@@ -48,6 +48,21 @@ model CutMediaObject {
   @@index([projectId, kind])
 }
 
+// One AI chat thread of a cloud project, stored as the same slimmed payload
+// the client keeps in localStorage. The thread id is client-generated, so the
+// key is (projectId, id); ownership is checked against CutProject on write.
+model CutChatThread {
+  id        String
+  userId    String
+  projectId String
+  data      Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@id([projectId, id])
+  @@index([userId, projectId, updatedAt])
+}
+
 model CutLibraryAsset {
   id            String   @id @default(cuid())
   userId        String

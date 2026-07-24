@@ -218,6 +218,7 @@ export const projectsCloud = {
       });
       await prisma.$transaction(async (tx) => {
         await tx.cutMediaObject.deleteMany({ where: { userId, projectId: id } });
+        await tx.cutChatThread.deleteMany({ where: { userId, projectId: id } });
         await tx.cutProject.delete({ where: { id } });
         await addUsage(tx, userId, -freed);
       });

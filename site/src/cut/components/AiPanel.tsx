@@ -48,6 +48,12 @@ import { runAiTool } from "@/cut/lib/aiTools";
 import { setAssetDragData } from "@/cut/lib/assetDrag";
 import { activeChatKey, threadsKey } from "@/cut/lib/chatThreads";
 import {
+  deleteCloudThread,
+  ensureCloudThreads,
+  flushCloudThreadSaves,
+  queueCloudThreadSave,
+} from "@/cut/lib/chatCloud";
+import {
   beginChatTurn,
   deleteChatAssets,
   endChatTurn,
@@ -166,10 +172,13 @@ function writeThreads(projectId: string, list: ChatThread[]) {
       .filter((t) => threadOwnsAssets(t.id) || threadHasLiveRun(t.id)),
   ];
   // A pruned thread is gone the way a deleted one is — anything it still
-  // owned (by construction nothing live) dies with it.
+  // owned (by construction nothing live) dies with it, cloud copy included.
   const keptIds = new Set(kept.map((t) => t.id));
   for (const t of list) {
-    if (!keptIds.has(t.id)) useGenScene.getState().killThread(t.id);
+    if (!keptIds.has(t.id)) {
+      useGenScene.getState().killThread(t.id);
+      deleteCloudThread(projectId, t.id);
+    }
   }
   try {
     localStorage.setItem(
@@ -241,6 +250,18 @@ export function AiPanel({
   }, [activeChat, projectId]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [threads, setThreads] = useState<ChatThread[]>([]);
+  // A cloud project's server threads merge into localStorage before the
+  // session reads it, so a project opened on another device resumes its chats.
+  const [chatsReady, setChatsReady] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void ensureCloudThreads(projectId).then(() => {
+      if (alive) setChatsReady(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [projectId]);
 
   useEffect(() => {
     // The models probe asks the engine which CLIs are installed; without the
@@ -281,6 +302,7 @@ export function AiPanel({
     // The thread's chat-only assets go with it; anything placed or filed
     // into Media/Library stays.
     deleteChatAssets(id);
+    deleteCloudThread(projectId, id);
     // Its work dies with it too: a scene run the thread owned aborts and its
     // plan clears — nothing keeps running behind a conversation the user killed.
     useGenScene.getState().killThread(id);
@@ -405,14 +427,16 @@ export function AiPanel({
         </>
       )}
 
-      <ChatSession
-        key={activeChat}
-        projectId={projectId}
-        threadId={activeChat}
-        info={mergedInfo}
-        model={model}
-        onModelChange={selectModel}
-      />
+      {chatsReady && (
+        <ChatSession
+          key={activeChat}
+          projectId={projectId}
+          threadId={activeChat}
+          info={mergedInfo}
+          model={model}
+          onModelChange={selectModel}
+        />
+      )}
     </aside>
   );
 }
@@ -644,18 +668,24 @@ function ChatSession({
         .join("")
         .trim()
         .slice(0, 80) || "New chat";
+    const thread: ChatThread = {
+      id: threadId,
+      title,
+      updatedAt: Date.now(),
+      messages,
+      sessions: { ...providerSessions.current },
+    };
     const rest = readThreads(projectId).filter((t) => t.id !== threadId);
-    writeThreads(projectId, [
-      {
-        id: threadId,
-        title,
-        updatedAt: Date.now(),
-        messages,
-        sessions: { ...providerSessions.current },
-      },
-      ...rest,
-    ]);
+    writeThreads(projectId, [thread, ...rest]);
+    // Cloud projects mirror the thread server-side (debounced while it streams).
+    queueCloudThreadSave(projectId, slimForStorage([thread])[0]);
   }, [messages, threadId, projectId]);
+
+  // Land the final transcript on the server as soon as the turn settles
+  // instead of waiting out the save debounce.
+  useEffect(() => {
+    if (!busy) flushCloudThreadSaves();
+  }, [busy]);
 
   // Stay glued to the newest message while the user sits at the bottom;
   // scrolling up releases the glue until they return. The ResizeObserver

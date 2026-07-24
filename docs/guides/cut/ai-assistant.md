@@ -80,7 +80,7 @@ Because a scene renders many paid shots, the tool plans and then stops. `generat
 
 ## Context across turns
 
-Threads persist per project in the browser's local storage — the newest 30, titled by their first message. What a returning thread remembers depends on the provider:
+Threads persist per project in the browser's local storage — the newest 30, titled by their first message. A cloud project also mirrors each thread to the hosted chat routes (Postgres, keyed to the account), merging the server copy back into local storage on open, so its history follows the account across devices. What a returning thread remembers depends on the provider:
 
 - **Claude and Codex hold their own history.** Each turn sends only the newest message plus the fresh snapshot; prior turns live in the provider's native session, whose id is saved on the thread and resumed. The engine never replays conversation history itself.
 - **Gemini is stateless.** The page replays the whole thread every turn — text only. Old turns are stripped to their words; tool traffic, old snapshots, and old attachment payloads stay out, and the fresh snapshot rides only the newest message.

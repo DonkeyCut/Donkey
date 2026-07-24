@@ -7,6 +7,7 @@
 import { type DonkeyAuthenticatedRequest, isDonkeySuperUser } from "@/lib/donkey-api-auth";
 import { matchRouteTable, type RouteEntry } from "../http/match";
 import { captionsCloud } from "./captions";
+import { chatsCloud } from "./chats";
 import { runGc } from "./gc";
 import { jobsCloud } from "./jobs";
 import { libraryCloud } from "./library";
@@ -43,6 +44,9 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "GET", path: "/api/cut-cloud/projects/:id/media/:file", handler: (_r, u, p) => projectsCloud.serveMedia(u, p.id, p.file) },
   { method: "DELETE", path: "/api/cut-cloud/projects/:id/media/:file", handler: (_r, u, p) => projectsCloud.removeMedia(u, p.id, p.file) },
   { method: "GET", path: "/api/cut-cloud/projects/:id/preview", handler: (_r, u, p) => projectsCloud.servePreview(u, p.id) },
+  { method: "GET", path: "/api/cut-cloud/projects/:id/chats", handler: (_r, u, p) => chatsCloud.list(u, p.id) },
+  { method: "PUT", path: "/api/cut-cloud/projects/:id/chats/:chatId", handler: (r, u, p) => chatsCloud.put(u, p.id, p.chatId, r) },
+  { method: "DELETE", path: "/api/cut-cloud/projects/:id/chats/:chatId", handler: (_r, u, p) => chatsCloud.remove(u, p.id, p.chatId) },
   { method: "POST", path: "/api/cut-cloud/projects/:id/image", handler: (r, u, p) => mediaCloud.importImage(u, p.id, r) },
   { method: "POST", path: "/api/cut-cloud/projects/:id/media/presign", handler: (r, u, p) => mediaCloud.presign(u, p.id, r) },
   { method: "POST", path: "/api/cut-cloud/projects/:id/media/complete", handler: (r, u) => mediaCloud.complete(u, r) },
