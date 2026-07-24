@@ -172,6 +172,7 @@ export const projectsCloud = {
             ? { ...existing.notes, ...body.notes }
             : existing.notes,
         genvideo: body.genvideo !== undefined ? body.genvideo ?? undefined : existing.genvideo,
+        renders: Array.isArray(body.renders) ? body.renders : existing.renders,
       };
       doc.updatedAt = Date.now();
       const data = { doc: asJson(doc), name: doc.name, version: { increment: 1 } };

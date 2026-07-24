@@ -15,9 +15,9 @@
  */
 
 import { apiFetch, apiJson, getBackend, type CutBackend } from "../backend";
-import { storedAssets, useEditor } from "../store";
+import { RENDERS_CAP, storedAssets, useEditor } from "../store";
 import { mediaUrl, SPEED_MIN } from "../types";
-import type { AudioClip, MediaAsset, ProjectDoc, VideoClip } from "../types";
+import type { AudioClip, MediaAsset, ProjectDoc, RenderRecord, VideoClip } from "../types";
 import { fillSlot } from "./fillSlot";
 
 const MIN_LEN = 0.1;
@@ -89,6 +89,38 @@ export function stockAssetInDoc(
       if (!doc.assets.some((a) => a.id === asset.id)) {
         doc.assets.push(storedAssets([asset])[0]);
       }
+    },
+    backend
+  );
+}
+
+/** Mirror a chat-launched render's record into a closed project's doc (the
+ * open-project path writes the store and autosave persists it). */
+export function upsertRenderInDoc(
+  projectId: string,
+  record: RenderRecord,
+  backend?: CutBackend
+): Promise<void> {
+  return withProjectDoc(
+    projectId,
+    (doc) => {
+      const rest = (doc.renders ?? []).filter((r) => r.id !== record.id);
+      doc.renders = [...rest, record].slice(-RENDERS_CAP);
+    },
+    backend
+  );
+}
+
+/** Drop render records from a closed project's doc (dismissed or owner gone). */
+export function removeRendersInDoc(
+  projectId: string,
+  ids: string[],
+  backend?: CutBackend
+): Promise<void> {
+  return withProjectDoc(
+    projectId,
+    (doc) => {
+      doc.renders = (doc.renders ?? []).filter((r) => !ids.includes(r.id));
     },
     backend
   );

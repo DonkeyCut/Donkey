@@ -9,7 +9,12 @@ import type { AssetRef } from "./assetRef";
 import { bytesFromBase64 } from "./bytes";
 import { readThreadIds } from "./chatThreads";
 import { composeGenPrompt, foldTextRefs } from "./composeGen";
-import { stockAssetInDoc } from "./genvideo/docWriter";
+import {
+  projectWriteMode,
+  removeRendersInDoc,
+  stockAssetInDoc,
+  upsertRenderInDoc,
+} from "./genvideo/docWriter";
 import { cutAppBase } from "./hosts";
 import { hostedPost } from "./hosted";
 import { enrichAsset, importFileToProject, uploadProjectImage } from "./media";
@@ -17,7 +22,7 @@ import { refsToInlineImages, videoSafeInline, visualRefs, type InlineImage } fro
 import { useGenNotify } from "./genNotify";
 import { useImageGen } from "./imageGen";
 import { useEditor } from "./store";
-import { mediaSlug, type MediaAsset } from "./types";
+import { mediaSlug, type MediaAsset, type RenderRecord } from "./types";
 import { videoModel } from "./videoModels";
 import { walkLadder, type VideoAttempt } from "./videoLadder";
 
@@ -394,9 +399,48 @@ export const useGenerate = create<GenerateState>((set, get) => {
   // owner is gone drops its result instead of re-adding orphaned media.
   const cancelledJobs = new Set<string>();
 
+  // Chat-launched video renders mirror into the project doc (doc.renders): the
+  // job store is per browser, the doc travels with the project, so the mirror
+  // is what makes the chat's render card show the same outcome everywhere.
+  // Open project → the store (autosave persists it); closed → its doc.
+  const mirrorRender = (id: string) => {
+    const j = get().jobs.find((x) => x.id === id);
+    if (!j || j.kind !== "video" || !j.chatId) return;
+    const record: RenderRecord = {
+      id: j.id,
+      chatId: j.chatId,
+      prompt: j.prompt,
+      startedAt: j.startedAt,
+      status: j.status,
+      ...(j.error !== undefined ? { error: j.error } : {}),
+      ...(j.assetId !== undefined ? { assetId: j.assetId } : {}),
+    };
+    const backend = jobBackend(j);
+    void (async () => {
+      if ((await projectWriteMode(j.projectId)) === "store")
+        useEditor.getState().upsertRender(record);
+      else await upsertRenderInDoc(j.projectId, record, backend);
+    })().catch(() => {});
+  };
+
+  const unmirrorRenders = (projectId: string, victims: GenerateJob[]) => {
+    const mirrored = victims.filter((j) => j.kind === "video" && j.chatId);
+    if (mirrored.length === 0) return;
+    const ids = mirrored.map((j) => j.id);
+    const backend = jobBackend(mirrored[0]);
+    void (async () => {
+      if ((await projectWriteMode(projectId)) === "store")
+        useEditor.getState().removeRenders(ids);
+      else await removeRendersInDoc(projectId, ids, backend);
+    })().catch(() => {});
+  };
+
   const update = (id: string, patch: Partial<GenerateJob>) => {
     set((s) => ({ jobs: s.jobs.map((j) => (j.id === id ? { ...j, ...patch } : j)) }));
     persistJobs(get().jobs);
+    // Poll-payload and rung refreshes stay browser-local; only record-visible
+    // fields re-mirror.
+    if ("status" in patch || "assetId" in patch || "error" in patch) mirrorRender(id);
   };
 
   const fail = (id: string, err: unknown) =>
@@ -643,6 +687,7 @@ export const useGenerate = create<GenerateState>((set, get) => {
       };
       set((s) => ({ jobs: [job, ...s.jobs] }));
       claimJobLease(job.id); // this tab started it, this tab polls it
+      mirrorRender(job.id);
 
       // Resolves the moment the backend accepts a rung's submit (a real render
       // is in flight) or, if every rung is rejected before acceptance, with the
@@ -757,6 +802,15 @@ export const useGenerate = create<GenerateState>((set, get) => {
       }
       set((s) => ({ jobs: s.jobs.filter((j) => !match(j)) }));
       persistJobs(get().jobs);
+      // The mirrored records go with the owner — except on project deletion,
+      // where the whole doc is going away anyway.
+      if (owner.projectId === undefined) {
+        const byProject = new Map<string, GenerateJob[]>();
+        for (const j of victims) {
+          byProject.set(j.projectId, [...(byProject.get(j.projectId) ?? []), j]);
+        }
+        for (const [projectId, group] of byProject) unmirrorRenders(projectId, group);
+      }
     },
 
     resumeRunningJobs: () => {
@@ -815,8 +869,10 @@ export const useGenerate = create<GenerateState>((set, get) => {
     },
 
     dismiss: (id) => {
+      const victim = get().jobs.find((j) => j.id === id);
       set((s) => ({ jobs: s.jobs.filter((j) => j.id !== id) }));
       persistJobs(get().jobs);
+      if (victim) unmirrorRenders(victim.projectId, [victim]);
     },
   };
 });

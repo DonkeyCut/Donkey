@@ -144,6 +144,7 @@ export const projectsApi = {
         // key keeps the existing plan, and null clears it (a dismissed plan) —
         // normalized to undefined so the doc at rest never stores null.
         genvideo: body.genvideo !== undefined ? body.genvideo ?? undefined : existing.genvideo,
+        renders: Array.isArray(body.renders) ? body.renders : existing.renders,
       };
       await writeProject(id, doc);
       return Response.json({ ok: true, updatedAt: doc.updatedAt });

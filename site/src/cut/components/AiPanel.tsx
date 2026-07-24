@@ -90,7 +90,7 @@ import { cn } from "@/lib/utils";
 import { cardIconButton } from "@/cut/components/iconButton";
 import { MentionTextarea, RefChips, RefThumb, RefTokenChip } from "./AssetRefs";
 import { DictationBody } from "./MicDictation";
-import { ToolOutputAssets } from "./ChatAssets";
+import { RECORD_RUNNING_TTL_MS, ToolOutputAssets } from "./ChatAssets";
 import { HostedErrorText } from "./hostedError";
 import { useMicTranscription } from "@/cut/lib/micTranscribe";
 
@@ -1439,10 +1439,24 @@ const MessageView = memo(function MessageView({
  * "something is still happening" without scrolling. */
 function ThreadRenders({ threadId }: { threadId: string }) {
   const jobs = useGenerate((s) => s.jobs);
-  const running = jobs.filter(
+  const records = useEditor((s) => s.renders);
+  const live = jobs.filter(
     (j) =>
       j.kind === "video" && j.status === "running" && j.chatId === threadId,
   );
+  // Renders another machine is still working on: doc-mirrored records with no
+  // local job. The TTL keeps a record whose job died from spinning forever;
+  // a mount-time clock is enough for that check.
+  const [now] = useState(() => Date.now());
+  const liveIds = new Set(jobs.map((j) => j.id));
+  const remote = records.filter(
+    (r) =>
+      r.chatId === threadId &&
+      r.status === "running" &&
+      !liveIds.has(r.id) &&
+      now - r.startedAt < RECORD_RUNNING_TTL_MS,
+  );
+  const running = [...live, ...remote];
   const oldest = running.length
     ? Math.min(...running.map((j) => j.startedAt))
     : null;

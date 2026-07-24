@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type React from "react";
 import { Copy, ExternalLink, FileText, Film, Loader2, Maximize2, Plus } from "lucide-react";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
@@ -16,7 +16,7 @@ import {
 import { useElapsed } from "@/cut/hooks/useElapsed";
 import { useHoverPlay } from "@/cut/hooks/useHoverPlay";
 import { useInView } from "@/cut/hooks/useInView";
-import { useGenerate } from "@/cut/lib/generate";
+import { useGenerate, type GenerateJob } from "@/cut/lib/generate";
 import { lightboxItemFromRef, useLightbox } from "@/cut/lib/lightbox";
 import { usePreviewAudio } from "@/cut/lib/previewAudio";
 import { useEditor } from "@/cut/lib/store";
@@ -103,40 +103,61 @@ export function ToolOutputAssets({ output }: { output: unknown }) {
   );
 }
 
+/** How long a mirrored "running" record with no live job stays believable —
+ * another machine may genuinely still be polling the render. Past this, the
+ * job died without settling its record; show that instead of a forever
+ * spinner. */
+export const RECORD_RUNNING_TTL_MS = 30 * 60_000;
+
+/** The card's data, from whichever source knows the job: the browser-local
+ * job store when this machine ran the render, else the record the render
+ * mirrored into the doc (ProjectDoc.renders). */
+type RenderView = Pick<GenerateJob, "status" | "prompt" | "startedAt" | "error" | "assetId">;
+
 /** A video render the tool started but couldn't wait out: a live card that
- * follows the generation job and becomes the clip's card when it lands.
- * Settled jobs persist per browser, so the card survives a reload; only a
- * render still in flight when the page closed has no card afterwards. */
+ * follows the generation job and becomes the clip's card when it lands. The
+ * job store covers this browser; the doc-mirrored record carries the same
+ * card to every other browser and machine. */
 export function ChatVideoJobCard({ jobId }: { jobId: string }) {
   const job = useGenerate((s) => s.jobs.find((j) => j.id === jobId));
-  const elapsed = useElapsed(job?.status === "running" ? job.startedAt : null);
-  if (!job) return null;
-  if (job.status === "done") return job.assetId ? <ChatProjectAsset assetId={job.assetId} /> : null;
+  const record = useEditor((s) => s.renders.find((r) => r.id === jobId));
+  // Mount-time clock: a record already past the TTL is stale when the card
+  // appears — the check doesn't need to keep ticking.
+  const [now] = useState(() => Date.now());
+  const view: RenderView | undefined =
+    job ??
+    (record &&
+      (record.status === "running" && now - record.startedAt > RECORD_RUNNING_TTL_MS
+        ? { ...record, status: "error" as const, error: "The render was interrupted." }
+        : record));
+  const elapsed = useElapsed(view?.status === "running" ? view.startedAt : null);
+  if (!view) return null;
+  if (view.status === "done") return view.assetId ? <ChatProjectAsset assetId={view.assetId} /> : null;
   return (
     <div className="ai-chat-job flex w-full max-w-[280px] flex-col gap-1.5 rounded-xl border border-border p-2.5">
       <div className="flex items-center gap-2">
         <span className="grid size-6 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
-          {job.status === "running" ? (
+          {view.status === "running" ? (
             <Loader2 className="size-3.5 animate-spin" />
           ) : (
             <Film className="size-3.5" />
           )}
         </span>
-        <div className="min-w-0 flex-1 truncate text-[11px] font-medium">{job.prompt}</div>
+        <div className="min-w-0 flex-1 truncate text-[11px] font-medium">{view.prompt}</div>
       </div>
       <div
         className={cn(
           "text-[10.5px] leading-snug break-words",
-          job.status === "error" ? "text-red-600" : "text-muted-foreground"
+          view.status === "error" ? "text-red-600" : "text-muted-foreground"
         )}
       >
-        {job.status === "running" ? (
+        {view.status === "running" ? (
           <>
             Rendering…{" "}
             {elapsed && <span className="tabular-nums text-muted-foreground/80">{elapsed}</span>}
           </>
         ) : (
-          <HostedErrorText error={job.error} link={false} />
+          <HostedErrorText error={view.error} link={false} />
         )}
       </div>
     </div>

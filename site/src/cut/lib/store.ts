@@ -10,6 +10,7 @@ import type {
   LookStyle,
   MediaAsset,
   ProjectDoc,
+  RenderRecord,
   Selection,
   StoredAsset,
   SubtitleCue,
@@ -147,6 +148,10 @@ export interface EditorState {
   /** In-progress or finished brief-to-video run; persisted on ProjectDoc.genvideo
    * and driven by the genScene store. Absent when no scene was generated. */
   genvideo?: VideoProject;
+  /** Chat-launched renders mirrored from the job store (ProjectDoc.renders),
+   * so their chat cards render on machines that never ran the job. Outside the
+   * undo history, like assets. */
+  renders: RenderRecord[];
 
   loadProject: (id: string) => Promise<void>;
   setProjectName: (name: string) => void;
@@ -336,6 +341,8 @@ export interface EditorState {
   setAiOpen: (v: boolean) => void;
   undo: () => void;
   redo: () => void;
+  upsertRender: (r: RenderRecord) => void;
+  removeRenders: (ids: string[]) => void;
   pushHistory: () => void;
   /** Coalesce every edit until the matching `endHistoryBatch` into one undo
    * step. Used so a whole assistant turn reverts with a single ⌘Z. */
@@ -351,6 +358,8 @@ export interface EditorState {
 // Per-project undo/redo stacks; both reset when a project loads. Capped so a
 // long session (each snapshot deep-copies every clip/cue) can't grow unbounded.
 const HISTORY_CAP = 100;
+/** Most chat render records a doc keeps — settled cards past this fall off. */
+export const RENDERS_CAP = 100;
 const history: DocSnapshot[] = [];
 const future: DocSnapshot[] = [];
 /** A checkpoint captured on pointerdown/focus but not yet committed: it lands
@@ -762,6 +771,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
     dropActive: null,
     aiOpen: typeof window !== "undefined" && localStorage.getItem("cut-ai-open") === "1",
     genvideo: undefined,
+    renders: [],
 
     loadProject: async (id) => {
       history.length = 0;
@@ -795,6 +805,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
         subtitleError: null,
         exportOpen: false,
         genvideo: undefined,
+        renders: [],
       });
       // A background scene run may still be writing this project's doc — drain
       // its queued writes so the load never reads a half-written doc. Ordering
@@ -877,6 +888,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
           subtitles: doc.subtitles ?? emptySubtitles(),
           subtitleStatus: (doc.subtitles?.cues.length ?? 0) > 0 ? "ready" : "idle",
           genvideo: doc.genvideo ?? undefined,
+          renders: Array.isArray(doc.renders) ? doc.renders : [],
           loaded: true,
         });
       } catch (err) {
@@ -892,6 +904,13 @@ export const useEditor = create<EditorState>((baseSet, get) => {
     // by identity — without the clone every save after the first looks unchanged
     // and the plan is never written back.
     setGenvideo: (project) => set({ genvideo: project ? { ...project } : undefined }),
+
+    upsertRender: (r) =>
+      set((s) => ({
+        renders: [...s.renders.filter((x) => x.id !== r.id), r].slice(-RENDERS_CAP),
+      })),
+    removeRenders: (ids) =>
+      set((s) => ({ renders: s.renders.filter((x) => !ids.includes(x.id)) })),
 
     placeGenClip: (assetId, startSec, endSec, opts) => {
       const asset = get().assets.find((a) => a.id === assetId);
@@ -2849,6 +2868,7 @@ export function serializeDoc(s: {
   notes: { text: string; publishedAt: string; links: string[] };
   subtitles: SubtitlesBlock;
   genvideo?: VideoProject;
+  renders: RenderRecord[];
 }): Partial<ProjectDoc> {
   return {
     name: s.projectName,
@@ -2866,6 +2886,7 @@ export function serializeDoc(s: {
     // Explicit null when there is no run: absence means "keep what you have"
     // to the PUT handler, so a dismissed plan could otherwise never be cleared.
     genvideo: s.genvideo ?? null,
+    renders: s.renders,
   };
 }
 

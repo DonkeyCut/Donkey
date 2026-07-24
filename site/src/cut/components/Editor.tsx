@@ -231,6 +231,7 @@ export function Editor({
         // Normalized like serializeDoc stores it (?? null): a project with no
         // run holds undefined in state and null in the doc — not a change.
         (s.genvideo ?? null) !== ((last.genvideo ?? null) as unknown) ||
+        s.renders !== (last.renders as unknown) ||
         s.projectName !== lastName;
       if (!changed) return;
       last = serializeDoc(s);

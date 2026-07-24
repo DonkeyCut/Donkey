@@ -701,6 +701,24 @@ export interface ProjectDoc {
    * source of truth for the run (see lib/genvideo/types.ts). On the save wire,
    * null means "clear it" (absent means keep); at rest it is never null. */
   genvideo?: VideoProject | null;
+  /** Chat-launched video renders, running and settled — see RenderRecord. */
+  renders?: RenderRecord[];
+}
+
+/** A chat-launched video render, mirrored into the doc as it runs and settles.
+ * The browser-local job store covers only the machine that ran the render;
+ * this record is what lets the chat's render card show the same outcome on
+ * every browser and machine. */
+export interface RenderRecord {
+  /** The GenerateJob id the chat message's tool output points at. */
+  id: string;
+  chatId: string;
+  prompt: string;
+  startedAt: number;
+  status: "running" | "done" | "error";
+  error?: string;
+  /** The project asset the finished render landed as. */
+  assetId?: string;
 }
 
 /** A named group of projects on the home screen. */
