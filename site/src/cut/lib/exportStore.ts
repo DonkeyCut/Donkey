@@ -130,15 +130,29 @@ export const useExports = create<ExportsState>((set, get) => ({
     void get().refresh();
   },
 
-  dismiss: (id) =>
+  dismiss: (id) => {
+    // A settled row is retired from its backend's feed too (the same DELETE
+    // that cancels a live job), so it stays gone across tabs and reloads —
+    // the `dismissed` entry only hides it until the next poll confirms.
+    // Hiding a still-running row stays local: the export keeps rendering.
+    const job = get().jobs.find((j) => j.id === id);
+    if (job && (job.status === "done" || job.status === "error")) {
+      cancelExportJob(id, exportBackend(job.residency));
+    }
     set((s) => ({
       local: s.local.filter((r) => r.id !== id),
       dismissed: s.jobs.some((j) => j.id === id)
         ? [...new Set([...s.dismissed, id])]
         : s.dismissed,
-    })),
+    }));
+  },
 
-  dismissSettled: () =>
+  dismissSettled: () => {
+    for (const j of get().jobs) {
+      if (j.status === "done" || j.status === "error") {
+        cancelExportJob(j.id, exportBackend(j.residency));
+      }
+    }
     set((s) => ({
       local: s.local.filter((r) => r.status !== "error"),
       dismissed: [
@@ -149,7 +163,8 @@ export const useExports = create<ExportsState>((set, get) => ({
             .map((j) => j.id),
         ]),
       ],
-    })),
+    }));
+  },
 
   refresh: async () => {
     // One backend's feed, rows stamped with its residency; null on a hiccup so

@@ -513,7 +513,8 @@ export async function createExportJob(
   return body.id;
 }
 
-/** Cancel a running or queued export job by id. */
+/** Cancel a running or queued export job, or retire a settled one from the
+ * export-jobs feed. */
 export function cancelExportJob(jobId: string, backend: CutBackend = getBackend()) {
   void backend.fetch(`/api/cut/export/${jobId}`, { method: "DELETE" }).catch(() => {});
 }

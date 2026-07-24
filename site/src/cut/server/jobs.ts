@@ -130,6 +130,10 @@ export function cancelJob(id: string) {
     const i = pending.findIndex((p) => p.job.id === id);
     if (i >= 0) pending.splice(i, 1);
     retire(job);
+  } else if (job.status === "done" || job.status === "error") {
+    // Dismissed from the dock: drop it from the feed for good. A finished
+    // file stays on disk in exports/.
+    jobs.delete(id);
   }
 }
 

@@ -154,10 +154,17 @@ export const jobsCloud = {
 
   async exportCancel(userId: string, jobId: string) {
     // The worker honors "canceled" mid-run; a queued row is simply never claimed.
-    await prisma.cutRenderJob.updateMany({
+    const canceled = await prisma.cutRenderJob.updateMany({
       where: { id: jobId, userId, state: { in: ["queued", "running"] } },
       data: { state: "canceled" },
     });
+    // A settled row is being dismissed from the dock: drop it from the feed
+    // for good. A finished file survives as the project's export media object.
+    if (canceled.count === 0) {
+      await prisma.cutRenderJob.deleteMany({
+        where: { id: jobId, userId, state: { in: ["done", "error", "canceled"] } },
+      });
+    }
     return Response.json({ ok: true });
   },
 
