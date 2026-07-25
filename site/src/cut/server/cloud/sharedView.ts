@@ -7,15 +7,30 @@
 import type { ProjectDoc, StoredAsset } from "@/cut/lib/types";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { MEDIA_TOKEN_TTL_SECONDS, mediaCdnEnabled, mediaCdnUrl } from "./mediaCdn";
 import { presignGet, presignGetLifetime, projectMediaKey } from "./r2";
 import { normalizeEmails, normalizeFeatures, type ShareFeatures } from "./share";
 import { shareCacheHeaders, shareRedirectHeaders } from "./shareCache";
 import { caught, decodeFileParam, err, redirect } from "./util";
 
 const PRESIGN_GET_BATCH_MAX = 500;
-/** How long a media redirect may be reused. Well inside the signing window so
- * the URL it carries never expires before the redirect does. */
+/** How long a media redirect may be reused. It has to stay inside the life of
+ * the URL it carries, or the edge would keep handing out a dead link. */
 const MEDIA_REDIRECT_TTL = 15 * 60;
+
+/** A viewer-facing URL for one of the owner's objects: the edge Worker when
+ * this deployment has it configured, a presigned R2 URL otherwise. */
+const sharedMediaUrl = (key: string): Promise<string> =>
+  Promise.resolve(mediaCdnUrl(key) ?? presignGet(key));
+
+/** Redirect lifetime that matches whichever URL kind was minted. */
+const mediaRedirectTtl = () =>
+  mediaCdnEnabled() ? Math.floor(MEDIA_TOKEN_TTL_SECONDS / 5) : MEDIA_REDIRECT_TTL;
+
+/** What the client is told a media batch is good for, so it re-mints ahead of
+ * expiry rather than after a 403. */
+const mediaUrlLifetime = () =>
+  mediaCdnEnabled() ? MEDIA_TOKEN_TTL_SECONDS : presignGetLifetime();
 
 export type ShareRow = NonNullable<
   Awaited<ReturnType<typeof prisma.cutProjectShare.findUnique>>
@@ -149,8 +164,8 @@ export const sharedView = {
       const allowed = await allowedFileNames(view.share, view.features);
       if (!allowed.has(fileName)) return err("Media not found.", 404);
       return redirect(
-        await presignGet(projectMediaKey(view.share.userId, id, fileName)),
-        shareRedirectHeaders(view.share, MEDIA_REDIRECT_TTL)
+        await sharedMediaUrl(projectMediaKey(view.share.userId, id, fileName)),
+        shareRedirectHeaders(view.share, mediaRedirectTtl())
       );
     } catch (e) {
       return caught(e, "Bad request.", 400);
@@ -178,10 +193,12 @@ export const sharedView = {
           .map(async (i) => ({
             projectId: i.projectId!,
             fileName: i.fileName!,
-            url: await presignGet(projectMediaKey(view.share.userId, i.projectId!, i.fileName!)),
+            url: await sharedMediaUrl(
+              projectMediaKey(view.share.userId, i.projectId!, i.fileName!)
+            ),
           }))
       );
-      return Response.json({ urls, expiresIn: presignGetLifetime() });
+      return Response.json({ urls, expiresIn: mediaUrlLifetime() });
     } catch (e) {
       return caught(e, "Could not sign the media URLs.");
     }
@@ -210,8 +227,8 @@ export const sharedView = {
       const row = await ownerProject(view.share);
       if (!row?.previewKey) return new Response("Not found.", { status: 404 });
       return redirect(
-        await presignGet(row.previewKey),
-        shareRedirectHeaders(view.share, MEDIA_REDIRECT_TTL)
+        await sharedMediaUrl(row.previewKey),
+        shareRedirectHeaders(view.share, mediaRedirectTtl())
       );
     } catch (e) {
       return caught(e, "Bad request.", 400);

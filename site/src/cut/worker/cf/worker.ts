@@ -6,8 +6,9 @@
 // This file is compiled by wrangler, not the site's tsconfig — workers
 // globals are typed loosely on purpose.
 import { Container, getContainer } from "@cloudflare/containers";
+import { serveMedia, type MediaEnv } from "./media";
 
-type WorkerEnv = {
+type WorkerEnv = MediaEnv & {
   CUT_RENDER_WORKER: unknown;
   DATABASE_URL: string;
   R2_ACCOUNT_ID: string;
@@ -16,6 +17,8 @@ type WorkerEnv = {
   CUT_WAKE_SECRET: string;
   CUT_COPY_EXECUTE_URL: string;
   CUT_COPY_EXECUTE_SECRET: string;
+  /** Hostname the shared-media routes arrive on. */
+  CUT_MEDIA_HOST: string;
 };
 
 // Minimal shapes for the queue consumer — this file stays off workers-types
@@ -46,8 +49,18 @@ export class CutRenderWorker extends Container<WorkerEnv> {
 }
 
 export default {
-  async fetch(request: Request, env: WorkerEnv): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: WorkerEnv,
+    ctx: { waitUntil(p: Promise<unknown>): void }
+  ): Promise<Response> {
     const url = new URL(request.url);
+    // Shared media arrives on its own hostname (see wrangler.jsonc routes) and
+    // is the only public traffic this Worker takes. Matching on the host keeps
+    // it clear of the container's control endpoints below.
+    if (env.CUT_MEDIA_HOST && url.hostname === env.CUT_MEDIA_HOST) {
+      return serveMedia(request, env, ctx);
+    }
     if (request.method === "POST" && url.pathname === "/wake") {
       // Starting the container bills CPU, so the wake is not public: callers
       // present the shared secret the hosted API holds.
