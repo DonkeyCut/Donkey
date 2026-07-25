@@ -216,6 +216,16 @@ export function Editor({
     let last = serializeDoc(useEditor.getState());
     let lastName = useEditor.getState().projectName;
 
+    // Transient failures (the network coming back up after a laptop wake, a
+    // 5xx) retry on a capped backoff so unsaved work never parks on a dead
+    // link; 4xx (e.g. a version conflict, which has its own recovery event)
+    // waits for the next edit as before.
+    let failures = 0;
+    const retry = () => {
+      failures = Math.min(failures + 1, 5);
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => void save(), 2000 * 2 ** (failures - 1));
+    };
     const save = async () => {
       const s = useEditor.getState();
       if (!s.loaded || s.projectId !== projectId) return;
@@ -226,10 +236,16 @@ export function Editor({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(serializeDoc(s)),
         });
-        if (!res.ok) throw new Error();
-        useEditor.getState().setSaveState("saved");
+        if (res.ok) {
+          failures = 0;
+          useEditor.getState().setSaveState("saved");
+          return;
+        }
+        useEditor.getState().setSaveState("error");
+        if (res.status >= 500) retry();
       } catch {
         useEditor.getState().setSaveState("error");
+        retry();
       }
     };
 
