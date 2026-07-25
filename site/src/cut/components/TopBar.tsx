@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Check, ChevronDown, ChevronLeft, Cloud, Ellipsis, Loader2, Mic, Monitor, Smartphone, Sparkles, Upload, Video } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, Cloud, Ellipsis, Loader2, Mic, Monitor, Share2, Smartphone, Sparkles, Upload, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,6 +27,7 @@ import { useEditor } from "@/cut/lib/store";
 import { ASPECT_LABEL, type Aspect } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 import { RecordDialog, type RecordMode } from "./RecordDialog";
+import { ShareDialog } from "./ShareDialog";
 
 export function TopBar({
   onImport,
@@ -61,6 +62,7 @@ export function TopBar({
   // Cloud imports are real uploads worth reporting; local imports are instant
   // disk copies, so the flag-off surface stays exactly as it was.
   const cloudUploading = uploading > 0 && cutMode === "cloud";
+  const [shareOpen, setShareOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [moving, setMoving] = useState(false);
   const [moveProgress, setMoveProgress] = useState<string | null>(null);
@@ -213,6 +215,29 @@ export function TopBar({
         </span>
       </div>
       <div className="flex items-center gap-2">
+        {cutMode === "cloud" && (
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Share"
+            title="Share"
+            onClick={() => setShareOpen(true)}
+          >
+            <Share2 data-icon="inline-start" /> Share
+          </Button>
+        )}
+        <Button
+          size="sm"
+          disabled={!hasClips}
+          onClick={() => {
+            const s = useEditor.getState();
+            s.setPlaying(false);
+            s.setExportOpen(true);
+          }}
+        >
+          <Upload data-icon="inline-start" /> Export
+        </Button>
+        <div aria-hidden className="h-4 w-px bg-border" />
         <Button
           variant="ghost"
           size="sm"
@@ -225,17 +250,6 @@ export function TopBar({
           }}
         >
           <Sparkles data-icon="inline-start" /> Chat
-        </Button>
-        <Button
-          size="sm"
-          disabled={!hasClips}
-          onClick={() => {
-            const s = useEditor.getState();
-            s.setPlaying(false);
-            s.setExportOpen(true);
-          }}
-        >
-          <Upload data-icon="inline-start" /> Export
         </Button>
         {canMoveToCloud && (
           <DropdownMenu>
@@ -259,6 +273,12 @@ export function TopBar({
           </DropdownMenu>
         )}
       </div>
+      {shareOpen && (
+        <ShareDialog
+          projectId={useEditor.getState().projectId ?? ""}
+          onClose={() => setShareOpen(false)}
+        />
+      )}
       {moveOpen && (
         <Dialog open onOpenChange={(open) => !open && !moving && setMoveOpen(false)}>
           <DialogContent className="sm:max-w-sm">

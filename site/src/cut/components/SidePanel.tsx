@@ -109,11 +109,29 @@ export function SidePanel({
   onImport: (files: FileList | File[]) => void;
   importing: boolean;
 }) {
+  // A shared view shows only the surfaces the share opted in; the Library is
+  // the viewer's own cross-project shelf and never appears there.
+  const sharedFeatures = useEditor((s) => s.sharedFeatures);
+  const visibleTabs = !sharedFeatures
+    ? TABS
+    : TABS.filter(({ id }) =>
+        id === "media"
+          ? sharedFeatures.media
+          : id === "video" || id === "image" || id === "audio"
+            ? sharedFeatures.genai
+            : id === "subtitles"
+              ? sharedFeatures.subtitles
+              : id === "publish"
+                ? sharedFeatures.details
+                : false
+      );
   // `null` collapses the panel: clicking the active tab unselects it, leaving
   // just the icon rail so the video canvas takes the freed width.
-  const [tab, setTab] = useLocalPref<Tab | null>("cut-side-tab", "media", (v) =>
+  const [tabPref, setTab] = useLocalPref<Tab | null>("cut-side-tab", "media", (v) =>
     v === null || TABS.some((t) => t.id === v)
   );
+  // The remembered tab may be hidden in this share; fall back to collapsed.
+  const tab = tabPref !== null && !visibleTabs.some((t) => t.id === tabPref) ? null : tabPref;
   // The Audio tab's Voice/Music sub-tab lives here so the Music sub-tab can lay
   // out as two columns — the generator plus the sample library — like Image/Video.
   const [audioSub, setAudioSub] = useLocalPref<"voice" | "music">(
@@ -179,7 +197,7 @@ export function SidePanel({
           tab !== null && "border-r border-border"
         )}
       >
-        {TABS.map(({ id, label, icon: Icon }) => {
+        {visibleTabs.map(({ id, label, icon: Icon }, tabIndex) => {
           // The open tab never badges — its completions are already on screen.
           const unseenCount = isGenTab(id) && id !== tab ? unseen[id].length : 0;
           const tileClass =
@@ -242,7 +260,7 @@ export function SidePanel({
           return (
             <Fragment key={id}>
               {/* Soft breaks between the file tabs, the AI-generate tabs, and the finishing tabs. */}
-              {(id === "video" || id === "subtitles") && (
+              {(id === "video" || id === "subtitles") && tabIndex > 0 && (
                 <div aria-hidden className="my-1 h-px w-8 shrink-0 bg-border" />
               )}
               {id === "media" || id === "library" ? (
@@ -266,22 +284,30 @@ export function SidePanel({
         // the stock reference browser on the right. Clicking a stock tile loads
         // its prompt into the generate panel beside it.
         <>
-          <div className="flex w-[252px] min-h-0 shrink-0 flex-col border-r border-border">
+          <div
+            className={cn(
+              "flex w-[252px] min-h-0 shrink-0 flex-col",
+              !sharedFeatures && "border-r border-border"
+            )}
+          >
             {tab === "image" ? (
               <ImageGenPanel projectId={projectId} />
             ) : (
               <GenerateVideoPanel projectId={projectId} />
             )}
           </div>
-          {/* Video browses wider: 16:9 clip tiles need the room. */}
-          <div
-            className={cn(
-              "flex min-h-0 shrink-0 flex-col",
-              tab === "image" ? "w-[264px]" : "w-[340px]"
-            )}
-          >
-            {tab === "image" ? <StockImagesPanel /> : <StockVideosPanel />}
-          </div>
+          {/* Video browses wider: 16:9 clip tiles need the room. A shared view
+              shows only the project's own generations — no stock browsing. */}
+          {!sharedFeatures && (
+            <div
+              className={cn(
+                "flex min-h-0 shrink-0 flex-col",
+                tab === "image" ? "w-[264px]" : "w-[340px]"
+              )}
+            >
+              {tab === "image" ? <StockImagesPanel /> : <StockVideosPanel />}
+            </div>
+          )}
         </>
       ) : tab === "audio" ? (
         // Music is two columns like the generate tabs — the generator on the
@@ -290,7 +316,7 @@ export function SidePanel({
           <div
             className={cn(
               "flex w-[264px] min-h-0 shrink-0 flex-col",
-              audioSub === "music" && STOCK_MUSIC.length > 0 && "border-r border-border"
+              !sharedFeatures && audioSub === "music" && STOCK_MUSIC.length > 0 && "border-r border-border"
             )}
           >
             <AudioPanel
@@ -300,7 +326,7 @@ export function SidePanel({
               onSub={setAudioSub}
             />
           </div>
-          {audioSub === "music" && STOCK_MUSIC.length > 0 && (
+          {!sharedFeatures && audioSub === "music" && STOCK_MUSIC.length > 0 && (
             <div className="flex w-[340px] min-h-0 shrink-0 flex-col">
               <SampleLibrary projectId={projectId} />
             </div>
@@ -410,6 +436,7 @@ function MediaPanel({
   const preparing = exportLocal.filter(
     (r) => r.projectId === projectId && r.status === "preparing"
   );
+  const readOnly = useEditor((s) => s.readOnly);
   const inputRef = useRef<HTMLInputElement>(null);
   const [exports, setExports] = useState<ExportItem[]>([]);
   const [preview, setPreview] = useState<ExportItem | null>(null);
@@ -456,22 +483,24 @@ function MediaPanel({
           ) : undefined
         }
       />
-      <div className="px-3.5 pb-3">
-        <Button variant="outline" className="w-full" onClick={() => inputRef.current?.click()}>
-          <Upload data-icon="inline-start" /> Upload
-        </Button>
-        <input
-          ref={inputRef}
-          type="file"
-          accept="video/*,audio/*"
-          multiple
-          hidden
-          onChange={(e) => {
-            if (e.target.files?.length) onImport(e.target.files);
-            e.target.value = "";
-          }}
-        />
-      </div>
+      {!readOnly && (
+        <div className="px-3.5 pb-3">
+          <Button variant="outline" className="w-full" onClick={() => inputRef.current?.click()}>
+            <Upload data-icon="inline-start" /> Upload
+          </Button>
+          <input
+            ref={inputRef}
+            type="file"
+            accept="video/*,audio/*"
+            multiple
+            hidden
+            onChange={(e) => {
+              if (e.target.files?.length) onImport(e.target.files);
+              e.target.value = "";
+            }}
+          />
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-3.5">
         {templates.length > 0 && (
@@ -1098,6 +1127,7 @@ function ProjectFadeRow({ label, value, onChange }: {
 }
 
 function PublishPanel() {
+  const readOnly = useEditor((s) => s.readOnly);
   const publish = useEditor((s) => s.publish);
   const setPublish = useEditor((s) => s.setPublish);
   const notes = useEditor((s) => s.notes);
@@ -1113,19 +1143,21 @@ function PublishPanel() {
     <>
       <PanelHead title="Details" />
       <div className="flex min-h-0 flex-col gap-4 overflow-y-auto px-3.5 pb-4">
-        <div className="flex flex-col gap-1.5">
-          <SectionTitle>Video</SectionTitle>
-          <ProjectFadeRow
-            label="Fade in"
-            value={fadeIn}
-            onChange={(v) => useEditor.getState().setProjectFade({ fadeIn: v })}
-          />
-          <ProjectFadeRow
-            label="Fade out"
-            value={fadeOut}
-            onChange={(v) => useEditor.getState().setProjectFade({ fadeOut: v })}
-          />
-        </div>
+        {!readOnly && (
+          <div className="flex flex-col gap-1.5">
+            <SectionTitle>Video</SectionTitle>
+            <ProjectFadeRow
+              label="Fade in"
+              value={fadeIn}
+              onChange={(v) => useEditor.getState().setProjectFade({ fadeIn: v })}
+            />
+            <ProjectFadeRow
+              label="Fade out"
+              value={fadeOut}
+              onChange={(v) => useEditor.getState().setProjectFade({ fadeOut: v })}
+            />
+          </div>
+        )}
 
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
@@ -1136,6 +1168,7 @@ function PublishPanel() {
             className="publish-caption min-h-[110px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 text-[12.5px] leading-relaxed outline-none focus:border-ring"
             placeholder={"What's happening in this video?\n\nHooks read best in the first line."}
             value={publish.caption}
+            readOnly={readOnly}
             onChange={(e) => setPublish({ caption: e.target.value })}
           />
         </div>
@@ -1149,6 +1182,7 @@ function PublishPanel() {
             className="publish-tags w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-[12.5px] outline-none focus:border-ring"
             placeholder="fyp howto cut"
             value={publish.tags}
+            readOnly={readOnly}
             onChange={(e) => setPublish({ tags: e.target.value })}
           />
           {tagsLine && (
@@ -1174,6 +1208,7 @@ function PublishPanel() {
             className="publish-sound w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-[12.5px] outline-none focus:border-ring"
             placeholder="My track — artist"
             value={publish.soundTitle}
+            readOnly={readOnly}
             onChange={(e) => setPublish({ soundTitle: e.target.value })}
           />
           <p className="text-[11px] leading-relaxed text-muted-foreground">
@@ -1190,6 +1225,7 @@ function PublishPanel() {
               type="date"
               className="notes-date rounded-lg border border-input bg-transparent px-2 py-1 text-[12px] outline-none focus:border-ring"
               value={notes.publishedAt}
+              disabled={readOnly}
               onChange={(e) => setNotes({ publishedAt: e.target.value })}
             />
           </label>
@@ -1197,12 +1233,14 @@ function PublishPanel() {
             className="notes-links min-h-[54px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-[11.5px] leading-relaxed outline-none focus:border-ring"
             placeholder={"Links, one per line\nhttps://tiktok.com/…"}
             value={notes.links.join("\n")}
+            readOnly={readOnly}
             onChange={(e) => setNotes({ links: e.target.value.split("\n") })}
           />
           <textarea
             className="notes-text min-h-[70px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 text-[12.5px] leading-relaxed outline-none focus:border-ring"
             placeholder="Anything worth remembering about this cut…"
             value={notes.text}
+            readOnly={readOnly}
             onChange={(e) => setNotes({ text: e.target.value })}
           />
         </div>

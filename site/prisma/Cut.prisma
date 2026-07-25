@@ -18,6 +18,24 @@ model CutProject {
   @@index([userId, updatedAt])
 }
 
+// A read-only share of one cloud project. The row id doubles as the link
+// token: deleting the row kills the link, and re-sharing mints a fresh URL
+// without moving the project. For a public share the token is the only gate,
+// so share.ts always supplies a cryptographically random id (the cuid()
+// default is a fallback only, never the token an attacker would see).
+model CutProjectShare {
+  id        String   @id @default(cuid()) // link token (random, set in share.ts)
+  projectId String   @unique
+  userId    String // owner; content queries and R2 keys resolve under this id
+  access    String   @default("restricted") // restricted | public
+  emails    Json     @default("[]") // lowercased invitee emails
+  features  Json     @default("{}") // { chat, media, genai, subtitles, details } booleans
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
 model CutFolder {
   id        String   @id @default(cuid())
   userId    String

@@ -232,6 +232,7 @@ export function AiPanel({
 }) {
   const [info, setInfo] = useState<ModelsInfo | null>(null);
   const caps = useCutCaps();
+  const readOnly = useEditor((s) => s.readOnly);
   const signedIn = useSignedIn();
   const [model, setModel] = useState<string>(() =>
     typeof window === "undefined"
@@ -262,6 +263,16 @@ export function AiPanel({
       alive = false;
     };
   }, [projectId]);
+
+  // A shared view opens on the owner's newest thread — the viewer has no chat
+  // of their own to resume. Derived, so the fallback holds until the viewer
+  // explicitly opens another thread from the list.
+  const sessionThread = useMemo(() => {
+    if (!readOnly || !chatsReady) return activeChat;
+    const list = readThreads(projectId);
+    if (list.length === 0 || list.some((t) => t.id === activeChat)) return activeChat;
+    return list[0].id;
+  }, [readOnly, chatsReady, projectId, activeChat]);
 
   useEffect(() => {
     // The models probe asks the engine which CLIs are installed; without the
@@ -350,15 +361,17 @@ export function AiPanel({
         >
           <History />
         </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="ai-new-thread"
-          title="New chat"
-          onClick={newChat}
-        >
-          <Plus />
-        </Button>
+        {!readOnly && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ai-new-thread"
+            title="New chat"
+            onClick={newChat}
+          >
+            <Plus />
+          </Button>
+        )}
         <Button variant="ghost" size="sm" title="Close (⌘J)" onClick={onClose}>
           <X />
         </Button>
@@ -407,6 +420,7 @@ export function AiPanel({
                         minute: "2-digit",
                       })}
                     </span>
+                    {!readOnly && (
                     <span
                       role="button"
                       aria-label="Delete thread"
@@ -419,6 +433,7 @@ export function AiPanel({
                     >
                       <Trash2 className="size-3.5" />
                     </span>
+                    )}
                   </button>
                 ))
               )}
@@ -429,9 +444,9 @@ export function AiPanel({
 
       {chatsReady && (
         <ChatSession
-          key={activeChat}
+          key={sessionThread}
           projectId={projectId}
-          threadId={activeChat}
+          threadId={sessionThread}
           info={mergedInfo}
           model={model}
           onModelChange={selectModel}
@@ -459,6 +474,7 @@ function ChatSession({
   const [input, setInput] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const caps = useCutCaps();
+  const readOnly = useEditor((s) => s.readOnly);
   // Live dictation → drops the finished transcript into the composer, appended
   // after whatever the user had already typed.
   const mic = useMicTranscription((text) =>
@@ -838,6 +854,7 @@ function ChatSession({
         </div>
       </div>
 
+      {!readOnly && (
       <div className="shrink-0 px-2.5 pb-2.5">
         <div className="relative">
           {outOfCredits && (
@@ -950,6 +967,7 @@ function ChatSession({
           </p>
         )}
       </div>
+      )}
     </div>
   );
 }

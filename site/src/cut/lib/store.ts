@@ -12,6 +12,7 @@ import type {
   ProjectDoc,
   RenderRecord,
   Selection,
+  ShareFeatures,
   StoredAsset,
   SubtitleCue,
   SubtitlesBlock,
@@ -100,6 +101,11 @@ export interface EditorState {
   loaded: boolean;
   loadError: string | null;
   saveState: SaveState;
+  /** Read-only shared view: the set wrapper strips doc-mutating writes, so
+   * every edit path is inert by construction. View state stays live. */
+  readOnly: boolean;
+  /** The share's opted-in surfaces; null outside a shared view. */
+  sharedFeatures: ShareFeatures | null;
 
   assets: MediaAsset[];
   /** Every video clip, on any track. Tracks number 0..N bottom-up: track 0
@@ -156,6 +162,8 @@ export interface EditorState {
   loadProject: (id: string) => Promise<void>;
   setProjectName: (name: string) => void;
   setSaveState: (s: SaveState) => void;
+  /** Enter read-only shared mode; call before loadProject. */
+  setSharedView: (features: ShareFeatures) => void;
 
   setAspect: (a: Aspect) => void;
   /** Set the whole-video fade in/out (seconds; 0 clears). Like the aspect,
@@ -648,6 +656,28 @@ export async function runTranscription(projectId: string, spec: object): Promise
   }
 }
 
+// Doc-mutating state: in a read-only shared view the set wrapper drops these
+// keys from every write, so edit paths anywhere in the app become no-ops.
+// Hydration (loadProject, the shared-view poll) escapes via `hydrating`.
+const DOC_KEYS = [
+  "projectName",
+  "saveState",
+  "assets",
+  "clips",
+  "audioClips",
+  "overlays",
+  "templates",
+  "aspect",
+  "fadeIn",
+  "fadeOut",
+  "publish",
+  "notes",
+  "subtitles",
+  "genvideo",
+  "renders",
+] as const;
+let hydrating = false;
+
 export const useEditor = create<EditorState>((baseSet, get) => {
   // Every write that touches clips grounds the stack, so the spine invariant
   // holds by construction — across deletes, drops, undo, and doc loads.
@@ -658,7 +688,11 @@ export const useEditor = create<EditorState>((baseSet, get) => {
     replace?: boolean
   ) =>
     baseSet((prev) => {
-      const next = typeof partial === "function" ? partial(prev) : partial;
+      let next = typeof partial === "function" ? partial(prev) : partial;
+      if (prev.readOnly && !hydrating) {
+        next = { ...next };
+        for (const k of DOC_KEYS) delete (next as Record<string, unknown>)[k];
+      }
       return next.clips ? { ...next, clips: groundTracks(next.clips) } : next;
     }, replace as false | undefined);
 
@@ -743,6 +777,8 @@ export const useEditor = create<EditorState>((baseSet, get) => {
     loaded: false,
     loadError: null,
     saveState: "saved",
+    readOnly: false,
+    sharedFeatures: null,
 
     assets: [],
     clips: [],
@@ -781,6 +817,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       // stale, and the loaded clips are ordinary, fully-undoable content.
       genClipIds.clear();
       genAudioIds.clear();
+      hydrating = true;
       set({
         projectId: id,
         loaded: false,
@@ -807,6 +844,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
         genvideo: undefined,
         renders: [],
       });
+      hydrating = false;
       // A background scene run may still be writing this project's doc — drain
       // its queued writes so the load never reads a half-written doc. Ordering
       // matters: projectId is set (loaded false) BEFORE this await, so a write
@@ -823,9 +861,10 @@ export const useEditor = create<EditorState>((baseSet, get) => {
           ...a,
           url: mediaUrl(id, a.fileName),
         }));
-        // Cloud media rides signed R2 URLs, batch-minted once per load; the
-        // /media route's 302 stays the fallback for anything the mint misses.
-        if (getBackend().kind === "cloud") {
+        // Cloud and shared media ride signed R2 URLs, batch-minted once per
+        // load; the /media route's 302 stays the fallback for anything the
+        // mint misses.
+        if (getBackend().kind !== "local") {
           const signed = await fetchSignedMediaUrls(id, assets.map((a) => a.fileName));
           for (const a of assets) a.url = signed.get(a.fileName) ?? a.url;
         }
@@ -857,6 +896,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
         // Docs saved when edge transition styles existed convert them into the
         // equivalent clip animations.
         const merged = migrateLegacyTransitions(lifted);
+        hydrating = true;
         set({
           projectName: doc.name,
           assets,
@@ -893,11 +933,14 @@ export const useEditor = create<EditorState>((baseSet, get) => {
         });
       } catch (err) {
         set({ loadError: err instanceof Error ? err.message : String(err) });
+      } finally {
+        hydrating = false;
       }
     },
 
     setProjectName: (name) => set({ projectName: name }),
     setSaveState: (s) => set({ saveState: s }),
+    setSharedView: (features) => set({ readOnly: true, sharedFeatures: features }),
 
     // Clone so each persist yields a fresh top-level reference: the orchestrator
     // mutates one project object in place, and autosave detects a genvideo change
@@ -1064,10 +1107,31 @@ export const useEditor = create<EditorState>((baseSet, get) => {
         return { assets: [...s.assets, asset], ...(guess ? { aspect: guess } : {}) };
       }),
 
-    updateAsset: (id, patch) =>
+    updateAsset: (id, patch) => {
+      // A read-only view still takes runtime enrichment (signed URLs,
+      // filmstrips, waveforms) — decorative fields only; doc fields stay
+      // stripped with every other edit.
+      if (get().readOnly) {
+        const runtime: Partial<MediaAsset> = {};
+        if (patch.url !== undefined) runtime.url = patch.url;
+        if (patch.thumbs !== undefined) runtime.thumbs = patch.thumbs;
+        if (patch.thumbStep !== undefined) runtime.thumbStep = patch.thumbStep;
+        if (patch.peaks !== undefined) runtime.peaks = patch.peaks;
+        if (Object.keys(runtime).length === 0) return;
+        hydrating = true;
+        try {
+          set((s) => ({
+            assets: s.assets.map((a) => (a.id === id ? { ...a, ...runtime } : a)),
+          }));
+        } finally {
+          hydrating = false;
+        }
+        return;
+      }
       set((s) => ({
         assets: s.assets.map((a) => (a.id === id ? { ...a, ...patch } : a)),
-      })),
+      }));
+    },
 
     removeAsset: (id) => {
       const st = get();

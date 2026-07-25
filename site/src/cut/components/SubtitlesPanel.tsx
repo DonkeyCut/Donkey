@@ -73,6 +73,7 @@ function laneLanguage(subs: SubtitlesBlock, lane: number): string {
 
 export function SubtitlesPanel() {
   const caps = useCutCaps();
+  const readOnly = useEditor((s) => s.readOnly);
   const subtitles = useEditor((s) => s.subtitles);
   const lane = useEditor((s) => s.subtitleLane);
   const status = useEditor((s) => s.subtitleStatus);
@@ -95,6 +96,25 @@ export function SubtitlesPanel() {
   const translate = (fromLane: number) => {
     void useEditor.getState().translateSubtitleTrack(fromLane).then(growTimeline);
   };
+
+  // A shared view reads the transcript; styling and generation stay the
+  // owner's.
+  if (readOnly) {
+    return (
+      <>
+        <div className="flex h-12 shrink-0 items-center pl-4">
+          <span className="text-sm font-semibold tracking-tight">Subtitles</span>
+        </div>
+        {hasCues ? (
+          <Transcript cues={activeCues} />
+        ) : (
+          <p className="px-4 text-[11px] leading-relaxed text-muted-foreground">
+            No subtitles yet.
+          </p>
+        )}
+      </>
+    );
+  }
 
   return (
     <>

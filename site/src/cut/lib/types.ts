@@ -649,6 +649,16 @@ export interface ClipSpan {
 }
 
 /** The document persisted as project.json inside each project folder. */
+/** Which optional surfaces a project share exposes to viewers. Playback
+ * (preview + timeline) is always shared; these opt the rest in. */
+export interface ShareFeatures {
+  chat: boolean;
+  media: boolean;
+  genai: boolean;
+  subtitles: boolean;
+  details: boolean;
+}
+
 export interface ProjectDoc {
   version: 1;
   name: string;

@@ -18,7 +18,9 @@ const seeded = new Map<string, Promise<void>>();
  * projects; memoized per project, but a network failure clears the memo so
  * the next panel mount retries. */
 export function ensureCloudThreads(projectId: string): Promise<void> {
-  if (cutMode() !== "cloud") return Promise.resolve();
+  // Shared viewers seed too (read-only); saves and deletes below stay
+  // cloud-only, so a viewer never writes back.
+  if (cutMode() === "local") return Promise.resolve();
   let p = seeded.get(projectId);
   if (!p) {
     p = seedThreads(projectId).catch(() => {

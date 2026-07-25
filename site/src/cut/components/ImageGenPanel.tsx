@@ -57,6 +57,7 @@ function pixelDims(aspect: ImageAspect, resolution: ImageResolution): string {
 
 export function ImageGenPanel({ projectId }: { projectId: string }) {
   const { prompt, aspect, resolution, refs } = useImageGen();
+  const readOnly = useEditor((s) => s.readOnly);
   const signedIn = useSignedIn();
   const candidates = useRefCandidates();
   const allJobs = useGenerate((s) => s.jobs);
@@ -102,6 +103,7 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3.5 pb-4">
+        {!readOnly && (<>
         {/* Composer: attached references ride as little image thumbnails inside
             the input box, above the prompt (Claude-style). */}
         <div
@@ -178,6 +180,7 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
             to continue.
           </p>
         )}
+        </>)}
 
         {/* Generations in flight (or failed): a finished asset drops into the
             list below, so only the transient states row here. Several can run

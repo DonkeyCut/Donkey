@@ -366,6 +366,8 @@ export function startLaneMove<V = unknown>(
     (ui.visStart ?? self.start) +
     (e.clientX - e.currentTarget.getBoundingClientRect().left) / ui.pps;
   s.seek(grabTime);
+  // A read-only view: the click selects and seeks; the drag never starts.
+  if (s.readOnly) return;
   s.pushHistory();
 
   const start0 = self.start;
@@ -588,6 +590,7 @@ export function startLaneTrim(
 ) {
   settleSnapBack();
   const s = useEditor.getState();
+  if (s.readOnly) return;
   const ad = ADAPTERS[kind];
   const raw0 = ad.raws(s).find((r) => ad.view(r).id === id);
   if (!raw0) return;

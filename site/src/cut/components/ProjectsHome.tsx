@@ -46,10 +46,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { engineLost, engineOrigin, servedFromEngine } from "@/cut/lib/api";
-import { cloudBackend } from "@/cut/lib/backend/cloud";
+import { cloudBackend, quotaErrorMessage } from "@/cut/lib/backend/cloud";
 import { useCutMode } from "@/cut/lib/backend/hooks";
 import { localBackend } from "@/cut/lib/backend/local";
-import type { CutBackend, CutMode } from "@/cut/lib/backend/types";
+import type { CutBackend } from "@/cut/lib/backend/types";
 import { useWebMode, webModeEnabled } from "@/cut/lib/flags";
 import { track } from "@/lib/analytics";
 import { authClient } from "@/lib/auth-client";
@@ -69,8 +69,9 @@ type View = "gallery" | "list";
 // Where a project lives: the engine on this Mac or the hosted cloud backend.
 // The home lists each residency it can reach as its own section, talking to
 // the backend objects directly — the global mode is only bound when a project
-// opens into the editor.
-type Residency = CutMode;
+// opens into the editor. (The "shared" mode is a view of someone else's
+// project, never a residency of yours.)
+type Residency = "local" | "cloud";
 
 const backendFor = (r: Residency): CutBackend => (r === "cloud" ? cloudBackend : localBackend);
 
@@ -115,6 +116,8 @@ export function ProjectsHome() {
   const router = useRouter();
   const base = useCutBase();
   const mode = useCutMode();
+  // The home never runs in shared mode; anything non-cloud lists as local.
+  const homeMode: Residency = mode === "cloud" ? "cloud" : "local";
   const webMode = useWebMode();
   const { data: session } = authClient.useSession();
   // Which backends this home lists. Engine presence is what the ConnectGate
@@ -335,10 +338,10 @@ export function ProjectsHome() {
         } finally {
           setImporting((n) => n - 1);
         }
-        await refresh(mode);
+        await refresh(homeMode);
       }
     },
-    [refresh, mode]
+    [refresh, homeMode]
   );
 
   const rename = async () => {
@@ -359,9 +362,38 @@ export function ProjectsHome() {
 
   const duplicate = async (r: Residency, p: ProjectSummary) => {
     setBusy(true);
+    setDupError(null);
     try {
-      await backendFor(r).fetch(`/api/cut/projects/${p.id}/duplicate`, { method: "POST" });
+      const res = await backendFor(r).fetch(`/api/cut/projects/${p.id}/duplicate`, {
+        method: "POST",
+      });
+      const body = (await res.json().catch(() => null)) as
+        | { jobId?: string; error?: string }
+        | null;
+      if (!res.ok) {
+        throw new Error(
+          quotaErrorMessage(res.status, body) ?? body?.error ?? "Could not duplicate the project."
+        );
+      }
+      // Cloud duplicates queue (copies drain one at a time); poll until this
+      // one lands. The engine answers with the finished summary instead.
+      if (body?.jobId) {
+        for (;;) {
+          await new Promise((done) => setTimeout(done, 2000));
+          const st = await backendFor(r).fetch(`/api/cut/copy-jobs/${body.jobId}`);
+          if (!st.ok) throw new Error("Could not duplicate the project.");
+          const job = (await st.json()) as { state: string; error?: string };
+          if (job.state === "done") break;
+          if (job.state === "error") {
+            throw new Error(job.error || "Could not duplicate the project.");
+          }
+        }
+      }
       await refresh(r);
+    } catch (e) {
+      setDupError(
+        e instanceof Error && e.message ? e.message : "Could not duplicate the project."
+      );
     } finally {
       setBusy(false);
     }
@@ -650,7 +682,7 @@ export function ProjectsHome() {
   // Whole-surface file drops import on the globally bound backend; a folder
   // another backend owns can't receive them, so those land at the root.
   const surfaceDropFolder =
-    dual && openFolder && !data[mode].folders.some((f) => f.id === openFolder)
+    dual && openFolder && !data[homeMode].folders.some((f) => f.id === openFolder)
       ? null
       : openFolder;
 

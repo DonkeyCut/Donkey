@@ -87,6 +87,7 @@ export function AudioPanel({
   sub: "voice" | "music";
   onSub: (v: "voice" | "music") => void;
 }) {
+  const readOnly = useEditor((s) => s.readOnly);
   // The app-wide preview player: starting a clip stops the last one, here or
   // on a chat audio card. Leaving the tab silences only this panel's own
   // preview — a chat card's playback belongs to the chat, which is still on
@@ -113,7 +114,7 @@ export function AudioPanel({
       <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-3.5 pb-4">
         {sub === "voice" ? (
           <>
-            <VoiceGenerator projectId={projectId} />
+            {!readOnly && <VoiceGenerator projectId={projectId} />}
             <ProjectAudio
               projectId={projectId}
               importing={importing}
@@ -123,7 +124,7 @@ export function AudioPanel({
           </>
         ) : (
           <>
-            <MusicGenerator projectId={projectId} />
+            {!readOnly && <MusicGenerator projectId={projectId} />}
             <ProjectMusic projectId={projectId} onTogglePlay={togglePlay} playingUrl={playingUrl} />
           </>
         )}

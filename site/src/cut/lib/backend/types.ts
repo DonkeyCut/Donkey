@@ -1,10 +1,11 @@
 // A Cut backend is where a project lives and executes: "local" is the engine
 // on this Mac (127.0.0.1, disk storage, native tools), "cloud" is the hosted
-// deployment (session auth, Postgres + R2). Both speak the same JSON route
-// shapes, so ordinary API calls dispatch through one transport; operations
-// whose contracts genuinely differ (uploads, export, transcription) branch on
-// the backend kind where they are implemented.
-export type CutMode = "local" | "cloud";
+// deployment (session auth, Postgres + R2), and "shared" is a read-only view
+// of another account's cloud project through a share link. All speak the same
+// JSON route shapes, so ordinary API calls dispatch through one transport;
+// operations whose contracts genuinely differ (uploads, export,
+// transcription) branch on the backend kind where they are implemented.
+export type CutMode = "local" | "cloud" | "shared";
 
 // What the active backend can do. Components consult these to hide
 // affordances instead of feature-detecting or failing at call time.

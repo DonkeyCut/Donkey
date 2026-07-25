@@ -24,15 +24,20 @@ import { Preview } from "./Preview";
 import { SidePanel } from "./SidePanel";
 import { Timeline } from "./Timeline";
 import { TopBar } from "./TopBar";
+import { ViewerTopBar } from "./ViewerTopBar";
 
 export function Editor({
   projectId,
   from,
   folder,
+  viewer = false,
 }: {
   projectId: string;
   from?: string | null;
   folder?: string | null;
+  /** Read-only share view: the share page bound the shared backend and put
+   * the store in read-only mode before mounting. */
+  viewer?: boolean;
 }) {
   useEffect(() => installDevHooks(), []);
   const back = backTarget(useCutBase(), from, folder);
@@ -44,22 +49,31 @@ export function Editor({
   const stale = useEditor((s) => s.projectId) !== projectId;
   const exportOpen = useEditor((s) => s.exportOpen);
   const aiOpen = useEditor((s) => s.aiOpen);
+  const sharedFeatures = useEditor((s) => s.sharedFeatures);
   // The inspector only earns its column when the selection has a panel to
   // show; otherwise (nothing selected, or a subtitle cue) it is an empty white
   // panel, so collapse it and let the preview take the space.
-  const hasInspector = useEditor((s) => s.selection != null && s.selection.kind !== "cue");
+  const hasInspector = useEditor(
+    (s) => !s.readOnly && s.selection != null && s.selection.kind !== "cue"
+  );
   const [importing, setImporting] = useState(0);
   const [conflictReloaded, setConflictReloaded] = useState(false);
+  const [shareGone, setShareGone] = useState(false);
   const dragDepth = useRef(0);
 
   // Load the project document, then enrich assets (thumbs/waveforms) lazily.
   // Residency is a fact about the project, not the link: resolve where the id
   // lives (residency.ts) and bind the backend before anything else fetches.
+  // A share view skips that — its page bound the shared backend already.
   useEffect(() => {
     let alive = true;
-    void resolveProjectMode(projectId).then((mode) => {
+    const bind = viewer
+      ? Promise.resolve()
+      : resolveProjectMode(projectId).then((mode) => {
+          if (alive) setCutMode(mode);
+        });
+    void bind.then(() => {
       if (!alive) return;
-      setCutMode(mode);
       void useEditor
         .getState()
         .loadProject(projectId)
@@ -73,12 +87,46 @@ export function Editor({
     return () => {
       alive = false;
     };
-  }, [projectId]);
+  }, [projectId, viewer]);
+
+  // Delayed follow of the owner's edits: poll the doc version every 10s and
+  // reload on change, keeping the playhead. A 401/403/404 means the share was
+  // revoked or narrowed — stop and say so.
+  useEffect(() => {
+    if (!viewer) return;
+    let last: string | null = null;
+    let stopped = false;
+    const tick = async () => {
+      if (stopped || document.hidden) return;
+      try {
+        const res = await apiFetch(`/api/cut/projects/${projectId}`, { method: "HEAD" });
+        if ([401, 403, 404].includes(res.status)) {
+          stopped = true;
+          setShareGone(true);
+          return;
+        }
+        if (!res.ok) return;
+        const version = res.headers.get("x-cut-doc-version");
+        if (version && last && version !== last) {
+          const at = useEditor.getState().currentTime;
+          await useEditor.getState().loadProject(projectId);
+          for (const asset of useEditor.getState().assets) void enrichAsset(asset);
+          useEditor.getState().seek(at);
+        }
+        if (version) last = version;
+      } catch {
+        // Transient network failure — the next tick retries.
+      }
+    };
+    const timer = setInterval(() => void tick(), 10_000);
+    return () => clearInterval(timer);
+  }, [viewer, projectId]);
 
   // A cloud save hit a newer stored version (another session's edits won).
   // Take the newer doc through the ordinary load path — the GET returns it and
   // rebinds the driver's version — and say so.
   useEffect(() => {
+    if (viewer) return;
     const onConflict = (e: Event) => {
       const detail = (e as CustomEvent<{ projectId: string }>).detail;
       if (!detail || detail.projectId !== projectId) return;
@@ -92,11 +140,12 @@ export function Editor({
     };
     window.addEventListener("cut-cloud-doc-conflict", onConflict);
     return () => window.removeEventListener("cut-cloud-doc-conflict", onConflict);
-  }, [projectId]);
+  }, [projectId, viewer]);
 
   // Keep the project card's hover proxy fresh: rebuild it a few seconds after
   // the cut settles. Best-effort and single-flight; skips when there's no cut.
   useEffect(() => {
+    if (viewer) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let rendering = false;
     const render = async () => {
@@ -158,10 +207,11 @@ export function Editor({
       unsub();
       if (timer) clearTimeout(timer);
     };
-  }, [projectId]);
+  }, [projectId, viewer]);
 
   // Autosave: debounce document changes into PUT /api/cut/projects/<id>.
   useEffect(() => {
+    if (viewer) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let last = serializeDoc(useEditor.getState());
     let lastName = useEditor.getState().projectName;
@@ -244,7 +294,7 @@ export function Editor({
       unsub();
       if (timer) clearTimeout(timer);
     };
-  }, [projectId]);
+  }, [projectId, viewer]);
 
   const importFiles = useCallback(
     async (
@@ -291,6 +341,7 @@ export function Editor({
   // with `Files` too, so internal drags — which always carry the ref MIME —
   // are filtered out; dragging a stock tile never lights the drop hints.
   useEffect(() => {
+    if (viewer) return;
     const isFileDrag = (e: DragEvent) =>
       !!e.dataTransfer?.types.includes("Files") && !hasRefDrag(e);
     // "media" when the drag carries at least one video/audio/image (the
@@ -356,7 +407,7 @@ export function Editor({
       window.removeEventListener("dragleave", leave);
       window.removeEventListener("drop", drop);
     };
-  }, [importFiles]);
+  }, [importFiles, viewer]);
 
   // Keyboard shortcuts.
   useEffect(() => {
@@ -375,6 +426,19 @@ export function Editor({
         target.tagName === "INPUT" || target.closest('[role="switch"],[role="slider"]') !== null;
       const s = useEditor.getState();
       if (s.exportOpen || document.querySelector('[data-slot="dialog-content"]')) return;
+
+      // A read-only view keeps playback keys; everything that edits is out.
+      if (s.readOnly) {
+        const allowed =
+          e.code === "Space" ||
+          e.key === "ArrowLeft" ||
+          e.key === "ArrowRight" ||
+          e.key === "Escape" ||
+          ((e.metaKey || e.ctrlKey) &&
+            e.key.toLowerCase() === "j" &&
+            s.sharedFeatures?.chat === true);
+        if (!allowed) return;
+      }
 
       if (e.code === "Space" && !controlFocused) {
         e.preventDefault();
@@ -441,16 +505,27 @@ export function Editor({
     );
   }
 
+  const anySidePanel = sharedFeatures
+    ? sharedFeatures.media || sharedFeatures.genai || sharedFeatures.subtitles || sharedFeatures.details
+    : true;
+
   return (
     <div className="flex h-screen min-w-[900px] overflow-hidden">
       <div className="grid min-w-0 flex-1 grid-rows-[46px_minmax(0,1fr)_auto]">
-        <TopBar onImport={importFiles} from={from} folder={folder} uploading={importing} />
+        {viewer ? (
+          <ViewerTopBar />
+        ) : (
+          <TopBar onImport={importFiles} from={from} folder={folder} uploading={importing} />
+        )}
         <div
           className={`grid min-h-0 ${
             hasInspector ? "grid-cols-[auto_minmax(0,1fr)_272px]" : "grid-cols-[auto_minmax(0,1fr)]"
           }`}
         >
-          <SidePanel projectId={projectId} onImport={importFiles} importing={importing > 0} />
+          {anySidePanel && (
+            <SidePanel projectId={projectId} onImport={importFiles} importing={importing > 0} />
+          )}
+          {!anySidePanel && <div />}
           <div className="grid min-h-0 min-w-0">
             <Preview />
           </div>
@@ -458,7 +533,7 @@ export function Editor({
         </div>
         <Timeline />
       </div>
-      {aiOpen && (
+      {aiOpen && (!viewer || sharedFeatures?.chat) && (
         <AiPanel
           key={projectId}
           projectId={projectId}
@@ -466,6 +541,11 @@ export function Editor({
         />
       )}
       {exportOpen && <ExportDialog />}
+      {shareGone && (
+        <div className="fixed top-14 left-1/2 z-50 -translate-x-1/2 rounded-full bg-foreground/90 px-3.5 py-1.5 text-xs font-medium text-background shadow-lg">
+          This share is no longer available.
+        </div>
+      )}
       {conflictReloaded && (
         <div className="fixed top-14 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-foreground/90 py-1.5 pr-1.5 pl-3.5 text-background shadow-lg">
           <span className="text-xs font-medium">Reloaded a newer version saved elsewhere.</span>

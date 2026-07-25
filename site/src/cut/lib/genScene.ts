@@ -99,6 +99,9 @@ useEditor.subscribe((s, prev) => {
   // mounts. loadProject flips `loaded` false→true in the same set() that
   // fills genvideo, so the edge fires once per open.
   if (!s.loaded || prev.loaded || !s.projectId) return;
+  // A shared view shows the owner's persisted run as data only — never
+  // adopt or resume it (resuming would render on the viewer's account).
+  if (s.readOnly) return;
   const live = orchestrators.get(s.projectId);
   if (live && !live.isAborted && !isTerminal(statusFor(live.project))) {
     // The run is still working: its clips loaded as ordinary content — re-mark

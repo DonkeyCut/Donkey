@@ -49,6 +49,7 @@ const ASPECT_WORD: Record<VideoAspect, string> = {
 };
 
 export function GenerateVideoPanel({ projectId }: { projectId: string }) {
+  const readOnly = useEditor((s) => s.readOnly);
   const signedIn = useSignedIn();
   const allJobs = useGenerate((s) => s.jobs);
   // Panel renders only — a chat- or scene-owned job lives on its chat card.
@@ -112,6 +113,7 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
         {...targetProps}
         className="relative flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3.5 pb-4"
       >
+        {!readOnly && (<>
         {/* Composer: the character and attached references ride inside the
             input box, above the prompt — same shape as the image panel, which
             also highlights this box while a drag hovers the panel. */}
@@ -220,6 +222,7 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
             Renders take a minute or two. Keep editing while it runs.
           </p>
         )}
+        </>)}
 
         {jobs.length > 0 && (
           <div className="flex flex-col gap-1.5">

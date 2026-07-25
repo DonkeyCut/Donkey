@@ -53,9 +53,11 @@ async function cloudFetch(path: string, init?: RequestInit): Promise<Response> {
   return res;
 }
 
-/** Batch-mint signed R2 GET URLs for a cloud project's media files. Returns
- * fileName -> url; anything the mint misses keeps the /media route, whose 302
- * serves the same bytes. */
+/** Batch-mint signed R2 GET URLs for a cloud or shared project's media files.
+ * Returns fileName -> url; anything the mint misses keeps the /media route,
+ * whose 302 serves the same bytes. Dispatches through the active backend so
+ * the shared driver's token prefix applies; lazy import because ./index
+ * imports this module. */
 export async function fetchSignedMediaUrls(
   projectId: string,
   fileNames: string[]
@@ -63,7 +65,8 @@ export async function fetchSignedMediaUrls(
   const out = new Map<string, string>();
   if (fileNames.length === 0) return out;
   try {
-    const res = await cloudFetch("/api/cut/media/presign-get", {
+    const { apiFetch } = await import("./index");
+    const res = await apiFetch("/api/cut/media/presign-get", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ items: fileNames.map((fileName) => ({ projectId, fileName })) }),

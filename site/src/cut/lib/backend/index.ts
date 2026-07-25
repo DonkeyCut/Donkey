@@ -8,6 +8,7 @@
 // imports apiUrl from here. React hooks live in ./hooks.
 import { cloudBackend } from "./cloud";
 import { localBackend } from "./local";
+import { sharedBackend } from "./shared";
 import type { CutBackend, CutCaps, CutMode } from "./types";
 
 export type { CutBackend, CutCaps, CutMode };
@@ -36,7 +37,7 @@ export function subscribeCutMode(onChange: () => void) {
 }
 
 export function getBackend(): CutBackend {
-  return mode === "cloud" ? cloudBackend : localBackend;
+  return mode === "cloud" ? cloudBackend : mode === "shared" ? sharedBackend : localBackend;
 }
 
 /** fetch() against the active backend. */
