@@ -142,9 +142,15 @@ async function runClaude(
           emit({ type: "text-end", id: textId });
           textId = null;
         }
-      } else if (m.type === "result" && m.subtype !== "success") {
-        const detail = typeof m.result === "string" ? m.result : String(m.subtype);
-        emit({ type: "error", errorText: `Claude stopped: ${detail}` });
+      } else if (m.type === "result") {
+        if (m.subtype !== "success") {
+          const detail = typeof m.result === "string" ? m.result : String(m.subtype);
+          emit({ type: "error", errorText: `Claude stopped: ${detail}` });
+        }
+        // The result message is the turn's last word — after it the CLI only
+        // tears down. Leaving the loop closes the chat stream now instead of
+        // holding the working indicator open through process exit.
+        break;
       }
     }
   } finally {
@@ -186,6 +192,20 @@ async function runCodex(
     const onAbort = () => proc.kill("SIGTERM");
     signal.addEventListener("abort", onAbort);
 
+    // The turn settles on its terminal event, not on process exit: codex
+    // spends seconds saving the session after turn.completed, and holding the
+    // stream open that long keeps the chat's working indicator running past
+    // the finished reply. The process keeps writing its session in the
+    // background; once settled, late process events must not touch the
+    // (closed) stream writer.
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    };
+
     let textCount = 0;
     let stdoutBuf = "";
     let stderrTail = "";
@@ -213,13 +233,19 @@ async function runCodex(
         } else if (ev.type === "error" || ev.type === "turn.failed") {
           const message = ev.error?.message ?? ev.message ?? "Codex failed.";
           emit({ type: "error", errorText: message });
+          if (ev.type === "turn.failed") settle();
+        } else if (ev.type === "turn.completed") {
+          settle();
         }
+        if (settled) return;
       }
     });
     proc.stderr.on("data", (d: Buffer) => {
       stderrTail = (stderrTail + d.toString()).slice(-2000);
     });
     proc.on("error", (err) => {
+      if (settled) return;
+      settled = true;
       signal.removeEventListener("abort", onAbort);
       reject(
         err.message.includes("ENOENT")
@@ -228,6 +254,7 @@ async function runCodex(
       );
     });
     proc.on("close", (code) => {
+      if (settled) return;
       signal.removeEventListener("abort", onAbort);
       if (code !== 0 && !signal.aborted && code !== null) {
         const lines = stderrTail.trim().split("\n").map((l) => l.trim()).filter(Boolean);
