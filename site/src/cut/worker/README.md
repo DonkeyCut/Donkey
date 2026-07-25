@@ -97,16 +97,20 @@ stream straight through, uncached.
 One-time setup:
 
 1. The zone must be on Cloudflare — the Cache API is a no-op on `workers.dev`,
-   so `routes` has to be a real hostname. `wrangler.jsonc` claims
-   `media.donkeycut.com` as a custom domain and sets `CUT_MEDIA_HOST` to match;
-   change both together, or comment both out to leave the feature off.
-2. Worker secret: `npx wrangler secret put CUT_MEDIA_SIGNING_SECRET -c
-   src/cut/worker/wrangler.jsonc` (any long random string).
-3. On the hosted site (Vercel env): `CUT_MEDIA_BASE_URL` = `https://` + that
-   hostname, and `CUT_MEDIA_SIGNING_SECRET` = the same string.
+   so the route has to be a real hostname. `wrangler.jsonc` claims
+   `media.donkeycut.com` as a custom domain and wrangler creates the DNS record
+   and certificate on deploy; a pre-existing CNAME on that name blocks it. The
+   handler matches `CUT_MEDIA_HOST` in `../lib/hosts.ts`, so the two names move
+   together.
+2. Generate the secret once: `openssl rand -hex 32`.
+3. Worker secret: `npx wrangler secret put CUT_MEDIA_SIGNING_SECRET -c
+   src/cut/worker/wrangler.jsonc`, pasting that value.
+4. On the hosted site (Vercel env): `CUT_MEDIA_SIGNING_SECRET`, the same value.
+   Holding it is what switches the feature on.
 
-Without those two site variables the hosted API presigns R2 exactly as before,
-so local dev and an un-migrated deployment both keep working.
+The two sides must carry the same string — a mismatch fails every request's
+signature check. Without the site variable the hosted API presigns R2 exactly
+as before, so local dev and an un-migrated deployment both keep working.
 
 ## Copy queue
 

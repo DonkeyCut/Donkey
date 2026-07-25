@@ -27,12 +27,11 @@
   },
   // Shared media is served from the edge (cf/media.ts) with the bucket kept
   // private: this binding is the only way in. The Cache API is inert on
-  // workers.dev, so the route has to be a real hostname on the zone — set
-  // CUT_MEDIA_HOST to the same name. Comment both out to leave the feature off;
-  // the hosted API then presigns R2 exactly as before.
+  // workers.dev, so the route has to be a real hostname on the zone; it must
+  // match CUT_MEDIA_HOST in ../../lib/hosts.ts, which is what the handler
+  // matches on. Wrangler creates the DNS record and certificate on deploy.
   "r2_buckets": [{ "binding": "CUT_MEDIA", "bucket_name": "donkey-cut" }],
   "routes": [{ "pattern": "media.donkeycut.com", "custom_domain": true }],
-  "vars": { "CUT_MEDIA_HOST": "media.donkeycut.com" },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CutRenderWorker"] }],
   // Share-copy jobs drain serially: one message per batch, one batch in
   // flight, so a burst of copy requests can't stampede R2 or the database.

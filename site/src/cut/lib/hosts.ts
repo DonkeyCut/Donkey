@@ -11,6 +11,12 @@ export const DONKEYCUT_HOSTS = new Set(["donkeycut.com", "www.donkeycut.com"]);
 
 export const DONKEYCUT_CANONICAL = "https://donkeycut.com";
 
+// Shared media is served from its own hostname by the Cut Worker's R2 binding
+// (src/cut/worker/cf/media.ts), never by this app. The Worker claims it as a
+// custom domain in wrangler.jsonc; change that route and this together.
+export const CUT_MEDIA_HOST = "media.donkeycut.com";
+export const CUT_MEDIA_ORIGIN = `https://${CUT_MEDIA_HOST}`;
+
 function hostname(host: string | null | undefined): string {
   return host ? host.split(":")[0] : "";
 }
