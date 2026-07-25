@@ -161,6 +161,21 @@ function slimForStorage(list: ChatThread[]): ChatThread[] {
   }));
 }
 
+/** A saved thread can hold tool parts captured mid-run — the page closed or
+ * the stream died before the result landed. Nothing settles them after a
+ * reload, so they'd show a live spinner forever; restore them as failed. */
+function settleInterruptedTools(messages: UIMessage[]): UIMessage[] {
+  return messages.map((m) => ({
+    ...m,
+    parts: m.parts.map((p) => {
+      const t = p as { type: string; state?: string };
+      if (!isToolPartType(t.type)) return p;
+      if (t.state === "output-available" || t.state === "output-error") return p;
+      return { ...p, state: "output-error", errorText: "Interrupted." } as typeof p;
+    }),
+  }));
+}
+
 function writeThreads(projectId: string, list: ChatThread[]) {
   // Cap history, but retain any overflow thread that still owns chat media or
   // a working scene run — killing media or work is an explicit act (deleting
@@ -581,7 +596,7 @@ function ChatSession({
 
   const { messages, sendMessage, stop, status, error, clearError } = useChat({
     id: threadId,
-    messages: initialThread?.messages,
+    messages: initialThread && settleInterruptedTools(initialThread.messages),
     transport,
     onData: (part) => {
       if (part.type === "data-session") {
