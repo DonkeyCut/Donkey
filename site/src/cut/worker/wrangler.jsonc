@@ -25,5 +25,19 @@
   "durable_objects": {
     "bindings": [{ "name": "CUT_RENDER_WORKER", "class_name": "CutRenderWorker" }]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CutRenderWorker"] }]
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CutRenderWorker"] }],
+  // Share-copy jobs drain serially: one message per batch, one batch in
+  // flight, so a burst of copy requests can't stampede R2 or the database.
+  // Create the queue once: npx wrangler queues create donkey-cut-copy
+  "queues": {
+    "consumers": [
+      {
+        "queue": "donkey-cut-copy",
+        "max_batch_size": 1,
+        "max_concurrency": 1,
+        "max_retries": 10,
+        "retry_delay": 30
+      }
+    ]
+  }
 }

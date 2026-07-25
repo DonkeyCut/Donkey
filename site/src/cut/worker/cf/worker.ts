@@ -14,7 +14,18 @@ type WorkerEnv = {
   R2_ACCESS_KEY_ID: string;
   R2_SECRET_ACCESS_KEY: string;
   CUT_WAKE_SECRET: string;
+  CUT_COPY_EXECUTE_URL: string;
+  CUT_COPY_EXECUTE_SECRET: string;
 };
+
+// Minimal shapes for the queue consumer — this file stays off workers-types
+// on purpose (see the header note).
+type QueueMessage = {
+  body: unknown;
+  ack(): void;
+  retry(opts?: { delaySeconds?: number }): void;
+};
+type QueueBatch = { messages: QueueMessage[] };
 
 export class CutRenderWorker extends Container<WorkerEnv> {
   // Backstop only: main.ts exits by itself when the queue drains. This stops
@@ -49,5 +60,34 @@ export default {
       return Response.json({ ok: true });
     }
     return new Response("donkey-cut-worker", { status: 200 });
+  },
+
+  // Share-copy queue consumer (donkey-cut-copy, wrangler.jsonc): one message
+  // per batch, one batch at a time, so copies drain serially no matter how
+  // many viewers ask at once. The copy itself runs on the hosted API — this
+  // handler only paces it and carries the queue's retry semantics: 2xx acks,
+  // anything else redelivers after a delay.
+  async queue(batch: QueueBatch, env: WorkerEnv): Promise<void> {
+    for (const message of batch.messages) {
+      const jobId = (message.body as { jobId?: unknown } | null)?.jobId;
+      if (typeof jobId !== "string" || !jobId) {
+        message.ack();
+        continue;
+      }
+      try {
+        const res = await fetch(env.CUT_COPY_EXECUTE_URL, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${env.CUT_COPY_EXECUTE_SECRET}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ jobId }),
+        });
+        if (res.ok) message.ack();
+        else message.retry({ delaySeconds: 30 });
+      } catch {
+        message.retry({ delaySeconds: 30 });
+      }
+    }
   },
 };

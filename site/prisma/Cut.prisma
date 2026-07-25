@@ -36,6 +36,26 @@ model CutProjectShare {
   @@index([userId])
 }
 
+// One requested project copy — a share copy into a viewer's account, or an
+// owner duplicating their own project. Copies move whole projects' worth of
+// R2 objects, so they never run in the request that asked: the request writes
+// this row and publishes its id to a Cloudflare Queue, the queue's serial
+// consumer executes it, and the client polls this row for the outcome.
+model CutCopyJob {
+  id           String   @id @default(cuid())
+  kind         String   @default("share") // share | duplicate
+  shareId      String? // share: access re-checked against this row at drain time
+  projectId    String? // duplicate: the owner's source project
+  userId       String // destination account (the viewer, or the owner)
+  state        String   @default("queued") // queued | running | done | error
+  newProjectId String?
+  error        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId, createdAt])
+}
+
 model CutFolder {
   id        String   @id @default(cuid())
   userId    String

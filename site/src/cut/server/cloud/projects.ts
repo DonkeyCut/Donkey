@@ -4,7 +4,6 @@ import type { ProjectDoc, ProjectFolder, ProjectSummary } from "@/cut/lib/types"
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
-  copy,
   del,
   presignGet,
   projectExportKey,
@@ -220,6 +219,7 @@ export const projectsCloud = {
       await prisma.$transaction(async (tx) => {
         await tx.cutMediaObject.deleteMany({ where: { userId, projectId: id } });
         await tx.cutChatThread.deleteMany({ where: { userId, projectId: id } });
+        await tx.cutProjectShare.deleteMany({ where: { projectId: id } });
         await tx.cutProject.delete({ where: { id } });
         await addUsage(tx, userId, -freed);
       });
@@ -227,48 +227,6 @@ export const projectsCloud = {
       return Response.json({ ok: true });
     } catch (e) {
       return caught(e, "Could not delete project.");
-    }
-  },
-
-  /** Duplicate a project: copy the doc and its media objects (not its exports)
-   * into a fresh project. */
-  async duplicate(userId: string, id: string) {
-    try {
-      const row = await getProject(userId, id);
-      if (!row) return err("Project not found.", 404);
-      const doc = docOf(row);
-      const now = Date.now();
-      const copyDoc: ProjectDoc = { ...doc, name: `${doc.name} copy`, createdAt: now, updatedAt: now };
-      const media = await prisma.cutMediaObject.findMany({
-        where: { userId, projectId: id, kind: "media", uploadState: "complete" },
-      });
-      const created = await prisma.cutProject.create({
-        data: { userId, name: copyDoc.name, doc: asJson(copyDoc), folderId: row.folderId },
-      });
-      for (const m of media) {
-        await copy(m.r2Key, projectMediaKey(userId, created.id, m.fileName));
-      }
-      const added = media.reduce((sum, m) => sum + Number(m.bytes), 0);
-      await prisma.$transaction(async (tx) => {
-        if (media.length > 0) {
-          await tx.cutMediaObject.createMany({
-            data: media.map((m) => ({
-              userId,
-              projectId: created.id,
-              r2Key: projectMediaKey(userId, created.id, m.fileName),
-              fileName: m.fileName,
-              mime: m.mime,
-              bytes: m.bytes,
-              kind: "media",
-              uploadState: "complete",
-            })),
-          });
-        }
-        await addUsage(tx, userId, added);
-      });
-      return Response.json(summarize(created, added));
-    } catch (e) {
-      return caught(e, "Could not duplicate project.");
     }
   },
 

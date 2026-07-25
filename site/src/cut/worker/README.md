@@ -72,3 +72,23 @@ Manual deploy from `site/`:
 ```sh
 npm run worker:build && npx wrangler deploy -c src/cut/worker/wrangler.jsonc
 ```
+
+## Copy queue
+
+The Worker is also the consumer of the `donkey-cut-copy` Cloudflare Queue:
+project copies — a viewer copying a share, or an owner duplicating a cloud
+project from the dashboard — enqueue a `CutCopyJob` id, and the consumer
+POSTs each id back to the hosted `/api/cut-copy-worker` endpoint one message
+at a time (`max_batch_size` and `max_concurrency` are both 1), so copies
+drain serially instead of stampeding R2. One-time setup:
+
+1. Create the queue (from `site/`): `npx wrangler queues create donkey-cut-copy`.
+2. Worker secrets: `CUT_COPY_EXECUTE_URL` (the hosted endpoint, e.g.
+   `https://donkeycut.com/api/cut-copy-worker`) and `CUT_COPY_EXECUTE_SECRET`
+   (any long random string).
+3. On the hosted site (Vercel env): `CLOUDFLARE_QUEUES_API_TOKEN` (an API
+   token with Queues edit on the account — publishes ride the REST API since
+   the site isn't a Worker) and the same `CUT_COPY_EXECUTE_SECRET`.
+
+Without the queue env, the hosted API runs copies inline in the request —
+fine for local dev, unthrottled in production.

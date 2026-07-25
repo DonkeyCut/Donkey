@@ -8,11 +8,13 @@ import { type DonkeyAuthenticatedRequest, isDonkeySuperUser } from "@/lib/donkey
 import { matchRouteTable, type RouteEntry } from "../http/match";
 import { captionsCloud } from "./captions";
 import { chatsCloud } from "./chats";
+import { copyJobs } from "./copyQueue";
 import { runGc } from "./gc";
 import { jobsCloud } from "./jobs";
 import { libraryCloud } from "./library";
 import { mediaCloud } from "./media";
 import { projectsCloud } from "./projects";
+import { shareCloud } from "./share";
 import { transcribeCloud } from "./transcribe";
 import { usageApi } from "./usage";
 
@@ -37,13 +39,17 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "GET", path: "/api/cut-cloud/projects/:id", handler: (_r, u, p) => projectsCloud.get(u, p.id) },
   { method: "PUT", path: "/api/cut-cloud/projects/:id", handler: (r, u, p) => projectsCloud.put(u, p.id, r) },
   { method: "DELETE", path: "/api/cut-cloud/projects/:id", handler: (_r, u, p) => projectsCloud.remove(u, p.id) },
-  { method: "POST", path: "/api/cut-cloud/projects/:id/duplicate", handler: (_r, u, p) => projectsCloud.duplicate(u, p.id) },
+  { method: "POST", path: "/api/cut-cloud/projects/:id/duplicate", handler: (_r, u, p) => copyJobs.requestDuplicate(u, p.id) },
+  { method: "GET", path: "/api/cut-cloud/copy-jobs/:jobId", handler: (_r, u, p) => copyJobs.ownerStatus(u, p.jobId) },
   { method: "GET", path: "/api/cut-cloud/projects/:id/exports", handler: (_r, u, p) => projectsCloud.listExports(u, p.id) },
   { method: "GET", path: "/api/cut-cloud/projects/:id/exports/:file", handler: (r, u, p) => projectsCloud.serveExport(u, p.id, p.file, new URL(r.url).searchParams.has("download")) },
   { method: "DELETE", path: "/api/cut-cloud/projects/:id/exports/:file", handler: (_r, u, p) => projectsCloud.removeExport(u, p.id, p.file) },
   { method: "GET", path: "/api/cut-cloud/projects/:id/media/:file", handler: (_r, u, p) => projectsCloud.serveMedia(u, p.id, p.file) },
   { method: "DELETE", path: "/api/cut-cloud/projects/:id/media/:file", handler: (_r, u, p) => projectsCloud.removeMedia(u, p.id, p.file) },
   { method: "GET", path: "/api/cut-cloud/projects/:id/preview", handler: (_r, u, p) => projectsCloud.servePreview(u, p.id) },
+  { method: "GET", path: "/api/cut-cloud/projects/:id/share", handler: (_r, u, p) => shareCloud.get(u, p.id) },
+  { method: "PUT", path: "/api/cut-cloud/projects/:id/share", handler: (r, u, p) => shareCloud.put(u, p.id, r) },
+  { method: "DELETE", path: "/api/cut-cloud/projects/:id/share", handler: (_r, u, p) => shareCloud.remove(u, p.id) },
   { method: "GET", path: "/api/cut-cloud/projects/:id/chats", handler: (_r, u, p) => chatsCloud.list(u, p.id) },
   { method: "PUT", path: "/api/cut-cloud/projects/:id/chats/:chatId", handler: (r, u, p) => chatsCloud.put(u, p.id, p.chatId, r) },
   { method: "DELETE", path: "/api/cut-cloud/projects/:id/chats/:chatId", handler: (_r, u, p) => chatsCloud.remove(u, p.id, p.chatId) },
