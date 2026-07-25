@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Check, ChevronDown, ChevronLeft, Cloud, Ellipsis, Loader2, Mic, Monitor, Share2, Smartphone, Sparkles, Upload, Video } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, Cloud, Loader2, Mic, Monitor, Share2, Smartphone, Sparkles, Upload, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -49,6 +49,7 @@ export function TopBar({
   const aspect = useEditor((s) => s.aspect);
   const projectName = useEditor((s) => s.projectName);
   const saveState = useEditor((s) => s.saveState);
+  const aiOpen = useEditor((s) => s.aiOpen);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [recordMode, setRecordMode] = useState<RecordMode | null>(null);
@@ -226,7 +227,19 @@ export function TopBar({
             <Share2 data-icon="inline-start" /> Share
           </Button>
         )}
+        {canMoveToCloud && (
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Move to Cloud"
+            title="Move to Cloud"
+            onClick={() => setMoveOpen(true)}
+          >
+            <Cloud data-icon="inline-start" /> Move to Cloud
+          </Button>
+        )}
         <Button
+          variant="ghost"
           size="sm"
           disabled={!hasClips}
           onClick={() => {
@@ -239,10 +252,11 @@ export function TopBar({
         </Button>
         <div aria-hidden className="h-4 w-px bg-border" />
         <Button
-          variant="ghost"
+          variant={aiOpen ? "default" : "outline"}
           size="sm"
           className="ai-toggle"
           aria-label="Chat"
+          aria-pressed={aiOpen}
           title="Chat (⌘J)"
           onClick={() => {
             const s = useEditor.getState();
@@ -251,27 +265,6 @@ export function TopBar({
         >
           <Sparkles data-icon="inline-start" /> Chat
         </Button>
-        {canMoveToCloud && (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Project options"
-                  title="Project options"
-                />
-              }
-            >
-              <Ellipsis />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setMoveOpen(true)}>
-                <Cloud /> Move to Cloud
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
       </div>
       {shareOpen && (
         <ShareDialog
