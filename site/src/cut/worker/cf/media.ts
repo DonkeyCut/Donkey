@@ -64,34 +64,69 @@ function sameSignature(a: string, b: string): boolean {
   return diff === 0;
 }
 
+// The editor loads every decoder with crossOrigin="anonymous" and reads frames
+// back out of a canvas (filmstrips, thumbnails, the colour panel's histogram),
+// so a response without CORS headers does not merely taint the canvas — the
+// media fails to load at all. Presigned R2 URLs get this from the bucket's own
+// CORS policy; going through the binding bypasses that, so it is served here.
+//
+// The allowance is "*" rather than the calling origin because echoing would
+// need Vary: Origin, which splits the cache entry per origin and undoes the
+// point of keying on the object. Nothing is given away by it: the token in the
+// URL is already full access, and no credentials ride these requests.
+const CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges, ETag",
+};
+
 function baseHeaders(object: R2Object): Headers {
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set("etag", object.httpEtag);
   headers.set("Accept-Ranges", "bytes");
   headers.set("Cache-Control", `public, max-age=${EDGE_TTL_SECONDS}, immutable`);
+  for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v);
   return headers;
 }
+
+const refuse = (body: string, status: number) =>
+  new Response(body, { status, headers: CORS_HEADERS });
 
 export async function serveMedia(
   request: Request,
   env: MediaEnv,
   ctx: { waitUntil(p: Promise<unknown>): void }
 ): Promise<Response> {
+  // A media element's ranged GET is not preflighted, but a fetch() carrying a
+  // Range header is; answer it so either style of caller works.
+  if (request.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        ...CORS_HEADERS,
+        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+        "Access-Control-Allow-Headers": request.headers.get("access-control-request-headers") ?? "Range",
+        "Access-Control-Max-Age": "86400",
+      },
+    });
+  }
   if (request.method !== "GET" && request.method !== "HEAD") {
-    return new Response("Method not allowed.", { status: 405, headers: { Allow: "GET, HEAD" } });
+    return new Response("Method not allowed.", {
+      status: 405,
+      headers: { ...CORS_HEADERS, Allow: "GET, HEAD, OPTIONS" },
+    });
   }
   const url = new URL(request.url);
   const key = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
   const expires = Number(url.searchParams.get("e"));
   const sig = url.searchParams.get("s") ?? "";
-  if (!key || !sig || !Number.isFinite(expires)) return new Response("Not found.", { status: 404 });
+  if (!key || !sig || !Number.isFinite(expires)) return refuse("Not found.", 404);
   // Expiry first: an expired token is the ordinary case once a share is
   // revoked, and it costs nothing to answer.
-  if (expires * 1000 < Date.now()) return new Response("Link expired.", { status: 403 });
-  if (!env.CUT_MEDIA_SIGNING_SECRET) return new Response("Not configured.", { status: 500 });
+  if (expires * 1000 < Date.now()) return refuse("Link expired.", 403);
+  if (!env.CUT_MEDIA_SIGNING_SECRET) return refuse("Not configured.", 500);
   if (!sameSignature(sig, await signatureFor(env.CUT_MEDIA_SIGNING_SECRET, key, expires))) {
-    return new Response("Forbidden.", { status: 403 });
+    return refuse("Forbidden.", 403);
   }
 
   // The cache key is the object, never the token: tokens rotate every few
@@ -108,40 +143,23 @@ export async function serveMedia(
   const hit = await cache.match(lookupKey);
   if (hit) return hit;
 
-  const head = await env.CUT_MEDIA.head(key);
-  if (!head) return new Response("Not found.", { status: 404 });
+  // The size is only needed to resolve a range; a whole-object request skips
+  // this and reads it off the object it is already fetching.
+  const head = rangeHeader ? await env.CUT_MEDIA.head(key) : null;
+  if (rangeHeader && !head) return refuse("Not found.", 404);
 
-  const range = parseRange(rangeHeader, head.size);
+  const range = parseRange(rangeHeader, head?.size ?? 0);
   if (range === "invalid") {
     return new Response("Range not satisfiable.", {
       status: 416,
-      headers: { "Content-Range": `bytes */${head.size}` },
+      headers: { ...CORS_HEADERS, "Content-Range": `bytes */${head?.size ?? 0}` },
     });
   }
-
-  // Beyond the cacheable ceiling, stream the asked-for bytes straight through
-  // and skip the cache — putting it would fail, and buffering it to try would
-  // be worse than the miss.
-  if (head.size > MAX_CACHEABLE_BYTES) {
-    const object = await env.CUT_MEDIA.get(
-      key,
-      range ? { range: { offset: range.start, length: range.end - range.start + 1 } } : undefined
-    );
-    if (!object) return new Response("Not found.", { status: 404 });
-    const headers = baseHeaders(object);
-    headers.set("Cache-Control", "public, max-age=3600");
-    if (range) {
-      headers.set("Content-Range", `bytes ${range.start}-${range.end}/${head.size}`);
-      headers.set("Content-Length", String(range.end - range.start + 1));
-      return new Response(object.body, { status: 206, headers });
-    }
-    headers.set("Content-Length", String(head.size));
-    return new Response(object.body, { status: 200, headers });
-  }
+  const size = head?.size ?? 0;
 
   // Warm the cache with the whole object, streamed. cache.put refuses a 206,
-  // so the entry is always the full 200 — which is what lets later range
-  // requests be answered from it.
+  // so the stored entry is always the full 200 — which is what lets later
+  // range requests be answered from it.
   const warm = async () => {
     const whole = await env.CUT_MEDIA.get(key);
     if (!whole || !whole.body) return;
@@ -151,25 +169,27 @@ export async function serveMedia(
   };
 
   if (range) {
-    // Serve the asked-for bytes from R2 directly and warm in the background.
-    // Reading the whole object to slice it here would risk the Worker's memory
-    // ceiling on exactly the large files that most need the cache.
+    // Serve the asked-for bytes from R2 and warm behind the response. Reading
+    // the whole object to slice it here would risk the Worker's memory ceiling
+    // on exactly the large files that most need the cache.
     const part = await env.CUT_MEDIA.get(key, {
       range: { offset: range.start, length: range.end - range.start + 1 },
     });
-    if (!part) return new Response("Not found.", { status: 404 });
+    if (!part) return refuse("Not found.", 404);
     const headers = baseHeaders(part);
-    headers.set("Content-Range", `bytes ${range.start}-${range.end}/${head.size}`);
+    headers.set("Content-Range", `bytes ${range.start}-${range.end}/${size}`);
     headers.set("Content-Length", String(range.end - range.start + 1));
-    ctx.waitUntil(warm());
+    if (size <= MAX_CACHEABLE_BYTES) ctx.waitUntil(warm());
     return new Response(part.body, { status: 206, headers });
   }
 
   const object = await env.CUT_MEDIA.get(key);
-  if (!object || !object.body) return new Response("Not found.", { status: 404 });
+  if (!object || !object.body) return refuse("Not found.", 404);
   const headers = baseHeaders(object);
   headers.set("Content-Length", String(object.size));
   const full = new Response(object.body, { status: 200, headers });
-  ctx.waitUntil(cache.put(storeKey, full.clone()));
+  // Past Cloudflare's ceiling the put would fail, so it is not attempted;
+  // those objects stream from R2 every time rather than breaking.
+  if (object.size <= MAX_CACHEABLE_BYTES) ctx.waitUntil(cache.put(storeKey, full.clone()));
   return full;
 }

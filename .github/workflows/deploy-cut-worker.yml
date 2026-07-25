@@ -15,6 +15,7 @@ on:
       - site/src/cut/server/urlDownload.ts
       - site/src/cut/server/jobs.ts
       - site/src/cut/server/cloud/r2.ts
+      - site/src/cut/server/cloud/httpRange.ts
       - site/prisma/**
       - .github/workflows/deploy-cut-worker.yml
 
