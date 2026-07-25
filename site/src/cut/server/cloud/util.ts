@@ -9,8 +9,8 @@ export const caught = (e: unknown, fallback: string, status = 500) =>
     ? err(e.message, 500)
     : err(e instanceof Error ? e.message : fallback, status);
 
-export const redirect = (url: string) =>
-  new Response(null, { status: 302, headers: { Location: url } });
+export const redirect = (url: string, headers: Record<string, string> = {}) =>
+  new Response(null, { status: 302, headers: { Location: url, ...headers } });
 
 /** Sanitize an upload name the way the engine's saveMedia does. */
 export function safeFileName(original: string): string {

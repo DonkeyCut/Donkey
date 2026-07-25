@@ -4,7 +4,7 @@
 // server like the engine's importImage.
 import { prisma } from "@/lib/prisma";
 import { getProject, takenMediaNames } from "./projects";
-import { GET_EXPIRY_SECONDS, head, presignGet, presignPut, projectMediaKey, putObject } from "./r2";
+import { head, presignGet, presignGetLifetime, presignPut, projectMediaKey, putObject } from "./r2";
 import { addUsage, quotaCheck } from "./usage";
 import { caught, dedupeName, err, safeFileName } from "./util";
 
@@ -132,7 +132,7 @@ export const mediaCloud = {
             url: await presignGet(projectMediaKey(userId, i.projectId!, safeFileName(i.fileName!))),
           }))
       );
-      return Response.json({ urls, expiresIn: GET_EXPIRY_SECONDS });
+      return Response.json({ urls, expiresIn: presignGetLifetime() });
     } catch (e) {
       return caught(e, "Could not sign the media URLs.");
     }

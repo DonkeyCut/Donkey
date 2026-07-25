@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Clapperboard, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiFetch, setCutMode } from "@/cut/lib/backend";
+import { loadedDocVersion } from "@/cut/lib/backend/shared";
 import { renderPreviewProxy } from "@/cut/lib/exportClient";
 import { fileZoneAt, hasRefDrag } from "@/cut/lib/assetRef";
 import { enrichAsset, importFileToProject } from "@/cut/lib/media";
@@ -25,6 +26,13 @@ import { SidePanel } from "./SidePanel";
 import { Timeline } from "./Timeline";
 import { TopBar } from "./TopBar";
 import { ViewerTopBar } from "./ViewerTopBar";
+
+/** Bounds on the viewer's change poll. The server picks the interval inside
+ * this range from how long the owner has been idle; the floor keeps a live
+ * edit feeling live, the ceiling keeps a hidden tab or a settled project from
+ * polling forever. */
+const VIEWER_POLL_MIN_MS = 5_000;
+const VIEWER_POLL_MAX_MS = 300_000;
 
 export function Editor({
   projectId,
@@ -89,37 +97,60 @@ export function Editor({
     };
   }, [projectId, viewer]);
 
-  // Delayed follow of the owner's edits: poll the doc version every 10s and
-  // reload on change, keeping the playhead. A 401/403/404 means the share was
-  // revoked or narrowed — stop and say so.
+  // Delayed follow of the owner's edits: poll the doc version and reload on
+  // change, keeping the playhead. A 401/403/404 means the share was revoked or
+  // narrowed — stop and say so.
+  //
+  // The server sets the pace (x-cut-poll-after), because it knows how long the
+  // owner has been idle: an actively edited project answers in seconds, a
+  // settled one stretches to minutes so a shared link that a crowd is watching
+  // costs a handful of requests instead of six per viewer per minute. The
+  // response is cached at the edge for that same interval, so the poll usually
+  // never reaches the origin at all.
   useEffect(() => {
     if (!viewer) return;
-    let last: string | null = null;
     let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const tick = async () => {
-      if (stopped || document.hidden) return;
+      if (stopped) return;
+      let nextIn = document.hidden ? VIEWER_POLL_MAX_MS : VIEWER_POLL_MIN_MS;
       try {
-        const res = await apiFetch(`/api/cut/projects/${projectId}`, { method: "HEAD" });
-        if ([401, 403, 404].includes(res.status)) {
-          stopped = true;
-          setShareGone(true);
-          return;
+        if (!document.hidden) {
+          const res = await apiFetch(`/api/cut/projects/${projectId}`, { method: "HEAD" });
+          if ([401, 403, 404].includes(res.status)) {
+            stopped = true;
+            setShareGone(true);
+            return;
+          }
+          if (res.ok) {
+            const after = Number(res.headers.get("x-cut-poll-after"));
+            if (Number.isFinite(after) && after > 0) {
+              nextIn = Math.min(VIEWER_POLL_MAX_MS, Math.max(VIEWER_POLL_MIN_MS, after * 1000));
+            }
+            // Compare against the version the loaded doc reported, so a doc
+            // still coming from cache is fetched again on the next tick
+            // instead of the viewer settling on an older cut.
+            const version = res.headers.get("x-cut-doc-version");
+            const showing = loadedDocVersion(projectId);
+            if (version && showing && version !== showing) {
+              const at = useEditor.getState().currentTime;
+              await useEditor.getState().loadProject(projectId);
+              for (const asset of useEditor.getState().assets) void enrichAsset(asset);
+              useEditor.getState().seek(at);
+            }
+          }
         }
-        if (!res.ok) return;
-        const version = res.headers.get("x-cut-doc-version");
-        if (version && last && version !== last) {
-          const at = useEditor.getState().currentTime;
-          await useEditor.getState().loadProject(projectId);
-          for (const asset of useEditor.getState().assets) void enrichAsset(asset);
-          useEditor.getState().seek(at);
-        }
-        if (version) last = version;
       } catch {
         // Transient network failure — the next tick retries.
+      } finally {
+        if (!stopped) timer = setTimeout(() => void tick(), nextIn);
       }
     };
-    const timer = setInterval(() => void tick(), 10_000);
-    return () => clearInterval(timer);
+    timer = setTimeout(() => void tick(), VIEWER_POLL_MIN_MS);
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [viewer, projectId]);
 
   // A cloud save hit a newer stored version (another session's edits won).
@@ -144,6 +175,8 @@ export function Editor({
 
   // Keep the project card's hover proxy fresh: rebuild it a few seconds after
   // the cut settles. Best-effort and single-flight; skips when there's no cut.
+  // A shared project's link-preview card rides the same settle, so what the
+  // link unfurls with follows the edit instead of freezing at share time.
   useEffect(() => {
     if (viewer) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -152,20 +185,17 @@ export function Editor({
       const s = useEditor.getState();
       if (rendering || !s.loaded || s.projectId !== projectId || s.clips.length === 0) return;
       rendering = true;
+      const doc = {
+        assets: s.assets,
+        clips: s.clips,
+        audioClips: s.audioClips,
+        overlays: s.overlays,
+        subtitles: s.subtitles,
+        fadeIn: s.fadeIn,
+        fadeOut: s.fadeOut,
+      };
       try {
-        await renderPreviewProxy(
-          projectId,
-          {
-            assets: s.assets,
-            clips: s.clips,
-            audioClips: s.audioClips,
-            overlays: s.overlays,
-            subtitles: s.subtitles,
-            fadeIn: s.fadeIn,
-            fadeOut: s.fadeOut,
-          },
-          s.aspect
-        );
+        await renderPreviewProxy(projectId, doc, s.aspect);
       } finally {
         rendering = false;
       }

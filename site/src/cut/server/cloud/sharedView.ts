@@ -7,11 +7,15 @@
 import type { ProjectDoc, StoredAsset } from "@/cut/lib/types";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { GET_EXPIRY_SECONDS, presignGet, projectMediaKey } from "./r2";
+import { presignGet, presignGetLifetime, projectMediaKey } from "./r2";
 import { normalizeEmails, normalizeFeatures, type ShareFeatures } from "./share";
+import { shareCacheHeaders, shareRedirectHeaders } from "./shareCache";
 import { caught, decodeFileParam, err, redirect } from "./util";
 
 const PRESIGN_GET_BATCH_MAX = 500;
+/** How long a media redirect may be reused. Well inside the signing window so
+ * the URL it carries never expires before the redirect does. */
+const MEDIA_REDIRECT_TTL = 15 * 60;
 
 export type ShareRow = NonNullable<
   Awaited<ReturnType<typeof prisma.cutProjectShare.findUnique>>
@@ -95,12 +99,15 @@ export const sharedView = {
     if (view instanceof Response) return view;
     const row = await ownerProject(view.share);
     if (!row) return err("Share not found.", 404);
-    return Response.json({
-      projectId: view.share.projectId,
-      name: row.name,
-      access: view.share.access,
-      features: view.features,
-    });
+    return Response.json(
+      {
+        projectId: view.share.projectId,
+        name: row.name,
+        access: view.share.access,
+        features: view.features,
+      },
+      { headers: shareCacheHeaders(view.share, row.updatedAt, { meta: true }) }
+    );
   },
 
   async doc(token: string, id: string, req: Request) {
@@ -113,15 +120,23 @@ export const sharedView = {
     if (req.method === "HEAD") {
       const meta = await prisma.cutProject.findFirst({
         where: { id: view.share.projectId, userId: view.share.userId },
-        select: { version: true },
+        select: { version: true, updatedAt: true },
       });
       if (!meta) return err("Project not found.", 404);
-      return new Response(null, { headers: { "x-cut-doc-version": String(meta.version) } });
+      return new Response(null, {
+        headers: {
+          "x-cut-doc-version": String(meta.version),
+          ...shareCacheHeaders(view.share, meta.updatedAt),
+        },
+      });
     }
     const row = await ownerProject(view.share);
     if (!row) return err("Project not found.", 404);
     return Response.json(filterDocForShare(row.doc as unknown as ProjectDoc, view.features), {
-      headers: { "x-cut-doc-version": String(row.version) },
+      headers: {
+        "x-cut-doc-version": String(row.version),
+        ...shareCacheHeaders(view.share, row.updatedAt),
+      },
     });
   },
 
@@ -133,7 +148,10 @@ export const sharedView = {
       const fileName = decodeFileParam(file);
       const allowed = await allowedFileNames(view.share, view.features);
       if (!allowed.has(fileName)) return err("Media not found.", 404);
-      return redirect(await presignGet(projectMediaKey(view.share.userId, id, fileName)));
+      return redirect(
+        await presignGet(projectMediaKey(view.share.userId, id, fileName)),
+        shareRedirectHeaders(view.share, MEDIA_REDIRECT_TTL)
+      );
     } catch (e) {
       return caught(e, "Bad request.", 400);
     }
@@ -163,7 +181,7 @@ export const sharedView = {
             url: await presignGet(projectMediaKey(view.share.userId, i.projectId!, i.fileName!)),
           }))
       );
-      return Response.json({ urls, expiresIn: GET_EXPIRY_SECONDS });
+      return Response.json({ urls, expiresIn: presignGetLifetime() });
     } catch (e) {
       return caught(e, "Could not sign the media URLs.");
     }
@@ -176,9 +194,12 @@ export const sharedView = {
     const rows = await prisma.cutChatThread.findMany({
       where: { userId: view.share.userId, projectId: id },
       orderBy: { updatedAt: "desc" },
-      select: { data: true },
+      select: { data: true, updatedAt: true },
     });
-    return Response.json(rows.map((r) => r.data));
+    return Response.json(
+      rows.map((r) => r.data),
+      { headers: shareCacheHeaders(view.share, rows[0]?.updatedAt) }
+    );
   },
 
   async preview(token: string, id: string, req: Request) {
@@ -188,7 +209,10 @@ export const sharedView = {
       if (id !== view.share.projectId) return err("Not found.", 404);
       const row = await ownerProject(view.share);
       if (!row?.previewKey) return new Response("Not found.", { status: 404 });
-      return redirect(await presignGet(row.previewKey));
+      return redirect(
+        await presignGet(row.previewKey),
+        shareRedirectHeaders(view.share, MEDIA_REDIRECT_TTL)
+      );
     } catch (e) {
       return caught(e, "Bad request.", 400);
     }
