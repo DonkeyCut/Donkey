@@ -1,7 +1,8 @@
 # Cut cloud render worker
 
 A Linux container that executes Cut web mode's background jobs — `export`,
-`preview` (hover proxy), and `import_url` — by polling the `cut_render_job`
+`preview` (hover proxy), `card` (a shared link's preview image), and
+`import_url` — by polling the `cut_render_job`
 table and running the same pipeline code the local engine uses
 (`../server/exportPipeline.ts`, `../server/urlDownload.ts`). Media moves
 through Cloudflare R2; ffmpeg/ffprobe/yt-dlp come from the container image's
