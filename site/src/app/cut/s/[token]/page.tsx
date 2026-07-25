@@ -1,105 +1,81 @@
-"use client";
+import type { Metadata } from "next";
+import { headers } from "next/headers";
+import { cutAppBase } from "@/cut/lib/hosts";
+import { shareMetaForToken } from "@/cut/server/cloud/shareCard";
+import { SharedProjectView } from "./SharedProjectView";
 
-import { Suspense, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
-import { Clapperboard, Loader2 } from "lucide-react";
-import { authHrefFor } from "@/app/_components/landing/useAppEntryHref";
-import { Button } from "@/components/ui/button";
-import { Editor } from "@/cut/components/Editor";
-import { setCutMode } from "@/cut/lib/backend";
-import { bindSharedBackend } from "@/cut/lib/backend/shared";
-import { useEditor } from "@/cut/lib/store";
-import type { ShareFeatures } from "@/cut/lib/types";
-import { authClient } from "@/lib/auth-client";
+// The share page is a client view — it fetches its own access decision and
+// mounts the editor read-only — but the document around it is server-rendered,
+// which is the only thing a link crawler ever sees. So the title, description,
+// and card come from here.
+//
+// Only a public share describes itself. A restricted share is a link that
+// means nothing without the right account, so it unfurls as a neutral invite
+// and stays out of search: naming the project there would leak it to anyone
+// holding the URL.
 
-// The read-only share view. This route sits beside the app subtree on purpose:
-// /cut/app is session-gated (RequireSession) and engine-gated (ConnectGate),
-// and a public share link must open with neither. The share meta fetch is the
-// access check — the server answers 401 (sign in), 403 (not invited), or 404
-// (no such share) — and on success the page binds the shared backend and
-// mounts the editor in viewer mode.
+/** Absolute origin for this request — card URLs must be absolute for crawlers. */
+async function origin(): Promise<string> {
+  const h = await headers();
+  const host = h.get("host") ?? "donkeycut.com";
+  const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
+  return `${proto}://${host}`;
+}
 
-type Gate =
-  | { state: "loading" }
-  | { state: "ready"; projectId: string }
-  | { state: "signin" }
-  | { state: "denied" }
-  | { state: "missing" };
+/** The public path of this share, mirroring the link the Share dialog copies:
+ * the app base without its /app segment. */
+function sharePath(host: string | null, token: string): string {
+  return `${cutAppBase(host).replace(/\/app$/, "")}/s/${encodeURIComponent(token)}`;
+}
 
-function SharedProject() {
-  const { token } = useParams<{ token: string }>();
-  const [gate, setGate] = useState<Gate>({ state: "loading" });
-  const { data: session } = authClient.useSession();
-
-  useEffect(() => {
-    let alive = true;
-    void fetch(`/api/cut-shared/${encodeURIComponent(token)}`)
-      .then(async (res) => {
-        if (!alive) return;
-        if (res.status === 401) return setGate({ state: "signin" });
-        if (res.status === 403) return setGate({ state: "denied" });
-        if (!res.ok) return setGate({ state: "missing" });
-        const meta = (await res.json()) as { projectId: string; features: ShareFeatures };
-        bindSharedBackend(token);
-        setCutMode("shared");
-        useEditor.getState().setSharedView(meta.features);
-        setGate({ state: "ready", projectId: meta.projectId });
-      })
-      .catch(() => alive && setGate({ state: "missing" }));
-    return () => {
-      alive = false;
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ token: string }>;
+}): Promise<Metadata> {
+  const { token } = await params;
+  const meta = await shareMetaForToken(token);
+  if (!meta || !meta.isPublic) {
+    return {
+      title: "Shared project · Donkey Cut",
+      description: "This project is shared with specific people.",
+      robots: { index: false, follow: false },
     };
-  }, [token]);
-
-  if (gate.state === "ready") return <Editor projectId={gate.projectId} viewer />;
-
-  if (gate.state === "loading") {
-    return (
-      <div className="grid h-screen place-items-center text-muted-foreground">
-        <Loader2 className="size-5 animate-spin" />
-      </div>
-    );
   }
-
-  const signIn = () => {
-    const here = window.location.pathname + window.location.search;
-    window.location.href = authHrefFor("/sign-in", here);
+  const h = await headers();
+  const base = await origin();
+  const url = `${base}${sharePath(h.get("host"), token)}`;
+  const card = (kind: "gif" | "jpg") => `${url}/card/${kind}?v=${meta.version}`;
+  const description = `A video project shared from Donkey Cut. Watch ${meta.name} in the browser.`;
+  // The GIF leads: the platforms that animate it play the opening seconds, and
+  // the rest fall back to its first frame — the same picture the JPEG carries
+  // for anything that would rather not take a multi-megabyte image. Either URL
+  // answers before a card has rendered; the route draws one.
+  const images = [
+    { url: card("gif"), width: 1200, height: 630, alt: meta.name },
+    { url: card("jpg"), width: 1200, height: 630, alt: meta.name },
+  ];
+  return {
+    title: `${meta.name} · Donkey Cut`,
+    description,
+    alternates: { canonical: url },
+    openGraph: {
+      type: "video.other",
+      title: meta.name,
+      description,
+      url,
+      siteName: "Donkey Cut",
+      images,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: meta.name,
+      description,
+      images: images.map((i) => i.url),
+    },
   };
-
-  return (
-    <div className="grid h-screen place-items-center">
-      <div className="flex max-w-sm flex-col items-center gap-3 text-center">
-        <Clapperboard className="size-7 text-muted-foreground" />
-        {gate.state === "signin" ? (
-          <>
-            <p className="text-sm text-muted-foreground">
-              This project is shared with specific people — sign in to see if
-              that&apos;s you.
-            </p>
-            <Button onClick={signIn}>Sign in</Button>
-          </>
-        ) : gate.state === "denied" ? (
-          <p className="text-sm text-muted-foreground">
-            You don&apos;t have access to this project
-            {session?.user.email ? ` as ${session.user.email}` : ""}. Ask the
-            owner to invite you.
-          </p>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            This share link isn&apos;t active anymore.
-          </p>
-        )}
-      </div>
-    </div>
-  );
 }
 
 export default function SharedProjectPage() {
-  return (
-    <div className="min-h-screen bg-white font-system text-foreground antialiased">
-      <Suspense>
-        <SharedProject />
-      </Suspense>
-    </div>
-  );
+  return <SharedProjectView />;
 }

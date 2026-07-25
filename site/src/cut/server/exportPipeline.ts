@@ -12,9 +12,10 @@ import { lookFilterLines } from "../lib/looks";
 
 export interface ExportSpec {
   projectId: string;
-  /** "preview" renders the low-res hover proxy into the project's preview.mp4
-   * instead of a stamped file in exports/. */
-  target?: "export" | "preview";
+  /** Where the render lands instead of a stamped file in exports/: "preview"
+   * writes the project's low-res hover proxy, "card" the opening seconds the
+   * cloud worker derives a shared link's preview image from. */
+  target?: "export" | "preview" | "card";
   width: number;
   height: number;
   fps: number;

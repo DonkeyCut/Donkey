@@ -110,19 +110,25 @@ export const jobsCloud = {
           return err("Invalid overlay key.", 400);
         }
       }
-      const preview = body.spec.target === "preview";
-      if (!preview) {
+      // Hover proxies and share cards are small internal renders the editor
+      // fires on its own; only renders the user asked for count against the
+      // cap.
+      const target = body.spec.target === "preview" || body.spec.target === "card"
+        ? body.spec.target
+        : "export";
+      if (target === "export") {
         const capped = await renderJobCheck(userId);
         if (capped) return capped;
       }
-      const outName = preview
-        ? "preview.mp4"
-        : await exportName(userId, projectId, body.outName?.trim() || project.name);
+      const outName =
+        target === "export"
+          ? await exportName(userId, projectId, body.outName?.trim() || project.name)
+          : `${target}.mp4`;
       const row = await prisma.cutRenderJob.create({
         data: {
           userId,
           projectId,
-          kind: preview ? "preview" : "export",
+          kind: target,
           spec: {
             spec: body.spec,
             overlays: body.overlays ?? [],

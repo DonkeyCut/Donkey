@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
 import { apiFetch } from "@/cut/lib/backend";
+import { refreshShareCard } from "@/cut/lib/exportClient";
 import { useCutBase } from "@/cut/lib/nav";
 import type { ShareFeatures } from "@/cut/lib/types";
 
@@ -85,6 +86,10 @@ export function ShareDialog({
       .then((r) => (r.ok ? (r.json() as Promise<{ share: ShareState | null }>) : { share: null }))
       .then((body) => {
         if (!alive) return;
+        // Opening the dialog is the moment before a link gets pasted
+        // somewhere, so bring an existing share's preview card up to date with
+        // the cut as it stands.
+        if (body.share) refreshShareCard(projectId);
         setShare(body.share);
         setLoading(false);
       })
@@ -114,6 +119,9 @@ export function ShareDialog({
       });
       if (!res.ok) throw new Error();
       const body = (await res.json()) as { share: ShareState };
+      // Sharing for the first time: build the link's preview card now, so the
+      // first person to see the link sees the cut rather than a placeholder.
+      if (!share) refreshShareCard(projectId);
       setShare(body.share);
       return body.share;
     } catch {

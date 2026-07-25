@@ -176,7 +176,7 @@ async function buildExportPayload(
   projectId: string,
   doc: ExportDoc,
   settings: ExportSettings,
-  target: "export" | "preview"
+  target: "export" | "preview" | "card"
 ): Promise<ExportPayload> {
   const spans = getClipSpans(doc.clips, doc.assets);
   const duration = projectDuration(doc);
@@ -537,4 +537,102 @@ export async function renderPreviewProxy(projectId: string, doc: ExportDoc, aspe
   const body = (await res.json().catch(() => ({}))) as { id?: string };
   if (!res.ok || !body.id) return; // a slot was busy; try again later
   await pollExport(body.id, () => {}, undefined, backend).catch(() => {});
+}
+
+/** Seconds of the cut a share card shows. */
+const CARD_SECONDS = 5;
+
+/** The cut's first `seconds`, as a doc. Clips keep their trim-in and lose
+ * whatever hangs past the cut-off; everything starting after it drops. Used
+ * for the share card, which is a five-second window onto the opening rather
+ * than a render of the whole project. */
+export function docFirstSeconds(doc: ExportDoc, seconds: number): ExportDoc {
+  // A clip's timeline footprint is (out - in) / speed, so the trim that ends
+  // it at `seconds` scales back through the speed.
+  const clampOut = <T extends { start: number; in: number; out: number; speed?: number }>(
+    clip: T
+  ): T => {
+    const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
+    const room = (seconds - clip.start) * speed;
+    return clip.out - clip.in <= room ? clip : { ...clip, out: clip.in + room };
+  };
+  const starts = <T extends { start: number }>(item: T) => item.start < seconds;
+  return {
+    ...doc,
+    clips: doc.clips.filter(starts).map(clampOut),
+    audioClips: doc.audioClips.filter(starts).map(clampOut),
+    overlays: doc.overlays
+      .filter(starts)
+      .map((o) => (o.end <= seconds ? o : { ...o, end: seconds })),
+    subtitles: {
+      ...doc.subtitles,
+      cues: doc.subtitles.cues
+        .filter(starts)
+        .map((c) => (c.end <= seconds ? c : { ...c, end: seconds })),
+    },
+    // A fade-out belongs to the end of the project, which the card cuts away.
+    fadeOut: 0,
+  };
+}
+
+/** Card frame size for an aspect: 16:9 sits close to the 1.91:1 social cards
+ * want, and portrait cuts get a tall card rather than a letterboxed wide one. */
+function cardSettings(aspect: Aspect): ExportSettings {
+  const [width, height] = aspect === "16:9" ? [1280, 720] : [720, 1280];
+  return { width, height, fps: 15, crf: 26, preset: "veryfast" };
+}
+
+/** Render the project's link-preview card: the opening five seconds, which
+ * the worker turns into the still frame and the animated thumbnail a shared
+ * link unfurls with. Only shared projects have one, so this asks first and
+ * costs a single small request when the project isn't shared.
+ *
+ * Best-effort throughout — a project with no footage, an unconfigured
+ * backend, or a busy render slot simply keeps the card it already had. */
+async function renderShareCard(projectId: string, doc: ExportDoc, aspect: Aspect): Promise<void> {
+  const backend = getBackend(); // pinned: the card render outlives navigation
+  if (backend.kind !== "cloud") return;
+  try {
+    const res = await backend.fetch(`/api/cut/projects/${projectId}/share`);
+    const body = (await res.json().catch(() => ({}))) as { share?: unknown | null };
+    if (!res.ok || !body.share) return;
+  } catch {
+    return;
+  }
+  let res: Response;
+  try {
+    const payload = await buildExportPayload(
+      projectId,
+      docFirstSeconds(doc, CARD_SECONDS),
+      cardSettings(aspect),
+      "card"
+    );
+    res = await postExport(projectId, payload, "card.mp4", backend);
+  } catch {
+    return; // no clips yet
+  }
+  const body = (await res.json().catch(() => ({}))) as { id?: string };
+  if (!res.ok || !body.id) return;
+  await pollExport(body.id, () => {}, undefined, backend).catch(() => {});
+}
+
+/** Rebuild the open project's share card from the cut as it stands. Fire and
+ * forget: the card is an accessory to the link, and a failed render leaves the
+ * previous one (or the generated placeholder) in place. */
+export function refreshShareCard(projectId: string): void {
+  const s = useEditor.getState();
+  if (!s.loaded || s.projectId !== projectId || s.clips.length === 0) return;
+  void renderShareCard(
+    projectId,
+    {
+      assets: s.assets,
+      clips: s.clips,
+      audioClips: s.audioClips,
+      overlays: s.overlays,
+      subtitles: s.subtitles,
+      fadeIn: s.fadeIn,
+      fadeOut: s.fadeOut,
+    },
+    s.aspect
+  ).catch(() => {});
 }

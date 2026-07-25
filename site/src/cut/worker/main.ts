@@ -118,7 +118,7 @@ async function runJob(job: ClaimedJob): Promise<void> {
   active.set(job.id, entry);
   const watcher = watchJob(job.id, entry);
   try {
-    if (job.kind === "export" || job.kind === "preview") {
+    if (job.kind === "export" || job.kind === "preview" || job.kind === "card") {
       const { outputKey, outName } = await runExportJob(job, handle);
       await prisma.cutRenderJob.updateMany({
         where: { id: job.id, state: "running" },

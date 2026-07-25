@@ -49,6 +49,11 @@ export const projectExportKey = (userId: string, projectId: string, fileName: st
   `cut/${userId}/projects/${projectId}/exports/${fileName}`;
 export const projectPreviewKey = (userId: string, projectId: string) =>
   `cut/${userId}/projects/${projectId}/preview.mp4`;
+/** The link-preview card's artifacts. Fixed keys, rewritten by each card
+ * render: the public URL carries the doc version, so freshness rides the URL
+ * and R2 keeps one copy instead of one per edit. */
+export const projectCardKey = (userId: string, projectId: string, ext: "jpg" | "gif") =>
+  `cut/${userId}/projects/${projectId}/card.${ext}`;
 export const libraryKey = (userId: string, fileName: string) =>
   `cut/${userId}/library/${fileName}`;
 export const overlayKey = (userId: string, batchId: string, name: string) =>

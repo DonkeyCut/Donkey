@@ -15,6 +15,7 @@ import {
 // routes can never drift apart.
 
 export {
+  projectCardKey as cardKey,
   projectExportKey as exportKey,
   projectMediaKey as mediaKey,
   projectPreviewKey as previewKey,

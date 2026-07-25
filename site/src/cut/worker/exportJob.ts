@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { runExport, type ExportSpec, type RenderHandle } from "../server/exportPipeline";
+import { storeCardArtifacts } from "./cardJob";
 import { prisma, registerObject, type ClaimedJob } from "./db";
 import { downloadToFile, exportKey, mediaKey, previewKey, uploadFile } from "./r2";
 
@@ -26,9 +27,11 @@ export function overlayKeysOf(job: ClaimedJob): string[] {
 }
 
 /**
- * Run one export or preview job: stage a project-shaped work dir (media/ +
- * overlay PNGs in the pipeline tmp dir), render through the engine's shared
- * pipeline, and land the mp4 back in R2. Returns what the job row records.
+ * Run one export, preview, or card job: stage a project-shaped work dir
+ * (media/ + overlay PNGs in the pipeline tmp dir), render through the engine's
+ * shared pipeline, and land the result back in R2 — the mp4 for an export or
+ * hover proxy, the derived still and animation for a card. Returns what the
+ * job row records.
  */
 export async function runExportJob(
   job: ClaimedJob,
@@ -39,7 +42,13 @@ export async function runExportJob(
   if (!spec || !Array.isArray(spec.clips)) throw new Error("Malformed export spec.");
   const projectId = job.projectId ?? spec.projectId;
   if (!projectId) throw new Error("Export job has no project.");
-  const preview = job.kind === "preview" || spec.target === "preview";
+  const mode: "export" | "preview" | "card" =
+    job.kind === "preview" || spec.target === "preview"
+      ? "preview"
+      : job.kind === "card" || spec.target === "card"
+        ? "card"
+        : "export";
+  const preview = mode === "preview";
 
   const work = await mkdtemp(path.join(os.tmpdir(), "cut-worker-"));
   try {
@@ -67,11 +76,15 @@ export async function runExportJob(
       ),
     ]);
 
-    const outName = preview ? "preview.mp4" : job.outName?.trim() || "export.mp4";
+    const outName = mode === "export" ? job.outName?.trim() || "export.mp4" : `${mode}.mp4`;
     handle.outPath = path.join(work, "out", outName);
     await mkdir(path.dirname(handle.outPath), { recursive: true });
 
     await runExport(handle, spec, (file) => path.join(mediaDir, path.basename(file)));
+
+    // A card's rendered clip is scratch: only the still and the animation it
+    // derives are stored, so the mp4 never reaches R2.
+    if (mode === "card") return storeCardArtifacts(job, handle, projectId);
 
     // The project may have been deleted (its jobs canceled) between the
     // watcher's last tick and now; registering the output then would charge

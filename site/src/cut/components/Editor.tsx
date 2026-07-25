@@ -6,7 +6,7 @@ import { Clapperboard, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiFetch, setCutMode } from "@/cut/lib/backend";
 import { loadedDocVersion } from "@/cut/lib/backend/shared";
-import { renderPreviewProxy } from "@/cut/lib/exportClient";
+import { refreshShareCard, renderPreviewProxy } from "@/cut/lib/exportClient";
 import { fileZoneAt, hasRefDrag } from "@/cut/lib/assetRef";
 import { enrichAsset, importFileToProject } from "@/cut/lib/media";
 // Side-effect import: registers the brief-to-video resume subscription, so a
@@ -196,6 +196,7 @@ export function Editor({
       };
       try {
         await renderPreviewProxy(projectId, doc, s.aspect);
+        refreshShareCard(projectId);
       } finally {
         rendering = false;
       }
