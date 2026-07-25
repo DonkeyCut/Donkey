@@ -33,27 +33,95 @@ const EMPTY_ROUND_RETRIES = 2;
 const backoff = (attempt: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, 600 * (attempt + 1)));
 
-/** One round-trip to the hosted Responses route, retrying transient failures. */
+/** One round-trip to the hosted Responses route, retrying transient failures.
+ * With onDelta the route streams the round: text deltas arrive as the model
+ * writes them, and the returned body is the same shape a plain round returns.
+ * A broken stream retries only while no delta has been delivered — replaying
+ * a partly-shown round would duplicate its text. */
 async function postRound(
   payload: Record<string, unknown>,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  onDelta?: (delta: string) => void
 ): Promise<ResponseBody> {
   for (let attempt = 0; ; attempt++) {
     let res: Response;
     try {
-      res = await hostedPost("/api/inference/responses", payload, abortSignal);
+      res = await hostedPost(
+        "/api/inference/responses",
+        onDelta ? { ...payload, stream: true } : payload,
+        abortSignal
+      );
     } catch (err) {
       // Network drop — retry unless the user stopped the turn or we're out.
       if (abortSignal?.aborted || attempt >= TRANSIENT_RETRIES) throw err;
       await backoff(attempt);
       continue;
     }
-    if (res.ok) return (await res.json()) as ResponseBody;
+    if (res.ok) {
+      if (!onDelta) return (await res.json()) as ResponseBody;
+      let delivered = false;
+      try {
+        return await readStreamedRound(res, (delta) => {
+          delivered = true;
+          onDelta(delta);
+        });
+      } catch (err) {
+        if (delivered || abortSignal?.aborted || attempt >= TRANSIENT_RETRIES) throw err;
+        await backoff(attempt);
+        continue;
+      }
+    }
     if (!RETRYABLE_STATUS.has(res.status) || attempt >= TRANSIENT_RETRIES) {
       throw new Error(await requestError(res));
     }
     await backoff(attempt);
   }
+}
+
+/** The route's SSE frames: deltas go out through onDelta as they land, and the
+ * terminal `response.completed` frame is the return value. An `error` event or
+ * a stream that ends without the terminal frame throws. */
+async function readStreamedRound(
+  res: Response,
+  onDelta: (delta: string) => void
+): Promise<ResponseBody> {
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("Gemini returned no response stream.");
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let completed: ResponseBody | null = null;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    for (;;) {
+      const split = buffer.indexOf("\n\n");
+      if (split === -1) break;
+      const frame = buffer.slice(0, split);
+      buffer = buffer.slice(split + 2);
+      let isError = false;
+      let data = "";
+      for (const line of frame.split("\n")) {
+        if (line.startsWith("event: ")) isError = line.slice(7).trim() === "error";
+        else if (line.startsWith("data: ")) data += line.slice(6);
+      }
+      if (!data || data === "[DONE]") continue;
+      let event: { type?: string; delta?: string; response?: ResponseBody; message?: string };
+      try {
+        event = JSON.parse(data) as typeof event;
+      } catch {
+        continue;
+      }
+      if (isError) throw new Error(event.message || "Gemini stream failed.");
+      if (event.type === "response.output_text.delta" && typeof event.delta === "string") {
+        onDelta(event.delta);
+      } else if (event.type === "response.completed" && event.response) {
+        completed = event.response;
+      }
+    }
+  }
+  if (!completed) throw new Error("Gemini stream ended early.");
+  return completed;
 }
 
 const STEP_LIMIT_FALLBACK =
@@ -327,14 +395,39 @@ export function streamGeminiChat({
         let scenePlannedThisTurn = false;
 
         for (let round = 0; round < MAX_TOOL_ROUNDS && !settled; round++) {
-          const body = await postRound(
-            { donkeyProvider: "gemini", model, instructions: systemPrompt(), input, ...(tools ? { tools } : {}) },
-            abortSignal
-          );
+          // The round streams: text lands in the reply bubble as Gemini writes
+          // it, instead of popping in whole seconds later when the round-trip
+          // settles. The block opens on the first real (non-whitespace) delta,
+          // matching the trim the settled body gets below.
+          let textId: string | null = null;
+          let body: ResponseBody;
+          try {
+            body = await postRound(
+              { donkeyProvider: "gemini", model, instructions: systemPrompt(), input, ...(tools ? { tools } : {}) },
+              abortSignal,
+              (delta) => {
+                if (!textId) {
+                  if (!delta.trim()) return;
+                  textId = `t${++textCount}`;
+                  emit({ type: "text-start", id: textId });
+                  delta = delta.trimStart();
+                }
+                emit({ type: "text-delta", id: textId, delta });
+              }
+            );
+          } catch (err) {
+            // Close a half-streamed block so the transcript stays well-formed
+            // before the turn's error surfaces.
+            if (textId) emit({ type: "text-end", id: textId });
+            throw err;
+          }
 
           const assistantParts: Item[] = [];
           const text = (body.output_text ?? "").trim();
-          if (text) {
+          if (textId) {
+            emit({ type: "text-end", id: textId });
+            if (text) assistantParts.push({ text });
+          } else if (text) {
             const id = `t${++textCount}`;
             emit({ type: "text-start", id });
             emit({ type: "text-delta", id, delta: text });

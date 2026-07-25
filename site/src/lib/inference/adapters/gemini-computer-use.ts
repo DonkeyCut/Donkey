@@ -41,6 +41,8 @@ import {
   type JsonValue,
   type ResponseCreateRequest,
   type ResponseCreateResult,
+  type ResponseStreamEvent,
+  type ResponseStreamResult,
   type TextCompletionResult,
   type TextStreamResult,
 } from "@/lib/inference/providers";
@@ -105,11 +107,9 @@ export function createGeminiComputerUseProvider(
     ];
   }
 
-  async function createResponse(
-    request: ResponseCreateRequest,
-  ): Promise<ResponseCreateResult> {
-    ensureConfigured(configured);
-
+  // The shared front half of a Responses call, streamed or not: tool
+  // validation, model resolution, and the generateContent parameters.
+  function responseRequestSetup(request: ResponseCreateRequest) {
     // Caller-defined function tools are honored only when the caller explicitly
     // asked for Gemini; the default Responses route keeps sending them elsewhere.
     const allowFunctionTools = request.donkeyProvider === geminiProviderID;
@@ -137,6 +137,15 @@ export function createGeminiComputerUseProvider(
       registeredTools,
       model,
     );
+    return { registeredTools, model, requestParameters };
+  }
+
+  async function createResponse(
+    request: ResponseCreateRequest,
+  ): Promise<ResponseCreateResult> {
+    ensureConfigured(configured);
+
+    const { registeredTools, model, requestParameters } = responseRequestSetup(request);
     const client = clientFactory(clientConfig.options);
 
     // Cache the planner's large, byte-identical system instruction once and reference it on later steps, so
@@ -177,6 +186,40 @@ export function createGeminiComputerUseProvider(
         service: clientConfig.service,
         registeredTools,
         structuredSchemaRetry: String(retriedWithoutSchema),
+      },
+    };
+  }
+
+  // A Responses call as typed stream events: text deltas while the model
+  // generates, then a terminal event whose body is byte-for-byte what
+  // createResponse would have returned — callers keep one parsing path and the
+  // route bills from the terminal usage. No structured-schema retry here:
+  // streaming callers ask for free-form text.
+  async function createResponseStream(
+    request: ResponseCreateRequest,
+  ): Promise<ResponseStreamResult> {
+    ensureConfigured(configured);
+
+    const { registeredTools, model, requestParameters } = responseRequestSetup(request);
+    const client = clientFactory(clientConfig.options);
+    await applyContextCacheToRequest(requestParameters, registeredTools, client);
+
+    let iterator: AsyncGenerator<GenerateContentResponse>;
+    try {
+      iterator = await client.models.generateContentStream(requestParameters);
+    } catch (error) {
+      throw geminiProviderError(error);
+    }
+
+    return {
+      provider: geminiProviderID,
+      model,
+      events: responseStreamEvents(iterator, registeredTools),
+      metadata: {
+        provider: geminiProviderID,
+        api: "google-genai-sdk",
+        service: clientConfig.service,
+        registeredTools,
       },
     };
   }
@@ -299,7 +342,62 @@ export function createGeminiComputerUseProvider(
     completeText,
     streamCompletion,
     createResponse,
+    createResponseStream,
   };
+}
+
+// The streamed chunks replayed into one whole response. Chunks carry part
+// fragments — adjacent text fragments are glued back into single parts (the
+// newline join in normalizedGeminiResponse would otherwise land inside
+// sentences), functionCall parts pass through whole with their thought
+// signatures. Non-thought text also goes out live as delta events.
+async function* responseStreamEvents(
+  iterator: AsyncGenerator<GenerateContentResponse>,
+  registeredTools: string[],
+): AsyncGenerator<ResponseStreamEvent> {
+  const parts: JsonObject[] = [];
+  let responseId: string | undefined;
+  let usageMetadata: JsonValue | undefined;
+
+  for await (const chunk of iterator) {
+    const raw = toJsonValue(chunk);
+    if (isJsonObject(raw)) {
+      responseId = stringValue(raw.responseId) ?? responseId;
+      if (raw.usageMetadata !== undefined) {
+        usageMetadata = raw.usageMetadata;
+      }
+    }
+    for (const part of geminiCandidateParts(geminiCandidates(raw)[0])) {
+      if (functionCallFromPart(part) || typeof part.text !== "string") {
+        parts.push(part);
+        continue;
+      }
+      const previous = parts[parts.length - 1];
+      if (
+        previous &&
+        typeof previous.text === "string" &&
+        !functionCallFromPart(previous) &&
+        (previous.thought === true) === (part.thought === true)
+      ) {
+        previous.text += part.text;
+      } else {
+        parts.push({ ...part });
+      }
+      if (part.thought !== true && part.text) {
+        yield { type: "output_text_delta", delta: part.text };
+      }
+    }
+  }
+
+  const body = normalizedGeminiResponse(
+    {
+      ...(responseId ? { responseId } : {}),
+      ...(usageMetadata !== undefined ? { usageMetadata } : {}),
+      candidates: [{ content: { parts } }],
+    },
+    registeredTools,
+  );
+  yield { type: "completed", body, usage: body.usage };
 }
 
 // The incremental text of one streamed model chunk: the SDK's concatenated `.text` getter, falling

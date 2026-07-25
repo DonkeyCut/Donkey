@@ -69,6 +69,21 @@ export type ResponseCreateResult = {
   metadata?: JsonObject;
 };
 
+// A streamed Responses call, as typed events the route serializes to SSE: text
+// deltas as they generate, then one terminal event carrying the same body a
+// non-streamed call would have returned (so callers run one parsing path) plus
+// the usage the route records for billing.
+export type ResponseStreamEvent =
+  | { type: "output_text_delta"; delta: string }
+  | { type: "completed"; body: JsonValue; usage?: JsonValue };
+
+export type ResponseStreamResult = {
+  provider: string;
+  model: string;
+  events: AsyncGenerator<ResponseStreamEvent>;
+  metadata?: JsonObject;
+};
+
 export type AssetGenerationProviderRequest = {
   generationId: string;
   request: AssetGenerationRequest;
@@ -112,6 +127,9 @@ export type InferenceProvider = {
   createResponse?: (
     request: ResponseCreateRequest,
   ) => Promise<ResponseCreateResult>;
+  createResponseStream?: (
+    request: ResponseCreateRequest,
+  ) => Promise<ResponseStreamResult>;
   canCreateResponse?: (request: ResponseCreateRequest) => boolean;
   // Positively declares that this provider handles audio/video input parts in a Responses request.
   // The router requires it for media requests so media is routed by capability, not by elimination

@@ -51,19 +51,13 @@ export const responseCreateRequestSchema = z
     metadata: metadataSchema.optional(),
   })
   .passthrough()
-  .superRefine((value, context) => {
-    if (value.stream) {
-      context.addIssue({
-        code: "custom",
-        message: "Streaming Responses are not supported by this proxy yet.",
-        path: ["stream"],
-      });
-    }
-  })
   .transform((value) => {
     const { donkeyProvider, ...body } = value;
+    // `stream` selects the route's SSE branch; the provider body always says
+    // stream:false because the adapter picks its own streaming API call.
     return {
       donkeyProvider,
+      stream: value.stream,
       body: toJsonObject({
         ...body,
         store: body.store ?? false,
