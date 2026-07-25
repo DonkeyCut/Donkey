@@ -20,7 +20,7 @@ import { NO_CREDITS_MESSAGE } from "../lib/generate";
 import { GEN_FPS } from "../lib/genvideo/editorBridge";
 import { useEditor } from "../lib/store";
 import { formatTime } from "../lib/time";
-import type { MediaAsset } from "../lib/types";
+import { frameOf, type MediaAsset } from "../lib/types";
 import type { Shot, ShotStatus } from "../lib/genvideo/types";
 import { cn } from "@/lib/utils";
 import { HostedErrorText } from "./hostedError";
@@ -263,7 +263,8 @@ function ShotStrip({
 }) {
   const assets = useEditor((s) => s.assets);
   const aspect = useEditor((s) => s.aspect);
-  const baseRatio = aspect === "9:16" ? 9 / 16 : 16 / 9;
+  const baseFrame = frameOf(aspect);
+  const baseRatio = baseFrame.w / baseFrame.h;
   return (
     <div className="ai-scene-strip mt-1.5 grid grid-cols-2 gap-1.5">
       {run.shots.map((sh, i) => (

@@ -20,6 +20,7 @@ import { useLightbox } from "@/cut/lib/lightbox";
 import { refsFromDroppedFiles } from "@/cut/lib/refMedia";
 import { characterPrompt, stockTitle } from "@/cut/lib/stock";
 import { useEditor } from "@/cut/lib/store";
+import { nearestAspect } from "@/cut/lib/types";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { useVideoGen } from "@/cut/lib/videoGen";
 import {
@@ -76,12 +77,16 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
   // Every knob renders from — and is clamped to — what the selected model
   // supports, so a stored pick from another model can never reach the API.
   const model = VIDEO_MODELS.find((m) => m.tier === tier) ?? VIDEO_MODELS[0];
-  const effAspect = model.aspects.includes(aspect) ? aspect : model.aspects[0];
+  const effAspect = nearestAspect(aspect, model.aspects);
 
   // Default the shape to the project's own orientation when the panel opens,
-  // same as the image panel (the user can still pick the other one).
+  // same as the image panel (the user can still pick the other one). A custom
+  // project ratio seeds the closest shape the model renders.
   useEffect(() => {
-    useVideoGen.getState().setAspect(useEditor.getState().aspect);
+    useVideoGen
+      .getState()
+      .setAspect(nearestAspect(useEditor.getState().aspect, model.aspects));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-time seed only
   }, []);
 
   const go = () => {

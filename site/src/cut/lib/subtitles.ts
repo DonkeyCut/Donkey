@@ -285,12 +285,12 @@ export function wrapCaption(text: string): string {
  * line centered without wrapping, so this is what guarantees captions stay in
  * bounds — bigger styles (and the punchy opener) wrap to fewer words per line.
  */
-export function wrapCaptionForSize(text: string, size: number): string {
+export function wrapCaptionForSize(text: string, size: number, frameW = 1080): string {
   const words = text.trim().replace(/\s+/g, " ").split(" ").filter(Boolean);
   if (words.length === 0) return "";
-  // ~88% of the 1080 design short-side, with a conservative bold-glyph advance
+  // ~88% of the frame width, with a conservative bold-glyph advance
   // (~0.58·size) so real fonts stay comfortably inside the safe area.
-  const maxChars = Math.max(8, Math.floor((0.88 * 1080) / (0.58 * size)));
+  const maxChars = Math.max(8, Math.floor((0.88 * frameW) / (0.58 * size)));
   const lines: string[] = [];
   let line = "";
   for (const w of words) {
@@ -344,7 +344,8 @@ export function cueOverlay(
   style: CaptionStyle = CAPTION_STYLES.clean,
   isOpener = false,
   pos?: { x?: number; y?: number; size?: number; font?: FontId; accentMode?: WordAccentMode; accentColor?: string },
-  wordIndex?: number
+  wordIndex?: number,
+  frameW = 1080
 ): TextOverlay {
   const kl = wordIndex !== undefined ? karaokeLook(style, pos) : null;
   const size = Math.round(
@@ -352,7 +353,7 @@ export function cueOverlay(
   );
   return {
     id: `sub-${cue.id}`,
-    text: wrapCaptionForSize(cue.text, size),
+    text: wrapCaptionForSize(cue.text, size, frameW),
     start: cue.start,
     end: cue.end,
     x: pos?.x ?? style.x,

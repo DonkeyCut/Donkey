@@ -22,7 +22,7 @@ import { refsToInlineImages, videoSafeInline, visualRefs, type InlineImage } fro
 import { useGenNotify } from "./genNotify";
 import { useImageGen } from "./imageGen";
 import { useEditor } from "./store";
-import { mediaSlug, type MediaAsset, type RenderRecord } from "./types";
+import { mediaSlug, nearestAspect, type MediaAsset, type RenderRecord } from "./types";
 import { videoModel } from "./videoModels";
 import { walkLadder, type VideoAttempt } from "./videoLadder";
 
@@ -603,7 +603,9 @@ export const useGenerate = create<GenerateState>((set, get) => {
       set((s) => ({ jobs: [job, ...s.jobs] }));
       return (async () => {
         try {
-          const aspect = opts?.aspect ?? useEditor.getState().aspect;
+          const aspect =
+            opts?.aspect ??
+            nearestAspect(useEditor.getState().aspect, ["16:9", "9:16", "1:1"] as const);
           const resolution = opts?.resolution ?? useImageGen.getState().resolution;
           // The job (and the landed asset's name) keeps the user's own words;
           // only the render sees the composed prompt. The image model takes
@@ -738,7 +740,8 @@ export const useGenerate = create<GenerateState>((set, get) => {
               ? { inputs: { images } }
               : {}),
           parameters: {
-            aspectRatio: opts?.aspect ?? useEditor.getState().aspect,
+            aspectRatio:
+              opts?.aspect ?? nearestAspect(useEditor.getState().aspect, ["16:9", "9:16"] as const),
             ...(opts?.negativePrompt ? { negativePrompt: opts.negativePrompt } : {}),
           },
         });

@@ -32,7 +32,7 @@ import { fetchSignedMediaUrls } from "./backend/cloud";
 import { markSignedBatch } from "./mediaLinks";
 import { cloudTranscribeSpec, type CloudTranscribeSpec } from "./cloudTranscribe";
 import { trackLocale } from "./subtitles";
-import { ANIM_STYLE_IDS, emptySubtitles, IMAGE_CLIP_SECONDS, LOOK_IDS, MAX_SUBTITLE_LANES, mediaUrl, migrateLegacyTransitions, SPEED_FLOOR, SPEED_MIN, TRANSITION_MAX } from "./types";
+import { ANIM_STYLE_IDS, emptySubtitles, IMAGE_CLIP_SECONDS, LOOK_IDS, MAX_SUBTITLE_LANES, mediaUrl, migrateLegacyTransitions, parseRatio, SPEED_FLOOR, SPEED_MIN, TRANSITION_MAX } from "./types";
 import { readTextStyle } from "./textStyle";
 import { loadUiState, saveUiState } from "./uiState";
 import { captureTimelineFrames } from "./visualFrames";
@@ -1087,7 +1087,9 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       if (batchDepth === 0) flush(); // commit the whole run as one undo step
     },
 
-    setAspect: (a) => set({ aspect: a }),
+    setAspect: (a) => {
+      if (parseRatio(a)) set({ aspect: a });
+    },
     setProjectFade: (patch) => {
       const clamp = (v: number | undefined) =>
         v === undefined ? undefined : Math.max(0, Math.min(TRANSITION_MAX, v));

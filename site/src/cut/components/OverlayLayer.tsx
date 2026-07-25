@@ -21,7 +21,7 @@ import {
   plateFill,
   SHADOW,
 } from "@/cut/lib/textRender";
-import { FRAME, fontStack, type TextOverlay } from "@/cut/lib/types";
+import { frameOf, fontStack, type TextOverlay } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 
 // Plate geometry as CSS, kept in lockstep with the export burn-in metrics.
@@ -63,7 +63,7 @@ export function OverlayLayer({ stageWidth }: { stageWidth: number }) {
     else boxes.current.delete(id);
   }, []);
 
-  const stageHeight = (stageWidth * FRAME[aspect].h) / FRAME[aspect].w;
+  const stageHeight = (stageWidth * frameOf(aspect).h) / frameOf(aspect).w;
 
   // Figma-style smart snapping: while dragging an item, pull its left/center/
   // right edges to the frame edges, safe margins, center line, and the edges
@@ -236,7 +236,14 @@ function SubtitleCaption({
   // Captions ride the same style/opener/anchor logic as the export burn-in,
   // so the preview and the rendered file match exactly.
   const style = captionStyle(subtitles.style);
-  const ov = cueOverlay(cue, style, cue.id === cues[0]?.id, trackPos(subtitles, style, lane));
+  const ov = cueOverlay(
+    cue,
+    style,
+    cue.id === cues[0]?.id,
+    trackPos(subtitles, style, lane),
+    undefined,
+    frameOf(aspect).w
+  );
   // Karaoke: the word under the playhead lights up as it is spoken.
   const wordIndex = subtitles.wordHighlight
     ? cueWordWindows(cue).findIndex((w) => t >= w.start && t < w.end)
@@ -262,7 +269,7 @@ function SubtitleCaption({
             textDecorationThickness: "0.07em",
             textUnderlineOffset: "0.14em",
           };
-  const scale = stageWidth / FRAME[aspect].w;
+  const scale = stageWidth / frameOf(aspect).w;
   return (
     <div
       ref={(el) => registerBox(subtitleBoxId(lane), el)}
@@ -344,7 +351,7 @@ function OverlayItem({
   const [editing, setEditing] = useState(false);
   const editRef = useRef<HTMLDivElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
-  const frame = useEditor((s) => FRAME[s.aspect]);
+  const frame = frameOf(useEditor((s) => s.aspect));
   const scale = stageWidth / frame.w;
   const stageHeight = (stageWidth * frame.h) / frame.w;
 

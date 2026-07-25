@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Check, ChevronDown, ChevronLeft, Cloud, Loader2, Mic, Monitor, Share2, Smartphone, Sparkles, Upload, Video } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, Cloud, Loader2, Mic, Monitor, Share2, Smartphone, Sparkles, Square, Upload, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,10 +24,16 @@ import { useWebMode } from "@/cut/lib/flags";
 import { backTarget, projectHref, useCutBase } from "@/cut/lib/nav";
 import { copyProjectAcross } from "@/cut/lib/projectCopy";
 import { useEditor } from "@/cut/lib/store";
-import { ASPECT_LABEL, type Aspect } from "@/cut/lib/types";
+import { ASPECT_PRESETS, aspectLabel, aspectOrientation, type Aspect } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 import { RecordDialog, type RecordMode } from "./RecordDialog";
 import { ShareDialog } from "./ShareDialog";
+
+function AspectIcon({ aspect, className }: { aspect: Aspect; className?: string }) {
+  const o = aspectOrientation(aspect);
+  const Icon = o === "square" ? Square : o === "landscape" ? Monitor : Smartphone;
+  return <Icon className={className} />;
+}
 
 export function TopBar({
   onImport,
@@ -106,21 +112,19 @@ export function TopBar({
       <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-2">
         <DropdownMenu>
           <DropdownMenuTrigger className="aspect-switch flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-xs transition-colors hover:text-foreground">
-            {aspect === "9:16" ? <Smartphone className="size-3.5" /> : <Monitor className="size-3.5" />}
-            {ASPECT_LABEL[aspect]}
+            <AspectIcon aspect={aspect} className="size-3.5" />
+            {aspectLabel(aspect)}
             <ChevronDown className="size-3" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-56">
-            {(Object.keys(ASPECT_LABEL) as Aspect[]).map((a) => (
-              <DropdownMenuItem key={a} onClick={() => useEditor.getState().setAspect(a)}>
-                {a === "9:16" ? <Smartphone /> : <Monitor />}
+            {ASPECT_PRESETS.map((p) => (
+              <DropdownMenuItem key={p.value} onClick={() => useEditor.getState().setAspect(p.value)}>
+                <AspectIcon aspect={p.value} />
                 <span className="flex-1">
-                  {ASPECT_LABEL[a]}
-                  <span className="block text-[10.5px] text-muted-foreground">
-                    {a === "9:16" ? "TikTok, Reels, Shorts" : "YouTube"}
-                  </span>
+                  {p.name} · {p.value}
+                  <span className="block text-[10.5px] text-muted-foreground">{p.sublabel}</span>
                 </span>
-                {aspect === a && <Check className="size-3.5 text-muted-foreground" />}
+                {aspect === p.value && <Check className="size-3.5 text-muted-foreground" />}
               </DropdownMenuItem>
             ))}
           </DropdownMenuContent>

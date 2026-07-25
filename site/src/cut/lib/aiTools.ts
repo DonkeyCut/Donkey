@@ -48,18 +48,21 @@ import { DUCK_DEFAULT, generateSubtitlesReadout } from "./voiceover";
 import {
   ANIM_DEFAULT_SECONDS,
   ANIM_STYLE_IDS,
-  FRAME,
+  frameOf,
   IMAGE_CLIP_SECONDS,
   LAYOUTS,
   LOOK_IDS,
   MAX_SUBTITLE_LANES,
   mediaUrl,
+  nearestAspect,
   overlayAnimStyle,
+  parseRatio,
   rectOf,
   regionLabel,
   SPEED_FLOOR,
   TRANSITION_STYLE_IDS,
   type AnimStyle,
+  type Aspect,
   type AudioClip,
   type ColorGrade,
   type FontId,
@@ -671,7 +674,7 @@ export async function runAiTool(
             // Bake the still at the current project frame, framed exactly as
             // the preview shows it. Switching aspect later letterboxes this
             // still — capture a fresh one to re-fit.
-            frame: { w: FRAME[s.aspect].w, h: FRAME[s.aspect].h },
+            frame: frameOf(s.aspect),
             framing: {
               fit: span.clip.fit ?? "fit",
               panX: span.clip.panX ?? 0,
@@ -814,7 +817,7 @@ export async function runAiTool(
           aspect:
             input.aspect === "16:9" || input.aspect === "9:16"
               ? input.aspect
-              : useEditor.getState().aspect,
+              : nearestAspect(useEditor.getState().aspect, ["16:9", "9:16"] as const),
           chatId: chatOwner() ?? undefined,
         });
         const stillAsset =
@@ -1704,10 +1707,17 @@ export async function runAiTool(
     }
 
     case "set_aspect": {
-      const a = input.aspect === "16:9" ? "16:9" : input.aspect === "9:16" ? "9:16" : null;
-      if (!a) throw new ToolError('aspect must be "9:16" or "16:9".');
+      const a =
+        typeof input.aspect === "string" && parseRatio(input.aspect)
+          ? (input.aspect as Aspect)
+          : null;
+      if (!a)
+        throw new ToolError(
+          'aspect must be "W:H" with whole numbers up to a 4:1 shape, e.g. "9:16", "16:9", "1:1", or "9:5".'
+        );
       s.setAspect(a);
-      return { aspect: a };
+      const f = frameOf(a);
+      return { aspect: a, frame: `${f.w}x${f.h}` };
     }
 
     case "set_project_fade": {

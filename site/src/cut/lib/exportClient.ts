@@ -7,7 +7,7 @@ import { putSigned } from "./media";
 import { clipSpeed, getClipSpans, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
 import { captionStyle, cueOverlay, cueWordWindows, laneCues, subtitleLaneCount, trackPos } from "./subtitles";
 import { renderOverlayPng } from "./textRender";
-import { FRAME, overlayAnimStyle } from "./types";
+import { frameOf, overlayAnimStyle } from "./types";
 import type {
   Aspect,
   AudioClip,
@@ -26,36 +26,45 @@ export interface ExportSettings {
   preset: string;
 }
 
-/** Presets are stored portrait (9:16); `presetSettings` flips them for 16:9. */
+/** Presets pick a short-side target; `presetSettings` derives both dims from
+ * the project ratio. */
 export const EXPORT_PRESETS = [
   {
     id: "tiktok",
     label: "Best · 1080p",
     detail: "H.264 · best quality",
-    settings: { width: 1080, height: 1920, fps: 30, crf: 19, preset: "medium" },
+    shortSide: 1080,
+    settings: { fps: 30, crf: 19, preset: "medium" },
   },
   {
     id: "fast",
     label: "Quick share · 1080p",
     detail: "smaller file, faster",
-    settings: { width: 1080, height: 1920, fps: 30, crf: 24, preset: "veryfast" },
+    shortSide: 1080,
+    settings: { fps: 30, crf: 24, preset: "veryfast" },
   },
   {
     id: "light",
     label: "Draft · 720p",
     detail: "fastest render",
-    settings: { width: 720, height: 1280, fps: 30, crf: 24, preset: "veryfast" },
+    shortSide: 720,
+    settings: { fps: 30, crf: 24, preset: "veryfast" },
   },
 ] as const;
+
+/** Frame dims for an aspect scaled to a short-side target, even-rounded. */
+function scaledFrame(aspect: Aspect, shortSide: number): { width: number; height: number } {
+  const f = frameOf(aspect);
+  const k = shortSide / Math.min(f.w, f.h);
+  const even = (n: number) => 2 * Math.round((n * k) / 2);
+  return { width: even(f.w), height: even(f.h) };
+}
 
 export function presetSettings(
   preset: (typeof EXPORT_PRESETS)[number],
   aspect: Aspect
 ): ExportSettings {
-  const { width, height, ...rest } = preset.settings;
-  return aspect === "16:9"
-    ? { width: height, height: width, ...rest }
-    : { width, height, ...rest };
+  return { ...scaledFrame(aspect, preset.shortSide), ...preset.settings };
 }
 
 /**
@@ -70,7 +79,7 @@ export function originalSettings(
   clips: VideoClip[],
   assets: MediaAsset[]
 ): ExportSettings {
-  const base = FRAME[aspect];
+  const base = frameOf(aspect);
   const srcLong = Math.max(
     0,
     ...getClipSpans(clips, assets).map((sp) =>
@@ -357,7 +366,15 @@ async function buildExportPayload(
           const win = windows[wi];
           if (win.start >= duration) break;
           const png = await renderOverlayPng(
-            cueOverlay(cue, capStyle, i === 0, pos, doc.subtitles.wordHighlight ? wi : undefined),
+            cueOverlay(
+              cue,
+              capStyle,
+              i === 0,
+              pos,
+              doc.subtitles.wordHighlight ? wi : undefined,
+              // Wrap in design space (1080 short side), whatever the render size.
+              Math.round((1080 * settings.width) / Math.min(settings.width, settings.height))
+            ),
             settings.width,
             settings.height
           );
@@ -525,8 +542,7 @@ export function cancelExportJob(jobId: string, backend: CutBackend = getBackend(
  * footage yet. */
 export async function renderPreviewProxy(projectId: string, doc: ExportDoc, aspect: Aspect) {
   const backend = getBackend(); // pinned: the proxy render outlives navigation
-  const [width, height] = aspect === "16:9" ? [640, 360] : [360, 640];
-  const settings: ExportSettings = { width, height, fps: 24, crf: 30, preset: "veryfast" };
+  const settings: ExportSettings = { ...scaledFrame(aspect, 360), fps: 24, crf: 30, preset: "veryfast" };
   let res: Response;
   try {
     const payload = await buildExportPayload(projectId, doc, settings, "preview");
@@ -578,8 +594,7 @@ export function docFirstSeconds(doc: ExportDoc, seconds: number): ExportDoc {
 /** Card frame size for an aspect: 16:9 sits close to the 1.91:1 social cards
  * want, and portrait cuts get a tall card rather than a letterboxed wide one. */
 function cardSettings(aspect: Aspect): ExportSettings {
-  const [width, height] = aspect === "16:9" ? [1280, 720] : [720, 1280];
-  return { width, height, fps: 15, crf: 26, preset: "veryfast" };
+  return { ...scaledFrame(aspect, 720), fps: 15, crf: 26, preset: "veryfast" };
 }
 
 /** Render the project's link-preview card: the opening five seconds, which

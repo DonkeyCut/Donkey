@@ -7,18 +7,68 @@ export type AssetType = "video" | "audio" | "image";
  * an image has no intrinsic duration, so the clip carries this as its `out`. */
 export const IMAGE_CLIP_SECONDS = 8;
 
-/** Project output frame. Vertical (TikTok/Reels) or widescreen (YouTube). */
-export type Aspect = "9:16" | "16:9";
+/** Project output frame ratio as "W:H". Presets cover common platforms;
+ * any ratio that passes `parseRatio` (e.g. "9:5") is valid. */
+export type Aspect = `${number}:${number}`;
 
-export const FRAME: Record<Aspect, { w: number; h: number }> = {
-  "9:16": { w: 1080, h: 1920 },
-  "16:9": { w: 1920, h: 1080 },
-};
+/** Parse a "W:H" ratio. Null unless both sides are positive integers up to
+ * three digits and the long/short ratio is at most 4 (keeps ffmpeg output
+ * dims and text layout sane). */
+export function parseRatio(a: string | undefined | null): { w: number; h: number } | null {
+  const m = /^(\d{1,3}):(\d{1,3})$/.exec(a ?? "");
+  if (!m) return null;
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  if (!w || !h || Math.max(w, h) / Math.min(w, h) > 4) return null;
+  return { w, h };
+}
 
-export const ASPECT_LABEL: Record<Aspect, string> = {
-  "9:16": "Vertical · 9:16",
-  "16:9": "Widescreen · 16:9",
-};
+/** Output frame in pixels. The short side is pinned to 1080 — the design
+ * short side that text scaling and overlay math assume — and the long side
+ * follows the ratio, rounded to even for the encoder. */
+export function frameOf(aspect: Aspect): { w: number; h: number } {
+  const r = parseRatio(aspect) ?? { w: 9, h: 16 };
+  const long = 2 * Math.round((1080 * Math.max(r.w, r.h)) / Math.min(r.w, r.h) / 2);
+  return r.w >= r.h ? { w: long, h: 1080 } : { w: 1080, h: long };
+}
+
+export const ASPECT_PRESETS: { value: Aspect; name: string; sublabel: string }[] = [
+  { value: "16:9", name: "Widescreen", sublabel: "YouTube" },
+  { value: "4:3", name: "Classic", sublabel: "LinkedIn, Facebook ads" },
+  { value: "2:1", name: "Cinematic", sublabel: "Wide social banners" },
+  { value: "9:16", name: "Vertical", sublabel: "TikTok, Reels, Shorts" },
+  { value: "1:1", name: "Square", sublabel: "Instagram posts" },
+  { value: "3:4", name: "Portrait", sublabel: "Feed photos" },
+];
+
+export function aspectLabel(aspect: Aspect): string {
+  const preset = ASPECT_PRESETS.find((p) => p.value === aspect);
+  return preset ? `${preset.name} · ${preset.value}` : `Custom · ${aspect}`;
+}
+
+export function aspectOrientation(aspect: Aspect): "landscape" | "portrait" | "square" {
+  const r = parseRatio(aspect) ?? { w: 9, h: 16 };
+  return r.w === r.h ? "square" : r.w > r.h ? "landscape" : "portrait";
+}
+
+/** Project the project aspect onto a model/provider's supported ratio list:
+ * the entry whose shape is closest (log-ratio distance), first entry on ties. */
+export function nearestAspect<T extends string>(aspect: Aspect, supported: readonly T[]): T {
+  const r = parseRatio(aspect) ?? { w: 9, h: 16 };
+  const target = Math.log(r.w / r.h);
+  let best = supported[0];
+  let bestDist = Infinity;
+  for (const s of supported) {
+    const sr = parseRatio(s);
+    if (!sr) continue;
+    const dist = Math.abs(Math.log(sr.w / sr.h) - target);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = s;
+    }
+  }
+  return best;
+}
 
 /** Asset fields persisted in project.json. */
 export interface StoredAsset {

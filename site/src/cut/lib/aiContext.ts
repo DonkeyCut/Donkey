@@ -4,7 +4,7 @@ import { chatOwner } from "./chatAssets";
 import { useGenerate } from "./generate";
 import { getClipSpans, overlayLayers, totalDuration, useEditor } from "./store";
 import { laneCues, subtitleLaneCount } from "./subtitles";
-import { rectOf, regionLabel, type ClipSpan, type VideoClip } from "./types";
+import { frameOf, rectOf, regionLabel, type ClipSpan, type VideoClip } from "./types";
 
 const r = (n: number) => Math.round(n * 100) / 100;
 
@@ -111,7 +111,7 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
       name: s.projectName,
       duration: r(duration),
       aspect: s.aspect,
-      frame: s.aspect === "9:16" ? "1080x1920" : "1920x1080",
+      frame: `${frameOf(s.aspect).w}x${frameOf(s.aspect).h}`,
       ...(s.fadeIn > 0 ? { fadeIn: r(s.fadeIn) } : {}),
       ...(s.fadeOut > 0 ? { fadeOut: r(s.fadeOut) } : {}),
     },

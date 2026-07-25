@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import type { ProjectDoc } from "@/cut/lib/types";
+import { parseRatio, type ProjectDoc } from "@/cut/lib/types";
 import { detectSilence, extractAudio, makeContactSheets, makeFreezeFrame, probeDims, probeDuration } from "../frames";
 import {
   createProject,
@@ -122,7 +122,7 @@ export const projectsApi = {
             : existing.overlayClips,
         overlays: Array.isArray(body.overlays) ? body.overlays : existing.overlays,
         templates: Array.isArray(body.templates) ? body.templates : existing.templates,
-        aspect: body.aspect === "9:16" || body.aspect === "16:9" ? body.aspect : existing.aspect,
+        aspect: parseRatio(body.aspect) ? body.aspect : existing.aspect,
         fadeIn: typeof body.fadeIn === "number" ? body.fadeIn : existing.fadeIn,
         fadeOut: typeof body.fadeOut === "number" ? body.fadeOut : existing.fadeOut,
         subtitles:

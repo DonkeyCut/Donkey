@@ -19,7 +19,7 @@ import {
 import { useLightbox } from "@/cut/lib/lightbox";
 import { refsFromDroppedFiles } from "@/cut/lib/refMedia";
 import { useEditor } from "@/cut/lib/store";
-import type { MediaAsset } from "@/cut/lib/types";
+import { nearestAspect, type MediaAsset } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 import { MentionTextarea, RefChips, RefHandlePill } from "./AssetRefs";
 import { DictationControl } from "./MicDictation";
@@ -87,7 +87,11 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
   // a widescreen project generates landscape images by default (the user can
   // still pick another size). 1:1 has no project counterpart.
   useEffect(() => {
-    useImageGen.getState().setAspect(useEditor.getState().aspect);
+    useImageGen
+      .getState()
+      .setAspect(
+        nearestAspect(useEditor.getState().aspect, Object.keys(ASPECT_WORD) as ImageAspect[])
+      );
   }, []);
 
   const go = () => {

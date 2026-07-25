@@ -6,7 +6,7 @@ import { clearAssetDrag, setAssetDragData } from "@/cut/lib/assetDrag";
 import { startDrag } from "@/cut/lib/drag";
 import { getClipSpans, useEditor } from "@/cut/lib/store";
 import { setPreviewCanvas } from "@/cut/lib/previewCanvas";
-import { FRAME, isFullRect, rectOf, type Aspect, type ClipSpan, type FrameRect, type MediaAsset, type VideoClip } from "@/cut/lib/types";
+import { frameOf, isFullRect, rectOf, type Aspect, type ClipSpan, type FrameRect, type MediaAsset, type VideoClip } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 import { OverlayLayer } from "./OverlayLayer";
 
@@ -26,7 +26,7 @@ function pannableSpan(s: {
   if (!span || span.clip.fit !== "fill" || !isFullRect(rectOf(span.clip))) return null;
   const { width, height } = span.asset;
   if (!width || !height) return null;
-  const frame = FRAME[s.aspect];
+  const frame = frameOf(s.aspect);
   const scale = Math.max(frame.w / width, frame.h / height);
   const ox = width * scale - frame.w;
   const oy = height * scale - frame.h;
@@ -39,7 +39,7 @@ export function Preview() {
   const [stage, setStage] = useState({ w: 270, h: 480 });
   const pannable = useEditor((s) => pannableSpan(s) !== null);
   const aspect = useEditor((s) => s.aspect);
-  const frame = FRAME[aspect];
+  const frame = frameOf(aspect);
 
   usePlayback(canvasRef);
 
@@ -51,7 +51,7 @@ export function Preview() {
   useEffect(() => {
     const wrap = wrapRef.current;
     if (!wrap) return;
-    const [rw, rh] = aspect === "9:16" ? [9, 16] : [16, 9];
+    const { w: rw, h: rh } = frameOf(aspect);
     const fit = () => {
       const r = wrap.getBoundingClientRect();
       const pad = 28;
@@ -71,7 +71,7 @@ export function Preview() {
     const s = useEditor.getState();
     const span = pannableSpan(s);
     if (!span) return false;
-    const fr = FRAME[s.aspect];
+    const fr = frameOf(s.aspect);
     const { width = 1, height = 1 } = span.asset;
     const scale = Math.max(fr.w / width, fr.h / height);
     const ox = width * scale - fr.w;
