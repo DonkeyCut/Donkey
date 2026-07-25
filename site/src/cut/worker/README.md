@@ -74,6 +74,40 @@ Manual deploy from `site/`:
 npm run worker:build && npx wrangler deploy -c src/cut/worker/wrangler.jsonc
 ```
 
+## Shared media at the edge
+
+The Worker also serves a shared project's media (`cf/media.ts`), on its own
+hostname and its own R2 binding — the bucket stays private, so this handler is
+the only way in. The hosted API mints a short HMAC token per URL; the Worker
+checks it, then serves the object from Cloudflare's cache **keyed on the object
+path alone**, with the token dropped. That is what lets the token be short:
+every viewer and every re-mint share one cached copy instead of missing per
+URL.
+
+Two properties fall out of it. Unsharing takes effect within a token's life
+(five minutes) rather than the day a presigned R2 URL would keep working. And
+media is served from the edge instead of R2's S3 endpoint, which Cloudflare
+does not cache at all.
+
+Range requests are served from the cached object (Cloudflare answers `206` from
+a stored `200`); a miss streams the asked-for bytes from R2 and warms the full
+object in the background. Objects past Cloudflare's 512 MB cacheable ceiling
+stream straight through, uncached.
+
+One-time setup:
+
+1. The zone must be on Cloudflare — the Cache API is a no-op on `workers.dev`,
+   so `routes` has to be a real hostname. `wrangler.jsonc` claims
+   `media.donkeycut.com` as a custom domain and sets `CUT_MEDIA_HOST` to match;
+   change both together, or comment both out to leave the feature off.
+2. Worker secret: `npx wrangler secret put CUT_MEDIA_SIGNING_SECRET -c
+   src/cut/worker/wrangler.jsonc` (any long random string).
+3. On the hosted site (Vercel env): `CUT_MEDIA_BASE_URL` = `https://` + that
+   hostname, and `CUT_MEDIA_SIGNING_SECRET` = the same string.
+
+Without those two site variables the hosted API presigns R2 exactly as before,
+so local dev and an un-migrated deployment both keep working.
+
 ## Copy queue
 
 The Worker is also the consumer of the `donkey-cut-copy` Cloudflare Queue:
