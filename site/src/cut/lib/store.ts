@@ -29,6 +29,7 @@ import type { VideoProject } from "./genvideo/types";
 import { fillSlot } from "./genvideo/fillSlot";
 import { apiFetch, apiJson, getBackend } from "./backend";
 import { fetchSignedMediaUrls } from "./backend/cloud";
+import { markSignedBatch } from "./mediaLinks";
 import { cloudTranscribeSpec, type CloudTranscribeSpec } from "./cloudTranscribe";
 import { trackLocale } from "./subtitles";
 import { ANIM_STYLE_IDS, emptySubtitles, IMAGE_CLIP_SECONDS, LOOK_IDS, MAX_SUBTITLE_LANES, mediaUrl, migrateLegacyTransitions, SPEED_FLOOR, SPEED_MIN, TRANSITION_MAX } from "./types";
@@ -171,6 +172,10 @@ export interface EditorState {
   setProjectFade: (patch: { fadeIn?: number; fadeOut?: number }) => void;
   addAsset: (asset: MediaAsset) => void;
   updateAsset: (id: string, patch: Partial<MediaAsset>) => void;
+  /** Swap asset URLs in place (fileName -> url), e.g. after re-minting an
+   * expired signed batch. Runtime-only — the stored projection omits url —
+   * and allowed in read-only shared views. */
+  applyMediaUrls: (urls: Map<string, string>) => void;
   /** Remove a project asset and any clips/audio that reference it. */
   removeAsset: (id: string) => void;
   /** Add a video clip from an asset onto video track 0 — at `start` (sliding
@@ -863,10 +868,13 @@ export const useEditor = create<EditorState>((baseSet, get) => {
         }));
         // Cloud and shared media ride signed R2 URLs, batch-minted once per
         // load; the /media route's 302 stays the fallback for anything the
-        // mint misses.
+        // mint misses. mediaLinks re-mints the batch as it nears expiry.
         if (getBackend().kind !== "local") {
           const signed = await fetchSignedMediaUrls(id, assets.map((a) => a.fileName));
-          for (const a of assets) a.url = signed.get(a.fileName) ?? a.url;
+          for (const a of assets) a.url = signed.urls.get(a.fileName) ?? a.url;
+          markSignedBatch(id, signed.expiresAt);
+        } else {
+          markSignedBatch(id, null);
         }
         // Older docs stored video track 0 packed (array order implied the
         // position); bake explicit starts in once so every clip is free-placed.
@@ -1131,6 +1139,20 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       set((s) => ({
         assets: s.assets.map((a) => (a.id === id ? { ...a, ...patch } : a)),
       }));
+    },
+
+    applyMediaUrls: (urls) => {
+      hydrating = true;
+      try {
+        set((s) => ({
+          assets: s.assets.map((a) => {
+            const url = urls.get(a.fileName);
+            return url && url !== a.url ? { ...a, url } : a;
+          }),
+        }));
+      } finally {
+        hydrating = false;
+      }
     },
 
     removeAsset: (id) => {

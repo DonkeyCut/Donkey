@@ -53,29 +53,49 @@ async function cloudFetch(path: string, init?: RequestInit): Promise<Response> {
   return res;
 }
 
+export interface SignedMediaBatch {
+  /** fileName -> signed URL. */
+  urls: Map<string, string>;
+  /** Wall-clock ms when the batch's URLs stop working; null when the mint
+   * came back empty or without an expiry. */
+  expiresAt: number | null;
+}
+
 /** Batch-mint signed R2 GET URLs for a cloud or shared project's media files.
- * Returns fileName -> url; anything the mint misses keeps the /media route,
- * whose 302 serves the same bytes. Dispatches through the active backend so
- * the shared driver's token prefix applies; lazy import because ./index
- * imports this module. */
+ * Anything the mint misses keeps the /media route, whose 302 serves the same
+ * bytes. Network errors and 5xx retry with a short backoff — this runs right
+ * after a laptop wakes, when the link may still be coming up. Dispatches
+ * through the active backend so the shared driver's token prefix applies;
+ * lazy import because ./index imports this module. */
 export async function fetchSignedMediaUrls(
   projectId: string,
   fileNames: string[]
-): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
+): Promise<SignedMediaBatch> {
+  const out: SignedMediaBatch = { urls: new Map(), expiresAt: null };
   if (fileNames.length === 0) return out;
-  try {
-    const { apiFetch } = await import("./index");
-    const res = await apiFetch("/api/cut/media/presign-get", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items: fileNames.map((fileName) => ({ projectId, fileName })) }),
-    });
-    if (!res.ok) return out;
-    const body = (await res.json()) as { urls?: { fileName: string; url: string }[] };
-    for (const u of body.urls ?? []) out.set(u.fileName, u.url);
-  } catch {
-    // Signed URLs are an optimization; the route fallback still streams.
+  const { apiFetch } = await import("./index");
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 500 * 2 ** (attempt - 1)));
+    try {
+      const res = await apiFetch("/api/cut/media/presign-get", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: fileNames.map((fileName) => ({ projectId, fileName })) }),
+      });
+      if (res.status >= 500) continue;
+      if (!res.ok) return out; // 4xx: the route fallback still streams
+      const body = (await res.json()) as {
+        urls?: { fileName: string; url: string }[];
+        expiresIn?: number;
+      };
+      for (const u of body.urls ?? []) out.urls.set(u.fileName, u.url);
+      if (out.urls.size > 0 && typeof body.expiresIn === "number") {
+        out.expiresAt = Date.now() + body.expiresIn * 1000;
+      }
+      return out;
+    } catch {
+      // Network down — retry; signed URLs stay an optimization either way.
+    }
   }
   return out;
 }

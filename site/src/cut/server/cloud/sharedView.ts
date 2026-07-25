@@ -7,7 +7,7 @@
 import type { ProjectDoc, StoredAsset } from "@/cut/lib/types";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { presignGet, projectMediaKey } from "./r2";
+import { GET_EXPIRY_SECONDS, presignGet, projectMediaKey } from "./r2";
 import { normalizeEmails, normalizeFeatures, type ShareFeatures } from "./share";
 import { caught, decodeFileParam, err, redirect } from "./util";
 
@@ -163,7 +163,7 @@ export const sharedView = {
             url: await presignGet(projectMediaKey(view.share.userId, i.projectId!, i.fileName!)),
           }))
       );
-      return Response.json({ urls });
+      return Response.json({ urls, expiresIn: GET_EXPIRY_SECONDS });
     } catch (e) {
       return caught(e, "Could not sign the media URLs.");
     }

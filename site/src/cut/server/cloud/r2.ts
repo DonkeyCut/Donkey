@@ -14,7 +14,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 const R2_BUCKET = "donkey-cut";
 
 const PUT_EXPIRY_SECONDS = 60 * 60; // 1h — the client uploads right after presigning
-const GET_EXPIRY_SECONDS = 24 * 60 * 60; // 24h — hydrated asset URLs live a session
+export const GET_EXPIRY_SECONDS = 24 * 60 * 60; // 24h — hydrated asset URLs live a session
 
 export class R2NotConfiguredError extends Error {
   constructor() {

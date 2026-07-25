@@ -6,6 +6,7 @@ import { isFullRect, overlayAnimStyle, projectFadeSeconds, rectOf, TRANSITION_ZO
 import type { AudioClip, ClipAnim, ClipSpan, FrameRect, MediaAsset, TransitionStyle, VideoClip } from "@/cut/lib/types";
 import { gradeTint, gradeToCssFilter, isNeutralGrade } from "@/cut/lib/colorGrade";
 import { grainTile, lookCssFilter, lookPost } from "@/cut/lib/looks";
+import { reportMediaElementError } from "@/cut/lib/mediaLinks";
 import { registerSourceSampler } from "@/cut/lib/previewCanvas";
 
 /** The alpha/zoom/gain ramps a transition or clip animation puts on one
@@ -208,6 +209,9 @@ function makeMediaEl(asset: MediaAsset): MediaEl {
   if (asset.type === "image") {
     const img = document.createElement("img");
     img.crossOrigin = "anonymous";
+    // Detached elements never reach the global error listener — report
+    // failures explicitly so an expired signed URL re-mints the batch.
+    img.addEventListener("error", () => reportMediaElementError(img));
     img.src = asset.url;
     return img;
   }
@@ -215,6 +219,7 @@ function makeMediaEl(asset: MediaAsset): MediaEl {
   v.playsInline = true;
   v.preload = "auto";
   v.crossOrigin = "anonymous";
+  v.addEventListener("error", () => reportMediaElementError(v));
   v.src = asset.url;
   return v;
 }
@@ -1132,8 +1137,11 @@ class Engine {
         el = undefined;
       }
       if (!el) {
-        el = new Audio(asset.url);
-        el.preload = "auto";
+        const audio = new Audio();
+        audio.preload = "auto";
+        audio.addEventListener("error", () => reportMediaElementError(audio));
+        audio.src = asset.url;
+        el = audio;
         this.audioEls.set(a.id, el);
       }
       // Detached audio can carry its video clip's rate; footprint is (out-in)/speed.
