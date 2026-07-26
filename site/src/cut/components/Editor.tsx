@@ -186,6 +186,7 @@ export function Editor({
       if (rendering || !s.loaded || s.projectId !== projectId || s.clips.length === 0) return;
       rendering = true;
       const doc = {
+        aspect: s.aspect,
         assets: s.assets,
         clips: s.clips,
         audioClips: s.audioClips,
@@ -195,7 +196,7 @@ export function Editor({
         fadeOut: s.fadeOut,
       };
       try {
-        await renderPreviewProxy(projectId, doc, s.aspect);
+        await renderPreviewProxy(projectId, doc);
         refreshShareCard(projectId);
       } finally {
         rendering = false;

@@ -46,3 +46,9 @@ export const VIDEO_MODELS: VideoModelOption[] = [
 export function videoModel(tier: VideoTier): VideoModelOption {
   return VIDEO_MODELS.find((m) => m.tier === tier) ?? VIDEO_MODELS[0];
 }
+
+/** The default model's supported shapes — what AI-path renders and pipeline
+ * seeds clamp the project aspect onto when no tier was picked. */
+export function defaultVideoAspects(): VideoAspect[] {
+  return VIDEO_MODELS[0].aspects;
+}

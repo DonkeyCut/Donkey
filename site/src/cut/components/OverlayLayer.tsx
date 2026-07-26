@@ -63,7 +63,8 @@ export function OverlayLayer({ stageWidth }: { stageWidth: number }) {
     else boxes.current.delete(id);
   }, []);
 
-  const stageHeight = (stageWidth * frameOf(aspect).h) / frameOf(aspect).w;
+  const frame = frameOf(aspect);
+  const stageHeight = (stageWidth * frame.h) / frame.w;
 
   // Figma-style smart snapping: while dragging an item, pull its left/center/
   // right edges to the frame edges, safe margins, center line, and the edges
@@ -226,7 +227,7 @@ function SubtitleCaption({
   const currentTime = useEditor((s) => s.currentTime);
   const skimTime = useEditor((s) => s.skimTime);
   const playing = useEditor((s) => s.playing);
-  const aspect = useEditor((s) => s.aspect);
+  const frame = frameOf(useEditor((s) => s.aspect));
   const t = !playing && skimTime !== null ? skimTime : currentTime;
 
   const cues = laneCues(subtitles, lane);
@@ -242,7 +243,7 @@ function SubtitleCaption({
     cue.id === cues[0]?.id,
     trackPos(subtitles, style, lane),
     undefined,
-    frameOf(aspect).w
+    frame.w
   );
   // Karaoke: the word under the playhead lights up as it is spoken.
   const wordIndex = subtitles.wordHighlight
@@ -269,7 +270,7 @@ function SubtitleCaption({
             textDecorationThickness: "0.07em",
             textUnderlineOffset: "0.14em",
           };
-  const scale = stageWidth / frameOf(aspect).w;
+  const scale = stageWidth / frame.w;
   return (
     <div
       ref={(el) => registerBox(subtitleBoxId(lane), el)}

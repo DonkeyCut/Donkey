@@ -24,6 +24,7 @@
 
 import { useEditor } from "../store";
 import { nearestAspect, TRANSITION_STYLE_IDS, type TransitionStyle } from "../types";
+import { defaultVideoAspects } from "../videoModels";
 import { docPlaceGenAudio, docPlaceGenClip, projectWriteMode, withProjectDoc } from "./docWriter";
 import type { AudioClipInfo, EditorBridge, TimelineInfo } from "./editor";
 
@@ -75,7 +76,7 @@ export class StoreEditorBridge implements EditorBridge {
       durationFrames: Math.round(clipEnd * GEN_FPS),
       // The pipeline renders in the shapes the models support; a custom
       // project ratio maps to the closest one and letterboxes on the timeline.
-      aspect: nearestAspect(s.aspect, ["9:16", "16:9"] as const),
+      aspect: nearestAspect(s.aspect, defaultVideoAspects()),
     };
     return this.lastTimeline;
   }

@@ -11,6 +11,7 @@ import { genPulseOverlay, useGenPulse } from "@/cut/lib/genNotify";
 import { useElapsed } from "@/cut/hooks/useElapsed";
 import { signInUrl, useGenerate, useSignedIn, type GenerateJob } from "@/cut/lib/generate";
 import {
+  IMAGE_ASPECTS,
   IMAGE_RESOLUTION_LABEL,
   useImageGen,
   type ImageAspect,
@@ -89,9 +90,7 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
   useEffect(() => {
     useImageGen
       .getState()
-      .setAspect(
-        nearestAspect(useEditor.getState().aspect, Object.keys(ASPECT_WORD) as ImageAspect[])
-      );
+      .setAspect(nearestAspect(useEditor.getState().aspect, IMAGE_ASPECTS));
   }, []);
 
   const go = () => {

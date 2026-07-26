@@ -285,7 +285,7 @@ export function wrapCaption(text: string): string {
  * line centered without wrapping, so this is what guarantees captions stay in
  * bounds — bigger styles (and the punchy opener) wrap to fewer words per line.
  */
-export function wrapCaptionForSize(text: string, size: number, frameW = 1080): string {
+export function wrapCaptionForSize(text: string, size: number, frameW: number): string {
   const words = text.trim().replace(/\s+/g, " ").split(" ").filter(Boolean);
   if (words.length === 0) return "";
   // ~88% of the frame width, with a conservative bold-glyph advance
@@ -343,9 +343,9 @@ export function cueOverlay(
   cue: SubtitleCue,
   style: CaptionStyle = CAPTION_STYLES.clean,
   isOpener = false,
-  pos?: { x?: number; y?: number; size?: number; font?: FontId; accentMode?: WordAccentMode; accentColor?: string },
-  wordIndex?: number,
-  frameW = 1080
+  pos: { x?: number; y?: number; size?: number; font?: FontId; accentMode?: WordAccentMode; accentColor?: string } | undefined,
+  wordIndex: number | undefined,
+  frameW: number
 ): TextOverlay {
   const kl = wordIndex !== undefined ? karaokeLook(style, pos) : null;
   const size = Math.round(

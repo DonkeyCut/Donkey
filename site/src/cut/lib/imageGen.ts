@@ -10,6 +10,10 @@ import { addRefOnce, sameRef, type AssetRef } from "./assetRef";
 /** The shape the next generated image is composed in. */
 export type ImageAspect = "16:9" | "9:16" | "1:1";
 
+/** Every shape the image model renders — the registry list AI-path defaults
+ * and panel seeds clamp the project aspect onto. */
+export const IMAGE_ASPECTS: readonly ImageAspect[] = ["16:9", "9:16", "1:1"];
+
 export const IMAGE_ASPECT_LABEL: Record<ImageAspect, string> = {
   "16:9": "Landscape (16:9)",
   "9:16": "Portrait (9:16)",

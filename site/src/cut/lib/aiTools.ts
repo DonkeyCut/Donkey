@@ -44,6 +44,7 @@ import { synthesizeMusic } from "./audioGen";
 import { composeMusicPrompt } from "./composeGen";
 import { stockAssetInDoc } from "./genvideo/docWriter";
 import { resolveVoice, synthesizeSpeech, SPEECH_VOICES } from "./tts";
+import { defaultVideoAspects } from "./videoModels";
 import { DUCK_DEFAULT, generateSubtitlesReadout } from "./voiceover";
 import {
   ANIM_DEFAULT_SECONDS,
@@ -55,14 +56,13 @@ import {
   MAX_SUBTITLE_LANES,
   mediaUrl,
   nearestAspect,
+  normalizeAspect,
   overlayAnimStyle,
-  parseRatio,
   rectOf,
   regionLabel,
   SPEED_FLOOR,
   TRANSITION_STYLE_IDS,
   type AnimStyle,
-  type Aspect,
   type AudioClip,
   type ColorGrade,
   type FontId,
@@ -817,7 +817,7 @@ export async function runAiTool(
           aspect:
             input.aspect === "16:9" || input.aspect === "9:16"
               ? input.aspect
-              : nearestAspect(useEditor.getState().aspect, ["16:9", "9:16"] as const),
+              : nearestAspect(useEditor.getState().aspect, defaultVideoAspects()),
           chatId: chatOwner() ?? undefined,
         });
         const stillAsset =
@@ -1707,10 +1707,7 @@ export async function runAiTool(
     }
 
     case "set_aspect": {
-      const a =
-        typeof input.aspect === "string" && parseRatio(input.aspect)
-          ? (input.aspect as Aspect)
-          : null;
+      const a = typeof input.aspect === "string" ? normalizeAspect(input.aspect) : null;
       if (!a)
         throw new ToolError(
           'aspect must be "W:H" with whole numbers up to a 4:1 shape, e.g. "9:16", "16:9", "1:1", or "9:5".'

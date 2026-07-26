@@ -80,13 +80,19 @@ export function originalSettings(
   assets: MediaAsset[]
 ): ExportSettings {
   const base = frameOf(aspect);
+  const longBase = Math.max(base.w, base.h);
   const srcLong = Math.max(
     0,
     ...getClipSpans(clips, assets).map((sp) =>
       Math.max(sp.asset.width ?? 0, sp.asset.height ?? 0)
     )
   );
-  const k = Math.min(2, Math.max(1, srcLong / Math.max(base.w, base.h) || 1));
+  // The 4K long-side cap wins over the 1080 base floor: a very wide custom
+  // ratio (whose base already exceeds 3840) scales down to stay encodable.
+  const k = Math.min(
+    3840 / longBase,
+    Math.min(2, Math.max(1, srcLong / longBase || 1))
+  );
   const even = (n: number) => 2 * Math.round((n * k) / 2);
   return { width: even(base.w), height: even(base.h), fps: 30, crf: 19, preset: "medium" };
 }
@@ -157,6 +163,9 @@ export async function deleteExport(projectId: string, file: string) {
 }
 
 export interface ExportDoc {
+  /** Output frame ratio the cut renders at — keeps burn-in layout (caption
+   * wrap) in the same design space as the live preview. */
+  aspect: Aspect;
   assets: MediaAsset[];
   /** Every video clip, any track (track 0 folds sequentially, others composite). */
   clips: VideoClip[];
@@ -372,8 +381,9 @@ async function buildExportPayload(
               i === 0,
               pos,
               doc.subtitles.wordHighlight ? wi : undefined,
-              // Wrap in design space (1080 short side), whatever the render size.
-              Math.round((1080 * settings.width) / Math.min(settings.width, settings.height))
+              // Wrap in design space (1080 short side) from the project ratio —
+              // the same width the preview passes, whatever the render size.
+              frameOf(doc.aspect).w
             ),
             settings.width,
             settings.height
@@ -540,9 +550,9 @@ export function cancelExportJob(jobId: string, backend: CutBackend = getBackend(
  * Renders through the same pipeline (overlays and all), writing the project's
  * preview.mp4. Best-effort: silently no-ops if a slot is busy or there's no
  * footage yet. */
-export async function renderPreviewProxy(projectId: string, doc: ExportDoc, aspect: Aspect) {
+export async function renderPreviewProxy(projectId: string, doc: ExportDoc) {
   const backend = getBackend(); // pinned: the proxy render outlives navigation
-  const settings: ExportSettings = { ...scaledFrame(aspect, 360), fps: 24, crf: 30, preset: "veryfast" };
+  const settings: ExportSettings = { ...scaledFrame(doc.aspect, 360), fps: 24, crf: 30, preset: "veryfast" };
   let res: Response;
   try {
     const payload = await buildExportPayload(projectId, doc, settings, "preview");
@@ -604,7 +614,7 @@ function cardSettings(aspect: Aspect): ExportSettings {
  *
  * Best-effort throughout — a project with no footage, an unconfigured
  * backend, or a busy render slot simply keeps the card it already had. */
-async function renderShareCard(projectId: string, doc: ExportDoc, aspect: Aspect): Promise<void> {
+async function renderShareCard(projectId: string, doc: ExportDoc): Promise<void> {
   const backend = getBackend(); // pinned: the card render outlives navigation
   if (backend.kind !== "cloud") return;
   try {
@@ -619,7 +629,7 @@ async function renderShareCard(projectId: string, doc: ExportDoc, aspect: Aspect
     const payload = await buildExportPayload(
       projectId,
       docFirstSeconds(doc, CARD_SECONDS),
-      cardSettings(aspect),
+      cardSettings(doc.aspect),
       "card"
     );
     res = await postExport(projectId, payload, "card.mp4", backend);
@@ -637,17 +647,14 @@ async function renderShareCard(projectId: string, doc: ExportDoc, aspect: Aspect
 export function refreshShareCard(projectId: string): void {
   const s = useEditor.getState();
   if (!s.loaded || s.projectId !== projectId || s.clips.length === 0) return;
-  void renderShareCard(
-    projectId,
-    {
-      assets: s.assets,
-      clips: s.clips,
-      audioClips: s.audioClips,
-      overlays: s.overlays,
-      subtitles: s.subtitles,
-      fadeIn: s.fadeIn,
-      fadeOut: s.fadeOut,
-    },
-    s.aspect
-  ).catch(() => {});
+  void renderShareCard(projectId, {
+    aspect: s.aspect,
+    assets: s.assets,
+    clips: s.clips,
+    audioClips: s.audioClips,
+    overlays: s.overlays,
+    subtitles: s.subtitles,
+    fadeIn: s.fadeIn,
+    fadeOut: s.fadeOut,
+  }).catch(() => {});
 }

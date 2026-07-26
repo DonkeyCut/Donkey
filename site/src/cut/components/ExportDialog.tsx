@@ -61,6 +61,7 @@ export function ExportDialog() {
     void useExports.getState().start(
       s.projectId,
       {
+        aspect: s.aspect,
         assets: s.assets,
         clips: s.clips,
         audioClips: s.audioClips,

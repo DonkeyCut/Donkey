@@ -23,6 +23,17 @@ export function parseRatio(a: string | undefined | null): { w: number; h: number
   return { w, h };
 }
 
+/** Reduce a valid ratio to lowest terms as the one canonical string —
+ * "18:32" and "09:16" both become "9:16", so preset checks and literal
+ * comparisons see a single spelling. Null when the ratio is invalid. */
+export function normalizeAspect(a: string | undefined | null): Aspect | null {
+  const r = parseRatio(a);
+  if (!r) return null;
+  const gcd = (x: number, y: number): number => (y === 0 ? x : gcd(y, x % y));
+  const g = gcd(r.w, r.h);
+  return `${r.w / g}:${r.h / g}`;
+}
+
 /** Output frame in pixels. The short side is pinned to 1080 — the design
  * short side that text scaling and overlay math assume — and the long side
  * follows the ratio, rounded to even for the encoder. */

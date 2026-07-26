@@ -1,6 +1,6 @@
 // Cloud twin of the engine's project CRUD (server/projects.ts + http/projects.ts):
 // docs and metadata in Postgres, media bytes in R2. Every query scopes by userId.
-import { parseRatio, type ProjectDoc, type ProjectFolder, type ProjectSummary } from "@/cut/lib/types";
+import { normalizeAspect, type ProjectDoc, type ProjectFolder, type ProjectSummary } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
@@ -156,7 +156,7 @@ export const projectsCloud = {
             : existing.overlayClips,
         overlays: Array.isArray(body.overlays) ? body.overlays : existing.overlays,
         templates: Array.isArray(body.templates) ? body.templates : existing.templates,
-        aspect: parseRatio(body.aspect) ? body.aspect : existing.aspect,
+        aspect: normalizeAspect(body.aspect) ?? existing.aspect,
         fadeIn: typeof body.fadeIn === "number" ? body.fadeIn : existing.fadeIn,
         fadeOut: typeof body.fadeOut === "number" ? body.fadeOut : existing.fadeOut,
         subtitles:

@@ -1776,6 +1776,7 @@ function exportSegment(asset: MediaAsset, clip: VideoClip | AudioClip) {
   const doc: ExportDoc =
     "track" in clip
       ? {
+          aspect: s.aspect,
           assets: [asset],
           clips: [{ ...clip, start: 0, track: 0, hidden: undefined }],
           audioClips: [],
@@ -1783,6 +1784,7 @@ function exportSegment(asset: MediaAsset, clip: VideoClip | AudioClip) {
           subtitles: emptySubtitles(),
         }
       : {
+          aspect: s.aspect,
           assets: [asset],
           clips: [],
           audioClips: [{ ...clip, start: 0, hidden: undefined }],

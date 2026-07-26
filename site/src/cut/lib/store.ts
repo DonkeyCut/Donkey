@@ -32,7 +32,7 @@ import { fetchSignedMediaUrls } from "./backend/cloud";
 import { markSignedBatch } from "./mediaLinks";
 import { cloudTranscribeSpec, type CloudTranscribeSpec } from "./cloudTranscribe";
 import { trackLocale } from "./subtitles";
-import { ANIM_STYLE_IDS, emptySubtitles, IMAGE_CLIP_SECONDS, LOOK_IDS, MAX_SUBTITLE_LANES, mediaUrl, migrateLegacyTransitions, parseRatio, SPEED_FLOOR, SPEED_MIN, TRANSITION_MAX } from "./types";
+import { ANIM_STYLE_IDS, emptySubtitles, IMAGE_CLIP_SECONDS, LOOK_IDS, MAX_SUBTITLE_LANES, mediaUrl, migrateLegacyTransitions, normalizeAspect, SPEED_FLOOR, SPEED_MIN, TRANSITION_MAX } from "./types";
 import { readTextStyle } from "./textStyle";
 import { loadUiState, saveUiState } from "./uiState";
 import { captureTimelineFrames } from "./visualFrames";
@@ -115,8 +115,11 @@ export interface EditorState {
   clips: VideoClip[];
   audioClips: AudioClip[];
   overlays: TextOverlay[];
-  /** Output frame (9:16 vertical or 16:9 widescreen), persisted per project. */
+  /** Output frame ratio ("W:H", short side 1080), persisted per project. */
   aspect: Aspect;
+  /** The aspect was chosen deliberately (picker, set_aspect, or saved in the
+   * doc) — the first-import orientation guess stands down. Not a doc field. */
+  aspectTouched: boolean;
   /** Whole-video fades, seconds (0 = off): in from black at the start, out to
    * black at the end of the cut. Applied to the final picture and mix. */
   fadeIn: number;
@@ -791,6 +794,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
     overlays: [],
     templates: [],
     aspect: "9:16",
+    aspectTouched: false,
     fadeIn: 0,
     fadeOut: 0,
     selection: null,
@@ -834,6 +838,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
         overlays: [],
         templates: [],
         aspect: "9:16",
+        aspectTouched: false,
         fadeIn: 0,
         fadeOut: 0,
         selection: null,
@@ -912,7 +917,8 @@ export const useEditor = create<EditorState>((baseSet, get) => {
           audioClips: doc.audioClips,
           overlays: doc.overlays,
           templates: doc.templates ?? [],
-          aspect: doc.aspect ?? "9:16",
+          aspect: normalizeAspect(doc.aspect) ?? "9:16",
+          aspectTouched: doc.aspect !== undefined,
           fadeIn: doc.fadeIn ?? 0,
           fadeOut: doc.fadeOut ?? 0,
           // View state lives in IndexedDB; doc.ui covers projects saved
@@ -1088,7 +1094,8 @@ export const useEditor = create<EditorState>((baseSet, get) => {
     },
 
     setAspect: (a) => {
-      if (parseRatio(a)) set({ aspect: a });
+      const n = normalizeAspect(a);
+      if (n) set({ aspect: n, aspectTouched: true });
     },
     setProjectFade: (patch) => {
       const clamp = (v: number | undefined) =>
@@ -1103,8 +1110,10 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       set((s) => {
         // The first video in an untouched project decides the starting frame
         // (landscape footage → 16:9, portrait → 9:16); the user can switch it
-        // any time from the top bar.
+        // any time from the top bar. A deliberately chosen aspect wins — the
+        // guess never overrides it.
         const guess =
+          !s.aspectTouched &&
           (asset.type === "video" || asset.type === "image") &&
           asset.width !== undefined &&
           asset.height !== undefined &&

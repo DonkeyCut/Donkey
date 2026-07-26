@@ -11,6 +11,7 @@ import { projectWriteMode, withProjectDoc } from "./genvideo/docWriter";
 import type { RefAsset, Shot, VideoEvent, VideoPhase, VideoProject } from "./genvideo/types";
 import { useEditor } from "./store";
 import { nearestAspect, type Aspect } from "./types";
+import { defaultVideoAspects } from "./videoModels";
 
 // Brief-to-video ("generate a video") controller. It owns one VideoOrchestrator
 // per open project and runs it browser-side, exactly where generation and the
@@ -263,7 +264,7 @@ function newProject(projectId: string, params: StartSceneParams): VideoProject {
     // The plan owns its shape from the start (start() applies params.aspect to
     // an empty timeline before this runs), so a background render can never
     // pick up another open project's aspect.
-    aspect: nearestAspect(useEditor.getState().aspect, ["9:16", "16:9"] as const),
+    aspect: nearestAspect(useEditor.getState().aspect, defaultVideoAspects()),
     style: params.style?.trim() ?? "",
     suiteLabel: "donkey-hosted",
     ...(params.chatId ? { chatId: params.chatId } : {}),

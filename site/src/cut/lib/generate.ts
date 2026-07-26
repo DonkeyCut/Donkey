@@ -20,10 +20,10 @@ import { hostedPost } from "./hosted";
 import { enrichAsset, importFileToProject, uploadProjectImage } from "./media";
 import { refsToInlineImages, videoSafeInline, visualRefs, type InlineImage } from "./refMedia";
 import { useGenNotify } from "./genNotify";
-import { useImageGen } from "./imageGen";
+import { IMAGE_ASPECTS, useImageGen } from "./imageGen";
 import { useEditor } from "./store";
 import { mediaSlug, nearestAspect, type MediaAsset, type RenderRecord } from "./types";
-import { videoModel } from "./videoModels";
+import { defaultVideoAspects, videoModel } from "./videoModels";
 import { walkLadder, type VideoAttempt } from "./videoLadder";
 
 // AI generation jobs, held outside the panels so a tab switch (which unmounts
@@ -604,8 +604,7 @@ export const useGenerate = create<GenerateState>((set, get) => {
       return (async () => {
         try {
           const aspect =
-            opts?.aspect ??
-            nearestAspect(useEditor.getState().aspect, ["16:9", "9:16", "1:1"] as const);
+            opts?.aspect ?? nearestAspect(useEditor.getState().aspect, IMAGE_ASPECTS);
           const resolution = opts?.resolution ?? useImageGen.getState().resolution;
           // The job (and the landed asset's name) keeps the user's own words;
           // only the render sees the composed prompt. The image model takes
@@ -741,7 +740,7 @@ export const useGenerate = create<GenerateState>((set, get) => {
               : {}),
           parameters: {
             aspectRatio:
-              opts?.aspect ?? nearestAspect(useEditor.getState().aspect, ["16:9", "9:16"] as const),
+              opts?.aspect ?? nearestAspect(useEditor.getState().aspect, defaultVideoAspects()),
             ...(opts?.negativePrompt ? { negativePrompt: opts.negativePrompt } : {}),
           },
         });
