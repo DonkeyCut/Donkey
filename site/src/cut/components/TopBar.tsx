@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { Check, ChevronDown, ChevronLeft, Cloud, Loader2, Mic, Monitor, Ratio, Share2, Smartphone, Sparkles, Square, Upload, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -17,8 +17,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent } from "@/components/ui/popover";
 import { cloudBackend } from "@/cut/lib/backend/cloud";
 import { useCutMode } from "@/cut/lib/backend/hooks";
 import { localBackend } from "@/cut/lib/backend/local";
@@ -26,7 +24,8 @@ import { useWebMode } from "@/cut/lib/flags";
 import { backTarget, projectHref, useCutBase } from "@/cut/lib/nav";
 import { copyProjectAcross } from "@/cut/lib/projectCopy";
 import { useEditor } from "@/cut/lib/store";
-import { ASPECT_PRESETS, aspectLabel, aspectOrientation, frameOf, parseRatio, type Aspect } from "@/cut/lib/types";
+import { useLocalPref } from "@/cut/lib/uiState";
+import { ASPECT_PRESETS, aspectLabel, aspectOrientation, normalizeAspect, parseRatio, type Aspect } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 import { RecordDialog, type RecordMode } from "./RecordDialog";
 import { ShareDialog } from "./ShareDialog";
@@ -62,16 +61,59 @@ export function TopBar({
   const [draft, setDraft] = useState("");
   const [recordMode, setRecordMode] = useState<RecordMode | null>(null);
   const isPreset = ASPECT_PRESETS.some((p) => p.value === aspect);
-  const pillRef = useRef<HTMLDivElement>(null);
-  const [customOpen, setCustomOpen] = useState(false);
-  const [customW, setCustomW] = useState("16");
-  const [customH, setCustomH] = useState("9");
-  const customRatio = parseRatio(`${customW}:${customH}`);
-  const customFrame = customRatio ? frameOf(`${customRatio.w}:${customRatio.h}`) : null;
+  // Custom is a sticky mode: picked from the menu (or loading a project with a
+  // non-preset ratio) the pill stays a W:H editor — blur applies the ratio and
+  // the editor remains until a preset is chosen from its chevron menu.
+  const [customMode, setCustomMode] = useState(false);
+  const showCustomEditor = customMode || !isPreset;
+  // The last custom ratio survives preset detours and reloads: it's only
+  // rewritten by a manual apply (or an external non-preset aspect), so
+  // re-picking Custom… returns to it.
+  // Remembered AS TYPED ("9.5:5"), so the pill re-shows the user's spelling
+  // after reloads; the project doc always stores the reduced form ("19:10").
+  const [savedCustom, setSavedCustom] = useLocalPref<string>(
+    "cut-custom-aspect",
+    "",
+    (v) => typeof v === "string" && normalizeAspect(v) !== null
+  );
+  const [customW, setCustomW] = useState(() => savedCustom.split(":")[0] || "16");
+  const [customH, setCustomH] = useState(() => savedCustom.split(":")[1] || "9");
+  // Sides may be decimal ("1.85"); the applied/stored form is the reduced
+  // whole-number ratio ("37:20").
+  const customNormalized = normalizeAspect(`${customW}:${customH}`);
+  const ratioInput = (v: string) => v.replace(/[^\d.]/g, "").replace(/^(\d*\.\d*).*$/, "$1").slice(0, 6);
+  // The inputs mirror non-preset aspect changes (apply, AI set_aspect, project
+  // load); a preset pick leaves the remembered custom value alone, and an
+  // apply of what's already typed keeps the typed (possibly decimal) form.
+  const [seenAspect, setSeenAspect] = useState(aspect);
+  if (aspect !== seenAspect) {
+    setSeenAspect(aspect);
+    const r = parseRatio(aspect);
+    if (r && !ASPECT_PRESETS.some((p) => p.value === aspect) && customNormalized !== aspect) {
+      setCustomW(String(r.w));
+      setCustomH(String(r.h));
+    }
+  }
+  const reseedCustom = () => {
+    if (normalizeAspect(savedCustom)) {
+      const [w, h] = savedCustom.split(":");
+      setCustomW(w);
+      setCustomH(h);
+      return;
+    }
+    const r = parseRatio(useEditor.getState().aspect);
+    if (r) {
+      setCustomW(String(r.w));
+      setCustomH(String(r.h));
+    }
+  };
   const applyCustom = () => {
-    if (!customRatio) return;
-    useEditor.getState().setAspect(`${customRatio.w}:${customRatio.h}`);
-    setCustomOpen(false);
+    if (!customNormalized) {
+      reseedCustom();
+      return;
+    }
+    setSavedCustom(`${customW}:${customH}`);
+    useEditor.getState().setAspect(customNormalized);
   };
 
   // "Move to Cloud" (cut-web-mode flag): copies this local project — doc and
@@ -124,73 +166,89 @@ export function TopBar({
   return (
     <header className="relative flex items-center justify-between border-b border-border bg-card pr-3 pl-2">
       <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-2">
-        <Popover open={customOpen} onOpenChange={setCustomOpen}>
-          <div ref={pillRef}>
+        {(() => {
+          const aspectMenu = (
+            <DropdownMenuContent align="start" className="w-56">
+              {ASPECT_PRESETS.map((p) => (
+                <DropdownMenuItem
+                  key={p.value}
+                  onClick={() => {
+                    useEditor.getState().setAspect(p.value);
+                    setCustomMode(false);
+                  }}
+                >
+                  <AspectIcon aspect={p.value} />
+                  <span className="flex-1">
+                    {p.name} · {p.value}
+                    {p.sublabel && (
+                      <span className="block text-[10.5px] text-muted-foreground">{p.sublabel}</span>
+                    )}
+                  </span>
+                  {!showCustomEditor && aspect === p.value && (
+                    <Check className="size-3.5 text-muted-foreground" />
+                  )}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuItem
+                onClick={() => {
+                  setCustomMode(true);
+                  // Picking Custom returns to the remembered ratio right away.
+                  if (customNormalized) useEditor.getState().setAspect(customNormalized);
+                }}
+              >
+                <Ratio />
+                <span className="flex-1">
+                  {normalizeAspect(savedCustom) ? `Custom · ${savedCustom}` : "Custom…"}
+                </span>
+                {showCustomEditor && <Check className="size-3.5 text-muted-foreground" />}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          );
+          return showCustomEditor ? (
+            <div
+              className="aspect-switch flex items-center gap-1 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium shadow-xs"
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) applyCustom();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLElement).blur();
+                if (e.key === "Escape") reseedCustom();
+              }}
+            >
+              <Ratio className="size-3.5 text-muted-foreground" />
+              <input
+                aria-label="Width"
+                inputMode="decimal"
+                className="w-9 bg-transparent text-center outline-none"
+                value={customW}
+                onChange={(e) => setCustomW(ratioInput(e.target.value))}
+              />
+              <span className="text-muted-foreground">:</span>
+              <input
+                aria-label="Height"
+                inputMode="decimal"
+                className="w-9 bg-transparent text-center outline-none"
+                value={customH}
+                onChange={(e) => setCustomH(ratioInput(e.target.value))}
+              />
+              <DropdownMenu>
+                <DropdownMenuTrigger className="grid place-items-center text-muted-foreground transition-colors hover:text-foreground">
+                  <ChevronDown className="size-3" />
+                </DropdownMenuTrigger>
+                {aspectMenu}
+              </DropdownMenu>
+            </div>
+          ) : (
             <DropdownMenu>
               <DropdownMenuTrigger className="aspect-switch flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-xs transition-colors hover:text-foreground">
                 <AspectIcon aspect={aspect} className="size-3.5" />
                 {aspectLabel(aspect)}
                 <ChevronDown className="size-3" />
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-56">
-                {ASPECT_PRESETS.map((p) => (
-                  <DropdownMenuItem key={p.value} onClick={() => useEditor.getState().setAspect(p.value)}>
-                    <AspectIcon aspect={p.value} />
-                    <span className="flex-1">
-                      {p.name} · {p.value}
-                      {p.sublabel && (
-                        <span className="block text-[10.5px] text-muted-foreground">{p.sublabel}</span>
-                      )}
-                    </span>
-                    {aspect === p.value && <Check className="size-3.5 text-muted-foreground" />}
-                  </DropdownMenuItem>
-                ))}
-                <DropdownMenuItem
-                  onClick={() => {
-                    const r = parseRatio(aspect);
-                    if (r) {
-                      setCustomW(String(r.w));
-                      setCustomH(String(r.h));
-                    }
-                    setCustomOpen(true);
-                  }}
-                >
-                  <Ratio />
-                  <span className="flex-1">Custom…</span>
-                  {!isPreset && <Check className="size-3.5 text-muted-foreground" />}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
+              {aspectMenu}
             </DropdownMenu>
-          </div>
-          <PopoverContent anchor={pillRef} align="start" className="w-56">
-            <div className="text-xs font-medium">Custom ratio</div>
-            <div className="mt-2 flex items-center gap-1.5">
-              <Input
-                aria-label="Width"
-                inputMode="numeric"
-                className="h-8 text-center"
-                value={customW}
-                onChange={(e) => setCustomW(e.target.value.replace(/\D/g, "").slice(0, 3))}
-                onKeyDown={(e) => e.key === "Enter" && applyCustom()}
-              />
-              <span className="text-xs text-muted-foreground">:</span>
-              <Input
-                aria-label="Height"
-                inputMode="numeric"
-                className="h-8 text-center"
-                value={customH}
-                onChange={(e) => setCustomH(e.target.value.replace(/\D/g, "").slice(0, 3))}
-                onKeyDown={(e) => e.key === "Enter" && applyCustom()}
-              />
-            </div>
-            <div className="mt-1.5 text-[10.5px] text-muted-foreground">
-              {customFrame ? `Frame ${customFrame.w} × ${customFrame.h}` : "Whole numbers, up to a 4:1 shape."}
-            </div>
-            <Button size="sm" className="mt-2 w-full" disabled={!customRatio} onClick={applyCustom}>
-              Apply
-            </Button>
-          </PopoverContent>
-        </Popover>
+          );
+        })()}
         <DropdownMenu>
           <DropdownMenuTrigger className="record-switch flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-xs transition-colors hover:text-foreground">
             <span className="size-2 rounded-full bg-red-500" aria-hidden />
