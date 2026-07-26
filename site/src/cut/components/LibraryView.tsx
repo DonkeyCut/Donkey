@@ -342,7 +342,7 @@ export function LibraryView() {
         </div>
       ) : !hasContent ? (
         <button
-          className="grid w-full cursor-pointer place-items-center rounded-2xl border-2 border-dashed border-border py-24 transition-colors hover:border-primary/40"
+          className="grid w-full cursor-pointer place-items-center rounded-2xl py-24"
           onClick={() => {
             setUrlError(null);
             setAddOpen(true);
