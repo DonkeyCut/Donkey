@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { Check, ChevronDown, ChevronLeft, Cloud, Loader2, Mic, Monitor, Ratio, Share2, Smartphone, Sparkles, Square, Upload, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverContent } from "@/components/ui/popover";
 import { cloudBackend } from "@/cut/lib/backend/cloud";
 import { useCutMode } from "@/cut/lib/backend/hooks";
 import { localBackend } from "@/cut/lib/backend/local";
@@ -62,10 +62,12 @@ export function TopBar({
   const [draft, setDraft] = useState("");
   const [recordMode, setRecordMode] = useState<RecordMode | null>(null);
   const isPreset = ASPECT_PRESETS.some((p) => p.value === aspect);
+  const pillRef = useRef<HTMLDivElement>(null);
   const [customOpen, setCustomOpen] = useState(false);
   const [customW, setCustomW] = useState("16");
   const [customH, setCustomH] = useState("9");
   const customRatio = parseRatio(`${customW}:${customH}`);
+  const customFrame = customRatio ? frameOf(`${customRatio.w}:${customRatio.h}`) : null;
   const applyCustom = () => {
     if (!customRatio) return;
     useEditor.getState().setAspect(`${customRatio.w}:${customRatio.h}`);
@@ -123,7 +125,7 @@ export function TopBar({
     <header className="relative flex items-center justify-between border-b border-border bg-card pr-3 pl-2">
       <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-2">
         <Popover open={customOpen} onOpenChange={setCustomOpen}>
-          <div className="relative">
+          <div ref={pillRef}>
             <DropdownMenu>
               <DropdownMenuTrigger className="aspect-switch flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-xs transition-colors hover:text-foreground">
                 <AspectIcon aspect={aspect} className="size-3.5" />
@@ -162,11 +164,8 @@ export function TopBar({
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            {/* Invisible anchor spanning the pill, so the custom-ratio popover
-                opens where the menu just was. */}
-            <PopoverTrigger className="pointer-events-none absolute inset-0 -z-10" aria-hidden tabIndex={-1} />
           </div>
-          <PopoverContent align="start" className="w-56">
+          <PopoverContent anchor={pillRef} align="start" className="w-56">
             <div className="text-xs font-medium">Custom ratio</div>
             <div className="mt-2 flex items-center gap-1.5">
               <Input
@@ -188,9 +187,7 @@ export function TopBar({
               />
             </div>
             <div className="mt-1.5 text-[10.5px] text-muted-foreground">
-              {customRatio
-                ? `Frame ${frameOf(`${customRatio.w}:${customRatio.h}`).w} × ${frameOf(`${customRatio.w}:${customRatio.h}`).h}`
-                : "Whole numbers, up to a 4:1 shape."}
+              {customFrame ? `Frame ${customFrame.w} × ${customFrame.h}` : "Whole numbers, up to a 4:1 shape."}
             </div>
             <Button size="sm" className="mt-2 w-full" disabled={!customRatio} onClick={applyCustom}>
               Apply
