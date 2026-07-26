@@ -138,13 +138,15 @@ export function TopBar({
                     <AspectIcon aspect={p.value} />
                     <span className="flex-1">
                       {p.name} · {p.value}
-                      <span className="block text-[10.5px] text-muted-foreground">{p.sublabel}</span>
+                      {p.sublabel && (
+                        <span className="block text-[10.5px] text-muted-foreground">{p.sublabel}</span>
+                      )}
                     </span>
                     {aspect === p.value && <Check className="size-3.5 text-muted-foreground" />}
                   </DropdownMenuItem>
                 ))}
                 <DropdownMenuItem
-                  onSelect={() => {
+                  onClick={() => {
                     const r = parseRatio(aspect);
                     if (r) {
                       setCustomW(String(r.w));
@@ -154,12 +156,7 @@ export function TopBar({
                   }}
                 >
                   <Ratio />
-                  <span className="flex-1">
-                    Custom…
-                    <span className="block text-[10.5px] text-muted-foreground">
-                      {isPreset ? "Any width : height" : `Current · ${aspect}`}
-                    </span>
-                  </span>
+                  <span className="flex-1">Custom…</span>
                   {!isPreset && <Check className="size-3.5 text-muted-foreground" />}
                 </DropdownMenuItem>
               </DropdownMenuContent>

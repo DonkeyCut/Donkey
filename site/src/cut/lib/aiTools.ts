@@ -1710,7 +1710,7 @@ export async function runAiTool(
       const a = typeof input.aspect === "string" ? normalizeAspect(input.aspect) : null;
       if (!a)
         throw new ToolError(
-          'aspect must be "W:H" with whole numbers up to a 4:1 shape, e.g. "9:16", "16:9", "1:1", or "9:5".'
+          'aspect must be "W:H" up to an 8:1 shape — whole or decimal sides, e.g. "9:16", "1:1", "9:2", "2.39:1".'
         );
       s.setAspect(a);
       const f = frameOf(a);

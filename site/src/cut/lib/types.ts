@@ -12,26 +12,35 @@ export const IMAGE_CLIP_SECONDS = 8;
 export type Aspect = `${number}:${number}`;
 
 /** Parse a "W:H" ratio. Null unless both sides are positive integers up to
- * three digits and the long/short ratio is at most 4 (keeps ffmpeg output
+ * three digits and the long/short ratio is at most 8 (keeps ffmpeg output
  * dims and text layout sane). */
 export function parseRatio(a: string | undefined | null): { w: number; h: number } | null {
   const m = /^(\d{1,3}):(\d{1,3})$/.exec(a ?? "");
   if (!m) return null;
   const w = Number(m[1]);
   const h = Number(m[2]);
-  if (!w || !h || Math.max(w, h) / Math.min(w, h) > 4) return null;
+  if (!w || !h || Math.max(w, h) / Math.min(w, h) > 8) return null;
   return { w, h };
 }
 
-/** Reduce a valid ratio to lowest terms as the one canonical string —
- * "18:32" and "09:16" both become "9:16", so preset checks and literal
- * comparisons see a single spelling. Null when the ratio is invalid. */
+/** Reduce a ratio to the one canonical string: lowest-terms whole numbers.
+ * Sides may carry up to two decimals — "1.85:1" → "37:20", "18:32" and
+ * "09:16" both → "9:16" — so preset checks and literal comparisons see a
+ * single spelling. Null when invalid: non-positive, more extreme than 8:1,
+ * or not expressible with whole sides up to 999. */
 export function normalizeAspect(a: string | undefined | null): Aspect | null {
-  const r = parseRatio(a);
-  if (!r) return null;
+  const m = /^(\d{1,3}(?:\.\d{1,2})?):(\d{1,3}(?:\.\d{1,2})?)$/.exec(a ?? "");
+  if (!m) return null;
+  const scale = 10 ** Math.max(m[1].split(".")[1]?.length ?? 0, m[2].split(".")[1]?.length ?? 0);
+  let w = Math.round(Number(m[1]) * scale);
+  let h = Math.round(Number(m[2]) * scale);
+  if (!w || !h || Math.max(w, h) / Math.min(w, h) > 8) return null;
   const gcd = (x: number, y: number): number => (y === 0 ? x : gcd(y, x % y));
-  const g = gcd(r.w, r.h);
-  return `${r.w / g}:${r.h / g}`;
+  const g = gcd(w, h);
+  w /= g;
+  h /= g;
+  if (w > 999 || h > 999) return null;
+  return `${w}:${h}`;
 }
 
 /** Output frame in pixels. The short side is pinned to 1080 — the design
@@ -43,13 +52,13 @@ export function frameOf(aspect: Aspect): { w: number; h: number } {
   return r.w >= r.h ? { w: long, h: 1080 } : { w: 1080, h: long };
 }
 
-export const ASPECT_PRESETS: { value: Aspect; name: string; sublabel: string }[] = [
+export const ASPECT_PRESETS: { value: Aspect; name: string; sublabel?: string }[] = [
   { value: "16:9", name: "Widescreen", sublabel: "YouTube" },
-  { value: "4:3", name: "Classic", sublabel: "LinkedIn, Facebook ads" },
-  { value: "2:1", name: "Cinematic", sublabel: "Wide social banners" },
   { value: "9:16", name: "Vertical", sublabel: "TikTok, Reels, Shorts" },
-  { value: "1:1", name: "Square", sublabel: "Instagram posts" },
-  { value: "3:4", name: "Portrait", sublabel: "Feed photos" },
+  { value: "4:3", name: "Classic" },
+  { value: "2:1", name: "Cinematic" },
+  { value: "1:1", name: "Square" },
+  { value: "3:4", name: "Portrait" },
 ];
 
 export function aspectLabel(aspect: Aspect): string {

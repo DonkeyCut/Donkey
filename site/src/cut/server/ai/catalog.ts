@@ -709,8 +709,8 @@ export const AI_TOOLS: AiToolDef[] = [
   {
     name: "set_aspect",
     description:
-      "Set the project's output frame ratio as \"W:H\". Presets: 16:9 (YouTube), 9:16 (TikTok/Reels/Shorts), 1:1, 4:3, 3:4, 2:1 — but any whole-number ratio up to a 4:1 shape works (e.g. \"9:5\" for a custom screen). The frame renders with its short side at 1080px: 9:16 → 1080×1920, 16:9 → 1920×1080, 9:5 → 1944×1080.",
-    inputSchema: obj({ aspect: { type: "string", description: "Output ratio as \"W:H\", e.g. \"9:16\", \"16:9\", \"1:1\", \"9:5\"" } }, ["aspect"]),
+      "Set the project's output frame ratio as \"W:H\". Presets: 16:9 (YouTube), 9:16 (TikTok/Reels/Shorts), 1:1, 4:3, 3:4, 2:1 — but any ratio up to an 8:1 shape works, with whole or decimal sides (\"9:5\", \"2.39:1\" — stored reduced, so 2.39:1 becomes 239:100). The frame renders with its short side at 1080px: 9:16 → 1080×1920, 16:9 → 1920×1080, 9:5 → 1944×1080.",
+    inputSchema: obj({ aspect: { type: "string", description: "Output ratio as \"W:H\", e.g. \"9:16\", \"1:1\", \"9:5\", \"2.39:1\"" } }, ["aspect"]),
   },
   {
     name: "set_project_fade",
