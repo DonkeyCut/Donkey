@@ -454,6 +454,19 @@ export function ProjectsHome() {
     (r) => (data[r].projects?.length ?? 0) > 0 || data[r].folders.length > 0
   );
 
+  // One flat surface: every residency's folders on one shelf and projects in
+  // one grid, newest edits first — the per-card badge says where each lives.
+  const residencyOfFolder = (id: string): Residency =>
+    residencies.find((r) => data[r].folders.some((f) => f.id === id)) ?? homeMode;
+  const mergedFolders = residencies.flatMap((r) => data[r].folders);
+  const mergedShown = residencies
+    .flatMap((r) =>
+      (data[r].projects ?? [])
+        .filter((p) => (p.folderId ?? null) === openFolder)
+        .map((p) => ({ p, r }))
+    )
+    .sort((a, b) => (b.p.updatedAt ?? 0) - (a.p.updatedAt ?? 0));
+
   // Begin a project drag. Dragging a member of the current selection carries the
   // whole selection; dragging anything else drags (and selects) just that item.
   const onProjectDragStart = (e: React.DragEvent, p: ProjectSummary) => {
@@ -479,37 +492,39 @@ export function ProjectsHome() {
   // PROJECT_MIME and are handled by the folder tiles and breadcrumb instead.
   const isFileDrag = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes("Files");
 
-  const renderShelf = (r: Residency) => (
+  const renderShelf = () => (
     <FolderShelf
-      folders={data[r].folders}
+      folders={mergedFolders}
       mime={PROJECT_MIME}
-      creating={folderCreating === r}
-      onCreatingChange={(c) => setFolderCreating(c ? r : null)}
+      creating={folderCreating !== null}
+      onCreatingChange={(c) => setFolderCreating(c ? (folderCreating ?? homeMode) : null)}
       statOf={(id) => {
-        const items = (data[r].projects ?? []).filter((p) => (p.folderId ?? null) === id);
+        const items = (data[residencyOfFolder(id)].projects ?? []).filter(
+          (p) => (p.folderId ?? null) === id
+        );
         return { count: items.length, size: items.reduce((n, p) => n + (p.sizeBytes ?? 0), 0) };
       }}
       onOpen={gotoFolder}
-      onCreate={(n) => void createFolder(r, n)}
-      onRename={(id, n) => void renameFolder(r, id, n)}
-      onDelete={(id) => void deleteFolder(r, id)}
-      onDropIds={(ids, fid) => void moveProjects(r, ids, fid)}
-      // File imports run on the globally bound backend, so only its section's
-      // folders take file drops.
-      onDropFiles={r === mode ? (files, fid) => void importFilesAsProjects(files, fid) : undefined}
+      onCreate={(n) => void createFolder(folderCreating ?? homeMode, n)}
+      onRename={(id, n) => void renameFolder(residencyOfFolder(id), id, n)}
+      onDelete={(id) => void deleteFolder(residencyOfFolder(id), id)}
+      onDropIds={(ids, fid) => void moveProjects(residencyOfFolder(fid), ids, fid)}
+      // File imports run on the globally bound backend, so only its folders
+      // can receive the files themselves; drops on another residency's folder
+      // land at the root, like drops on the page surface.
+      onDropFiles={(files, fid) =>
+        void importFilesAsProjects(files, residencyOfFolder(fid) === mode ? fid : null)
+      }
     />
   );
 
-  const renderGallery = (r: Residency, shown: ProjectSummary[]) => (
+  const renderGallery = (shown: { p: ProjectSummary; r: Residency }[]) => (
     <Marquee
-      className={cn(
-        "grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] content-start gap-5",
-        dual ? "min-h-[20vh]" : "min-h-[42vh]"
-      )}
+      className="grid min-h-[42vh] grid-cols-[repeat(auto-fill,minmax(190px,1fr))] content-start gap-5"
       selected={selected}
       setSelected={setSelected}
     >
-      {shown.map((p) => (
+      {shown.map(({ p, r }) => (
         <div
           key={p.id}
           data-sel-id={p.id}
@@ -574,7 +589,7 @@ export function ProjectsHome() {
     </Marquee>
   );
 
-  const renderList = (r: Residency, shown: ProjectSummary[]) => (
+  const renderList = (shown: { p: ProjectSummary; r: Residency }[]) => (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       <div className="grid grid-cols-[1fr_90px_70px_110px_40px] items-center gap-3 border-b border-border bg-muted/50 px-4 py-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
         <span>Name</span>
@@ -583,7 +598,7 @@ export function ProjectsHome() {
         <span>Edited</span>
         <span />
       </div>
-      {shown.map((p) => (
+      {shown.map(({ p, r }) => (
         <div
           key={p.id}
           data-sel-id={p.id}
@@ -639,45 +654,19 @@ export function ProjectsHome() {
           />
         </div>
       ))}
-      {!(dual && r === "cloud") && (
-        <button
-          type="button"
-          data-no-marquee
-          onClick={() => void newProjectHere(r)}
-          className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-        >
-          <Plus className="size-4" /> New project
-        </button>
-      )}
+      <button
+        type="button"
+        data-no-marquee
+        onClick={() => void newProjectHere(dual ? (folderOwner ?? "local") : r0)}
+        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+      >
+        <Plus className="size-4" /> New project
+      </button>
     </div>
   );
 
-  const renderSection = (r: Residency) => {
-    const d = data[r];
-    const shown = (d.projects ?? []).filter((p) => (p.folderId ?? null) === openFolder);
-    return (
-      <section key={r} className="mb-8">
-        <h2 className="mb-3 text-sm font-semibold text-muted-foreground">{RESIDENCY_LABEL[r]}</h2>
-        {d.error ? (
-          <p className="py-6 text-sm text-muted-foreground">Couldn&rsquo;t load these projects.</p>
-        ) : d.projects === null ? (
-          <div className="grid place-items-center py-10 text-muted-foreground">
-            <Loader2 className="size-5 animate-spin" />
-          </div>
-        ) : (
-          <>
-            {openFolder === null && (d.folders.length > 0 || folderCreating === r) && renderShelf(r)}
-            {view === "gallery" ? renderGallery(r, shown) : renderList(r, shown)}
-          </>
-        )}
-      </section>
-    );
-  };
-
-  // Single-residency derivations, matching the pre-dual home exactly.
   const soleData = data[r0];
   const showHeader = dual ? anySettled : soleData.projects !== null && hasContent;
-  const dualSections = openFolder === null ? residencies : folderOwner ? [folderOwner] : [];
 
   // Whole-surface file drops import on the globally bound backend; a folder
   // another backend owns can't receive them, so those land at the root.
@@ -798,59 +787,47 @@ export function ProjectsHome() {
 
       {dupError && <p className="mb-4 text-sm text-destructive">{dupError}</p>}
 
-      {dual ? (
-        !anySettled ? (
-          <div className="grid place-items-center py-24 text-muted-foreground">
-            <Loader2 className="size-5 animate-spin" />
+      {!anySettled ? (
+        <div className="grid place-items-center py-24 text-muted-foreground">
+          <Loader2 className="size-5 animate-spin" />
+        </div>
+      ) : !hasContent && residencies.every((r) => data[r].error) ? (
+        <p className="py-24 text-center text-sm text-muted-foreground">
+          Couldn&rsquo;t load these projects.
+        </p>
+      ) : !hasContent ? (
+        <div className="grid min-h-[60vh] place-items-center">
+          <div className="flex flex-col items-center gap-4 text-center">
+            <div className="grid size-14 place-items-center rounded-2xl bg-muted">
+              <Film className="size-7 text-muted-foreground" />
+            </div>
+            <h1 className="text-lg font-semibold tracking-tight">
+              Create a new project to get started
+            </h1>
+            <Button
+              onClick={() => {
+                setName("");
+                setCreateOpen(true);
+              }}
+            >
+              <Plus data-icon="inline-start" /> New project
+            </Button>
           </div>
-        ) : (
-          dualSections.map(renderSection)
-        )
+        </div>
       ) : (
         <>
-          {soleData.projects !== null &&
-            openFolder === null &&
-            (soleData.folders.length > 0 || folderCreating === r0) &&
-            renderShelf(r0)}
-
-          {soleData.error ? (
-            <p className="py-24 text-center text-sm text-muted-foreground">
-              Couldn&rsquo;t load these projects.
-            </p>
-          ) : soleData.projects === null ? (
-            <div className="grid place-items-center py-24 text-muted-foreground">
-              <Loader2 className="size-5 animate-spin" />
-            </div>
-          ) : !hasContent ? (
-            <div className="grid min-h-[60vh] place-items-center">
-              <div className="flex flex-col items-center gap-4 text-center">
-                <div className="grid size-14 place-items-center rounded-2xl bg-muted">
-                  <Film className="size-7 text-muted-foreground" />
-                </div>
-                <h1 className="text-lg font-semibold tracking-tight">
-                  Create a new project to get started
-                </h1>
-                <Button
-                  onClick={() => {
-                    setName("");
-                    setCreateOpen(true);
-                  }}
-                >
-                  <Plus data-icon="inline-start" /> New project
-                </Button>
-              </div>
-            </div>
-          ) : view === "gallery" ? (
-            renderGallery(
-              r0,
-              (soleData.projects ?? []).filter((p) => (p.folderId ?? null) === openFolder)
-            )
-          ) : (
-            renderList(
-              r0,
-              (soleData.projects ?? []).filter((p) => (p.folderId ?? null) === openFolder)
-            )
+          {residencies.map(
+            (r) =>
+              data[r].error && (
+                <p key={r} className="mb-4 text-sm text-muted-foreground">
+                  Couldn&rsquo;t load {r === "cloud" ? "cloud projects" : "the projects on this Mac"}.
+                </p>
+              )
           )}
+          {openFolder === null &&
+            (mergedFolders.length > 0 || folderCreating !== null) &&
+            renderShelf()}
+          {view === "gallery" ? renderGallery(mergedShown) : renderList(mergedShown)}
         </>
       )}
 
