@@ -6,7 +6,7 @@
 // This file is compiled by wrangler, not the site's tsconfig — workers
 // globals are typed loosely on purpose.
 import { Container, getContainer } from "@cloudflare/containers";
-import { CUT_MEDIA_HOST } from "../../lib/hosts";
+import { CUT_MEDIA_HOST, CUT_WORKER_HOST } from "../../lib/hosts";
 import { serveMedia, type MediaEnv } from "./media";
 
 type WorkerEnv = MediaEnv & {
@@ -54,10 +54,13 @@ export default {
     ctx: { waitUntil(p: Promise<unknown>): void }
   ): Promise<Response> {
     const url = new URL(request.url);
-    // Shared media arrives on its own hostname (see wrangler.jsonc routes) and
-    // is the only public traffic this Worker takes. Matching on the host keeps
-    // it clear of the container's control endpoints below.
-    if (url.hostname === CUT_MEDIA_HOST) return serveMedia(request, env, ctx);
+    // Two hostnames, two jobs (both claimed in wrangler.jsonc): media is the
+    // only public traffic this Worker takes, and the control plane is where the
+    // hosted API wakes the container. The control host is matched first — the
+    // media branch returns, so a /wake arriving there would be swallowed.
+    if (url.hostname !== CUT_WORKER_HOST && url.hostname === CUT_MEDIA_HOST) {
+      return serveMedia(request, env, ctx);
+    }
     if (request.method === "POST" && url.pathname === "/wake") {
       // Starting the container bills CPU, so the wake is not public: callers
       // present the shared secret the hosted API holds.

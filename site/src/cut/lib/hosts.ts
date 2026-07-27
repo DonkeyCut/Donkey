@@ -17,6 +17,14 @@ export const DONKEYCUT_CANONICAL = "https://donkeycut.com";
 export const CUT_MEDIA_HOST = "media.donkeycut.com";
 export const CUT_MEDIA_ORIGIN = `https://${CUT_MEDIA_HOST}`;
 
+// The Cut Worker's control plane — the /wake the hosted API posts to when it
+// queues a render. Its own custom domain, claimed in wrangler.jsonc beside the
+// media route, so it cannot be revoked by a deploy default the way the
+// workers.dev address was: adding the media route turned workers.dev off and
+// stranded every render for two days, with nothing to see but queued jobs.
+export const CUT_WORKER_HOST = "worker.donkeycut.com";
+export const CUT_WORKER_WAKE_URL = `https://${CUT_WORKER_HOST}/wake`;
+
 function hostname(host: string | null | undefined): string {
   return host ? host.split(":")[0] : "";
 }

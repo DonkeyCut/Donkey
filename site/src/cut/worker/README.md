@@ -46,9 +46,12 @@ POSTs the Worker's `/wake` endpoint (bearer `CUT_WAKE_SECRET`) whenever it
 queues a job and again on every poll of a still-queued job, so a lost wake
 self-heals; `main.ts` exits after ~60s of empty queue so the container stops
 billing. Cold start is a few seconds. The hosted deployment needs
-`CUT_RENDER_WAKE_URL` (the Worker's `/wake` URL) and `CUT_RENDER_WAKE_SECRET`
-in its env to send wakes — without them, queued jobs wait for a manually run
-worker.
+`CUT_RENDER_WAKE_SECRET` in its env to send wakes — without it, queued jobs
+wait for a manually run worker. The address is code, not config: the Worker
+claims `worker.donkeycut.com` as its own custom domain, named in
+`src/cut/lib/hosts.ts`. That is deliberate — the wake used to ride the
+workers.dev address, and declaring the media route made wrangler turn
+workers.dev off, stranding every render with nothing to see but queued jobs.
 
 GitHub Actions deploys automatically on push to `main` when the worker or the
 shared pipeline code changes (`.github/workflows/deploy-cut-worker.yml`).
@@ -63,10 +66,8 @@ One-time setup:
    and the same for `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
    `R2_SECRET_ACCESS_KEY`, and `CUT_WAKE_SECRET` (any long random string).
    Use the Supabase connection-pooler URL for `DATABASE_URL`.
-4. On the hosted site (Vercel env): `CUT_RENDER_WAKE_URL` = the deployed
-   Worker's URL + `/wake` (e.g.
-   `https://donkey-cut-worker.<subdomain>.workers.dev/wake`) and
-   `CUT_RENDER_WAKE_SECRET` = the same random string.
+4. On the hosted site (Vercel env): `CUT_RENDER_WAKE_SECRET` = the same random
+   string.
 
 Manual deploy from `site/`:
 
