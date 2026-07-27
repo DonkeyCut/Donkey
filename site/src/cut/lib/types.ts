@@ -26,10 +26,11 @@ export function parseRatio(a: string | undefined | null): { w: number; h: number
 /** Reduce a ratio to the one canonical string: lowest-terms whole numbers.
  * Sides may carry up to two decimals — "1.85:1" → "37:20", "18:32" and
  * "09:16" both → "9:16" — so preset checks and literal comparisons see a
- * single spelling. Null when invalid: non-positive, more extreme than 8:1,
- * or not expressible with whole sides up to 999. */
+ * single spelling. Sides take up to four digits so a frame size is a legal way
+ * to say a ratio ("1280:720" → "16:9"). Null when invalid: non-positive, more
+ * extreme than 8:1, or not expressible with whole sides up to 999. */
 export function normalizeAspect(a: string | undefined | null): Aspect | null {
-  const m = /^(\d{1,3}(?:\.\d{1,2})?):(\d{1,3}(?:\.\d{1,2})?)$/.exec(a ?? "");
+  const m = /^(\d{1,4}(?:\.\d{1,2})?):(\d{1,4}(?:\.\d{1,2})?)$/.exec(a ?? "");
   if (!m) return null;
   const scale = 10 ** Math.max(m[1].split(".")[1]?.length ?? 0, m[2].split(".")[1]?.length ?? 0);
   let w = Math.round(Number(m[1]) * scale);

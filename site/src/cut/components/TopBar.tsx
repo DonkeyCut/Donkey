@@ -63,9 +63,11 @@ export function TopBar({
   const [draft, setDraft] = useState("");
   const [recordMode, setRecordMode] = useState<RecordMode | null>(null);
   const isPreset = ASPECT_PRESETS.some((p) => p.value === aspect);
-  // Custom is a sticky mode: picked from the menu (or loading a project with a
-  // non-preset ratio) the pill stays a W:H editor — blur applies the ratio and
-  // the editor remains until a preset is chosen from its chevron menu.
+  // Custom is a sticky mode: picked from the menu, entered by typing in the pill,
+  // or loading a project on a non-preset ratio, the pill stays a W:H editor until
+  // a preset is chosen from its chevron menu. Sticky matters while typing — a
+  // keystroke that lands on a preset value ("16:9") would otherwise flip
+  // `isPreset` and unmount the editor out from under the cursor.
   const [customMode, setCustomMode] = useState(false);
   const showCustomEditor = customMode || !isPreset;
   // The last custom ratio survives preset detours and reloads: it's only
@@ -83,39 +85,99 @@ export function TopBar({
   // Sides may be decimal ("1.85"); the applied/stored form is the reduced
   // whole-number ratio ("37:20").
   const customNormalized = normalizeAspect(`${customW}:${customH}`);
-  const ratioInput = (v: string) => v.replace(/[^\d.]/g, "").replace(/^(\d*\.\d*).*$/, "$1").slice(0, 6);
-  // The inputs mirror non-preset aspect changes (apply, AI set_aspect, project
-  // load); a preset pick leaves the remembered custom value alone, and an
-  // apply of what's already typed keeps the typed (possibly decimal) form.
+  // Hold the field to what normalizeAspect accepts — four whole digits, two
+  // decimals — so a value can't type clean and then fail to apply. Four, so that
+  // typing a frame size ("1280" by "720") is a legal entry that reduces to 16:9
+  // rather than being trimmed to "128" and applied as a different ratio.
+  const ratioInput = (v: string) => {
+    const [whole, ...rest] = v.replace(/[^\d.]/g, "").split(".");
+    const head = whole.slice(0, 4);
+    return rest.length === 0 ? head : `${head}.${rest.join("").slice(0, 2)}`;
+  };
+  // A side mid-keystroke (empty, or a bare "1.") is unfinished rather than
+  // wrong; only a settled pair that still won't normalize — a zero, or past the
+  // 8:1 cap — reads as invalid, so the pill doesn't flash while someone types.
+  const sideSettled = (v: string) => v !== "" && !v.endsWith(".");
+  const customInvalid = sideSettled(customW) && sideSettled(customH) && !customNormalized;
+  // Typing applies: a keystroke parks the pair it wants applied here, and the
+  // effect below lands it a beat later, so the frame follows the fields instead
+  // of waiting for a commit the user has to guess at. A newer keystroke replaces
+  // the pending pair; settling, reverting, or an outside change clears it.
+  const [pendingRatio, setPendingRatio] = useState<string | null>(null);
+  const applyRatio = (ratio: string) => {
+    const next = normalizeAspect(ratio);
+    if (next) useEditor.getState().setAspect(next);
+  };
+  useEffect(() => {
+    if (!pendingRatio) return;
+    const id = setTimeout(() => {
+      applyRatio(pendingRatio);
+      setPendingRatio(null);
+    }, 250);
+    // Cancels on the next keystroke and on leaving the editor, so a ratio the
+    // user moved past never lands.
+    return () => clearTimeout(id);
+  }, [pendingRatio]);
+
+  // The inputs mirror aspect changes made outside the editor (AI set_aspect,
+  // project load). Ours are recognised by the fields already normalizing to the
+  // new value, so a live apply doesn't reformat what the user is typing.
   const [seenAspect, setSeenAspect] = useState(aspect);
   if (aspect !== seenAspect) {
     setSeenAspect(aspect);
-    const r = parseRatio(aspect);
-    if (r && !ASPECT_PRESETS.some((p) => p.value === aspect) && customNormalized !== aspect) {
-      setCustomW(String(r.w));
-      setCustomH(String(r.h));
+    if (customNormalized !== aspect) {
+      // The change came from outside: drop the pending keystroke so it can't land
+      // a beat later and stomp it.
+      setPendingRatio(null);
+      const r = parseRatio(aspect);
+      if (r && !ASPECT_PRESETS.some((p) => p.value === aspect)) {
+        setCustomW(String(r.w));
+        setCustomH(String(r.h));
+      }
     }
   }
-  const reseedCustom = () => {
-    if (normalizeAspect(savedCustom)) {
-      const [w, h] = savedCustom.split(":");
-      setCustomW(w);
-      setCustomH(h);
+
+  // What Escape restores. Captured when an edit session starts rather than read
+  // back from `savedCustom`, because live apply means the "last good" value is
+  // whatever was typed a moment ago — Escape has to reach further back, to the
+  // ratio the project had before the user touched the pill.
+  const revertRef = useRef<{ w: string; h: string; aspect: Aspect } | null>(null);
+  const beginEditing = () => {
+    setCustomMode(true);
+    revertRef.current ??= { w: customW, h: customH, aspect: useEditor.getState().aspect };
+  };
+  const revertCustom = () => {
+    setPendingRatio(null);
+    const snapshot = revertRef.current;
+    revertRef.current = null;
+    if (!snapshot) return;
+    setCustomW(snapshot.w);
+    setCustomH(snapshot.h);
+    if (useEditor.getState().aspect !== snapshot.aspect) {
+      useEditor.getState().setAspect(snapshot.aspect);
+    }
+  };
+  // Leaving the pill ends the session. Whatever is typed has already been applied
+  // live, so this only remembers the spelling and puts the fields back when they
+  // hold something that never applied — the pill never sits showing a ratio the
+  // project doesn't have.
+  const endEditing = () => {
+    revertRef.current = null;
+    if (customNormalized) {
+      setSavedCustom(`${customW}:${customH}`);
       return;
     }
+    setPendingRatio(null);
     const r = parseRatio(useEditor.getState().aspect);
     if (r) {
       setCustomW(String(r.w));
       setCustomH(String(r.h));
     }
   };
-  const applyCustom = () => {
-    if (!customNormalized) {
-      reseedCustom();
-      return;
-    }
-    setSavedCustom(`${customW}:${customH}`);
-    useEditor.getState().setAspect(customNormalized);
+  const commitCustom = () => {
+    setPendingRatio(null);
+    if (customNormalized) applyRatio(`${customW}:${customH}`);
+    endEditing();
   };
 
   // "Move to Cloud" (cut-web-mode flag): copies this local project — doc and
@@ -218,33 +280,55 @@ export function TopBar({
           );
           return showCustomEditor ? (
             <div
-              className="aspect-switch flex items-center gap-1 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium shadow-xs"
+              className={cn(
+                "aspect-switch flex items-center gap-1 rounded-full border bg-card px-3 py-1.5 text-xs font-medium shadow-xs",
+                customInvalid ? "border-destructive text-destructive" : "border-border"
+              )}
+              title={customInvalid ? "Up to an 8:1 shape" : undefined}
+              // The session ends when focus leaves the pill entirely. Moving
+              // between the two fields (or to the chevron) stays inside it, so a
+              // half-typed side is never settled out from under the user.
               onBlur={(e) => {
-                if (!e.currentTarget.contains(e.relatedTarget as Node)) applyCustom();
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) endEditing();
               }}
               onKeyDown={(e) => {
-                if (e.key === "Enter") (e.target as HTMLElement).blur();
-                if (e.key === "Escape") reseedCustom();
+                if (e.key === "Enter") commitCustom();
+                if (e.key === "Escape") revertCustom();
               }}
             >
               <Ratio className="size-3.5 text-muted-foreground" />
               <input
                 aria-label="Width"
+                aria-invalid={customInvalid}
                 inputMode="decimal"
-                className="w-9 bg-transparent text-center outline-none"
+                className="w-10 bg-transparent text-center outline-none"
                 value={customW}
-                onChange={(e) => setCustomW(ratioInput(e.target.value))}
+                onFocus={beginEditing}
+                onChange={(e) => {
+                  const v = ratioInput(e.target.value);
+                  setCustomW(v);
+                  setPendingRatio(`${v}:${customH}`);
+                }}
               />
               <span className="text-muted-foreground">:</span>
               <input
                 aria-label="Height"
+                aria-invalid={customInvalid}
                 inputMode="decimal"
-                className="w-9 bg-transparent text-center outline-none"
+                className="w-10 bg-transparent text-center outline-none"
                 value={customH}
-                onChange={(e) => setCustomH(ratioInput(e.target.value))}
+                onFocus={beginEditing}
+                onChange={(e) => {
+                  const v = ratioInput(e.target.value);
+                  setCustomH(v);
+                  setPendingRatio(`${customW}:${v}`);
+                }}
               />
               <DropdownMenu>
-                <DropdownMenuTrigger className="grid place-items-center text-muted-foreground transition-colors hover:text-foreground">
+                <DropdownMenuTrigger
+                  aria-label="Aspect ratio presets"
+                  className="grid place-items-center text-muted-foreground transition-colors hover:text-foreground"
+                >
                   <ChevronDown className="size-3" />
                 </DropdownMenuTrigger>
                 {aspectMenu}

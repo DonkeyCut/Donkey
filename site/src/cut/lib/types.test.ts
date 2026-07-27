@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { migrateLegacyTransitions, TRANSITION_STYLE_IDS, type VideoClip } from "./types";
+import { migrateLegacyTransitions, normalizeAspect, TRANSITION_STYLE_IDS, type VideoClip } from "./types";
 
 /** A minimal track-0 clip; legacy docs carry retired transitionStyle strings. */
 function clip(
@@ -94,5 +94,35 @@ describe("migrateLegacyTransitions", () => {
       const clips = [clip("a", 0, { transition: 0.5, transitionStyle: id }), clip("b", 4)];
       expect(migrateLegacyTransitions(clips)).toBe(clips);
     }
+  });
+});
+
+describe("normalizeAspect", () => {
+  test("reduces a frame size to its ratio", () => {
+    // Typing the dimensions you know is a legal way to say a ratio; before, a
+    // four-digit side was trimmed to three and applied as something else.
+    expect(normalizeAspect("1280:720")).toBe("16:9");
+    expect(normalizeAspect("1920:1080")).toBe("16:9");
+    expect(normalizeAspect("1080:1920")).toBe("9:16");
+  });
+
+  test("keeps the single canonical spelling", () => {
+    expect(normalizeAspect("18:32")).toBe("9:16");
+    expect(normalizeAspect("09:16")).toBe("9:16");
+    expect(normalizeAspect("1.85:1")).toBe("37:20");
+  });
+
+  test("rejects what can't be a frame", () => {
+    expect(normalizeAspect("0:9")).toBe(null);
+    expect(normalizeAspect("16:0")).toBe(null);
+    // Past the 8:1 shape cap.
+    expect(normalizeAspect("100:1")).toBe(null);
+    // Reduces to sides that don't fit the stored form.
+    expect(normalizeAspect("1000:999")).toBe(null);
+    expect(normalizeAspect("16")).toBe(null);
+    expect(normalizeAspect("16:9:2")).toBe(null);
+    expect(normalizeAspect("1.855:1")).toBe(null);
+    expect(normalizeAspect("")).toBe(null);
+    expect(normalizeAspect(null)).toBe(null);
   });
 });
