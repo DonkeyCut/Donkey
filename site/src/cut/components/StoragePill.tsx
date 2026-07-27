@@ -26,7 +26,7 @@ const PILL =
 /** "278 / 250 MB" — the pill sits in a crowded top bar, so a unit is spelled
  * out only where it carries information: repeat it just when the two numbers
  * land on different ones ("1.2 GB / 250 MB"). */
-function usageLabel(bytes: number, quotaBytes: number): string {
+export function usageLabel(bytes: number, quotaBytes: number): string {
   const used = formatBytes(bytes);
   const cap = formatBytes(quotaBytes);
   const unit = cap.slice(cap.lastIndexOf(" ") + 1);

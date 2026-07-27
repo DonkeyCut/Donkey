@@ -18,6 +18,7 @@ import { apiFetch, getBackend } from "@/cut/lib/backend";
 import { seedNewProjectDoc } from "@/cut/lib/docCache";
 import { patchProjects } from "@/cut/lib/queries";
 import { track } from "@/lib/analytics";
+import { NavStorage } from "@/cut/components/NavStorage";
 import { NavUser } from "@/cut/components/NavUser";
 import { homeHref, projectHref, tabForPath, useCutBase, type CutTab } from "@/cut/lib/nav";
 import type { ProjectSummary } from "@/cut/lib/types";
@@ -107,7 +108,10 @@ export function AppSidebar() {
           );
         })}
       </nav>
-      <NavUser />
+      <div className="mt-auto flex flex-col">
+        <NavStorage />
+        <NavUser />
+      </div>
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>

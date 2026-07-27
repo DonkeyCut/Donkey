@@ -13,7 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useCutBase } from "@/cut/lib/nav";
+import { useUpgradeToPro } from "@/cut/lib/proUpgrade";
 import {
   clearStorageQuotaWall,
   onStorageQuota,
@@ -21,7 +21,7 @@ import {
 } from "@/cut/lib/storageQuota";
 import { daysUntil } from "@/cut/lib/time";
 import { track } from "@/lib/analytics";
-import { useProSubscription, useStartCheckout } from "@/queries/billing";
+import { useProSubscription } from "@/queries/billing";
 import { formatBytes } from "./desktopFolders";
 
 export function StorageUpgradeDialog() {
@@ -48,8 +48,7 @@ export function StorageUpgradeDialog() {
 // Split so the billing query only runs while the dialog is up.
 function OpenDialog({ detail, onClose }: { detail: StorageQuotaDetail; onClose: () => void }) {
   const pro = useProSubscription();
-  const checkout = useStartCheckout();
-  const base = useCutBase();
+  const upgrade = useUpgradeToPro();
   const isPro = pro.data?.isActive === true;
 
   const used =
@@ -57,19 +56,6 @@ function OpenDialog({ detail, onClose }: { detail: StorageQuotaDetail; onClose: 
       ? `You've used ${formatBytes(detail.bytes)} of ${formatBytes(detail.quotaBytes)}.`
       : null;
   const graceDays = detail.grace ? daysUntil(detail.grace.deadline) : null;
-
-  const upgrade = async () => {
-    track("pro_checkout_started");
-    try {
-      const { url } = await checkout.mutateAsync("pro");
-      window.location.assign(url);
-    } catch {
-      // Checkout can't start (an unconfigured plan 404s); the billing page
-      // carries the same subscribe action, so send them there rather than
-      // leaving the button dead.
-      window.location.assign(`${base}/settings`);
-    }
-  };
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -101,8 +87,8 @@ function OpenDialog({ detail, onClose }: { detail: StorageQuotaDetail; onClose: 
             </Button>
           ) : (
             <div className="flex w-full flex-col gap-2">
-              <Button className="w-full" disabled={checkout.isPending} onClick={() => void upgrade()}>
-                {checkout.isPending && <Loader2 className="animate-spin" data-icon="inline-start" />}
+              <Button className="w-full" disabled={upgrade.isPending} onClick={upgrade.start}>
+                {upgrade.isPending && <Loader2 className="animate-spin" data-icon="inline-start" />}
                 Upgrade to Pro
               </Button>
               <Button variant="ghost" className="w-full" onClick={onClose}>
