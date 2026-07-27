@@ -960,7 +960,6 @@ export async function runAiTool(
         ...(isNum(input.target_seconds)
           ? { targetSeconds: clamp(Math.round(input.target_seconds), 6, 90) }
           : {}),
-        ...(input.aspect === "16:9" || input.aspect === "9:16" ? { aspect: input.aspect } : {}),
         ...(typeof input.style === "string" && input.style.trim() ? { style: input.style.trim() } : {}),
         ...(Array.isArray(input.reference_asset_ids)
           ? { referenceAssetIds: input.reference_asset_ids.map(String) }

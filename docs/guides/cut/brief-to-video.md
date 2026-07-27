@@ -75,6 +75,10 @@ instead — the same fixed words every shot:
    reference-conditioned video from the sheets → text-only, where the cast's
    full written descriptions ride the prompt and identity drifts the most.
 
+The project's frame is the user's setting. A run reads it when the plan is
+approved and never changes it — a reference in another shape or a platform the
+brief names is something to mention, not a reason to reframe someone's project.
+
 ## Where it's going
 
 Audio follows the same principles later: wall-to-wall narration generalizes to

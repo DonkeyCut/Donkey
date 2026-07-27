@@ -72,7 +72,6 @@ export interface StartSceneParams {
   brief?: string;
   fromAudioAssetId?: string;
   targetSeconds?: number;
-  aspect?: Aspect;
   style?: string;
   referenceAssetIds?: string[];
   /** The chat thread that asked, so the run's media is tagged to it and stays
@@ -261,9 +260,9 @@ function newProject(projectId: string, params: StartSceneParams): VideoProject {
     fps: GEN_FPS,
     durationFrames: audio ? Math.round(audio.duration * GEN_FPS) : 0,
     transcript: [],
-    // The plan owns its shape from the start (start() applies params.aspect to
-    // an empty timeline before this runs), so a background render can never
-    // pick up another open project's aspect.
+    // The plan takes the project's shape once, at planning time: a run reads the
+    // user's frame and never reshapes it, and a background render can't pick up
+    // another open project's aspect later.
     aspect: nearestAspect(useEditor.getState().aspect, defaultVideoAspects()),
     style: params.style?.trim() ?? "",
     suiteLabel: "donkey-hosted",
@@ -672,17 +671,8 @@ export const useGenScene = create<GenSceneState>((set, get) => ({
           "A video is already being generated for this project. Stop it with cancel_scene, or wait for it to finish.",
       };
     }
-    // Validate before any side effect — the aspect apply below reshapes the
-    // timeline and must not run for a request that gets rejected.
     if (!params.fromAudioAssetId && !params.brief?.trim()) {
       return { started: false, message: "Tell me what the video should be about." };
-    }
-    // Only set the aspect on an empty timeline: reframing a project that already
-    // has clips is a committing edit, and this runs before the approval gate.
-    // Applied before newProject so the plan freezes the effective shape.
-    const ed = useEditor.getState();
-    if (params.aspect && ed.clips.length === 0 && ed.audioClips.length === 0) {
-      ed.setAspect(params.aspect);
     }
     const project = newProject(projectId, params);
     if (project.audioMode === "generated" && !project.brief) {
