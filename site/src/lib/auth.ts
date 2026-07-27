@@ -1,10 +1,8 @@
 import { apiKey } from "@better-auth/api-key";
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
-import { oneTimeToken } from "better-auth/plugins";
 
 import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
-import { macAuthRedirectOrigins } from "@/lib/mac-auth";
 import { provisionSignupGrants } from "@/lib/onboarding/signup-grants";
 import { prisma } from "@/lib/prisma";
 
@@ -23,12 +21,8 @@ const baseURL = process.env.VERCEL ? DONKEYCUT_CANONICAL : undefined;
 export const auth = betterAuth({
   baseURL,
   secret: process.env.BETTER_AUTH_SECRET,
-  // The Mac-app handoff redirects to a custom URL scheme, which better-auth's
-  // callback-origin check must trust.
-  trustedOrigins: macAuthRedirectOrigins(),
-  // Sessions last a year, and the rolling expiry is refreshed daily on use, so an active user effectively
-  // never has to sign in again. The Mac app's native session cookie rides this same lifetime, keeping the
-  // desktop signed in long after the handoff.
+  // Sessions last a year, and the rolling expiry is refreshed daily on use, so an active user
+  // effectively never has to sign in again.
   session: {
     expiresIn: 60 * 60 * 24 * 365,
     updateAge: 60 * 60 * 24,
@@ -61,10 +55,6 @@ export const auth = betterAuth({
     },
   },
   plugins: [
-    oneTimeToken({
-      expiresIn: 60,
-      storeToken: "hashed",
-    }),
     apiKey({
       // We enforce our own monthly call quota and per-key rate limit on the
       // vision route, so the plugin's built-in rate limiting stays off.

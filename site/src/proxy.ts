@@ -14,7 +14,7 @@ import {
 //
 //   donkeycut.com       "/" → landing, "/app/…" → editor app (generic
 //                       "/…" → "/cut/…" rewrite). The auth pages (/sign-in,
-//                       /sign-up, /mac-auth), "/install", and the legal pages
+//                       /sign-up), "/install", and the legal pages
 //                       pass through so the shared apex routes serve them
 //                       same-host. www. 308s to the apex.
 //
@@ -75,7 +75,6 @@ const DONKEYCUT_PASSTHROUGH = [
   "/terms",
   "/sign-in",
   "/sign-up",
-  "/mac-auth",
 ];
 
 // Local dev mirrors donkeycut.com (Cut at "/", the editor at "/app/…"). It adds
