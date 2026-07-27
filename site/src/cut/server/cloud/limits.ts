@@ -12,6 +12,14 @@ export type CutLimits = {
 
 export const FREE_STORAGE_BYTES = 250 * 1024 ** 2;
 
+/** Headroom an export may render into past the storage quota. A finished
+ * export counts against storage like any other object, so a full account would
+ * otherwise be unable to get its work out — the one thing it needs in order to
+ * clear space. The margin keeps that door open without making exports free:
+ * past it, and under the daily render cap either way, an export waits for space
+ * or for Pro. */
+export const EXPORT_QUOTA_MARGIN = 1.2;
+
 const FREE: CutLimits = { storageBytes: FREE_STORAGE_BYTES, renderJobsPerDay: 10 };
 const PRO: CutLimits = { storageBytes: 50 * 1024 ** 3, renderJobsPerDay: 200 };
 const UNLIMITED: CutLimits = { storageBytes: null, renderJobsPerDay: null };

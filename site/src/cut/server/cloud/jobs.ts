@@ -3,10 +3,11 @@
 // shapes byte-match the engine's export routes (http/export.ts + server/jobs.ts).
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { renderJobCheck } from "./limits";
+import { EXPORT_QUOTA_MARGIN, renderJobCheck } from "./limits";
 import { wakeRenderWorker } from "./wake";
 import { getProject } from "./projects";
 import { overlayKey, presignGet, presignPut } from "./r2";
+import { quotaCheck } from "./usage";
 import { caught, err, redirect } from "./util";
 
 /** How long finished jobs stay in the export-jobs feed — the engine's registry
@@ -119,6 +120,13 @@ export const jobsCloud = {
       if (target === "export") {
         const capped = await renderJobCheck(userId);
         if (capped) return capped;
+        // The finished file is registered like any other object, so an export
+        // grows storage. The output's size isn't knowable until it renders;
+        // what is knowable is whether this account is already too far past its
+        // quota to be handed more, so that is the gate. Previews and share
+        // cards are the editor's own small internal renders and skip it.
+        const over = await quotaCheck(userId, 0, EXPORT_QUOTA_MARGIN);
+        if (over) return over;
       }
       const outName =
         target === "export"

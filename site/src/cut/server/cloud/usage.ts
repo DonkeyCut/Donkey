@@ -21,12 +21,19 @@ export async function addUsage(tx: Prisma.TransactionClient, userId: string, del
 }
 
 /** 413 when `incoming` more bytes would break the account's storage quota,
- * else null. Superusers are unquotaed. */
-export async function quotaCheck(userId: string, incoming: number): Promise<Response | null> {
+ * else null. Superusers are unquotaed. `margin` widens the ceiling for a write
+ * that gets something out rather than in (see EXPORT_QUOTA_MARGIN); the quota
+ * the caller is told about stays the real one, so the wall reads the same
+ * wherever it is raised. */
+export async function quotaCheck(
+  userId: string,
+  incoming: number,
+  margin = 1
+): Promise<Response | null> {
   const limits = await cutLimitsFor(userId);
   if (limits.storageBytes === null) return null;
   const bytes = await usageBytes(userId);
-  if (bytes + incoming > limits.storageBytes) {
+  if (bytes + incoming > limits.storageBytes * margin) {
     return Response.json(
       { error: "storage_quota_exceeded", bytes, quotaBytes: limits.storageBytes },
       { status: 413 }

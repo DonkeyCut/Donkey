@@ -536,7 +536,13 @@ export async function createExportJob(
   const payload = await buildExportPayload(projectId, doc, settings, "export");
   const res = await postExport(projectId, payload, exportOutName(), backend);
   const body = await apiJson<{ id?: string }>(res);
-  if (!res.ok || !body.id) throw new Error(body.error ?? "Export failed to start.");
+  if (!res.ok || !body.id) {
+    // A quota rejection raises the upgrade wall on its way through, the same as
+    // one from an upload — otherwise the only sign is a terse line in the dock.
+    throw new Error(
+      quotaErrorMessage(res.status, body) ?? body.error ?? "Export failed to start."
+    );
+  }
   return body.id;
 }
 
