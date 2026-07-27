@@ -193,6 +193,21 @@ const safeRate = (speed: number) => Math.min(16, Math.max(0.0625, speed));
 const WARM_HORIZON_S = 8;
 const WARM_MAX = 4;
 
+// Decoder health. A decoder can stop making progress two ways, and both used
+// to be permanent for the life of the tab. It can error — and an errored
+// element stays errored, because re-minting the media links does not repoint
+// it: a signed URL is stable for its whole signing window, so the mint hands
+// back the very string that just failed and nothing swaps. Or it can wedge
+// before its first frame with nothing arriving, which nothing was watching for
+// at all. Either way that clip played black for the rest of the session while
+// its neighbours played fine. Decoders are cheap and replaceable, so a clip
+// whose element stops advancing gets a new one, bounded so a source that
+// really is unplayable settles into the paint-through path instead of
+// refetching forever.
+const DECODER_STALL_MS = 10_000;
+const DECODER_RETRY_MS = 1_000;
+const DECODER_REBUILDS = 3;
+
 // Pre-roll lead. Inside this many seconds of a clip's entrance, its element is
 // played muted and undrawn so the decoder is already running across the
 // in-point when the cut lands — the handoff play() then resumes hot instead of
@@ -256,6 +271,10 @@ class Engine {
   // source can appear on two tracks at once.
   private overlayEls = new Map<string, MediaEl>();
   private audioEls = new Map<string, HTMLAudioElement>();
+  // Per-clip decoder health, keyed like the element maps: the last progress
+  // reading and when it was taken, plus how many times this clip's decoder has
+  // been rebuilt on the current source.
+  private health = new Map<string, { mark: number; at: number; rebuilds: number }>();
   private raf = 0;
   private activeClipId: string | null = null;
   private disposed = false;
@@ -287,6 +306,7 @@ class Engine {
     this.videoEls.clear();
     this.overlayEls.clear();
     this.audioEls.clear();
+    this.health.clear();
   }
 
   /** The cached element for a clip, rebuilt when its source no longer matches —
@@ -296,6 +316,12 @@ class Engine {
     let el = map.get(clipId);
     if (el && el.getAttribute("src") !== asset.url) {
       teardown(el);
+      // A repoint is a new source, so it starts with a full rebuild budget.
+      this.health.delete(clipId);
+      el = undefined;
+    }
+    if (el && this.spent(clipId, el)) {
+      teardown(el);
       el = undefined;
     }
     if (!el) {
@@ -303,6 +329,40 @@ class Engine {
       map.set(clipId, el);
     }
     return el;
+  }
+
+  /** Whether this clip's decoder has stopped making progress and should be
+   * replaced. A ready element is healthy and clears its streak; one whose
+   * readiness and buffer are both still advancing is on its way there. What is
+   * left is an element that errored, or that has sat at the same reading past
+   * `DECODER_STALL_MS` — dead either way, and worth one more decoder. Says yes
+   * at most `DECODER_REBUILDS` times per source, so an unplayable file stops
+   * costing fetches and falls through to the paint-through path. */
+  private spent(clipId: string, el: MediaEl): boolean {
+    const now = performance.now();
+    const h = this.health.get(clipId) ?? { mark: -1, at: now, rebuilds: 0 };
+    if (elReady(el)) {
+      this.health.set(clipId, { mark: -1, at: now, rebuilds: 0 });
+      return false;
+    }
+    // Progress reading, not a clock: readiness plus how far the buffer reaches,
+    // so a big file arriving slowly over a thin link is never mistaken for a
+    // wedge and torn down mid-fetch.
+    const mark = isImageEl(el)
+      ? 0
+      : el.readyState + (el.buffered.length ? el.buffered.end(el.buffered.length - 1) : 0);
+    if (mark > h.mark) {
+      this.health.set(clipId, { ...h, mark, at: now });
+      return false;
+    }
+    const since = now - h.at;
+    const dead = elErrored(el) ? since > DECODER_RETRY_MS : since > DECODER_STALL_MS;
+    if (!dead || h.rebuilds >= DECODER_REBUILDS) {
+      this.health.set(clipId, { ...h, mark });
+      return false;
+    }
+    this.health.set(clipId, { mark: -1, at: now, rebuilds: h.rebuilds + 1 });
+    return true;
   }
 
   private videoFor(clip: VideoClip, asset: MediaAsset): MediaEl {
@@ -1119,6 +1179,7 @@ class Engine {
       if (!overlayLayers(s.clips).some((c) => c.id === id)) {
         teardown(el);
         this.overlayEls.delete(id);
+        this.health.delete(id);
       }
     }
   }
@@ -1194,6 +1255,7 @@ class Engine {
         if (live.has(id)) continue;
         teardown(el);
         this.videoEls.delete(id);
+        this.health.delete(id);
       }
     }
     // Whole-project length so time past track 0's end (a longer video track or

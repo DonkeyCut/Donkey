@@ -13,8 +13,10 @@
 //   lead re-mints too, which is what catches a laptop waking from sleep with
 //   every timer long since fired.
 // - Failure retry: a media element error on a time-limited URL forces a
-//   re-mint; an error on an API-route URL (whose 302 re-signs per request, so
-//   failures there are transient) reloads the element with a capped backoff.
+//   re-mint, and the element reloads on a capped backoff. Both matter: the
+//   mint only heals a URL that really expired, and inside a signing window it
+//   hands back the same string, so the reload is what clears an element that
+//   failed for any other reason.
 //
 // A re-mint swaps the store's asset URLs in place. Components and the preview
 // engine both key their elements off asset.url, so the swap heals them on
@@ -136,18 +138,23 @@ function retryElement(el: HTMLImageElement | HTMLMediaElement, src: string, atte
   }, ELEMENT_RETRY_BASE_MS * attempt);
 }
 
-/** A media element failed to load. Signed URLs re-mint the whole batch (the
- * store swap repoints every consumer); route URLs reload the element itself. */
+/** A media element failed to load. An expiring URL may genuinely have expired,
+ * so re-mint the whole batch — the store swap repoints every consumer. Then
+ * reload the element either way: re-minting is not a cure on its own, because
+ * a signed URL is stable for its whole signing window, so inside that window
+ * the mint hands back the very string that just failed and no consumer
+ * repoints. Reloading is what heals the ordinary failure — a range request
+ * lost to a blip, a 403 that raced the re-mint — instead of leaving a dead
+ * element on screen until the tab is reloaded. */
 export function reportMediaElementError(el: HTMLImageElement | HTMLMediaElement) {
   const src = el instanceof HTMLImageElement ? el.src : el.currentSrc || el.src;
   if (!src || src.startsWith("blob:") || src.startsWith("data:")) return;
-  if (isExpiringUrl(src)) {
-    if (Date.now() - lastForcedAt < FORCED_GAP_MS) return;
+  const expiring = isExpiringUrl(src);
+  if (expiring && Date.now() - lastForcedAt >= FORCED_GAP_MS) {
     lastForcedAt = Date.now();
     void refreshSignedUrls(true);
-    return;
   }
-  if (!isCutApiUrl(src)) return;
+  if (!expiring && !isCutApiUrl(src)) return;
   const rec = attempts.get(el) ?? { n: 0, at: 0 };
   if (Date.now() - rec.at > ATTEMPT_RESET_MS) rec.n = 0;
   if (rec.n >= ELEMENT_RETRIES) return;
