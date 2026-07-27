@@ -1,6 +1,29 @@
 name: Release Donkey
 
 on:
+  # Every push that changes code shipping inside the Mac app cuts a patch release.
+  # The path list mirrors the ` [rebuild]` commit-subject rule in CLAUDE.md: the Swift
+  # app, the Cut engine sources bun compiles into the bundled binary, and the packaging
+  # scripts. Site-only changes take no release.
+  #
+  # The tools recipe (tools/**, fetch-bundled-tools.sh) is deliberately absent. Those
+  # changes go to Publish Bundled Tools first, which builds the new bundle, commits the
+  # manifest pinning it, and then dispatches this workflow. Releasing on the recipe push
+  # too would ship a build that still stages the previous bundle.
+  push:
+    branches:
+      - main
+    paths:
+      - apps/**
+      - site/src/cut/engine/**
+      - site/src/cut/server/**
+      - site/src/cut/lib/**
+      - site/scripts/build-cut-engine.sh
+      - scripts/package-donkey-app.sh
+      - scripts/ensure-bundled-tools.sh
+      - scripts/sign-bundled-tools.sh
+      - scripts/promote-github-release.py
+      - .github/workflows/promote-donkey-release.yml
   workflow_dispatch:
     inputs:
       bump:
@@ -16,16 +39,23 @@ on:
 permissions:
   contents: write
 
+# One release at a time, repo-wide: version numbers are derived from the tags that
+# already exist, so two runs deriving in parallel would both claim the same patch.
+# Never cancel in progress — a run killed between creating the release and moving the
+# aliases leaves a tagged release the website and appcast never learn about.
 concurrency:
   group: release-donkey
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Build and release
-    # The macos-26 image carries the Xcode 26 SDK that defines the SpeechAnalyzer /
-    # SpeechTranscriber APIs the app compiles against (gated to macOS 26 at runtime).
-    runs-on: macos-26
+  gate:
+    name: Decide release
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.decide.outputs.should_release }}
+      target_sha: ${{ steps.decide.outputs.target_sha }}
+      version: ${{ steps.decide.outputs.version }}
+      tag: ${{ steps.decide.outputs.tag }}
 
     steps:
       - name: Check out repository
@@ -34,20 +64,31 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.repository.default_branch }}
 
-      - name: Configure git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -B "${{ github.event.repository.default_branch }}" "origin/${{ github.event.repository.default_branch }}"
-          git branch --set-upstream-to="origin/${{ github.event.repository.default_branch }}" "${{ github.event.repository.default_branch }}"
-
       - name: Fetch tags
         run: git fetch --tags --force origin
 
-      - name: Prepare release values
-        id: release
+      - name: Decide release
+        id: decide
+        env:
+          # Automatic push releases are always patches; a manual run picks its own bump.
+          BUMP: ${{ inputs.bump || 'patch' }}
         run: |
-          version="$(python3 - "${{ inputs.bump }}" <<'PY'
+          target_sha="$(git rev-parse HEAD)"
+          should_release=true
+
+          # This job checks out the branch tip rather than the pushed commit, so a run
+          # queued behind another can land on a commit that already shipped. A numeric
+          # tag pointing at HEAD says exactly that. A manual run bypasses the check so a
+          # release that failed after tagging can be retried.
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            existing="$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)"
+            if [[ -n "$existing" ]]; then
+              should_release=false
+              echo "::notice::${target_sha} is already released as ${existing}; skipping."
+            fi
+          fi
+
+          version="$(python3 - "$BUMP" <<'PY'
           from __future__ import annotations
 
           import re
@@ -81,6 +122,52 @@ jobs:
           PY
           )"
 
+          {
+            echo "should_release=$should_release"
+            echo "target_sha=$target_sha"
+            echo "version=$version"
+            echo "tag=v$version"
+          } >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Build and release
+    needs: gate
+    if: needs.gate.outputs.should_release == 'true'
+    # The macos-26 image carries the Xcode 26 SDK that defines the SpeechAnalyzer /
+    # SpeechTranscriber APIs the app compiles against (gated to macOS 26 at runtime).
+    runs-on: macos-26
+
+    steps:
+      # Build the exact commit the gate approved. A push landing between the two jobs
+      # gets its own queued run; letting it ride along here would ship it under a version
+      # derived before it existed and then release the same code twice.
+      - name: Check out release commit
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.gate.outputs.target_sha }}
+
+      - name: Configure git
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Name the detached release commit as the default branch. The promote step
+          # commits the appcast here, then rebases onto origin before pushing, so
+          # anything that landed during the build is preserved.
+          git checkout -B "$DEFAULT_BRANCH"
+
+      - name: Fetch tags
+        run: git fetch --tags --force origin
+
+      - name: Prepare release values
+        id: release
+        env:
+          VERSION: ${{ needs.gate.outputs.version }}
+          TAG: ${{ needs.gate.outputs.tag }}
+          TARGET_SHA: ${{ needs.gate.outputs.target_sha }}
+        run: |
           build="${GITHUB_RUN_NUMBER}"
           if [[ ! "$build" =~ ^[0-9]+$ ]]; then
             echo "Build must be numeric for CFBundleVersion." >&2
@@ -88,10 +175,10 @@ jobs:
           fi
 
           {
-            echo "version=$version"
-            echo "tag=v$version"
+            echo "version=$VERSION"
+            echo "tag=$TAG"
             echo "build=$build"
-            echo "target_sha=$(git rev-parse HEAD)"
+            echo "target_sha=$TARGET_SHA"
           } >> "$GITHUB_OUTPUT"
 
       - name: Check Sparkle secrets
@@ -236,6 +323,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # `gh release create` made the numeric tag server-side; pull it down so the
+          # alias tags can be pointed at it.
+          git fetch --tags --force origin
+
           args=(
             --repo "${{ github.repository }}"
             --version "${{ steps.release.outputs.version }}"
