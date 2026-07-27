@@ -27,6 +27,7 @@ import {
 import { cloudBackend } from "@/cut/lib/backend/cloud";
 import { cloudUsageQueryKey, useCutMode } from "@/cut/lib/backend/hooks";
 import { localBackend } from "@/cut/lib/backend/local";
+import { clearProjectThreads } from "@/cut/lib/chatThreads";
 import { useWebMode } from "@/cut/lib/flags";
 import { backTarget, projectHref, useCutBase } from "@/cut/lib/nav";
 import { copyProjectAcross } from "@/cut/lib/projectCopy";
@@ -227,6 +228,9 @@ export function TopBar({
       await localBackend
         .fetch(`/api/cut/projects/${projectId}`, { method: "DELETE" })
         .catch(() => {});
+      // The chat history moved with the project; the old project's copy goes
+      // with the project itself.
+      clearProjectThreads(projectId);
       window.location.href = projectHref(base, newId, "projects", null);
     } catch (e) {
       setMoveError(

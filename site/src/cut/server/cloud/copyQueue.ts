@@ -154,8 +154,12 @@ async function shareSource(job: { shareId: string | null; userId: string }): Pro
   };
 }
 
-/** An owner duplicate's source: the whole doc verbatim, same folder, media
- * only — the same shape the old synchronous duplicate produced. */
+/** An owner duplicate's source: the whole doc, same folder, all its media, and
+ * its conversations — chat-created media rides the doc and only its own thread
+ * shows it, so a duplicate without the threads would hold media the owner can
+ * neither see nor delete while it counts against their storage. A mid-flight
+ * brief-to-video run is dropped, as on a share copy: a live plan on the
+ * duplicate would resume and bill every shot a second time. */
 async function duplicateSource(job: {
   projectId: string | null;
   userId: string;
@@ -166,12 +170,20 @@ async function duplicateSource(job: {
   if (!row) return "The project was deleted.";
   const doc = row.doc as unknown as ProjectDoc;
   const media = await completeMedia(job.userId, row.id);
+  const chats = await prisma.cutChatThread.findMany({
+    where: { userId: job.userId, projectId: row.id },
+    select: { id: true, data: true },
+  });
+  const gv = doc.genvideo;
   return {
-    doc,
+    doc: {
+      ...doc,
+      genvideo: gv && (gv.phase === "done" || gv.phase === "failed") ? gv : undefined,
+    },
     name: `${doc.name} copy`,
     folderId: row.folderId,
     media,
-    chats: [],
+    chats,
     added: mediaBytes(media),
   };
 }

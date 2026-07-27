@@ -3,15 +3,48 @@
 // /projects/:id/chats routes so the history follows the account across
 // devices. Threads stay opaque here — the module reads only id and updatedAt
 // to merge, and ships the same slimmed payload the panel writes to storage.
-import { apiFetch, cutMode } from "./backend";
-import { threadsKey } from "./chatThreads";
-
-type ThreadRecord = { id: string; updatedAt?: number };
-
-const isThread = (v: unknown): v is ThreadRecord =>
-  !!v && typeof v === "object" && typeof (v as ThreadRecord).id === "string";
+import { apiFetch, cutMode, getBackend, type CutBackend } from "./backend";
+import {
+  isStoredThread,
+  mergeThreads,
+  readProjectThreads,
+  writeProjectThreads,
+  type StoredThread,
+} from "./chatThreads";
 
 const seeded = new Map<string, Promise<void>>();
+
+/** A cloud project's threads as the server holds them. Takes its backend, so a
+ * project copy can read the residency it is copying from rather than the one
+ * the editor happens to be bound to. */
+export async function fetchCloudThreads(
+  backend: CutBackend,
+  projectId: string
+): Promise<StoredThread[]> {
+  if (backend.kind !== "cloud") return [];
+  // Throws on a failed read rather than reading as "no threads": the seed memo
+  // and a project copy both have to tell an empty history from a lost one.
+  const res = await backend.fetch(`/api/cut/projects/${projectId}/chats`);
+  if (!res.ok) throw new Error("Could not read the project's chats.");
+  const body = (await res.json()) as unknown;
+  return Array.isArray(body) ? mergeThreads(body.filter(isStoredThread)) : [];
+}
+
+/** Write one thread to a cloud project, on an explicit backend. Throws on a
+ * failed write — a copy that loses a conversation has to say so. */
+export async function putCloudThread(
+  backend: CutBackend,
+  projectId: string,
+  thread: StoredThread
+): Promise<void> {
+  if (backend.kind !== "cloud") return;
+  const res = await backend.fetch(`/api/cut/projects/${projectId}/chats/${thread.id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(thread),
+  });
+  if (!res.ok) throw new Error("Could not save a chat thread.");
+}
 
 /** Merge the server's copy of a cloud project's threads into localStorage —
  * per thread, the newer updatedAt wins. Resolves immediately for local
@@ -32,28 +65,9 @@ export function ensureCloudThreads(projectId: string): Promise<void> {
 }
 
 async function seedThreads(projectId: string): Promise<void> {
-  const res = await apiFetch(`/api/cut/projects/${projectId}/chats`);
-  if (!res.ok) return;
-  const remote = (await res.json()) as unknown;
-  if (!Array.isArray(remote)) return;
-  let local: unknown[] = [];
-  try {
-    const v = JSON.parse(localStorage.getItem(threadsKey(projectId)) ?? "[]") as unknown;
-    if (Array.isArray(v)) local = v;
-  } catch {
-    // Unreadable local copy — the server copy stands alone.
-  }
-  const byId = new Map<string, ThreadRecord>();
-  for (const t of [...remote, ...local].filter(isThread)) {
-    const prev = byId.get(t.id);
-    if (!prev || (t.updatedAt ?? 0) >= (prev.updatedAt ?? 0)) byId.set(t.id, t);
-  }
-  const merged = [...byId.values()].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
-  try {
-    localStorage.setItem(threadsKey(projectId), JSON.stringify(merged));
-  } catch {
-    // Storage full/blocked — the in-memory panel still works this session.
-  }
+  const remote = await fetchCloudThreads(getBackend(), projectId);
+  if (remote.length === 0) return;
+  writeProjectThreads(projectId, mergeThreads(remote, readProjectThreads(projectId)));
 }
 
 // Saves debounce per thread: while a turn streams, the panel re-saves on every
@@ -73,7 +87,7 @@ let pageHideHooked = false;
 
 const saveKey = (projectId: string, threadId: string) => `${projectId}/${threadId}`;
 
-export function queueCloudThreadSave(projectId: string, thread: ThreadRecord): void {
+export function queueCloudThreadSave(projectId: string, thread: StoredThread): void {
   if (cutMode() !== "cloud") return;
   const key = saveKey(projectId, thread.id);
   const prev = pending.get(key);

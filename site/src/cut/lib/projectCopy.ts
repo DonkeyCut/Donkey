@@ -1,11 +1,38 @@
 // Copy a project between backends: read the source doc, create the target
 // project, move every media file's bytes across (in doc order — the fresh
 // target dedupes only against names this copy already claimed), remap asset
-// fileNames, then save the doc. A failure deletes the half-made copy. Shared
-// by the projects home's "Duplicate to cloud/Mac" and the editor's move.
+// fileNames, save the doc, and carry the chat history. A failure deletes the
+// half-made copy. Shared by the projects home's "Duplicate to cloud/Mac" and
+// the editor's move.
 import type { CutBackend } from "./backend/types";
+import { fetchCloudThreads, putCloudThread } from "./chatCloud";
+import { mergeThreads, readProjectThreads, writeProjectThreads } from "./chatThreads";
 import { uploadProjectMediaTo } from "./media";
 import type { ProjectDoc } from "./types";
+
+/** Move a project's conversations onto the copy.
+ *
+ * Chat-created media belongs to a thread: it rides the doc like any other
+ * asset, but only its thread shows it, and only deleting that thread deletes
+ * it. A copy that took the media and left the conversations behind would hold
+ * media nobody can see, delete, or account for — while it still counts against
+ * the account's storage. So the threads travel with it. */
+async function copyChatThreads(
+  src: CutBackend,
+  dst: CutBackend,
+  srcProjectId: string,
+  dstProjectId: string
+): Promise<void> {
+  const threads = mergeThreads(
+    await fetchCloudThreads(src, srcProjectId),
+    readProjectThreads(srcProjectId)
+  );
+  if (threads.length === 0) return;
+  writeProjectThreads(dstProjectId, threads);
+  for (const thread of threads) {
+    await putCloudThread(dst, dstProjectId, thread);
+  }
+}
 
 export async function copyProjectAcross(
   src: CutBackend,
@@ -59,6 +86,7 @@ export async function copyProjectAcross(
       body: JSON.stringify(copied),
     });
     if (!putRes.ok) throw new Error("Could not save the project.");
+    await copyChatThreads(src, dst, projectId, summary.id);
     return summary.id;
   } catch (e) {
     if (created) {
