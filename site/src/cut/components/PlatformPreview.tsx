@@ -1,14 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { apiUrl } from "@/cut/lib/backend";
 import {
   Bookmark,
   Camera,
-  Check,
-  Copy,
-  Download,
-  FolderOpen,
   Heart,
   MessageCircle,
   MoreHorizontal,
@@ -22,11 +18,7 @@ import {
   VolumeX,
   X,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { SectionTitle } from "@/cut/components/SectionTitle";
-import { useCutCaps } from "@/cut/lib/backend/hooks";
-import { downloadProjectExport, revealExport } from "@/cut/lib/exportClient";
-import { CAPTION_LIMIT, normalizeTags } from "@/cut/lib/publish";
+import { normalizeTags } from "@/cut/lib/publish";
 import { useEditor } from "@/cut/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -48,7 +40,9 @@ const PLATFORMS: { id: Platform; label: string }[] = [
 const shadow = "[text-shadow:0_1px_3px_rgba(0,0,0,0.6)]";
 
 /** Full post preview: the export playing inside a phone, dressed in each
- * platform's overlay chrome, with the publish metadata rendered in place. */
+ * platform's overlay chrome, with the publish metadata (edited in the Details
+ * tab) rendered in place. "Original" drops the phone and plays the export at
+ * its own frame size. */
 export function PlatformPreviewDialog({
   projectId,
   item,
@@ -58,13 +52,9 @@ export function PlatformPreviewDialog({
   item: ExportItem;
   onClose: () => void;
 }) {
-  const caps = useCutCaps();
   const publish = useEditor((s) => s.publish);
-  const setPublish = useEditor((s) => s.setPublish);
   const [platform, setPlatform] = useState<Platform>("original");
   const [muted, setMuted] = useState(true);
-  const [copied, setCopied] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -79,10 +69,7 @@ export function PlatformPreviewDialog({
   const caption = publish.caption.trim();
   const tagsLine = normalizeTags(publish.tags);
   const sound = publish.soundTitle.trim() || `original sound - ${handle}`;
-  const combined = [caption, tagsLine].filter(Boolean).join("\n\n");
-
-  const box =
-    "w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-[12.5px] outline-none focus:border-ring";
+  const original = platform === "original";
 
   return (
     <div
@@ -92,179 +79,83 @@ export function PlatformPreviewDialog({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="flex max-h-full overflow-hidden rounded-2xl bg-card shadow-2xl">
-        {/* Metadata editor — the original, editable in place. */}
-        <div className="flex w-[300px] shrink-0 flex-col gap-3.5 overflow-y-auto border-r border-border p-4">
-          <div>
-            <div className="text-sm font-semibold tracking-tight">Post preview</div>
+      <div className="relative flex max-h-full flex-col items-center gap-4 overflow-hidden rounded-2xl bg-card px-10 py-5 shadow-2xl">
+        <button
+          className="absolute top-3 right-3 grid size-7 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          aria-label="Close preview"
+          onClick={onClose}
+        >
+          <X className="size-4" />
+        </button>
+
+        <div className="flex gap-1 rounded-full border border-border bg-card p-1 shadow-xs">
+          {PLATFORMS.map((p) => (
             <button
-              type="button"
-              onClick={() =>
-                caps.revealInFinder
-                  ? void revealExport(projectId, item.file).catch(() => {})
-                  : downloadProjectExport(projectId, item.file)
-              }
-              title={caps.revealInFinder ? "Show in Finder" : "Download"}
-              className="reveal-export mt-0.5 flex w-full items-center gap-1 font-mono text-[10.5px] text-muted-foreground transition-colors hover:text-foreground"
-            >
-              {caps.revealInFinder ? (
-                <FolderOpen className="size-3 shrink-0" />
-              ) : (
-                <Download className="size-3 shrink-0" />
-              )}
-              <span className="truncate">{item.file}</span>
-            </button>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <SectionTitle>Handle</SectionTitle>
-            <div className="relative">
-              <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-[12.5px] text-muted-foreground">
-                @
-              </span>
-              <input
-                className={cn(box, "publish-handle pl-6")}
-                placeholder="you"
-                value={publish.handle}
-                onChange={(e) => setPublish({ handle: e.target.value.replace(/^@+/, "") })}
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <SectionTitle>Caption</SectionTitle>
-            <textarea
-              className={cn(box, "min-h-[96px] resize-y leading-relaxed")}
-              placeholder="What's happening in this video?"
-              value={publish.caption}
-              onChange={(e) => setPublish({ caption: e.target.value })}
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <SectionTitle>Tags</SectionTitle>
-            <input
-              className={box}
-              placeholder="fyp howto cut"
-              value={publish.tags}
-              onChange={(e) => setPublish({ tags: e.target.value })}
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <SectionTitle>Sound title</SectionTitle>
-            <input
-              className={box}
-              placeholder={`original sound - ${handle}`}
-              value={publish.soundTitle}
-              onChange={(e) => setPublish({ soundTitle: e.target.value })}
-            />
-          </div>
-
-          <div className="mt-auto flex flex-col gap-2 pt-1">
-            <Button
-              className="w-full"
-              disabled={!combined}
-              onClick={() => {
-                void navigator.clipboard.writeText(combined).then(() => {
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1500);
-                });
-              }}
-            >
-              {copied ? (
-                <>
-                  <Check data-icon="inline-start" /> Copied
-                </>
-              ) : (
-                <>
-                  <Copy data-icon="inline-start" /> Copy caption + tags
-                </>
-              )}
-            </Button>
-            <p
+              key={p.id}
               className={cn(
-                "text-right font-mono text-[11px] tabular-nums",
-                combined.length > CAPTION_LIMIT
-                  ? "font-semibold text-red-600"
-                  : "text-muted-foreground"
+                "rounded-full px-3.5 py-1 text-xs font-medium transition-colors",
+                platform === p.id
+                  ? "bg-foreground text-background"
+                  : "text-muted-foreground hover:text-foreground"
               )}
+              aria-pressed={platform === p.id}
+              onClick={() => setPlatform(p.id)}
             >
-              {combined.length.toLocaleString()} / {CAPTION_LIMIT.toLocaleString()}
-            </p>
-          </div>
+              {p.label}
+            </button>
+          ))}
         </div>
 
-        {/* Phone stage */}
-        <div className="relative flex flex-col items-center gap-4 bg-muted/40 px-10 py-5">
+        {/* The stage: Original sizes itself to the export's own frame; the
+            platform mocks put it inside a fixed 9:16 phone. */}
+        <div
+          className={cn(
+            "relative overflow-hidden bg-black",
+            original
+              ? "rounded-xl shadow-[0_24px_60px_rgba(0,0,0,0.35)]"
+              : "phone h-[600px] w-[290px] rounded-[38px] border-[9px] border-neutral-950 shadow-[0_24px_60px_rgba(0,0,0,0.45)]"
+          )}
+        >
+          <video
+            src={url}
+            // Original leaves width and height auto so the element takes the
+            // video's intrinsic aspect, bounded by the viewport.
+            className={cn(
+              original
+                ? "block max-h-[78vh] max-w-[80vw]"
+                : "absolute inset-0 size-full object-cover"
+            )}
+            autoPlay
+            loop
+            muted={muted}
+            playsInline
+            onClick={() => setMuted((m) => !m)}
+          />
+          {/* legibility gradients — only under platform chrome */}
+          {!original && (
+            <>
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-black/50 to-transparent" />
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-44 bg-gradient-to-t from-black/70 via-black/25 to-transparent" />
+            </>
+          )}
+
           <button
-            className="absolute top-3 right-3 grid size-7 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            aria-label="Close preview"
-            onClick={onClose}
+            className="absolute top-3.5 left-3.5 z-20 grid size-7 place-items-center rounded-full bg-black/40 text-white"
+            aria-label={muted ? "Unmute" : "Mute"}
+            onClick={() => setMuted((m) => !m)}
           >
-            <X className="size-4" />
+            {muted ? <VolumeX className="size-3.5" /> : <Volume2 className="size-3.5" />}
           </button>
 
-          <div className="flex gap-1 rounded-full border border-border bg-card p-1 shadow-xs">
-            {PLATFORMS.map((p) => (
-              <button
-                key={p.id}
-                className={cn(
-                  "rounded-full px-3.5 py-1 text-xs font-medium transition-colors",
-                  platform === p.id
-                    ? "bg-foreground text-background"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-                aria-pressed={platform === p.id}
-                onClick={() => setPlatform(p.id)}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="phone relative h-[600px] w-[290px] overflow-hidden rounded-[38px] border-[9px] border-neutral-950 bg-black shadow-[0_24px_60px_rgba(0,0,0,0.45)]">
-            <video
-              ref={videoRef}
-              src={url}
-              className={cn(
-                "absolute inset-0 size-full",
-                // "Original" shows the true exported frame, uncropped; the
-                // platform mocks fill the phone the way each app would.
-                platform === "original" ? "object-contain" : "object-cover"
-              )}
-              autoPlay
-              loop
-              muted={muted}
-              playsInline
-              onClick={() => setMuted((m) => !m)}
-            />
-            {/* legibility gradients — only under platform chrome */}
-            {platform !== "original" && (
-              <>
-                <div className="pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-black/50 to-transparent" />
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-44 bg-gradient-to-t from-black/70 via-black/25 to-transparent" />
-              </>
-            )}
-
-            <button
-              className="absolute top-3.5 left-3.5 z-20 grid size-7 place-items-center rounded-full bg-black/40 text-white"
-              aria-label={muted ? "Unmute" : "Mute"}
-              onClick={() => setMuted((m) => !m)}
-            >
-              {muted ? <VolumeX className="size-3.5" /> : <Volume2 className="size-3.5" />}
-            </button>
-
-            {platform === "tiktok" && (
-              <TikTokChrome handle={handle} caption={caption} tags={tagsLine} sound={sound} />
-            )}
-            {platform === "instagram" && (
-              <ReelsChrome handle={handle} caption={caption} tags={tagsLine} sound={sound} />
-            )}
-            {platform === "youtube" && (
-              <ShortsChrome handle={handle} caption={caption} tags={tagsLine} sound={sound} />
-            )}
-          </div>
+          {platform === "tiktok" && (
+            <TikTokChrome handle={handle} caption={caption} tags={tagsLine} sound={sound} />
+          )}
+          {platform === "instagram" && (
+            <ReelsChrome handle={handle} caption={caption} tags={tagsLine} sound={sound} />
+          )}
+          {platform === "youtube" && (
+            <ShortsChrome handle={handle} caption={caption} tags={tagsLine} sound={sound} />
+          )}
         </div>
       </div>
     </div>
