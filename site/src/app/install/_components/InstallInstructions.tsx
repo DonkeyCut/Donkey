@@ -64,9 +64,9 @@ export function InstallInstructions() {
             maxWidth: 640,
           }}
         >
-          Edit on your own storage, and let your Mac do the heavy work —
-          exports and speech to text. When a project is ready to share, move it
-          to the cloud.
+          Your projects stay on your Mac. Text-to-speech and exports run
+          locally, so your files never leave your computer until you&rsquo;re
+          ready to share them.
         </p>
         <PillButton href={DONKEY_DOWNLOAD_URL} variant="primary" size="lg">
           Download for Mac
