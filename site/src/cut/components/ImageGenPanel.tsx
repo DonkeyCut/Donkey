@@ -5,6 +5,7 @@ import { Copy, Loader2, Maximize2, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { SectionTitle } from "@/cut/components/SectionTitle";
+import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { clearAssetDrag, setAssetDragData } from "@/cut/lib/assetDrag";
 import { collectRefs, mentionToken, useRefCandidates, useAssetDrop } from "@/cut/lib/assetRef";
 import { genPulseOverlay, useGenPulse } from "@/cut/lib/genNotify";
@@ -251,7 +252,7 @@ function GeneratedTile({
         onClick={() => useImageGen.getState().openWith(asset.name)}
       >
         {/* eslint-disable-next-line @next/next/no-img-element -- engine media file, not Next-optimizable */}
-        <img
+        <img crossOrigin={MEDIA_CORS}
           src={asset.url}
           alt={asset.name}
           loading="lazy"

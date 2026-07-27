@@ -31,6 +31,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { clearAssetDrag, setCardDragImage, setLibraryDragData } from "@/cut/lib/assetDrag";
 import { useInView } from "@/cut/hooks/useInView";
 import { isMediaFile } from "@/cut/lib/media";
@@ -514,6 +515,7 @@ export function LibraryCard({
         {a.type === "video" ? (
           seen && (
             <video
+              crossOrigin={MEDIA_CORS}
               ref={videoRef}
               src={`${libraryMediaUrl(a.fileName)}#t=${posterT}`}
               muted
@@ -525,7 +527,7 @@ export function LibraryCard({
           )
         ) : a.type === "image" ? (
           // eslint-disable-next-line @next/next/no-img-element -- library media file, not Next-optimizable
-          <img src={libraryMediaUrl(a.fileName)} alt={a.name} loading="lazy" className="size-full object-cover" />
+          <img crossOrigin={MEDIA_CORS} src={libraryMediaUrl(a.fileName)} alt={a.name} loading="lazy" className="size-full object-cover" />
         ) : (
           <AudioCardFace
             url={libraryMediaUrl(a.fileName)}

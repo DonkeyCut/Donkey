@@ -46,6 +46,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { engineOrigin, servedFromEngine } from "@/cut/lib/api";
 import { quotaErrorMessage } from "@/cut/lib/backend/cloud";
 import { useCloudUsage, useCutMode } from "@/cut/lib/backend/hooks";
@@ -962,6 +963,7 @@ function CardPreview({ project: p, residency }: { project: ProjectSummary; resid
     return (
       // eslint-disable-next-line @next/next/no-img-element -- engine media file, not Next-optimizable
       <img
+        crossOrigin={MEDIA_CORS}
         src={fileUrl(p.previewFile!)}
         alt=""
         loading="lazy"
@@ -989,6 +991,7 @@ function CardPreview({ project: p, residency }: { project: ProjectSummary; resid
     >
       {seen && (
         <video
+          crossOrigin={MEDIA_CORS}
           ref={videoRef}
           src={`${src}#t=${posterT}`}
           muted

@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { Copy, Film, Loader2, Maximize2, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { clearAssetDrag, setAssetDragData } from "@/cut/lib/assetDrag";
 import {
   collectRefs,
@@ -344,6 +345,7 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
         onClick={() => useVideoGen.getState().openWith(job.prompt)}
       >
         <video
+          crossOrigin={MEDIA_CORS}
           ref={videoRef}
           muted
           loop

@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import type React from "react";
 import { Copy, ExternalLink, FileText, Film, Loader2, Maximize2, Plus } from "lucide-react";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { clearAssetDrag, setAssetDragData, setChipDragImage } from "@/cut/lib/assetDrag";
 import {
   projectRefs,
@@ -260,7 +261,7 @@ function MediaCard({ item, asset }: ChatCardProps) {
     >
       {item.kind === "video" ? (
         // Native first frame as the poster — full-resolution, no blurry thumb.
-        <video
+        <video crossOrigin={MEDIA_CORS}
           ref={videoRef}
           src={seen ? `${ref.url}#t=0.1` : undefined}
           preload="metadata"
@@ -271,7 +272,7 @@ function MediaCard({ item, asset }: ChatCardProps) {
         />
       ) : seen ? (
         // eslint-disable-next-line @next/next/no-img-element -- engine/static file, not Next-optimizable
-        <img src={ref.url} alt={ref.name} loading="lazy" className="size-full object-cover" />
+        <img crossOrigin={MEDIA_CORS} src={ref.url} alt={ref.name} loading="lazy" className="size-full object-cover" />
       ) : null}
       {item.kind === "video" && ref.duration !== undefined && (
         <span className="absolute right-1.5 bottom-1.5 rounded-[5px] bg-black/65 px-1 py-px font-mono text-[9px] text-white tabular-nums">

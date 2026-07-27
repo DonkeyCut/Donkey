@@ -8,6 +8,7 @@ import {
   refToken,
   type AssetRef,
 } from "@/cut/lib/assetRef";
+import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { useRefFor, useRefCandidates } from "@/cut/lib/assetRef";
 import { useInView } from "@/cut/hooks/useInView";
 import { revealRef } from "@/cut/lib/refReveal";
@@ -44,7 +45,7 @@ export function RefThumb({ item, className }: { item: AssetRef; className?: stri
       )}
     >
       {item.kind === "video" ? (
-        <video
+        <video crossOrigin={MEDIA_CORS}
           src={seen ? `${item.url}#t=0.1` : undefined}
           preload="metadata"
           muted
@@ -54,7 +55,7 @@ export function RefThumb({ item, className }: { item: AssetRef; className?: stri
       ) : item.kind === "image" ? (
         seen ? (
           // eslint-disable-next-line @next/next/no-img-element -- refs point at engine/static files, not Next-optimizable images
-          <img src={item.url} alt={item.name} loading="lazy" className="size-full object-cover" />
+          <img crossOrigin={MEDIA_CORS} src={item.url} alt={item.name} loading="lazy" className="size-full object-cover" />
         ) : null
       ) : item.kind === "text" ? (
         <div className="grid size-full place-items-center bg-gradient-to-br from-slate-100 to-slate-50 text-slate-500">
@@ -138,7 +139,7 @@ function PeekVideo({ item }: { item: AssetRef }) {
   }, []);
   return (
     <div className="relative aspect-square w-full border border-border bg-muted">
-      <video ref={videoRef} src={item.url} loop playsInline className="size-full object-cover" />
+      <video crossOrigin={MEDIA_CORS} ref={videoRef} src={item.url} loop playsInline className="size-full object-cover" />
       {item.duration !== undefined && (
         <span className="absolute right-1 bottom-1 rounded-[5px] bg-black/65 px-1 py-px font-mono text-[8.5px] text-white tabular-nums">
           {formatTime(item.duration)}

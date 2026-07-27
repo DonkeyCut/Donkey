@@ -27,6 +27,7 @@ import {
   setCardDragImage,
   setTemplateDragData,
 } from "@/cut/lib/assetDrag";
+import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { useAssetDrop, type AssetRef } from "@/cut/lib/assetRef";
 import { cardIconButton } from "@/cut/components/iconButton";
 import { formatTime } from "@/cut/lib/time";
@@ -280,6 +281,7 @@ export function TemplateCard({
         >
           {preview.media.type === "video" ? (
             <video
+              crossOrigin={MEDIA_CORS}
               src={mediaSrc(preview.media.fileName)}
               autoPlay
               muted
@@ -290,6 +292,7 @@ export function TemplateCard({
           ) : (
             // eslint-disable-next-line @next/next/no-img-element -- engine media file, not Next-optimizable
             <img
+              crossOrigin={MEDIA_CORS}
               src={mediaSrc(preview.media.fileName)}
               alt={preview.media.name}
               className="w-44 rounded-lg border border-border shadow-lg"

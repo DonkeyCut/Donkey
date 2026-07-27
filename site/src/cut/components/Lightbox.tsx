@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy, FileText, Loader2, Music, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { addLibraryAssetToProject, fetchLibrary } from "@/cut/lib/library";
 import { useLightbox, type LightboxItem } from "@/cut/lib/lightbox";
 import { importImage, importStockVideo } from "@/cut/lib/media";
@@ -176,7 +177,7 @@ function LightboxMedia({ item, ratio }: { item: LightboxItem; ratio?: number }) 
 
   if (item.kind === "video") {
     return (
-      <video
+      <video crossOrigin={MEDIA_CORS}
         controls
         autoPlay
         loop
@@ -189,7 +190,7 @@ function LightboxMedia({ item, ratio }: { item: LightboxItem; ratio?: number }) 
   }
   return (
     // eslint-disable-next-line @next/next/no-img-element -- static/project image, client-only page
-    <img src={item.src} alt={item.name} className={mediaClass} style={mediaStyle} />
+    <img crossOrigin={MEDIA_CORS} src={item.src} alt={item.name} className={mediaClass} style={mediaStyle} />
   );
 }
 

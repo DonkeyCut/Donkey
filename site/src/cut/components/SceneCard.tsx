@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import { HostedErrorText } from "./hostedError";
 import { scrimIconButton } from "./iconButton";
 import { RefThumb } from "./AssetRefs";
+import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 
 // The brief-to-video progress card, pinned into the chat while a "generate a
 // video" run is planning, waiting for approval, or rendering. The timeline fills
@@ -326,7 +327,7 @@ function ShotTile({
         {...(clip && ref ? hoverPlay : {})}
       >
         {clip && ref ? (
-          <video
+          <video crossOrigin={MEDIA_CORS}
             ref={videoRef}
             src={`${ref.url}#t=0.1`}
             preload="metadata"
@@ -337,7 +338,7 @@ function ShotTile({
           />
         ) : frame && ref ? (
           // eslint-disable-next-line @next/next/no-img-element -- engine/static file, not Next-optimizable
-          <img src={ref.url} alt="" className="size-full object-cover" />
+          <img crossOrigin={MEDIA_CORS} src={ref.url} alt="" className="size-full object-cover" />
         ) : (
           <span className="grid size-full place-items-center text-[13px] font-semibold text-muted-foreground/50">
             {inFlight ? <CircleDashed className="size-4 animate-spin text-[#0a84ff]" /> : n}
@@ -483,7 +484,7 @@ function FeedEntry({
           {...(item.kind === "video" ? hoverPlay : {})}
         >
           {item.kind === "video" ? (
-            <video
+            <video crossOrigin={MEDIA_CORS}
               ref={videoRef}
               src={`${item.url}#t=0.1`}
               preload="metadata"
@@ -494,7 +495,7 @@ function FeedEntry({
             />
           ) : (
             // eslint-disable-next-line @next/next/no-img-element -- engine/static file, not Next-optimizable
-            <img src={item.url} alt={item.name} className="size-full object-cover" />
+            <img crossOrigin={MEDIA_CORS} src={item.url} alt={item.name} className="size-full object-cover" />
           )}
           {item.kind === "video" && item.duration !== undefined && (
             <span className="absolute right-1.5 bottom-1.5 rounded-[5px] bg-black/65 px-1 py-px font-mono text-[9px] text-white tabular-nums">

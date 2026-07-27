@@ -23,6 +23,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { apiFetch, apiUrl } from "@/cut/lib/backend";
 import { useCutCaps } from "@/cut/lib/backend/hooks";
 import {
@@ -590,7 +591,7 @@ function MediaPanel({
                     title="Preview as a post"
                     onClick={() => setPreview(it)}
                   >
-                    <video
+                    <video crossOrigin={MEDIA_CORS}
                       muted
                       playsInline
                       preload="metadata"
@@ -758,7 +759,7 @@ function AssetCard({ asset, projectId }: { asset: MediaAsset; projectId: string 
         {asset.type === "video" ? (
           // Native first frame as the poster — full-resolution, no blurry thumb.
           seen && (
-            <video
+            <video crossOrigin={MEDIA_CORS}
               ref={videoRef}
               src={`${asset.url}#t=0.1`}
               preload="metadata"
@@ -770,7 +771,7 @@ function AssetCard({ asset, projectId }: { asset: MediaAsset; projectId: string 
           )
         ) : asset.type === "image" ? (
           // eslint-disable-next-line @next/next/no-img-element -- engine/static file, not Next-optimizable
-          <img src={asset.url} alt={asset.name} loading="lazy" className="size-full object-cover" />
+          <img crossOrigin={MEDIA_CORS} src={asset.url} alt={asset.name} loading="lazy" className="size-full object-cover" />
         ) : (
           <AudioCardFace
             url={asset.url}

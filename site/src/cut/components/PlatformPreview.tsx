@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { apiUrl } from "@/cut/lib/backend";
 import {
   Bookmark,
@@ -117,6 +118,7 @@ export function PlatformPreviewDialog({
           )}
         >
           <video
+            crossOrigin={MEDIA_CORS}
             src={url}
             // Original leaves width and height auto so the element takes the
             // video's intrinsic aspect, bounded by the viewport.
