@@ -38,17 +38,5 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.7,
       url: `${SITE_URL}/use-cases/${useCase.slug}`,
     })),
-    {
-      changeFrequency: "yearly",
-      lastModified,
-      priority: 0.5,
-      url: `${SITE_URL}/privacy`,
-    },
-    {
-      changeFrequency: "yearly",
-      lastModified,
-      priority: 0.5,
-      url: `${SITE_URL}/terms`,
-    },
   ];
 }
