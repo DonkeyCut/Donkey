@@ -18,17 +18,28 @@ export const POST = withDonkeyAuth(async (request) => {
     return unauthorizedResponse();
   }
 
-  const subscription = await prisma.visionApiSubscription.findUnique({
-    where: { userId },
+  // Pro customers carry their Stripe id on User (ensureStripeCustomer);
+  // early Vision-only customers may still have it on their subscription row.
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { stripeCustomerId: true },
   });
-  if (!subscription?.stripeCustomerId) {
+  let customerId = user?.stripeCustomerId ?? null;
+  if (!customerId) {
+    const vision = await prisma.visionApiSubscription.findUnique({
+      where: { userId },
+      select: { stripeCustomerId: true },
+    });
+    customerId = vision?.stripeCustomerId ?? null;
+  }
+  if (!customerId) {
     return notFoundResponse();
   }
 
   const stripe = getStripe();
   const configuration = visionPortalConfigurationId();
   const portal = await stripe.billingPortal.sessions.create({
-    customer: subscription.stripeCustomerId,
+    customer: customerId,
     return_url: `${request.nextUrl.origin}/app/settings`,
     ...(configuration ? { configuration } : {}),
   });
