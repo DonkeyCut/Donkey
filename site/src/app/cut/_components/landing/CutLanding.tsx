@@ -4,6 +4,7 @@ import { BG, BLACK } from "@/app/_components/landing/theme";
 import { CutFinalCTA } from "@/app/cut/_components/landing/CutFinalCTA";
 import { CutFooter } from "@/app/cut/_components/landing/CutFooter";
 import { CutHero } from "@/app/cut/_components/landing/CutHero";
+import { CutLocal } from "@/app/cut/_components/landing/CutLocal";
 import { CutOpenSource } from "@/app/cut/_components/landing/CutOpenSource";
 import { CutPricing } from "@/app/cut/_components/landing/CutPricing";
 import { CutTopNav } from "@/app/cut/_components/landing/CutTopNav";
@@ -30,6 +31,7 @@ export function CutLanding({ root }: { root: string }) {
       <CutHero root={root} />
       <CutWorksWith />
       <CutPricing root={root} />
+      <CutLocal root={root} />
       <CutOpenSource />
       <CutFinalCTA root={root} />
       <CutFooter />
