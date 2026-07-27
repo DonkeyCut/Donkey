@@ -83,12 +83,23 @@ export function useCreditsRecheck(): void {
   }, [out]);
 }
 
+// The hosted routes run as serverless functions behind a 4.5MB request-body
+// limit the platform enforces at the edge: an oversized body is refused before
+// the route runs, the upload resets mid-flight, and fetch rejects with a bare
+// "Failed to fetch" that reads like the network died. Attachments are fitted to
+// fit (refMedia.ts); this says so plainly if one ever isn't.
+const MAX_BODY_BYTES = 4 * 1024 * 1024;
+
 /** POST one of Donkey's hosted inference routes with the user's session. */
 export const hostedPost = async (path: string, body: unknown, signal?: AbortSignal) => {
+  const payload = JSON.stringify(body);
+  if (new Blob([payload]).size > MAX_BODY_BYTES) {
+    throw new Error("That request carries too much attached media to send. Use fewer references.");
+  }
   const res = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-donkey-client-id": CLIENT_ID },
-    body: JSON.stringify(body),
+    body: payload,
     signal,
   });
   noteBalance(res);

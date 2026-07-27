@@ -21,6 +21,23 @@ export interface InlineImage {
 const MAX_W = 1280;
 const JPEG_Q = 0.85;
 
+// Every picture riding to a hosted model is fitted to this budget first.
+//
+// A generated reference sheet comes back at the image model's full output size
+// — a 2752x1536 PNG is around 4MB — and base64 inflates it by a third. The
+// hosted routes run as serverless functions behind a 4.5MB request-body limit
+// enforced at the edge, so one such sheet as a reference blows the whole
+// request up before the route sees it: the upload resets mid-flight and the
+// browser reports a bare "Failed to fetch". A scene run rides its anchor sheet
+// into every later call, so that one oversized picture failed every location
+// design, every keyframe, and every video take in the run.
+//
+// Fitting here — the one place bytes become an inline part — keeps any number
+// of references comfortably inside one request. The models resample inputs to
+// roughly this size anyway, so nothing the model sees is lost.
+const MAX_INLINE_EDGE = 1536;
+const MAX_INLINE_BYTES = 900 * 1024;
+
 // Vertex image models accept only real image mime types. Read the format from the
 // bytes rather than the transport Content-Type: a media file served as
 // application/octet-stream (or with none) otherwise reaches the model labelled with a
@@ -66,8 +83,45 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-/** A blob's bytes as an inline image part, mime read from the bytes. */
+/** Re-encode a picture down into the inline budget: scaled to the edge cap,
+ * then stepped down until it fits. Null when the browser can't decode it — the
+ * caller keeps the original bytes rather than dropping the reference. */
+async function encodeWithin(blob: Blob): Promise<InlineImage | null> {
+  const bitmap = await createImageBitmap(blob).catch(() => null);
+  if (!bitmap) return null;
+  try {
+    let edge = MAX_INLINE_EDGE;
+    let out: InlineImage | null = null;
+    for (const quality of [JPEG_Q, 0.7, 0.55]) {
+      const scale = Math.min(1, edge / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      ctx.imageSmoothingQuality = "high";
+      // JPEG carries no alpha, so a cut-out sheet composites onto white here
+      // instead of the canvas's transparent black.
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      out = splitDataUrl(canvas.toDataURL("image/jpeg", quality));
+      if (out.data.length * 0.75 <= MAX_INLINE_BYTES) return out;
+      edge = Math.round(edge * 0.75);
+    }
+    return out;
+  } finally {
+    bitmap.close();
+  }
+}
+
+/** A blob's bytes as an inline image part, fitted to the inline budget, mime
+ * read from the bytes. */
 export async function blobToInline(blob: Blob): Promise<InlineImage> {
+  if (blob.size > MAX_INLINE_BYTES) {
+    const fitted = await encodeWithin(blob);
+    if (fitted) return fitted;
+  }
   return splitDataUrl(await blobToDataUrl(blob));
 }
 
@@ -87,24 +141,15 @@ export async function blobToInlineAudio(blob: Blob): Promise<InlineImage | null>
 
 /** Video models take input images only as JPEG or PNG — the render rejects anything
  * else by format, killing the render after it was billed. Re-encode any other
- * picture (webp saved off the web is the common case) to PNG; jpeg and png
+ * picture (webp saved off the web is the common case) through the inline
+ * budget, so the conversion lands as a JPEG the request can carry; jpeg and png
  * pass through untouched. */
 export async function videoSafeInline(img: InlineImage): Promise<InlineImage> {
   if (img.mimeType === "image/jpeg" || img.mimeType === "image/png") return img;
   const blob = await (await fetch(`data:${img.mimeType};base64,${img.data}`)).blob();
-  const bitmap = await createImageBitmap(blob).catch(() => null);
-  if (!bitmap) throw new Error("A reference image is in a format the video model can't read.");
-  try {
-    const canvas = document.createElement("canvas");
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Could not convert a reference image for the video model.");
-    ctx.drawImage(bitmap, 0, 0);
-    return splitDataUrl(canvas.toDataURL("image/png"));
-  } finally {
-    bitmap.close();
-  }
+  const fitted = await encodeWithin(blob);
+  if (!fitted) throw new Error("A reference image is in a format the video model can't read.");
+  return fitted;
 }
 
 // Keeps the inline payload well under the Gemini per-request inline-data cap
