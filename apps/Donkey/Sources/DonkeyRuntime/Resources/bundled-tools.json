@@ -1,7 +1,7 @@
 {
-  "_comment": "Build-time pointer to the prebuilt CLI tools bundle (ffmpeg, yt-dlp, ...). Produced and published by scripts/publish-bundled-tools.sh, which builds the tools, uploads the tarball as a GitHub release asset, and rewrites version+sha256 here. scripts/ensure-bundled-tools.sh reads it to fetch the bundle into vendor/donkey-tools instead of compiling from source; packaging then bakes that directory into the app. The shipped app never reads this file — it carries the tools. An empty sha256 means nothing is published yet, so builds fall back to building from source.",
-  "version": "2026.06.26",
+  "_comment": "Build-time pointer to the prebuilt CLI tools bundle (ffmpeg, yt-dlp, ...). Produced and published by scripts/publish-bundled-tools.sh, which builds the tools, uploads the tarball as a GitHub release asset, and rewrites version+sha256 here. scripts/ensure-bundled-tools.sh reads it to fetch the bundle into vendor/donkey-tools instead of compiling from source; packaging then bakes that directory into the app. The shipped app never reads this file \u2014 it carries the tools. An empty sha256 means nothing is published yet, so builds fall back to building from source.",
+  "version": "2026.07.27.1",
   "arch": "arm64",
-  "url": "https://github.com/DonkeyUseCorp/Donkey/releases/download/bundled-tools-2026.06.26/donkey-tools-2026.06.26-arm64.tar.gz",
-  "sha256": "0ddebe09229248c53a330e064461e5b81a80aae9e9e0501e047205a395557b16"
+  "url": "https://github.com/DonkeyUseCorp/Donkey/releases/download/bundled-tools-2026.07.27.1/donkey-tools-2026.07.27.1-arm64.tar.gz",
+  "sha256": "8dca39ee6c998252dcd960a7088d93cfd0e9637bf825a8e211f93c320c7cd204"
 }
