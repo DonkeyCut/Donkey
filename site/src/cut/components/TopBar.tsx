@@ -18,6 +18,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cloudBackend } from "@/cut/lib/backend/cloud";
 import { cloudUsageQueryKey, useCutMode } from "@/cut/lib/backend/hooks";
 import { localBackend } from "@/cut/lib/backend/local";
@@ -449,15 +455,26 @@ export function TopBar({
           </Button>
         )}
         {canMoveToCloud && (
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label="Move to Cloud"
-            title="Move to Cloud"
-            onClick={() => setMoveOpen(true)}
-          >
-            <CloudUpload data-icon="inline-start" /> Cloud
-          </Button>
+          // Our own tooltip, not the `title` attribute: the button's label is
+          // just "Cloud", and the browser's native tooltip waits a beat before
+          // saying what it does.
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Move to Cloud"
+                    onClick={() => setMoveOpen(true)}
+                  >
+                    <CloudUpload data-icon="inline-start" /> Cloud
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom">Move to Cloud</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         )}
         <Button
           variant="ghost"
