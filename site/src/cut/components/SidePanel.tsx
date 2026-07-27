@@ -39,6 +39,7 @@ import { RefDropZone } from "./RefDropZone";
 import { deleteExport, downloadProjectExport, revealExport } from "@/cut/lib/exportClient";
 import { useExports, useWatchExportLands, type ExportJob } from "@/cut/lib/exportStore";
 import { useElapsed } from "@/cut/hooks/useElapsed";
+import { useInView } from "@/cut/hooks/useInView";
 import {
   addAssetToLibraryTemplate,
   addLibraryAssetToProject,
@@ -691,6 +692,9 @@ function AssetCard({ asset, projectId }: { asset: MediaAsset; projectId: string 
   const [confirmUses, setConfirmUses] = useState<number | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const { flash, attachReveal } = useRevealFlash("project", asset.id);
+  // A media-heavy project would open every one of these connections at once;
+  // the source waits until the tile has been scrolled near.
+  const [tileRef, seen] = useInView<HTMLDivElement>();
 
   const add = () => {
     const s = useEditor.getState();
@@ -745,6 +749,7 @@ function AssetCard({ asset, projectId }: { asset: MediaAsset; projectId: string 
       }}
     >
       <div
+        ref={tileRef}
         className={cn(
           "relative aspect-square overflow-hidden rounded-lg border border-border bg-muted transition-colors group-hover:border-input",
           flash && "ring-2 ring-[#0a84ff] ring-offset-1"
@@ -752,15 +757,17 @@ function AssetCard({ asset, projectId }: { asset: MediaAsset; projectId: string 
       >
         {asset.type === "video" ? (
           // Native first frame as the poster — full-resolution, no blurry thumb.
-          <video
-            ref={videoRef}
-            src={`${asset.url}#t=0.1`}
-            preload="metadata"
-            muted
-            loop
-            playsInline
-            className="size-full object-cover"
-          />
+          seen && (
+            <video
+              ref={videoRef}
+              src={`${asset.url}#t=0.1`}
+              preload="metadata"
+              muted
+              loop
+              playsInline
+              className="size-full object-cover"
+            />
+          )
         ) : asset.type === "image" ? (
           // eslint-disable-next-line @next/next/no-img-element -- engine/static file, not Next-optimizable
           <img src={asset.url} alt={asset.name} loading="lazy" className="size-full object-cover" />

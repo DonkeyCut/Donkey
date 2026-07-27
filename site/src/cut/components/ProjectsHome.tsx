@@ -58,6 +58,7 @@ import {
   type ProjectsSection,
   type Residency,
 } from "@/cut/lib/queries";
+import { useInView } from "@/cut/hooks/useInView";
 import { useWebMode } from "@/cut/lib/flags";
 import { track } from "@/lib/analytics";
 import { authClient } from "@/lib/auth-client";
@@ -933,9 +934,15 @@ export function ProjectsHome() {
 
 /** Card art: the actual edit (a rendered proxy) plays on hover; the poster is
  * the first clip's real first frame. Falls back to the source when no proxy
- * has been rendered yet. */
+ * has been rendered yet.
+ *
+ * The source is withheld until the tile has been scrolled near, because each
+ * card is a real media element: a grid of cloud projects would otherwise open
+ * a connection per card on arrival and pull every file's metadata across the
+ * network before the first row settled. */
 function CardPreview({ project: p, residency }: { project: ProjectSummary; residency: Residency }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [tileRef, seen] = useInView<HTMLDivElement>();
   const backend = backendFor(residency);
   const fileUrl = (file: string) =>
     backend.url(`/api/cut/projects/${p.id}/media/${encodeURIComponent(file)}`);
@@ -957,6 +964,7 @@ function CardPreview({ project: p, residency }: { project: ProjectSummary; resid
       <img
         src={fileUrl(p.previewFile!)}
         alt=""
+        loading="lazy"
         className="absolute inset-0 size-full object-cover"
       />
     );
@@ -968,6 +976,7 @@ function CardPreview({ project: p, residency }: { project: ProjectSummary; resid
 
   return (
     <div
+      ref={tileRef}
       className="absolute inset-0"
       onMouseEnter={() => void videoRef.current?.play().catch(() => {})}
       onMouseLeave={() => {
@@ -978,15 +987,17 @@ function CardPreview({ project: p, residency }: { project: ProjectSummary; resid
         }
       }}
     >
-      <video
-        ref={videoRef}
-        src={`${src}#t=${posterT}`}
-        muted
-        loop
-        playsInline
-        preload="metadata"
-        className="size-full object-cover"
-      />
+      {seen && (
+        <video
+          ref={videoRef}
+          src={`${src}#t=${posterT}`}
+          muted
+          loop
+          playsInline
+          preload="metadata"
+          className="size-full object-cover"
+        />
+      )}
     </div>
   );
 }

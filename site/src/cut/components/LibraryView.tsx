@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { clearAssetDrag, setCardDragImage, setLibraryDragData } from "@/cut/lib/assetDrag";
+import { useInView } from "@/cut/hooks/useInView";
 import { isMediaFile } from "@/cut/lib/media";
 import { patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
 import {
@@ -474,6 +475,10 @@ export function LibraryCard({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const { flash, attachReveal } = useRevealFlash("library", a.id);
+  // Each card is a real media element, so the source waits until the tile has
+  // been scrolled near: a large library would otherwise pull every file's
+  // metadata across the network the moment the page opened.
+  const [tileRef, seen] = useInView<HTMLDivElement>();
   // Poster from the video itself so the still matches what plays on hover.
   // An ffmpeg still washes out iPhone HDR (HLG) footage — the browser tone-maps
   // the video correctly, so we render the frame instead of a baked thumbnail.
@@ -500,21 +505,24 @@ export function LibraryCard({
       }}
     >
       <div
+        ref={tileRef}
         className={cn(
           "relative aspect-square cursor-grab overflow-hidden rounded-xl border bg-muted transition-shadow group-hover:shadow-[0_4px_20px_rgba(0,0,0,0.1)] active:cursor-grabbing",
           selected || flash ? "border-[#0a84ff] ring-2 ring-[#0a84ff]" : "border-border"
         )}
       >
         {a.type === "video" ? (
-          <video
-            ref={videoRef}
-            src={`${libraryMediaUrl(a.fileName)}#t=${posterT}`}
-            muted
-            loop
-            playsInline
-            preload="metadata"
-            className="size-full object-cover"
-          />
+          seen && (
+            <video
+              ref={videoRef}
+              src={`${libraryMediaUrl(a.fileName)}#t=${posterT}`}
+              muted
+              loop
+              playsInline
+              preload="metadata"
+              className="size-full object-cover"
+            />
+          )
         ) : a.type === "image" ? (
           // eslint-disable-next-line @next/next/no-img-element -- library media file, not Next-optimizable
           <img src={libraryMediaUrl(a.fileName)} alt={a.name} loading="lazy" className="size-full object-cover" />
