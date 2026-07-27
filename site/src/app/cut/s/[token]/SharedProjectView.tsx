@@ -6,7 +6,7 @@ import { Clapperboard, Loader2 } from "lucide-react";
 import { authHrefFor } from "@/app/_components/landing/useAppEntryHref";
 import { Button } from "@/components/ui/button";
 import { Editor } from "@/cut/components/Editor";
-import { setCutMode } from "@/cut/lib/backend";
+import { bindCutMode } from "@/cut/lib/backend";
 import { bindSharedBackend } from "@/cut/lib/backend/shared";
 import { useEditor } from "@/cut/lib/store";
 import type { ShareFeatures } from "@/cut/lib/types";
@@ -41,7 +41,7 @@ export function SharedProject() {
         if (!res.ok) return setGate({ state: "missing" });
         const meta = (await res.json()) as { projectId: string; features: ShareFeatures };
         bindSharedBackend(token);
-        setCutMode("shared");
+        bindCutMode("shared");
         useEditor.getState().setSharedView(meta.features);
         setGate({ state: "ready", projectId: meta.projectId });
       })

@@ -14,18 +14,48 @@ import type { CutBackend, CutCaps, CutMode } from "./types";
 export type { CutBackend, CutCaps, CutMode };
 export { apiJson } from "../api";
 
-let mode: CutMode = "local";
+// Two things decide the backend, and only one of them knows about a project.
+// The gate probes this Mac for an engine and sets the *ambient* mode — what the
+// projects home and library run against, before any project is open. A project
+// that is open pins the mode to its own residency, which is a fact about that
+// project and outranks the ambient guess. Both writers are async and race on
+// load; pinning is what keeps the gate's later "an engine answered, so local"
+// from dragging an open cloud project onto the engine, where its doc and media
+// don't exist.
+let ambient: CutMode = "local";
+let pinned: CutMode | null = null;
 const listeners = new Set<() => void>();
 
-/** Set by the ConnectGate before the app's data layer runs. */
+function settle(apply: () => void) {
+  const before = cutMode();
+  apply();
+  if (cutMode() !== before) listeners.forEach((l) => l());
+}
+
+/** Set by the ConnectGate: where the app runs when no project is open. */
 export function setCutMode(next: CutMode) {
-  if (mode === next) return;
-  mode = next;
-  listeners.forEach((l) => l());
+  settle(() => {
+    ambient = next;
+  });
+}
+
+/** Pin the mode to an open project's residency, outranking the ambient mode
+ * until `releaseCutMode`. */
+export function bindCutMode(next: CutMode) {
+  settle(() => {
+    pinned = next;
+  });
+}
+
+/** Drop the pin when the project closes; the ambient mode takes over again. */
+export function releaseCutMode() {
+  settle(() => {
+    pinned = null;
+  });
 }
 
 export function cutMode(): CutMode {
-  return mode;
+  return pinned ?? ambient;
 }
 
 /** Subscription feed for ./hooks' useSyncExternalStore. */
@@ -37,6 +67,7 @@ export function subscribeCutMode(onChange: () => void) {
 }
 
 export function getBackend(): CutBackend {
+  const mode = cutMode();
   return mode === "cloud" ? cloudBackend : mode === "shared" ? sharedBackend : localBackend;
 }
 

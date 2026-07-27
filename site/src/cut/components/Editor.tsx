@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Clapperboard, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { apiFetch, setCutMode } from "@/cut/lib/backend";
+import { apiFetch, bindCutMode, releaseCutMode } from "@/cut/lib/backend";
 import { loadedDocVersion } from "@/cut/lib/backend/shared";
 import { refreshShareCard, renderPreviewProxy } from "@/cut/lib/exportClient";
 import { fileZoneAt, hasRefDrag } from "@/cut/lib/assetRef";
@@ -72,14 +72,17 @@ export function Editor({
 
   // Load the project document, then enrich assets (thumbs/waveforms) lazily.
   // Residency is a fact about the project, not the link: resolve where the id
-  // lives (residency.ts) and bind the backend before anything else fetches.
-  // A share view skips that — its page bound the shared backend already.
+  // lives (residency.ts) and pin the backend before anything else fetches.
+  // Pinning, rather than setting the ambient mode, is what makes this stick —
+  // the ConnectGate's engine probe finishes on its own schedule and would
+  // otherwise flip an open cloud project onto the engine.
+  // A share view skips that — its page pinned the shared backend already.
   useEffect(() => {
     let alive = true;
     const bind = viewer
       ? Promise.resolve()
       : resolveProjectMode(projectId).then((mode) => {
-          if (alive) setCutMode(mode);
+          if (alive) bindCutMode(mode);
         });
     void bind.then(() => {
       if (!alive) return;
@@ -95,6 +98,7 @@ export function Editor({
     // project reconnect here.
     return () => {
       alive = false;
+      releaseCutMode();
     };
   }, [projectId, viewer]);
 

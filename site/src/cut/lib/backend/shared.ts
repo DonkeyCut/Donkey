@@ -8,7 +8,7 @@ import type { CutBackend } from "./types";
 
 let token = "";
 
-/** Bind the share link token before setCutMode("shared"). */
+/** Bind the share link token before bindCutMode("shared"). */
 export function bindSharedBackend(next: string) {
   token = next;
 }
