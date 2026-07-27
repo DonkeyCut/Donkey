@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Check,
@@ -45,12 +46,19 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { engineLost, engineOrigin, servedFromEngine } from "@/cut/lib/api";
-import { cloudBackend, quotaErrorMessage } from "@/cut/lib/backend/cloud";
+import { engineOrigin, servedFromEngine } from "@/cut/lib/api";
+import { quotaErrorMessage } from "@/cut/lib/backend/cloud";
 import { useCloudUsage, useCutMode } from "@/cut/lib/backend/hooks";
-import { localBackend } from "@/cut/lib/backend/local";
-import type { CutBackend } from "@/cut/lib/backend/types";
-import { useWebMode, webModeEnabled } from "@/cut/lib/flags";
+import { dropCachedDoc, seedNewProjectDoc } from "@/cut/lib/docCache";
+import {
+  backendFor,
+  patchProjects,
+  refetchProjects,
+  useProjectsSection,
+  type ProjectsSection,
+  type Residency,
+} from "@/cut/lib/queries";
+import { useWebMode } from "@/cut/lib/flags";
 import { track } from "@/lib/analytics";
 import { authClient } from "@/lib/auth-client";
 import { useStartCheckout } from "@/queries/billing";
@@ -67,15 +75,10 @@ import { buildDragGhost, FolderCrumb, FolderShelf, formatBytes, Marquee } from "
 
 type View = "gallery" | "list";
 
-// Where a project lives: the engine on this Mac or the hosted cloud backend.
-// The home lists each residency it can reach as its own section, talking to
-// the backend objects directly — the global mode is only bound when a project
-// opens into the editor. (The "shared" mode is a view of someone else's
-// project, never a residency of yours.)
-type Residency = "local" | "cloud";
-
-const backendFor = (r: Residency): CutBackend => (r === "cloud" ? cloudBackend : localBackend);
-
+// The home lists each residency it can reach, talking to the backend objects
+// directly — the global mode is only bound when a project opens into the
+// editor. Each section's listing is cached (lib/queries.ts), so returning here
+// paints the shelf immediately and revalidates behind it.
 const RESIDENCY_LABEL: Record<Residency, string> = { local: "On this Mac", cloud: "Cloud" };
 
 type SectionData = {
@@ -83,8 +86,6 @@ type SectionData = {
   folders: ProjectFolder[];
   error: boolean;
 };
-
-const EMPTY_SECTION: SectionData = { projects: null, folders: [], error: false };
 
 // A dragged selection is carried as a JSON array of project ids, so one drag can
 // move a whole marquee-selected collection into a folder.
@@ -176,10 +177,31 @@ export function ProjectsHome() {
   const dual = residencies.length > 1;
   const r0 = residencies[0];
 
-  const [data, setData] = useState<Record<Residency, SectionData>>({
-    local: EMPTY_SECTION,
-    cloud: EMPTY_SECTION,
+  const client = useQueryClient();
+  // Hooks can't run in a loop, so both sections are always wired and the
+  // inactive one simply stays disabled.
+  const localSection = useProjectsSection("local", residencies.includes("local"));
+  const cloudSection = useProjectsSection("cloud", residencies.includes("cloud"));
+  const asSection = (q: typeof localSection): SectionData => ({
+    projects: q.data?.projects ?? null,
+    folders: q.data?.folders ?? [],
+    // A cached listing on screen outranks a failed revalidation: the cards
+    // stay, and only a section with nothing to show says it couldn't load.
+    error: q.isError && q.data === undefined,
   });
+  const data: Record<Residency, SectionData> = {
+    local: asSection(localSection),
+    cloud: asSection(cloudSection),
+  };
+
+  // Optimistic edits to a section's cached listing; the next revalidation
+  // reconciles whatever the server actually did.
+  const patch = useCallback(
+    (r: Residency, fn: (s: ProjectsSection) => ProjectsSection) => patchProjects(client, r, fn),
+    [client]
+  );
+  const refresh = useCallback((r: Residency) => refetchProjects(client, r), [client]);
+
   // The open folder lives in the URL (?folder=…) so project URLs can point
   // back into it and the browser's back button steps folder → root.
   const openFolder = useSearchParams().get("folder");
@@ -214,46 +236,6 @@ export function ProjectsHome() {
     localStorage.setItem("cut-projects-view", v);
   };
 
-  const refresh = useCallback(async (r: Residency) => {
-    const backend = backendFor(r);
-    try {
-      const [res, fres] = await Promise.all([
-        backend.fetch("/api/cut/projects"),
-        backend.fetch("/api/cut/projects/folders"),
-      ]);
-      if (!res.ok) throw new Error(String(res.status));
-      const projects = (await res.json()) as ProjectSummary[];
-      const folders = fres.ok ? ((await fres.json()) as ProjectFolder[]) : [];
-      setData((prev) => ({ ...prev, [r]: { projects, folders, error: false } }));
-    } catch {
-      if (r === "local" && !webModeEnabled()) {
-        // The engine on this Mac stopped answering; the ConnectGate takes the
-        // screen back over until it returns.
-        engineLost();
-        return;
-      }
-      // One backend failing never takes down the other's section.
-      setData((prev) => ({ ...prev, [r]: { ...prev[r], error: true } }));
-    }
-  }, []);
-
-  const residencyKey = residencies.join(",");
-  useEffect(() => {
-    for (const r of residencyKey.split(",") as Residency[]) void refresh(r);
-  }, [residencyKey, refresh]);
-
-  // A section stuck on "Couldn't load these projects" heals itself: while any
-  // section is errored, retry its refresh every few seconds. A successful
-  // refresh clears the error, which changes the key and drops the interval.
-  const erroredKey = residencies.filter((r) => data[r].error).join(",");
-  useEffect(() => {
-    if (!erroredKey) return;
-    const id = setInterval(() => {
-      for (const r of erroredKey.split(",") as Residency[]) void refresh(r);
-    }, 3000);
-    return () => clearInterval(id);
-  }, [erroredKey, refresh]);
-
   const createFolder = async (r: Residency, fname: string) => {
     const res = await backendFor(r).fetch("/api/cut/projects/folders", {
       method: "POST",
@@ -262,18 +244,15 @@ export function ProjectsHome() {
     });
     if (res.ok) {
       const f = (await res.json()) as ProjectFolder;
-      setData((prev) => ({ ...prev, [r]: { ...prev[r], folders: [...prev[r].folders, f] } }));
+      patch(r, (s) => ({ ...s, folders: [...s.folders, f] }));
       track("folder_created");
     }
   };
 
   const renameFolder = async (r: Residency, id: string, fname: string) => {
-    setData((prev) => ({
-      ...prev,
-      [r]: {
-        ...prev[r],
-        folders: prev[r].folders.map((f) => (f.id === id ? { ...f, name: fname } : f)),
-      },
+    patch(r, (s) => ({
+      ...s,
+      folders: s.folders.map((f) => (f.id === id ? { ...f, name: fname } : f)),
     }));
     await backendFor(r)
       .fetch(`/api/cut/projects/folders/${id}`, {
@@ -292,15 +271,9 @@ export function ProjectsHome() {
   };
 
   const deleteFolder = async (r: Residency, id: string) => {
-    setData((prev) => ({
-      ...prev,
-      [r]: {
-        ...prev[r],
-        folders: prev[r].folders.filter((f) => f.id !== id),
-        projects: (prev[r].projects ?? []).map((p) =>
-          p.folderId === id ? { ...p, folderId: null } : p
-        ),
-      },
+    patch(r, (s) => ({
+      folders: s.folders.filter((f) => f.id !== id),
+      projects: s.projects.map((p) => (p.folderId === id ? { ...p, folderId: null } : p)),
     }));
     if (openFolder === id) router.replace(homeHref(base, "projects"));
     await backendFor(r)
@@ -316,14 +289,9 @@ export function ProjectsHome() {
     const move = ids.filter((id) => own.has(id));
     if (move.length === 0) return;
     const idset = new Set(move);
-    setData((prev) => ({
-      ...prev,
-      [r]: {
-        ...prev[r],
-        projects: (prev[r].projects ?? []).map((p) =>
-          idset.has(p.id) ? { ...p, folderId } : p
-        ),
-      },
+    patch(r, (s) => ({
+      ...s,
+      projects: s.projects.map((p) => (idset.has(p.id) ? { ...p, folderId } : p)),
     }));
     setSelected(new Set());
     await Promise.all(
@@ -337,17 +305,28 @@ export function ProjectsHome() {
     ).catch(() => void refresh(r));
   };
 
+  // Creating a project is the one moment where the whole answer is already
+  // known: the server hands back the summary, and the document it just wrote
+  // is empty. Seed both — the card is in the grid before the navigation, and
+  // the editor opens on its first frame instead of waiting out a round trip
+  // for a document we can describe in full.
+  const openNewProject = async (r: Residency, pname: string, folderId: string | null) => {
+    const res = await backendFor(r).fetch("/api/cut/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: pname, folderId }),
+    });
+    const project = (await res.json()) as ProjectSummary;
+    patch(r, (s) => ({ ...s, projects: [project, ...s.projects] }));
+    seedNewProjectDoc(project.id, project.name, r);
+    track("project_created", { source: "projects_home" });
+    router.push(projectHref(base, project.id, "projects", folderId));
+  };
+
   const create = async () => {
     setBusy(true);
     try {
-      const res = await backendFor(r0).fetch("/api/cut/projects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim() || "Untitled", folderId: openFolder }),
-      });
-      const project = (await res.json()) as ProjectSummary;
-      track("project_created", { source: "projects_home" });
-      router.push(projectHref(base, project.id, "projects", openFolder));
+      await openNewProject(r0, name.trim() || "Untitled", openFolder);
     } finally {
       setBusy(false);
     }
@@ -355,16 +334,8 @@ export function ProjectsHome() {
 
   // Make a new project in the folder that's open (root when none), then jump
   // straight into it — no naming step.
-  const newProjectHere = async (r: Residency, folderId: string | null = openFolder) => {
-    const res = await backendFor(r).fetch("/api/cut/projects", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Untitled", folderId }),
-    });
-    const project = (await res.json()) as ProjectSummary;
-    track("project_created", { source: "projects_home" });
-    router.push(projectHref(base, project.id, "projects", folderId));
-  };
+  const newProjectHere = (r: Residency, folderId: string | null = openFolder) =>
+    openNewProject(r, "Untitled", folderId);
 
   // Turn a batch of desktop files into projects filed under `folderId`. Each
   // becomes its own project and pops into the grid the moment it's ready.
@@ -392,18 +363,20 @@ export function ProjectsHome() {
 
   const rename = async () => {
     if (!renaming) return;
-    setBusy(true);
-    try {
-      await backendFor(renaming.residency).fetch(`/api/cut/projects/${renaming.project.id}`, {
+    const { project, residency } = renaming;
+    const next = name.trim() || project.name;
+    patch(residency, (s) => ({
+      ...s,
+      projects: s.projects.map((p) => (p.id === project.id ? { ...p, name: next } : p)),
+    }));
+    setRenaming(null);
+    await backendFor(residency)
+      .fetch(`/api/cut/projects/${project.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim() || renaming.project.name }),
-      });
-      setRenaming(null);
-      await refresh(renaming.residency);
-    } finally {
-      setBusy(false);
-    }
+        body: JSON.stringify({ name: next }),
+      })
+      .catch(() => void refresh(residency));
   };
 
   const duplicate = async (r: Residency, p: ProjectSummary) => {
@@ -474,13 +447,15 @@ export function ProjectsHome() {
       await backendFor(residency).fetch(`/api/cut/projects/${id}`, { method: "DELETE" });
       // The doc, media, and exports go with the folder on the server. Purge the
       // client-side residue keyed to this project so nothing survives it: a live
-      // scene run, its in-flight renders, and its chat history (whose ids the
-      // render-resume guard reads to keep a deleted thread's render from landing).
+      // scene run, its in-flight renders, its chat history (whose ids the
+      // render-resume guard reads to keep a deleted thread's render from
+      // landing), and the cached copy of its document.
       useGenScene.getState().killProject(id);
       useGenerate.getState().cancelForOwner({ projectId: id });
       clearProjectThreads(id);
+      dropCachedDoc(id, residency);
+      patch(residency, (s) => ({ ...s, projects: s.projects.filter((p) => p.id !== id) }));
       setDeleting(null);
-      await refresh(residency);
     } finally {
       setBusy(false);
     }

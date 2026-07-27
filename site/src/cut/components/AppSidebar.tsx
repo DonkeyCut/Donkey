@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Clapperboard, FolderOpen, Loader2, Plus } from "lucide-react";
@@ -13,7 +14,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { apiFetch } from "@/cut/lib/backend";
+import { apiFetch, getBackend } from "@/cut/lib/backend";
+import { seedNewProjectDoc } from "@/cut/lib/docCache";
+import { patchProjects } from "@/cut/lib/queries";
 import { track } from "@/lib/analytics";
 import { NavUser } from "@/cut/components/NavUser";
 import { homeHref, projectHref, tabForPath, useCutBase, type CutTab } from "@/cut/lib/nav";
@@ -29,6 +32,7 @@ export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const base = useCutBase();
+  const client = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -42,6 +46,14 @@ export function AppSidebar() {
         body: JSON.stringify({ name: name.trim() || "Untitled" }),
       });
       const project = (await res.json()) as ProjectSummary;
+      const kind = getBackend().kind;
+      patchProjects(client, kind === "cloud" ? "cloud" : "local", (s) => ({
+        ...s,
+        projects: [project, ...s.projects],
+      }));
+      // A brand-new project's document is empty, so the editor about to open
+      // needs no round trip to draw it.
+      seedNewProjectDoc(project.id, project.name, kind);
       track("project_created", { source: "sidebar" });
       // The sidebar creates on the globally bound backend, so the link carries
       // that residency.

@@ -2,6 +2,8 @@
 
 import { useCallback, useState } from "react";
 
+import { openCutDb } from "./cache";
+
 /**
  * Per-project view state (zoom level, timeline panel height) — how this
  * browser looks at a project, not part of the cut. Stored in IndexedDB
@@ -15,23 +17,11 @@ export interface ProjectUiState {
   timelineH?: number;
 }
 
-const DB_NAME = "cut";
 const STORE = "project-ui";
-
-function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = () => {
-      if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE);
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
 
 export async function loadUiState(projectId: string): Promise<ProjectUiState> {
   try {
-    const db = await openDb();
+    const db = await openCutDb();
     return await new Promise((resolve) => {
       const req = db.transaction(STORE).objectStore(STORE).get(projectId);
       req.onsuccess = () => resolve((req.result as ProjectUiState) ?? {});
@@ -51,7 +41,7 @@ async function flush() {
   pending = null;
   if (!job) return;
   try {
-    const db = await openDb();
+    const db = await openCutDb();
     const tx = db.transaction(STORE, "readwrite");
     const store = tx.objectStore(STORE);
     const req = store.get(job.projectId);

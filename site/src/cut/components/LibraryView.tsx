@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   FolderOpen,
@@ -32,12 +33,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { clearAssetDrag, setCardDragImage, setLibraryDragData } from "@/cut/lib/assetDrag";
 import { isMediaFile } from "@/cut/lib/media";
+import { patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
 import {
   createLibraryFolder,
   deleteFromLibrary,
   deleteLibraryFolder,
   deleteTemplate,
-  fetchLibrary,
   importUrlToLibrary,
   libraryMediaUrl,
   moveLibraryItem,
@@ -45,9 +46,8 @@ import {
   renameTemplate,
   uploadToLibrary,
   type LibraryAsset,
-  type LibraryFolder,
+  type LibraryData,
 } from "@/cut/lib/library";
-import type { LibraryTemplate } from "@/cut/lib/types";
 import { TemplateCard } from "./TemplateCard";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
 import { useRevealFlash } from "@/cut/lib/refReveal";
@@ -64,9 +64,18 @@ const LIBRARY_MOVE_MIME = "application/x-cut-library-move";
 export function LibraryView() {
   const router = useRouter();
   const base = useCutBase();
-  const [assets, setAssets] = useState<LibraryAsset[] | null>(null);
-  const [folders, setFolders] = useState<LibraryFolder[]>([]);
-  const [templates, setTemplates] = useState<LibraryTemplate[]>([]);
+  const client = useQueryClient();
+  // The listing is cached (lib/queries.ts): coming back to the library paints
+  // the shelf it painted last time and revalidates behind it.
+  const library = useLibrary();
+  const all = library.data?.assets ?? [];
+  const folders = library.data?.folders ?? [];
+  const templates = library.data?.templates ?? [];
+  const patch = useCallback(
+    (fn: (prev: LibraryData) => LibraryData) => patchLibrary(client, fn),
+    [client]
+  );
+  const reload = useCallback(() => refetchLibrary(client), [client]);
   // The open folder lives in the URL (?folder=…) so the browser's back button
   // steps folder → root and the location survives reloads.
   const openFolder = useSearchParams().get("folder");
@@ -84,28 +93,15 @@ export function LibraryView() {
   const [fileOver, setFileOver] = useState(false);
   const dragDepth = useRef(0);
 
-  const reload = () =>
-    fetchLibrary()
-      .then((d) => {
-        setAssets(d.assets);
-        setFolders(d.folders);
-        setTemplates(d.templates);
-      })
-      .catch(() => setAssets([]));
-
   const renameTpl = async (id: string, name: string) => {
-    setTemplates((prev) => prev.map((t) => (t.id === id ? { ...t, name } : t)));
+    patch((d) => ({ ...d, templates: d.templates.map((t) => (t.id === id ? { ...t, name } : t)) }));
     await renameTemplate(id, name).catch(() => void reload());
   };
 
   const removeTpl = async (id: string) => {
-    setTemplates((prev) => prev.filter((t) => t.id !== id));
+    patch((d) => ({ ...d, templates: d.templates.filter((t) => t.id !== id) }));
     await deleteTemplate(id).catch(() => void reload());
   };
-
-  useEffect(() => {
-    void reload();
-  }, []);
 
   // Upload a batch into `folderId` (the open folder by default — folder tiles
   // pass their own id when files are dropped straight onto them).
@@ -119,7 +115,7 @@ export function LibraryView() {
           await moveLibraryItem(asset.id, folderId).catch(() => {});
           asset.folderId = folderId;
         }
-        setAssets((prev) => [asset, ...(prev ?? [])]);
+        patch((d) => ({ ...d, assets: [asset, ...d.assets] }));
       } catch {
         // Skip unreadable files; the rest of the batch still uploads.
       } finally {
@@ -141,7 +137,7 @@ export function LibraryView() {
           asset.folderId = openFolder;
         }
       }
-      setAssets((prev) => [...imported, ...(prev ?? [])]);
+      patch((d) => ({ ...d, assets: [...imported, ...d.assets] }));
       setUrl("");
       setAddOpen(false);
     } catch (e) {
@@ -155,7 +151,7 @@ export function LibraryView() {
     if (!deleting) return;
     const id = deleting.id;
     setDeleting(null);
-    setAssets((prev) => (prev ?? []).filter((a) => a.id !== id));
+    patch((d) => ({ ...d, assets: d.assets.filter((a) => a.id !== id) }));
     try {
       await deleteFromLibrary(id);
     } catch {
@@ -173,8 +169,11 @@ export function LibraryView() {
   const moveItems = async (ids: string[], folderId: string | null) => {
     if (ids.length === 0) return;
     const idset = new Set(ids);
-    setAssets((prev) => (prev ?? []).map((a) => (idset.has(a.id) ? { ...a, folderId } : a)));
-    setTemplates((prev) => prev.map((t) => (idset.has(t.id) ? { ...t, folderId } : t)));
+    patch((d) => ({
+      ...d,
+      assets: d.assets.map((a) => (idset.has(a.id) ? { ...a, folderId } : a)),
+      templates: d.templates.map((t) => (idset.has(t.id) ? { ...t, folderId } : t)),
+    }));
     setSelected(new Set());
     await Promise.all(ids.map((id) => moveLibraryItem(id, folderId))).catch(() => void reload());
   };
@@ -197,7 +196,6 @@ export function LibraryView() {
     }
   };
 
-  const all = assets ?? [];
   const shown = all.filter((a) => (a.folderId ?? null) === openFolder);
   const shownTemplates = templates.filter((t) => (t.folderId ?? null) === openFolder);
   const openFolderName = folders.find((f) => f.id === openFolder)?.name;
@@ -295,20 +293,23 @@ export function LibraryView() {
           onOpen={gotoFolder}
           onCreate={async (name) => {
             const f = await createLibraryFolder(name);
-            setFolders((prev) => [...prev, f]);
+            patch((d) => ({ ...d, folders: [...d.folders, f] }));
           }}
           onRename={async (id, name) => {
-            setFolders((prev) => prev.map((f) => (f.id === id ? { ...f, name } : f)));
+            patch((d) => ({
+              ...d,
+              folders: d.folders.map((f) => (f.id === id ? { ...f, name } : f)),
+            }));
             await renameLibraryFolder(id, name).catch(() => void reload());
           }}
           onDelete={async (id) => {
-            setFolders((prev) => prev.filter((f) => f.id !== id));
-            setAssets((prev) =>
-              (prev ?? []).map((a) => (a.folderId === id ? { ...a, folderId: null } : a))
-            );
-            setTemplates((prev) =>
-              prev.map((t) => (t.folderId === id ? { ...t, folderId: null } : t))
-            );
+            patch((d) => ({
+              folders: d.folders.filter((f) => f.id !== id),
+              assets: d.assets.map((a) => (a.folderId === id ? { ...a, folderId: null } : a)),
+              templates: d.templates.map((t) =>
+                t.folderId === id ? { ...t, folderId: null } : t
+              ),
+            }));
             if (openFolder === id) router.replace(homeHref(base, "library"));
             await deleteLibraryFolder(id).catch(() => void reload());
           }}
@@ -336,7 +337,7 @@ export function LibraryView() {
         </div>
       )}
 
-      {assets === null ? (
+      {!library.data && library.isPending ? (
         <div className="grid place-items-center py-24 text-muted-foreground">
           <Loader2 className="size-5 animate-spin" />
         </div>

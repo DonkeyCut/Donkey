@@ -6,6 +6,7 @@ import { Clapperboard, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiFetch, bindCutMode, releaseCutMode } from "@/cut/lib/backend";
 import { loadedDocVersion } from "@/cut/lib/backend/shared";
+import { writeCachedDoc } from "@/cut/lib/docCache";
 import { refreshShareCard, renderPreviewProxy } from "@/cut/lib/exportClient";
 import { fileZoneAt, hasRefDrag } from "@/cut/lib/assetRef";
 import { enrichAsset, importFileToProject } from "@/cut/lib/media";
@@ -267,15 +268,19 @@ export function Editor({
       const s = useEditor.getState();
       if (!s.loaded || s.projectId !== projectId) return;
       s.setSaveState("saving");
+      const doc = serializeDoc(s);
       try {
         const res = await apiFetch(`/api/cut/projects/${projectId}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(serializeDoc(s)),
+          body: JSON.stringify(doc),
         });
         if (res.ok) {
           failures = 0;
           useEditor.getState().setSaveState("saved");
+          // The snapshot the next open paints from is whatever this browser
+          // last put on the server, so it tracks every save.
+          writeCachedDoc(projectId, doc);
           return;
         }
         useEditor.getState().setSaveState("error");
@@ -286,7 +291,10 @@ export function Editor({
       }
     };
 
-    let primed = false;
+    // Re-baselined every time a document is hydrated — the snapshot an open
+    // paints, the live document that replaces it, a conflict reload — so a
+    // document that came from the server is never saved straight back to it.
+    let primedEpoch = -1;
     // Assets change identity on runtime enrichment (thumbs, peaks) too, so a
     // new reference compares by its stored projection: field edits like an
     // origin change ("Add to Media", chat tagging) must save, enrichment not.
@@ -302,10 +310,10 @@ export function Editor({
     };
     const unsub = useEditor.subscribe((s) => {
       if (!s.loaded || s.projectId !== projectId) return;
-      if (!primed) {
-        // First tick after load: snapshot the freshly loaded doc so opening
-        // a project never counts as an edit.
-        primed = true;
+      if (s.loadEpoch !== primedEpoch) {
+        // First tick after a hydration: snapshot the freshly loaded doc so
+        // arriving at one never counts as an edit.
+        primedEpoch = s.loadEpoch;
         last = serializeDoc(s);
         lastName = s.projectName;
         assetsChanged(s.assets);

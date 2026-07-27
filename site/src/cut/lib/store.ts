@@ -30,11 +30,18 @@ import { fillSlot } from "./genvideo/fillSlot";
 import { apiFetch, apiJson, getBackend } from "./backend";
 import { fetchSignedMediaUrls } from "./backend/cloud";
 import { markSignedBatch } from "./mediaLinks";
+import {
+  dropCachedDoc,
+  readCachedDoc,
+  readCachedMediaLinks,
+  writeCachedDoc,
+  writeCachedMediaLinks,
+} from "./docCache";
 import { cloudTranscribeSpec, type CloudTranscribeSpec } from "./cloudTranscribe";
 import { trackLocale } from "./subtitles";
 import { ANIM_STYLE_IDS, emptySubtitles, IMAGE_CLIP_SECONDS, LOOK_IDS, MAX_SUBTITLE_LANES, mediaUrl, migrateLegacyTransitions, normalizeAspect, SPEED_FLOOR, SPEED_MIN, TRANSITION_MAX } from "./types";
 import { readTextStyle } from "./textStyle";
-import { loadUiState, saveUiState } from "./uiState";
+import { loadUiState, saveUiState, type ProjectUiState } from "./uiState";
 import { captureTimelineFrames } from "./visualFrames";
 
 const uid = () => crypto.randomUUID().slice(0, 8);
@@ -100,6 +107,11 @@ export interface EditorState {
   projectId: string | null;
   projectName: string;
   loaded: boolean;
+  /** Bumped every time a document is hydrated into the store — the cached
+   * copy an open paints first, the live one that replaces it, a conflict
+   * reload. Autosave watches it to re-baseline, so a document that arrived
+   * from the server is never saved straight back to it. */
+  loadEpoch: number;
   loadError: string | null;
   saveState: SaveState;
   /** Read-only shared view: the set wrapper strips doc-mutating writes, so
@@ -783,6 +795,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
     projectId: null,
     projectName: "",
     loaded: false,
+    loadEpoch: 0,
     loadError: null,
     saveState: "saved",
     readOnly: false,
@@ -819,6 +832,10 @@ export const useEditor = create<EditorState>((baseSet, get) => {
     renders: [],
 
     loadProject: async (id) => {
+      // Re-reading a project already on screen — a viewer's change poll, a
+      // conflict reload. The whole point of those is that the stored copy has
+      // moved on, so the snapshot below is exactly the wrong thing to paint.
+      const reloading = get().projectId === id && get().loaded;
       history.length = 0;
       future.length = 0;
       pending = null;
@@ -863,28 +880,16 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       // the drain and the fetch below. Lazy import: docWriter reads store
       // helpers, so a static import would be a cycle.
       await import("./genvideo/docWriter").then((m) => m.docWriterIdle(id)).catch(() => {});
-      try {
-        const [res, ui] = await Promise.all([apiFetch(`/api/cut/projects/${id}`), loadUiState(id)]);
-        if (!res.ok) throw new Error("This project no longer exists.");
-        const doc = (await res.json()) as ProjectDoc;
-        const assets: MediaAsset[] = doc.assets.map((a) => ({
-          ...a,
-          url: mediaUrl(id, a.fileName),
-        }));
-        // Cloud and shared media ride signed R2 URLs, batch-minted once per
-        // load; the /media route's 302 stays the fallback for anything the
-        // mint misses. mediaLinks re-mints the batch as it nears expiry.
-        if (getBackend().kind !== "local") {
-          const signed = await fetchSignedMediaUrls(id, assets.map((a) => a.fileName));
-          for (const a of assets) a.url = signed.urls.get(a.fileName) ?? a.url;
-          markSignedBatch(id, signed.expiresAt);
-        } else {
-          markSignedBatch(id, null);
-        }
+
+      // One shape of hydration, used by both the snapshot painted below and
+      // the live document that replaces it, so the legacy migrations happen
+      // once per document rather than once per code path.
+      const hydrate = (doc: Partial<ProjectDoc>, assets: MediaAsset[], ui: ProjectUiState) => {
+        const docClips = doc.clips ?? [];
         // Older docs stored video track 0 packed (array order implied the
         // position); bake explicit starts in once so every clip is free-placed.
-        const legacy = (doc.clips as LegacyClip[]).some((c) => typeof c.start !== "number");
-        const folded = (legacy ? packStarts(doc.clips as LegacyClip[]) : doc.clips).map((c) => ({
+        const legacy = (docClips as LegacyClip[]).some((c) => typeof c.start !== "number");
+        const folded = (legacy ? packStarts(docClips as LegacyClip[]) : docClips).map((c) => ({
           ...c,
           track: c.track ?? 0,
         }));
@@ -911,11 +916,11 @@ export const useEditor = create<EditorState>((baseSet, get) => {
         const merged = migrateLegacyTransitions(lifted);
         hydrating = true;
         set({
-          projectName: doc.name,
+          projectName: doc.name ?? "",
           assets,
           clips: merged,
-          audioClips: doc.audioClips,
-          overlays: doc.overlays,
+          audioClips: doc.audioClips ?? [],
+          overlays: doc.overlays ?? [],
           templates: doc.templates ?? [],
           aspect: normalizeAspect(doc.aspect) ?? "9:16",
           aspectTouched: doc.aspect !== undefined,
@@ -944,9 +949,109 @@ export const useEditor = create<EditorState>((baseSet, get) => {
           genvideo: doc.genvideo ?? undefined,
           renders: Array.isArray(doc.renders) ? doc.renders : [],
           loaded: true,
+          loadEpoch: get().loadEpoch + 1,
         });
+        hydrating = false;
+      };
+
+      // The live document goes out first, so everything below is a head start
+      // on it and never a substitute for it.
+      const docReq = apiFetch(`/api/cut/projects/${id}`);
+      const uiReq = loadUiState(id);
+      let landed = false;
+      const settle = () => {
+        landed = true;
+      };
+      void docReq.then(settle, settle);
+
+      // Paint the copy this browser last held. It is written on load and on
+      // every successful save, so for the ordinary case — reopening your own
+      // project — it is the document, and the editor draws on the next frame
+      // instead of a round trip later. Whether it is still on screen when the
+      // live document arrives decides how that one is applied.
+      let paintedFromCache = false;
+      try {
+        const [cached, ui] = reloading
+          ? [null, null]
+          : await Promise.all([readCachedDoc(id), uiReq]);
+        const stored = cached?.value;
+        const openable = () => !landed && get().projectId === id && !get().loaded;
+        if (stored && ui && openable()) {
+          const stale = stored.assets ?? [];
+          // Signed R2 links are cached alongside the doc, so a snapshot open
+          // hands its clips the very URLs the live load is about to hand
+          // them: identical strings, so nothing reloads when it lands.
+          const links =
+            getBackend().kind === "local"
+              ? null
+              : await readCachedMediaLinks(id, stale.map((a) => a.fileName));
+          if (openable()) {
+            hydrate(
+              stored,
+              stale.map((a) => ({ ...a, url: links?.urls.get(a.fileName) ?? mediaUrl(id, a.fileName) })),
+              ui
+            );
+            // Keep the re-mint schedule honest even if the live load never
+            // arrives: these links do expire.
+            markSignedBatch(id, links?.expiresAt ?? null);
+            paintedFromCache = true;
+          }
+        }
+      } catch {
+        // A snapshot miss costs a spinner and nothing else.
+      }
+
+      try {
+        const [res, ui] = await Promise.all([docReq, uiReq]);
+        if (!res.ok) {
+          // Gone, or no longer ours to read: the server is the authority on
+          // that, so retire the snapshot and show the error even when it is
+          // already on screen. Any other status is a server having a bad
+          // moment, which is the same case as not reaching it at all.
+          if ([401, 403, 404].includes(res.status)) {
+            dropCachedDoc(id);
+            set({ loaded: false, loadError: "This project no longer exists." });
+            return;
+          }
+          throw new Error("This project could not be loaded.");
+        }
+        const doc = (await res.json()) as ProjectDoc;
+        writeCachedDoc(id, doc);
+        const assets: MediaAsset[] = doc.assets.map((a) => ({
+          ...a,
+          url: mediaUrl(id, a.fileName),
+        }));
+        // Cloud and shared media ride signed R2 URLs, batch-minted once per
+        // load; the /media route's 302 stays the fallback for anything the
+        // mint misses. mediaLinks re-mints the batch as it nears expiry.
+        if (getBackend().kind !== "local") {
+          const signed = await fetchSignedMediaUrls(id, assets.map((a) => a.fileName));
+          for (const a of assets) a.url = signed.urls.get(a.fileName) ?? a.url;
+          markSignedBatch(id, signed.expiresAt);
+          writeCachedMediaLinks(id, signed.urls, signed.expiresAt);
+        } else {
+          markSignedBatch(id, null);
+        }
+        // The snapshot is on screen and has already been edited on top of —
+        // an undoable edit, or a project-level one like a rename that autosave
+        // has already marked dirty. Replacing it would throw that work away,
+        // so only the media links go in; the edits don't touch them and they
+        // do expire. The edits save as usual, and a stored copy that really
+        // has moved on answers that save with a conflict, which reloads
+        // through this same path.
+        if (paintedFromCache && (history.length > 0 || get().saveState !== "saved")) {
+          get().applyMediaUrls(new Map(assets.map((a) => [a.fileName, a.url])));
+          return;
+        }
+        hydrate(doc, assets, ui);
       } catch (err) {
-        set({ loadError: err instanceof Error ? err.message : String(err) });
+        // Couldn't reach the server. A snapshot already on screen is the
+        // better answer than an error page: the project is open and editable,
+        // a version behind at worst, and autosave retries until the link is
+        // back.
+        if (!paintedFromCache) {
+          set({ loadError: err instanceof Error ? err.message : String(err) });
+        }
       } finally {
         hydrating = false;
       }

@@ -13,7 +13,9 @@ export async function resolveProjectMode(projectId: string): Promise<CutMode> {
   if (!webModeEnabled()) return "local";
   if (!servedFromEngine() && !engineOrigin()) return "cloud";
   try {
-    const res = await localBackend.fetch(`/api/cut/projects/${projectId}`);
+    // HEAD: the question is whether the engine owns the id, and the answer is
+    // the status. The doc itself is fetched a moment later by the load.
+    const res = await localBackend.fetch(`/api/cut/projects/${projectId}`, { method: "HEAD" });
     if (res.ok) return "local";
   } catch {
     // The engine dropped since the gate probed it; the cloud copy (if any)

@@ -141,6 +141,13 @@ export function setEngineUser(id: string) {
   engineUser = id;
 }
 
+/** The bound account, or null before the session resolves. Client-side caches
+ * scope their keys to it so two accounts sharing a browser can't read each
+ * other's snapshots. */
+export function currentEngineUser(): string | null {
+  return engineUser;
+}
+
 const scopedPath = (path: string) =>
   engineUser
     ? `${path}${path.includes("?") ? "&" : "?"}u=${encodeURIComponent(engineUser)}`
