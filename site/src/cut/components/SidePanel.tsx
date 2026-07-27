@@ -61,6 +61,7 @@ import {
   type LibraryAsset,
   type LibraryFolder,
 } from "@/cut/lib/library";
+import { retryUpload } from "@/cut/lib/importQueue";
 import { revealMedia } from "@/cut/lib/media";
 import { mediaUrl, TRANSITION_MAX, type LibraryTemplate } from "@/cut/lib/types";
 import { genPulseOverlay, isGenTab, useGenNotify, useGenPulse, useWatchGenTab } from "@/cut/lib/genNotify";
@@ -686,6 +687,39 @@ function MediaPanel({
   );
 }
 
+/** The tile's upload state. The clip is already usable, so this stays out of
+ * the way: a line across the bottom of the tile while the bytes go out, and a
+ * message only if they don't arrive. */
+function UploadState({ asset }: { asset: MediaAsset }) {
+  const upload = asset.upload;
+  if (!upload) return null;
+  if (upload.error) {
+    return (
+      <div className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-black/70 px-1.5 py-1 text-[10px] text-white">
+        <span className="min-w-0 flex-1 truncate">Upload failed</span>
+        <button
+          type="button"
+          className="shrink-0 font-medium underline underline-offset-2"
+          onClick={(e) => {
+            e.stopPropagation();
+            retryUpload(asset.id);
+          }}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+  return (
+    <span className="absolute inset-x-0 bottom-0 h-[3px] bg-black/25">
+      <span
+        className="block h-full bg-primary transition-[width] duration-150"
+        style={{ width: `${Math.round(upload.progress * 100)}%` }}
+      />
+    </span>
+  );
+}
+
 function AssetCard({ asset, projectId }: { asset: MediaAsset; projectId: string }) {
   const caps = useCutCaps();
   const [saved, setSaved] = useState(false);
@@ -815,7 +849,7 @@ function AssetCard({ asset, projectId }: { asset: MediaAsset; projectId: string 
             {saved ? <Check className="size-3" /> : <Ellipsis className="size-3" />}
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
-            <DropdownMenuItem onClick={saveToLibrary}>
+            <DropdownMenuItem onClick={saveToLibrary} disabled={!!asset.upload}>
               <FolderPlus /> Save to library
             </DropdownMenuItem>
             {caps.revealInFinder && (
@@ -838,6 +872,7 @@ function AssetCard({ asset, projectId }: { asset: MediaAsset; projectId: string 
             className="absolute top-1.5 left-1.5 max-w-[70%] px-2 py-1 text-[11px] font-medium text-white transition-[max-width] group-hover:max-w-[calc(100%-4.75rem)]"
           />
         )}
+        {asset.upload && <UploadState asset={asset} />}
       </div>
       {asset.type !== "audio" && (
         <CopyNameLabel name={asset.name} className="text-[11px] text-muted-foreground" />

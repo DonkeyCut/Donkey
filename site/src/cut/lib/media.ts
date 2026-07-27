@@ -94,6 +94,28 @@ export function isTextFile(file: File) {
   return file.type.startsWith("text/") || /\.(txt|md|markdown|srt|vtt|csv|json)$/i.test(file.name);
 }
 
+/** Claim a name and mint a direct-to-R2 PUT for one file. The name is deduped
+ * and reserved server-side before the URL comes back, so callers can build the
+ * asset's final identity before a single byte moves. */
+export async function presignUpload(
+  presignPath: string,
+  file: Blob,
+  name: string,
+  backend: CutBackend = getBackend()
+): Promise<{ key: string; url: string; fileName: string }> {
+  const mime = file.type || "application/octet-stream";
+  const res = await backend.fetch(presignPath, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fileName: name, mime, bytes: file.size }),
+  });
+  const body = await apiJson<{ key?: string; url?: string; fileName?: string }>(res);
+  if (!res.ok || !body.key || !body.url) {
+    throw new Error(quotaErrorMessage(res.status, body) ?? body.error ?? "Upload failed.");
+  }
+  return { key: body.key, url: body.url, fileName: body.fileName ?? name };
+}
+
 /** Presign a direct-to-R2 upload, PUT the bytes, and return the object key
  * for the follow-up complete call. Shared by project media, the library, and
  * export overlays; cloud backend only. */
@@ -103,28 +125,37 @@ export async function presignedUpload(
   name: string,
   backend: CutBackend = getBackend()
 ): Promise<string> {
-  const mime = file.type || "application/octet-stream";
-  const res = await backend.fetch(presignPath, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fileName: name, mime, bytes: file.size }),
-  });
-  const body = await apiJson<{ key?: string; url?: string }>(res);
-  if (!res.ok || !body.key || !body.url) {
-    throw new Error(quotaErrorMessage(res.status, body) ?? body.error ?? "Upload failed.");
-  }
-  await putSigned(body.url, file, mime);
-  return body.key;
+  const signed = await presignUpload(presignPath, file, name, backend);
+  await putSigned(signed.url, file, file.type || "application/octet-stream");
+  return signed.key;
 }
 
-/** PUT a blob to a presigned R2 URL. */
-export async function putSigned(url: string, file: Blob, mime?: string) {
-  const put = await fetch(url, {
-    method: "PUT",
-    headers: { "Content-Type": mime ?? (file.type || "application/octet-stream") },
-    body: file,
+/** PUT a blob to a presigned R2 URL. XHR rather than fetch: it is the only way
+ * to watch the bytes leave, which is what an upload running behind the editor
+ * has to report. */
+export function putSigned(
+  url: string,
+  file: Blob,
+  mime?: string,
+  opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (opts?.signal?.aborted) return reject(new DOMException("Upload cancelled.", "AbortError"));
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url);
+    xhr.setRequestHeader("Content-Type", mime ?? (file.type || "application/octet-stream"));
+    if (opts?.onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && e.total > 0) opts.onProgress!(e.loaded / e.total);
+      };
+    }
+    xhr.onload = () =>
+      xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error("Upload failed."));
+    xhr.onerror = () => reject(new Error("Upload failed."));
+    xhr.onabort = () => reject(new DOMException("Upload cancelled.", "AbortError"));
+    opts?.signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+    xhr.send(file);
   });
-  if (!put.ok) throw new Error("Upload failed.");
 }
 
 /** Upload raw media bytes into a project. Local: the engine's multipart POST,
@@ -218,6 +249,50 @@ export async function uploadProjectImage(
   };
 }
 
+/** The kind of asset a dropped file becomes, or null if Cut can't use it.
+ * MIME wins over extension: recordings are .webm for both video and audio. */
+export function assetTypeOf(file: File): AssetType | null {
+  if (file.type.startsWith("video/")) return "video";
+  if (file.type.startsWith("audio/")) return "audio";
+  if (file.type.startsWith("image/")) return "image";
+  if (isVideoFile(file)) return "video";
+  if (isAudioFile(file)) return "audio";
+  if (isImageFile(file)) return "image";
+  return null;
+}
+
+type ProbedMeta = {
+  type: AssetType;
+  duration: number;
+  width?: number;
+  height?: number;
+  peaks?: number[];
+};
+
+/** Read a media URL's kind/duration/dimensions with the browser's own
+ * decoders. The probe can correct the guessed kind: a "video" container with
+ * no video stream is really audio. */
+async function probeMedia(type: AssetType, url: string): Promise<ProbedMeta> {
+  if (type === "image") {
+    // Images have no intrinsic duration; the timeline clip carries its length.
+    const dims = await loadImageMeta(url);
+    return { type, duration: 0, width: dims.width, height: dims.height };
+  }
+  if (type === "video") {
+    const v = await loadVideoMeta(url);
+    if (v.videoWidth === 0) return { type: "audio", duration: v.duration };
+    return { type, duration: v.duration, width: v.videoWidth, height: v.videoHeight };
+  }
+  // Decode for a sample-exact duration (HTMLAudioElement overestimates MP3s,
+  // leaving a placed clip running past its real audio) and reuse the same
+  // decode for the waveform, so enrichAsset has nothing left to do.
+  const audio = await decodeAudio(url);
+  if (audio && audio.duration > 0) {
+    return { type, duration: audio.duration, peaks: peaksFromChannel(audio.getChannelData(0)) };
+  }
+  return { type, duration: await loadAudioDuration(url) };
+}
+
 /** Probe a media file's kind/duration/dimensions in the browser via an object
  * URL — for backends that can't probe server-side (cloud library complete). */
 export async function probeFileMeta(file: File): Promise<{
@@ -228,18 +303,77 @@ export async function probeFileMeta(file: File): Promise<{
 }> {
   const url = URL.createObjectURL(file);
   try {
-    if (isImageFile(file) && !isVideoFile(file) && !isAudioFile(file)) {
-      const dims = await loadImageMeta(url);
-      return { type: "image", duration: 0, width: dims.width, height: dims.height };
-    }
-    if (isAudioFile(file) && !isVideoFile(file)) {
-      return { type: "audio", duration: await loadAudioDuration(url).catch(() => 0) };
-    }
-    const v = await loadVideoMeta(url);
-    if (v.videoWidth === 0) return { type: "audio", duration: v.duration };
-    return { type: "video", duration: v.duration, width: v.videoWidth, height: v.videoHeight };
+    const meta = await probeMedia(assetTypeOf(file) ?? "video", url);
+    return { type: meta.type, duration: meta.duration, width: meta.width, height: meta.height };
   } finally {
     URL.revokeObjectURL(url);
+  }
+}
+
+/** An import that is on screen before its bytes have left the browser. */
+export type PendingImport = {
+  /** Ready to add to the project: plays from `localUrl`, carries its final
+   * `fileName`, and is marked `upload` until the bytes land. */
+  asset: MediaAsset;
+  /** The object URL the asset plays from until the stored file takes over. */
+  localUrl: string;
+  /** Send the bytes and mark the object complete. */
+  send: (opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }) => Promise<void>;
+};
+
+/** Prepare a dropped file so it can appear instantly: reserve its stored name
+ * and probe it from local bytes, both before anything is uploaded. The caller
+ * adds the asset, then runs `send` in the background.
+ *
+ * Cloud only. The engine takes a file's bytes and hands back its name in one
+ * request, so there is no name to build an asset around ahead of time — and a
+ * copy to local disk is quick enough that there is nothing to hide. */
+export async function prepareImport(
+  projectId: string,
+  file: File,
+  backend: CutBackend = getBackend()
+): Promise<PendingImport | null> {
+  if (backend.kind !== "cloud") return null;
+  const type = assetTypeOf(file);
+  if (!type) return null;
+
+  const localUrl = URL.createObjectURL(file);
+  try {
+    // Probing and claiming the name are independent, so the asset is ready
+    // after whichever is slower rather than after both in turn.
+    const [meta, signed] = await Promise.all([
+      probeMedia(type, localUrl),
+      presignUpload(`/api/cut/projects/${projectId}/media/presign`, file, file.name, backend),
+    ]);
+    const asset: MediaAsset = {
+      id: uid(),
+      fileName: signed.fileName,
+      name: file.name,
+      type: meta.type,
+      duration: meta.duration,
+      ...(meta.width !== undefined ? { width: meta.width } : {}),
+      ...(meta.height !== undefined ? { height: meta.height } : {}),
+      ...(meta.peaks ? { peaks: meta.peaks } : {}),
+      url: localUrl,
+      upload: { progress: 0 },
+    };
+    const send = async (opts?: {
+      onProgress?: (fraction: number) => void;
+      signal?: AbortSignal;
+    }) => {
+      await putSigned(signed.url, file, file.type || "application/octet-stream", opts);
+      const res = await backend.fetch(`/api/cut/projects/${projectId}/media/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: signed.key }),
+      });
+      const body = await apiJson<{ fileName?: string }>(res);
+      if (!res.ok || !body.fileName) throw new Error(body.error ?? "Upload failed.");
+    };
+    return { asset, localUrl, send };
+  } catch (err) {
+    URL.revokeObjectURL(localUrl);
+    throw err;
   }
 }
 
@@ -250,63 +384,23 @@ export async function importFileToProject(
   file: File,
   backend: CutBackend = getBackend()
 ): Promise<MediaAsset | null> {
-  // MIME wins over extension: recordings are .webm for both video and audio.
-  const type: AssetType | null = file.type.startsWith("video/")
-    ? "video"
-    : file.type.startsWith("audio/")
-      ? "audio"
-      : file.type.startsWith("image/")
-        ? "image"
-        : isVideoFile(file)
-          ? "video"
-          : isAudioFile(file)
-            ? "audio"
-            : isImageFile(file)
-              ? "image"
-              : null;
+  const type = assetTypeOf(file);
   if (!type) return null;
 
   const fileName = await uploadProjectMediaTo(backend, projectId, file, file.name);
-
   const url = mediaUrl(projectId, fileName);
-  const asset: MediaAsset = {
+  const meta = await probeMedia(type, url);
+  return {
     id: uid(),
     fileName,
     name: file.name,
-    type,
-    duration: 0,
+    type: meta.type,
+    duration: meta.duration,
+    ...(meta.width !== undefined ? { width: meta.width } : {}),
+    ...(meta.height !== undefined ? { height: meta.height } : {}),
+    ...(meta.peaks ? { peaks: meta.peaks } : {}),
     url,
   };
-
-  if (type === "video") {
-    const v = await loadVideoMeta(url);
-    if (v.videoWidth === 0) {
-      // A "video" container with no video stream is really audio.
-      asset.type = "audio";
-      asset.duration = v.duration;
-    } else {
-      asset.duration = v.duration;
-      asset.width = v.videoWidth;
-      asset.height = v.videoHeight;
-    }
-  } else if (type === "image") {
-    // Images have no intrinsic duration; the timeline clip carries its length.
-    const dims = await loadImageMeta(url);
-    asset.width = dims.width;
-    asset.height = dims.height;
-  } else {
-    // Decode for a sample-exact duration (HTMLAudioElement overestimates MP3s,
-    // leaving a placed clip running past its real audio) and reuse the same
-    // decode for the waveform, so enrichAsset has nothing left to do.
-    const audio = await decodeAudio(url);
-    if (audio && audio.duration > 0) {
-      asset.duration = audio.duration;
-      asset.peaks = peaksFromChannel(audio.getChannelData(0));
-    } else {
-      asset.duration = await loadAudioDuration(url);
-    }
-  }
-  return asset;
 }
 
 /** Natural pixel size of an image URL, for framing on the timeline. */
@@ -723,13 +817,15 @@ export async function makeContactSheetsClientSide(
 }
 
 /** Generate filmstrip thumbnails / waveform peaks and merge them into the
- * store. Safe to call repeatedly; skips assets that are already enriched. */
-export async function enrichAsset(asset: MediaAsset) {
+ * store. Safe to call repeatedly; skips assets that are already enriched.
+ * `src` overrides where the frames are read from — an import still uploading
+ * has the bytes in the browser already, so it need not wait or re-download. */
+export async function enrichAsset(asset: MediaAsset, src = asset.url) {
   try {
     if (asset.type === "image") {
       // A still is its own filmstrip: one frame, tiled across the clip.
       if (!asset.thumbs?.length) {
-        useEditor.getState().updateAsset(asset.id, { thumbs: [asset.url], thumbStep: IMAGE_CLIP_SECONDS });
+        useEditor.getState().updateAsset(asset.id, { thumbs: [src], thumbStep: IMAGE_CLIP_SECONDS });
       }
     } else if (asset.type === "video" && !asset.thumbs?.length) {
       const key = stripCacheKey(useEditor.getState().projectId, asset.fileName);
@@ -737,12 +833,12 @@ export async function enrichAsset(asset: MediaAsset) {
       if (cached) {
         useEditor.getState().updateAsset(asset.id, { thumbs: cached.thumbs, thumbStep: cached.thumbStep });
       } else {
-        const { thumbs, thumbStep } = await makeThumbs(asset.url, asset.duration);
+        const { thumbs, thumbStep } = await makeThumbs(src, asset.duration);
         useEditor.getState().updateAsset(asset.id, { thumbs, thumbStep });
         writeCachedStrip(key, { thumbs, thumbStep, duration: asset.duration, at: Date.now() });
       }
     } else if (asset.type === "audio" && !asset.peaks?.length) {
-      const peaks = await makePeaks(asset.url);
+      const peaks = await makePeaks(src);
       useEditor.getState().updateAsset(asset.id, { peaks });
     }
   } catch {

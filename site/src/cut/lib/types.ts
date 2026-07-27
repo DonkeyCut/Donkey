@@ -113,6 +113,17 @@ export interface StoredAsset {
   chatId?: string;
 }
 
+/** An import whose bytes are still on their way to storage. While this is set
+ * the asset plays from a local object URL, and it is held out of the saved
+ * document along with the clips that use it — a reload cannot resume bytes
+ * this tab was holding, so a doc pointing at them would open broken. */
+export interface AssetUpload {
+  /** Share of the bytes sent, 0..1. */
+  progress: number;
+  /** Set when the upload failed; the asset is retryable until it is removed. */
+  error?: string;
+}
+
 /** Runtime asset: stored fields plus derived/browser-only data. */
 export interface MediaAsset extends StoredAsset {
   url: string; // /api/cut/projects/<id>/media/<fileName>
@@ -121,6 +132,8 @@ export interface MediaAsset extends StoredAsset {
   thumbStep?: number;
   /** Normalized waveform peaks 0..1 (audio only). */
   peaks?: number[];
+  /** Present only while the file is still uploading. */
+  upload?: AssetUpload;
 }
 
 /**

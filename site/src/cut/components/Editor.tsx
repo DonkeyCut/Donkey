@@ -9,14 +9,22 @@ import { loadedDocVersion } from "@/cut/lib/backend/shared";
 import { writeCachedDoc } from "@/cut/lib/docCache";
 import { refreshShareCard, renderPreviewProxy } from "@/cut/lib/exportClient";
 import { fileZoneAt, hasRefDrag } from "@/cut/lib/assetRef";
-import { enrichAsset, importFileToProject } from "@/cut/lib/media";
+import { startUpload } from "@/cut/lib/importQueue";
+import { enrichAsset, importFileToProject, prepareImport } from "@/cut/lib/media";
 // Side-effect import: registers the brief-to-video resume subscription, so a
 // persisted run resumes on project load even when the AI panel never mounts.
 import "@/cut/lib/genScene";
 import { installDevHooks } from "@/cut/lib/devHooks";
 import { backTarget, useCutBase } from "@/cut/lib/nav";
 import { resolveProjectMode } from "@/cut/lib/residency";
-import { projectDuration, serializeDoc, storedAssets, useEditor } from "@/cut/lib/store";
+import {
+  docAudioClips,
+  docClips,
+  projectDuration,
+  serializeDoc,
+  storedAssets,
+  useEditor,
+} from "@/cut/lib/store";
 import type { MediaAsset } from "@/cut/lib/types";
 import { AiPanel } from "./AiPanel";
 import { ExportDialog } from "./ExportDialog";
@@ -67,6 +75,9 @@ export function Editor({
     (s) => !s.readOnly && s.selection != null && s.selection.kind !== "cue"
   );
   const [importing, setImporting] = useState(0);
+  // Files being probed and named, plus the ones already placed whose bytes are
+  // still going out — both are work the save indicator reports.
+  const sending = useEditor((s) => s.assets.reduce((n, a) => (a.upload ? n + 1 : n), 0));
   const [conflictReloaded, setConflictReloaded] = useState(false);
   const [shareGone, setShareGone] = useState(false);
   const dragDepth = useRef(0);
@@ -324,8 +335,10 @@ export function Editor({
       const assetsDirty = assetsChanged(s.assets);
       const changed =
         assetsDirty ||
-        s.clips !== (last.clips as unknown) ||
-        s.audioClips !== (last.audioClips as unknown) ||
+        // The projections, not the raw arrays: clips waiting on an upload are
+        // held out of the document, and holding one is not an edit.
+        docClips(s.clips, s.assets) !== (last.clips as unknown) ||
+        docAudioClips(s.audioClips, s.assets) !== (last.audioClips as unknown) ||
         s.overlays !== (last.overlays as unknown) ||
         s.templates !== (last.templates as unknown) ||
         s.subtitles !== (last.subtitles as unknown) ||
@@ -364,9 +377,16 @@ export function Editor({
     ) => {
       const list = Array.from(files);
       setImporting((n) => n + list.length);
+      // Files are prepared one at a time: each claims its stored name against
+      // the names already taken, so two drops of the same name must not race
+      // for it. Only the bytes go out in parallel, from the upload queue.
       for (const file of list) {
         try {
-          const asset = await importFileToProject(projectId, file);
+          // Cloud: the file is probed and named before anything is uploaded,
+          // so it can be placed now and sent behind the editor. Local: the
+          // engine names a file only once it holds the bytes.
+          const pending = await prepareImport(projectId, file);
+          const asset = pending?.asset ?? (await importFileToProject(projectId, file));
           if (!asset) continue;
           // Recordings are created media: tag them so they land on the timeline
           // but never in the Media panel (reserved for user imports).
@@ -387,7 +407,10 @@ export function Editor({
               s.addAudioFromAsset(asset.id, opts?.at);
             }
           }
-          void enrichAsset(asset);
+          // A pending import already holds its bytes, so the filmstrip is
+          // drawn from those rather than downloaded back from storage.
+          void enrichAsset(asset, pending?.localUrl);
+          if (pending) startUpload(projectId, pending);
         } catch (err) {
           console.error(`Import failed for ${file.name}:`, err);
         } finally {
@@ -576,7 +599,12 @@ export function Editor({
         {viewer ? (
           <ViewerTopBar />
         ) : (
-          <TopBar onImport={importFiles} from={from} folder={folder} uploading={importing} />
+          <TopBar
+            onImport={importFiles}
+            from={from}
+            folder={folder}
+            uploading={importing + sending}
+          />
         )}
         <div
           className={`grid min-h-0 ${

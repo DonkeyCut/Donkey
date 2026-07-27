@@ -1262,6 +1262,9 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       try {
         set((s) => ({
           assets: s.assets.map((a) => {
+            // An import still uploading plays from local bytes; a signed URL
+            // for an object that hasn't landed would only 404.
+            if (a.upload) return a;
             const url = urls.get(a.fileName);
             return url && url !== a.url ? { ...a, url } : a;
           }),
@@ -3037,22 +3040,53 @@ useEditor.subscribe((s, prev) => {
     docSeq++;
 });
 
+/** Ids of the assets still uploading, as a comparable key ("" when none). An
+ * import is on screen before its bytes are stored, and nothing about it may
+ * reach the document until they are. */
+function pendingKey(assets: MediaAsset[]): string {
+  let key = "";
+  for (const a of assets) if (a.upload) key += `${a.id},`;
+  return key;
+}
+
+/** Clips are held back from the document while their asset is still uploading:
+ * one pointing at bytes this tab never finished sending would reopen broken.
+ * Memoized, so autosave's change detector can compare the projection by
+ * reference and an upload in flight doesn't read as a stream of edits. */
+function docClipFilter<T extends { assetId: string }>() {
+  let memo: { clips: T[]; key: string; out: T[] } | null = null;
+  return (clips: T[], assets: MediaAsset[]): T[] => {
+    const key = pendingKey(assets);
+    if (memo && memo.clips === clips && memo.key === key) return memo.out;
+    const out = key
+      ? clips.filter((c) => !assets.some((a) => a.id === c.assetId && a.upload))
+      : clips;
+    memo = { clips, key, out };
+    return out;
+  };
+}
+export const docClips = docClipFilter<VideoClip>();
+export const docAudioClips = docClipFilter<AudioClip>();
+
 /** The asset fields persisted in project.json — the projection autosave
  * writes, and the one its change detector compares (runtime fields like
- * thumbs/peaks must not mark the doc dirty). */
+ * thumbs/peaks must not mark the doc dirty). Assets whose bytes are still
+ * uploading are left out entirely; they join the document when they land. */
 export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
-  return assets.map(({ id, fileName, name, type, duration, width, height, origin, chatId, language }) => ({
-    id,
-    fileName,
-    name,
-    type,
-    duration,
-    ...(width !== undefined ? { width } : {}),
-    ...(height !== undefined ? { height } : {}),
-    ...(origin !== undefined ? { origin } : {}),
-    ...(chatId !== undefined ? { chatId } : {}),
-    ...(language !== undefined ? { language } : {}),
-  }));
+  return assets
+    .filter((a) => !a.upload)
+    .map(({ id, fileName, name, type, duration, width, height, origin, chatId, language }) => ({
+      id,
+      fileName,
+      name,
+      type,
+      duration,
+      ...(width !== undefined ? { width } : {}),
+      ...(height !== undefined ? { height } : {}),
+      ...(origin !== undefined ? { origin } : {}),
+      ...(chatId !== undefined ? { chatId } : {}),
+      ...(language !== undefined ? { language } : {}),
+    }));
 }
 
 /** The persistable slice of the editor state, for autosave. */
@@ -3075,8 +3109,8 @@ export function serializeDoc(s: {
   return {
     name: s.projectName,
     assets: storedAssets(s.assets),
-    clips: s.clips,
-    audioClips: s.audioClips,
+    clips: docClips(s.clips, s.assets),
+    audioClips: docAudioClips(s.audioClips, s.assets),
     overlays: s.overlays,
     templates: s.templates,
     aspect: s.aspect,

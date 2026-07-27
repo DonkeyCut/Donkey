@@ -1,0 +1,119 @@
+"use client";
+
+// Imports that are on screen before they are stored. A dropped file is probed
+// from its own bytes and placed straight away; the upload runs here, behind the
+// editor, and the asset swaps from its local object URL to the stored one when
+// the bytes land.
+//
+// Three things keep that honest:
+// - Nothing about a pending asset reaches the saved document (see storedAssets
+//   / docClips), so a tab that dies mid-upload leaves no broken reference.
+// - Deleting a pending asset aborts its upload; the claimed object is never
+//   completed and is collected server-side.
+// - A failed upload leaves the asset in place with an error, so the user can
+//   retry it rather than discover later that it was never saved.
+import type { PendingImport } from "./media";
+import { useEditor } from "./store";
+import { mediaUrl } from "./types";
+
+// Browsers cap connections per host anyway; a small window keeps one big file
+// from starving the rest of a multi-file drop.
+const MAX_IN_FLIGHT = 3;
+
+let active = 0;
+const waiting: (() => void)[] = [];
+
+function acquire(): Promise<void> {
+  if (active < MAX_IN_FLIGHT) {
+    active++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => waiting.push(resolve));
+}
+
+function release() {
+  const next = waiting.shift();
+  if (next) next();
+  else active--;
+}
+
+type Job = { pending: PendingImport; projectId: string; controller: AbortController };
+
+const jobs = new Map<string, Job>();
+
+/** Start the background upload for a prepared import. The asset must already
+ * be in the store. */
+export function startUpload(projectId: string, pending: PendingImport) {
+  const job: Job = { pending, projectId, controller: new AbortController() };
+  jobs.set(pending.asset.id, job);
+  void run(job);
+}
+
+/** Retry an upload that failed. */
+export function retryUpload(assetId: string) {
+  const job = jobs.get(assetId);
+  if (!job) return;
+  job.controller = new AbortController();
+  useEditor.getState().updateAsset(assetId, { upload: { progress: 0 } });
+  void run(job);
+}
+
+/** Stop an upload whose asset is gone. The claimed object is left incomplete
+ * on purpose — it was never counted against the account. */
+export function cancelUpload(assetId: string) {
+  const job = jobs.get(assetId);
+  if (!job) return;
+  jobs.delete(assetId);
+  job.controller.abort();
+  URL.revokeObjectURL(job.pending.localUrl);
+}
+
+/** An upload is only worth finishing while its asset is still open in front of
+ * the user: deleting it, or leaving for another project, ends it. */
+function wanted(job: Job): boolean {
+  const s = useEditor.getState();
+  return s.projectId === job.projectId && s.assets.some((a) => a.id === job.pending.asset.id);
+}
+
+async function run(job: Job) {
+  const { asset, localUrl, send } = job.pending;
+  await acquire();
+  try {
+    if (!wanted(job)) return cancelUpload(asset.id);
+    let shown = -1;
+    await send({
+      signal: job.controller.signal,
+      onProgress: (fraction) => {
+        // The progress stream is the cheapest place to notice the asset is
+        // gone, and the only one that fires during a long upload.
+        if (!wanted(job)) return cancelUpload(asset.id);
+        const pct = Math.floor(fraction * 100);
+        if (pct === shown) return;
+        shown = pct;
+        useEditor.getState().updateAsset(asset.id, { upload: { progress: fraction } });
+      },
+    });
+    if (!wanted(job)) return cancelUpload(asset.id);
+    jobs.delete(asset.id);
+    // The stored file takes over from the local bytes. Filmstrips are
+    // self-contained frames and survive the swap; a still's single "frame" is
+    // the source itself, so it repoints with the asset.
+    const url = mediaUrl(job.projectId, asset.fileName);
+    useEditor.getState().updateAsset(asset.id, {
+      url,
+      upload: undefined,
+      ...(asset.type === "image" ? { thumbs: [url] } : {}),
+    });
+    // Decoders repoint on the URL change; let the frame they are painting
+    // finish before the bytes behind them go away.
+    setTimeout(() => URL.revokeObjectURL(localUrl), 10_000);
+  } catch (err) {
+    if (job.controller.signal.aborted) return;
+    if (!wanted(job)) return cancelUpload(asset.id);
+    useEditor.getState().updateAsset(asset.id, {
+      upload: { progress: 0, error: err instanceof Error ? err.message : "Upload failed." },
+    });
+  } finally {
+    release();
+  }
+}

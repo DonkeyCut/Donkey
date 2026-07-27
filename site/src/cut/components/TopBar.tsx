@@ -479,7 +479,11 @@ export function TopBar({
         <Button
           variant="ghost"
           size="sm"
-          disabled={!hasClips}
+          // A render reads the saved document, which an import still uploading
+          // is deliberately absent from — exporting now would quietly leave it
+          // out of the video.
+          disabled={!hasClips || cloudUploading}
+          title={cloudUploading ? "Finishing uploads…" : undefined}
           onClick={() => {
             const s = useEditor.getState();
             s.setPlaying(false);
