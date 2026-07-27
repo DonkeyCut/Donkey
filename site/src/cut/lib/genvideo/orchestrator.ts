@@ -539,6 +539,12 @@ export class VideoOrchestrator {
         if (attempt < VIDEO_ATTEMPTS) await this.sleep(BACKOFF_MS * attempt);
       }
     }
+    // Every take is spent. Say what the last one failed on: the run's own
+    // activity is where the user watched this shot, and "could not be generated"
+    // with no reason is not something anyone can act on.
+    if (shot.error) {
+      this.deps.emit({ type: "log", message: `Shot ${shot.id} failed — ${shot.error}` });
+    }
     await this.placeFallback(shot); // never leave a hole
     this.emitProgress();
   }

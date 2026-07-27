@@ -100,6 +100,9 @@ export function SceneCard({ threadId }: { threadId: string }) {
   const creditsOut = run.shots.some(
     (sh) => sh.status === "failed" && sh.error === NO_CREDITS_MESSAGE
   );
+  // Why they held: the first failed shot's own error, so the notice names the
+  // cause instead of stating that something failed.
+  const stillReason = run.shots.find((sh) => sh.status === "failed" && sh.error)?.error;
   // Elapsed clock: planning counts from the run start, rendering from approval;
   // it stops at the end. Hidden while waiting for the user at the gate.
   const clockAnchor = run.status === "planning" ? run.startedAt : run.renderStartedAt ?? run.startedAt;
@@ -190,8 +193,8 @@ export function SceneCard({ threadId }: { threadId: string }) {
               <span>
                 {stillCount} of {run.shots.length} shot{run.shots.length === 1 ? "" : "s"} held a
                 still —{" "}
-                {creditsOut ? (
-                  <HostedErrorText error={NO_CREDITS_MESSAGE} link={false} />
+                {creditsOut || stillReason ? (
+                  <HostedErrorText error={creditsOut ? NO_CREDITS_MESSAGE : stillReason!} link={false} />
                 ) : (
                   "video generation failed"
                 )}
