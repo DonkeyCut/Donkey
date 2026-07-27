@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, ChevronLeft, Cloud, Loader2, Mic, Monitor, Ratio, Share2, Smartphone, Sparkles, Square, Upload, Video } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, CloudUpload, Loader2, Mic, Monitor, Ratio, Share2, Smartphone, Sparkles, Square, Upload, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -456,7 +456,7 @@ export function TopBar({
             title="Move to Cloud"
             onClick={() => setMoveOpen(true)}
           >
-            <Cloud data-icon="inline-start" /> Move to Cloud
+            <CloudUpload data-icon="inline-start" /> Cloud
           </Button>
         )}
         <Button
