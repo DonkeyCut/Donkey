@@ -168,6 +168,14 @@ export function SidePanel({
   useWatchGenTab(tab, projectId);
   // Media badges too: its arrivals are exports finishing in the background.
   useWatchExportLands(projectId);
+  // While one of this project's exports renders, the Media tile spins — the
+  // export row lives in that panel, which is usually closed while it runs.
+  const exporting = useExports(
+    (s) =>
+      s.jobs.some(
+        (j) => j.projectId === projectId && (j.status === "queued" || j.status === "running")
+      ) || s.local.some((r) => r.projectId === projectId && r.status === "preparing")
+  );
 
   // Clicking a reference token anywhere jumps here: switch to the tab that
   // owns the asset; the matching card scrolls into view and flashes.
@@ -212,11 +220,15 @@ export function SidePanel({
                 )}
               >
                 <Icon className="size-4.5" />
-                {unseenCount > 0 && (
+                {unseenCount > 0 ? (
                   <span className="absolute -top-1 -right-1 grid h-[15px] min-w-[15px] place-items-center rounded-full bg-[#0a84ff] px-1 text-[9px] leading-none font-semibold text-white tabular-nums ring-2 ring-card">
                     {unseenCount}
                   </span>
-                )}
+                ) : id === "media" && exporting ? (
+                  <span className="absolute -top-1 -right-1 grid size-[15px] place-items-center rounded-full bg-card ring-2 ring-card">
+                    <Loader2 className="size-3 animate-spin text-primary" />
+                  </span>
+                ) : null}
               </span>
               <span className={cn("text-[10px] font-medium", tab === id && "text-foreground")}>
                 {label}
@@ -346,11 +358,10 @@ export function SidePanel({
   );
 }
 
-function PanelHead({ title, action }: { title: string; action?: React.ReactNode }) {
+function PanelHead({ title }: { title: string }) {
   return (
-    <div className="flex h-12 shrink-0 items-center justify-between pr-2.5 pl-4">
+    <div className="flex h-12 shrink-0 items-center pr-2.5 pl-4">
       <span className="text-sm font-semibold tracking-tight">{title}</span>
-      {action}
     </div>
   );
 }
@@ -475,14 +486,8 @@ function MediaPanel({
 
   return (
     <>
-      <PanelHead
-        title="Media"
-        action={
-          exporting.length + preparing.length > 0 ? (
-            <Loader2 className="mr-1 size-4 animate-spin text-muted-foreground" />
-          ) : undefined
-        }
-      />
+      {/* An export in flight spins on the Media rail tile, not here. */}
+      <PanelHead title="Media" />
       {!readOnly && (
         <div className="px-3.5 pb-3">
           <Button variant="outline" className="w-full" onClick={() => inputRef.current?.click()}>

@@ -107,8 +107,13 @@ export const useExports = create<ExportsState>((set, get) => ({
     }));
     try {
       await createExportJob(projectId, doc, settings);
+      // Pull the queued job into the feed *before* retiring the placeholder.
+      // Dropping the local row first left a round-trip with neither row on
+      // screen, which read as the export card flashing away and back.
+      // A failed poll must not mark a started export as a start error, so it
+      // never reaches the catch below.
+      await get().refresh().catch(() => {});
       set((s) => ({ local: s.local.filter((r) => r.id !== localId) }));
-      void get().refresh(); // show the queued job now, not on the next tick
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       set((s) => ({
