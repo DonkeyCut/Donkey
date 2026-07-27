@@ -8,7 +8,8 @@ import { ACCOUNT_FEATURE_FLAGS, isKnownFeatureFlag } from "@/lib/feature-flags";
 import { prisma } from "@/lib/prisma";
 
 // The signed-in account's feature flags: the full registry with each flag's
-// enabled state. Rows exist only for flags the user has touched.
+// enabled state. Rows exist only for flags the user has touched; everyone else
+// gets the flag's registry default.
 export const GET = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) => {
   const rows = await prisma.userFeatureFlag.findMany({
     where: { userId: request.donkey.userId },
@@ -17,7 +18,7 @@ export const GET = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) =>
   return NextResponse.json({
     flags: ACCOUNT_FEATURE_FLAGS.map((f) => ({
       ...f,
-      enabled: enabled.get(f.id) ?? false,
+      enabled: enabled.get(f.id) ?? f.defaultEnabled,
     })),
   });
 });
