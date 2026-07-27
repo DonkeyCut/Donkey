@@ -50,39 +50,27 @@ export function InstallInstructions() {
       }}
     >
       <div style={{ margin: "0 auto", maxWidth: 1280 }}>
-        <div
+        <Headline>
+          Install Donkey
+          <br />
+          <span style={{ fontStyle: "italic" }}>on your Mac.</span>
+        </Headline>
+        <p
           style={{
-            alignItems: "end",
-            display: "grid",
-            gap: 36,
-            gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 440px), 1fr))",
+            color: "#454545",
+            fontSize: "clamp(16px, 1.8vw, 18px)",
+            lineHeight: 1.6,
+            margin: "24px 0 32px",
+            maxWidth: 640,
           }}
         >
-          <div>
-            <Headline>
-              Install Donkey
-              <br />
-              <span style={{ fontStyle: "italic" }}>on your Mac.</span>
-            </Headline>
-          </div>
-          <div>
-            <p
-              style={{
-                color: "#454545",
-                fontSize: "clamp(16px, 1.8vw, 18px)",
-                lineHeight: 1.6,
-                margin: "0 0 22px",
-                maxWidth: 560,
-              }}
-            >
-              Download the DMG, drag the app into Applications, then launch it
-              like any other Mac app.
-            </p>
-            <PillButton href={DONKEY_DOWNLOAD_URL} variant="primary" size="lg">
-              Download for Mac
-            </PillButton>
-          </div>
-        </div>
+          Edit on your own storage, and let your Mac do the heavy work —
+          exports and speech to text. When a project is ready to share, move it
+          to the cloud.
+        </p>
+        <PillButton href={DONKEY_DOWNLOAD_URL} variant="primary" size="lg">
+          Download for Mac
+        </PillButton>
 
         <div style={instructionPanelStyle}>
           <div style={stepsGridStyle}>
