@@ -11,11 +11,12 @@ export function cutPricingPlans(root: string): PricingPlan[] {
         kind: "link",
         label: "Start a new project",
       },
-      body: "The whole editor, running on your own hardware.",
+      body: "The whole editor, in the cloud or on your own Mac.",
       color: "cream",
       detail: "For everyone",
       features: [
         "Full access to the video editor",
+        "250 MB of cloud storage",
         "Import, export, and local transcription",
         "Connect your Claude or Codex subscription",
       ],
@@ -34,6 +35,7 @@ export function cutPricingPlans(root: string): PricingPlan[] {
       detail: "For individuals",
       features: [
         "Everything in Free",
+        "50 GB of cloud storage",
         "Generous AI credits every month",
         "Image, video, voiceover, and music generation",
       ],

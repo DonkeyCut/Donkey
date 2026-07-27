@@ -47,6 +47,9 @@ export function CutPricing({ root }: { root: string }) {
           <PricingPlanCard key={plan.name} plan={plan} />
         ))}
       </div>
+      <p className="mt-6 text-[15px] leading-[1.55] text-[#454545]">
+        * Buy credits for AI generated content at any time.
+      </p>
     </section>
   );
 }
