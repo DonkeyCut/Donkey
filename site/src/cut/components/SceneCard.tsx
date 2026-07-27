@@ -181,66 +181,70 @@ export function SceneCard({ threadId }: { threadId: string }) {
       )}
 
       {canDismiss && (
-        <div className="mt-2.5 flex items-center gap-1.5">
-          {run.status === "awaiting_approval" && (
-            <Button
-              size="sm"
-              className="h-7 flex-1 text-[11.5px]"
-              onClick={() => useGenScene.getState().approve()}
-            >
-              Approve &amp; render{run.shots.length ? ` (${run.shots.length})` : ""}
-            </Button>
-          )}
-          {run.status === "failed" && (
-            // Failed is a deliberate stop (nothing auto-resumes it); the run
-            // continues only through this click, skipping work already done.
-            <Button
-              size="sm"
-              className="h-7 flex-1 text-[11.5px]"
-              onClick={() => useGenScene.getState().retryRun()}
-            >
-              Retry
-            </Button>
-          )}
-          {run.status === "done" && stillCount === 0 && (
-            <span className="flex flex-1 items-center gap-1 text-emerald-600">
-              <Check className="size-3.5" /> Video ready
+        <div className="mt-2.5 flex flex-col gap-1.5">
+          {/* The stills notice reads as a paragraph, so it takes its own line
+              above the buttons rather than sharing a row with them. */}
+          {run.status === "done" && stillCount > 0 && (
+            <span className="flex items-start gap-1 text-[10.5px] text-amber-700">
+              <TriangleAlert className="mt-px size-3 shrink-0" />
+              <span>
+                {stillCount} of {run.shots.length} shot{run.shots.length === 1 ? "" : "s"} held a
+                still —{" "}
+                {creditsOut ? (
+                  <HostedErrorText error={NO_CREDITS_MESSAGE} link={false} />
+                ) : (
+                  "video generation failed"
+                )}
+              </span>
             </span>
           )}
-          {run.status === "done" && stillCount > 0 && (
-            <>
-              <span className="flex flex-1 items-start gap-1 text-[10.5px] text-amber-700">
-                <TriangleAlert className="mt-px size-3 shrink-0" />
-                <span>
-                  {stillCount} of {run.shots.length} shot{run.shots.length === 1 ? "" : "s"} held a
-                  still —{" "}
-                  {creditsOut ? (
-                    <HostedErrorText error={NO_CREDITS_MESSAGE} link={false} />
-                  ) : (
-                    "video generation failed"
-                  )}
-                </span>
-              </span>
+          <div className="flex items-center gap-1.5">
+            {run.status === "awaiting_approval" && (
               <Button
                 size="sm"
-                className="h-7 text-[11.5px]"
+                className="h-7 flex-1 text-[11.5px]"
+                onClick={() => useGenScene.getState().approve()}
+              >
+                Approve &amp; render{run.shots.length ? ` (${run.shots.length})` : ""}
+              </Button>
+            )}
+            {run.status === "failed" && (
+              // Failed is a deliberate stop (nothing auto-resumes it); the run
+              // continues only through this click, skipping work already done.
+              <Button
+                size="sm"
+                className="h-7 flex-1 text-[11.5px]"
+                onClick={() => useGenScene.getState().retryRun()}
+              >
+                Retry
+              </Button>
+            )}
+            {run.status === "done" && stillCount === 0 && (
+              <span className="flex flex-1 items-center gap-1 text-emerald-600">
+                <Check className="size-3.5" /> Video ready
+              </span>
+            )}
+            {run.status === "done" && stillCount > 0 && (
+              <Button
+                size="sm"
+                className="h-7 flex-1 text-[11.5px]"
                 onClick={() => useGenScene.getState().retryFailedShots()}
               >
                 Retry {stillCount} shot{stillCount === 1 ? "" : "s"}
               </Button>
-            </>
-          )}
-          {canDismiss && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 text-muted-foreground"
-              title="Dismiss"
-              onClick={() => useGenScene.getState().dismiss()}
-            >
-              <X className="size-3.5" />
-            </Button>
-          )}
+            )}
+            {canDismiss && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 text-muted-foreground"
+                title="Dismiss"
+                onClick={() => useGenScene.getState().dismiss()}
+              >
+                <X className="size-3.5" />
+              </Button>
+            )}
+          </div>
         </div>
       )}
     </div>
