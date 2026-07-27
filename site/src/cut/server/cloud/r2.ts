@@ -6,6 +6,7 @@ import {
   DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -58,6 +59,16 @@ export const libraryKey = (userId: string, fileName: string) =>
   `cut/${userId}/library/${fileName}`;
 export const overlayKey = (userId: string, batchId: string, name: string) =>
   `cut/${userId}/overlays/${batchId}/${name}`;
+
+/** Scratch media a hosted inference call carries — reference sheets, keyframes,
+ * chat attachments. Keyed by the SHA-256 of the bytes, so a sheet that rides
+ * into thirty calls uploads once and every caller addresses it by content.
+ * These live outside the per-user media prefix: they are not the user's media,
+ * they never count against a storage quota, and the sweep finds them by prefix
+ * rather than by row. */
+export const INFERENCE_PREFIX = "cut/inference/";
+export const inferenceBlobKey = (userId: string, sha256: string, ext: string) =>
+  `${INFERENCE_PREFIX}${userId}/${sha256}.${ext}`;
 
 export function presignPut(key: string, mime: string): Promise<string> {
   return getSignedUrl(
@@ -113,6 +124,49 @@ export async function head(key: string): Promise<{ bytes: number; mime: string }
     if (e instanceof R2NotConfiguredError) throw e;
     return null;
   }
+}
+
+/** An object's bytes, or null when it does not exist. */
+export async function getObject(key: string): Promise<{ bytes: Buffer; mime: string } | null> {
+  try {
+    const res = await r2().send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+    const body = res.Body;
+    if (!body) return null;
+    return {
+      bytes: Buffer.from(await body.transformToByteArray()),
+      mime: res.ContentType ?? "application/octet-stream",
+    };
+  } catch (e) {
+    if (e instanceof R2NotConfiguredError) throw e;
+    return null;
+  }
+}
+
+/** Keys under `prefix` last written before `before`, paged to `limit` objects.
+ * For prefix sweeps of objects no database row tracks. */
+export async function listOlderThan(
+  prefix: string,
+  before: Date,
+  limit = 5000
+): Promise<string[]> {
+  const out: string[] = [];
+  let token: string | undefined;
+  do {
+    const res = await r2().send(
+      new ListObjectsV2Command({
+        Bucket: R2_BUCKET,
+        Prefix: prefix,
+        ContinuationToken: token,
+        MaxKeys: 1000,
+      })
+    );
+    for (const o of res.Contents ?? []) {
+      if (o.Key && o.LastModified && o.LastModified < before) out.push(o.Key);
+      if (out.length >= limit) return out;
+    }
+    token = res.IsTruncated ? res.NextContinuationToken : undefined;
+  } while (token);
+  return out;
 }
 
 export async function copy(srcKey: string, dstKey: string): Promise<void> {

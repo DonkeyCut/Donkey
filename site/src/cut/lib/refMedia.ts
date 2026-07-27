@@ -21,22 +21,14 @@ export interface InlineImage {
 const MAX_W = 1280;
 const JPEG_Q = 0.85;
 
-// Every picture riding to a hosted model is fitted to this budget first.
-//
-// A generated reference sheet comes back at the image model's full output size
-// — a 2752x1536 PNG is around 4MB — and base64 inflates it by a third. The
-// hosted routes run as serverless functions behind a 4.5MB request-body limit
-// enforced at the edge, so one such sheet as a reference blows the whole
-// request up before the route sees it: the upload resets mid-flight and the
-// browser reports a bare "Failed to fetch". A scene run rides its anchor sheet
-// into every later call, so that one oversized picture failed every location
-// design, every keyframe, and every video take in the run.
-//
-// Fitting here — the one place bytes become an inline part — keeps any number
-// of references comfortably inside one request. The models resample inputs to
-// roughly this size anyway, so nothing the model sees is lost.
-const MAX_INLINE_EDGE = 1536;
-const MAX_INLINE_BYTES = 900 * 1024;
+// Every picture riding to a hosted model is fitted to this budget first — a
+// generated reference sheet comes back at the image model's full output size, and
+// a handful of those is more than one model call should carry. Getting the bytes
+// to the model is storage's job (hostedBlobs.ts), so this budget is about what
+// the model reads: it resamples inputs to roughly this size anyway, so nothing
+// it sees is lost.
+const MAX_INLINE_EDGE = 2048;
+const MAX_INLINE_BYTES = 4 * 1024 * 1024;
 
 // Vertex image models accept only real image mime types. Read the format from the
 // bytes rather than the transport Content-Type: a media file served as
@@ -141,8 +133,7 @@ export async function blobToInlineAudio(blob: Blob): Promise<InlineImage | null>
 
 /** Video models take input images only as JPEG or PNG — the render rejects anything
  * else by format, killing the render after it was billed. Re-encode any other
- * picture (webp saved off the web is the common case) through the inline
- * budget, so the conversion lands as a JPEG the request can carry; jpeg and png
+ * picture (webp saved off the web is the common case) to JPEG; jpeg and png
  * pass through untouched. */
 export async function videoSafeInline(img: InlineImage): Promise<InlineImage> {
   if (img.mimeType === "image/jpeg" || img.mimeType === "image/png") return img;

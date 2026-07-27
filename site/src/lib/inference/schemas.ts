@@ -80,6 +80,22 @@ export const assetGenerationRequestSchema = z.object({
   metadata: metadataSchema.optional(),
 });
 
+// Media a request will carry by reference: the client hashes the bytes, claims a
+// key for each, and uploads straight to storage. Hashes are content addresses,
+// so the same picture claimed twice resolves to the same object.
+export const inferenceUploadRequestSchema = z.object({
+  blobs: z
+    .array(
+      z.object({
+        sha256: z.string().regex(/^[0-9a-f]{64}$/),
+        mimeType: z.string().min(1).max(128),
+        bytes: z.number().int().positive(),
+      })
+    )
+    .min(1)
+    .max(24),
+});
+
 const nullableProviderStringSchema = z
   .string()
   .min(1)

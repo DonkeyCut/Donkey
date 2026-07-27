@@ -21,7 +21,9 @@ import {
 } from "@/lib/inference/responses";
 import { assetGenerationRequestSchema } from "@/lib/inference/schemas";
 import { withDonkeyAuth } from "@/lib/donkey-api-auth";
-import { InferenceProviderError } from "@/lib/inference/providers";
+import { resolveInferenceBlobs } from "@/lib/inference/blobs";
+import { InferenceProviderError, type JsonObject } from "@/lib/inference/providers";
+import { toJsonObject, toJsonValue } from "@/lib/inference/json";
 
 export const dynamic = "force-dynamic";
 
@@ -75,9 +77,19 @@ export const POST = withDonkeyAuth(async (request) => {
       id: generationId,
       kind: parsed.data.kind,
     };
+    // Reference pictures and seed frames ride storage, not the request body —
+    // they become inline data here, on the server-to-server leg.
+    const inputs: JsonObject | undefined = parsed.data.inputs
+      ? toJsonObject(
+          await resolveInferenceBlobs(
+            toJsonValue(parsed.data.inputs),
+            request.donkey.userId,
+          ),
+        )
+      : undefined;
     const result = await provider.generateAsset?.({
       generationId,
-      request: parsed.data,
+      request: inputs ? { ...parsed.data, inputs } : parsed.data,
     });
 
     if (!result) {

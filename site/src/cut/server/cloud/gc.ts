@@ -8,10 +8,13 @@ import { graceDeadline } from "./grace";
 import { cutLimitsFor, FREE_STORAGE_BYTES } from "./limits";
 import { deleteLibraryAssetCascade } from "./library";
 import { deleteProjectCascade } from "./projects";
-import { del } from "./r2";
+import { del, INFERENCE_PREFIX, listOlderThan } from "./r2";
 import { addUsage } from "./usage";
 
 const PENDING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+// Scratch media a hosted inference call carried. No row tracks these — they are
+// found by prefix and live only as long as the calls that might reuse them.
+const SCRATCH_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const ORPHAN_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const JOB_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const TERMINAL_STATES = ["done", "error", "canceled"];
@@ -240,11 +243,20 @@ export async function runGc(): Promise<Response> {
       ? await prisma.cutRenderJob.deleteMany({ where: { id: { in: oldJobs.map((j) => j.id) } } })
       : { count: 0 };
 
+  // Scratch inference media, swept by prefix: it never counted toward usage and
+  // no row points at it, so age is the only thing that makes it garbage.
+  const scratch = await listOlderThan(
+    INFERENCE_PREFIX,
+    new Date(Date.now() - SCRATCH_MAX_AGE_MS)
+  ).catch(() => [] as string[]);
+  await del(scratch);
+
   const reclaimed = await reclaimOverQuota();
 
   return Response.json({
     pendingObjects: pending.length,
     orphanedMedia: orphans.length,
+    inferenceScratch: scratch.length,
     renderJobs: jobs.count,
     reclaimedUsers: reclaimed.users,
     reclaimedProjects: reclaimed.projects,

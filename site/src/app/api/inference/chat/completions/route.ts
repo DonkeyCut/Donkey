@@ -9,6 +9,8 @@ import {
   requireInferenceCredits,
 } from "@/lib/credits/inference";
 import { createProviderRegistry } from "@/lib/inference/router";
+import { resolveInferenceBlobs } from "@/lib/inference/blobs";
+import { toJsonValue } from "@/lib/inference/json";
 import {
   inferenceErrorCode,
   inferenceProviderErrorResponse,
@@ -65,12 +67,21 @@ export const POST = withDonkeyAuth(async (request) => {
   let failedUsageProvider = "default";
 
   try {
+    // Attached pictures and sound ride storage, not the request body — they
+    // become inline message parts here, on the server-to-server leg.
+    const data = {
+      ...parsed.data,
+      messages: (await resolveInferenceBlobs(
+        toJsonValue(parsed.data.messages),
+        request.donkey.userId,
+      )) as typeof parsed.data.messages,
+    };
     const registry = createProviderRegistry();
-    const provider = registry.textProvider(parsed.data.stream);
+    const provider = registry.textProvider(data.stream);
     failedUsageProvider = provider.id;
 
-    if (parsed.data.stream) {
-      const result = await provider.streamCompletion?.(parsed.data);
+    if (data.stream) {
+      const result = await provider.streamCompletion?.(data);
       if (!result) {
         if (!bypassCredits) {
           await recordFailedInferenceUsage({
@@ -124,7 +135,7 @@ export const POST = withDonkeyAuth(async (request) => {
       });
     }
 
-    const result = await provider.completeText?.(parsed.data);
+    const result = await provider.completeText?.(data);
     if (!result) {
       if (!bypassCredits) {
         await recordFailedInferenceUsage({

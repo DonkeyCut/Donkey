@@ -83,6 +83,20 @@ hand back job IDs, generation IDs, polling URLs, and output references, but it
 never persists prompts, generation records, provider output references, or
 generated assets in Postgres.
 
+**Media never rides the request body.** The routes run as serverless functions
+behind a request-body limit the platform enforces at the edge, and an oversized
+body is refused before a handler runs — the caller sees a dropped connection, not
+an error anyone can act on. So a client with pictures or sound to send uploads
+the bytes straight to object storage and puts a placeholder in the body naming
+the object and the field the bytes belong in. The route swaps the bytes back in
+before the provider call, where the request is server-to-server and only the
+model's own limit applies.
+
+Two rules follow. A placeholder is scoped to the account that uploaded it, so a
+route reads an object only under the caller's own prefix. And storage is how a
+large request succeeds, never why a small one fails: a client that can't reach
+storage sends the bytes inline, as it always could.
+
 ### Computer use
 
 Computer use is a built-in tool of Gemini's main flash model, so one model

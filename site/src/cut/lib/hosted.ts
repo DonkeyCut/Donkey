@@ -3,6 +3,8 @@
 import { useEffect } from "react";
 import { create } from "zustand";
 
+import { offloadHostedMedia } from "./hostedBlobs";
+
 // Donkey's hosted inference routes, called from the page with the user's
 // session and credits (the one hosted carve-out on the otherwise local-only
 // Cut page). Shared by media generation, prompt composition, and AI chat.
@@ -86,13 +88,19 @@ export function useCreditsRecheck(): void {
 // The hosted routes run as serverless functions behind a 4.5MB request-body
 // limit the platform enforces at the edge: an oversized body is refused before
 // the route runs, the upload resets mid-flight, and fetch rejects with a bare
-// "Failed to fetch" that reads like the network died. Attachments are fitted to
-// fit (refMedia.ts); this says so plainly if one ever isn't.
+// "Failed to fetch" that reads like the network died. Media never rides the body
+// far enough to reach that: past the soft limit every picture and sound moves to
+// storage and travels as a reference (hostedBlobs.ts). The hard limit stands
+// behind that as a plain error, for a body that is large without being media.
+const OFFLOAD_ABOVE_BYTES = 1024 * 1024;
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 /** POST one of Donkey's hosted inference routes with the user's session. */
 export const hostedPost = async (path: string, body: unknown, signal?: AbortSignal) => {
-  const payload = JSON.stringify(body);
+  let payload = JSON.stringify(body);
+  if (payload.length > OFFLOAD_ABOVE_BYTES) {
+    payload = JSON.stringify(await offloadHostedMedia(body, CLIENT_ID));
+  }
   if (new Blob([payload]).size > MAX_BODY_BYTES) {
     throw new Error("That request carries too much attached media to send. Use fewer references.");
   }

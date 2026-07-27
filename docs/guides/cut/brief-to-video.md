@@ -75,6 +75,12 @@ instead — the same fixed words every shot:
    reference-conditioned video from the sheets → text-only, where the cast's
    full written descriptions ride the prompt and identity drifts the most.
 
+Sheets are what make a run expensive to send: every keyframe and every take
+carries several of them, so the pictures travel through object storage rather
+than the request body (see the inference gateway's media rule). A sheet is
+addressed by its content, so it uploads once for the whole run no matter how
+many shots ride it.
+
 The project's frame is the user's setting. A run reads it when the plan is
 approved and never changes it — a reference in another shape or a platform the
 brief names is something to mention, not a reason to reframe someone's project.
