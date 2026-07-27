@@ -57,7 +57,7 @@ export function NavStorage() {
       <p className="text-xs leading-snug text-muted-foreground">
         {u.grace
           ? `Your Pro plan ended. Upgrade or free ${formatBytes(u.grace.overBytes)} before your oldest projects are deleted.`
-          : "Pro gives you 50 GB of cloud storage."}
+          : "Pro gives you 50 GB."}
       </p>
       <Button
         variant="outline"
