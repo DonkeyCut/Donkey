@@ -6,13 +6,7 @@ import {
   Headline,
   PillButton,
 } from "@/app/_components/landing/LandingPrimitives";
-import { DONKEY_INSTALL_URL } from "@/app/_components/landing/data";
-
-// The install page is served on donkeycut.com and local dev only, so the
-// hosted apex (root "/cut") has to leave for the canonical host.
-function installHref(root: string) {
-  return root ? DONKEY_INSTALL_URL : "/install";
-}
+import { cutInstallHref } from "@/cut/lib/install";
 
 export function CutLocal({ root }: { root: string }) {
   return (
@@ -30,7 +24,7 @@ export function CutLocal({ root }: { root: string }) {
             transcribes audio on device.
           </p>
           <div className="mt-8">
-            <PillButton href={installHref(root)} variant="primary" size="md">
+            <PillButton href={cutInstallHref(root)} variant="primary" size="md">
               Download for Mac
             </PillButton>
           </div>

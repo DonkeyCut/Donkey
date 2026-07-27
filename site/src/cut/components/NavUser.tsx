@@ -1,7 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { ChartColumn, CreditCard, EllipsisVertical, Flag, LogOut } from "lucide-react";
+import {
+  ChartColumn,
+  CreditCard,
+  EllipsisVertical,
+  Flag,
+  LogOut,
+  MonitorDown,
+} from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,6 +18,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { cutInstallHref } from "@/cut/lib/install";
 import { useCutBase } from "@/cut/lib/nav";
 import { authClient } from "@/lib/auth-client";
 
@@ -35,6 +43,7 @@ export function NavUser() {
   if (!session) return null;
 
   const { name, email, image } = session.user;
+  const root = base.replace(/\/app$/, "");
 
   const signOut = () => {
     // Sign out everywhere: revoke every session for this user (so the Mac app
@@ -46,7 +55,7 @@ export function NavUser() {
         await authClient.revokeSessions();
       } finally {
         await authClient.signOut();
-        router.push(base.replace(/\/app$/, "") || "/");
+        router.push(root || "/");
       }
     })();
   };
@@ -78,6 +87,13 @@ export function NavUser() {
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => router.push(`${base}/settings/usage`)}>
           <ChartColumn /> Usage
+        </DropdownMenuItem>
+        {/* The install page lives outside the editor, so it opens in its own
+            tab rather than navigating away from an open project. */}
+        <DropdownMenuItem
+          onClick={() => window.open(cutInstallHref(root), "_blank", "noopener")}
+        >
+          <MonitorDown /> Run Donkey Cut locally
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => router.push(`${base}/settings/flags`)}>
           <Flag /> Feature flags
