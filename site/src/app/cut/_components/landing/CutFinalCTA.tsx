@@ -20,10 +20,7 @@ export function CutFinalCTA({ root }: { root: string }) {
             <br />
             on your Mac.
           </h2>
-          <p className="mx-auto mb-8 max-w-[480px] text-base text-[rgba(255,255,255,0.7)] md:text-lg">
-            Installs in 90 seconds.
-          </p>
-          <div className="flex justify-center">
+          <div className="mt-8 flex justify-center">
             <PillButton href={appHref(`${root}/app`)} variant="primary" size="lg">
               Start Today
             </PillButton>
