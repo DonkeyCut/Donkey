@@ -22,6 +22,8 @@ browser ── API calls ──▶ Cut engine on 127.0.0.1 (spawned by the Donke
              · the user's own claude/codex CLI logins
 ```
 
+**What loads is cached locally.** Every visit re-reads the same three things: the projects listing, the library, and a project's document. The browser keeps the last answer to each in IndexedDB, scoped to the account and the backend that served it, and paints it on arrival while the real request runs behind it. So returning to a project draws on the next frame instead of after a round trip, and a project you just created opens on a document the client already knows is empty. A snapshot is a head start and the live answer always replaces it; where the two disagree the server wins. The one exception is an edit made on top of a snapshot — that is kept rather than overwritten, saves like any other edit, and a cloud project whose stored copy really has moved on answers that save with the version conflict it already had.
+
 The client probes the engine's health endpoint (dedicated port first, dev server second) and remembers the winner. Browsers permission-gate a hosted page's calls to the local machine, so the first hosted visit holds on a connect screen and fires the browser's permission prompt from the user's own click; a denied permission gets its own recovery screen. The engine grants the hosted origin cross-origin access, and only that origin. Without a running engine the page shows a "get Donkey / open Donkey" state that connects by itself as soon as the engine appears — unless web mode is on, in which case the page passes straight into cloud-only editing instead of walling. Engine updates ride the Donkey app's own auto-updater, so the client never prompts to update.
 
 ## Web mode
