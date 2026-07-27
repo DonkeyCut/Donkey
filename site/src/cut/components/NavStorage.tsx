@@ -36,11 +36,7 @@ export function NavStorage() {
         <span
           className={cn(
             "tabular-nums",
-            frac >= 1
-              ? "text-destructive"
-              : frac >= 0.8
-                ? "text-amber-600 dark:text-amber-500"
-                : "text-muted-foreground"
+            frac >= 1 ? "text-destructive" : "text-muted-foreground"
           )}
         >
           {usageLabel(u.bytes, u.quotaBytes)}
@@ -50,9 +46,7 @@ export function NavStorage() {
         value={Math.min(u.bytes, u.quotaBytes)}
         max={u.quotaBytes}
         aria-label="Cloud storage used"
-        indicatorClassName={
-          frac >= 1 ? "bg-destructive" : frac >= 0.8 ? "bg-amber-500" : undefined
-        }
+        indicatorClassName={frac >= 1 ? "bg-destructive" : undefined}
       />
       <p className="text-xs leading-snug text-muted-foreground">
         {u.grace

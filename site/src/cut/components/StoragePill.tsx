@@ -84,9 +84,7 @@ function CloudStoragePill() {
     ? "Your Pro plan ended and you're over the free limit. Upgrade or free up space before your oldest projects are deleted."
     : frac >= 1
       ? "You've run out of cloud storage. Upgrade or free up space to keep uploading."
-      : frac >= 0.8
-        ? "Cloud storage is almost full. Upgrade or free up space."
-        : `${formatBytes(u.bytes)} of ${formatBytes(u.quotaBytes)} of cloud storage used.`;
+      : `${formatBytes(u.bytes)} of ${formatBytes(u.quotaBytes)} of cloud storage used.`;
   return (
     <PillTooltip message={message}>
       <TooltipTrigger
@@ -94,9 +92,7 @@ function CloudStoragePill() {
           PILL,
           frac >= 1
             ? "text-destructive hover:bg-destructive/10"
-            : frac >= 0.8
-              ? "text-amber-600 hover:bg-amber-500/10 dark:text-amber-500"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            : "text-muted-foreground hover:bg-muted hover:text-foreground"
         )}
         onClick={() => {
           track("cut_storage_pill_clicked");
