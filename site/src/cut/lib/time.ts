@@ -1,3 +1,9 @@
+/** Whole days left until an ISO timestamp, floored at zero — anything inside
+ * the last day reads as 0, so "today" means today. */
+export function daysUntil(iso: string): number {
+  return Math.max(0, Math.floor((new Date(iso).getTime() - Date.now()) / 86_400_000));
+}
+
 /** Elapsed wall-clock as "m:ss" — 63400ms -> "1:03". */
 export function formatElapsed(ms: number) {
   const t = Math.max(0, Math.floor(ms / 1000));

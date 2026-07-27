@@ -24,6 +24,7 @@ import { Lightbox } from "./Lightbox";
 import { Preview } from "./Preview";
 import { SidePanel } from "./SidePanel";
 import { Timeline } from "./Timeline";
+import { StorageUpgradeDialog } from "./StorageUpgradeDialog";
 import { TopBar } from "./TopBar";
 import { ViewerTopBar } from "./ViewerTopBar";
 
@@ -608,6 +609,7 @@ export function Editor({
           </Button>
         </div>
       )}
+      <StorageUpgradeDialog />
       <Lightbox />
     </div>
   );

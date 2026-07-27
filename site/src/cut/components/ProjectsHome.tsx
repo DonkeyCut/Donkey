@@ -47,19 +47,20 @@ import {
 import { Input } from "@/components/ui/input";
 import { engineLost, engineOrigin, servedFromEngine } from "@/cut/lib/api";
 import { cloudBackend, quotaErrorMessage } from "@/cut/lib/backend/cloud";
-import { useCutMode } from "@/cut/lib/backend/hooks";
+import { useCloudUsage, useCutMode } from "@/cut/lib/backend/hooks";
 import { localBackend } from "@/cut/lib/backend/local";
 import type { CutBackend } from "@/cut/lib/backend/types";
 import { useWebMode, webModeEnabled } from "@/cut/lib/flags";
 import { track } from "@/lib/analytics";
 import { authClient } from "@/lib/auth-client";
+import { useStartCheckout } from "@/queries/billing";
 import { clearProjectThreads } from "@/cut/lib/chatThreads";
 import { useGenerate } from "@/cut/lib/generate";
 import { useGenScene } from "@/cut/lib/genScene";
 import { createProjectFromFile, isMediaFile } from "@/cut/lib/media";
 import { copyProjectAcross } from "@/cut/lib/projectCopy";
 import { homeHref, projectHref, useCutBase } from "@/cut/lib/nav";
-import { formatTime } from "@/cut/lib/time";
+import { daysUntil, formatTime } from "@/cut/lib/time";
 import type { ProjectFolder, ProjectSummary } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 import { buildDragGhost, FolderCrumb, FolderShelf, formatBytes, Marquee } from "./desktopFolders";
@@ -109,6 +110,51 @@ function ResidencyBadge({ residency, className }: { residency: Residency; classN
     <span title={RESIDENCY_LABEL[residency]} className={className}>
       <Icon className="size-3" />
     </span>
+  );
+}
+
+/** After a Pro plan ends, an over-cap account has a countdown before the daily
+ * sweep reclaims its oldest projects. Say so where the projects are. */
+function GraceBanner({ enabled }: { enabled: boolean }) {
+  // A deletion deadline moves once a day; one read per visit is plenty.
+  const usage = useCloudUsage(enabled, { poll: false });
+  const checkout = useStartCheckout();
+  const base = useCutBase();
+  const grace = usage.data?.grace;
+  const shown = useRef(false);
+  useEffect(() => {
+    if (grace && !shown.current) {
+      shown.current = true;
+      track("cut_grace_banner_shown");
+    }
+  }, [grace]);
+  if (!grace) return null;
+  const days = daysUntil(grace.deadline);
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+      <span className="text-destructive">
+        Your Pro plan ended and you&rsquo;re over the free storage limit. Your oldest cloud projects
+        will be deleted {days === 0 ? "today" : `in ${days} day${days === 1 ? "" : "s"}`} unless you
+        upgrade or free {formatBytes(grace.overBytes)}.
+      </span>
+      <Button
+        variant="link"
+        size="sm"
+        className="h-auto p-0"
+        disabled={checkout.isPending}
+        onClick={async () => {
+          track("pro_checkout_started");
+          try {
+            const { url } = await checkout.mutateAsync("pro");
+            window.location.assign(url);
+          } catch {
+            window.location.assign(`${base}/settings`);
+          }
+        }}
+      >
+        Upgrade to Pro
+      </Button>
+    </div>
   );
 }
 
@@ -784,6 +830,8 @@ export function ProjectsHome() {
           </div>
         </div>
       )}
+
+      <GraceBanner enabled={residencies.includes("cloud")} />
 
       {dupError && <p className="mb-4 text-sm text-destructive">{dupError}</p>}
 

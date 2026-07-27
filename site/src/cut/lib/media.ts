@@ -197,7 +197,9 @@ export async function uploadProjectImage(
       body: form,
     });
     const body = await apiJson<MediaAsset>(res);
-    if (!res.ok || !body.fileName) throw new Error(body.error ?? failMessage);
+    if (!res.ok || !body.fileName) {
+      throw new Error(quotaErrorMessage(res.status, body) ?? body.error ?? failMessage);
+    }
     return { ...body, url: mediaUrl(projectId, body.fileName) };
   }
   const stored = await uploadProjectMediaTo(backend, projectId, file, fileName);

@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, ChevronLeft, Cloud, Loader2, Mic, Monitor, Ratio, Share2, Smartphone, Sparkles, Square, Upload, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,7 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cloudBackend } from "@/cut/lib/backend/cloud";
-import { useCutMode } from "@/cut/lib/backend/hooks";
+import { cloudUsageQueryKey, useCutMode } from "@/cut/lib/backend/hooks";
 import { localBackend } from "@/cut/lib/backend/local";
 import { useWebMode } from "@/cut/lib/flags";
 import { backTarget, projectHref, useCutBase } from "@/cut/lib/nav";
@@ -29,6 +30,7 @@ import { ASPECT_PRESETS, aspectLabel, aspectOrientation, normalizeAspect, parseR
 import { cn } from "@/lib/utils";
 import { RecordDialog, type RecordMode } from "./RecordDialog";
 import { ShareDialog } from "./ShareDialog";
+import { StoragePill } from "./StoragePill";
 
 function AspectIcon({ aspect, className }: { aspect: Aspect; className?: string }) {
   const o = aspectOrientation(aspect);
@@ -125,6 +127,16 @@ export function TopBar({
   // Cloud imports are real uploads worth reporting; local imports are instant
   // disk copies, so the flag-off surface stays exactly as it was.
   const cloudUploading = uploading > 0 && cutMode === "cloud";
+  // Uploads settle in bursts; refresh the storage pill's number when a burst
+  // ends. Only the settling edge counts — on mount nothing has landed yet.
+  const queryClient = useQueryClient();
+  const wasUploading = useRef(false);
+  useEffect(() => {
+    if (wasUploading.current && !cloudUploading) {
+      void queryClient.invalidateQueries({ queryKey: cloudUsageQueryKey });
+    }
+    wasUploading.current = cloudUploading;
+  }, [cloudUploading, queryClient]);
   const [shareOpen, setShareOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [moving, setMoving] = useState(false);
@@ -340,6 +352,7 @@ export function TopBar({
         </span>
       </div>
       <div className="flex items-center gap-2">
+        <StoragePill />
         {cutMode === "cloud" && (
           <Button
             variant="ghost"

@@ -22,6 +22,10 @@ export type AnalyticsEvents = {
   // Cut projects home.
   project_created: { source: "projects_home" | "sidebar" | "file_import" };
   folder_created: void;
+  // Cut cloud storage limits.
+  cut_storage_pill_clicked: void;
+  cut_storage_upgrade_shown: { source: "quota-413" | "pill" };
+  cut_grace_banner_shown: void;
   // Billing (settings).
   pro_checkout_started: void;
   billing_portal_opened: void;

@@ -3,6 +3,7 @@
 // the session). Routes mirror the engine's JSON shapes under /api/cut-cloud.
 // Media bytes ride presigned R2 URLs minted by those routes, not this
 // transport.
+import { emitStorageQuota } from "../storageQuota";
 import type { CutBackend } from "./types";
 
 const cloudPath = (path: string) => path.replace(/^\/api\/cut\//, "/api/cut-cloud/");
@@ -100,14 +101,16 @@ export async function fetchSignedMediaUrls(
   return out;
 }
 
-/** Friendly message for a presign 413 quota rejection, else null. */
+/** Friendly message for a presign 413 quota rejection, else null. Also raises
+ * the storage-quota wall so the upgrade dialog opens wherever the rejection
+ * happened — this inline string stays as the terse fallback next to it. */
 export function quotaErrorMessage(
   status: number,
-  body: { error?: string } | null | undefined
+  body: { error?: string; bytes?: number; quotaBytes?: number } | null | undefined
 ): string | null {
-  return status === 413 && body?.error === "storage_quota_exceeded"
-    ? "Cloud storage is full — free space in your projects or delete unused media."
-    : null;
+  if (status !== 413 || body?.error !== "storage_quota_exceeded") return null;
+  emitStorageQuota({ bytes: body?.bytes, quotaBytes: body?.quotaBytes, source: "quota-413" });
+  return "Cloud storage is full.";
 }
 
 export const cloudBackend: CutBackend = {
