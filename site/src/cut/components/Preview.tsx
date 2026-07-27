@@ -1,10 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { usePlayback } from "@/cut/hooks/usePlayback";
 import { clearAssetDrag, setAssetDragData } from "@/cut/lib/assetDrag";
 import { startDrag } from "@/cut/lib/drag";
 import { getClipSpans, useEditor } from "@/cut/lib/store";
+import {
+  capturePoster,
+  capturePosterWhenReady,
+  paintPoster,
+  readPoster,
+} from "@/cut/lib/posterCache";
 import { setPreviewCanvas } from "@/cut/lib/previewCanvas";
 import { frameOf, isFullRect, rectOf, type Aspect, type ClipSpan, type FrameRect, type MediaAsset, type VideoClip } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
@@ -33,6 +39,35 @@ function pannableSpan(s: {
   return ox > 1 || oy > 1 ? span : null;
 }
 
+/** Paint the picture this project's preview last showed, then hand the canvas
+ * back to the engine. Cloud media is a network away, so without this the
+ * preview holds black for about a second on every open while the first decoder
+ * fetches and seeks — the engine leaves the canvas alone until it has a frame,
+ * which is what lets a poster sit there in the meantime. Once a real frame
+ * lands it is kept for the next open. */
+function useCachedFirstFrame(canvasRef: RefObject<HTMLCanvasElement | null>) {
+  // Re-runs per load, so reopening a project repaints and re-captures.
+  const epoch = useEditor((s) => (s.loaded ? s.loadEpoch : 0));
+  const projectId = useEditor((s) => s.projectId);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !epoch || !projectId) return;
+    let alive = true;
+    void readPoster("frame", projectId).then((data) => {
+      // Only if the engine has not beaten us to it — a warm decoder paints
+      // within the same frame, and the real picture outranks a stored one.
+      if (alive && data && !capturePoster("frame", projectId, canvas)) {
+        void paintPoster(canvas, data);
+      }
+    });
+    const stop = capturePosterWhenReady("frame", projectId, () => canvasRef.current);
+    return () => {
+      alive = false;
+      stop();
+    };
+  }, [canvasRef, epoch, projectId]);
+}
+
 export function Preview() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -47,6 +82,8 @@ export function Preview() {
     setPreviewCanvas(canvasRef.current);
     return () => setPreviewCanvas(null);
   }, []);
+
+  useCachedFirstFrame(canvasRef);
 
   useEffect(() => {
     const wrap = wrapRef.current;

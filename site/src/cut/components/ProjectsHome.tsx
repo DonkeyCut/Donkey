@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
+import { capturePosterWhenReady, readPoster } from "@/cut/lib/posterCache";
 import { engineOrigin, servedFromEngine } from "@/cut/lib/api";
 import { quotaErrorMessage } from "@/cut/lib/backend/cloud";
 import { useCloudUsage, useCutMode } from "@/cut/lib/backend/hooks";
@@ -944,6 +945,9 @@ export function ProjectsHome() {
 function CardPreview({ project: p, residency }: { project: ProjectSummary; residency: Residency }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [tileRef, seen] = useInView<HTMLDivElement>();
+  // The frame this card drew last time, so coming back from a project shows the
+  // picture at once instead of a grey rectangle while the media loads.
+  const poster = useCardPoster(p.id, residency, videoRef, seen);
   const backend = backendFor(residency);
   const fileUrl = (file: string) =>
     backend.url(`/api/cut/projects/${p.id}/media/${encodeURIComponent(file)}`);
@@ -994,6 +998,7 @@ function CardPreview({ project: p, residency }: { project: ProjectSummary; resid
           crossOrigin={MEDIA_CORS}
           ref={videoRef}
           src={`${src}#t=${posterT}`}
+          poster={poster ?? undefined}
           muted
           loop
           playsInline
@@ -1003,6 +1008,32 @@ function CardPreview({ project: p, residency }: { project: ProjectSummary; resid
       )}
     </div>
   );
+}
+
+/** The cached opening frame for a project card, once it has been read off this
+ * machine, and the standing job of keeping it fresh. Null until the read lands,
+ * and for a project this browser has never drawn. */
+function useCardPoster(
+  projectId: string,
+  residency: Residency,
+  videoRef: RefObject<HTMLVideoElement | null>,
+  seen: boolean
+): string | null {
+  const [poster, setPoster] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void readPoster("card", projectId, residency).then((data) => {
+      if (alive) setPoster(data);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [projectId, residency]);
+  useEffect(() => {
+    if (!seen) return;
+    return capturePosterWhenReady("card", projectId, () => videoRef.current, residency);
+  }, [projectId, residency, seen, videoRef]);
+  return poster;
 }
 
 function ProjectMenu({
