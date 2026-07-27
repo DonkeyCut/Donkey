@@ -23,7 +23,7 @@ import { useGenNotify } from "./genNotify";
 import { IMAGE_ASPECTS, useImageGen } from "./imageGen";
 import { useEditor } from "./store";
 import { mediaSlug, nearestAspect, type MediaAsset, type RenderRecord } from "./types";
-import { defaultVideoAspects, videoModel } from "./videoModels";
+import { aspectFramingNote, defaultVideoAspects, videoModel } from "./videoModels";
 import { walkLadder, type VideoAttempt } from "./videoLadder";
 
 // AI generation jobs, held outside the panels so a tab switch (which unmounts
@@ -729,9 +729,14 @@ export const useGenerate = create<GenerateState>((set, get) => {
           ? { prompt, images: [] as InlineImage[] }
           : await promptAndImages("video", prompt, opts?.refs ?? [], opts?.composeRefs !== false, 1);
         const images = await Promise.all(rawImages.map(videoSafeInline));
+        const projectAspect = useEditor.getState().aspect;
+        const aspectRatio = opts?.aspect ?? nearestAspect(projectAspect, defaultVideoAspects());
+        // A project on a shape the model can't render gets its clip cropped, so
+        // the prompt carries the frame the take is really for.
+        const framing = aspectFramingNote(projectAspect, aspectRatio);
         const res = await hostedPost("/api/inference/assets", {
           kind: "video",
-          prompt: sent,
+          prompt: framing ? `${sent}\n\n${framing}` : sent,
           provider: "gemini-omni",
           ...(anchors.length > 0
             ? { inputs: { referenceImages: anchors } }
@@ -739,8 +744,7 @@ export const useGenerate = create<GenerateState>((set, get) => {
               ? { inputs: { images } }
               : {}),
           parameters: {
-            aspectRatio:
-              opts?.aspect ?? nearestAspect(useEditor.getState().aspect, defaultVideoAspects()),
+            aspectRatio,
             ...(opts?.negativePrompt ? { negativePrompt: opts.negativePrompt } : {}),
           },
         });

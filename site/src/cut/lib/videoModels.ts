@@ -52,3 +52,22 @@ export function videoModel(tier: VideoTier): VideoModelOption {
 export function defaultVideoAspects(): VideoAspect[] {
   return VIDEO_MODELS[0].aspects;
 }
+
+/**
+ * Composition guidance for a project the renderer can't shoot natively. The
+ * models render 16:9 or 9:16 only, so a project on any other ratio gets a clip
+ * of a different shape than its frame. A clip letterboxes by default (`fit`
+ * defaults to "fit"), and filling the frame instead — the Inspector's Fill, the
+ * usual next move — crops whatever sits outside a centered slice. Naming the
+ * target shape keeps the subject inside the part that survives either way.
+ * Empty when the project already is a shape the model renders, so those prompts
+ * stay exactly as written.
+ */
+export function aspectFramingNote(projectAspect: string, renderAspect: VideoAspect): string {
+  if ((defaultVideoAspects() as string[]).includes(projectAspect)) return "";
+  return (
+    `Compose for a ${projectAspect} frame. This renders ${renderAspect}, a different shape, and sits ` +
+    `in a ${projectAspect} project where it may be cropped to fill the frame — so keep the subject ` +
+    `and any important action within a centered ${projectAspect} area, clear of the edges.`
+  );
+}
