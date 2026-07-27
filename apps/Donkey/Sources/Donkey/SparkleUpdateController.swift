@@ -1,11 +1,10 @@
-import DonkeyContracts
 import Foundation
 import Sparkle
 
 @MainActor
 protocol DonkeyUpdateChecking: AnyObject {
     var currentVersion: String { get }
-    var updateStateChanged: ((UserQueryUpdateState) -> Void)? { get set }
+    var updateStateChanged: ((DonkeyUpdateState) -> Void)? { get set }
 
     func start()
     func checkForUpdates()
@@ -22,7 +21,7 @@ final class SparkleUpdateController: NSObject, DonkeyUpdateChecking, SPUUserDriv
     /// taps the notch button, then answer `.install` to begin the silent download.
     private var pendingInstall: ((SPUUserUpdateChoice) -> Void)?
 
-    var updateStateChanged: ((UserQueryUpdateState) -> Void)?
+    var updateStateChanged: ((DonkeyUpdateState) -> Void)?
 
     var currentVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ??
@@ -88,12 +87,12 @@ final class SparkleUpdateController: NSObject, DonkeyUpdateChecking, SPUUserDriv
     }
 
     private func emit(
-        _ status: UserQueryUpdateStatus,
+        _ status: DonkeyUpdateStatus,
         latestVersion: String? = nil,
         message: String? = nil
     ) {
         updateStateChanged?(
-            UserQueryUpdateState(
+            DonkeyUpdateState(
                 status: status,
                 currentVersion: currentVersion,
                 latestVersion: latestVersion,

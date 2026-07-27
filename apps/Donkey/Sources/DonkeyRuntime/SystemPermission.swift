@@ -1,16 +1,11 @@
-import ApplicationServices
 import AVFoundation
 import CoreGraphics
-import CoreServices
 import Foundation
 
-/// A macOS system (TCC) permission Donkey may need while running a task.
+/// A macOS system (TCC) permission Donkey needs to record the screen.
 public enum SystemPermission: Equatable, Sendable {
     case screenRecording
     case microphone
-    case accessibility
-    /// Apple Events to a target app (Automation). `nil` target means System Events.
-    case automation(targetBundleID: String?)
 }
 
 public enum SystemPermissionStatus: String, Sendable {
@@ -19,9 +14,9 @@ public enum SystemPermissionStatus: String, Sendable {
     case denied
 }
 
-/// The single place that checks and requests macOS TCC permissions. Everything else preflights
-/// through `status(_:)` (which never prompts) and only calls `request(_:)` after the user has
-/// approved the in-notch pre-gate — so the system dialog never appears without the user's go-ahead.
+/// The single place that checks and requests macOS TCC permissions. Callers preflight through
+/// `status(_:)`, which never prompts, and call `request(_:)` only when starting the recording the
+/// user just asked for — so the system dialog never appears out of the blue.
 public enum SystemPermissionCoordinator {
     /// A short user-facing label for the pre-gate banner.
     public static func displayName(_ permission: SystemPermission) -> String {
@@ -30,13 +25,6 @@ public enum SystemPermissionCoordinator {
             return "Screen Recording"
         case .microphone:
             return "Microphone"
-        case .accessibility:
-            return "Accessibility"
-        case .automation(let bundleID):
-            if let bundleID, !bundleID.isEmpty {
-                return "Automation (\(bundleID))"
-            }
-            return "Automation"
         }
     }
 
@@ -52,10 +40,6 @@ public enum SystemPermissionCoordinator {
             case .denied, .restricted: return .denied
             @unknown default: return .notDetermined
             }
-        case .accessibility:
-            return AXIsProcessTrusted() ? .granted : .notDetermined
-        case .automation(let bundleID):
-            return automationStatus(targetBundleID: bundleID, askIfNeeded: false)
         }
     }
 
@@ -63,19 +47,7 @@ public enum SystemPermissionCoordinator {
         status(permission) == .granted
     }
 
-    /// Runs a System Events AppleScript ONLY when Automation consent is already granted — it never
-    /// prompts. For internal niceties (e.g. un-minimizing a window before a screenshot) that must
-    /// not raise a bare system dialog mid-task. The user's actual AppleScript tasks gate in the notch.
-    @discardableResult
-    public static func runSystemEventsScriptIfGranted(_ source: String) -> Bool {
-        guard isGranted(.automation(targetBundleID: "com.apple.systemevents")) else { return false }
-        var error: NSDictionary?
-        NSAppleScript(source: source)?.executeAndReturnError(&error)
-        return error == nil
-    }
-
-    /// Triggers the macOS permission dialog (or the grant, for automation) and reports whether it
-    /// ended up granted. Call only after the user approved the pre-gate.
+    /// Triggers the macOS permission dialog and reports whether it ended up granted.
     @discardableResult
     public static func request(_ permission: SystemPermission) async -> Bool {
         switch permission {
@@ -87,38 +59,6 @@ public enum SystemPermissionCoordinator {
                     continuation.resume(returning: granted)
                 }
             }
-        case .accessibility:
-            // String value of kAXTrustedCheckOptionPrompt (the global is concurrency-unsafe to touch).
-            let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-            return AXIsProcessTrustedWithOptions(options)
-        case .automation(let bundleID):
-            return automationStatus(targetBundleID: bundleID, askIfNeeded: true) == .granted
-        }
-    }
-
-    // Apple Events / Automation consent for a specific target app.
-    private static func automationStatus(targetBundleID: String?, askIfNeeded: Bool) -> SystemPermissionStatus {
-        let bundleID = (targetBundleID?.isEmpty == false ? targetBundleID! : "com.apple.systemevents")
-        guard let data = bundleID.data(using: .utf8) else { return .notDetermined }
-
-        var addressDesc = AEAddressDesc()
-        let createStatus: OSStatus = data.withUnsafeBytes { raw in
-            OSStatus(AECreateDesc(typeApplicationBundleID, raw.baseAddress, data.count, &addressDesc))
-        }
-        guard createStatus == noErr else { return .notDetermined }
-        defer { AEDisposeDesc(&addressDesc) }
-
-        let result = AEDeterminePermissionToAutomateTarget(&addressDesc, typeWildCard, typeWildCard, askIfNeeded)
-        switch result {
-        case noErr:
-            return .granted
-        case OSStatus(errAEEventNotPermitted):
-            return .denied
-        case OSStatus(errAEEventWouldRequireUserConsent):
-            return .notDetermined
-        default:
-            // procNotFound (target not running) and other transient errors aren't a denial.
-            return .notDetermined
         }
     }
 }

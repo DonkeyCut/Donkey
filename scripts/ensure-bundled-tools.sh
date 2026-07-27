@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #
-# Guarantees vendor/donkey-tools/ holds the command-line tools Donkey's capability
-# skills run by bare name (yt-dlp, ffmpeg, ...). The dev run script and the offline
-# packaging override both call this, so the tools are present without a manual step.
+# Guarantees vendor/donkey-tools/ holds the command-line tools the Cut engine runs by
+# bare name (ffmpeg, ffprobe, yt-dlp). The dev run script and app packaging both call
+# this, so the tools are present without a manual step.
 #
 # Strategy: prefer the published prebuilt bundle named in bundled-tools.json (a fast
-# download, the same artifact the shipped app installs on first run). If nothing is
+# download, the same artifact the shipped app carries). If nothing is
 # published yet, or the download/checksum fails, fall back to building from source via
-# fetch-bundled-tools.sh. Either way, fail loudly if a mandatory tool is still missing
-# rather than letting a build run without the media/pdf capabilities.
+# fetch-bundled-tools.sh. Either way, fail loudly if any tool is still missing rather
+# than letting a build ship an app without the media/pdf capabilities.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,12 +16,20 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VENDOR_DIR="${DONKEY_TOOLS_DIR:-$ROOT_DIR/vendor/donkey-tools}"
 MANIFEST="$ROOT_DIR/apps/Donkey/Sources/DonkeyRuntime/Resources/bundled-tools.json"
 
-# Tools without which a build is not shippable: ffmpeg/ffprobe (media), yt-dlp (the
-# YouTube/download path), lit + pdf-fill (the pdf skill), epub-pack (the book skill),
-# reframe (the shorts skill's active-speaker auto-reframe).
-# Keep in sync with fetch-bundled-tools.sh and BundledTools.swift.
-MANDATORY_TOOLS=(ffmpeg ffprobe yt-dlp lit pdf-fill epub-pack reframe)
-OPTIONAL_TOOLS=(qpdf exiftool)
+# Every tool the app ships. All of them are required: they travel inside the app, so a
+# build that can't stage one would ship a capability that silently doesn't work on a
+# machine that happens not to have it. Scoped to the Donkey Cut video editor —
+# ffmpeg/ffprobe (export, probe, frame extract) and yt-dlp (URL import). Keep in sync
+# with fetch-bundled-tools.sh and BundledTools.swift — the Swift list is checked
+# against this one by BundledToolsTests.
+REQUIRED_TOOLS=(ffmpeg ffprobe yt-dlp)
+
+# `--list` prints the required set, one per line, so packaging verifies the baked copy
+# against this single source of truth instead of keeping its own list.
+if [ "${1:-}" = "--list" ]; then
+  printf '%s\n' "${REQUIRED_TOOLS[@]}"
+  exit 0
+fi
 
 missing_of() {
   local t out=()
@@ -29,26 +37,6 @@ missing_of() {
     [ -x "$VENDOR_DIR/$t" ] || out+=("$t")
   done
   printf '%s\n' "${out[@]:-}"
-}
-
-# `lit` loads pdfium at runtime via PDFIUM_LIB_PATH; without libpdfium.dylib beside it, every PDF parse
-# fails. The dylib is not an executable, so it can't live in MANDATORY_TOOLS — check it as lit's companion.
-pdfium_missing() {
-  [ -x "$VENDOR_DIR/lit" ] && [ ! -f "$VENDOR_DIR/libpdfium.dylib" ]
-}
-
-# True only when a bundled-tool SOURCE file has local (uncommitted) changes — the dev is iterating, so the
-# staged binary is stale and fetch-bundled-tools.sh should rebuild just that tool (its own per-tool `-nt`
-# guard decides which). Detected with git, NOT file mtimes: a fresh clone / CI checkout has clone-order
-# mtimes that made the old `-nt` check fire spuriously and recompile a perfectly good prebuilt bundle.
-# `tools/` covers every compiled tool generically (no per-tool path list to keep in sync — that lives once,
-# in fetch-bundled-tools.sh); ReframePlanner.swift is reframe's one source outside `tools/`. Outside a git
-# tree (a source tarball) nothing is being edited, so treat as unchanged.
-any_source_modified() {
-  git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
-  ! git -C "$ROOT_DIR" diff --quiet HEAD -- \
-      tools/ \
-      apps/Donkey/Sources/DonkeyRuntime/ReframePlanner.swift
 }
 
 
@@ -95,9 +83,7 @@ download_prebuilt() {
 # it (nor rebuild for source-change reasons — the prebuilt binaries are authoritative). A complete set is
 # done; only a genuinely missing tool fails, with the real list rather than an empty one.
 if [ -n "${DONKEY_TOOLS_DIR:-}" ]; then
-  missing="$(missing_of "${MANDATORY_TOOLS[@]}" | grep -v '^$' | tr '\n' ' ')"
-  pdfium_missing && missing="$missing libpdfium.dylib"
-  missing="$(echo "$missing" | xargs)"
+  missing="$(missing_of "${REQUIRED_TOOLS[@]}" | grep -v '^$' | tr '\n' ' ' | xargs)"
   if [ -n "$missing" ]; then
     echo "ERROR: DONKEY_TOOLS_DIR=$VENDOR_DIR is missing required tools: $missing" >&2
     exit 1
@@ -106,54 +92,32 @@ if [ -n "${DONKEY_TOOLS_DIR:-}" ]; then
   exit 0
 fi
 
-mandatory_missing=$(missing_of "${MANDATORY_TOOLS[@]}" | grep -c .)
-optional_missing=$(missing_of "${OPTIONAL_TOOLS[@]}" | grep -c .)
-if [ "$mandatory_missing" -eq 0 ] && [ "$optional_missing" -eq 0 ] && ! pdfium_missing && ! any_source_modified; then
+required_missing=$(missing_of "${REQUIRED_TOOLS[@]}" | grep -c .)
+if [ "$required_missing" -eq 0 ]; then
   echo "Bundled tools present in $VENDOR_DIR"
   exit 0
 fi
 
-if any_source_modified; then
-  echo "Source changes detected in tools/ — compiling custom tools..."
-  "$SCRIPT_DIR/fetch-bundled-tools.sh" || true
-elif pdfium_missing; then
-  echo "Staged libpdfium.dylib is missing — attempting to restore from prebuilt..."
-  if ! download_prebuilt; then
-    echo "Could not restore prebuilt tools. Compiling from source..."
-    "$SCRIPT_DIR/fetch-bundled-tools.sh" || true
-  fi
-elif ! download_prebuilt; then
+# Every bundled tool is now third-party and prebuilt, so the published bundle is always the right
+# first move; a source build is the fallback for when nothing is published or the download fails.
+if ! download_prebuilt; then
   echo "Building tools from source (one-time; ffmpeg builds from source and can take several minutes)..."
   "$SCRIPT_DIR/fetch-bundled-tools.sh" || true
 fi
 
 
-# A published prebuilt bundle can predate a newly added mandatory tool (e.g. a first-party CLI
-# added to the scripts before the next republish). Rather than hard-fail, build just the missing
-# ones from source — fetch-bundled-tools.sh skips anything already present in VENDOR_DIR.
-still_mandatory=$(missing_of "${MANDATORY_TOOLS[@]}" | grep -v '^$' || true)
-if [ -n "$still_mandatory" ]; then
-  echo "Prebuilt bundle missing: $(echo "$still_mandatory" | tr '\n' ' ')— building those from source..."
+# A published prebuilt bundle can predate a newly added tool (e.g. a first-party CLI added to
+# the scripts before the next republish). Rather than hard-fail, build just the missing ones
+# from source — fetch-bundled-tools.sh skips anything already present in VENDOR_DIR.
+still_missing=$(missing_of "${REQUIRED_TOOLS[@]}" | grep -v '^$' || true)
+if [ -n "$still_missing" ]; then
+  echo "Prebuilt bundle missing: $(echo "$still_missing" | tr '\n' ' ')— building those from source..."
   "$SCRIPT_DIR/fetch-bundled-tools.sh" || true
-  still_mandatory=$(missing_of "${MANDATORY_TOOLS[@]}" | grep -v '^$' || true)
+  still_missing=$(missing_of "${REQUIRED_TOOLS[@]}" | grep -v '^$' || true)
 fi
-if [ -n "$still_mandatory" ]; then
-  echo "ERROR: bundled tools still missing after install: $(echo "$still_mandatory" | tr '\n' ' ')" >&2
+if [ -n "$still_missing" ]; then
+  echo "ERROR: bundled tools still missing after install: $(echo "$still_missing" | tr '\n' ' ')" >&2
   echo "       Source build needs Homebrew + network; fix that and re-run." >&2
   exit 1
 fi
-if pdfium_missing; then
-  echo "Staged libpdfium.dylib is missing — compiling/fetching it from source..."
-  "$SCRIPT_DIR/fetch-bundled-tools.sh" || true
-fi
-if pdfium_missing; then
-  echo "ERROR: lit is present but libpdfium.dylib is still missing in $VENDOR_DIR; lit cannot parse PDFs." >&2
-  exit 1
-fi
-
-still_optional=$(missing_of "${OPTIONAL_TOOLS[@]}" | grep -v '^$' || true)
-if [ -n "$still_optional" ]; then
-  echo "Warning: optional bundled tools missing (skills fall back to installed copies): $(echo "$still_optional" | tr '\n' ' ')" >&2
-fi
-
 echo "Bundled tools ready in $VENDOR_DIR"

@@ -1,9 +1,0 @@
-Q3 REGIONAL FIGURES
-
-Region      Revenue     Growth    Churn
-West        4,820,000   12.4%     1.8%
-East        3,610,000   8.1%      2.3%
-North       2,990,000   15.2%     1.1%
-South       2,140,000   4.7%      3.0%
-
-Totals: Revenue 13,560,000; blended growth 10.1%.

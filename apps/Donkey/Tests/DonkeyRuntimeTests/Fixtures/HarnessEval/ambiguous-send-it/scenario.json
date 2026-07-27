@@ -1,9 +1,0 @@
-{
-  "frontmostApp": "Finder",
-  "maxSteps": 6,
-  "expect": {
-    "turnKind": "clarify",
-    "used": ["user.clarify"],
-    "notUsed": ["shell_exec"]
-  }
-}

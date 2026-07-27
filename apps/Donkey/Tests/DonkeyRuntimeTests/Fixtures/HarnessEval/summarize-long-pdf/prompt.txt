@@ -1,1 +1,0 @@
-summarize report.pdf into a one-page brief and save it to my Desktop

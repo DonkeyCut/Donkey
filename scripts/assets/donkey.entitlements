@@ -2,12 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <!-- Donkey drives other apps via Apple Events (osascript, System Events, app automation). Under the
-       hardened runtime that notarization requires, sending Apple Events is blocked without this entitlement.
-       Donkey is not sandboxed (accessibility/automation are incompatible with the sandbox), so this is the
-       only entitlement it needs; microphone/screen-capture/accessibility are governed by TCC + the Info.plist
-       usage strings, not entitlements. -->
-  <key>com.apple.security.automation.apple-events</key>
-  <true/>
+  <!-- Donkey is not sandboxed: it runs the bundled Cut engine and the media tools as child processes.
+       Screen recording and the microphone are governed by TCC plus the Info.plist usage strings, not
+       entitlements, so it needs none of its own. -->
 </dict>
 </plist>

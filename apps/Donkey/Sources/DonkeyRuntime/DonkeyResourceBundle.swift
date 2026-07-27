@@ -25,8 +25,8 @@ public enum DonkeyResourceBundle {
         return nil
     }
 
-    /// The DonkeyRuntime target's own resource bundle (`bundled-tools.json`, the local-app finder
-    /// profiles, and the BuiltInSkills tree).
+    /// The DonkeyRuntime target's own resource bundle (the local-app finder profiles and the
+    /// BuiltInSkills tree).
     ///
     /// Falls back to the SwiftPM-generated `Bundle.module` for the `swift test` / `swift run` layout,
     /// where `Bundle.main` is the toolchain's test runner and `named` can't find the bundle. The fallback
@@ -35,6 +35,6 @@ public enum DonkeyResourceBundle {
     /// bundle genuinely exists.
     public static let runtime: Bundle? = named("Donkey_DonkeyRuntime") ?? Bundle.module
 
-    /// The Donkey executable target's resource bundle (app icon, sign-in art, theme).
+    /// The Donkey executable target's resource bundle (the menu bar icon).
     public static let app = named("Donkey_Donkey")
 }

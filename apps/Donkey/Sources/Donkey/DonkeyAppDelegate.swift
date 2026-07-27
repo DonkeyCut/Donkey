@@ -1,64 +1,26 @@
 import AppKit
-import Carbon.HIToolbox
-import Combine
-import Darwin
-import DonkeyAI
-import DonkeyContracts
 import DonkeyRuntime
 import Foundation
 import SwiftUI
 
+/// Donkey is a menu bar app with no windows and no account. The product is the Donkey Cut video editor
+/// in the browser; this app exists so that page can use the Mac's hardware — the local Cut engine
+/// (encoding, storage, speech-to-text) and screen recording. Everything here is one of those two
+/// features, plus the updater that keeps them current.
 @MainActor
 final class DonkeyAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    private var authCoordinator: DonkeyAuthCoordinator?
-    private var onboardingWindowController: OnboardingWindowController?
-    /// The menu bar surface: the status item whose menu carries Go to App, updates, and Quit.
+    /// The menu bar surface: the status item whose menu carries Go to App, Record Screen, updates, and Quit.
     private var statusItemController: DonkeyStatusItemController?
     /// Sparkle, running windowless. A background check that finds an update surfaces the status
     /// menu's "Install Update" item; choosing it downloads, installs, and relaunches silently.
     private var updateChecker: (any DonkeyUpdateChecking)?
-    private var uiUnderstandingCoordinator: UIUnderstandingCoordinator?
-    /// Mirrors the auth coordinator's session phase into the process-wide session gate and the
-    /// session heartbeat for the whole run.
-    private var authStateCancellable: AnyCancellable?
-    /// Periodically reconciles the app's session against the server, so a sign-out performed on the website
-    /// (or another device) takes effect here without a relaunch. A periodic tick plus an app-reactivation
-    /// observer fire a cheap auth-gated probe; a 401 routes through the usual session-expiry handling. Both
-    /// run only while signed in and are torn down on sign-out.
-    private var sessionHeartbeatTimer: Timer?
-    private var sessionHeartbeatActiveObserver: NSObjectProtocol?
-    /// Runs the Donkey Cut engine (the local server behind donkeycut.com) for the app's
-    /// lifetime. Cut is free and standalone, so this starts regardless of sign-in state.
+    /// Runs the Donkey Cut engine (the local server behind donkeycut.com) for the app's lifetime.
     private var cutEngineSupervisor: DonkeyCutEngineSupervisor?
     /// The QuickTime-style screen recorder: a menu bar toggle, a center-bottom control bar, and the
-    /// region/window pickers. Free and standalone like Cut, so it installs regardless of sign-in.
+    /// region/window pickers.
     private var screenRecordingController: ScreenRecordingController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if ManualCaptureDebugLaunchHandler.shouldHandle(arguments: CommandLine.arguments) {
-            NSApp.setActivationPolicy(.accessory)
-            Task {
-                let exitCode = await ManualCaptureDebugLaunchHandler().run(
-                    arguments: CommandLine.arguments
-                )
-                Darwin.exit(exitCode)
-            }
-            return
-        }
-
-        let authCoordinator = DonkeyAuthCoordinator()
-        self.authCoordinator = authCoordinator
-        // Seed the process-wide session gate before any surface is built, so every backend consumer
-        // sees the real auth state on its first tick instead of the optimistic default. The phase
-        // observer keeps it current from here on.
-        BackendSessionGate.shared.update(isAuthenticated: authCoordinator.isAuthenticated)
-        authCoordinator.authenticationCompleted = { [weak self] _ in
-            // Sign-in may have happened on the onboarding card's sign-in slide; close it. `close()`
-            // clears the retain via onDismiss, and this is a no-op when the card isn't showing
-            // (e.g. sign-in from the status menu).
-            self?.onboardingWindowController?.close()
-        }
-        registerAuthCallbackHandler()
         // Build the recorder before the status item so its menu can drive the "Record Screen" item.
         self.screenRecordingController = ScreenRecordingController()
         installMainMenu()
@@ -68,52 +30,6 @@ final class DonkeyAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let cutEngineSupervisor = DonkeyCutEngineSupervisor()
         self.cutEngineSupervisor = cutEngineSupervisor
         cutEngineSupervisor.start()
-
-        // The UI-understanding engine exists only to draw the developer debug overlay; the agent does
-        // not read from it. It parses the screen solely to render that overlay, so it is built only in
-        // debug-overlay builds and never in production.
-        #if DONKEY_DEBUG_OVERLAY
-        uiUnderstandingCoordinator = UIUnderstandingCoordinator(
-            overlayController: DebugUIInspectionOverlayController(),
-            rendersOverlay: true
-        )
-        #endif
-
-        // Drive the session gate, heartbeat, and debug overlay engine from the auth phase for the
-        // whole run. `$phase` replays the current value on subscription, so this also applies the
-        // launch state.
-        authStateCancellable = authCoordinator.$phase
-            .sink { [weak self] phase in
-                self?.applySessionState(isSignedIn: phase.isSignedIn)
-            }
-
-        // The sign-in onboarding card belongs to Donkey Use, which is deprecated. The app is the
-        // Donkey Cut distribution now — free and standalone — so no launch presents it.
-    }
-
-    func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls {
-            handleAuthCallbackURL(url)
-        }
-    }
-
-    func applicationDidBecomeActive(_ notification: Notification) {
-        // The donkey:// sign-in callback can be serviced by a different app instance than this one
-        // (LaunchServices cold-launching a second copy of this bundle id, which shares this
-        // UserDefaults domain). That copy persists the session and exits, leaving this instance's
-        // in-memory phase signed-out. Clicking "Open Donkey" activates us, so reconciling from the
-        // durable session here flips the phase without a relaunch. A no-op when already signed in
-        // or when no session is on disk.
-        authCoordinator?.reconcileWithPersistedSession()
-    }
-
-    func applicationShouldHandleReopen(
-        _ sender: NSApplication,
-        hasVisibleWindows flag: Bool
-    ) -> Bool {
-        // Reopening no longer surfaces the deprecated Donkey Use sign-in card; Cut lives in the
-        // browser reached from the status menu.
-        return true
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -121,53 +37,7 @@ final class DonkeyAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        NSAppleEventManager.shared().removeEventHandler(
-            forEventClass: AEEventClass(kInternetEventClass),
-            andEventID: AEEventID(kAEGetURL)
-        )
-        uiUnderstandingCoordinator?.stop()
         cutEngineSupervisor?.stop()
-    }
-
-    /// Presents the onboarding card — the single surface for both the walkthrough and login. When signed
-    /// out, slide 0 is the Google sign-in landing with an Explore link into the feature tour, and the card
-    /// stays up until sign-in completes (the `authenticationCompleted` handler closes it). When signed in,
-    /// it's the feature tour ending in Done.
-    private func presentOnboardingCard() {
-        guard let authCoordinator else { return }
-        NSApp.setActivationPolicy(.regular)
-
-        // Only one onboarding card is ever on screen: if one is already up, close it before showing the
-        // next so a reopen or menu replay replaces the current card rather than stacking another behind it.
-        // `close()` fires the old card's onDismiss synchronously (clearing this reference), so the fresh
-        // controller assigned next isn't clobbered.
-        onboardingWindowController?.close()
-
-        let controller = OnboardingWindowController()
-        onboardingWindowController = controller
-
-        let isSignedIn = authCoordinator.isAuthenticated
-        // Reopening the sign-in surface means the user is back to try again: clear any stalled attempt
-        // (e.g. they dismissed the card on "Continue with Google", then closed the browser) so the button
-        // is enabled and ready rather than stuck disabled on `.waitingForCallback`.
-        if !isSignedIn {
-            authCoordinator.resetSignInIfStalled()
-        }
-        let pages = OnboardingTour.pages(isSignedIn: isSignedIn)
-
-        controller.present(
-            pages: pages,
-            initialPageIndex: 0,
-            continueButtonTitle: "Continue",
-            finishButtonTitle: "Done",
-            onDismiss: { [weak self] in self?.onboardingWindowController = nil },
-            signInFooter: isSignedIn ? nil : { [weak self, authCoordinator] in
-                AnyView(OnboardingGoogleSignInFooter(
-                    authCoordinator: authCoordinator,
-                    onContinue: { self?.onboardingWindowController?.close() }
-                ))
-            }
-        )
     }
 
     // MARK: - Status item
@@ -198,83 +68,6 @@ final class DonkeyAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.statusItemController?.updateState = state
         }
         updateChecker.start()
-    }
-
-    /// Drive the process-wide session gate, the debug overlay engine, and the session heartbeat from
-    /// the auth phase. Signed out: close the gate (every backend call short-circuits to
-    /// `.authenticationRequired` with no network round trip) and suspend the overlay engine, so a
-    /// logged-out app stops issuing guaranteed-401 requests. Signed in: reopen the gate and restart
-    /// them. Idempotent — `start()`/`stop()` are safe to call repeatedly, and the coordinator is nil
-    /// outside debug-overlay builds.
-    private func applySessionState(isSignedIn: Bool) {
-        BackendSessionGate.shared.update(isAuthenticated: isSignedIn)
-        if isSignedIn {
-            uiUnderstandingCoordinator?.start()
-            startSessionHeartbeat()
-        } else {
-            uiUnderstandingCoordinator?.stop()
-            stopSessionHeartbeat()
-        }
-    }
-
-    // MARK: - Session heartbeat
-
-    /// Starts the session heartbeat: a periodic tick plus an app-reactivation observer, each firing a
-    /// cheap session-validity probe, plus one immediate probe. Idempotent — a no-op while already
-    /// running, so the auth-phase observer can call it freely. Torn down by `stopSessionHeartbeat`
-    /// on sign-out.
-    private func startSessionHeartbeat() {
-        guard sessionHeartbeatTimer == nil else { return }
-
-        sessionHeartbeatTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.probeSessionValidity()
-            }
-        }
-        sessionHeartbeatActiveObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.didBecomeActiveNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.probeSessionValidity()
-            }
-        }
-
-        // A locally-stored session can already be dead server-side; probe right away so the status menu
-        // shows "Log in" immediately instead of only on the first real query's 401.
-        probeSessionValidity()
-    }
-
-    private func stopSessionHeartbeat() {
-        sessionHeartbeatTimer?.invalidate()
-        sessionHeartbeatTimer = nil
-        if let sessionHeartbeatActiveObserver {
-            NotificationCenter.default.removeObserver(sessionHeartbeatActiveObserver)
-            self.sessionHeartbeatActiveObserver = nil
-        }
-    }
-
-    /// Confirms the session is still valid server-side. Fires one cheap, auth-gated GET
-    /// (`/api/inference/models/`); a 401 clears the dead local session — the server already revoked it,
-    /// so this is local cleanup only — which tears down the session-bound machinery via the phase
-    /// observer. Network or other errors are ignored so a transient hiccup never signs the user out.
-    private func probeSessionValidity() {
-        guard authCoordinator?.isAuthenticated == true,
-              let configuration = try? DonkeyBackendInferenceConfiguration.fromEnvironment()
-        else { return }
-
-        let backend = DonkeyBackendInferenceClient(
-            configuration: configuration,
-            onAuthenticationRequired: { [weak self] in
-                Task { @MainActor in
-                    self?.authCoordinator?.signOut(revokingRemoteSessions: false)
-                }
-            }
-        )
-        Task {
-            _ = try? await backend.listModels()
-        }
     }
 
     // MARK: - Menu
@@ -322,35 +115,5 @@ final class DonkeyAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
             ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
             ?? ProcessInfo.processInfo.processName
-    }
-
-    private func registerAuthCallbackHandler() {
-        NSAppleEventManager.shared().setEventHandler(
-            self,
-            andSelector: #selector(handleGetURLEvent(_:withReplyEvent:)),
-            forEventClass: AEEventClass(kInternetEventClass),
-            andEventID: AEEventID(kAEGetURL)
-        )
-    }
-
-    @objc
-    private func handleGetURLEvent(
-        _ event: NSAppleEventDescriptor,
-        withReplyEvent replyEvent: NSAppleEventDescriptor
-    ) {
-        guard let urlString = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
-              let url = URL(string: urlString) else {
-            return
-        }
-
-        handleAuthCallbackURL(url)
-    }
-
-    private func handleAuthCallbackURL(_ url: URL) {
-        guard authCoordinator?.handleCallbackURL(url) == true else {
-            return
-        }
-
-        NSApp.activate(ignoringOtherApps: true)
     }
 }

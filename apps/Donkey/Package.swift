@@ -11,14 +11,6 @@ let package = Package(
         .executable(
             name: "Donkey",
             targets: ["Donkey"]
-        ),
-        .library(
-            name: "DonkeyContracts",
-            targets: ["DonkeyContracts"]
-        ),
-        .library(
-            name: "DonkeyHarness",
-            targets: ["DonkeyHarness"]
         )
     ],
     dependencies: [
@@ -26,50 +18,17 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "DonkeyContracts"
-        ),
-        .target(
-            name: "DonkeyHarness",
-            dependencies: ["DonkeyContracts"]
-        ),
-        .target(
             name: "DonkeyRuntime",
-            dependencies: [
-                "DonkeyContracts",
-                "DonkeyHarness"
-            ],
             resources: [
-                .process("Resources/local-app-finder-profiles.json"),
-                .process("Resources/bundled-tools.json"),
-                .copy("Resources/BuiltInSkills")
-            ],
-            swiftSettings: [
-                .define("DONKEY_DEBUG_OVERLAY", .when(configuration: .debug))
-            ],
-            linkerSettings: [
-                .linkedLibrary("sqlite3")
+                .process("Resources/bundled-tools.json")
             ]
         ),
         .target(
-            name: "DonkeyAI",
-            dependencies: [
-                "DonkeyContracts",
-                "DonkeyRuntime"
-            ],
-            swiftSettings: [
-                .define("DONKEY_DEBUG_OVERLAY", .when(configuration: .debug))
-            ]
-        ),
-        .target(
-            name: "DonkeyUI",
-            dependencies: ["DonkeyContracts"]
+            name: "DonkeyUI"
         ),
         .executableTarget(
             name: "Donkey",
             dependencies: [
-                "DonkeyAI",
-                "DonkeyContracts",
-                "DonkeyHarness",
                 "DonkeyRuntime",
                 "DonkeyUI",
                 .product(name: "Sparkle", package: "Sparkle")
@@ -80,50 +39,16 @@ let package = Package(
                 "Resources/Donkey.iconset"
             ],
             resources: [
-                .copy("Resources/donkey-app-icon.png"),
-                .copy("Resources/google-continue-dark-rounded.png"),
                 .copy("Resources/menu-bar-icon.png"),
-                .copy("Resources/menu-bar-icon@2x.png"),
-                .copy("Resources/theme.json")
-            ],
-            swiftSettings: [
-                .define("DONKEY_DEBUG_OVERLAY", .when(configuration: .debug))
+                .copy("Resources/menu-bar-icon@2x.png")
             ]
         ),
         .testTarget(
             name: "DonkeyRuntimeTests",
             dependencies: [
                 "Donkey",
-                "DonkeyAI",
-                "DonkeyContracts",
-                "DonkeyHarness",
                 "DonkeyRuntime",
                 "DonkeyUI"
-            ],
-            resources: [
-                .copy("Fixtures")
-            ],
-            swiftSettings: [
-                .unsafeFlags([
-                    "-F",
-                    "/Library/Developer/CommandLineTools/Library/Developer/Frameworks"
-                ])
-            ],
-            linkerSettings: [
-                .unsafeFlags([
-                    "-F",
-                    "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
-                    "-L",
-                    "/Library/Developer/CommandLineTools/Library/Developer/usr/lib",
-                    "-Xlinker",
-                    "-rpath",
-                    "-Xlinker",
-                    "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
-                    "-Xlinker",
-                    "-rpath",
-                    "-Xlinker",
-                    "/Library/Developer/CommandLineTools/Library/Developer/usr/lib"
-                ])
             ]
         )
     ]

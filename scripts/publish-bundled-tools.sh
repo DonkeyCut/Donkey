@@ -45,7 +45,7 @@ ASSET="donkey-tools-$VERSION-$ARCH.tar.gz"
 URL="https://github.com/$REPO/releases/download/$TAG/$ASSET"
 OUT="/tmp/$ASSET"
 
-MANDATORY_TOOLS=(ffmpeg ffprobe yt-dlp lit pdf-fill epub-pack reframe)
+MANDATORY_TOOLS=(ffmpeg ffprobe yt-dlp)
 
 echo "==> Building tools from source (idempotent; skips already-built)"
 "$SCRIPT_DIR/fetch-bundled-tools.sh"

@@ -1,1 +1,0 @@
-resize every photo in ~/Desktop/trip to 1080px wide, strip the GPS metadata, then make a 3x3 contact sheet

@@ -1,1 +1,0 @@
-In the folder {DIR} there is f1120.pdf (a blank IRS Form 1120) and 1120data.txt. Fill out f1120.pdf using the values in 1120data.txt and write the filled PDF into {DIR}.

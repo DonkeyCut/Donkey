@@ -1,6 +1,8 @@
 import Foundation
 
-public enum UserQueryUpdateStatus: String, Equatable, Sendable {
+/// Where the app is in the Sparkle update cycle. The status item renders this; `SparkleUpdateController`
+/// produces it.
+public enum DonkeyUpdateStatus: String, Equatable, Sendable {
     case notChecked
     case checking
     case upToDate
@@ -10,14 +12,14 @@ public enum UserQueryUpdateStatus: String, Equatable, Sendable {
     case failed
 }
 
-public struct UserQueryUpdateState: Equatable, Sendable {
-    public var status: UserQueryUpdateStatus
+public struct DonkeyUpdateState: Equatable, Sendable {
+    public var status: DonkeyUpdateStatus
     public var currentVersion: String
     public var latestVersion: String?
     public var message: String?
 
     public init(
-        status: UserQueryUpdateStatus = .notChecked,
+        status: DonkeyUpdateStatus = .notChecked,
         currentVersion: String,
         latestVersion: String? = nil,
         message: String? = nil

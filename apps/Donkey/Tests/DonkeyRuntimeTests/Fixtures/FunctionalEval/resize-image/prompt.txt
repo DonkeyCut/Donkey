@@ -1,1 +1,0 @@
-In the folder {DIR} there is photo.png (800x600). Resize it to exactly 200 pixels wide (keeping aspect ratio) and save the result as a new image in {DIR}.

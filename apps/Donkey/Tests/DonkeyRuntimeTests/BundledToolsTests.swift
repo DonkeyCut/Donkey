@@ -2,51 +2,92 @@ import DonkeyRuntime
 import Foundation
 import Testing
 
+/// The bundled CLI tools ship inside the app, so resolution is a path question, not an install question:
+/// an explicit `DONKEY_TOOLS_DIR` (how a test process points at the repo's vendor copy) wins, otherwise
+/// the app's own `Resources/donkey-tools`. These lock that order and the "are the tools really here" check.
 @Suite
 struct BundledToolsTests {
-    private func decode(_ json: String) -> BundledTools.Manifest? {
-        try? JSONDecoder().decode(BundledTools.Manifest.self, from: Data(json.utf8))
+    @Test
+    func overrideWinsAndMustExist() {
+        let real = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("donkey-tools-test-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: real) }
+
+        setenv("DONKEY_TOOLS_DIR", real.path, 1)
+        #expect(BundledTools.resolvedDirectory()?.path == real.path)
+
+        // A path that doesn't exist is not a usable override: resolution falls through to the app copy
+        // (nil in a test runner, whose Bundle.main is the test binary) rather than handing back a
+        // directory nothing can run from.
+        setenv("DONKEY_TOOLS_DIR", real.path + "-gone", 1)
+        #expect(BundledTools.resolvedDirectory()?.path != real.path + "-gone")
+
+        // An empty override reads as unset.
+        setenv("DONKEY_TOOLS_DIR", "", 1)
+        #expect(BundledTools.resolvedDirectory()?.path != "")
+        unsetenv("DONKEY_TOOLS_DIR")
     }
 
     @Test
-    func emptyChecksumMeansNotPublished() {
-        // An empty sha256 is the "nothing published yet" sentinel: callers must not download.
-        let m = decode(#"{"version":"1","arch":"arm64","url":"https://x/y.tar.gz","sha256":""}"#)
-        #expect(m?.isPublished == false)
+    func toolsPresenceIsDecidedByFfmpeg() {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("donkey-tools-test-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        #expect(!BundledTools.hasTools(at: dir))
+        let ffmpeg = dir.appendingPathComponent("ffmpeg")
+        FileManager.default.createFile(atPath: ffmpeg.path, contents: Data("#!/bin/sh\n".utf8))
+        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: ffmpeg.path)
+        #expect(BundledTools.hasTools(at: dir))
     }
 
     @Test
-    func realChecksumAndURLMeansPublished() {
-        let m = decode(#"{"version":"1","arch":"arm64","url":"https://x/y.tar.gz","sha256":"abc123"}"#)
-        #expect(m?.isPublished == true)
+    func everySelfExtractingToolIsAlsoABundledTool() {
+        // The library-validation exception list names tools the bundle actually ships; a name that drifted
+        // out of `executableNames` would be signed for nothing.
+        #expect(BundledTools.selfExtractingExecutableNames.isSubset(of: BundledTools.executableNames))
     }
 
     @Test
-    func malformedURLIsNotPublished() {
-        let m = decode(#"{"version":"1","arch":"arm64","url":"","sha256":"abc123"}"#)
-        #expect(m?.isPublished == false)
+    func theMediaToolsExportsDependOnAreDeclared() {
+        // Cut's export and probe paths run these by bare name off the PATH built from the tools directory.
+        #expect(BundledTools.executableNames.contains("ffmpeg"))
+        #expect(BundledTools.executableNames.contains("ffprobe"))
     }
 
     @Test
-    func shippedManifestLoadsAndNamesAnArm64Asset() {
-        // The manifest bundled into the app must parse and point at a versioned arm64 tools asset.
-        let m = BundledTools.loadManifest()
-        #expect(m != nil)
-        #expect(m?.arch == "arm64")
-        #expect(m?.url.contains("donkey-tools") == true)
-    }
+    func theSwiftListMatchesWhatTheBuildStages() throws {
+        // Two lists name the shipped tools: this one, and REQUIRED_TOOLS in
+        // scripts/ensure-bundled-tools.sh (which packaging validates the baked app against). They
+        // have to agree — a tool in only one of them either ships unannounced or is declared and
+        // never staged. Read the script's own `--list` output rather than re-typing the names.
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()  // DonkeyRuntimeTests
+            .deletingLastPathComponent()  // Tests
+            .deletingLastPathComponent()  // Donkey
+            .deletingLastPathComponent()  // apps
+            .deletingLastPathComponent()  // <repo root>
+        let script = repoRoot.appendingPathComponent("scripts/ensure-bundled-tools.sh")
+        try #require(FileManager.default.isReadableFile(atPath: script.path))
 
-    @Test
-    func baseDirectoryIsUnderApplicationSupport() {
-        #expect(BundledTools.baseDirectory.path.contains("Application Support/Donkey/donkey-tools"))
-    }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [script.path, "--list"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
 
-    @Test
-    func installDirectoryNestsTheVersionUnderBase() {
-        // Each published version installs into its own `<base>/<version>` directory, so one app build's
-        // pinned tools can never overwrite another's. The version IS the directory name.
-        let dir = BundledTools.installDirectory(forVersion: "2026.06.25")
-        #expect(dir.deletingLastPathComponent().path == BundledTools.baseDirectory.path)
-        #expect(dir.lastPathComponent == "2026.06.25")
+        let staged = Set(
+            (String(data: data, encoding: .utf8) ?? "")
+                .split(whereSeparator: \.isNewline)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+        )
+        #expect(staged == BundledTools.executableNames)
     }
 }

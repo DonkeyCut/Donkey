@@ -1,1 +1,0 @@
-In the folder {DIR} there are three photos (IMG_3001.jpg, IMG_3002.jpg, IMG_3003.jpg) of a dad and his young son learning to swim. Make a short comic book from them — a cover plus one page per photo with a short caption — and save BOTH a PDF and an EPUB of the book into {DIR}. Just save the two files; do not open them in any app.

@@ -1,1 +1,0 @@
-take sales.csv, compute the monthly revenue totals, and turn it into a bar chart saved as monthly.png

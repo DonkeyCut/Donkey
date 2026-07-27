@@ -42,8 +42,7 @@ Pay it only when it buys something.
   five.
 
 Indirection that maps to a real boundary is good: the Swift MVC split
-(`docs/guides/swift-mvc.md`) and the typed harness/model boundaries
-(`docs/guides/agent-harness.md`) exist for reasons. The tax is forwarding
+(`docs/guides/swift-mvc.md`) exists for a reason. The tax is forwarding
 layers that exist for their own sake.
 
 ## Design Simplicity
@@ -76,7 +75,7 @@ layers that exist for their own sake.
 1. **Never match raw user text for intent.** No phrase lists, prefixes,
    suffixes, regexes, app-name checks, or greeting/help classifiers. Route the
    turn through an LLM or a typed model boundary, then match on structured
-   output only. See `docs/guides/agent-harness.md`.
+   output only.
 2. **Keep the Swift MVC boundaries intact.** Views render and emit intents,
    models own state, controllers own AppKit. See `docs/guides/swift-mvc.md`.
 3. **Follow the site guides.** For `site` UI,
@@ -86,5 +85,5 @@ layers that exist for their own sake.
    `prisma migrate` or `prisma db push`, and Prisma models in grouped sibling
    `.prisma` files, never in `schema.prisma`.
 4. **Confirm the required checks ran.** `npm run lint` and `npm run build` for
-   `site` changes; focused `swift test` runs for harness changes.
+   `site` changes; focused `swift test` runs for Mac app changes.
 5. **Never commit secrets, keys, tokens, or PII.** This repo is open source.

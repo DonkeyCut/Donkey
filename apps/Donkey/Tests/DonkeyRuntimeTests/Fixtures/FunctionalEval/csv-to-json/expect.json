@@ -1,8 +1,0 @@
-{
-  "frontmostApp": "Finder",
-  "maxSteps": 14,
-  "expectProduced": [
-    { "kind": "jsonMinRecords", "minRecords": 4 },
-    { "kind": "fileExists", "extension": "json" }
-  ]
-}

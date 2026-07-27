@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# Vendors the arm64 command-line tools that Donkey's capability skills use into
+# Vendors the arm64 command-line tools the Donkey Cut video editor runs into
 # vendor/donkey-tools/, making each binary self-contained (its Homebrew dylibs are
 # copied alongside and the install names are rewritten to @loader_path). The
 # packaging step (scripts/package-donkey-app.sh -> stage_bundled_tools) then copies
 # this directory into Donkey.app/Contents/Resources/donkey-tools/.
 #
-# The vendored binaries are large (~250MB) and are NOT committed to git — run this
+# The vendored binaries are large and are NOT committed to git — run this
 # on the build machine before packaging. Re-runnable; each tool is independent, so
 # one failure does not abort the rest.
 #
@@ -24,13 +24,6 @@ STATUS=()
 log() { printf '\n==> %s\n' "$*"; }
 ok()  { STATUS+=("OK    $1"); }
 fail(){ STATUS+=("FAIL  $1 ($2)"); echo "  ! $1: $2" >&2; }
-
-ensure_brew_tool() {
-  # $1 = formula, $2 = binary name to check
-  command -v "$2" >/dev/null 2>&1 && return 0
-  log "brew install $1"
-  brew install "$1" >/dev/null 2>&1
-}
 
 # Extra dylib search dirs (besides Homebrew's lib) for the next bundle() call.
 EXTRA_SEARCH=()
@@ -140,172 +133,11 @@ build_lgpl_ffmpeg() {
   EXTRA_SEARCH=()
 }
 
-# Build liteparse's `lit` from source (Rust). It static-links leptonica+tesseract (replacing a separate
-# tesseract), but it loads pdfium as a SHARED library at runtime: pdfium-rs dlopens `libpdfium.dylib` and
-# finds it via the PDFIUM_LIB_PATH directory. So `lit` is NOT self-contained — every PDF parse panics with
-# "could not find pdfium shared library" unless that dylib ships beside it. We stage both here, and the app
-# (and the evals) point PDFIUM_LIB_PATH at this dir. MANDATORY: the pdf skill's extraction/OCR depends on it.
-build_liteparse() {
-  # Require both the `lit` binary and its pdfium dylib before treating the build as cached.
-  if [ -x "$VENDOR_DIR/lit" ] && [ -f "$VENDOR_DIR/libpdfium.dylib" ]; then
-    ok "lit (cached)"
-    return 0
-  fi
-  local ver="2.1.1"
-  command -v cargo >/dev/null 2>&1 || brew install rust >/dev/null 2>&1
-  command -v cmake >/dev/null 2>&1 || brew install cmake >/dev/null 2>&1
-  command -v cargo >/dev/null 2>&1 || { echo "FATAL: cargo unavailable for liteparse build" >&2; exit 1; }
-  local root="/tmp/liteparse-build"
-  rm -rf "$root"
-  # Wipe the pdfium-rs cache first, so this build downloads EXACTLY the pdfium that liteparse $ver links and
-  # the stage step below can't pick up a stale, ABI-incompatible dylib a previous build of a different
-  # liteparse version left behind — the root cause of `lit parse` crashing at runtime on a green build.
-  rm -rf "$HOME/Library/Caches/pdfium-rs"
-  # Building liteparse re-downloads the matching pdfium into that (now-empty) cache.
-  PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig" cargo install liteparse --version "$ver" --root "$root" >"$root.log" 2>&1
-  if [ ! -x "$root/bin/lit" ]; then
-    echo "FATAL: liteparse (lit) build failed; tail of $root.log:" >&2
-    tail -25 "$root.log" >&2
-    exit 1
-  fi
-  
-  # Stage the real binary directly as `lit` — a single signed Mach-O (sign-bundled-tools.sh signs it). It is
-  # never invoked through the model's shell; Donkey drives `lit parse` in-process via runBundledTool, which
-  # sets PDFIUM_LIB_PATH to the tools dir, so the binary always finds its pdfium without a wrapper.
-  cp -f "$root/bin/lit" "$VENDOR_DIR/lit"
-  chmod +x "$VENDOR_DIR/lit"
-
-  # Stage the matching libpdfium.dylib next to `lit` so it loads at runtime via PDFIUM_LIB_PATH. Pick the
-  # NEWEST match (this build's fresh download), not an arbitrary one, in case the cache holds more than one.
-  local pdfium
-  pdfium="$(find "$HOME/Library/Caches/pdfium-rs" -name libpdfium.dylib 2>/dev/null \
-    | while read -r f; do printf '%s\t%s\n' "$(stat -f '%m' "$f" 2>/dev/null)" "$f"; done \
-    | sort -rn | head -1 | cut -f2-)"
-  if [ -z "$pdfium" ] || [ ! -f "$pdfium" ]; then
-    echo "FATAL: built lit but no libpdfium.dylib in the pdfium-rs cache; lit cannot parse PDFs without it" >&2
-    exit 1
-  fi
-  cp -f "$pdfium" "$VENDOR_DIR/libpdfium.dylib"
-  # The staged dylib must be arm64 — a wrong-arch copy would fail to load at runtime.
-  if ! lipo -archs "$VENDOR_DIR/libpdfium.dylib" 2>/dev/null | grep -qw arm64; then
-    echo "FATAL: staged libpdfium.dylib is not arm64: $(lipo -archs "$VENDOR_DIR/libpdfium.dylib" 2>/dev/null)" >&2
-    exit 1
-  fi
-  # Smoke-test the PAIR exactly as Donkey runs it: `lit` parses a PDF using the staged pdfium with
-  # PDFIUM_LIB_PATH pointed at the tools dir (the env runBundledTool/shellEnvironment set at runtime).
-  local sample="$ROOT_DIR/apps/Donkey/Tests/DonkeyRuntimeTests/Fixtures/FunctionalEval/merge-pdfs/inputs/a.pdf"
-  if [ -f "$sample" ]; then
-    if ! PDFIUM_LIB_PATH="$VENDOR_DIR" "$VENDOR_DIR/lit" parse "$sample" --no-ocr >/dev/null 2>"$root.smoke.log"; then
-      echo "FATAL: staged lit could not parse a sample PDF with the staged libpdfium.dylib (ABI mismatch?):" >&2
-      tail -10 "$root.smoke.log" >&2
-      exit 1
-    fi
-  fi
-  ok "lit (+ libpdfium.dylib, parse-verified)"
-}
-
-# Build the `pdf-fill` CLI from the in-repo Swift source (tools/pdf-fill/main.swift).
-# It links only Apple system frameworks (PDFKit/Quartz), so the result is a single
-# self-contained binary — no dylib bundling. MANDATORY: it is the pdf skill's
-# headless form-fill/overlay path (litparse reads PDFs; this writes them).
-build_pdf_fill() {
-  if [ -x "$VENDOR_DIR/pdf-fill" ] && [ ! "$ROOT_DIR/tools/pdf-fill/main.swift" -nt "$VENDOR_DIR/pdf-fill" ]; then
-    ok "pdf-fill (cached)"
-    return 0
-  fi
-  command -v swiftc >/dev/null 2>&1 || { echo "FATAL: swiftc unavailable for pdf-fill build" >&2; exit 1; }
-  if ! swiftc -O "$ROOT_DIR/tools/pdf-fill/main.swift" -o "$VENDOR_DIR/pdf-fill" 2>/tmp/pdf-fill-build.log; then
-    echo "FATAL: pdf-fill build failed; tail of /tmp/pdf-fill-build.log:" >&2
-    tail -25 /tmp/pdf-fill-build.log >&2
-    exit 1
-  fi
-  chmod +x "$VENDOR_DIR/pdf-fill"
-  ok "pdf-fill"
-}
-
-# Build the `epub-pack` CLI from the in-repo Swift source (tools/epub-pack/main.swift).
-# Like pdf-fill it links only Foundation (a self-contained store-only ZIP writer), so the
-# result is a single self-contained binary — no dylib bundling. MANDATORY: it is the book
-# skill's EPUB packaging path (image_render writes the PDF; this writes the .epub).
-build_epub_pack() {
-  if [ -x "$VENDOR_DIR/epub-pack" ] && [ ! "$ROOT_DIR/tools/epub-pack/main.swift" -nt "$VENDOR_DIR/epub-pack" ]; then
-    ok "epub-pack (cached)"
-    return 0
-  fi
-  command -v swiftc >/dev/null 2>&1 || { echo "FATAL: swiftc unavailable for epub-pack build" >&2; exit 1; }
-  if ! swiftc -O "$ROOT_DIR/tools/epub-pack/main.swift" -o "$VENDOR_DIR/epub-pack" 2>/tmp/epub-pack-build.log; then
-    echo "FATAL: epub-pack build failed; tail of /tmp/epub-pack-build.log:" >&2
-    tail -25 /tmp/epub-pack-build.log >&2
-    exit 1
-  fi
-  chmod +x "$VENDOR_DIR/epub-pack"
-  ok "epub-pack"
-}
-
-# Build the `reframe` CLI from the in-repo Swift source. It links only Apple system frameworks
-# (AVFoundation/Vision/CoreImage), so the result is a single self-contained binary — no dylib
-# bundling. Its decision core, ReframePlanner.swift, is shared with the app (it lives in
-# DonkeyRuntime and is unit-tested there); the CLI compiles it in alongside main.swift so the
-# shipped algorithm is the tested one. MANDATORY: it is the shorts skill's on-device
-# active-speaker auto-reframe (landscape -> vertical 9:16 that follows whoever is talking).
-build_reframe() {
-  if [ -x "$VENDOR_DIR/reframe" ] && \
-     [ ! "$ROOT_DIR/tools/reframe/main.swift" -nt "$VENDOR_DIR/reframe" ] && \
-     [ ! "$ROOT_DIR/apps/Donkey/Sources/DonkeyRuntime/ReframePlanner.swift" -nt "$VENDOR_DIR/reframe" ]; then
-    ok "reframe (cached)"
-    return 0
-  fi
-  command -v swiftc >/dev/null 2>&1 || { echo "FATAL: swiftc unavailable for reframe build" >&2; exit 1; }
-  if ! swiftc -O \
-       "$ROOT_DIR/tools/reframe/main.swift" \
-       "$ROOT_DIR/apps/Donkey/Sources/DonkeyRuntime/ReframePlanner.swift" \
-       -o "$VENDOR_DIR/reframe" 2>/tmp/reframe-build.log; then
-    echo "FATAL: reframe build failed; tail of /tmp/reframe-build.log:" >&2
-    tail -25 /tmp/reframe-build.log >&2
-    exit 1
-  fi
-  chmod +x "$VENDOR_DIR/reframe"
-  ok "reframe"
-}
-
 log "Ensuring dylibbundler"
 command -v dylibbundler >/dev/null 2>&1 || brew install dylibbundler >/dev/null 2>&1
 
 # --- ffmpeg + ffprobe: mandatory, built LGPL from source (see build_lgpl_ffmpeg) ---
 build_lgpl_ffmpeg
-
-# --- liteparse `lit`: mandatory, built from source (self-contained, includes OCR) ---
-build_liteparse
-
-# --- pdf-fill: mandatory, built from in-repo Swift source (native PDFKit, no deps) ---
-build_pdf_fill
-
-# --- epub-pack: mandatory, built from in-repo Swift source (native Foundation, no deps) ---
-build_epub_pack
-
-# --- reframe: mandatory, built from in-repo Swift source (native AVFoundation/Vision, no deps) ---
-build_reframe
-
-# --- qpdf (Homebrew) ---
-if [ -x "$VENDOR_DIR/qpdf" ]; then
-  ok "qpdf (cached)"
-elif ensure_brew_tool qpdf qpdf; then
-  bundle "$(brew --prefix qpdf)/bin/qpdf" qpdf
-fi
-
-# pandoc is intentionally NOT bundled. macOS's built-in `textutil` already converts
-# among txt/html/rtf/doc/docx/odt (the common office formats), so the ~180MB pandoc
-# binary isn't worth shipping. The `pdf` skill leads with textutil and uses pandoc
-# only when the user happens to have it installed (markdown/LaTeX/EPUB).
-#
-# tesseract is no longer bundled separately: `lit` (liteparse) static-links its own
-# Tesseract and is the pdf skill's extraction/OCR path.
-
-# --- ImageMagick `magick` is intentionally NOT bundled. It loads coder modules
-# (PNG/JPEG/etc.) and configuration at runtime from its install tree, which
-# dylibbundler cannot relocate — a bundled copy fails with "no decode delegate".
-# The `images` skill leads with `sips` (always present) and treats magick as an
-# optional tool used only when the user has it installed. ---
 
 # --- yt-dlp: official self-contained macOS build (bundles its own Python) ---
 if [ -x "$VENDOR_DIR/yt-dlp" ]; then
@@ -319,23 +151,6 @@ else
   else
     fail "yt-dlp" "download failed"
   fi
-fi
-
-# --- exiftool: standalone Perl distribution, runs via system /usr/bin/perl ---
-if [ -x "$VENDOR_DIR/exiftool" ]; then
-  ok "exiftool (cached)"
-elif log "Downloading exiftool"; curl -fsSL -o /tmp/exiftool.tar.gz \
-  "https://github.com/exiftool/exiftool/archive/refs/heads/master.tar.gz"; then
-  rm -rf /tmp/exiftool-src "$VENDOR_DIR/exiftool" "$VENDOR_DIR/lib/Image"
-  mkdir -p /tmp/exiftool-src
-  tar -xzf /tmp/exiftool.tar.gz -C /tmp/exiftool-src --strip-components=1
-  cp /tmp/exiftool-src/exiftool "$VENDOR_DIR/exiftool"
-  chmod +x "$VENDOR_DIR/exiftool"
-  mkdir -p "$VENDOR_DIR/lib"
-  cp -R /tmp/exiftool-src/lib/. "$VENDOR_DIR/lib/"
-  ok "exiftool"
-else
-  fail "exiftool" "download failed"
 fi
 
 # dylibbundler invalidated each binary's signature when it rewrote install names, and an

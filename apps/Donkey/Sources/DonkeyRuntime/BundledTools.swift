@@ -1,19 +1,21 @@
 import Foundation
 
-/// The prebuilt CLI tools (ffmpeg, ffprobe, yt-dlp, ...) that Donkey's capability skills run by bare
-/// name. The shipped app stays small and downloads a self-contained arm64 bundle on first run into
-/// Application Support; this type is the shared knowledge of *what* to fetch and *where* it lives.
+/// The prebuilt CLI tools (ffmpeg, ffprobe, yt-dlp) the Cut engine runs by bare name.
 ///
-/// `bundled-tools.json` (in the app's resource bundle) is the single source of truth for the version,
-/// download URL, and checksum; scripts/publish-bundled-tools.sh builds the artifact and rewrites it.
+/// They ship inside the app: `Donkey.app/Contents/Resources/donkey-tools`, staged at packaging time by
+/// scripts/package-donkey-app.sh. Being part of the app means they are there the moment it is — no
+/// first-run download to race, nothing to retry on a bad network, and no dependence on what the user
+/// happens to have installed. A dev build symlinks that same path at the repo's `vendor/donkey-tools`,
+/// so a source checkout and a shipped app resolve identically.
 public enum BundledTools {
-    /// Bare executable names of the tools shipped in the bundle — the mandatory media set from
-    /// scripts/publish-bundled-tools.sh plus the document tools fetched in fetch-bundled-tools.sh. Donkey
-    /// resolves these from `installDirectory`, which `shellEnvironment()` puts on PATH, so capability
-    /// skills run them by bare name. This is the single Swift home for the list; keep it in step with the
-    /// fetch/publish scripts when the bundle gains or drops a tool.
+    /// Bare executable names of the tools shipped in the bundle. Donkey resolves these from
+    /// `resolvedDirectory()`, which `childEnvironment()` puts on PATH, so they run by bare name. This is
+    /// the single Swift home for the list; keep it in step with the fetch/ensure scripts when the bundle
+    /// gains or drops a tool.
+    ///
+    /// ffmpeg and ffprobe sit behind every export, probe, and frame extract; yt-dlp behind URL import.
     public static let executableNames: Set<String> = [
-        "ffmpeg", "ffprobe", "yt-dlp", "lit", "pdf-fill", "epub-pack", "reframe", "qpdf", "exiftool"
+        "ffmpeg", "ffprobe", "yt-dlp"
     ]
 
     /// Tools that unpack a private interpreter/runtime to a temp dir at launch and `dlopen()` it — a
@@ -21,98 +23,110 @@ public enum BundledTools {
     /// that load when the extracted framework's Team ID differs from the binary's ("different Team IDs"),
     /// so a copy signed with the runtime flag but no exception cannot start at all. These need the
     /// `com.apple.security.cs.disable-library-validation` entitlement; `scripts/sign-bundled-tools.sh`
-    /// signs exactly these with it, and `BundledToolsInstaller` repairs the downloaded copy the same way.
-    /// Keep this list in step with that script.
+    /// signs exactly these with it, both when the bundle is built and when packaging bakes it into the
+    /// app. Keep this list in step with that script.
     public static let selfExtractingExecutableNames: Set<String> = ["yt-dlp"]
 
-    /// The manifest describing the published tools bundle. An empty `sha256` means nothing is published
-    /// yet, so callers should treat the bundle as unavailable rather than downloading something unverified.
-    public struct Manifest: Decodable, Sendable, Equatable {
-        public let version: String
-        public let arch: String
-        public let url: String
-        public let sha256: String
+    /// The app's own tools directory — the baked copy in a packaged build, a symlink to the repo's
+    /// vendor directory in a dev build. Nil only where there is no app bundle to read (a unit-test
+    /// runner, where `Bundle.main` is the test binary).
+    public static var appDirectory: URL? {
+        Bundle.main.resourceURL?.appendingPathComponent("donkey-tools", isDirectory: true)
+    }
 
-        public var isPublished: Bool {
-            !sha256.isEmpty && URL(string: url) != nil
+    /// The tools directory this process should use, or nil when it has none.
+    ///
+    /// `DONKEY_TOOLS_DIR` comes first, and is what lets a test or eval process — where `Bundle.main` is
+    /// the test runner, so the app path never resolves — point at the repo's `vendor/donkey-tools` and
+    /// run the same bundled binaries as production. It mirrors the
+    /// build-time `DONKEY_TOOLS_DIR` convention in `ensure-bundled-tools.sh`.
+    public static func resolvedDirectory() -> URL? {
+        // Read live via getenv: `ProcessInfo.processInfo.environment` is a process-start snapshot, so a
+        // test or eval that `setenv`s this after launch would otherwise not be seen.
+        if let raw = getenv("DONKEY_TOOLS_DIR") {
+            let override = String(cString: raw)
+            if !override.isEmpty {
+                let dir = URL(fileURLWithPath: (override as NSString).expandingTildeInPath, isDirectory: true)
+                if FileManager.default.fileExists(atPath: dir.path) {
+                    return dir
+                }
+            }
         }
+        guard let app = appDirectory, FileManager.default.fileExists(atPath: app.path) else { return nil }
+        return app
     }
 
-    /// Parent of the per-version tool installs. Writable, survives app updates, and is where
-    /// `shellEnvironment()` looks for the tools on PATH. Each published bundle lives in its own
-    /// `<baseDirectory>/<version>` subdirectory (see `installDirectory(forVersion:)`), so an app build
-    /// reads and writes only the version its manifest pins — a different build (e.g. a dev copy) installing
-    /// another version into a sibling directory cannot disturb it.
-    public static var baseDirectory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Donkey", isDirectory: true)
-            .appendingPathComponent("donkey-tools", isDirectory: true)
-    }
-
-    /// Where a specific bundle version is installed. The version string IS the directory name, so the
-    /// directory itself records which bundle is present — there is no separate marker file to drift out of
-    /// sync with the bytes on disk.
-    public static func installDirectory(forVersion version: String) -> URL {
-        baseDirectory.appendingPathComponent(version, isDirectory: true)
-    }
-
-    /// The bundle is usable if a sentinel tool exists in the directory. ffmpeg is mandatory in every
-    /// bundle, so its presence is the cheapest "are the tools really here" check.
-    public static func isInstalled(at directory: URL) -> Bool {
+    /// Whether a directory really holds the tools. ffmpeg is in every bundle, so its presence is the
+    /// cheapest "are the tools really here" check.
+    public static func hasTools(at directory: URL) -> Bool {
         FileManager.default.isExecutableFile(atPath: directory.appendingPathComponent("ffmpeg").path)
     }
 
-    /// A pre-namespacing install: ffmpeg sits directly under `baseDirectory` instead of in a `<version>`
-    /// subdirectory. The installer clears such a layout once before installing the versioned set, so an
-    /// app updated from an older build reclaims the loose copy rather than leaving it as orphaned cruft.
-    public static var hasLegacyFlatInstall: Bool { isInstalled(at: baseDirectory) }
-
-    /// Installed bundle versions present on disk — each a `<baseDirectory>/<version>` directory holding a
-    /// usable ffmpeg — ordered most-recently-used first (the installer refreshes a version's mtime on every
-    /// launch that uses it). Empty when nothing is installed. The legacy flat layout is not a version
-    /// directory, so it never appears here.
-    public static func installedVersions() -> [URL] {
-        let fileManager = FileManager.default
-        let entries = (try? fileManager.contentsOfDirectory(
-            at: baseDirectory,
-            includingPropertiesForKeys: [.contentModificationDateKey]
-        )) ?? []
-        func modified(_ url: URL) -> Date {
-            (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+    /// The environment for a child process that runs the bundled tools — today, the Cut engine.
+    ///
+    /// PATH is `<bundled tools dir> : <login-shell PATH>`. The bundled dir is PREPENDED so the app's
+    /// curated, signed copy always wins over whatever the user happens to have installed: an export
+    /// behaves identically on every machine instead of silently deferring to a stripped or incompatible
+    /// build. A GUI-launched app inherits only launchd's bare PATH, so the login-shell PATH follows to
+    /// keep the user's own tools resolvable.
+    public static func childEnvironment() -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        var segments: [String] = []
+        if let toolsDirectory = resolvedDirectory() {
+            segments.append(toolsDirectory.path)
         }
-        return entries.filter { isInstalled(at: $0) }.sorted { modified($0) > modified($1) }
+        segments.append(loginShellPath)
+        environment["PATH"] = segments.joined(separator: ":")
+        return environment
     }
 
-    /// The install directory the running app should use right now: the version its manifest pins when that
-    /// version is installed, otherwise the most-recently-used installed version (so usable tools still
-    /// resolve while the pinned version is still downloading, or when the manifest can't be read). `nil`
-    /// only when no tools are installed at all.
-    public static func resolvedInstallDirectory() -> URL? {
-        if let version = loadManifest()?.version {
-            let pinned = installDirectory(forVersion: version)
-            if isInstalled(at: pinned) { return pinned }
-        }
-        if let newest = installedVersions().first { return newest }
-        // A pre-namespacing flat install still has usable tools until the versioned install replaces them,
-        // so a build updated from an older copy keeps its capabilities through the one-time migration.
-        return hasLegacyFlatInstall ? baseDirectory : nil
-    }
+    /// The PATH the user's interactive shell would have, resolved once. Asking the login shell
+    /// (`$SHELL -lc …`) runs their `.zprofile`/`.zshrc`, so the result includes `/opt/homebrew/bin`,
+    /// `~/.local/bin`, language version managers, and anything else they rely on. Cached: it is stable
+    /// for the process lifetime and spawning a login shell is not free.
+    private static let loginShellPath: String = resolveLoginShellPath()
 
-    /// Whether the tools this app build pins are ready, i.e. setup has nothing left to do: the manifest's
-    /// version is installed, or — when nothing is published — any usable tools exist (a dev symlink or
-    /// offline-baked copy). Drives the "setup already done" decisions.
-    public static var isCurrentVersionReady: Bool {
-        if let manifest = loadManifest(), manifest.isPublished {
-            return isInstalled(at: installDirectory(forVersion: manifest.version))
-        }
-        return resolvedInstallDirectory() != nil
-    }
+    /// Covers both Homebrew prefixes, used when the login shell can't be queried so the child still gets
+    /// a useful PATH rather than launchd's bare minimum.
+    private static let fallbackShellPath =
+        "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
-    /// Load the bundled manifest from the app's resources. Returns nil if it is missing or malformed.
-    public static func loadManifest() -> Manifest? {
-        guard let url = DonkeyResourceBundle.runtime?.url(forResource: "bundled-tools", withExtension: "json"),
-              let data = try? Data(contentsOf: url)
-        else { return nil }
-        return try? JSONDecoder().decode(Manifest.self, from: data)
+    private static func resolveLoginShellPath() -> String {
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        // Markers fence the value so output printed by the user's rc files (version-manager banners,
+        // etc.) can't contaminate the PATH we extract.
+        let start = "__DONKEY_PATH_START__"
+        let end = "__DONKEY_PATH_END__"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: shell)
+        process.arguments = ["-lc", "printf '%s%s%s' '\(start)' \"$PATH\" '\(end)'"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
+        do {
+            try process.run()
+        } catch {
+            return fallbackShellPath
+        }
+        // Bound it: a login shell normally exits in well under a second, but a pathological profile
+        // must not hang app launch forever.
+        if finished.wait(timeout: .now() + 5.0) == .timedOut {
+            process.terminate()
+            return fallbackShellPath
+        }
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard
+            let output = String(data: data, encoding: .utf8),
+            let lower = output.range(of: start),
+            let upper = output.range(of: end)
+        else {
+            return fallbackShellPath
+        }
+        let resolved = String(output[lower.upperBound..<upper.lowerBound])
+        return resolved.isEmpty ? fallbackShellPath : resolved
     }
 }

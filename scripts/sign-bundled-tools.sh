@@ -30,6 +30,9 @@ if [ "$IDENTITY" != "-" ]; then
   sign_opts+=(--options runtime --timestamp)
   real_identity=true
 fi
+# Target the signing keychain explicitly when the caller points us at one: in CI the keychain is
+# imported in a separate step and the search-list state doesn't dependably reach codesign here.
+[ -n "${DONKEY_SIGN_KEYCHAIN:-}" ] && sign_opts+=(--keychain "$DONKEY_SIGN_KEYCHAIN")
 
 # A PyInstaller onefile tool (yt-dlp) unpacks a private Python.framework to a temp dir at launch and
 # dlopen()s it. Under the hardened runtime, library validation rejects that load ("mapping process and
@@ -61,7 +64,7 @@ PLIST
 is_macho() { file -b "$1" 2>/dev/null | grep -q "Mach-O"; }
 
 # A signing failure under a real identity must abort (an unsigned prod binary is a broken release); under
-# ad-hoc it's tolerated so a non-Mach-O file (e.g. the exiftool Perl script) is simply skipped. Extra
+# ad-hoc it's tolerated so a non-Mach-O file is simply skipped. Extra
 # codesign args after the file (e.g. --entitlements for executables) are passed through.
 sign_one() {
   local f="$1"; shift

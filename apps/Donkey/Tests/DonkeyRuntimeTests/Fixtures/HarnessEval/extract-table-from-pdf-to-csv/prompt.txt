@@ -1,1 +1,0 @@
-extract the table from q3-figures.pdf into a CSV

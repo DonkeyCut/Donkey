@@ -1,5 +1,4 @@
 import AppKit
-import DonkeyContracts
 import DonkeyRuntime
 
 /// The menu bar entry point: a status item with the Donkey glyph whose menu carries "Go to App",
@@ -23,7 +22,7 @@ final class DonkeyStatusItemController: NSObject, NSMenuDelegate {
     /// Latest update-checker state; drives the update section of the menu. Setting it while the menu
     /// is open refreshes the update row in place, so a user-triggered check spins and resolves without
     /// the menu having to be reopened.
-    var updateState: UserQueryUpdateState? {
+    var updateState: DonkeyUpdateState? {
         didSet {
             refreshLiveUpdateItem()
             refreshStatusItemImage()

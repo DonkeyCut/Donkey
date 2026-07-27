@@ -46,30 +46,47 @@ GitHub's latest, moves the alias tags, and prunes releases beyond the latest 10.
 The app's Developer ID signing + notarization reuses the same secrets as the
 bundled tools (see below); without them the release falls back to an ad-hoc
 signed app that is not distributable. The app is signed with the hardened
-runtime and the Apple Events entitlement (`scripts/assets/donkey.entitlements`)
-it needs to keep automating other apps once hardened.
+runtime. It carries no entitlements of its own — screen recording and the
+microphone are governed by TCC and the Info.plist usage strings.
 
 ## Bundled Tools
 
-The capability skills (media, pdf) run CLI tools — `ffmpeg`, `yt-dlp`, and a few
-others — that the app downloads once the user signs in (so the bundle stays out
-of the app download, and isn't fetched for someone who never gets past sign-in).
-The download surfaces in the notch as a progress conversation the user can watch
-but not stop or dismiss; it retries on its own and no-ops once the version this
-build pins is already installed. The `Publish Bundled Tools` workflow builds them from source on an
-arm64 runner, signs and notarizes them, uploads the bundle as a GitHub release
-asset, and commits the refreshed `bundled-tools.json` (the manifest the app reads
-to know what to fetch). It runs on demand and whenever the tools recipe changes.
+The Cut engine runs CLI tools — `ffmpeg` and `ffprobe` behind every export, probe,
+and frame extract, and `yt-dlp` behind URL import — by bare name off PATH. Those tools ship **inside** the app, at
+`Donkey.app/Contents/Resources/donkey-tools`. Being part of the app is what makes
+them dependable: they are present the moment the app is, so an export or a download
+cannot fail on a machine that never had ffmpeg, there is no setup step to race, and
+nothing has to work offline that can't.
+
+Staging copies only the required tools and the dylibs they actually load, so a
+published bundle holding more than the current set can't put extra binaries into
+the app.
+
+Packaging stages them without a separate step. `ensure-bundled-tools.sh` puts the
+tools in `vendor/donkey-tools` — downloading the prebuilt bundle named in
+`bundled-tools.json` when one is published, otherwise building from source — and
+`package-donkey-app.sh` copies that directory into the app and re-signs it. Point
+`DONKEY_TOOLS_DIR` at a prebuilt directory to bake that instead.
+
+Every tool in the set is required, and packaging verifies the copy that actually
+landed in the app before signing it. There is no optional tier: a tool that ships
+sometimes is a capability that fails for whoever didn't get it, so a build that
+can't stage one fails instead. `REQUIRED_TOOLS` in `ensure-bundled-tools.sh` is
+the list, and a unit test holds `BundledTools.executableNames` to it so the two
+can't drift.
+
+The `Publish Bundled Tools` workflow is what produces the prebuilt bundle: it
+builds the tools from source on an arm64 runner, signs and notarizes them,
+uploads the result as a GitHub release asset, and commits the refreshed
+`bundled-tools.json`. That manifest is a build-time input only — the shipped app
+never reads it. It runs on demand and whenever the tools recipe changes.
 
 Each manifest pins one bundle version by sha256, and that pairing is permanent.
-Every published version installs into its own `donkey-tools/<version>/` directory,
-so an app build reads and writes only the version it pins — a dev build and a
-released build keep separate copies and never disturb each other. Published assets
-are immutable to match: re-publishing a version that already has an asset
-auto-bumps to `<version>.1` instead of overwriting it, so the bytes a shipped app
-pinned always stay fetchable and pass verification. (The bug this prevents: a
-date-named version was once re-uploaded with different bytes, and every app that
-had pinned the original sha could no longer finish tool setup.)
+Published assets are immutable to match: re-publishing a version that already has
+an asset auto-bumps to `<version>.1` instead of overwriting it, so a checkout that
+pins a version keeps fetching the bytes it verified against. (The bug this
+prevents: a date-named version was once re-uploaded with different bytes, and
+every build pinning the original sha could no longer stage its tools.)
 
 Every tool is re-signed during the build: relocating their bundled libraries
 invalidates the original signature, and macOS will not run an unsigned binary on
@@ -82,8 +99,10 @@ get it — they load only the sibling libraries we re-sign, so they stay fully
 hardened.
 
 Standalone CLI binaries cannot be stapled (only app/dmg/pkg bundles can), so
-notarization here is the online proof that the Developer ID signature is good;
-the signature itself is what lets the downloaded tools run.
+notarization of the published bundle is the online proof that its Developer ID
+signature is good; the signature itself is what lets the tools run. Baking them
+into the app re-signs each one with the app's own identity, and the app's
+notarization then covers them.
 
 ### Obtaining the signing secrets
 

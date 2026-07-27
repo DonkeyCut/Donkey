@@ -1,1 +1,0 @@
-Make a bar chart of this sales data and save it to ~/Desktop/q3-chart.png

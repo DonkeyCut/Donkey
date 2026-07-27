@@ -1,11 +1,11 @@
 name: Publish Bundled Tools
 
-# Builds the prebuilt CLI tools bundle (ffmpeg, yt-dlp, lit, pdf-fill, qpdf, exiftool) from source and
-# publishes it as a GitHub release asset, then commits the refreshed bundled-tools.json so the shipped app
-# and the dev script download the new bundle on first run. This is the ONE place the heavy source build
-# runs — end users and dev machines only ever download the result.
+# Builds the prebuilt CLI tools bundle (ffmpeg, ffprobe, yt-dlp) from source and
+# publishes it as a GitHub release asset, then commits the refreshed bundled-tools.json so app packaging
+# and the dev script stage the new bundle. This is the ONE place the heavy source build runs — every other
+# build only ever downloads the result, and the app then carries it.
 #
-# Runs on demand, and automatically whenever the tools recipe changes (a new ffmpeg, a pdf-fill tweak).
+# Runs on demand, and automatically whenever the tools recipe changes (e.g. a new ffmpeg).
 
 on:
   workflow_dispatch:
@@ -29,7 +29,7 @@ concurrency:
 jobs:
   publish:
     name: Build and publish tools
-    # macos-26 is arm64 with the Xcode SDK the in-repo pdf-fill source builds against.
+    # macos-26 is arm64 with the Xcode SDK the tools build against.
     runs-on: macos-26
 
     steps:
@@ -47,7 +47,7 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       # Same cache key as the nightly build, so the two share a single ffmpeg/Rust build. The key busts
-      # when the recipe or any in-repo tool source (pdf-fill, epub-pack, reframe, …) changes, which is
+      # when the recipe changes, which is
       # also what triggers this workflow.
       - name: Restore bundled tools cache
         id: tools-cache

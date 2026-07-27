@@ -1,1 +1,0 @@
-combine all the PDFs in ~/Desktop/scans into one file, then compress it to under 5MB

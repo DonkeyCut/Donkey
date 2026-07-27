@@ -180,9 +180,9 @@ jobs:
           # rather than depending on the search-list state set above carrying across steps.
           echo "keychain=$keychain" >> "$GITHUB_OUTPUT"
 
-      # The bundled CLI tools (ffmpeg, lit, pdf-fill, …) are NOT baked into the app: it downloads
-      # them on first run from the artifact published by the Publish Bundled Tools workflow, so the
-      # release package builds without vendoring them here.
+      # The bundled CLI tools (ffmpeg, ffprobe, yt-dlp) ship inside the app. Packaging stages them
+      # itself — ensure-bundled-tools.sh fetches the artifact published by the Publish Bundled Tools
+      # workflow (or builds from source), and package-donkey-app.sh bakes and re-signs the directory.
       - name: Package Donkey
         env:
           DONKEY_APP_VERSION: ${{ steps.release.outputs.version }}

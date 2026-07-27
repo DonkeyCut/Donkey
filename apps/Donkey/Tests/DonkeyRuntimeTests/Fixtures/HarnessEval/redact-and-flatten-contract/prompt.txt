@@ -1,1 +1,0 @@
-redact every Social Security number from contract.pdf and flatten the result

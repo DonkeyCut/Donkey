@@ -10,7 +10,6 @@ RUNTIME_PACKAGE_DIR="$ROOT_DIR/dist/LocalRuntimePackages"
 APP_VERSION="${DONKEY_APP_VERSION:-0.1.0}"
 APP_BUILD="${DONKEY_APP_BUILD:-1}"
 WEB_BASE_URL="${DONKEY_WEB_BASE_URL:-https://donkeyuse.com}"
-AUTH_CALLBACK_SCHEME="${DONKEY_AUTH_CALLBACK_SCHEME:-donkey}"
 SPARKLE_FEED_URL="${DONKEY_SPARKLE_FEED_URL:-}"
 SPARKLE_PUBLIC_ED_KEY="${DONKEY_SPARKLE_PUBLIC_ED_KEY:-}"
 CONTENTS_DIR="$APP_DIR/Contents"
@@ -207,8 +206,7 @@ notarytool_submit() {
 
 # Sign the app bundle. Ad-hoc when no identity; otherwise Developer ID + hardened runtime, signed
 # inside-out (Apple discourages --deep for notarization). Sparkle's nested XPC services and Updater.app
-# are signed first, preserving their own (sandbox) entitlements, then the framework, then the app — which
-# carries the Apple Events entitlement it needs to keep automating other apps under the hardened runtime.
+# are signed first, preserving their own (sandbox) entitlements, then the framework, then the app.
 sign_app() {
   if [ "$APP_SIGN_IDENTITY" = "-" ]; then
     codesign --force --deep --sign - "$APP_DIR" >/dev/null
@@ -289,38 +287,97 @@ cd "$BUILD_DIR"
 echo "Compiling Donkey for Mac ..."
 swift build -c release --product Donkey
 
-# The bundled command-line tools (yt-dlp, ffmpeg, qpdf, exiftool, ...) are NOT baked into
-# the app: the shipped app stays small and downloads a prebuilt, self-contained arm64 tools
-# bundle on first run (see BundledToolsInstaller + bundled-tools.json). The release pipeline
-# that *produces and publishes* that artifact is scripts/publish-bundled-tools.sh.
+# The bundled command-line tools (ffmpeg, ffprobe, yt-dlp) ship INSIDE the app.
+# The Cut engine runs them by bare name off PATH, so a copy that
+# travels with the binary is what makes an export or a download work on a machine that never
+# had them — nothing to fetch on first run, nothing to race, nothing to retry offline.
 #
-# As an offline/airgapped escape hatch, point DONKEY_TOOLS_DIR at a prebuilt directory to
-# bake it into the app anyway; otherwise this stages nothing and the app self-installs.
-stage_bundled_tools() {
-  local source_dir="${DONKEY_TOOLS_DIR:-}"
-  if [ -z "$source_dir" ]; then
-    echo "Not baking tools into the app; it downloads them on first run."
-    return 0
-  fi
-  if [ ! -d "$source_dir" ]; then
-    echo "DONKEY_TOOLS_DIR=$source_dir does not exist." >&2
+# scripts/ensure-bundled-tools.sh produces the directory (downloading the prebuilt bundle named
+# in bundled-tools.json, or building from source). Point DONKEY_TOOLS_DIR at a prebuilt set to
+# use that instead.
+# Bring along every dylib the staged tools load, transitively. fetch-bundled-tools.sh rewrites each
+# binary's install names to @loader_path/<name> and lays the libraries flat beside it, so a dependency
+# is normally just a file name in the source dir. Walking from the tools (rather than copying every
+# dylib) drops the libraries that belonged only to tools this build no longer ships.
+#
+# @rpath and absolute paths are matched by base name too: a published bundle laid out differently, or a
+# tool linked against an @rpath entry, would otherwise be skipped silently. Anything genuinely absent
+# from the source dir (a system library under /usr/lib) has no basename match and is left alone, which
+# is correct — the OS provides it. `verify_staged_tools` is the backstop for whatever this misses.
+copy_tool_dylibs() {
+  local source_dir="$1" dest_dir="$2" binary dep name added=1
+  # A copied library can pull in more, so sweep to a fixed point. Iterative rather than recursive:
+  # recursing per dependency overflows bash's stack on a dependency set the size of ffmpeg's.
+  while [ "$added" -eq 1 ]; do
+    added=0
+    for binary in "$dest_dir"/*; do
+      [ -f "$binary" ] || continue
+      while IFS= read -r dep; do
+        name="${dep##*/}"
+        [ -n "$name" ] || continue
+        [ -e "$dest_dir/$name" ] && continue
+        [ -e "$source_dir/$name" ] || continue
+        cp "$source_dir/$name" "$dest_dir/$name"
+        added=1
+      done < <(otool -L "$binary" 2>/dev/null | awk 'NR>1 {print $1}')
+    done
+  done
+}
+
+# Run each staged tool. The executable bit says nothing about whether its libraries came along, so a
+# dependency the walk missed would otherwise sail through packaging, signing, and notarization and only
+# fail on the user's Mac with a dyld error. Every bundled tool answers a version flag, so launching one
+# is a cheap end-to-end proof that it and its dylibs are really there. ffmpeg/ffprobe take `-version`
+# and yt-dlp takes `--version`, so accept either rather than keeping a per-tool flag table.
+verify_staged_tools() {
+  local dest_dir="$1" tool
+  while IFS= read -r tool; do
+    if "$dest_dir/$tool" -version >/dev/null 2>&1 || "$dest_dir/$tool" --version >/dev/null 2>&1; then
+      continue
+    fi
+    echo "Staged tool '$tool' will not run from $dest_dir (missing dylib or bad signature)." >&2
+    "$dest_dir/$tool" -version || true
     exit 1
-  fi
+  done < <(bash "$ROOT_DIR/scripts/ensure-bundled-tools.sh" --list)
+}
+
+stage_bundled_tools() {
+  # ensure-bundled-tools.sh either populates vendor/donkey-tools or, with DONKEY_TOOLS_DIR
+  # set, validates the caller-supplied set. Run it either way so the full required list is
+  # checked before anything is copied — a build must not ship a half-populated tools dir.
+  bash "$ROOT_DIR/scripts/ensure-bundled-tools.sh"
+  local source_dir="${DONKEY_TOOLS_DIR:-$ROOT_DIR/vendor/donkey-tools}"
   local dest_dir="$RESOURCES_DIR/donkey-tools"
   rm -rf "$dest_dir"
   mkdir -p "$dest_dir"
-  cp -R "$source_dir/." "$dest_dir/"
-  # Sign each baked tool with the app's identity (Developer ID + hardened runtime for a release,
-  # ad-hoc otherwise) so a notarized build doesn't trip on an unsigned Mach-O; a non-Mach-O script
-  # (e.g. exiftool) just no-ops here.
-  local sopts=(--force --sign "$APP_SIGN_IDENTITY")
-  [ "$APP_SIGN_IDENTITY" != "-" ] && sopts+=(--options runtime --timestamp)
-  [ -n "${DONKEY_SIGN_KEYCHAIN:-}" ] && sopts+=(--keychain "$DONKEY_SIGN_KEYCHAIN")
-  find "$dest_dir" -type f -perm -u+x -print0 | while IFS= read -r -d '' tool; do
-    chmod +x "$tool"
-    codesign "${sopts[@]}" "$tool" >/dev/null 2>&1 || true
-  done
-  echo "Baked bundled tools from $source_dir into $dest_dir (offline override)."
+  # Copy ONLY the required tools, then the dylibs they actually load. The source directory can hold
+  # more than the required set — a published bundle predating a tool's removal, or a stale vendor dir —
+  # and copying it wholesale would ship binaries the product has no use for.
+  local tool
+  while IFS= read -r tool; do
+    [ -e "$source_dir/$tool" ] && cp "$source_dir/$tool" "$dest_dir/$tool"
+  done < <(bash "$ROOT_DIR/scripts/ensure-bundled-tools.sh" --list)
+  copy_tool_dylibs "$source_dir" "$dest_dir"
+  # Verify what actually landed in the app, against the same list ensure-bundled-tools.sh
+  # checks: the copy is what ships, so this is the assertion that matters.
+  local missing=()
+  while IFS= read -r tool; do
+    [ -x "$dest_dir/$tool" ] || missing+=("$tool")
+  done < <(bash "$ROOT_DIR/scripts/ensure-bundled-tools.sh" --list)
+  if [ ${#missing[@]} -gt 0 ]; then
+    echo "Baked tools directory is missing: ${missing[*]}; refusing to package." >&2
+    exit 1
+  fi
+  # Re-sign the baked copy with the app's identity (Developer ID + hardened runtime for a release,
+  # ad-hoc otherwise): copying preserves the vendor signature, but a notarized build must carry our
+  # own. sign-bundled-tools.sh is the one place that knows which tools need the library-validation
+  # exception to launch at all, so signing goes through it rather than a second codesign loop here.
+  DONKEY_TOOLS_SIGN_IDENTITY="$APP_SIGN_IDENTITY" \
+    bash "$ROOT_DIR/scripts/sign-bundled-tools.sh" "$dest_dir"
+  # After signing, not before: a re-signed binary that can't load its libraries fails here rather than
+  # on the user's Mac.
+  verify_staged_tools "$dest_dir"
+  echo "Baked bundled tools from $source_dir into $dest_dir."
 }
 
 # The Donkey Cut engine — the local server behind donkeycut.com — is version-locked to the
@@ -415,7 +472,6 @@ if [ "$copied_any_bundle" -eq 0 ]; then
   echo "No SwiftPM resource bundles found to stage; the app will crash at launch." >&2
   exit 1
 fi
-find "$APP_DIR" -name dev-overlay.json -type f -delete
 prepare_app_icon
 
 SPARKLE_FRAMEWORK="$(find "$BUILD_DIR/.build" -path "*/release/Sparkle.framework" -type d | head -n 1 || true)"
@@ -468,35 +524,16 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <true/>
   <key>DonkeyWebBaseURL</key>
   <string>$WEB_BASE_URL</string>
-  <key>DonkeyAuthCallbackScheme</key>
-  <string>$AUTH_CALLBACK_SCHEME</string>
-  <key>CFBundleURLTypes</key>
-  <array>
-    <dict>
-      <key>CFBundleURLName</key>
-      <string>com.donkeyuse.Donkey.auth</string>
-      <key>CFBundleURLSchemes</key>
-      <array>
-        <string>$AUTH_CALLBACK_SCHEME</string>
-      </array>
-    </dict>
-  </array>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Donkey uses the microphone for user-requested voice input.</string>
+  <string>Donkey records microphone audio when you record your screen.</string>
   <key>NSSpeechRecognitionUsageDescription</key>
-  <string>Donkey transcribes your voice input on-device to turn it into a command.</string>
+  <string>Donkey transcribes your video's audio on-device to build subtitles.</string>
   <key>NSScreenCaptureUsageDescription</key>
-  <string>Donkey captures bounded screenshots for user-requested app context.</string>
-  <key>NSAppleEventsUsageDescription</key>
-  <string>Donkey uses local app automation only for user-requested actions.</string>
+  <string>Donkey records your screen when you start a screen recording.</string>
+  <!-- Recordings are written to the Desktop (ScreenRecordingDestination.makeOutputURL), which is
+       TCC-protected; without this string the write is denied and the app is killed. -->
   <key>NSDesktopFolderUsageDescription</key>
-  <string>Donkey may search Desktop files only when you ask it to find or open a local item.</string>
-  <key>NSDocumentsFolderUsageDescription</key>
-  <string>Donkey may search Documents files only when you ask it to find or open a local item.</string>
-  <key>NSDownloadsFolderUsageDescription</key>
-  <string>Donkey may search Downloads files only when you ask it to find or open a local item.</string>
-  <key>NSAppleMusicUsageDescription</key>
-  <string>Donkey plays Apple Music natively when you ask for music.</string>
+  <string>Donkey saves your screen recordings to the Desktop.</string>
 $SPARKLE_PLIST_KEYS
 </dict>
 </plist>

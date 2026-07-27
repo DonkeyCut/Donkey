@@ -1,14 +1,13 @@
 # Swift MVC Guide
 
 Donkey Swift code keeps product state, UI rendering, and AppKit orchestration
-separate, so the pointer UI stays easy to change without coupling it to runtime
-or AI harness work. Views render and emit typed intents; models own state;
+separate, so the app's UI stays easy to change without coupling it to runtime
+work. Views render and emit typed intents; models own state;
 controllers own AppKit.
 
-**The one rule:** `DonkeyUI` never imports `DonkeyRuntime` or `DonkeyAI`.
-Runtime and LLM work crosses through `DonkeyContracts`, never through view
-internals. If a view needs runtime data, the data becomes a contract type the
-model passes in.
+**The one rule:** `DonkeyUI` never imports `DonkeyRuntime`.
+Runtime work reaches a view only as data its model passes in, never through
+view internals.
 
 ## Pattern
 
@@ -28,29 +27,25 @@ model passes in.
   screen and event geometry, monitor double-Command activation, own `NSPanel`,
   and translate geometry into model state.
 - Keep app entry files small: `@main`, delegate adaptation, and little else.
-- Prefer target-level separation for reusable contracts and UI:
-  `DonkeyContracts`, `DonkeyUI`, `DonkeyRuntime`, and `DonkeyAI`.
-- Keep shared UI state types in `DonkeyContracts`, not in `DonkeyUI`, when
-  models and views both need them.
+- Prefer target-level separation for reusable UI and runtime work: `DonkeyUI`
+  holds views, `DonkeyRuntime` holds the engine supervisor, bundled tools, and
+  the recorder.
 - Name files after their MVC role when a feature grows past one screen:
   `FeatureModel.swift`, `FeatureRootView.swift`, `FeatureController.swift`.
 
 ## Current Donkey Shape
 
-The pointer overlay follows this split: model state covers prompt text, typed
-input, placement, theme, and typed intents; views render the notch status and
-composer from model state; the controller owns AppKit-only work such as the
-notch and prompt panels, double-Command activation, screen positioning, and
-movement timing; app entry bootstraps the feature without owning product
-behavior. See `docs/guides/user-query-overlay.md` for the overlay's full
-division of labor.
+Screen recording follows this split: `ScreenRecorder` and its destination types
+hold the capture state; `RecordingControlBarView` renders it; the controllers own
+AppKit-only work such as the control bar panel, the region and window pickers, and
+screen positioning; `DonkeyAppDelegate` bootstraps the feature and the menu bar
+without owning product behavior.
 
 ## Review Checklist
 
 - A SwiftUI view does not call `NSEvent.mouseLocation`, create an `NSPanel`,
-  start a `Timer`, or import `DonkeyAI`/`DonkeyRuntime`.
-- A model does not import `DonkeyUI`; shared display state belongs in
-  `DonkeyContracts`.
+  start a `Timer`, or import `DonkeyRuntime`.
+- A model does not import `DonkeyUI`.
 - A model does not know about frames, screens, windows, or animation timing.
 - A controller does not store business text or decide model-provider behavior
   beyond presenting existing model state.

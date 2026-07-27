@@ -23,37 +23,21 @@ FRAMEWORKS_DIR="$CONTENTS_DIR/Frameworks"
 # mistaken for an installed release in the Dock.
 APP_ICON_SOURCE="$APP_DIR/Sources/Donkey/Resources/Donkey-dev.icns"
 APP_ICONSET_SOURCE="$APP_DIR/Sources/Donkey/Resources/Donkey.iconset"
-AUTH_CALLBACK_SCHEME="${DONKEY_AUTH_CALLBACK_SCHEME:-donkey-dev}"
 # The dev engine binds its own loopback port (baked into the dev Info.plist below,
 # read by DonkeyCutEngineSupervisor) so it coexists with an installed release's
 # engine on 41417 instead of the two supervisors killing each other's engine.
 DEV_CUT_ENGINE_PORT="${DONKEY_DEV_CUT_ENGINE_PORT:-41418}"
 LAUNCH_APP="${DONKEY_LAUNCH_APP:-1}"
-LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 SITE_PID=""
 SITE_LOG="${DONKEY_SITE_LOG:-${TMPDIR:-/tmp}/donkey-site-dev.log}"
 LOG_PID=""
 
 export DONKEY_WEB_BASE_URL="${DONKEY_WEB_BASE_URL:-http://localhost:3000}"
 
-# The dev build registers its own auth callback scheme (AUTH_CALLBACK_SCHEME,
-# baked into the dev Info.plist below) so the website's site->app handoff
-# deep-links to THIS build (donkey-dev://) instead of colliding with an installed
-# release that owns donkey://. The site derives the matching scheme automatically
-# from NODE_ENV (next dev -> donkey-dev), so no site env var is needed here.
-# Google OAuth is unaffected: its redirect_uri is the website's own callback
-# (BETTER_AUTH_URL host), which never sees this scheme.
-
-# The app authenticates hosted inference with a real signed-in session: launch
-# it, sign in through Google, and the native session cookie carries the auth.
-# Dev auth bypass is intentionally NOT enabled here. It exists only for scripts
-# that hit the API directly (e.g. the GeminiLive smoke tests, which set
-# DONKEY_DEV_AUTH_BYPASS=1 themselves), not for normal app usage.
-
 # Stop only a prior DEV build so a rebuild (or script exit) doesn't leave two dev
 # instances running. Never touch an installed release: its process is "Donkey" from
 # "Donkey.app", while the dev build runs as "$DEV_EXECUTABLE_NAME" from
-# "$DEV_DISPLAY_NAME.app" with a separate bundle id, auth scheme, and Cut engine port,
+# "$DEV_DISPLAY_NAME.app" with a separate bundle id and Cut engine port,
 # so the two are meant to run side by side.
 stop_running_dev_donkey_apps() {
   killall "$DEV_EXECUTABLE_NAME" >/dev/null 2>&1 || true
@@ -64,45 +48,6 @@ stop_running_dev_donkey_apps() {
   if command -v pkill >/dev/null 2>&1; then
     pkill -f "/$DEV_DISPLAY_NAME\.app/Contents/MacOS/" >/dev/null 2>&1 || true
   fi
-}
-
-# Eject mounted Donkey disk images and drop every other app bundle claiming the donkey:
-# URL scheme from LaunchServices, leaving only this dev build. Each packaged DMG mount and
-# every rebuilt copy registers itself as a donkey:// handler, so without this the OAuth
-# callback (donkey://auth/callback) can get routed to a leftover release copy with a
-# different bundle id — a different UserDefaults, so the saved sign-in state never matches
-# and the running dev notch never receives the callback. The dev app re-registers itself in
-# create_debug_app_bundle, so it stays the sole handler.
-purge_other_donkey_installs() {
-  if command -v hdiutil >/dev/null 2>&1; then
-    local volume
-    for volume in /Volumes/Donkey*; do
-      [ -d "$volume" ] || continue
-      echo "Ejecting $volume ..."
-      hdiutil detach "$volume" -quiet >/dev/null 2>&1 ||
-        hdiutil detach "$volume" -force -quiet >/dev/null 2>&1 || true
-    done
-  fi
-
-  [ -x "$LSREGISTER" ] || return 0
-
-  local claimant
-  while IFS= read -r claimant; do
-    [ -z "$claimant" ] && continue
-    [ "$claimant" = "$DEV_APP_DIR" ] && continue
-    echo "Unregistering stale donkey:// handler: $claimant"
-    "$LSREGISTER" -u "$claimant" >/dev/null 2>&1 || true
-  done < <(
-    "$LSREGISTER" -dump 2>/dev/null | awk -v scheme="$AUTH_CALLBACK_SCHEME" '
-      /^[ \t]*path:/ {
-        line = $0
-        sub(/^[ \t]*path:[ \t]*/, "", line)
-        sub(/ \(0x[0-9a-f]+\)[ \t]*$/, "", line)
-        p = line
-      }
-      $0 ~ ("claimed schemes:.*" scheme ":") { print p }
-    ' | sort -u
-  )
 }
 
 cleanup_child_processes() {
@@ -168,33 +113,6 @@ start_logger() {
     "$LOG_SCRIPT" "${log_args[@]}" &
   fi
   LOG_PID="$!"
-}
-
-print_dev_overlay_status() {
-  local overlay_config="$APP_DIR/dev-overlay.json"
-  if [ ! -f "$overlay_config" ]; then
-    echo "Dev overlay config: missing at $overlay_config"
-    return
-  fi
-
-  local summary
-  summary="$(
-    python3 - "$overlay_config" <<'PY' 2>/dev/null || true
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as handle:
-    config = json.load(handle)
-
-print("enabled={enabled}".format(enabled=config.get("enabled", False)))
-PY
-  )"
-
-  if [ -n "$summary" ]; then
-    echo "Dev overlay config: $summary"
-  else
-    echo "Dev overlay config: invalid JSON at $overlay_config"
-  fi
 }
 
 is_local_web_base_url() {
@@ -381,12 +299,10 @@ prepare_app_icon() {
 
 write_info_plist() {
   local escaped_web_base_url
-  local escaped_callback_scheme
   local escaped_bundle_identifier
   local escaped_display_name
   local escaped_executable_name
   escaped_web_base_url="$(xml_escape "$DONKEY_WEB_BASE_URL")"
-  escaped_callback_scheme="$(xml_escape "$AUTH_CALLBACK_SCHEME")"
   escaped_bundle_identifier="$(xml_escape "$DEV_BUNDLE_IDENTIFIER")"
   escaped_display_name="$(xml_escape "$DEV_DISPLAY_NAME")"
   escaped_executable_name="$(xml_escape "$DEV_EXECUTABLE_NAME")"
@@ -420,21 +336,6 @@ write_info_plist() {
   <string>$escaped_web_base_url</string>
   <key>DonkeyCutEnginePort</key>
   <integer>$DEV_CUT_ENGINE_PORT</integer>
-  <key>DonkeyAuthCallbackScheme</key>
-  <string>$escaped_callback_scheme</string>
-  <key>DonkeyDevOverlayConfigPath</key>
-  <string>$APP_DIR/dev-overlay.json</string>
-  <key>CFBundleURLTypes</key>
-  <array>
-    <dict>
-      <key>CFBundleURLName</key>
-      <string>$escaped_bundle_identifier.auth</string>
-      <key>CFBundleURLSchemes</key>
-      <array>
-        <string>$escaped_callback_scheme</string>
-      </array>
-    </dict>
-  </array>
   <key>NSMicrophoneUsageDescription</key>
   <string>Donkey uses the microphone for user-requested voice input.</string>
   <key>NSSpeechRecognitionUsageDescription</key>
@@ -541,9 +442,6 @@ create_debug_app_bundle() {
     fi
   fi
 
-  if [ -x "$LSREGISTER" ]; then
-    "$LSREGISTER" -f "$DEV_APP_DIR" >/dev/null 2>&1 || true
-  fi
 }
 
 swift_build() {
@@ -566,11 +464,6 @@ if [ "${DONKEY_STOP_APPS_BEFORE_BUILD:-1}" = "1" ]; then
   stop_running_dev_donkey_apps
 fi
 
-if [ "${DONKEY_PURGE_OTHER_INSTALLS:-1}" = "1" ]; then
-  echo "Ejecting Donkey volumes and clearing stale donkey:// handlers..."
-  purge_other_donkey_installs
-fi
-
 cd "$APP_DIR"
 
 echo "Building Donkey..."
@@ -581,8 +474,8 @@ if [ ! -x "$DONKEY_BIN" ]; then
   exit 1
 fi
 
-# Make sure the bundled CLI tools (yt-dlp, ffmpeg, ...) are vendored before staging them
-# into the app, so a dev build behaves like release: capability skills run them by bare
+# Make sure the bundled CLI tools (ffmpeg, yt-dlp, ...) are vendored before staging them
+# into the app, so a dev build behaves like release: the Cut engine runs them by bare
 # name instead of hunting for Homebrew. Cached after the first run.
 echo "Ensuring bundled tools..."
 "$ROOT_DIR/scripts/ensure-bundled-tools.sh"
@@ -597,9 +490,5 @@ if [ "$LAUNCH_APP" = "0" ]; then
 fi
 
 echo "Starting Donkey..."
-print_dev_overlay_status
-if [ "${DONKEY_DEV_AUTH_BYPASS:-0}" != "0" ]; then
-  echo "Hosted inference auth: DEV BYPASS ON (no login) baseURL=$DONKEY_WEB_BASE_URL"
-fi
 start_logger
 open -W -n "$DEV_APP_DIR"

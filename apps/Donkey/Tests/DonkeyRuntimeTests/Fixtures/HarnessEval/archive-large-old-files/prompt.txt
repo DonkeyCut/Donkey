@@ -1,1 +1,0 @@
-find every file over 1GB I have not opened in 6 months and move them into ~/Archive

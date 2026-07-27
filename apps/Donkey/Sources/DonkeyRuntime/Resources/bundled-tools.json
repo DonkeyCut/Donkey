@@ -1,5 +1,5 @@
 {
-  "_comment": "Single source of truth for the prebuilt CLI tools bundle (ffmpeg, yt-dlp, ...) the app downloads on first run. Produced and published by scripts/publish-bundled-tools.sh, which builds the tools, uploads the tarball as a GitHub release asset, and rewrites version+sha256 here. The app (BundledToolsInstaller) and the dev script (ensure-bundled-tools.sh) both read this. An empty sha256 means nothing is published yet: the installer no-ops and dev falls back to building from source.",
+  "_comment": "Build-time pointer to the prebuilt CLI tools bundle (ffmpeg, yt-dlp, ...). Produced and published by scripts/publish-bundled-tools.sh, which builds the tools, uploads the tarball as a GitHub release asset, and rewrites version+sha256 here. scripts/ensure-bundled-tools.sh reads it to fetch the bundle into vendor/donkey-tools instead of compiling from source; packaging then bakes that directory into the app. The shipped app never reads this file — it carries the tools. An empty sha256 means nothing is published yet, so builds fall back to building from source.",
   "version": "2026.06.26",
   "arch": "arm64",
   "url": "https://github.com/DonkeyUseCorp/Donkey/releases/download/bundled-tools-2026.06.26/donkey-tools-2026.06.26-arm64.tar.gz",

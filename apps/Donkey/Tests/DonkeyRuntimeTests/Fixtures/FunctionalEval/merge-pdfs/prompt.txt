@@ -1,1 +1,0 @@
-In the folder {DIR} there are two PDFs, a.pdf (2 pages) and b.pdf (1 page). Merge them into a single PDF in {DIR} with a.pdf first, then b.pdf.

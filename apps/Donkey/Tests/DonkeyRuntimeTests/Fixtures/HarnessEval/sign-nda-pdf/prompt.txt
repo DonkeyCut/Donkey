@@ -1,1 +1,0 @@
-add my signature from signature.png to the signature line on nda.pdf

@@ -1,9 +1,8 @@
 # Backend API Guide
 
 Backend APIs are the Next.js route handlers under the site project. They serve
-three callers: the Mac app, signed in with a session cookie; the site's own
-client views; and third-party Vision API developers, who authenticate with an
-API key.
+two callers: the site's own client views, signed in with a session cookie; and
+third-party Vision API developers, who authenticate with an API key.
 
 **The one rule:** every route handler is wrapped in `withDonkeyAuth`. A public
 endpoint is a deliberate exception with a product reason — today only Better
@@ -27,37 +26,13 @@ in one place. The only interactive login is Google OAuth; email-and-password
 stays off unless the product deliberately adds another method. Better Auth's own
 Google callback is `${BETTER_AUTH_URL}/api/auth/callback/google`.
 
-Mac app sign-in rides Better Auth's one-time-token plugin. The browser does the
-real login, then hands a short-lived code to the app:
-
-```text
-browser session signs in
-    |
-    v
-/mac-auth/callback mints a one-time code
-    |
-    v
-handoff page opens donkey://auth/callback
-    |
-    v
-app exchanges the code at /api/auth/one-time-token/verify
-    |
-    v
-app stores the Better Auth cookie in its own cookie jar
-```
-
-Keep the code short-lived, leave a manual "Open Donkey" fallback on the handoff
-page, and keep the `donkey://` callback origin in Better Auth's trusted origins.
-
-**Sign-out is everywhere.** The app and each browser hold their own session, so
-signing out on any surface revokes *every* session for that user (Better Auth's
-`revoke-sessions`), not just the current one. The app picks up a web sign-out
-through a periodic session check; the browser picks up an app sign-out when it
-refetches the session on focus. That keeps the two in sync in both directions.
+**Sign-out is everywhere.** Each browser holds its own session, so signing out on
+any surface revokes *every* session for that user (Better Auth's
+`revoke-sessions`), not just the current one. Other tabs pick it up when they
+refetch the session on focus.
 
 The hosted deploy needs `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`,
-`GOOGLE_CLIENT_ID`, and `GOOGLE_CLIENT_SECRET`. The `donkey://` callback origin is
-derived automatically, so no env var configures it. Never commit real OAuth
+`GOOGLE_CLIENT_ID`, and `GOOGLE_CLIENT_SECRET`. Never commit real OAuth
 credentials.
 
 ## Handler Rules
@@ -94,16 +69,16 @@ credentials.
 
 ## Inference Gateway
 
-The inference gateway is the Mac-app-facing boundary for remote model calls and
-asset generation. Everything the Mac app and backend share — routes, schemas,
-the stateless provider calls, the Swift contracts — stays provider-neutral.
-Provider names live only inside private adapters, as configuration and data.
+The inference gateway is the client-facing boundary for remote model calls and
+asset generation. Everything a client and the backend share — routes, schemas,
+the stateless provider calls — stays provider-neutral. Provider names live only
+inside private adapters, as configuration and data.
 
 Every inference route requires the `x-donkey-client-id` header. Provider request
 mapping lives behind the provider registry, so handlers import the registry and
 the neutral schemas, never an individual adapter.
 
-**State stays on the Mac.** The backend can create or refresh a provider job and
+**State stays on the client.** The backend can create or refresh a provider job and
 hand back job IDs, generation IDs, polling URLs, and output references, but it
 never persists prompts, generation records, provider output references, or
 generated assets in Postgres.
@@ -138,7 +113,7 @@ hosted Google credentials or `GEMINI_API_KEY`.
 The Gemini adapter uses the official `@google/genai` SDK. It runs on Vertex AI's
 global endpoint only when `GOOGLE_APPLICATION_CREDENTIALS_JSON` carries a
 `project_id`; without one, the provider is unavailable. Set that JSON as a
-hosted-deploy secret — Google credentials never live in the Mac app.
+hosted-deploy secret.
 
 Model choice is code (see Handler Rules on `process.env`):
 

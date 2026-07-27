@@ -1,1 +1,0 @@
-In the folder {DIR} there is clip.mp4. Extract its audio track as an MP3 file and save it in {DIR}.

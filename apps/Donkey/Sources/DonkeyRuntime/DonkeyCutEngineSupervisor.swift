@@ -135,12 +135,12 @@ public final class DonkeyCutEngineSupervisor: @unchecked Sendable {
             break
         }
 
-        var environment = DonkeyCommandBackends.shellEnvironment()
+        var environment = BundledTools.childEnvironment()
         environment["DONKEY_CUT_ENGINE"] = "1"
         environment["DONKEY_CUT_VERSION"] = Self.appVersion
         environment["DONKEY_CUT_PORT"] = String(Self.port)
         environment["DONKEY_CUT_PARENT_PID"] = String(ProcessInfo.processInfo.processIdentifier)
-        if let tools = DonkeyCommandBackends.bundledToolsDirectory {
+        if let tools = BundledTools.resolvedDirectory() {
             environment["DONKEY_CUT_TOOLS_DIR"] = tools.path
         }
 

@@ -1,7 +1,0 @@
-Total words: 12
-Filler words (text start end): um 3.10 3.42 | uh 7.80 8.05
-Silences over 0.5s (start end): 18.51 19.43 | 95.20 96.88
-Removal spans, fillers padded 0.05s (start end): 3.05 3.47 | 7.75 8.10
-Silence removal keeping 0.15s floor (start end): 18.59 19.36 | 95.28 96.81
-All removals merged (start end): 3.05 3.47 | 7.75 8.10 | 18.59 19.36 | 95.28 96.81
-Keep spans over [0, 664.0] (start end): 0 3.05 | 3.47 7.75 | 8.10 18.59 | 19.36 95.28 | 96.81 664.0

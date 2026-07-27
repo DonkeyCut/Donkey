@@ -1,1 +1,0 @@
-Build me a tiny macOS menu bar app in Swift that shows a hello message, and put the project folder on my Desktop.
