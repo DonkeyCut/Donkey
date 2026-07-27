@@ -1,7 +1,12 @@
 # Donkey Cut cloud render worker. Build the bundle first (npm run worker:build),
 # then build this image from site/:
 #   docker build -f src/cut/worker/Dockerfile -t donkey-cut-worker .
-FROM node:22-slim
+#
+# The Debian release picks the ffmpeg, so it is part of the contract: the
+# export's final pass passes -display_rotation, which ffmpeg gained in 6.0.
+# Bookworm's 5.1 encodes the entire file and then dies on that last command, at
+# 98% progress, with "Unrecognized option". Trixie carries 7.1.
+FROM node:22-trixie-slim
 
 # ffmpeg/ffprobe for the render pipeline; python3 runs the yt-dlp zipapp.
 RUN apt-get update \
@@ -12,6 +17,11 @@ RUN apt-get update \
   && apt-get purge -y curl \
   && apt-get autoremove -y \
   && rm -rf /var/lib/apt/lists/*
+
+# Hold the image to what the pipeline actually calls. A base bump that walks
+# ffmpeg backwards fails here instead of at 98% of someone's export.
+RUN ffmpeg -hide_banner -h full 2>&1 | grep -q -- '-display_rotation' \
+  || { echo "ffmpeg is too old: the export re-mux needs -display_rotation (6.0+)." >&2; exit 1; }
 
 WORKDIR /app
 COPY dist/cut-worker/main.js ./main.js
