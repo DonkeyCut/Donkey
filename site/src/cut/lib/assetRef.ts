@@ -62,7 +62,7 @@ export const refFromLibrary = (a: LibraryAsset): AssetRef => ({
   id: a.id,
   name: a.name,
   kind: a.type,
-  url: libraryMediaUrl(a.fileName),
+  url: libraryMediaUrl(a.fileName, a.residency),
   duration: a.duration,
 });
 

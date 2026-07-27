@@ -208,6 +208,7 @@ export function FolderCrumb({
 export function FolderShelf<F extends DeskFolder>({
   folders,
   statOf,
+  badgeOf,
   mime,
   onOpen,
   onCreate,
@@ -222,6 +223,9 @@ export function FolderShelf<F extends DeskFolder>({
 }: {
   folders: F[];
   statOf: (id: string) => { count: number; size?: number };
+  /** Small marker beside the item count — where the library says which shelf
+   * a folder is on. */
+  badgeOf?: (id: string) => React.ReactNode;
   mime: string;
   onOpen: (id: string) => void;
   onCreate?: (name: string) => void | Promise<void>;
@@ -369,9 +373,10 @@ export function FolderShelf<F extends DeskFolder>({
             />
             <div className="min-w-0 flex-1">
               <div className="truncate text-xs font-medium">{f.name}</div>
-              <div className="text-[10px] text-muted-foreground tabular-nums">
+              <div className="flex items-center gap-1 text-[10px] text-muted-foreground tabular-nums">
                 {s.count} {s.count === 1 ? "item" : "items"}
                 {s.size != null ? ` · ${formatBytes(s.size)}` : ""}
+                {badgeOf?.(f.id)}
               </div>
             </div>
             {menu}
@@ -387,9 +392,10 @@ export function FolderShelf<F extends DeskFolder>({
             <span className="mt-0.5 line-clamp-2 max-w-full text-xs font-medium leading-tight">
               {f.name}
             </span>
-            <span className="text-[10px] text-muted-foreground tabular-nums">
+            <span className="flex items-center gap-1 text-[10px] text-muted-foreground tabular-nums">
               {s.count}
               {s.size != null ? ` · ${formatBytes(s.size)}` : ""}
+              {badgeOf?.(f.id)}
             </span>
             {menu}
           </div>

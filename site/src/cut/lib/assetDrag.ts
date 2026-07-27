@@ -2,7 +2,7 @@
 
 import type React from "react";
 import { clearRefDrag, refFromAsset, refFromLibrary, setRefDragData } from "./assetRef";
-import type { LibraryAsset } from "./library";
+import type { LibraryAsset, LibraryTemplateItem } from "./library";
 import { useEditor } from "./store";
 import type { LibraryTemplate } from "./types";
 
@@ -62,19 +62,21 @@ export function draggedLibraryId(e: React.DragEvent | DragEvent): string | null 
 }
 
 /** A template dragged from the Media panel (project scope) or the Library
- * panel (library scope), so the rail tiles can move it the other way. */
+ * panel (library scope), so the rail tiles can move it the other way. A
+ * library template carries the shelf it sits on; a project one lives in the
+ * open project and needs no residency. */
 export const TEMPLATE_MIME = "application/x-cut-template";
 
-let inFlightTemplate: { scope: "project" | "library"; template: LibraryTemplate } | null = null;
+export type TemplateDrag =
+  | { scope: "project"; template: LibraryTemplate }
+  | { scope: "library"; template: LibraryTemplateItem };
 
-export function setTemplateDragData(
-  e: React.DragEvent,
-  scope: "project" | "library",
-  template: LibraryTemplate
-) {
-  e.dataTransfer.setData(TEMPLATE_MIME, template.id);
+let inFlightTemplate: TemplateDrag | null = null;
+
+export function setTemplateDragData(e: React.DragEvent, drag: TemplateDrag) {
+  e.dataTransfer.setData(TEMPLATE_MIME, drag.template.id);
   e.dataTransfer.effectAllowed = "copy";
-  inFlightTemplate = { scope, template };
+  inFlightTemplate = drag;
 }
 
 /** The template drag in flight, readable during `dragover`. */

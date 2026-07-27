@@ -60,10 +60,12 @@ import {
   saveTemplate,
   type LibraryAsset,
   type LibraryFolder,
+  type LibraryTemplateItem,
 } from "@/cut/lib/library";
+import { activeResidency, availableResidencies, type Residency } from "@/cut/lib/residency";
 import { retryUpload } from "@/cut/lib/importQueue";
 import { revealMedia } from "@/cut/lib/media";
-import { mediaUrl, TRANSITION_MAX, type LibraryTemplate } from "@/cut/lib/types";
+import { mediaUrl, TRANSITION_MAX } from "@/cut/lib/types";
 import { genPulseOverlay, isGenTab, useGenNotify, useGenPulse, useWatchGenTab } from "@/cut/lib/genNotify";
 import { CAPTION_LIMIT, normalizeTags } from "@/cut/lib/publish";
 import { useEditor } from "@/cut/lib/store";
@@ -84,7 +86,7 @@ import { SampleLibrary } from "./StockMusicPanel";
 import { StockVideosPanel } from "./StockVideosPanel";
 import { STOCK_MUSIC } from "@/cut/lib/stockMusicManifest";
 import { STOCK_VIDEOS } from "@/cut/lib/stockVideoManifest";
-import { LibraryCard } from "./LibraryView";
+import { LibraryCard, ShelfBadge } from "./LibraryView";
 
 // Drag a library clip onto a folder tile to file it (side panel, single card).
 const LIBRARY_MOVE_MIME = "application/x-cut-library-move";
@@ -518,7 +520,7 @@ function MediaPanel({
                 key={t.id}
                 template={t}
                 mediaSrc={(f) => mediaUrl(projectId, f)}
-                dragScope="project"
+                drag={{ scope: "project", template: t }}
                 addTitle="Add to timeline"
                 onAdd={() => addProjectTemplateToTimeline(projectId, t)}
                 onRename={(name) => useEditor.getState().renameTemplate(t.id, name)}
@@ -905,7 +907,7 @@ function AssetCard({ asset, projectId }: { asset: MediaAsset; projectId: string 
 function LibraryPanel({ projectId }: { projectId: string }) {
   const [assets, setAssets] = useState<LibraryAsset[] | null>(null);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
-  const [templates, setTemplates] = useState<LibraryTemplate[]>([]);
+  const [templates, setTemplates] = useState<LibraryTemplateItem[]>([]);
   const [openFolder, setOpenFolder] = useLocalPref<string | null>(
     "cut-library-folder",
     null,
@@ -936,14 +938,14 @@ function LibraryPanel({ projectId }: { projectId: string }) {
     if (a) setOpenFolder(a.folderId ?? null);
   });
 
-  const removeTemplate = async (id: string) => {
+  const removeTemplate = async (r: Residency, id: string) => {
     setTemplates((prev) => prev.filter((t) => t.id !== id));
-    await deleteTemplate(id).catch(() => void reload());
+    await deleteTemplate(r, id).catch(() => void reload());
   };
 
-  const commitTemplateRename = async (id: string, name: string) => {
+  const commitTemplateRename = async (r: Residency, id: string, name: string) => {
     setTemplates((prev) => prev.map((t) => (t.id === id ? { ...t, name } : t)));
-    await renameTemplate(id, name).catch(() => void reload());
+    await renameTemplate(r, id, name).catch(() => void reload());
   };
 
   useEffect(() => {
@@ -952,21 +954,31 @@ function LibraryPanel({ projectId }: { projectId: string }) {
 
   const remove = async () => {
     if (!deleting) return;
-    const id = deleting.id;
+    const { id, residency } = deleting;
     setAssets((prev) => (prev ?? []).filter((a) => a.id !== id));
     setDeleting(null);
     try {
-      await deleteFromLibrary(id);
+      await deleteFromLibrary(residency, id);
     } catch {
       // Server delete failed; pull a fresh list so the UI stays truthful.
       void reload();
     }
   };
 
+  // Every item carries its shelf; a folder belongs to one, so an item only
+  // files into a folder on the same shelf.
+  const shelfOf = (id: string): Residency | null =>
+    (assets ?? []).find((a) => a.id === id)?.residency ??
+    templates.find((t) => t.id === id)?.residency ??
+    null;
+
   const move = async (id: string, folderId: string | null) => {
+    const residency = shelfOf(id);
+    if (!residency) return;
+    if (folderId && folders.find((f) => f.id === folderId)?.residency !== residency) return;
     setAssets((prev) => (prev ?? []).map((a) => (a.id === id ? { ...a, folderId } : a)));
     setTemplates((prev) => prev.map((t) => (t.id === id ? { ...t, folderId } : t)));
-    await moveLibraryItem(id, folderId).catch(() => void reload());
+    await moveLibraryItem(residency, id, folderId).catch(() => void reload());
   };
 
   // Let a clip be dragged onto a folder tile to file it (alongside the timeline
@@ -978,6 +990,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
   };
 
   const all = assets ?? [];
+  const bothShelves = availableResidencies().length > 1;
   const shown = all.filter((a) => (a.folderId ?? null) === openFolder);
   const shownTemplates = templates.filter((t) => (t.folderId ?? null) === openFolder);
   const openFolderName = folders.find((f) => f.id === openFolder)?.name;
@@ -1009,12 +1022,20 @@ function LibraryPanel({ projectId }: { projectId: string }) {
                 all.filter((a) => (a.folderId ?? null) === id).length +
                 templates.filter((t) => (t.folderId ?? null) === id).length,
             })}
+            badgeOf={(id) => {
+              const r = folders.find((f) => f.id === id)?.residency;
+              return bothShelves && r ? <ShelfBadge residency={r} /> : null;
+            }}
             onOpen={(id) => setOpenFolder(id)}
             onRename={async (id, name) => {
+              const r = folders.find((f) => f.id === id)?.residency;
+              if (!r) return;
               setFolders((prev) => prev.map((f) => (f.id === id ? { ...f, name } : f)));
-              await renameLibraryFolder(id, name).catch(() => void reload());
+              await renameLibraryFolder(r, id, name).catch(() => void reload());
             }}
             onDelete={async (id) => {
+              const r = folders.find((f) => f.id === id)?.residency;
+              if (!r) return;
               setFolders((prev) => prev.filter((f) => f.id !== id));
               setAssets((prev) =>
                 (prev ?? []).map((a) => (a.folderId === id ? { ...a, folderId: null } : a))
@@ -1023,17 +1044,20 @@ function LibraryPanel({ projectId }: { projectId: string }) {
                 prev.map((t) => (t.folderId === id ? { ...t, folderId: null } : t))
               );
               if (openFolder === id) setOpenFolder(null);
-              await deleteLibraryFolder(id).catch(() => void reload());
+              await deleteLibraryFolder(r, id).catch(() => void reload());
             }}
             onDropIds={(ids, fid) => ids.forEach((id) => void move(id, fid))}
             onRefDrop={(ref, fid) => {
               // Project media dropped on a folder tile (a Media card or a
               // timeline clip): save it to the library, filed in that folder.
+              // The copy lands on the project's own shelf, so a folder on the
+              // other one can't take it.
               if (ref.scope !== "project") return;
+              if (folders.find((f) => f.id === fid)?.residency !== activeResidency()) return;
               const asset = useEditor.getState().assets.find((a) => a.id === ref.id);
               if (!asset) return;
               void saveAssetToLibrary(projectId, asset)
-                .then((saved) => moveLibraryItem(saved.id, fid))
+                .then((saved) => moveLibraryItem(saved.residency, saved.id, fid))
                 .then(() => void reload())
                 .catch(() => {});
             }}
@@ -1047,21 +1071,21 @@ function LibraryPanel({ projectId }: { projectId: string }) {
               <TemplateCard
                 key={t.id}
                 template={t}
-                mediaSrc={libraryMediaUrl}
-                dragScope="library"
+                mediaSrc={(f) => libraryMediaUrl(f, t.residency)}
+                drag={{ scope: "library", template: t }}
                 onDragStartExtra={(e) => {
                   e.dataTransfer.setData(LIBRARY_MOVE_MIME, JSON.stringify([t.id]));
                   e.dataTransfer.effectAllowed = "copyMove";
                 }}
                 addTitle="Add to this project"
                 onAdd={() => void addTemplateToProject(projectId, t)}
-                onRename={(name) => void commitTemplateRename(t.id, name)}
-                onDelete={() => void removeTemplate(t.id)}
+                onRename={(name) => void commitTemplateRename(t.residency, t.id, name)}
+                onDelete={() => void removeTemplate(t.residency, t.id)}
                 onRefDrop={(r) => {
                   if (r.scope !== "project") return;
                   const asset = useEditor.getState().assets.find((a) => a.id === r.id);
                   if (!asset) return;
-                  void addAssetToLibraryTemplate(projectId, t.id, asset)
+                  void addAssetToLibraryTemplate(projectId, t, asset)
                     .then((updated) =>
                       setTemplates((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
                     )

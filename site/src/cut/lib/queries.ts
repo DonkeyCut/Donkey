@@ -20,28 +20,24 @@ import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-quer
 import { useEffect } from "react";
 
 import { engineLost } from "./api";
-import { getBackend } from "./backend";
-import { cloudBackend } from "./backend/cloud";
-import { localBackend } from "./backend/local";
 import { useCutMode } from "./backend/hooks";
-import type { CutBackend, CutMode } from "./backend/types";
 import { readSnapshot, snapshotKey, writeSnapshot } from "./cache";
 import { webModeEnabled } from "./flags";
 import { fetchLibrary, type LibraryData } from "./library";
+import { availableResidencies, backendFor, type Residency } from "./residency";
 import type { ProjectFolder, ProjectSummary } from "./types";
 
-/** Where a project lives: the engine on this Mac, or the hosted cloud
- * backend. ("shared" is a view of someone else's project, never a residency
- * of yours, so it never lists here.) */
-export type Residency = "local" | "cloud";
-
-export const backendFor = (r: Residency): CutBackend =>
-  r === "cloud" ? cloudBackend : localBackend;
+export { backendFor };
+export type { Residency };
 
 export type ProjectsSection = { projects: ProjectSummary[]; folders: ProjectFolder[] };
 
 export const projectsKey = (r: Residency) => ["cut", "projects", r] as const;
-export const libraryKey = (mode: CutMode) => ["cut", "library", mode] as const;
+/** The library listing spans every reachable residency, so the set itself is
+ * the cache key — connecting the engine mid-session widens the shelf rather
+ * than repainting a stale half of it. */
+export const libraryScope = () => availableResidencies().join("+");
+export const libraryKey = (scope: string) => ["cut", "library", scope] as const;
 
 /**
  * Paint the last answer we stored while the live one is in flight. The
@@ -111,21 +107,25 @@ export function useProjectsSection(r: Residency, enabled: boolean) {
   });
 }
 
-/** The library of the backend the app is currently bound to. */
+/** The user's whole shelf: every reachable residency's library, merged. */
 export function useLibrary() {
-  const mode = useCutMode();
+  // Not read for the query itself — the backend binding decides which
+  // residencies are reachable, so a mode change re-keys and re-reads.
+  useCutMode();
   const client = useQueryClient();
+  const scope = libraryScope();
+  const snap = snapshotKey(scope, "library");
 
   useEffect(
-    () => seedFromSnapshot<LibraryData>(client, libraryKey(mode), snapshotKey(mode, "library")),
-    [client, mode]
+    () => seedFromSnapshot<LibraryData>(client, libraryKey(scope), snap),
+    [client, scope, snap]
   );
 
   return useQuery<LibraryData>({
-    queryKey: libraryKey(mode),
+    queryKey: libraryKey(scope),
     queryFn: async () => {
       const data = await fetchLibrary();
-      writeSnapshot(snapshotKey(mode, "library"), data);
+      writeSnapshot(snap, data);
       return data;
     },
     staleTime: 0,
@@ -148,14 +148,14 @@ export function patchProjects(
   if (next) writeSnapshot(snapshotKey(r, "projects"), next);
 }
 
-/** The library's equivalent. Keyed on the active backend, which is the only
- * one the library view ever shows. */
+/** The library's equivalent. Its items carry their own residency, so one
+ * merged listing is patched however the mutation asks. */
 export function patchLibrary(client: QueryClient, fn: (prev: LibraryData) => LibraryData) {
-  const mode = getBackend().kind;
-  const next = client.setQueryData<LibraryData>(libraryKey(mode), (prev) =>
+  const scope = libraryScope();
+  const next = client.setQueryData<LibraryData>(libraryKey(scope), (prev) =>
     prev ? fn(prev) : prev
   );
-  if (next) writeSnapshot(snapshotKey(mode, "library"), next);
+  if (next) writeSnapshot(snapshotKey(scope, "library"), next);
 }
 
 /** Pull a residency's listing again — for the changes only the server can
@@ -165,5 +165,5 @@ export function refetchProjects(client: QueryClient, r: Residency) {
 }
 
 export function refetchLibrary(client: QueryClient) {
-  return client.invalidateQueries({ queryKey: libraryKey(getBackend().kind) });
+  return client.invalidateQueries({ queryKey: libraryKey(libraryScope()) });
 }

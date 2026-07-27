@@ -1221,6 +1221,13 @@ export async function runAiTool(
     }
 
     case "library_organize": {
+      // The library spans both shelves, so every id is resolved against the
+      // current listing to find the backend that owns it.
+      const lib = await fetchLibrary();
+      const folderShelf = (id: string) => lib.folders.find((f) => f.id === id)?.residency;
+      const itemShelf = (id: string) =>
+        lib.assets.find((a) => a.id === id)?.residency ??
+        lib.templates.find((t) => t.id === id)?.residency;
       switch (String(input.action ?? "")) {
         case "create_folder": {
           const name = String(input.name ?? "").trim();
@@ -1231,25 +1238,43 @@ export async function runAiTool(
         case "rename_folder": {
           const name = String(input.name ?? "").trim();
           if (!name) throw new ToolError("A folder name is required.");
-          await renameLibraryFolder(String(input.folder_id ?? ""), name);
+          const id = String(input.folder_id ?? "");
+          const r = folderShelf(id);
+          if (!r) throw new ToolError(`No library folder with id ${id}.`);
+          await renameLibraryFolder(r, id, name);
           return { renamed: true, name };
         }
         case "delete_folder": {
-          await deleteLibraryFolder(String(input.folder_id ?? ""));
+          const id = String(input.folder_id ?? "");
+          const r = folderShelf(id);
+          if (!r) throw new ToolError(`No library folder with id ${id}.`);
+          await deleteLibraryFolder(r, id);
           return { deleted: true, note: "Its assets moved to the Library root." };
         }
         case "move_asset": {
           const folderId =
             typeof input.folder_id === "string" && input.folder_id ? input.folder_id : null;
-          await moveLibraryItem(String(input.id ?? ""), folderId);
+          const id = String(input.id ?? "");
+          const r = itemShelf(id);
+          if (!r) throw new ToolError(`No library item with id ${id}.`);
+          if (folderId && folderShelf(folderId) !== r) {
+            throw new ToolError("That folder is on the other library shelf.");
+          }
+          await moveLibraryItem(r, id, folderId);
           return { moved: true, folderId };
         }
         case "delete_asset": {
-          await deleteFromLibrary(String(input.id ?? ""));
+          const id = String(input.id ?? "");
+          const r = lib.assets.find((a) => a.id === id)?.residency;
+          if (!r) throw new ToolError(`No library asset with id ${id}.`);
+          await deleteFromLibrary(r, id);
           return { deleted: true };
         }
         case "delete_template": {
-          await deleteTemplate(String(input.id ?? ""));
+          const id = String(input.id ?? "");
+          const r = lib.templates.find((t) => t.id === id)?.residency;
+          if (!r) throw new ToolError(`No library template with id ${id}.`);
+          await deleteTemplate(r, id);
           return { deleted: true };
         }
         default:

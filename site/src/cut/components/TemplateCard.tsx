@@ -26,6 +26,7 @@ import {
   clearAssetDrag,
   setCardDragImage,
   setTemplateDragData,
+  type TemplateDrag,
 } from "@/cut/lib/assetDrag";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { useAssetDrop, type AssetRef } from "@/cut/lib/assetRef";
@@ -36,7 +37,7 @@ import { cn } from "@/lib/utils";
 
 /** A template row card: name and parts, a "…" menu (Rename / extras / Delete)
  * and an optional "+" action, both revealed on hover. Rename swaps the name
- * into an inline input. With `dragScope` set the card drags like any other
+ * into an inline input. With `drag` set the card drags like any other
  * item — onto the timeline, or onto the Media/Library rail tiles. Clicking the
  * card expands it to preview what's inside: each clip, sound, and title, plus
  * a caption count. Hovering a video/image row floats a live preview (video
@@ -45,7 +46,7 @@ import { cn } from "@/lib/utils";
 export function TemplateCard({
   template: t,
   mediaSrc,
-  dragScope,
+  drag,
   onAdd,
   addTitle,
   onRename,
@@ -57,8 +58,8 @@ export function TemplateCard({
   template: LibraryTemplate;
   /** Resolve a template media file to a playable URL (project or library). */
   mediaSrc: (fileName: string) => string;
-  /** Where this card lives; makes it draggable with a template payload. */
-  dragScope?: "project" | "library";
+  /** The payload this card drags; omit to make it undraggable. */
+  drag?: TemplateDrag;
   /** The "+" action; omit to drop the button (e.g. no open project). */
   onAdd?: () => void;
   addTitle?: string;
@@ -130,13 +131,13 @@ export function TemplateCard({
       {...(onRefDrop ? refDrop.targetProps : {})}
       className={cn(
         "group flex flex-col rounded-lg border border-border bg-background px-2.5 py-1.5",
-        dragScope ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
+        drag ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
         onRefDrop && refDrop.active && "border-primary bg-primary/10",
       )}
-      draggable={!!dragScope}
+      draggable={!!drag}
       onDragStart={(e) => {
-        if (!dragScope) return;
-        setTemplateDragData(e, dragScope, t);
+        if (!drag) return;
+        setTemplateDragData(e, drag);
         onDragStartExtra?.(e);
         setCardDragImage(e, e.currentTarget);
       }}

@@ -4,8 +4,10 @@ import { useCallback, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  Cloud,
   FolderOpen,
   FolderPlus,
+  Laptop,
   Link as LinkIcon,
   Loader2,
   Plus,
@@ -50,6 +52,12 @@ import {
   type LibraryAsset,
   type LibraryData,
 } from "@/cut/lib/library";
+import {
+  activeResidency,
+  availableResidencies,
+  RESIDENCY_LABEL,
+  type Residency,
+} from "@/cut/lib/residency";
 import { TemplateCard } from "./TemplateCard";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
 import { useRevealFlash } from "@/cut/lib/refReveal";
@@ -62,6 +70,23 @@ import { buildDragGhost, FolderCrumb, FolderShelf, Marquee } from "./desktopFold
 // A dragged library selection travels as a JSON array of asset ids, so a whole
 // marquee-selected collection can be dropped onto a folder at once.
 const LIBRARY_MOVE_MIME = "application/x-cut-library-move";
+
+/** Which shelf an item sits on, on its card. The library merges both, so the
+ * badge is how you tell a clip on this Mac from one in the cloud. */
+export function ShelfBadge({
+  residency,
+  className,
+}: {
+  residency: Residency;
+  className?: string;
+}) {
+  const Icon = residency === "cloud" ? Cloud : Laptop;
+  return (
+    <span title={RESIDENCY_LABEL[residency]} className={className}>
+      <Icon className="size-3" />
+    </span>
+  );
+}
 
 export function LibraryView() {
   const router = useRouter();
@@ -95,26 +120,36 @@ export function LibraryView() {
   const [fileOver, setFileOver] = useState(false);
   const dragDepth = useRef(0);
 
-  const renameTpl = async (id: string, name: string) => {
+  // Every mutation goes to the shelf its item sits on; only new items need a
+  // destination, and that is the folder they land in, or the bound backend.
+  const shelfOf = (id: string): Residency | null =>
+    all.find((a) => a.id === id)?.residency ??
+    templates.find((t) => t.id === id)?.residency ??
+    null;
+  const shelfForNew = (folderId: string | null) =>
+    (folderId ? folders.find((f) => f.id === folderId)?.residency : null) ?? activeResidency();
+
+  const renameTpl = async (r: Residency, id: string, name: string) => {
     patch((d) => ({ ...d, templates: d.templates.map((t) => (t.id === id ? { ...t, name } : t)) }));
-    await renameTemplate(id, name).catch(() => void reload());
+    await renameTemplate(r, id, name).catch(() => void reload());
   };
 
-  const removeTpl = async (id: string) => {
+  const removeTpl = async (r: Residency, id: string) => {
     patch((d) => ({ ...d, templates: d.templates.filter((t) => t.id !== id) }));
-    await deleteTemplate(id).catch(() => void reload());
+    await deleteTemplate(r, id).catch(() => void reload());
   };
 
   // Upload a batch into `folderId` (the open folder by default — folder tiles
   // pass their own id when files are dropped straight onto them).
   const upload = async (files: FileList | File[], folderId: string | null = openFolder) => {
     const list = Array.from(files).filter(isMediaFile);
+    const residency = shelfForNew(folderId);
     setUploading((n) => n + list.length);
     for (const file of list) {
       try {
-        const asset = await uploadToLibrary(file);
+        const asset = await uploadToLibrary(file, residency);
         if (folderId) {
-          await moveLibraryItem(asset.id, folderId).catch(() => {});
+          await moveLibraryItem(residency, asset.id, folderId).catch(() => {});
           asset.folderId = folderId;
         }
         patch((d) => ({ ...d, assets: [asset, ...d.assets] }));
@@ -131,11 +166,12 @@ export function LibraryView() {
     if (!value || importing) return;
     setImporting(true);
     setUrlError(null);
+    const residency = shelfForNew(openFolder);
     try {
-      const imported = await importUrlToLibrary(value);
+      const imported = await importUrlToLibrary(value, residency);
       if (openFolder) {
         for (const asset of imported) {
-          await moveLibraryItem(asset.id, openFolder).catch(() => {});
+          await moveLibraryItem(residency, asset.id, openFolder).catch(() => {});
           asset.folderId = openFolder;
         }
       }
@@ -151,11 +187,11 @@ export function LibraryView() {
 
   const remove = async () => {
     if (!deleting) return;
-    const id = deleting.id;
+    const { id, residency } = deleting;
     setDeleting(null);
     patch((d) => ({ ...d, assets: d.assets.filter((a) => a.id !== id) }));
     try {
-      await deleteFromLibrary(id);
+      await deleteFromLibrary(residency, id);
     } catch {
       void reload();
     }
@@ -168,16 +204,25 @@ export function LibraryView() {
     router.push(homeHref(base, "library", id));
   };
 
+  // A folder belongs to one shelf, so a drag that spans both files only the
+  // items already on that folder's shelf; the rest stay where they are.
   const moveItems = async (ids: string[], folderId: string | null) => {
-    if (ids.length === 0) return;
-    const idset = new Set(ids);
+    const target = folderId ? folders.find((f) => f.id === folderId)?.residency : null;
+    const moving = ids
+      .map((id) => ({ id, residency: shelfOf(id) }))
+      .filter((x): x is { id: string; residency: Residency } => !!x.residency)
+      .filter((x) => !target || x.residency === target);
+    if (moving.length === 0) return;
+    const idset = new Set(moving.map((x) => x.id));
     patch((d) => ({
       ...d,
       assets: d.assets.map((a) => (idset.has(a.id) ? { ...a, folderId } : a)),
       templates: d.templates.map((t) => (idset.has(t.id) ? { ...t, folderId } : t)),
     }));
     setSelected(new Set());
-    await Promise.all(ids.map((id) => moveLibraryItem(id, folderId))).catch(() => void reload());
+    await Promise.all(
+      moving.map((x) => moveLibraryItem(x.residency, x.id, folderId))
+    ).catch(() => void reload());
   };
 
   // Carry the current selection (or just this card) as a folder-move payload,
@@ -198,6 +243,7 @@ export function LibraryView() {
     }
   };
 
+  const bothShelves = availableResidencies().length > 1;
   const shown = all.filter((a) => (a.folderId ?? null) === openFolder);
   const shownTemplates = templates.filter((t) => (t.folderId ?? null) === openFolder);
   const openFolderName = folders.find((f) => f.id === openFolder)?.name;
@@ -292,19 +338,27 @@ export function LibraryView() {
               all.filter((a) => (a.folderId ?? null) === id).length +
               templates.filter((t) => (t.folderId ?? null) === id).length,
           })}
+          badgeOf={(id) => {
+            const r = folders.find((f) => f.id === id)?.residency;
+            return bothShelves && r ? <ShelfBadge residency={r} /> : null;
+          }}
           onOpen={gotoFolder}
           onCreate={async (name) => {
-            const f = await createLibraryFolder(name);
+            const f = await createLibraryFolder(name, activeResidency());
             patch((d) => ({ ...d, folders: [...d.folders, f] }));
           }}
           onRename={async (id, name) => {
+            const r = folders.find((f) => f.id === id)?.residency;
+            if (!r) return;
             patch((d) => ({
               ...d,
               folders: d.folders.map((f) => (f.id === id ? { ...f, name } : f)),
             }));
-            await renameLibraryFolder(id, name).catch(() => void reload());
+            await renameLibraryFolder(r, id, name).catch(() => void reload());
           }}
           onDelete={async (id) => {
+            const r = folders.find((f) => f.id === id)?.residency;
+            if (!r) return;
             patch((d) => ({
               folders: d.folders.filter((f) => f.id !== id),
               assets: d.assets.map((a) => (a.folderId === id ? { ...a, folderId: null } : a)),
@@ -313,7 +367,7 @@ export function LibraryView() {
               ),
             }));
             if (openFolder === id) router.replace(homeHref(base, "library"));
-            await deleteLibraryFolder(id).catch(() => void reload());
+            await deleteLibraryFolder(r, id).catch(() => void reload());
           }}
           onDropIds={(ids, fid) => void moveItems(ids, fid)}
           onDropFiles={(files, fid) => void upload(files, fid)}
@@ -326,14 +380,14 @@ export function LibraryView() {
             <TemplateCard
               key={t.id}
               template={t}
-              mediaSrc={libraryMediaUrl}
-              dragScope="library"
+              mediaSrc={(f) => libraryMediaUrl(f, t.residency)}
+              drag={{ scope: "library", template: t }}
               onDragStartExtra={(e) => {
                 e.dataTransfer.setData(LIBRARY_MOVE_MIME, JSON.stringify([t.id]));
                 e.dataTransfer.effectAllowed = "copyMove";
               }}
-              onRename={(name) => void renameTpl(t.id, name)}
-              onDelete={() => void removeTpl(t.id)}
+              onRename={(name) => void renameTpl(t.residency, t.id, name)}
+              onDelete={() => void removeTpl(t.residency, t.id)}
             />
           ))}
         </div>
@@ -476,6 +530,9 @@ export function LibraryCard({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const { flash, attachReveal } = useRevealFlash("library", a.id);
+  // With one shelf reachable, every card is on it — the badge would say
+  // nothing.
+  const bothShelves = availableResidencies().length > 1;
   // Each card is a real media element, so the source waits until the tile has
   // been scrolled near: a large library would otherwise pull every file's
   // metadata across the network the moment the page opened.
@@ -517,7 +574,7 @@ export function LibraryCard({
             <video
               crossOrigin={MEDIA_CORS}
               ref={videoRef}
-              src={`${libraryMediaUrl(a.fileName)}#t=${posterT}`}
+              src={`${libraryMediaUrl(a.fileName, a.residency)}#t=${posterT}`}
               muted
               loop
               playsInline
@@ -527,10 +584,10 @@ export function LibraryCard({
           )
         ) : a.type === "image" ? (
           // eslint-disable-next-line @next/next/no-img-element -- library media file, not Next-optimizable
-          <img crossOrigin={MEDIA_CORS} src={libraryMediaUrl(a.fileName)} alt={a.name} loading="lazy" className="size-full object-cover" />
+          <img crossOrigin={MEDIA_CORS} src={libraryMediaUrl(a.fileName, a.residency)} alt={a.name} loading="lazy" className="size-full object-cover" />
         ) : (
           <AudioCardFace
-            url={libraryMediaUrl(a.fileName)}
+            url={libraryMediaUrl(a.fileName, a.residency)}
             duration={a.duration}
             // On hover the + button takes the pill's corner.
             durationClassName={!!onUse && "transition-opacity group-hover:opacity-0"}
@@ -557,6 +614,16 @@ export function LibraryCard({
           >
             <Plus className="size-3.5" />
           </button>
+        )}
+        {bothShelves && (
+          <ShelfBadge
+            residency={a.residency}
+            className={cn(
+              "absolute top-2 right-2 text-white/85 transition-opacity",
+              // The delete button takes this corner on hover.
+              onDelete && "group-hover:opacity-0"
+            )}
+          />
         )}
         <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100">
           {onDelete && (
