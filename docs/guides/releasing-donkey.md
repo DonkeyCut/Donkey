@@ -2,9 +2,11 @@
 
 Donkey production releases are distributed through GitHub Releases, built by
 the `Release Donkey` GitHub Actions workflow from the latest default-branch
-code. A separate `Nightly Donkey Build` workflow publishes a smoke-test
-prerelease on a schedule. The Supabase Storage `/release` bucket is not part
-of the release path.
+code. Releases are automatic: every push to the default branch that changes
+code shipping inside the Mac app cuts the next patch version. A separate
+`Nightly Donkey Build` workflow publishes a smoke-test prerelease on a
+schedule. The Supabase Storage `/release` bucket is not part of the release
+path.
 
 **The one rule:** user-facing links use the immutable numeric tag. The website
 download URL and the appcast enclosure URL point at
@@ -15,19 +17,59 @@ download URL and the appcast enclosure URL point at
 
 | | `Release Donkey` | `Nightly Donkey Build` |
 |---|---|---|
-| Trigger | manual: choose `patch`, `minor`, or `major` | nightly at 09:00 UTC, plus manual |
+| Trigger | push to the default branch touching app code, or a bundled-tools republish — both always patch; plus manual: choose `patch`, `minor`, or `major` | nightly at 09:00 UTC, plus manual |
 | Tag | numeric SemVer `vMAJOR.MINOR.PATCH` (starts at `0.1.0`) | moving `nightly` tag |
 | Release | numeric GitHub Release, marked GitHub's latest | `Donkey Nightly Build` prerelease |
 | Assets | `Donkey.dmg` + `Donkey.dmg.sha256` | `Donkey.dmg` + `Donkey.dmg.sha256` |
 | Appcast / website | updates `site/public/appcast.xml` and the website download constant, commits both | untouched |
 | Alias tags | moves `vMAJOR`, `vMAJOR.MINOR`, `latest` | untouched |
 | Retention | keeps the latest 10 numeric releases; deletes older release records (never tags or the nightly prerelease) | n/a |
-| Skip condition | none | skips when the `nightly` tag already points at the default-branch commit |
+| Skip condition | a pushed commit that already carries a numeric release tag | skips when the `nightly` tag already points at the default-branch commit |
 
 Use nightly builds to smoke-test the latest default-branch app package. Use
 `Release Donkey` to publish a user-facing release.
 
+## What Triggers a Release
+
+A push releases when it touches the Swift app, the Cut engine sources compiled
+into the bundled binary, or the packaging scripts. Hosted site changes leave
+the release alone. That path list is the same boundary as the ` [rebuild]`
+commit-subject rule: a commit that needs a new Mac app build cuts a release.
+
+The bundled tools take the long way round, because their recipe and the bundle
+the app actually stages move at different times. A push to the tools recipe
+runs `Publish Bundled Tools`, which builds and notarizes the new bundle and
+commits the manifest pinning it — and only then asks for a release. Releasing
+straight off the recipe push would package a build that still stages the
+previous bundle.
+
+Only the bump size stays manual: pushes are always patches, so minor and major
+come from a manual run.
+
+Three guards keep automatic releases from tripping over each other:
+
+1. **One release at a time.** All runs share a concurrency group and are never
+   cancelled mid-flight, so version numbers are derived from a settled set of
+   tags and a run can't die between tagging a release and updating the appcast.
+   Pushes arriving during a build queue up, and only the newest queued run
+   survives.
+2. **The gate picks the commit; the build honors it.** A short first job on a
+   Linux runner decides whether to release, resolves the version, and pins the
+   commit. The macOS build checks out that exact commit, so a push landing
+   mid-run neither sneaks into this release nor gets built twice.
+3. **A released commit is never released again.** A queued run lands on the
+   branch tip, which may already be the commit the previous run shipped. If a
+   numeric tag points at it, the run stops. A manual run bypasses this so a
+   release that failed after tagging can be retried.
+
+Retention keeps the latest ten numeric releases, so automatic patches retire
+older release records faster than manual releases did. The tags stay, and the
+appcast always names exactly one version.
+
 ## Release Runbook
+
+Merging app changes into the default branch is the runbook. For a minor or
+major bump:
 
 1. Open GitHub Actions for the repository.
 2. Select `Release Donkey`.
@@ -35,7 +77,7 @@ Use nightly builds to smoke-test the latest default-branch app package. Use
 4. Choose `patch`, `minor`, or `major`.
 5. Run the workflow.
 
-The workflow checks out the latest default branch, derives the next version
+The workflow checks out the release commit, derives the next version
 from existing numeric release tags and the selected bump, builds and packages
 `dist/Donkey.dmg`, Developer ID-signs and notarizes the app and disk image and
 signs the DMG with the Sparkle private key, creates or updates the numeric
@@ -80,6 +122,12 @@ builds the tools from source on an arm64 runner, signs and notarizes them,
 uploads the result as a GitHub release asset, and commits the refreshed
 `bundled-tools.json`. That manifest is a build-time input only — the shipped app
 never reads it. It runs on demand and whenever the tools recipe changes.
+
+When the manifest moves, the workflow asks `Release Donkey` for a patch release
+so the new tools reach users. It has to ask explicitly: a git push authored by
+the Actions token never starts a workflow, while a dispatch from that same token
+does. A rebuild that lands on the same bundle commits nothing and asks for
+nothing.
 
 Each manifest pins one bundle version by sha256, and that pairing is permanent.
 Published assets are immutable to match: re-publishing a version that already has
