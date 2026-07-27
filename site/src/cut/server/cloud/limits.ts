@@ -10,7 +10,9 @@ export type CutLimits = {
   renderJobsPerDay: number | null;
 };
 
-const FREE: CutLimits = { storageBytes: 250 * 1024 ** 2, renderJobsPerDay: 10 };
+export const FREE_STORAGE_BYTES = 250 * 1024 ** 2;
+
+const FREE: CutLimits = { storageBytes: FREE_STORAGE_BYTES, renderJobsPerDay: 10 };
 const PRO: CutLimits = { storageBytes: 50 * 1024 ** 3, renderJobsPerDay: 200 };
 const UNLIMITED: CutLimits = { storageBytes: null, renderJobsPerDay: null };
 

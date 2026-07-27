@@ -1,5 +1,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import { graceState } from "./grace";
 import { cutLimitsFor } from "./limits";
 
 export async function usageBytes(userId: string): Promise<number> {
@@ -37,6 +38,13 @@ export async function quotaCheck(userId: string, incoming: number): Promise<Resp
 export const usageApi = {
   async get(userId: string) {
     const [bytes, limits] = await Promise.all([usageBytes(userId), cutLimitsFor(userId)]);
-    return Response.json({ bytes, quotaBytes: limits.storageBytes });
+    const grace = await graceState(userId, bytes, limits);
+    return Response.json({
+      bytes,
+      quotaBytes: limits.storageBytes,
+      ...(grace && {
+        grace: { deadline: grace.deadline.toISOString(), overBytes: grace.overBytes },
+      }),
+    });
   },
 };

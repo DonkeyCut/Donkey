@@ -87,6 +87,35 @@ async function projectSizes(userId: string, projectIds: string[]): Promise<Map<s
 
 const asJson = (doc: ProjectDoc) => doc as unknown as Prisma.InputJsonValue;
 
+/** Delete a project and everything hanging off it — media rows and bytes,
+ * chats, shares — and settle the usage counter. Returns bytes freed. Shared by
+ * the delete route and the storage-reclamation sweep (gc.ts). */
+export async function deleteProjectCascade(userId: string, id: string): Promise<number> {
+  const objects = await prisma.cutMediaObject.findMany({
+    where: { userId, projectId: id },
+  });
+  const freed = objects
+    .filter((o) => o.uploadState === "complete")
+    .reduce((sum, o) => sum + Number(o.bytes), 0);
+  // Cancel the project's in-flight renders first: a job finishing after
+  // the delete would re-register storage for a project nothing can see.
+  await prisma.cutRenderJob.updateMany({
+    where: { userId, projectId: id, state: { in: ["queued", "running"] } },
+    data: { state: "canceled" },
+  });
+  await prisma.$transaction(async (tx) => {
+    await tx.cutMediaObject.deleteMany({ where: { userId, projectId: id } });
+    await tx.cutChatThread.deleteMany({ where: { userId, projectId: id } });
+    await tx.cutProjectShare.deleteMany({ where: { projectId: id } });
+    // deleteMany, so ownership is enforced here rather than trusted from the
+    // caller: a mismatched (userId, id) pair deletes nothing.
+    await tx.cutProject.deleteMany({ where: { id, userId } });
+    await addUsage(tx, userId, -freed);
+  });
+  await del(objects.map((o) => o.r2Key));
+  return freed;
+}
+
 export const projectsCloud = {
   async list(userId: string) {
     const rows = await prisma.cutProject.findMany({
@@ -204,26 +233,7 @@ export const projectsCloud = {
     try {
       const row = await getProject(userId, id);
       if (!row) return err("Project not found.", 404);
-      const objects = await prisma.cutMediaObject.findMany({
-        where: { userId, projectId: id },
-      });
-      const freed = objects
-        .filter((o) => o.uploadState === "complete")
-        .reduce((sum, o) => sum + Number(o.bytes), 0);
-      // Cancel the project's in-flight renders first: a job finishing after
-      // the delete would re-register storage for a project nothing can see.
-      await prisma.cutRenderJob.updateMany({
-        where: { userId, projectId: id, state: { in: ["queued", "running"] } },
-        data: { state: "canceled" },
-      });
-      await prisma.$transaction(async (tx) => {
-        await tx.cutMediaObject.deleteMany({ where: { userId, projectId: id } });
-        await tx.cutChatThread.deleteMany({ where: { userId, projectId: id } });
-        await tx.cutProjectShare.deleteMany({ where: { projectId: id } });
-        await tx.cutProject.delete({ where: { id } });
-        await addUsage(tx, userId, -freed);
-      });
-      await del(objects.map((o) => o.r2Key));
+      await deleteProjectCascade(userId, id);
       return Response.json({ ok: true });
     } catch (e) {
       return caught(e, "Could not delete project.");

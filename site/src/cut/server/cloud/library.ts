@@ -140,6 +140,30 @@ async function copyIntoLibrary(
   return dest;
 }
 
+/** Delete a library asset with its media object, bytes, and R2 key. Returns
+ * bytes freed, or null when the asset is not this user's. Shared by the delete
+ * route and the storage-reclamation sweep (gc.ts). */
+export async function deleteLibraryAssetCascade(
+  userId: string,
+  id: string
+): Promise<number | null> {
+  const asset = await prisma.cutLibraryAsset.findFirst({ where: { id, userId } });
+  if (!asset) return null;
+  const obj = await prisma.cutMediaObject.findFirst({
+    where: { id: asset.mediaObjectId, userId },
+  });
+  const freed = obj && obj.uploadState === "complete" ? Number(obj.bytes) : 0;
+  await prisma.$transaction(async (tx) => {
+    await tx.cutLibraryAsset.delete({ where: { id } });
+    if (obj) {
+      await tx.cutMediaObject.delete({ where: { id: obj.id } });
+      if (freed > 0) await addUsage(tx, userId, -freed);
+    }
+  });
+  if (obj) await del([obj.r2Key]);
+  return freed;
+}
+
 /** Copy one library object into a project, recording the row and usage.
  * Returns the fileName inside the project. */
 async function copyIntoProject(
@@ -367,17 +391,8 @@ export const libraryCloud = {
 
   async remove(userId: string, id: string) {
     try {
-      const asset = await prisma.cutLibraryAsset.findFirst({ where: { id, userId } });
-      if (!asset) throw new Error("Library asset not found.");
-      const obj = await prisma.cutMediaObject.findUnique({ where: { id: asset.mediaObjectId } });
-      await prisma.$transaction(async (tx) => {
-        await tx.cutLibraryAsset.delete({ where: { id } });
-        if (obj) {
-          await tx.cutMediaObject.delete({ where: { id: obj.id } });
-          if (obj.uploadState === "complete") await addUsage(tx, userId, -Number(obj.bytes));
-        }
-      });
-      if (obj) await del([obj.r2Key]);
+      const freed = await deleteLibraryAssetCascade(userId, id);
+      if (freed === null) throw new Error("Library asset not found.");
       return Response.json({ ok: true });
     } catch (e) {
       return caught(e, "Could not delete.");
