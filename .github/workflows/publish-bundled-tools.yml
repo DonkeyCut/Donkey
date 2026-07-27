@@ -21,6 +21,8 @@ on:
 
 permissions:
   contents: write
+  # Dispatching Release Donkey once the new manifest lands.
+  actions: write
 
 concurrency:
   group: publish-bundled-tools
@@ -97,10 +99,12 @@ jobs:
         run: ./scripts/publish-bundled-tools.sh "${{ steps.ver.outputs.version }}"
 
       - name: Commit the refreshed manifest
+        id: manifest
         run: |
           manifest="apps/Donkey/Sources/DonkeyRuntime/Resources/bundled-tools.json"
           if git diff --quiet -- "$manifest"; then
             echo "Manifest unchanged; nothing to commit."
+            echo "committed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git config user.name "github-actions[bot]"
@@ -108,3 +112,19 @@ jobs:
           git add "$manifest"
           git commit -m "chore(tools): publish bundled tools ${{ steps.ver.outputs.version }} [skip ci]"
           git push origin "HEAD:${{ github.event.repository.default_branch }}"
+          echo "committed=true" >> "$GITHUB_OUTPUT"
+
+      # New tools are new bytes inside the app, so they need a release. The push above
+      # cannot trigger one — a git push authored by the Actions token never starts a
+      # workflow — but a workflow_dispatch from that same token does, and it is the only
+      # release route for a tools change. Dispatch only when the manifest actually moved,
+      # so a rebuild that pins the same bundle doesn't reissue the current version.
+      - name: Release the new tools
+        if: steps.manifest.outputs.committed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          gh workflow run promote-donkey-release.yml \
+            --ref "$DEFAULT_BRANCH" \
+            --field bump=patch
