@@ -21,6 +21,11 @@ const SECTIONS = [
     pinned: true,
   },
   {
+    suffix: "/settings/profile",
+    title: "Profile",
+    pinned: true,
+  },
+  {
     suffix: "/settings",
     title: "Billing",
     description: "Your subscription and credit balance.",
@@ -40,7 +45,9 @@ export function SettingsHeader() {
       )}
     >
       <h1 className="text-lg font-semibold tracking-tight">{section.title}</h1>
-      <p className="mt-1 text-sm text-muted-foreground">{section.description}</p>
+      {section.description && (
+        <p className="mt-1 text-sm text-muted-foreground">{section.description}</p>
+      )}
     </div>
   );
 }

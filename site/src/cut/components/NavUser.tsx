@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import {
   ChartColumn,
+  ChevronRight,
   CreditCard,
   EllipsisVertical,
   Flag,
@@ -14,24 +15,14 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { UserAvatar } from "@/cut/components/UserAvatar";
 import { cutInstallHref } from "@/cut/lib/install";
 import { useCutBase } from "@/cut/lib/nav";
 import { authClient } from "@/lib/auth-client";
-
-function Avatar({ name, image }: { name: string; image: string | null | undefined }) {
-  if (image) {
-    return <img src={image} alt="" className="size-8 shrink-0 rounded-lg object-cover" />;
-  }
-  return (
-    <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground">
-      {(name.trim()[0] ?? "?").toUpperCase()}
-    </span>
-  );
-}
+import { useAccountProfile, visibleName } from "@/queries/accountProfile";
 
 // Signed-in user row pinned to the sidebar bottom; the whole row opens the
 // account menu. Hidden while signed out — the editor itself needs no account,
@@ -40,9 +31,14 @@ export function NavUser() {
   const router = useRouter();
   const base = useCutBase();
   const { data: session } = authClient.useSession();
+  // Mounted above the session check so the hook order is stable; it stays idle
+  // until there's a session to read a profile for.
+  const { data: profile } = useAccountProfile({ enabled: Boolean(session) });
   if (!session) return null;
 
-  const { name, email, image } = session.user;
+  // The name the user chose wins over the one the provider gave us.
+  const name = visibleName(profile, session.user.name);
+  const image = profile?.image ?? session.user.image;
   const root = base.replace(/\/app$/, "");
 
   const signOut = () => {
@@ -62,24 +58,23 @@ export function NavUser() {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="mt-auto flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted data-[popup-open]:bg-muted">
-        <Avatar name={name} image={image} />
-        <span className="min-w-0 flex-1 leading-tight">
-          <span className="block truncate text-sm font-medium">{name}</span>
-          <span className="block truncate text-xs text-muted-foreground">{email}</span>
-        </span>
+      <DropdownMenuTrigger className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted data-[popup-open]:bg-muted">
+        <UserAvatar name={name} image={image} />
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
         <EllipsisVertical className="size-4 shrink-0 text-muted-foreground" />
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-56">
-        {/* GroupLabel must live inside a Group in this menu kit. */}
+        {/* The identity row is the way into the profile, where the account's
+            details live and the display name is edited. */}
         <DropdownMenuGroup>
-          <DropdownMenuLabel className="flex items-center gap-2.5 font-normal">
-            <Avatar name={name} image={image} />
-            <span className="min-w-0 flex-1 leading-tight">
-              <span className="block truncate text-sm font-medium">{name}</span>
-              <span className="block truncate text-xs text-muted-foreground">{email}</span>
-            </span>
-          </DropdownMenuLabel>
+          <DropdownMenuItem
+            className="gap-2.5 py-2"
+            onClick={() => router.push(`${base}/settings/profile`)}
+          >
+            <UserAvatar name={name} image={image} />
+            <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
+            <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+          </DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => router.push(`${base}/settings`)}>
