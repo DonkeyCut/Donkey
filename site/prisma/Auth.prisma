@@ -1,6 +1,9 @@
 model User {
   id            String    @id
+  // The name Google gave us at sign-in. Never edited in the product.
   name          String
+  // The name the product shows instead, when the user has set one.
+  displayName   String?
   email         String    @unique
   emailVerified Boolean   @default(false)
   image         String?
@@ -21,8 +24,19 @@ model User {
   apiKeys       Apikey[]
   visionApiSubscription VisionApiSubscription?
   proSubscription ProSubscription?
+  avatar        UserAvatar?
 
   @@map("user")
+}
+
+// The picture the user uploaded, already cropped and compressed by the client.
+// Kept out of `user` so the row every session read touches stays small.
+model UserAvatar {
+  userId      String   @id
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  data        Bytes
+  contentType String
+  updatedAt   DateTime @updatedAt
 }
 
 model Session {
