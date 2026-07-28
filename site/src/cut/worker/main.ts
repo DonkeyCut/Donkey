@@ -8,10 +8,14 @@ import { deleteObjects } from "./r2";
 // The cloud render worker: a headless loop that claims CutRenderJob rows the
 // hosted API queues (export, preview, import_url), executes them with the
 // same pipeline code the local engine runs, and writes progress and results
-// back to the row the client polls. One process, MAX_RUNNING jobs at a time,
-// horizontal scale by adding replicas — the atomic claim keeps them apart.
+// back to the row the client polls. Scale is horizontal: one job per process,
+// several processes — the atomic claim keeps them apart.
 
-const MAX_RUNNING = 2; // mirrors the engine's concurrent-ffmpeg cap
+// One render per replica: ffmpeg already threads across every core it is given,
+// so a second concurrent job halves the first one's cores and doubles how long
+// someone watches a progress bar. Parallelism comes from replicas instead
+// (max_instances / REPLICAS, wrangler.jsonc + cf/worker.ts).
+const MAX_RUNNING = 1;
 const IDLE_POLL_MS = 2000;
 const WATCH_MS = 1000; // progress write + cancellation check cadence
 // Drain-and-exit: once the queue stays empty this long with nothing running,
@@ -41,21 +45,33 @@ let stopping = false;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** Atomically claim the oldest queued job: the updateMany's state guard makes
- * exactly one worker win each row, so replicas never double-run a job. */
+/** The kinds someone is watching happen: an export or a URL import has a
+ * progress bar on screen, while a hover proxy and a share card are background
+ * polish nobody is waiting on. */
+const WATCHED_KINDS = ["export", "import_url"];
+
+/** Atomically claim the next queued job: the updateMany's state guard makes
+ * exactly one worker win each row, so replicas never double-run a job.
+ *
+ * Watched kinds go first, FIFO within a tier. Strict FIFO across all kinds let
+ * a proxy render queued moments earlier hold up an export the user is staring
+ * at — the wait was invisible in the UI, because the export's elapsed clock
+ * only starts once it is claimed. */
 async function claimNext(): Promise<ClaimedJob | null> {
-  const candidates = await prisma.cutRenderJob.findMany({
-    where: { state: "queued" },
-    orderBy: { createdAt: "asc" },
-    take: 5,
-    select: { id: true, userId: true, projectId: true, kind: true, spec: true, outName: true },
-  });
-  for (const c of candidates) {
-    const { count } = await prisma.cutRenderJob.updateMany({
-      where: { id: c.id, state: "queued" },
-      data: { state: "running", claimedAt: new Date(), progress: 0, error: null },
+  for (const kind of [{ in: WATCHED_KINDS }, { notIn: WATCHED_KINDS }]) {
+    const candidates = await prisma.cutRenderJob.findMany({
+      where: { state: "queued", kind },
+      orderBy: { createdAt: "asc" },
+      take: 5,
+      select: { id: true, userId: true, projectId: true, kind: true, spec: true, outName: true },
     });
-    if (count === 1) return c;
+    for (const c of candidates) {
+      const { count } = await prisma.cutRenderJob.updateMany({
+        where: { id: c.id, state: "queued" },
+        data: { state: "running", claimedAt: new Date(), progress: 0, error: null },
+      });
+      if (count === 1) return c;
+    }
   }
   return null;
 }

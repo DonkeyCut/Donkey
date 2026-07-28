@@ -29,6 +29,15 @@ type QueueMessage = {
 };
 type QueueBatch = { messages: QueueMessage[] };
 
+// How many container replicas the render pool runs. Each one takes a single
+// job at a time, so this is also the number of renders that can be in flight
+// at once. Keep it in step with max_instances in ../wrangler.jsonc; a replica
+// with nothing to claim drains out on its own (IDLE_EXIT_MS in ../main.ts),
+// so waking the whole pool costs idle poll time and nothing else.
+const REPLICAS = 4;
+
+const replicaName = (i: number) => `cut-render-${i}`;
+
 export class CutRenderWorker extends Container<WorkerEnv> {
   // Backstop only: main.ts exits by itself when the queue drains. This stops
   // a hung process that no longer polls (and so can't exit).
@@ -68,9 +77,24 @@ export default {
       if (!env.CUT_WAKE_SECRET || auth !== `Bearer ${env.CUT_WAKE_SECRET}`) {
         return new Response("Unauthorized", { status: 401 });
       }
-      // start() is a no-op while the container runs and a boot after a sleep.
-      await getContainer(env.CUT_RENDER_WORKER as never).start();
-      return Response.json({ ok: true });
+      // Wake the whole pool: the queue is drained by whichever replicas are up,
+      // and each claim is atomic, so starting them all is how a burst of jobs
+      // renders in parallel instead of one at a time. start() is a no-op on a
+      // replica already running and a boot on one that slept.
+      const starts = await Promise.allSettled(
+        Array.from({ length: REPLICAS }, (_, i) =>
+          getContainer(env.CUT_RENDER_WORKER as never, replicaName(i)).start()
+        )
+      );
+      const started = starts.filter((s) => s.status === "fulfilled").length;
+      // Some replicas failing still drains the queue, just slower. All of them
+      // failing means no render can ever run, which has to be loud.
+      if (started === 0) {
+        const first = starts.find((s) => s.status === "rejected");
+        const why = first?.status === "rejected" ? String(first.reason) : "unknown";
+        return new Response(`No render replica started: ${why}`, { status: 500 });
+      }
+      return Response.json({ ok: true, started });
     }
     return new Response("donkey-cut-worker", { status: 200 });
   },

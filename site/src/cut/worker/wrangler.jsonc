@@ -16,10 +16,17 @@
       // The Dockerfile copies dist/cut-worker/main.js, so the build context is
       // the site root (three levels up from this file).
       "image_build_context": "../../..",
-      "max_instances": 1,
-      // ffmpeg encodes are CPU-bound; exports also stage media on disk.
-      // Cloudflare validation: >= 3 GiB memory per vCPU, disk <= 2x memory.
-      "instance_type": { "vcpu": 2, "memory_mib": 6144, "disk_mb": 10000 }
+      // Renders scale out, not up: each replica runs ONE job on the whole box
+      // (MAX_RUNNING in ../main.ts), so an export never splits cores with
+      // another render or queues behind someone else's. Keep this in step with
+      // REPLICAS in cf/worker.ts — that constant is what /wake starts.
+      "max_instances": 4,
+      // The platform maximum (4 vCPU / 12 GiB / 20 GB). ffmpeg encodes are
+      // CPU-bound and x264 scales nearly linearly across threads, and container
+      // CPU bills on active use rather than provisioned, so the wider box costs
+      // about the same per render and finishes in half the time. Cloudflare
+      // validation: >= 3 GiB memory per vCPU, disk <= 2x memory.
+      "instance_type": { "vcpu": 4, "memory_mib": 12288, "disk_mb": 20000 }
     }
   ],
   "durable_objects": {
