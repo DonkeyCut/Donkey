@@ -422,21 +422,24 @@ export function ProjectsHome() {
     }
   };
 
-  // Copy a project into the other residency (projectCopy.ts does the doc +
-  // media transfer and cleans up a half-made copy itself).
-  const duplicateAcross = async (source: Residency, p: ProjectSummary) => {
+  // Move a project to the other residency: copy it across (projectCopy.ts does
+  // the doc + media transfer and cleans up a half-made copy itself), then drop
+  // the original. The copy landing first is what makes deleting it safe.
+  const moveAcross = async (source: Residency, p: ProjectSummary) => {
     const target: Residency = source === "cloud" ? "local" : "cloud";
     setDupError(null);
     setBusy(true);
     try {
-      await copyProjectAcross(backendFor(source), backendFor(target), p.id, {
-        rename: (n) => `${n || p.name} copy`,
-      });
-      await refresh(target);
+      await copyProjectAcross(backendFor(source), backendFor(target), p.id);
+      await backendFor(source)
+        .fetch(`/api/cut/projects/${p.id}`, { method: "DELETE" })
+        .catch(() => {});
+      // The chat history moved with the project; the old project's copy goes
+      // with the project itself.
+      clearProjectThreads(p.id);
+      await Promise.all([refresh(source), refresh(target)]);
     } catch (e) {
-      setDupError(
-        e instanceof Error && e.message ? e.message : "Could not duplicate the project."
-      );
+      setDupError(e instanceof Error && e.message ? e.message : "Could not move the project.");
     } finally {
       setBusy(false);
     }
@@ -594,11 +597,11 @@ export function ProjectsHome() {
                 setRenaming({ project: p, residency: r });
               }}
               onDuplicate={() => void duplicate(r, p)}
-              duplicateTo={
+              moveTo={
                 dual
                   ? {
                       target: r === "cloud" ? "local" : "cloud",
-                      run: () => void duplicateAcross(r, p),
+                      run: () => void moveAcross(r, p),
                     }
                   : undefined
               }
@@ -666,11 +669,11 @@ export function ProjectsHome() {
               setRenaming({ project: p, residency: r });
             }}
             onDuplicate={() => void duplicate(r, p)}
-            duplicateTo={
+            moveTo={
               dual
                 ? {
                     target: r === "cloud" ? "local" : "cloud",
-                    run: () => void duplicateAcross(r, p),
+                    run: () => void moveAcross(r, p),
                   }
                 : undefined
             }
@@ -1057,7 +1060,7 @@ function ProjectMenu({
   folders,
   onRename,
   onDuplicate,
-  duplicateTo,
+  moveTo,
   onMove,
   onDelete,
 }: {
@@ -1066,8 +1069,8 @@ function ProjectMenu({
   folders: ProjectFolder[];
   onRename: () => void;
   onDuplicate: () => void;
-  /** Cross-residency copy, when both residencies are live. */
-  duplicateTo?: { target: Residency; run: () => void };
+  /** Move to the other residency, when both are live. */
+  moveTo?: { target: Residency; run: () => void };
   onMove: (folderId: string | null) => void;
   onDelete: () => void;
 }) {
@@ -1093,10 +1096,10 @@ function ProjectMenu({
         <DropdownMenuItem onClick={onDuplicate}>
           <Copy /> Duplicate
         </DropdownMenuItem>
-        {duplicateTo && (
-          <DropdownMenuItem onClick={duplicateTo.run}>
-            {duplicateTo.target === "cloud" ? <Cloud /> : <Laptop />}{" "}
-            {duplicateTo.target === "cloud" ? "Duplicate to Cloud" : "Duplicate to this Mac"}
+        {moveTo && (
+          <DropdownMenuItem onClick={moveTo.run}>
+            {moveTo.target === "cloud" ? <Cloud /> : <Laptop />}{" "}
+            {moveTo.target === "cloud" ? "Move to Cloud" : "Move to this Mac"}
           </DropdownMenuItem>
         )}
         {folders.length > 0 && (
