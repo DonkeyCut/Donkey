@@ -98,6 +98,18 @@ const PAD_END = 320;
 /** Breathing room on both sides so the playhead cap is never clipped. */
 const PAD_SIDE = 20;
 
+/** Zoom range, in timeline pixels per second of media. */
+const ZOOM_MIN = 12;
+const ZOOM_MAX = 800;
+/**
+ * Zoom reads as a ratio — doubling px/sec feels like one step whether you start
+ * at 20 or at 400 — so the slider travels in log space. A linear track would
+ * spend its first sixth on every zoom anyone uses and the rest on extremes.
+ */
+const zoomToSlider = (pps: number) =>
+  (Math.log(pps / ZOOM_MIN) / Math.log(ZOOM_MAX / ZOOM_MIN)) * 100;
+const sliderToZoom = (pos: number) => ZOOM_MIN * (ZOOM_MAX / ZOOM_MIN) ** (pos / 100);
+
 // A high-contrast selected state: a bright blue ring drawn both inside and
 // (crucially) *outside* the box, so it stays visible on top of a clip's
 // filmstrip thumbnails, plus a halo and a raised stacking order so selected
@@ -455,7 +467,7 @@ export function Timeline() {
   const zoomTo = useCallback((next: number, anchorT?: number, anchorPx?: number) => {
     const el = scrollRef.current;
     const cur = useEditor.getState();
-    const clamped = Math.max(12, Math.min(800, next));
+    const clamped = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, next));
     if (Math.abs(clamped - cur.pxPerSec) < 0.01) return;
     if (el) {
       const t = anchorT ?? cur.currentTime;
@@ -899,11 +911,12 @@ export function Timeline() {
         <div className="flex-1" />
         <Slider
           className="data-horizontal:w-28"
-          min={12}
-          max={800}
-          value={pps}
+          min={0}
+          max={100}
+          step={0.1}
+          value={zoomToSlider(pps)}
           aria-label="Zoom"
-          onValueChange={(v) => zoomTo(Number(v))}
+          onValueChange={(v) => zoomTo(sliderToZoom(Number(v)))}
         />
         <Button variant="ghost" size="sm" title="Fit timeline to window" onClick={fit}>
           Fit
