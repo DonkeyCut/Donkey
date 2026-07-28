@@ -487,7 +487,7 @@ export const AI_TOOLS: AiToolDef[] = [
   {
     name: "subtitles_generate",
     description:
-      "Transcribe the cut on-device (Apple speech) and create subtitle captions on a subtitle track (the active one unless `track` says otherwise; other tracks keep their captions) — it WRITES captions the user sees, so call it only when they asked for subtitles; to just hear what an audio asset says, listen_audio. Runs in the background; returns when finished. If no speech is found, no subtitles are added.",
+      "Transcribe the cut on-device (Apple speech) and create subtitle captions on a subtitle track (the active one unless `track` says otherwise; other tracks keep their captions) — it WRITES captions the user sees, so call it only when they asked for subtitles; to just hear what an audio asset says, listen_audio. Cue times come back snapped to the audio, so treat them as in sync — retime a cue only when the user points at one. Runs in the background; returns when finished. If no speech is found, no subtitles are added.",
     inputSchema: obj({
       locale: str("Speech language as BCP-47 like en-US (default: the track's language)"),
       track: num("Subtitle track to write, 0-based (default: the active track)"),

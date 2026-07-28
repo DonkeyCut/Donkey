@@ -38,6 +38,7 @@ import {
   writeCachedMediaLinks,
 } from "./docCache";
 import { renderMix, transcribeSamples, type CloudTranscribeSpec } from "./cloudTranscribe";
+import { alignCues } from "./cueAlign";
 import { engineTranscribeSamples } from "./localStt";
 import { trackLocale } from "./subtitles";
 import { ANIM_STYLE_IDS, emptySubtitles, IMAGE_CLIP_SECONDS, LOOK_IDS, MAX_SUBTITLE_LANES, mediaUrl, migrateLegacyTransitions, normalizeAspect, SPEED_FLOOR, SPEED_MIN, TRANSITION_MAX } from "./types";
@@ -671,7 +672,10 @@ export async function runTranscription(projectId: string, spec: object): Promise
         // The hosted route still works, so the user never sees the difference.
       }
     }
-    return transcribeSamples(samples, s.locale, stale);
+    // The hosted model reads cue times off the audio by ear, so they land near
+    // the speech rather than on it; the mix is right here to settle it.
+    const cues = await transcribeSamples(samples, s.locale, stale);
+    return cues && alignCues(cues, samples, mix.sampleRate, { snap: 0.6 });
   }
   const res = await apiFetch(`/api/cut/projects/${projectId}/transcribe`, {
     method: "POST",

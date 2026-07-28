@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { alignCues } from "../lib/cueAlign";
 import { assertLocalRuntime } from "./local-only";
 import { createJobRegistry } from "./jobRegistry";
 import { mediaPath, readProject } from "./projects";
@@ -148,6 +149,56 @@ export function groupWords(words: Word[]): Cue[] {
   return cues;
 }
 
+/** Mono 16-bit samples out of a canonical PCM wav (what the mix render and the
+ * browser's uploads both are), for reading where the speech actually sits.
+ * Null for anything else — alignment is an improvement, so an unreadable file
+ * costs the caller nothing. */
+async function readWavMono(file: string): Promise<{ samples: Int16Array; rate: number } | null> {
+  const buf = await readFile(file);
+  if (buf.length < 44 || buf.toString("ascii", 0, 4) !== "RIFF") return null;
+  if (buf.toString("ascii", 8, 12) !== "WAVE") return null;
+  let pos = 12;
+  let rate = 0;
+  let channels = 0;
+  let bits = 0;
+  let data: Uint8Array | null = null;
+  while (pos + 8 <= buf.length) {
+    const id = buf.toString("ascii", pos, pos + 4);
+    const size = buf.readUInt32LE(pos + 4);
+    const body = pos + 8;
+    if (id === "fmt " && body + 16 <= buf.length) {
+      channels = buf.readUInt16LE(body + 2);
+      rate = buf.readUInt32LE(body + 4);
+      bits = buf.readUInt16LE(body + 14);
+    } else if (id === "data") {
+      data = buf.subarray(body, Math.min(buf.length, body + size));
+      break;
+    }
+    pos = body + size + (size % 2); // chunks are word-aligned
+  }
+  if (!data || bits !== 16 || channels < 1 || rate <= 0) return null;
+  // An odd byte offset can't back an Int16Array view; copying realigns it.
+  const bytes = data.byteOffset % 2 === 0 ? data : new Uint8Array(data);
+  const pcm = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.length / 2));
+  if (channels === 1) return { samples: pcm, rate };
+  const mono = new Int16Array(Math.floor(pcm.length / channels));
+  for (let i = 0; i < mono.length; i++) {
+    let sum = 0;
+    for (let c = 0; c < channels; c++) sum += pcm[i * channels + c];
+    mono[i] = sum / channels;
+  }
+  return { samples: mono, rate };
+}
+
+/** The finished cues for a run: grouped from the model's words, then snapped
+ * onto the speech in the very wav it transcribed, so captions land on the
+ * audio instead of a few frames off it. */
+async function cuesFromRun(out: string, wav: string, duration: number): Promise<Cue[]> {
+  const cues = cuesFromStt(out, duration);
+  const pcm = await readWavMono(wav).catch(() => null);
+  return pcm ? alignCues(cues, pcm.samples, pcm.rate) : cues;
+}
+
 /** Cues from one cut-stt run: drop what the model emits degenerate, clamp to
  * the audio's own length, and group the words into caption-sized cues. */
 function cuesFromStt(out: string, duration: number): Cue[] {
@@ -201,7 +252,7 @@ async function runAudioTranscribe(
     const bin = await ensureStt();
     job.stage = "transcribe";
     const out = await run(bin, [wav, locale ?? "en-US"]);
-    job.cues = cuesFromStt(out, duration && duration > 0 ? duration : Infinity);
+    job.cues = await cuesFromRun(out, wav, duration && duration > 0 ? duration : Infinity);
     job.status = "done";
   } finally {
     void rm(tmpDir, { recursive: true, force: true });
@@ -385,7 +436,7 @@ async function runTranscribe(job: TranscribeJob, spec: TranscribeSpec) {
 
     job.stage = "transcribe";
     const out = await run(bin, [wav, spec.locale ?? "en-US"]);
-    job.cues = cuesFromStt(out, spec.duration);
+    job.cues = await cuesFromRun(out, wav, spec.duration);
     job.status = "done";
   } finally {
     void rm(tmpDir, { recursive: true, force: true });
