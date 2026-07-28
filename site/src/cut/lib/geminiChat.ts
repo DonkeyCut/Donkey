@@ -292,20 +292,19 @@ async function execTool(name: string, args: Record<string, unknown>): Promise<un
 
 /** A tool result as content parts. The id pairs the function_response with its
  * originating call so Gemini matches responses to calls across parallel calls.
- * Frames leave the JSON (a data URL inlined as text would blow the token
- * budget) and ride along as image parts instead: the first on the response
- * itself, the rest (contact sheets) as input_image parts in the same turn.
  *
- * Audio (listen_audio) leaves the JSON too, but returns via `audioTurn`: a
- * separate user turn shaped like a message attachment. Gemini 3.5 Flash
- * answers a turn that holds a functionResponse alongside audio inlineData
- * with one-token garbage and no tool call; the same audio in its own turn
- * gets a full reply. */
+ * Media (frames from watch_video and capture_frame, sound from listen_audio)
+ * leaves the JSON — a data URL inlined as text would blow the token budget —
+ * and returns via `mediaTurn`: a separate user turn shaped like a message
+ * attachment. Gemini answers a turn that holds a functionResponse alongside
+ * inline media by degenerating — one-token garbage for audio, and for frames
+ * a prose paraphrase of the next tool call instead of the call — then stops.
+ * The same media in its own turn gets the real reply. */
 function functionResponseParts(
   name: string,
   output: unknown,
   id: string
-): { parts: Item[]; audioTurn: Item[] } {
+): { parts: Item[]; mediaTurn: Item[] } {
   if (output && typeof output === "object" && "audio" in output) {
     const { audio, ...rest } = output as { audio?: unknown; name?: unknown };
     const m = typeof audio === "string" ? /^data:([^;,]+);base64,(.+)$/.exec(audio) : null;
@@ -313,7 +312,7 @@ function functionResponseParts(
       const assetName = typeof rest.name === "string" ? rest.name : name;
       return {
         parts: [{ type: "function_response", id, name, response: rest }],
-        audioTurn: [
+        mediaTurn: [
           { text: `Attached audio "${assetName}":` },
           { type: "input_audio", dataBase64: m[2], mimeType: m[1] },
         ],
@@ -321,7 +320,11 @@ function functionResponseParts(
     }
   }
   if (output && typeof output === "object" && ("image" in output || "images" in output)) {
-    const { image, images, ...rest } = output as { image?: unknown; images?: unknown };
+    const { image, images, ...rest } = output as {
+      image?: unknown;
+      images?: unknown;
+      source?: { name?: unknown };
+    };
     const parsed = [
       ...(typeof image === "string" ? [image] : []),
       ...(Array.isArray(images) ? images.filter((u): u is string => typeof u === "string") : []),
@@ -329,20 +332,13 @@ function functionResponseParts(
       .map((u) => /^data:([^;,]+);base64,(.+)$/.exec(u))
       .filter((m): m is RegExpExecArray => m !== null);
     if (parsed.length > 0) {
-      const [first, ...more] = parsed;
+      const sourceName = typeof rest.source?.name === "string" ? rest.source.name : null;
       return {
-        parts: [
-          {
-            type: "function_response",
-            id,
-            name,
-            response: rest,
-            mimeType: first[1],
-            screenshotBase64: first[2],
-          },
-          ...more.map((m) => ({ type: "input_image", dataBase64: m[2], mimeType: m[1] })),
+        parts: [{ type: "function_response", id, name, response: rest }],
+        mediaTurn: [
+          { text: sourceName ? `Frames from ${name} of "${sourceName}":` : `Frames from ${name}:` },
+          ...parsed.map((m) => ({ type: "input_image", dataBase64: m[2], mimeType: m[1] })),
         ],
-        audioTurn: [],
       };
     }
   }
@@ -350,7 +346,7 @@ function functionResponseParts(
     output && typeof output === "object" && !Array.isArray(output)
       ? output
       : { result: output ?? null };
-  return { parts: [{ type: "function_response", id, name, response }], audioTurn: [] };
+  return { parts: [{ type: "function_response", id, name, response }], mediaTurn: [] };
 }
 
 interface ResponseBody {
@@ -453,9 +449,9 @@ export function streamGeminiChat({
 
           // Parallel calls stay in one model turn, with every response in the
           // single user turn that follows — the shape Gemini expects back.
-          // Tool audio gathers separately and follows as its own user turn.
+          // Tool media gathers separately and follows as its own user turn.
           const responseParts: Item[] = [];
-          const audioParts: Item[] = [];
+          const mediaParts: Item[] = [];
           for (const call of calls) {
             const name = String(call.name ?? "unknown_function");
             const args =
@@ -492,9 +488,9 @@ export function streamGeminiChat({
                 uiOutput = rest;
               }
               emit({ type: "tool-output-available", toolCallId, output: uiOutput ?? null });
-              const { parts, audioTurn } = functionResponseParts(name, output, toolCallId);
+              const { parts, mediaTurn } = functionResponseParts(name, output, toolCallId);
               responseParts.push(...parts);
-              audioParts.push(...audioTurn);
+              mediaParts.push(...mediaTurn);
             } catch (err) {
               const errorText = err instanceof Error ? err.message : String(err);
               emit({ type: "tool-output-error", toolCallId, errorText });
@@ -505,7 +501,7 @@ export function streamGeminiChat({
           }
           input.push({ role: "assistant", content: assistantParts });
           input.push({ role: "user", content: responseParts });
-          if (audioParts.length > 0) input.push({ role: "user", content: audioParts });
+          if (mediaParts.length > 0) input.push({ role: "user", content: mediaParts });
         }
 
         if (!settled && !abortSignal?.aborted) {
