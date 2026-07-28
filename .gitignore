@@ -18,5 +18,9 @@ __pycache__/
 ## Bundled capability tools (large arm64 binaries; fetched by scripts/fetch-bundled-tools.sh)
 /vendor/
 
+## Local agent settings (per-machine permission mode; never shared)
+/.claude/settings.local.json
+/.claude/scheduled_tasks.lock
+
 ## Project policy
 # Keep Package.resolved tracked for reproducible dependency resolution.
