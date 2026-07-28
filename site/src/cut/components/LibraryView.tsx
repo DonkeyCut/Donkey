@@ -410,7 +410,7 @@ export function LibraryView() {
             <div className="text-base font-medium">
               Your Library is shared across all projects.
             </div>
-            <p className="max-w-xs text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               Drag and drop videos, images, or audio files here.
             </p>
           </div>
@@ -453,7 +453,6 @@ export function LibraryView() {
             >
               <Upload className="size-6 text-muted-foreground" />
               <span className="text-sm font-medium">Choose files</span>
-              <span className="text-xs text-muted-foreground">Video or audio from your Mac</span>
             </button>
             <div className="flex items-center gap-3 text-[11px] tracking-wide text-muted-foreground uppercase">
               <div className="h-px flex-1 bg-border" /> or paste a link{" "}
