@@ -30,14 +30,20 @@ const FAIL_EXIT_MS = 5 * 60_000;
 // A "running" row this quiet lost its worker; sweep it back to the queue.
 const STALE_RUNNING_MS = 60_000;
 const SWEEP_EVERY_MS = 15_000;
+// Cloudflare sends SIGTERM 15 minutes before SIGKILL and rolls replicas one at
+// a time, so a deploy can let a render finish rather than throw it away. Drain
+// inside that window, keeping enough of it back to requeue whatever is still
+// going when it closes.
+const DRAIN_MS = 13 * 60_000;
 
 interface ActiveJob {
   handle: RenderHandle;
   canceled: boolean;
-  /** The row left "running" from under us (stale-swept back to queued after a
-   * heartbeat gap): stop working it, write nothing, and keep its overlays for
-   * whichever worker claims the retry. */
-  lost: boolean;
+  /** This job goes back on the queue rather than settling here — swept out
+   * from under us after a heartbeat gap, or still rendering when a shutdown
+   * drain ran out. Either way: stop working it, write nothing more, and keep
+   * its overlay PNGs for whichever worker claims the retry. */
+  retry: boolean;
 }
 
 const active = new Map<string, ActiveJob>();
@@ -111,7 +117,7 @@ function watchJob(id: string, entry: ActiveJob): ReturnType<typeof setInterval> 
           return;
         }
         if (row.state !== "running") {
-          entry.lost = true;
+          entry.retry = true;
           entry.canceled = true; // suppress the run's own row writes
           entry.handle.error = "Requeued.";
           entry.handle.proc?.kill("SIGKILL");
@@ -130,7 +136,7 @@ function watchJob(id: string, entry: ActiveJob): ReturnType<typeof setInterval> 
 
 async function runJob(job: ClaimedJob): Promise<void> {
   const handle: RenderHandle = { tmpDir: "", outPath: "", progress: 0, log: [] };
-  const entry: ActiveJob = { handle, canceled: false, lost: false };
+  const entry: ActiveJob = { handle, canceled: false, retry: false };
   active.set(job.id, entry);
   const watcher = watchJob(job.id, entry);
   try {
@@ -165,23 +171,35 @@ async function runJob(job: ClaimedJob): Promise<void> {
     console.error(`[cut-worker] ${job.kind} ${job.id} ${entry.canceled ? "canceled" : "failed"}: ${message}`);
   } finally {
     clearInterval(watcher);
-    active.delete(job.id);
     // The overlay PNGs are single-use render inputs: delete them once the job
-    // settles. A shutdown or stale-sweep requeues the job instead, so its
-    // overlays must survive for the retry.
-    if (!stopping && !entry.lost) await deleteObjects(overlayKeysOf(job));
+    // settles — including one that settles while the worker drains. Only a job
+    // going back on the queue keeps its overlays, for the retry to read.
+    // (deleteObjects swallows its own failures, so this always reaches the
+    // delete below and the drain can never hang on it.)
+    if (!entry.retry) await deleteObjects(overlayKeysOf(job));
+    // Last, so a drain waiting on `active` waits for the cleanup too rather
+    // than exiting the process out from under it.
+    active.delete(job.id);
   }
 }
 
-/** On shutdown, hand claimed work back: kill the live renders and requeue
- * their rows so the next worker picks them up instead of stranding them in
- * "running" forever. */
+/** On shutdown, stop claiming and let the renders in hand finish — a deploy
+ * rolls one replica at a time, so a job most of the way through an encode is
+ * worth the wait, and restarting it means someone watches the same progress bar
+ * twice. Whatever is still going when the drain window closes is handed back:
+ * killed and requeued, so the next worker picks it up instead of leaving the row
+ * stranded in "running" forever. */
 async function stop(): Promise<void> {
   if (stopping) return;
   stopping = true;
-  console.log("[cut-worker] stopping…");
+  if (active.size > 0) console.log(`[cut-worker] draining ${active.size} job(s)…`);
+  const deadline = Date.now() + DRAIN_MS;
+  // The per-job watcher keeps heartbeating throughout, so another replica's
+  // stale sweep leaves a draining render alone.
+  while (active.size > 0 && Date.now() < deadline) await sleep(1000);
   for (const [id, entry] of active) {
     entry.canceled = true; // suppress the run's own error write
+    entry.retry = true; // and keep its overlays for whoever claims it next
     entry.handle.proc?.kill("SIGKILL");
     await prisma.cutRenderJob
       .updateMany({
