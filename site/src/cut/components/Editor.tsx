@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { apiFetch, bindCutMode, releaseCutMode } from "@/cut/lib/backend";
 import { loadedDocVersion } from "@/cut/lib/backend/shared";
 import { writeCachedDoc } from "@/cut/lib/docCache";
-import { refreshShareCard, renderPreviewProxy } from "@/cut/lib/exportClient";
+import { refreshShareCard, renderPreviewProxy, type ExportDoc } from "@/cut/lib/exportClient";
 import { fileZoneAt, hasRefDrag } from "@/cut/lib/assetRef";
 import { startUpload } from "@/cut/lib/importQueue";
 import { enrichAsset, importFileToProject, prepareImport } from "@/cut/lib/media";
@@ -43,6 +43,11 @@ import { ViewerTopBar } from "./ViewerTopBar";
  * polling forever. */
 const VIEWER_POLL_MIN_MS = 5_000;
 const VIEWER_POLL_MAX_MS = 300_000;
+
+/** Floor between hover-proxy rebuilds. The proxy is a full render of the whole
+ * cut, so a session spent flipping between tabs must not spend the render pool
+ * on it. */
+const PROXY_MIN_GAP_MS = 60_000;
 
 export function Editor({
   projectId,
@@ -190,28 +195,30 @@ export function Editor({
     return () => window.removeEventListener("cut-cloud-doc-conflict", onConflict);
   }, [projectId, viewer]);
 
-  // Keep the project card's hover proxy fresh: rebuild it a few seconds after
-  // the cut settles. Best-effort and single-flight; skips when there's no cut.
-  // A shared project's link-preview card rides the same settle, so what the
-  // link unfurls with follows the edit instead of freezing at share time.
+  // Keep the project card's hover proxy — and a shared project's link-preview
+  // card — following the cut. Both are full renders of the whole project on the
+  // same worker pool the exports run on, so they wait for a lull instead of
+  // firing while the user is still working: every change stashes the cut as it
+  // stands, and it renders when the editor closes or the tab goes to the
+  // background. Rebuilding on each settle instead meant a session of editing
+  // spent most of the pool on artwork nobody was waiting for, with the user's
+  // own export queued behind it.
   useEffect(() => {
     if (viewer) return;
-    let timer: ReturnType<typeof setTimeout> | null = null;
+    let pending: ExportDoc | null = null;
     let rendering = false;
-    const render = async () => {
-      const s = useEditor.getState();
-      if (rendering || !s.loaded || s.projectId !== projectId || s.clips.length === 0) return;
+    let lastRun = 0;
+    // The stashed doc renders as captured, so a flush that lands after the
+    // store has moved on still writes this project's proxy rather than nothing.
+    // `final` marks a one-shot exit (the project closing, the page going away):
+    // there is no next chance, so it skips the rate floor rather than leaving
+    // the card frozen mid-edit.
+    const flush = async (final = false) => {
+      const doc = pending;
+      if (!doc || rendering || (!final && Date.now() - lastRun < PROXY_MIN_GAP_MS)) return;
+      pending = null;
       rendering = true;
-      const doc = {
-        aspect: s.aspect,
-        assets: s.assets,
-        clips: s.clips,
-        audioClips: s.audioClips,
-        overlays: s.overlays,
-        subtitles: s.subtitles,
-        fadeIn: s.fadeIn,
-        fadeOut: s.fadeOut,
-      };
+      lastRun = Date.now();
       try {
         await renderPreviewProxy(projectId, doc);
         refreshShareCard(projectId);
@@ -219,6 +226,15 @@ export function Editor({
         rendering = false;
       }
     };
+    // Backgrounding the tab is the reliable signal that the user has stepped
+    // away — it fires on a tab switch, a window blur, and on the way out of the
+    // page, where an unmount alone never runs.
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") void flush();
+    };
+    const onPageHide = () => void flush(true);
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", onPageHide);
     let last: {
       clips: unknown;
       audioClips: unknown;
@@ -249,12 +265,23 @@ export function Editor({
         fadeOut: s.fadeOut,
       };
       if (!changed) return; // first tick just primes the baseline
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => void render(), 8000);
+      if (s.clips.length === 0) return; // nothing to render a card from yet
+      pending = {
+        aspect: s.aspect,
+        assets: s.assets,
+        clips: s.clips,
+        audioClips: s.audioClips,
+        overlays: s.overlays,
+        subtitles: s.subtitles,
+        fadeIn: s.fadeIn,
+        fadeOut: s.fadeOut,
+      };
     });
     return () => {
       unsub();
-      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", onPageHide);
+      void flush(true); // the project is closing: land whatever is still stashed
     };
   }, [projectId, viewer]);
 
