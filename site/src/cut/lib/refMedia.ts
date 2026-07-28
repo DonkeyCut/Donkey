@@ -147,12 +147,31 @@ export async function videoSafeInline(img: InlineImage): Promise<InlineImage> {
 // (base64 inflates by 4/3); larger audio degrades to a name-only marker.
 const MAX_AUDIO_BYTES = 12 * 1024 * 1024;
 
+/** A ref's bytes, naming what failed and where when they don't arrive. A bare
+ * fetch rejection is the string "Failed to fetch" and nothing else — no asset,
+ * no address — and the failures that reach here are exactly the ones that need
+ * both: a URL built against the wrong backend, a cross-origin hop that answers
+ * without CORS, an object that was never written. Which host and path was asked
+ * for tells them apart. */
+async function readRefBytes(ref: AssetRef): Promise<Blob> {
+  const where = mediaAddress(ref.url);
+  let res: Response;
+  try {
+    res = await fetch(ref.url);
+  } catch (err) {
+    // A rejected fetch never reached a server: DNS, CORS, mixed content, or a
+    // refused connection.
+    const why = err instanceof Error ? err.message : String(err);
+    throw new Error(`Could not reach “${ref.name}” at ${where} — ${why}.`);
+  }
+  if (!res.ok) throw new Error(`Could not load “${ref.name}” — ${res.status} from ${where}.`);
+  return res.blob();
+}
+
 /** The audio bytes for `ref`, base64 with a real audio mime, or null when the
  * file is too large to ride inline. */
 export async function refToInlineAudio(ref: AssetRef): Promise<InlineImage | null> {
-  const res = await fetch(ref.url);
-  if (!res.ok) throw new Error(`Could not load “${ref.name}”.`);
-  const blob = await res.blob();
+  const blob = await readRefBytes(ref);
   if (blob.size > MAX_AUDIO_BYTES) return null;
   const dataUrl = await blobToDataUrl(blob);
   const comma = dataUrl.indexOf(",");
@@ -161,6 +180,20 @@ export async function refToInlineAudio(ref: AssetRef): Promise<InlineImage | nul
     data: dataUrl.slice(comma + 1),
     mimeType: labelled.startsWith("audio/") ? labelled : "audio/mpeg",
   };
+}
+
+/** A media URL as much of itself as may be repeated. Origin and path are what
+ * identify a failure; the query string is not, and on cloud media it holds the
+ * signed token that grants read access to the object — these messages reach the
+ * chat transcript, which is persisted and readable by anyone a project's chat is
+ * shared with. */
+export function mediaAddress(url: string): string {
+  try {
+    const u = new URL(url, window.location.origin);
+    return u.protocol === "data:" ? "an inline attachment" : `${u.origin}${u.pathname}`;
+  } catch {
+    return "an unreadable address";
+  }
 }
 
 function captureFrame(url: string, duration?: number): Promise<InlineImage> {
@@ -182,7 +215,7 @@ function captureFrame(url: string, duration?: number): Promise<InlineImage> {
     // resolves currentTime synchronously) would hang refsToInlineImages and
     // wedge the whole generation. Bail after a few seconds, like visualFrames.
     timer = window.setTimeout(() => fail("Timed out reading a reference frame."), 4000);
-    v.onerror = () => fail("Could not read the video for a reference frame.");
+    v.onerror = () => fail(`Could not read ${mediaAddress(url)} for a reference frame.`);
     v.onloadedmetadata = () => {
       // Same poster spot the cards show, so the reference matches the preview.
       v.currentTime = Math.min(1, Math.max(0.1, (duration || v.duration || 2) / 10));
@@ -218,11 +251,7 @@ export async function refToInlineImage(ref: AssetRef): Promise<InlineImage> {
   if (ref.kind === "audio" || ref.kind === "text") {
     throw new Error(`“${ref.name}” has no picture — it can't be a visual reference.`);
   }
-  if (ref.kind === "image") {
-    const res = await fetch(ref.url);
-    if (!res.ok) throw new Error(`Could not load “${ref.name}”.`);
-    return blobToInline(await res.blob());
-  }
+  if (ref.kind === "image") return blobToInline(await readRefBytes(ref));
   return captureFrame(ref.url, ref.duration);
 }
 
