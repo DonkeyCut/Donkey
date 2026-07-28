@@ -96,15 +96,15 @@ export function NavUser() {
         <DropdownMenuItem onClick={() => router.push(`${base}/settings/usage`)}>
           <ChartColumn /> Usage
         </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => router.push(`${base}/settings/flags`)}>
+          <Flag /> Feature flags
+        </DropdownMenuItem>
         {/* The install page lives outside the editor, so it opens in its own
             tab rather than navigating away from an open project. */}
         <DropdownMenuItem
           onClick={() => window.open(cutInstallHref(root), "_blank", "noopener")}
         >
-          <MonitorDown /> Run Donkey Cut locally
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => router.push(`${base}/settings/flags`)}>
-          <Flag /> Feature flags
+          <MonitorDown /> Run locally on Mac
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={signOut}>
