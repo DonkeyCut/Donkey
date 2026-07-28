@@ -35,7 +35,7 @@ import {
   setAssetDragData,
   setCardDragImage,
 } from "@/cut/lib/assetDrag";
-import type { AssetRef } from "@/cut/lib/assetRef";
+import { draggingRef, useAssetDrop, type AssetRef } from "@/cut/lib/assetRef";
 import { RefDropZone } from "./RefDropZone";
 import { deleteExport, downloadProjectExport, revealExport } from "@/cut/lib/exportClient";
 import { useExports, useWatchExportLands, type ExportJob } from "@/cut/lib/exportStore";
@@ -58,13 +58,14 @@ import {
   renameTemplate,
   saveAssetToLibrary,
   saveTemplate,
+  uploadToLibrary,
   type LibraryAsset,
   type LibraryFolder,
   type LibraryTemplateItem,
 } from "@/cut/lib/library";
 import { activeResidency, availableResidencies, type Residency } from "@/cut/lib/residency";
 import { retryUpload } from "@/cut/lib/importQueue";
-import { revealMedia } from "@/cut/lib/media";
+import { isMediaFile, revealMedia } from "@/cut/lib/media";
 import { mediaUrl, TRANSITION_MAX } from "@/cut/lib/types";
 import { genPulseOverlay, isGenTab, useGenNotify, useGenPulse, useWatchGenTab } from "@/cut/lib/genNotify";
 import { CAPTION_LIMIT, normalizeTags } from "@/cut/lib/publish";
@@ -111,7 +112,7 @@ export function SidePanel({
   importing,
 }: {
   projectId: string;
-  onImport: (files: FileList | File[]) => void;
+  onImport: (files: FileList | File[], opts?: { mediaOnly?: boolean }) => void;
   importing: boolean;
 }) {
   // A shared view shows only the surfaces the share opted in; the Library is
@@ -363,6 +364,36 @@ export function SidePanel({
   );
 }
 
+type DragProps = Pick<
+  React.HTMLAttributes<HTMLElement>,
+  "onDragEnter" | "onDragOver" | "onDragLeave" | "onDrop"
+>;
+
+/** Narrow a whole-panel drop zone to the drags it can take: OS files, plus the
+ * refs `takesRef` accepts. Without this a card dragged out of the panel — on
+ * its way to the timeline — would light the panel it came from. */
+function forDrags(props: DragProps, takesRef: (ref: AssetRef) => boolean): DragProps {
+  const ok = (e: React.DragEvent) => {
+    if (Array.from(e.dataTransfer.types).includes("Files")) return true;
+    const ref = draggingRef();
+    return !!ref && takesRef(ref);
+  };
+  return {
+    onDragEnter: (e) => {
+      if (ok(e)) props.onDragEnter?.(e);
+    },
+    onDragOver: (e) => {
+      if (ok(e)) props.onDragOver?.(e);
+    },
+    onDragLeave: (e) => {
+      if (ok(e)) props.onDragLeave?.(e);
+    },
+    onDrop: (e) => {
+      if (ok(e)) props.onDrop?.(e);
+    },
+  };
+}
+
 function PanelHead({ title }: { title: string }) {
   return (
     <div className="flex h-12 shrink-0 items-center pr-2.5 pl-4">
@@ -420,7 +451,7 @@ function MediaPanel({
   importing,
 }: {
   projectId: string;
-  onImport: (files: FileList) => void;
+  onImport: (files: FileList | File[], opts?: { mediaOnly?: boolean }) => void;
   importing: boolean;
 }) {
   const caps = useCutCaps();
@@ -453,6 +484,16 @@ function MediaPanel({
     (r) => r.projectId === projectId && r.status === "preparing"
   );
   const readOnly = useEditor((s) => s.readOnly);
+  // The whole panel takes drops: OS files import into this project and stay off
+  // the timeline, and a project asset made elsewhere (a generation, a
+  // recording) dropped here moves into Media. It lights up for both.
+  const { active: dropActive, attachTarget, targetProps } = useAssetDrop(
+    (ref) => {
+      if (ref.scope === "project")
+        useEditor.getState().updateAsset(ref.id, { origin: undefined, chatId: undefined });
+    },
+    readOnly ? undefined : (files) => onImport(files, { mediaOnly: true })
+  );
   const inputRef = useRef<HTMLInputElement>(null);
   const [exports, setExports] = useState<ExportItem[]>([]);
   const [preview, setPreview] = useState<ExportItem | null>(null);
@@ -490,7 +531,22 @@ function MediaPanel({
   };
 
   return (
-    <>
+    <div
+      ref={attachTarget}
+      {...forDrags(
+        targetProps,
+        // Only media made elsewhere — a generation, a recording — moves in here;
+        // the panel's own cards are already Media.
+        (ref) =>
+          ref.scope === "project" &&
+          useEditor.getState().assets.find((a) => a.id === ref.id)?.origin != null
+      )}
+      className={cn(
+        "flex min-h-0 flex-1 flex-col",
+        dropActive &&
+          "rounded-xl bg-[#0a84ff]/5 outline-2 outline-dashed outline-offset-[-4px] outline-[#0a84ff]/60"
+      )}
+    >
       {/* An export in flight spins on the Media rail tile, not here. */}
       <PanelHead title="Media" />
       {!readOnly && (
@@ -686,7 +742,7 @@ function MediaPanel({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </>
+    </div>
   );
 }
 
@@ -915,6 +971,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
     (v) => v === null || typeof v === "string"
   );
   const [deleting, setDeleting] = useState<LibraryAsset | null>(null);
+  const [uploading, setUploading] = useState(0);
 
   const reload = () =>
     fetchLibrary()
@@ -982,6 +1039,46 @@ function LibraryPanel({ projectId }: { projectId: string }) {
     await moveLibraryItem(residency, id, folderId).catch(() => void reload());
   };
 
+  // New items land on the open folder's shelf, or on the bound backend at the
+  // root — the same rule the full-page library follows.
+  const shelfForNew = (folderId: string | null) =>
+    (folderId ? folders.find((f) => f.id === folderId)?.residency : null) ?? activeResidency();
+
+  const upload = async (files: FileList | File[], folderId: string | null = openFolder) => {
+    const list = Array.from(files).filter(isMediaFile);
+    if (list.length === 0) return;
+    const residency = shelfForNew(folderId);
+    setUploading((n) => n + list.length);
+    for (const file of list) {
+      try {
+        const asset = await uploadToLibrary(file, residency);
+        if (folderId) {
+          await moveLibraryItem(residency, asset.id, folderId).catch(() => {});
+          asset.folderId = folderId;
+        }
+        setAssets((prev) => [asset, ...(prev ?? [])]);
+      } catch {
+        // Skip unreadable files; the rest of the batch still uploads.
+      } finally {
+        setUploading((n) => n - 1);
+      }
+    }
+  };
+
+  // The whole panel takes drops: OS files upload to the shared library (into
+  // the open folder), and project media dropped here is saved to it.
+  const { active: dropActive, attachTarget, targetProps } = useAssetDrop(
+    (ref) => {
+      if (ref.scope !== "project") return;
+      const asset = useEditor.getState().assets.find((a) => a.id === ref.id);
+      if (!asset) return;
+      void saveAssetToLibrary(projectId, asset)
+        .then(() => void reload())
+        .catch(() => {});
+    },
+    (files) => void upload(files)
+  );
+
   // Let a clip be dragged onto a folder tile to file it (alongside the timeline
   // drag payload the card already sets). The ghost is the card itself.
   const onCardDragExtra = (e: React.DragEvent, a: LibraryAsset) => {
@@ -997,7 +1094,15 @@ function LibraryPanel({ projectId }: { projectId: string }) {
   const openFolderName = folders.find((f) => f.id === openFolder)?.name;
 
   return (
-    <>
+    <div
+      ref={attachTarget}
+      {...forDrags(targetProps, (ref) => ref.scope === "project")}
+      className={cn(
+        "flex min-h-0 flex-1 flex-col",
+        dropActive &&
+          "rounded-xl bg-[#0a84ff]/5 outline-2 outline-dashed outline-offset-[-4px] outline-[#0a84ff]/60"
+      )}
+    >
       {openFolder !== null ? (
         <div className="flex h-12 shrink-0 items-center pr-2.5 pl-2.5">
           <FolderCrumb
@@ -1101,7 +1206,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
         <div className="grid flex-1 place-items-center text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
         </div>
-      ) : shown.length === 0 ? (
+      ) : shown.length === 0 && uploading === 0 ? (
         // At the root, filed-away assets, folders, and templates all count as
         // content — "No items" is only for a truly empty library.
         openFolder !== null ? (
@@ -1122,6 +1227,14 @@ function LibraryPanel({ projectId }: { projectId: string }) {
               onDragStartExtra={(e) => onCardDragExtra(e, a)}
             />
           ))}
+          {uploading > 0 && (
+            <div className="flex aspect-square flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-input text-[11px] text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+              <span>
+                Uploading… <LiveElapsed />
+              </span>
+            </div>
+          )}
         </div>
       )}
 
@@ -1147,7 +1260,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </>
+    </div>
   );
 }
 
