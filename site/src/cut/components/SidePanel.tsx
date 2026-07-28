@@ -599,8 +599,8 @@ function MediaPanel({
               <Film className="size-5" />
               <Music className="size-5" />
             </div>
-            Drop videos, images, or audio here. They&apos;ll only be available
-            in this project.
+            Drop videos, audio and images assets here. They are only available in
+            this project.
           </div>
         ) : (
           <div className="grid grid-cols-2 content-start gap-2.5 px-3.5">
@@ -1208,13 +1208,15 @@ function LibraryPanel({ projectId }: { projectId: string }) {
         </div>
       ) : shown.length === 0 && uploading === 0 ? (
         // At the root, filed-away assets, folders, and templates all count as
-        // content — "No items" is only for a truly empty library.
+        // content — the invitation is only for a truly empty library.
         openFolder !== null ? (
           shownTemplates.length === 0 ? (
             <div className="px-3.5 py-6 text-center text-xs text-muted-foreground">Empty folder</div>
           ) : null
         ) : all.length === 0 && folders.length === 0 && templates.length === 0 ? (
-          <div className="px-3.5 py-6 text-center text-xs text-muted-foreground">No items</div>
+          <div className="text-balance px-3.5 py-6 text-center text-xs text-muted-foreground">
+            Drag video, audio and image assets here. Library assets are shared across all projects.
+          </div>
         ) : null
       ) : (
         <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-2.5 overflow-y-auto px-3.5 pb-3.5">
