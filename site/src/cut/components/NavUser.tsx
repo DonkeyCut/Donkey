@@ -18,6 +18,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Skeleton } from "@/components/ui/skeleton";
 import { UserAvatar } from "@/cut/components/UserAvatar";
 import { cutInstallHref } from "@/cut/lib/install";
 import { useCutBase } from "@/cut/lib/nav";
@@ -33,8 +34,20 @@ export function NavUser() {
   const { data: session } = authClient.useSession();
   // Mounted above the session check so the hook order is stable; it stays idle
   // until there's a session to read a profile for.
-  const { data: profile } = useAccountProfile({ enabled: Boolean(session) });
+  const { data: profile, isPending } = useAccountProfile({ enabled: Boolean(session) });
   if (!session) return null;
+
+  // The name and picture the user chose live in the profile, not the session.
+  // The row waits for them behind a skeleton of its own shape rather than
+  // painting the provider's name and swapping it out a beat later.
+  if (isPending) {
+    return (
+      <div className="flex w-full items-center gap-2.5 px-2 py-1.5">
+        <Skeleton className="size-8 rounded-lg" />
+        <Skeleton className="h-3.5 w-24" />
+      </div>
+    );
+  }
 
   // The name the user chose wins over the one the provider gave us.
   const name = visibleName(profile, session.user.name);
