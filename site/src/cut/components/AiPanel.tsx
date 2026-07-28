@@ -28,7 +28,7 @@ import {
 import Markdown, { type Components } from "react-markdown";
 import { baseMarkdownComponents } from "./markdownComponents";
 import { LiveElapsed } from "./Elapsed";
-import { SceneActivity, SceneCard } from "./SceneCard";
+import { SceneCard } from "./SceneCard";
 import { useElapsed } from "@/cut/hooks/useElapsed";
 import { Button } from "@/components/ui/button";
 import {
@@ -833,20 +833,10 @@ function ChatSession({
           {messages.map((m) => (
             <Fragment key={m.id}>
               <MessageView message={m} />
-              {m.id === sceneAnchorId && (
-                <>
-                  <SceneCard threadId={threadId} />
-                  <SceneActivity threadId={threadId} />
-                </>
-              )}
+              {m.id === sceneAnchorId && <SceneCard threadId={threadId} />}
             </Fragment>
           ))}
-          {sceneAnchorId === undefined && (
-            <>
-              <SceneCard threadId={threadId} />
-              <SceneActivity threadId={threadId} />
-            </>
-          )}
+          {sceneAnchorId === undefined && <SceneCard threadId={threadId} />}
           <ThreadRenders threadId={threadId} />
           {busy && (
             <div className="ai-busy mt-1 flex items-center gap-1.5 text-[11.5px] text-muted-foreground">

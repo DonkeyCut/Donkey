@@ -9,7 +9,6 @@ import {
   Maximize2,
   RotateCw,
   TriangleAlert,
-  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useHoverPlay } from "../hooks/useHoverPlay";
@@ -28,10 +27,12 @@ import { scrimIconButton } from "./iconButton";
 import { RefThumb } from "./AssetRefs";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 
-// The brief-to-video progress card, pinned into the chat while a "generate a
-// video" run is planning, waiting for approval, or rendering. The timeline fills
-// on its own via the editor bridge; this is the control surface — approve the
-// plan, watch shots land, redo one by clicking its chip.
+// The brief-to-video run, streamed into the chat while a "generate a video" run
+// is planning, waiting for approval, or rendering. It reads top to bottom the
+// way the work happens — what's being made, then the activity as it happens,
+// then the shots, then the approval. The timeline fills on its own via the
+// editor bridge; this is the control surface — approve the plan, watch shots
+// land, redo one by clicking its chip.
 
 const STATUS_LABEL: Record<SceneRun["status"], string> = {
   planning: "Planning",
@@ -85,7 +86,9 @@ export function SceneCard({ threadId }: { threadId: string }) {
   if (run.chatId && run.chatId !== threadId) return null;
 
   const inFlight = run.status === "planning" || run.status === "generating";
-  const canDismiss =
+  // The run has stopped and is waiting on the user — the footer carries
+  // whatever it's waiting for (approve, retry, or the ready line).
+  const settled =
     run.status === "awaiting_approval" || run.status === "done" || run.status === "failed";
   const pct = run.total ? Math.round((run.placed / run.total) * 100) : 0;
   const showProgress = run.status === "generating" || run.status === "done";
@@ -110,7 +113,7 @@ export function SceneCard({ threadId }: { threadId: string }) {
   const elapsed = run.status === "awaiting_approval" ? null : formatDuration(clockEnd - clockAnchor);
 
   return (
-    <div className="ai-scene-card mt-2 rounded-xl border border-border bg-card/60 p-3 text-[11.5px]">
+    <div className="ai-scene-card mt-2 mb-3 text-[11.5px]">
       <div className="flex items-center gap-1.5">
         <Clapperboard className="size-3.5 text-[#0a84ff]" />
         <span className="font-semibold">Generate video</span>
@@ -122,6 +125,8 @@ export function SceneCard({ threadId }: { threadId: string }) {
       </div>
 
       <p className="mt-1 line-clamp-2 text-muted-foreground">{run.title}</p>
+
+      <RunActivity run={run} inFlight={inFlight} />
 
       {run.shots.length > 0 &&
         (hasFrames ? (
@@ -183,7 +188,7 @@ export function SceneCard({ threadId }: { threadId: string }) {
         </p>
       )}
 
-      {canDismiss && (
+      {settled && (
         <div className="mt-2.5 flex flex-col gap-1.5">
           {/* The stills notice reads as a paragraph, so it takes its own line
               above the buttons rather than sharing a row with them. */}
@@ -234,17 +239,6 @@ export function SceneCard({ threadId }: { threadId: string }) {
                 onClick={() => useGenScene.getState().retryFailedShots()}
               >
                 Retry {stillCount} shot{stillCount === 1 ? "" : "s"}
-              </Button>
-            )}
-            {canDismiss && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 text-muted-foreground"
-                title="Dismiss"
-                onClick={() => useGenScene.getState().dismiss()}
-              >
-                <X className="size-3.5" />
               </Button>
             )}
           </div>
@@ -399,13 +393,11 @@ function ShotTile({
   );
 }
 
-/** The run's chronological record, streamed into the chat as its own item
- * right under the scene card — every narrated step and every asset it made,
- * thumbnails included. Nothing the run does is internal: this is the same
- * story the agent would tell in chat. */
-export function SceneActivity({ threadId }: { threadId: string }) {
-  const run = useGenScene((s) => s.run);
-  const projectId = useEditor((s) => s.projectId);
+/** The run's chronological record — every narrated step and every asset it
+ * made, thumbnails included — streamed above the shots as the work happens.
+ * Nothing the run does is internal: this is the same story the agent would
+ * tell in chat. */
+function RunActivity({ run, inFlight }: { run: SceneRun; inFlight: boolean }) {
   // Feed thumbnails resolve against the open project's media (the run's
   // assets are project assets, chat-owned).
   const assets = useEditor((s) => s.assets);
@@ -413,7 +405,7 @@ export function SceneActivity({ threadId }: { threadId: string }) {
   // Follow new entries only when the chat is already reading the tail —
   // never yank the user back down while they scroll through old images.
   const bottomRef = useRef<HTMLDivElement>(null);
-  const feedLen = run?.feed.length ?? 0;
+  const feedLen = run.feed.length;
   useEffect(() => {
     const scroller = bottomRef.current?.closest(".ai-messages");
     if (!scroller) return;
@@ -421,13 +413,10 @@ export function SceneActivity({ threadId }: { threadId: string }) {
     if (gap < 160) scroller.scrollTop = scroller.scrollHeight;
   }, [feedLen]);
 
-  if (!run || run.projectId !== projectId) return null;
-  if (run.chatId && run.chatId !== threadId) return null;
-  if (run.feed.length === 0) return null;
-  const inFlight = run.status === "planning" || run.status === "generating";
+  if (feedLen === 0) return null;
 
   return (
-    <div className="ai-scene-activity mt-2 mb-3 flex flex-col gap-1.5">
+    <div className="ai-scene-activity mt-2 flex flex-col gap-1.5">
       <div className="text-[10.5px] font-medium text-muted-foreground">Activity</div>
       {run.feed.map((f, i) => {
         const asset = f.mediaId ? assets.find((a) => a.id === f.mediaId) : undefined;

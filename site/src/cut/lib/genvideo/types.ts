@@ -175,10 +175,6 @@ export interface VideoProject {
   /** Epoch ms when the run reached done/failed — freezes the finished card's
    * elapsed clock across reloads. */
   endedAt?: number;
-  /** The user closed the finished run's chat card. A terminal run's card is
-   * its durable record — it re-surfaces on every load until this is stamped;
-   * reviving the run (retry, revision) clears it. */
-  cardDismissed?: boolean;
   updatedAt: number;
 }
 

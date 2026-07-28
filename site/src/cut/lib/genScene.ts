@@ -585,14 +585,10 @@ function resumeDoneRun(): boolean {
   const ed = useEditor.getState();
   const stored = ed.genvideo;
   if (!ed.projectId || !stored || stored.phase !== "done") return false;
-  // Reviving the run re-opens its card; a stale dismissal must not hide the
-  // record of the work about to happen on the next load.
-  const project = { ...stored, cardDismissed: undefined };
-  if (stored.cardDismissed) ed.setGenvideo(project);
   orchestrators.get(ed.projectId)?.abort();
-  const orch = buildOrchestrator(ed.projectId, project);
+  const orch = buildOrchestrator(ed.projectId, stored);
   orchestrators.set(ed.projectId, orch);
-  mirrorRun(ed.projectId, project);
+  mirrorRun(ed.projectId, stored);
   return true;
 }
 
@@ -656,7 +652,6 @@ interface GenSceneState {
   /** A project was deleted — abort any live run so it stops spending and can't
    * write back to a doc that no longer exists. */
   killProject: (projectId: string) => void;
-  dismiss: () => void;
 }
 
 export const useGenScene = create<GenSceneState>((set, get) => ({
@@ -827,10 +822,7 @@ export const useGenScene = create<GenSceneState>((set, get) => ({
     if (!openId || !stored || stored.phase !== "failed") {
       return { ok: false, message: "No failed video run to retry here." };
     }
-    // The retry re-opens the card; clear a stale dismissal so the revived
-    // run's record survives the next load too.
-    const plan = { ...stored, cardDismissed: undefined };
-    if (stored.cardDismissed) useEditor.getState().setGenvideo(plan);
+    const plan = stored;
     orchestrators.get(openId)?.abort();
     const orch = buildOrchestrator(openId, plan);
     orchestrators.set(openId, orch);
@@ -879,12 +871,12 @@ export const useGenScene = create<GenSceneState>((set, get) => ({
     // even a finished run's leftovers never sit in the generate panels.
     claimRunMedia(projectId, project);
     // A finished or failed run has nothing to resume — its clips are already
-    // on the timeline — but its card is the run's durable record, so it
-    // mirrors back on every load (no orchestrator, nothing spends) until the
-    // user dismisses it; the X stamps the plan so the dismissal sticks.
-    // Revision tools rebuild the live run on demand (resumeDoneRun).
+    // on the timeline — but the plan and its shots are the run's permanent
+    // record in the chat, so they mirror back on every load (no orchestrator,
+    // nothing spends). Revision tools rebuild the live run on demand
+    // (resumeDoneRun).
     if (project.phase === "done" || project.phase === "failed") {
-      if (!project.cardDismissed) mirrorRun(projectId, project);
+      mirrorRun(projectId, project);
       return;
     }
     // Rebuild the orchestrator around the persisted plan so approve/regenerate
@@ -969,25 +961,4 @@ export const useGenScene = create<GenSceneState>((set, get) => ({
     if (run?.projectId === projectId) set({ run: null });
   },
 
-  dismiss: () => {
-    const run = get().run;
-    // Dismissing an unrendered plan abandons it: the orchestrator stops and
-    // the persisted plan is cleared, so it can't resurrect on the next load.
-    // A finished (or failed) run keeps its record — its media re-tags from it
-    // on load — but the dismissal is stamped on the plan so the card stays
-    // closed across loads (until a retry or revision revives the run).
-    if (run && !isTerminal(run.status)) {
-      killRun(run.projectId);
-    } else if (run) {
-      const ed = useEditor.getState();
-      if (ed.projectId === run.projectId && ed.genvideo) {
-        ed.setGenvideo({ ...ed.genvideo, cardDismissed: true });
-      } else {
-        void withProjectDoc(run.projectId, (doc) => {
-          if (doc.genvideo) doc.genvideo = { ...doc.genvideo, cardDismissed: true };
-        }).catch(() => {});
-      }
-    }
-    set({ run: null });
-  },
 }));
