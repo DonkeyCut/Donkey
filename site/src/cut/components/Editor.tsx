@@ -438,20 +438,6 @@ export function Editor({
         ? "media"
         : "other";
     };
-    const enter = (e: DragEvent) => {
-      if (!isFileDrag(e)) return;
-      e.preventDefault();
-      dragDepth.current++;
-      useEditor.getState().setDropActive(dragKind(e));
-    };
-    const over = (e: DragEvent) => {
-      if (isFileDrag(e)) e.preventDefault();
-    };
-    const leave = (e: DragEvent) => {
-      if (!isFileDrag(e)) return;
-      dragDepth.current = Math.max(0, dragDepth.current - 1);
-      if (dragDepth.current === 0) useEditor.getState().setDropActive(null);
-    };
     // Time under the pointer when the drop lands on the timeline's tracks,
     // else null. Geometric, because the drop is handled at the window level
     // and the pointer may sit over any timeline child.
@@ -465,21 +451,67 @@ export function Editor({
       const t = (e.clientX - inner.getBoundingClientRect().left) / useEditor.getState().pxPerSec;
       return Math.max(0, t);
     };
+    // The video canvas joins the timeline as a place that adds to the cut: a
+    // drop there appends, since the canvas has no time under the pointer.
+    const overCanvas = (e: DragEvent) => {
+      const pane = document.querySelector(".preview-pane");
+      if (!pane) return false;
+      const r = pane.getBoundingClientRect();
+      return (
+        e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom
+      );
+    };
+    // The hint tracks where the files would land. Over a panel that takes them
+    // itself — Media, Library, a composer — nothing global lights up; that zone
+    // lights itself. The timeline lights only over the timeline or the canvas,
+    // the two places a drop joins the cut; elsewhere the drag still hints the
+    // chat as a target ("other").
+    const hintKind = (e: DragEvent): "media" | "other" | null => {
+      if (fileZoneAt(e.clientX, e.clientY)) return null;
+      if (dragKind(e) !== "media") return "other";
+      return timelineDropTime(e) != null || overCanvas(e) ? "media" : "other";
+    };
+    const setHint = (kind: "media" | "other" | null) => {
+      if (useEditor.getState().dropActive !== kind) useEditor.getState().setDropActive(kind);
+    };
+    const enter = (e: DragEvent) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      dragDepth.current++;
+      setHint(hintKind(e));
+    };
+    // Crossing between panels mid-drag fires no `dragenter` on the window, so
+    // the hint follows the pointer here.
+    const over = (e: DragEvent) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      setHint(hintKind(e));
+    };
+    const leave = (e: DragEvent) => {
+      if (!isFileDrag(e)) return;
+      dragDepth.current = Math.max(0, dragDepth.current - 1);
+      if (dragDepth.current === 0) useEditor.getState().setDropActive(null);
+    };
     const drop = (e: DragEvent) => {
       if (hasRefDrag(e) || !e.dataTransfer?.files.length) return;
       e.preventDefault();
       dragDepth.current = 0;
       useEditor.getState().setDropActive(null);
-      // A drop on a file-taking composer (generate/chat attachments) belongs
-      // to it; a drop on the timeline places at the pointer; anywhere else
-      // the files land in the Media panel only.
+      // Files land where they were dropped: a file-taking panel (Media,
+      // Library, a composer) keeps them; the timeline places at the pointer;
+      // the canvas appends to the cut; anywhere else imports into the project
+      // and leaves the timeline alone.
       const zone = fileZoneAt(e.clientX, e.clientY);
       if (zone) {
         zone(Array.from(e.dataTransfer.files));
         return;
       }
       const at = timelineDropTime(e);
-      void importFiles(e.dataTransfer.files, at == null ? { mediaOnly: true } : { at });
+      if (at != null) {
+        void importFiles(e.dataTransfer.files, { at });
+        return;
+      }
+      void importFiles(e.dataTransfer.files, { mediaOnly: !overCanvas(e) });
     };
     window.addEventListener("dragenter", enter);
     window.addEventListener("dragover", over);
