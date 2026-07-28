@@ -599,7 +599,7 @@ export function Editor({
 
   if (loadError && !stale) {
     return (
-      <div className="grid h-screen place-items-center">
+      <div className="grid h-full place-items-center">
         <div className="flex flex-col items-center gap-3 text-center">
           <Clapperboard className="size-7 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">{loadError}</p>
@@ -615,7 +615,7 @@ export function Editor({
 
   if (!loaded || stale) {
     return (
-      <div className="grid h-screen place-items-center text-muted-foreground">
+      <div className="grid h-full place-items-center text-muted-foreground">
         <Loader2 className="size-5 animate-spin" />
       </div>
     );
@@ -626,7 +626,7 @@ export function Editor({
     : true;
 
   return (
-    <div className="flex h-screen min-w-[900px] overflow-hidden">
+    <div className="flex h-full min-w-[900px] overflow-hidden">
       <div className="grid min-w-0 flex-1 grid-rows-[46px_minmax(0,1fr)_auto]">
         {viewer ? (
           <ViewerTopBar />

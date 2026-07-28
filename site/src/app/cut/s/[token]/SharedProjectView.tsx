@@ -96,7 +96,7 @@ export function SharedProject() {
 
 export function SharedProjectView() {
   return (
-    <div className="min-h-screen bg-white font-system text-foreground antialiased">
+    <div className="h-screen bg-white font-system text-foreground antialiased">
       <Suspense>
         <SharedProject />
       </Suspense>

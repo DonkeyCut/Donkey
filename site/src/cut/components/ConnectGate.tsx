@@ -3,11 +3,18 @@
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Loader2, Plug, ShieldX } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 import { DONKEY_DOWNLOAD_URL } from "@/app/_components/landing/data";
 import { track } from "@/lib/analytics";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   ENGINE_LOST_EVENT,
   engineConnect,
@@ -15,38 +22,32 @@ import {
   engineProbe,
   servedFromEngine,
 } from "@/cut/lib/api";
-import { cutMode, setCutMode } from "@/cut/lib/backend";
-import { enableWebMode, useWebMode, webModeEnabled } from "@/cut/lib/flags";
+import { setCutMode } from "@/cut/lib/backend";
 
-// Chrome gates a public https page's first fetch to 127.0.0.1 behind its
-// Local Network Access prompt — "donkeycut.com wants to access other apps and
-// services on this device". This gate renders the app blurred and inert
-// behind a modal until an engine probe actually succeeds, and asks with its
-// own UI first: while the browser permission is unresolved, the request that
-// raises Chrome's prompt only ever starts from the user's Connect click, so
-// the prompt can never ambush a login. The api.ts gate latch holds the
-// mounted app's own requests until the gate opens, making that true by
-// construction. The modal has two shapes:
+// Which backend the app starts on, decided once per load. Chrome gates a
+// public https page's first fetch to 127.0.0.1 behind its Local Network Access
+// prompt — "donkeycut.com wants to access other apps and services on this
+// device" — so the engine is probed only when that costs nothing: the page is
+// served by the engine itself, or the permission is already granted.
+// Otherwise the app starts in the cloud. The api.ts latch keeps app code off
+// loopback until a probe succeeds, so the prompt can never ambush a login.
 //
-//   connect/install — no engine has answered: ask to connect (browser prompt
-//     pending) or to install/open the Donkey app, with a direct DMG download.
-//   blocked — the permission is denied; site-settings recovery.
-//
-// Once the permission is granted (or the page is served by the engine, where
-// loopback is same-origin) the gate probes quietly and keeps polling, so the
-// page springs to life the moment the app starts. Engine loss anywhere in
-// the app (api.ts's engineLost) puts the modal back up.
-
-// Set after a user-initiated connect. Only consulted when the permission
-// state can't be queried (non-Chrome, older Chrome): there it marks the
-// browser ask as already answered, making mount-time probing safe.
+// Nothing here blocks the app. Cloud editing always works, so a Mac with no
+// engine reachable is a working editor, not a wall. What it is not is silent:
+// a browser that has reached this Mac's engine before and can't now gets a
+// banner it can't dismiss — its local projects are the ones that won't open —
+// and the banner opens the recovery instructions in a dialog. The gate keeps
+// probing behind the banner, so starting the Donkey app clears it. Engine
+// loss mid-session (api.ts's engineLost) lands in the same state.
 const ACK_KEY = "cut-engine-connect-acked";
+// Set the first time an engine answers in this browser. It separates a Mac
+// user whose app is missing from a browser that never had one, which is the
+// difference between a banner worth showing and noise.
+const SEEN_KEY = "cut-engine-seen";
 
-type Gate = "checking" | "install" | "connecting" | "blocked" | "pass";
-
-/** Dev-only preview of a gate state, since localhost normally passes straight
- * through: ?gate=ask (connect ask) | install (get-the-app variant) |
- * connecting | blocked. Compiled out of production builds. */
+/** Dev-only preview of the banner and its dialog, since localhost always
+ * reaches its engine: ?gate=ask (connect ask) | install (get-the-app variant)
+ * | blocked. Compiled out of production builds. */
 function forcedGate(): string | null {
   if (process.env.NODE_ENV === "production") return null;
   return new URLSearchParams(window.location.search).get("gate");
@@ -67,251 +68,208 @@ async function permissionState(): Promise<PermissionState | null> {
 
 export function ConnectGate({ children }: { children: ReactNode }) {
   // Settings pages (billing, usage, feature flags) never touch the engine, so
-  // they render ungated — walling them would block the very page that turns
-  // cloud mode on.
+  // they skip the probe and the banner.
   const onSettings = (usePathname() ?? "").split("/").includes("settings");
-  const [gate, setGate] = useState<Gate>("checking");
-  // Whether starting a probe would raise the browser's permission prompt.
-  // True blocks all automatic probing and turns the modal into the connect
-  // ask.
+  // Whether the engine on this Mac is reachable right now.
+  const [reached, setReached] = useState<boolean | null>(null);
+  // This browser has used the engine before, so an unreachable one is news.
+  const [seen, setSeen] = useState(false);
+  // Whether connecting would raise the browser's permission prompt. True keeps
+  // every automatic probe off loopback: the prompt fires from a click or not
+  // at all.
   const [needsAsk, setNeedsAsk] = useState(false);
+  // The permission is denied — no probe can recover it, only site settings.
+  const [blocked, setBlocked] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [howOpen, setHowOpen] = useState(false);
 
-  const pass = useCallback(() => {
+  const bindEngine = useCallback(() => {
+    localStorage.setItem(SEEN_KEY, "1");
+    setSeen(true);
+    setBlocked(false);
     setCutMode("local");
     engineGateOpen();
-    setGate("pass");
+    setReached(true);
   }, []);
 
-  // Web mode (the cut-web-mode flag): the app runs against the cloud backend,
-  // so a missing engine never walls the page — the gate still prefers the
-  // engine when it can probe without raising the browser ask, and otherwise
-  // passes straight through in cloud mode. The engine gate latch stays closed
-  // there; nothing in cloud mode touches loopback.
-  const passCloud = useCallback(() => {
+  const bindCloud = useCallback(() => {
     setCutMode("cloud");
-    setGate("pass");
+    setReached(false);
   }, []);
 
   const check = useCallback(async () => {
     const forced = forcedGate();
     if (forced) {
-      setNeedsAsk(forced === "ask" || forced === "connecting");
-      return setGate(forced === "ask" ? "install" : (forced as Gate));
+      setSeen(true);
+      setNeedsAsk(forced === "ask");
+      setBlocked(forced === "blocked");
+      return bindCloud();
     }
-    const web = webModeEnabled();
     const perm = await permissionState();
-    if (perm === "denied") {
-      if (web) passCloud();
-      else setGate("blocked");
-      return;
-    }
+    setSeen(localStorage.getItem(SEEN_KEY) === "1");
+    setBlocked(perm === "denied");
     const quiet =
       servedFromEngine() ||
       perm === "granted" ||
       (perm === null && localStorage.getItem(ACK_KEY) === "1");
-    setNeedsAsk(!quiet);
-    if (!quiet) {
-      if (web) passCloud();
-      else setGate("install");
-      return;
+    setNeedsAsk(!quiet && perm !== "denied");
+    if (quiet) {
+      try {
+        await engineProbe();
+        return bindEngine();
+      } catch {
+        // No engine on this Mac; the cloud is the working half.
+      }
     }
-    try {
-      await engineProbe();
-      pass();
-    } catch {
-      if (web) passCloud();
-      else setGate("install");
-    }
-  }, [pass, passCloud]);
+    bindCloud();
+  }, [bindCloud, bindEngine]);
 
   useEffect(() => {
     if (onSettings) return;
     void check();
   }, [check, onSettings]);
 
-  // The flag flips on the fly from the account menu: turning it on releases a
-  // gated page into cloud mode via a fresh check; turning it off while running
-  // on the cloud backend puts the gate back up on the local flow.
-  const webMode = useWebMode();
+  // Keep probing behind the banner so the app connects the moment the engine
+  // appears. Both skips are permanent conditions, not slow ones: a pending
+  // permission would turn the probe into a prompt, and a denied one can only
+  // be undone in site settings.
   useEffect(() => {
-    const flip = webMode ? gate === "install" || gate === "blocked" : cutMode() === "cloud";
-    if (!flip) return;
-    if (!webMode) setCutMode("local");
-    const t = setTimeout(() => void check(), 0);
-    return () => clearTimeout(t);
-  }, [webMode, gate, check]);
-
-  // While waiting with a prompt-free path to loopback, keep probing so the
-  // page connects the moment the app starts.
-  useEffect(() => {
-    if (gate !== "install" || needsAsk || forcedGate()) return;
+    if (reached !== false || needsAsk || blocked || forcedGate()) return;
     const t = setInterval(() => {
-      engineProbe().then(pass, () => {});
+      engineProbe().then(bindEngine, () => {});
     }, 3000);
     return () => clearInterval(t);
-  }, [gate, needsAsk, pass]);
+  }, [reached, needsAsk, blocked, bindEngine]);
 
-  // The engine stopped answering mid-session: put the modal back up (its
-  // polling then restores the app when the engine does).
+  // The engine stopped answering mid-session: fall back to the cloud and raise
+  // the banner. The poll above restores the app when the engine returns.
   useEffect(() => {
-    const onLost = () => setGate((g) => (g === "pass" ? "install" : g));
+    const onLost = () => {
+      setSeen(true);
+      bindCloud();
+    };
     window.addEventListener(ENGINE_LOST_EVENT, onLost);
     return () => window.removeEventListener(ENGINE_LOST_EVENT, onLost);
-  }, []);
-
-  // "Try Donkey Cut Cloud": enables the account's cut-web-mode flag right from
-  // the wall. On success the flag-flip effect above sees a walled gate with
-  // the flag on and releases the page into cloud mode.
-  const [cloudTrying, setCloudTrying] = useState(false);
-  const [cloudError, setCloudError] = useState(false);
-  const tryCloud = async () => {
-    track("cut_cloud_enable_clicked", {
-      source:
-        gate === "blocked"
-          ? "connect_gate_blocked"
-          : needsAsk
-            ? "connect_gate_ask"
-            : "connect_gate_install",
-    });
-    setCloudTrying(true);
-    setCloudError(false);
-    const ok = await enableWebMode();
-    setCloudTrying(false);
-    if (!ok) setCloudError(true);
-  };
+  }, [bindCloud]);
 
   const connect = async () => {
-    setGate("connecting");
+    setConnecting(true);
     localStorage.setItem(ACK_KEY, "1");
-    if (await engineConnect()) return pass();
+    const ok = await engineConnect();
+    setConnecting(false);
+    if (ok) {
+      setHowOpen(false);
+      return bindEngine();
+    }
     // No engine answered, but the browser ask may still have been decided.
     const perm = await permissionState();
-    if (perm === "denied") return setGate("blocked");
+    setBlocked(perm === "denied");
     setNeedsAsk(perm === "prompt");
-    setGate("install");
   };
 
-  if (onSettings) return <>{children}</>;
+  // The banner reports a fact about this browser, so it stays up until the
+  // engine answers; the instructions behind it are a dialog the user closes.
+  const banner = reached === false && seen && !onSettings;
 
-  const gated = gate !== "pass";
-  const connecting = gate === "connecting";
-
-  const cloudCta = (
-    <div className="mt-8 self-start text-left text-xs text-muted-foreground">
-      <p>
-        <button
-          className="font-medium text-foreground underline underline-offset-2 disabled:opacity-60"
-          disabled={cloudTrying}
-          onClick={() => void tryCloud()}
-          type="button"
-        >
-          {cloudTrying ? "Turning on…" : "Try Donkey Cut Cloud (Beta)"}
-        </button>{" "}
-        — edit right here in the browser, no install. Projects are stored in
-        the cloud and exports render on cloud servers. You can always install
-        the Donkey Mac app to enable local processing.
-      </p>
-      {cloudError && <p className="mt-1 text-red-600">Couldn&rsquo;t turn that on — try again.</p>}
-    </div>
-  );
-
+  // The banner takes its 32px out of the viewport rather than pushing the app
+  // past it: the surfaces below fill this column's remaining height (h-full),
+  // so the editor lays out against the space it actually has.
   return (
-    <>
-      <div inert={gated || undefined}>{children}</div>
-      {gated && (
-        <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/25 p-6 backdrop-blur-md">
-          {gate === "checking" ? (
-            <Loader2 className="size-5 animate-spin text-white/80" />
-          ) : gate === "blocked" ? (
-            <div className="flex w-full max-w-xl flex-col items-center gap-4 rounded-2xl border bg-background p-8 text-center shadow-2xl">
-              <div className="grid size-14 place-items-center rounded-2xl bg-muted">
-                <ShieldX className="size-7 text-muted-foreground" />
-              </div>
-              <h1 className="text-lg font-semibold tracking-tight">Connection blocked</h1>
-              <p className="self-start text-left text-sm text-muted-foreground">
-                Your browser is blocking this page from reaching the Donkey
-                app on this Mac. Open the site settings from the icon next to
-                the address bar, turn on{" "}
-                <span className="font-medium text-foreground">Apps on device</span>,
-                then try again.
-              </p>
-              <Image
-                alt="Chrome's site settings open over the address bar, with the Apps on device toggle"
-                className="w-full max-w-sm rounded-xl border shadow-sm"
-                height={660}
-                src="/cut/connect-site-settings.png"
-                unoptimized
-                width={970}
-              />
-              <Button onClick={() => void check()}>Try again</Button>
-              {cloudCta}
-            </div>
-          ) : (
-            <div className="flex w-full max-w-xl flex-col items-center gap-4 rounded-2xl border bg-background p-8 text-center shadow-2xl">
-              <div className="grid size-14 place-items-center rounded-2xl bg-muted">
-                <Plug className="size-7 text-muted-foreground" />
-              </div>
-              <h1 className="text-lg font-semibold tracking-tight">
-                {needsAsk ? "Connect to the Donkey app" : "Donkey Cut works with the Donkey Mac app"}
-              </h1>
-              <p className="self-start text-left text-sm text-muted-foreground">
-                {needsAsk ? (
-                  <>
-                    Donkey Cut runs locally in the Donkey app on this Mac.
-                    Your browser will ask for permission to connect to apps on
-                    this device — choose{" "}
-                    <span className="font-medium text-foreground">Allow</span>.
-                  </>
-                ) : (
-                  <>
-                    Everything runs locally on your Mac. Install Donkey, or
-                    open it if it&rsquo;s already installed — this page
-                    connects automatically.
-                  </>
-                )}
-              </p>
-              {needsAsk ? (
-                <Button onClick={() => void connect()} disabled={connecting}>
-                  {connecting && (
-                    <Loader2 className="animate-spin" data-icon="inline-start" />
-                  )}
-                  {connecting ? "Connecting…" : "Connect"}
-                </Button>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <Button
-                    onClick={() => {
-                      track("app_install_clicked", { source: "connect_gate_button" });
-                      window.location.href = DONKEY_DOWNLOAD_URL;
-                    }}
-                  >
-                    Download for Mac
-                  </Button>
-                  <Button variant="ghost" onClick={() => void connect()} disabled={connecting}>
-                    {connecting && (
-                      <Loader2 className="animate-spin" data-icon="inline-start" />
-                    )}
-                    {connecting ? "Connecting…" : "Try again"}
-                  </Button>
-                </div>
-              )}
-              {needsAsk && (
-                <p className="self-start text-left text-xs text-muted-foreground">
-                  Don&rsquo;t have the Donkey app yet?{" "}
-                  <a
-                    className="font-medium text-foreground underline underline-offset-2"
-                    href={DONKEY_DOWNLOAD_URL}
-                    onClick={() => track("app_install_clicked", { source: "connect_gate_link" })}
-                  >
-                    Install it for Mac
-                  </a>
-                </p>
-              )}
-              {cloudCta}
-            </div>
-          )}
+    <div className="flex h-screen flex-col">
+      {banner && (
+        <div className="flex h-8 shrink-0 items-center justify-center gap-3 bg-red-600 px-4 text-xs font-medium text-white">
+          <span className="min-w-0 truncate">
+            {blocked
+              ? "Your browser is blocking this page from reaching the Donkey app on this Mac."
+              : "Donkey Cut can’t reach the Donkey app on this Mac."}{" "}
+            Projects stored on this Mac won’t open.
+          </span>
+          <button
+            className="shrink-0 underline underline-offset-2"
+            onClick={() => setHowOpen(true)}
+            type="button"
+          >
+            How to fix this
+          </button>
         </div>
       )}
-    </>
+      <div className="min-h-0 flex-1">{children}</div>
+      <Dialog open={howOpen} onOpenChange={setHowOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {blocked
+                ? "Connection blocked"
+                : needsAsk
+                  ? "Connect to the Donkey app"
+                  : "Donkey Cut works with the Donkey Mac app"}
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {blocked ? (
+              <>
+                Your browser is blocking this page from reaching the Donkey app
+                on this Mac. Open the site settings from the icon next to the
+                address bar, turn on{" "}
+                <span className="font-medium text-foreground">Apps on device</span>,
+                then try again.
+              </>
+            ) : needsAsk ? (
+              <>
+                Donkey Cut runs locally in the Donkey app on this Mac. Your
+                browser will ask for permission to connect to apps on this
+                device — choose{" "}
+                <span className="font-medium text-foreground">Allow</span>.
+              </>
+            ) : (
+              <>
+                Everything runs locally on your Mac. Install Donkey, or open it
+                if it&rsquo;s already installed — this page connects
+                automatically.
+              </>
+            )}
+          </p>
+          {blocked && (
+            <Image
+              alt="Chrome's site settings open over the address bar, with the Apps on device toggle"
+              className="w-full rounded-xl border shadow-sm"
+              height={660}
+              src="/cut/connect-site-settings.png"
+              unoptimized
+              width={970}
+            />
+          )}
+          {!blocked && !needsAsk && (
+            <p className="text-xs text-muted-foreground">
+              Don&rsquo;t have the Donkey app yet?{" "}
+              <a
+                className="font-medium text-foreground underline underline-offset-2"
+                href={DONKEY_DOWNLOAD_URL}
+                onClick={() => track("app_install_clicked", { source: "connect_gate_link" })}
+              >
+                Install it for Mac
+              </a>
+            </p>
+          )}
+          <DialogFooter className="mt-2">
+            {!blocked && !needsAsk && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  track("app_install_clicked", { source: "connect_gate_button" });
+                  window.location.href = DONKEY_DOWNLOAD_URL;
+                }}
+              >
+                Download for Mac
+              </Button>
+            )}
+            <Button onClick={() => void connect()} disabled={connecting}>
+              {connecting && <Loader2 className="animate-spin" data-icon="inline-start" />}
+              {connecting ? "Connecting…" : needsAsk ? "Connect" : "Try again"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

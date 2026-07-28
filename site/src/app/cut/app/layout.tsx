@@ -11,10 +11,10 @@ import { RequireSession } from "@/cut/components/RequireSession";
 // html white so the cream does not show through the overscroll area, and
 // font-system matches the /app system font stack. RequireSession gates the
 // whole subtree on a signed-in session, redirecting signed-out visitors to
-// sign-in with their target URL as the callback. ConnectGate keeps the app
-// blurred and inert behind a connect modal until the engine on this Mac
-// answers, so the browser's local-network permission prompt only ever fires
-// from the user's own Connect click.
+// sign-in with their target URL as the callback. ConnectGate picks the backend
+// the app runs on — the engine on this Mac when it answers without raising the
+// browser's local-network prompt, the cloud otherwise — and owns the banner
+// that reports an engine this browser can no longer reach.
 export default function CutAppLayout({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-white font-system text-foreground antialiased">
