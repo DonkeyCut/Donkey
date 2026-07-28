@@ -13,11 +13,14 @@ import { cardKey, uploadFile } from "./r2";
 // the first frame, which is the same picture either way.
 
 /** Animated card: small enough that no crawler refuses it, big enough to read
- * on a phone. Tried in order until one lands under MAX_GIF_BYTES. */
+ * on a phone. Tried in order until one lands under MAX_GIF_BYTES. `box` is the
+ * longest side, not the width — sizing a portrait cut by width gives it three
+ * times the area of a landscape one at the same setting, and a GIF's size
+ * tracks its area. */
 const GIF_RECIPES = [
-  { fps: 12, width: 600, colors: 128 },
-  { fps: 10, width: 480, colors: 96 },
-  { fps: 8, width: 400, colors: 64 },
+  { fps: 12, box: 600, colors: 128 },
+  { fps: 10, box: 480, colors: 96 },
+  { fps: 8, box: 400, colors: 64 },
 ];
 const MAX_GIF_BYTES = 3 * 1024 * 1024;
 
@@ -65,7 +68,8 @@ async function renderAnimation(source: string, dest: string): Promise<number> {
       "-i",
       source,
       "-vf",
-      `fps=${recipe.fps},scale=${recipe.width}:-2:flags=lanczos,split[s0][s1];` +
+      `fps=${recipe.fps},scale=w=${recipe.box}:h=${recipe.box}:` +
+        `force_original_aspect_ratio=decrease:flags=lanczos,split[s0][s1];` +
         `[s0]palettegen=max_colors=${recipe.colors}[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3`,
       "-loop",
       "0",

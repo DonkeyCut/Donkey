@@ -51,9 +51,13 @@ export async function generateMetadata({
   // the rest fall back to its first frame — the same picture the JPEG carries
   // for anything that would rather not take a multi-megabyte image. Either URL
   // answers before a card has rendered; the route draws one.
+  //
+  // No declared dimensions: a card is the cut's own shape (a portrait project
+  // unfurls portrait) and the drawn placeholder is 1.91:1, so any number here
+  // would be wrong for some shares and platforms lay out against it.
   const images = [
-    { url: card("gif"), width: 1200, height: 630, alt: meta.name },
-    { url: card("jpg"), width: 1200, height: 630, alt: meta.name },
+    { url: card("gif"), alt: meta.name },
+    { url: card("jpg"), alt: meta.name },
   ];
   return {
     title: `${meta.name} · Donkey Cut`,
