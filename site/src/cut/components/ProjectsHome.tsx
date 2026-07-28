@@ -949,6 +949,11 @@ function CardPreview({ project: p, residency }: { project: ProjectSummary; resid
   // The frame this card drew last time, so coming back from a project shows the
   // picture at once instead of a grey rectangle while the media loads.
   const poster = useCardPoster(p.id, residency, videoRef, seen);
+  // Whether the media itself has a frame up yet. Until it does the cached one
+  // is what the tile shows — as its own layer, because the element's `poster`
+  // attribute is read when the media starts loading and the cached frame comes
+  // out of IndexedDB a moment after that.
+  const [decoded, setDecoded] = useState(false);
   const backend = backendFor(residency);
   const fileUrl = (file: string) =>
     backend.url(`/api/cut/projects/${p.id}/media/${encodeURIComponent(file)}`);
@@ -999,12 +1004,21 @@ function CardPreview({ project: p, residency }: { project: ProjectSummary; resid
           crossOrigin={MEDIA_CORS}
           ref={videoRef}
           src={`${src}#t=${posterT}`}
-          poster={poster ?? undefined}
           muted
           loop
           playsInline
           preload="metadata"
+          onLoadedData={() => setDecoded(true)}
           className="size-full object-cover"
+        />
+      )}
+      {poster && !decoded && (
+        // eslint-disable-next-line @next/next/no-img-element -- a cached data URL, not a Next asset
+        <img
+          src={poster}
+          alt=""
+          draggable={false}
+          className="absolute inset-0 size-full object-cover"
         />
       )}
     </div>
