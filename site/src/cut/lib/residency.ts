@@ -49,6 +49,28 @@ export function activeResidency(): Residency {
   return cutMode() === "cloud" ? "cloud" : "local";
 }
 
+const owners = new Map<string, Promise<CutBackend>>();
+
+/** The backend that holds a project's data, by id. Background work — a scene
+ * run that outlives the editor it started in — must address the project
+ * through this rather than the ambient backend: once the user navigates away
+ * the ambient one is whatever the app fell back to, and a cloud project's doc
+ * does not exist on the engine. A project never changes residency in place
+ * (a copy gets a new id), so the answer is remembered — but only a positive
+ * engine hit is definitive, since "cloud" is also what a momentarily
+ * unreachable engine looks like. */
+export function projectBackend(projectId: string): Promise<CutBackend> {
+  let p = owners.get(projectId);
+  if (!p) {
+    p = resolveProjectMode(projectId).then((mode) => {
+      if (mode !== "local") owners.delete(projectId);
+      return backendFor(mode === "local" ? "local" : "cloud");
+    });
+    owners.set(projectId, p);
+  }
+  return p;
+}
+
 export async function resolveProjectMode(projectId: string): Promise<CutMode> {
   if (!servedFromEngine() && !engineOrigin()) return "cloud";
   try {

@@ -14,7 +14,8 @@
  * the doc is just the other end of the same contract.
  */
 
-import { apiFetch, apiJson, getBackend, type CutBackend } from "../backend";
+import { apiJson, getBackend, type CutBackend } from "../backend";
+import { projectBackend } from "../residency";
 import { RENDERS_CAP, storedAssets, useEditor } from "../store";
 import { mediaUrl, SPEED_MIN } from "../types";
 import type { AudioClip, MediaAsset, ProjectDoc, RenderRecord, VideoClip } from "../types";
@@ -138,11 +139,15 @@ export async function findRunAsset(
     const live = s.assets.find((a) => a.id === assetId);
     if (live) return live;
   }
-  const res = await apiFetch(`/api/cut/projects/${projectId}`);
+  // The project's own backend, not the ambient one: a run whose project the
+  // user navigated away from would otherwise ask the engine for a cloud
+  // project's doc (or the reverse) and lose its identity anchors silently.
+  const backend = await projectBackend(projectId);
+  const res = await backend.fetch(`/api/cut/projects/${projectId}`);
   const doc = await apiJson<ProjectDoc>(res);
   if (!res.ok) return undefined;
   const stored = doc.assets.find((a) => a.id === assetId);
-  return stored ? { ...stored, url: mediaUrl(projectId, stored.fileName) } : undefined;
+  return stored ? { ...stored, url: mediaUrl(projectId, stored.fileName, backend) } : undefined;
 }
 
 /** placeGenClip against a doc: fill [startSec, endSec) exactly on track 0,
