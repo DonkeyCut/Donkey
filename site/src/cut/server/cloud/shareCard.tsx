@@ -11,7 +11,8 @@
 // also draws the placeholder: the project's name on Cut's own backdrop.
 import { ImageResponse } from "next/og";
 import { prisma } from "@/lib/prisma";
-import { head, presignGet, projectCardKey } from "./r2";
+import { MediaNotConfiguredError, mediaObjectUrl } from "./mediaCdn";
+import { head, projectCardKey } from "./r2";
 
 export type CardKind = "gif" | "jpg";
 
@@ -21,6 +22,10 @@ const CARD_HEIGHT = 630;
 /** A card URL names its version, so a crawler holding one can be handed the
  * edge copy for as long as the signature behind it lives. */
 export const CARD_CACHE_SECONDS = 45 * 60;
+/** How long past that a crawler may be served the cached redirect while it
+ * revalidates behind the request. A token in that redirect has to outlast the
+ * whole window, or the card unfurls broken hours after it was minted. */
+export const CARD_STALE_SECONDS = 24 * 60 * 60;
 
 export interface ShareCardTarget {
   userId: string;
@@ -36,9 +41,18 @@ export async function cardUrl(
 ): Promise<string | null> {
   try {
     const key = projectCardKey(target.userId, target.projectId, kind);
-    if (!(await head(key))) return null;
-    return await presignGet(key);
-  } catch {
+    const object = await head(key);
+    if (!object) return null;
+    // The card lives on a fixed key that every re-render overwrites, so its
+    // ETag is what keeps the edge from serving the previous one.
+    return mediaObjectUrl(key, {
+      version: object.etag,
+      minLifetimeSeconds: CARD_CACHE_SECONDS + CARD_STALE_SECONDS,
+    });
+  } catch (e) {
+    // A card that isn't there yet is ordinary — the caller draws a placeholder.
+    // A deployment with no signing secret is not, and must not hide behind it.
+    if (e instanceof MediaNotConfiguredError) throw e;
     return null;
   }
 }

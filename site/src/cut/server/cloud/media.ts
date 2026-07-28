@@ -3,8 +3,9 @@
 // step. Small images (AI generations, stock tiles) still ride through the
 // server like the engine's importImage.
 import { prisma } from "@/lib/prisma";
+import { mediaObjectUrl, mediaUrlLifetime } from "./mediaCdn";
 import { getProject, takenMediaNames } from "./projects";
-import { head, presignGet, presignGetLifetime, presignPut, projectMediaKey, putObject } from "./r2";
+import { head, presignPut, projectMediaKey, putObject } from "./r2";
 import { addUsage, quotaCheck } from "./usage";
 import { caught, dedupeName, err, safeFileName } from "./util";
 
@@ -123,16 +124,37 @@ export const mediaCloud = {
       };
       if (!Array.isArray(items)) return err("items is required.", 400);
       if (items.length > PRESIGN_GET_BATCH_MAX) return err("Too many items.", 400);
-      const urls = await Promise.all(
-        items
-          .filter((i) => typeof i.projectId === "string" && typeof i.fileName === "string")
-          .map(async (i) => ({
+      const wanted = items.filter(
+        (i) => typeof i.projectId === "string" && typeof i.fileName === "string"
+      );
+      // One query for the whole batch, not one per file. It carries the version
+      // each URL needs — a filename freed by a delete can be handed out again,
+      // and the edge would serve the old object under it — and it is also how a
+      // file that no longer exists is left out instead of minted for.
+      const rows = await prisma.cutMediaObject.findMany({
+        where: {
+          userId,
+          kind: "media",
+          projectId: { in: [...new Set(wanted.map((i) => i.projectId!))] },
+        },
+        select: { projectId: true, fileName: true, updatedAt: true },
+      });
+      const versions = new Map(
+        rows.map((r) => [`${r.projectId}/${r.fileName}`, String(r.updatedAt.getTime())])
+      );
+      const urls = wanted.flatMap((i) => {
+        const fileName = safeFileName(i.fileName!);
+        const version = versions.get(`${i.projectId}/${fileName}`);
+        if (!version) return [];
+        return [
+          {
             projectId: i.projectId!,
             fileName: i.fileName!,
-            url: await presignGet(projectMediaKey(userId, i.projectId!, safeFileName(i.fileName!))),
-          }))
-      );
-      return Response.json({ urls, expiresIn: presignGetLifetime() });
+            url: mediaObjectUrl(projectMediaKey(userId, i.projectId!, fileName), { version }),
+          },
+        ];
+      });
+      return Response.json({ urls, expiresIn: mediaUrlLifetime() });
     } catch (e) {
       return caught(e, "Could not sign the media URLs.");
     }

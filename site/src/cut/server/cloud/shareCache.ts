@@ -60,9 +60,9 @@ export function shareCacheHeaders(
   };
 }
 
-/** Headers for a redirect to a signed media URL. The signature is minted in
- * fixed windows (see r2.ts), so the redirect is reusable until the window
- * turns over; keep it well inside that window. */
+/** Headers for a redirect to a signed media URL. The token is minted in fixed
+ * windows (see mediaCdn.ts), so the redirect is reusable until the window turns
+ * over; keep it well inside that window. */
 export function shareRedirectHeaders(
   share: Pick<ShareRow, "access">,
   ttlSeconds: number

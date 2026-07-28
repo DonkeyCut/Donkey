@@ -14,8 +14,9 @@ import type {
 import type { StoredAsset } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import { mediaObjectUrl } from "./mediaCdn";
 import { getProject, takenMediaNames } from "./projects";
-import { copy, del, head, libraryKey, presignGet, presignPut, projectMediaKey } from "./r2";
+import { copy, del, head, libraryKey, presignPut, projectMediaKey } from "./r2";
 import { addUsage, quotaCheck } from "./usage";
 import { caught, decodeFileParam, dedupeName, err, redirect, safeFileName, typeOf } from "./util";
 
@@ -401,7 +402,7 @@ export const libraryCloud = {
 
   async serveMedia(userId: string, file: string) {
     try {
-      return redirect(await presignGet(libraryKey(userId, decodeFileParam(file))));
+      return redirect(mediaObjectUrl(libraryKey(userId, decodeFileParam(file))));
     } catch (e) {
       return caught(e, "Bad request.", 400);
     }

@@ -1,59 +1,107 @@
-// Shared media through Cloudflare's edge.
+// Cloud media through Cloudflare's edge.
 //
-// A presigned R2 URL points at the S3 API endpoint, which Cloudflare does not
-// cache, and its signature is a bearer credential nothing can withdraw — R2
-// validates it by arithmetic, with no record that the URL was ever issued. A
-// shared link is exactly where both hurt: many viewers pull the same objects,
-// and unsharing has to mean something.
+// Every byte the browser reads out of a cloud project comes through the media
+// Worker (worker/cf/media.ts): a private R2 binding addressed by a signed token
+// this module mints. The Worker sets CORS headers itself, which is what Cut
+// needs — the preview, the filmstrips and the AI pipeline all read pixels or
+// bytes back, so they load with crossOrigin="anonymous" (lib/mediaCors.ts), and
+// a response without those headers fails to load rather than degrading.
 //
-// So shared media is served from our own hostname instead, by a Worker holding
-// a private R2 binding (worker/cf/media.ts). Tokens are ours, so they are
-// short — unsharing takes effect within one token's life — and the Worker
-// keys its cache on the object path alone, so a token that rotates every few
-// minutes still collapses onto one cached copy per object.
+// Tokens are minted on window boundaries rather than at the instant of the
+// request, so every mint inside a window yields the identical URL. That is what
+// lets a project re-mint its whole batch without disturbing playback: the store
+// compares URLs to decide what changed, and a decoder keyed on a URL that
+// rotated would be torn down and rebuilt mid-edit.
 //
-// The hostname is code (lib/hosts.ts); the signing secret is the only part
-// that belongs in the environment, and holding it is what turns this on. A
-// deployment without it presigns R2 as before.
-import { createHmac, timingSafeEqual } from "node:crypto";
+// An object rewritten in place — a preview proxy, a share card, a media filename
+// freed by a delete and handed out again — carries a `version` that joins the
+// edge cache key, so new bytes are a new cache entry instead of a wait for the
+// old one to lapse.
+//
+// The hostname is code (lib/hosts.ts); the secret is the only part that lives in
+// the environment, and the Worker must hold the identical value.
+import { createHmac } from "node:crypto";
 import { CUT_MEDIA_ORIGIN } from "@/cut/lib/hosts";
+import { mediaDownloadName } from "./mediaName";
 
-/** Token lifetime. Short on purpose — it is the revocation window, and the
- * Worker's cache key ignores the token, so shortening it costs no cache hits.
- * The client re-mints ahead of expiry (lib/mediaLinks.ts). */
-export const MEDIA_TOKEN_TTL_SECONDS = 5 * 60;
+/** Tokens are minted on boundaries of this window, so every mint inside one
+ * produces the same URL. */
+const TOKEN_WINDOW_SECONDS = 60 * 60;
 
-/** The signing secret, when this deployment has one. */
-const signingSecret = () => process.env.CUT_MEDIA_SIGNING_SECRET || null;
+/** How long past its window a token keeps working. This is the floor on any
+ * token's life and the revocation window — unsharing takes effect within this
+ * plus the window the token was minted in. It also has to clear docCache's
+ * link-reuse floor (lib/docCache.ts), or a stored batch could never be reused
+ * and every cloud project would open on origin URLs. */
+const TOKEN_GRACE_SECONDS = 60 * 60;
 
-/** Whether shared media rides the edge Worker on this deployment. */
-export const mediaCdnEnabled = () => signingSecret() != null;
-
-/** The signature over one object and expiry. Both sides derive it the same
- * way; the Worker holds the same secret and never calls back here. */
-export function mediaSignature(secret: string, key: string, expires: number): string {
-  return createHmac("sha256", secret).update(`${key}\n${expires}`).digest("base64url");
+/** A deployment without the signing secret cannot serve cloud media at all.
+ * Carried as its own type so routes answer with a server error in their own
+ * words instead of echoing this message — which names an environment variable —
+ * to whoever asked, including anonymous share viewers. */
+export class MediaNotConfiguredError extends Error {
+  constructor() {
+    super("CUT_MEDIA_SIGNING_SECRET is not set — cloud media cannot be served");
+  }
 }
 
-/** An edge URL for one R2 key, or null when this deployment has no secret. */
-export function mediaCdnUrl(key: string): string | null {
-  const secret = signingSecret();
-  if (!secret) return null;
-  const expires = Math.floor(Date.now() / 1000) + MEDIA_TOKEN_TTL_SECONDS;
-  const sig = mediaSignature(secret, key, expires);
+function signingSecret(): string {
+  const secret = process.env.CUT_MEDIA_SIGNING_SECRET;
+  if (!secret) throw new MediaNotConfiguredError();
+  return secret;
+}
+
+/** The expiry every token minted in the current window carries. `minLifetime`
+ * raises it for a URL that outlives the page that minted it — a crawler holding
+ * a share card — and still lands on a window boundary, so those URLs stay stable
+ * and cacheable too. */
+function tokenExpiry(minLifetimeSeconds = TOKEN_GRACE_SECONDS, at = Date.now()): number {
+  const windowMs = TOKEN_WINDOW_SECONDS * 1000;
+  const windowEnd = Math.ceil(at / windowMs) * windowMs;
+  return Math.floor(windowEnd / 1000) + Math.max(TOKEN_GRACE_SECONDS, minLifetimeSeconds);
+}
+
+/** Seconds the tokens minted right now stay good for, so a client re-mints
+ * ahead of expiry rather than after a 403. */
+export const mediaUrlLifetime = (): number => tokenExpiry() - Math.floor(Date.now() / 1000);
+
+/** The signature over one object, its expiry, and the download name and version
+ * it carries — both empty when absent, so the framing is one rule. Signing them
+ * is what keeps either from being edited into a URL after the fact. Both sides
+ * derive this the same way; the Worker holds the same secret and never calls
+ * back here. */
+export function mediaSignature(
+  secret: string,
+  key: string,
+  expires: number,
+  downloadName = "",
+  version = ""
+): string {
+  return createHmac("sha256", secret)
+    .update(`${key}\n${expires}\n${downloadName}\n${version}`)
+    .digest("base64url");
+}
+
+/** The browser-facing URL for one R2 object.
+ *
+ * `downloadName` makes it an attachment download under that filename.
+ * `version` must change whenever the object's bytes do, for any key written
+ * more than once. `minLifetimeSeconds` widens the token for a URL that outlives
+ * its page; everything a live page reads leaves it alone, since the token's life
+ * is the revocation window. */
+export function mediaObjectUrl(
+  key: string,
+  opts?: { downloadName?: string; version?: string; minLifetimeSeconds?: number }
+): string {
+  const expires = tokenExpiry(opts?.minLifetimeSeconds);
+  const name = opts?.downloadName ? mediaDownloadName(opts.downloadName) : "";
+  const version = opts?.version ?? "";
+  const sig = mediaSignature(signingSecret(), key, expires, name, version);
   // The key's slashes are path separators on the edge host, so each segment is
   // encoded on its own.
   const path = key.split("/").map(encodeURIComponent).join("/");
-  return `${CUT_MEDIA_ORIGIN}/${path}?e=${expires}&s=${sig}`;
-}
-
-/** Verify a token the way the Worker does. Kept beside the minting so the two
- * can never drift. */
-export function mediaTokenValid(key: string, expires: number, sig: string): boolean {
-  const secret = signingSecret();
-  if (!secret) return false;
-  if (!Number.isFinite(expires) || expires * 1000 < Date.now()) return false;
-  const expected = Buffer.from(mediaSignature(secret, key, expires));
-  const given = Buffer.from(sig);
-  return expected.length === given.length && timingSafeEqual(expected, given);
+  const query = new URLSearchParams({ e: String(expires), s: sig });
+  if (version) query.set("v", version);
+  if (name) query.set("d", name);
+  return `${CUT_MEDIA_ORIGIN}/${path}?${query.toString()}`;
 }

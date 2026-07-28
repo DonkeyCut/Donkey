@@ -6,7 +6,8 @@ import { prisma } from "@/lib/prisma";
 import { EXPORT_QUOTA_MARGIN, renderJobCheck } from "./limits";
 import { wakeRenderWorker } from "./wake";
 import { getProject } from "./projects";
-import { overlayKey, presignGet, presignPut } from "./r2";
+import { mediaObjectUrl } from "./mediaCdn";
+import { overlayKey, presignPut } from "./r2";
 import { quotaCheck } from "./usage";
 import { caught, err, redirect } from "./util";
 
@@ -188,7 +189,9 @@ export const jobsCloud = {
       if (!row || row.state !== "done" || !row.outputKey) {
         return new Response("Export not ready.", { status: 404 });
       }
-      return redirect(await presignGet(row.outputKey, row.outName ?? undefined));
+      return redirect(
+        mediaObjectUrl(row.outputKey, row.outName ? { downloadName: row.outName } : undefined)
+      );
     } catch (e) {
       return caught(e, "Export not ready.");
     }

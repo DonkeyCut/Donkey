@@ -15,10 +15,6 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 const R2_BUCKET = "donkey-cut";
 
 const PUT_EXPIRY_SECONDS = 60 * 60; // 1h — the client uploads right after presigning
-// 24h from the signing window's start (see signingWindowStart) — hydrated
-// asset URLs live a session. Clients should refresh against
-// presignGetLifetime(), which subtracts the elapsed part of the window.
-export const GET_EXPIRY_SECONDS = 24 * 60 * 60;
 
 export class R2NotConfiguredError extends Error {
   constructor() {
@@ -78,48 +74,19 @@ export function presignPut(key: string, mime: string): Promise<string> {
   );
 }
 
-/** Signatures are minted on window boundaries rather than at the current
- * instant, so the same object presigns to the same URL for everyone asking
- * within the window. A signature that changed per request made every media
- * URL unique, which meant the browser cache (and any cache in front of it)
- * could never reuse a byte — worst on a shared link, where many viewers pull
- * the same objects and one viewer re-pulls them on every reload. */
-const SIGNING_WINDOW_SECONDS = 60 * 60; // 1h
-
-/** Start of the signing window `at` falls in. Exported for the callers that
- * need to tell a client how long a URL stays good. */
-export function signingWindowStart(at: number = Date.now()): Date {
-  const ms = SIGNING_WINDOW_SECONDS * 1000;
-  return new Date(Math.floor(at / ms) * ms);
-}
-
-/** Seconds a URL minted now is still valid for: the tail of its window plus
- * the expiry. Shorter than GET_EXPIRY_SECONDS, and it is what clients should
- * refresh against. */
-export function presignGetLifetime(at: number = Date.now()): number {
-  const elapsed = (at - signingWindowStart(at).getTime()) / 1000;
-  return Math.round(GET_EXPIRY_SECONDS - elapsed);
-}
-
-export function presignGet(key: string, downloadName?: string): Promise<string> {
-  return getSignedUrl(
-    r2(),
-    new GetObjectCommand({
-      Bucket: R2_BUCKET,
-      Key: key,
-      ...(downloadName
-        ? { ResponseContentDisposition: `attachment; filename="${downloadName.replace(/"/g, "")}"` }
-        : {}),
-    }),
-    { expiresIn: GET_EXPIRY_SECONDS, signingDate: signingWindowStart() }
-  );
-}
 
 /** Object size/type, or null when the object does not exist. */
-export async function head(key: string): Promise<{ bytes: number; mime: string } | null> {
+export async function head(
+  key: string
+): Promise<{ bytes: number; mime: string; etag: string } | null> {
   try {
     const res = await r2().send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }));
-    return { bytes: Number(res.ContentLength ?? 0), mime: res.ContentType ?? "" };
+    return {
+      bytes: Number(res.ContentLength ?? 0),
+      mime: res.ContentType ?? "",
+      // Quoted on the wire, and the quotes would need escaping in a URL.
+      etag: (res.ETag ?? "").replace(/[^\w]/g, ""),
+    };
   } catch (e) {
     if (e instanceof R2NotConfiguredError) throw e;
     return null;

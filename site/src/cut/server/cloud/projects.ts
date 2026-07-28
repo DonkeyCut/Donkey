@@ -3,12 +3,8 @@
 import { normalizeAspect, type ProjectDoc, type ProjectFolder, type ProjectSummary } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import {
-  del,
-  presignGet,
-  projectExportKey,
-  projectMediaKey,
-} from "./r2";
+import { mediaObjectUrl } from "./mediaCdn";
+import { del, projectExportKey, projectMediaKey } from "./r2";
 import { addUsage } from "./usage";
 import { caught, decodeFileParam, err, redirect } from "./util";
 
@@ -323,7 +319,17 @@ export const projectsCloud = {
 
   async serveMedia(userId: string, id: string, file: string) {
     try {
-      return redirect(await presignGet(projectMediaKey(userId, id, decodeFileParam(file))));
+      const fileName = decodeFileParam(file);
+      const row = await prisma.cutMediaObject.findFirst({
+        where: { userId, projectId: id, kind: "media", fileName },
+        select: { updatedAt: true },
+      });
+      if (!row) return err("Not found.", 404);
+      return redirect(
+        mediaObjectUrl(projectMediaKey(userId, id, fileName), {
+          version: String(row.updatedAt.getTime()),
+        })
+      );
     } catch (e) {
       return caught(e, "Bad request.", 400);
     }
@@ -362,7 +368,7 @@ export const projectsCloud = {
     try {
       const fileName = decodeFileParam(file);
       const key = projectExportKey(userId, id, fileName);
-      return redirect(await presignGet(key, download ? fileName : undefined));
+      return redirect(mediaObjectUrl(key, download ? { downloadName: fileName } : undefined));
     } catch (e) {
       return caught(e, "Bad request.", 400);
     }
@@ -391,7 +397,12 @@ export const projectsCloud = {
     try {
       const row = await getProject(userId, id);
       if (!row?.previewKey) return new Response("Not found.", { status: 404 });
-      return redirect(await presignGet(row.previewKey));
+      // One fixed key that every re-render overwrites, so the version is what
+      // stops the edge serving the pre-edit proxy: the row's updatedAt moves
+      // whenever the project that produced it did.
+      return redirect(
+        mediaObjectUrl(row.previewKey, { version: String(row.updatedAt.getTime()) })
+      );
     } catch (e) {
       return caught(e, "Bad request.", 400);
     }

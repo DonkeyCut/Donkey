@@ -1,6 +1,7 @@
 import { resolveShare } from "@/cut/server/cloud/sharedView";
 import {
   CARD_CACHE_SECONDS,
+  CARD_STALE_SECONDS,
   cardUrl,
   placeholderCard,
   shareProjectName,
@@ -29,7 +30,9 @@ export async function GET(
   const target = { userId: view.share.userId, projectId: view.share.projectId };
   const cacheable = view.share.access === "public";
   const headers: Record<string, string> = cacheable
-    ? { "Cache-Control": `public, s-maxage=${CARD_CACHE_SECONDS}, stale-while-revalidate=86400` }
+    ? {
+        "Cache-Control": `public, s-maxage=${CARD_CACHE_SECONDS}, stale-while-revalidate=${CARD_STALE_SECONDS}`,
+      }
     : { "Cache-Control": "private, no-store" };
 
   if (ext === "gif" || ext === "jpg") {

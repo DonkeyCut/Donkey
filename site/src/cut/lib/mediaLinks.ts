@@ -29,7 +29,7 @@ import { mediaUrl } from "./types";
 /** Re-mint this far ahead of expiry, as a share of the whole lifetime, so a
  * five-minute token and a one-day one are both refreshed in good time. */
 const REFRESH_LEAD_FRACTION = 1 / 3;
-const MAX_REFRESH_LEAD_MS = 60 * 60 * 1000; // a day-long URL needn't lead by more
+const MAX_REFRESH_LEAD_MS = 20 * 60 * 1000; // …and a long-lived one needn't by more
 const MIN_REFRESH_LEAD_MS = 20_000; // …nor a short one by less
 const FORCED_GAP_MS = 15_000; // min gap between failure-driven re-mints
 const ELEMENT_RETRIES = 3;
@@ -109,11 +109,10 @@ function refreshSignedUrls(force = false): Promise<void> {
   return refreshing;
 }
 
-/** A URL whose access expires and can be re-minted: a presigned R2 URL, or an
- * edge media token (`?e=<expiry>&s=<signature>`). Both heal by re-minting the
- * batch; anything else does not. */
+/** A URL whose access expires and can be re-minted: an edge media token
+ * (`?e=<expiry>&s=<signature>`). It heals by re-minting the batch; anything
+ * else does not. */
 function isExpiringUrl(src: string): boolean {
-  if (src.includes("X-Amz-Signature=")) return true;
   try {
     const params = new URL(src, window.location.origin).searchParams;
     return params.has("e") && params.has("s");

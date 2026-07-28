@@ -12,6 +12,7 @@
 // This file is compiled by wrangler, not the site's tsconfig — workers globals
 // are typed loosely on purpose.
 import { parseRange } from "../../server/cloud/httpRange";
+import { contentDisposition, mediaDownloadName } from "../../server/cloud/mediaName";
 
 type R2Range = { offset: number; length?: number };
 type R2Object = {
@@ -41,7 +42,13 @@ const EDGE_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 const encoder = new TextEncoder();
 
-async function signatureFor(secret: string, key: string, expires: number): Promise<string> {
+async function signatureFor(
+  secret: string,
+  key: string,
+  expires: number,
+  downloadName: string,
+  version: string
+): Promise<string> {
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
     encoder.encode(secret),
@@ -49,7 +56,11 @@ async function signatureFor(secret: string, key: string, expires: number): Promi
     false,
     ["sign"]
   );
-  const mac = await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(`${key}\n${expires}`));
+  const mac = await crypto.subtle.sign(
+    "HMAC",
+    cryptoKey,
+    encoder.encode(`${key}\n${expires}\n${downloadName}\n${version}`)
+  );
   // base64url, matching node's digest("base64url") on the signing side.
   let binary = "";
   for (const byte of new Uint8Array(mac)) binary += String.fromCharCode(byte);
@@ -76,8 +87,20 @@ function sameSignature(a: string, b: string): boolean {
 // URL is already full access, and no credentials ride these requests.
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges, ETag",
+  "Access-Control-Expose-Headers":
+    "Content-Length, Content-Range, Accept-Ranges, ETag, Content-Disposition",
 };
+
+/** An attachment download is the same bytes with one more header, so the cached
+ * entry stays the plain object and the header goes on the way out — the cache key
+ * ignores the download name, and a stored Content-Disposition would otherwise
+ * leak onto every later inline read of that object. */
+function asDownload(res: Response, downloadName: string): Response {
+  if (!downloadName) return res;
+  const out = new Response(res.body, res);
+  out.headers.set("Content-Disposition", contentDisposition(downloadName));
+  return out;
+}
 
 function baseHeaders(object: R2Object): Headers {
   const headers = new Headers();
@@ -117,23 +140,43 @@ export async function serveMedia(
     });
   }
   const url = new URL(request.url);
-  const key = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
+  // A stray percent in the path is a malformed request, not a fault: decoding it
+  // throws, and an uncaught throw here is a Cloudflare exception page against
+  // this Worker's error rate instead of the 404 it should be.
+  let key: string;
+  try {
+    key = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
+  } catch {
+    return refuse("Not found.", 404);
+  }
   const expires = Number(url.searchParams.get("e"));
   const sig = url.searchParams.get("s") ?? "";
+  // Both are signed, so neither can be edited in after the fact. The name is
+  // sanitized by the same rule that signed it, so the two agree by construction.
+  const downloadName = mediaDownloadName(url.searchParams.get("d") ?? "");
+  const version = url.searchParams.get("v") ?? "";
   if (!key || !sig || !Number.isFinite(expires)) return refuse("Not found.", 404);
   // Expiry first: an expired token is the ordinary case once a share is
   // revoked, and it costs nothing to answer.
   if (expires * 1000 < Date.now()) return refuse("Link expired.", 403);
   if (!env.CUT_MEDIA_SIGNING_SECRET) return refuse("Not configured.", 500);
-  if (!sameSignature(sig, await signatureFor(env.CUT_MEDIA_SIGNING_SECRET, key, expires))) {
-    return refuse("Forbidden.", 403);
-  }
+  const expected = await signatureFor(
+    env.CUT_MEDIA_SIGNING_SECRET,
+    key,
+    expires,
+    downloadName,
+    version
+  );
+  if (!sameSignature(sig, expected)) return refuse("Forbidden.", 403);
 
-  // The cache key is the object, never the token: tokens rotate every few
-  // minutes and every viewer holds a different one, so keying on the full URL
-  // would mean a miss per viewer per rotation. The stored entry is the whole
+  // The cache key is the object and its version, never the token: tokens rotate
+  // and every viewer holds a different one, so keying on the full URL would mean
+  // a miss per viewer per rotation. The version is what a rewritten object
+  // changes — without it, a fixed key like a project's preview proxy would serve
+  // its pre-edit bytes for the whole edge TTL. The stored entry is the whole
   // object; a Range on the lookup is what makes the cache answer 206 from it.
-  const cacheUrl = `${url.origin}/${url.pathname.replace(/^\/+/, "")}`;
+  const cacheUrl =
+    `${url.origin}/${url.pathname.replace(/^\/+/, "")}` + (version ? `?v=${version}` : "");
   const storeKey = new Request(cacheUrl, { method: "GET" });
   const rangeHeader = request.headers.get("range");
   const lookupKey = rangeHeader
@@ -141,7 +184,7 @@ export async function serveMedia(
     : storeKey;
   const cache = caches.default;
   const hit = await cache.match(lookupKey);
-  if (hit) return hit;
+  if (hit) return asDownload(hit, downloadName);
 
   // The size is only needed to resolve a range; a whole-object request skips
   // this and reads it off the object it is already fetching.
@@ -180,7 +223,7 @@ export async function serveMedia(
     headers.set("Content-Range", `bytes ${range.start}-${range.end}/${size}`);
     headers.set("Content-Length", String(range.end - range.start + 1));
     if (size <= MAX_CACHEABLE_BYTES) ctx.waitUntil(warm());
-    return new Response(part.body, { status: 206, headers });
+    return asDownload(new Response(part.body, { status: 206, headers }), downloadName);
   }
 
   const object = await env.CUT_MEDIA.get(key);
@@ -191,5 +234,5 @@ export async function serveMedia(
   // Past Cloudflare's ceiling the put would fail, so it is not attempted;
   // those objects stream from R2 every time rather than breaking.
   if (object.size <= MAX_CACHEABLE_BYTES) ctx.waitUntil(cache.put(storeKey, full.clone()));
-  return full;
+  return asDownload(full, downloadName);
 }

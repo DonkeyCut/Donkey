@@ -1,13 +1,21 @@
 import path from "node:path";
+import { MediaNotConfiguredError } from "./mediaCdn";
 import { R2NotConfiguredError } from "./r2";
 
 export const err = (message: string, status: number) =>
   Response.json({ error: message }, { status });
 
-export const caught = (e: unknown, fallback: string, status = 500) =>
-  e instanceof R2NotConfiguredError
-    ? err(e.message, 500)
-    : err(e instanceof Error ? e.message : fallback, status);
+export const caught = (e: unknown, fallback: string, status = 500) => {
+  if (e instanceof R2NotConfiguredError) return err(e.message, 500);
+  // The real reason belongs in the server's logs, not in a response an
+  // anonymous share viewer reads: it names the environment variable to set.
+  // 5xx also keeps the client's retry — a 4xx reads as "stop asking".
+  if (e instanceof MediaNotConfiguredError) {
+    console.error(e.message);
+    return err("Cloud media is unavailable.", 500);
+  }
+  return err(e instanceof Error ? e.message : fallback, status);
+};
 
 export const redirect = (url: string, headers: Record<string, string> = {}) =>
   new Response(null, { status: 302, headers: { Location: url, ...headers } });
