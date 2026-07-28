@@ -11,14 +11,6 @@ export type AnalyticsEvents = {
   home_download_clicked: { location: "hero" | "final_cta" };
   // Install prompts on the Cut app home's connect gate.
   app_install_clicked: { source: "connect_gate_button" | "connect_gate_link" };
-  // Cut cloud mode turned on (the cut-web-mode account flag).
-  cut_cloud_enable_clicked: {
-    source:
-      | "connect_gate_install"
-      | "connect_gate_ask"
-      | "connect_gate_blocked"
-      | "settings_flags";
-  };
   // Cut projects home.
   project_created: { source: "projects_home" | "sidebar" | "file_import" };
   folder_created: void;

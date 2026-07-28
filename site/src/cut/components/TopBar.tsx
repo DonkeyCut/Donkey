@@ -28,7 +28,6 @@ import { cloudBackend } from "@/cut/lib/backend/cloud";
 import { cloudUsageQueryKey, useCutMode } from "@/cut/lib/backend/hooks";
 import { localBackend } from "@/cut/lib/backend/local";
 import { clearProjectThreads } from "@/cut/lib/chatThreads";
-import { useWebMode } from "@/cut/lib/flags";
 import { backTarget, projectHref, useCutBase } from "@/cut/lib/nav";
 import { copyProjectAcross } from "@/cut/lib/projectCopy";
 import { useEditor } from "@/cut/lib/store";
@@ -187,14 +186,13 @@ export function TopBar({
     endEditing();
   };
 
-  // "Move to Cloud" (cut-web-mode flag): copies this local project — doc and
-  // every media file — to the cloud, deletes the local original, and reopens
-  // the editor on the cloud copy.
-  const webMode = useWebMode();
+  // "Move to Cloud": copies this local project — doc and every media file — to
+  // the cloud, deletes the local original, and reopens the editor on the cloud
+  // copy.
   const cutMode = useCutMode();
-  const canMoveToCloud = webMode && cutMode === "local";
+  const canMoveToCloud = cutMode === "local";
   // Cloud imports are real uploads worth reporting; local imports are instant
-  // disk copies, so the flag-off surface stays exactly as it was.
+  // disk copies, so they report nothing.
   const cloudUploading = uploading > 0 && cutMode === "cloud";
   // Uploads settle in bursts; refresh the storage pill's number when a burst
   // ends. Only the settling edge counts — on mount nothing has landed yet.

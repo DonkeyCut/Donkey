@@ -1,8 +1,7 @@
 // The backend seam: every Cut API call dispatches through the active backend.
-// The app runs local (the engine on this Mac) unless the ConnectGate put it in
-// cloud mode — web mode with no engine present, behind the `cut-web-mode`
-// flag. Call sites keep the exact apiFetch/apiUrl/apiJson shapes they always
-// had; only the import moved from ../api to this module.
+// The app runs local (the engine on this Mac) when the ConnectGate reached one,
+// and in the cloud otherwise. Call sites keep the exact apiFetch/apiUrl/apiJson
+// shapes they always had; only the import moved from ../api to this module.
 //
 // This module stays React-free: the engine binary compiles lib/types.ts, which
 // imports apiUrl from here. React hooks live in ./hooks.

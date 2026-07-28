@@ -6,7 +6,6 @@ import { engineOrigin, servedFromEngine } from "./api";
 import { getBackend, type CutBackend, type CutMode } from "./backend";
 import { cloudBackend } from "./backend/cloud";
 import { localBackend } from "./backend/local";
-import { webModeEnabled } from "./flags";
 import {
   cancelExportJob,
   createExportJob,
@@ -21,10 +20,10 @@ import { useGenNotify } from "./genNotify";
 // starting an export in one project while another still renders just adds a row.
 // The dock (ExportsDock) renders it; the engine does the queueing.
 //
-// With web mode on, local and cloud jobs can be in flight at once, so the
-// store reflects both backends' feeds; each row is tagged with the residency
-// it came from and every per-row action goes to that row's own backend — the
-// globally bound mode rebinds whenever a project of the other residency opens.
+// Local and cloud jobs can be in flight at once, so the store reflects both
+// backends' feeds; each row is tagged with the residency it came from and
+// every per-row action goes to that row's own backend — the globally bound
+// mode rebinds whenever a project of the other residency opens.
 
 export interface ExportJob {
   id: string;
@@ -184,14 +183,12 @@ export const useExports = create<ExportsState>((set, get) => ({
         return null;
       }
     };
-    // Flag off: exactly the pre-seam behavior — the local feed only. Flag on,
-    // jobs of both residencies can run at once, so poll every plausible feed:
-    // local when an engine is actually reachable, cloud always.
-    const cloudOn = webModeEnabled();
-    const pollLocal = !cloudOn || engineOrigin() !== "" || servedFromEngine();
+    // Jobs of both residencies can run at once, so poll every feed this
+    // browser can reach: the cloud always, local once an engine has answered.
+    const pollLocal = engineOrigin() !== "" || servedFromEngine();
     const [localRows, cloudRows] = await Promise.all([
       pollLocal ? fetchFeed(localBackend) : Promise.resolve(null),
-      cloudOn ? fetchFeed(cloudBackend) : Promise.resolve(null),
+      fetchFeed(cloudBackend),
     ]);
     set((s) => {
       // A failed or skipped feed keeps its previous rows; only a fresh answer

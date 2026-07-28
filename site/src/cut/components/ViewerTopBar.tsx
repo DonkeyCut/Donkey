@@ -6,7 +6,6 @@ import { authHrefFor } from "@/app/_components/landing/useAppEntryHref";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/cut/lib/backend";
 import { quotaErrorMessage } from "@/cut/lib/backend/cloud";
-import { enableWebMode } from "@/cut/lib/flags";
 import { projectHref, useCutBase } from "@/cut/lib/nav";
 import { useEditor } from "@/cut/lib/store";
 import { authClient } from "@/lib/auth-client";
@@ -54,9 +53,6 @@ export function ViewerTopBar() {
           error?: string;
         };
         if (job.state === "done" && job.newProjectId) {
-          // The copy is a cloud project, so cloud editing must be on for
-          // this account before the editor opens it.
-          await enableWebMode();
           window.location.href = projectHref(base, job.newProjectId, "projects");
           return;
         }

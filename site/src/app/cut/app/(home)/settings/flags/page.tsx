@@ -2,15 +2,13 @@
 
 import { useEffect, useState } from "react";
 
-import { track } from "@/lib/analytics";
 import { Switch } from "@/components/ui/switch";
-import { applyWebModeLocal } from "@/cut/lib/flags";
 
 type FlagRow = { id: string; title: string; description: string; enabled: boolean };
 
-// Self-serve account feature flags. The account is the source of truth; the
-// Cut client mirrors "cut-web-mode" locally so the editor reacts to a flip
-// without a reload.
+// Self-serve account feature flags. The account is the source of truth: the
+// switch writes the row and the page holds the new state optimistically until
+// the write answers.
 export default function CutFeatureFlagsPage() {
   const [flags, setFlags] = useState<FlagRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,19 +31,14 @@ export default function CutFeatureFlagsPage() {
 
   const toggle = (id: string, enabled: boolean) => {
     setFlags((cur) => cur?.map((f) => (f.id === id ? { ...f, enabled } : f)) ?? cur);
-    if (id === "cut-web-mode") {
-      applyWebModeLocal(enabled);
-      if (enabled) track("cut_cloud_enable_clicked", { source: "settings_flags" });
-    }
     void fetch("/api/account/feature-flags", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ flag: id, enabled }),
     }).then((res) => {
       if (res.ok) return;
-      // The account write failed; put the switch (and the mirror) back.
+      // The account write failed; put the switch back.
       setFlags((cur) => cur?.map((f) => (f.id === id ? { ...f, enabled: !enabled } : f)) ?? cur);
-      if (id === "cut-web-mode") applyWebModeLocal(!enabled);
       setError("Couldn't save that change — try again.");
     });
   };
@@ -55,6 +48,11 @@ export default function CutFeatureFlagsPage() {
       <div className="rounded-xl border bg-card p-5">
         {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
         {!flags && !error && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {flags?.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            There are no early features to turn on right now.
+          </p>
+        )}
         {flags?.map((f, i) => (
           <div key={f.id} className={i > 0 ? "mt-4 border-t pt-4" : undefined}>
             <div className="flex items-start justify-between gap-6">

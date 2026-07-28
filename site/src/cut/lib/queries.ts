@@ -20,9 +20,9 @@ import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-quer
 import { useEffect } from "react";
 
 import { engineLost } from "./api";
+import { cutMode } from "./backend";
 import { useCutMode } from "./backend/hooks";
 import { readSnapshot, snapshotKey, writeSnapshot } from "./cache";
-import { webModeEnabled } from "./flags";
 import { fetchLibrary, type LibraryData } from "./library";
 import { availableResidencies, backendFor, type Residency } from "./residency";
 import type { ProjectFolder, ProjectSummary } from "./types";
@@ -88,9 +88,11 @@ export function useProjectsSection(r: Residency, enabled: boolean) {
         writeSnapshot(snapshotKey(r, "projects"), data);
         return data;
       } catch (err) {
-        if (r === "local" && !webModeEnabled()) {
-          // The engine on this Mac stopped answering; the ConnectGate takes
-          // the screen back over until it returns.
+        if (r === "local" && cutMode() === "local") {
+          // The engine this app is running on stopped answering; the
+          // ConnectGate falls back to the cloud and says so. A cloud-bound app
+          // whose local shelf hiccups keeps running — that failure is one
+          // section's error, not the ground moving.
           engineLost();
         }
         throw err;

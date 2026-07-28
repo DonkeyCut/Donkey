@@ -61,7 +61,6 @@ import {
   type Residency,
 } from "@/cut/lib/queries";
 import { useInView } from "@/cut/hooks/useInView";
-import { useWebMode } from "@/cut/lib/flags";
 import { track } from "@/lib/analytics";
 import { authClient } from "@/lib/auth-client";
 import { useStartCheckout } from "@/queries/billing";
@@ -168,15 +167,17 @@ export function ProjectsHome() {
   const mode = useCutMode();
   // The home never runs in shared mode; anything non-cloud lists as local.
   const homeMode: Residency = mode === "cloud" ? "cloud" : "local";
-  const webMode = useWebMode();
   const { data: session } = authClient.useSession();
   // Which backends this home lists. Engine presence is what the ConnectGate
   // already resolved for this tab (same-origin page, or a memoized loopback
   // origin) — never a fresh probe, which could raise the browser's
   // local-network prompt.
   const engineUp = servedFromEngine() || engineOrigin() !== "";
-  const residencies: Residency[] =
-    !webMode || !session ? ["local"] : engineUp ? ["local", "cloud"] : ["cloud"];
+  const residencies: Residency[] = !session
+    ? ["local"]
+    : engineUp
+      ? ["local", "cloud"]
+      : ["cloud"];
   const dual = residencies.length > 1;
   const r0 = residencies[0];
 
