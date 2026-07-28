@@ -27,6 +27,21 @@ export function overlayKeysOf(job: ClaimedJob): string[] {
 }
 
 /**
+ * Run `render` against a fresh work dir and remove the dir once the job is
+ * completely finished, derived artifacts and all. The cleanup lives out here
+ * on purpose: inside the run, a `return somePromise` would hand back work that
+ * still needs those files while the `finally` deleted them out from under it.
+ */
+async function inWorkDir<T>(render: (work: string) => Promise<T>): Promise<T> {
+  const work = await mkdtemp(path.join(os.tmpdir(), "cut-worker-"));
+  try {
+    return await render(work);
+  } finally {
+    void rm(work, { recursive: true, force: true });
+  }
+}
+
+/**
  * Run one export, preview, or card job: stage a project-shaped work dir
  * (media/ + overlay PNGs in the pipeline tmp dir), render through the engine's
  * shared pipeline, and land the result back in R2 — the mp4 for an export or
@@ -50,8 +65,7 @@ export async function runExportJob(
         : "export";
   const preview = mode === "preview";
 
-  const work = await mkdtemp(path.join(os.tmpdir(), "cut-worker-"));
-  try {
+  return inWorkDir(async (work) => {
     // The pipeline reads overlay/caption PNGs from handle.tmpDir by base name
     // and writes its encode intermediate there too — mirror the engine's
     // uploaded-PNG staging.
@@ -115,7 +129,5 @@ export async function runExportJob(
         .catch(() => {});
     }
     return { outputKey: key, outName };
-  } finally {
-    void rm(work, { recursive: true, force: true });
-  }
+  });
 }
