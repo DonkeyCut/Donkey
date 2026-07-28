@@ -538,12 +538,13 @@ function MediaPanel({
           </div>
         )}
         {assets.length === 0 && !importing ? (
-          <div className="mx-3.5 px-4 py-7 text-center text-xs leading-relaxed text-muted-foreground">
+          <div className="px-2 py-7 text-center text-xs leading-relaxed text-balance text-muted-foreground">
             <div className="mb-3 flex justify-center gap-3.5">
               <Film className="size-5" />
               <Music className="size-5" />
             </div>
-            Drop videos and music anywhere, or upload to this project.
+            Drop videos, images, or audio here. They&apos;ll only be available
+            in this project.
           </div>
         ) : (
           <div className="grid grid-cols-2 content-start gap-2.5 px-3.5">

@@ -407,10 +407,11 @@ export function LibraryView() {
         >
           <div className="flex flex-col items-center gap-3 text-center">
             <FolderOpen className="size-8 text-muted-foreground" />
-            <div className="text-base font-medium">Your library is empty</div>
+            <div className="text-base font-medium">
+              Your Library is shared across all projects.
+            </div>
             <p className="max-w-xs text-sm text-muted-foreground">
-              Add intros, outros, logo stings, and music once — reuse them in
-              every cut.
+              Drag and drop videos, images, or audio files here.
             </p>
           </div>
         </button>
