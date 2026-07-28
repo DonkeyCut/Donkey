@@ -1,4 +1,4 @@
-import { apiUrl } from "./backend";
+import { getBackend, type CutBackend } from "./backend";
 import type { VideoProject } from "./genvideo/types";
 
 export type AssetType = "video" | "audio" | "image";
@@ -844,8 +844,15 @@ export interface ProjectSummary {
   sizeBytes?: number;
 }
 
-export const mediaUrl = (projectId: string, fileName: string) =>
-  apiUrl(`/api/cut/projects/${projectId}/media/${encodeURIComponent(fileName)}`);
+/** A project media file's URL. Work that outlives navigation (a generation
+ * landing after the user left the project) pins the backend it started on and
+ * must pass it: resolving the ambient backend here instead would address a
+ * cloud project's bytes at the local engine, or the reverse, and the asset
+ * would carry that wrong address for as long as it lives. */
+export const mediaUrl = (projectId: string, fileName: string, backend?: CutBackend) =>
+  (backend ?? getBackend()).url(
+    `/api/cut/projects/${projectId}/media/${encodeURIComponent(fileName)}`
+  );
 
 /** A filename-safe slug from a display name: lowercased, every run of
  * non-alphanumerics collapsed to a hyphen, trimmed and capped, with `fallback`

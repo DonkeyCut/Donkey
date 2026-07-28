@@ -231,10 +231,10 @@ export async function uploadProjectImage(
     if (!res.ok || !body.fileName) {
       throw new Error(quotaErrorMessage(res.status, body) ?? body.error ?? failMessage);
     }
-    return { ...body, url: mediaUrl(projectId, body.fileName) };
+    return { ...body, url: mediaUrl(projectId, body.fileName, backend) };
   }
   const stored = await uploadProjectMediaTo(backend, projectId, file, fileName);
-  const url = mediaUrl(projectId, stored);
+  const url = mediaUrl(projectId, stored, backend);
   const dims = await loadImageMeta(url);
   return {
     id: uid(),
@@ -388,7 +388,7 @@ export async function importFileToProject(
   if (!type) return null;
 
   const fileName = await uploadProjectMediaTo(backend, projectId, file, file.name);
-  const url = mediaUrl(projectId, fileName);
+  const url = mediaUrl(projectId, fileName, backend);
   const meta = await probeMedia(type, url);
   return {
     id: uid(),
@@ -514,7 +514,12 @@ export async function importUrlMedia(
   }
   const assets: MediaAsset[] = [];
   for (const f of body.files ?? []) {
-    const asset = await assetFromProjectFile(projectId, f.fileName, f.title || "Imported clip");
+    const asset = await assetFromProjectFile(
+      projectId,
+      f.fileName,
+      f.title || "Imported clip",
+      backend
+    );
     useEditor.getState().addAsset(asset);
     void enrichAsset(asset);
     assets.push(asset);
@@ -564,9 +569,10 @@ async function pollImportUrlJob(
 export async function assetFromProjectFile(
   projectId: string,
   fileName: string,
-  name: string
+  name: string,
+  backend: CutBackend = getBackend()
 ): Promise<MediaAsset> {
-  const url = mediaUrl(projectId, fileName);
+  const url = mediaUrl(projectId, fileName, backend);
   const asset: MediaAsset = {
     id: uid(),
     fileName,
