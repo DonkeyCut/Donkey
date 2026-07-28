@@ -1,29 +1,20 @@
 name: Release Donkey
 
 on:
-  # Every push that changes code shipping inside the Mac app cuts a patch release.
-  # The path list mirrors the ` [rebuild]` commit-subject rule in CLAUDE.md: the Swift
-  # app, the Cut engine sources bun compiles into the bundled binary, and the packaging
-  # scripts. Site-only changes take no release.
+  # A push cuts a patch release when it carries the ` [rebuild]` label — the
+  # commit-subject rule in CLAUDE.md. Whether a change needs a new Mac app build is
+  # the author's call, stated in the commit, rather than something inferred from the
+  # paths it touched: the engine compiles a handful of shared modules that also serve
+  # the hosted page, so a path list either releases site-only edits or misses app ones.
+  # Every push runs the gate; only a labelled one reaches the build.
   #
-  # The tools recipe (tools/**, fetch-bundled-tools.sh) is deliberately absent. Those
+  # The tools recipe (tools/**, fetch-bundled-tools.sh) goes the long way round. Those
   # changes go to Publish Bundled Tools first, which builds the new bundle, commits the
   # manifest pinning it, and then dispatches this workflow. Releasing on the recipe push
   # too would ship a build that still stages the previous bundle.
   push:
     branches:
       - main
-    paths:
-      - apps/**
-      - site/src/cut/engine/**
-      - site/src/cut/server/**
-      - site/src/cut/lib/**
-      - site/scripts/build-cut-engine.sh
-      - scripts/package-donkey-app.sh
-      - scripts/ensure-bundled-tools.sh
-      - scripts/sign-bundled-tools.sh
-      - scripts/promote-github-release.py
-      - .github/workflows/promote-donkey-release.yml
   workflow_dispatch:
     inputs:
       bump:
@@ -85,6 +76,20 @@ jobs:
             if [[ -n "$existing" ]]; then
               should_release=false
               echo "::notice::${target_sha} is already released as ${existing}; skipping."
+            fi
+          fi
+
+          # A push ships only what asked to ship. The ` [rebuild]` label marks a commit
+          # whose code goes inside the Mac app; with none since the last release there is
+          # nothing new to build, and the appcast commit this workflow pushes itself is the
+          # commonest such push. The whole range is read rather than the pushed commits, so
+          # a labelled commit still ships when its own run is skipped or queued behind
+          # another. A manual run bypasses the check: the run is the ask.
+          if [[ "$GITHUB_EVENT_NAME" == "push" && "$should_release" == "true" ]]; then
+            last_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' HEAD 2>/dev/null || true)"
+            if ! git log --format=%s "${last_tag:+$last_tag..}HEAD" | grep -qE '\[rebuild\][[:space:]]*$'; then
+              should_release=false
+              echo "::notice::No [rebuild] commit since ${last_tag:-the start of history}; skipping."
             fi
           fi
 

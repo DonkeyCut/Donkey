@@ -17,24 +17,35 @@ download URL and the appcast enclosure URL point at
 
 | | `Release Donkey` | `Nightly Donkey Build` |
 |---|---|---|
-| Trigger | push to the default branch touching app code, or a bundled-tools republish — both always patch; plus manual: choose `patch`, `minor`, or `major` | nightly at 09:00 UTC, plus manual |
+| Trigger | a ` [rebuild]` commit pushed to the default branch, or a bundled-tools republish — both always patch; plus manual: choose `patch`, `minor`, or `major` | nightly at 09:00 UTC, plus manual |
 | Tag | numeric SemVer `vMAJOR.MINOR.PATCH` (starts at `0.1.0`) | moving `nightly` tag |
 | Release | numeric GitHub Release, marked GitHub's latest | `Donkey Nightly Build` prerelease |
 | Assets | `Donkey.dmg` + `Donkey.dmg.sha256` | `Donkey.dmg` + `Donkey.dmg.sha256` |
 | Appcast / website | updates `site/public/appcast.xml` and the website download constant, commits both | untouched |
 | Alias tags | moves `vMAJOR`, `vMAJOR.MINOR`, `latest` | untouched |
 | Retention | keeps the latest 10 numeric releases; deletes older release records (never tags or the nightly prerelease) | n/a |
-| Skip condition | a pushed commit that already carries a numeric release tag | skips when the `nightly` tag already points at the default-branch commit |
+| Skip condition | no ` [rebuild]` commit since the last release, or a pushed commit that already carries a numeric release tag | skips when the `nightly` tag already points at the default-branch commit |
 
 Use nightly builds to smoke-test the latest default-branch app package. Use
 `Release Donkey` to publish a user-facing release.
 
 ## What Triggers a Release
 
-A push releases when it touches the Swift app, the Cut engine sources compiled
-into the bundled binary, or the packaging scripts. Hosted site changes leave
-the release alone. That path list is the same boundary as the ` [rebuild]`
-commit-subject rule: a commit that needs a new Mac app build cuts a release.
+The commit says so. A subject ending in ` [rebuild]` means the change ships
+inside the Mac app — the Swift app, the Cut engine sources compiled into the
+bundled binary, the packaging scripts — and a push carrying one cuts a release.
+Anything else lands on the site alone and no build runs.
+
+The label is the trigger rather than the paths a commit touched, because the
+two aren't the same question. The engine compiles shared modules that also
+serve the hosted page, so a path list either releases site-only edits or misses
+app ones; whether a change needs to reach users' Macs is a judgement the author
+already made.
+
+The gate looks for the label anywhere between the last released tag and the
+branch tip, not just in the commits of one push. A labelled commit that arrives
+while another release is building, or whose own run is skipped, still ships on
+the next push rather than waiting for someone to notice.
 
 The bundled tools take the long way round, because their recipe and the bundle
 the app actually stages move at different times. A push to the tools recipe
