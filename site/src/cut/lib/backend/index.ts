@@ -5,6 +5,7 @@
 //
 // This module stays React-free: the engine binary compiles lib/types.ts, which
 // imports apiUrl from here. React hooks live in ./hooks.
+import { engineOrigin, servedFromEngine } from "../api";
 import { cloudBackend } from "./cloud";
 import { localBackend } from "./local";
 import { sharedBackend } from "./shared";
@@ -68,6 +69,18 @@ export function subscribeCutMode(onChange: () => void) {
 export function getBackend(): CutBackend {
   const mode = cutMode();
   return mode === "cloud" ? cloudBackend : mode === "shared" ? sharedBackend : localBackend;
+}
+
+/**
+ * Whether work can run on this Mac: the gate resolved the engine's origin, or
+ * the page is served by it. Where a job *runs* is a separate question from
+ * where the project's data lives — speech and encoding belong on the Mac
+ * whenever the app is there, even for a cloud project, because it costs the
+ * user nothing and answers faster. The result still lands through the
+ * project's own backend, so where the work ran never decides where data goes.
+ */
+export function hasLocalCompute(): boolean {
+  return servedFromEngine() || engineOrigin() !== "";
 }
 
 /** fetch() against the active backend. */

@@ -6,6 +6,7 @@ import { exportApi } from "./export";
 import { libraryApi } from "./library";
 import { micApi } from "./mic";
 import { projectsApi } from "./projects";
+import { sttApi } from "./stt";
 
 type TableHandler = (req: Request, params: Record<string, string>) => Response | Promise<Response>;
 
@@ -77,6 +78,9 @@ export const CUT_ROUTES: CutRoute[] = [
   { method: "GET", path: "/api/cut/export/:jobId", handler: (req, p) => exportApi.status(req, { jobId: p.jobId }) },
   { method: "DELETE", path: "/api/cut/export/:jobId", handler: (req, p) => exportApi.cancel(req, { jobId: p.jobId }) },
   { method: "GET", path: "/api/cut/export/:jobId/file", handler: (req, p) => exportApi.file(req, { jobId: p.jobId }) },
+
+  { method: "POST", path: "/api/cut/stt", handler: (req) => sttApi.create(req) },
+  { method: "GET", path: "/api/cut/stt/:jobId", handler: (req, p) => sttApi.status(req, { jobId: p.jobId }) },
 
   { method: "POST", path: "/api/cut/mic/start", handler: (req) => micApi.start(req) },
   { method: "POST", path: "/api/cut/mic/:id/feed", handler: (req, p) => micApi.feed(req, { id: p.id }) },

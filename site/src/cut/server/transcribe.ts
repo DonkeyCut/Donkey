@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { assertLocalRuntime } from "./local-only";
@@ -148,21 +148,83 @@ export function groupWords(words: Word[]): Cue[] {
   return cues;
 }
 
+/** Cues from one cut-stt run: drop what the model emits degenerate, clamp to
+ * the audio's own length, and group the words into caption-sized cues. */
+function cuesFromStt(out: string, duration: number): Cue[] {
+  const parsed = JSON.parse(out) as { words: Word[] };
+  const words = parsed.words
+    .filter((w) => w.w.trim().length > 0 && w.t1 > w.t0 - 0.001)
+    .map((w) => ({
+      t0: Math.max(0, Math.min(w.t0, duration)),
+      t1: Math.max(0, Math.min(w.t1, duration)),
+      w: w.w.trim(),
+    }))
+    .filter((w) => w.t1 > w.t0);
+  return groupWords(words);
+}
+
+/**
+ * Transcribe audio the caller hands over, for a project this engine does not
+ * store. A cloud project's media lives in R2, so the browser renders its
+ * audible mix (the same graph runTranscribe builds with ffmpeg) and posts the
+ * wav here — on-device speech then works whatever holds the project, and its
+ * real word timings beat the hosted route's interpolated ones. Shares the
+ * registry with the project path, so heavy speech still runs one at a time.
+ */
+export async function createAudioTranscribeJob(
+  audio: Uint8Array,
+  opts: { locale?: string; duration?: number } = {}
+): Promise<TranscribeJob> {
+  assertLocalRuntime();
+  const id = crypto.randomUUID().slice(0, 12);
+  if (runningCount() >= MAX_RUNNING) return busyJob(id, "");
+  const job: TranscribeJob = { id, projectId: "", status: "running", stage: "model" };
+  jobs.set(job.id, job);
+  void runAudioTranscribe(job, audio, opts)
+    .catch((err: unknown) => {
+      job.status = "error";
+      job.error = err instanceof Error ? err.message : String(err);
+    })
+    .finally(() => retire(job));
+  return job;
+}
+
+async function runAudioTranscribe(
+  job: TranscribeJob,
+  audio: Uint8Array,
+  { locale, duration }: { locale?: string; duration?: number }
+) {
+  const tmpDir = await mkdtemp(path.join(os.tmpdir(), "veditor-stt-"));
+  try {
+    const wav = path.join(tmpDir, "mix.wav");
+    await writeFile(wav, audio);
+    const bin = await ensureStt();
+    job.stage = "transcribe";
+    const out = await run(bin, [wav, locale ?? "en-US"]);
+    job.cues = cuesFromStt(out, duration && duration > 0 ? duration : Infinity);
+    job.status = "done";
+  } finally {
+    void rm(tmpDir, { recursive: true, force: true });
+  }
+}
+
+function busyJob(id: string, projectId: string): TranscribeJob {
+  const job: TranscribeJob = {
+    id,
+    projectId,
+    status: "error",
+    stage: "audio",
+    error: "A transcription is already running — wait for it to finish.",
+  };
+  jobs.set(id, job);
+  retire(job);
+  return job;
+}
+
 export async function createTranscribeJob(spec: TranscribeSpec): Promise<TranscribeJob> {
   assertLocalRuntime();
   const id = crypto.randomUUID().slice(0, 12);
-  if (runningCount() >= MAX_RUNNING) {
-    const job: TranscribeJob = {
-      id,
-      projectId: spec.projectId,
-      status: "error",
-      stage: "audio",
-      error: "A transcription is already running — wait for it to finish.",
-    };
-    jobs.set(id, job);
-    retire(job);
-    return job;
-  }
+  if (runningCount() >= MAX_RUNNING) return busyJob(id, spec.projectId);
   const job: TranscribeJob = {
     id,
     projectId: spec.projectId,
@@ -323,18 +385,7 @@ async function runTranscribe(job: TranscribeJob, spec: TranscribeSpec) {
 
     job.stage = "transcribe";
     const out = await run(bin, [wav, spec.locale ?? "en-US"]);
-    const parsed = JSON.parse(out) as { words: Word[] };
-    // Clamp to the cut and drop anything degenerate the model emits.
-    const words = parsed.words
-      .filter((w) => w.w.trim().length > 0 && w.t1 > w.t0 - 0.001)
-      .map((w) => ({
-        t0: Math.max(0, Math.min(w.t0, spec.duration)),
-        t1: Math.max(0, Math.min(w.t1, spec.duration)),
-        w: w.w.trim(),
-      }))
-      .filter((w) => w.t1 > w.t0);
-
-    job.cues = groupWords(words);
+    job.cues = cuesFromStt(out, spec.duration);
     job.status = "done";
   } finally {
     void rm(tmpDir, { recursive: true, force: true });

@@ -1,13 +1,14 @@
 "use client";
 
-// Hosted transcription. The cloud backend has no on-device speech engine, so
-// the browser does the audio work itself: render the timeline's audible mix
-// with an OfflineAudioContext (the same trims/speeds/volumes/crossfades the
-// engine's ffmpeg graph applies — see server/transcribe.ts), chunk it as
-// 16 kHz mono WAV, POST each chunk to the metered /transcribe route, then
-// stitch the returned cues back into timeline time and interpolate per-word
-// timings. Mic dictation reuses the same chunk/post/stitch core on a
-// MediaRecorder capture.
+// Browser-side audio work for a project whose media the engine doesn't hold,
+// and the hosted transcriber that goes with it. Rendering the mix is shared:
+// an OfflineAudioContext applies the same trims, speeds, volumes, and
+// crossfades the engine's ffmpeg graph does (see server/transcribe.ts), so the
+// result is the cut's audible mix in timeline time — whether it then goes to
+// this Mac (localStt.ts) or to the metered hosted route. The hosted path
+// chunks it as 16 kHz mono WAV, POSTs each chunk, stitches the cues back into
+// timeline time, and interpolates per-word timings. Mic dictation reuses the
+// same chunk/post/stitch core on a MediaRecorder capture.
 
 import { apiFetch } from "./backend";
 import { mediaUrl, type SubtitleCue } from "./types";
@@ -50,7 +51,10 @@ const clipDur = (c: CloudTranscribeSpec["clips"][number]) =>
  * at their absolute starts with their volumes, and speed rides playbackRate
  * (pitch shifts where atempo would preserve it — timing, which is what cue
  * placement needs, is identical). Returns null when nothing audible exists. */
-async function renderMix(projectId: string, spec: CloudTranscribeSpec): Promise<AudioBuffer | null> {
+export async function renderMix(
+  projectId: string,
+  spec: CloudTranscribeSpec
+): Promise<AudioBuffer | null> {
   const ctx = new OfflineAudioContext(1, Math.max(1, Math.ceil(spec.duration * RATE)), RATE);
   const files = [...new Set([...spec.clips, ...spec.audio].map((c) => c.file).filter(Boolean))];
   const buffers = new Map<string, AudioBuffer>();
@@ -213,7 +217,7 @@ function interpolateWords(
  * decides ownership — cues whose center falls in the earlier chunk's half are
  * dropped from the later one (and vice versa), so seams never duplicate.
  * Returns null when `isStale` trips mid-run. */
-async function transcribeSamples(
+export async function transcribeSamples(
   samples: Float32Array,
   locale: string | undefined,
   isStale?: () => boolean
@@ -249,23 +253,6 @@ async function transcribeSamples(
     if (last) break;
   }
   return cues.sort((a, b) => a.start - b.start);
-}
-
-/** Cloud twin of the engine transcribe job: render the spec's audible mix in
- * the browser, transcribe it chunk by chunk, and return timeline-timed cues.
- * Returns null when `isStale` trips (caller switched projects mid-run). */
-export async function cloudTranscribeSpec(
-  projectId: string,
-  spec: CloudTranscribeSpec,
-  isStale: () => boolean
-): Promise<SubtitleCue[] | null> {
-  if (spec.clips.length === 0 && spec.audio.length === 0) {
-    throw new Error("Add audio or video to the timeline first.");
-  }
-  const mix = await renderMix(projectId, spec);
-  if (isStale()) return null;
-  if (!mix) return []; // nothing audible — no speech, like the engine's short-circuit
-  return transcribeSamples(mix.getChannelData(0), spec.locale, isStale);
 }
 
 /** Transcribe a finished mic recording: decode it, downmix/resample to the

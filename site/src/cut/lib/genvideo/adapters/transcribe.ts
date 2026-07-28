@@ -1,9 +1,11 @@
 "use client";
 
 /**
- * Transcription over the engine's on-device STT (Apple SpeechAnalyzer via
- * cut-stt) — the same route (and poller) the subtitle tools use. Nothing
- * leaves the machine.
+ * Transcription through the same path the subtitle tools use, which prefers
+ * this Mac's on-device speech (Apple SpeechAnalyzer via cut-stt) and falls
+ * back to the hosted route when the app isn't running. Word timings are what
+ * the shot cuts are built from, so the on-device path matters here: it reports
+ * real ones where the hosted route interpolates them inside a cue.
  *
  * The route transcribes a rendered mix, so we hand it a one-entry spec that
  * renders just the target audio asset: provided-mode ("animate this audio")

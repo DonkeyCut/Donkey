@@ -27,7 +27,7 @@ import type {
 } from "./types";
 import type { VideoProject } from "./genvideo/types";
 import { fillSlot } from "./genvideo/fillSlot";
-import { apiFetch, apiJson, getBackend } from "./backend";
+import { apiFetch, apiJson, getBackend, hasLocalCompute } from "./backend";
 import { fetchSignedMediaUrls } from "./backend/cloud";
 import { markSignedBatch } from "./mediaLinks";
 import {
@@ -37,7 +37,8 @@ import {
   writeCachedDoc,
   writeCachedMediaLinks,
 } from "./docCache";
-import { cloudTranscribeSpec, type CloudTranscribeSpec } from "./cloudTranscribe";
+import { renderMix, transcribeSamples, type CloudTranscribeSpec } from "./cloudTranscribe";
+import { engineTranscribeSamples } from "./localStt";
 import { trackLocale } from "./subtitles";
 import { ANIM_STYLE_IDS, emptySubtitles, IMAGE_CLIP_SECONDS, LOOK_IDS, MAX_SUBTITLE_LANES, mediaUrl, migrateLegacyTransitions, normalizeAspect, SPEED_FLOOR, SPEED_MIN, TRANSITION_MAX } from "./types";
 import { readTextStyle } from "./textStyle";
@@ -647,14 +648,30 @@ export function rippleInsert(
  * null when the user switches projects mid-run. Throws user-facing errors.
  * Shared with the brief-to-video transcribe adapter. */
 export async function runTranscription(projectId: string, spec: object): Promise<SubtitleCue[] | null> {
-  // The hosted backend has no transcription job runner: the browser renders
-  // the audible mix itself and calls the metered cloud route chunk by chunk.
+  // A cloud project's media isn't on this Mac, so the engine can't render the
+  // mix — the browser does, and then hands it to whoever can transcribe it:
+  // this Mac when the app is running (on-device, free, real word timings), the
+  // metered hosted route otherwise. A local project skips all of it; the
+  // engine already holds the media and runs the whole job.
   if (getBackend().kind === "cloud") {
-    return cloudTranscribeSpec(
-      projectId,
-      spec as CloudTranscribeSpec,
-      () => useEditor.getState().projectId !== projectId
-    );
+    const s = spec as CloudTranscribeSpec;
+    if (s.clips.length === 0 && s.audio.length === 0) {
+      throw new Error("Add audio or video to the timeline first.");
+    }
+    const stale = () => useEditor.getState().projectId !== projectId;
+    const mix = await renderMix(projectId, s);
+    if (stale()) return null;
+    if (!mix) return []; // nothing audible — no speech, like the engine's short-circuit
+    const samples = mix.getChannelData(0);
+    if (hasLocalCompute()) {
+      try {
+        return await engineTranscribeSamples(samples, s.duration, s.locale, stale);
+      } catch {
+        // The app went away, or on-device speech is unavailable on this Mac.
+        // The hosted route still works, so the user never sees the difference.
+      }
+    }
+    return transcribeSamples(samples, s.locale, stale);
   }
   const res = await apiFetch(`/api/cut/projects/${projectId}/transcribe`, {
     method: "POST",

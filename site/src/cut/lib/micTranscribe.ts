@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiFetch, getBackend } from "./backend";
+import { hasLocalCompute } from "./backend";
+import { localBackend } from "./backend/local";
 import { cloudTranscribeRecording } from "./cloudTranscribe";
 
 // Live dictation for the chat composer. The browser holds the mic permission,
@@ -114,7 +115,7 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
       off += c.length;
     }
     try {
-      await apiFetch(`/api/cut/mic/${job}/feed`, {
+      await localBackend.fetch(`/api/cut/mic/${job}/feed`, {
         method: "POST",
         headers: { "Content-Type": "application/octet-stream" },
         body: merged.buffer,
@@ -139,7 +140,10 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
       setError("Microphone access was blocked. Allow the microphone for this site, then try again.");
       return;
     }
-    if (getBackend().kind === "cloud") {
+    // Dictation runs on the Mac whenever the app is there — on-device, free,
+    // and live — whatever backend holds the project. Without it the take is
+    // recorded and sent to the hosted route in one go.
+    if (!hasLocalCompute()) {
       recChunksRef.current = [];
       const rec = new MediaRecorder(media);
       rec.ondataavailable = (e) => {
@@ -153,7 +157,7 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
       return;
     }
     try {
-      const res = await apiFetch("/api/cut/mic/start", {
+      const res = await localBackend.fetch("/api/cut/mic/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
@@ -192,7 +196,7 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
       const job = jobRef.current;
       if (!job) return;
       try {
-        const res = await apiFetch(`/api/cut/mic/${job}`);
+        const res = await localBackend.fetch(`/api/cut/mic/${job}`);
         if (!res.ok) return;
         const data = (await res.json()) as { text?: string; status?: string; error?: string };
         if (typeof data.text === "string") setPartial(data.text);
@@ -246,7 +250,7 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
     await flush();
     let text = "";
     try {
-      const res = await apiFetch(`/api/cut/mic/${job}/stop`, { method: "POST" });
+      const res = await localBackend.fetch(`/api/cut/mic/${job}/stop`, { method: "POST" });
       const data = (await res.json().catch(() => ({}))) as { text?: string };
       text = data.text ?? "";
     } catch {
@@ -263,7 +267,7 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
   const cancel = useCallback(() => {
     const job = jobRef.current;
     jobRef.current = null;
-    if (job) void apiFetch(`/api/cut/mic/${job}/cancel`, { method: "POST" }).catch(() => {});
+    if (job) void localBackend.fetch(`/api/cut/mic/${job}/cancel`, { method: "POST" }).catch(() => {});
     discardRecorder();
     teardownAudio();
     setState("idle");
@@ -275,7 +279,7 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
   useEffect(() => {
     return () => {
       const job = jobRef.current;
-      if (job) void apiFetch(`/api/cut/mic/${job}/cancel`, { method: "POST" }).catch(() => {});
+      if (job) void localBackend.fetch(`/api/cut/mic/${job}/cancel`, { method: "POST" }).catch(() => {});
       discardRecorder();
       teardownAudio();
     };
