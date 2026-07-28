@@ -107,10 +107,17 @@ function formatDate(ts: number) {
   });
 }
 
+// The badge marks where one project lives, so it says that outright rather
+// than repeating the shelf heading it sits under.
+const RESIDENCY_HINT: Record<Residency, string> = {
+  local: "This is a local project",
+  cloud: "This is a cloud project",
+};
+
 function ResidencyBadge({ residency, className }: { residency: Residency; className?: string }) {
   const Icon = residency === "cloud" ? Cloud : Laptop;
   return (
-    <span title={RESIDENCY_LABEL[residency]} className={className}>
+    <span title={RESIDENCY_HINT[residency]} className={className}>
       <Icon className="size-3" />
     </span>
   );
