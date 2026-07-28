@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Globe, Link as LinkIcon, Lock, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,11 +34,15 @@ import type { ShareFeatures } from "@/cut/lib/types";
 
 type ShareAccess = "restricted" | "public";
 
-interface ShareState {
-  id: string;
+/** What a share says, minus the identity the server assigns it. */
+interface ShareSettings {
   access: ShareAccess;
   emails: string[];
   features: ShareFeatures;
+}
+
+interface ShareState extends ShareSettings {
+  id: string;
 }
 
 const NO_FEATURES: ShareFeatures = {
@@ -79,6 +83,11 @@ export function ShareDialog({
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [saving, setSaving] = useState(false);
+  // What the controls show while a PUT is in flight, so a switch flips under
+  // the finger instead of after the round trip. The server's answer replaces
+  // it; a failed save drops it back to what the server still holds.
+  const [pending, setPending] = useState<ShareSettings | null>(null);
+  const saveSeq = useRef(0);
 
   useEffect(() => {
     let alive = true;
@@ -104,11 +113,9 @@ export function ShareDialog({
   }, [projectId]);
 
   /** PUT the next share state; the row is created on the first save. */
-  const save = async (next: {
-    access: ShareAccess;
-    emails: string[];
-    features: ShareFeatures;
-  }): Promise<ShareState | null> => {
+  const save = async (next: ShareSettings): Promise<ShareState | null> => {
+    const seq = ++saveSeq.current;
+    setPending(next);
     setSaving(true);
     setError(null);
     try {
@@ -128,15 +135,21 @@ export function ShareDialog({
       setError("Could not save sharing.");
       return null;
     } finally {
-      setSaving(false);
+      // Only the newest save owns the controls: an earlier response landing
+      // late leaves a rapid second toggle showing what was just clicked.
+      if (seq === saveSeq.current) {
+        setPending(null);
+        setSaving(false);
+      }
     }
   };
 
-  const current: Omit<ShareState, "id"> & { id?: string } = share ?? {
-    access: "restricted",
-    emails: [],
-    features: NO_FEATURES,
-  };
+  const current: ShareSettings = pending ??
+    share ?? {
+      access: "restricted",
+      emails: [],
+      features: NO_FEATURES,
+    };
 
   const addEmail = () => {
     const email = draft.trim().toLowerCase();
