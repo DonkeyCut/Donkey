@@ -949,9 +949,13 @@ export function Timeline() {
         data-tl-scroll
         className="tl-scroll relative h-full overflow-auto overscroll-y-none"
       >
+        {/* The side padding paints as timeline surface, so it scrubs like it:
+            a press in the left strip reads as a negative time and seek clamps
+            it to 0. */}
         <div
           className="relative flex min-h-full min-w-full flex-col"
           style={{ width: contentW + PAD_SIDE * 2 }}
+          onPointerDown={deselectIfSelf}
         >
           <div
             ref={innerRef}
