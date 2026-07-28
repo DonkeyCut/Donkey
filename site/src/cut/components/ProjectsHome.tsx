@@ -46,6 +46,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { capturePosterWhenReady, readPoster } from "@/cut/lib/posterCache";
 import { engineOrigin, servedFromEngine } from "@/cut/lib/api";
@@ -117,9 +123,14 @@ const RESIDENCY_HINT: Record<Residency, string> = {
 function ResidencyBadge({ residency, className }: { residency: Residency; className?: string }) {
   const Icon = residency === "cloud" ? Cloud : Laptop;
   return (
-    <span title={RESIDENCY_HINT[residency]} className={className}>
-      <Icon className="size-3" />
-    </span>
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger render={<span />} className={className}>
+          <Icon className="size-3" />
+        </TooltipTrigger>
+        <TooltipContent>{RESIDENCY_HINT[residency]}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
@@ -589,7 +600,7 @@ export function ProjectsHome() {
             {dual && (
               <ResidencyBadge
                 residency={r}
-                className="absolute bottom-2 left-2 grid size-5 place-items-center rounded-md bg-black/65 text-white"
+                className="absolute bottom-2 left-2 z-10 grid size-5 place-items-center rounded-md bg-black/65 text-white"
               />
             )}
             <span className="absolute right-2 bottom-2 rounded-md bg-black/65 px-1.5 py-0.5 font-mono text-[10px] text-white tabular-nums">
