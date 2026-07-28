@@ -7,8 +7,8 @@ import { mediaDir, mediaPath as projectMediaPath, readProject } from "./projects
 import { download, type Downloaded } from "./urlDownload";
 import { uniqueName } from "./util";
 
-// Import a media URL (TikTok, YouTube, Instagram, …) into the library or a
-// project. The fetch itself lives in urlDownload.ts (the bundled yt-dlp,
+// Import a URL (TikTok, YouTube, Instagram, an X post, a page, …) into the
+// library or a project. The fetch itself lives in urlDownload.ts (the bundled yt-dlp,
 // resolved from the widened PATH — tool-path.ts — exactly like ffmpeg); this
 // module owns the local landing spots and the concurrency guard.
 
@@ -41,9 +41,12 @@ async function withDownload<T>(url: string, consume: (dl: Downloaded) => Promise
 }
 
 /** Download a URL into the shared Library (the Library panel's import box).
- * A multi-photo tweet lands as one asset per photo. */
+ * A multi-photo post lands as one asset per photo. The Library holds media, so
+ * a source that turned out to be only words fails here — the chat's import is
+ * where text lands. */
 export async function importFromUrl(url: string): Promise<LibraryAsset[]> {
   return withDownload(url, async (dl) => {
+    if (dl.files.length === 0) throw new Error("That link has no media to import.");
     const assets: LibraryAsset[] = [];
     for (const f of dl.files) assets.push(await addDownloaded(f.file, f.title, dl.source));
     return assets;
@@ -51,8 +54,9 @@ export async function importFromUrl(url: string): Promise<LibraryAsset[]> {
 }
 
 /** Download a URL straight into a project's media folder (the chat's
- * import_url tool). Returns the project file names; the client builds and
- * registers the assets. */
+ * import_url tool). Returns the project file names — none when the source is
+ * only words, which come back as `text` — and the client builds and registers
+ * the assets. */
 export async function importUrlToProject(
   projectId: string,
   url: string

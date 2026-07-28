@@ -480,11 +480,12 @@ export async function importStockMusic(
   return asset;
 }
 
-/** Download a media URL (TikTok, YouTube, a tweet, …) into the project
+/** Download a URL (TikTok, YouTube, an X post, an article, …) into the project
  * through the engine's bundled downloader and register what came back — one
- * asset for a video, one per photo for a photo tweet — without placing
- * anything on the timeline. Callers choose where assets land. `text` is the
- * source's own words — a tweet's body, or a video's title and description. */
+ * asset for a video, one per photo for a photo post, none at all for a source
+ * that is only words — without placing anything on the timeline. Callers
+ * choose where assets land. `text` is the source's own words: a post's body,
+ * an article, or a video's title and description. */
 export async function importUrlMedia(
   projectId: string,
   url: string
@@ -506,9 +507,13 @@ export async function importUrlMedia(
   } else {
     body = await apiJson<{ files?: { fileName: string; title: string }[]; text?: string }>(res);
   }
-  if (!res.ok || !body.files?.length) throw new Error(body.error ?? "Could not import that URL.");
+  // A source that is only words (a text post, an article, a page) imports as
+  // that text with no files, so an empty file list with text is a success.
+  if (!res.ok || (!body.files?.length && !body.text)) {
+    throw new Error(body.error ?? "Could not import that URL.");
+  }
   const assets: MediaAsset[] = [];
-  for (const f of body.files) {
+  for (const f of body.files ?? []) {
     const asset = await assetFromProjectFile(projectId, f.fileName, f.title || "Imported clip");
     useEditor.getState().addAsset(asset);
     void enrichAsset(asset);
