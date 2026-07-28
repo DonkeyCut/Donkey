@@ -3,7 +3,8 @@
 // /projects/:id/chats routes so the history follows the account across
 // devices. Threads stay opaque here — the module reads only id and updatedAt
 // to merge, and ships the same slimmed payload the panel writes to storage.
-import { apiFetch, cutMode, getBackend, type CutBackend } from "./backend";
+import { cutMode, getBackend, type CutBackend } from "./backend";
+import { cloudBackend } from "./backend/cloud";
 import {
   isStoredThread,
   mergeThreads,
@@ -21,7 +22,9 @@ export async function fetchCloudThreads(
   backend: CutBackend,
   projectId: string
 ): Promise<StoredThread[]> {
-  if (backend.kind !== "cloud") return [];
+  // The shared backend rewrites this path onto the viewer surface, which
+  // serves the owner's threads when the share includes chat.
+  if (backend.kind === "local") return [];
   // Throws on a failed read rather than reading as "no threads": the seed memo
   // and a project copy both have to tell an empty history from a lost one.
   const res = await backend.fetch(`/api/cut/projects/${projectId}/chats`);
@@ -46,17 +49,21 @@ export async function putCloudThread(
   if (!res.ok) throw new Error("Could not save a chat thread.");
 }
 
-/** Merge the server's copy of a cloud project's threads into localStorage —
- * per thread, the newer updatedAt wins. Resolves immediately for local
- * projects; memoized per project, but a network failure clears the memo so
- * the next panel mount retries. */
+/** Bring a cloud project's chat history and the server's copy into agreement,
+ * per thread the newer updatedAt winning, and push back whatever the server is
+ * missing or trailing on. The push is what makes the mirror hold: a save that
+ * never landed — offline, a request that failed, a thread written before this
+ * project moved to the cloud — would otherwise stay local forever, and a share
+ * link would show a project with no chat at all. Resolves immediately for local
+ * projects; memoized per project, but a failure clears the memo so the next
+ * panel mount retries. */
 export function ensureCloudThreads(projectId: string): Promise<void> {
-  // Shared viewers seed too (read-only); saves and deletes below stay
-  // cloud-only, so a viewer never writes back.
+  // Shared viewers sync too, read-only: syncThreads pushes nothing back, and
+  // the saves and deletes below are cloud-only.
   if (cutMode() === "local") return Promise.resolve();
   let p = seeded.get(projectId);
   if (!p) {
-    p = seedThreads(projectId).catch(() => {
+    p = syncThreads(projectId).catch(() => {
       seeded.delete(projectId);
     });
     seeded.set(projectId, p);
@@ -64,10 +71,21 @@ export function ensureCloudThreads(projectId: string): Promise<void> {
   return p;
 }
 
-async function seedThreads(projectId: string): Promise<void> {
-  const remote = await fetchCloudThreads(getBackend(), projectId);
-  if (remote.length === 0) return;
-  writeProjectThreads(projectId, mergeThreads(remote, readProjectThreads(projectId)));
+async function syncThreads(projectId: string): Promise<void> {
+  const backend = getBackend();
+  const remote = await fetchCloudThreads(backend, projectId);
+  // A viewer's list is the owner's list — there is nothing of their own to
+  // merge, so the share's threads stand alone (in memory, per chatThreads).
+  if (backend.kind === "shared") {
+    writeProjectThreads(projectId, remote);
+    return;
+  }
+  const merged = mergeThreads(remote, readProjectThreads(projectId));
+  writeProjectThreads(projectId, merged);
+  const stored = new Map(remote.map((t) => [t.id, t.updatedAt ?? 0]));
+  const behind = merged.filter((t) => (stored.get(t.id) ?? -1) < (t.updatedAt ?? 0));
+  // One at a time: a full history can be a few megabytes of transcript.
+  for (const thread of behind) await putCloudThread(backend, projectId, thread);
 }
 
 // Saves debounce per thread: while a turn streams, the panel re-saves on every
@@ -110,14 +128,18 @@ async function flushOne(key: string, keepalive = false): Promise<void> {
   pending.delete(key);
   clearTimeout(entry.timer);
   try {
-    await apiFetch(`/api/cut/projects/${entry.projectId}/chats/${entry.threadId}`, {
+    // The cloud backend by name, not the ambient one: this save was queued for
+    // a cloud project, and by the time the debounce fires the user may have
+    // closed it — with the Mac app running, the ambient backend is then the
+    // engine, which has no chats route and no copy of this project.
+    await cloudBackend.fetch(`/api/cut/projects/${entry.projectId}/chats/${entry.threadId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(entry.data),
       keepalive,
     });
   } catch {
-    // The thread is still in localStorage; its next change re-queues it.
+    // The thread is still in localStorage; the next sync pushes it up.
   }
 }
 
@@ -134,7 +156,7 @@ export function deleteCloudThread(projectId: string, threadId: string): void {
     clearTimeout(entry.timer);
     pending.delete(saveKey(projectId, threadId));
   }
-  void apiFetch(`/api/cut/projects/${projectId}/chats/${threadId}`, {
+  void cloudBackend.fetch(`/api/cut/projects/${projectId}/chats/${threadId}`, {
     method: "DELETE",
   }).catch(() => {
     // Offline delete — the copy resurfaces on the next merge; the user can

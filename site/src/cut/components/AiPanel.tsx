@@ -46,7 +46,12 @@ import { useCutCaps } from "@/cut/lib/backend/hooks";
 import { buildAiContext } from "@/cut/lib/aiContext";
 import { runAiTool } from "@/cut/lib/aiTools";
 import { setAssetDragData } from "@/cut/lib/assetDrag";
-import { activeChatKey, threadsKey } from "@/cut/lib/chatThreads";
+import {
+  readActiveChat,
+  readRawThreads,
+  writeActiveChat,
+  writeRawThreads,
+} from "@/cut/lib/chatThreads";
 import {
   deleteCloudThread,
   ensureCloudThreads,
@@ -117,14 +122,7 @@ interface ChatThread {
 const THREAD_LIMIT = 30;
 
 function readThreads(projectId: string): ChatThread[] {
-  try {
-    const v = JSON.parse(
-      localStorage.getItem(threadsKey(projectId)) ?? "[]",
-    ) as unknown;
-    return Array.isArray(v) ? (v as ChatThread[]) : [];
-  } catch {
-    return [];
-  }
+  return readRawThreads(projectId) as ChatThread[];
 }
 
 /** Persisted copies drop frame payloads (data URLs) from tool outputs — one
@@ -195,14 +193,7 @@ function writeThreads(projectId: string, list: ChatThread[]) {
       deleteCloudThread(projectId, t.id);
     }
   }
-  try {
-    localStorage.setItem(
-      threadsKey(projectId),
-      JSON.stringify(slimForStorage(kept)),
-    );
-  } catch {
-    // Storage full/blocked — history just won't persist.
-  }
+  writeRawThreads(projectId, slimForStorage(kept));
 }
 
 const MODEL_KEY = "cut-ai-model";
@@ -259,10 +250,10 @@ export function AiPanel({
   const [activeChat, setActiveChat] = useState<string>(() =>
     typeof window === "undefined"
       ? crypto.randomUUID()
-      : (localStorage.getItem(activeChatKey(projectId)) ?? crypto.randomUUID()),
+      : (readActiveChat(projectId) ?? crypto.randomUUID()),
   );
   useEffect(() => {
-    localStorage.setItem(activeChatKey(projectId), activeChat);
+    writeActiveChat(projectId, activeChat);
   }, [activeChat, projectId]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [threads, setThreads] = useState<ChatThread[]>([]);

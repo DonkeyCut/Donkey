@@ -51,6 +51,17 @@ async function ownerProject(share: ShareRow) {
   return prisma.cutProject.findFirst({ where: { id: share.projectId, userId: share.userId } });
 }
 
+/** What the share offers a viewer. Chat drops out when the owner's project has
+ * no threads: there is nothing to open, so the viewer gets no chat button and
+ * no panel rather than an empty conversation. */
+async function offeredFeatures(view: ShareView): Promise<ShareFeatures> {
+  if (!view.features.chat) return view.features;
+  const threads = await prisma.cutChatThread.count({
+    where: { userId: view.share.userId, projectId: view.share.projectId },
+  });
+  return threads > 0 ? view.features : { ...view.features, chat: false };
+}
+
 /** The asset set a viewer may see: everything playback needs (referenced by a
  * clip), plus each optional surface's assets when that surface is shared.
  * Untagged assets belong to the Media panel; origin-tagged ones to the
@@ -106,7 +117,7 @@ export const sharedView = {
         projectId: view.share.projectId,
         name: row.name,
         access: view.share.access,
-        features: view.features,
+        features: await offeredFeatures(view),
       },
       { headers: shareCacheHeaders(view.share, row.updatedAt, { meta: true }) }
     );

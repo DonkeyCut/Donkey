@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Editor } from "@/cut/components/Editor";
 import { bindCutMode } from "@/cut/lib/backend";
 import { bindSharedBackend } from "@/cut/lib/backend/shared";
+import { holdThreadsInMemory } from "@/cut/lib/chatThreads";
 import { useEditor } from "@/cut/lib/store";
 import type { ShareFeatures } from "@/cut/lib/types";
 import { authClient } from "@/lib/auth-client";
@@ -42,6 +43,7 @@ export function SharedProject() {
         const meta = (await res.json()) as { projectId: string; features: ShareFeatures };
         bindSharedBackend(token);
         bindCutMode("shared");
+        holdThreadsInMemory();
         useEditor.getState().setSharedView(meta.features);
         setGate({ state: "ready", projectId: meta.projectId });
       })
