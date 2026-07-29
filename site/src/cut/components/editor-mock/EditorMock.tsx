@@ -9,7 +9,7 @@ import { MockPreview } from "@/cut/components/editor-mock/MockPreview";
 import { MockSidePanel } from "@/cut/components/editor-mock/MockSidePanel";
 import { MockTimeline } from "@/cut/components/editor-mock/MockTimeline";
 import { MockTopBar } from "@/cut/components/editor-mock/MockTopBar";
-import { MOCK_PROJECTS } from "@/cut/components/editor-mock/mockData";
+import { MOCK_PROJECTS, type MockProject } from "@/cut/components/editor-mock/mockData";
 import { cn } from "@/lib/utils";
 
 // The mock is authored at a fixed design size and scaled to its container's
@@ -29,6 +29,8 @@ const VIEWS = {
 export type EditorMockView = keyof typeof VIEWS;
 
 type Props = {
+  /** Show exactly this project instead of the landing's showcase pair. */
+  project?: MockProject;
   view?: EditorMockView;
   /** Which dimension the mock is sized by. "width" fills the container and
    * takes whatever height that implies; "height" fills a container of bounded
@@ -45,16 +47,18 @@ type Props = {
   shadow?: boolean;
 };
 
-// A hand-built, display-only replica of the Cut editor showing two finished
-// projects. The panels copy the real components' chrome (see the Mock*
-// siblings) over hardcoded data — no stores, no engine. The dots below switch
-// projects; nothing auto-advances.
+// A hand-built, display-only replica of the Cut editor over a finished project.
+// The panels copy the real components' chrome (see the Mock* siblings) on
+// hardcoded data — no stores, no engine. Given several projects the dots below
+// switch between them; nothing auto-advances.
 export function EditorMock({
+  project,
   view = "full",
   fit = "width",
   showSwitcher = true,
   shadow = true,
 }: Props) {
+  const projects = project ? [project] : MOCK_PROJECTS;
   const [active, setActive] = useState(0);
   const frameRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ width: 0, height: 0 });
@@ -117,9 +121,9 @@ export function EditorMock({
               transform: `scale(${scale}) translateX(${-x}px)`,
             }}
           >
-            {MOCK_PROJECTS.map((project, i) => (
+            {projects.map((p, i) => (
               <div
-                key={project.id}
+                key={p.id}
                 className={cn(
                   // Same frame as the real editor: the chat panel is a
                   // full-height column beside the top-bar/preview/timeline grid.
@@ -128,14 +132,14 @@ export function EditorMock({
                 )}
               >
                 <div className="grid min-w-0 flex-1 grid-rows-[46px_minmax(0,1fr)_auto]">
-                  <MockTopBar project={project} />
+                  <MockTopBar project={p} />
                   <div className="grid min-h-0 grid-cols-[auto_minmax(0,1fr)]">
-                    <MockSidePanel project={project} />
-                    <MockPreview project={project} active={i === active} />
+                    <MockSidePanel project={p} />
+                    <MockPreview project={p} active={i === active} />
                   </div>
-                  <MockTimeline project={project} />
+                  <MockTimeline project={p} />
                 </div>
-                <MockAiPanel project={project} />
+                <MockAiPanel project={p} />
               </div>
             ))}
           </div>
@@ -148,9 +152,9 @@ export function EditorMock({
       </figcaption>
       {showSwitcher && (
         <div className="mt-6 flex flex-wrap justify-center gap-1.5">
-          {MOCK_PROJECTS.map((project, i) => (
+          {projects.map((p, i) => (
             <button
-              key={project.id}
+              key={p.id}
               type="button"
               onClick={() => setActive(i)}
               aria-pressed={i === active}
@@ -165,7 +169,7 @@ export function EditorMock({
                   i === active ? "bg-coral" : "bg-ink/25",
                 )}
               />
-              {project.switcherLabel}
+              {p.switcherLabel}
             </button>
           ))}
         </div>

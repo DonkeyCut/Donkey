@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import type { MockProject } from "@/cut/components/editor-mock/mockData";
+import { aspectLabel } from "@/cut/lib/types";
 
 // Static replica of src/cut/components/TopBar.tsx — same chrome, no store.
 export function MockTopBar({ project }: { project: MockProject }) {
@@ -20,7 +21,7 @@ export function MockTopBar({ project }: { project: MockProject }) {
       <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-2">
         <span className="flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-xs">
           <AspectIcon className="size-3.5" />
-          {project.aspectLabel}
+          {aspectLabel(project.aspect)}
           <ChevronDown className="size-3" />
         </span>
         <span className="flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-xs">

@@ -2,12 +2,14 @@
 
 import {
   ArrowUp,
+  Check,
   ChevronDown,
   CircleDashed,
   History,
   Mic,
   Plus,
   Sparkles,
+  Wrench,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -96,22 +98,39 @@ function MockMessage({
   }
   return (
     <div className="mock-chat-msg mb-3 flex flex-col gap-1.5" style={delay}>
-      <div className="max-w-full text-[12.5px] leading-relaxed">
+      {message.tool && (
+        <span className="flex w-fit max-w-full items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground">
+          <Wrench className="size-3 shrink-0" />
+          <span className="font-mono">{message.tool.name}</span>
+          {message.tool.count && (
+            <span className="text-[10px] tabular-nums">×{message.tool.count}</span>
+          )}
+          <Check className="size-3 text-emerald-600" />
+        </span>
+      )}
+      <div className="max-w-full text-[12.5px] leading-relaxed whitespace-pre-line">
         {message.text}
       </div>
       {message.cards && (
         <div
           className={cn(
             "grid gap-1.5",
-            message.cards.length > 2 ? "grid-cols-3" : "grid-cols-2",
+            // Tall cards leave no room for a third column.
+            message.portrait || message.cards.length <= 2
+              ? "grid-cols-2"
+              : "grid-cols-3",
           )}
         >
           {message.cards.map((card) => (
-            <div key={card.label} className="flex flex-col gap-1">
+            <div key={card.src} className="flex flex-col gap-1">
               <div
                 className={cn(
                   "relative overflow-hidden rounded-md border border-border",
-                  card.duration ? "aspect-video" : "aspect-[3/4]",
+                  message.portrait
+                    ? "aspect-[9/16]"
+                    : card.duration
+                      ? "aspect-video"
+                      : "aspect-[3/4]",
                 )}
               >
                 <img
@@ -125,9 +144,11 @@ function MockMessage({
                   </span>
                 )}
               </div>
-              <span className="w-full truncate text-[10px] text-muted-foreground">
-                {card.label}
-              </span>
+              {card.label && (
+                <span className="w-full truncate text-[10px] text-muted-foreground">
+                  {card.label}
+                </span>
+              )}
             </div>
           ))}
         </div>

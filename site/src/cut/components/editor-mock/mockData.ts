@@ -14,17 +14,47 @@ export type MockPanelTab =
 
 export interface MockResultCard {
   src: string;
-  label: string;
+  /** Caption under the card; omitted where the real card shows the name only
+   * on hover. Also the alt text and list key when present. */
+  label?: string;
   /** Duration chip on video results ("4.0s"); omitted on images. */
   duration?: string;
   selected?: boolean;
 }
 
+/** One card in the Media panel's grid — a file the user brought into the
+ * project, with the short handle (`v1`, `a1`) prompts can reference it by. */
+export interface MockMediaItem {
+  kind: "video" | "image" | "audio";
+  handle: string;
+  name: string;
+  /** Poster for video and image cards; audio draws a waveform face instead. */
+  thumb?: string;
+  duration?: string;
+}
+
+/** A saved arrangement in the Media panel, collapsed to its summary row. */
+export interface MockTemplate {
+  name: string;
+  duration: string;
+  items: number;
+}
+
+/** Which panel is open on the left, and what it holds. The Media panel lists
+ * the project's own files; the generate panels are a prompt over its results. */
+export type MockPanel =
+  | { tab: "media"; templates: MockTemplate[]; items: MockMediaItem[] }
+  | { tab: "image" | "video"; prompt: string; results: MockResultCard[] };
+
 export interface MockChatMessage {
   role: "user" | "assistant";
   text: string;
+  /** Tool-call chip above the message, as the assistant's turn shows its work. */
+  tool?: { name: string; count?: number };
   /** Result cards rendered under the message text. */
   cards?: MockResultCard[];
+  /** Cards are 9:16 rather than the default 3:4 / 16:9. */
+  portrait?: boolean;
 }
 
 export interface MockClip {
@@ -32,6 +62,7 @@ export interface MockClip {
   thumb: string;
   seconds: number;
   selected?: boolean;
+  muted?: boolean;
 }
 
 export interface MockCue {
@@ -47,11 +78,7 @@ export interface MockProject {
   switcherLabel: string;
   name: string;
   aspect: MockAspect;
-  aspectLabel: string;
-  panelTab: MockPanelTab;
-  /** Generation prompt shown in the open side panel. */
-  panelPrompt: string;
-  panelResults: MockResultCard[];
+  panel: MockPanel;
   videoSrc: string;
   videoPoster: string;
   previewCaption: string;
@@ -73,14 +100,15 @@ export const MOCK_PROJECTS: MockProject[] = [
     switcherLabel: "Travel posters",
     name: "City poster series",
     aspect: "9:16",
-    aspectLabel: "9:16 · Portrait",
-    panelTab: "image",
-    panelPrompt:
-      "Hand-painted travel poster, PARIS — woman in a trench coat crossing the street, Eiffel Tower behind, café awnings, 'Live the romance' in red script",
-    panelResults: [
-      { src: `${ASSETS}/poster-paris.jpg`, label: "Paris", selected: true },
-      { src: `${ASSETS}/poster-newyork.jpg`, label: "New York" },
-    ],
+    panel: {
+      tab: "image",
+      prompt:
+        "Hand-painted travel poster, PARIS — woman in a trench coat crossing the street, Eiffel Tower behind, café awnings, 'Live the romance' in red script",
+      results: [
+        { src: `${ASSETS}/poster-paris.jpg`, label: "Paris", selected: true },
+        { src: `${ASSETS}/poster-newyork.jpg`, label: "New York" },
+      ],
+    },
     videoSrc: `${ASSETS}/travel-loop.mp4`,
     videoPoster: `${ASSETS}/poster-paris.jpg`,
     previewCaption: "Live the romance",
@@ -124,15 +152,16 @@ export const MOCK_PROJECTS: MockProject[] = [
     switcherLabel: "Railway mystery",
     name: "The Railway Mystery",
     aspect: "16:9",
-    aspectLabel: "16:9 · Landscape",
-    panelTab: "video",
-    panelPrompt:
-      "Franco-Belgian comic style, early-1900s animation with film grain: a steam train races a cliffside railway through a mountain canyon; a cloaked figure rides the carriage roof; a boy on a bicycle gives chase",
-    panelResults: [
-      { src: `${ASSETS}/chase-1.jpg`, label: "Canyon run", duration: "3.2s", selected: true },
-      { src: `${ASSETS}/chase-2.jpg`, label: "On the roof", duration: "2.8s" },
-      { src: `${ASSETS}/chase-3.jpg`, label: "Bicycle chase", duration: "4.0s" },
-    ],
+    panel: {
+      tab: "video",
+      prompt:
+        "Franco-Belgian comic style, early-1900s animation with film grain: a steam train races a cliffside railway through a mountain canyon; a cloaked figure rides the carriage roof; a boy on a bicycle gives chase",
+      results: [
+        { src: `${ASSETS}/chase-1.jpg`, label: "Canyon run", duration: "3.2s", selected: true },
+        { src: `${ASSETS}/chase-2.jpg`, label: "On the roof", duration: "2.8s" },
+        { src: `${ASSETS}/chase-3.jpg`, label: "Bicycle chase", duration: "4.0s" },
+      ],
+    },
     videoSrc: `${ASSETS}/railway-loop.mp4`,
     videoPoster: `${ASSETS}/chase-1.jpg`,
     previewCaption: "",

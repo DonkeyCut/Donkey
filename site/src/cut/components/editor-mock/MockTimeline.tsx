@@ -4,6 +4,7 @@
 // presentation: geometry and chrome copied from src/cut/components/Timeline.tsx.
 
 import type { CSSProperties } from "react";
+import { VolumeX } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { MockProject } from "@/cut/components/editor-mock/mockData";
 
@@ -25,7 +26,7 @@ const WAVE = [
 
 export function MockTimeline({ project }: { project: MockProject }) {
   const pxPerSec = TRACK_W / project.timelineSeconds;
-  const ticks = Array.from({ length: project.timelineSeconds }, (_, i) => i);
+  const ticks = Array.from({ length: Math.ceil(project.timelineSeconds) }, (_, i) => i);
 
   // Clips butt up against each other; each starts where the previous ended.
   const clips = project.clips.map((c, i) => ({
@@ -63,23 +64,28 @@ export function MockTimeline({ project }: { project: MockProject }) {
           {clips.map((c) => (
             <div
               key={c.label}
+              role="img"
+              aria-label={c.label}
               className={cn(
-                "absolute top-0.5 overflow-hidden rounded-lg bg-neutral-200 bg-cover bg-center shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
+                "absolute top-0.5 overflow-hidden rounded-lg bg-neutral-200 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
                 c.selected && "z-10 ring-2 ring-[#0a84ff]"
               )}
               style={{
                 left: c.left,
                 width: c.width,
                 height: VIDEO_H - 4,
+                // The editor draws a clip as a strip of frames repeated across
+                // its width; one tile at native aspect gives the same read.
                 backgroundImage: `url(${c.thumb})`,
+                backgroundSize: "auto 100%",
+                backgroundRepeat: "repeat-x",
               }}
             >
-              <span className="absolute top-1 left-1 max-w-[80%] truncate rounded-[5px] bg-black/65 px-1.5 py-px text-[10px] text-white">
-                {c.label}
-              </span>
-              <span className="absolute right-1 bottom-1 rounded px-1 py-px font-mono text-[10px] tabular-nums text-white bg-black/65">
-                {c.seconds.toFixed(1)}s
-              </span>
+              {c.muted && (
+                <span className="absolute bottom-1 left-1 grid size-[18px] place-items-center rounded-[5px] bg-black/70 text-white">
+                  <VolumeX className="size-3" />
+                </span>
+              )}
             </div>
           ))}
         </div>
