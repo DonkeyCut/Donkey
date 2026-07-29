@@ -204,18 +204,26 @@ export function SidePanel({
   return (
     <div className="flex min-h-0 border-r border-border bg-card">
       {/* Icon rail — its divider drops when collapsed so the panel's outer
-          border becomes the single line between the rail and the canvas. */}
+          border becomes the single line between the rail and the canvas.
+          It scrolls down its own length when a short window cannot show every
+          tab, and never sideways: `overflow-y-auto` alone would not say that,
+          since an axis left visible beside a scrolling one computes to auto,
+          and a scrollbar that takes its width out of a fixed 68px is enough to
+          push the widest label past the edge. */}
       <div
         className={cn(
-          "flex min-h-0 w-[68px] shrink-0 flex-col items-center gap-1 overflow-y-auto py-3",
+          "flex min-h-0 w-[68px] shrink-0 flex-col items-center gap-1 overflow-x-hidden overflow-y-auto py-3",
           tab !== null && "border-r border-border"
         )}
       >
         {visibleTabs.map(({ id, label, icon: Icon }, tabIndex) => {
           // The open tab never badges — its completions are already on screen.
           const unseenCount = isGenTab(id) && id !== tab ? unseen[id].length : 0;
+          // Full width of the rail, whatever a scrollbar has left of it, so a
+          // label that no longer fits ellipsises inside the tile rather than
+          // running out past both edges of a centred one.
           const tileClass =
-            "flex shrink-0 flex-col items-center gap-1 rounded-lg px-2 py-1.5 text-muted-foreground transition-colors hover:text-foreground";
+            "flex w-full min-w-0 shrink-0 flex-col items-center gap-1 rounded-lg px-2 py-1.5 text-muted-foreground transition-colors hover:text-foreground";
           const inner = (
             <>
               <span
@@ -236,7 +244,12 @@ export function SidePanel({
                   </span>
                 ) : null}
               </span>
-              <span className={cn("text-[10px] font-medium", tab === id && "text-foreground")}>
+              <span
+                className={cn(
+                  "w-full truncate text-center text-[10px] font-medium",
+                  tab === id && "text-foreground"
+                )}
+              >
                 {label}
               </span>
             </>
@@ -284,7 +297,7 @@ export function SidePanel({
               {id === "media" || id === "library" ? (
                 <RefDropZone
                   onRef={(ref) => dropRefOnTab(id, ref)}
-                  className="shrink-0 rounded-lg"
+                  className="w-full shrink-0 rounded-lg"
                   activeClassName="bg-primary/10"
                 >
                   {tile}
