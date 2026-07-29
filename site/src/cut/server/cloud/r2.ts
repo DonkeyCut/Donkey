@@ -46,6 +46,15 @@ export const projectExportKey = (userId: string, projectId: string, fileName: st
   `cut/${userId}/projects/${projectId}/exports/${fileName}`;
 export const projectPreviewKey = (userId: string, projectId: string) =>
   `cut/${userId}/projects/${projectId}/preview.mp4`;
+/** Root of one HLS ladder. The doc version is a path segment rather than a
+ * query parameter because a player reaches segments by relative URI: a version
+ * that lived in the query would be dropped on the first hop out of a playlist,
+ * and a re-rendered ladder would then be served the previous cut's segments out
+ * of the edge cache. A new version is a new tree, and the old one is swept. */
+export const projectHlsPrefix = (userId: string, projectId: string, version: string) =>
+  `cut/${userId}/projects/${projectId}/hls/${version}`;
+export const projectHlsRoot = (userId: string, projectId: string) =>
+  `cut/${userId}/projects/${projectId}/hls/`;
 /** The link-preview card's artifacts. Fixed keys, rewritten by each card
  * render: the public URL carries the doc version, so freshness rides the URL
  * and R2 keeps one copy instead of one per edit. */
@@ -107,6 +116,53 @@ export async function getObject(key: string): Promise<{ bytes: Buffer; mime: str
     if (e instanceof R2NotConfiguredError) throw e;
     return null;
   }
+}
+
+/**
+ * Delete everything under `prefix`, paging until the listing is empty.
+ *
+ * Deleting a tree cannot be "list once, then delete": an HLS ladder for a long
+ * cut runs to tens of thousands of objects, and a single capped listing would
+ * leave the remainder behind with nothing left pointing at it. Returns how many
+ * objects went.
+ */
+export async function deletePrefix(prefix: string): Promise<number> {
+  let removed = 0;
+  // Bounded so a listing that somehow never drains cannot spin forever; each
+  // pass removes up to 1000, so this is far above any real ladder.
+  for (let pass = 0; pass < 1000; pass++) {
+    const keys = await listUnder(prefix, 1000);
+    if (keys.length === 0) return removed;
+    await del(keys);
+    removed += keys.length;
+    // A delete that silently removed nothing would otherwise loop on the same
+    // page: del swallows its own failures, so treat no progress as done.
+    if (keys.length < 1000) return removed;
+  }
+  return removed;
+}
+
+/** Every key under `prefix`, up to `limit`. Callers deleting a whole tree
+ * should use deletePrefix, which pages instead of truncating. */
+export async function listUnder(prefix: string, limit = 10_000): Promise<string[]> {
+  const out: string[] = [];
+  let token: string | undefined;
+  do {
+    const res = await r2().send(
+      new ListObjectsV2Command({
+        Bucket: R2_BUCKET,
+        Prefix: prefix,
+        ContinuationToken: token,
+        MaxKeys: 1000,
+      })
+    );
+    for (const o of res.Contents ?? []) {
+      if (o.Key) out.push(o.Key);
+      if (out.length >= limit) return out;
+    }
+    token = res.IsTruncated ? res.NextContinuationToken : undefined;
+  } while (token);
+  return out;
 }
 
 /** Keys under `prefix` last written before `before`, paged to `limit` objects.

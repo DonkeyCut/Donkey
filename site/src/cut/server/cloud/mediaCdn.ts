@@ -65,6 +65,11 @@ function tokenExpiry(minLifetimeSeconds = TOKEN_GRACE_SECONDS, at = Date.now()):
  * ahead of expiry rather than after a 403. */
 export const mediaUrlLifetime = (): number => tokenExpiry() - Math.floor(Date.now() / 1000);
 
+/** The longest a tree token may live. A tree token is the revocation window for
+ * everything under its prefix, so a very long cut does not get to hold one
+ * open indefinitely. */
+const TREE_MAX_LIFETIME_SECONDS = 24 * 60 * 60;
+
 /** The signature over one object, its expiry, and the download name and version
  * it carries — both empty when absent, so the framing is one rule. Signing them
  * is what keeps either from being edited into a URL after the fact. Both sides
@@ -104,4 +109,54 @@ export function mediaObjectUrl(
   if (version) query.set("v", version);
   if (name) query.set("d", name);
   return `${CUT_MEDIA_ORIGIN}/${path}?${query.toString()}`;
+}
+
+// --- Tree tokens: one signature over a whole prefix ---
+//
+// An HLS ladder is hundreds of objects that the player discovers on its own:
+// the master playlist names variant playlists, and each variant names its
+// segments, all as RELATIVE URIs. Relative resolution keeps path segments and
+// drops the query string, so the per-object token above cannot survive the hop
+// from a playlist to the segments it references — the player would ask for
+// every segment unsigned.
+//
+// So a tree token rides in the PATH instead: /_t/<expires>/<depth>/<sig>/<key>.
+// A playlist fetched through that path resolves its relative children under the
+// same four segments, and the whole ladder plays on one signature.
+//
+// `depth` is how many leading segments of the key the signature covers, which
+// is what lets the Worker recover the prefix from a URL it has never seen
+// before. The framing is distinct from the object signature's, so neither kind
+// of token can be replayed as the other.
+
+/** Marks the token path. Leading underscore keeps it clear of the key space,
+ * which is always rooted at `cut/`. */
+export const MEDIA_TREE_PREFIX = "_t";
+
+export function mediaTreeSignature(secret: string, prefix: string, expires: number): string {
+  return createHmac("sha256", secret).update(`tree\n${prefix}\n${expires}`).digest("base64url");
+}
+
+/**
+ * A URL for `filePath` under the signed `prefix`, where everything else under
+ * that prefix is reachable by relative resolution from it.
+ *
+ * `holdSeconds` is how long the token must stay good — pass the cut's duration
+ * and the token outlives a straight-through watch, so playback never dies on a
+ * 403 halfway. It is the revocation window too, which is why it is bounded.
+ */
+export function mediaTreeUrl(
+  prefix: string,
+  filePath: string,
+  opts?: { holdSeconds?: number }
+): string {
+  const clean = prefix.replace(/^\/+|\/+$/g, "");
+  const hold = Math.min(opts?.holdSeconds ?? 0, TREE_MAX_LIFETIME_SECONDS);
+  const expires = tokenExpiry(hold);
+  const sig = mediaTreeSignature(signingSecret(), clean, expires);
+  const depth = clean.split("/").length;
+  const encode = (p: string) => p.split("/").map(encodeURIComponent).join("/");
+  return `${CUT_MEDIA_ORIGIN}/${MEDIA_TREE_PREFIX}/${expires}/${depth}/${encodeURIComponent(
+    sig
+  )}/${encode(clean)}/${encode(filePath.replace(/^\/+/, ""))}`;
 }
