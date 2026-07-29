@@ -16,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Donkey",
-  description: "Donkey gets work done on your Mac while you stay in control.",
+  title: "Donkey Cut",
+  description: "A video editor that does all its work on your Mac.",
 };
 
 export default function RootLayout({

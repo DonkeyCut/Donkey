@@ -1,8 +1,7 @@
 // Cut is served from one production host, mapped by src/proxy.ts onto the
 // real routes under /cut: donkeycut.com — marketing landing at "/", the app
-// at "/app/…" (rewritten to /cut/app/…). donkeyuse.com and old
-// cut.donkeyuse.com links are redirected to donkeycut.com at the edge
-// (Cloudflare) and never reach this app.
+// at "/app/…" (rewritten to /cut/app/…). Retired domains are redirected to
+// donkeycut.com at the edge (Cloudflare) and never reach this app.
 //
 // Local dev is deliberately absent from the set: the proxy serves localhost
 // the same mapping, keeping the session cookie same-origin on the one dev

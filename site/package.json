@@ -2,7 +2,7 @@
   "name": "site",
   "version": "0.1.0",
   "private": true,
-  "homepage": "https://donkeyuse.com",
+  "homepage": "https://donkeycut.com",
   "license": "Apache-2.0",
   "scripts": {
     "dev": "next dev",

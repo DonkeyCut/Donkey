@@ -13,9 +13,8 @@ import {
 // "/…" → "/cut/…" rewrite) — with donkeycut.com as the one production host.
 // The auth pages (/sign-in, /sign-up), "/install", "/donkeyvision", and the
 // legal pages are real root-level routes and pass through the rewrite.
-// www. 308s to the apex; donkeyuse.com and old cut.donkeyuse.com links are
-// redirected to donkeycut.com at the edge (Cloudflare) and never reach this
-// app.
+// www. 308s to the apex; retired domains redirect to donkeycut.com at the
+// edge (Cloudflare) and never reach this app.
 //
 // This file must live in src/ (next to app/) and use the Next 16 `proxy` name;
 // a root-level middleware.ts is not loaded when the app is under src/.
@@ -89,9 +88,8 @@ export function proxy(req: NextRequest) {
     );
   }
 
-  // Old direct /cut/… links (donkeyuse.com served the tree unrewritten, and
-  // Cloudflare forwards those paths here) canonicalize to the rewritten
-  // address: /cut/app/… → /app/….
+  // Legacy direct /cut/… links canonicalize to the rewritten address:
+  // /cut/app/… → /app/….
   if (underPath(pathname, "/cut")) {
     const url = req.nextUrl.clone();
     url.pathname = pathname.slice("/cut".length) || "/";

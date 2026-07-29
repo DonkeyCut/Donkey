@@ -10,7 +10,7 @@
   <a href="https://github.com/DonkeyUseCorp/Donkey/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/DonkeyUseCorp/Donkey?label=release&color=EC7868" /></a>
   <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" /></a>
   <img alt="Platform: macOS" src="https://img.shields.io/badge/Platform-macOS-black.svg" />
-  <a href="https://donkeyuse.com/donkeyvision"><img alt="Vision API" src="https://img.shields.io/badge/Vision-API-EC7868.svg" /></a>
+  <a href="https://donkeycut.com/donkeyvision"><img alt="Vision API" src="https://img.shields.io/badge/Vision-API-EC7868.svg" /></a>
 </p>
 
 Donkey is two things in one repository:
@@ -97,7 +97,7 @@ Pass a natural-language `instruction` like `click the play button` and it return
 ### Example
 
 ```bash
-curl "https://donkeyuse.com/api/vision" \
+curl "https://donkeycut.com/api/vision" \
   -H "Authorization: Bearer $DONKEY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -124,7 +124,7 @@ curl "https://donkeyuse.com/api/vision" \
 }
 ```
 
-A warm parse takes about **0.7s** server-side. See [donkeyuse.com/donkeyvision](https://donkeyuse.com/donkeyvision) for the full reference and to get a key. The parsing model and its latency notes live in [`docs/guides/donkey-vision.md`](docs/guides/donkey-vision.md) and [`vision/`](vision/).
+A warm parse takes about **0.7s** server-side. See [donkeycut.com/donkeyvision](https://donkeycut.com/donkeyvision) for the full reference and to get a key. The parsing model and its latency notes live in [`docs/guides/donkey-vision.md`](docs/guides/donkey-vision.md) and [`vision/`](vision/).
 
 ---
 
