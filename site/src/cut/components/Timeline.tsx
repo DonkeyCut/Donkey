@@ -243,6 +243,7 @@ export function Timeline() {
   // is glued to the content the same way — it is held out of the horizontal
   // scroll, not out of the vertical one.
   const gutterRef = useRef<HTMLDivElement>(null);
+  const gutterFaceRef = useRef<HTMLDivElement>(null);
   const gutterShadowRef = useRef<HTMLDivElement>(null);
   // The toolbar's editing tools and zoom fold into a menu when the bar cannot
   // hold them beside the transport. Both sides go at once — a bar with the
@@ -290,9 +291,12 @@ export function Timeline() {
       if (rulerUnderlayRef.current) rulerUnderlayRef.current.style.transform = y;
       if (gutterRef.current) gutterRef.current.style.transform = y;
       // Once the timeline has scrolled, the gutter has something running under
-      // it — the edge shadow is what says so. At rest it sits flush, because
-      // there is nothing beneath it to cast off.
-      gutterShadowRef.current?.toggleAttribute("data-scrolled", el.scrollLeft > 0);
+      // it — its face covers that, and the edge shadow says so. At rest both
+      // stay hidden: the underlay already paints the same surface, and a clip
+      // sitting at 0 keeps its selection ring whole.
+      const scrolled = el.scrollLeft > 0;
+      gutterFaceRef.current?.toggleAttribute("data-scrolled", scrolled);
+      gutterShadowRef.current?.toggleAttribute("data-scrolled", scrolled);
     };
     sync();
     el.addEventListener("scroll", sync);
@@ -1465,9 +1469,13 @@ export function Timeline() {
           need. It paints the resting surface (following vertical scroll, so
           its ruler band and rails stay glued to the live ones) and passes
           presses through to the scrubbing surface beneath; controls will take
-          their own pointer events when they land. */}
+          their own pointer events when they land. Its face shows only once
+          the timeline has scrolled: at rest the underlay behind the scroller
+          paints the same pixels, and staying clear lets a clip at 0 keep the
+          left side of its selection ring. */}
       <div
-        className="pointer-events-none absolute inset-y-0 left-0 z-40 overflow-hidden bg-muted"
+        ref={gutterFaceRef}
+        className="pointer-events-none absolute inset-y-0 left-0 z-40 overflow-hidden bg-muted opacity-0 transition-opacity duration-150 data-scrolled:opacity-100"
         style={{ width: PAD_SIDE }}
       >
         <div ref={gutterRef} className="absolute inset-0">
