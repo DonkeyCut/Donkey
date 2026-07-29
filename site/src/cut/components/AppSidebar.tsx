@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Clapperboard, FolderOpen, Loader2, Plus } from "lucide-react";
+import { Clapperboard, FolderOpen, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,11 +14,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { apiFetch, getBackend } from "@/cut/lib/backend";
 import { seedNewProjectDoc } from "@/cut/lib/docCache";
 import { patchProjects } from "@/cut/lib/queries";
+import { backendFor, type Residency } from "@/cut/lib/residency";
 import { track } from "@/lib/analytics";
 import { NavStorage } from "@/cut/components/NavStorage";
+import { NewProjectButton } from "@/cut/components/NewProjectButton";
 import { NavUser } from "@/cut/components/NavUser";
 import { homeHref, projectHref, tabForPath, useCutBase, type CutTab } from "@/cut/lib/nav";
 import type { ProjectSummary } from "@/cut/lib/types";
@@ -34,30 +35,32 @@ export function AppSidebar() {
   const router = useRouter();
   const base = useCutBase();
   const client = useQueryClient();
-  const [createOpen, setCreateOpen] = useState(false);
+  // The residency the pending creation was launched for; null when the naming
+  // dialog is closed.
+  const [createIn, setCreateIn] = useState<Residency | null>(null);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const create = async () => {
+  const create = async (r: Residency) => {
     setBusy(true);
     try {
-      const res = await apiFetch("/api/cut/projects", {
+      const res = await backendFor(r).fetch("/api/cut/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim() || "Untitled" }),
       });
       const project = (await res.json()) as ProjectSummary;
-      const kind = getBackend().kind;
-      patchProjects(client, kind === "cloud" ? "cloud" : "local", (s) => ({
+      patchProjects(client, r, (s) => ({
         ...s,
         projects: [project, ...s.projects],
       }));
       // A brand-new project's document is empty, so the editor about to open
       // needs no round trip to draw it.
-      seedNewProjectDoc(project.id, project.name, kind);
+      seedNewProjectDoc(project.id, project.name, r);
       track("project_created", { source: "sidebar" });
-      // The sidebar creates on the globally bound backend, so the link carries
-      // that residency.
+      // The link carries no residency; the editor resolves it by asking which
+      // backend owns the id, so a cloud project created from a Mac still opens
+      // against the cloud.
       router.push(projectHref(base, project.id, tabForPath(pathname), null));
     } finally {
       setBusy(false);
@@ -79,15 +82,13 @@ export function AppSidebar() {
         <span className="text-[17px] font-semibold tracking-tight">Donkey Cut</span>
       </div>
 
-      <Button
+      <NewProjectButton
         className="mb-5 w-full"
-        onClick={() => {
+        onCreate={(r) => {
           setName("");
-          setCreateOpen(true);
+          setCreateIn(r);
         }}
-      >
-        <Plus data-icon="inline-start" /> New project
-      </Button>
+      />
 
       <nav className="flex flex-col gap-0.5">
         {NAV.map(({ tab, label, icon: Icon }) => {
@@ -112,7 +113,7 @@ export function AppSidebar() {
         <NavStorage />
         <NavUser />
       </div>
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+      <Dialog open={createIn !== null} onOpenChange={(o) => !o && setCreateIn(null)}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>New project</DialogTitle>
@@ -120,7 +121,7 @@ export function AppSidebar() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              void create();
+              if (createIn) void create(createIn);
             }}
           >
             <Input

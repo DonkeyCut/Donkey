@@ -54,7 +54,6 @@ import {
 } from "@/components/ui/tooltip";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { capturePosterWhenReady, readPoster } from "@/cut/lib/posterCache";
-import { engineOrigin, servedFromEngine } from "@/cut/lib/api";
 import { quotaErrorMessage } from "@/cut/lib/backend/cloud";
 import { useCloudUsage, useCutMode } from "@/cut/lib/backend/hooks";
 import { dropCachedDoc, seedNewProjectDoc } from "@/cut/lib/docCache";
@@ -67,8 +66,9 @@ import {
   type Residency,
 } from "@/cut/lib/queries";
 import { useInView } from "@/cut/hooks/useInView";
+import { useNewProjectTarget } from "@/cut/lib/newProject";
+import { NewProjectButton } from "@/cut/components/NewProjectButton";
 import { track } from "@/lib/analytics";
-import { authClient } from "@/lib/auth-client";
 import { useStartCheckout } from "@/queries/billing";
 import { clearProjectThreads } from "@/cut/lib/chatThreads";
 import { useGenerate } from "@/cut/lib/generate";
@@ -185,17 +185,10 @@ export function ProjectsHome() {
   const mode = useCutMode();
   // The home never runs in shared mode; anything non-cloud lists as local.
   const homeMode: Residency = mode === "cloud" ? "cloud" : "local";
-  const { data: session } = authClient.useSession();
-  // Which backends this home lists. Engine presence is what the ConnectGate
-  // already resolved for this tab (same-origin page, or a memoized loopback
-  // origin) — never a fresh probe, which could raise the browser's
-  // local-network prompt.
-  const engineUp = servedFromEngine() || engineOrigin() !== "";
-  const residencies: Residency[] = !session
-    ? ["local"]
-    : engineUp
-      ? ["local", "cloud"]
-      : ["cloud"];
+  // Which backends this home lists, and where its New project button aims.
+  // They are the same question: a shelf this browser and account can reach is
+  // a shelf a project can be made on.
+  const { target, choices: residencies } = useNewProjectTarget();
   const dual = residencies.length > 1;
   const r0 = residencies[0];
 
@@ -229,7 +222,9 @@ export function ProjectsHome() {
   const openFolder = useSearchParams().get("folder");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [view, setView] = useState<View>("gallery");
-  const [createOpen, setCreateOpen] = useState(false);
+  // The residency the pending creation was launched for; null when the naming
+  // dialog is closed.
+  const [createIn, setCreateIn] = useState<Residency | null>(null);
   const [folderCreating, setFolderCreating] = useState<Residency | null>(null);
   const [renaming, setRenaming] = useState<{ project: ProjectSummary; residency: Residency } | null>(
     null
@@ -345,10 +340,10 @@ export function ProjectsHome() {
     router.push(projectHref(base, project.id, "projects", folderId));
   };
 
-  const create = async () => {
+  const create = async (r: Residency) => {
     setBusy(true);
     try {
-      await openNewProject(r0, name.trim() || "Untitled", openFolder);
+      await openNewProject(r, name.trim() || "Untitled", openFolder);
     } finally {
       setBusy(false);
     }
@@ -444,18 +439,18 @@ export function ProjectsHome() {
   // the doc + media transfer and cleans up a half-made copy itself), then drop
   // the original. The copy landing first is what makes deleting it safe.
   const moveAcross = async (source: Residency, p: ProjectSummary) => {
-    const target: Residency = source === "cloud" ? "local" : "cloud";
+    const dest: Residency = source === "cloud" ? "local" : "cloud";
     setDupError(null);
     setBusy(true);
     try {
-      await copyProjectAcross(backendFor(source), backendFor(target), p.id);
+      await copyProjectAcross(backendFor(source), backendFor(dest), p.id);
       await backendFor(source)
         .fetch(`/api/cut/projects/${p.id}`, { method: "DELETE" })
         .catch(() => {});
       // The chat history moved with the project; the old project's copy goes
       // with the project itself.
       clearProjectThreads(p.id);
-      await Promise.all([refresh(source), refresh(target)]);
+      await Promise.all([refresh(source), refresh(dest)]);
     } catch (e) {
       setDupError(e instanceof Error && e.message ? e.message : "Could not move the project.");
     } finally {
@@ -703,7 +698,7 @@ export function ProjectsHome() {
       <button
         type="button"
         data-no-marquee
-        onClick={() => void newProjectHere(dual ? (folderOwner ?? "local") : r0)}
+        onClick={() => void newProjectHere(folderOwner ?? target)}
         className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
       >
         <Plus className="size-4" /> New project
@@ -798,11 +793,10 @@ export function ProjectsHome() {
                   <FolderPlus data-icon="inline-start" /> New folder
                 </Button>
               ))}
-            {/* Local-first: with the engine present, creation is always local —
-                a project reaches the cloud by moving it from the editor. */}
-            <Button onClick={() => void newProjectHere(dual ? (folderOwner ?? "local") : r0)}>
-              <Plus data-icon="inline-start" /> New project
-            </Button>
+            <NewProjectButton
+              pinned={folderOwner}
+              onCreate={(r) => void newProjectHere(r)}
+            />
             {anyProjects && (
               <div className="flex rounded-lg border border-border bg-card p-0.5">
                 <Button
@@ -852,14 +846,13 @@ export function ProjectsHome() {
             <h1 className="text-lg font-semibold tracking-tight">
               Create a new project to get started
             </h1>
-            <Button
-              onClick={() => {
+            <NewProjectButton
+              pinned={folderOwner}
+              onCreate={(r) => {
                 setName("");
-                setCreateOpen(true);
+                setCreateIn(r);
               }}
-            >
-              <Plus data-icon="inline-start" /> New project
-            </Button>
+            />
           </div>
         </div>
       ) : (
@@ -879,7 +872,7 @@ export function ProjectsHome() {
         </>
       )}
 
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+      <Dialog open={createIn !== null} onOpenChange={(o) => !o && setCreateIn(null)}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>New project</DialogTitle>
@@ -887,7 +880,7 @@ export function ProjectsHome() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              void create();
+              if (createIn) void create(createIn);
             }}
           >
             <Input
