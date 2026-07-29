@@ -39,6 +39,23 @@ const safeRate = (speed: number) => Math.min(16, Math.max(0.0625, speed));
 const WARM_HORIZON_S = 8;
 const WARM_MAX = 4;
 
+// Live decoder budget. A decoder is not free: it holds an open fetch against
+// the media file, a demuxer, a decoded-frame buffer, and one of the small
+// number of hardware decode slots the browser hands out per tab. A clip's
+// element used to live from the first time the playhead came near it until the
+// clip was deleted, so a long cut split many times accumulated decoders for
+// every clip ever visited — all of them buffering the same file at once. Past
+// the hardware limit the extras fall back to software decode, and since sound
+// stays real-time while frames arrive late, the picture drifts behind the
+// audio. Only reloading the page cleared it.
+//
+// So the pool is capped. Clips this frame is built from are never candidates;
+// beyond them the least recently touched elements are torn down, leaving room
+// for a few just-played clips so stepping back a cut stays hot. Rebuilding is
+// cheap — the bytes are in the HTTP cache, and the same rebuild path already
+// runs for stalled decoders.
+const DECODER_BUDGET = 12;
+
 // Decoder health. A decoder can stop making progress two ways, and both used
 // to be permanent for the life of the tab. It can error — and an errored
 // element stays errored, because re-minting the media links does not repoint
@@ -121,6 +138,14 @@ class Engine {
   // reading and when it was taken, plus how many times this clip's decoder has
   // been rebuilt on the current source.
   private health = new Map<string, { mark: number; at: number; rebuilds: number }>();
+  // Decoder recency, keyed like the element maps: the tick that last asked for
+  // this clip's element. Anything below the current tick is idle and can be
+  // evicted; the current tick's entries are what the frame on screen is made
+  // of.
+  private used = new Map<string, number>();
+  private frame = 0;
+  // The clip array the decoder maps were last reconciled against.
+  private clipsSeen: VideoClip[] | null = null;
   private raf = 0;
   private activeClipId: string | null = null;
   private disposed = false;
@@ -149,12 +174,42 @@ class Engine {
     this.overlayEls.clear();
     this.audioEls.clear();
     this.health.clear();
+    this.used.clear();
+  }
+
+  /** Release one clip's decoder. The element maps are disjoint by clip id, so
+   * this serves track 0 and the overlay tracks alike. */
+  private dropDecoder(clipId: string) {
+    const el = this.videoEls.get(clipId) ?? this.overlayEls.get(clipId);
+    if (el) teardown(el);
+    this.videoEls.delete(clipId);
+    this.overlayEls.delete(clipId);
+    this.health.delete(clipId);
+    this.used.delete(clipId);
+  }
+
+  /** Hold the live decoder pool to `DECODER_BUDGET`, oldest first. Elements
+   * touched during the tick that just ran are the frame on screen — the
+   * master, its transition partner, the pre-rolling next clip, the live
+   * overlays, the warm set — and are never candidates, so a busy frame simply
+   * evicts less rather than tearing down something it is about to draw. */
+  private evictIdleDecoders() {
+    const total = this.videoEls.size + this.overlayEls.size;
+    if (total <= DECODER_BUDGET) return;
+    const idle = [...this.videoEls.keys(), ...this.overlayEls.keys()]
+      .filter((id) => (this.used.get(id) ?? 0) < this.frame)
+      .sort((a, b) => (this.used.get(a) ?? 0) - (this.used.get(b) ?? 0));
+    for (const id of idle.slice(0, total - DECODER_BUDGET)) this.dropDecoder(id);
   }
 
   /** The cached element for a clip, rebuilt when its source no longer matches —
    * a swap keeps the clip id but repoints the asset (a shot re-render), and the
    * old decoder would otherwise keep playing (or erroring on) the old file. */
   private elFor(map: Map<string, MediaEl>, clipId: string, asset: MediaAsset): MediaEl {
+    // Asking for a clip's element is what marks it in use — every path that
+    // draws, seeks, warms or pre-rolls a clip comes through here, so recency
+    // needs no bookkeeping at the call sites.
+    this.used.set(clipId, this.frame);
     let el = map.get(clipId);
     if (el && el.getAttribute("src") !== asset.url) {
       teardown(el);
@@ -525,11 +580,7 @@ class Engine {
     for (const [id, el] of this.overlayEls) {
       if (active.has(id)) continue;
       pauseEl(el);
-      if (!overlayLayers(s.clips).some((c) => c.id === id)) {
-        teardown(el);
-        this.overlayEls.delete(id);
-        this.health.delete(id);
-      }
+      if (!overlayLayers(s.clips).some((c) => c.id === id)) this.dropDecoder(id);
     }
   }
 
@@ -591,20 +642,25 @@ class Engine {
   private tick() {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.tick);
+    this.frame++;
+    this.render();
+    // After the frame, never during it: what `render` touched is exactly what
+    // must survive, and it takes every early return there is to say so.
+    this.evictIdleDecoders();
+  }
 
+  private render() {
     const s = useEditor.getState();
     const spans = getClipSpans(s.clips, s.assets);
     // Drop decoders for clips that no longer exist (deleted or replaced).
-    // videoEls holds track-0 decoders only, so compare against the spans —
-    // gating on the whole clip list would let layer clips mask deletions and
-    // keep dead <video> elements alive.
-    if (this.videoEls.size > spans.length) {
+    // Every edit rewrites the clip array, so its identity changing is the
+    // signal to re-check — a moving playhead leaves it alone, and the scan
+    // never runs per frame.
+    if (this.clipsSeen !== s.clips) {
+      this.clipsSeen = s.clips;
       const live = new Set(s.clips.map((c) => c.id));
-      for (const [id, el] of this.videoEls) {
-        if (live.has(id)) continue;
-        teardown(el);
-        this.videoEls.delete(id);
-        this.health.delete(id);
+      for (const id of [...this.videoEls.keys(), ...this.overlayEls.keys()]) {
+        if (!live.has(id)) this.dropDecoder(id);
       }
     }
     // Whole-project length so time past track 0's end (a longer video track or
