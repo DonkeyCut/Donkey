@@ -7,6 +7,7 @@ import {
   ArrowUp,
   Brain,
   Check,
+  ChevronLeft,
   ChevronDown,
   CircleDashed,
   Copy,
@@ -354,7 +355,17 @@ export function AiPanel({
   }, [info, signedIn, caps.localCliChat]);
 
   return (
-    <aside className="ai-panel relative flex min-h-0 w-[340px] shrink-0 animate-in flex-col border-l border-border bg-card duration-300 ease-out slide-in-from-right-full">
+    // A column beside the editor, as it has always been. Docking costs the
+    // editor 340px and it wears that down to a narrow window, taking the
+    // content over with it; only once the window itself is under the width the
+    // editor needs to be worth opening — NARROW_MAX_WIDTH, 900 — is there
+    // nothing left to take, and the panel lifts off and overlays instead.
+    //
+    // A plain overlay, with no scrim: the cut stays readable behind it, which
+    // is the point of having it open. Fixed rather than absolute so it is the
+    // viewport it pins to, not the editor's box — narrower than the panel and
+    // that box is wider than the screen, and the panel would hang off it.
+    <aside className="ai-panel relative flex min-h-0 w-[340px] shrink-0 animate-in flex-col border-l border-border bg-card duration-300 ease-out slide-in-from-right-full max-[900px]:fixed max-[900px]:inset-y-0 max-[900px]:right-0 max-[900px]:z-50 max-[900px]:w-full max-[900px]:max-w-[340px] max-[900px]:shadow-[-16px_0_40px_rgba(0,0,0,0.14)]">
       <div className="flex h-[46px] shrink-0 items-center gap-1.5 border-b border-border pr-2 pl-3.5">
         <div className="flex-1" />
         <Button
@@ -389,15 +400,32 @@ export function AiPanel({
             className="fixed inset-0 z-30"
             onClick={() => setHistoryOpen(false)}
           />
-          <div className="ai-thread-list absolute top-0 right-full bottom-0 z-40 flex w-[280px] animate-in flex-col border-x border-border bg-card shadow-[-16px_0_40px_rgba(0,0,0,0.14)] duration-200 ease-out fade-in-0 slide-in-from-right-6">
-            <div className="flex h-[46px] shrink-0 items-center justify-between border-b border-border pr-2 pl-3.5">
+          {/* Beside the panel where the two fit — the list needs its 280 to the
+              left of the panel's 340 — and over it where they do not, as a
+              screen the panel pushes to and comes back from. */}
+          <div className="ai-thread-list absolute top-0 right-full bottom-0 z-40 flex w-[280px] animate-in flex-col border-x border-border bg-card shadow-[-16px_0_40px_rgba(0,0,0,0.14)] duration-200 ease-out fade-in-0 slide-in-from-right-6 max-[620px]:inset-0 max-[620px]:w-auto max-[620px]:border-x-0 max-[620px]:shadow-none">
+            <div className="flex h-[46px] shrink-0 items-center gap-1 border-b border-border pr-2 pl-3.5 max-[620px]:pl-1">
+              {/* Only where the list is covering the panel: sitting beside it,
+                  there is nothing behind to go back to. */}
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="hidden max-[620px]:inline-flex"
+                aria-label="Back to chat"
+                title="Back to chat"
+                onClick={() => setHistoryOpen(false)}
+              >
+                <ChevronLeft />
+              </Button>
               <span className="text-sm font-semibold tracking-tight">
                 Threads
               </span>
+              <div className="flex-1" />
               <Button
                 variant="ghost"
                 size="sm"
                 title="Close"
+                className="max-[620px]:hidden"
                 onClick={() => setHistoryOpen(false)}
               >
                 <X />
