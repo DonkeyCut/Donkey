@@ -29,12 +29,7 @@ DONKEY_APP_BUILD="2" \
 ```
 
 The app has no account and makes no authenticated calls; the menu bar's "Go to
-App" opens the site at the packaged base URL — `https://donkeyuse.com` by
-default. Override it for local or staging testing:
-
-```bash
-DONKEY_WEB_BASE_URL="http://localhost:3000" ./scripts/package-donkey-app.sh
-```
+App" opens the Cut app at `https://donkeycut.com/app`.
 
 Launch the packaged app with `open dist/Donkey.app`; test the installer flow
 with `open dist/Donkey.dmg`.
@@ -61,7 +56,7 @@ user driver and surfaces the update itself in the menu bar, so Sparkle's standar
 update windows are never shown.
 
 The public Sparkle feed lives in `site/public/appcast.xml`, served as
-`https://donkeyuse.com/appcast.xml`. Appcast enclosure URLs point to the
+`https://donkeycut.com/appcast.xml`. Appcast enclosure URLs point to the
 numeric GitHub Release asset URL, not a moving `latest` or `-latest` URL. Do
 not use the Supabase Storage `/release` bucket for release binaries or appcast
 hosting.
@@ -71,7 +66,7 @@ Configure Sparkle when packaging:
 ```bash
 DONKEY_APP_VERSION="0.1.1" \
 DONKEY_APP_BUILD="2" \
-DONKEY_SPARKLE_FEED_URL="https://donkeyuse.com/appcast.xml" \
+DONKEY_SPARKLE_FEED_URL="https://donkeycut.com/appcast.xml" \
 DONKEY_SPARKLE_PUBLIC_ED_KEY="..." \
 ./scripts/package-donkey-app.sh
 ```
@@ -122,7 +117,7 @@ with a packaged `Donkey.app` over macOS privacy settings.
 |---|---|
 | `DONKEY_START_SITE=0` | skip starting the site |
 | `DONKEY_LAUNCH_APP=0` | build and register the debug app without opening it |
-| `DONKEY_WEB_BASE_URL` | point the app at a different site |
+| `DONKEY_WEB_BASE_URL` | where the dev site server is expected; non-local values skip starting it |
 | `DONKEY_CODESIGN_IDENTITY` | sign with a local identity so macOS privacy grants stick to it; otherwise ad-hoc signing with a stable dev designated requirement |
 | `DONKEY_KEEP_APP_ON_EXIT=1` | don't stop running `Donkey`, `Donkey Dev`, and sidecar processes when the script exits or receives `SIGINT`/`SIGTERM`/hangup |
 | `DONKEY_STOP_APPS_BEFORE_BUILD=0` | don't stop running Donkey app processes before rebuilding (only when intentionally inspecting a running build) |

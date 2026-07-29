@@ -230,7 +230,7 @@ After the workflow finishes:
   enclosure URL under `/releases/download/vMAJOR.MINOR.PATCH/Donkey.dmg`.
 - The GitHub Releases page keeps no more than 10 numeric production releases,
   plus the separate nightly prerelease when present.
-- `https://donkeyuse.com/appcast.xml` updates after the site deploy completes.
+- `https://donkeycut.com/appcast.xml` updates after the site deploy completes.
 
 If Sparkle cannot validate an update, first check that the app was packaged
 with the `DONKEY_SPARKLE_PUBLIC_ED_KEY` that matches the private key stored in
