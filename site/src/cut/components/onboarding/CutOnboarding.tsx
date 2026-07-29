@@ -19,6 +19,7 @@ import {
   type ReferralSource,
 } from "@/lib/onboarding/sequence";
 import { cn } from "@/lib/utils";
+import { useProSubscription } from "@/queries/billing";
 import {
   needsOnboarding,
   useOnboardingState,
@@ -51,8 +52,9 @@ const doneHere = (): boolean =>
 export function CutOnboarding() {
   const base = useCutBase();
   const { data: state, isPending } = useOnboardingState();
+  const { data: pro } = useProSubscription();
   const save = useSaveOnboarding();
-  const [step, setStep] = useState(0);
+  const [rawStep, setStep] = useState(0);
   const [referrals, setReferrals] = useState<ReferralSource[]>([]);
   const [dismissed, setDismissed] = useState(false);
   const [replaying, setReplaying] = useState(false);
@@ -69,6 +71,15 @@ export function CutOnboarding() {
     : !dismissed && needsOnboarding(state)
       ? "first_run"
       : null;
+
+  // A subscriber has nothing left to be sold, so the plans slide drops off the
+  // end for them: the sequence is one slide shorter, its last slide ends with
+  // Done instead of a pitch, and the header carries a way straight out. Reading
+  // the count this way rather than storing it means a subscription that lands
+  // mid-sequence (or a replay after checkout) is handled by the same clamp.
+  const isPro = pro?.isActive ?? false;
+  const slideCount = isPro ? SLIDE_COUNT - 1 : SLIDE_COUNT;
+  const step = Math.min(rawStep, slideCount - 1);
 
   useEffect(() => {
     if (run) track("onboarding_started", { source: run });
@@ -133,16 +144,20 @@ export function CutOnboarding() {
 
   const back = useCallback(() => {
     commitReferrals();
-    setStep((s) => Math.max(0, s - 1));
-  }, [commitReferrals]);
+    setStep(Math.max(0, step - 1));
+  }, [commitReferrals, step]);
   const advance = useCallback(() => {
     commitReferrals();
-    // The last slide is the plans slide, and it ends the sequence through its
-    // own two answers — Get Pro, or continue free. Arrowing or Entering past it
-    // would be a third, silent one, so forward stops here.
-    if (step >= SLIDE_COUNT - 1) return;
+    if (step >= slideCount - 1) {
+      // The plans slide ends the sequence through its own two answers — Get
+      // Pro, or continue with free. Arrowing or Entering past it would be a
+      // third, silent one, so forward stops there. A subscriber never sees that
+      // slide, so forward off their last one is how the sequence ends.
+      if (isPro) finish(false);
+      return;
+    }
     setStep(step + 1);
-  }, [commitReferrals, step]);
+  }, [commitReferrals, finish, isPro, slideCount, step]);
 
   useEffect(() => {
     if (!run) return;
@@ -181,7 +196,10 @@ export function CutOnboarding() {
     );
   };
 
-  const last = step === SLIDE_COUNT - 1;
+  const last = step === slideCount - 1;
+  // A subscriber's last slide ends the sequence from the footer, where everyone
+  // else finds the plans slide's own two answers.
+  const done = last && isPro;
 
   return (
     <div
@@ -190,7 +208,7 @@ export function CutOnboarding() {
       aria-label="Welcome to Donkey Cut"
       className="fixed inset-0 z-[80] flex flex-col bg-cream font-system text-ink antialiased"
     >
-      <div className="flex shrink-0 items-center px-6 py-2 md:px-10 md:py-2.5">
+      <div className="flex shrink-0 items-center justify-between px-6 py-2 md:px-10 md:py-2.5">
         {/* The landing nav's lockup, same icon box and wordmark size. */}
         <span className="flex items-center gap-0">
           <span className="flex size-[59px] shrink-0 items-center justify-center overflow-hidden rounded-[10px]">
@@ -204,6 +222,19 @@ export function CutOnboarding() {
           </span>
           <span className="text-2xl font-semibold">Donkey Cut</span>
         </span>
+
+        {/* A subscriber is being told about what they already pay for, so they
+            get the door: the same way out Escape takes. Everyone else meets it
+            at the end, where the plans slide asks its question. */}
+        {isPro ? (
+          <Button
+            variant="ghost"
+            onClick={() => finish(true)}
+            className="text-[#454545]"
+          >
+            Skip
+          </Button>
+        ) : null}
       </div>
 
       {/* Slides sit high rather than centered: the spacers split the free space
@@ -219,7 +250,7 @@ export function CutOnboarding() {
           {step === 2 && <ModesSlide />}
           {step === 3 && <CreditsSlide />}
           {step === 4 && <AiChatSlide />}
-          {step === 5 && <PlansSlide onSkipPro={() => finish(false)} />}
+          {step === 5 && !isPro && <PlansSlide onSkipPro={() => finish(false)} />}
         </div>
         <div aria-hidden className="flex-[3]" />
       </div>
@@ -234,7 +265,7 @@ export function CutOnboarding() {
         </Button>
 
         <div className="flex items-center gap-1.5">
-          {Array.from({ length: SLIDE_COUNT }, (_, i) => (
+          {Array.from({ length: slideCount }, (_, i) => (
             <span
               key={i}
               className={cn(
@@ -245,17 +276,25 @@ export function CutOnboarding() {
           ))}
         </div>
 
-        {/* The last slide carries its own two ways out — Get Pro, or continue
-            free — so the footer keeps only the space, not a third button. */}
+        {/* The plans slide carries its own two ways out — Get Pro, or continue
+            with free — so the footer keeps only the space there, not a third
+            button. A subscriber ends on the slide before it, and Done is what
+            takes them out. */}
         <Button
           onClick={advance}
           className={cn(
             "gap-1.5 rounded-full bg-ink px-5 text-white hover:bg-ink/90",
-            last && "invisible",
+            last && !done && "invisible",
           )}
         >
-          Next
-          <ArrowRight className="size-4" />
+          {done ? (
+            "Done"
+          ) : (
+            <>
+              Next
+              <ArrowRight className="size-4" />
+            </>
+          )}
         </Button>
       </div>
     </div>
