@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { usePlayback } from "@/cut/hooks/usePlayback";
 import { clearAssetDrag, setAssetDragData } from "@/cut/lib/assetDrag";
 import { startDrag } from "@/cut/lib/drag";
-import { getClipSpans, useEditor } from "@/cut/lib/store";
+import { getClipSpans, projectDuration, useEditor } from "@/cut/lib/store";
 import {
   capturePoster,
   capturePosterWhenReady,
@@ -103,6 +103,14 @@ export function Preview() {
     return () => ro.disconnect();
   }, [aspect]);
 
+  const togglePlayback = () => {
+    const s = useEditor.getState();
+    const total = projectDuration(s);
+    if (!total) return;
+    if (!s.playing && s.currentTime >= total - 0.01) s.seek(0);
+    s.setPlaying(!s.playing);
+  };
+
   // Drag a fill-mode clip inside the frame to choose the visible crop.
   const panDrag = (e: React.PointerEvent) => {
     const s = useEditor.getState();
@@ -127,6 +135,11 @@ export function Preview() {
           panY: oy > 1 ? Math.max(-1, Math.min(1, panY0 - (dy * toFrame) / (oy / 2))) : 0,
         });
       },
+      // startDrag suppresses the click event, so a stationary press on a
+      // pannable clip toggles playback here instead.
+      onUp: (_dx, _dy, moved) => {
+        if (!moved) togglePlayback();
+      },
     });
     return true;
   };
@@ -146,6 +159,16 @@ export function Preview() {
               (e.target as HTMLElement).tagName === "CANVAS"
             ) {
               if (!panDrag(e)) useEditor.getState().select(null);
+            }
+          }}
+          // A native drag on the canvas swallows the click, so this only fires
+          // for a stationary click.
+          onClick={(e) => {
+            if (
+              e.target === e.currentTarget ||
+              (e.target as HTMLElement).tagName === "CANVAS"
+            ) {
+              togglePlayback();
             }
           }}
         >
