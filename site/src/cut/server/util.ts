@@ -125,6 +125,57 @@ export function videoColorInfo(
 }
 
 /**
+ * The first video stream's coded size, or null when the probe fails or the file
+ * has no video. Reported in display orientation: ffprobe gives coded dimensions,
+ * so a phone portrait clip tagged with a 90° display matrix reads back as
+ * landscape, and the rotation is applied here rather than left to each caller.
+ */
+export function videoDimensions(
+  file: string
+): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    const p = spawn("ffprobe", [
+      "-v", "error",
+      "-select_streams", "v:0",
+      "-show_entries", "stream=width,height:stream_side_data=rotation",
+      "-of", "json",
+      file,
+    ]);
+    let out = "";
+    const timer = setTimeout(() => {
+      p.kill("SIGKILL");
+      resolve(null);
+    }, 30_000);
+    timer.unref();
+    p.stdout.on("data", (d) => (out += d));
+    p.on("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) return resolve(null);
+      try {
+        const s = JSON.parse(out).streams?.[0];
+        const width = Number(s?.width);
+        const height = Number(s?.height);
+        if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+          return resolve(null);
+        }
+        const rotation = Number(
+          (s?.side_data_list ?? []).find((d: { rotation?: unknown }) => d?.rotation != null)
+            ?.rotation ?? 0
+        );
+        const quarterTurned = Math.abs(rotation) % 180 === 90;
+        resolve(quarterTurned ? { width: height, height: width } : { width, height });
+      } catch {
+        resolve(null);
+      }
+    });
+    p.on("error", () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
+  });
+}
+
+/**
  * Whether a media file carries a stream of the given kind ("a" audio /
  * "v" video). Resolves false only when ffprobe reports no such stream; a
  * probe that errors is reported by `onProbeError` so callers can decide

@@ -12,10 +12,11 @@ import { lookFilterLines } from "../lib/looks";
 
 export interface ExportSpec {
   projectId: string;
-  /** Where the render lands instead of a stamped file in exports/: "preview"
+  /** Where the render lands instead of a stamped file in exports/: "hls" is the
+   * share's streaming ladder, "preview"
    * writes the project's low-res hover proxy, "card" the opening seconds the
    * cloud worker derives a shared link's preview image from. */
-  target?: "export" | "preview" | "card";
+  target?: "export" | "preview" | "card" | "hls";
   width: number;
   height: number;
   fps: number;
@@ -227,7 +228,7 @@ function regionPx(
  * message on a non-zero exit or a missing binary. Shared by the encode pass and
  * the rotation-strip remux.
  */
-function runFfmpeg(
+export function runFfmpeg(
   job: RenderHandle,
   args: string[],
   onProgress?: (seconds: number) => void

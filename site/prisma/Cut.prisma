@@ -137,7 +137,7 @@ model CutRenderJob {
   id        String    @id @default(cuid())
   userId    String
   projectId String?
-  kind      String // export | preview | import_url
+  kind      String // export | preview | hls | import_url
   state     String    @default("queued") // queued | running | done | error | canceled
   progress  Float     @default(0)
   spec      Json

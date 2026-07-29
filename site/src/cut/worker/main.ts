@@ -2,6 +2,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import type { RenderHandle } from "../server/exportPipeline";
 import { prisma, type ClaimedJob } from "./db";
 import { overlayKeysOf, runExportJob } from "./exportJob";
+import { runHlsJob } from "./hlsJob";
 import { runImportUrlJob } from "./importUrlJob";
 import { deleteObjects } from "./r2";
 
@@ -142,6 +143,12 @@ async function runJob(job: ClaimedJob): Promise<void> {
   try {
     if (job.kind === "export" || job.kind === "preview" || job.kind === "card") {
       const { outputKey, outName } = await runExportJob(job, handle);
+      await prisma.cutRenderJob.updateMany({
+        where: { id: job.id, state: "running" },
+        data: { state: "done", progress: 1, outputKey, outName },
+      });
+    } else if (job.kind === "hls") {
+      const { outputKey, outName } = await runHlsJob(job, handle);
       await prisma.cutRenderJob.updateMany({
         where: { id: job.id, state: "running" },
         data: { state: "done", progress: 1, outputKey, outName },

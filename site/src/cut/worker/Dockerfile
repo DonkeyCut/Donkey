@@ -23,6 +23,12 @@ RUN apt-get update \
 RUN ffmpeg -hide_banner -h full 2>&1 | grep -q -- '-display_rotation' \
   || { echo "ffmpeg is too old: the export re-mux needs -display_rotation (6.0+)." >&2; exit 1; }
 
+# The share ladder encodes every rung with libx264 and tunes it through
+# -x264-params. A build without it (an LGPL ffmpeg) would fail per rung at
+# encode time, so it fails here instead.
+RUN ffmpeg -hide_banner -encoders 2>&1 | grep -q '\blibx264\b' \
+  || { echo "ffmpeg has no libx264: the share HLS ladder cannot encode." >&2; exit 1; }
+
 WORKDIR /app
 COPY dist/cut-worker/main.js ./main.js
 

@@ -10,9 +10,14 @@ import { downloadToFile, exportKey, mediaKey, previewKey, uploadFile } from "./r
  * plus the R2 keys of the browser-rendered overlay PNGs (title/caption stills
  * and sub_blank.png). The queueing route (cloud/jobs.ts) stores exactly this
  * and puts the already-deduped export name on the row's outName column. */
-interface ExportJobSpec {
+export interface ExportJobSpec {
   spec: ExportSpec;
   overlays?: { name: string; key: string }[];
+  /** HLS only: whether the client burned captions into this render, decided by
+   * what the share grants. Recorded on the ladder so a share that later stops
+   * granting Subtitles is refused the render rather than served cue text it
+   * cannot strip out of the pixels. */
+  burnedSubtitles?: boolean;
 }
 
 /** The job's overlay-PNG R2 keys, restricted to the job owner's own overlay
@@ -32,13 +37,59 @@ export function overlayKeysOf(job: ClaimedJob): string[] {
  * on purpose: inside the run, a `return somePromise` would hand back work that
  * still needs those files while the `finally` deleted them out from under it.
  */
-async function inWorkDir<T>(render: (work: string) => Promise<T>): Promise<T> {
+export async function inWorkDir<T>(render: (work: string) => Promise<T>): Promise<T> {
   const work = await mkdtemp(path.join(os.tmpdir(), "cut-worker-"));
   try {
     return await render(work);
   } finally {
     void rm(work, { recursive: true, force: true });
   }
+}
+
+/**
+ * Pull everything the render reads into a project-shaped work dir: the clips,
+ * overlay videos and audio the spec names, plus the browser-rendered overlay
+ * PNGs. Returns the media dir the pipeline resolves file names against.
+ *
+ * Shared by every job that runs the export pipeline — the mp4 renders here and
+ * the HLS ladder in hlsJob.ts — so they cannot drift on what a staged project
+ * looks like.
+ */
+export async function stageJobMedia(
+  job: ClaimedJob,
+  body: ExportJobSpec,
+  projectId: string,
+  work: string,
+  handle: RenderHandle
+): Promise<string> {
+  // The pipeline reads overlay/caption PNGs from handle.tmpDir by base name
+  // and writes its encode intermediate there too — mirror the engine's
+  // uploaded-PNG staging.
+  handle.tmpDir = path.join(work, "overlays");
+  const mediaDir = path.join(work, "media");
+  await Promise.all([
+    mkdir(handle.tmpDir, { recursive: true }),
+    mkdir(mediaDir, { recursive: true }),
+  ]);
+
+  const spec = body.spec;
+  const mediaFiles = new Set<string>();
+  for (const c of spec.clips) if (c.file) mediaFiles.add(c.file);
+  for (const o of spec.overlayVideos ?? []) if (o.file) mediaFiles.add(o.file);
+  for (const a of spec.audio ?? []) if (a.file) mediaFiles.add(a.file);
+  const overlayPrefix = `cut/${job.userId}/overlays/`;
+  for (const o of body.overlays ?? []) {
+    if (!o.key.startsWith(overlayPrefix)) throw new Error("Invalid overlay key.");
+  }
+  await Promise.all([
+    ...[...mediaFiles].map((f) =>
+      downloadToFile(mediaKey(job.userId, projectId, f), path.join(mediaDir, path.basename(f)))
+    ),
+    ...(body.overlays ?? []).map((o) =>
+      downloadToFile(o.key, path.join(handle.tmpDir, path.basename(o.name)))
+    ),
+  ]);
+  return mediaDir;
 }
 
 /**
@@ -66,29 +117,7 @@ export async function runExportJob(
   const preview = mode === "preview";
 
   return inWorkDir(async (work) => {
-    // The pipeline reads overlay/caption PNGs from handle.tmpDir by base name
-    // and writes its encode intermediate there too — mirror the engine's
-    // uploaded-PNG staging.
-    handle.tmpDir = path.join(work, "overlays");
-    const mediaDir = path.join(work, "media");
-    await Promise.all([mkdir(handle.tmpDir, { recursive: true }), mkdir(mediaDir, { recursive: true })]);
-
-    const mediaFiles = new Set<string>();
-    for (const c of spec.clips) if (c.file) mediaFiles.add(c.file);
-    for (const o of spec.overlayVideos ?? []) if (o.file) mediaFiles.add(o.file);
-    for (const a of spec.audio ?? []) if (a.file) mediaFiles.add(a.file);
-    const overlayPrefix = `cut/${job.userId}/overlays/`;
-    for (const o of body.overlays ?? []) {
-      if (!o.key.startsWith(overlayPrefix)) throw new Error("Invalid overlay key.");
-    }
-    await Promise.all([
-      ...[...mediaFiles].map((f) =>
-        downloadToFile(mediaKey(job.userId, projectId, f), path.join(mediaDir, path.basename(f)))
-      ),
-      ...(body.overlays ?? []).map((o) =>
-        downloadToFile(o.key, path.join(handle.tmpDir, path.basename(o.name)))
-      ),
-    ]);
+    const mediaDir = await stageJobMedia(job, body, projectId, work, handle);
 
     const outName = mode === "export" ? job.outName?.trim() || "export.mp4" : `${mode}.mp4`;
     handle.outPath = path.join(work, "out", outName);

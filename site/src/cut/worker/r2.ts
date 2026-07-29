@@ -17,6 +17,8 @@ import {
 export {
   projectCardKey as cardKey,
   projectExportKey as exportKey,
+  projectHlsPrefix as hlsPrefix,
+  projectHlsRoot as hlsRoot,
   projectMediaKey as mediaKey,
   projectPreviewKey as previewKey,
 } from "../server/cloud/r2";
@@ -79,6 +81,31 @@ export async function uploadFile(key: string, file: string, contentType: string)
   return info.size;
 }
 
+/** Upload `files` (paths relative to `dir`) under `keyPrefix`, a few at a time.
+ * Returns the total bytes written. An HLS ladder is hundreds of small objects,
+ * so this bounds concurrency rather than opening one request per segment. */
+export async function uploadTree(
+  dir: string,
+  keyPrefix: string,
+  files: string[],
+  concurrency = 8
+): Promise<number> {
+  let total = 0;
+  let next = 0;
+  const workers = Array.from({ length: Math.min(concurrency, files.length) }, async () => {
+    for (let i = next++; i < files.length; i = next++) {
+      const rel = files[i];
+      total += await uploadFile(
+        `${keyPrefix}/${rel.split(path.sep).join("/")}`,
+        path.join(dir, rel),
+        mimeFor(rel)
+      );
+    }
+  });
+  await Promise.all(workers);
+  return total;
+}
+
 const MIME_BY_EXT: Record<string, string> = {
   ".mp4": "video/mp4",
   ".mov": "video/quicktime",
@@ -98,6 +125,11 @@ const MIME_BY_EXT: Record<string, string> = {
   ".gif": "image/gif",
   ".avif": "image/avif",
   ".bmp": "image/bmp",
+  // HLS. The playlist type matters to players; a wrong one makes Safari refuse
+  // the stream outright rather than degrade.
+  ".m3u8": "application/vnd.apple.mpegurl",
+  ".ts": "video/mp2t",
+  ".m4s": "video/iso.segment",
 };
 
 export function mimeFor(fileName: string): string {
