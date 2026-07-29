@@ -220,7 +220,7 @@ const SCENE_PROMPT =
 export const ONBOARDING_PROJECT: MockProject = {
   id: "mason",
   switcherLabel: "Mason",
-  name: "MTest",
+  name: "Cartoon",
   aspect: "9:16",
   panel: {
     tab: "media",
