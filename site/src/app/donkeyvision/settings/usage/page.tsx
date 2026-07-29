@@ -1,7 +1,7 @@
 "use client";
 
-import { UsageCard } from "@/app/app/settings/_components/UsageCard";
-import { UsageHistoryCard } from "@/app/app/settings/_components/UsageHistoryCard";
+import { UsageCard } from "@/app/donkeyvision/settings/_components/UsageCard";
+import { UsageHistoryCard } from "@/components/UsageHistoryCard";
 
 export default function UsagePage() {
   return (

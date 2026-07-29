@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { cutAppBase } from "@/cut/lib/hosts";
 import { shareMetaForToken } from "@/cut/server/cloud/shareCard";
 import { SharedProjectView } from "./SharedProjectView";
 
@@ -22,10 +21,9 @@ async function origin(): Promise<string> {
   return `${proto}://${host}`;
 }
 
-/** The public path of this share, mirroring the link the Share dialog copies:
- * the app base without its /app segment. */
-function sharePath(host: string | null, token: string): string {
-  return `${cutAppBase(host).replace(/\/app$/, "")}/s/${encodeURIComponent(token)}`;
+/** The public path of this share, mirroring the link the Share dialog copies. */
+function sharePath(token: string): string {
+  return `/s/${encodeURIComponent(token)}`;
 }
 
 export async function generateMetadata({
@@ -42,9 +40,8 @@ export async function generateMetadata({
       robots: { index: false, follow: false },
     };
   }
-  const h = await headers();
   const base = await origin();
-  const url = `${base}${sharePath(h.get("host"), token)}`;
+  const url = `${base}${sharePath(token)}`;
   const card = (kind: "gif" | "jpg") => `${url}/card/${kind}?v=${meta.version}`;
   const description = `A video project shared from Donkey Cut. Watch ${meta.name} in the browser.`;
   // The GIF leads: the platforms that animate it play the opening seconds, and

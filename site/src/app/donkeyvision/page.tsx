@@ -26,11 +26,11 @@ export const metadata: Metadata = {
     "Donkey Vision",
   ],
   alternates: {
-    canonical: "https://donkeyuse.com/donkeyvision",
+    canonical: "https://donkeycut.com/donkeyvision",
   },
   openGraph: {
     type: "website",
-    url: "https://donkeyuse.com/donkeyvision",
+    url: "https://donkeycut.com/donkeyvision",
     siteName: "Donkey",
     title: "OmniParser API for UI Element Detection | Donkey Vision",
     description:
@@ -49,13 +49,13 @@ const structuredData = {
   "@type": "WebAPI",
   name: "Donkey Vision",
   alternateName: "OmniParser API",
-  url: "https://donkeyuse.com/donkeyvision",
+  url: "https://donkeycut.com/donkeyvision",
   description:
     "Donkey Vision is a fast, OmniParser-compatible API for detecting interactable UI elements in screenshots — bounding boxes, center points, and labels.",
   provider: {
     "@type": "Organization",
     name: "Donkey",
-    url: "https://donkeyuse.com",
+    url: "https://donkeycut.com",
   },
 };
 

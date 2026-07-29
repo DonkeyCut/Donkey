@@ -4,7 +4,7 @@
 export const API_ENDPOINT = {
   method: "POST",
   path: "/api/vision",
-  host: "https://donkeyuse.com",
+  host: "https://donkeycut.com",
 } as const;
 
 export type CodeLanguage = {

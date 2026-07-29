@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { AppSurfaceBackground } from "@/app/app/_components/AppSurfaceBackground";
+import { AppSurfaceBackground } from "@/components/AppSurfaceBackground";
 import { ConnectGate } from "@/cut/components/ConnectGate";
 import { ExportsDock } from "@/cut/components/ExportsDock";
 import { CutOnboarding } from "@/cut/components/onboarding/CutOnboarding";

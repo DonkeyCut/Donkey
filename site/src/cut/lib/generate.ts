@@ -15,7 +15,7 @@ import {
   stockAssetInDoc,
   upsertRenderInDoc,
 } from "./genvideo/docWriter";
-import { cutAppBase } from "./hosts";
+import { CUT_APP_BASE } from "./nav";
 import { hostedPost } from "./hosted";
 import { enrichAsset, importFileToProject, uploadProjectImage } from "./media";
 import { refsToInlineImages, videoSafeInline, visualRefs, type InlineImage } from "./refMedia";
@@ -211,12 +211,10 @@ export function signInUrl(): string {
  * credits link, so keep it and those call sites in sync. */
 export const NO_CREDITS_MESSAGE = "No credits left";
 
-/** Cut's billing page, where credits are bought — same-host on every host via
- * the app link base. Linked from any generation error caused by an empty
- * balance. */
+/** Cut's billing page, where credits are bought. Linked from any generation
+ * error caused by an empty balance. */
 export function creditsUrl(): string {
-  if (typeof window === "undefined") return "/cut/app/settings";
-  return `${cutAppBase(window.location.host)}/settings`;
+  return `${CUT_APP_BASE}/settings`;
 }
 
 /** Creation-time ownership for generated media, in one place so the rule can't

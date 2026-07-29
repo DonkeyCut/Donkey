@@ -8,23 +8,14 @@ import {
 } from "@/cut/lib/hosts";
 
 // Cut (the video editor, publicly "Donkey Cut") lives under /cut in this single
-// site app: the marketing landing at /cut and the app under /cut/app. The proxy
-// maps its production host onto that tree while the apex host keeps serving
-// Donkey:
-//
-//   donkeycut.com       "/" → landing, "/app/…" → editor app (generic
-//                       "/…" → "/cut/…" rewrite). The auth pages (/sign-in,
-//                       /sign-up), "/install", and the legal pages
-//                       pass through so the shared apex routes serve them
-//                       same-host. www. 308s to the apex.
-//
-// Old cut.donkeyuse.com links are redirected to donkeycut.com at the edge
-// (Cloudflare) and never reach this app.
-//
-// Local dev (localhost) mirrors donkeycut.com — Cut is the default product, so
-// "/" is the Cut landing and "/app/…" the editor — while Donkey Use stays
-// reachable under "/use/…" (stripped to the apex routes). The session cookie
-// stays same-origin because everything is served from the one dev origin.
+// site app: the marketing landing at /cut and the app under /cut/app. Every
+// host gets the same mapping — "/" → landing, "/app/…" → editor app (generic
+// "/…" → "/cut/…" rewrite) — with donkeycut.com as the one production host.
+// The auth pages (/sign-in, /sign-up), "/install", "/donkeyvision", and the
+// legal pages are real root-level routes and pass through the rewrite.
+// www. 308s to the apex; donkeyuse.com and old cut.donkeyuse.com links are
+// redirected to donkeycut.com at the edge (Cloudflare) and never reach this
+// app.
 //
 // This file must live in src/ (next to app/) and use the Next 16 `proxy` name;
 // a root-level middleware.ts is not loaded when the app is under src/.
@@ -62,32 +53,26 @@ function cutApi(req: NextRequest): NextResponse {
   return res;
 }
 
-// Paths served by shared apex routes that must not be captured by the generic
-// "/…" → "/cut/…" rewrite on donkeycut.com. donkeycut.com owns auth directly,
-// so the sign-in/sign-up pages and the Mac-app handoff serve same-host here;
-// "/install" carries the Mac download and the legal pages are shared verbatim.
-// "/app/settings" is not among them: Cut ships its own billing and usage pages
-// under /cut/app/settings, which the generic rewrite serves at /app/settings on
-// this host.
-const DONKEYCUT_PASSTHROUGH = [
+// Root-level routes the generic "/…" → "/cut/…" rewrite must not capture:
+// auth pages, the Mac download, Donkey Vision (marketing, settings, and API
+// docs), and the legal pages. "/app/settings" is not among them: Cut ships its
+// own billing and usage pages under /cut/app/settings, which the generic
+// rewrite serves at /app/settings.
+const PASSTHROUGH = [
   "/install",
   "/privacy",
   "/terms",
   "/sign-in",
   "/sign-up",
+  "/donkeyvision",
 ];
-
-// Local dev mirrors donkeycut.com (Cut at "/", the editor at "/app/…"). It adds
-// the notch prototype, which only exists on the apex and is exercised from
-// localhost during development.
-const LOCAL_PASSTHROUGH = [...DONKEYCUT_PASSTHROUGH, "/prototype"];
 
 // Whole-segment prefix match, so "/cut" covers "/cut/…" but not "/cut-app".
 const underPath = (pathname: string, prefix: string) =>
   pathname === prefix || pathname.startsWith(`${prefix}/`);
 
 const passesThrough = (pathname: string) =>
-  DONKEYCUT_PASSTHROUGH.some((p) => underPath(pathname, p));
+  PASSTHROUGH.some((p) => underPath(pathname, p));
 
 export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -95,46 +80,37 @@ export function proxy(req: NextRequest) {
 
   const host = req.headers.get("host");
 
-  // Local dev serves Donkey Cut by default, like donkeycut.com; Donkey Use
-  // stays reachable under /use ("/use/…" → apex "/…").
-  if (isLocalHost(host)) {
-    if (underPath(pathname, "/use")) {
-      const url = req.nextUrl.clone();
-      url.pathname = pathname === "/use" ? "/" : pathname.slice("/use".length);
-      return NextResponse.rewrite(url);
-    }
-    if (underPath(pathname, "/cut") || underPath(pathname, "/api")) {
-      return NextResponse.next();
-    }
-    if (LOCAL_PASSTHROUGH.some((p) => underPath(pathname, p))) {
-      return NextResponse.next();
-    }
+  // Aliases (www.) canonicalize to the apex.
+  if (isDonkeycutHost(host) && host?.split(":")[0] !== "donkeycut.com") {
     const url = req.nextUrl.clone();
-    url.pathname = `/cut${pathname === "/" ? "" : pathname}`;
-    return NextResponse.rewrite(url);
+    return NextResponse.redirect(
+      `${DONKEYCUT_CANONICAL}${pathname}${url.search}`,
+      308,
+    );
   }
 
-  if (isDonkeycutHost(host)) {
-    if (host?.split(":")[0] !== "donkeycut.com") {
-      const url = req.nextUrl.clone();
-      return NextResponse.redirect(
-        `${DONKEYCUT_CANONICAL}${pathname}${url.search}`,
-        308,
-      );
-    }
-    if (underPath(pathname, "/cut") || underPath(pathname, "/api")) {
-      return NextResponse.next();
-    }
-    if (passesThrough(pathname)) return NextResponse.next();
+  // Old direct /cut/… links (donkeyuse.com served the tree unrewritten, and
+  // Cloudflare forwards those paths here) canonicalize to the rewritten
+  // address: /cut/app/… → /app/….
+  if (underPath(pathname, "/cut")) {
     const url = req.nextUrl.clone();
-    url.pathname =
-      pathname === "/sitemap.xml"
-        ? "/cut/sitemap.xml"
-        : `/cut${pathname === "/" ? "" : pathname}`;
-    return NextResponse.rewrite(url);
+    url.pathname = pathname.slice("/cut".length) || "/";
+    return NextResponse.redirect(url, 308);
   }
 
-  return NextResponse.next();
+  if (underPath(pathname, "/api")) return NextResponse.next();
+  if (passesThrough(pathname)) return NextResponse.next();
+  // The notch prototype is a dev-only page.
+  if (isLocalHost(host) && underPath(pathname, "/prototype")) {
+    return NextResponse.next();
+  }
+
+  const url = req.nextUrl.clone();
+  url.pathname =
+    pathname === "/sitemap.xml"
+      ? "/cut/sitemap.xml"
+      : `/cut${pathname === "/" ? "" : pathname}`;
+  return NextResponse.rewrite(url);
 }
 
 export const config = {

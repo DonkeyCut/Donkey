@@ -1,8 +1,8 @@
 "use client";
 
-import { CreditsCard } from "@/app/app/settings/_components/CreditsCard";
-import { ProCard } from "@/app/app/settings/_components/ProCard";
-import { SuperuserCreditsCard } from "@/app/app/settings/_components/SuperuserCreditsCard";
+import { CreditsCard } from "@/app/cut/app/(home)/settings/_components/CreditsCard";
+import { ProCard } from "@/app/cut/app/(home)/settings/_components/ProCard";
+import { SuperuserCreditsCard } from "@/app/cut/app/(home)/settings/_components/SuperuserCreditsCard";
 
 // Cut's billing page: the Pro subscription that carries the monthly AI
 // credits, plus the credit balance and top-ups. The Vision API plan is a

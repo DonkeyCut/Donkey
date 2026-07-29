@@ -45,7 +45,7 @@ export function PricingSection() {
         </div>
         <div className="flex flex-col justify-center md:w-60">
           <Link
-            href="/app/settings"
+            href="/donkeyvision/settings"
             className="flex min-h-14 w-full items-center justify-center gap-2 rounded-full bg-[#EC7868] px-7 text-base font-semibold text-[#0F0E0D] transition hover:-translate-y-0.5"
           >
             Start building

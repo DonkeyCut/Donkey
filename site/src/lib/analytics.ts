@@ -12,8 +12,6 @@ import type {
 export type AnalyticsEvents = {
   // A signed-in app surface finished loading (fires once per page load).
   app_loaded: { app: "cut" | "settings" };
-  // Landing page download CTAs.
-  home_download_clicked: { location: "hero" | "final_cta" };
   // Install prompts on the Cut app home's connect gate.
   app_install_clicked: { source: "connect_gate_button" | "connect_gate_link" };
   // The welcome sequence a new account sees, and its replay from settings.

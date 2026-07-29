@@ -1,20 +1,12 @@
 "use client";
 
-import { createContext, useContext, type ReactNode } from "react";
-
-// The Cut app's routes live under /cut/app/*. A proxy rewrite (src/proxy.ts)
-// serves them at "/app/…" on donkeycut.com and in local dev (base "/app");
-// the hosted apex serves them unrewritten at /cut/app (base "/cut/app"). The
-// base is resolved on the server from the request host (see the cut layout)
-// and handed to the client here.
-const CutBaseContext = createContext("");
-
-export function CutBaseProvider({ base, children }: { base: string; children: ReactNode }) {
-  return <CutBaseContext.Provider value={base}>{children}</CutBaseContext.Provider>;
-}
+// The Cut app's routes live under /cut/app/*; the proxy rewrite (src/proxy.ts)
+// serves them at "/app/…" on every host, so that is the base every in-app
+// href is built on.
+export const CUT_APP_BASE = "/app";
 
 export function useCutBase(): string {
-  return useContext(CutBaseContext);
+  return CUT_APP_BASE;
 }
 
 // The project editor can be reached from either home tab, from inside a
