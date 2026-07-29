@@ -1,6 +1,11 @@
 import posthog from "posthog-js";
 import { useEffect } from "react";
 
+import type {
+  OnboardingRun,
+  ReferralSource,
+} from "@/lib/onboarding/sequence";
+
 // Every product analytics event, in one place. `track` checks the name and
 // its properties against this map at compile time, so call sites can't drift
 // from the list. Events with `void` properties take no second argument.
@@ -11,6 +16,10 @@ export type AnalyticsEvents = {
   home_download_clicked: { location: "hero" | "final_cta" };
   // Install prompts on the Cut app home's connect gate.
   app_install_clicked: { source: "connect_gate_button" | "connect_gate_link" };
+  // The welcome sequence a new account sees, and its replay from settings.
+  onboarding_started: { source: OnboardingRun };
+  onboarding_referral_selected: { referralSource: ReferralSource };
+  onboarding_completed: { source: OnboardingRun; skipped: boolean; step: number };
   // Cut projects home.
   project_created: { source: "projects_home" | "sidebar" | "file_import" };
   folder_created: void;

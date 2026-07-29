@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { UserAvatar } from "@/cut/components/UserAvatar";
+import { openOnboarding } from "@/cut/lib/onboarding";
 import {
   useAccountProfile,
   useUpdateDisplayName,
@@ -95,6 +96,20 @@ export default function CutProfilePage() {
             </p>
           )}
         </div>
+      </div>
+
+      {/* The welcome sequence is a full-window overlay mounted in the app
+          shell, so this row asks for it rather than rendering it. */}
+      <div className="flex items-center justify-between gap-4 rounded-xl border bg-card p-5">
+        <div className="min-w-0">
+          <div className="text-sm font-medium">Welcome tour</div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            The short intro to Donkey Cut you saw when you signed up.
+          </p>
+        </div>
+        <Button variant="outline" onClick={openOnboarding}>
+          Replay
+        </Button>
       </div>
 
       <AvatarDialog
