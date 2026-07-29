@@ -18,11 +18,12 @@ const DESIGN_W = 1200;
 const DESIGN_H = 726;
 
 // Which slice of that design is on screen. "full" is the whole editor; "ai"
-// crops to the chat column and the timeline edge beside it, which is how the
-// same mock reads as a different picture when the subject is the assistant.
+// drops the side panel and keeps the preview, timeline, and chat column, which
+// is how the same mock reads as a different picture when the subject is the
+// assistant.
 const VIEWS = {
   full: { x: 0, w: DESIGN_W },
-  ai: { x: 655, w: DESIGN_W - 655 },
+  ai: { x: 300, w: DESIGN_W - 300 },
 } as const;
 
 export type EditorMockView = keyof typeof VIEWS;
@@ -31,12 +32,17 @@ type Props = {
   view?: EditorMockView;
   /** Which dimension the mock is sized by. "width" fills the container and
    * takes whatever height that implies; "height" fills a container of bounded
-   * height and takes whatever width that implies, which is what a cropped view
-   * needs so it can't grow taller than the space it was given. */
-  fit?: "width" | "height";
+   * height and takes whatever width that implies; "contain" takes the smaller
+   * of the two and centers, so the whole mock is always on screen whichever
+   * way the container is short. */
+  fit?: "width" | "height" | "contain";
   /** The dots that switch projects. Off where the mock is one slide of a
    * larger sequence and the only navigation should be that sequence's. */
   showSwitcher?: boolean;
+  /** The drop shadow that lifts the mock off the page. Off where the frame is
+   * meant to sit flat on the surface — a shadow doesn't dissolve, so it
+   * outlines the mock wherever the edges are supposed to fade away. */
+  shadow?: boolean;
 };
 
 // A hand-built, display-only replica of the Cut editor showing two finished
@@ -47,6 +53,7 @@ export function EditorMock({
   view = "full",
   fit = "width",
   showSwitcher = true,
+  shadow = true,
 }: Props) {
   const [active, setActive] = useState(0);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -64,25 +71,41 @@ export function EditorMock({
   }, []);
 
   const { x, w } = VIEWS[view];
-  const scale = fit === "height" ? box.height / DESIGN_H : box.width / w;
+  const byWidth = box.width / w;
+  const byHeight = box.height / DESIGN_H;
+  const scale =
+    fit === "height"
+      ? byHeight
+      : fit === "contain"
+        ? Math.min(byWidth, byHeight)
+        : byWidth;
 
   return (
     <figure
-      className={cn("m-0 flex min-h-0 flex-col", fit === "height" && "h-full")}
+      className={cn("m-0 flex min-h-0 flex-col", fit !== "width" && "h-full")}
     >
       <div
         ref={frameRef}
-        className={cn("w-full", fit === "height" && "min-h-0 flex-1")}
+        className={cn(
+          "w-full",
+          fit === "height" && "min-h-0 flex-1",
+          fit === "contain" && "flex min-h-0 flex-1 items-center justify-center",
+        )}
       >
         {/* Sized by width, the box holds its shape from the aspect ratio alone,
             so the space it will occupy is right before the first measurement
             and the page never jumps under it. */}
         <div
-          className="mx-auto overflow-hidden rounded-2xl bg-card shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_24px_64px_rgba(15,14,13,0.25)]"
+          className={cn(
+            "overflow-hidden rounded-2xl bg-card",
+            shadow
+              ? "shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_24px_64px_rgba(15,14,13,0.25)]"
+              : "shadow-[0_0_0_1px_rgba(0,0,0,0.06)]",
+          )}
           style={
-            fit === "height"
-              ? { width: Math.round(w * scale), height: Math.round(DESIGN_H * scale) }
-              : { width: "100%", aspectRatio: `${w} / ${DESIGN_H}` }
+            fit === "width"
+              ? { width: "100%", aspectRatio: `${w} / ${DESIGN_H}` }
+              : { width: Math.round(w * scale), height: Math.round(DESIGN_H * scale) }
           }
         >
           <div
