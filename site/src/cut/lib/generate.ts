@@ -5,7 +5,7 @@ import { create } from "zustand";
 import { getBackend, type CutBackend, type CutMode } from "./backend";
 import { cloudBackend } from "./backend/cloud";
 import { localBackend } from "./backend/local";
-import type { AssetRef } from "./assetRef";
+import { normalizeRef, type AssetRef } from "./assetRef";
 import { bytesFromBase64 } from "./bytes";
 import { readThreadIds } from "./chatThreads";
 import { composeGenPrompt, foldTextRefs } from "./composeGen";
@@ -61,6 +61,12 @@ export interface GenerateJob {
   /** Which ladder rung landed the render (0-based index into the attempts) —
    * how a caller knows whether its take rode an image anchor. */
   rung?: number;
+  /** The ladder this video job submitted — prompt, refs, aspect, fallbacks —
+   * kept on the job so a failed render can resubmit itself (`retry`) instead
+   * of dead-ending with only its prompt on screen. Rung gates are functions,
+   * so they survive in memory but not the localStorage round trip; a retried
+   * job from a past session walks every rung. */
+  attempts?: VideoAttempt[];
   /** The provider poll payload for an in-flight render — persisting it is what
    * lets a reload re-attach to the running job instead of orphaning it. */
   poll?: {
@@ -134,6 +140,11 @@ interface GenerateState {
       onAttempt?: (rung: number) => void;
     }
   ) => { jobId: string; settled: Promise<GenerateJob>; submitted: Promise<VideoSubmitOutcome> };
+  /** Resubmit a failed video job as itself: same job id (so its chat card and
+   * doc mirror follow along), same ladder. A render that failed on an empty
+   * balance retries after a top-up without retyping the prompt or losing its
+   * references. */
+  retry: (id: string) => void;
   dismiss: (id: string) => void;
   /** Cancel every render owned by a deleted thread or project: matching jobs are
    * dropped from the list and their in-flight polls refuse to land, so a render
@@ -557,6 +568,140 @@ export const useGenerate = create<GenerateState>((set, get) => {
     update(jobId, { status: "done", assetId: asset.id, poll: undefined });
   };
 
+  /** An attempt with its refs re-resolved against the live catalogs — a
+   * project ref's persisted URL can be a short-lived signed one, and the
+   * asset it names may have moved since the job first ran. */
+  const freshRefs = (refs: AssetRef[] | undefined): AssetRef[] | undefined =>
+    refs?.map((r) => normalizeRef(r) ?? r);
+  const freshAttempt = (a: VideoAttempt): VideoAttempt =>
+    a.opts
+      ? {
+          ...a,
+          opts: {
+            ...a.opts,
+            ...(a.opts.refs ? { refs: freshRefs(a.opts.refs) } : {}),
+            ...(a.opts.referenceImages
+              ? { referenceImages: freshRefs(a.opts.referenceImages) }
+              : {}),
+          },
+        }
+      : a;
+
+  /** Walk a video job's ladder to settlement: submit rungs in order, poll the
+   * accepted one to landing, settle the job. The job is already in the list
+   * with its lease claimed — this is the shared engine behind a fresh
+   * generateVideoLadder call and retry's resubmission of a failed job. */
+  const runLadder = (
+    job: GenerateJob,
+    attempts: VideoAttempt[],
+    jobOpts?: {
+      onDone?: (asset: MediaAsset) => void;
+      onAttempt?: (rung: number) => void;
+    }
+  ) => {
+    // Resolves the moment the backend accepts a rung's submit (a real render
+    // is in flight) or, if every rung is rejected before acceptance, with the
+    // reason. A caller awaits this to distinguish "rendering" from a render
+    // that never started (auth, credits, a bad request reject in well under a
+    // second) instead of claiming success on a fire-and-forget kickoff.
+    let resolveSubmitted!: (outcome: VideoSubmitOutcome) => void;
+    const submitted = new Promise<VideoSubmitOutcome>((resolve) => {
+      resolveSubmitted = resolve;
+    });
+    let submitReported = false;
+    const reportSubmit = (outcome: VideoSubmitOutcome) => {
+      if (submitReported) return;
+      submitReported = true;
+      resolveSubmitted(outcome);
+    };
+
+    /** Compose and submit one rung's render request; resolves the provider's
+     * first response (usually in_progress) or throws the readable error. */
+    const submitRung = async ({ prompt, opts }: VideoAttempt): Promise<GenerationResponse> => {
+      // The model seeds from a single first-frame image, so at most one kept
+      // picture rides along. Identity anchors travel separately: with
+      // referenceImages set, the prompt stands as written and no seed image
+      // rides (the render takes one or the other).
+      // Every picture riding to the video model goes through videoSafeInline:
+      // it takes only JPEG/PNG, and a webp reference would fail the render
+      // after it was already billed.
+      const anchors = opts?.referenceImages?.length
+        ? await Promise.all(
+            (
+              await refsToInlineImages(
+                visualRefs(opts.referenceImages).slice(0, videoModel("omni").maxReferenceImages)
+              )
+            ).map(videoSafeInline)
+          )
+        : [];
+      const { prompt: sent, images: rawImages } = anchors.length
+        ? { prompt, images: [] as InlineImage[] }
+        : await promptAndImages("video", prompt, opts?.refs ?? [], opts?.composeRefs !== false, 1);
+      const images = await Promise.all(rawImages.map(videoSafeInline));
+      const projectAspect = useEditor.getState().aspect;
+      const aspectRatio = opts?.aspect ?? nearestAspect(projectAspect, defaultVideoAspects());
+      // A project on a shape the model can't render gets its clip cropped, so
+      // the prompt carries the frame the take is really for.
+      const framing = aspectFramingNote(projectAspect, aspectRatio);
+      const res = await hostedPost("/api/inference/assets", {
+        kind: "video",
+        prompt: framing ? `${sent}\n\n${framing}` : sent,
+        provider: "gemini-omni",
+        ...(anchors.length > 0
+          ? { inputs: { referenceImages: anchors } }
+          : images.length > 0
+            ? { inputs: { images } }
+            : {}),
+        parameters: {
+          aspectRatio,
+          ...(opts?.negativePrompt ? { negativePrompt: opts.negativePrompt } : {}),
+        },
+      });
+      if (!res.ok) throw new Error(await readError(res, "Video generation failed."));
+      return (await res.json()) as GenerationResponse;
+    };
+
+    const settledRun = (async () => {
+      try {
+        const outcome = await walkLadder(
+          attempts,
+          async (attempt, rung) => {
+            jobOpts?.onAttempt?.(rung);
+            // The rung persists as the attempt starts, not when the walk
+            // settles — a reload that adopts this in-flight job must still
+            // know which rung (anchored or not) produced the take.
+            update(job.id, { rung });
+            const gen = await submitRung(attempt);
+            // The backend took the submit — a render is genuinely in flight
+            // now (instant rejects throw above and never reach here). A later
+            // polling failure still fails the job, but it did start.
+            reportSubmit({ ok: true });
+            await finishVideo(job.id, gen, jobOpts?.onDone, Date.now());
+          },
+          {
+            // The next rung is a fresh submission: drop the dead rung's poll
+            // payload so a reload can't resume a render that already failed.
+            onRungFailed: () => update(job.id, { poll: undefined }),
+            // An empty balance fails every rung identically — stop there so
+            // a broke render fails fast, not once per rung.
+            fatal: (error) => error === NO_CREDITS_MESSAGE,
+          }
+        );
+        if (!outcome.ok) fail(job.id, new Error(outcome.error));
+      } finally {
+        releaseJobLease(job.id);
+        // No rung was ever accepted: the render never started, so report the
+        // submit as failed with the job's recorded reason. A no-op once an
+        // accepted rung already reported success.
+        const errored = get().jobs.find((x) => x.id === job.id);
+        reportSubmit({ ok: false, error: errored?.error ?? "Video generation failed." });
+      }
+      return settled(job.id, job);
+    })();
+    settlements.set(job.id, settledRun);
+    return { jobId: job.id, settled: settledRun, submitted };
+  };
+
   return {
     signedIn: null,
     jobs: typeof window === "undefined" ? [] : readPersistedJobs(),
@@ -681,114 +826,37 @@ export const useGenerate = create<GenerateState>((set, get) => {
         startedAt: Date.now(),
         status: "running",
         residency: getBackend().kind, // pinned: the render outlives navigation
+        attempts,
         ...(jobOpts?.chatId ? { chatId: jobOpts.chatId } : {}),
         ...(jobOpts?.genKey ? { genKey: jobOpts.genKey } : {}),
       };
       set((s) => ({ jobs: [job, ...s.jobs] }));
       claimJobLease(job.id); // this tab started it, this tab polls it
       mirrorRender(job.id);
+      return runLadder(job, attempts, jobOpts);
+    },
 
-      // Resolves the moment the backend accepts a rung's submit (a real render
-      // is in flight) or, if every rung is rejected before acceptance, with the
-      // reason. A caller awaits this to distinguish "rendering" from a render
-      // that never started (auth, credits, a bad request reject in well under a
-      // second) instead of claiming success on a fire-and-forget kickoff.
-      let resolveSubmitted!: (outcome: VideoSubmitOutcome) => void;
-      const submitted = new Promise<VideoSubmitOutcome>((resolve) => {
-        resolveSubmitted = resolve;
+    retry: (id) => {
+      const job = get().jobs.find((j) => j.id === id);
+      if (!job || job.kind !== "video" || job.status !== "error") return;
+      // The job's own ladder resubmits; one persisted by a build that predates
+      // `attempts` re-runs as its bare prompt. Placement callbacks (onDone) are
+      // closures and are gone by retry time — the take still lands on this
+      // job's card or panel row, same as a reload-resumed render.
+      const attempts = (job.attempts?.length ? job.attempts : [{ prompt: job.prompt }]).map(
+        freshAttempt
+      );
+      update(id, {
+        status: "running",
+        startedAt: Date.now(),
+        error: undefined,
+        assetId: undefined,
+        rung: undefined,
+        poll: undefined,
+        attempts,
       });
-      let submitReported = false;
-      const reportSubmit = (outcome: VideoSubmitOutcome) => {
-        if (submitReported) return;
-        submitReported = true;
-        resolveSubmitted(outcome);
-      };
-
-      /** Compose and submit one rung's render request; resolves the provider's
-       * first response (usually in_progress) or throws the readable error. */
-      const submitRung = async ({ prompt, opts }: VideoAttempt): Promise<GenerationResponse> => {
-        // The model seeds from a single first-frame image, so at most one kept
-        // picture rides along. Identity anchors travel separately: with
-        // referenceImages set, the prompt stands as written and no seed image
-        // rides (the render takes one or the other).
-        // Every picture riding to the video model goes through videoSafeInline:
-        // it takes only JPEG/PNG, and a webp reference would fail the render
-        // after it was already billed.
-        const anchors = opts?.referenceImages?.length
-          ? await Promise.all(
-              (
-                await refsToInlineImages(
-                  visualRefs(opts.referenceImages).slice(0, videoModel("omni").maxReferenceImages)
-                )
-              ).map(videoSafeInline)
-            )
-          : [];
-        const { prompt: sent, images: rawImages } = anchors.length
-          ? { prompt, images: [] as InlineImage[] }
-          : await promptAndImages("video", prompt, opts?.refs ?? [], opts?.composeRefs !== false, 1);
-        const images = await Promise.all(rawImages.map(videoSafeInline));
-        const projectAspect = useEditor.getState().aspect;
-        const aspectRatio = opts?.aspect ?? nearestAspect(projectAspect, defaultVideoAspects());
-        // A project on a shape the model can't render gets its clip cropped, so
-        // the prompt carries the frame the take is really for.
-        const framing = aspectFramingNote(projectAspect, aspectRatio);
-        const res = await hostedPost("/api/inference/assets", {
-          kind: "video",
-          prompt: framing ? `${sent}\n\n${framing}` : sent,
-          provider: "gemini-omni",
-          ...(anchors.length > 0
-            ? { inputs: { referenceImages: anchors } }
-            : images.length > 0
-              ? { inputs: { images } }
-              : {}),
-          parameters: {
-            aspectRatio,
-            ...(opts?.negativePrompt ? { negativePrompt: opts.negativePrompt } : {}),
-          },
-        });
-        if (!res.ok) throw new Error(await readError(res, "Video generation failed."));
-        return (await res.json()) as GenerationResponse;
-      };
-
-      const settledRun = (async () => {
-        try {
-          const outcome = await walkLadder(
-            attempts,
-            async (attempt, rung) => {
-              jobOpts?.onAttempt?.(rung);
-              // The rung persists as the attempt starts, not when the walk
-              // settles — a reload that adopts this in-flight job must still
-              // know which rung (anchored or not) produced the take.
-              update(job.id, { rung });
-              const gen = await submitRung(attempt);
-              // The backend took the submit — a render is genuinely in flight
-              // now (instant rejects throw above and never reach here). A later
-              // polling failure still fails the job, but it did start.
-              reportSubmit({ ok: true });
-              await finishVideo(job.id, gen, jobOpts?.onDone, Date.now());
-            },
-            {
-              // The next rung is a fresh submission: drop the dead rung's poll
-              // payload so a reload can't resume a render that already failed.
-              onRungFailed: () => update(job.id, { poll: undefined }),
-              // An empty balance fails every rung identically — stop there so
-              // a broke render fails fast, not once per rung.
-              fatal: (error) => error === NO_CREDITS_MESSAGE,
-            }
-          );
-          if (!outcome.ok) fail(job.id, new Error(outcome.error));
-        } finally {
-          releaseJobLease(job.id);
-          // No rung was ever accepted: the render never started, so report the
-          // submit as failed with the job's recorded reason. A no-op once an
-          // accepted rung already reported success.
-          const errored = get().jobs.find((x) => x.id === job.id);
-          reportSubmit({ ok: false, error: errored?.error ?? "Video generation failed." });
-        }
-        return settled(job.id, job);
-      })();
-      settlements.set(job.id, settledRun);
-      return { jobId: job.id, settled: settledRun, submitted };
+      claimJobLease(id); // this tab retried it, this tab polls it
+      runLadder({ ...job, status: "running" }, attempts);
     },
 
     cancelForOwner: (owner) => {

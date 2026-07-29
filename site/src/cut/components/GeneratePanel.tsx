@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Copy, Film, Loader2, Maximize2, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { Copy, Film, Loader2, Maximize2, Plus, RotateCw, Sparkles, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
@@ -254,6 +254,7 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
  * stay a compact status row. */
 function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
   const asset = useEditor((s) => s.assets.find((a) => a.id === job.assetId));
+  const readOnly = useEditor((s) => s.readOnly);
   const pulse = useGenPulse("video", job.assetId);
   const elapsed = useElapsed(job.status === "running" ? job.startedAt : null);
   const tileRef = useRef<HTMLDivElement>(null);
@@ -292,13 +293,24 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
           </div>
         </div>
         {job.status !== "running" && (
-          <button
-            title="Dismiss"
-            className={cn(cardIconButton, "opacity-0 group-hover:opacity-100")}
-            onClick={() => useGenerate.getState().dismiss(job.id)}
-          >
-            <Trash2 className="size-3.5" />
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            {job.status === "error" && !readOnly && (
+              <button
+                title="Retry"
+                className={cardIconButton}
+                onClick={() => useGenerate.getState().retry(job.id)}
+              >
+                <RotateCw className="size-3.5" />
+              </button>
+            )}
+            <button
+              title="Dismiss"
+              className={cn(cardIconButton, "opacity-0 group-hover:opacity-100")}
+              onClick={() => useGenerate.getState().dismiss(job.id)}
+            >
+              <Trash2 className="size-3.5" />
+            </button>
+          </div>
         )}
       </div>
     );

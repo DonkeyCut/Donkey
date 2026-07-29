@@ -122,6 +122,7 @@ type RenderView = Pick<GenerateJob, "status" | "prompt" | "startedAt" | "error" 
 export function ChatVideoJobCard({ jobId }: { jobId: string }) {
   const job = useGenerate((s) => s.jobs.find((j) => j.id === jobId));
   const record = useEditor((s) => s.renders.find((r) => r.id === jobId));
+  const readOnly = useEditor((s) => s.readOnly);
   // Mount-time clock: a record already past the TTL is stale when the card
   // appears — the check doesn't need to keep ticking.
   const [now] = useState(() => Date.now());
@@ -161,6 +162,18 @@ export function ChatVideoJobCard({ jobId }: { jobId: string }) {
           <HostedErrorText error={view.error} link={false} />
         )}
       </div>
+      {/* Retry needs the job's stored ladder, which lives in this browser's
+          job store — a doc-mirrored record from another machine has only the
+          prompt, so its card stays informational. */}
+      {view.status === "error" && job && !readOnly && (
+        <button
+          type="button"
+          className="self-start text-[10.5px] font-medium underline underline-offset-2 hover:no-underline"
+          onClick={() => useGenerate.getState().retry(job.id)}
+        >
+          Retry
+        </button>
+      )}
     </div>
   );
 }
