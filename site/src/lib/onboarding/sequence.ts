@@ -27,5 +27,10 @@ export const ONBOARDING_VERSION = 1;
 
 /** USD the signup hook grants a new account. Lives here, free of server
  * imports, because the sequence's credits slide names the same number the
- * grant uses (src/lib/onboarding/signup-grants.ts). */
-export const signupAppCredits = "1";
+ * grant uses (src/lib/onboarding/signup-grants.ts).
+ *
+ * Sized against the priciest first thing an account can do: a generated video
+ * clip bills a little over a dollar, so this covers a couple of them and the
+ * chat around them. A grant that can't buy one leaves every new account
+ * bouncing off an empty balance on its first real try. */
+export const signupAppCredits = "3";
