@@ -10,6 +10,7 @@
 // timeline time, and interpolates per-word timings. Mic dictation reuses the
 // same chunk/post/stitch core on a MediaRecorder capture.
 
+import { renderMix as mixAudio } from "./audioMix";
 import { apiFetch } from "./backend";
 import { mediaUrl, type SubtitleCue } from "./types";
 
@@ -38,96 +39,25 @@ const SILENCE_PEAK = 1e-3;
 
 const uid = () => crypto.randomUUID().slice(0, 8);
 const round = (n: number) => Math.round(n * 1000) / 1000;
-const speedOf = (s?: number) => (s && s > 0 ? s : 1);
 
-/** Timeline length of one spec clip: source span over speed. A gap spacer
- * (no file) keeps its exact length — flooring it would land later cues late. */
-const clipDur = (c: CloudTranscribeSpec["clips"][number]) =>
-  c.file ? Math.max(0.1, (c.out - c.in) / speedOf(c.speed)) : Math.max(0, c.out - c.in);
-
-/** Render the cut's audible mix to a 16 kHz mono buffer, mirroring the engine's
- * ffmpeg graph: clip audio folds sequentially with cross-dissolves overlapping
- * (linear crossfade ≈ acrossfade's tri curve), soundtrack/voiceover items land
- * at their absolute starts with their volumes, and speed rides playbackRate
- * (pitch shifts where atempo would preserve it — timing, which is what cue
- * placement needs, is identical). Returns null when nothing audible exists. */
-export async function renderMix(
+/** Render the cut's audible mix to a 16 kHz mono buffer — the wire format the
+ * speech models read. The fold itself is the shared one (audioMix.ts), so the
+ * audio a caption is timed against is the same audio an export writes, at a
+ * different rate. Returns null when nothing audible exists. */
+export function renderMix(
   projectId: string,
   spec: CloudTranscribeSpec
 ): Promise<AudioBuffer | null> {
-  const ctx = new OfflineAudioContext(1, Math.max(1, Math.ceil(spec.duration * RATE)), RATE);
-  const files = [...new Set([...spec.clips, ...spec.audio].map((c) => c.file).filter(Boolean))];
-  const buffers = new Map<string, AudioBuffer>();
-  await Promise.all(
-    files.map(async (f) => {
-      try {
-        const res = await fetch(mediaUrl(projectId, f));
-        if (!res.ok) return;
-        buffers.set(f, await ctx.decodeAudioData(await res.arrayBuffer()));
-      } catch {
-        // No decodable audio stream (e.g. a silent video) — mixes as silence,
-        // like the engine's hasStream check.
-      }
-    })
+  return mixAudio(
+    {
+      duration: spec.duration,
+      clips: spec.clips,
+      // Transcription hears the soundtrack the way the viewer will, minus the
+      // shaping it does not change the timing of.
+      items: spec.audio,
+    },
+    { sampleRate: RATE, channels: 1, resolve: (file) => mediaUrl(projectId, file) }
   );
-
-  const hasSpeechSource =
-    spec.clips.some((c) => !c.muted && buffers.has(c.file)) ||
-    spec.audio.some((a) => buffers.has(a.file));
-  if (!hasSpeechSource) return null;
-
-  // First pass: the timeline geometry of the sequential clip fold. Each
-  // cross-dissolve pulls the next clip back by the (clamped) overlap, exactly
-  // like the engine's acrossfade chain.
-  const geo = spec.clips.map((c) => ({ clip: c, at: 0, dur: clipDur(c), fadeIn: 0, fadeOut: 0 }));
-  let acc = 0;
-  geo.forEach((g, j) => {
-    const d =
-      j > 0 ? Math.min(spec.clips[j - 1].transition ?? 0, acc * 0.9, g.dur * 0.9) : 0;
-    const fade = d > 0.01 ? d : 0;
-    g.at = j === 0 ? 0 : acc - fade;
-    g.fadeIn = fade;
-    if (j > 0) geo[j - 1].fadeOut = fade;
-    acc = g.at + g.dur;
-  });
-
-  for (const g of geo) {
-    const c = g.clip;
-    const buf = !c.muted && c.file ? buffers.get(c.file) : undefined;
-    if (!buf) continue; // muted / silent clips and gap spacers only shape time
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    src.playbackRate.value = speedOf(c.speed);
-    const gain = ctx.createGain();
-    if (g.fadeIn > 0) {
-      gain.gain.setValueAtTime(0, g.at);
-      gain.gain.linearRampToValueAtTime(1, g.at + g.fadeIn);
-    }
-    if (g.fadeOut > 0) {
-      gain.gain.setValueAtTime(1, g.at + g.dur - g.fadeOut);
-      gain.gain.linearRampToValueAtTime(0, g.at + g.dur);
-    }
-    src.connect(gain);
-    gain.connect(ctx.destination);
-    // start()'s offset/duration are source seconds; playbackRate stretches
-    // them onto the timeline, matching the engine's atrim + atempo.
-    src.start(g.at, Math.max(0, c.in), Math.max(0, c.out - c.in));
-  }
-
-  for (const a of spec.audio) {
-    const buf = buffers.get(a.file);
-    if (!buf) continue;
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    src.playbackRate.value = speedOf(a.speed);
-    const gain = ctx.createGain();
-    gain.gain.value = a.volume;
-    src.connect(gain);
-    gain.connect(ctx.destination);
-    src.start(Math.max(0, a.start), Math.max(0, a.in), Math.max(0, a.out - a.in));
-  }
-
-  return ctx.startRendering();
 }
 
 /** 16-bit PCM WAV (RIFF) from mono 16 kHz float samples. */
