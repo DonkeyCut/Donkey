@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type ChatTransport, type UIMessage } from "ai";
 import {
@@ -122,6 +122,9 @@ interface ChatThread {
 }
 
 const THREAD_LIMIT = 30;
+// How long a streaming turn's newest snapshot may park before it must land —
+// the same cadence the cloud mirror debounces on.
+const THREAD_SAVE_MS = 1500;
 
 function readThreads(projectId: string): ChatThread[] {
   return readRawThreads(projectId) as ChatThread[];
@@ -713,6 +716,27 @@ function ChatSession({
   }, [busy]);
 
   // Keep the thread saved (so it shows up in the Threads panel) as it grows.
+  // A save rereads, re-slims, and rewrites the project's whole stored history —
+  // synchronous main-thread work that scales with everything the chats have
+  // ever produced — and a streaming turn replaces `messages` every chunk, so
+  // saving on each change ground the editor down as transcripts grew. The
+  // newest snapshot parks in a ref and lands at most once per THREAD_SAVE_MS;
+  // turn end, thread switch, and pagehide flush it, so nothing is lost.
+  const pendingThread = useRef<ChatThread | null>(null);
+  const saveTimer = useRef<number | null>(null);
+  const saveThreadNow = useCallback(() => {
+    const thread = pendingThread.current;
+    if (!thread) return;
+    pendingThread.current = null;
+    if (saveTimer.current !== null) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const rest = readThreads(projectId).filter((t) => t.id !== thread.id);
+    writeThreads(projectId, [thread, ...rest]);
+    // Cloud projects mirror the thread server-side (debounced while it streams).
+    queueCloudThreadSave(projectId, slimForStorage([thread])[0]);
+  }, [projectId]);
   useEffect(() => {
     if (messages.length === 0) return;
     const firstUser = messages.find((m) => m.role === "user");
@@ -722,24 +746,43 @@ function ChatSession({
         .join("")
         .trim()
         .slice(0, 80) || "New chat";
-    const thread: ChatThread = {
+    pendingThread.current = {
       id: threadId,
       title,
       updatedAt: Date.now(),
       messages,
       sessions: { ...providerSessions.current },
     };
-    const rest = readThreads(projectId).filter((t) => t.id !== threadId);
-    writeThreads(projectId, [thread, ...rest]);
-    // Cloud projects mirror the thread server-side (debounced while it streams).
-    queueCloudThreadSave(projectId, slimForStorage([thread])[0]);
-  }, [messages, threadId, projectId]);
+    if (saveTimer.current === null) {
+      saveTimer.current = window.setTimeout(() => {
+        saveTimer.current = null;
+        saveThreadNow();
+      }, THREAD_SAVE_MS);
+    }
+  }, [messages, threadId, projectId, saveThreadNow]);
 
-  // Land the final transcript on the server as soon as the turn settles
-  // instead of waiting out the save debounce.
+  // Land the final transcript locally and on the server as soon as the turn
+  // settles instead of waiting out the save throttle.
   useEffect(() => {
-    if (!busy) flushCloudThreadSaves();
-  }, [busy]);
+    if (busy) return;
+    saveThreadNow();
+    flushCloudThreadSaves();
+  }, [busy, saveThreadNow]);
+
+  // A thread switch unmounts this session mid-throttle; the page going away
+  // skips unmounts entirely. Both flush the parked snapshot.
+  useEffect(() => {
+    const onPageHide = () => {
+      saveThreadNow();
+      flushCloudThreadSaves(true);
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      saveThreadNow();
+      flushCloudThreadSaves();
+    };
+  }, [saveThreadNow]);
 
   // Stay glued to the newest message while the user sits at the bottom;
   // scrolling up releases the glue until they return. The ResizeObserver
