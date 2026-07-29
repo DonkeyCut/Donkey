@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, ChevronLeft, CloudUpload, Loader2, Mic, Monitor, Ratio, Share2, Smartphone, Sparkles, Square, Upload, Video } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, CloudUpload, Loader2, Mic, Monitor, MoreHorizontal, Ratio, Share2, Smartphone, Sparkles, Square, Upload, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -68,6 +68,34 @@ export function TopBar({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [recordMode, setRecordMode] = useState<RecordMode | null>(null);
+  // The right-hand rail collapses to a menu when its buttons no longer fit
+  // beside the centre switches. The rail's own width is what they have to fit
+  // in, and it does not move when they collapse — the grid track is a fixed
+  // share of the header, not a function of what is in it — so the measurement
+  // that folds the buttons away is the same one that brings them back.
+  const railRef = useRef<HTMLDivElement>(null);
+  const pillRef = useRef<HTMLDivElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    const rail = railRef.current;
+    const actions = actionsRef.current;
+    if (!rail || !actions) return;
+    const fit = () => {
+      const pill = pillRef.current?.offsetWidth ?? 0;
+      // gap-2 between the pill and the buttons, and only when the pill is there
+      // to need one — it renders nothing on a local project.
+      const needed = actions.offsetWidth + (pill > 0 ? pill + 8 : 0);
+      setCollapsed(needed > rail.clientWidth);
+    };
+    fit();
+    // The rail for the window resizing, the buttons for the set of them
+    // changing — Share and Cloud come and go with the project's backend.
+    const ro = new ResizeObserver(fit);
+    ro.observe(rail);
+    ro.observe(actions);
+    return () => ro.disconnect();
+  }, []);
   const isPreset = ASPECT_PRESETS.some((p) => p.value === aspect);
   // Custom is a sticky mode: picked from the menu, entered by typing in the pill,
   // or loading a project on a non-preset ratio, the pill stays a W:H editor until
@@ -246,8 +274,17 @@ export function TopBar({
   };
 
   return (
-    <header className="relative flex items-center justify-between border-b border-border bg-card pr-3 pl-2">
-      <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-2">
+    // Three tracks, the middle one sized to its content and the sides sharing
+    // what is left equally — so the aspect and record switches sit centred on
+    // the bar and keep their full width at any size. Two things that centring
+    // depends on: the sides are minmax(0,…) rather than plain 1fr, since a
+    // track that its own contents can push wider would shove the middle off
+    // centre (which is how the right-hand buttons used to end up underneath
+    // them); and the bar's insets belong to the side tracks rather than the
+    // header, because padding the header centres the middle on what is left
+    // after the insets, and those two differ.
+    <header className="relative grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center border-b border-border bg-card">
+      <div className="col-start-2 row-start-1 flex items-center gap-2">
         {(() => {
           const aspectMenu = (
             <DropdownMenuContent align="start" className="w-56">
@@ -376,7 +413,7 @@ export function TopBar({
           onUse={(file) => onImport([file], { origin: "recording" })}
         />
       )}
-      <div className="flex min-w-0 items-center gap-1">
+      <div className="col-start-1 row-start-1 flex min-w-0 items-center gap-1 overflow-hidden ml-2">
         <Button
           variant="ghost"
           size="icon-sm"
@@ -443,72 +480,136 @@ export function TopBar({
           )}
         </span>
       </div>
-      <div className="flex items-center gap-2">
-        <StoragePill />
-        {cutMode === "cloud" && (
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label="Share"
-            title="Share"
-            onClick={() => setShareOpen(true)}
+      <div
+        ref={railRef}
+        // No clipping here: the collapse is what keeps this rail inside its
+        // track, and the hidden measuring row needs no help staying out of
+        // sight. Clipping would only shave the focus ring off the last button.
+        className="col-start-3 row-start-1 flex min-w-0 items-center justify-end gap-2 mr-3"
+      >
+        <div ref={pillRef} className="flex items-center">
+          <StoragePill />
+        </div>
+        {/* The actions, and the same actions listed in a menu for when they no
+            longer fit beside the switches. The row stays mounted through the
+            swap — held out of the flow rather than unmounted — because its
+            natural width is what decides which of the two is showing, and a row
+            that only exists while it fits can never say that it would. */}
+        <div className="relative flex items-center gap-2">
+          <div
+            ref={actionsRef}
+            className={cn(
+              "flex items-center gap-2",
+              collapsed && "invisible absolute right-0 pointer-events-none"
+            )}
           >
-            <Share2 data-icon="inline-start" /> Share
-          </Button>
-        )}
-        {canMoveToCloud && (
-          // Our own tooltip, not the `title` attribute: the button's label is
-          // just "Cloud", and the browser's native tooltip waits a beat before
-          // saying what it does.
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-label="Move to Cloud"
-                    onClick={() => setMoveOpen(true)}
-                  >
-                    <CloudUpload data-icon="inline-start" /> Cloud
-                  </Button>
-                }
-              />
-              <TooltipContent side="bottom">Move to Cloud</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        )}
-        <Button
-          variant="ghost"
-          size="sm"
-          // A render reads the saved document, which an import still uploading
-          // is deliberately absent from — exporting now would quietly leave it
-          // out of the video.
-          disabled={!hasClips || cloudUploading}
-          title={cloudUploading ? "Finishing uploads…" : undefined}
-          onClick={() => {
-            const s = useEditor.getState();
-            s.setPlaying(false);
-            s.setExportOpen(true);
-          }}
-        >
-          <Upload data-icon="inline-start" /> Export
-        </Button>
-        <div aria-hidden className="h-4 w-px bg-border" />
-        <Button
-          variant={aiOpen ? "default" : "outline"}
-          size="sm"
-          className="ai-toggle"
-          aria-label="Chat"
-          aria-pressed={aiOpen}
-          title="Chat (⌘J)"
-          onClick={() => {
-            const s = useEditor.getState();
-            s.setAiOpen(!s.aiOpen);
-          }}
-        >
-          <Sparkles data-icon="inline-start" /> Chat
-        </Button>
+            {cutMode === "cloud" && (
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label="Share"
+                title="Share"
+                onClick={() => setShareOpen(true)}
+              >
+                <Share2 data-icon="inline-start" /> Share
+              </Button>
+            )}
+            {canMoveToCloud && (
+              // Our own tooltip, not the `title` attribute: the button's label is
+              // just "Cloud", and the browser's native tooltip waits a beat before
+              // saying what it does.
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label="Move to Cloud"
+                        onClick={() => setMoveOpen(true)}
+                      >
+                        <CloudUpload data-icon="inline-start" /> Cloud
+                      </Button>
+                    }
+                  />
+                  <TooltipContent side="bottom">Move to Cloud</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              // A render reads the saved document, which an import still uploading
+              // is deliberately absent from — exporting now would quietly leave it
+              // out of the video.
+              disabled={!hasClips || cloudUploading}
+              title={cloudUploading ? "Finishing uploads…" : undefined}
+              onClick={() => {
+                const s = useEditor.getState();
+                s.setPlaying(false);
+                s.setExportOpen(true);
+              }}
+            >
+              <Upload data-icon="inline-start" /> Export
+            </Button>
+            <div aria-hidden className="h-4 w-px bg-border" />
+            <Button
+              variant={aiOpen ? "default" : "outline"}
+              size="sm"
+              className="ai-toggle"
+              aria-label="Chat"
+              aria-pressed={aiOpen}
+              title="Chat (⌘J)"
+              onClick={() => {
+                const s = useEditor.getState();
+                s.setAiOpen(!s.aiOpen);
+              }}
+            >
+              <Sparkles data-icon="inline-start" /> Chat
+            </Button>
+          </div>
+          {collapsed && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={<Button variant="ghost" size="icon-sm" aria-label="More actions" title="More actions" />}
+              >
+                <MoreHorizontal />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                {cutMode === "cloud" && (
+                  <DropdownMenuItem onClick={() => setShareOpen(true)}>
+                    <Share2 /> Share
+                  </DropdownMenuItem>
+                )}
+                {canMoveToCloud && (
+                  <DropdownMenuItem onClick={() => setMoveOpen(true)}>
+                    <CloudUpload /> Move to Cloud
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem
+                  disabled={!hasClips || cloudUploading}
+                  onClick={() => {
+                    const s = useEditor.getState();
+                    s.setPlaying(false);
+                    s.setExportOpen(true);
+                  }}
+                >
+                  <Upload /> {cloudUploading ? "Finishing uploads…" : "Export"}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => {
+                    const s = useEditor.getState();
+                    s.setAiOpen(!s.aiOpen);
+                  }}
+                >
+                  <Sparkles />
+                  <span className="flex-1">Chat</span>
+                  {aiOpen && <Check className="size-3.5 text-muted-foreground" />}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
       </div>
       {shareOpen && (
         <ShareDialog
