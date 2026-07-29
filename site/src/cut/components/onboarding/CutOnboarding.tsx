@@ -13,6 +13,7 @@ import { WelcomeSlide } from "@/cut/components/onboarding/slides/Welcome";
 import { useCutBase } from "@/cut/lib/nav";
 import { onOpenOnboarding } from "@/cut/lib/onboarding";
 import { track } from "@/lib/analytics";
+import { authClient } from "@/lib/auth-client";
 import {
   ONBOARDING_VERSION,
   type OnboardingRun,
@@ -28,15 +29,17 @@ import {
 
 const SLIDE_COUNT = 6;
 
-// The sequence version this browser last finished. It exists so a returning
-// load paints the app immediately instead of covering it while the account
-// read is in flight; the account row stays the source of truth, and a browser
-// that has never finished waits the one request out.
-const DONE_KEY = "cut-onboarding-done";
+// The sequence version this browser last saw this account finish. It exists so
+// a returning load paints the app immediately instead of covering it while the
+// account read is in flight; the account row stays the source of truth, and a
+// browser with no record for this account waits the one request out. Keyed per
+// account so one account finishing doesn't paint the app home over another
+// account's owed first run.
+const doneKey = (userId: string) => `cut-onboarding-done:${userId}`;
 
-const doneHere = (): boolean =>
+const doneHere = (userId: string): boolean =>
   typeof window !== "undefined" &&
-  Number(localStorage.getItem(DONE_KEY) ?? 0) >= ONBOARDING_VERSION;
+  Number(localStorage.getItem(doneKey(userId)) ?? 0) >= ONBOARDING_VERSION;
 
 // The welcome sequence: five slides over the whole window, shown once to a new
 // account and again whenever settings asks to replay it. Mounted in the Cut app
@@ -51,6 +54,9 @@ const doneHere = (): boolean =>
 // thing it writes is what it asks for: where the account heard about us.
 export function CutOnboarding() {
   const base = useCutBase();
+  // Mounted inside RequireSession, so the session is already resolved.
+  const { data: session } = authClient.useSession();
+  const userId = session?.user.id ?? "";
   const { data: state, isPending } = useOnboardingState();
   const { data: pro } = useProSubscription();
   const save = useSaveOnboarding();
@@ -59,18 +65,34 @@ export function CutOnboarding() {
   const [dismissed, setDismissed] = useState(false);
   const [replaying, setReplaying] = useState(false);
   // Read once per mount: whether this browser can skip the wait below.
-  const [skipWait] = useState(doneHere);
+  const [skipWait] = useState(() => doneHere(userId));
+  // Arriving at the sequence's own address is an explicit ask — a signup lands
+  // there — so the sequence is the first paint, ahead of the account read.
+  const [askedByAddress] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.location.pathname === `${base}/onboarding`,
+  );
   // What the account already has, so leaving the question without changing
   // anything writes nothing.
   const savedReferrals = useRef("");
 
   // Which run is on screen, derived rather than set: the account read landing
-  // is what opens a first run, and nothing has to push that into state.
+  // is what opens a first run, and nothing has to push that into state. On the
+  // sequence's address the run opens before that read answers; it is a first
+  // run until the read says the account already finished, which makes it the
+  // replay that account linked back to.
   const run: OnboardingRun | null = replaying
     ? "replay"
-    : !dismissed && needsOnboarding(state)
-      ? "first_run"
-      : null;
+    : dismissed
+      ? null
+      : needsOnboarding(state)
+        ? "first_run"
+        : askedByAddress
+          ? isPending
+            ? "first_run"
+            : "replay"
+          : null;
 
   // A subscriber has nothing left to be sold, so the plans slide drops off the
   // end for them: the sequence is one slide shorter, its last slide ends with
@@ -81,8 +103,17 @@ export function CutOnboarding() {
   const slideCount = isPro ? SLIDE_COUNT - 1 : SLIDE_COUNT;
   const step = Math.min(rawStep, slideCount - 1);
 
+  // Once per open. On the sequence's address the run label can settle from
+  // first_run to replay when the account read lands; that is the same open.
+  const started = useRef(false);
   useEffect(() => {
-    if (run) track("onboarding_started", { source: run });
+    if (!run) {
+      started.current = false;
+      return;
+    }
+    if (started.current) return;
+    started.current = true;
+    track("onboarding_started", { source: run });
   }, [run]);
 
   // While the sequence is up, the address says so — it can be linked, reloaded,
@@ -106,8 +137,8 @@ export function CutOnboarding() {
   // An account that's already done teaches this browser to stop waiting.
   useEffect(() => {
     if (!state || needsOnboarding(state)) return;
-    localStorage.setItem(DONE_KEY, String(state.version));
-  }, [state]);
+    localStorage.setItem(doneKey(userId), String(state.version));
+  }, [state, userId]);
 
   useEffect(
     () =>
@@ -135,11 +166,11 @@ export function CutOnboarding() {
       commitReferrals();
       track("onboarding_completed", { source: run, skipped, step });
       save.mutate({ completed: true, skipped });
-      localStorage.setItem(DONE_KEY, String(ONBOARDING_VERSION));
+      localStorage.setItem(doneKey(userId), String(ONBOARDING_VERSION));
       setReplaying(false);
       setDismissed(true);
     },
-    [commitReferrals, run, save, step],
+    [commitReferrals, run, save, step, userId],
   );
 
   const back = useCallback(() => {
@@ -179,13 +210,41 @@ export function CutOnboarding() {
     return () => window.removeEventListener("keydown", onKey);
   }, [run, back, advance, finish]);
 
+  // The landing nav's lockup, same icon box and wordmark size. Shared by the
+  // hold below and the open sequence, so one becoming the other repaints
+  // nothing.
+  const lockup = (
+    <span className="flex items-center gap-0">
+      <span className="flex size-[59px] shrink-0 items-center justify-center overflow-hidden rounded-[10px]">
+        <img
+          src="/donkey-logo.svg"
+          alt=""
+          width={59}
+          height={59}
+          className="block h-full w-full object-contain"
+        />
+      </span>
+      <span className="text-2xl font-semibold">Donkey Cut</span>
+    </span>
+  );
+
   // Between the session landing and the account read answering, an account that
   // turns out to need the sequence would otherwise watch the app paint and then
   // be covered. Hold the surface for that one request — only for a browser with
-  // no record of finishing, so it isn't a wait everyone pays on every load.
+  // no record of this account finishing, so it isn't a wait everyone pays on
+  // every load. The hold is the sequence's own first frame, so an account that
+  // needs it watches the slide arrive rather than a repaint; one that turns out
+  // to be done pays a single cream frame here once, then the record above
+  // skips the hold for good.
   if (!run) {
     const waiting = isPending && !skipWait;
-    return waiting ? <div className="fixed inset-0 z-[80] bg-white" /> : null;
+    return waiting ? (
+      <div className="fixed inset-0 z-[80] flex flex-col bg-cream font-system text-ink antialiased">
+        <div className="flex shrink-0 items-center justify-between px-6 py-2 md:px-10 md:py-2.5">
+          {lockup}
+        </div>
+      </div>
+    ) : null;
   }
 
   const toggleReferral = (source: ReferralSource) => {
@@ -209,19 +268,7 @@ export function CutOnboarding() {
       className="fixed inset-0 z-[80] flex flex-col bg-cream font-system text-ink antialiased"
     >
       <div className="flex shrink-0 items-center justify-between px-6 py-2 md:px-10 md:py-2.5">
-        {/* The landing nav's lockup, same icon box and wordmark size. */}
-        <span className="flex items-center gap-0">
-          <span className="flex size-[59px] shrink-0 items-center justify-center overflow-hidden rounded-[10px]">
-            <img
-              src="/donkey-logo.svg"
-              alt=""
-              width={59}
-              height={59}
-              className="block h-full w-full object-contain"
-            />
-          </span>
-          <span className="text-2xl font-semibold">Donkey Cut</span>
-        </span>
+        {lockup}
 
         {/* A subscriber is being told about what they already pay for, so they
             get the door: the same way out Escape takes. Everyone else meets it

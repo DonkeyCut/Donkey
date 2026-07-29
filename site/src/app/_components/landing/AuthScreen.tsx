@@ -68,6 +68,9 @@ export function AuthScreen({ mode }: Props) {
     try {
       await authClient.signIn.social({
         callbackURL,
+        // A brand-new account lands on the welcome sequence's own address, so
+        // its first paint is the sequence rather than the app home.
+        newUserCallbackURL: "/app/onboarding",
         provider: "google",
       });
     } catch {
