@@ -12,8 +12,11 @@ on:
     paths:
       - site/src/cut/worker/**
       - site/src/cut/server/exportPipeline.ts
+      - site/src/cut/server/hlsLadder.ts
       - site/src/cut/server/urlDownload.ts
       - site/src/cut/server/jobs.ts
+      - site/src/cut/server/util.ts
+      - site/src/cut/server/cloud/ladderStore.ts
       - site/src/cut/server/cloud/r2.ts
       - site/src/cut/server/cloud/httpRange.ts
       - site/prisma/**
