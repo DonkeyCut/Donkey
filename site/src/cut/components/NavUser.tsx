@@ -6,9 +6,9 @@ import {
   ChevronRight,
   CreditCard,
   EllipsisVertical,
-  Flag,
   LogOut,
   MonitorDown,
+  Sparkles,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -21,6 +21,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { UserAvatar } from "@/cut/components/UserAvatar";
 import { cutInstallHref } from "@/cut/lib/install";
+import { openOnboarding } from "@/cut/lib/onboarding";
 import { useCutBase } from "@/cut/lib/nav";
 import { authClient } from "@/lib/auth-client";
 import { useAccountProfile, visibleName } from "@/queries/accountProfile";
@@ -96,8 +97,10 @@ export function NavUser() {
         <DropdownMenuItem onClick={() => router.push(`${base}/settings/usage`)}>
           <ChartColumn /> Usage
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => router.push(`${base}/settings/flags`)}>
-          <Flag /> Feature flags
+        {/* The welcome sequence is a full-window overlay mounted in the app
+            shell, so this asks for it rather than routing anywhere. */}
+        <DropdownMenuItem onClick={openOnboarding}>
+          <Sparkles /> View onboarding
         </DropdownMenuItem>
         {/* The install page lives outside the editor, so it opens in its own
             tab rather than navigating away from an open project. */}

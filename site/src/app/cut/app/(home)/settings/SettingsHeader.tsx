@@ -15,12 +15,6 @@ const SECTIONS = [
     pinned: false,
   },
   {
-    suffix: "/settings/flags",
-    title: "Feature flags",
-    description: "Early features you can turn on for your account.",
-    pinned: true,
-  },
-  {
     suffix: "/settings/profile",
     title: "Profile",
     pinned: true,
@@ -35,8 +29,9 @@ const SECTIONS = [
 
 export function SettingsHeader() {
   const pathname = usePathname();
+  // Billing is the settings root, so it's also the fallback title.
   const section =
-    SECTIONS.find((s) => pathname.endsWith(s.suffix)) ?? SECTIONS[1];
+    SECTIONS.find((s) => pathname.endsWith(s.suffix)) ?? SECTIONS.at(-1)!;
   return (
     <div
       className={cn(
