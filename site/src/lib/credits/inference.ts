@@ -285,6 +285,17 @@ export async function assertCanUseInference(input: CreditPreflightInput) {
     },
   });
 
+  // Any positive balance clears the preflight, so a charge can overshoot what
+  // the account holds and the overshoot is written off (forgiveOverdraft).
+  // Sequentially that exposure is bounded by one charge: the write-off lands in
+  // the charge's own transaction, and the next preflight sees zero. The open
+  // window is concurrency — the scene-run pool submits up to 6 clips at once,
+  // and every submit can read the same small balance before the first flat
+  // charge (~$1.33/clip) lands, so one depleted account can cost up to ~6
+  // clips in write-offs. Accepted for now; the "writeoff" ledger rows total the
+  // real leakage. Closing it means holding a flat-priced charge at preflight
+  // (balance >= generationCostMicros), which would fail a run's last clip
+  // up front instead of letting it finish — a product call.
   if (account.balanceMicros <= zeroCreditMicros) {
     throw new InsufficientCreditsError(account.balanceMicros);
   }
