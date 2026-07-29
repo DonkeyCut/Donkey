@@ -178,6 +178,12 @@ export async function grantCredits(input: {
     return await prisma.$transaction(
       async (tx) => {
         const account = await ensureCreditAccountRecord(tx, input.userId);
+        // An account already carrying an overdraft — one that predates the
+        // write-off at charge time — starts from zero here, so the grant lands
+        // whole. Funding $25 credits $25.
+        if (affectsBalance) {
+          await forgiveOverdraft(tx, account.id, input.userId, account.balanceMicros, null);
+        }
         const updatedAccount = affectsBalance
           ? await tx.userCreditAccount.update({
               data: {
@@ -437,7 +443,13 @@ export async function recordInferenceUsage(input: InferenceUsageInput) {
 
       return {
         creditCostMicros,
-        remainingBalanceMicros: updatedAccount.balanceMicros,
+        remainingBalanceMicros: await forgiveOverdraft(
+          tx,
+          account.id,
+          input.userId,
+          updatedAccount.balanceMicros,
+          usageEvent.id,
+        ),
         usageEventId: usageEvent.id,
       };
     },
@@ -768,6 +780,57 @@ async function expireCreditsForAccount(
   }
 
   return balanceMicros;
+}
+
+// The balance never sits below zero. A charge is priced from what the provider
+// actually did, so it can land on more than the account can cover — a
+// token-metered call that ran long, or two generations that both cleared the
+// preflight and then billed. Whatever the account couldn't pay is ours to eat,
+// and eating it here is the whole point: an overdraft left on the balance would
+// otherwise be silently collected from the user's next top-up, which is how
+// funding $25 came to show $24.67.
+//
+// The write-off is booked rather than clamped. A "writeoff" ledger row keeps
+// the account reconcilable (grants - charges + write-offs = balance) and makes
+// the leakage a number someone can total, instead of a difference between the
+// stored balance and the displayed one.
+async function forgiveOverdraft(
+  tx: Prisma.TransactionClient,
+  accountId: string,
+  userId: string,
+  balanceMicros: bigint,
+  usageEventId: string | null,
+) {
+  if (balanceMicros >= zeroCreditMicros) {
+    return balanceMicros;
+  }
+
+  const forgivenMicros = -balanceMicros;
+  await tx.userCreditAccount.update({
+    data: {
+      balanceMicros: {
+        increment: forgivenMicros,
+      },
+    },
+    where: {
+      id: accountId,
+    },
+  });
+  await tx.userCreditLedgerEntry.create({
+    data: {
+      accountId,
+      amountMicros: forgivenMicros,
+      balanceAfterMicros: zeroCreditMicros,
+      description: "Overdraft written off",
+      source: "inference",
+      sourceId: usageEventId,
+      type: "writeoff",
+      usageEventId,
+      userId,
+    },
+  });
+
+  return zeroCreditMicros;
 }
 
 async function debitGrants(
