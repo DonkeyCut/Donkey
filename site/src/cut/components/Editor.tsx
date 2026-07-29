@@ -2,9 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Clapperboard, Loader2, X } from "lucide-react";
+import { Clapperboard, Laptop, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { apiFetch, bindCutMode, releaseCutMode } from "@/cut/lib/backend";
+import {
+  apiFetch,
+  bindCutMode,
+  hasLocalCompute,
+  releaseCutMode,
+  subscribeCutMode,
+} from "@/cut/lib/backend";
 import { loadedDocVersion } from "@/cut/lib/backend/shared";
 import { writeCachedDoc } from "@/cut/lib/docCache";
 import {
@@ -21,7 +27,7 @@ import { enrichAsset, importFileToProject, prepareImport } from "@/cut/lib/media
 import "@/cut/lib/genScene";
 import { installDevHooks } from "@/cut/lib/devHooks";
 import { backTarget, useCutBase } from "@/cut/lib/nav";
-import { resolveProjectMode } from "@/cut/lib/residency";
+import { resolveProjectPlacement } from "@/cut/lib/residency";
 import {
   docAudioClips,
   docClips,
@@ -90,6 +96,9 @@ export function Editor({
   const sending = useEditor((s) => s.assets.reduce((n, a) => (a.upload ? n + 1 : n), 0));
   const [conflictReloaded, setConflictReloaded] = useState(false);
   const [shareGone, setShareGone] = useState(false);
+  // This project lives on this Mac and the Donkey app isn't answering. Nothing
+  // to load, and nothing to guess at either: say where it is and wait.
+  const [needsApp, setNeedsApp] = useState(false);
   const dragDepth = useRef(0);
 
   // Load the project document, then enrich assets (thumbs/waveforms) lazily.
@@ -97,29 +106,55 @@ export function Editor({
   // lives (residency.ts) and pin the backend before anything else fetches.
   // Pinning, rather than setting the ambient mode, is what makes this stick —
   // the ConnectGate's engine probe finishes on its own schedule and would
-  // otherwise flip an open cloud project onto the engine.
+  // otherwise flip an open cloud project onto the engine. It is also what
+  // raises the gate's banner over a local project the app isn't answering for:
+  // the banner follows the open project's residency.
   // A share view skips that — its page pinned the shared backend already.
   useEffect(() => {
     let alive = true;
-    const bind = viewer
-      ? Promise.resolve()
-      : resolveProjectMode(projectId).then((mode) => {
-          if (alive) bindCutMode(mode);
+    let waiting: (() => void) | undefined;
+
+    const open = () => {
+      const bind = viewer
+        ? Promise.resolve({ mode: "shared" as const, reachable: true })
+        : resolveProjectPlacement(projectId).then((placement) => {
+            if (alive) bindCutMode(placement.mode);
+            return placement;
+          });
+      void bind.then((placement) => {
+        if (!alive) return;
+        setNeedsApp(!placement.reachable);
+        if (placement.reachable) {
+          void useEditor
+            .getState()
+            .loadProject(projectId)
+            .then(() => {
+              for (const asset of useEditor.getState().assets) void enrichAsset(asset);
+            });
+          return;
+        }
+        // The project is on this Mac with no app answering. The gate keeps
+        // probing behind its banner, so wait for that rather than retrying:
+        // the moment the app is back, this opens the project as if the user
+        // had just clicked it. Waiting on the engine here — rather than
+        // re-running on it — is what keeps an open cloud project from being
+        // re-resolved out from under its own pinned backend.
+        waiting = subscribeCutMode(() => {
+          if (!alive || !hasLocalCompute()) return;
+          waiting?.();
+          waiting = undefined;
+          open();
         });
-    void bind.then(() => {
-      if (!alive) return;
-      void useEditor
-        .getState()
-        .loadProject(projectId)
-        .then(() => {
-          for (const asset of useEditor.getState().assets) void enrichAsset(asset);
-        });
-    });
+      });
+    };
+    open();
+
     // An export still rendering after a reload rejoins on its own: the app-wide
     // exports dock polls the engine's job feed, so it reappears with no per-
     // project reconnect here.
     return () => {
       alive = false;
+      waiting?.();
       releaseCutMode();
     };
   }, [projectId, viewer]);
@@ -632,6 +667,28 @@ export function Editor({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // The project is here, on this Mac — it just can't be opened without the app
+  // that holds it. The gate's banner sits above this with the recovery steps,
+  // and the moment the app answers this screen loads the project itself.
+  if (needsApp) {
+    return (
+      <div className="grid h-full place-items-center">
+        <div className="flex max-w-sm flex-col items-center gap-3 text-center">
+          <Laptop className="size-7 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">
+            This is a local project — it lives on this Mac. Open the Donkey app and it opens
+            here.
+          </p>
+          <Button
+            variant="outline"
+            nativeButton={false}
+            render={<Link href={back.href}>Back to {back.tab}</Link>}
+          />
+        </div>
+      </div>
+    );
+  }
 
   if (loadError && !stale) {
     return (

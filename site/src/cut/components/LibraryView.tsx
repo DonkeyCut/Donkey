@@ -1,15 +1,18 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Cloud,
+  Film,
   FolderOpen,
   FolderPlus,
+  Image as ImageIcon,
   Laptop,
   Link as LinkIcon,
   Loader2,
+  Music,
   Plus,
   Trash2,
   Upload,
@@ -53,6 +56,8 @@ import {
   type LibraryData,
 } from "@/cut/lib/library";
 import { useNewProjectTarget } from "@/cut/lib/newProject";
+import { useListedResidencies, useLocalCompute } from "@/cut/lib/backend/hooks";
+import { setNeedsApp } from "@/cut/lib/needsApp";
 import { availableResidencies, RESIDENCY_LABEL, type Residency } from "@/cut/lib/residency";
 import { TemplateCard } from "./TemplateCard";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
@@ -68,17 +73,23 @@ import { buildDragGhost, FolderCrumb, FolderShelf, Marquee } from "./desktopFold
 const LIBRARY_MOVE_MIME = "application/x-cut-library-move";
 
 /** Which shelf an item sits on, on its card. The library merges both, so the
- * badge is how you tell a clip on this Mac from one in the cloud. */
+ * badge is how you tell a clip on this Mac from one in the cloud — and, when
+ * the app isn't answering, why that clip is showing but not usable. */
 export function ShelfBadge({
   residency,
+  offline = false,
   className,
 }: {
   residency: Residency;
+  offline?: boolean;
   className?: string;
 }) {
   const Icon = residency === "cloud" ? Cloud : Laptop;
   return (
-    <span title={RESIDENCY_LABEL[residency]} className={className}>
+    <span
+      title={offline ? "On this Mac — open the Donkey app to use it" : RESIDENCY_LABEL[residency]}
+      className={className}
+    >
       <Icon className="size-3" />
     </span>
   );
@@ -89,8 +100,18 @@ export function LibraryView() {
   const base = useCutBase();
   const client = useQueryClient();
   // The listing is cached (lib/queries.ts): coming back to the library paints
-  // the shelf it painted last time and revalidates behind it.
+  // the shelf it painted last time and revalidates behind it. With the Donkey
+  // app closed that cache is the Mac's half outright — those files are still
+  // on that disk, so they still list, badged and read-only until the app is
+  // back. Clicking one raises the gate's banner, which is where the way out
+  // of that state lives.
   const library = useLibrary();
+  const listed = useListedResidencies();
+  const engineUp = useLocalCompute();
+  const live = useCallback((r: Residency) => r === "cloud" || engineUp, [engineUp]);
+  // Drop the flag when this view goes away: the banner belongs to the surface
+  // that raised it.
+  useEffect(() => () => setNeedsApp(false), []);
   // New projects and new library items answer the same question — which shelf
   // is this browser putting things on — so they read the one choice the user
   // already made, rather than the backend the app happens to be bound to.
@@ -121,29 +142,39 @@ export function LibraryView() {
   const dragDepth = useRef(0);
 
   // Every mutation goes to the shelf its item sits on; only new items need a
-  // destination, and that is the folder they land in, or the bound backend.
+  // destination, and that is the folder they land in, or the bound backend. A
+  // shelf that isn't answering takes none of them, so each one checks first.
   const shelfOf = (id: string): Residency | null =>
     all.find((a) => a.id === id)?.residency ??
     templates.find((t) => t.id === id)?.residency ??
     null;
-  const shelfForNew = (folderId: string | null) =>
-    (folderId ? folders.find((f) => f.id === folderId)?.residency : null) ?? target;
+  // Where a new item lands, and the folder it can land in: a folder on a shelf
+  // that isn't answering can't take one, so the item goes to the root of the
+  // shelf new items go to.
+  const landing = (folderId: string | null) => {
+    const owner = folderId ? folders.find((f) => f.id === folderId)?.residency : null;
+    const residency = owner && live(owner) ? owner : target;
+    return { residency, folderId: owner === residency ? folderId : null };
+  };
 
   const renameTpl = async (r: Residency, id: string, name: string) => {
+    if (!live(r)) return;
     patch((d) => ({ ...d, templates: d.templates.map((t) => (t.id === id ? { ...t, name } : t)) }));
     await renameTemplate(r, id, name).catch(() => void reload());
   };
 
   const removeTpl = async (r: Residency, id: string) => {
+    if (!live(r)) return;
     patch((d) => ({ ...d, templates: d.templates.filter((t) => t.id !== id) }));
     await deleteTemplate(r, id).catch(() => void reload());
   };
 
   // Upload a batch into `folderId` (the open folder by default — folder tiles
   // pass their own id when files are dropped straight onto them).
-  const upload = async (files: FileList | File[], folderId: string | null = openFolder) => {
+  const upload = async (files: FileList | File[], into: string | null = openFolder) => {
     const list = Array.from(files).filter(isMediaFile);
-    const residency = shelfForNew(folderId);
+    const { residency, folderId } = landing(into);
+    if (!live(residency)) return;
     setUploading((n) => n + list.length);
     for (const file of list) {
       try {
@@ -164,15 +195,16 @@ export function LibraryView() {
   const importUrl = async () => {
     const value = url.trim();
     if (!value || importing) return;
+    const { residency, folderId } = landing(openFolder);
+    if (!live(residency)) return;
     setImporting(true);
     setUrlError(null);
-    const residency = shelfForNew(openFolder);
     try {
       const imported = await importUrlToLibrary(value, residency);
-      if (openFolder) {
+      if (folderId) {
         for (const asset of imported) {
-          await moveLibraryItem(residency, asset.id, openFolder).catch(() => {});
-          asset.folderId = openFolder;
+          await moveLibraryItem(residency, asset.id, folderId).catch(() => {});
+          asset.folderId = folderId;
         }
       }
       patch((d) => ({ ...d, assets: [...imported, ...d.assets] }));
@@ -189,6 +221,7 @@ export function LibraryView() {
     if (!deleting) return;
     const { id, residency } = deleting;
     setDeleting(null);
+    if (!live(residency)) return;
     patch((d) => ({ ...d, assets: d.assets.filter((a) => a.id !== id) }));
     try {
       await deleteFromLibrary(residency, id);
@@ -211,6 +244,7 @@ export function LibraryView() {
     const moving = ids
       .map((id) => ({ id, residency: shelfOf(id) }))
       .filter((x): x is { id: string; residency: Residency } => !!x.residency)
+      .filter((x) => live(x.residency))
       .filter((x) => !target || x.residency === target);
     if (moving.length === 0) return;
     const idset = new Set(moving.map((x) => x.id));
@@ -243,7 +277,7 @@ export function LibraryView() {
     }
   };
 
-  const bothShelves = availableResidencies().length > 1;
+  const bothShelves = listed.length > 1;
   const shown = all.filter((a) => (a.folderId ?? null) === openFolder);
   const shownTemplates = templates.filter((t) => (t.folderId ?? null) === openFolder);
   const openFolderName = folders.find((f) => f.id === openFolder)?.name;
@@ -340,16 +374,17 @@ export function LibraryView() {
           })}
           badgeOf={(id) => {
             const r = folders.find((f) => f.id === id)?.residency;
-            return bothShelves && r ? <ShelfBadge residency={r} /> : null;
+            return bothShelves && r ? <ShelfBadge residency={r} offline={!live(r)} /> : null;
           }}
           onOpen={gotoFolder}
           onCreate={async (name) => {
+            if (!live(target)) return;
             const f = await createLibraryFolder(name, target);
             patch((d) => ({ ...d, folders: [...d.folders, f] }));
           }}
           onRename={async (id, name) => {
             const r = folders.find((f) => f.id === id)?.residency;
-            if (!r) return;
+            if (!r || !live(r)) return;
             patch((d) => ({
               ...d,
               folders: d.folders.map((f) => (f.id === id ? { ...f, name } : f)),
@@ -358,7 +393,7 @@ export function LibraryView() {
           }}
           onDelete={async (id) => {
             const r = folders.find((f) => f.id === id)?.residency;
-            if (!r) return;
+            if (!r || !live(r)) return;
             patch((d) => ({
               folders: d.folders.filter((f) => f.id !== id),
               assets: d.assets.map((a) => (a.folderId === id ? { ...a, folderId: null } : a)),
@@ -381,13 +416,17 @@ export function LibraryView() {
               key={t.id}
               template={t}
               mediaSrc={(f) => libraryMediaUrl(f, t.residency)}
-              drag={{ scope: "library", template: t }}
+              drag={live(t.residency) ? { scope: "library", template: t } : undefined}
               onDragStartExtra={(e) => {
                 e.dataTransfer.setData(LIBRARY_MOVE_MIME, JSON.stringify([t.id]));
                 e.dataTransfer.effectAllowed = "copyMove";
               }}
-              onRename={(name) => void renameTpl(t.residency, t.id, name)}
-              onDelete={() => void removeTpl(t.residency, t.id)}
+              onRename={
+                live(t.residency) ? (name) => void renameTpl(t.residency, t.id, name) : undefined
+              }
+              onDelete={
+                live(t.residency) ? () => void removeTpl(t.residency, t.id) : undefined
+              }
             />
           ))}
         </div>
@@ -426,7 +465,12 @@ export function LibraryView() {
               key={a.id}
               asset={a}
               selected={selected.has(a.id)}
-              onDelete={() => setDeleting(a)}
+              offline={!live(a.residency)}
+              // Clicking an item this browser can only remember is the moment
+              // something is actually blocked, so that is when the gate's
+              // banner — and the way out of it — comes up.
+              onClick={live(a.residency) ? undefined : () => setNeedsApp(true)}
+              onDelete={live(a.residency) ? () => setDeleting(a) : undefined}
               onDragStartExtra={(e) => onCardDragExtra(e, a)}
             />
           ))}
@@ -518,21 +562,26 @@ export function LibraryView() {
 export function LibraryCard({
   asset: a,
   selected,
+  offline = false,
+  onClick,
   onDelete,
   onUse,
   onDragStartExtra,
 }: {
   asset: LibraryAsset;
   selected?: boolean;
+  /** The shelf this item is on isn't answering: it lists from memory, so the
+   * card shows what it knows and reaches for no media it can't load. */
+  offline?: boolean;
+  onClick?: () => void;
   onDelete?: () => void;
   onUse?: () => void;
   onDragStartExtra?: (e: React.DragEvent) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const { flash, attachReveal } = useRevealFlash("library", a.id);
-  // With one shelf reachable, every card is on it — the badge would say
-  // nothing.
-  const bothShelves = availableResidencies().length > 1;
+  // With one shelf listed, every card is on it — the badge would say nothing.
+  const bothShelves = availableResidencies().length > 1 || offline;
   // Each card is a real media element, so the source waits until the tile has
   // been scrolled near: a large library would otherwise pull every file's
   // metadata across the network the moment the page opened.
@@ -547,7 +596,8 @@ export function LibraryCard({
       ref={attachReveal}
       data-sel-id={a.id}
       className="group flex flex-col"
-      draggable
+      draggable={!offline}
+      onClick={onClick}
       onDragStart={(e) => {
         setLibraryDragData(e, a);
         onDragStartExtra?.(e);
@@ -569,7 +619,19 @@ export function LibraryCard({
           selected || flash ? "border-[#0a84ff] ring-2 ring-[#0a84ff]" : "border-border"
         )}
       >
-        {a.type === "video" ? (
+        {offline ? (
+          // Nothing to load from a shelf that isn't answering, so the card
+          // shows what it knows: the kind of file, its name, its length.
+          <span className="grid size-full place-items-center">
+            {a.type === "audio" ? (
+              <Music className="size-6 text-muted-foreground/50" />
+            ) : a.type === "image" ? (
+              <ImageIcon className="size-6 text-muted-foreground/50" />
+            ) : (
+              <Film className="size-6 text-muted-foreground/50" />
+            )}
+          </span>
+        ) : a.type === "video" ? (
           seen && (
             <video
               crossOrigin={MEDIA_CORS}
@@ -618,8 +680,10 @@ export function LibraryCard({
         {bothShelves && (
           <ShelfBadge
             residency={a.residency}
+            offline={offline}
             className={cn(
-              "absolute top-2 right-2 text-white/85 transition-opacity",
+              "absolute top-2 right-2 transition-opacity",
+              offline ? "text-muted-foreground" : "text-white/85",
               // The delete button takes this corner on hover.
               onDelete && "group-hover:opacity-0"
             )}

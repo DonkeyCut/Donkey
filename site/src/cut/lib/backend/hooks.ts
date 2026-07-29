@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
 
+import { listedResidencies, type Residency } from "../residency";
 import { cutMode, getBackend, hasLocalCompute, subscribeCutMode } from "./index";
 import type { CutCaps, CutMode } from "./types";
 
@@ -15,6 +16,23 @@ export function useCutMode(): CutMode {
  * when the answer lands. */
 export function useLocalCompute(): boolean {
   return useSyncExternalStore(subscribeCutMode, hasLocalCompute, () => false);
+}
+
+// The shelves the home lists, as a subscription. The array is held between
+// reads and replaced only when the set actually changes: useSyncExternalStore
+// re-renders forever on a fresh object every call.
+const CLOUD_ONLY: Residency[] = ["cloud"];
+let listed: Residency[] = CLOUD_ONLY;
+
+function listedSnapshot(): Residency[] {
+  const next = listedResidencies();
+  if (next.length !== listed.length || next.some((r, i) => r !== listed[i])) listed = next;
+  return listed;
+}
+
+/** Which residencies the projects home shows — see `listedResidencies`. */
+export function useListedResidencies(): Residency[] {
+  return useSyncExternalStore(subscribeCutMode, listedSnapshot, () => CLOUD_ONLY);
 }
 
 export function useCutCaps(): CutCaps {

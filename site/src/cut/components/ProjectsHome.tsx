@@ -55,7 +55,12 @@ import {
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { capturePosterWhenReady, readPoster } from "@/cut/lib/posterCache";
 import { quotaErrorMessage } from "@/cut/lib/backend/cloud";
-import { useCloudUsage, useCutMode } from "@/cut/lib/backend/hooks";
+import {
+  useCloudUsage,
+  useCutMode,
+  useListedResidencies,
+  useLocalCompute,
+} from "@/cut/lib/backend/hooks";
 import { dropCachedDoc, seedNewProjectDoc } from "@/cut/lib/docCache";
 import {
   backendFor,
@@ -83,10 +88,18 @@ import { buildDragGhost, FolderCrumb, FolderShelf, formatBytes, Marquee } from "
 
 type View = "gallery" | "list";
 
-// The home lists each residency it can reach, talking to the backend objects
+// The home lists every residency the user has, talking to the backend objects
 // directly — the global mode is only bound when a project opens into the
 // editor. Each section's listing is cached (lib/queries.ts), so returning here
 // paints the shelf immediately and revalidates behind it.
+//
+// That cache is also what keeps the Mac's shelf on screen with the Donkey app
+// closed: local projects still exist, so they still list, and the card says
+// where each one lives. What they don't do is change — a shelf whose engine
+// isn't answering takes no renames, moves, or deletes, so the cards carry no
+// menu and every mutation checks first. Opening one is allowed, and lands on
+// the editor's "this project is on this Mac" screen with the gate's banner
+// above it.
 
 type SectionData = {
   projects: ProjectSummary[] | null;
@@ -113,13 +126,24 @@ function formatDate(ts: number) {
 }
 
 // The badge marks where one project lives, so it says that outright rather
-// than repeating the shelf heading it sits under.
+// than repeating the shelf heading it sits under. A local project the Donkey
+// app isn't answering for says that instead: it is the reason its card can't
+// be renamed or moved.
 const RESIDENCY_HINT: Record<Residency, string> = {
   local: "This is a local project",
   cloud: "This is a cloud project",
 };
+const OFFLINE_HINT = "This is a local project — open the Donkey app to edit it";
 
-function ResidencyBadge({ residency, className }: { residency: Residency; className?: string }) {
+function ResidencyBadge({
+  residency,
+  offline = false,
+  className,
+}: {
+  residency: Residency;
+  offline?: boolean;
+  className?: string;
+}) {
   const Icon = residency === "cloud" ? Cloud : Laptop;
   return (
     <TooltipProvider>
@@ -127,7 +151,7 @@ function ResidencyBadge({ residency, className }: { residency: Residency; classN
         <TooltipTrigger render={<span />} className={className}>
           <Icon className="size-3" />
         </TooltipTrigger>
-        <TooltipContent>{RESIDENCY_HINT[residency]}</TooltipContent>
+        <TooltipContent>{offline ? OFFLINE_HINT : RESIDENCY_HINT[residency]}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );
@@ -184,18 +208,29 @@ export function ProjectsHome() {
   const mode = useCutMode();
   // The home never runs in shared mode; anything non-cloud lists as local.
   const homeMode: Residency = mode === "cloud" ? "cloud" : "local";
-  // Which backends this home lists, and where its New project button aims.
-  // They are the same question: a shelf this browser and account can reach is
-  // a shelf a project can be made on.
-  const { target, choices: residencies } = useNewProjectTarget();
+  // What this home shows and what a new project can be made on are two
+  // questions now. The Mac's shelf lists whenever this browser has used it,
+  // reachable or not; creating on it needs the Donkey app answering.
+  const residencies = useListedResidencies();
+  const { target } = useNewProjectTarget();
   const dual = residencies.length > 1;
   const r0 = residencies[0];
+  // Whether a shelf takes writes right now. The cloud always does; the Mac's
+  // does while its engine answers.
+  const engineUp = useLocalCompute();
+  const live = useCallback((r: Residency) => r === "cloud" || engineUp, [engineUp]);
 
   const client = useQueryClient();
   // Hooks can't run in a loop, so both sections are always wired and the
   // inactive one simply stays disabled.
-  const localSection = useProjectsSection("local", residencies.includes("local"));
-  const cloudSection = useProjectsSection("cloud", residencies.includes("cloud"));
+  const localSection = useProjectsSection("local", {
+    list: residencies.includes("local"),
+    live: engineUp,
+  });
+  const cloudSection = useProjectsSection("cloud", {
+    list: residencies.includes("cloud"),
+    live: true,
+  });
   const asSection = (q: typeof localSection): SectionData => ({
     projects: q.data?.projects ?? null,
     folders: q.data?.folders ?? [],
@@ -252,7 +287,11 @@ export function ProjectsHome() {
     localStorage.setItem("cut-projects-view", v);
   };
 
+  // Each mutation below opens with the same guard: a shelf that isn't
+  // answering takes no changes, and an optimistic patch would paint a rename
+  // that never happened and then take it back on reconnect.
   const createFolder = async (r: Residency, fname: string) => {
+    if (!live(r)) return;
     const res = await backendFor(r).fetch("/api/cut/projects/folders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -266,6 +305,7 @@ export function ProjectsHome() {
   };
 
   const renameFolder = async (r: Residency, id: string, fname: string) => {
+    if (!live(r)) return;
     patch(r, (s) => ({
       ...s,
       folders: s.folders.map((f) => (f.id === id ? { ...f, name: fname } : f)),
@@ -287,6 +327,7 @@ export function ProjectsHome() {
   };
 
   const deleteFolder = async (r: Residency, id: string) => {
+    if (!live(r)) return;
     patch(r, (s) => ({
       folders: s.folders.filter((f) => f.id !== id),
       projects: s.projects.map((p) => (p.folderId === id ? { ...p, folderId: null } : p)),
@@ -301,6 +342,7 @@ export function ProjectsHome() {
   // null). Optimistic; reconciles from disk on any failure. A dragged
   // selection can span sections, so a backend only ever moves its own.
   const moveProjects = async (r: Residency, ids: string[], folderId: string | null) => {
+    if (!live(r)) return;
     const own = new Set((data[r].projects ?? []).map((p) => p.id));
     const move = ids.filter((id) => own.has(id));
     if (move.length === 0) return;
@@ -327,6 +369,7 @@ export function ProjectsHome() {
   // the editor opens on its first frame instead of waiting out a round trip
   // for a document we can describe in full.
   const openNewProject = async (r: Residency, pname: string, folderId: string | null) => {
+    if (!live(r)) return;
     const res = await backendFor(r).fetch("/api/cut/projects", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -380,6 +423,7 @@ export function ProjectsHome() {
   const rename = async () => {
     if (!renaming) return;
     const { project, residency } = renaming;
+    if (!live(residency)) return setRenaming(null);
     const next = name.trim() || project.name;
     patch(residency, (s) => ({
       ...s,
@@ -396,6 +440,7 @@ export function ProjectsHome() {
   };
 
   const duplicate = async (r: Residency, p: ProjectSummary) => {
+    if (!live(r)) return;
     setBusy(true);
     setDupError(null);
     try {
@@ -439,6 +484,7 @@ export function ProjectsHome() {
   // the original. The copy landing first is what makes deleting it safe.
   const moveAcross = async (source: Residency, p: ProjectSummary) => {
     const dest: Residency = source === "cloud" ? "local" : "cloud";
+    if (!live(source) || !live(dest)) return;
     setDupError(null);
     setBusy(true);
     try {
@@ -459,8 +505,9 @@ export function ProjectsHome() {
 
   const remove = async () => {
     if (!deleting) return;
-    setBusy(true);
     const { project, residency } = deleting;
+    if (!live(residency)) return setDeleting(null);
+    setBusy(true);
     const id = project.id;
     try {
       await backendFor(residency).fetch(`/api/cut/projects/${id}`, { method: "DELETE" });
@@ -487,6 +534,11 @@ export function ProjectsHome() {
   const openFolderName = folderOwner
     ? data[folderOwner].folders.find((f) => f.id === openFolder)?.name
     : undefined;
+  // A folder pins where a new project lands, but only a shelf that answers can
+  // take one: inside a folder on an unreachable shelf, New project goes where
+  // the picker points instead.
+  const pinnedTarget = folderOwner && live(folderOwner) ? folderOwner : null;
+  const newTarget = pinnedTarget ?? target;
 
   const anySettled = residencies.some((r) => data[r].projects !== null || data[r].error);
   const anyProjects = residencies.some((r) => (data[r].projects?.length ?? 0) > 0);
@@ -569,7 +621,7 @@ export function ProjectsHome() {
           key={p.id}
           data-sel-id={p.id}
           className="group cursor-pointer"
-          draggable
+          draggable={live(r)}
           onDragStart={(e) => onProjectDragStart(e, p)}
           onClick={(e) => {
             if (e.shiftKey || e.metaKey) {
@@ -587,39 +639,42 @@ export function ProjectsHome() {
               selected.has(p.id) ? "border-[#0a84ff] ring-2 ring-[#0a84ff]" : "border-border"
             )}
           >
-            <CardPreview project={p} residency={r} />
+            <CardPreview project={p} residency={r} offline={!live(r)} />
             <span className="absolute top-2 left-2 max-w-[70%] truncate rounded-lg bg-black/55 px-2 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
               {p.name}
             </span>
             {dual && (
               <ResidencyBadge
                 residency={r}
+                offline={!live(r)}
                 className="absolute bottom-2 left-2 z-10 grid size-5 place-items-center rounded-md bg-black/65 text-white"
               />
             )}
             <span className="absolute right-2 bottom-2 rounded-md bg-black/65 px-1.5 py-0.5 font-mono text-[10px] text-white tabular-nums">
               {formatTime(p.duration)}
             </span>
-            <ProjectMenu
-              project={p}
-              className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
-              folders={data[r].folders}
-              onRename={() => {
-                setName(p.name);
-                setRenaming({ project: p, residency: r });
-              }}
-              onDuplicate={() => void duplicate(r, p)}
-              moveTo={
-                dual
-                  ? {
-                      target: r === "cloud" ? "local" : "cloud",
-                      run: () => void moveAcross(r, p),
-                    }
-                  : undefined
-              }
-              onMove={(folderId) => void moveProjects(r, [p.id], folderId)}
-              onDelete={() => setDeleting({ project: p, residency: r })}
-            />
+            {live(r) && (
+              <ProjectMenu
+                project={p}
+                className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
+                folders={data[r].folders}
+                onRename={() => {
+                  setName(p.name);
+                  setRenaming({ project: p, residency: r });
+                }}
+                onDuplicate={() => void duplicate(r, p)}
+                moveTo={
+                  dual && engineUp
+                    ? {
+                        target: r === "cloud" ? "local" : "cloud",
+                        run: () => void moveAcross(r, p),
+                      }
+                    : undefined
+                }
+                onMove={(folderId) => void moveProjects(r, [p.id], folderId)}
+                onDelete={() => setDeleting({ project: p, residency: r })}
+              />
+            )}
           </div>
           <div className="mt-2 px-0.5 text-xs text-muted-foreground">
             {formatBytes(p.sizeBytes ?? 0)} · edited {formatDate(p.updatedAt)}
@@ -646,7 +701,7 @@ export function ProjectsHome() {
             "group grid cursor-pointer grid-cols-[1fr_90px_70px_110px_40px] items-center gap-3 border-b border-border px-4 py-2.5 text-sm last:border-b-0 hover:bg-muted/50",
             selected.has(p.id) && "bg-[#0a84ff]/10 hover:bg-[#0a84ff]/15"
           )}
-          draggable
+          draggable={live(r)}
           onDragStart={(e) => onProjectDragStart(e, p)}
           onClick={(e) => {
             if (e.shiftKey || e.metaKey) {
@@ -661,7 +716,11 @@ export function ProjectsHome() {
             <Film className="size-4 shrink-0 text-muted-foreground" />
             <span className="truncate font-medium">{p.name}</span>
             {dual && (
-              <ResidencyBadge residency={r} className="shrink-0 text-muted-foreground" />
+              <ResidencyBadge
+                residency={r}
+                offline={!live(r)}
+                className="shrink-0 text-muted-foreground"
+              />
             )}
           </span>
           <span className="font-mono text-xs text-muted-foreground tabular-nums">
@@ -673,31 +732,35 @@ export function ProjectsHome() {
           <span className="text-xs text-muted-foreground">
             {formatDate(p.updatedAt)}
           </span>
-          <ProjectMenu
-            project={p}
-            folders={data[r].folders}
-            onRename={() => {
-              setName(p.name);
-              setRenaming({ project: p, residency: r });
-            }}
-            onDuplicate={() => void duplicate(r, p)}
-            moveTo={
-              dual
-                ? {
-                    target: r === "cloud" ? "local" : "cloud",
-                    run: () => void moveAcross(r, p),
-                  }
-                : undefined
-            }
-            onMove={(folderId) => void moveProjects(r, [p.id], folderId)}
-            onDelete={() => setDeleting({ project: p, residency: r })}
-          />
+          {live(r) ? (
+            <ProjectMenu
+              project={p}
+              folders={data[r].folders}
+              onRename={() => {
+                setName(p.name);
+                setRenaming({ project: p, residency: r });
+              }}
+              onDuplicate={() => void duplicate(r, p)}
+              moveTo={
+                dual && engineUp
+                  ? {
+                      target: r === "cloud" ? "local" : "cloud",
+                      run: () => void moveAcross(r, p),
+                    }
+                  : undefined
+              }
+              onMove={(folderId) => void moveProjects(r, [p.id], folderId)}
+              onDelete={() => setDeleting({ project: p, residency: r })}
+            />
+          ) : (
+            <span />
+          )}
         </div>
       ))}
       <button
         type="button"
         data-no-marquee
-        onClick={() => void newProjectHere(folderOwner ?? target)}
+        onClick={() => void newProjectHere(newTarget)}
         className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
       >
         <Plus className="size-4" /> New project
@@ -780,7 +843,7 @@ export function ProjectsHome() {
               </Button>
             )}
             <NewProjectButton
-              pinned={folderOwner}
+              pinned={pinnedTarget}
               onCreate={(r) => void newProjectHere(r)}
             />
             {anyProjects && (
@@ -833,7 +896,7 @@ export function ProjectsHome() {
               Create a new project to get started
             </h1>
             <NewProjectButton
-              pinned={folderOwner}
+              pinned={pinnedTarget}
               onCreate={(r) => {
                 setName("");
                 setCreateIn(r);
@@ -942,8 +1005,17 @@ export function ProjectsHome() {
  * The source is withheld until the tile has been scrolled near, because each
  * card is a real media element: a grid of cloud projects would otherwise open
  * a connection per card on arrival and pull every file's metadata across the
- * network before the first row settled. */
-function CardPreview({ project: p, residency }: { project: ProjectSummary; residency: Residency }) {
+ * network before the first row settled. A shelf that isn't answering has no
+ * media to reach at all, so those cards stop at the frame they cached. */
+function CardPreview({
+  project: p,
+  residency,
+  offline = false,
+}: {
+  project: ProjectSummary;
+  residency: Residency;
+  offline?: boolean;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [tileRef, seen] = useInView<HTMLDivElement>();
   // The frame this card drew last time, so coming back from a project shows the
@@ -957,6 +1029,20 @@ function CardPreview({ project: p, residency }: { project: ProjectSummary; resid
   const backend = backendFor(residency);
   const fileUrl = (file: string) =>
     backend.url(`/api/cut/projects/${p.id}/media/${encodeURIComponent(file)}`);
+
+  if (offline) {
+    return poster ? (
+      // eslint-disable-next-line @next/next/no-img-element -- a cached data URL, not a Next asset
+      <img
+        src={poster}
+        alt=""
+        draggable={false}
+        className="absolute inset-0 size-full object-cover"
+      />
+    ) : (
+      <Film className="size-7 text-muted-foreground/50" />
+    );
+  }
 
   if (!p.previewFile && !p.hasPreview) {
     return (

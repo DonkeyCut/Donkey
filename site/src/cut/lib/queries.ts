@@ -24,7 +24,13 @@ import { cutMode } from "./backend";
 import { useCutMode } from "./backend/hooks";
 import { readSnapshot, snapshotKey, writeSnapshot } from "./cache";
 import { fetchLibrary, type LibraryData } from "./library";
-import { availableResidencies, backendFor, type Residency } from "./residency";
+import {
+  availableResidencies,
+  backendFor,
+  listedResidencies,
+  projectsSnapshotKey,
+  type Residency,
+} from "./residency";
 import type { ProjectFolder, ProjectSummary } from "./types";
 
 export { backendFor };
@@ -33,10 +39,17 @@ export type { Residency };
 export type ProjectsSection = { projects: ProjectSummary[]; folders: ProjectFolder[] };
 
 export const projectsKey = (r: Residency) => ["cut", "projects", r] as const;
-/** The library listing spans every reachable residency, so the set itself is
+/** The library listing spans every shelf the user has, so the set itself is
  * the cache key — connecting the engine mid-session widens the shelf rather
- * than repainting a stale half of it. */
-export const libraryScope = () => availableResidencies().join("+");
+ * than repainting a stale half of it. A recalled shelf keys apart from a live
+ * one (`local!`), so the app answering re-reads it instead of holding on to
+ * the memory. */
+export const libraryScope = () => {
+  const live = availableResidencies();
+  return listedResidencies()
+    .map((r) => (live.includes(r) ? r : `${r}!`))
+    .join("+");
+};
 export const libraryKey = (scope: string) => ["cut", "library", scope] as const;
 
 /**
@@ -69,23 +82,30 @@ async function fetchProjectsSection(r: Residency): Promise<ProjectsSection> {
   };
 }
 
-/** One residency's projects and folders. Errors surface as `isError` rather
- * than an empty list, so one backend failing never blanks the other's cards. */
-export function useProjectsSection(r: Residency, enabled: boolean) {
+/**
+ * One residency's projects and folders. Errors surface as `isError` rather
+ * than an empty list, so one backend failing never blanks the other's cards.
+ *
+ * Listing a shelf and reading it are separate: the Mac's shelf lists with the
+ * Donkey app closed, off the snapshot alone, because those projects still
+ * exist and the user is entitled to see them. `live` is what asks the backend
+ * for a fresh answer, and it turns on by itself the moment the app connects.
+ */
+export function useProjectsSection(r: Residency, { list, live }: { list: boolean; live: boolean }) {
   const client = useQueryClient();
 
   useEffect(() => {
-    if (!enabled) return;
-    return seedFromSnapshot<ProjectsSection>(client, projectsKey(r), snapshotKey(r, "projects"));
-  }, [client, r, enabled]);
+    if (!list) return;
+    return seedFromSnapshot<ProjectsSection>(client, projectsKey(r), projectsSnapshotKey(r));
+  }, [client, r, list]);
 
   return useQuery<ProjectsSection>({
-    enabled,
+    enabled: list && live,
     queryKey: projectsKey(r),
     queryFn: async () => {
       try {
         const data = await fetchProjectsSection(r);
-        writeSnapshot(snapshotKey(r, "projects"), data);
+        writeSnapshot(projectsSnapshotKey(r), data);
         return data;
       } catch (err) {
         if (r === "local" && cutMode() === "local") {
@@ -109,7 +129,8 @@ export function useProjectsSection(r: Residency, enabled: boolean) {
   });
 }
 
-/** The user's whole shelf: every reachable residency's library, merged. */
+/** The user's whole shelf: every residency's library, merged — including the
+ * one this browser can only remember. */
 export function useLibrary() {
   // Not read for the query itself — the backend binding decides which
   // residencies are reachable, so a mode change re-keys and re-reads.
@@ -126,7 +147,7 @@ export function useLibrary() {
   return useQuery<LibraryData>({
     queryKey: libraryKey(scope),
     queryFn: async () => {
-      const data = await fetchLibrary();
+      const data = await fetchLibrary({ remembered: true });
       writeSnapshot(snap, data);
       return data;
     },
@@ -147,7 +168,7 @@ export function patchProjects(
   const next = client.setQueryData<ProjectsSection>(projectsKey(r), (prev) =>
     prev ? fn(prev) : prev
   );
-  if (next) writeSnapshot(snapshotKey(r, "projects"), next);
+  if (next) writeSnapshot(projectsSnapshotKey(r), next);
 }
 
 /** The library's equivalent. Its items carry their own residency, so one

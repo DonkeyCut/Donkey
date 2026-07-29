@@ -63,8 +63,10 @@ export function TemplateCard({
   /** The "+" action; omit to drop the button (e.g. no open project). */
   onAdd?: () => void;
   addTitle?: string;
-  onRename: (name: string) => void;
-  onDelete: () => void;
+  /** Rename and delete; omit both on a shelf that can't be written to right
+   * now — the card keeps its preview and drops the menu. */
+  onRename?: (name: string) => void;
+  onDelete?: () => void;
   /** When set, the card accepts media drops (cards and timeline clips) —
    * filter by `ref.scope` and append the item to the template. */
   onRefDrop?: (ref: AssetRef) => void;
@@ -160,7 +162,7 @@ export function TemplateCard({
               onBlur={() => setRenaming(false)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && draft.trim()) {
-                  onRename(draft.trim());
+                  onRename?.(draft.trim());
                   setRenaming(false);
                 } else if (e.key === "Escape") setRenaming(false);
               }}
@@ -188,36 +190,44 @@ export function TemplateCard({
               <Plus className="size-3.5" />
             </button>
           )}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <button
-                  title="Template options"
-                  className={cn(
-                    cardIconButton,
-                    "opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100",
-                  )}
-                />
-              }
-            >
-              <MoreHorizontal className="size-3.5" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-40">
-              <DropdownMenuItem
-                onClick={() => {
-                  setDraft(t.name);
-                  setRenaming(true);
-                }}
+          {(onRename || onDelete) && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <button
+                    title="Template options"
+                    className={cn(
+                      cardIconButton,
+                      "opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100",
+                    )}
+                  />
+                }
               >
-                <Pencil /> Rename
-              </DropdownMenuItem>
-              {extraMenu}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" onClick={onDelete}>
-                <Trash2 /> Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <MoreHorizontal className="size-3.5" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-40">
+                {onRename && (
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setDraft(t.name);
+                      setRenaming(true);
+                    }}
+                  >
+                    <Pencil /> Rename
+                  </DropdownMenuItem>
+                )}
+                {extraMenu}
+                {onDelete && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem variant="destructive" onClick={onDelete}>
+                      <Trash2 /> Delete
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
       {expanded && parts.length > 0 && (

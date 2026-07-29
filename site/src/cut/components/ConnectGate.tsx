@@ -23,6 +23,9 @@ import {
   servedFromEngine,
 } from "@/cut/lib/api";
 import { announceLocalCompute, setCutMode } from "@/cut/lib/backend";
+import { useCutMode } from "@/cut/lib/backend/hooks";
+import { setNeedsApp, useNeedsApp } from "@/cut/lib/needsApp";
+import { engineSeen, markEngineSeen } from "@/cut/lib/residency";
 
 // Which backend the app starts on, decided once per load. Chrome gates a
 // public https page's first fetch to 127.0.0.1 behind its Local Network Access
@@ -33,21 +36,20 @@ import { announceLocalCompute, setCutMode } from "@/cut/lib/backend";
 // loopback until a probe succeeds, so the prompt can never ambush a login.
 //
 // Nothing here blocks the app. Cloud editing always works, so a Mac with no
-// engine reachable is a working editor, not a wall. What it is not is silent:
-// a browser that has reached this Mac's engine before and can't now gets a
-// banner it can't dismiss — its local projects are the ones that won't open —
-// and the banner opens the recovery instructions in a dialog. The gate keeps
-// probing behind the banner, so starting the Donkey app clears it. Engine
-// loss mid-session (api.ts's engineLost) lands in the same state.
+// engine reachable is a working editor, not a wall. The banner is not a
+// warning about the app being closed, then — it belongs to the projects that
+// need it. The projects home keeps listing the Mac's shelf from what it last
+// saw there, and the banner rises when one of those projects is open: that is
+// the moment something is actually blocked, and the banner opens the recovery
+// steps in a dialog. The gate keeps probing behind it, so starting the Donkey
+// app clears the banner and the project loads. Engine loss mid-session
+// (api.ts's engineLost) lands in the same state.
 const ACK_KEY = "cut-engine-connect-acked";
-// Set the first time an engine answers in this browser. It separates a Mac
-// user whose app is missing from a browser that never had one, which is the
-// difference between a banner worth showing and noise.
-const SEEN_KEY = "cut-engine-seen";
 
 /** Dev-only preview of the banner and its dialog, since localhost always
- * reaches its engine: ?gate=ask (connect ask) | install (get-the-app variant)
- * | blocked. Compiled out of production builds. */
+ * reaches its engine — open a local project with it, since that is where the
+ * banner shows: ?gate=ask (connect ask) | install (get-the-app variant) |
+ * blocked. Compiled out of production builds. */
 function forcedGate(): string | null {
   if (process.env.NODE_ENV === "production") return null;
   return new URLSearchParams(window.location.search).get("gate");
@@ -70,6 +72,11 @@ export function ConnectGate({ children }: { children: ReactNode }) {
   // Settings pages (billing, usage, feature flags) never touch the engine, so
   // they skip the probe and the banner.
   const onSettings = (usePathname() ?? "").split("/").includes("settings");
+  // What the user reached for: an editor pins the open project's residency,
+  // and any other surface raises the flag when it hands back something that
+  // needs the app. Either one is what the banner is about.
+  const mode = useCutMode();
+  const needsApp = useNeedsApp();
   // Whether the engine on this Mac is reachable right now.
   const [reached, setReached] = useState<boolean | null>(null);
   // This browser has used the engine before, so an unreachable one is news.
@@ -84,9 +91,11 @@ export function ConnectGate({ children }: { children: ReactNode }) {
   const [howOpen, setHowOpen] = useState(false);
 
   const bindEngine = useCallback(() => {
-    localStorage.setItem(SEEN_KEY, "1");
+    markEngineSeen();
     setSeen(true);
     setBlocked(false);
+    // Whatever was reached for is reachable again.
+    setNeedsApp(false);
     setCutMode("local");
     engineGateOpen();
     announceLocalCompute();
@@ -108,7 +117,7 @@ export function ConnectGate({ children }: { children: ReactNode }) {
       return bindCloud();
     }
     const perm = await permissionState();
-    setSeen(localStorage.getItem(SEEN_KEY) === "1");
+    setSeen(engineSeen());
     setBlocked(perm === "denied");
     const quiet =
       servedFromEngine() ||
@@ -169,9 +178,13 @@ export function ConnectGate({ children }: { children: ReactNode }) {
     setNeedsAsk(perm === "prompt");
   };
 
-  // The banner reports a fact about this browser, so it stays up until the
-  // engine answers; the instructions behind it are a dialog the user closes.
-  const banner = reached === false && seen && !onSettings;
+  // The banner belongs to what the user reached for, not to the browser: it
+  // rises when that thing lives on this Mac and the app isn't answering, and
+  // stays up until it is. An open project says so by pinning its residency; a
+  // click on a recalled library item raises the flag. Both listings stay on
+  // screen either way, so nothing is hidden by keeping the banner off them.
+  // The instructions behind it are a dialog the user closes.
+  const banner = reached === false && seen && (mode === "local" || needsApp) && !onSettings;
 
   // The banner takes its 32px out of the viewport rather than pushing the app
   // past it: the surfaces below fill this column's remaining height (h-full),
@@ -181,10 +194,10 @@ export function ConnectGate({ children }: { children: ReactNode }) {
       {banner && (
         <div className="flex h-8 shrink-0 items-center justify-center gap-3 bg-red-600 px-4 text-xs font-medium text-white">
           <span className="min-w-0 truncate">
+            This project is stored on this Mac, and{" "}
             {blocked
-              ? "Your browser is blocking this page from reaching the Donkey app on this Mac."
-              : "Donkey Cut can’t reach the Donkey app on this Mac."}{" "}
-            Projects stored on this Mac won’t open.
+              ? "your browser is blocking this page from reaching the Donkey app."
+              : "Donkey Cut can’t reach the Donkey app."}
           </span>
           <button
             className="shrink-0 underline underline-offset-2"
@@ -204,29 +217,31 @@ export function ConnectGate({ children }: { children: ReactNode }) {
                 ? "Connection blocked"
                 : needsAsk
                   ? "Connect to the Donkey app"
-                  : "Donkey Cut works with the Donkey Mac app"}
+                  : "This project is stored on this Mac"}
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
             {blocked ? (
               <>
-                Your browser is blocking this page from reaching the Donkey app
-                on this Mac. Open the site settings from the icon next to the
-                address bar, turn on{" "}
+                This is a local project — its video and its edits live on this
+                Mac, and your browser is blocking this page from reaching the
+                Donkey app that opens them. Open the site settings from the icon
+                next to the address bar, turn on{" "}
                 <span className="font-medium text-foreground">Apps on device</span>,
                 then try again.
               </>
             ) : needsAsk ? (
               <>
-                Donkey Cut runs locally in the Donkey app on this Mac. Your
-                browser will ask for permission to connect to apps on this
-                device — choose{" "}
+                This is a local project — it lives in the Donkey app on this
+                Mac. Your browser will ask for permission to connect to apps on
+                this device — choose{" "}
                 <span className="font-medium text-foreground">Allow</span>.
               </>
             ) : (
               <>
-                Everything runs locally on your Mac. Install Donkey, or open it
-                if it&rsquo;s already installed — this page connects
+                This is a local project: its video and its edits live on this
+                Mac, and the Donkey app is what opens them. Install Donkey, or
+                open it if it&rsquo;s already installed — this page connects
                 automatically.
               </>
             )}
@@ -240,18 +255,6 @@ export function ConnectGate({ children }: { children: ReactNode }) {
               unoptimized
               width={970}
             />
-          )}
-          {!blocked && !needsAsk && (
-            <p className="text-xs text-muted-foreground">
-              Don&rsquo;t have the Donkey app yet?{" "}
-              <a
-                className="font-medium text-foreground underline underline-offset-2"
-                href={DONKEY_DOWNLOAD_URL}
-                onClick={() => track("app_install_clicked", { source: "connect_gate_link" })}
-              >
-                Install it for Mac
-              </a>
-            </p>
           )}
           <DialogFooter className="mt-2">
             {!blocked && !needsAsk && (

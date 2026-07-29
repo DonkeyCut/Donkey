@@ -1,11 +1,14 @@
 "use client";
 
 import { apiJson, getBackend } from "./backend";
+import { readSnapshot, writeSnapshot } from "./cache";
 import { enrichAsset, presignedUpload, probeFileMeta, uploadProjectMediaTo } from "./media";
 import {
   activeResidency,
   availableResidencies,
   backendFor,
+  libraryShelfKey,
+  listedResidencies,
   type Residency,
 } from "./residency";
 import { useEditor } from "./store";
@@ -59,21 +62,43 @@ async function fetchLibraryFrom(r: Residency): Promise<LibraryData> {
   const res = await backendFor(r).fetch("/api/cut/library");
   if (!res.ok) throw new Error("Could not load the library.");
   const data = (await res.json()) as LibraryData;
-  return {
+  const shelf: LibraryData = {
     assets: (data.assets ?? []).map((a) => ({ ...a, residency: r })),
     folders: (data.folders ?? []).map((f) => ({ ...f, residency: r })),
     templates: (data.templates ?? []).map((t) => ({ ...t, residency: r })),
   };
+  // Each half is stored on its own, so one can be recalled while the other is
+  // re-read: that is what keeps the Mac's shelf listed with the app closed.
+  writeSnapshot(libraryShelfKey(r), shelf);
+  return shelf;
+}
+
+/** One shelf as this browser last saw it, for a residency it can't ask right
+ * now. Those files are still on that Mac; only the way to reach them is gone. */
+async function rememberedLibraryFrom(r: Residency): Promise<LibraryData | null> {
+  const hit = await readSnapshot<LibraryData>(libraryShelfKey(r));
+  return hit?.value ?? null;
 }
 
 /**
- * The whole shelf: every reachable residency's library in one listing, newest
- * first. A residency that fails is left out rather than failing the read — one
+ * The whole shelf: every residency's library in one listing, newest first. A
+ * residency that fails is left out rather than failing the read — one
  * unreachable half never hides the other; only both failing is an error.
+ *
+ * `remembered` widens that from what this browser can reach to what the user
+ * has: a shelf whose backend isn't answering is recalled from its last
+ * listing. The Library tab asks for it, because those items exist and the user
+ * is entitled to see them; the editor's library picker doesn't, because an
+ * item it can't copy into the project has no business in a picker.
  */
-export async function fetchLibrary(): Promise<LibraryData> {
-  const rs = availableResidencies();
-  const parts = await Promise.all(rs.map((r) => fetchLibraryFrom(r).catch(() => null)));
+export async function fetchLibrary(opts?: { remembered?: boolean }): Promise<LibraryData> {
+  const live = availableResidencies();
+  const rs = opts?.remembered ? listedResidencies() : live;
+  const parts = await Promise.all(
+    rs.map((r) =>
+      live.includes(r) ? fetchLibraryFrom(r).catch(() => null) : rememberedLibraryFrom(r)
+    )
+  );
   const got = parts.filter((p): p is LibraryData => p !== null);
   if (got.length === 0) throw new Error("Could not load the library.");
   const byNewest = <T extends { addedAt: number }>(items: T[]) =>
