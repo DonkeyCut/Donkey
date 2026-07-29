@@ -95,7 +95,9 @@ const TEXT_H = 28;
 const SUB_H = 22;
 const RULER_H = 26;
 const PAD_END = 320;
-/** Breathing room on both sides so the playhead cap is never clipped. */
+/** Breathing room on both sides so the playhead cap is never clipped. The left
+ * one doubles as the gutter — the strip that stays put while the timeline
+ * scrolls under it — so widening this widens the column controls will sit in. */
 const PAD_SIDE = 20;
 
 /** Zoom range, in timeline pixels per second of media. */
@@ -138,6 +140,42 @@ const laneRail = (top: number, key?: React.Key) => (
  * the video rows draw, repeating downward. Shared by the scroll content and
  * the overscroll underlay so both paint the identical picture. */
 const REST_RAILS = `repeating-linear-gradient(to bottom, transparent 0 ${VIDEO_H + 4}px, var(--border) ${VIDEO_H + 4}px ${VIDEO_H + 5}px, transparent ${VIDEO_H + 5}px ${VIDEO_H + 6}px)`;
+
+/** The timeline with nothing on it: the card-white ruler band over the track
+ * gray, a hairline under each occupied row, and the resting rails where a
+ * project has no rows yet.
+ *
+ * Painted twice, in the two places the tracks are not. Behind the scroller it
+ * is what a rubber-band bounce reveals; in the pinned gutter it is what the
+ * timeline scrolls under. Both draw from here so the surface cannot come apart
+ * at either edge. Fills its parent, which is what positions it. */
+function RestingSurface({
+  railYs,
+  empty,
+  timelineH,
+}: {
+  railYs: number[];
+  empty: boolean;
+  timelineH: number;
+}) {
+  return (
+    <>
+      <div
+        className="absolute inset-x-0 top-0 border-b border-border bg-card"
+        style={{ height: RULER_H }}
+      />
+      {railYs.map((y, i) => (
+        <div key={i} className="absolute inset-x-0 h-px bg-border" style={{ top: y }} />
+      ))}
+      {empty && (
+        <div
+          className="absolute inset-x-0"
+          style={{ top: RULER_H, height: timelineH, background: REST_RAILS }}
+        />
+      )}
+    </>
+  );
+}
 
 /** An asset type that lands as a video clip — footage or a still image. */
 const isClipMedia = (t: string | undefined): t is "video" | "image" =>
@@ -190,12 +228,22 @@ export function Timeline() {
   // band runs unbroken through the bounce. (Horizontal position is moot — the
   // band is uniform across the full width.)
   const rulerUnderlayRef = useRef<HTMLDivElement>(null);
+  // The left gutter paints that same surface out in front of the scroller, and
+  // is glued to the content the same way — it is held out of the horizontal
+  // scroll, not out of the vertical one.
+  const gutterRef = useRef<HTMLDivElement>(null);
+  const gutterShadowRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = scrollRef.current;
-    const band = rulerUnderlayRef.current;
-    if (!el || !band) return;
+    if (!el) return;
     const sync = () => {
-      band.style.transform = `translateY(${-el.scrollTop}px)`;
+      const y = `translateY(${-el.scrollTop}px)`;
+      if (rulerUnderlayRef.current) rulerUnderlayRef.current.style.transform = y;
+      if (gutterRef.current) gutterRef.current.style.transform = y;
+      // Once the timeline has scrolled, the gutter has something running under
+      // it — the edge shadow is what says so. At rest it sits flush, because
+      // there is nothing beneath it to cast off.
+      gutterShadowRef.current?.toggleAttribute("data-scrolled", el.scrollLeft > 0);
     };
     sync();
     el.addEventListener("scroll", sync);
@@ -930,19 +978,7 @@ export function Timeline() {
           underlay IS the timeline's surface. */}
       <div className="relative min-h-0 flex-1 bg-muted">
       <div ref={rulerUnderlayRef} className="pointer-events-none absolute inset-x-0 top-0">
-        <div
-          className="absolute inset-x-0 top-0 border-b border-border bg-card"
-          style={{ height: RULER_H }}
-        />
-        {railYs.map((y, i) => (
-          <div key={i} className="absolute inset-x-0 h-px bg-border" style={{ top: y }} />
-        ))}
-        {total <= 0 && (
-          <div
-            className="absolute inset-x-0"
-            style={{ top: RULER_H, height: timelineH, background: REST_RAILS }}
-          />
-        )}
+        <RestingSurface railYs={railYs} empty={total <= 0} timelineH={timelineH} />
       </div>
       <div
         ref={scrollRef}
@@ -1316,6 +1352,33 @@ export function Timeline() {
           </div>
         </div>
       </div>
+      {/* The gutter: the strip of surface at the left edge, held out of the
+          scroll so the timeline runs under it instead of carrying it away.
+          It is the width of the content's left pad, so at rest it sits over
+          empty surface and the timeline looks no different — but the column
+          is now a fixed place on screen, which is what per-track controls
+          need. It paints the resting surface (following vertical scroll, so
+          its ruler band and rails stay glued to the live ones) and passes
+          presses through to the scrubbing surface beneath; controls will take
+          their own pointer events when they land. */}
+      <div
+        className="pointer-events-none absolute inset-y-0 left-0 z-40 overflow-hidden bg-muted"
+        style={{ width: PAD_SIDE }}
+      >
+        <div ref={gutterRef} className="absolute inset-0">
+          <RestingSurface railYs={railYs} empty={total <= 0} timelineH={timelineH} />
+        </div>
+      </div>
+      {/* Cast off the gutter's right edge alone, once the timeline has scrolled
+          — that shadow is the whole tell that clips are running underneath
+          rather than stopping there. A blurred box-shadow on the gutter would
+          spill over its top and bottom too, so the edge draws its own strip:
+          the same height as the gutter, starting where it ends. */}
+      <div
+        ref={gutterShadowRef}
+        className="pointer-events-none absolute inset-y-0 z-40 w-2 bg-gradient-to-r from-black/20 to-transparent opacity-0 transition-opacity duration-150 data-scrolled:opacity-100"
+        style={{ left: PAD_SIDE }}
+      />
       </div>
       {/* Subtle valid-target hint while an OS media drag is over the window:
           a tint and inset ring over the track area, under the toolbar. */}
@@ -1556,7 +1619,11 @@ function Playhead({
 
   return (
     <div
-      className="pointer-events-none absolute top-0 bottom-2 left-0 z-30 w-[1.5px] bg-[#0a84ff] shadow-[0_0_8px_rgba(10,132,255,0.6)]"
+      // Over the gutter as well as the clips: at 0 the playhead stands on the
+      // gutter's own edge, and the side padding is there so its cap is never
+      // clipped. The clips pass under the gutter; the time it is showing does
+      // not.
+      className="pointer-events-none absolute top-0 bottom-2 left-0 z-50 w-[1.5px] bg-[#0a84ff] shadow-[0_0_8px_rgba(10,132,255,0.6)]"
       style={{ transform: `translateX(${x}px)` }}
     >
       <div
