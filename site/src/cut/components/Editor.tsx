@@ -662,7 +662,15 @@ export function Editor({
     : true;
 
   return (
-    <div className="flex h-full min-w-[900px] overflow-hidden">
+    // The shell tracks the window rather than flooring at a width the window
+    // has to scroll to reach. A floor moved the problem instead of solving it:
+    // the editor kept its full size and the page scrolled sideways, so the
+    // preview ran off the edge, the top bar measured a header wider than the
+    // screen and never folded its buttons away, and the chat panel opened into
+    // space that was not there. Shrinking, each of those resolves on its own —
+    // the panels give up width, the top bar collapses to a menu, and the
+    // timeline scrolls inside itself as it always has.
+    <div className="flex h-full min-w-0 overflow-hidden">
       <div className="grid min-w-0 flex-1 grid-rows-[46px_minmax(0,1fr)_auto]">
         {viewer ? (
           <ViewerTopBar />

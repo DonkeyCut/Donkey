@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 
-/** Below this the editor cannot lay out: its shell alone floors at 900px of
- * fixed chrome before the preview canvas gets a pixel. */
+/** The width below which the editor stops being worth opening. It still lays
+ * out down here — the panels give up width, the top bar folds its buttons into
+ * a menu, the chat panel overlays rather than docking — but its fixed chrome
+ * leaves the preview so little room that there is nothing left to edit with. */
 export const NARROW_MAX_WIDTH = 900;
 
 /**
