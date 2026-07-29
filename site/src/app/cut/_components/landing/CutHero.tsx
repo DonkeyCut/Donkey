@@ -2,7 +2,7 @@
 
 import { PillButton } from "@/app/_components/landing/LandingPrimitives";
 import { useAppEntryHref } from "@/app/_components/landing/useAppEntryHref";
-import { EditorMock } from "@/app/cut/_components/landing/editor-mock/EditorMock";
+import { EditorMock } from "@/cut/components/editor-mock/EditorMock";
 
 export function CutHero({ root }: { root: string }) {
   const appHref = useAppEntryHref();

@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 import type {
   MockPanelTab,
   MockProject,
-} from "@/app/cut/_components/landing/editor-mock/mockData";
+} from "@/cut/components/editor-mock/mockData";
 
 // Static replica of the editor's left side panel for the landing mock: the
 // icon rail plus the open generation panel, populated from hardcoded slide

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 
-import type { MockProject } from "@/app/cut/_components/landing/editor-mock/mockData";
+import type { MockProject } from "@/cut/components/editor-mock/mockData";
 
 // Static replica of the editor's preview stage (src/cut/components/Preview.tsx):
 // the black rounded canvas on the muted backdrop, here playing a looping muted

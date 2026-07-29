@@ -10,7 +10,7 @@ import {
   Upload,
 } from "lucide-react";
 
-import type { MockProject } from "@/app/cut/_components/landing/editor-mock/mockData";
+import type { MockProject } from "@/cut/components/editor-mock/mockData";
 
 // Static replica of src/cut/components/TopBar.tsx — same chrome, no store.
 export function MockTopBar({ project }: { project: MockProject }) {

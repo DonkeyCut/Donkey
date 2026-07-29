@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 import type {
   MockChatMessage,
   MockProject,
-} from "@/app/cut/_components/landing/editor-mock/mockData";
+} from "@/cut/components/editor-mock/mockData";
 
 /** Static replica of the Cut editor's AI chat panel for the landing mock.
  * Mirrors AiPanel's structure and Tailwind styling with hardcoded content. */
