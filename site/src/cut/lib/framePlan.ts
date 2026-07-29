@@ -227,6 +227,21 @@ export interface TrackZeroPlan {
 export const PREROLL_LEAD_S = 0.5;
 
 /**
+ * How long the pre-roll for this clip can actually run, in timeline seconds.
+ *
+ * The roll plays the element forward so it arrives at the in-point exactly as
+ * the cut lands, which it can only do where there is source ahead of that point
+ * to play through: a trimmed clip gets the full lead, one that starts at 0 gets
+ * none. Rolling for longer than the source allows leaves the element that far
+ * past its in-point when the cut lands, and the handoff seeks back to reach it —
+ * restarting the decoder at the join, which is the hitch the pre-roll exists to
+ * remove.
+ */
+export function prerollLead(inPoint: number, speed: number): number {
+  return Math.max(0, Math.min(PREROLL_LEAD_S, inPoint / speed));
+}
+
+/**
  * Work out track 0's state at time `t`: the transition live across the join,
  * the master clip's own entrance/exit ramps, and the neighbour frame that
  * belongs behind an animation at an abutting cut.

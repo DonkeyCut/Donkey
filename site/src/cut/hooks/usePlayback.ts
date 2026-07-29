@@ -5,7 +5,7 @@ import { clipSpeed, getClipSpans, overlayLayers, projectDuration, useEditor } fr
 import { isFullRect, projectFadeSeconds, rectOf } from "@/cut/lib/types";
 import type { ClipSpan, MediaAsset, VideoClip } from "@/cut/lib/types";
 import { FrameCompositor, MISSING_FRAME, PENDING_FRAME, type Frame } from "@/cut/lib/composite";
-import { duckGainAt, overlayPlan, PREROLL_LEAD_S, trackZeroPlan } from "@/cut/lib/framePlan";
+import { duckGainAt, overlayPlan, prerollLead, trackZeroPlan } from "@/cut/lib/framePlan";
 import { reportMediaElementError } from "@/cut/lib/mediaLinks";
 import { registerSourceSampler } from "@/cut/lib/previewCanvas";
 
@@ -54,11 +54,12 @@ const DECODER_STALL_MS = 10_000;
 const DECODER_RETRY_MS = 1_000;
 const DECODER_REBUILDS = 3;
 
-// Inside PREROLL_LEAD_S of a clip's entrance its element is played muted and
-// undrawn, so the decoder is already running across the in-point when the cut
-// lands and the handoff play() resumes hot instead of spinning a cold decoder
-// up. The lead itself is part of the frame plan, which is what decides when a
-// clip is about to be needed.
+// Ahead of a clip's entrance its element is played muted and undrawn, so the
+// decoder is already running across the in-point when the cut lands and the
+// handoff play() resumes hot instead of spinning a cold decoder up. How long
+// that roll gets is `prerollLead`, and when a clip is close enough to be worth
+// keeping alive is the frame plan's `upcoming` — both live there, so the
+// picture and the decoders agree on when a clip is about to be needed.
 
 const pauseEl = (el: MediaEl) => {
   if (!isImageEl(el) && !el.paused) el.pause();
@@ -221,18 +222,22 @@ class Engine {
     for (const span of spans) {
       if (span.start <= t) continue; // current or past — not ours to warm
       if (span.start > t + WARM_HORIZON_S) break;
-      // The imminent clip inside the pre-roll window is `warmNext`'s to play
-      // hot; a parking seek here would fight it, so leave it alone.
-      if (span.start - t <= PREROLL_LEAD_S) continue;
+      const speed = clipSpeed(span.clip);
+      const lead = prerollLead(span.clip.in, speed);
+      // The imminent clip inside its own pre-roll window is `warmNext`'s to
+      // play hot; a parking seek here would fight it, so leave it alone. A clip
+      // with no roll to give (an untrimmed one) has no such window, and stays
+      // parked here right up to the cut.
+      if (lead > 0 && span.start - t <= lead) continue;
       const el = this.videoFor(span.clip, span.asset); // creating it starts the fetch
       // Park a not-yet-imminent clip exactly where the pre-roll will play from
       // (`warmNext`'s `from`), not on its entrance frame: parking at `in` and
-      // then seeking back `PREROLL_LEAD_S` for the roll-in discards the warmed
-      // buffer, and over the network (cloud media) that late re-seek is what
-      // used to stall the handoff. Parked here, the pre-roll's seek is a no-op
-      // on already-buffered bytes and the cut lands hot.
+      // then seeking back for the roll-in discards the warmed buffer, and over
+      // the network (cloud media) that late re-seek is what used to stall the
+      // handoff. Parked here, the pre-roll's seek is a no-op on already-buffered
+      // bytes and the cut lands hot.
       if (!isImageEl(el) && !el.seeking && el.paused) {
-        const target = Math.max(0, span.clip.in - PREROLL_LEAD_S * clipSpeed(span.clip));
+        const target = span.clip.in - lead * speed;
         if (Math.abs(el.currentTime - target) > 0.1) el.currentTime = target;
       }
       if (++warmed >= WARM_MAX) break;
@@ -271,18 +276,21 @@ class Engine {
   private warmNext(span: ClipSpan, t: number) {
     const el = this.videoFor(span.clip, span.asset);
     if (isImageEl(el)) return; // a still needs no pipeline
-    // Farther out than the lead: leave it parked and buffering (warmAhead's job).
-    if (t < span.start - PREROLL_LEAD_S) return;
     const speed = clipSpeed(span.clip);
+    // Only as long a roll as there is source ahead of the in-point to cover it
+    // — nothing at all for an untrimmed clip, which stays parked on its already
+    // hot keyframe 0 instead. Farther out than that, it is warmAhead's to park
+    // and buffer.
+    const lead = prerollLead(span.clip.in, speed);
+    if (t < span.start - lead) return;
     const rate = safeRate(speed);
     if (el.playbackRate !== rate) el.playbackRate = rate;
     el.muted = true; // silent until it becomes master and unmutes
     // Already rolling: let it run — it crosses `in` on its own as the cut lands.
     if (!el.paused) return;
     // Seat it `lead` of source before the entrance, then play forward so it
-    // reaches `in` right as the playhead reaches the cut. Bounded at 0 for an
-    // untrimmed clip, whose keyframe-0 start is already hot.
-    const from = Math.max(0, span.clip.in - PREROLL_LEAD_S * speed);
+    // reaches `in` right as the playhead reaches the cut.
+    const from = span.clip.in - lead * speed;
     if (!el.seeking && Math.abs(el.currentTime - from) > 0.1) el.currentTime = from;
     if (el.readyState >= 2 && !el.seeking) void el.play().catch(() => {});
   }

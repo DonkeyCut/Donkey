@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { clipAnimFx, duckGainAt, trackZeroPlan } from "./framePlan";
+import { clipAnimFx, duckGainAt, prerollLead, PREROLL_LEAD_S, trackZeroPlan } from "./framePlan";
 import { TRANSITION_ZOOM } from "./types";
 import type { AudioClip, ClipSpan, MediaAsset, VideoClip } from "./types";
 
@@ -181,5 +181,48 @@ describe("duckGainAt", () => {
 
   test("ignores a hidden clip", () => {
     expect(duckGainAt([voice({ hidden: true })], 2)).toBe(1);
+  });
+});
+
+describe("prerollLead", () => {
+  // The roll seats the element `lead × speed` of source before the in-point and
+  // plays forward for `lead` of timeline, so it arrives exactly at `in` as the
+  // cut lands. Both halves come from this one number: hold the roll at a fixed
+  // length and the seat has to clamp at 0, which lands the element past `in` and
+  // makes the handoff seek backwards — a decoder restart at every join.
+  const cases: [number, number][] = [
+    [0, 1],
+    [0.2, 1],
+    [3, 1],
+    [0.6, 2],
+    [4, 0.5],
+  ];
+
+  test("gives a trimmed clip the full lead", () => {
+    expect(prerollLead(3, 1)).toBeCloseTo(PREROLL_LEAD_S, 5);
+  });
+
+  test("gives an untrimmed clip none — there is no source to roll through", () => {
+    expect(prerollLead(0, 1)).toBe(0);
+  });
+
+  test("shortens the roll to the source a barely-trimmed clip has", () => {
+    expect(prerollLead(0.2, 1)).toBeCloseTo(0.2, 5);
+  });
+
+  test("scales with the clip's speed", () => {
+    // At 2×, half a second of timeline eats a second of source, so a clip with
+    // 0.6s ahead of its in-point can only roll for 0.3s.
+    expect(prerollLead(0.6, 2)).toBeCloseTo(0.3, 5);
+    expect(prerollLead(4, 2)).toBeCloseTo(PREROLL_LEAD_S, 5);
+  });
+
+  test("seats the roll inside the source and lands it on the in-point", () => {
+    for (const [inPoint, speed] of cases) {
+      const lead = prerollLead(inPoint, speed);
+      const seat = inPoint - lead * speed;
+      expect(seat).toBeGreaterThanOrEqual(0);
+      expect(seat + lead * speed).toBeCloseTo(inPoint, 5);
+    }
   });
 });
