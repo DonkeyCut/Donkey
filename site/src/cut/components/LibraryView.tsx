@@ -52,12 +52,8 @@ import {
   type LibraryAsset,
   type LibraryData,
 } from "@/cut/lib/library";
-import {
-  activeResidency,
-  availableResidencies,
-  RESIDENCY_LABEL,
-  type Residency,
-} from "@/cut/lib/residency";
+import { useNewProjectTarget } from "@/cut/lib/newProject";
+import { availableResidencies, RESIDENCY_LABEL, type Residency } from "@/cut/lib/residency";
 import { TemplateCard } from "./TemplateCard";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
 import { useRevealFlash } from "@/cut/lib/refReveal";
@@ -95,6 +91,10 @@ export function LibraryView() {
   // The listing is cached (lib/queries.ts): coming back to the library paints
   // the shelf it painted last time and revalidates behind it.
   const library = useLibrary();
+  // New projects and new library items answer the same question — which shelf
+  // is this browser putting things on — so they read the one choice the user
+  // already made, rather than the backend the app happens to be bound to.
+  const { target } = useNewProjectTarget();
   const all = library.data?.assets ?? [];
   const folders = library.data?.folders ?? [];
   const templates = library.data?.templates ?? [];
@@ -127,7 +127,7 @@ export function LibraryView() {
     templates.find((t) => t.id === id)?.residency ??
     null;
   const shelfForNew = (folderId: string | null) =>
-    (folderId ? folders.find((f) => f.id === folderId)?.residency : null) ?? activeResidency();
+    (folderId ? folders.find((f) => f.id === folderId)?.residency : null) ?? target;
 
   const renameTpl = async (r: Residency, id: string, name: string) => {
     patch((d) => ({ ...d, templates: d.templates.map((t) => (t.id === id ? { ...t, name } : t)) }));
@@ -344,7 +344,7 @@ export function LibraryView() {
           }}
           onOpen={gotoFolder}
           onCreate={async (name) => {
-            const f = await createLibraryFolder(name, activeResidency());
+            const f = await createLibraryFolder(name, target);
             patch((d) => ({ ...d, folders: [...d.folders, f] }));
           }}
           onRename={async (id, name) => {

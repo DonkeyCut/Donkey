@@ -9,26 +9,47 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useNewProjectTarget } from "@/cut/lib/newProject";
 import { RESIDENCY_LABEL, type Residency } from "@/cut/lib/residency";
 import { cn } from "@/lib/utils";
 
 const RESIDENCY_ICON: Record<Residency, typeof Cloud> = { local: Laptop, cloud: Cloud };
 
+// The picker is one switch for the whole app, and its tooltip is where that
+// scope is stated: everything that lands on the shelf, then the shelf itself in
+// bold. The break is written into the copy rather than left to a width, so the
+// sentence reads the same in both shelves. The menu needs no more than the two
+// names.
+const RESIDENCY_LEAD = "All projects and media will";
+const RESIDENCY_SCOPE: Record<Residency, { tail: string; place: string }> = {
+  local: { tail: "be stored on", place: "this Mac" },
+  cloud: { tail: "be stored on the", place: "Cloud" },
+};
+
 /**
- * Make a project, and say where it will land.
+ * Make a project, and — where the app keeps the switch — say where things land.
  *
- * The chevron is the residency choice, and it appears only when there is one
+ * The chevron is that switch, and it appears once, in the sidebar: it sets the
+ * shelf for everything this browser creates, so every other New project button
+ * follows it rather than asking again. It appears only when there is a choice
  * to make. Without the Donkey app running this Mac has no shelf, so every
- * project is a cloud project and this is a plain button. A folder pins its own
- * residency, since a project files only into a folder beside it.
+ * project is a cloud project. A folder pins its own residency, since a project
+ * files only into a folder beside it.
  */
 export function NewProjectButton({
   pinned = null,
+  picker = false,
   onCreate,
   className,
 }: {
   pinned?: Residency | null;
+  picker?: boolean;
   onCreate: (r: Residency) => void;
   className?: string;
 }) {
@@ -36,7 +57,7 @@ export function NewProjectButton({
   const r = pinned ?? target;
   const Icon = RESIDENCY_ICON[r];
 
-  if (pinned || choices.length < 2) {
+  if (!picker || pinned || choices.length < 2) {
     return (
       <Button className={className} onClick={() => onCreate(r)}>
         <Plus data-icon="inline-start" /> New project
@@ -45,28 +66,40 @@ export function NewProjectButton({
   }
 
   return (
-    <div className={cn("flex", className)}>
-      {/* The two halves read as one control: no seam between them. The base
-          button's transparent border sits over the page with bg-clip-padding,
-          so the facing borders have to go or they show as a line. */}
-      <Button
-        className="min-w-0 flex-1 rounded-r-none border-r-0"
-        onClick={() => onCreate(r)}
-      >
+    <div className={cn("flex items-center gap-1.5", className)}>
+      {/* Two controls, not two halves of one: making a project and choosing the
+          shelf are separate acts, so they stand apart rather than sharing an
+          edge. */}
+      <Button className="min-w-0 flex-1" onClick={() => onCreate(r)}>
         <Plus data-icon="inline-start" /> New project
       </Button>
       <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button
-              aria-label={`New projects go to ${RESIDENCY_LABEL[r]}`}
-              className="gap-1 rounded-l-none border-l-0 pr-2 pl-1.5"
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      aria-label={`Where new projects and media are saved: ${RESIDENCY_LABEL[r]}`}
+                      className="shrink-0 gap-1 px-2"
+                    />
+                  }
+                >
+                  <Icon className="size-3.5" />
+                  <ChevronDown className="size-3" />
+                </DropdownMenuTrigger>
+              }
             />
-          }
-        >
-          <Icon className="size-3.5" />
-          <ChevronDown className="size-3" />
-        </DropdownMenuTrigger>
+            <TooltipContent className="flex-col items-start gap-0 py-2 text-left">
+              <span>{RESIDENCY_LEAD}</span>
+              <span>
+                {RESIDENCY_SCOPE[r].tail}{" "}
+                <span className="font-semibold">{RESIDENCY_SCOPE[r].place}</span>
+              </span>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
         <DropdownMenuContent align="end">
           <DropdownMenuRadioGroup value={r} onValueChange={(v) => pick(v as Residency)}>
             {choices.map((c) => {

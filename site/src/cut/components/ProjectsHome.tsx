@@ -87,7 +87,6 @@ type View = "gallery" | "list";
 // directly — the global mode is only bound when a project opens into the
 // editor. Each section's listing is cached (lib/queries.ts), so returning here
 // paints the shelf immediately and revalidates behind it.
-const RESIDENCY_LABEL: Record<Residency, string> = { local: "On this Mac", cloud: "Cloud" };
 
 type SectionData = {
   projects: ProjectSummary[] | null;
@@ -538,7 +537,7 @@ export function ProjectsHome() {
       folders={mergedFolders}
       mime={PROJECT_MIME}
       creating={folderCreating !== null}
-      onCreatingChange={(c) => setFolderCreating(c ? (folderCreating ?? homeMode) : null)}
+      onCreatingChange={(c) => setFolderCreating(c ? (folderCreating ?? target) : null)}
       statOf={(id) => {
         const items = (data[residencyOfFolder(id)].projects ?? []).filter(
           (p) => (p.folderId ?? null) === id
@@ -546,7 +545,7 @@ export function ProjectsHome() {
         return { count: items.length, size: items.reduce((n, p) => n + (p.sizeBytes ?? 0), 0) };
       }}
       onOpen={gotoFolder}
-      onCreate={(n) => void createFolder(folderCreating ?? homeMode, n)}
+      onCreate={(n) => void createFolder(folderCreating ?? target, n)}
       onRename={(id, n) => void renameFolder(residencyOfFolder(id), id, n)}
       onDelete={(id) => void deleteFolder(residencyOfFolder(id), id)}
       onDropIds={(ids, fid) => void moveProjects(residencyOfFolder(fid), ids, fid)}
@@ -773,26 +772,13 @@ export function ProjectsHome() {
             />
           )}
           <div className="flex items-center gap-2">
-            {openFolder === null &&
-              (dual ? (
-                <DropdownMenu>
-                  <DropdownMenuTrigger render={<Button variant="outline" />}>
-                    <FolderPlus data-icon="inline-start" /> New folder
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => setFolderCreating("local")}>
-                      <Laptop /> {RESIDENCY_LABEL.local}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setFolderCreating("cloud")}>
-                      <Cloud /> {RESIDENCY_LABEL.cloud}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ) : (
-                <Button variant="outline" onClick={() => setFolderCreating(r0)}>
-                  <FolderPlus data-icon="inline-start" /> New folder
-                </Button>
-              ))}
+            {/* A folder lands where a project would: New project owns that
+                choice for the whole page, so this asks nothing of its own. */}
+            {openFolder === null && (
+              <Button variant="outline" onClick={() => setFolderCreating(target)}>
+                <FolderPlus data-icon="inline-start" /> New folder
+              </Button>
+            )}
             <NewProjectButton
               pinned={folderOwner}
               onCreate={(r) => void newProjectHere(r)}

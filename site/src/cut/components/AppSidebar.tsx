@@ -82,7 +82,9 @@ export function AppSidebar() {
         <span className="text-[17px] font-semibold tracking-tight">Donkey Cut</span>
       </div>
 
+      {/* The one place the shelf is chosen: everything else follows it. */}
       <NewProjectButton
+        picker
         className="mb-5 w-full"
         onCreate={(r) => {
           setName("");
