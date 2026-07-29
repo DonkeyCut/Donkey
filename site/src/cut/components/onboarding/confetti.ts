@@ -23,7 +23,7 @@ type Piece = {
  * the caller's cleanup; a burst also stops on its own once every piece has
  * fallen past the bottom. No-op under prefers-reduced-motion, where a screenful
  * of moving paper is the last thing anyone wants. */
-export function burstConfetti(canvas: HTMLCanvasElement, count = 130): () => void {
+export function burstConfetti(canvas: HTMLCanvasElement): () => void {
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
     return () => {};
   }
@@ -36,18 +36,24 @@ export function burstConfetti(canvas: HTMLCanvasElement, count = 130): () => voi
   canvas.height = Math.round(height * ratio);
   context.scale(ratio, ratio);
 
+  // Enough pieces to fill the window it's actually covering: a fixed count
+  // reads as a shower on a laptop and as a drizzle on a large display.
+  const count = Math.round(Math.min(260, Math.max(120, width / 7)));
+  // Launch speed scales with the window too, so the burst reaches the edges of
+  // a large display instead of hanging around the middle.
+  const reach = Math.min(2.4, Math.max(1, width / 900));
   const originX = width / 2;
   const originY = height * 0.38;
   const pieces: Piece[] = Array.from({ length: count }, (_, i) => {
     // Spread the launch angles evenly and jitter each one, so the burst reads
     // as a ring rather than a stripe.
     const angle = (i / count) * Math.PI * 2 + Math.random() * 0.4;
-    const speed = 3 + Math.random() * 5;
+    const speed = (3 + Math.random() * 5) * reach;
     return {
       x: originX,
       y: originY,
       vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed - 3,
+      vy: Math.sin(angle) * speed - 3 * reach,
       w: 5 + Math.random() * 5,
       h: 8 + Math.random() * 6,
       rotation: Math.random() * Math.PI,

@@ -2,42 +2,42 @@
 
 import { Cloud, Laptop } from "lucide-react";
 
+import { TapedCard } from "@/app/_components/landing/LandingPrimitives";
+import { CheckBullet } from "@/cut/components/onboarding/CheckBullet";
+
 export function ModesSlide() {
   return (
-    <div className="mx-auto w-full max-w-[880px]">
-      <h2 className="text-center text-[clamp(26px,3.4vw,36px)] leading-[1.1] font-semibold tracking-[-0.02em]">
-        Two places to work
+    <div className="mx-auto w-full max-w-[760px]">
+      <h2 className="text-center text-[clamp(24px,3vw,32px)] leading-[1.1] font-semibold tracking-[-0.02em]">
+        Works in the cloud or on your Mac
       </h2>
-      <p className="mx-auto mt-3 max-w-[560px] text-center text-[16px] leading-[1.5] text-[#454545]">
-        Donkey Cut edits in the cloud or on your own machine, and the editor is
-        the same either way.
+      <p className="mx-auto mt-3 max-w-[560px] text-center text-[16px] leading-[1.5] text-[#454545] italic">
+        Same editor. Choose what works for you.
       </p>
 
-      <div className="mt-9 grid gap-4 md:grid-cols-2">
+      {/* The landing's taped cards, so the two places to work are framed the
+          same way the site frames everything else. */}
+      <div className="mt-10 grid gap-5 md:grid-cols-2">
         <Mode
           icon={<Cloud className="size-5" />}
           title="In the cloud"
-          points={[
-            "Any browser, any OS, nothing to install",
-            "Projects and media stored for you",
-            "Exports rendered by our workers",
-          ]}
+          tape="coral"
+          points={["No install", "Works in any browser", "We handle rendering"]}
         />
         <Mode
           icon={<Laptop className="size-5" />}
           title="On your Mac"
+          tape="yellow"
           points={[
-            "The Donkey app, macOS only",
-            "Footage stays in your own file system",
-            "Free on-device speech-to-text, and exports on your hardware",
+            "Your files stay local",
+            "Uses your Mac's hardware",
+            "Faster exports & AI features",
           ]}
         />
       </div>
 
-      <p className="mx-auto mt-7 max-w-[560px] text-center text-[15px] leading-[1.5] text-[#454545]">
-        Nothing to choose now. Donkey Cut works locally whenever the Mac app is
-        running and in the cloud when it isn&apos;t — each project remembers
-        where it lives, and you can move between them any time.
+      <p className="mt-9 text-center text-[15px] leading-[1.5] text-[#454545]">
+        Automatically switches between cloud and local when available.
       </p>
     </div>
   );
@@ -45,32 +45,38 @@ export function ModesSlide() {
 
 function Mode({
   icon,
-  title,
   points,
+  tape,
+  title,
 }: {
   icon: React.ReactNode;
-  title: string;
   points: string[];
+  tape: "coral" | "yellow";
+  title: string;
 }) {
   return (
-    <div className="rounded-2xl border border-ink/10 bg-white p-6">
-      <div className="flex items-center gap-2.5">
-        <span className="grid size-9 place-items-center rounded-lg bg-ink/5">
-          {icon}
-        </span>
-        <h3 className="text-[17px] font-semibold">{title}</h3>
+    <TapedCard color="cream" fill tapeColor={tape} tapePosition="left">
+      {/* Deep top and bottom padding on a narrower card, so the pair reads as
+          squares rather than banners. */}
+      <div className="px-7 py-14">
+        <div className="flex items-center gap-2.5">
+          <span className="grid size-9 place-items-center rounded-lg border-2 border-ink bg-white">
+            {icon}
+          </span>
+          <h3 className="text-[18px] font-semibold">{title}</h3>
+        </div>
+        <ul className="mt-5 flex flex-col gap-2.5">
+          {points.map((point) => (
+            <li
+              key={point}
+              className="flex items-center gap-2.5 text-[14px] font-semibold"
+            >
+              <CheckBullet />
+              {point}
+            </li>
+          ))}
+        </ul>
       </div>
-      <ul className="mt-4 flex flex-col gap-2.5">
-        {points.map((point) => (
-          <li
-            key={point}
-            className="flex gap-2.5 text-[14.5px] leading-[1.45] text-[#454545]"
-          >
-            <span className="mt-[7px] size-1.5 shrink-0 rounded-full bg-coral" />
-            {point}
-          </li>
-        ))}
-      </ul>
-    </div>
+    </TapedCard>
   );
 }

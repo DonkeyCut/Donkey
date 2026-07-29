@@ -3,51 +3,50 @@
 import { useEffect, useRef } from "react";
 
 import { burstConfetti } from "@/cut/components/onboarding/confetti";
-import { formatUsd } from "@/lib/credits/format-usd";
-import { signupAppCredits, type OnboardingRun } from "@/lib/onboarding/sequence";
-import { useCreditBalance } from "@/queries/credits";
+import { signupAppCredits } from "@/lib/onboarding/sequence";
 
 // The signup grant already landed when the account was created, so this slide
-// never grants anything — it shows what is there. A first run celebrates it; a
-// replay is a balance check, without the confetti or the news framing.
-export function CreditsSlide({ run }: { run: OnboardingRun }) {
+// never grants anything — it says what's there. That's as true on a replay as
+// on a first run, so the words don't change between them; the burst fires every
+// time the slide is reached.
+export function CreditsSlide() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { data: balance } = useCreditBalance();
-  const firstRun = run === "first_run";
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !firstRun) return;
+    if (!canvas) return;
     return burstConfetti(canvas);
-  }, [firstRun]);
+  }, []);
 
   return (
     <div className="relative flex flex-col items-center text-center">
       {/* Fixed to the window: the burst covers the whole overlay and, being out
-          of flow, can't stretch the slide's scroll area. */}
-      {firstRun && (
-        <canvas ref={canvasRef} aria-hidden className="pointer-events-none fixed inset-0" />
-      )}
-      <div className="relative max-w-[560px]">
-        <div className="text-[clamp(56px,9vw,96px)] leading-none font-semibold tracking-[-0.03em] text-coral tabular-nums">
-          {formatUsd(signupAppCredits)}
-        </div>
-        <h2 className="mt-5 text-[clamp(24px,3.2vw,34px)] leading-[1.1] font-semibold tracking-[-0.02em]">
-          {firstRun ? "In AI credits, on the house" : "Your AI credits"}
+          of flow, can't stretch the slide's scroll area. The explicit size is
+          load-bearing — a canvas left to `auto` takes its 300×150 intrinsic
+          size rather than the inset box. */}
+      <canvas
+        ref={canvasRef}
+        aria-hidden
+        className="pointer-events-none fixed inset-0 h-full w-full"
+      />
+      <div className="relative max-w-[900px]">
+        {/* One line, two sizes: the amount at display size in coral, the words
+            a couple of steps down and thin beside it. Cents belong on a
+            balance, not on the offer. */}
+        <h2 className="flex flex-wrap items-baseline justify-center gap-x-4 leading-[1.02] tracking-[-0.03em]">
+          <span className="text-[clamp(40px,7.4vw,84px)] font-semibold text-coral tabular-nums">
+            ${signupAppCredits}
+          </span>
+          <span className="text-[clamp(26px,4.4vw,52px)] font-light">
+            in AI credits is on us
+          </span>
         </h2>
-        <p className="mt-4 text-[16px] leading-[1.55] text-[#454545]">
-          {firstRun
-            ? "Already in your account — nothing to claim. Spend it on generated images, video, voiceover, and music, right inside the timeline."
-            : "Credits pay for generated images, video, voiceover, and music. Top up any time from Settings → Billing."}
+        {/* Ragged right on a narrow measure: the line breaks stay put instead
+            of the last line floating in the middle of the slide. */}
+        <p className="mx-auto mt-4 max-w-[460px] text-left text-[16px] leading-[1.55] text-[#454545]">
+          Already in your account — nothing to claim. Spend it on generated
+          video, audio and images.
         </p>
-        {balance?.balance && (
-          <p className="mt-6 text-[14px] text-[#454545]">
-            Balance today:{" "}
-            <span className="font-medium text-ink tabular-nums">
-              {formatUsd(balance.balance)}
-            </span>
-          </p>
-        )}
       </div>
     </div>
   );
