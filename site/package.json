@@ -50,6 +50,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "defuddle": "^0.18.1",
+    "hls.js": "^1.6.16",
     "linkedom": "^0.18.12",
     "lucide-react": "^1.23.0",
     "next": "16.2.6",

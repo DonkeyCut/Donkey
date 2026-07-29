@@ -6,6 +6,8 @@ import { Clapperboard, Loader2 } from "lucide-react";
 import { authHrefFor } from "@/app/_components/landing/useAppEntryHref";
 import { Button } from "@/components/ui/button";
 import { Editor } from "@/cut/components/Editor";
+import { MobileShare } from "@/cut/components/share/MobileShare";
+import { useIsNarrow } from "@/cut/hooks/useIsNarrow";
 import { bindCutMode } from "@/cut/lib/backend";
 import { bindSharedBackend } from "@/cut/lib/backend/shared";
 import { holdThreadsInMemory } from "@/cut/lib/chatThreads";
@@ -22,7 +24,7 @@ import { authClient } from "@/lib/auth-client";
 
 type Gate =
   | { state: "loading" }
-  | { state: "ready"; projectId: string }
+  | { state: "ready"; projectId: string; name: string; features: ShareFeatures }
   | { state: "signin" }
   | { state: "denied" }
   | { state: "missing" };
@@ -31,6 +33,7 @@ export function SharedProject() {
   const { token } = useParams<{ token: string }>();
   const [gate, setGate] = useState<Gate>({ state: "loading" });
   const { data: session } = authClient.useSession();
+  const narrow = useIsNarrow();
 
   useEffect(() => {
     let alive = true;
@@ -40,12 +43,21 @@ export function SharedProject() {
         if (res.status === 401) return setGate({ state: "signin" });
         if (res.status === 403) return setGate({ state: "denied" });
         if (!res.ok) return setGate({ state: "missing" });
-        const meta = (await res.json()) as { projectId: string; features: ShareFeatures };
+        const meta = (await res.json()) as {
+          projectId: string;
+          name?: string;
+          features: ShareFeatures;
+        };
         bindSharedBackend(token);
         bindCutMode("shared");
         holdThreadsInMemory();
         useEditor.getState().setSharedView(meta.features);
-        setGate({ state: "ready", projectId: meta.projectId });
+        setGate({
+          state: "ready",
+          projectId: meta.projectId,
+          name: meta.name ?? "Untitled",
+          features: meta.features,
+        });
       })
       .catch(() => alive && setGate({ state: "missing" }));
     return () => {
@@ -53,11 +65,26 @@ export function SharedProject() {
     };
   }, [token]);
 
-  if (gate.state === "ready") return <Editor projectId={gate.projectId} viewer />;
+  // A phone gets the player, not the editor. The choice is made here rather
+  // than in CSS because the editor starts a decoder per clip the moment it
+  // mounts, which is the cost a narrow screen cannot pay — so the render waits
+  // for `narrow` to be known rather than guessing and correcting.
+  if (gate.state === "ready" && narrow !== null) {
+    return narrow ? (
+      <MobileShare
+        token={token}
+        projectId={gate.projectId}
+        name={gate.name}
+        features={gate.features}
+      />
+    ) : (
+      <Editor projectId={gate.projectId} viewer />
+    );
+  }
 
-  if (gate.state === "loading") {
+  if (gate.state === "loading" || gate.state === "ready") {
     return (
-      <div className="grid h-screen place-items-center text-muted-foreground">
+      <div className="grid h-[100dvh] place-items-center text-muted-foreground">
         <Loader2 className="size-5 animate-spin" />
       </div>
     );
@@ -69,7 +96,7 @@ export function SharedProject() {
   };
 
   return (
-    <div className="grid h-screen place-items-center">
+    <div className="grid h-[100dvh] place-items-center">
       <div className="flex max-w-sm flex-col items-center gap-3 text-center">
         <Clapperboard className="size-7 text-muted-foreground" />
         {gate.state === "signin" ? (
@@ -97,8 +124,11 @@ export function SharedProject() {
 }
 
 export function SharedProjectView() {
+  // Dynamic viewport units, not h-screen: on a phone the browser's own chrome
+  // slides in and out, and 100vh measures the tallest state — so the bottom of
+  // a fixed-height page sits under the toolbar for most of a visit.
   return (
-    <div className="h-screen bg-white font-system text-foreground antialiased">
+    <div className="h-[100dvh] bg-white font-system text-foreground antialiased">
       <Suspense>
         <SharedProject />
       </Suspense>
