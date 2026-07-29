@@ -1,8 +1,22 @@
 "use client";
 
+import { scanSilence, type PcmChunk } from "./audioScan";
 import { apiFetch, apiJson, getBackend, type CutBackend } from "./backend";
 import { quotaErrorMessage } from "./backend/cloud";
 import { encodeWav } from "./cloudTranscribe";
+import {
+  audioChunks,
+  audioPeaks,
+  audioTrackOf,
+  decodeAudioSpan,
+  frameAt,
+  framesAt,
+  frameSink,
+  openMedia,
+  probeMediaFile,
+  UnreadableMediaError,
+  videoTrackOf,
+} from "./mediaRead";
 import { useEditor } from "./store";
 import type { AssetType, AudioClip, MediaAsset, ProjectSummary, StoredAsset, VideoClip } from "./types";
 import { IMAGE_CLIP_SECONDS, mediaUrl } from "./types";
@@ -269,45 +283,45 @@ type ProbedMeta = {
   peaks?: number[];
 };
 
-/** Read a media URL's kind/duration/dimensions with the browser's own
- * decoders. The probe can correct the guessed kind: a "video" container with
- * no video stream is really audio. */
-async function probeMedia(type: AssetType, url: string): Promise<ProbedMeta> {
+/** Read a media source's kind/duration/dimensions from its container. The
+ * probe can correct the guessed kind: a "video" container with no video track
+ * is really audio, and an "audio" one that turns out to carry picture is video.
+ *
+ * The duration is exact, which matters — it is a placed clip's length, and the
+ * metadata a player reports overestimates MP3s badly enough to leave a clip
+ * running past its own audio. */
+async function probeMedia(type: AssetType, src: string | Blob): Promise<ProbedMeta> {
   if (type === "image") {
     // Images have no intrinsic duration; the timeline clip carries its length.
-    const dims = await loadImageMeta(url);
-    return { type, duration: 0, width: dims.width, height: dims.height };
+    // Stills are the one kind read through the browser's image decoder rather
+    // than the container reader, which does not do them.
+    const url = typeof src === "string" ? src : URL.createObjectURL(src);
+    try {
+      const dims = await loadImageMeta(url);
+      return { type, duration: 0, width: dims.width, height: dims.height };
+    } finally {
+      if (typeof src !== "string") URL.revokeObjectURL(url);
+    }
   }
-  if (type === "video") {
-    const v = await loadVideoMeta(url);
-    if (v.videoWidth === 0) return { type: "audio", duration: v.duration };
-    return { type, duration: v.duration, width: v.videoWidth, height: v.videoHeight };
+  const meta = await probeMediaFile(src);
+  if (!meta.hasVideo) {
+    // The waveform rides along with the probe: the file is open and its audio
+    // is being read either way, so enrichAsset has nothing left to do.
+    return { type: "audio", duration: meta.duration, peaks: await audioPeaks(src, PEAK_BUCKETS) };
   }
-  // Decode for a sample-exact duration (HTMLAudioElement overestimates MP3s,
-  // leaving a placed clip running past its real audio) and reuse the same
-  // decode for the waveform, so enrichAsset has nothing left to do.
-  const audio = await decodeAudio(url);
-  if (audio && audio.duration > 0) {
-    return { type, duration: audio.duration, peaks: peaksFromChannel(audio.getChannelData(0)) };
-  }
-  return { type, duration: await loadAudioDuration(url) };
+  return { type: "video", duration: meta.duration, width: meta.width, height: meta.height };
 }
 
-/** Probe a media file's kind/duration/dimensions in the browser via an object
- * URL — for backends that can't probe server-side (cloud library complete). */
+/** Probe a media file's kind/duration/dimensions from the bytes in hand — for
+ * backends that can't probe server-side (cloud library complete). */
 export async function probeFileMeta(file: File): Promise<{
   type: AssetType;
   duration: number;
   width?: number;
   height?: number;
 }> {
-  const url = URL.createObjectURL(file);
-  try {
-    const meta = await probeMedia(assetTypeOf(file) ?? "video", url);
-    return { type: meta.type, duration: meta.duration, width: meta.width, height: meta.height };
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+  const meta = await probeMedia(assetTypeOf(file) ?? "video", file);
+  return { type: meta.type, duration: meta.duration, width: meta.width, height: meta.height };
 }
 
 /** An import that is on screen before its bytes have left the browser. */
@@ -340,9 +354,11 @@ export async function prepareImport(
   const localUrl = URL.createObjectURL(file);
   try {
     // Probing and claiming the name are independent, so the asset is ready
-    // after whichever is slower rather than after both in turn.
+    // after whichever is slower rather than after both in turn. The probe
+    // reads the dropped bytes rather than the object URL, so it never goes
+    // back through the network stack for a file already in hand.
     const [meta, signed] = await Promise.all([
-      probeMedia(type, localUrl),
+      probeMedia(type, file),
       presignUpload(`/api/cut/projects/${projectId}/media/presign`, file, file.name, backend),
     ]);
     const asset: MediaAsset = {
@@ -401,6 +417,30 @@ export async function importFileToProject(
     ...(meta.peaks ? { peaks: meta.peaks } : {}),
     url,
   };
+}
+
+// The frame reader hands back whichever canvas kind its context has — an
+// element in the DOM, an OffscreenCanvas in a worker — and these two are the
+// only places that difference shows.
+
+function canvasBlob(canvas: HTMLCanvasElement | OffscreenCanvas, type: string): Promise<Blob | null> {
+  if (canvas instanceof OffscreenCanvas) return canvas.convertToBlob({ type });
+  return new Promise((resolve) => canvas.toBlob(resolve, type));
+}
+
+async function canvasDataUrl(
+  canvas: HTMLCanvasElement | OffscreenCanvas,
+  type: string,
+  quality: number
+): Promise<string> {
+  if (!(canvas instanceof OffscreenCanvas)) return canvas.toDataURL(type, quality);
+  const blob = await canvas.convertToBlob({ type, quality });
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
 }
 
 /** Natural pixel size of an image URL, for framing on the timeline. */
@@ -588,13 +628,13 @@ export async function assetFromProjectFile(
     asset.height = dims.height;
     return asset;
   }
-  const v = await loadVideoMeta(url);
-  asset.duration = v.duration;
-  if (v.videoWidth === 0) {
+  const meta = await probeMediaFile(url);
+  asset.duration = meta.duration;
+  if (!meta.hasVideo) {
     asset.type = "audio";
   } else {
-    asset.width = v.videoWidth;
-    asset.height = v.videoHeight;
+    asset.width = meta.width;
+    asset.height = meta.height;
   }
   return asset;
 }
@@ -611,15 +651,9 @@ export async function captureFreezeFrame(
   srcTime: number,
   duration = 0
 ): Promise<MediaAsset> {
-  const v = await loadVideoMeta(sourceUrl);
-  await seekTo(v, Math.max(0, srcTime));
-  const canvas = document.createElement("canvas");
-  canvas.width = v.videoWidth;
-  canvas.height = v.videoHeight;
-  canvas.getContext("2d")!.drawImage(v, 0, 0);
-  v.removeAttribute("src");
-  v.load();
-  const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/png"));
+  const frame = await frameAt(sourceUrl, srcTime);
+  if (!frame) throw new Error("Could not render the freeze frame.");
+  const blob = await canvasBlob(frame.canvas, "image/png");
   if (!blob) throw new Error("Could not render the freeze frame.");
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -632,51 +666,38 @@ export async function captureFreezeFrame(
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-/** Cloud twin of the engine's silence route (ffmpeg silencedetect): decode the
+/** Cloud twin of the engine's silence route (ffmpeg silencedetect): read the
  * source's audio and scan 20ms RMS windows against the same dB threshold and
  * minimum-duration rules. Times are absolute source seconds. */
 export async function detectSilenceClientSide(
   sourceUrl: string,
   opts: { from: number; to?: number; thresholdDb: number; minSilence: number }
 ): Promise<{ start: number; end: number; duration: number }[]> {
-  const audio = await decodeAudio(sourceUrl);
-  if (!audio) throw new Error("This file has no audio track.");
-  const to = Math.min(opts.to ?? audio.duration, audio.duration);
-  const from = Math.max(0, Math.min(opts.from, to));
-  if (!(to > from)) return [];
-  const rate = audio.sampleRate;
-  const win = Math.max(1, Math.round(rate * 0.02));
-  const threshold = Math.pow(10, opts.thresholdDb / 20);
-  const channels = Array.from({ length: audio.numberOfChannels }, (_, c) =>
-    audio.getChannelData(c)
-  );
-  const first = Math.floor(from * rate);
-  const last = Math.min(audio.length, Math.ceil(to * rate));
-  const silences: { start: number; end: number; duration: number }[] = [];
-  let open: number | null = null;
-  const close = (endT: number) => {
-    if (open !== null && endT - open >= opts.minSilence) {
-      const start = round2(Math.max(from, open));
-      const end = round2(Math.min(to, endT));
-      if (end > start) silences.push({ start, end, duration: round2(end - start) });
-    }
-    open = null;
-  };
-  for (let s = first; s < last; s += win) {
-    const e = Math.min(last, s + win);
-    let sum = 0;
-    for (const ch of channels) {
-      for (let i = s; i < e; i++) sum += ch[i] * ch[i];
-    }
-    const rms = Math.sqrt(sum / ((e - s) * channels.length));
-    if (rms < threshold) {
-      if (open === null) open = s / rate;
-    } else {
-      close(s / rate);
+  const from = Math.max(0, opts.from);
+  const to = opts.to;
+  // Whether the file has sound is asked of the file, not of the span: a range
+  // past the end of a perfectly good recording is an empty answer, not a file
+  // with no audio in it.
+  const input = openMedia(sourceUrl);
+  const track = await audioTrackOf(input).finally(() => input.dispose());
+  if (!track) throw new Error("This file has no audio track.");
+  if (to !== undefined && !(to > from)) return [];
+
+  // The audio is folded into windows as it arrives, so scanning a long file
+  // costs one decoded chunk at a time rather than a decoded copy of the whole
+  // thing.
+  async function* pcm(): AsyncGenerator<PcmChunk> {
+    for await (const { buffer, timestamp } of audioChunks(sourceUrl, from, to)) {
+      yield {
+        channels: Array.from({ length: buffer.numberOfChannels }, (_, c) =>
+          buffer.getChannelData(c)
+        ),
+        timestamp,
+        sampleRate: buffer.sampleRate,
+      };
     }
   }
-  close(to);
-  return silences;
+  return scanSilence(pcm(), { ...opts, from });
 }
 
 /** Cloud twin of the engine's audio-extract route: render a span of the
@@ -687,18 +708,18 @@ export async function renderAudioSpanWav(
   from: number,
   to: number | undefined
 ): Promise<Blob> {
-  const audio = await decodeAudio(sourceUrl);
-  if (!audio) throw new Error("This file has no audio track.");
-  const end = Math.min(to ?? audio.duration, audio.duration);
-  const start = Math.max(0, Math.min(from, end));
-  const dur = end - start;
+  // Only the asked-for span is decoded, so pulling thirty seconds out of an
+  // hour-long file costs thirty seconds of work.
+  const span = await decodeAudioSpan(sourceUrl, Math.max(0, from), to);
+  if (!span) throw new Error("This file has no audio track.");
+  const dur = span.duration;
   if (!(dur > 0)) throw new Error("from/to describe an empty range.");
   const rate = 16000; // encodeWav's fixed sample rate
   const ctx = new OfflineAudioContext(1, Math.max(1, Math.ceil(dur * rate)), rate);
   const src = ctx.createBufferSource();
-  src.buffer = audio;
+  src.buffer = span;
   src.connect(ctx.destination);
-  src.start(0, start, dur);
+  src.start(0);
   return encodeWav((await ctx.startRendering()).getChannelData(0));
 }
 
@@ -766,11 +787,12 @@ export async function makeContactSheetsClientSide(
   sourceUrl: string,
   opts: { from: number; to?: number; interval?: number }
 ): Promise<WatchSheets> {
-  const v = await loadVideoMeta(sourceUrl);
+  const input = openMedia(sourceUrl);
   try {
-    if (v.videoWidth === 0) throw new Error("Could not sample the video.");
+    const track = await videoTrackOf(input);
+    if (!track) throw new Error("Could not sample the video.");
     const from = Math.max(0, opts.from);
-    const wanted = opts.to ?? v.duration;
+    const wanted = opts.to ?? (await input.computeDuration());
     if (opts.to === undefined && !(wanted > 0))
       throw new Error("Could not read the media duration — pass to (seconds).");
     if (!(wanted > from)) throw new Error("from/to describe an empty range.");
@@ -785,31 +807,53 @@ export async function makeContactSheetsClientSide(
     for (let t = from; t < to && times.length < SHEET_MAX * perSheet; t += interval)
       times.push(round2(t));
 
-    const [cw, ch] = cellDims(v.videoWidth, v.videoHeight);
+    const [cw, ch] = cellDims(await track.getDisplayWidth(), await track.getDisplayHeight());
     const sheetW = 2 * SHEET_GAP + SHEET_GRID * cw + (SHEET_GRID - 1) * SHEET_GAP;
     const sheetH = 2 * SHEET_GAP + SHEET_GRID * ch + (SHEET_GRID - 1) * SHEET_GAP;
     const sheets: WatchSheets["sheets"] = [];
-    for (let i = 0; i < times.length; i += perSheet) {
-      const chunk = times.slice(i, i + perSheet);
-      const canvas = document.createElement("canvas");
-      canvas.width = sheetW;
-      canvas.height = sheetH;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("Could not sample the video.");
-      ctx.fillStyle = "#000";
-      ctx.fillRect(0, 0, sheetW, sheetH);
-      ctx.imageSmoothingQuality = "high";
-      for (let j = 0; j < chunk.length; j++) {
-        await seekTo(v, chunk[j]);
+
+    // The times are ascending, so the whole span decodes once, in order, and
+    // each cell is drawn as its frame comes past.
+    const cells = frameSink(track, { width: cw, height: ch, fit: "fill" }).canvasesAtTimestamps(
+      times
+    );
+    let ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = null;
+    let canvas: HTMLCanvasElement | null = null;
+    // Only the cells that actually got a frame are reported. A cell the decoder
+    // had nothing for stays black, and listing its timestamp anyway would tell
+    // the model there is a picture of that moment on the sheet — it would then
+    // describe a black tile as the content at that time, or read every later
+    // cell against the wrong one.
+    let drawn: { t: number }[] = [];
+    for (let i = 0; i < times.length; i++) {
+      const j = i % perSheet;
+      if (j === 0) {
+        canvas = document.createElement("canvas");
+        canvas.width = sheetW;
+        canvas.height = sheetH;
+        ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("Could not sample the video.");
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, sheetW, sheetH);
+        ctx.imageSmoothingQuality = "high";
+        drawn = [];
+      }
+      const next = await cells.next();
+      if (!next.done && next.value) {
         const x = SHEET_GAP + (j % SHEET_GRID) * (cw + SHEET_GAP);
         const y = SHEET_GAP + Math.floor(j / SHEET_GRID) * (ch + SHEET_GAP);
-        ctx.drawImage(v, x, y, cw, ch);
+        ctx!.drawImage(next.value.canvas, x, y, cw, ch);
+        drawn.push({ t: times[i] });
       }
-      sheets.push({
-        image: canvas.toDataURL("image/jpeg", SHEET_QUALITY),
-        frames: chunk.map((t) => ({ t })),
-      });
+      const lastCell = j === perSheet - 1 || i === times.length - 1;
+      if (lastCell && drawn.length > 0) {
+        sheets.push({
+          image: await canvasDataUrl(canvas!, "image/jpeg", SHEET_QUALITY),
+          frames: drawn,
+        });
+      }
     }
+
     const lastT = times.length > 0 ? times[times.length - 1] : from;
     const capped = times.length >= SHEET_MAX * perSheet && lastT < to - interval;
     // The per-call span bound is itself truncation — the caller asked for more.
@@ -822,8 +866,7 @@ export async function makeContactSheetsClientSide(
       truncated,
     };
   } finally {
-    v.removeAttribute("src");
-    v.load();
+    input.dispose();
   }
 }
 
@@ -868,46 +911,6 @@ export async function ensurePeaks(asset: MediaAsset) {
   } catch {
     // Waveforms are decorative; editing works without them.
   }
-}
-
-/** MediaRecorder webm files report Infinity until seeked to the end. */
-function ensureFiniteDuration(el: HTMLVideoElement | HTMLAudioElement): Promise<number> {
-  if (Number.isFinite(el.duration) && el.duration > 0) return Promise.resolve(el.duration);
-  return new Promise((resolve) => {
-    const done = () => {
-      el.removeEventListener("durationchange", done);
-      clearTimeout(timer);
-      el.currentTime = 0;
-      resolve(Number.isFinite(el.duration) ? el.duration : 0);
-    };
-    const timer = setTimeout(done, 4000);
-    el.addEventListener("durationchange", done);
-    el.currentTime = 1e7;
-  });
-}
-
-function loadVideoMeta(url: string): Promise<HTMLVideoElement> {
-  return new Promise((resolve, reject) => {
-    const v = document.createElement("video");
-    v.preload = "metadata";
-    v.muted = true;
-    // Media may come from the engine on another origin; anonymous CORS keeps
-    // canvas frame grabs (filmstrips, AI captures) from tainting.
-    v.crossOrigin = "anonymous";
-    v.src = url;
-    v.onloadedmetadata = () => void ensureFiniteDuration(v).then(() => resolve(v));
-    v.onerror = () => reject(new Error("Could not read this video file."));
-  });
-}
-
-export function loadAudioDuration(url: string): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const a = new Audio();
-    a.preload = "metadata";
-    a.src = url;
-    a.onloadedmetadata = () => void ensureFiniteDuration(a).then(resolve);
-    a.onerror = () => reject(new Error("Could not read this audio file."));
-  });
 }
 
 // Filmstrip frames render at 60 CSS px tall — capture at 3× so they stay sharp
@@ -989,26 +992,34 @@ function writeCachedStrip(key: string, strip: CachedStrip) {
 }
 
 async function makeThumbs(url: string, duration: number) {
-  const v = await loadVideoMeta(url);
   // One frame every ~2s (min 10, max 24) so long clips don't repeat frames.
   const count = Math.min(24, Math.max(10, Math.round(duration / 2)));
   const thumbStep = duration / count;
-  const aspect = v.videoWidth / Math.max(1, v.videoHeight);
-  const w = Math.max(64, Math.round(THUMB_H * aspect));
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = THUMB_H;
-  const ctx = canvas.getContext("2d")!;
-  ctx.imageSmoothingQuality = "high";
-  const thumbs: string[] = [];
-  for (let i = 0; i < count; i++) {
-    const t = Math.min(duration - 0.05, (i + 0.5) * thumbStep);
-    await seekTo(v, Math.max(0, t));
-    ctx.drawImage(v, 0, 0, w, THUMB_H);
-    thumbs.push(canvas.toDataURL("image/jpeg", 0.92));
+  const times = Array.from({ length: count }, (_, i) =>
+    Math.max(0, Math.min(duration - 0.05, (i + 0.5) * thumbStep))
+  );
+  // Ascending times over one decode pass — the strip is a single sweep of the
+  // file rather than `count` seeks into it.
+  //
+  // The strip is read back by position (`thumbs[floor(t / thumbStep)]`), so a
+  // time the decoder has no frame for cannot simply be dropped: that would
+  // slide every later tile onto the wrong moment for the rest of the clip, and
+  // the wrong strip would be cached. A gap repeats the frame before it, which
+  // keeps every index meaning what it says.
+  const captured: (string | null)[] = [];
+  for await (const frame of framesAt(url, times, { height: THUMB_H })) {
+    captured.push(frame ? await canvasDataUrl(frame.canvas, "image/jpeg", 0.92) : null);
   }
-  v.removeAttribute("src");
-  v.load();
+  // Fill gaps from the nearest frame either side, so a strip is either fully
+  // populated or empty.
+  const thumbs: string[] = [];
+  let fill: string | null = captured.find((c) => c !== null) ?? null;
+  if (fill) {
+    for (const shot of captured) {
+      if (shot) fill = shot;
+      thumbs.push(fill);
+    }
+  }
   return { thumbs, thumbStep };
 }
 
@@ -1016,8 +1027,13 @@ async function makeThumbs(url: string, duration: number) {
 // frames at its in/out points. Asset thumbs are fixed-interval midpoint
 // samples, so edges are captured on demand at the precise source time. Each
 // clip edge is a "slot" whose newest request supersedes queued ones (trim
-// drags stay cheap); one serial loop performs the seeks on a small pool of
-// shared per-URL video elements.
+// drags stay cheap); one serial loop reads frames from a small pool of
+// per-URL readers.
+//
+// The pool is what makes a trim drag cheap. A reader holds a warm decoder and
+// its cache of recently decoded frames, so the frames either side of where the
+// handle already is come back without re-reading the file — which is the whole
+// difference between this and re-opening the source per request.
 const EDGE_CACHE_CAP = 300;
 const EDGE_POOL_CAP = 4;
 
@@ -1028,9 +1044,12 @@ type EdgeRequest = {
   resolvers: ((src: string | null) => void)[];
 };
 
+/** A file held open for repeated frame reads, with the sink that decodes it. */
+type EdgeReader = { input: ReturnType<typeof openMedia>; sink: ReturnType<typeof frameSink> };
+
 const edgeCache = new Map<string, string>();
 const edgeQueue = new Map<string, EdgeRequest>();
-const edgePool = new Map<string, Promise<HTMLVideoElement>>();
+const edgePool = new Map<string, Promise<EdgeReader>>();
 let edgePumping = false;
 
 function edgeKey(url: string, time: number) {
@@ -1061,7 +1080,7 @@ export function requestEdgeFrame(slot: string, url: string, time: number): Promi
   });
 }
 
-function edgeVideo(url: string): Promise<HTMLVideoElement> {
+function edgeReader(url: string): Promise<EdgeReader> {
   const hit = edgePool.get(url);
   if (hit) {
     // Re-insert to refresh recency; the pool evicts oldest-first.
@@ -1069,19 +1088,24 @@ function edgeVideo(url: string): Promise<HTMLVideoElement> {
     edgePool.set(url, hit);
     return hit;
   }
-  const loading = loadVideoMeta(url);
-  edgePool.set(url, loading);
+  const opening = (async () => {
+    const input = openMedia(url);
+    const track = await videoTrackOf(input);
+    if (!track) {
+      input.dispose();
+      throw new UnreadableMediaError("This file has no readable video.");
+    }
+    // A pool of canvases the sink cycles through, so a drag that reads hundreds
+    // of frames keeps its allocation flat.
+    return { input, sink: frameSink(track, { height: THUMB_H }, 4) };
+  })();
+  edgePool.set(url, opening);
   while (edgePool.size > EDGE_POOL_CAP) {
     const [oldUrl, old] = edgePool.entries().next().value!;
     edgePool.delete(oldUrl);
-    old
-      .then((v) => {
-        v.removeAttribute("src");
-        v.load();
-      })
-      .catch(() => {});
+    old.then((r) => r.input.dispose()).catch(() => {});
   }
-  return loading;
+  return opening;
 }
 
 async function pumpEdgeFrames() {
@@ -1096,18 +1120,10 @@ async function pumpEdgeFrames() {
       let src = edgeCache.get(req.key) ?? null;
       if (!src) {
         try {
-          const v = await edgeVideo(req.url);
-          const max = Math.max(0, (Number.isFinite(v.duration) ? v.duration : req.time) - 0.05);
-          await seekTo(v, Math.max(0, Math.min(req.time, max)));
-          const aspect = v.videoWidth / Math.max(1, v.videoHeight);
-          const w = Math.max(64, Math.round(THUMB_H * aspect));
-          const canvas = document.createElement("canvas");
-          canvas.width = w;
-          canvas.height = THUMB_H;
-          const ctx = canvas.getContext("2d")!;
-          ctx.imageSmoothingQuality = "high";
-          ctx.drawImage(v, 0, 0, w, THUMB_H);
-          src = canvas.toDataURL("image/jpeg", 0.92);
+          const { sink } = await edgeReader(req.url);
+          const frame = await sink.getCanvas(Math.max(0, req.time));
+          if (!frame) throw new Error("No frame at that time.");
+          src = await canvasDataUrl(frame.canvas, "image/jpeg", 0.92);
           edgeCache.set(req.key, src);
           while (edgeCache.size > EDGE_CACHE_CAP) {
             edgeCache.delete(edgeCache.keys().next().value!);
@@ -1123,60 +1139,8 @@ async function pumpEdgeFrames() {
   }
 }
 
-function seekTo(v: HTMLVideoElement, t: number): Promise<void> {
-  return new Promise((resolve) => {
-    const done = () => {
-      v.removeEventListener("seeked", done);
-      clearTimeout(timer);
-      resolve();
-    };
-    const timer = setTimeout(done, 1500);
-    v.addEventListener("seeked", done);
-    v.currentTime = t;
-  });
-}
-
 const PEAK_BUCKETS = 1600;
 
-/** Decode an audio URL to a buffer, or null on any failure (a bad/undecodable
- * file). The decoded buffer's duration is sample-exact — the source of truth for
- * an audio clip's length, unlike HTMLAudioElement.duration, which overestimates
- * MP3s and would leave a placed clip running past its real audio. */
-async function decodeAudio(url: string): Promise<AudioBuffer | null> {
-  try {
-    const buf = await (await fetch(url)).arrayBuffer();
-    const AC: typeof AudioContext =
-      window.AudioContext ??
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    const ctx = new AC();
-    try {
-      return await ctx.decodeAudioData(buf);
-    } finally {
-      void ctx.close();
-    }
-  } catch {
-    return null;
-  }
-}
-
-/** Normalized 0..1 waveform peaks from a decoded buffer's first channel. */
-function peaksFromChannel(data: Float32Array): number[] {
-  const bucketSize = Math.max(1, Math.floor(data.length / PEAK_BUCKETS));
-  const peaks: number[] = [];
-  for (let i = 0; i < PEAK_BUCKETS; i++) {
-    let max = 0;
-    const from = i * bucketSize;
-    const to = Math.min(data.length, from + bucketSize);
-    for (let j = from; j < to; j += 8) {
-      const v = Math.abs(data[j]);
-      if (v > max) max = v;
-    }
-    peaks.push(max);
-  }
-  return peaks;
-}
-
-async function makePeaks(url: string): Promise<number[]> {
-  const audio = await decodeAudio(url);
-  return audio ? peaksFromChannel(audio.getChannelData(0)) : [];
+function makePeaks(url: string): Promise<number[]> {
+  return audioPeaks(url, PEAK_BUCKETS);
 }

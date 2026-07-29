@@ -3,6 +3,7 @@
 import { refFromAsset, refFromTextFile, type AssetRef } from "./assetRef";
 import { tagChatAsset } from "./chatAssets";
 import { enrichAsset, importFileToProject, isMediaFile, isTextFile } from "./media";
+import { frameSink, openMedia, videoTrackOf } from "./mediaRead";
 import { useEditor } from "./store";
 
 // Turn refs and dropped files into what the hosted models take. Generation
@@ -196,53 +197,25 @@ export function mediaAddress(url: string): string {
   }
 }
 
-function captureFrame(url: string, duration?: number): Promise<InlineImage> {
-  return new Promise((resolve, reject) => {
-    const v = document.createElement("video");
-    v.preload = "auto";
-    v.muted = true;
-    // Media may come from the engine on another origin; anonymous CORS keeps
-    // the canvas grab from tainting.
-    v.crossOrigin = "anonymous";
-    let timer = 0;
-    const fail = (msg: string) => {
-      clearTimeout(timer);
-      v.removeAttribute("src");
-      v.load();
-      reject(new Error(msg));
-    };
-    // A seek whose `seeked` never fires (a too-short clip, a source that
-    // resolves currentTime synchronously) would hang refsToInlineImages and
-    // wedge the whole generation. Bail after a few seconds, like visualFrames.
-    timer = window.setTimeout(() => fail("Timed out reading a reference frame."), 4000);
-    v.onerror = () => fail(`Could not read ${mediaAddress(url)} for a reference frame.`);
-    v.onloadedmetadata = () => {
-      // Same poster spot the cards show, so the reference matches the preview.
-      v.currentTime = Math.min(1, Math.max(0.1, (duration || v.duration || 2) / 10));
-    };
-    v.onseeked = () => {
-      if (v.readyState < 2 || !v.videoWidth) return fail("The video has no readable frame.");
-      const w = Math.min(MAX_W, v.videoWidth);
-      const h = Math.round((w / v.videoWidth) * v.videoHeight);
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return fail("Could not draw the reference frame.");
-      ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(v, 0, 0, w, h);
-      try {
-        const out = splitDataUrl(canvas.toDataURL("image/jpeg", JPEG_Q));
-        clearTimeout(timer);
-        v.removeAttribute("src");
-        v.load();
-        resolve(out);
-      } catch {
-        fail("Could not capture a reference frame.");
-      }
-    };
-    v.src = url;
-  });
+async function captureFrame(url: string, duration?: number): Promise<InlineImage> {
+  const input = openMedia(url);
+  try {
+    const track = await videoTrackOf(input);
+    if (!track) throw new Error(`Could not read ${mediaAddress(url)} for a reference frame.`);
+    // Same poster spot the cards show, so the reference matches the preview.
+    const at = Math.min(1, Math.max(0.1, (duration || (await input.computeDuration()) || 2) / 10));
+    const width = Math.min(MAX_W, await track.getDisplayWidth());
+    const frame = await frameSink(track, { width }).getCanvas(at);
+    if (!frame) throw new Error("The video has no readable frame.");
+    const canvas = frame.canvas;
+    return splitDataUrl(
+      canvas instanceof OffscreenCanvas
+        ? await blobToDataUrl(await canvas.convertToBlob({ type: "image/jpeg", quality: JPEG_Q }))
+        : canvas.toDataURL("image/jpeg", JPEG_Q)
+    );
+  } finally {
+    input.dispose();
+  }
 }
 
 /** A single reference image for `ref`: the file itself for images, a captured
