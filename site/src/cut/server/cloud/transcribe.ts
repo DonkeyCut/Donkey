@@ -1,8 +1,9 @@
-// Hosted transcription: one ~90s 16 kHz mono WAV chunk in, cue-level
-// timestamps out. The client renders the timeline's audible mix, chunks it,
-// and stitches the results (lib/cloudTranscribe.ts); this route only turns
-// one chunk of speech into cues with Gemini, metered against the user's
-// inference credits like every /api/inference route.
+// Hosted transcription: one short 16 kHz mono WAV chunk in, cue-level
+// timestamps out. The client renders the timeline's audible mix, chunks it
+// short enough to bound the model's timing drift, and stitches the results
+// (lib/cloudTranscribe.ts); this route only turns one chunk of speech into
+// cues with Gemini, metered against the user's inference credits like every
+// /api/inference route.
 import {
   creditErrorResponse,
   recordFailedInferenceUsage,
@@ -22,7 +23,7 @@ import { toJsonValue } from "@/lib/inference/json";
 import type { JsonValue } from "@/lib/inference/providers";
 import { err } from "./util";
 
-// The client sends ~2.9MB chunks (90s of 16-bit mono PCM); anything bigger is
+// The client sends sub-megabyte chunks of 16-bit mono PCM; anything bigger is
 // not ours and would blow past inline-audio comfort anyway.
 const MAX_AUDIO_BYTES = 4 * 1024 * 1024;
 const ROUTE = "/api/cut-cloud/transcribe/";

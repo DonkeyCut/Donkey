@@ -31,8 +31,14 @@ export interface CloudTranscribeSpec {
 }
 
 const RATE = 16000; // the wire format the hosted route expects
-const CHUNK_SECONDS = 90; // ~2.9MB of 16-bit mono PCM per chunk
+// The hosted model reads times off the audio by ear, and its clock drifts as a
+// chunk runs on — cues open in sync and land seconds late by the end of a long
+// one. Every chunk boundary re-anchors that clock at a known offset, so the
+// chunk length is what bounds the drift: short enough to keep it inside the
+// alignment pass's snap window, long enough that a sentence keeps its context.
+const CHUNK_SECONDS = 20;
 const OVERLAP_SECONDS = 3; // audio shared across chunk seams for stitching
+const POSTS_IN_FLIGHT = 4; // short chunks mean more round-trips; overlap them
 // A chunk quieter than this end to end carries no speech; skip the round-trip
 // (and its credit charge) — the engine path short-circuits silence the same way.
 const SILENCE_PEAK = 1e-3;
@@ -154,33 +160,53 @@ export async function transcribeSamples(
 ): Promise<SubtitleCue[] | null> {
   const duration = samples.length / RATE;
   const step = (CHUNK_SECONDS - OVERLAP_SECONDS) * RATE;
-  const cues: SubtitleCue[] = [];
+  const chunks: { slice: Float32Array; offset: number; last: boolean }[] = [];
   for (let s = 0; s < samples.length; s += step) {
     const slice = samples.subarray(s, Math.min(samples.length, s + CHUNK_SECONDS * RATE));
-    const offset = s / RATE;
     const last = s + CHUNK_SECONDS * RATE >= samples.length;
-    if (isStale?.()) return null;
-    if (!isSilent(slice)) {
-      const chunk = await postChunk(slice, offset, locale);
-      if (isStale?.()) return null;
-      const from = s === 0 ? -Infinity : offset + OVERLAP_SECONDS / 2;
-      const to = last ? Infinity : offset + slice.length / RATE - OVERLAP_SECONDS / 2;
-      for (const c of chunk) {
-        const start = Math.max(0, Math.min(c.start + offset, duration));
-        const end = Math.max(0, Math.min(c.end + offset, duration));
-        const text = c.text.trim();
-        const mid = (start + end) / 2;
-        if (!text || end <= start || mid < from || mid >= to) continue;
-        cues.push({
-          id: uid(),
-          start: round(start),
-          end: round(end),
-          text,
-          words: interpolateWords(text, start, end),
-        });
+    if (!isSilent(slice)) chunks.push({ slice, offset: s / RATE, last });
+    if (last) break;
+  }
+
+  // A small pool posts the chunks; a failure parks its error and drains the
+  // pool so no further metered calls go out.
+  const results: WireCue[][] = chunks.map(() => []);
+  let next = 0;
+  let failed: unknown;
+  const worker = async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= chunks.length || failed !== undefined || isStale?.()) return;
+      try {
+        results[i] = await postChunk(chunks[i].slice, chunks[i].offset, locale);
+      } catch (error) {
+        failed = error;
+        return;
       }
     }
-    if (last) break;
+  };
+  await Promise.all(Array.from({ length: Math.min(POSTS_IN_FLIGHT, chunks.length) }, worker));
+  if (isStale?.()) return null;
+  if (failed !== undefined) throw failed;
+
+  const cues: SubtitleCue[] = [];
+  for (const [i, { slice, offset, last }] of chunks.entries()) {
+    const from = i === 0 ? -Infinity : offset + OVERLAP_SECONDS / 2;
+    const to = last ? Infinity : offset + slice.length / RATE - OVERLAP_SECONDS / 2;
+    for (const c of results[i]) {
+      const start = Math.max(0, Math.min(c.start + offset, duration));
+      const end = Math.max(0, Math.min(c.end + offset, duration));
+      const text = c.text.trim();
+      const mid = (start + end) / 2;
+      if (!text || end <= start || mid < from || mid >= to) continue;
+      cues.push({
+        id: uid(),
+        start: round(start),
+        end: round(end),
+        text,
+        words: interpolateWords(text, start, end),
+      });
+    }
   }
   return cues.sort((a, b) => a.start - b.start);
 }
