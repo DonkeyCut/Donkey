@@ -15,7 +15,7 @@ export interface AiModel {
  * Gemini runs through Donkey's hosted inference (sign-in + credits), not a local CLI. */
 export const AI_MODELS: AiModel[] = [
   { id: "claude-fable-5", label: "Fable 5", provider: "claude" },
-  { id: "claude-opus-4-8", label: "Opus 4.8", provider: "claude" },
+  { id: "claude-opus-5", label: "Opus 5", provider: "claude" },
   { id: "claude-sonnet-5", label: "Sonnet 5", provider: "claude" },
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5", provider: "claude" },
   { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", provider: "codex" },
