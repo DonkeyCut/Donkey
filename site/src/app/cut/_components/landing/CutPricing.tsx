@@ -6,13 +6,13 @@ import { useAppEntryHref } from "@/app/_components/landing/useAppEntryHref";
 import { useMediaQuery } from "@/app/_components/landing/useMediaQuery";
 import { cutPricingPlans } from "@/app/cut/_components/landing/cutPricingPlans";
 
-export function CutPricing({ root }: { root: string }) {
+export function CutPricing() {
   const isDesktop = useMediaQuery("(min-width: 768px)");
   const appHref = useAppEntryHref();
 
   // Both plan CTAs enter the app, so gate them the same way as the hero: a
   // signed-out click lands on sign-in first, then returns to the app target.
-  const plans = cutPricingPlans(root).map((plan) => ({
+  const plans = cutPricingPlans().map((plan) => ({
     ...plan,
     action: { ...plan.action, href: appHref(plan.action.href) },
   }));

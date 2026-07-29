@@ -16,13 +16,12 @@ export const CUT_PRO = {
 };
 
 // Cut's two tiers: the editor itself is free and local; Pro adds monthly AI
-// generation credits. `root` prefixes in-app links ("" on donkeycut.com,
-// "/cut" in dev) so the cards work on either host.
-export function cutPricingPlans(root: string): PricingPlan[] {
+// generation credits.
+export function cutPricingPlans(): PricingPlan[] {
   return [
     {
       action: {
-        href: `${root}/app`,
+        href: "/app",
         kind: "link",
         label: "Start a new project",
       },
@@ -41,7 +40,7 @@ export function cutPricingPlans(root: string): PricingPlan[] {
     },
     {
       action: {
-        href: `${root}/app/settings`,
+        href: "/app/settings",
         kind: "link",
         label: "Get Pro",
       },

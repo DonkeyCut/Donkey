@@ -8,7 +8,7 @@ import {
 } from "@/app/_components/landing/LandingPrimitives";
 import { cutInstallHref } from "@/cut/lib/install";
 
-export function CutLocal({ root }: { root: string }) {
+export function CutLocal() {
   return (
     <section
       id="local"
@@ -24,7 +24,7 @@ export function CutLocal({ root }: { root: string }) {
             transcribes audio on device.
           </p>
           <div className="mt-8">
-            <PillButton href={cutInstallHref(root)} variant="primary" size="md">
+            <PillButton href={cutInstallHref()} variant="primary" size="md">
               Download for Mac
             </PillButton>
           </div>

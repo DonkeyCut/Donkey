@@ -53,7 +53,6 @@ export function NavUser() {
   // The name the user chose wins over the one the provider gave us.
   const name = visibleName(profile, session.user.name);
   const image = profile?.image ?? session.user.image;
-  const root = base.replace(/\/app$/, "");
 
   const signOut = () => {
     // Sign out everywhere: revoke every session for this user (so the Mac app
@@ -65,7 +64,7 @@ export function NavUser() {
         await authClient.revokeSessions();
       } finally {
         await authClient.signOut();
-        router.push(root || "/");
+        router.push("/");
       }
     })();
   };
@@ -105,7 +104,7 @@ export function NavUser() {
         {/* The install page lives outside the editor, so it opens in its own
             tab rather than navigating away from an open project. */}
         <DropdownMenuItem
-          onClick={() => window.open(cutInstallHref(root), "_blank", "noopener")}
+          onClick={() => window.open(cutInstallHref(), "_blank", "noopener")}
         >
           <MonitorDown /> Run locally on Mac
         </DropdownMenuItem>

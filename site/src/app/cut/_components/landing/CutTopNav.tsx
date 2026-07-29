@@ -5,17 +5,16 @@ import { authHrefFor } from "@/app/_components/landing/useAppEntryHref";
 
 // The donkeycut.com site nav: Donkey Cut wordmark with session-aware auth
 // entries. Shared by the Cut landing and the pass-through pages (e.g.
-// /install) served on that host. `root` is "" on donkeycut.com and local dev,
-// "/cut" on the hosted apex.
-export function CutTopNav({ root }: { root: string }) {
+// /install).
+export function CutTopNav() {
   return (
     <TopNav
-      homeHref={root || "/"}
+      homeHref="/"
       wordmark="Donkey Cut"
-      signedInPill={{ href: `${root}/app`, label: "Go to App" }}
+      signedInPill={{ href: "/app", label: "Go to App" }}
       signedOutAuth={{
-        logInHref: authHrefFor("/sign-in", `${root}/app`),
-        signUpHref: authHrefFor("/sign-up", `${root}/app`),
+        logInHref: authHrefFor("/sign-in", "/app"),
+        signUpHref: authHrefFor("/sign-up", "/app"),
       }}
     />
   );

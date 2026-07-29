@@ -10,13 +10,11 @@ import { CutPricing } from "@/app/cut/_components/landing/CutPricing";
 import { CutTopNav } from "@/app/cut/_components/landing/CutTopNav";
 import { CutWorksWith } from "@/app/cut/_components/landing/CutWorksWith";
 
-// The donkeycut.com marketing page: the Donkey landing's cream visual system
-// with Cut-only content. `root` is "" on donkeycut.com and "/cut" in dev, so
-// links into the app resolve on either host. Every CTA into the app is gated on
-// session (useAppEntryHref): signed-out clicks route to sign-in first. The nav
-// mirrors this — a "Log in" link with a "Sign up" pill when signed out,
-// "Go to App" when signed in.
-export function CutLanding({ root }: { root: string }) {
+// The donkeycut.com marketing page, on the cream visual system. Every CTA into
+// the app is gated on session (useAppEntryHref): signed-out clicks route to
+// sign-in first. The nav mirrors this — a "Log in" link with a "Sign up" pill
+// when signed out, "Go to App" when signed in.
+export function CutLanding() {
   return (
     <main
       style={{
@@ -27,13 +25,13 @@ export function CutLanding({ root }: { root: string }) {
         WebkitFontSmoothing: "antialiased",
       }}
     >
-      <CutTopNav root={root} />
-      <CutHero root={root} />
+      <CutTopNav />
+      <CutHero />
       <CutWorksWith />
-      <CutPricing root={root} />
-      <CutLocal root={root} />
+      <CutPricing />
+      <CutLocal />
       <CutOpenSource />
-      <CutFinalCTA root={root} />
+      <CutFinalCTA />
       <CutFooter />
     </main>
   );

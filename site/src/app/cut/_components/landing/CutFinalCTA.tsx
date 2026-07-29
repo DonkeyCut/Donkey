@@ -3,7 +3,7 @@
 import { PillButton } from "@/app/_components/landing/LandingPrimitives";
 import { useAppEntryHref } from "@/app/_components/landing/useAppEntryHref";
 
-export function CutFinalCTA({ root }: { root: string }) {
+export function CutFinalCTA() {
   const appHref = useAppEntryHref();
 
   return (
@@ -21,7 +21,7 @@ export function CutFinalCTA({ root }: { root: string }) {
             on your Mac.
           </h2>
           <div className="mt-8 flex justify-center">
-            <PillButton href={appHref(`${root}/app`)} variant="primary" size="lg">
+            <PillButton href={appHref("/app")} variant="primary" size="lg">
               Start Today
             </PillButton>
           </div>
