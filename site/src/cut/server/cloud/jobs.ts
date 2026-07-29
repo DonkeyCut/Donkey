@@ -7,13 +7,18 @@ import { EXPORT_QUOTA_MARGIN, renderJobCheck } from "./limits";
 import { wakeRenderWorker } from "./wake";
 import { getProject } from "./projects";
 import { mediaObjectUrl } from "./mediaCdn";
-import { overlayKey, presignPut } from "./r2";
-import { quotaCheck } from "./usage";
+import { head, overlayKey, presignPut, projectExportKey } from "./r2";
+import { addUsage, quotaCheck } from "./usage";
 import { caught, err, redirect } from "./util";
 
 /** How long finished jobs stay in the export-jobs feed — the engine's registry
  * keeps a bounded terminal backlog; the cloud keeps a day. */
 const FEED_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** How long a browser render may hold its reserved name before it is treated
+ * as a tab that went away. Generous next to the ten-minute cut the client will
+ * take on, because the wall-clock cost of a render depends on the machine. */
+const CLIENT_RENDER_WINDOW_MS = 2 * 60 * 60 * 1000;
 
 type JobRow = {
   id: string;
@@ -43,15 +48,20 @@ async function findJob(userId: string, id: string): Promise<JobRow | null> {
 /** Engine-style export name: `base.mp4` with a " 2", " 3"… suffix when taken
  * by an existing export object or a job still in flight. The client derives the
  * base from the project name; the dedupe happens here, where the rows are. */
-async function exportName(userId: string, projectId: string, baseName: string) {
+async function exportName(
+  userId: string,
+  projectId: string,
+  baseName: string,
+  tx: Prisma.TransactionClient | typeof prisma = prisma
+) {
   const base =
     baseName.replace(/\.mp4$/i, "").replace(/[/\\:*?"<>|]/g, "").trim().slice(0, 60) || "export";
   const [files, jobs] = await Promise.all([
-    prisma.cutMediaObject.findMany({
+    tx.cutMediaObject.findMany({
       where: { userId, projectId, kind: "export" },
       select: { fileName: true },
     }),
-    prisma.cutRenderJob.findMany({
+    tx.cutRenderJob.findMany({
       where: { userId, projectId, kind: "export" },
       select: { outName: true },
     }),
@@ -221,6 +231,130 @@ export const jobsCloud = {
     return Response.json({ ok: true });
   },
 
+  /**
+   * Claim a name and a destination for an export the browser renders itself.
+   *
+   * The gates a queued render passes on its way in have to be passed here too —
+   * the concurrent-render cap and the storage margin — because a browser render
+   * is still a render this account asked for and still lands as a stored file.
+   * The name is deduped here, where the rows are, exactly as it is for the
+   * worker.
+   */
+  async exportClientPresign(userId: string, req: Request) {
+    try {
+      const body = (await req.json()) as { projectId?: string; outName?: string };
+      const projectId = body.projectId;
+      if (!projectId) return err("projectId is required.", 400);
+      if (!(await getProject(userId, projectId))) return err("Project not found.", 400);
+      const capped = await renderJobCheck(userId);
+      if (capped) return capped;
+      const over = await quotaCheck(userId, 0, EXPORT_QUOTA_MARGIN);
+      if (over) return over;
+      // The name is claimed by writing the row, not just by reading the rows
+      // that exist. `exportName` dedupes against stored objects and jobs, so a
+      // second export started while this one renders has to see this one — two
+      // tabs exporting the same project would otherwise both be handed
+      // "export.mp4", the second upload would overwrite the first, and the
+      // completion would then fail on the unique key with the render already
+      // spent. The row is the reservation.
+      const row = await prisma.$transaction(async (tx) => {
+        const outName = await exportName(userId, projectId, body.outName ?? "export.mp4", tx);
+        return tx.cutRenderJob.create({
+          data: {
+            userId,
+            projectId,
+            kind: "export",
+            // Rendering, in the tab rather than on the worker — which is why
+            // nothing ever claims it.
+            state: "running",
+            progress: 0,
+            spec: { client: true },
+            outName,
+          },
+        });
+      });
+      const key = projectExportKey(userId, projectId, row.outName!);
+      return Response.json({
+        jobId: row.id,
+        key,
+        outName: row.outName,
+        url: await presignPut(key, "video/mp4"),
+      });
+    } catch (e) {
+      return caught(e, "Could not start the export.");
+    }
+  },
+
+  /**
+   * Register a browser-rendered export that has finished uploading.
+   *
+   * The row is written already finished, because it is: the render happened in
+   * the tab and the bytes are in the bucket before this is called. That is the
+   * whole difference from a queued export — there is no state for the client to
+   * poll towards, so the dock's next refresh simply finds a completed job.
+   *
+   * The object's size is read from the bucket rather than taken from the
+   * client, since it is what the account's storage is charged.
+   */
+  async exportClientComplete(userId: string, req: Request) {
+    try {
+      const body = (await req.json()) as { jobId?: string };
+      if (!body.jobId) return err("jobId is required.", 400);
+      // The row the presign reserved carries the project and the name, so the
+      // client cannot claim a different one at completion time.
+      const row = await findJob(userId, body.jobId);
+      if (!row || row.kind !== "export" || !row.projectId || !row.outName) {
+        return err("Export not found.", 400);
+      }
+      if (row.state === "canceled") return err("Export canceled.", 400);
+      const { projectId, outName } = row;
+      const key = projectExportKey(userId, projectId, outName);
+      const object = await head(key);
+      if (!object) return err("The export was not uploaded.", 400);
+      const bytes = object.bytes;
+      await prisma.$transaction(async (tx) => {
+        await tx.cutMediaObject.create({
+          data: {
+            userId,
+            projectId,
+            r2Key: key,
+            fileName: outName,
+            mime: "video/mp4",
+            bytes: BigInt(bytes),
+            kind: "export",
+            uploadState: "complete",
+          },
+        });
+        await addUsage(tx, userId, bytes);
+        await tx.cutRenderJob.update({
+          where: { id: row.id },
+          data: { state: "done", progress: 1, outputKey: key },
+        });
+      });
+      return Response.json({ id: row.id, outName });
+    } catch (e) {
+      return caught(e, "Could not save the export.");
+    }
+  },
+
+  /**
+   * Give back a name a browser render claimed but will not use.
+   *
+   * The row is deleted rather than marked canceled: nothing rendered, so there
+   * is nothing to report, and a canceled row would put a failure card in the
+   * dock for a render the user themselves stopped.
+   */
+  async exportClientRelease(userId: string, jobId: string) {
+    try {
+      await prisma.cutRenderJob.deleteMany({
+        where: { id: jobId, userId, kind: "export", state: { in: ["running", "queued"] } },
+      });
+      return Response.json({ ok: true });
+    } catch (e) {
+      return caught(e, "Could not release the export.");
+    }
+  },
+
   async exportFile(userId: string, jobId: string) {
     try {
       const row = await findJob(userId, jobId);
@@ -238,6 +372,22 @@ export const jobsCloud = {
   /** The exports-dock feed: every export job for this account, start order —
    * same view the engine's listAllJobs builds (previews stay internal). */
   async exportFeed(userId: string) {
+    // A browser render lives in a tab, and a tab can close mid-render. Nothing
+    // claims those rows, so nothing else would ever release them, and each one
+    // left behind holds a name and a render slot for good. Any that have been
+    // running longer than a render plausibly takes are swept here, on the poll
+    // that would have displayed them.
+    await prisma.cutRenderJob
+      .deleteMany({
+        where: {
+          userId,
+          kind: "export",
+          state: "running",
+          claimedAt: null,
+          updatedAt: { lt: new Date(Date.now() - CLIENT_RENDER_WINDOW_MS) },
+        },
+      })
+      .catch(() => {});
     const rows = await prisma.cutRenderJob.findMany({
       where: {
         userId,

@@ -38,6 +38,7 @@ export function ExportsDock() {
   const jobs = useExports((s) => s.jobs);
   const local = useExports((s) => s.local);
   const dismissed = useExports((s) => s.dismissed);
+  const rendering = useExports((s) => s.rendering);
   const [collapsed, setCollapsed] = useState(false);
 
   // Poll the feed while the dock is mounted (i.e. the whole time the app is up).
@@ -48,8 +49,16 @@ export function ExportsDock() {
 
   const items = useMemo(() => {
     const rank = (status: string) =>
-      status === "running" ? 0 : status === "queued" || status === "preparing" ? 1 : status === "done" ? 2 : 3;
-    const visible = jobs.filter((j) => !dismissed.includes(j.id));
+      status === "running" || status === "rendering"
+        ? 0
+        : status === "queued" || status === "preparing"
+          ? 1
+          : status === "done"
+            ? 2
+            : 3;
+    // A row this tab is rendering shows as its local row, which has the
+    // progress; the reserved job row behind it stays out of the dock.
+    const visible = jobs.filter((j) => !dismissed.includes(j.id) && !rendering.includes(j.id));
     return [
       ...visible.map((j) => ({ kind: "job" as const, data: j })),
       ...local.map((r) => ({ kind: "local" as const, data: r })),
@@ -57,11 +66,13 @@ export function ExportsDock() {
       const dr = rank(a.data.status) - rank(b.data.status);
       return dr !== 0 ? dr : (a.data.createdAt ?? 0) - (b.data.createdAt ?? 0);
     });
-  }, [jobs, local, dismissed]);
+  }, [jobs, local, dismissed, rendering]);
 
   if (items.length === 0) return null;
 
-  const running = items.filter((i) => i.data.status === "running").length;
+  const running = items.filter(
+    (i) => i.data.status === "running" || i.data.status === "rendering"
+  ).length;
   const waiting = items.filter(
     (i) => i.data.status === "queued" || i.data.status === "preparing"
   ).length;
@@ -116,7 +127,7 @@ export function ExportsDock() {
 }
 
 function StatusIcon({ status }: { status: string }) {
-  if (status === "running" || status === "preparing")
+  if (status === "running" || status === "preparing" || status === "rendering")
     return <Loader2 className="size-4 shrink-0 animate-spin text-primary" />;
   if (status === "queued") return <Clock className="size-4 shrink-0 text-muted-foreground" />;
   if (status === "done")
@@ -256,8 +267,10 @@ function ExportRow({ job }: { job: ExportJob }) {
 }
 
 function LocalRowView({ row }: { row: LocalRow }) {
+  const rendering = row.status === "rendering";
+  const pct = Math.round(Math.min(1, Math.max(0, row.progress ?? 0)) * 100);
   return (
-    <div className="flex items-center gap-2.5 px-3 py-2">
+    <div className="relative flex items-center gap-2.5 px-3 py-2">
       <StatusIcon status={row.status} />
       <div className="min-w-0 flex-1">
         <ProjectName projectId={row.projectId} name={row.projectName} />
@@ -267,9 +280,23 @@ function LocalRowView({ row }: { row: LocalRow }) {
             row.status === "error" ? "text-destructive" : "text-muted-foreground"
           )}
         >
-          {row.status === "preparing" ? "Preparing…" : row.error || "Couldn't start export"}
+          {rendering
+            ? `Rendering… ${pct}%`
+            : row.status === "preparing"
+              ? "Preparing…"
+              : row.error || "Couldn't start export"}
         </div>
       </div>
+      {rendering && (
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label="Stop export"
+          onClick={() => useExports.getState().cancel(row.id)}
+        >
+          <X />
+        </Button>
+      )}
       {row.status === "error" && (
         <Button
           variant="ghost"
@@ -279,6 +306,14 @@ function LocalRowView({ row }: { row: LocalRow }) {
         >
           <X />
         </Button>
+      )}
+      {rendering && (
+        <div className="absolute inset-x-0 bottom-0 h-0.5 bg-secondary">
+          <div
+            className="h-full bg-primary transition-[width] duration-300"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
       )}
     </div>
   );

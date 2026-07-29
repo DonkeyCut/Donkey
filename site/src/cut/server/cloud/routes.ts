@@ -79,6 +79,11 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "GET", path: "/api/cut-cloud/export-jobs", handler: (_r, u) => jobsCloud.exportFeed(u) },
   { method: "POST", path: "/api/cut-cloud/export", handler: (r, u) => jobsCloud.exportCreate(u, r) },
   { method: "POST", path: "/api/cut-cloud/export/presign", handler: (r, u) => jobsCloud.exportPresign(u, r) },
+  // A render the browser does itself: claim a name and a destination, then
+  // register the finished file. No queue in between — the tab is the worker.
+  { method: "POST", path: "/api/cut-cloud/export/client/presign", handler: (r, u) => jobsCloud.exportClientPresign(u, r) },
+  { method: "POST", path: "/api/cut-cloud/export/client/complete", handler: (r, u) => jobsCloud.exportClientComplete(u, r) },
+  { method: "POST", path: "/api/cut-cloud/export/client/:jobId/release", handler: (_r, u, p) => jobsCloud.exportClientRelease(u, p.jobId) },
   { method: "GET", path: "/api/cut-cloud/export/:jobId", handler: (_r, u, p) => jobsCloud.exportStatus(u, p.jobId) },
   { method: "DELETE", path: "/api/cut-cloud/export/:jobId", handler: (_r, u, p) => jobsCloud.exportCancel(u, p.jobId) },
   { method: "GET", path: "/api/cut-cloud/export/:jobId/file", handler: (_r, u, p) => jobsCloud.exportFile(u, p.jobId) },

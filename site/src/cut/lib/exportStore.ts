@@ -9,9 +9,11 @@ import { localBackend } from "./backend/local";
 import {
   cancelExportJob,
   createExportJob,
+  runBrowserExport,
   type ExportDoc,
   type ExportSettings,
 } from "./exportClient";
+import { canRenderInBrowser } from "./exportRender";
 import { useGenNotify } from "./genNotify";
 
 // Exports are tracked app-wide, not per-open-project. The engine holds every
@@ -47,19 +49,24 @@ export function exportBackend(residency: CutMode): CutBackend {
   return residency === "cloud" ? cloudBackend : localBackend;
 }
 
-/** A client-only dock row for the brief window before the engine has a job id:
- * while the cut is being built and uploaded ("preparing"), or when that failed
- * before a job ever existed ("error"). Kept apart from the engine feed so a
+/** A client-only dock row for work no server job covers: the window before the
+ * engine has a job id ("preparing"), a failure that happened before a job ever
+ * existed ("error"), and the whole of a browser render ("rendering"), which has
+ * no server row until the file is stored. Kept apart from the engine feed so a
  * poll tick never clears it. */
 export interface LocalRow {
   id: string;
   projectId: string;
   projectName?: string;
-  status: "preparing" | "error";
+  status: "preparing" | "rendering" | "error";
   error?: string;
+  /** 0..1 while rendering in this tab. */
+  progress?: number;
   createdAt: number;
   /** The backend the export is starting on, captured when it was kicked off. */
   residency: CutMode;
+  /** Stops a browser render; absent for work a server owns. */
+  abort?: AbortController;
 }
 
 interface ExportsState {
@@ -69,6 +76,10 @@ interface ExportsState {
   local: LocalRow[];
   /** Finished/failed engine jobs the user cleared from this tab's dock. */
   dismissed: string[];
+  /** Reserved job rows this tab is rendering itself. They are real rows in the
+   * feed, but the local row beside them is the one carrying progress, so they
+   * stay hidden until the render settles. */
+  rendering: string[];
   /** Build the cut and hand it to the engine; the dock tracks it from there. */
   start: (
     projectId: string,
@@ -88,9 +99,17 @@ export const useExports = create<ExportsState>((set, get) => ({
   jobs: [],
   local: [],
   dismissed: [],
+  rendering: [],
 
   start: async (projectId, doc, settings, projectName) => {
     const localId = `local-${crypto.randomUUID().slice(0, 8)}`;
+    const backend = getBackend();
+    // A cloud project renders in the tab: no upload of the cut to a container,
+    // no queue behind other accounts, and the file matches the preview because
+    // the same compositor drew both. Past what a tab can hold — a long cut, a
+    // very large frame — it goes to the worker, which has a whole machine.
+    const inBrowser = backend.kind === "cloud" && (await canRenderInBrowser(doc, settings));
+    const abort = inBrowser ? new AbortController() : undefined;
     set((s) => ({
       local: [
         ...s.local,
@@ -98,32 +117,73 @@ export const useExports = create<ExportsState>((set, get) => ({
           id: localId,
           projectId,
           projectName,
-          status: "preparing",
+          status: inBrowser ? "rendering" : "preparing",
+          ...(inBrowser ? { progress: 0 } : {}),
           createdAt: Date.now(),
-          residency: getBackend().kind,
+          residency: backend.kind,
+          abort,
         },
       ],
     }));
-    try {
-      await createExportJob(projectId, doc, settings);
-      // Pull the queued job into the feed *before* retiring the placeholder.
-      // Dropping the local row first left a round-trip with neither row on
-      // screen, which read as the export card flashing away and back.
-      // A failed poll must not mark a started export as a start error, so it
-      // never reaches the catch below.
-      await get().refresh().catch(() => {});
-      set((s) => ({ local: s.local.filter((r) => r.id !== localId) }));
-    } catch (err) {
+    let claimedId: string | null = null;
+    const release = () => {
+      if (claimedId) set((s) => ({ rendering: s.rendering.filter((id) => id !== claimedId) }));
+    };
+    const fail = (err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
       set((s) => ({
         local: s.local.map((r) =>
-          r.id === localId ? { ...r, status: "error", error: msg } : r
+          r.id === localId ? { ...r, status: "error" as const, error: msg, abort: undefined } : r
         ),
       }));
+    };
+    try {
+      if (inBrowser) {
+        await runBrowserExport(projectId, doc, settings, {
+          signal: abort!.signal,
+          // The reservation is a real job row, so the feed would show it beside
+          // the local row that carries the progress. Hide it until this tab is
+          // done with it.
+          onClaimed: (jobId) => {
+            claimedId = jobId;
+            set((s) => ({ rendering: [...new Set([...s.rendering, jobId])] }));
+          },
+          onProgress: (progress) =>
+            set((s) => ({
+              local: s.local.map((r) => (r.id === localId ? { ...r, progress } : r)),
+            })),
+        });
+      } else {
+        await createExportJob(projectId, doc, settings);
+      }
+      // Pull the finished (or queued) job into the feed *before* retiring the
+      // placeholder. Dropping the local row first left a round-trip with
+      // neither row on screen, which read as the export card flashing away and
+      // back. A failed poll must not mark a started export as a start error, so
+      // it never reaches the catch below.
+      release();
+      await get().refresh().catch(() => {});
+      set((s) => ({ local: s.local.filter((r) => r.id !== localId) }));
+    } catch (err) {
+      release();
+      // A render the user stopped leaves no row at all — the dock already
+      // showed it going, and an error card for their own cancel reads as a
+      // failure.
+      if (err instanceof DOMException && err.name === "AbortError") {
+        set((s) => ({ local: s.local.filter((r) => r.id !== localId) }));
+        return;
+      }
+      fail(err);
     }
   },
 
   cancel: (id) => {
+    const local = get().local.find((r) => r.id === id);
+    if (local) {
+      local.abort?.abort();
+      set((s) => ({ local: s.local.filter((r) => r.id !== id) }));
+      return;
+    }
     const job = get().jobs.find((j) => j.id === id);
     cancelExportJob(id, job ? exportBackend(job.residency) : undefined);
     set((s) => ({

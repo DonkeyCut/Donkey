@@ -3,6 +3,7 @@
 import { apiFetch, apiJson, getBackend, type CutBackend } from "./backend";
 import { quotaErrorMessage } from "./backend/cloud";
 import { normalizeGrade } from "./colorGrade";
+import { renderProjectToMp4 } from "./exportRender";
 import { putSigned } from "./media";
 import { clipSpeed, getClipSpans, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
 import { captionStyle, cueOverlay, cueWordWindows, laneCues, subtitleLaneCount, trackPos } from "./subtitles";
@@ -545,6 +546,89 @@ export async function createExportJob(
     );
   }
   return body.id;
+}
+
+/**
+ * Render the cut in this tab and store the result, returning the finished job's
+ * id.
+ *
+ * The worker path exists because a hosted page had no way to encode video; it
+ * does now. Rendering here removes the round trip a queued export costs — the
+ * media does not have to be pulled back out of storage into a container, and
+ * nothing waits behind another account's render — and the file matches the
+ * preview, because the same compositor drew both.
+ *
+ * Cloud projects only: a local project's engine has ffmpeg, a whole machine,
+ * and the media already on disk.
+ */
+export async function runBrowserExport(
+  projectId: string,
+  doc: ExportDoc,
+  settings: ExportSettings,
+  opts: {
+    onProgress?: (ratio: number) => void;
+    signal?: AbortSignal;
+    /** The reserved job's id, as soon as it exists — the dock hides that row
+     * while this tab is the thing rendering it. */
+    onClaimed?: (jobId: string) => void;
+  } = {}
+): Promise<string> {
+  const backend = getBackend(); // pinned: the render outlives navigation
+  if (backend.kind !== "cloud") throw new Error("This project renders on its own machine.");
+
+  // The name and the destination are claimed before a frame is drawn, so a
+  // render that is going to be refused for space or for the render cap is
+  // refused now rather than after minutes of work. The claim is a job row, so
+  // a second export started while this one renders sees it and takes the next
+  // name instead of overwriting this one's file.
+  const claim = await backend.fetch("/api/cut/export/client/presign", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ projectId, outName: exportOutName() }),
+  });
+  const claimed = await apiJson<{ jobId?: string; url?: string; outName?: string }>(claim);
+  if (!claim.ok || !claimed.jobId || !claimed.url) {
+    throw new Error(
+      quotaErrorMessage(claim.status, claimed) ?? claimed.error ?? "Export failed to start."
+    );
+  }
+  const jobId = claimed.jobId;
+  opts.onClaimed?.(jobId);
+
+  try {
+    const file = await renderProjectToMp4(doc, settings, {
+      // Read the asset's URL at the moment it is needed rather than off the
+      // snapshot: a long render can outlive the links it started with, and the
+      // store re-mints them behind it.
+      resolve: (asset) =>
+        useEditor.getState().assets.find((a) => a.id === asset.id)?.url ?? asset.url,
+      signal: opts.signal,
+      // The render is nearly all of the work; the upload is the tail of the bar.
+      onProgress: ({ ratio }) => opts.onProgress?.(ratio * 0.9),
+    });
+
+    await putSigned(claimed.url, file, "video/mp4", {
+      signal: opts.signal,
+      onProgress: (fraction) => opts.onProgress?.(0.9 + fraction * 0.1),
+    });
+
+    const done = await backend.fetch("/api/cut/export/client/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobId }),
+    });
+    const body = await apiJson<{ id?: string }>(done);
+    if (!done.ok || !body.id) throw new Error(body.error ?? "Could not save the export.");
+    return body.id;
+  } catch (err) {
+    // A render that stopped — cancelled, failed, or refused — gives back the
+    // name it was holding. Leaving the row behind would keep the name taken and
+    // a render slot spent for a file that will never exist.
+    void backend
+      .fetch(`/api/cut/export/client/${jobId}/release`, { method: "POST" })
+      .catch(() => {});
+    throw err;
+  }
 }
 
 /** Cancel a running or queued export job, or retire a settled one from the
