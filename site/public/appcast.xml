@@ -2,20 +2,20 @@
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
     <title>Donkey Updates</title>
-    <link>https://donkeycut.com/appcast.xml</link>
+    <link>https://donkeyuse.com/appcast.xml</link>
     <description>Donkey macOS app updates.</description>
     <language>en</language>
     <item>
-      <title>Version 0.1.99</title>
-      <sparkle:releaseNotesLink>https://github.com/DonkeyUseCorp/Donkey/releases/tag/v0.1.99</sparkle:releaseNotesLink>
-      <pubDate>Wed, 29 Jul 2026 07:11:33 GMT</pubDate>
+      <title>Version 0.1.100</title>
+      <sparkle:releaseNotesLink>https://github.com/DonkeyUseCorp/Donkey/releases/tag/v0.1.100</sparkle:releaseNotesLink>
+      <pubDate>Wed, 29 Jul 2026 09:11:44 GMT</pubDate>
       <enclosure
-        url="https://github.com/DonkeyUseCorp/Donkey/releases/download/v0.1.99/Donkey.dmg"
-        sparkle:version="120"
-        sparkle:shortVersionString="0.1.99"
+        url="https://github.com/DonkeyUseCorp/Donkey/releases/download/v0.1.100/Donkey.dmg"
+        sparkle:version="123"
+        sparkle:shortVersionString="0.1.100"
         sparkle:minimumSystemVersion="14.0"
-        sparkle:edSignature="qMp+y6YnBMjQkPz9Nc4sYpG7czn5rtSxagyWGrmbGpUxSfC5ylifjpBCXJXAFREmbO6jU0hm8ZxvD53+z5QtDA=="
-        length="79982591"
+        sparkle:edSignature="l8/mVHYf3+OQ0ugtx1wiFhgoVLC4B6QYHSlgDQGVFUcT9zF75EmSWCQxIEIsCfdd/HSS2hMIho6i08o2xOB/AQ=="
+        length="79982575"
         type="application/x-apple-diskimage" />
     </item>
   </channel>
