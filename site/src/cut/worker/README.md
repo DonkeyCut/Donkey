@@ -132,3 +132,43 @@ drain serially instead of stampeding R2. One-time setup:
 
 Without the queue env, the hosted API runs copies inline in the request —
 fine for local dev, unthrottled in production.
+
+## Share streaming (HLS ladder)
+
+A shared project plays as an adaptive stream rather than a file, so an `hls`
+job renders the cut and packages it into a rung ladder under
+`cut/<user>/projects/<id>/hls/<version>/` in R2. Segments are served by the
+media handler above, through a token that covers the whole tree — see
+`../server/hlsLadder.ts` for why a single mp4 is the wrong shape here.
+
+What a project has published is recorded in **Workers KV**, not Postgres: it is
+derived state, and losing it costs a re-render and nothing else. Neither writer
+is a Worker (the site runs on Vercel, this render worker is a container), so
+both use the KV REST API.
+
+The record is more than a pointer, because it is the only index these trees
+have. A version is claimed there *before* its first byte uploads, so a render
+killed partway still leaves something the sweep can find; a published version
+displaces the previous one into a retired list stamped with the moment it was
+replaced, which is the clock its day of grace runs on. Only records carrying
+retired or pending versions are listed at all, so the nightly sweep does work
+proportional to the garbage rather than to how many projects exist.
+
+The only setup is the credential — `CLOUDFLARE_KV_API_TOKEN`, scoped to
+Workers KV read+write on the account in `R2_ACCOUNT_ID`, held both by the
+hosted site and as a Worker secret (`cf/worker.ts` passes it into the
+container). The namespace itself is created on first write and then found by
+title, so there is nothing to provision and no id to paste into
+`wrangler.jsonc`; the title lives in `../server/cloud/ladderStore.ts`.
+
+It is required, not optional, and its absence is loud where an operator will
+see it: a ladder render that cannot record where it landed fails its job with
+the reason on the row, and the stream route logs and answers 5xx rather than
+reporting "no ladder". What a viewer sees is separate — they fall back to the
+project's flattened preview proxy, because a broken deployment is not theirs to
+diagnose and a spinner helps nobody. The two are deliberately not the same
+signal: `readLadder` returning null means one thing only, that no ladder exists
+yet, and it never doubles as "something is broken".
+
+Ladders never count against a user's storage quota — they carry no media rows
+and are found and swept by prefix, the same way inference scratch is.

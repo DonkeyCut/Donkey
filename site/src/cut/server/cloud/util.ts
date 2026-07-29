@@ -1,4 +1,5 @@
 import path from "node:path";
+import { LadderStoreNotConfiguredError } from "./ladderStore";
 import { MediaNotConfiguredError } from "./mediaCdn";
 import { R2NotConfiguredError } from "./r2";
 
@@ -13,6 +14,10 @@ export const caught = (e: unknown, fallback: string, status = 500) => {
   if (e instanceof MediaNotConfiguredError) {
     console.error(e.message);
     return err("Cloud media is unavailable.", 500);
+  }
+  if (e instanceof LadderStoreNotConfiguredError) {
+    console.error(e.message);
+    return err("Streaming is unavailable.", 500);
   }
   return err(e instanceof Error ? e.message : fallback, status);
 };

@@ -18,6 +18,7 @@ type WorkerEnv = MediaEnv & {
   CUT_WAKE_SECRET: string;
   CUT_COPY_EXECUTE_URL: string;
   CUT_COPY_EXECUTE_SECRET: string;
+  CLOUDFLARE_KV_API_TOKEN: string;
 };
 
 // Minimal shapes for the queue consumer — this file stays off workers-types
@@ -52,6 +53,9 @@ export class CutRenderWorker extends Container<WorkerEnv> {
       R2_ACCOUNT_ID: env.R2_ACCOUNT_ID,
       R2_ACCESS_KEY_ID: env.R2_ACCESS_KEY_ID,
       R2_SECRET_ACCESS_KEY: env.R2_SECRET_ACCESS_KEY,
+      // The container records a finished HLS ladder in KV. It is not a Worker,
+      // so it has no binding and goes over the REST API like the site does.
+      CLOUDFLARE_KV_API_TOKEN: env.CLOUDFLARE_KV_API_TOKEN,
     };
   }
 }

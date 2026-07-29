@@ -6,9 +6,10 @@
 import { prisma } from "@/lib/prisma";
 import { graceDeadline } from "./grace";
 import { cutLimitsFor, FREE_STORAGE_BYTES } from "./limits";
+import { collectable, listSweepableLadders, pruneLadder, readLadder } from "./ladderStore";
 import { deleteLibraryAssetCascade } from "./library";
 import { deleteProjectCascade } from "./projects";
-import { del, INFERENCE_PREFIX, listOlderThan } from "./r2";
+import { del, deletePrefix, INFERENCE_PREFIX, listOlderThan, projectHlsRoot } from "./r2";
 import { addUsage } from "./usage";
 
 const PENDING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -23,7 +24,64 @@ const RECLAIM_SCAN_LIMIT = 500;
 const RECLAIM_MAX_USERS = 10;
 const RECLAIM_MAX_DELETES_PER_USER = 25;
 
+// A re-rendered HLS ladder is written to a NEW version prefix so viewers on
+// the old one keep playing off the edge cache. That makes the previous ladder
+// garbage the moment the new one publishes — but not immediately collectable,
+// because someone may still be watching it. A day of grace clears any single
+// sitting, timed from when the version was RETIRED (the record carries that
+// stamp) rather than from when its bytes were written, which for a ladder built
+// weeks ago is already long past and would mean no grace at all.
+const HLS_RETIRED_GRACE_MS = 24 * 60 * 60 * 1000;
+// A version claimed but never published belongs to a render that is either
+// still going or dead. The longest a ladder can legitimately take is bounded by
+// the worker's own job lifetime, so past this it is a dead render's leftovers.
+const HLS_PENDING_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+
 type ReclaimPlan = { projects: string[]; assets: string[]; bytes: number };
+
+/**
+ * Drop ladder versions a project has moved on from, and the leftovers of
+ * renders that died partway.
+ *
+ * Ladders carry no media rows and no storage quota, so the record in KV is the
+ * only index of them and this is a pure prefix delete. Two clocks decide what
+ * goes: a retired version leaves a day after it stopped being current, and a
+ * pending version — one claimed before upload whose render never published —
+ * leaves once it is too old to still be running.
+ *
+ * The work scales with the garbage, not the project count: only records that
+ * carry retired or pending versions are listed at all, and a swept record drops
+ * out of that set. So there is no per-run project cap to strand the tail of the
+ * namespace behind the same first hundred keys every night.
+ */
+async function sweepStaleLadders() {
+  const out = { projects: 0, versions: 0, objects: 0, failed: 0 };
+  const now = Date.now();
+  for (const { projectId } of await listSweepableLadders()) {
+    try {
+      const record = await readLadder(projectId);
+      if (!record) continue;
+      const drop = collectable(record, now, HLS_RETIRED_GRACE_MS, HLS_PENDING_TIMEOUT_MS);
+      if (drop.length === 0) continue;
+      const root = projectHlsRoot(record.userId, projectId);
+      const dropped = new Set<string>();
+      for (const version of drop) {
+        out.objects += await deletePrefix(`${root}${version}/`);
+        dropped.add(version);
+      }
+      // Only now does the record forget them: pruning first would unindex the
+      // objects if the delete then failed.
+      await pruneLadder(projectId, record, dropped);
+      out.projects += 1;
+      out.versions += dropped.size;
+    } catch {
+      // One project's sweep failing must not fail the cron, and the record
+      // still names its garbage, so the next run tries again.
+      out.failed += 1;
+    }
+  }
+  return out;
+}
 
 /** What the sweep can actually free for one account, oldest first: whole
  * projects, then library assets, stopping as soon as the plan covers `target`.
@@ -251,6 +309,14 @@ export async function runGc(): Promise<Response> {
   ).catch(() => [] as string[]);
   await del(scratch);
 
+  // Guarded like the prefix sweeps above it: the ladder store is optional
+  // infrastructure whose loss costs a re-render, so a missing token or an
+  // unreachable KV must not take down the run that reclaims storage.
+  const ladders = await sweepStaleLadders().catch((e: unknown) => {
+    console.error("[cut-gc] ladder sweep failed:", e instanceof Error ? e.message : e);
+    return { projects: 0, versions: 0, objects: 0, failed: 1 };
+  });
+
   const reclaimed = await reclaimOverQuota();
 
   return Response.json({
@@ -258,6 +324,10 @@ export async function runGc(): Promise<Response> {
     orphanedMedia: orphans.length,
     inferenceScratch: scratch.length,
     renderJobs: jobs.count,
+    staleLadderProjects: ladders.projects,
+    staleLadderVersions: ladders.versions,
+    staleLadderObjects: ladders.objects,
+    staleLadderFailures: ladders.failed,
     reclaimedUsers: reclaimed.users,
     reclaimedProjects: reclaimed.projects,
     reclaimedLibraryAssets: reclaimed.libraryAssets,
