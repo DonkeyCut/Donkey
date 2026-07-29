@@ -103,14 +103,22 @@ const PAD_SIDE = 20;
 /** Zoom range, in timeline pixels per second of media. */
 const ZOOM_MIN = 12;
 const ZOOM_MAX = 800;
+/** px/sec at which `dur` seconds fill a `width`-px viewport, with room spared
+ * for the side padding. */
+const fitZoom = (width: number, dur: number) => Math.max((width - 60) / dur, 0.01);
+/** The slider's left end. ZOOM_MIN suits short projects, but a long one still
+ * overflows there, so the floor drops with duration until full-left always
+ * means the whole project in view. */
+const zoomFloor = (width: number, dur: number) =>
+  dur > 0 ? Math.min(ZOOM_MIN, fitZoom(width, dur)) : ZOOM_MIN;
 /**
  * Zoom reads as a ratio — doubling px/sec feels like one step whether you start
  * at 20 or at 400 — so the slider travels in log space. A linear track would
  * spend its first sixth on every zoom anyone uses and the rest on extremes.
  */
-const zoomToSlider = (pps: number) =>
-  (Math.log(pps / ZOOM_MIN) / Math.log(ZOOM_MAX / ZOOM_MIN)) * 100;
-const sliderToZoom = (pos: number) => ZOOM_MIN * (ZOOM_MAX / ZOOM_MIN) ** (pos / 100);
+const zoomToSlider = (pps: number, min: number) =>
+  (Math.log(pps / min) / Math.log(ZOOM_MAX / min)) * 100;
+const sliderToZoom = (pos: number, min: number) => min * (ZOOM_MAX / min) ** (pos / 100);
 
 // A high-contrast selected state: a bright blue ring outside the box, a halo,
 // and a raised stacking order, so a selected item reads clearly against its
@@ -329,6 +337,7 @@ export function Timeline() {
     return m;
   }, [overlayClips, clips, assets]);
   const total = projectDuration({ clips, audioClips });
+  const zoomMin = zoomFloor(viewportW, total);
   // Fill the viewport at minimum so a wide window never leaves the ruler/tracks
   // cut off; grow past it once the content is longer. While a trim/slide drag
   // is in flight, hold the width at its drag-start value so the scroll area
@@ -556,7 +565,8 @@ export function Timeline() {
   const zoomTo = useCallback((next: number, anchorT?: number, anchorPx?: number) => {
     const el = scrollRef.current;
     const cur = useEditor.getState();
-    const clamped = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, next));
+    const floor = el ? zoomFloor(el.clientWidth, projectDuration(cur)) : ZOOM_MIN;
+    const clamped = Math.max(floor, Math.min(ZOOM_MAX, next));
     if (Math.abs(clamped - cur.pxPerSec) < 0.01) return;
     if (el) {
       const t = anchorT ?? cur.currentTime;
@@ -570,7 +580,7 @@ export function Timeline() {
     const el = scrollRef.current;
     const dur = projectDuration(useEditor.getState());
     if (!el || dur <= 0) return;
-    zoomTo((el.clientWidth - 60) / dur, 0, PAD_SIDE);
+    zoomTo(fitZoom(el.clientWidth, dur), 0, PAD_SIDE);
   }, [zoomTo]);
 
   // The editing tools, as the toolbar button and its menu row both invoke them.
@@ -1043,9 +1053,9 @@ export function Timeline() {
               min={0}
               max={100}
               step={0.1}
-              value={zoomToSlider(pps)}
+              value={zoomToSlider(pps, zoomMin)}
               aria-label="Zoom"
-              onValueChange={(v) => zoomTo(sliderToZoom(Number(v)))}
+              onValueChange={(v) => zoomTo(sliderToZoom(Number(v), zoomMin))}
             />
             <Button variant="ghost" size="sm" title="Fit timeline to window" onClick={fit}>
               Fit
@@ -1054,6 +1064,7 @@ export function Timeline() {
           {barTight && (
             <TimelineToolsMenu
               pps={pps}
+              zoomMin={zoomMin}
               zoomTo={zoomTo}
               fit={fit}
               split={split}
@@ -1608,6 +1619,7 @@ function TimelineTools({
  * so it keeps the slider and the menu stays open around it. */
 function TimelineToolsMenu({
   pps,
+  zoomMin,
   zoomTo,
   fit,
   split,
@@ -1616,6 +1628,7 @@ function TimelineToolsMenu({
   selectionCount,
 }: {
   pps: number;
+  zoomMin: number;
   zoomTo: (next: number, anchorT?: number, anchorPx?: number) => void;
   fit: () => void;
   split: () => void;
@@ -1666,9 +1679,9 @@ function TimelineToolsMenu({
               min={0}
               max={100}
               step={0.1}
-              value={zoomToSlider(pps)}
+              value={zoomToSlider(pps, zoomMin)}
               aria-label="Zoom"
-              onValueChange={(v) => zoomTo(sliderToZoom(Number(v)))}
+              onValueChange={(v) => zoomTo(sliderToZoom(Number(v), zoomMin))}
             />
           </div>
           <Button
