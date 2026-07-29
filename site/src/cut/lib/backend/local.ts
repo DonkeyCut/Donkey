@@ -11,7 +11,6 @@ export const localBackend: CutBackend = {
     liveMic: true,
     transcribe: true,
     captionAi: true,
-    localCliChat: true,
     revealInFinder: true,
     watch: true,
   },

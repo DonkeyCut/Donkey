@@ -42,8 +42,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { engineReady } from "@/cut/lib/api";
-import { apiFetch, apiUrl } from "@/cut/lib/backend";
-import { useCutCaps } from "@/cut/lib/backend/hooks";
+import { useCutCaps, useLocalCompute } from "@/cut/lib/backend/hooks";
+import { localBackend } from "@/cut/lib/backend/local";
 import { buildAiContext } from "@/cut/lib/aiContext";
 import { runAiTool } from "@/cut/lib/aiTools";
 import { setAssetDragData } from "@/cut/lib/assetDrag";
@@ -238,7 +238,7 @@ export function AiPanel({
   onClose: () => void;
 }) {
   const [info, setInfo] = useState<ModelsInfo | null>(null);
-  const caps = useCutCaps();
+  const engineUp = useLocalCompute();
   const readOnly = useEditor((s) => s.readOnly);
   const signedIn = useSignedIn();
   const [model, setModel] = useState<string>(() =>
@@ -282,19 +282,21 @@ export function AiPanel({
   }, [readOnly, chatsReady, projectId, activeChat]);
 
   useEffect(() => {
-    // The models probe asks the engine which CLIs are installed; without the
-    // localCliChat cap there is no engine to ask (mergedInfo synthesizes the
-    // Gemini-only provider set instead).
-    if (!caps.localCliChat) return;
+    // The models probe asks the engine which CLIs are installed. The CLIs live
+    // on this Mac, so the engine being reachable is what decides — whatever
+    // backend holds the project. Without one there is no engine to ask
+    // (mergedInfo synthesizes the Gemini-only provider set instead).
+    if (!engineUp) return;
     let alive = true;
-    void apiFetch("/api/cut/ai/models")
+    void localBackend
+      .fetch("/api/cut/ai/models")
       .then((r) => r.json())
       .then((d: ModelsInfo) => alive && setInfo(d))
       .catch(() => {});
     return () => {
       alive = false;
     };
-  }, [caps.localCliChat]);
+  }, [engineUp]);
 
   const newChat = () => {
     setActiveChat(crypto.randomUUID());
@@ -342,17 +344,17 @@ export function AiPanel({
       signedIn === false
         ? { available: false, note: "sign in to Donkey to chat", installed: true }
         : (info?.providers.gemini ?? { available: true, note: "", installed: true });
-    // Without the localCliChat cap (cloud mode) the CLI providers don't exist:
-    // their groups hide, and the saved-model fallback effect moves a CLI
-    // selection over to Gemini.
-    if (!caps.localCliChat) {
+    // With no engine on this Mac the CLI providers don't exist: their groups
+    // hide, and the saved-model fallback effect moves a CLI selection over to
+    // Gemini.
+    if (!engineUp) {
       const off = { available: false, note: "", installed: false };
       const providers: ModelsInfo["providers"] = { claude: off, codex: off, test: off, gemini };
       return { providers };
     }
     if (!info) return null;
     return { ...info, providers: { ...info.providers, gemini } };
-  }, [info, signedIn, caps.localCliChat]);
+  }, [info, signedIn, engineUp]);
 
   return (
     // A column beside the editor, as it has always been. Docking costs the
@@ -578,13 +580,14 @@ function ChatSession({
       // The engine origin is discovered asynchronously; await it per request
       // (not at mount) so an early send still targets the local engine rather
       // than the hosted origin, where the Cut APIs 404. engineReady memoizes,
-      // so only the first request pays for discovery. apiUrl (read after the
-      // origin resolves) carries the account scope the engine requires on every
-      // data route — building the URL by hand here would drop it.
+      // so only the first request pays for discovery. CLI chat always runs on
+      // this Mac's engine — even for a cloud project — so the URL comes from
+      // localBackend (read after the origin resolves), which carries the
+      // account scope the engine requires on every data route.
       prepareSendMessagesRequest: async ({ messages }) => {
         await engineReady();
         return {
-          api: apiUrl("/api/cut/ai/chat"),
+          api: localBackend.url("/api/cut/ai/chat"),
           body: {
             messages,
             model: modelRef.current,
@@ -637,7 +640,7 @@ function ChatSession({
       // server-side bridge (which is holding the provider's tool call open).
       void (async () => {
         const post = (payload: Record<string, unknown>) =>
-          apiFetch("/api/cut/ai/tool-result", {
+          localBackend.fetch("/api/cut/ai/tool-result", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({

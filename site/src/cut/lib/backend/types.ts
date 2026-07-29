@@ -18,8 +18,6 @@ export type CutCaps = {
   transcribe: boolean;
   /** Caption AI: translate, rewrite, visual subtitles (engine Claude-CLI one-shots). */
   captionAi: boolean;
-  /** Claude/Codex CLI chat providers (the user's own local logins). */
-  localCliChat: boolean;
   /** Reveal a media file in Finder. */
   revealInFinder: boolean;
   /** AI "watch" filmstrip contact sheets (engine ffmpeg). */

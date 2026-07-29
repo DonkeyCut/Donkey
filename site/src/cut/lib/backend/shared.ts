@@ -48,7 +48,6 @@ export const sharedBackend: CutBackend = {
     liveMic: false,
     transcribe: false,
     captionAi: false,
-    localCliChat: false,
     revealInFinder: false,
     watch: false,
   },
