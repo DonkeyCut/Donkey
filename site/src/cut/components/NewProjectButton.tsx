@@ -46,7 +46,13 @@ export function NewProjectButton({
 
   return (
     <div className={cn("flex", className)}>
-      <Button className="min-w-0 flex-1 rounded-r-none" onClick={() => onCreate(r)}>
+      {/* The two halves read as one control: no seam between them. The base
+          button's transparent border sits over the page with bg-clip-padding,
+          so the facing borders have to go or they show as a line. */}
+      <Button
+        className="min-w-0 flex-1 rounded-r-none border-r-0"
+        onClick={() => onCreate(r)}
+      >
         <Plus data-icon="inline-start" /> New project
       </Button>
       <DropdownMenu>
@@ -54,7 +60,7 @@ export function NewProjectButton({
           render={
             <Button
               aria-label={`New projects go to ${RESIDENCY_LABEL[r]}`}
-              className="gap-1 rounded-l-none border-l-primary-foreground/25 px-2"
+              className="gap-1 rounded-l-none border-l-0 pr-2 pl-1.5"
             />
           }
         >
