@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { apiUrl } from "@/cut/lib/backend";
 import {
@@ -10,6 +10,8 @@ import {
   MessageCircle,
   MoreHorizontal,
   Music2,
+  Pause,
+  Play,
   Search,
   Send,
   Share2,
@@ -21,6 +23,8 @@ import {
 } from "lucide-react";
 import { normalizeTags } from "@/cut/lib/publish";
 import { useEditor } from "@/cut/lib/store";
+import { formatElapsed } from "@/cut/lib/time";
+import { parseRatio } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 
 export interface ExportItem {
@@ -54,8 +58,20 @@ export function PlatformPreviewDialog({
   onClose: () => void;
 }) {
   const publish = useEditor((s) => s.publish);
+  const aspect = useEditor((s) => s.aspect);
   const [platform, setPlatform] = useState<Platform>("original");
   const [muted, setMuted] = useState(true);
+  // Shape the stage before a single byte of video arrives: the project already
+  // knows the frame it exported, so the dialog opens at its final size and the
+  // file's own dimensions only ever confirm it.
+  const [ratio, setRatio] = useState(() => {
+    const r = parseRatio(aspect) ?? { w: 9, h: 16 };
+    return r.w / r.h;
+  });
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [playing, setPlaying] = useState(true);
+  const [time, setTime] = useState(0);
+  const [duration, setDuration] = useState(0);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -64,6 +80,13 @@ export function PlatformPreviewDialog({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  const togglePlay = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) void v.play();
+    else v.pause();
+  };
 
   const url = apiUrl(`/api/cut/projects/${projectId}/exports/${encodeURIComponent(item.file)}`);
   const handle = publish.handle.trim().replace(/^@+/, "") || "you";
@@ -75,7 +98,7 @@ export function PlatformPreviewDialog({
   return (
     <div
       data-slot="dialog-content"
-      className="platform-preview fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm"
+      className="platform-preview fixed inset-0 z-70 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm"
       onPointerDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -111,27 +134,38 @@ export function PlatformPreviewDialog({
             platform mocks put it inside a fixed 9:16 phone. */}
         <div
           className={cn(
-            "relative overflow-hidden bg-black",
+            "group relative overflow-hidden bg-black",
             original
               ? "rounded-xl shadow-[0_24px_60px_rgba(0,0,0,0.35)]"
               : "phone h-[600px] w-[290px] rounded-[38px] border-[9px] border-neutral-950 shadow-[0_24px_60px_rgba(0,0,0,0.45)]"
           )}
+          style={
+            original
+              ? { width: `min(80vw, ${(78 * ratio).toFixed(3)}vh)`, aspectRatio: String(ratio) }
+              : undefined
+          }
         >
           <video
+            ref={videoRef}
             crossOrigin={MEDIA_CORS}
             src={url}
-            // Original leaves width and height auto so the element takes the
-            // video's intrinsic aspect, bounded by the viewport.
-            className={cn(
-              original
-                ? "block max-h-[78vh] max-w-[80vw]"
-                : "absolute inset-0 size-full object-cover"
-            )}
+            className="absolute inset-0 size-full object-cover"
             autoPlay
             loop
             muted={muted}
             playsInline
-            onClick={() => setMuted((m) => !m)}
+            onClick={togglePlay}
+            onPlay={() => setPlaying(true)}
+            onPause={() => setPlaying(false)}
+            onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
+            onLoadedMetadata={(e) => {
+              const v = e.currentTarget;
+              setDuration(v.duration || 0);
+              if (v.videoWidth && v.videoHeight) {
+                const r = v.videoWidth / v.videoHeight;
+                setRatio((prev) => (Math.abs(prev - r) > 0.005 ? r : prev));
+              }
+            }}
           />
           {/* legibility gradients — only under platform chrome */}
           {!original && (
@@ -149,6 +183,21 @@ export function PlatformPreviewDialog({
             {muted ? <VolumeX className="size-3.5" /> : <Volume2 className="size-3.5" />}
           </button>
 
+          {original && (
+            <Transport
+              playing={playing}
+              time={time}
+              duration={duration}
+              onToggle={togglePlay}
+              onSeek={(t) => {
+                const v = videoRef.current;
+                if (!v) return;
+                v.currentTime = t;
+                setTime(t);
+              }}
+            />
+          )}
+
           {platform === "tiktok" && (
             <TikTokChrome handle={handle} caption={caption} tags={tagsLine} sound={sound} />
           )}
@@ -160,6 +209,89 @@ export function PlatformPreviewDialog({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Hover transport for the Original view: play/pause, a draggable scrub bar,
+ * and the clock. It stays up while a drag is in flight so the bar never slips
+ * out from under the pointer. */
+function Transport({
+  playing,
+  time,
+  duration,
+  onToggle,
+  onSeek,
+}: {
+  playing: boolean;
+  time: number;
+  duration: number;
+  onToggle: () => void;
+  onSeek: (t: number) => void;
+}) {
+  const barRef = useRef<HTMLDivElement>(null);
+  const [scrubbing, setScrubbing] = useState(false);
+  const pct = duration > 0 ? Math.min(1, Math.max(0, time / duration)) * 100 : 0;
+
+  const seekFrom = (clientX: number) => {
+    const el = barRef.current;
+    if (!el || duration <= 0) return;
+    const r = el.getBoundingClientRect();
+    onSeek(Math.min(1, Math.max(0, (clientX - r.left) / r.width)) * duration);
+  };
+
+  return (
+    <div
+      className={cn(
+        "absolute inset-x-0 bottom-0 z-20 flex items-center gap-3 bg-gradient-to-t from-black/75 via-black/45 to-transparent px-4 pt-10 pb-3.5 opacity-0 transition-opacity duration-150",
+        "group-hover:opacity-100 focus-within:opacity-100",
+        scrubbing && "opacity-100"
+      )}
+    >
+      <button
+        className="grid size-8 shrink-0 place-items-center rounded-full bg-white/15 text-white backdrop-blur-sm transition-colors hover:bg-white/25"
+        aria-label={playing ? "Pause" : "Play"}
+        onClick={onToggle}
+      >
+        {playing ? <Pause className="size-4 fill-white" /> : <Play className="size-4 fill-white" />}
+      </button>
+
+      <div
+        ref={barRef}
+        className="relative h-4 flex-1 cursor-pointer touch-none"
+        role="slider"
+        tabIndex={0}
+        aria-label="Seek"
+        aria-valuemin={0}
+        aria-valuemax={Math.max(0, duration)}
+        aria-valuenow={time}
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          setScrubbing(true);
+          seekFrom(e.clientX);
+        }}
+        onPointerMove={(e) => scrubbing && seekFrom(e.clientX)}
+        onPointerUp={() => setScrubbing(false)}
+        onPointerCancel={() => setScrubbing(false)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowLeft") onSeek(Math.max(0, time - 1));
+          else if (e.key === "ArrowRight") onSeek(Math.min(duration, time + 1));
+          else return;
+          e.preventDefault();
+        }}
+      >
+        <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 overflow-hidden rounded-full bg-white/30">
+          <div className="h-full rounded-full bg-white" style={{ width: `${pct}%` }} />
+        </div>
+        <span
+          className="pointer-events-none absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_1px_4px_rgba(0,0,0,0.5)]"
+          style={{ left: `${pct}%` }}
+        />
+      </div>
+
+      <span className="shrink-0 text-[11px] font-medium text-white/90 tabular-nums">
+        {formatElapsed(time * 1000)} / {formatElapsed(duration * 1000)}
+      </span>
     </div>
   );
 }
