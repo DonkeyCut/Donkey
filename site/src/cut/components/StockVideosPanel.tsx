@@ -101,10 +101,13 @@ export function StockVideosPanel() {
         </p>
       ) : view === "root" ? (
         <>
+          {/* The topmost section head shares its row with the side panel's
+              floating close button; inset its View all clear of it. */}
           {characters.length > 0 && (
             <section className="shrink-0">
               <SectionHead
                 title="Talking Characters"
+                className="pr-7"
                 onViewAll={
                   characters.length > SECTION_PREVIEW ? () => go("characters") : undefined
                 }
@@ -115,6 +118,7 @@ export function StockVideosPanel() {
           <section className="mt-3 shrink-0">
             <SectionHead
               title="Stock Videos"
+              className={characters.length === 0 ? "pr-7" : undefined}
               onViewAll={footage.length > SECTION_PREVIEW ? () => go("videos") : undefined}
             />
             {footage.length > 0 ? (
@@ -164,9 +168,17 @@ function Crumb({ title, onBack }: { title: string; onBack: () => void }) {
   );
 }
 
-function SectionHead({ title, onViewAll }: { title: string; onViewAll?: () => void }) {
+function SectionHead({
+  title,
+  onViewAll,
+  className,
+}: {
+  title: string;
+  onViewAll?: () => void;
+  className?: string;
+}) {
   return (
-    <div className="mb-1.5 flex items-center justify-between">
+    <div className={cn("mb-1.5 flex items-center justify-between", className)}>
       <span className="text-[12px] font-semibold">{title}</span>
       {onViewAll && <ViewAllButton onClick={onViewAll} />}
     </div>

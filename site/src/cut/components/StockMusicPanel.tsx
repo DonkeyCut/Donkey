@@ -51,8 +51,10 @@ export function SampleLibrary({ projectId }: { projectId: string }) {
 
   return (
     <>
-      {/* Chips sit at the same top inset as the left column's Voice/Music tabs. */}
-      <div className="shrink-0 px-3.5 pt-4 pb-3">
+      {/* Chips sit at the same top inset as the left column's Voice/Music tabs.
+          The right inset keeps the first row clear of the side panel's floating
+          close button. */}
+      <div className="shrink-0 pt-4 pr-12 pb-3 pl-3.5">
         <div className="flex flex-wrap gap-1.5">
           <Chip active={cat === "all"} onClick={() => setCat("all")}>
             All

@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useRef, useState } from "react";
-import { Captions, Check, Clapperboard, ClipboardList, Copy, Download, Ellipsis, Film, FolderOpen, FolderPlus, Image as ImageIcon, Loader2, Music, Plus, Trash2, Upload } from "lucide-react";
+import { Captions, Check, Clapperboard, ClipboardList, Copy, Download, Ellipsis, Film, FolderOpen, FolderPlus, Image as ImageIcon, Loader2, Music, Plus, Trash2, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LiveElapsed } from "@/cut/components/Elapsed";
 import {
@@ -201,6 +201,10 @@ export function SidePanel({
   // collapse the panel so the canvas gets the room.
   usePanelRequestEffect(setTab);
 
+  // The Audio tab's second column; when it's absent the audio generator is the
+  // outermost column and takes the floating close button on its own corner.
+  const musicLibrary = !sharedFeatures && audioSub === "music" && STOCK_MUSIC.length > 0;
+
   return (
     <div className="flex min-h-0 border-r border-border bg-card">
       {/* Icon rail — its divider drops when collapsed so the panel's outer
@@ -310,7 +314,9 @@ export function SidePanel({
         })}
       </div>
 
-      {tab === null ? null : tab === "image" || tab === "video" ? (
+      {tab === null ? null : (
+        <div className="relative flex min-h-0">
+          {tab === "image" || tab === "video" ? (
         // The generate tabs are two columns: the generate input on the left,
         // the stock reference browser on the right. Clicking a stock tile loads
         // its prompt into the generate panel beside it.
@@ -347,7 +353,7 @@ export function SidePanel({
           <div
             className={cn(
               "flex w-[264px] min-h-0 shrink-0 flex-col",
-              !sharedFeatures && audioSub === "music" && STOCK_MUSIC.length > 0 && "border-r border-border"
+              musicLibrary && "border-r border-border"
             )}
           >
             <AudioPanel
@@ -355,9 +361,10 @@ export function SidePanel({
               importing={importing}
               sub={audioSub}
               onSub={setAudioSub}
+              closeInset={!musicLibrary}
             />
           </div>
-          {!sharedFeatures && audioSub === "music" && STOCK_MUSIC.length > 0 && (
+          {musicLibrary && (
             <div className="flex w-[340px] min-h-0 shrink-0 flex-col">
               <SampleLibrary projectId={projectId} />
             </div>
@@ -371,6 +378,20 @@ export function SidePanel({
           {tab === "library" && <LibraryPanel projectId={projectId} />}
           {tab === "subtitles" && <SubtitlesPanel />}
           {tab === "publish" && <PublishPanel />}
+        </div>
+      )}
+          {/* Floats over the panel's own header row; a solid face keeps it
+              legible where a column scrolls beneath it. Same action as
+              clicking the active rail tile. */}
+          <button
+            type="button"
+            aria-label="Close panel"
+            title="Close panel"
+            className="absolute top-2.5 right-2.5 z-10 grid size-7 place-items-center rounded-md bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            onClick={() => setTab(null)}
+          >
+            <X className="size-4" />
+          </button>
         </div>
       )}
     </div>

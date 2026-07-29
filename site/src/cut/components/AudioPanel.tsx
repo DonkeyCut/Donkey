@@ -79,6 +79,7 @@ export function AudioPanel({
   importing,
   sub,
   onSub,
+  closeInset,
 }: {
   projectId: string;
   importing: boolean;
@@ -86,6 +87,9 @@ export function AudioPanel({
    * two columns (this panel + the sample library) like the Image/Video tabs. */
   sub: "voice" | "music";
   onSub: (v: "voice" | "music") => void;
+  /** When this is the panel's outermost column, the side panel's floating close
+   * button sits on this corner; keep the toggle clear of it. */
+  closeInset?: boolean;
 }) {
   const readOnly = useEditor((s) => s.readOnly);
   // The app-wide preview player: starting a clip stops the last one, here or
@@ -107,7 +111,7 @@ export function AudioPanel({
 
   return (
     <>
-      <div className="shrink-0 px-3.5 pt-4 pb-3">
+      <div className={cn("shrink-0 px-3.5 pt-4 pb-3", closeInset && "pr-12")}>
         <AudioSubTabs value={sub} onChange={onSub} />
       </div>
 
