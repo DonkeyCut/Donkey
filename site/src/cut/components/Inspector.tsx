@@ -185,6 +185,19 @@ function PanelTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** One-line header for a media clip's panel: the file name (ellipsised, with
+ * the full name in its hover tooltip) and the clip's running length. */
+function ClipHead({ name, time }: { name?: string; time: string }) {
+  return (
+    <div className="mb-1.5 flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border">
+      <div className="min-w-0 truncate text-sm font-semibold tracking-tight" title={name}>
+        {name}
+      </div>
+      <Value className="shrink-0 text-muted-foreground">{time}</Value>
+    </div>
+  );
+}
+
 function Row({
   label,
   info,
@@ -322,14 +335,8 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
   }
   return (
     <>
-      <PanelTitle>Video clip</PanelTitle>
       <div className="flex flex-col gap-1 px-3.5 pb-4">
-        <div className="mb-1.5 flex items-baseline justify-between gap-2 border-b border-border pb-2.5">
-          <div className="truncate text-xs font-medium" title={asset?.name}>
-            {asset?.name}
-          </div>
-          <Value className="shrink-0 text-muted-foreground">{formatTime(speedLen)}</Value>
-        </div>
+        <ClipHead name={asset?.name} time={formatTime(speedLen)} />
         <Row label="Trim">
           <ScrubValue
             label="Trim start"
@@ -825,14 +832,8 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
   };
   return (
     <>
-      <PanelTitle>Soundtrack</PanelTitle>
       <div className="flex flex-col gap-1 px-3.5 pb-4">
-        <div className="mb-1.5 flex items-baseline justify-between gap-2 border-b border-border pb-2.5">
-          <div className="truncate text-xs font-medium" title={asset?.name}>
-            {asset?.name}
-          </div>
-          <Value className="shrink-0 text-muted-foreground">{formatTime(len)}</Value>
-        </div>
+        <ClipHead name={asset?.name} time={formatTime(len)} />
         <Row label="Trim">
           <ScrubValue
             label="Trim start"
