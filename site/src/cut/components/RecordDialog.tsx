@@ -2,6 +2,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Mic, Square, Video, X } from "lucide-react";
+import {
+  BufferTarget,
+  getFirstEncodableAudioCodec,
+  getFirstEncodableVideoCodec,
+  MediaStreamAudioTrackSource,
+  MediaStreamVideoTrackSource,
+  Mp4OutputFormat,
+  Output,
+  QUALITY_HIGH,
+  QUALITY_MEDIUM,
+} from "mediabunny";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   Select,
@@ -15,14 +26,13 @@ import { cn } from "@/lib/utils";
 
 export type RecordMode = "camera" | "audio";
 
-function pickMime(mode: RecordMode) {
-  // mp4 first: this Chrome produces empty webm video recordings.
-  const candidates =
-    mode === "camera"
-      ? ["video/mp4", "video/webm;codecs=vp9,opus", "video/webm"]
-      : ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"];
-  return candidates.find((c) => MediaRecorder.isTypeSupported(c)) ?? "";
-}
+// A take is muxed here rather than handed to MediaRecorder, so what comes out
+// is an MP4 whichever browser recorded it — with a real duration in its header,
+// which a WebM from MediaRecorder does not have. Codecs are picked by asking
+// what this browser can actually encode, in preference order, instead of
+// guessing at MIME strings and hoping the recording isn't empty.
+const VIDEO_CODECS = ["avc", "vp9", "av1", "vp8"] as const;
+const AUDIO_CODECS = ["aac", "opus"] as const;
 
 function stamp() {
   const d = new Date();
@@ -79,8 +89,10 @@ export function RecordDialog({
   const [cameraId, setCameraId] = useState<string | null>(() => loadDeviceId("videoinput"));
   const [micId, setMicId] = useState<string | null>(() => loadDeviceId("audioinput"));
   const videoRef = useRef<HTMLVideoElement>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const outputRef = useRef<Output<Mp4OutputFormat, BufferTarget> | null>(null);
+  // Setting up the encoders is a round trip, so the button can be hit again
+  // before `recording` flips. This claims the take at the click.
+  const startingRef = useRef(false);
   const streamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
@@ -135,7 +147,10 @@ export function RecordDialog({
       });
     return () => {
       canceled = true;
-      recorderRef.current?.state === "recording" && recorderRef.current.stop();
+      // A take abandoned mid-record is thrown away rather than finalized —
+      // nothing is waiting for the file.
+      if (outputRef.current?.state === "started") void outputRef.current.cancel();
+      outputRef.current = null;
       streamRef.current?.getTracks().forEach((t) => t.stop());
     };
   }, [mode, cameraId, micId]);
@@ -161,36 +176,69 @@ export function RecordDialog({
     return () => clearInterval(t);
   }, [recording]);
 
-  const startRecording = () => {
-    if (!stream) return;
-    const mimeType = pickMime(mode);
-    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-    recorderRef.current = recorder;
-    chunksRef.current = [];
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunksRef.current.push(e.data);
-    };
-    recorder.onstop = () => {
-      const type = recorder.mimeType || (mode === "camera" ? "video/webm" : "audio/webm");
-      const ext = type.includes("mp4") ? (mode === "camera" ? ".mp4" : ".m4a") : ".webm";
-      const label = mode === "camera" ? "Camera" : "Voice";
-      const file = new File(chunksRef.current, `${label} recording ${stamp()}${ext}`, { type });
-      if (file.size === 0) {
-        setRecording(false);
-        setError("The recording came back empty. Check that no other app is using the camera, then try again.");
-        return;
+  const startRecording = async () => {
+    if (!stream || outputRef.current || startingRef.current) return;
+    startingRef.current = true;
+    const videoTrack = mode === "camera" ? stream.getVideoTracks()[0] : undefined;
+    const audioTrack = stream.getAudioTracks()[0];
+    try {
+      const output = new Output({ format: new Mp4OutputFormat(), target: new BufferTarget() });
+      if (videoTrack) {
+        const codec = await getFirstEncodableVideoCodec([...VIDEO_CODECS]);
+        if (!codec) throw new Error("This browser can't encode video.");
+        output.addVideoTrack(
+          new MediaStreamVideoTrackSource(videoTrack, { codec, bitrate: QUALITY_HIGH })
+        );
       }
-      onUse(file);
-      onClose();
-    };
-    recorder.start(250);
-    setElapsed(0);
-    setRecording(true);
+      if (audioTrack) {
+        const codec = await getFirstEncodableAudioCodec([...AUDIO_CODECS]);
+        if (!codec) throw new Error("This browser can't encode audio.");
+        output.addAudioTrack(
+          new MediaStreamAudioTrackSource(audioTrack, { codec, bitrate: QUALITY_MEDIUM })
+        );
+      }
+      await output.start();
+      outputRef.current = output;
+      setElapsed(0);
+      setRecording(true);
+    } catch {
+      setError(
+        mode === "camera"
+          ? "This browser could not start a camera recording. Check that no other app is using the camera, then try again."
+          : "This browser could not start a recording. Try again."
+      );
+    } finally {
+      startingRef.current = false;
+    }
   };
 
-  const stopRecording = () => {
+  const stopRecording = async () => {
+    const output = outputRef.current;
+    if (!output) return;
+    outputRef.current = null;
     setRecording(false);
-    recorderRef.current?.stop();
+    try {
+      await output.finalize();
+    } catch {
+      setError("The recording could not be saved. Try again.");
+      return;
+    }
+    const buffer = output.target.buffer;
+    if (!buffer || buffer.byteLength === 0) {
+      setError(
+        "The recording came back empty. Check that no other app is using the camera, then try again."
+      );
+      return;
+    }
+    // An MP4 holding only sound takes the audio extension and MIME, so it
+    // reads as audio wherever a name or a type is all there is to go on.
+    const audioOnly = mode !== "camera";
+    const label = audioOnly ? "Voice" : "Camera";
+    const file = new File([buffer], `${label} recording ${stamp()}${audioOnly ? ".m4a" : ".mp4"}`, {
+      type: audioOnly ? "audio/mp4" : "video/mp4",
+    });
+    onUse(file);
+    onClose();
   };
 
   // Picking a device clears the fallback notice so the live guidance returns —
@@ -319,7 +367,7 @@ export function RecordDialog({
                     className="grid size-12 place-items-center rounded-full border-[3px] border-foreground/20 transition-transform hover:scale-105 disabled:opacity-40"
                     title="Start recording"
                     disabled={!stream}
-                    onClick={startRecording}
+                    onClick={() => void startRecording()}
                   >
                     <span className="size-8 rounded-full bg-red-500" />
                   </button>
@@ -327,7 +375,7 @@ export function RecordDialog({
                   <button
                     className="grid size-12 place-items-center rounded-full border-[3px] border-red-500/40 transition-transform hover:scale-105"
                     title="Stop and use recording"
-                    onClick={stopRecording}
+                    onClick={() => void stopRecording()}
                   >
                     <Square className="size-5 fill-red-500 stroke-none" />
                   </button>
