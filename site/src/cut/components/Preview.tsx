@@ -125,10 +125,18 @@ export function Preview() {
     const panX0 = span.clip.panX ?? 0;
     const panY0 = span.clip.panY ?? 0;
     const toFrame = fr.w / stage.w; // screen px → frame px
-    s.select({ kind: "clip", id: clipId });
-    s.pushHistory();
+    // Selection moves to the panned clip only once the pointer actually travels;
+    // a stationary press is a play/pause and leaves the selection alone.
+    let began = false;
     startDrag(e, {
       onMove: (dx, dy) => {
+        if (!began) {
+          if (Math.abs(dx) <= 3 && Math.abs(dy) <= 3) return;
+          began = true;
+          const st = useEditor.getState();
+          st.select({ kind: "clip", id: clipId });
+          st.pushHistory();
+        }
         // Content follows the pointer; pan is the crop-window position.
         useEditor.getState().updateClipTransient(clipId, {
           panX: ox > 1 ? Math.max(-1, Math.min(1, panX0 - (dx * toFrame) / (ox / 2))) : 0,
@@ -146,7 +154,15 @@ export function Preview() {
 
   return (
     <section className="preview-pane flex min-h-0 min-w-0 flex-col bg-muted/40 select-none">
-      <div ref={wrapRef} className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-3">
+      <div
+        ref={wrapRef}
+        className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-3"
+        // The empty room around the picture is the only part of the preview that
+        // clears the selection; the picture itself just plays and pauses.
+        onPointerDown={(e) => {
+          if (e.target === e.currentTarget) useEditor.getState().select(null);
+        }}
+      >
         <div
           className={cn(
             "stage relative overflow-hidden rounded-xl bg-black shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_36px_rgba(0,0,0,0.18)]",
@@ -158,7 +174,7 @@ export function Preview() {
               e.target === e.currentTarget ||
               (e.target as HTMLElement).tagName === "CANVAS"
             ) {
-              if (!panDrag(e)) useEditor.getState().select(null);
+              panDrag(e);
             }
           }}
           // A native drag on the canvas swallows the click, so this only fires
