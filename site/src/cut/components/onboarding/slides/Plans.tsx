@@ -7,6 +7,8 @@ import { CUT_PRO } from "@/app/cut/_components/landing/cutPricingPlans";
 import { Button } from "@/components/ui/button";
 import { useUpgradeToPro } from "@/cut/lib/proUpgrade";
 
+import "../onboarding.css";
+
 // The sequence's last word: Pro is the offer, free is the default, and the
 // benefits sit in the card so nobody has to take the price on faith. It's the
 // landing's own Pro card — same taped coral frame, same ringed check bullets —
@@ -25,7 +27,12 @@ export function PlansSlide({ onSkipPro }: { onSkipPro: () => void }) {
       </p>
 
       <div className="mt-8">
-        <TapedCard color="coral" tapeColor="yellow" tapePosition="right">
+        <TapedCard
+          color="coral"
+          tapeColor="yellow"
+          tapePosition="right"
+          tapeClassName="onboarding-tape-shake"
+        >
           <div className="p-7 md:p-9">
             <div className="text-[22px] font-semibold">Pro</div>
             <div className="mt-4 text-[clamp(34px,4.4vw,48px)] leading-[0.95] font-semibold">
@@ -69,7 +76,7 @@ export function PlansSlide({ onSkipPro }: { onSkipPro: () => void }) {
           onClick={onSkipPro}
           className="text-[15px] text-[#454545] underline-offset-4 transition-colors hover:text-ink hover:underline"
         >
-          Continue free
+          Continue with free
         </button>
       </div>
     </div>

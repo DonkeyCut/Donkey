@@ -29,6 +29,10 @@ type TapedCardProps = {
   style?: CSSProperties;
   tapeColor?: CardColor;
   tapePosition?: "left" | "right" | "center";
+  // Opt-in hook for animating the tape. The tape's resting tilt and centering
+  // live in the individual `rotate` / `translate` properties rather than one
+  // `transform`, so a class can animate the tilt alone and leave the rest.
+  tapeClassName?: string;
 };
 
 export function TapedCard({
@@ -38,6 +42,7 @@ export function TapedCard({
   shadowColor,
   style,
   tapeColor,
+  tapeClassName,
   tapePosition = "left",
 }: TapedCardProps) {
   const tapeSide =
@@ -46,10 +51,7 @@ export function TapedCard({
       : tapePosition === "right"
         ? { right: 32 }
         : { left: "50%" };
-  const tapeTransform =
-    tapePosition === "center"
-      ? "translateX(-50%) rotate(-2deg)"
-      : "rotate(-2deg)";
+  const tapeTranslate = tapePosition === "center" ? "-50% 0" : undefined;
 
   return (
     <div
@@ -82,6 +84,7 @@ export function TapedCard({
       >
         {tapeColor ? (
           <div
+            className={tapeClassName}
             style={{
               position: "absolute",
               top: -10,
@@ -91,7 +94,8 @@ export function TapedCard({
               border: `2px solid ${BLACK}`,
               background: CARD[tapeColor],
               boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
-              transform: tapeTransform,
+              rotate: "-2deg",
+              translate: tapeTranslate,
               ...tapeSide,
             }}
           />

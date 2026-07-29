@@ -1,0 +1,42 @@
+/* Animations for the welcome sequence. Decorative only — every one of them
+   stops under prefers-reduced-motion. */
+
+/* The plans card's tape flutters once when the slide arrives, so the eye lands
+   on the offer. Only the tilt moves; the tape's resting -2deg and its centering
+   offset stay in the individual transform properties TapedCard sets. */
+@keyframes onboarding-tape-shake {
+  0% {
+    rotate: -2deg;
+  }
+  12% {
+    rotate: -13deg;
+  }
+  26% {
+    rotate: 7deg;
+  }
+  40% {
+    rotate: -10deg;
+  }
+  54% {
+    rotate: 3deg;
+  }
+  68% {
+    rotate: -6deg;
+  }
+  84% {
+    rotate: -0.5deg;
+  }
+  100% {
+    rotate: -2deg;
+  }
+}
+
+.onboarding-tape-shake {
+  animation: onboarding-tape-shake 700ms ease-in-out 250ms both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-tape-shake {
+    animation: none;
+  }
+}
