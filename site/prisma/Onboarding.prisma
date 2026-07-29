@@ -12,9 +12,8 @@ model UserOnboarding {
   // Null until the sequence ends; `skipped` says how it ended.
   completedAt        DateTime?
   skipped            Boolean   @default(false)
-  referralSource     String?
-  // Free text alongside the choice, for answers worth qualifying.
-  referralDetail     String?
+  // Every source the account picked; the question takes more than one answer.
+  referralSources    String[] @default([])
   referralAnsweredAt DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt

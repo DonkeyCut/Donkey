@@ -7,6 +7,7 @@ import {
 } from "@/lib/donkey-api-auth";
 import {
   ONBOARDING_VERSION,
+  REFERRAL_SOURCES,
   isKnownReferralSource,
 } from "@/lib/onboarding/sequence";
 import { prisma } from "@/lib/prisma";
@@ -17,7 +18,7 @@ type OnboardingState = {
   version: number;
   completedAt: string | null;
   skipped: boolean;
-  referralSource: string | null;
+  referralSources: string[];
 };
 
 // An account that has never opened the sequence has no row; it reads as an
@@ -26,7 +27,7 @@ const UNSTARTED: OnboardingState = {
   version: ONBOARDING_VERSION,
   completedAt: null,
   skipped: false,
-  referralSource: null,
+  referralSources: [],
 };
 
 export const GET = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) => {
@@ -38,13 +39,14 @@ export const GET = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) =>
 
 const updateSchema = z
   .object({
-    referralSource: z.string().refine(isKnownReferralSource),
-    referralDetail: z.string().max(200).optional(),
+    referralSources: z
+      .array(z.string().refine(isKnownReferralSource))
+      .max(REFERRAL_SOURCES.length),
   })
   .or(z.object({ completed: z.literal(true), skipped: z.boolean() }));
 
 // One write for both things the sequence records: the referral answer when it's
-// picked, and the run's end. Either is the account's first row, so both upsert.
+// given, and the run's end. Either is the account's first row, so both upsert.
 export const PUT = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) => {
   const parsed = updateSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
@@ -53,10 +55,9 @@ export const PUT = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) =>
 
   const userId = request.donkey.userId;
   const data =
-    "referralSource" in parsed.data
+    "referralSources" in parsed.data
       ? {
-          referralSource: parsed.data.referralSource,
-          referralDetail: parsed.data.referralDetail ?? null,
+          referralSources: [...new Set(parsed.data.referralSources)],
           referralAnsweredAt: new Date(),
         }
       : {
@@ -77,12 +78,12 @@ function toState(row: {
   version: number;
   completedAt: Date | null;
   skipped: boolean;
-  referralSource: string | null;
+  referralSources: string[];
 }): OnboardingState {
   return {
     version: row.version,
     completedAt: row.completedAt?.toISOString() ?? null,
     skipped: row.skipped,
-    referralSource: row.referralSource,
+    referralSources: row.referralSources,
   };
 }

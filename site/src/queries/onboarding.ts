@@ -11,11 +11,11 @@ export type OnboardingState = {
   version: number;
   completedAt: string | null;
   skipped: boolean;
-  referralSource: string | null;
+  referralSources: string[];
 };
 
 type OnboardingUpdate =
-  | { referralSource: ReferralSource; referralDetail?: string }
+  | { referralSources: ReferralSource[] }
   | { completed: true; skipped: boolean };
 
 /** Whether this account still owes us a run of the current sequence. */
