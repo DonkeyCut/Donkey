@@ -1,6 +1,7 @@
 "use client";
 
 import { EditorMock } from "@/cut/components/editor-mock/EditorMock";
+import { ONBOARDING_PROJECT } from "@/cut/components/editor-mock/mockData";
 
 // The one slide that uses the whole window rather than the sequence's reading
 // column. The editor is the layout — the slide is exactly as tall as the mock,
@@ -22,7 +23,12 @@ export function AiChatSlide() {
             past the bottom of the slide. */}
         <div className="relative mx-auto w-[min(100%,86vh)]">
           <div className="pointer-events-none [mask-image:linear-gradient(to_right,transparent_10%,black_70%)] [-webkit-mask-image:linear-gradient(to_right,transparent_10%,black_70%)]">
-            <EditorMock view="ai" showSwitcher={false} shadow={false} />
+            <EditorMock
+              project={ONBOARDING_PROJECT}
+              view="ai"
+              showSwitcher={false}
+              shadow={false}
+            />
           </div>
           <div className="pointer-events-none absolute inset-y-0 left-0 w-[64%] bg-gradient-to-r from-cream via-cream/85 to-transparent" />
           <div className="absolute top-[15%] left-0 z-10 w-[48%] min-w-[320px]">

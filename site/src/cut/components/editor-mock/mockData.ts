@@ -208,3 +208,73 @@ export const MOCK_PROJECTS: MockProject[] = [
     ],
   },
 ];
+
+// The mock the onboarding sequence shows: a real project a parent built from
+// one voiceover of their son introducing himself, so the slide's subject — the
+// assistant working the timeline mid-conversation — is what the frame shows.
+const VOICEOVER =
+  "AI voice — 안녕 내 이름은 메이슨이고 한국에 사는 꼬마 소년이야 나는 학교에 가는 걸 좋아해";
+const SCENE_PROMPT =
+  "Hand-drawn 2D cartoon animation with bold black outlines,…";
+
+export const ONBOARDING_PROJECT: MockProject = {
+  id: "mason",
+  switcherLabel: "Mason",
+  name: "MTest",
+  aspect: "9:16",
+  panel: {
+    tab: "media",
+    templates: [
+      { name: "Template", duration: "0:03.9", items: 2 },
+      { name: "Template", duration: "0:05.3", items: 2 },
+    ],
+    items: [
+      { kind: "audio", handle: "a1", name: VOICEOVER, duration: "0:16.2" },
+      { kind: "video", handle: "v1", name: SCENE_PROMPT, thumb: `${ASSETS}/mason-school.jpg`, duration: "0:10.0" },
+      { kind: "video", handle: "v2", name: SCENE_PROMPT, thumb: `${ASSETS}/mason-fish.jpg`, duration: "0:10.0" },
+      { kind: "image", handle: "i1", name: "Screenshot 2026-07-19 at 9.57.03 PM.png", thumb: `${ASSETS}/mason-shot.jpg` },
+      { kind: "video", handle: "v3", name: SCENE_PROMPT, thumb: `${ASSETS}/mason-school.jpg`, duration: "0:10.0" },
+      { kind: "video", handle: "v4", name: SCENE_PROMPT, thumb: `${ASSETS}/mason-fish.jpg`, duration: "0:10.0" },
+      { kind: "video", handle: "v5", name: SCENE_PROMPT, thumb: `${ASSETS}/mason-school.jpg`, duration: "0:10.0" },
+      { kind: "video", handle: "v6", name: SCENE_PROMPT, thumb: `${ASSETS}/mason-fish.jpg`, duration: "0:10.0" },
+    ],
+  },
+  videoSrc: `${ASSETS}/mason-loop.mp4`,
+  videoPoster: `${ASSETS}/mason-walk.jpg`,
+  previewCaption: "",
+  timelineSeconds: 16.28,
+  clips: [
+    { label: "Walking to school", thumb: `${ASSETS}/mason-walk.jpg`, seconds: 4.8, muted: true },
+    { label: "School gates", thumb: `${ASSETS}/mason-school.jpg`, seconds: 3.2, muted: true },
+    { label: "Fish tank", thumb: `${ASSETS}/mason-fish.jpg`, seconds: 2.2, muted: true },
+    { label: "Strawberries", thumb: `${ASSETS}/mason-strawberry.jpg`, seconds: 2, muted: true },
+    { label: "Soccer", thumb: `${ASSETS}/mason-soccer.jpg`, seconds: 1.3, muted: true },
+    { label: "Taekwondo", thumb: `${ASSETS}/mason-taekwondo.jpg`, seconds: 1.3, muted: true },
+    { label: "Swimming", thumb: `${ASSETS}/mason-swim.jpg`, seconds: 1.48, muted: true },
+  ],
+  captions: [],
+  audioLabel: VOICEOVER,
+  audioDuration: "16.3s",
+  sfx: [],
+  chat: [
+    {
+      role: "user",
+      text: "@a1 is my son Mason introducing himself in Korean. Draw a scene for everything he mentions and cut it to the audio.",
+    },
+    {
+      role: "assistant",
+      tool: { name: "generate_video", count: 3 },
+      text: "I've cleared the strawberry eating scene at the end of the timeline and started generating three brand new scenes matching Mason's favorite sports: soccer, taekwondo, and swimming!\n\nThey will render in the background and pop right onto your timeline starting at 9.5 seconds to match the audio perfectly. Let me know if Mason needs any more athletic training!",
+      portrait: true,
+      cards: [
+        { src: `${ASSETS}/mason-soccer.jpg` },
+        { src: `${ASSETS}/mason-taekwondo.jpg` },
+        { src: `${ASSETS}/mason-swim.jpg` },
+      ],
+    },
+    {
+      role: "user",
+      text: "he also likes strawberries. you need to match the audio",
+    },
+  ],
+};

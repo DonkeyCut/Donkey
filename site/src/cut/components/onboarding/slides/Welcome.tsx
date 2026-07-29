@@ -1,6 +1,7 @@
 "use client";
 
 import { EditorMock } from "@/cut/components/editor-mock/EditorMock";
+import { ONBOARDING_PROJECT } from "@/cut/components/editor-mock/mockData";
 
 export function WelcomeSlide() {
   return (
@@ -18,7 +19,12 @@ export function WelcomeSlide() {
       {/* Contained rather than width-driven: on a short window the mock gives
           up size instead of pushing the slide into a scroll. */}
       <div className="h-[min(56vh,640px)] w-full max-w-[1060px]">
-        <EditorMock fit="contain" showSwitcher={false} shadow={false} />
+        <EditorMock
+          project={ONBOARDING_PROJECT}
+          fit="contain"
+          showSwitcher={false}
+          shadow={false}
+        />
       </div>
     </div>
   );
