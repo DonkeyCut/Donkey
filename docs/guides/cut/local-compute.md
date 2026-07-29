@@ -37,7 +37,11 @@ Dictation is the same trade in the other direction: with the app running, mic au
 
 ## Export
 
-Export still runs hosted for cloud projects, on the render worker. Moving it to the Mac is the same shape as speech with two extra pieces: the engine has to pull each clip from a signed URL before it can render, and push the finished file back up to storage after.
+A cloud project exports in the browser. The rule above still holds — the finished file is uploaded to the project's own storage and registered there, so where it lands is unchanged; what moved is who does the work, and the answer turned out to be the machine already in front of the user.
+
+That works because the editor composites the cut live to draw the preview. Rendering is the same drawing done on a clock the tab steps rather than follows, so a browser and a container produce the same picture from the same document, and the browser needs nothing pulled out of storage that it is not already playing.
+
+The worker is the rung above rather than the default: a cut too long or too large for a tab to hold goes there, as do the renders the editor fires on its own — hover proxies, share cards, streaming ladders. Moving export to the Mac would be a third path and there is no longer much to win from it.
 
 ## Rules
 
@@ -51,7 +55,8 @@ Export still runs hosted for cloud projects, on the render worker. Moving it to 
 | Work | Runs | Why |
 | --- | --- | --- |
 | Transcription, dictation | the Mac when it is there, hosted otherwise | the app ships the speech tool |
-| Export, encoding, thumbnails | the Mac for its own projects, hosted for cloud ones | see Export above |
+| Export | the Mac for its own projects, the browser for cloud ones, the worker past what a tab holds | see Export above |
+| Thumbnails, waveforms, media probing | the browser, always | it decodes the media itself |
 | Image, video, and voice generation | hosted, always | no local counterpart |
 | The assistant's Gemini models | hosted, always | credits and the user's session |
 | The assistant's Claude and Codex providers | the Mac, always | the user's own CLI logins |
