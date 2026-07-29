@@ -1556,7 +1556,7 @@ function HoverLine({
   if (skimTime === null) return null;
   return (
     <div
-      className="tl-hover-line pointer-events-none absolute top-0 bottom-2 z-30 w-px bg-foreground/30"
+      className="tl-hover-line pointer-events-none absolute top-0 bottom-0 z-30 w-px bg-foreground/30"
       style={{ transform: `translateX(${skimTime * pps}px)` }}
     />
   );
@@ -1870,7 +1870,7 @@ function Playhead({
       // gutter's own edge, and the side padding is there so its cap is never
       // clipped. The clips pass under the gutter; the time it is showing does
       // not.
-      className="pointer-events-none absolute top-0 bottom-2 left-0 z-50 w-[1.5px] bg-[#0a84ff] shadow-[0_0_8px_rgba(10,132,255,0.6)]"
+      className="pointer-events-none absolute top-0 bottom-0 left-0 z-50 w-[1.5px] bg-[#0a84ff] shadow-[0_0_8px_rgba(10,132,255,0.6)]"
       style={{ transform: `translateX(${x}px)` }}
     >
       <div
