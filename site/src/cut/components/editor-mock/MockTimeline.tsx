@@ -12,6 +12,7 @@ import type { MockProject } from "@/cut/components/editor-mock/mockData";
 // usable track width is the frame minus that column and some gutter.
 const TRACK_W = 800;
 const CLIP_GAP = 4;
+const PANEL_H = 170;
 const RULER_H = 26;
 const VIDEO_H = 56;
 const AUDIO_H = 40;
@@ -38,7 +39,7 @@ export function MockTimeline({ project }: { project: MockProject }) {
   }));
 
   return (
-    <div className="relative shrink-0 overflow-hidden border-t border-border bg-muted select-none" style={{ height: 170 }}>
+    <div className="relative shrink-0 overflow-hidden border-t border-border bg-muted select-none" style={{ height: PANEL_H }}>
       {/* Ruler strip runs edge to edge like the editor's card-backed ruler. */}
       <div className="absolute inset-x-0 top-0 border-b border-border bg-card" style={{ height: RULER_H }} />
 
@@ -158,12 +159,21 @@ export function MockTimeline({ project }: { project: MockProject }) {
           </div>
         </div>
 
-        {/* Playhead: swept externally via the mock-playhead keyframes. */}
+        {/* Playhead: the editor's own (Timeline.tsx) — same blue, glow, and
+            cap — swept externally via the mock-playhead keyframes. It runs the
+            full panel, past the last track into the empty space below, so the
+            column of rows reads as one cut rather than stopping at the audio. */}
         <div
-          className="mock-playhead pointer-events-none absolute top-0 bottom-0 left-0 z-30 w-px bg-[#ff2d55]"
-          style={{ "--track-w": TRACK_W + "px", "--sweep-s": project.timelineSeconds + "s" } as CSSProperties}
+          className="mock-playhead pointer-events-none absolute top-0 left-0 z-30 w-[1.5px] bg-[#0a84ff] shadow-[0_0_8px_rgba(10,132,255,0.6)]"
+          style={{
+            height: PANEL_H - 8,
+            "--track-w": TRACK_W + "px",
+            "--sweep-s": project.timelineSeconds + "s",
+          } as CSSProperties}
         >
-          <div className="absolute -top-0 -left-[4.5px] mx-auto h-3 w-2.5 rounded-t-[3px] bg-[#ff2d55] [clip-path:polygon(0_0,100%_0,100%_58%,50%_100%,0_58%)]" />
+          <div className="absolute -top-0 -left-[7px] h-5 w-4">
+            <div className="mx-auto h-3 w-2.5 rounded-t-[3px] bg-[#0a84ff] [clip-path:polygon(0_0,100%_0,100%_58%,50%_100%,0_58%)]" />
+          </div>
         </div>
       </div>
     </div>
