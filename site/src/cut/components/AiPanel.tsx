@@ -105,8 +105,9 @@ import { useMicTranscription } from "@/cut/lib/micTranscribe";
 // tiles, timeline clips, the preview) or as @name mentions in the message.
 
 interface ModelsInfo {
-  // `installed` false hides the provider's whole group; a provider that is
-  // installed but unavailable (e.g. signed out) still lists with its note.
+  // A CLI provider's group lists only on `installed` true — unknown (probe
+  // still out, or no engine) reads as absent. A provider that is installed
+  // but unavailable (e.g. signed out) still lists with its note.
   providers: Record<string, { available: boolean; note: string; installed?: boolean }>;
 }
 
@@ -1548,11 +1549,17 @@ function ModelSelector({
     .map((p) => ({
       provider: p,
       models: models.filter((m) => m.provider === p),
-      installed: info?.providers[p]?.installed !== false,
+      // CLI providers list only once the engine has confirmed the CLI is
+      // installed — until the probe answers there is no evidence the group
+      // exists on this Mac. Gemini is hosted, so it needs no confirmation.
+      installed:
+        p === "gemini"
+          ? info?.providers[p]?.installed !== false
+          : info?.providers[p]?.installed === true,
     }))
-    // The picker lists every installed provider and lets any of them be picked;
-    // a provider whose CLI isn't installed drops out entirely, and any other
-    // problem (signed out, etc.) surfaces as a chat error when the user sends.
+    // The picker lists every confirmed provider and lets any of them be
+    // picked; any other problem (signed out, etc.) surfaces as a chat error
+    // when the user sends.
     .filter((group) => group.models.length > 0 && group.installed);
   const flat = groups.flatMap((group) => group.models);
   const currentLabel = models.find((m) => m.id === model)?.label ?? model;
