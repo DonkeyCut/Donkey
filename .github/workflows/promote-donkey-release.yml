@@ -279,7 +279,7 @@ jobs:
         env:
           DONKEY_APP_VERSION: ${{ steps.release.outputs.version }}
           DONKEY_APP_BUILD: ${{ steps.release.outputs.build }}
-          DONKEY_SPARKLE_FEED_URL: https://donkeyuse.com/appcast.xml
+          DONKEY_SPARKLE_FEED_URL: https://donkeycut.com/appcast.xml
           DONKEY_SPARKLE_PUBLIC_ED_KEY: ${{ secrets.DONKEY_SPARKLE_PUBLIC_ED_KEY }}
           DONKEY_APP_SIGN_IDENTITY: ${{ steps.signing.outputs.identity }}
           DONKEY_SIGN_KEYCHAIN: ${{ steps.signing.outputs.keychain }}

@@ -9,7 +9,6 @@ DMG_ROOT="$ROOT_DIR/dist/DonkeyInstaller"
 RUNTIME_PACKAGE_DIR="$ROOT_DIR/dist/LocalRuntimePackages"
 APP_VERSION="${DONKEY_APP_VERSION:-0.1.0}"
 APP_BUILD="${DONKEY_APP_BUILD:-1}"
-WEB_BASE_URL="${DONKEY_WEB_BASE_URL:-https://donkeyuse.com}"
 SPARKLE_FEED_URL="${DONKEY_SPARKLE_FEED_URL:-}"
 SPARKLE_PUBLIC_ED_KEY="${DONKEY_SPARKLE_PUBLIC_ED_KEY:-}"
 CONTENTS_DIR="$APP_DIR/Contents"
@@ -522,8 +521,6 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <string>14.0</string>
   <key>LSMultipleInstancesProhibited</key>
   <true/>
-  <key>DonkeyWebBaseURL</key>
-  <string>$WEB_BASE_URL</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>Donkey records microphone audio when you record your screen.</string>
   <key>NSSpeechRecognitionUsageDescription</key>

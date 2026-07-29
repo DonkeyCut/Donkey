@@ -298,11 +298,9 @@ prepare_app_icon() {
 }
 
 write_info_plist() {
-  local escaped_web_base_url
   local escaped_bundle_identifier
   local escaped_display_name
   local escaped_executable_name
-  escaped_web_base_url="$(xml_escape "$DONKEY_WEB_BASE_URL")"
   escaped_bundle_identifier="$(xml_escape "$DEV_BUNDLE_IDENTIFIER")"
   escaped_display_name="$(xml_escape "$DEV_DISPLAY_NAME")"
   escaped_executable_name="$(xml_escape "$DEV_EXECUTABLE_NAME")"
@@ -332,8 +330,6 @@ write_info_plist() {
   <string>14.0</string>
   <key>LSMultipleInstancesProhibited</key>
   <true/>
-  <key>DonkeyWebBaseURL</key>
-  <string>$escaped_web_base_url</string>
   <key>DonkeyCutEnginePort</key>
   <integer>$DEV_CUT_ENGINE_PORT</integer>
   <key>NSMicrophoneUsageDescription</key>
