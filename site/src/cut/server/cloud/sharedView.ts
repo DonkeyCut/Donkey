@@ -7,8 +7,9 @@
 import type { ProjectDoc, StoredAsset } from "@/cut/lib/types";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { mediaObjectUrl, mediaUrlLifetime } from "./mediaCdn";
-import { projectMediaKey } from "./r2";
+import { readLadder } from "./ladderStore";
+import { mediaObjectUrl, mediaTreeUrl, mediaUrlLifetime } from "./mediaCdn";
+import { projectHlsPrefix, projectMediaKey } from "./r2";
 import { normalizeEmails, normalizeFeatures, type ShareFeatures } from "./share";
 import { shareCacheHeaders, shareRedirectHeaders } from "./shareCache";
 import { caught, decodeFileParam, err, redirect } from "./util";
@@ -215,6 +216,55 @@ export const sharedView = {
     );
   },
 
+  /**
+   * The share's streaming manifest: a tree-token URL for the published HLS
+   * master, or 404 while no ladder exists yet.
+   *
+   * The token is sized to the cut's own duration, so a viewer who starts a long
+   * project and watches it straight through never has playback die on an
+   * expired segment. It is also the revocation window for those bytes, which is
+   * why it tracks the content rather than being long by default.
+   */
+  async stream(token: string, id: string, req: Request) {
+    try {
+      const view = await resolveShare(token, req);
+      if (view instanceof Response) return view;
+      if (id !== view.share.projectId) return err("Not found.", 404);
+      const ladder = await readLadder(id);
+      // The record names the owner it was rendered for; a share whose project
+      // changed hands is not served someone else's tree.
+      const current = ladder?.userId === view.share.userId ? ladder.current : undefined;
+      if (!current) return err("No stream yet.", 404);
+      // The render is only as filtered as the share it was built for. If the
+      // owner has since turned Subtitles off, the existing ladder still has cue
+      // text in its pixels and there is nothing left to strip — so it is
+      // withheld entirely, which reads to the viewer as a stream still being
+      // prepared and is exactly what the next render fixes.
+      if (current.burnedSubtitles && !view.features.subtitles) {
+        return err("No stream yet.", 404);
+      }
+      const url = mediaTreeUrl(
+        projectHlsPrefix(view.share.userId, id, current.version),
+        "master.m3u8",
+        { holdSeconds: Math.ceil(current.duration * 1.5) }
+      );
+      // Deliberately uncached, unlike the rest of a share's reads. A viewer who
+      // opens a link mid-render polls this until the ladder appears, so an
+      // edge-cached 404 would keep answering "not yet" after it had. The
+      // response is a few bytes; the segments behind it are what caching is
+      // for.
+      return Response.json(
+        { url, duration: current.duration },
+        { headers: { "Cache-Control": "private, no-store" } }
+      );
+    } catch (e) {
+      // 5xx, not 400: a store that is misconfigured or briefly unreachable is
+      // the server's problem, and the viewer's poll should keep asking rather
+      // than read it as "this share has no stream".
+      return caught(e, "Could not read the stream.", 500);
+    }
+  },
+
   async preview(token: string, id: string, req: Request) {
     try {
       const view = await resolveShare(token, req);
@@ -222,6 +272,13 @@ export const sharedView = {
       if (id !== view.share.projectId) return err("Not found.", 404);
       const row = await ownerProject(view.share);
       if (!row?.previewKey) return new Response("Not found.", { status: 404 });
+      // The proxy is rendered from the owner's own doc, captions and all, so it
+      // crosses the same boundary the ladder does: a share that hides Subtitles
+      // must not be handed a render with the cue text burned into it.
+      const doc = row.doc as unknown as ProjectDoc | null;
+      if (doc?.subtitles?.showOnVideo && !view.features.subtitles) {
+        return new Response("Not found.", { status: 404 });
+      }
       return redirect(
         mediaObjectUrl(row.previewKey),
         shareRedirectHeaders(view.share, MEDIA_REDIRECT_TTL)

@@ -7,7 +7,12 @@ import { Button } from "@/components/ui/button";
 import { apiFetch, bindCutMode, releaseCutMode } from "@/cut/lib/backend";
 import { loadedDocVersion } from "@/cut/lib/backend/shared";
 import { writeCachedDoc } from "@/cut/lib/docCache";
-import { refreshShareCard, renderPreviewProxy, type ExportDoc } from "@/cut/lib/exportClient";
+import {
+  refreshShareCard,
+  refreshShareLadder,
+  renderPreviewProxy,
+  type ExportDoc,
+} from "@/cut/lib/exportClient";
 import { fileZoneAt, hasRefDrag } from "@/cut/lib/assetRef";
 import { startUpload } from "@/cut/lib/importQueue";
 import { enrichAsset, importFileToProject, prepareImport } from "@/cut/lib/media";
@@ -222,6 +227,10 @@ export function Editor({
       try {
         await renderPreviewProxy(projectId, doc);
         refreshShareCard(projectId);
+        // The share's streaming ladder rides this same lull. It is the most
+        // expensive of the three — the whole cut, once per rung — so it runs
+        // last, and it no-ops for a project that isn't shared.
+        await refreshShareLadder(projectId);
       } finally {
         rendering = false;
       }

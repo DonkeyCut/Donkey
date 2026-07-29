@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
 import { apiFetch } from "@/cut/lib/backend";
-import { refreshShareCard } from "@/cut/lib/exportClient";
+import { refreshShareCard, refreshShareLadder } from "@/cut/lib/exportClient";
 import { useCutBase } from "@/cut/lib/nav";
 import type { ShareFeatures } from "@/cut/lib/types";
 
@@ -98,6 +98,9 @@ export function ShareDialog({
         // Opening the dialog is the moment before a link gets pasted
         // somewhere, so bring an existing share's preview card up to date with
         // the cut as it stands.
+        // The card is a five-second render and can ride a dialog open. The
+        // ladder cannot: it re-encodes the whole cut once per rung, so it waits
+        // for the editor's own lull instead (Editor.tsx).
         if (body.share) refreshShareCard(projectId);
         setShare(body.share);
         setLoading(false);
@@ -127,8 +130,15 @@ export function ShareDialog({
       if (!res.ok) throw new Error();
       const body = (await res.json()) as { share: ShareState };
       // Sharing for the first time: build the link's preview card now, so the
-      // first person to see the link sees the cut rather than a placeholder.
-      if (!share) refreshShareCard(projectId);
+      // first person to open the link sees the cut rather than a placeholder,
+      // and start the streaming ladder so the link is playable on a phone
+      // without waiting for the editor to close. This is the one interaction
+      // that earns a whole-cut render — it is the moment a link starts
+      // existing — and later saves leave it to the editor's lull.
+      if (!share) {
+        refreshShareCard(projectId);
+        void refreshShareLadder(projectId);
+      }
       setShare(body.share);
       return body.share;
     } catch {

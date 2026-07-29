@@ -20,6 +20,7 @@ const CUT_SHARED_ROUTES: SharedRoute[] = [
   { method: "POST", path: "/api/cut-shared/:token/media/presign-get", handler: (r, p) => sharedView.presignGetBatch(p.token, r) },
   { method: "GET", path: "/api/cut-shared/:token/projects/:id/chats", handler: (r, p) => sharedView.chats(p.token, p.id, r) },
   { method: "GET", path: "/api/cut-shared/:token/projects/:id/preview", handler: (r, p) => sharedView.preview(p.token, p.id, r) },
+  { method: "GET", path: "/api/cut-shared/:token/projects/:id/stream", handler: (r, p) => sharedView.stream(p.token, p.id, r) },
   { method: "POST", path: "/api/cut-shared/:token/copy", handler: (r, p) => copyJobs.request(p.token, r) },
   { method: "GET", path: "/api/cut-shared/:token/copy/:jobId", handler: (r, p) => copyJobs.status(p.token, p.jobId, r) },
 ];

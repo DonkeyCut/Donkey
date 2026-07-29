@@ -97,6 +97,7 @@ export const jobsCloud = {
         overlays?: { name: string; key: string }[];
         projectId?: string;
         outName?: string;
+        burnedSubtitles?: boolean;
       };
       if (!body.spec || typeof body.spec !== "object") return err("spec is required.", 400);
       const projectId = body.projectId ?? body.spec.projectId;
@@ -112,12 +113,15 @@ export const jobsCloud = {
           return err("Invalid overlay key.", 400);
         }
       }
-      // Hover proxies and share cards are small internal renders the editor
+      // Hover proxies, share cards and share ladders are renders the editor
       // fires on its own; only renders the user asked for count against the
       // cap.
-      const target = body.spec.target === "preview" || body.spec.target === "card"
-        ? body.spec.target
-        : "export";
+      const target =
+        body.spec.target === "preview" ||
+        body.spec.target === "card" ||
+        body.spec.target === "hls"
+          ? body.spec.target
+          : "export";
       if (target === "export") {
         const capped = await renderJobCheck(userId);
         if (capped) return capped;
@@ -129,21 +133,55 @@ export const jobsCloud = {
         const over = await quotaCheck(userId, 0, EXPORT_QUOTA_MARGIN);
         if (over) return over;
       }
+      const jobSpec = {
+        spec: body.spec,
+        overlays: body.overlays ?? [],
+        ...(target === "hls" ? { burnedSubtitles: body.burnedSubtitles === true } : {}),
+      } as unknown as Prisma.InputJsonValue;
+
+      if (target === "hls") {
+        // A ladder is only worth rendering for a project someone can actually
+        // open: it is fired by the editor rather than asked for, so without
+        // this an unshared project would burn a render slot on a stream with no
+        // viewer.
+        const shared = await prisma.cutProjectShare.findUnique({
+          where: { projectId },
+          select: { id: true },
+        });
+        if (!shared) return Response.json({ id: null, skipped: "not-shared" });
+
+        // A ladder re-encodes the whole cut once per rung and holds a render
+        // slot for the duration, so at most one runs and one waits. The waiting
+        // one is REPLACED rather than kept: what matters is that the newest doc
+        // renders last, and returning the in-flight job's id instead — as this
+        // once did — silently dropped every edit made while one was running,
+        // leaving the share streaming a pre-edit cut indefinitely.
+        const queued = await prisma.cutRenderJob.findFirst({
+          where: { userId, projectId, kind: "hls", state: "queued" },
+          orderBy: { createdAt: "desc" },
+          select: { id: true },
+        });
+        if (queued) {
+          const replaced = await prisma.cutRenderJob.updateMany({
+            where: { id: queued.id, state: "queued" },
+            data: { spec: jobSpec },
+          });
+          // It started between the read and the write, so it is now the running
+          // job and this doc needs a fresh row behind it.
+          if (replaced.count > 0) {
+            wakeRenderWorker();
+            return Response.json({ id: queued.id });
+          }
+        }
+      }
       const outName =
         target === "export"
           ? await exportName(userId, projectId, body.outName?.trim() || project.name)
-          : `${target}.mp4`;
+          : target === "hls"
+            ? "master.m3u8"
+            : `${target}.mp4`;
       const row = await prisma.cutRenderJob.create({
-        data: {
-          userId,
-          projectId,
-          kind: target,
-          spec: {
-            spec: body.spec,
-            overlays: body.overlays ?? [],
-          } as unknown as Prisma.InputJsonValue,
-          outName,
-        },
+        data: { userId, projectId, kind: target, spec: jobSpec, outName },
       });
       wakeRenderWorker();
       return Response.json({ id: row.id });

@@ -194,7 +194,7 @@ async function buildExportPayload(
   projectId: string,
   doc: ExportDoc,
   settings: ExportSettings,
-  target: "export" | "preview" | "card"
+  target: "export" | "preview" | "card" | "hls"
 ): Promise<ExportPayload> {
   const spans = getClipSpans(doc.clips, doc.assets);
   const duration = projectDuration(doc);
@@ -446,7 +446,8 @@ async function postExport(
   projectId: string,
   payload: ExportPayload,
   outName: string,
-  backend: CutBackend
+  backend: CutBackend,
+  extra?: Record<string, unknown>
 ): Promise<Response> {
   if (backend.kind !== "cloud") {
     return backend.fetch("/api/cut/export", { method: "POST", body: exportFormFromPayload(payload) });
@@ -479,7 +480,7 @@ async function postExport(
   return backend.fetch("/api/cut/export", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ spec: payload.spec, overlays, projectId, outName }),
+    body: JSON.stringify({ spec: payload.spec, overlays, projectId, outName, ...extra }),
   });
 }
 
@@ -550,6 +551,53 @@ export async function createExportJob(
  * export-jobs feed. */
 export function cancelExportJob(jobId: string, backend: CutBackend = getBackend()) {
   void backend.fetch(`/api/cut/export/${jobId}`, { method: "DELETE" }).catch(() => {});
+}
+
+/**
+ * Build the share's streaming ladder for the cut as it stands.
+ *
+ * A share plays HLS rather than a single file, so this is what makes a shared
+ * project watchable — see server/hlsLadder.ts for why. The render is queued and
+ * not waited on: it re-encodes the whole cut once per rung, so the caller
+ * returns immediately and the viewer's page polls for the ladder to appear.
+ *
+ * The top rung is capped at the source, so the frame size sent here is the
+ * ceiling on what any viewer can ever see; it renders at the doc's own size.
+ *
+ * `shareSubtitles` is what the share grants, and it decides whether captions
+ * are burned in at all. The doc is what the OWNER sees, so passing it through
+ * unfiltered would put cue text in the pixels of a stream sent to viewers whose
+ * share hides Subtitles — and pixels are past the point where the server's doc
+ * filter can take it back out.
+ */
+export async function renderShareLadder(
+  projectId: string,
+  doc: ExportDoc,
+  shareSubtitles: boolean
+): Promise<void> {
+  const backend = getBackend(); // pinned: the ladder outlives the dialog
+  // The master renders at "Original" — the ladder caps its top rung at this
+  // frame, so anything given up here is given up for every viewer. The encode
+  // preset is loosened because this master is an intermediate: every rung is
+  // re-encoded from it, so its own compression never reaches a viewer.
+  const settings: ExportSettings = {
+    ...originalSettings(doc.aspect, doc.clips, doc.assets),
+    preset: "veryfast",
+  };
+  // Both the flag and the cues go: the flag is what the burn-in reads, and
+  // dropping the cues as well means no path through the pipeline can put this
+  // text on screen for a viewer whose share does not grant it.
+  const source: ExportDoc = shareSubtitles
+    ? doc
+    : { ...doc, subtitles: { ...doc.subtitles, cues: [], showOnVideo: false } };
+  const burnedSubtitles = shareSubtitles && doc.subtitles?.showOnVideo === true;
+  try {
+    const payload = await buildExportPayload(projectId, source, settings, "hls");
+    await postExport(projectId, payload, "master.m3u8", backend, { burnedSubtitles });
+  } catch {
+    // No clips yet, or a slot was busy. The share keeps playing whatever it
+    // already had until a later attempt lands.
+  }
 }
 
 /** Low-res proxy of the actual edit for the project card's hover preview.
@@ -663,4 +711,46 @@ export function refreshShareCard(projectId: string): void {
     fadeIn: s.fadeIn,
     fadeOut: s.fadeOut,
   }).catch(() => {});
+}
+
+/**
+ * Rebuild the open project's streaming ladder from the cut as it stands.
+ *
+ * Fire and forget, like the card: a failed render leaves the previous ladder
+ * serving. Unlike the card, this is not cheap — it re-encodes the whole cut
+ * once per rung — so it belongs on the same lull the hover proxy waits for
+ * (the editor closing, or the tab going to the background), never on an
+ * interaction like opening a dialog. The server drops it for a project that
+ * has no share, so callers do not have to know.
+ *
+ * `shareSubtitles` decides whether captions are burned in; pass what the share
+ * actually grants, not what the owner is looking at.
+ */
+export async function refreshShareLadder(projectId: string): Promise<void> {
+  const s = useEditor.getState();
+  if (!s.loaded || s.projectId !== projectId || s.clips.length === 0) return;
+  const backend = getBackend();
+  // The share decides what the render may contain, so it is read first. This
+  // also settles whether to render at all: an unshared project has no viewer to
+  // build a ladder for.
+  const res = await backend.fetch(`/api/cut/projects/${projectId}/share`).catch(() => null);
+  if (!res?.ok) return;
+  const body = (await res.json().catch(() => null)) as {
+    share?: { features?: { subtitles?: boolean } } | null;
+  } | null;
+  if (!body?.share) return;
+  await renderShareLadder(
+    projectId,
+    {
+      aspect: s.aspect,
+      assets: s.assets,
+      clips: s.clips,
+      audioClips: s.audioClips,
+      overlays: s.overlays,
+      subtitles: s.subtitles,
+      fadeIn: s.fadeIn,
+      fadeOut: s.fadeOut,
+    },
+    body.share.features?.subtitles === true
+  );
 }
