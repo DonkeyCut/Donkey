@@ -112,12 +112,15 @@ const zoomToSlider = (pps: number) =>
   (Math.log(pps / ZOOM_MIN) / Math.log(ZOOM_MAX / ZOOM_MIN)) * 100;
 const sliderToZoom = (pos: number) => ZOOM_MIN * (ZOOM_MAX / ZOOM_MIN) ** (pos / 100);
 
-// A high-contrast selected state: a bright blue ring drawn both inside and
-// (crucially) *outside* the box, so it stays visible on top of a clip's
-// filmstrip thumbnails, plus a halo and a raised stacking order so selected
-// items read clearly against their neighbours.
+// A high-contrast selected state: a bright blue ring outside the box, a halo,
+// and a raised stacking order, so a selected item reads clearly against its
+// neighbours. The ring sits outside every kind of item alike, which is the
+// only way it measures the same on all of them: a video clip's filmstrip
+// covers its box, so an inner ring vanished under the thumbnails, while an
+// audio, text or subtitle bar paints its own background and showed that same
+// ring at full width on top of this one.
 const SELECTED_SHADOW =
-  "z-10 shadow-[inset_0_0_0_2px_#0a84ff,0_0_0_2px_#0a84ff,0_2px_11px_rgba(10,132,255,0.6)]";
+  "z-10 shadow-[0_0_0_2px_#0a84ff,0_2px_11px_rgba(10,132,255,0.6)]";
 
 const trimHandle =
   "tl-trim absolute top-0 bottom-0 z-3 w-[10px] cursor-ew-resize after:absolute after:top-1/2 after:left-[3px] after:h-[calc(100%-10px)] after:w-1 after:-translate-y-1/2 after:rounded-full after:bg-white after:opacity-0 after:shadow-[0_0_0_1px_rgba(0,0,0,0.35)] after:transition-opacity group-hover:after:opacity-90 hover:after:opacity-100";
