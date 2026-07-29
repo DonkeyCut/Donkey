@@ -1,11 +1,12 @@
 import { creditStringToMicros } from "@/lib/credits/amounts";
 import { grantCredits } from "@/lib/credits/inference";
 import { grantVisionCalls } from "@/lib/credits/vision-grants";
+import { signupAppCredits } from "@/lib/onboarding/sequence";
 
 // Single source of truth for what a new account starts with. Both grants are
 // idempotent and keyed to the user, so provisioning can run more than once (e.g.
-// a retried signup) without ever double-granting.
-export const signupAppCredits = "1"; // USD added to the app inference balance
+// a retried signup) without ever double-granting. The credit amount itself is
+// in sequence.ts, which the welcome slides can import too.
 export const signupVisionFreeCalls = 100; // lifetime free Vision API calls
 
 export async function provisionSignupGrants(userId: string): Promise<void> {

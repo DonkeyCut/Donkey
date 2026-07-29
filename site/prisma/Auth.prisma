@@ -25,6 +25,7 @@ model User {
   visionApiSubscription VisionApiSubscription?
   proSubscription ProSubscription?
   avatar        UserAvatar?
+  onboarding    UserOnboarding?
 
   @@map("user")
 }

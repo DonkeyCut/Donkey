@@ -1,0 +1,21 @@
+// What an account has been through on the way in: the welcome sequence, and
+// the answers it collected. One row per user, written the first time the
+// sequence opens. Referral source ids live in code
+// (src/lib/onboarding/referral-sources.ts); the route accepts only those.
+
+model UserOnboarding {
+  userId             String    @id
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // The sequence this account saw. Raising ONBOARDING_VERSION in code shows a
+  // rewritten sequence again to accounts that only finished an older one.
+  version            Int       @default(1)
+  // Null until the sequence ends; `skipped` says how it ended.
+  completedAt        DateTime?
+  skipped            Boolean   @default(false)
+  referralSource     String?
+  // Free text alongside the choice, for answers worth qualifying.
+  referralDetail     String?
+  referralAnsweredAt DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+}
