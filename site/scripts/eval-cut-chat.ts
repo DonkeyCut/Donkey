@@ -21,7 +21,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { geminiModelRoles } from "../src/lib/inference/gemini-models";
-import { AI_SKILL_INDEX, AI_SKILLS, AI_TOOLS, attachedAssetsBlock, systemPrompt } from "../src/cut/server/ai/catalog";
+import { AI_SKILL_INDEX, AI_SKILLS, AI_TOOLS, attachedAssetsBlock, systemPrompt, toolsRanBlock } from "../src/cut/server/ai/catalog";
 import {
   parseTurnIntent,
   TURN_INTENT_PROMPT,
@@ -252,8 +252,8 @@ const AUDIO_STATE = {
 
 /** A tweet photo import_url landed in an earlier turn: chat-owned (aiTools
  * tags chat imports origin "chat"), named by the post's text, not yet placed.
- * Past turns' tool traffic is stripped from the request, so the model must
- * find this asset through `media` in the snapshot. */
+ * A past turn replays as its text plus a ledger of the tool names it ran, so
+ * the model must find this asset through `media` in the snapshot. */
 const TWEET_ASSET = {
   id: "a-tw1",
   name: "first snow of the year ❄️",
@@ -264,6 +264,41 @@ const TWEET_ASSET = {
 const TWEET_STATE = {
   ...EDITOR_STATE,
   media: [...EDITOR_STATE.media, TWEET_ASSET],
+};
+
+/** The project after a styling turn finished: the reference import landed in
+ * media, the three city clips are already joined by the crosszooms that turn
+ * set, and every clip is still unmuted. Everything the previous turn did is
+ * visible here, so redoing any of it is plainly redundant. */
+const cityClip = (n: number, name: string, start: number, styled: boolean) => ({
+  index: n - 1,
+  id: `c${n}`,
+  asset: name,
+  start,
+  len: 4.7,
+  in: 0,
+  out: 4.7,
+  sourceDuration: 4.7,
+  muted: false,
+  framing: "fit",
+  speed: 1,
+  ...(styled ? { transitionToNext: { style: "crosszoom", seconds: 1 } } : {}),
+});
+const STYLED_STATE = {
+  ...EDITOR_STATE,
+  media: [
+    ...EDITOR_STATE.media,
+    TWEET_ASSET,
+    { id: "a-c1", name: "seoul.mp4", type: "video", duration: 4.7, origin: "generated" },
+    { id: "a-c2", name: "san-francisco.mp4", type: "video", duration: 4.7, origin: "generated" },
+    { id: "a-c3", name: "toronto.mp4", type: "video", duration: 4.7, origin: "generated" },
+  ],
+  videoTrack: [
+    cityClip(1, "seoul.mp4", 0, true),
+    cityClip(2, "san-francisco.mp4", 3.7, true),
+    cityClip(3, "toronto.mp4", 7.4, false),
+  ],
+  soundtrack: [],
 };
 
 /** A finished scene run's timeline: three generated takes, each clip carrying
@@ -347,6 +382,13 @@ function userTurn(
  * attaches the editor snapshot to the newest user message alone. */
 const plainUserTurn = (text: string): Item => ({ role: "user", content: [{ text }] });
 const assistantTurn = (text: string): Item => ({ role: "assistant", content: [{ text }] });
+
+/** An earlier assistant turn that ran tools, carrying the same <tools_ran>
+ * ledger production replays it with (catalog's toolsRanBlock). */
+const assistantToolTurn = (text: string, tools: string[]): Item => ({
+  role: "assistant",
+  content: [{ text: `${text}${toolsRanBlock(tools)}` }],
+});
 
 /** A tiny track-0 simulator for composed cut flows: splits, trims, deletes,
  * and undo evolve real state, so get_state shows the model its own edits and
@@ -680,6 +722,36 @@ function cases(audio: { dataBase64: string; mimeType: string }): EvalCase[] {
             "Rendering a new take — it previews in this chat when it lands, in a minute or two. Your current clip stays put.",
         },
       },
+    },
+    {
+      // The screenshot regression: after a turn that imported a reference and
+      // styled the cut, "mute all clips" mutes and stops. A replayed
+      // conversation carries no tool traffic, so without the <tools_ran>
+      // ledger the model reads its own last reply as an unfinished plan and
+      // runs the whole thing again — re-importing, re-watching, re-styling —
+      // then narrates that as the answer. The snapshot names every clip and
+      // its muted flag, so the mute needs no reads either.
+      name: "mute-all-does-not-redo-prior-turn",
+      input: () => [
+        plainUserTurn(
+          "use the illustration style at https://x.com/example/status/1 and blend the three city clips together"
+        ),
+        assistantToolTurn(
+          "Imported the reference illustration and blended Seoul, San Francisco, and Toronto with 1-second crosszooms.",
+          ["import_url", "watch_video", "watch_video", "watch_video", "set_transition", "set_transition"]
+        ),
+        userTurn("mute all clips", { state: STYLED_STATE }),
+      ],
+      reply: /mut/i,
+      requiredTools: ["set_clip_muted"],
+      maxToolCalls: 3,
+      state: STYLED_STATE,
+      simulate: () => (name) => {
+        if (name === "import_url" || name === "watch_video" || name === "set_transition")
+          throw new Error(`${name} — the previous turn already ran it; "mute all clips" only mutes`);
+        return undefined;
+      },
+      stubs: { set_clip_muted: { muted: true } },
     },
     {
       // The tweet-import flow: after import_url landed a photo in an earlier

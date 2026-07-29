@@ -2,7 +2,7 @@
 
 import type { UIMessage, UIMessageChunk } from "ai";
 import { geminiModelRoles } from "@/lib/inference/gemini-models";
-import { AI_SKILL_INDEX, AI_SKILLS, AI_TOOLS, attachedAssetsBlock, systemPrompt } from "@/cut/server/ai/catalog";
+import { AI_SKILL_INDEX, AI_SKILLS, AI_TOOLS, attachedAssetsBlock, systemPrompt, toolsRanBlock } from "@/cut/server/ai/catalog";
 import { buildAiContext } from "./aiContext";
 import { runAiTool } from "./aiTools";
 import { normalizeRef } from "./assetRef";
@@ -219,11 +219,29 @@ const toolDeclarations = () =>
     parameters: t.inputSchema,
   }));
 
-/** The conversation replayed as hosted-Responses input items. Only text (and
- * attachment refs) from past turns — tool traffic stays within its own turn.
- * The fresh editor snapshot rides on the newest user message alone, and so do
- * the attachments' actual payloads (video frames, images, audio, text-file contents):
- * older turns keep just the metadata JSON so replays stay within budget. */
+/** The tools an assistant turn finished, read off its rendered parts. A call
+ * that errored did no work, so it stays out and a retry stays open. */
+function toolsRanIn(m: UIMessage): string[] {
+  const parts = m.parts as unknown as { type: string; state?: string; toolName?: string }[];
+  return parts.flatMap((p) => {
+    const name =
+      p.type === "dynamic-tool"
+        ? p.toolName
+        : p.type.startsWith("tool-")
+          ? p.type.slice(5)
+          : undefined;
+    return name && p.state === "output-available" ? [name] : [];
+  });
+}
+
+/** The conversation replayed as hosted-Responses input items. Past turns keep
+ * their text plus a <tools_ran> ledger of what each reply executed — the tool
+ * traffic itself (media payloads, thought signatures) stays within its own
+ * turn, but the record of it has to survive or the model re-runs finished
+ * work. The fresh editor snapshot rides on the newest user message alone, and
+ * so do the attachments' actual payloads (video frames, images, audio,
+ * text-file contents): older turns keep just the metadata JSON so replays stay
+ * within budget. */
 async function inputFromMessages(messages: UIMessage[]): Promise<Item[]> {
   const lastUser = messages.findLast((m) => m.role === "user");
   const items: Item[] = [];
@@ -249,6 +267,8 @@ async function inputFromMessages(messages: UIMessage[]): Promise<Item[]> {
       if (m === lastUser) {
         text += `\n\n<editor_state>\n${JSON.stringify(buildAiContext())}\n</editor_state>`;
       }
+    } else {
+      text += toolsRanBlock(toolsRanIn(m));
     }
     if (!text && extra.length === 0) continue;
     items.push({
