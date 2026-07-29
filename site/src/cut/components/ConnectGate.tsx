@@ -22,7 +22,7 @@ import {
   engineProbe,
   servedFromEngine,
 } from "@/cut/lib/api";
-import { setCutMode } from "@/cut/lib/backend";
+import { announceLocalCompute, setCutMode } from "@/cut/lib/backend";
 
 // Which backend the app starts on, decided once per load. Chrome gates a
 // public https page's first fetch to 127.0.0.1 behind its Local Network Access
@@ -89,11 +89,13 @@ export function ConnectGate({ children }: { children: ReactNode }) {
     setBlocked(false);
     setCutMode("local");
     engineGateOpen();
+    announceLocalCompute();
     setReached(true);
   }, []);
 
   const bindCloud = useCallback(() => {
     setCutMode("cloud");
+    announceLocalCompute();
     setReached(false);
   }, []);
 

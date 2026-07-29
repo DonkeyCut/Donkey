@@ -83,6 +83,19 @@ export function hasLocalCompute(): boolean {
   return servedFromEngine() || engineOrigin() !== "";
 }
 
+/**
+ * Announce that the gate settled whether this Mac has an engine.
+ *
+ * The answer lives in api.ts's memoized origin, where React can't subscribe to
+ * it, and binding the mode doesn't stand in for it: an engine that answers
+ * leaves the ambient mode exactly where it started, so nothing would fire.
+ * Screens that offer local work — creating a project on this Mac — appear on
+ * this signal.
+ */
+export function announceLocalCompute() {
+  listeners.forEach((l) => l());
+}
+
 /** fetch() against the active backend. */
 export const apiFetch = (path: string, init?: RequestInit) => getBackend().fetch(path, init);
 

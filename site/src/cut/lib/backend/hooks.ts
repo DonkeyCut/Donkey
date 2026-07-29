@@ -3,11 +3,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
 
-import { cutMode, getBackend, subscribeCutMode } from "./index";
+import { cutMode, getBackend, hasLocalCompute, subscribeCutMode } from "./index";
 import type { CutCaps, CutMode } from "./types";
 
 export function useCutMode(): CutMode {
   return useSyncExternalStore(subscribeCutMode, cutMode, () => "local" as const);
+}
+
+/** Whether this Mac's engine is reachable, as a subscription: the gate resolves
+ * it after the first paint, so a screen that offers local work has to redraw
+ * when the answer lands. */
+export function useLocalCompute(): boolean {
+  return useSyncExternalStore(subscribeCutMode, hasLocalCompute, () => false);
 }
 
 export function useCutCaps(): CutCaps {
