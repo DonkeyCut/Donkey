@@ -81,6 +81,12 @@ export function Editor({
   // rendering the editor against it would leak that project's state (chat,
   // clips, selection) into this route.
   const stale = useEditor((s) => s.projectId) !== projectId;
+  // Leaving the editor keeps the store as it was, so on reopening the same
+  // project `stale` alone would let a full editor — preview, decoders, poster
+  // — render against that leftover state for the frames before the load
+  // resets it: a flash of the old picture, then the loading screen. The
+  // editor earns its first paint only once this mount's own load has begun.
+  const [opened, setOpened] = useState(false);
   const exportOpen = useEditor((s) => s.exportOpen);
   const aiOpen = useEditor((s) => s.aiOpen);
   const sharedFeatures = useEditor((s) => s.sharedFeatures);
@@ -125,12 +131,14 @@ export function Editor({
         if (!alive) return;
         setNeedsApp(!placement.reachable);
         if (placement.reachable) {
-          void useEditor
-            .getState()
-            .loadProject(projectId)
-            .then(() => {
-              for (const asset of useEditor.getState().assets) void enrichAsset(asset);
-            });
+          // loadProject clears `loaded` synchronously before its first await,
+          // so marking the mount opened here can never show the editor
+          // against leftover state.
+          const load = useEditor.getState().loadProject(projectId);
+          setOpened(true);
+          void load.then(() => {
+            for (const asset of useEditor.getState().assets) void enrichAsset(asset);
+          });
           return;
         }
         // The project is on this Mac with no app answering. The gate keeps
@@ -196,7 +204,7 @@ export function Editor({
             const showing = loadedDocVersion(projectId);
             if (version && showing && version !== showing) {
               const at = useEditor.getState().currentTime;
-              await useEditor.getState().loadProject(projectId);
+              await useEditor.getState().loadProject(projectId, { inPlace: true });
               for (const asset of useEditor.getState().assets) void enrichAsset(asset);
               useEditor.getState().seek(at);
             }
@@ -225,7 +233,7 @@ export function Editor({
       if (!detail || detail.projectId !== projectId) return;
       void useEditor
         .getState()
-        .loadProject(projectId)
+        .loadProject(projectId, { inPlace: true })
         .then(() => {
           for (const asset of useEditor.getState().assets) void enrichAsset(asset);
         });
@@ -706,10 +714,15 @@ export function Editor({
     );
   }
 
-  if (!loaded || stale) {
+  if (!opened || !loaded || stale) {
+    // The spinner waits a beat before showing: a snapshot open lands within a
+    // few frames, and a spinner that blinks in and out for those frames reads
+    // as flicker, not progress.
     return (
       <div className="grid h-full place-items-center text-muted-foreground">
-        <Loader2 className="size-5 animate-spin" />
+        <div className="animate-in fade-in [animation-delay:300ms] [animation-fill-mode:backwards]">
+          <Loader2 className="size-5 animate-spin" />
+        </div>
       </div>
     );
   }

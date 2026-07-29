@@ -177,7 +177,11 @@ export interface EditorState {
    * undo history, like assets. */
   renders: RenderRecord[];
 
-  loadProject: (id: string) => Promise<void>;
+  /** Load a project into the store. `inPlace` is for re-reading a project the
+   * editor is already showing (the viewer's change poll, a conflict reload):
+   * the stored copy has moved on, so the head-start snapshot is skipped and
+   * only the live document is applied. */
+  loadProject: (id: string, opts?: { inPlace?: boolean }) => Promise<void>;
   setProjectName: (name: string) => void;
   setSaveState: (s: SaveState) => void;
   /** Enter read-only shared mode; call before loadProject. */
@@ -852,11 +856,14 @@ export const useEditor = create<EditorState>((baseSet, get) => {
     genvideo: undefined,
     renders: [],
 
-    loadProject: async (id) => {
-      // Re-reading a project already on screen — a viewer's change poll, a
-      // conflict reload. The whole point of those is that the stored copy has
-      // moved on, so the snapshot below is exactly the wrong thing to paint.
-      const reloading = get().projectId === id && get().loaded;
+    loadProject: async (id, opts) => {
+      // In-place re-reads (the viewer's change poll, a conflict reload) say so
+      // explicitly: the whole point of those is that the stored copy has moved
+      // on, so the snapshot below is exactly the wrong thing to paint. A fresh
+      // open of a project this store happened to hold last — going home and
+      // clicking back in — is not a re-read, and gets the snapshot's head
+      // start like any other open.
+      const inPlace = opts?.inPlace === true;
       history.length = 0;
       future.length = 0;
       pending = null;
@@ -992,7 +999,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       // live document arrives decides how that one is applied.
       let paintedFromCache = false;
       try {
-        const [cached, ui] = reloading
+        const [cached, ui] = inPlace
           ? [null, null]
           : await Promise.all([readCachedDoc(id), uiReq]);
         const stored = cached?.value;
