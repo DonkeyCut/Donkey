@@ -315,7 +315,7 @@ export function SidePanel({
       </div>
 
       {tab === null ? null : (
-        <div className="relative flex min-h-0">
+        <div className="flex min-h-0">
           {tab === "image" || tab === "video" ? (
         // The generate tabs are two columns: the generate input on the left,
         // the stock reference browser on the right. Clicking a stock tile loads
@@ -323,10 +323,11 @@ export function SidePanel({
         <>
           <div
             className={cn(
-              "flex w-[252px] min-h-0 shrink-0 flex-col",
+              "relative flex w-[252px] min-h-0 shrink-0 flex-col",
               !sharedFeatures && "border-r border-border"
             )}
           >
+            <ClosePanelButton onClose={() => setTab(null)} />
             {tab === "image" ? (
               <ImageGenPanel projectId={projectId} />
             ) : (
@@ -352,16 +353,16 @@ export function SidePanel({
         <>
           <div
             className={cn(
-              "flex w-[264px] min-h-0 shrink-0 flex-col",
+              "relative flex w-[264px] min-h-0 shrink-0 flex-col",
               musicLibrary && "border-r border-border"
             )}
           >
+            <ClosePanelButton onClose={() => setTab(null)} />
             <AudioPanel
               projectId={projectId}
               importing={importing}
               sub={audioSub}
               onSub={setAudioSub}
-              closeInset={!musicLibrary}
             />
           </div>
           {musicLibrary && (
@@ -371,7 +372,8 @@ export function SidePanel({
           )}
         </>
       ) : (
-        <div className="flex w-[264px] min-h-0 shrink-0 flex-col">
+        <div className="relative flex w-[264px] min-h-0 shrink-0 flex-col">
+          <ClosePanelButton onClose={() => setTab(null)} />
           {tab === "media" && (
             <MediaPanel projectId={projectId} onImport={onImport} importing={importing} />
           )}
@@ -380,18 +382,6 @@ export function SidePanel({
           {tab === "publish" && <PublishPanel />}
         </div>
       )}
-          {/* Floats over the panel's own header row; a solid face keeps it
-              legible where a column scrolls beneath it. Same action as
-              clicking the active rail tile. */}
-          <button
-            type="button"
-            aria-label="Close panel"
-            title="Close panel"
-            className="absolute top-2.5 right-2.5 z-10 grid size-7 place-items-center rounded-md bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            onClick={() => setTab(null)}
-          >
-            <X className="size-4" />
-          </button>
         </div>
       )}
     </div>
@@ -426,6 +416,23 @@ function forDrags(props: DragProps, takesRef: (ref: AssetRef) => boolean): DragP
       if (ok(e)) props.onDrop?.(e);
     },
   };
+}
+
+/** Floats over the first column's header row, whatever panel owns it; a solid
+ * face keeps it legible where the column scrolls beneath it. Same action as
+ * clicking the active rail tile. */
+function ClosePanelButton({ onClose }: { onClose: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label="Close panel"
+      title="Close panel"
+      className="absolute top-2.5 right-2.5 z-10 grid size-7 place-items-center rounded-md bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      onClick={onClose}
+    >
+      <X className="size-4" />
+    </button>
+  );
 }
 
 function PanelHead({ title }: { title: string }) {

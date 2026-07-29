@@ -101,13 +101,10 @@ export function StockVideosPanel() {
         </p>
       ) : view === "root" ? (
         <>
-          {/* The topmost section head shares its row with the side panel's
-              floating close button; inset its View all clear of it. */}
           {characters.length > 0 && (
             <section className="shrink-0">
               <SectionHead
                 title="Talking Characters"
-                className="pr-7"
                 onViewAll={
                   characters.length > SECTION_PREVIEW ? () => go("characters") : undefined
                 }
@@ -118,7 +115,6 @@ export function StockVideosPanel() {
           <section className="mt-3 shrink-0">
             <SectionHead
               title="Stock Videos"
-              className={characters.length === 0 ? "pr-7" : undefined}
               onViewAll={footage.length > SECTION_PREVIEW ? () => go("videos") : undefined}
             />
             {footage.length > 0 ? (
