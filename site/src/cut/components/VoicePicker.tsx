@@ -182,7 +182,7 @@ export function VoicePicker({
       <div className="flex items-stretch gap-2">
         <button
           type="button"
-          className="voice-sample grid aspect-square shrink-0 place-items-center rounded-lg border border-input text-foreground transition-colors hover:bg-muted"
+          className="voice-sample grid size-[34px] shrink-0 place-items-center rounded-lg border border-input text-foreground transition-colors hover:bg-muted"
           title={direction?.trim() ? "Hear this voice with your direction" : "Hear this voice"}
           aria-label="Play a sample of the selected voice"
           onClick={() => void sample()}
