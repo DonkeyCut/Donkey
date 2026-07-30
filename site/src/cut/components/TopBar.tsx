@@ -68,32 +68,53 @@ export function TopBar({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [recordMode, setRecordMode] = useState<RecordMode | null>(null);
-  // The right-hand rail collapses to a menu when its buttons no longer fit
-  // beside the centre switches. The rail's own width is what they have to fit
-  // in, and it does not move when they collapse — the grid track is a fixed
-  // share of the header, not a function of what is in it — so the measurement
-  // that folds the buttons away is the same one that brings them back.
-  const railRef = useRef<HTMLDivElement>(null);
+  // The right-hand actions step down as the bar tightens: full labels →
+  // icon-only Share/Cloud/Export → everything in a … menu. The storage pill
+  // never folds. Which step fits is measured against hidden copies of the
+  // full and compact rows, because the visible row can't report a width it
+  // isn't showing. Every measured box is content-sized — none of them depend
+  // on the chosen step — so the measurement can't feed back into itself.
+  const headerRef = useRef<HTMLElement>(null);
+  const leftRef = useRef<HTMLDivElement>(null);
+  const middleRef = useRef<HTMLDivElement>(null);
   const pillRef = useRef<HTMLDivElement>(null);
-  const actionsRef = useRef<HTMLDivElement>(null);
-  const [collapsed, setCollapsed] = useState(false);
+  const fullRowRef = useRef<HTMLDivElement>(null);
+  const compactRowRef = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState<"full" | "compact" | "menu">("full");
   useEffect(() => {
-    const rail = railRef.current;
-    const actions = actionsRef.current;
-    if (!rail || !actions) return;
-    const fit = () => {
-      const pill = pillRef.current?.offsetWidth ?? 0;
-      // gap-2 between the pill and the buttons, and only when the pill is there
-      // to need one — it renders nothing on a local project.
-      const needed = actions.offsetWidth + (pill > 0 ? pill + 8 : 0);
-      setCollapsed(needed > rail.clientWidth);
+    const boxes = [
+      headerRef.current,
+      leftRef.current,
+      middleRef.current,
+      pillRef.current,
+      fullRowRef.current,
+      compactRowRef.current,
+    ];
+    if (boxes.some((el) => !el)) return;
+    const [header, left, middle, pill, fullRow, compactRow] = boxes as HTMLElement[];
+    const refit = () => {
+      // The fixed seams around the actions: the two spacers' min-w-2 (16),
+      // the pill↔actions gap-2 (8), and the bar's pr-3 inset (12).
+      const room =
+        header.clientWidth -
+        left.offsetWidth -
+        middle.offsetWidth -
+        pill.offsetWidth -
+        36;
+      setFit(
+        fullRow.offsetWidth <= room
+          ? "full"
+          : compactRow.offsetWidth <= room
+            ? "compact"
+            : "menu"
+      );
     };
-    fit();
-    // The rail for the window resizing, the buttons for the set of them
-    // changing — Share and Cloud come and go with the project's backend.
-    const ro = new ResizeObserver(fit);
-    ro.observe(rail);
-    ro.observe(actions);
+    refit();
+    // The header for the window resizing; the rest for their contents
+    // changing — the project name, the custom-aspect editor, the pill and
+    // buttons that come and go with the project's backend.
+    const ro = new ResizeObserver(refit);
+    boxes.forEach((el) => ro.observe(el!));
     return () => ro.disconnect();
   }, []);
   const isPreset = ASPECT_PRESETS.some((p) => p.value === aspect);
@@ -273,18 +294,156 @@ export function TopBar({
     if (name && name !== projectName) useEditor.getState().setProjectName(name);
   };
 
+  // One set of actions rendered both ways: labelled, and icon-only when the
+  // bar tightens. Chat keeps its label in both — it is the primary control.
+  const actionButtons = (compact: boolean) => (
+    <>
+      {cutMode === "cloud" && (
+        <Button
+          variant="ghost"
+          size={compact ? "icon-sm" : "sm"}
+          aria-label="Share"
+          title="Share"
+          onClick={() => setShareOpen(true)}
+        >
+          <Share2 data-icon={compact ? undefined : "inline-start"} />
+          {!compact && "Share"}
+        </Button>
+      )}
+      {canMoveToCloud && (
+        // Our own tooltip, not the `title` attribute: the button's label is
+        // just "Cloud", and the browser's native tooltip waits a beat before
+        // saying what it does.
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size={compact ? "icon-sm" : "sm"}
+                  aria-label="Move to Cloud"
+                  onClick={() => setMoveOpen(true)}
+                >
+                  <CloudUpload data-icon={compact ? undefined : "inline-start"} />
+                  {!compact && "Cloud"}
+                </Button>
+              }
+            />
+            <TooltipContent side="bottom">Move to Cloud</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
+      <Button
+        variant="ghost"
+        size={compact ? "icon-sm" : "sm"}
+        aria-label="Export"
+        // A render reads the saved document, which an import still uploading
+        // is deliberately absent from — exporting now would quietly leave it
+        // out of the video.
+        disabled={!hasClips || cloudUploading}
+        title={cloudUploading ? "Finishing uploads…" : compact ? "Export" : undefined}
+        onClick={() => {
+          const s = useEditor.getState();
+          s.setPlaying(false);
+          s.setExportOpen(true);
+        }}
+      >
+        <Upload data-icon={compact ? undefined : "inline-start"} />
+        {!compact && "Export"}
+      </Button>
+      <div aria-hidden className="h-4 w-px bg-border" />
+      <Button
+        variant={aiOpen ? "default" : "outline"}
+        size="sm"
+        className="ai-toggle"
+        aria-label="Chat"
+        aria-pressed={aiOpen}
+        title="Chat (⌘J)"
+        onClick={() => {
+          const s = useEditor.getState();
+          s.setAiOpen(!s.aiOpen);
+        }}
+      >
+        <Sparkles data-icon="inline-start" /> Chat
+      </Button>
+    </>
+  );
+
   return (
-    // Three tracks, the middle one sized to its content and the sides sharing
-    // what is left equally — so the aspect and record switches sit centred on
-    // the bar and keep their full width at any size. Two things that centring
-    // depends on: the sides are minmax(0,…) rather than plain 1fr, since a
-    // track that its own contents can push wider would shove the middle off
-    // centre (which is how the right-hand buttons used to end up underneath
-    // them); and the bar's insets belong to the side tracks rather than the
-    // header, because padding the header centres the middle on what is left
-    // after the insets, and those two differ.
-    <header className="relative grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center border-b border-border bg-card">
-      <div className="col-start-2 row-start-1 flex items-center gap-2">
+    // One flex row — left group, switches, right rail — with a stretching
+    // spacer either side of the switches. With room to spare the spacers
+    // match and the switches sit centred; as the bar tightens they drift
+    // toward whichever side has slack instead of colliding with the rail.
+    <header ref={headerRef} className="relative flex items-center border-b border-border bg-card">
+      <div ref={leftRef} className="flex shrink-0 items-center gap-1 pl-2">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`Back to ${back.tab}`}
+          nativeButton={false}
+          render={<Link href={back.href} />}
+        >
+          <ChevronLeft />
+        </Button>
+        <span className="grid size-[22px] shrink-0 place-items-center">
+          <img
+            src="/donkey-logo.svg"
+            alt="Donkey"
+            width={22}
+            height={22}
+            className="block h-full w-full object-contain"
+          />
+        </span>
+        {editing ? (
+          <input
+            autoFocus
+            className="ml-1.5 h-7 w-52 rounded-md border border-input bg-transparent px-2 text-sm font-medium outline-none select-text focus:border-ring"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commitName}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitName();
+              if (e.key === "Escape") setEditing(false);
+            }}
+          />
+        ) : (
+          <button
+            className="ml-1.5 max-w-64 cursor-text truncate rounded-md px-2 py-1 text-sm font-medium tracking-tight hover:bg-muted"
+            title="Rename project"
+            onClick={() => {
+              setDraft(projectName);
+              setEditing(true);
+            }}
+          >
+            {projectName}
+          </button>
+        )}
+        <span
+          className={cn(
+            "ml-2 flex items-center gap-1 text-[11px] text-muted-foreground transition-opacity",
+            saveState === "saved" && !cloudUploading && "opacity-60"
+          )}
+        >
+          {cloudUploading ? (
+            <>
+              <Loader2 className="size-3 animate-spin" />{" "}
+              {uploading === 1 ? "Uploading" : `Uploading ${uploading} files`}
+            </>
+          ) : saveState === "saving" || saveState === "dirty" ? (
+            <>
+              <Loader2 className="size-3 animate-spin" /> Saving
+            </>
+          ) : saveState === "error" ? (
+            <span className="text-destructive">Couldn’t save</span>
+          ) : (
+            <>
+              <Check className="size-3" /> Saved
+            </>
+          )}
+        </span>
+      </div>
+      <div className="min-w-2 flex-1" />
+      <div ref={middleRef} className="flex shrink-0 items-center gap-2">
         {(() => {
           const aspectMenu = (
             <DropdownMenuContent align="start" className="w-56">
@@ -413,162 +572,37 @@ export function TopBar({
           onUse={(file) => onImport([file], { origin: "recording" })}
         />
       )}
-      <div className="col-start-1 row-start-1 flex min-w-0 items-center gap-1 overflow-hidden ml-2">
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={`Back to ${back.tab}`}
-          nativeButton={false}
-          render={<Link href={back.href} />}
-        >
-          <ChevronLeft />
-        </Button>
-        <span className="grid size-[22px] shrink-0 place-items-center">
-          <img
-            src="/donkey-logo.svg"
-            alt="Donkey"
-            width={22}
-            height={22}
-            className="block h-full w-full object-contain"
-          />
-        </span>
-        {editing ? (
-          <input
-            autoFocus
-            className="ml-1.5 h-7 w-52 rounded-md border border-input bg-transparent px-2 text-sm font-medium outline-none select-text focus:border-ring"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commitName}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commitName();
-              if (e.key === "Escape") setEditing(false);
-            }}
-          />
-        ) : (
-          <button
-            className="ml-1.5 max-w-64 cursor-text truncate rounded-md px-2 py-1 text-sm font-medium tracking-tight hover:bg-muted"
-            title="Rename project"
-            onClick={() => {
-              setDraft(projectName);
-              setEditing(true);
-            }}
-          >
-            {projectName}
-          </button>
-        )}
-        <span
-          className={cn(
-            "ml-2 flex items-center gap-1 text-[11px] text-muted-foreground transition-opacity",
-            saveState === "saved" && !cloudUploading && "opacity-60"
-          )}
-        >
-          {cloudUploading ? (
-            <>
-              <Loader2 className="size-3 animate-spin" />{" "}
-              {uploading === 1 ? "Uploading" : `Uploading ${uploading} files`}
-            </>
-          ) : saveState === "saving" || saveState === "dirty" ? (
-            <>
-              <Loader2 className="size-3 animate-spin" /> Saving
-            </>
-          ) : saveState === "error" ? (
-            <span className="text-destructive">Couldn’t save</span>
-          ) : (
-            <>
-              <Check className="size-3" /> Saved
-            </>
-          )}
-        </span>
-      </div>
-      <div
-        ref={railRef}
-        // No clipping here: the collapse is what keeps this rail inside its
-        // track, and the hidden measuring row needs no help staying out of
-        // sight. Clipping would only shave the focus ring off the last button.
-        className="col-start-3 row-start-1 flex min-w-0 items-center justify-end gap-2 mr-3"
-      >
+      <div className="min-w-2 flex-1" />
+      {/* No clipping on the rail: stepping down is what keeps it inside the
+          bar, and the hidden measuring rows need no help staying out of
+          sight. Clipping would only shave the focus ring off the last
+          button. */}
+      <div className="flex shrink-0 items-center gap-2 pr-3">
         <div ref={pillRef} className="flex items-center">
           <StoragePill />
         </div>
-        {/* The actions, and the same actions listed in a menu for when they no
-            longer fit beside the switches. The row stays mounted through the
-            swap — held out of the flow rather than unmounted — because its
-            natural width is what decides which of the two is showing, and a row
-            that only exists while it fits can never say that it would. */}
-        <div className="relative flex items-center gap-2">
+        <div className="relative flex items-center">
+          {/* Inert copies of the labelled and icon-only rows, held out of the
+              flow; their natural widths are what the fit measurement reads. */}
           <div
-            ref={actionsRef}
-            className={cn(
-              "flex items-center gap-2",
-              collapsed && "invisible absolute right-0 pointer-events-none"
-            )}
+            ref={fullRowRef}
+            inert
+            aria-hidden
+            className="invisible absolute right-0 flex items-center gap-2"
           >
-            {cutMode === "cloud" && (
-              <Button
-                variant="ghost"
-                size="sm"
-                aria-label="Share"
-                title="Share"
-                onClick={() => setShareOpen(true)}
-              >
-                <Share2 data-icon="inline-start" /> Share
-              </Button>
-            )}
-            {canMoveToCloud && (
-              // Our own tooltip, not the `title` attribute: the button's label is
-              // just "Cloud", and the browser's native tooltip waits a beat before
-              // saying what it does.
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        aria-label="Move to Cloud"
-                        onClick={() => setMoveOpen(true)}
-                      >
-                        <CloudUpload data-icon="inline-start" /> Cloud
-                      </Button>
-                    }
-                  />
-                  <TooltipContent side="bottom">Move to Cloud</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            )}
-            <Button
-              variant="ghost"
-              size="sm"
-              // A render reads the saved document, which an import still uploading
-              // is deliberately absent from — exporting now would quietly leave it
-              // out of the video.
-              disabled={!hasClips || cloudUploading}
-              title={cloudUploading ? "Finishing uploads…" : undefined}
-              onClick={() => {
-                const s = useEditor.getState();
-                s.setPlaying(false);
-                s.setExportOpen(true);
-              }}
-            >
-              <Upload data-icon="inline-start" /> Export
-            </Button>
-            <div aria-hidden className="h-4 w-px bg-border" />
-            <Button
-              variant={aiOpen ? "default" : "outline"}
-              size="sm"
-              className="ai-toggle"
-              aria-label="Chat"
-              aria-pressed={aiOpen}
-              title="Chat (⌘J)"
-              onClick={() => {
-                const s = useEditor.getState();
-                s.setAiOpen(!s.aiOpen);
-              }}
-            >
-              <Sparkles data-icon="inline-start" /> Chat
-            </Button>
+            {actionButtons(false)}
           </div>
-          {collapsed && (
+          <div
+            ref={compactRowRef}
+            inert
+            aria-hidden
+            className="invisible absolute right-0 flex items-center gap-2"
+          >
+            {actionButtons(true)}
+          </div>
+          {fit !== "menu" ? (
+            <div className="flex items-center gap-2">{actionButtons(fit === "compact")}</div>
+          ) : (
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={<Button variant="ghost" size="icon-sm" aria-label="More actions" title="More actions" />}

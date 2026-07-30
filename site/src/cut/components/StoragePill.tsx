@@ -21,7 +21,7 @@ import { useOpenBillingPortal, useProSubscription } from "@/queries/billing";
 import { formatBytes } from "./desktopFolders";
 
 const PILL =
-  "flex cursor-pointer items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium shadow-xs transition-colors";
+  "flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium shadow-xs transition-colors";
 
 /** "278 / 250 MB" — the pill sits in a crowded top bar, so a unit is spelled
  * out only where it carries information: repeat it just when the two numbers
