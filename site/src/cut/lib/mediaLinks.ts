@@ -91,9 +91,15 @@ function refreshSignedUrls(force = false): Promise<void> {
     // event retries.
     if (minted.urls.size === 0 && !force && Date.now() < b.expiresAt) return;
     const urls = new Map<string, string>();
+    let rotated = 0;
     for (const a of st.assets) {
-      urls.set(a.fileName, minted.urls.get(a.fileName) ?? mediaUrl(b.projectId, a.fileName));
+      const url = minted.urls.get(a.fileName) ?? mediaUrl(b.projectId, a.fileName);
+      urls.set(a.fileName, url);
+      if (url !== a.url) rotated++;
     }
+    console.debug(
+      `[cut-media] re-mint: ${rotated}/${st.assets.length} url(s) rotated` + (force ? " (forced by a load failure)" : "")
+    );
     st.applyMediaUrls(urls);
     if (minted.expiresAt !== null) {
       b.expiresAt = minted.expiresAt;

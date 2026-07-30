@@ -261,6 +261,10 @@ class Engine {
       return false;
     }
     this.health.set(clipId, { mark: -1, at: now, rebuilds: h.rebuilds + 1 });
+    console.debug(
+      `[cut-preview] decoder rebuild: clip ${clipId} ` +
+        `(${elErrored(el) ? "errored" : "stalled"}, attempt ${h.rebuilds + 1}/${DECODER_REBUILDS})`
+    );
     return true;
   }
 
@@ -672,6 +676,45 @@ class Engine {
     // After the frame, never during it: what `render` touched is exactly what
     // must survive, and it takes every early return there is to say so.
     this.evictIdleDecoders();
+    this.diagPulse();
+  }
+
+  // Diagnostic heartbeat. The decoder pool is invisible from DevTools — the
+  // elements are detached — so every ten seconds the engine prints each live
+  // decoder's clock, readiness and buffer. A decoder found playing while the
+  // project is paused is flagged loudly: every paused-path element is supposed
+  // to be parked, so one still running marks a leak. Filter the console on
+  // "cut-preview".
+  private lastDiagAt = 0;
+
+  private diagPulse() {
+    const now = performance.now();
+    if (now - this.lastDiagAt < 10_000) return;
+    this.lastDiagAt = now;
+    const playing = useEditor.getState().playing;
+    const rows: string[] = [];
+    const scan = (map: Map<string, MediaEl>, kind: string) => {
+      for (const [id, el] of map) {
+        if (isImageEl(el)) {
+          rows.push(`${kind} ${id} img`);
+          continue;
+        }
+        const buf = el.buffered.length ? el.buffered.end(el.buffered.length - 1).toFixed(1) : "0";
+        rows.push(
+          `${kind} ${id} ct=${el.currentTime.toFixed(2)} rs=${el.readyState} buf=${buf}` +
+            `${el.paused ? "" : " PLAYING"}${el.error ? ` err=${el.error.code}` : ""}`
+        );
+        if (!playing && !el.paused) {
+          console.warn(`[cut-preview] decoder playing while paused: clip ${id} at ${el.currentTime.toFixed(2)}s`);
+        }
+      }
+    };
+    scan(this.videoEls, "track0");
+    scan(this.overlayEls, "overlay");
+    console.debug(
+      `[cut-preview] playing=${playing} decoders=${this.videoEls.size + this.overlayEls.size} ` +
+        `audio=${this.audioEls.size}\n` + rows.join("\n")
+    );
   }
 
   private render() {
