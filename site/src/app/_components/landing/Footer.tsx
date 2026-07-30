@@ -69,10 +69,10 @@ export function Footer() {
           <p className="text-[15px] font-semibold text-ink">
             Need help? Email us at{" "}
             <a
-              href="mailto:david@donkeyuse.com"
+              href="mailto:hello@donkeycut.com"
               className="underline underline-offset-2"
             >
-              david@donkeyuse.com
+              hello@donkeycut.com
             </a>
           </p>
           <p className="mt-6 text-[13px] text-[#666]">
