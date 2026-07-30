@@ -17,13 +17,17 @@ import {
 } from "@/components/ui/dialog";
 import {
   ENGINE_LOST_EVENT,
-  engineConnect,
   engineGateOpen,
   engineProbe,
   servedFromEngine,
 } from "@/cut/lib/api";
 import { announceLocalCompute, setCutMode } from "@/cut/lib/backend";
 import { useCutMode } from "@/cut/lib/backend/hooks";
+import {
+  CONNECT_ACK_KEY,
+  ENGINE_CONNECTED_EVENT,
+  connectToEngine,
+} from "@/cut/lib/connect";
 import { setNeedsApp, useNeedsApp } from "@/cut/lib/needsApp";
 import { engineSeen, markEngineSeen } from "@/cut/lib/residency";
 
@@ -44,7 +48,6 @@ import { engineSeen, markEngineSeen } from "@/cut/lib/residency";
 // steps in a dialog. The gate keeps probing behind it, so starting the Donkey
 // app clears the banner and the project loads. Engine loss mid-session
 // (api.ts's engineLost) lands in the same state.
-const ACK_KEY = "cut-engine-connect-acked";
 
 /** Dev-only preview of the banner and its dialog, since localhost always
  * reaches its engine — open a local project with it, since that is where the
@@ -122,7 +125,7 @@ export function ConnectGate({ children }: { children: ReactNode }) {
     const quiet =
       servedFromEngine() ||
       perm === "granted" ||
-      (perm === null && localStorage.getItem(ACK_KEY) === "1");
+      (perm === null && localStorage.getItem(CONNECT_ACK_KEY) === "1");
     setNeedsAsk(!quiet && perm !== "denied");
     if (quiet) {
       try {
@@ -163,14 +166,23 @@ export function ConnectGate({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(ENGINE_LOST_EVENT, onLost);
   }, [bindCloud]);
 
+  // A user-triggered connect elsewhere (the account menu's "Run locally on
+  // Mac") reached the engine: fold it into this gate's state so the banner
+  // drops and the poll stops.
+  useEffect(() => {
+    const onConnected = () => bindEngine();
+    window.addEventListener(ENGINE_CONNECTED_EVENT, onConnected);
+    return () => window.removeEventListener(ENGINE_CONNECTED_EVENT, onConnected);
+  }, [bindEngine]);
+
   const connect = async () => {
     setConnecting(true);
-    localStorage.setItem(ACK_KEY, "1");
-    const ok = await engineConnect();
+    const ok = await connectToEngine();
     setConnecting(false);
     if (ok) {
+      // bindEngine ran via ENGINE_CONNECTED_EVENT.
       setHowOpen(false);
-      return bindEngine();
+      return;
     }
     // No engine answered, but the browser ask may still have been decided.
     const perm = await permissionState();

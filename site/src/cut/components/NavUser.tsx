@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UserAvatar } from "@/cut/components/UserAvatar";
+import { connectToEngine } from "@/cut/lib/connect";
 import { cutInstallHref } from "@/cut/lib/install";
 import { openOnboarding } from "@/cut/lib/onboarding";
 import { useCutBase } from "@/cut/lib/nav";
@@ -54,6 +55,19 @@ export function NavUser() {
   const name = visibleName(profile, session.user.name);
   const image = profile?.image ?? session.user.image;
 
+  const runLocally = () => {
+    // Reach for the engine first — the app may already be installed and
+    // running, and this click is the browser-permission ask landing in
+    // context. Only when nothing answers does the install page open; without
+    // noopener so a popup-blocked open (the permission ask can outlive the
+    // click's activation window) is detectable and falls back to this tab.
+    void connectToEngine().then((ok) => {
+      if (ok) return;
+      const tab = window.open(cutInstallHref(), "_blank");
+      if (!tab) window.location.assign(cutInstallHref());
+    });
+  };
+
   const signOut = () => {
     // Sign out everywhere: revoke every session for this user (so the Mac app
     // signs out too), then clear this browser's session and land on the Cut
@@ -71,7 +85,7 @@ export function NavUser() {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted data-[popup-open]:bg-muted">
+      <DropdownMenuTrigger className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted data-[popup-open]:bg-muted">
         <UserAvatar name={name} image={image} />
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
         <EllipsisVertical className="size-4 shrink-0 text-muted-foreground" />
@@ -101,11 +115,7 @@ export function NavUser() {
         <DropdownMenuItem onClick={openOnboarding}>
           <Sparkles /> View onboarding
         </DropdownMenuItem>
-        {/* The install page lives outside the editor, so it opens in its own
-            tab rather than navigating away from an open project. */}
-        <DropdownMenuItem
-          onClick={() => window.open(cutInstallHref(), "_blank", "noopener")}
-        >
+        <DropdownMenuItem onClick={runLocally}>
           <MonitorDown /> Run locally on Mac
         </DropdownMenuItem>
         <DropdownMenuSeparator />
