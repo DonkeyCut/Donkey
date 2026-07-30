@@ -41,7 +41,7 @@ export function NavStorage() {
             render={
               <button
                 type="button"
-                className="group flex items-center justify-between gap-2 rounded-lg px-2 py-2 text-xs transition-colors hover:bg-muted disabled:opacity-50"
+                className="group flex cursor-pointer items-center justify-between gap-2 rounded-lg px-2 py-2 text-xs transition-colors hover:bg-muted disabled:opacity-50"
                 disabled={upgrade.isPending}
                 onClick={upgrade.start}
               />
@@ -58,7 +58,7 @@ export function NavStorage() {
               Get 50 GB
             </span>
           </TooltipTrigger>
-          <TooltipContent>Upgrade to get 50 GB</TooltipContent>
+          <TooltipContent>Upgrade for 50 GB + AI credits</TooltipContent>
         </Tooltip>
       </TooltipProvider>
       {u.grace && (
