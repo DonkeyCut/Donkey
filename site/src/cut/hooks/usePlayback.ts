@@ -329,8 +329,11 @@ class Engine {
    * cut, play the element muted and undrawn from `lead` of source before its
    * entrance, so it is already running across the in-point — arriving there as
    * the playhead reaches the cut — and the real `play()` resumes hot with
-   * nothing skipped. */
-  private warmNext(span: ClipSpan, t: number) {
+   * nothing skipped. Rolling only makes sense while the playhead is moving:
+   * paused inside the window, the element parks on the seat, and a roll left
+   * over from playback is stopped — an unwatched roll runs past the cut to the
+   * end of the file and restarts forever. */
+  private warmNext(span: ClipSpan, t: number, play: boolean) {
     const el = this.videoFor(span.clip, span.asset);
     if (isImageEl(el)) return; // a still needs no pipeline
     const speed = clipSpeed(span.clip);
@@ -343,11 +346,16 @@ class Engine {
     const rate = safeRate(speed);
     if (el.playbackRate !== rate) el.playbackRate = rate;
     el.muted = true; // silent until it becomes master and unmutes
+    // Seat it `lead` of source before the entrance; playing, it then rolls
+    // forward so it reaches `in` right as the playhead reaches the cut.
+    const from = span.clip.in - lead * speed;
+    if (!play) {
+      if (!el.paused) el.pause();
+      else if (!el.seeking && Math.abs(el.currentTime - from) > 0.1) el.currentTime = from;
+      return;
+    }
     // Already rolling: let it run — it crosses `in` on its own as the cut lands.
     if (!el.paused) return;
-    // Seat it `lead` of source before the entrance, then play forward so it
-    // reaches `in` right as the playhead reaches the cut.
-    const from = span.clip.in - lead * speed;
     if (!el.seeking && Math.abs(el.currentTime - from) > 0.1) el.currentTime = from;
     if (el.readyState >= 2 && !el.seeking) void el.play().catch(() => {});
   }
@@ -425,7 +433,7 @@ class Engine {
     // (the dissolve start, or the hard cut) so the handoff `play()` resumes hot
     // — no cold-start spin-up freezing the picture and playhead at the cut.
     if (plan.upcoming) {
-      this.warmNext(plan.upcoming, t);
+      this.warmNext(plan.upcoming, t, play);
       keep.add(plan.upcoming.clip.id);
     }
     // Each clip owns its element, so a transition's two clips decode side by
