@@ -219,6 +219,8 @@ function MusicGenerator({ projectId }: { projectId: string }) {
     setPending((p) => p + n);
     await Promise.all(
       Array.from({ length: n }, async () => {
+        // Spins the Audio rail tile for the take's whole flight.
+        const settle = useGenNotify.getState().begin("audio");
         try {
           const asset = await synthesizeMusic(projectId, text, { variant, instrumental });
           // A render can outlast the open project — the user may switch away
@@ -237,6 +239,7 @@ function MusicGenerator({ projectId }: { projectId: string }) {
           fail(e, "Music generation failed.");
         } finally {
           setPending((p) => p - 1);
+          settle();
         }
       })
     );
@@ -401,6 +404,9 @@ function VoiceGenerator({ projectId }: { projectId: string }) {
     const text = script.trim();
     if (!text) return;
     setPending((p) => p + 1);
+    // The Audio rail tile spins while this runs — the tab is often closed
+    // before the voice lands.
+    const settle = useGenNotify.getState().begin("audio");
     setError(null);
     try {
       const playhead = useEditor.getState().currentTime;
@@ -433,6 +439,7 @@ function VoiceGenerator({ projectId }: { projectId: string }) {
       fail(e, "Voice generation failed.");
     } finally {
       setPending((p) => p - 1);
+      settle();
     }
   };
 

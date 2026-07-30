@@ -68,6 +68,7 @@ import { retryUpload } from "@/cut/lib/importQueue";
 import { isMediaFile, revealMedia } from "@/cut/lib/media";
 import { mediaUrl, TRANSITION_MAX } from "@/cut/lib/types";
 import { genPulseOverlay, isGenTab, useGenNotify, useGenPulse, useWatchGenTab } from "@/cut/lib/genNotify";
+import { useGenerate, type GenerateJob } from "@/cut/lib/generate";
 import { CAPTION_LIMIT, normalizeTags } from "@/cut/lib/publish";
 import { useEditor } from "@/cut/lib/store";
 import { formatTime } from "@/cut/lib/time";
@@ -174,14 +175,32 @@ export function SidePanel({
   useWatchGenTab(tab, projectId);
   // Media badges too: its arrivals are exports finishing in the background.
   useWatchExportLands(projectId);
-  // While one of this project's exports renders, the Media tile spins — the
-  // export row lives in that panel, which is usually closed while it runs.
+  // While a tab owns work in flight its rail tile spins — the work's own panel
+  // is usually closed while it runs. Each tab's running state comes from the
+  // store that owns that work: exports for Media, panel renders for
+  // Video/Image, registered syntheses for Audio, the transcription pass for
+  // Subtitles.
   const exporting = useExports(
     (s) =>
       s.jobs.some(
         (j) => j.projectId === projectId && (j.status === "queued" || j.status === "running")
       ) || s.local.some((r) => r.projectId === projectId && r.status === "preparing")
   );
+  const panelRendering = (s: { jobs: GenerateJob[] }, kind: GenerateJob["kind"]) =>
+    s.jobs.some(
+      (j) => j.projectId === projectId && j.kind === kind && j.status === "running" && !j.chatId
+    );
+  const videoBusy = useGenerate((s) => panelRendering(s, "video"));
+  const imageBusy = useGenerate((s) => panelRendering(s, "image"));
+  const audioBusy = useGenNotify((s) => s.active.audio.length > 0);
+  const subtitlesBusy = useEditor((s) => s.subtitleStatus === "running");
+  const busy: Partial<Record<Tab, boolean>> = {
+    media: exporting,
+    video: videoBusy,
+    image: imageBusy,
+    audio: audioBusy,
+    subtitles: subtitlesBusy,
+  };
 
   // Clicking a reference token anywhere jumps here: switch to the tab that
   // owns the asset; the matching card scrolls into view and flashes.
@@ -238,15 +257,7 @@ export function SidePanel({
                 )}
               >
                 <Icon className="size-4.5" />
-                {unseenCount > 0 ? (
-                  <span className="absolute -top-1 -right-1 grid h-[15px] min-w-[15px] place-items-center rounded-full bg-[#0a84ff] px-1 text-[9px] leading-none font-semibold text-white tabular-nums ring-2 ring-card">
-                    {unseenCount}
-                  </span>
-                ) : id === "media" && exporting ? (
-                  <span className="absolute -top-1 -right-1 grid size-[15px] place-items-center rounded-full bg-card ring-2 ring-card">
-                    <Loader2 className="size-3 animate-spin text-primary" />
-                  </span>
-                ) : null}
+                <TileStatus count={unseenCount} busy={!!busy[id]} />
               </span>
               <span
                 className={cn(
@@ -433,6 +444,25 @@ function ClosePanelButton({ onClose }: { onClose: () => void }) {
       <X className="size-4" />
     </button>
   );
+}
+
+/** The rail tile's corner status, one look for every tab: a blue count of
+ * arrivals that finished while the tab was closed, else a spinner while the
+ * tab owns work still in flight. */
+function TileStatus({ count, busy }: { count: number; busy: boolean }) {
+  if (count > 0)
+    return (
+      <span className="absolute -top-1 -right-1 grid h-[15px] min-w-[15px] place-items-center rounded-full bg-[#0a84ff] px-1 text-[9px] leading-none font-semibold text-white tabular-nums ring-2 ring-card">
+        {count}
+      </span>
+    );
+  if (busy)
+    return (
+      <span className="absolute -top-1 -right-1 grid size-[15px] place-items-center rounded-full bg-card ring-2 ring-card">
+        <Loader2 className="size-3 animate-spin text-primary" />
+      </span>
+    );
+  return null;
 }
 
 function PanelHead({ title }: { title: string }) {

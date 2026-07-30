@@ -39,6 +39,7 @@ import {
 } from "./docCache";
 import { renderMix, transcribeSamples, type CloudTranscribeSpec } from "./cloudTranscribe";
 import { alignCues } from "./cueAlign";
+import { useGenNotify } from "./genNotify";
 import { engineTranscribeSamples } from "./localStt";
 import { trackLocale } from "./subtitles";
 import { ANIM_STYLE_IDS, emptySubtitles, IMAGE_CLIP_SECONDS, LOOK_IDS, MAX_SUBTITLE_LANES, mediaUrl, migrateLegacyTransitions, normalizeAspect, SPEED_FLOOR, SPEED_MIN, TRANSITION_MAX } from "./types";
@@ -3066,6 +3067,16 @@ useEditor.subscribe((s, prev) => {
     s.subtitles !== prev.subtitles
   )
     docSeq++;
+});
+
+// Every subtitles pass — transcription, translation, AI captions — rides
+// subtitleStatus, so this one watch badges the Subtitles rail tile whenever a
+// pass settles while the tab is closed (landed() no-ops while it's watched).
+// A project load also drops "running", inside the same set() that clears
+// `loaded` — the guard keeps that reset off the badge.
+useEditor.subscribe((s, prev) => {
+  if (prev.subtitleStatus === "running" && s.subtitleStatus !== "running" && s.loaded)
+    useGenNotify.getState().landed("subtitles", `subs-${Date.now()}`);
 });
 
 /** Ids of the assets still uploading, as a comparable key ("" when none). An

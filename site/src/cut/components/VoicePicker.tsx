@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { SectionTitle } from "@/cut/components/SectionTitle";
 import { creditsUrl, signInUrl, useSignedIn } from "@/cut/lib/generate";
+import { useGenNotify } from "@/cut/lib/genNotify";
 import { useEditor, type EditorState } from "@/cut/lib/store";
 import { NoCreditsError, renderSpeechClip, resolveLanguage, resolveVoice } from "@/cut/lib/tts";
 import {
@@ -304,6 +305,9 @@ export function GenerateSubtitlesAudio({
   const generate = async () => {
     setBusy(true);
     setError(null);
+    // A voiceover like the Audio tab's own: its rail tile spins for the
+    // flight, and the landed clip badges it if the user stepped away.
+    const settle = useGenNotify.getState().begin("audio");
     try {
       if (scopedCueIds(useEditor.getState(), selectCueIds).length === 0) {
         // Nothing to read yet — transcribe first, then voice the fresh cues.
@@ -323,10 +327,11 @@ export function GenerateSubtitlesAudio({
           throw new Error("No speech found to voice.");
         }
       }
-      await generateSubtitlesReadout(voice, {
+      const { asset } = await generateSubtitlesReadout(voice, {
         cueIds: selectCueIds?.(useEditor.getState()),
         language,
       });
+      useGenNotify.getState().landed("audio", asset.id);
     } catch (e) {
       setError(
         e instanceof Error
@@ -335,6 +340,7 @@ export function GenerateSubtitlesAudio({
       );
     } finally {
       setBusy(false);
+      settle();
     }
   };
 

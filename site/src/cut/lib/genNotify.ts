@@ -7,17 +7,18 @@ import { create } from "zustand";
 // already imports, so the styles load exactly where the overlay is used.
 import "./genNotify.css";
 
-// AI generations and exports outlive the panel that started them — several can
-// render at once while the user edits elsewhere. This store notices the ones
-// that finish unwatched: the side rail badges the owning tab with a blue count,
-// and opening that tab clears the count and lets the freshly-arrived tiles
-// pulse blue for a few seconds so the eye lands on them. Media's arrivals are
-// finished exports, keyed by file name.
+// Long-running work outlives the panel that started it — several renders,
+// exports, or transcriptions can run at once while the user edits elsewhere.
+// This store is the one place every tab reports that work: while a tab owns
+// work in flight its rail tile spins, and a completion that lands unwatched
+// badges the tile with a blue count. Opening the tab clears the count and lets
+// the freshly-arrived tiles pulse blue for a few seconds so the eye lands on
+// them. Media's arrivals are finished exports, keyed by file name.
 
-export type GenTab = "video" | "image" | "audio" | "media";
+export type GenTab = "video" | "image" | "audio" | "media" | "subtitles";
 
 export const isGenTab = (v: string): v is GenTab =>
-  v === "video" || v === "image" || v === "audio" || v === "media";
+  v === "video" || v === "image" || v === "audio" || v === "media" || v === "subtitles";
 
 /** How long a tab's new tiles keep pulsing once it opens. */
 const PULSE_MS = 4500;
@@ -28,17 +29,35 @@ const PULSE_MS = 4500;
 export const genPulseOverlay =
   "cut-gen-pulse pointer-events-none absolute inset-0 rounded-[inherit]";
 
-const EMPTY: Record<GenTab, string[]> = { video: [], image: [], audio: [], media: [] };
+const EMPTY: Record<GenTab, string[]> = {
+  video: [],
+  image: [],
+  audio: [],
+  media: [],
+  subtitles: [],
+};
+
+/** Unique key per registered piece of in-flight work. */
+let workSeq = 0;
 
 interface GenNotifyState {
   /** Finished-while-away asset ids per tab — the rail badge counts these. */
   unseen: Record<GenTab, string[]>;
   /** The just-opened tab's arrivals, pulsing until their timer clears them. */
   pulsing: Record<GenTab, string[]>;
+  /** In-flight work registered per tab — the rail tile spins while a tab has
+   * entries. For work whose running state lives in no store of its own (audio
+   * syntheses); tabs with a job store (generate, exports, subtitles) are read
+   * directly by the rail. */
+  active: Record<GenTab, string[]>;
   /** The generate tab on screen; a completion here needs no badge or pulse —
    *  the user watched the tile appear. */
   watching: GenTab | null;
   landed: (tab: GenTab, assetId: string) => void;
+  /** Register a long task with its tab; call the returned function when it
+   * settles. Settling after a project switch is a no-op — reset() already
+   * dropped the entry. */
+  begin: (tab: GenTab) => () => void;
   watch: (tab: GenTab | null) => void;
   endPulse: (tab: GenTab) => void;
   reset: () => void;
@@ -47,10 +66,21 @@ interface GenNotifyState {
 export const useGenNotify = create<GenNotifyState>((set, get) => ({
   unseen: EMPTY,
   pulsing: EMPTY,
+  active: EMPTY,
   watching: null,
   landed: (tab, assetId) => {
     if (get().watching === tab) return; // watched live — no badge, no pulse
     set((s) => ({ unseen: { ...s.unseen, [tab]: [...s.unseen[tab], assetId] } }));
+  },
+  begin: (tab) => {
+    const key = `w${workSeq++}`;
+    set((s) => ({ active: { ...s.active, [tab]: [...s.active[tab], key] } }));
+    return () =>
+      set((s) =>
+        s.active[tab].includes(key)
+          ? { active: { ...s.active, [tab]: s.active[tab].filter((k) => k !== key) } }
+          : {}
+      );
   },
   // Opening a tab clears its badge and hands its arrivals to the pulse set, so
   // leaving before the pulse ends never brings the count back — they're seen.
@@ -68,7 +98,7 @@ export const useGenNotify = create<GenNotifyState>((set, get) => ({
     }),
   endPulse: (tab) =>
     set((s) => (s.pulsing[tab].length === 0 ? {} : { pulsing: { ...s.pulsing, [tab]: [] } })),
-  reset: () => set({ unseen: EMPTY, pulsing: EMPTY }),
+  reset: () => set({ unseen: EMPTY, pulsing: EMPTY, active: EMPTY }),
 }));
 
 /** Whether this finished tile is in its tab's fresh-arrival pulse. */
