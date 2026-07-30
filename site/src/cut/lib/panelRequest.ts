@@ -3,19 +3,11 @@
 import { useEffect } from "react";
 import { create } from "zustand";
 
-// The assistant's set_side_panel tool lands here: a one-shot request the
-// SidePanel applies — open a tab, or collapse the panel to the icon rail so
-// the preview canvas takes the freed width.
+// The assistant's set_side_panel tool and the doc's firstOpen block land
+// here: a one-shot request the SidePanel applies — open a tab, or collapse
+// the panel to the icon rail so the preview canvas takes the freed width.
 
-/** Side-panel tabs; `null` collapses the panel to the icon rail. */
-export type SidePanelTab =
-  | "media"
-  | "library"
-  | "video"
-  | "image"
-  | "audio"
-  | "subtitles"
-  | "publish";
+import type { SidePanelTab } from "./types";
 
 export const SIDE_PANEL_TABS: SidePanelTab[] = [
   "media",

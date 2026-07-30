@@ -441,5 +441,10 @@
     "musicAssetId": "1d1583d4",
     "musicClipId": "1fc154e8",
     "endedAt": 1785304696184
+  },
+  "firstOpen": {
+    "sidePanel": null,
+    "chat": "59ba035c-d37a-400e-ac1a-d216c254fa5f",
+    "play": true
   }
 }

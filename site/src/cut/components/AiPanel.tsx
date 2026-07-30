@@ -88,7 +88,6 @@ import { useCreditsRecheck, useOutOfCredits } from "@/cut/lib/hosted";
 import { streamGeminiChat } from "@/cut/lib/geminiChat";
 import { AI_MODELS } from "@/cut/lib/aiModels";
 import { saveAssetToLibrary } from "@/cut/lib/library";
-import { isStarterProjectId } from "@/cut/lib/starter";
 import { formatDuration, useGenScene } from "@/cut/lib/genScene";
 import { lightboxItemFromRef, useLightbox } from "@/cut/lib/lightbox";
 import { refsFromDroppedFiles } from "@/cut/lib/refMedia";
@@ -259,12 +258,6 @@ export function AiPanel({
       ? crypto.randomUUID()
       : (readActiveChat(projectId) ?? crypto.randomUUID()),
   );
-  // Whether this browser held a chat pointer for the project before the write
-  // below stamps one; captured at mount so the resume in the merge effect can
-  // still tell a first open apart.
-  const [hadStoredChat] = useState(
-    () => typeof window !== "undefined" && readActiveChat(projectId) !== null,
-  );
   useEffect(() => {
     writeActiveChat(projectId, activeChat);
   }, [activeChat, projectId]);
@@ -276,22 +269,12 @@ export function AiPanel({
   useEffect(() => {
     let alive = true;
     void ensureCloudThreads(projectId).then(() => {
-      if (!alive) return;
-      // The starter project's first open on this browser resumes its newest
-      // saved thread — the seeded walkthrough — instead of a blank chat. Set
-      // before chatsReady so the session mounts once, on the right thread.
-      if (!hadStoredChat && isStarterProjectId(projectId)) {
-        setActiveChat((cur) => {
-          const list = readThreads(projectId);
-          return list.length > 0 && !list.some((t) => t.id === cur) ? list[0].id : cur;
-        });
-      }
-      setChatsReady(true);
+      if (alive) setChatsReady(true);
     });
     return () => {
       alive = false;
     };
-  }, [projectId, hadStoredChat]);
+  }, [projectId]);
 
   // A shared view opens on the owner's newest thread — the viewer has no chat
   // of their own to resume. Derived, so the fallback holds until the viewer

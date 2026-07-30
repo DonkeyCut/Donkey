@@ -26,11 +26,12 @@ import { enrichAsset, importFileToProject, prepareImport } from "@/cut/lib/media
 // persisted run resumes on project load even when the AI panel never mounts.
 import "@/cut/lib/genScene";
 import { installDevHooks } from "@/cut/lib/devHooks";
+import { ensureCloudThreads } from "@/cut/lib/chatCloud";
+import { readProjectThreads, writeActiveChat } from "@/cut/lib/chatThreads";
 import { backTarget, useCutBase } from "@/cut/lib/nav";
 import { useOnboardingCover } from "@/cut/lib/onboarding";
 import { requestSidePanel } from "@/cut/lib/panelRequest";
 import { resolveProjectPlacement } from "@/cut/lib/residency";
-import { starterProjectId } from "@/cut/lib/starter";
 import {
   docAudioClips,
   docClips,
@@ -40,7 +41,6 @@ import {
   useEditor,
 } from "@/cut/lib/store";
 import type { MediaAsset } from "@/cut/lib/types";
-import { authClient } from "@/lib/auth-client";
 import { AiPanel } from "./AiPanel";
 import { ExportDialog } from "./ExportDialog";
 import { Inspector } from "./Inspector";
@@ -171,31 +171,55 @@ export function Editor({
     };
   }, [projectId, viewer]);
 
-  // The starter project's first open presents the finished cut: the side
-  // panel folds to its rail, chat opens on the seeded thread, and the video
-  // plays — held while the welcome slides still cover the editor, so it
-  // starts the moment they hand over. Once per browser; after this the
-  // layout is the user's own to keep.
-  const { data: session } = authClient.useSession();
-  const userId = session?.user.id;
+  // A doc that carries `firstOpen` presents itself on its first open in this
+  // browser: the editor reads the block and follows it — which side-panel tab
+  // shows (null folds the panel to its rail), whether chat opens on the
+  // newest saved thread, whether playback starts. Playback is held while the
+  // welcome slides still cover the editor, so it starts the moment they hand
+  // over. Applied once per browser; after this the layout is the user's own
+  // to keep. The seeded starter template is what ships the block today.
   useEffect(() => {
-    if (!loaded || viewer || !userId || projectId !== starterProjectId(userId)) return;
-    const seenKey = `cut-starter-intro-${projectId}`;
+    if (!loaded || viewer) return;
+    const intro = useEditor.getState().firstOpen;
+    if (!intro) return;
+    const seenKey = `cut-first-open-${projectId}`;
     if (localStorage.getItem(seenKey)) return;
     localStorage.setItem(seenKey, "1");
-    requestSidePanel(null);
-    useEditor.getState().setAiOpen(true);
-    if (!useOnboardingCover.getState().up) {
-      useEditor.getState().setPlaying(true);
-      return;
+    let alive = true;
+    const cleanups: (() => void)[] = [];
+    if (intro.sidePanel !== undefined) requestSidePanel(intro.sidePanel);
+    if (intro.chat === true) {
+      // No thread named: the panel opens on a fresh empty chat.
+      useEditor.getState().setAiOpen(true);
+    } else if (intro.chat) {
+      // Point the chat at the named thread before the panel mounts, so it
+      // opens the seeded conversation rather than a blank one.
+      const wantedId = intro.chat;
+      void ensureCloudThreads(projectId).then(() => {
+        if (!alive) return;
+        const threads = readProjectThreads(projectId);
+        const wanted = threads.find((t) => t.id === wantedId) ?? threads[0];
+        if (wanted) writeActiveChat(projectId, wanted.id);
+        useEditor.getState().setAiOpen(true);
+      });
     }
-    const unsub = useOnboardingCover.subscribe((s) => {
-      if (s.up) return;
-      unsub();
-      useEditor.getState().setPlaying(true);
-    });
-    return unsub;
-  }, [loaded, viewer, userId, projectId]);
+    if (intro.play) {
+      if (!useOnboardingCover.getState().up) {
+        useEditor.getState().setPlaying(true);
+      } else {
+        const unsub = useOnboardingCover.subscribe((s) => {
+          if (s.up) return;
+          unsub();
+          useEditor.getState().setPlaying(true);
+        });
+        cleanups.push(unsub);
+      }
+    }
+    return () => {
+      alive = false;
+      cleanups.forEach((fn) => fn());
+    };
+  }, [loaded, viewer, projectId]);
 
   // Delayed follow of the owner's edits: poll the doc version and reload on
   // change, keeping the playhead. A 401/403/404 means the share was revoked or

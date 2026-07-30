@@ -177,6 +177,9 @@ export interface EditorState {
    * so their chat cards render on machines that never ran the job. Outside the
    * undo history, like assets. */
   renders: RenderRecord[];
+  /** The doc's first-open presentation (ProjectDoc.firstOpen), carried so the
+   * editor can apply it and saves keep it. */
+  firstOpen?: ProjectDoc["firstOpen"];
 
   /** Load a project into the store. `inPlace` is for re-reading a project the
    * editor is already showing (the viewer's change poll, a conflict reload):
@@ -908,6 +911,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
         exportOpen: false,
         genvideo: undefined,
         renders: [],
+        firstOpen: undefined,
       });
       hydrating = false;
       // A background scene run may still be writing this project's doc — drain
@@ -986,6 +990,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
           subtitleStatus: (doc.subtitles?.cues.length ?? 0) > 0 ? "ready" : "idle",
           genvideo: doc.genvideo ?? undefined,
           renders: Array.isArray(doc.renders) ? doc.renders : [],
+          firstOpen: doc.firstOpen,
           loaded: true,
           loadEpoch: get().loadEpoch + 1,
         });
@@ -3189,6 +3194,7 @@ export function serializeDoc(s: {
   subtitles: SubtitlesBlock;
   genvideo?: VideoProject;
   renders: RenderRecord[];
+  firstOpen?: ProjectDoc["firstOpen"];
 }): Partial<ProjectDoc> {
   return {
     name: s.projectName,
@@ -3207,6 +3213,7 @@ export function serializeDoc(s: {
     // to the PUT handler, so a dismissed plan could otherwise never be cleared.
     genvideo: s.genvideo ?? null,
     renders: s.renders,
+    firstOpen: s.firstOpen,
   };
 }
 

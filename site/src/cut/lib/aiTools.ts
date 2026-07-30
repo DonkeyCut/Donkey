@@ -30,7 +30,7 @@ import {
   makeStillSheetClientSide,
   renderAudioSpanWav,
 } from "./media";
-import { requestSidePanel, SIDE_PANEL_TABS, type SidePanelTab } from "./panelRequest";
+import { requestSidePanel, SIDE_PANEL_TABS } from "./panelRequest";
 import { blobToInlineAudio, refToInlineAudio, visualRefs, type InlineImage } from "./refMedia";
 import { characterPrompt, stockTitle } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
@@ -68,6 +68,7 @@ import {
   type FontId,
   type MediaAsset,
   type Selection,
+  type SidePanelTab,
   type TransitionStyle,
   type VideoClip,
 } from "./types";

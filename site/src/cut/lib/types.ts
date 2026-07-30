@@ -749,6 +749,16 @@ export interface ShareFeatures {
   details: boolean;
 }
 
+/** The editor's side-panel tabs ("publish" shows as Details). */
+export type SidePanelTab =
+  | "media"
+  | "library"
+  | "video"
+  | "image"
+  | "audio"
+  | "subtitles"
+  | "publish";
+
 export interface ProjectDoc {
   version: 1;
   name: string;
@@ -803,6 +813,20 @@ export interface ProjectDoc {
   genvideo?: VideoProject | null;
   /** Chat-launched video renders, running and settled — see RenderRecord. */
   renders?: RenderRecord[];
+  /** How the project presents itself the first time a browser opens it: the
+   * editor reads this and applies it once, then the layout is the user's own.
+   * Seeded template docs (public/cut-starter) carry it; absent means an
+   * ordinary open. */
+  firstOpen?: {
+    /** Side-panel tab to show; null folds the panel to its icon rail. */
+    sidePanel?: SidePanelTab | null;
+    /** Open the chat panel: `true` on a fresh empty thread, a thread id on
+     * that saved thread ("newest", or any id no saved thread carries,
+     * resolves to the project's most recent one). */
+    chat?: boolean | string;
+    /** Start playback (held until the welcome slides hand over). */
+    play?: boolean;
+  };
 }
 
 /** A chat-launched video render, mirrored into the doc as it runs and settles.
