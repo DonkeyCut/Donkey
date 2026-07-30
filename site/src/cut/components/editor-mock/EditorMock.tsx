@@ -118,7 +118,7 @@ export function EditorMock({
             className={cn(
               "relative h-full w-full overflow-hidden rounded-2xl bg-card",
               frame === "lifted" &&
-                "shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_24px_64px_rgba(15,14,13,0.25)]",
+                "shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_24px_64px_rgba(15,14,13,0.25)] max-md:rounded-none",
               frame === "flat" && "shadow-[0_0_0_1px_rgba(0,0,0,0.06)]",
               frame === "card" && "border-2 border-ink",
             )}

@@ -28,7 +28,7 @@ export function CutHero() {
           </PillButton>
         </div>
       </div>
-      <div className="mt-12 md:mt-16">
+      <div className="-mx-6 mt-12 md:mx-0 md:mt-16">
         <EditorMock />
       </div>
     </section>
