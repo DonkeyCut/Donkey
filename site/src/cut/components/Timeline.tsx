@@ -37,7 +37,7 @@ import { CLIP_GAP, startLaneMove, startLaneTrim, type LaneDrag } from "@/cut/lib
 import { ensurePeaks, importImage, importStockMusic, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia } from "@/cut/lib/media";
 import { track0Clips, trackGapAt, clipLen, clipSpeed, footprints, getClipSpans, nextFreeStart, overlayLayers, projectDuration, rippleInsert, TIMELINE_H_MAX, useEditor } from "@/cut/lib/store";
 import type { VideoTrackPlacement } from "@/cut/lib/store";
-import { subtitleLaneCount } from "@/cut/lib/subtitles";
+import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
 import { emptySubtitles, IMAGE_CLIP_SECONDS, TRANSITION_STYLE_LABELS } from "@/cut/lib/types";
 import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, SubtitleCue, TextOverlay, TransitionStyle, VideoClip } from "@/cut/lib/types";
@@ -245,6 +245,9 @@ export function Timeline() {
   const gutterRef = useRef<HTMLDivElement>(null);
   const gutterFaceRef = useRef<HTMLDivElement>(null);
   const gutterShadowRef = useRef<HTMLDivElement>(null);
+  // The track toggles ride the gutter column, glued to vertical scroll the
+  // same way the gutter surface is.
+  const gutterCtlRef = useRef<HTMLDivElement>(null);
   // The toolbar's editing tools and zoom fold into a menu when the bar cannot
   // hold them beside the transport. Both sides go at once — a bar with the
   // tools on the left and a menu on the right for the zoom alone would be a
@@ -290,6 +293,7 @@ export function Timeline() {
       const y = `translateY(${-el.scrollTop}px)`;
       if (rulerUnderlayRef.current) rulerUnderlayRef.current.style.transform = y;
       if (gutterRef.current) gutterRef.current.style.transform = y;
+      if (gutterCtlRef.current) gutterCtlRef.current.style.transform = y;
       // Once the timeline has scrolled, the gutter has something running under
       // it — its face covers that, and the edge shadow says so. At rest both
       // stay hidden: the underlay already paints the same surface, and a clip
@@ -318,6 +322,40 @@ export function Timeline() {
     );
     setRailYs((prev) =>
       prev.length === ys.length && prev.every((v, i) => v === ys[i]) ? prev : ys
+    );
+  });
+  // Where each toggle-bearing row sits, measured the same way as the rails:
+  // the rows live in the scrolled content, but the toggles are pinned in the
+  // gutter, so they need the rows' content-space tops.
+  const [gutterYs, setGutterYs] = useState<{
+    video: { track: number; y: number }[];
+    audioTop: number | null;
+    textTop: number | null;
+    subTop: number | null;
+  }>({ video: [], audioTop: null, textTop: null, subTop: null });
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const box = el.getBoundingClientRect();
+    const contentY = (sel: string) => {
+      const r = el.querySelector<HTMLElement>(sel);
+      return r ? Math.round(r.getBoundingClientRect().top - box.top + el.scrollTop) : null;
+    };
+    const video = Array.from(el.querySelectorAll<HTMLElement>("[data-tl-vrow]"), (r) => ({
+      track: Number(r.dataset.tlVrow),
+      y: Math.round(r.getBoundingClientRect().top - box.top + el.scrollTop),
+    }));
+    const audioTop = contentY("[data-tl-arows]");
+    const textTop = contentY("[data-tl-trows]");
+    const subTop = contentY("[data-tl-srows]");
+    setGutterYs((prev) =>
+      prev.audioTop === audioTop &&
+      prev.textTop === textTop &&
+      prev.subTop === subTop &&
+      prev.video.length === video.length &&
+      prev.video.every((v, i) => v.track === video[i].track && v.y === video[i].y)
+        ? prev
+        : { video, audioTop, textTop, subTop }
     );
   });
   // Measured width of the scroll viewport, so the ruler and tracks always draw
@@ -489,6 +527,52 @@ export function Timeline() {
     const rowOf = new Map(used.map((l, i) => [l, i]));
     return { used, rowOf, count: used.length };
   }, [audioClips]);
+  // What the gutter's track-wide eye/speaker reflect and flip, tallied per
+  // video track. Sound counts only clips whose source carries audio, so an
+  // all-image track offers no speaker.
+  const trackState = useMemo(() => {
+    const m = new Map<number, { total: number; hidden: number; sound: number; muted: number }>();
+    const typeById = new Map(assets.map((a) => [a.id, a.type]));
+    for (const c of clips) {
+      const t = m.get(c.track) ?? { total: 0, hidden: 0, sound: 0, muted: 0 };
+      t.total++;
+      if (c.hidden) t.hidden++;
+      if (typeById.get(c.assetId) === "video") {
+        t.sound++;
+        if (c.muted) t.muted++;
+      }
+      m.set(c.track, t);
+    }
+    return m;
+  }, [clips, assets]);
+  // The same tally per soundtrack lane; `hidden` is an audio segment's mute.
+  const audioLaneState = useMemo(() => {
+    const m = new Map<number, { total: number; hidden: number }>();
+    for (const a of audioClips) {
+      const lane = a.lane ?? 0;
+      const t = m.get(lane) ?? { total: 0, hidden: 0 };
+      t.total++;
+      if (a.hidden) t.hidden++;
+      m.set(lane, t);
+    }
+    return m;
+  }, [audioClips]);
+  // And per title lane.
+  const textLaneState = useMemo(() => {
+    const m = new Map<number, { total: number; hidden: number }>();
+    for (const o of overlays) {
+      const lane = o.lane ?? 0;
+      const t = m.get(lane) ?? { total: 0, hidden: 0 };
+      t.total++;
+      if (o.hidden) t.hidden++;
+      m.set(lane, t);
+    }
+    return m;
+  }, [overlays]);
+  // Reveals the resting toggles while the pointer is over the track area;
+  // a toggle whose track has anything off stays visible on its own.
+  const [trackHover, setTrackHover] = useState(false);
+
   // Chat mention token per audio clip ("@s1"), keyed by clip id — the same
   // handles the chat resolves against, so the token shown on hover is exactly
   // what pulls this sound into a message.
@@ -1085,7 +1169,11 @@ export function Timeline() {
           picture the bounce reveals: the card-white ruler band (with its
           baseline) over the track gray. The scroller stays transparent — the
           underlay IS the timeline's surface. */}
-      <div className="relative min-h-0 flex-1 bg-muted">
+      <div
+        className="relative min-h-0 flex-1 bg-muted"
+        onPointerEnter={() => setTrackHover(true)}
+        onPointerLeave={() => setTrackHover(false)}
+      >
       <div ref={rulerUnderlayRef} className="pointer-events-none absolute inset-x-0 top-0">
         <RestingSurface railYs={railYs} empty={total <= 0} timelineH={timelineH} />
       </div>
@@ -1134,6 +1222,7 @@ export function Timeline() {
               key={`ov-${track}`}
               className="relative mt-1.5"
               style={{ height: OVERLAY_H }}
+              data-tl-vrow={track}
               data-drop={placementAttr({ kind: "track", track })}
               onPointerDown={deselectIfSelf}
               onContextMenu={openGapMenu(track)}
@@ -1196,6 +1285,7 @@ export function Timeline() {
           <div
             className="relative mt-1.5"
             style={{ height: VIDEO_H }}
+            data-tl-vrow={0}
             data-drop={placementAttr(TRACK_ZERO)}
             onPointerDown={deselectIfSelf}
             onContextMenu={openGapMenu(0)}
@@ -1271,6 +1361,7 @@ export function Timeline() {
           {(audioClips.length > 0 || audioDrop !== null) && (
             <div
               ref={audioRef}
+              data-tl-arows=""
               className="relative mt-1.5"
               style={{
                 height:
@@ -1346,6 +1437,7 @@ export function Timeline() {
 
           {overlays.length > 0 && (
             <div
+              data-tl-trows=""
               className="relative mt-1.5"
               style={{
                 height:
@@ -1407,6 +1499,7 @@ export function Timeline() {
 
           {subtitles.showOnTimeline && subtitles.cues.length > 0 && (
             <div
+              data-tl-srows=""
               className="tl-sub-track relative mt-1.5"
               style={{ height: subtitleLaneCount(subtitles) * SUB_H }}
               onPointerDown={deselectIfSelf}
@@ -1437,6 +1530,7 @@ export function Timeline() {
                 <SubBar
                   key={c.id}
                   cue={c}
+                  dimmed={laneHidden(subtitles, c.lane ?? 0)}
                   pps={pps}
                   top={(c.lane ?? 0) * SUB_H}
                   homeRow={c.lane ?? 0}
@@ -1492,6 +1586,105 @@ export function Timeline() {
         className="pointer-events-none absolute inset-y-0 z-40 w-2 bg-gradient-to-r from-black/20 to-transparent opacity-0 transition-opacity duration-150 data-scrolled:opacity-100"
         style={{ left: PAD_SIDE }}
       />
+      {/* Track-wide toggles in the gutter column: an eye (and a speaker, when
+          the track carries sound) per video track, a speaker per soundtrack
+          lane. Resting toggles show while the pointer is over the track area;
+          one whose track has anything off stays visible so the strip reads as
+          the enabled/disabled readout. */}
+      <div
+        className="pointer-events-none absolute inset-y-0 left-0 z-50"
+        style={{ width: PAD_SIDE }}
+      >
+        <div ref={gutterCtlRef} className="absolute inset-0">
+          {gutterYs.video.map(({ track, y }) => {
+            const t = trackState.get(track);
+            if (!t) return null;
+            const rows: React.ReactNode[] = [
+              <GutterToggle
+                key={`v-${track}-hide`}
+                kind="hide"
+                off={t.hidden === t.total}
+                partial={t.hidden > 0}
+                reveal={trackHover}
+                top={y + (t.sound > 0 ? VIDEO_H / 2 - 22 : VIDEO_H / 2 - 8)}
+                onToggle={() =>
+                  useEditor.getState().setTrackHidden(track, t.hidden !== t.total)
+                }
+              />,
+            ];
+            if (t.sound > 0)
+              rows.push(
+                <GutterToggle
+                  key={`v-${track}-mute`}
+                  kind="mute"
+                  off={t.muted === t.sound}
+                  partial={t.muted > 0}
+                  reveal={trackHover}
+                  top={y + VIDEO_H / 2 + 6}
+                  onToggle={() =>
+                    useEditor.getState().setTrackMuted(track, t.muted !== t.sound)
+                  }
+                />
+              );
+            return rows;
+          })}
+          {gutterYs.audioTop !== null &&
+            audioLanes.used.map((lane, r) => {
+              const t = audioLaneState.get(lane);
+              if (!t) return null;
+              return (
+                <GutterToggle
+                  key={`a-${lane}`}
+                  kind="mute"
+                  off={t.hidden === t.total}
+                  partial={t.hidden > 0}
+                  reveal={trackHover}
+                  top={gutterYs.audioTop! + r * AUDIO_H + AUDIO_H / 2 - 8}
+                  onToggle={() =>
+                    useEditor.getState().setAudioLaneHidden(lane, t.hidden !== t.total)
+                  }
+                />
+              );
+            })}
+          {gutterYs.textTop !== null &&
+            overlayLanes.used.map((lane, r) => {
+              const t = textLaneState.get(lane);
+              if (!t) return null;
+              return (
+                <GutterToggle
+                  key={`t-${lane}`}
+                  kind="hide"
+                  off={t.hidden === t.total}
+                  partial={t.hidden > 0}
+                  reveal={trackHover}
+                  top={gutterYs.textTop! + r * TEXT_H + TEXT_H / 2 - 8}
+                  onToggle={() =>
+                    useEditor.getState().setTextLaneHidden(lane, t.hidden !== t.total)
+                  }
+                />
+              );
+            })}
+          {gutterYs.subTop !== null &&
+            Array.from({ length: subtitleLaneCount(subtitles) }, (_, lane) => {
+              const off = laneHidden(subtitles, lane);
+              return (
+                <GutterToggle
+                  key={`s-${lane}`}
+                  kind="hide"
+                  off={off}
+                  partial={false}
+                  reveal={trackHover}
+                  top={gutterYs.subTop! + lane * SUB_H + SUB_H / 2 - 8}
+                  onToggle={() => {
+                    const s = useEditor.getState();
+                    s.pushHistory();
+                    s.setSubtitleTrackMeta(lane, { hidden: off ? undefined : true });
+                  }}
+                />
+              );
+            })}
+        </div>
+      </div>
       </div>
       {/* Subtle valid-target hint while an OS media drag is over the window:
           a tint and inset ring over the track area, under the toolbar. */}
@@ -2295,6 +2488,62 @@ function Filmstrip({
   );
 }
 
+/** A track-wide toggle pinned in the gutter column. Rests invisible until the
+ * pointer is over the track area; while anything on its track is off it stays
+ * visible on its own, the off glyph fading to say "some segments" versus the
+ * full-strength "whole track". A click always turns the whole track off, and
+ * the next click turns every segment back on — individually disabled segments
+ * included. */
+function GutterToggle({
+  kind,
+  off,
+  partial,
+  reveal,
+  top,
+  onToggle,
+}: {
+  kind: "hide" | "mute";
+  off: boolean;
+  partial: boolean;
+  reveal: boolean;
+  top: number;
+  onToggle: () => void;
+}) {
+  const active = off || partial;
+  const title =
+    kind === "hide"
+      ? off
+        ? "Show track"
+        : "Hide track"
+      : off
+        ? "Unmute track"
+        : "Mute track";
+  const Icon = kind === "hide" ? (active ? EyeOff : Eye) : active ? VolumeX : Volume2;
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      className={cn(
+        "tl-track-toggle pointer-events-auto absolute left-[3px] grid size-4 place-items-center transition-opacity",
+        active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+        active
+          ? partial && !off
+            ? "opacity-60 hover:opacity-100"
+            : "opacity-100"
+          : reveal
+            ? "opacity-100"
+            : "pointer-events-none opacity-0"
+      )}
+      style={{ top }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={onToggle}
+    >
+      <Icon className="size-3" />
+    </button>
+  );
+}
+
 function HideChip({
   hidden,
   onToggle,
@@ -2674,6 +2923,7 @@ function TextBar({
     <div
       className={cn(
         "tl-text-bar group absolute flex cursor-grab items-center overflow-hidden rounded-md bg-gradient-to-b from-purple-500 to-purple-600 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
+        o.hidden && "opacity-40 grayscale",
         selected && SELECTED_SHADOW,
         drag
           ? "tl-text-ghost pointer-events-none cursor-grabbing opacity-80 shadow-2xl"
@@ -2708,6 +2958,7 @@ function TextBar({
  * edges to trim. Editing the words happens in the Subtitles panel. */
 function SubBar({
   cue,
+  dimmed,
   pps,
   top,
   homeRow,
@@ -2718,6 +2969,8 @@ function SubBar({
   onSnap,
 }: {
   cue: SubtitleCue;
+  /** The cue's track is hidden — gray the bar like a hidden clip. */
+  dimmed: boolean;
   pps: number;
   /** Rendered row top in px — one row per subtitle track (language). */
   top: number;
@@ -2737,6 +2990,7 @@ function SubBar({
     <div
       className={cn(
         "tl-sub-bar group absolute flex cursor-grab items-center overflow-hidden rounded-[5px] bg-gradient-to-b from-amber-300 to-amber-400 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
+        dimmed && "opacity-40 grayscale",
         selected && SELECTED_SHADOW,
         drag
           ? "tl-sub-ghost pointer-events-none cursor-grabbing opacity-80 shadow-2xl"

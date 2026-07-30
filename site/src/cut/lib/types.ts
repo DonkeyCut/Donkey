@@ -619,6 +619,9 @@ export interface TextOverlay {
   /** Which title track (row) this sits on, 0-based. Tracks are kept
    * contiguous: empty ones collapse and dragging past the last adds one. */
   lane?: number;
+  /** Hidden titles stay on the timeline (grayed) but are excluded from the
+   * played/exported picture. */
+  hidden?: boolean;
   /** Karaoke burn-in: index of the display word (whitespace-split across all
    * lines) drawn per the accent treatment — recolored, underlined, or on an
    * accent box with a contrast text color. */
@@ -658,6 +661,9 @@ export const MAX_SUBTITLE_LANES = 3;
 export interface SubtitleTrackMeta {
   /** Speech-recognition and display language for this track. */
   locale?: string;
+  /** This track's captions stay on the timeline (grayed) but are excluded
+   * from the played/exported picture; other tracks keep showing. */
+  hidden?: boolean;
   /** Caption anchor as frame fractions; absent = the style's spot, stacked
    * upward per track so simultaneous languages never sit on each other. */
   x?: number;

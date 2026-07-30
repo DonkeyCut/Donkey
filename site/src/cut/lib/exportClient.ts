@@ -6,7 +6,7 @@ import { normalizeGrade } from "./colorGrade";
 import { renderProjectToMp4 } from "./exportRender";
 import { putSigned } from "./media";
 import { clipSpeed, getClipSpans, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
-import { captionStyle, cueOverlay, cueWordWindows, laneCues, subtitleLaneCount, trackPos } from "./subtitles";
+import { captionStyle, cueOverlay, cueWordWindows, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
 import { renderOverlayPng } from "./textRender";
 import { frameOf, overlayAnimStyle } from "./types";
 import type {
@@ -346,7 +346,7 @@ async function buildExportPayload(
   const overlays: { file: string; start: number; end: number }[] = [];
   for (let i = 0; i < doc.overlays.length; i++) {
     const o = doc.overlays[i];
-    if (o.start >= duration || !o.text.trim()) continue;
+    if (o.hidden || o.start >= duration || !o.text.trim()) continue;
     const png = await renderOverlayPng(o, settings.width, settings.height);
     const key = `overlay_${i}.png`;
     pngs.push({ name: key, blob: png });
@@ -362,6 +362,7 @@ async function buildExportPayload(
   if (doc.subtitles.showOnVideo) {
     const capStyle = captionStyle(doc.subtitles.style);
     for (let lane = 0; lane < subtitleLaneCount(doc.subtitles); lane++) {
+      if (laneHidden(doc.subtitles, lane)) continue;
       const cues = laneCues(doc.subtitles, lane);
       const pos = trackPos(doc.subtitles, capStyle, lane);
       for (let i = 0; i < cues.length; i++) {

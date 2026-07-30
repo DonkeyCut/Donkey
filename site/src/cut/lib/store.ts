@@ -255,6 +255,15 @@ export interface EditorState {
   /** Set (or clear with null) a clip's preset filter look; amount 0..1. */
   setClipLook: (id: string, style: LookStyle | null, amount?: number) => void;
   updateAudio: (id: string, patch: Partial<AudioClip>) => void;
+  /** Hide or show every clip on one video track, in one undo step. Showing a
+   * track also shows its individually hidden clips. */
+  setTrackHidden: (track: number, hidden: boolean) => void;
+  /** Mute or unmute every clip on one video track, in one undo step. */
+  setTrackMuted: (track: number, muted: boolean) => void;
+  /** Mute or unmute every segment on one soundtrack lane, in one undo step. */
+  setAudioLaneHidden: (lane: number, hidden: boolean) => void;
+  /** Hide or show every title on one title lane, in one undo step. */
+  setTextLaneHidden: (lane: number, hidden: boolean) => void;
   updateOverlay: (id: string, patch: Partial<TextOverlay>) => void;
   /** Live-drag updates that should not create undo entries. */
   updateOverlayTransient: (id: string, patch: Partial<TextOverlay>) => void;
@@ -1585,6 +1594,42 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       push();
       get().updateAudioTransient(id, patch);
       settleAudioFootprint(id, patch);
+    },
+
+    setTrackHidden: (track, hidden) => {
+      const ids = get()
+        .clips.filter((c) => c.track === track && !!c.hidden !== hidden)
+        .map((c) => c.id);
+      if (!ids.length) return;
+      push();
+      get().updateClipsTransient(ids.map((id) => ({ id, patch: { hidden } })));
+    },
+
+    setTrackMuted: (track, muted) => {
+      const ids = get()
+        .clips.filter((c) => c.track === track && c.muted !== muted)
+        .map((c) => c.id);
+      if (!ids.length) return;
+      push();
+      get().updateClipsTransient(ids.map((id) => ({ id, patch: { muted } })));
+    },
+
+    setAudioLaneHidden: (lane, hidden) => {
+      const ids = get()
+        .audioClips.filter((a) => (a.lane ?? 0) === lane && !!a.hidden !== hidden)
+        .map((a) => a.id);
+      if (!ids.length) return;
+      push();
+      get().updateAudiosTransient(ids.map((id) => ({ id, patch: { hidden } })));
+    },
+
+    setTextLaneHidden: (lane, hidden) => {
+      const ids = get()
+        .overlays.filter((o) => (o.lane ?? 0) === lane && !!o.hidden !== hidden)
+        .map((o) => o.id);
+      if (!ids.length) return;
+      push();
+      get().updateOverlaysTransient(ids.map((id) => ({ id, patch: { hidden } })));
     },
     updateOverlay: (id, patch) => {
       push();

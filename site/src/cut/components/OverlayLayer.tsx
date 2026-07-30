@@ -10,6 +10,7 @@ import {
   cueWordWindows,
   karaokeLook,
   laneCues,
+  laneHidden,
   subtitleLaneCount,
   trackPos,
 } from "@/cut/lib/subtitles";
@@ -147,6 +148,7 @@ export function OverlayLayer({ stageWidth }: { stageWidth: number }) {
         onSnapEnd={clearGuides}
       />
       {overlays.map((o) => {
+        if (o.hidden) return null;
         const selected = sel?.id === o.id;
         const inRange = t >= o.start && t <= o.end;
         // While hover-scrubbing (paused, skimmer active) the preview must show the
@@ -197,9 +199,11 @@ function SubtitleCaptions(props: {
   if (!subtitles.showOnVideo) return null;
   return (
     <>
-      {Array.from({ length: subtitleLaneCount(subtitles) }, (_, lane) => (
-        <SubtitleCaption key={lane} lane={lane} {...props} />
-      ))}
+      {Array.from({ length: subtitleLaneCount(subtitles) }, (_, lane) =>
+        laneHidden(subtitles, lane) ? null : (
+          <SubtitleCaption key={lane} lane={lane} {...props} />
+        )
+      )}
     </>
   );
 }

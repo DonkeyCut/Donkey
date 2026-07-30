@@ -31,7 +31,7 @@ import { FrameCompositor, MISSING_FRAME, type Frame } from "./composite";
 import { overlayPlan, trackZeroPlan } from "./framePlan";
 import { frameSink, openMedia, videoTrackOf } from "./mediaRead";
 import { getClipSpans, overlayLayers, projectDuration, spanSequence } from "./store";
-import { captionStyle, cueOverlay, cueWordWindows, laneCues, subtitleLaneCount, trackPos } from "./subtitles";
+import { captionStyle, cueOverlay, cueWordWindows, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
 import { renderOverlayPng } from "./textRender";
 import { frameOf, isFullRect, overlayAnimStyle, projectFadeSeconds, rectOf } from "./types";
 import type { ClipSpan, MediaAsset, TextOverlay } from "./types";
@@ -247,7 +247,7 @@ function stampText(doc: ExportDoc): StampedLayer[] {
   const layers: StampedLayer[] = [];
 
   for (const o of doc.overlays) {
-    if (o.start >= duration || !o.text.trim()) continue;
+    if (o.hidden || o.start >= duration || !o.text.trim()) continue;
     layers.push({ overlay: o, start: o.start, end: Math.min(o.end, duration) });
   }
 
@@ -257,6 +257,7 @@ function stampText(doc: ExportDoc): StampedLayer[] {
     // width the preview passes, whatever the render size.
     const designWidth = frameOf(doc.aspect).w;
     for (let lane = 0; lane < subtitleLaneCount(doc.subtitles); lane++) {
+      if (laneHidden(doc.subtitles, lane)) continue;
       const cues = laneCues(doc.subtitles, lane);
       const pos = trackPos(doc.subtitles, capStyle, lane);
       for (let i = 0; i < cues.length; i++) {
