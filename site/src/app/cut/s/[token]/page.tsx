@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { shareMetaForToken } from "@/cut/server/cloud/shareCard";
+import { NoSessionReplay } from "@/app/_components/NoSessionReplay";
 import { SharedProjectView } from "./SharedProjectView";
 
 // The share page is a client view — it fetches its own access decision and
@@ -78,5 +79,10 @@ export async function generateMetadata({
 }
 
 export default function SharedProjectPage() {
-  return <SharedProjectView />;
+  return (
+    <>
+      <NoSessionReplay />
+      <SharedProjectView />
+    </>
+  );
 }

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { AppSurfaceBackground } from "@/components/AppSurfaceBackground";
+import { NoSessionReplay } from "@/app/_components/NoSessionReplay";
 import { ConnectGate } from "@/cut/components/ConnectGate";
 import { ExportsDock } from "@/cut/components/ExportsDock";
 import { CutOnboarding } from "@/cut/components/onboarding/CutOnboarding";
@@ -21,6 +22,7 @@ export default function CutAppLayout({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-white font-system text-foreground antialiased">
       <AppSurfaceBackground />
+      <NoSessionReplay />
       <RequireSession>
         <ConnectGate>
           {children}
