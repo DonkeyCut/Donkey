@@ -253,7 +253,9 @@ class Engine {
       return false;
     }
     const since = now - h.at;
-    const dead = elErrored(el) ? since > DECODER_RETRY_MS : since > DECODER_STALL_MS;
+    // A hidden document defers media loads, so no progress there is no verdict.
+    const visible = typeof document === "undefined" || document.visibilityState === "visible";
+    const dead = visible && (elErrored(el) ? since > DECODER_RETRY_MS : since > DECODER_STALL_MS);
     if (!dead || h.rebuilds >= DECODER_REBUILDS) {
       this.health.set(clipId, { ...h, mark });
       return false;
@@ -639,9 +641,24 @@ class Engine {
     }
   }
 
+  // The last tick's wall-clock stamp, for detecting gaps in the tick stream.
+  private lastTickAt = 0;
+
   private tick() {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.tick);
+    const now = performance.now();
+    // The stall clock must count only time the engine was alive. rAF freezes
+    // with the tab hidden while `health.at` stamps keep aging — and Chrome
+    // defers a hidden tab's media loads, so a decoder created near the switch
+    // is still cold on return. The first tick back would then read every such
+    // decoder as minutes past the stall limit and tear it down, killing the
+    // very load Chrome had just released. A gap in the tick stream restarts
+    // each decoder's stall window instead.
+    if (this.lastTickAt && now - this.lastTickAt > 1_000) {
+      for (const h of this.health.values()) h.at = now;
+    }
+    this.lastTickAt = now;
     this.frame++;
     this.render();
     // After the frame, never during it: what `render` touched is exactly what
