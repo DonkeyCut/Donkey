@@ -10,10 +10,11 @@ export function WelcomeSlide() {
           with the window rather than letting it wrap. */}
       <div className="max-w-[860px]">
         <h2 className="text-[clamp(22px,3.1vw,34px)] leading-[1.1] font-semibold tracking-[-0.02em]">
-          The AI video editor that works anywhere.
+          Edit videos by chatting.
         </h2>
         <p className="mt-4 text-[17px] leading-[1.55] text-[#454545]">
-          Chat to edit videos. Generate the shots you don&apos;t have.
+          Trim clips, add captions, generate images, or create new
+          scenes&mdash;all from chat.
         </p>
       </div>
       {/* Contained rather than width-driven: on a short window the mock gives
