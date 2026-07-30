@@ -306,7 +306,7 @@ export const AI_TOOLS: AiToolDef[] = [
       reference_asset_ids: {
         type: "array",
         items: { type: "string" },
-        description: "Project asset ids to reference — images and videos ride as pictures; audio folds what it carries into the prompt",
+        description: "Project asset ids to reference — images and videos ride as pictures; audio folds what it carries into the prompt. Append @seconds to read a video/audio reference at a pinned moment (\"<id>@16.3\")",
       },
       add_to_timeline: bool("Insert the still on the video track (default false — it stays on its chat card until the user asks)"),
       index: num("Insert position on the video track (passing it implies add_to_timeline; 0 = first/cover)"),
@@ -319,7 +319,7 @@ export const AI_TOOLS: AiToolDef[] = [
     inputSchema: obj({
       prompt: str("The shot to generate — describe motion, subject, and mood"),
       aspect: { type: "string", enum: ["16:9", "9:16"], description: "Clip shape (default: the supported shape closest to the project aspect)" },
-      reference_asset_id: str("One project asset id to reference — an image or video anchors the clip's opening frame; audio folds what it carries into the prompt"),
+      reference_asset_id: str("One project asset id to reference — an image or video anchors the clip's opening frame; audio folds what it carries into the prompt. Append @seconds to read a video/audio reference at a pinned moment (\"<id>@16.3\")"),
       animate_reference: bool("The referenced image IS the opening frame: animate it directly, unchanged, skipping the frame-design step (use when the user says to animate that image)"),
       add_to_timeline: bool("Insert the clip on the video track when it lands (default false — it stays on its chat card until the user asks)"),
       index: num("Insert position on the video track (passing it implies add_to_timeline)"),
@@ -563,7 +563,7 @@ export const AI_TOOLS: AiToolDef[] = [
       reference_asset_ids: {
         type: "array",
         items: { type: "string" },
-        description: "Project asset ids to match the sound of — an audio track to emulate, or video/images whose mood the score should carry",
+        description: "Project asset ids to match the sound of — an audio track to emulate, or video/images whose mood the score should carry. Append @seconds to match the passage around a pinned moment (\"<id>@62\")",
       },
       volume: num("Bed volume 0..1.5 when placed (default 0.4 so it sits under speech)"),
       add_to_timeline: bool("Place it on the soundtrack (default false — it stays on its chat card until the user asks)"),
@@ -904,5 +904,5 @@ export function attachedAssetsBlock(refs: unknown[]): string {
   const clipHint = refs.some((r) => (r as { scope?: string }).scope === "clip")
     ? '\nA "clip" attachment means the user is pointing at that segment of the cut: diagnose with read-only looks (watch_video, listen_audio — never subtitles_generate, which writes captions), then revise the clip in place — regenerate_shot for its sceneShot, edit tools otherwise — without deleting it.'
     : "";
-  return `\n\n<attached_assets>\nThe user attached these assets to this message; their text may cite one by @handle or @name. Assets with scope "project" are in the open project (ids usable with the editor tools); "clip" assets are clips on the timeline — a video clip's id matches videoTrack in editor_state (a scene-run clip carries its sceneShot number there), an audio clip's (kind "audio") id matches soundtrack; "library" and "stock" assets live outside the project until imported; "file" assets came straight from the user's computer and exist only on this message. An asset with "t" carries a moment the user pinned, in seconds into it — the attached frame (or audio segment) reads from there, and that moment is what they mean by the reference:\n${JSON.stringify(refs)}${clipHint}\n</attached_assets>`;
+  return `\n\n<attached_assets>\nThe user attached these assets to this message; their text may cite one by @handle or @name. Assets with scope "project" are in the open project (ids usable with the editor tools); "clip" assets are clips on the timeline — a video clip's id matches videoTrack in editor_state (a scene-run clip carries its sceneShot number there), an audio clip's (kind "audio") id matches soundtrack; "library" and "stock" assets live outside the project until imported; "file" assets came straight from the user's computer and exist only on this message. An asset with "t" carries a moment the user pinned, in seconds into it — the attached frame (or audio segment) reads from there, and that moment is what they mean by the reference; when you pass such an asset to a generation tool, forward the pin by appending it to the asset id ("<assetId>@<seconds>"):\n${JSON.stringify(refs)}${clipHint}\n</attached_assets>`;
 }

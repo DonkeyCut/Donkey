@@ -1981,15 +1981,25 @@ function targetSubtitleTrack(input: Record<string, unknown>): number {
 
 /** Map generation reference ids to project asset refs. Any media resolves:
  * images and video frames ride as pictures; audio rides to the compose pass,
- * which folds what it hears (speech, sound) into the prompt. */
+ * which folds what it hears (speech, sound) into the prompt. An id may carry
+ * a pinned moment as "<assetId>@<seconds>" — the model forwards a user's pin
+ * this way, and the ref then reads from that moment (its frame capture, its
+ * audio segment) instead of the default spot. */
 function resolveRefAssets(ids: unknown): AssetRef[] {
   if (ids === undefined || ids === null) return [];
   const s = useEditor.getState();
   return (Array.isArray(ids) ? ids : [ids]).map((raw) => {
-    const asset = s.assets.find((a) => a.id === String(raw));
+    const token = String(raw);
+    const at = token.lastIndexOf("@");
+    const suffix = at > 0 ? Number(token.slice(at + 1)) : NaN;
+    const pinned = Number.isFinite(suffix) && suffix >= 0;
+    const id = pinned ? token.slice(0, at) : token;
+    // The whole token wins over the split when both name an asset — an id
+    // that happens to contain "@" is still addressable.
+    const asset = s.assets.find((a) => a.id === token) ?? (pinned ? s.assets.find((a) => a.id === id) : undefined);
     if (!asset)
-      throw new ToolError(`No project asset with id ${String(raw)} — see media in the editor state.`);
-    return refFromAsset(asset);
+      throw new ToolError(`No project asset with id ${token} — see media in the editor state.`);
+    return pinned && asset.id === id ? { ...refFromAsset(asset), t: suffix } : refFromAsset(asset);
   });
 }
 
