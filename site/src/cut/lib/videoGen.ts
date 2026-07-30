@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import { addRefOnce, sameRef, type AssetRef } from "./assetRef";
+import { addRefOnce, sameRef, upsertRef, type AssetRef } from "./assetRef";
 import type { StockVideo } from "./stock";
 import type { VideoAspect } from "./videoModels";
 
@@ -29,6 +29,10 @@ interface VideoGenState {
   setPrompt: (prompt: string) => void;
   setAspect: (aspect: VideoAspect) => void;
   addRef: (ref: AssetRef) => void;
+  /** Land a ref's new shape — replaced in place when attached, attached when
+   * not — how the moment picker lands a pinned timestamp from a chip or a
+   * typed mention. */
+  updateRef: (ref: AssetRef) => void;
   removeRef: (ref: AssetRef) => void;
 }
 
@@ -43,5 +47,6 @@ export const useVideoGen = create<VideoGenState>((set) => ({
   setPrompt: (prompt) => set({ prompt }),
   setAspect: (aspect) => set({ aspect }),
   addRef: (ref) => set((s) => ({ refs: addRefOnce(s.refs, ref) })),
+  updateRef: (ref) => set((s) => ({ refs: upsertRef(s.refs, ref) })),
   removeRef: (ref) => set((s) => ({ refs: s.refs.filter((r) => !sameRef(r, ref)) })),
 }));

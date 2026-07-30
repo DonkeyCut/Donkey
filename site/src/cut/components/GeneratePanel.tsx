@@ -59,14 +59,12 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
   const { prompt, refs, character, aspect } = useVideoGen();
   const candidates = useRefCandidates();
   const { active: dropActive, attachTarget, targetProps } = useAssetDrop(
-    (ref) => {
-      if (ref.kind !== "audio") useVideoGen.getState().addRef(ref);
-    },
+    (ref) => useVideoGen.getState().addRef(ref),
     // OS files dropped on the panel attach as references (media files import
     // into the project on the way; text files ride as-is).
     (files) =>
       void refsFromDroppedFiles(projectId, files).then((refs) => {
-        for (const r of refs) if (r.kind !== "audio") useVideoGen.getState().addRef(r);
+        for (const r of refs) useVideoGen.getState().addRef(r);
       })
   );
   const [tier, setTier] = useLocalPref<VideoModelOption["tier"]>(
@@ -91,7 +89,7 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
   }, []);
 
   const go = () => {
-    const { text, refs: all } = collectRefs(prompt.trim(), refs, candidates, { dropAudio: true });
+    const { text, refs: all } = collectRefs(prompt.trim(), refs, candidates);
     if (!text) return;
     // Character mode: the text is the spoken line — compose it with the
     // persona, and seed the render with the character's poster frame so the
@@ -152,6 +150,7 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
           <RefChips
             refs={refs}
             onRemove={(ref) => useVideoGen.getState().removeRef(ref)}
+            onUpdate={(ref) => useVideoGen.getState().updateRef(ref)}
             className="p-2 pb-0"
             peekSide="bottom"
           />
@@ -168,6 +167,8 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
             submitKey="mod-enter"
             menuSide="bottom"
             onSubmit={go}
+            attachedRefs={refs}
+            onUpsertRef={(r) => useVideoGen.getState().updateRef(r)}
           />
           <DictationControl
             text={prompt}

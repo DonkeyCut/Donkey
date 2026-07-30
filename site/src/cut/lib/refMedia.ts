@@ -2,9 +2,10 @@
 
 import { refFromAsset, refFromTextFile, type AssetRef } from "./assetRef";
 import { tagChatAsset } from "./chatAssets";
-import { enrichAsset, importFileToProject, isMediaFile, isTextFile } from "./media";
+import { enrichAsset, importFileToProject, isMediaFile, isTextFile, renderAudioSpanWav } from "./media";
 import { frameSink, openMedia, videoTrackOf } from "./mediaRead";
 import { useEditor } from "./store";
+import { formatTime } from "./time";
 
 // Turn refs and dropped files into what the hosted models take. Generation
 // routes read `inputs.images = [{ data, mimeType }]`: stock images upload
@@ -197,14 +198,23 @@ export function mediaAddress(url: string): string {
   }
 }
 
-async function captureFrame(url: string, duration?: number): Promise<InlineImage> {
+async function captureFrame(
+  url: string,
+  duration?: number,
+  opts?: { at?: number; width?: number }
+): Promise<InlineImage> {
   const input = openMedia(url);
   try {
     const track = await videoTrackOf(input);
     if (!track) throw new Error(`Could not read ${mediaAddress(url)} for a reference frame.`);
-    // Same poster spot the cards show, so the reference matches the preview.
-    const at = Math.min(1, Math.max(0.1, (duration || (await input.computeDuration()) || 2) / 10));
-    const width = Math.min(MAX_W, await track.getDisplayWidth());
+    const dur = duration || (await input.computeDuration()) || 2;
+    // A pinned moment reads exactly there (kept inside the source); otherwise
+    // the same poster spot the cards show, so the reference matches the preview.
+    const at =
+      opts?.at !== undefined
+        ? Math.min(Math.max(0, opts.at), Math.max(0, dur - 0.05))
+        : Math.min(1, Math.max(0.1, dur / 10));
+    const width = Math.min(opts?.width ?? MAX_W, await track.getDisplayWidth());
     const frame = await frameSink(track, { width }).getCanvas(at);
     if (!frame) throw new Error("The video has no readable frame.");
     const canvas = frame.canvas;
@@ -218,14 +228,22 @@ async function captureFrame(url: string, duration?: number): Promise<InlineImage
   }
 }
 
+/** The length of the SOURCE behind a ref, as far as the ref knows it. A clip
+ * ref's `duration` is the clip's own length, not its source file's — times on
+ * a clip ref (its `t` pin) are source seconds, so the capture must probe the
+ * real source length instead. */
+const sourceDuration = (ref: AssetRef): number | undefined =>
+  ref.scope === "clip" ? undefined : ref.duration;
+
 /** A single reference image for `ref`: the file itself for images, a captured
- * poster frame for videos. Audio and text have no picture and reject. */
+ * frame for videos — the pinned moment when the user chose one, the poster
+ * spot otherwise. Audio and text have no picture and reject. */
 export async function refToInlineImage(ref: AssetRef): Promise<InlineImage> {
   if (ref.kind === "audio" || ref.kind === "text") {
     throw new Error(`“${ref.name}” has no picture — it can't be a visual reference.`);
   }
   if (ref.kind === "image") return blobToInline(await readRefBytes(ref));
-  return captureFrame(ref.url, ref.duration);
+  return captureFrame(ref.url, sourceDuration(ref), ref.t !== undefined ? { at: ref.t } : undefined);
 }
 
 /** Reference images for a whole ref list, in order; skips nothing — a broken
@@ -277,26 +295,67 @@ export async function readRefText(ref: AssetRef): Promise<string> {
   return res.text();
 }
 
+// A pinned video moment also samples a frame this far to each side, so the
+// pick lands even when the user's scrub was a beat off the exact frame.
+const PIN_SAMPLE_SPREAD = 1;
+const PIN_SAMPLE_W = 640;
+// A pinned audio moment reads as a segment reaching this far back and forward
+// — enough lead-in to place the moment and enough tail to hear the passage.
+const PIN_AUDIO_BACK = 5;
+const PIN_AUDIO_FORWARD = 25;
+
+/** The audio around a pinned moment as an inline part, rendered in the
+ * browser from the source URL. Null when the span can't be read (no audio
+ * track, an unreadable source) — the caller falls back to the whole file. */
+async function pinnedAudioSegment(
+  ref: AssetRef,
+  t: number
+): Promise<{ audio: InlineImage; from: number; to: number } | null> {
+  const dur = sourceDuration(ref);
+  const from = Math.max(0, t - PIN_AUDIO_BACK);
+  const to = dur !== undefined ? Math.min(dur, t + PIN_AUDIO_FORWARD) : t + PIN_AUDIO_FORWARD;
+  if (to <= from) return null;
+  try {
+    const audio = await blobToInlineAudio(await renderAudioSpanWav(ref.url, from, to));
+    return audio ? { audio, from, to } : null;
+  } catch {
+    return null;
+  }
+}
+
 /** A ref list as hosted-Responses content parts, for any Gemini call that
  * should actually see the attachments: each visual ref contributes a numbered
  * label plus its picture (image as-is, video by poster frame), each text ref
  * its contents, and each audio ref its actual sound (so the model can answer
  * about what's said without touching the project; oversized files fall back
- * to a name-only marker). `visuals` returns the pictures in label order
- * (`Image 1` = visuals[0]) so a model can pick among them. */
+ * to a name-only marker). A ref with a pinned moment (`t`) reads from there
+ * instead: a video contributes the pinned frame plus a sampled frame each
+ * side, an audio ref the segment around the moment. `visuals` returns the
+ * pictures in label order (`Image 1` = visuals[0]) so a model can pick among
+ * them. */
 export async function refsToParts(
   refs: AssetRef[]
 ): Promise<{ parts: Record<string, unknown>[]; visuals: InlineImage[] }> {
   const parts: Record<string, unknown>[] = [];
   const visuals: InlineImage[] = [];
+  const pushImage = (image: InlineImage, label: string) => {
+    visuals.push(image);
+    parts.push({ text: `Image ${visuals.length} — ${label}` });
+    parts.push({ type: "input_image", dataBase64: image.data, mimeType: image.mimeType });
+  };
   for (const ref of refs) {
     if (ref.kind === "audio") {
-      const audio = await refToInlineAudio(ref);
+      const segment = ref.t !== undefined ? await pinnedAudioSegment(ref, ref.t) : null;
+      const audio = segment?.audio ?? (await refToInlineAudio(ref));
       if (!audio) {
         parts.push({ text: `Attached audio "${ref.name}" (too large to include inline).` });
         continue;
       }
-      parts.push({ text: `Attached audio "${ref.name}":` });
+      parts.push({
+        text: segment
+          ? `Attached audio "${ref.name}" — the segment around the user's pinned moment ${formatTime(ref.t!)} (${formatTime(segment.from)}–${formatTime(segment.to)}):`
+          : `Attached audio "${ref.name}":`,
+      });
       parts.push({ type: "input_audio", dataBase64: audio.data, mimeType: audio.mimeType });
       continue;
     }
@@ -304,14 +363,29 @@ export async function refsToParts(
       parts.push({ text: `Attached file "${ref.name}":\n${await readRefText(ref)}` });
       continue;
     }
-    const image = await refToInlineImage(ref);
-    visuals.push(image);
-    parts.push({
-      text:
-        `Image ${visuals.length} — ` +
-        (ref.kind === "video" ? `a frame of video "${ref.name}":` : `image "${ref.name}":`),
-    });
-    parts.push({ type: "input_image", dataBase64: image.data, mimeType: image.mimeType });
+    if (ref.kind === "video" && ref.t !== undefined) {
+      const t = ref.t;
+      const dur = sourceDuration(ref);
+      pushImage(
+        await refToInlineImage(ref),
+        `the frame the user pinned, ${formatTime(t)} into video "${ref.name}":`
+      );
+      for (const dt of [-PIN_SAMPLE_SPREAD, PIN_SAMPLE_SPREAD]) {
+        const at = Math.max(0, dur !== undefined ? Math.min(t + dt, dur) : t + dt);
+        // A neighbor clamped onto the pin itself adds nothing.
+        if (Math.abs(at - t) < 0.25) continue;
+        const image = await captureFrame(ref.url, dur, { at, width: PIN_SAMPLE_W }).catch(
+          () => null
+        );
+        if (!image) continue;
+        pushImage(image, `the same video ${formatTime(at)}, sampled near the pinned frame:`);
+      }
+      continue;
+    }
+    pushImage(
+      await refToInlineImage(ref),
+      ref.kind === "video" ? `a frame of video "${ref.name}":` : `image "${ref.name}":`
+    );
   }
   return { parts, visuals };
 }

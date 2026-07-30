@@ -74,14 +74,12 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
     [assets]
   );
   const { active: dropActive, attachTarget, targetProps } = useAssetDrop(
-    (ref) => {
-      if (ref.kind !== "audio") useImageGen.getState().addRef(ref);
-    },
+    (ref) => useImageGen.getState().addRef(ref),
     // OS files dropped on the panel attach as references (media files import
     // into the project on the way; text files ride as-is).
     (files) =>
       void refsFromDroppedFiles(projectId, files).then((refs) => {
-        for (const r of refs) if (r.kind !== "audio") useImageGen.getState().addRef(r);
+        for (const r of refs) useImageGen.getState().addRef(r);
       })
   );
 
@@ -95,7 +93,7 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
   }, []);
 
   const go = () => {
-    const { text, refs: all } = collectRefs(prompt.trim(), refs, candidates, { dropAudio: true });
+    const { text, refs: all } = collectRefs(prompt.trim(), refs, candidates);
     if (!text) return;
     void useGenerate.getState().generateImage(projectId, text, { refs: all, aspect, resolution });
   };
@@ -119,6 +117,7 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
           <RefChips
             refs={refs}
             onRemove={(r) => useImageGen.getState().removeRef(r)}
+            onUpdate={(r) => useImageGen.getState().updateRef(r)}
             className="p-2 pb-0"
             peekSide="bottom"
           />
@@ -131,6 +130,8 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
             submitKey="mod-enter"
             menuSide="bottom"
             onSubmit={go}
+            attachedRefs={refs}
+            onUpsertRef={(r) => useImageGen.getState().updateRef(r)}
           />
           <DictationControl
             text={prompt}

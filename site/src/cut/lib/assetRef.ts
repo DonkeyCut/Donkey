@@ -42,6 +42,12 @@ export interface AssetRef {
   /** Fetchable URL for the media itself (previews and frame capture). */
   url: string;
   duration?: number;
+  /** The moment the user pinned on this reference, seconds into the source —
+   * set only by an explicit pick in the chip's moment picker. When present,
+   * a video ref reads from this frame (with a little sampling around it) and
+   * an audio ref reads as a segment around it; absent, the ref reads from its
+   * default spot. 0 is a real pick, distinct from unset. */
+  t?: number;
   /** Short mention handle (`v2`, `i1`, `a3`), assigned to project assets in
    * media order by `useRefCandidates`. Derived per session, not persisted —
    * display surfaces re-resolve it live so a stale copy never shows. */
@@ -117,6 +123,13 @@ export const sameRef = (a: AssetRef, b: AssetRef) => a.scope === b.scope && a.id
 export const addRefOnce = (list: AssetRef[], ref: AssetRef): AssetRef[] =>
   list.some((r) => sameRef(r, ref)) ? list : [...list, ref];
 
+/** Replace a ref in place (same scope+id), attaching it when absent — how a
+ * pinned moment lands whether the ref arrived as a chip or a typed mention. */
+export const upsertRef = (list: AssetRef[], ref: AssetRef): AssetRef[] =>
+  list.some((r) => sameRef(r, ref))
+    ? list.map((r) => (sameRef(r, ref) ? ref : r))
+    : [...list, ref];
+
 /** A ref's fetchable URL, re-read from the live catalogs. Cloud asset URLs are
  * short-lived signed R2 URLs, so a ref persisted in a saved chat thread
  * outlives its `url`; project and clip refs resolve through the current asset
@@ -149,6 +162,7 @@ export function normalizeRef(v: unknown): AssetRef | null {
     kind: o.kind ?? o.type ?? "video",
     url: liveRefUrl(scope, o.id, o.url),
     duration: o.duration,
+    ...(typeof o.t === "number" && Number.isFinite(o.t) ? { t: o.t } : {}),
   };
 }
 
@@ -536,23 +550,18 @@ export function parseMentions(
 }
 
 /** Resolve a prompt's `@name` mentions and merge them into the already-attached
- * `chips`, de-duplicated. `dropAudio` excludes audio refs — image/video
- * generation take only pictures; chat keeps them. The single place the three
- * send paths (chat, generate image, generate video) share this composition. */
+ * `chips`, de-duplicated. The single place the three send paths (chat,
+ * generate image, generate video) share this composition. */
 export function collectRefs(
   text: string,
   chips: AssetRef[],
-  candidates: AssetRef[],
-  opts?: { dropAudio?: boolean }
+  candidates: AssetRef[]
 ): { refs: AssetRef[]; text: string } {
   const parsed = parseMentions(text, candidates);
-  const mentioned = opts?.dropAudio
-    ? parsed.refs.filter((r) => r.kind !== "audio")
-    : parsed.refs;
   // Re-resolve each ref's short handle from the live candidates — chips from
   // drags predate handle assignment, and the model reads handles to talk
   // about attachments ("v2").
-  const refs = mentioned.reduce(addRefOnce, chips).map((r) => {
+  const refs = parsed.refs.reduce(addRefOnce, chips).map((r) => {
     const live = candidates.find((c) => sameRef(c, r));
     return live?.handle ? { ...r, handle: live.handle } : r;
   });

@@ -74,6 +74,7 @@ import {
   sameRef,
   setRefDragData,
   splitMentions,
+  upsertRef,
   useRefCandidates,
   useAssetDrop,
   type AssetRef,
@@ -969,6 +970,9 @@ function ChatSession({
                   onRemove={(ref) =>
                     setAttachments((p) => p.filter((x) => !sameRef(x, ref)))
                   }
+                  onUpdate={(ref) =>
+                    setAttachments((p) => p.map((x) => (sameRef(x, ref) ? ref : x)))
+                  }
                   className="px-2.5 pt-2.5"
                 />
                 <MentionTextarea
@@ -983,6 +987,8 @@ function ChatSession({
                   menuSide="top"
                   inputRef={composerRef}
                   onSubmit={() => send(input)}
+                  attachedRefs={attachments}
+                  onUpsertRef={(ref) => setAttachments((p) => upsertRef(p, ref))}
                 />
                 <div className="flex items-center gap-1 px-1.5 pb-1.5">
                   <ModelSelector
