@@ -17,13 +17,13 @@
  */
 
 import {
-  BufferTarget,
   CanvasSource,
   getFirstEncodableAudioCodec,
   getFirstEncodableVideoCodec,
   Mp4OutputFormat,
   Output,
   AudioBufferSource,
+  StreamTarget,
   type VideoCodec,
 } from "mediabunny";
 import { renderMix, type MixClip, type MixItem, type MixSpec } from "./audioMix";
@@ -49,6 +49,51 @@ export interface RenderProgress {
   /** 0..1 across the whole render. */
   ratio: number;
   stage: "audio" | "video" | "finishing";
+}
+
+/** A finished render: the file, and the scratch space it occupies. */
+export interface RenderedExport {
+  /** The MP4, backed by origin-private disk rather than the tab's heap — it
+   * streams from there into whatever reads it. */
+  file: File;
+  /** Delete the backing scratch file. Call once the file has been consumed. */
+  discard(): Promise<void>;
+}
+
+/**
+ * Where an in-tab render writes its file while it is being made.
+ *
+ * Origin-private disk, not memory. The encoded output is the one thing in a
+ * render whose size grows with the cut — half a gigabyte for ten minutes of
+ * 1080p — and holding it in the heap is what crashes a tab on a project the
+ * gate otherwise allows. On disk, the tab's memory stays flat no matter how
+ * big the file gets.
+ */
+const SCRATCH_DIR = "cut-export-scratch";
+
+/** After this long, a scratch file can only be the leaving of a tab that died
+ * mid-render — no render or upload runs for a day. */
+const SCRATCH_ORPHAN_MS = 24 * 60 * 60 * 1000;
+
+async function scratchDir(): Promise<FileSystemDirectoryHandle> {
+  const root = await navigator.storage.getDirectory();
+  return root.getDirectoryHandle(SCRATCH_DIR, { create: true });
+}
+
+/** Sweep scratch files no render can still own. Housekeeping — a failure here
+ * never stops the render that triggered it. */
+async function sweepScratch(dir: FileSystemDirectoryHandle): Promise<void> {
+  try {
+    for await (const [name, handle] of dir) {
+      if (handle.kind !== "file") continue;
+      const file = await (handle as FileSystemFileHandle).getFile();
+      if (Date.now() - file.lastModified > SCRATCH_ORPHAN_MS) {
+        await dir.removeEntry(name).catch(() => {});
+      }
+    }
+  } catch {
+    // The sweep is best effort.
+  }
 }
 
 export interface RenderOptions {
@@ -397,19 +442,27 @@ function projectFadeGain(doc: ExportDoc, t: number, total: number): number {
 }
 
 /**
- * Render `doc` to an MP4.
+ * Render `doc` to an MP4 in scratch storage.
  *
  * Frames are produced in order and handed to the muxer as they are drawn, so
  * the memory this holds is a handful of decoded frames rather than the render.
- * The audio is mixed up front, because a single offline pass over the whole
- * timeline is both cheaper and more accurate than trying to mix it in slices
- * that have to agree at the seams.
+ * The encoded output goes the same way: the muxer writes each chunk to the
+ * scratch file and lets it go, so the file on disk is the only whole copy that
+ * ever exists. The audio is mixed up front, because a single offline pass over
+ * the whole timeline is both cheaper and more accurate than trying to mix it
+ * in slices that have to agree at the seams.
+ *
+ * The file carries its index at the front, like the ffmpeg path's faststart
+ * files. That placement normally costs either memory (buffer everything) or a
+ * second pass (ffmpeg's), but a render knows its exact frame and sample counts
+ * before it starts, which is enough for the muxer to reserve the index's space
+ * up front and fill it in at the end.
  */
 export async function renderProjectToMp4(
   doc: ExportDoc,
   settings: ExportSettings,
   opts: RenderOptions
-): Promise<Blob> {
+): Promise<RenderedExport> {
   const { resolve, onProgress, signal } = opts;
   const duration = projectDuration(doc);
   if (!(duration > 0)) throw new Error("There is nothing to export yet.");
@@ -441,21 +494,25 @@ export async function renderProjectToMp4(
         });
   const comp = new FrameCompositor(canvas);
 
-  const output = new Output({ format: new Mp4OutputFormat(), target: new BufferTarget() });
-  const video = new CanvasSource(canvas, { codec, bitrate: bitrateFor(settings) });
-  output.addVideoTrack(video, { frameRate: settings.fps });
-  let audio: AudioBufferSource | null = null;
-  if (mix) {
-    const audioCodec = await getFirstEncodableAudioCodec(["aac", "opus"], {
-      numberOfChannels: AUDIO_CHANNELS,
-      sampleRate: AUDIO_RATE,
-    });
-    if (audioCodec) {
-      audio = new AudioBufferSource({ codec: audioCodec, bitrate: 192_000 });
-      output.addAudioTrack(audio);
-    }
-  }
-  await output.start();
+  const frameDur = 1 / settings.fps;
+  const frames = Math.max(1, Math.round(duration * settings.fps));
+
+  const dir = await scratchDir();
+  void sweepScratch(dir);
+  const scratchName = `export-${crypto.randomUUID()}.mp4`;
+  const scratchHandle = await dir.getFileHandle(scratchName, { create: true });
+  const writable = await scratchHandle.createWritable();
+  const discard = async () => {
+    // An open writer holds a lock removeEntry respects; closing is a no-op
+    // once the muxer already has.
+    await writable.close().catch(() => {});
+    await dir.removeEntry(scratchName).catch(() => {});
+  };
+
+  const output = new Output({
+    format: new Mp4OutputFormat({ fastStart: "reserve" }),
+    target: new StreamTarget(writable, { chunked: true }),
+  });
 
   const stamps = new StampCache(settings.width, settings.height);
   const readers = new Map<string, ClipReader>();
@@ -466,6 +523,25 @@ export async function renderProjectToMp4(
   };
 
   try {
+    const video = new CanvasSource(canvas, { codec, bitrate: bitrateFor(settings) });
+    // Reserving the index space needs a packet ceiling per track. The video's
+    // is exact — one packet per frame; the audio's is the mix's sample count
+    // over the smallest samples-per-packet a codec here uses (Opus's 960; AAC
+    // packs more), plus slack for encoder priming.
+    output.addVideoTrack(video, { frameRate: settings.fps, maximumPacketCount: frames + 8 });
+    let audio: AudioBufferSource | null = null;
+    if (mix) {
+      const audioCodec = await getFirstEncodableAudioCodec(["aac", "opus"], {
+        numberOfChannels: AUDIO_CHANNELS,
+        sampleRate: AUDIO_RATE,
+      });
+      if (audioCodec) {
+        audio = new AudioBufferSource({ codec: audioCodec, bitrate: 192_000 });
+        output.addAudioTrack(audio, { maximumPacketCount: Math.ceil(mix.length / 960) + 32 });
+      }
+    }
+    await output.start();
+
     // The audio is one buffer for the whole timeline, so it goes in before the
     // frames rather than being interleaved with them.
     if (audio && mix) await audio.add(mix);
@@ -481,8 +557,6 @@ export async function renderProjectToMp4(
     const spansOf = (track: number) => byTrack.get(track) ?? [];
     const spanOfClip = new Map<string, ClipSpan>();
     for (const list of byTrack.values()) for (const sp of list) spanOfClip.set(sp.clip.id, sp);
-    const frameDur = 1 / settings.fps;
-    const frames = Math.max(1, Math.round(duration * settings.fps));
 
     for (let i = 0; i < frames; i++) {
       stop();
@@ -547,12 +621,13 @@ export async function renderProjectToMp4(
     }
 
     onProgress?.({ ratio: 1, stage: "finishing" });
+    // Finalize fills in the reserved index and closes the scratch file, so the
+    // handle reads back the finished MP4.
     await output.finalize();
-    const buffer = output.target.buffer;
-    if (!buffer) throw new Error("The render produced no file.");
-    return new Blob([buffer], { type: "video/mp4" });
+    return { file: await scratchHandle.getFile(), discard };
   } catch (err) {
     await output.cancel().catch(() => {});
+    await discard();
     throw err;
   } finally {
     stamps.dispose();
@@ -582,13 +657,15 @@ async function drawStamps(
 /**
  * Whether this render should happen in the tab.
  *
- * Two things have to hold. The cut has to be one a tab can carry — past ten
+ * Three things have to hold. The cut has to be one a tab can carry — past ten
  * minutes or 4K it belongs on the worker, which has a whole machine rather than
- * a share of one. And the browser has to actually be able to encode it: whether
- * WebCodecs offers a video encoder for these dimensions is a fact about the
- * browser, not about the project, and asking after the render has already been
- * routed here leaves nowhere to go. Answering it first means a browser that
- * cannot encode quietly renders on the worker, the way every cloud export did
+ * a share of one. The browser has to offer scratch storage, because the render
+ * writes its file to origin-private disk rather than the heap. And the browser
+ * has to actually be able to encode it: whether WebCodecs offers a video
+ * encoder for these dimensions is a fact about the browser, not about the
+ * project, and asking after the render has already been routed here leaves
+ * nowhere to go. Answering all three first means a browser that cannot carry
+ * the render quietly renders on the worker, the way every cloud export did
  * before this path existed.
  */
 export async function canRenderInBrowser(
@@ -598,6 +675,13 @@ export async function canRenderInBrowser(
   const duration = projectDuration(doc);
   const pixels = settings.width * settings.height;
   if (!(duration > 0) || duration > 10 * 60 || pixels > 3840 * 2160) return false;
+  if (
+    typeof navigator.storage?.getDirectory !== "function" ||
+    typeof FileSystemFileHandle === "undefined" ||
+    !("createWritable" in FileSystemFileHandle.prototype)
+  ) {
+    return false;
+  }
   try {
     return !!(await getFirstEncodableVideoCodec(VIDEO_CODECS, {
       width: settings.width,

@@ -596,7 +596,7 @@ export async function runBrowserExport(
   opts.onClaimed?.(jobId);
 
   try {
-    const file = await renderProjectToMp4(doc, settings, {
+    const rendered = await renderProjectToMp4(doc, settings, {
       // Read the asset's URL at the moment it is needed rather than off the
       // snapshot: a long render can outlive the links it started with, and the
       // store re-mints them behind it.
@@ -607,10 +607,16 @@ export async function runBrowserExport(
       onProgress: ({ ratio }) => opts.onProgress?.(ratio * 0.9),
     });
 
-    await putSigned(claimed.url, file, "video/mp4", {
-      signal: opts.signal,
-      onProgress: (fraction) => opts.onProgress?.(0.9 + fraction * 0.1),
-    });
+    try {
+      await putSigned(claimed.url, rendered.file, "video/mp4", {
+        signal: opts.signal,
+        onProgress: (fraction) => opts.onProgress?.(0.9 + fraction * 0.1),
+      });
+    } finally {
+      // The file streamed from scratch disk into the upload; its space comes
+      // back as soon as the upload is done with it.
+      void rendered.discard();
+    }
 
     const done = await backend.fetch("/api/cut/export/client/complete", {
       method: "POST",
