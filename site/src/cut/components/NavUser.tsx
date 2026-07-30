@@ -85,7 +85,7 @@ export function NavUser() {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted data-[popup-open]:bg-muted">
+      <DropdownMenuTrigger className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted data-[popup-open]:bg-muted">
         <UserAvatar name={name} image={image} />
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
         <EllipsisVertical className="size-4 shrink-0 text-muted-foreground" />
