@@ -7,6 +7,12 @@
 // cloud projects, and the number is the same either way. Pro accounts see
 // nothing here — 50 GB is enough that a meter would only take up room.
 import { Cloud, Loader2 } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useCloudUsage } from "@/cut/lib/backend/hooks";
 import { useUpgradeToPro } from "@/cut/lib/proUpgrade";
 import { cn } from "@/lib/utils";
@@ -28,26 +34,35 @@ export function NavStorage() {
 
   const frac = u.bytes / u.quotaBytes;
   return (
-    <div className="flex flex-col border-b">
-      <div className="flex items-center justify-between gap-2 px-2 py-2.5 text-xs">
-        <span className="flex items-center gap-1.5 text-muted-foreground">
-          <Cloud className="size-4" />
-          <span className={cn("tabular-nums", frac >= 1 && "text-destructive")}>
-            {usageLabel(u.bytes, u.quotaBytes)}
-          </span>
-        </span>
-        <button
-          type="button"
-          className="flex items-center gap-1.5 font-bold text-foreground disabled:opacity-50"
-          disabled={upgrade.isPending}
-          onClick={upgrade.start}
-        >
-          {upgrade.isPending && <Loader2 className="size-3 animate-spin" />}
-          Get 50 GB
-        </button>
-      </div>
+    <div className="mb-2 flex flex-col border-b pb-2">
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                className="flex items-center justify-between gap-2 rounded-lg px-2 py-2 text-xs transition-colors hover:bg-muted disabled:opacity-50"
+                disabled={upgrade.isPending}
+                onClick={upgrade.start}
+              />
+            }
+          >
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              <Cloud className="size-4" />
+              <span className={cn("tabular-nums", frac >= 1 && "text-destructive")}>
+                {usageLabel(u.bytes, u.quotaBytes)}
+              </span>
+            </span>
+            <span className="flex items-center gap-1.5">
+              {upgrade.isPending && <Loader2 className="size-3 animate-spin" />}
+              Get 50 GB
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>Upgrade to get 50 GB</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
       {u.grace && (
-        <p className="px-2 pb-2.5 text-xs leading-snug text-muted-foreground">
+        <p className="px-2 pt-1 text-xs leading-snug text-muted-foreground">
           {`Your Pro plan ended. Upgrade or free ${formatBytes(u.grace.overBytes)} before your oldest projects are deleted.`}
         </p>
       )}
