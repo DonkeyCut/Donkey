@@ -1,20 +1,22 @@
+import { seedStarterProject } from "@/cut/server/cloud/starter";
 import { creditStringToMicros } from "@/lib/credits/amounts";
 import { grantCredits } from "@/lib/credits/inference";
 import { grantVisionCalls } from "@/lib/credits/vision-grants";
 import { signupAppCredits } from "@/lib/onboarding/sequence";
 
-// Single source of truth for what a new account starts with. Both grants are
-// idempotent and keyed to the user, so provisioning can run more than once (e.g.
-// a retried signup) without ever double-granting. The credit amount itself is
-// in sequence.ts, which the welcome slides can import too.
+// Single source of truth for what a new account starts with. All three steps
+// are idempotent and keyed to the user, so provisioning can run more than once
+// (e.g. a retried signup) without double-granting or double-seeding. The credit
+// amount itself is in sequence.ts, which the welcome slides can import too.
 export const signupVisionFreeCalls = 100; // lifetime free Vision API calls
 
 export async function provisionSignupGrants(userId: string): Promise<void> {
-  // Settle the two grants independently: one failing must not block the other,
+  // Settle the steps independently: one failing must not block the others,
   // and signup itself must never fail because a bonus grant hiccupped.
   const results = await Promise.allSettled([
     grantSignupAppCredits(userId),
     grantSignupVisionCalls(userId),
+    seedStarterProject(userId),
   ]);
 
   for (const result of results) {

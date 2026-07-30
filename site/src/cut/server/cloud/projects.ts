@@ -91,8 +91,10 @@ export async function deleteProjectCascade(userId: string, id: string): Promise<
   const objects = await prisma.cutMediaObject.findMany({
     where: { userId, projectId: id },
   });
+  // Quota-exempt rows (seeded starter media) never added usage, so they
+  // subtract none here; their R2 copies still go with the rest.
   const freed = objects
-    .filter((o) => o.uploadState === "complete")
+    .filter((o) => o.uploadState === "complete" && !o.quotaExempt)
     .reduce((sum, o) => sum + Number(o.bytes), 0);
   // Cancel the project's in-flight renders first: a job finishing after
   // the delete would re-register storage for a project nothing can see.
@@ -355,7 +357,9 @@ export const projectsCloud = {
       if (row) {
         await prisma.$transaction(async (tx) => {
           await tx.cutMediaObject.delete({ where: { id: row.id } });
-          if (row.uploadState === "complete") await addUsage(tx, userId, -Number(row.bytes));
+          if (row.uploadState === "complete" && !row.quotaExempt) {
+            await addUsage(tx, userId, -Number(row.bytes));
+          }
         });
         await del([row.r2Key]);
       }
@@ -394,7 +398,9 @@ export const projectsCloud = {
       if (row) {
         await prisma.$transaction(async (tx) => {
           await tx.cutMediaObject.delete({ where: { id: row.id } });
-          if (row.uploadState === "complete") await addUsage(tx, userId, -Number(row.bytes));
+          if (row.uploadState === "complete" && !row.quotaExempt) {
+            await addUsage(tx, userId, -Number(row.bytes));
+          }
         });
         await del([row.r2Key]);
       }

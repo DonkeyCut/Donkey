@@ -1,0 +1,444 @@
+{
+  "version": 1,
+  "name": "Cities",
+  "createdAt": 1785304221163,
+  "updatedAt": 1785306061281,
+  "assets": [
+    {
+      "id": "97139b9b",
+      "fileName": "2078729226820424157-1.jpg",
+      "name": "GPT image 2.0 on ChatGPT. Prompt: { \"CITY_NAME\": \"<Enter City Name>\", \"TAGLINE\": \"<Enter Short Tagline>\", \"prompt\": \"Cre",
+      "type": "image",
+      "duration": 0,
+      "width": 1086,
+      "height": 1448,
+      "origin": "chat",
+      "chatId": "59ba035c-d37a-400e-ac1a-d216c254fa5f"
+    },
+    {
+      "id": "0fc2a719",
+      "fileName": "2078729226820424157-2.jpg",
+      "name": "GPT image 2.0 on ChatGPT. Prompt: { \"CITY_NAME\": \"<Enter City Name>\", \"TAGLINE\": \"<Enter Short Tagline>\", \"prompt\": \"Cre",
+      "type": "image",
+      "duration": 0,
+      "width": 1086,
+      "height": 1448,
+      "origin": "chat",
+      "chatId": "59ba035c-d37a-400e-ac1a-d216c254fa5f"
+    },
+    {
+      "id": "ab925161",
+      "fileName": "4218c2a2-5276-447a-ad55-db33ad4584df-0.png",
+      "name": "Character reference: The Traveler. A woman with long wavy\u2026",
+      "type": "image",
+      "duration": 0,
+      "width": 1536,
+      "height": 2752,
+      "origin": "chat",
+      "chatId": "59ba035c-d37a-400e-ac1a-d216c254fa5f"
+    },
+    {
+      "id": "5b5dac7a",
+      "fileName": "d26e5830-9424-46a1-b6be-cc734e0dfda4-0.png",
+      "name": "Location reference: Steep Hillside, San Francisco. A stee\u2026",
+      "type": "image",
+      "duration": 0,
+      "width": 1536,
+      "height": 2752,
+      "origin": "chat",
+      "chatId": "59ba035c-d37a-400e-ac1a-d216c254fa5f"
+    },
+    {
+      "id": "b8a4adfc",
+      "fileName": "0b108cc1-2237-4680-91b0-9cc704778480-0.png",
+      "name": "Location reference: Dongdaemun Design Plaza, Seoul. The c\u2026",
+      "type": "image",
+      "duration": 0,
+      "width": 1536,
+      "height": 2752,
+      "origin": "chat",
+      "chatId": "59ba035c-d37a-400e-ac1a-d216c254fa5f"
+    },
+    {
+      "id": "6fee6d34",
+      "fileName": "c76a22e1-732c-49f6-bb3e-0d9f633e9f54-0.png",
+      "name": "Location reference: Autumnal Street, Toronto. A city stre\u2026",
+      "type": "image",
+      "duration": 0,
+      "width": 1536,
+      "height": 2752,
+      "origin": "chat",
+      "chatId": "59ba035c-d37a-400e-ac1a-d216c254fa5f"
+    },
+    {
+      "id": "89529dfb",
+      "fileName": "c773dd7c-dceb-48bc-91e7-3c0af92567c2-0.png",
+      "name": "Watercolor and loose black ink sketch illustration on tex\u2026",
+      "type": "image",
+      "duration": 0,
+      "width": 1536,
+      "height": 2752,
+      "origin": "chat",
+      "chatId": "59ba035c-d37a-400e-ac1a-d216c254fa5f"
+    },
+    {
+      "id": "4853b0e6",
+      "fileName": "d3be7b91-db0a-4bdf-b934-eeb98ae0ff65-0.png",
+      "name": "Watercolor and loose black ink sketch illustration on tex\u2026",
+      "type": "image",
+      "duration": 0,
+      "width": 1536,
+      "height": 2752,
+      "origin": "chat",
+      "chatId": "59ba035c-d37a-400e-ac1a-d216c254fa5f"
+    },
+    {
+      "id": "d79aa708",
+      "fileName": "3a2fe5ac-3163-422a-b512-51fd0a3f10c1-0.png",
+      "name": "Watercolor and loose black ink sketch illustration on tex\u2026",
+      "type": "image",
+      "duration": 0,
+      "width": 1536,
+      "height": 2752,
+      "origin": "chat",
+      "chatId": "59ba035c-d37a-400e-ac1a-d216c254fa5f"
+    },
+    {
+      "id": "62b66ce9",
+      "fileName": "ai-watercolor-and-loose-black-ink-sketch-il.mp4",
+      "name": "Watercolor and loose black ink sketch illustration on tex\u2026",
+      "type": "video",
+      "duration": 10.005333333333333,
+      "width": 720,
+      "height": 1280,
+      "origin": "chat",
+      "chatId": "59ba035c-d37a-400e-ac1a-d216c254fa5f"
+    },
+    {
+      "id": "8e504d5d",
+      "fileName": "ai-watercolor-and-loose-black-ink-sketch-il-1.mp4",
+      "name": "Watercolor and loose black ink sketch illustration on tex\u2026",
+      "type": "video",
+      "duration": 10.005333333333333,
+      "width": 720,
+      "height": 1280,
+      "origin": "chat",
+      "chatId": "59ba035c-d37a-400e-ac1a-d216c254fa5f"
+    },
+    {
+      "id": "abf50efa",
+      "fileName": "ai-watercolor-and-loose-black-ink-sketch-il-2.mp4",
+      "name": "Watercolor and loose black ink sketch illustration on tex\u2026",
+      "type": "video",
+      "duration": 10.005333333333333,
+      "width": 720,
+      "height": 1280,
+      "origin": "chat",
+      "chatId": "59ba035c-d37a-400e-ac1a-d216c254fa5f"
+    },
+    {
+      "id": "1d1583d4",
+      "fileName": "3a5e9d97-c63d-48f8-bde5-3a9e757c295c-0.mp3",
+      "name": "Music bed",
+      "type": "audio",
+      "duration": 30.772244897959183,
+      "origin": "chat",
+      "chatId": "59ba035c-d37a-400e-ac1a-d216c254fa5f"
+    },
+    {
+      "id": "7ea8f4c5",
+      "fileName": "2078729226820424157-1-1.jpg",
+      "name": "GPT image 2.0 on ChatGPT. Prompt: { \"CITY_NAME\": \"<Enter City Name>\", \"TAGLINE\": \"<Enter Short Tagline>\", \"prompt\": \"Cre",
+      "type": "image",
+      "duration": 0,
+      "width": 1086,
+      "height": 1448,
+      "origin": "chat",
+      "chatId": "59ba035c-d37a-400e-ac1a-d216c254fa5f"
+    },
+    {
+      "id": "6a8bce44",
+      "fileName": "2078729226820424157-2-1.jpg",
+      "name": "GPT image 2.0 on ChatGPT. Prompt: { \"CITY_NAME\": \"<Enter City Name>\", \"TAGLINE\": \"<Enter Short Tagline>\", \"prompt\": \"Cre",
+      "type": "image",
+      "duration": 0,
+      "width": 1086,
+      "height": 1448,
+      "origin": "chat",
+      "chatId": "59ba035c-d37a-400e-ac1a-d216c254fa5f"
+    }
+  ],
+  "clips": [
+    {
+      "id": "96765a79",
+      "assetId": "abf50efa",
+      "track": 0,
+      "start": 0,
+      "in": 0,
+      "out": 4.733333333333333,
+      "muted": true
+    },
+    {
+      "id": "3cbdbdb5",
+      "assetId": "62b66ce9",
+      "track": 0,
+      "start": 4.733333333333333,
+      "in": 4.3,
+      "out": 9.4,
+      "muted": true,
+      "transition": 1,
+      "transitionStyle": "crosszoom"
+    },
+    {
+      "id": "249a27ff",
+      "assetId": "8e504d5d",
+      "track": 0,
+      "start": 8.833333333333334,
+      "in": 1.5,
+      "out": 6.966666666666667,
+      "muted": true
+    }
+  ],
+  "audioClips": [
+    {
+      "id": "1fc154e8",
+      "assetId": "1d1583d4",
+      "start": 0,
+      "in": 0,
+      "out": 14.3,
+      "volume": 0.4,
+      "lane": 1
+    }
+  ],
+  "overlays": [],
+  "overlayClips": [],
+  "templates": [],
+  "aspect": "9:16",
+  "fadeIn": 0,
+  "fadeOut": 0,
+  "subtitles": {
+    "cues": [],
+    "showOnVideo": true,
+    "showOnTimeline": true
+  },
+  "publish": {
+    "caption": "",
+    "tags": "",
+    "soundTitle": "",
+    "handle": ""
+  },
+  "notes": {
+    "text": "",
+    "publishedAt": "",
+    "links": []
+  },
+  "renders": [
+    {
+      "id": "ff07f318",
+      "chatId": "59ba035c-d37a-400e-ac1a-d216c254fa5f",
+      "prompt": "Watercolor and loose black ink sketch illustration on textured cream paper. Soft, diffuse daylight with transparent watercolor color washes. A limited palette of mustard-yellow, soft indigo, charcoal grey, muted brick red, and faded sage green. Eye-level flat 2D perspective tracking shot with a nostalgic, serene travel poster mood. In a seamless transition as she steps forward, the traveler in her mustard-yellow rain jacket and black backpack is now walking down a steep, sunny hill in San Francisco with historic streetcars and the bay in the background. The voiceover heard over this shot (audio only, never visible): ...but sometimes, those steps cross oceans before you even realize you've crossed the street. Setting, Steep Hillside, San Francisco. Framing, medium tracking shot. This shot's role in the story: the turn as she transitions to San Francisco. One single continuous shot with fluid, continuous character motion throughout \u2014 smooth, natural movement, never held poses or stepped animation. Pure visual storytelling: no on-screen text of any kind \u2014 no captions, subtitles, speech bubbles, titles, signs, or lettering \u2014 and no split screens, panels, or storyboard collages. No baked-in editing effects: no transition frames, fades, motion-blur smears, borders, or blurred letterbox bands \u2014 the picture fills the frame edge to edge, composed upright for this frame with a level horizon; cuts and transitions are added later in the editor. The video continues this exact opening frame \u2014 keep its artwork, medium, and rendering technique unchanged.",
+      "startedAt": 1785304617103,
+      "status": "done",
+      "assetId": "62b66ce9"
+    },
+    {
+      "id": "65fa372e",
+      "chatId": "59ba035c-d37a-400e-ac1a-d216c254fa5f",
+      "prompt": "Watercolor and loose black ink sketch illustration on textured cream paper. Soft, diffuse daylight with transparent watercolor color washes. A limited palette of mustard-yellow, soft indigo, charcoal grey, muted brick red, and faded sage green. Eye-level flat 2D perspective tracking shot with a nostalgic, serene travel poster mood. With her next step, the traveler in her mustard-yellow rain jacket and black backpack emerges onto a crisp, autumnal Toronto street, walking towards the CN Tower towering in the cool morning sky. The voiceover heard over this shot (audio only, never visible): Because home isn't where you land, it's the rhythm of the road beneath your feet. Setting, Autumnal Street, Toronto. Framing, low-angle tracking shot. This shot's role in the story: the payoff in Toronto. One single continuous shot with fluid, continuous character motion throughout \u2014 smooth, natural movement, never held poses or stepped animation. Pure visual storytelling: no on-screen text of any kind \u2014 no captions, subtitles, speech bubbles, titles, signs, or lettering \u2014 and no split screens, panels, or storyboard collages. No baked-in editing effects: no transition frames, fades, motion-blur smears, borders, or blurred letterbox bands \u2014 the picture fills the frame edge to edge, composed upright for this frame with a level horizon; cuts and transitions are added later in the editor. The video continues this exact opening frame \u2014 keep its artwork, medium, and rendering technique unchanged.",
+      "startedAt": 1785304617103,
+      "status": "done",
+      "assetId": "8e504d5d"
+    },
+    {
+      "id": "de9d8f97",
+      "chatId": "59ba035c-d37a-400e-ac1a-d216c254fa5f",
+      "prompt": "Watercolor and loose black ink sketch illustration on textured cream paper. Soft, diffuse daylight with transparent watercolor color washes. A limited palette of mustard-yellow, soft indigo, charcoal grey, muted brick red, and faded sage green. Eye-level flat 2D perspective tracking shot with a nostalgic, serene travel poster mood. A traveler wearing a mustard-yellow rain jacket and a black backpack walks briskly past the futuristic curves of the Dongdaemun Design Plaza and glowing neon shopfronts in Seoul. The voiceover heard over this shot (audio only, never visible): They say a journey of a thousand miles begins with a single step... Setting, Dongdaemun Design Plaza, Seoul. Framing, wide tracking shot. This shot's role in the story: establish the world with an iconic Seoul cityscape. One single continuous shot with fluid, continuous character motion throughout \u2014 smooth, natural movement, never held poses or stepped animation. Pure visual storytelling: no on-screen text of any kind \u2014 no captions, subtitles, speech bubbles, titles, signs, or lettering \u2014 and no split screens, panels, or storyboard collages. No baked-in editing effects: no transition frames, fades, motion-blur smears, borders, or blurred letterbox bands \u2014 the picture fills the frame edge to edge, composed upright for this frame with a level horizon; cuts and transitions are added later in the editor. The video continues this exact opening frame \u2014 keep its artwork, medium, and rendering technique unchanged.",
+      "startedAt": 1785304617102,
+      "status": "done",
+      "assetId": "abf50efa"
+    }
+  ],
+  "genvideo": {
+    "id": "scene-df15cc5e",
+    "brief": "A travel journey across three cities: Seoul, San Francisco, and Toronto. Each segment features a traveler walking through iconic cityscapes, seamlessly transitioning and walking from one city to the next.",
+    "references": [
+      {
+        "mediaId": "97139b9b",
+        "kind": "image",
+        "purpose": "style",
+        "name": "GPT image 2.0 on ChatGPT. Prompt: { \"CITY_NAME\": \"<Enter City Name>\", \"TAGLINE\": \"<Enter Short Tagline>\", \"prompt\": \"Cre"
+      },
+      {
+        "mediaId": "0fc2a719",
+        "kind": "image",
+        "purpose": "style",
+        "name": "GPT image 2.0 on ChatGPT. Prompt: { \"CITY_NAME\": \"<Enter City Name>\", \"TAGLINE\": \"<Enter Short Tagline>\", \"prompt\": \"Cre"
+      }
+    ],
+    "audioMode": "generated",
+    "targetSeconds": 18,
+    "fps": 30,
+    "durationFrames": 459,
+    "transcript": [],
+    "aspect": "9:16",
+    "style": "Watercolor and loose black ink sketch illustration on textured cream paper. Soft, diffuse daylight with transparent watercolor color washes. A limited palette of mustard-yellow, soft indigo, charcoal grey, muted brick red, and faded sage green. Eye-level flat 2D perspective tracking shot with a nostalgic, serene travel poster mood.",
+    "suiteLabel": "donkey-hosted",
+    "chatId": "59ba035c-d37a-400e-ac1a-d216c254fa5f",
+    "characters": [
+      {
+        "id": "char:1",
+        "kind": "character",
+        "name": "The Traveler",
+        "description": "A woman with long wavy brown hair. She wears a bright mustard-yellow rain jacket, a white t-shirt, light blue denim jeans, white sneakers, and carries a matte black backpack. Rendered with loose black ink linework and soft watercolor fills.",
+        "mediaId": "ab925161"
+      }
+    ],
+    "locations": [
+      {
+        "id": "loc:1",
+        "kind": "location",
+        "name": "Dongdaemun Design Plaza, Seoul",
+        "description": "The curving, metallic-like structure of the plaza rendered in light grey watercolor washes and loose ink outlines. In the background, glowing neon shopfronts shimmer in soft pink and cool blue washes against warm cream paper.",
+        "mediaId": "b8a4adfc"
+      },
+      {
+        "id": "loc:2",
+        "kind": "location",
+        "name": "Steep Hillside, San Francisco",
+        "description": "A steep downhill street with a historic cable car in muted brick red and cream watercolor. The background features the San Francisco bay in soft indigo washes under a sunny, warm cream sky.",
+        "mediaId": "5b5dac7a"
+      },
+      {
+        "id": "loc:3",
+        "kind": "location",
+        "name": "Autumnal Street, Toronto",
+        "description": "A city street lined with maple trees in faded orange and dry gold watercolor washes. The tall silhouette of the CN Tower rises in soft indigo and grey washes against a clear cream sky.",
+        "mediaId": "6fee6d34"
+      }
+    ],
+    "shots": [
+      {
+        "id": "shot:0",
+        "startFrame": 0,
+        "endFrame": 142,
+        "audioText": "They say a journey of a thousand miles begins with a single step...",
+        "dialogue": "They say a journey of a thousand miles begins with a single step...",
+        "action": "A traveler wearing a mustard-yellow rain jacket and a black backpack walks briskly past the futuristic curves of the Dongdaemun Design Plaza and glowing neon shopfronts in Seoul.",
+        "intent": "establish the world with an iconic Seoul cityscape",
+        "characters": [
+          "char:1"
+        ],
+        "location": "loc:1",
+        "framing": "wide tracking shot",
+        "status": "placed",
+        "attempts": 1,
+        "startKeyframe": "4853b0e6",
+        "lastPrompt": "Watercolor and loose black ink sketch illustration on textured cream paper. Soft, diffuse daylight with transparent watercolor color washes. A limited palette of mustard-yellow, soft indigo, charcoal grey, muted brick red, and faded sage green. Eye-level flat 2D perspective tracking shot with a nostalgic, serene travel poster mood. A traveler wearing a mustard-yellow rain jacket and a black backpack walks briskly past the futuristic curves of the Dongdaemun Design Plaza and glowing neon shopfronts in Seoul. The voiceover heard over this shot (audio only, never visible): They say a journey of a thousand miles begins with a single step... Setting, Dongdaemun Design Plaza, Seoul. Framing, wide tracking shot. This shot's role in the story: establish the world with an iconic Seoul cityscape. One single continuous shot with fluid, continuous character motion throughout \u2014 smooth, natural movement, never held poses or stepped animation. Pure visual storytelling: no on-screen text of any kind \u2014 no captions, subtitles, speech bubbles, titles, signs, or lettering \u2014 and no split screens, panels, or storyboard collages. No baked-in editing effects: no transition frames, fades, motion-blur smears, borders, or blurred letterbox bands \u2014 the picture fills the frame edge to edge, composed upright for this frame with a level horizon; cuts and transitions are added later in the editor.",
+        "clip": "abf50efa",
+        "timelineClipId": "96765a79"
+      },
+      {
+        "id": "shot:1",
+        "startFrame": 142,
+        "endFrame": 295,
+        "audioText": "...but sometimes, those steps cross oceans before you even realize you've crossed the street.",
+        "dialogue": "...but sometimes, those steps cross oceans before you even realize you've crossed the street.",
+        "action": "In a seamless transition as she steps forward, the traveler in her mustard-yellow rain jacket and black backpack is now walking down a steep, sunny hill in San Francisco with historic streetcars and the bay in the background.",
+        "intent": "the turn as she transitions to San Francisco",
+        "characters": [
+          "char:1"
+        ],
+        "location": "loc:2",
+        "framing": "medium tracking shot",
+        "status": "placed",
+        "attempts": 1,
+        "startKeyframe": "89529dfb",
+        "lastPrompt": "Watercolor and loose black ink sketch illustration on textured cream paper. Soft, diffuse daylight with transparent watercolor color washes. A limited palette of mustard-yellow, soft indigo, charcoal grey, muted brick red, and faded sage green. Eye-level flat 2D perspective tracking shot with a nostalgic, serene travel poster mood. In a seamless transition as she steps forward, the traveler in her mustard-yellow rain jacket and black backpack is now walking down a steep, sunny hill in San Francisco with historic streetcars and the bay in the background. The voiceover heard over this shot (audio only, never visible): ...but sometimes, those steps cross oceans before you even realize you've crossed the street. Setting, Steep Hillside, San Francisco. Framing, medium tracking shot. This shot's role in the story: the turn as she transitions to San Francisco. One single continuous shot with fluid, continuous character motion throughout \u2014 smooth, natural movement, never held poses or stepped animation. Pure visual storytelling: no on-screen text of any kind \u2014 no captions, subtitles, speech bubbles, titles, signs, or lettering \u2014 and no split screens, panels, or storyboard collages. No baked-in editing effects: no transition frames, fades, motion-blur smears, borders, or blurred letterbox bands \u2014 the picture fills the frame edge to edge, composed upright for this frame with a level horizon; cuts and transitions are added later in the editor.",
+        "clip": "62b66ce9",
+        "timelineClipId": "3cbdbdb5"
+      },
+      {
+        "id": "shot:2",
+        "startFrame": 295,
+        "endFrame": 459,
+        "audioText": "Because home isn't where you land, it's the rhythm of the road beneath your feet.",
+        "dialogue": "Because home isn't where you land, it's the rhythm of the road beneath your feet.",
+        "action": "With her next step, the traveler in her mustard-yellow rain jacket and black backpack emerges onto a crisp, autumnal Toronto street, walking towards the CN Tower towering in the cool morning sky.",
+        "intent": "the payoff in Toronto",
+        "characters": [
+          "char:1"
+        ],
+        "location": "loc:3",
+        "framing": "low-angle tracking shot",
+        "status": "placed",
+        "attempts": 1,
+        "startKeyframe": "d79aa708",
+        "lastPrompt": "Watercolor and loose black ink sketch illustration on textured cream paper. Soft, diffuse daylight with transparent watercolor color washes. A limited palette of mustard-yellow, soft indigo, charcoal grey, muted brick red, and faded sage green. Eye-level flat 2D perspective tracking shot with a nostalgic, serene travel poster mood. With her next step, the traveler in her mustard-yellow rain jacket and black backpack emerges onto a crisp, autumnal Toronto street, walking towards the CN Tower towering in the cool morning sky. The voiceover heard over this shot (audio only, never visible): Because home isn't where you land, it's the rhythm of the road beneath your feet. Setting, Autumnal Street, Toronto. Framing, low-angle tracking shot. This shot's role in the story: the payoff in Toronto. One single continuous shot with fluid, continuous character motion throughout \u2014 smooth, natural movement, never held poses or stepped animation. Pure visual storytelling: no on-screen text of any kind \u2014 no captions, subtitles, speech bubbles, titles, signs, or lettering \u2014 and no split screens, panels, or storyboard collages. No baked-in editing effects: no transition frames, fades, motion-blur smears, borders, or blurred letterbox bands \u2014 the picture fills the frame edge to edge, composed upright for this frame with a level horizon; cuts and transitions are added later in the editor.",
+        "clip": "8e504d5d",
+        "timelineClipId": "249a27ff"
+      }
+    ],
+    "phase": "done",
+    "breakdownApproved": true,
+    "createdAt": 1785304298202,
+    "updatedAt": 35,
+    "script": {
+      "logline": "A solo traveler seamlessly steps across the iconic streets of Seoul, San Francisco, and Toronto in a single continuous journey.",
+      "beats": [
+        {
+          "dialogue": "They say a journey of a thousand miles begins with a single step...",
+          "action": "A traveler wearing a mustard-yellow rain jacket and a black backpack walks briskly past the futuristic curves of the Dongdaemun Design Plaza and glowing neon shopfronts in Seoul.",
+          "characters": [
+            "char:1"
+          ],
+          "location": "loc:1",
+          "framing": "wide tracking shot",
+          "intent": "establish the world with an iconic Seoul cityscape",
+          "approxSeconds": 5
+        },
+        {
+          "dialogue": "...but sometimes, those steps cross oceans before you even realize you've crossed the street.",
+          "action": "In a seamless transition as she steps forward, the traveler in her mustard-yellow rain jacket and black backpack is now walking down a steep, sunny hill in San Francisco with historic streetcars and the bay in the background.",
+          "characters": [
+            "char:1"
+          ],
+          "location": "loc:2",
+          "framing": "medium tracking shot",
+          "intent": "the turn as she transitions to San Francisco",
+          "approxSeconds": 5
+        },
+        {
+          "dialogue": "Because home isn't where you land, it's the rhythm of the road beneath your feet.",
+          "action": "With her next step, the traveler in her mustard-yellow rain jacket and black backpack emerges onto a crisp, autumnal Toronto street, walking towards the CN Tower towering in the cool morning sky.",
+          "characters": [
+            "char:1"
+          ],
+          "location": "loc:3",
+          "framing": "low-angle tracking shot",
+          "intent": "the payoff in Toronto",
+          "approxSeconds": 5
+        }
+      ],
+      "style": "Cinematic travel documentary style, smooth steadycam movement, rich color grading transitioning from vibrant night neons to warm golden hour and crisp morning light."
+    },
+    "beatVoices": [
+      {
+        "startFrame": 0,
+        "durationFrames": 142
+      },
+      {
+        "startFrame": 142,
+        "durationFrames": 153
+      },
+      {
+        "startFrame": 295,
+        "durationFrames": 164
+      }
+    ],
+    "negative": "photorealistic rendering, 3D CGI, live-action footage, photographic lighting, digital gradients, hyperrealistic textures, lens flare",
+    "renderStartedAt": 1785304617083,
+    "musicAssetId": "1d1583d4",
+    "musicClipId": "1fc154e8",
+    "endedAt": 1785304696184
+  }
+}

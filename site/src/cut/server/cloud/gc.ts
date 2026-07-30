@@ -101,6 +101,9 @@ async function reclaimPlan(userId: string, target: number): Promise<ReclaimPlan>
       userId,
       projectId: { in: projects.map((p) => p.id) },
       uploadState: "complete",
+      // Exempt bytes never counted toward the quota, so deleting them frees
+      // nothing the quota can see — they must not pad a project's claim.
+      quotaExempt: false,
     },
     _sum: { bytes: true },
   });
@@ -185,7 +188,7 @@ async function reclaimOverQuota() {
       const limits = await cutLimitsFor(userId);
       if (limits.storageBytes === null || limits.storageBytes > FREE_STORAGE_BYTES) continue;
       const stored = await prisma.cutMediaObject.aggregate({
-        where: { userId, uploadState: "complete" },
+        where: { userId, uploadState: "complete", quotaExempt: false },
         _sum: { bytes: true },
       });
       const target = Number(stored._sum.bytes ?? 0) - limits.storageBytes;
@@ -251,7 +254,15 @@ export async function runGc(): Promise<Response> {
       projectId: { not: null },
       updatedAt: { lt: new Date(Date.now() - ORPHAN_MAX_AGE_MS) },
     },
-    select: { id: true, userId: true, projectId: true, fileName: true, r2Key: true, bytes: true },
+    select: {
+      id: true,
+      userId: true,
+      projectId: true,
+      fileName: true,
+      r2Key: true,
+      bytes: true,
+      quotaExempt: true,
+    },
   });
   const docProjects = await prisma.cutProject.findMany({
     where: { id: { in: [...new Set(mediaCandidates.map((c) => c.projectId!))] } },
@@ -271,9 +282,11 @@ export async function runGc(): Promise<Response> {
     byUser.set(o.userId, list);
   }
   for (const [userId, rows] of byUser) {
+    // Quota-exempt rows never added usage, so only the counted ones subtract.
+    const counted = rows.filter((r) => !r.quotaExempt);
     await prisma.$transaction(async (tx) => {
       await tx.cutMediaObject.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
-      await addUsage(tx, userId, -rows.reduce((sum, r) => sum + Number(r.bytes), 0));
+      await addUsage(tx, userId, -counted.reduce((sum, r) => sum + Number(r.bytes), 0));
     });
     await del(rows.map((r) => r.r2Key));
   }

@@ -79,6 +79,9 @@ model CutMediaObject {
   bytes       BigInt   @default(0)
   kind        String   @default("media") // media | export | preview | library | overlay
   uploadState String   @default("pending") // pending | complete
+  // Seeded starter-project media never counts toward the storage quota: usage
+  // is not added when the row lands, so nothing is subtracted when it goes.
+  quotaExempt Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
