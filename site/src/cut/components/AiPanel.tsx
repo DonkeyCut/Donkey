@@ -1386,6 +1386,39 @@ function ToolChipGroup({ parts }: { parts: ToolPartView[] }) {
   );
 }
 
+/** A run of 3+ settled tool chips folded behind one summary row. Opening it
+ * reveals the individual chips, each still expandable to its payload. */
+function ToolRunGroup({ groups }: { groups: ToolPartView[][] }) {
+  const calls = groups.reduce((n, g) => n + g.length, 0);
+  const failed = groups.some((g) => g.some((p) => p.state === "output-error"));
+  return (
+    <details className="ai-tool-run group/run max-w-full">
+      <summary
+        className={cn(
+          "flex cursor-pointer list-none items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition-colors select-none hover:bg-muted/60 [&::-webkit-details-marker]:hidden",
+          failed && "border-red-200 text-red-700",
+        )}
+      >
+        <Wrench className="size-3 shrink-0" />
+        <span>
+          {calls} tool call{calls === 1 ? "" : "s"}
+        </span>
+        {failed ? (
+          <TriangleAlert className="size-3" />
+        ) : (
+          <Check className="size-3 text-emerald-600" />
+        )}
+        <ChevronDown className="ml-auto size-3 transition-transform group-open/run:rotate-180" />
+      </summary>
+      <div className="mt-1.5 flex flex-col gap-1.5 border-l border-border pl-2">
+        {groups.map((parts, i) => (
+          <ToolChipGroup key={i} parts={parts} />
+        ))}
+      </div>
+    </details>
+  );
+}
+
 /** A collapsed disclosure for a reasoning block, styled like the tool row. */
 function ThoughtBlock({ text }: { text: string }) {
   return (
@@ -1478,9 +1511,43 @@ const MessageView = memo(function MessageView({
     }
     blocks.push({ kind: "tools", index, parts: [p] });
   });
+  // A run of 3+ consecutive settled chips folds behind one "N tool calls" row;
+  // a still-running call stays outside the fold so its spinner remains visible.
+  type RenderBlock = Block | { kind: "toolrun"; index: number; groups: ToolPartView[][] };
+  const renderBlocks: RenderBlock[] = [];
+  let run: Extract<Block, { kind: "tools" }>[] = [];
+  const flushRun = () => {
+    if (run.length >= 3) {
+      renderBlocks.push({
+        kind: "toolrun",
+        index: run[0].index,
+        groups: run.map((b) => b.parts),
+      });
+    } else {
+      renderBlocks.push(...run);
+    }
+    run = [];
+  };
+  for (const block of blocks) {
+    const settled =
+      block.kind === "tools" &&
+      block.parts.every(
+        (p) => p.state === "output-available" || p.state === "output-error",
+      );
+    if (settled && block.kind === "tools") {
+      run.push(block);
+      continue;
+    }
+    flushRun();
+    renderBlocks.push(block);
+  }
+  flushRun();
   return (
     <div className="ai-msg-assistant group mb-3 flex min-w-0 flex-col gap-1.5">
-      {blocks.map((block) => {
+      {renderBlocks.map((block) => {
+        if (block.kind === "toolrun") {
+          return <ToolRunGroup key={block.index} groups={block.groups} />;
+        }
         if (block.kind === "tools") {
           return <ToolChipGroup key={block.index} parts={block.parts} />;
         }
