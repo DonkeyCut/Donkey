@@ -206,7 +206,7 @@ def write_appcast(path: Path, version: Version, build: str, signature: str, rele
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
     <title>Donkey Updates</title>
-    <link>https://donkeyuse.com/appcast.xml</link>
+    <link>https://donkeycut.com/appcast.xml</link>
     <description>Donkey macOS app updates.</description>
     <language>en</language>
     <item>
