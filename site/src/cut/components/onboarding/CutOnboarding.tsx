@@ -11,7 +11,7 @@ import { PlansSlide } from "@/cut/components/onboarding/slides/Plans";
 import { ReferralSlide } from "@/cut/components/onboarding/slides/Referral";
 import { WelcomeSlide } from "@/cut/components/onboarding/slides/Welcome";
 import { useCutBase } from "@/cut/lib/nav";
-import { onOpenOnboarding } from "@/cut/lib/onboarding";
+import { onOpenOnboarding, setOnboardingCover } from "@/cut/lib/onboarding";
 import { track } from "@/lib/analytics";
 import { authClient } from "@/lib/auth-client";
 import {
@@ -114,6 +114,12 @@ export function CutOnboarding() {
     if (started.current) return;
     started.current = true;
     track("onboarding_started", { source: run });
+  }, [run]);
+
+  // The editor underneath reads this to hold the starter project's first
+  // playback until the slides hand over.
+  useEffect(() => {
+    setOnboardingCover(run !== null);
   }, [run]);
 
   // While the sequence is up, the address says so — it can be linked, reloaded,

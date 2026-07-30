@@ -207,7 +207,8 @@
       "in": 0,
       "out": 14.3,
       "volume": 0.4,
-      "lane": 1
+      "lane": 1,
+      "hidden": true
     }
   ],
   "overlays": [],

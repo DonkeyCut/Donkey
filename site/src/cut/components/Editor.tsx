@@ -27,7 +27,10 @@ import { enrichAsset, importFileToProject, prepareImport } from "@/cut/lib/media
 import "@/cut/lib/genScene";
 import { installDevHooks } from "@/cut/lib/devHooks";
 import { backTarget, useCutBase } from "@/cut/lib/nav";
+import { useOnboardingCover } from "@/cut/lib/onboarding";
+import { requestSidePanel } from "@/cut/lib/panelRequest";
 import { resolveProjectPlacement } from "@/cut/lib/residency";
+import { starterProjectId } from "@/cut/lib/starter";
 import {
   docAudioClips,
   docClips,
@@ -37,6 +40,7 @@ import {
   useEditor,
 } from "@/cut/lib/store";
 import type { MediaAsset } from "@/cut/lib/types";
+import { authClient } from "@/lib/auth-client";
 import { AiPanel } from "./AiPanel";
 import { ExportDialog } from "./ExportDialog";
 import { Inspector } from "./Inspector";
@@ -166,6 +170,32 @@ export function Editor({
       releaseCutMode();
     };
   }, [projectId, viewer]);
+
+  // The starter project's first open presents the finished cut: the side
+  // panel folds to its rail, chat opens on the seeded thread, and the video
+  // plays — held while the welcome slides still cover the editor, so it
+  // starts the moment they hand over. Once per browser; after this the
+  // layout is the user's own to keep.
+  const { data: session } = authClient.useSession();
+  const userId = session?.user.id;
+  useEffect(() => {
+    if (!loaded || viewer || !userId || projectId !== starterProjectId(userId)) return;
+    const seenKey = `cut-starter-intro-${projectId}`;
+    if (localStorage.getItem(seenKey)) return;
+    localStorage.setItem(seenKey, "1");
+    requestSidePanel(null);
+    useEditor.getState().setAiOpen(true);
+    if (!useOnboardingCover.getState().up) {
+      useEditor.getState().setPlaying(true);
+      return;
+    }
+    const unsub = useOnboardingCover.subscribe((s) => {
+      if (s.up) return;
+      unsub();
+      useEditor.getState().setPlaying(true);
+    });
+    return unsub;
+  }, [loaded, viewer, userId, projectId]);
 
   // Delayed follow of the owner's edits: poll the doc version and reload on
   // change, keeping the playhead. A 401/403/404 means the share was revoked or
