@@ -27,7 +27,7 @@ export function AiChatSlide() {
               project={ONBOARDING_PROJECT}
               view="ai"
               showSwitcher={false}
-              shadow={false}
+              frame="flat"
             />
           </div>
           <div className="pointer-events-none absolute inset-y-0 left-0 w-[64%] bg-gradient-to-r from-cream via-cream/85 to-transparent" />
@@ -46,7 +46,7 @@ export function AiChatSlide() {
         {/* Edge to edge: the slide's own padding is cancelled so the editor
             uses the whole width it has down here. */}
         <div className="-mx-6 mt-8">
-          <EditorMock view="ai" showSwitcher={false} shadow={false} />
+          <EditorMock view="ai" showSwitcher={false} frame="flat" />
         </div>
       </div>
     </div>

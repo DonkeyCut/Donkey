@@ -23,7 +23,7 @@ export function WelcomeSlide() {
           project={ONBOARDING_PROJECT}
           fit="contain"
           showSwitcher={false}
-          shadow={false}
+          frame="card"
         />
       </div>
     </div>

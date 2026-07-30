@@ -41,10 +41,11 @@ type Props = {
   /** The dots that switch projects. Off where the mock is one slide of a
    * larger sequence and the only navigation should be that sequence's. */
   showSwitcher?: boolean;
-  /** The drop shadow that lifts the mock off the page. Off where the frame is
-   * meant to sit flat on the surface — a shadow doesn't dissolve, so it
-   * outlines the mock wherever the edges are supposed to fade away. */
-  shadow?: boolean;
+  /** How the mock sits on the page. "lifted" is a soft drop shadow; "flat"
+   * keeps just a hairline, for frames whose edges are meant to dissolve into
+   * the surface; "card" is the landing cards' treatment — ink border with a
+   * solid offset shadow. */
+  frame?: "lifted" | "flat" | "card";
 };
 
 // A hand-built, display-only replica of the Cut editor over a finished project.
@@ -56,7 +57,7 @@ export function EditorMock({
   view = "full",
   fit = "width",
   showSwitcher = true,
-  shadow = true,
+  frame = "lifted",
 }: Props) {
   const projects = project ? [project] : MOCK_PROJECTS;
   const [active, setActive] = useState(0);
@@ -100,48 +101,59 @@ export function EditorMock({
             so the space it will occupy is right before the first measurement
             and the page never jumps under it. */}
         <div
-          className={cn(
-            "overflow-hidden rounded-2xl bg-card",
-            shadow
-              ? "shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_24px_64px_rgba(15,14,13,0.25)]"
-              : "shadow-[0_0_0_1px_rgba(0,0,0,0.06)]",
-          )}
+          className="relative"
           style={
             fit === "width"
               ? { width: "100%", aspectRatio: `${w} / ${DESIGN_H}` }
               : { width: Math.round(w * scale), height: Math.round(DESIGN_H * scale) }
           }
         >
+          {frame === "card" && (
+            <div
+              aria-hidden
+              className="absolute inset-0 translate-x-[6px] translate-y-[6px] rounded-2xl bg-ink"
+            />
+          )}
           <div
-            aria-hidden
-            className="pointer-events-none relative origin-top-left overflow-hidden bg-card font-system text-foreground antialiased select-none"
-            style={{
-              width: DESIGN_W,
-              height: DESIGN_H,
-              transform: `scale(${scale}) translateX(${-x}px)`,
-            }}
+            className={cn(
+              "relative h-full w-full overflow-hidden rounded-2xl bg-card",
+              frame === "lifted" &&
+                "shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_24px_64px_rgba(15,14,13,0.25)]",
+              frame === "flat" && "shadow-[0_0_0_1px_rgba(0,0,0,0.06)]",
+              frame === "card" && "border-2 border-ink",
+            )}
           >
-            {projects.map((p, i) => (
-              <div
-                key={p.id}
-                className={cn(
-                  // Same frame as the real editor: the chat panel is a
-                  // full-height column beside the top-bar/preview/timeline grid.
-                  "absolute inset-0 flex bg-card transition-opacity duration-300",
-                  i === active ? "opacity-100" : "opacity-0",
-                )}
-              >
-                <div className="grid min-w-0 flex-1 grid-rows-[46px_minmax(0,1fr)_auto]">
-                  <MockTopBar project={p} />
-                  <div className="grid min-h-0 grid-cols-[auto_minmax(0,1fr)]">
-                    <MockSidePanel project={p} />
-                    <MockPreview project={p} active={i === active} />
+            <div
+              aria-hidden
+              className="pointer-events-none relative origin-top-left overflow-hidden bg-card font-system text-foreground antialiased select-none"
+              style={{
+                width: DESIGN_W,
+                height: DESIGN_H,
+                transform: `scale(${scale}) translateX(${-x}px)`,
+              }}
+            >
+              {projects.map((p, i) => (
+                <div
+                  key={p.id}
+                  className={cn(
+                    // Same frame as the real editor: the chat panel is a
+                    // full-height column beside the top-bar/preview/timeline grid.
+                    "absolute inset-0 flex bg-card transition-opacity duration-300",
+                    i === active ? "opacity-100" : "opacity-0",
+                  )}
+                >
+                  <div className="grid min-w-0 flex-1 grid-rows-[46px_minmax(0,1fr)_auto]">
+                    <MockTopBar project={p} />
+                    <div className="grid min-h-0 grid-cols-[auto_minmax(0,1fr)]">
+                      <MockSidePanel project={p} />
+                      <MockPreview project={p} active={i === active} />
+                    </div>
+                    <MockTimeline project={p} />
                   </div>
-                  <MockTimeline project={p} />
+                  <MockAiPanel project={p} />
                 </div>
-                <MockAiPanel project={p} />
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
       </div>
