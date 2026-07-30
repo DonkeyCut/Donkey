@@ -26,10 +26,10 @@ const RESIDENCY_ICON: Record<Residency, typeof Cloud> = { local: Laptop, cloud: 
 // bold. The break is written into the copy rather than left to a width, so the
 // sentence reads the same in both shelves. The menu needs no more than the two
 // names.
-const RESIDENCY_LEAD = "All projects and media will";
+const RESIDENCY_LEAD = "All projects and media created going";
 const RESIDENCY_SCOPE: Record<Residency, { tail: string; place: string }> = {
-  local: { tail: "be stored on", place: "this Mac" },
-  cloud: { tail: "be stored on the", place: "Cloud" },
+  local: { tail: "forward will be stored on", place: "this Mac" },
+  cloud: { tail: "forward will be stored on the", place: "Cloud" },
 };
 
 /**
