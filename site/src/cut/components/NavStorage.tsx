@@ -41,7 +41,7 @@ export function NavStorage() {
             render={
               <button
                 type="button"
-                className="flex items-center justify-between gap-2 rounded-lg px-2 py-2 text-xs transition-colors hover:bg-muted disabled:opacity-50"
+                className="group flex items-center justify-between gap-2 rounded-lg px-2 py-2 text-xs transition-colors hover:bg-muted disabled:opacity-50"
                 disabled={upgrade.isPending}
                 onClick={upgrade.start}
               />
@@ -53,7 +53,7 @@ export function NavStorage() {
                 {usageLabel(u.bytes, u.quotaBytes)}
               </span>
             </span>
-            <span className="flex items-center gap-1.5">
+            <span className="flex items-center gap-1.5 group-hover:underline">
               {upgrade.isPending && <Loader2 className="size-3 animate-spin" />}
               Get 50 GB
             </span>
