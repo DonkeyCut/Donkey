@@ -77,7 +77,7 @@ function OpenDialog({ detail, onClose }: { detail: StorageQuotaDetail; onClose: 
           <p>
             {isPro
               ? "Free up space by deleting projects or media you no longer need."
-              : "Pro includes 50 GB of cloud storage, or free up space by deleting media."}
+              : "Pro includes 100 GB of cloud storage, or free up space by deleting media."}
           </p>
         </div>
         <DialogFooter className="mt-2">

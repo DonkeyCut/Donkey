@@ -8,7 +8,7 @@ export const CUT_PRO = {
   // What Pro adds. The landing card sits beside the Free card and opens with a
   // line pointing at it; nothing else does, so that line isn't in here.
   features: [
-    "50 GB of cloud storage",
+    "100 GB of cloud storage",
     "Generous AI credits every month",
     "Image, video, voiceover, and music generation",
   ],

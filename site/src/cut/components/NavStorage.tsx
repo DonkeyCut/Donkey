@@ -5,7 +5,7 @@
 // quota belongs to the account, not to the backend the app happens to be
 // running against, so this shows in local mode too — a local editor still has
 // cloud projects, and the number is the same either way. Pro accounts see
-// nothing here — 50 GB is enough that a meter would only take up room.
+// nothing here — 100 GB is enough that a meter would only take up room.
 import { Cloud, Loader2 } from "lucide-react";
 import {
   Tooltip,
@@ -55,10 +55,10 @@ export function NavStorage() {
             </span>
             <span className="flex items-center gap-1.5 group-hover:underline">
               {upgrade.isPending && <Loader2 className="size-3 animate-spin" />}
-              Get 50 GB
+              Get 100 GB
             </span>
           </TooltipTrigger>
-          <TooltipContent>Upgrade for 50 GB + AI credits</TooltipContent>
+          <TooltipContent>Upgrade for 100 GB + AI credits</TooltipContent>
         </Tooltip>
       </TooltipProvider>
       {u.grace && (
