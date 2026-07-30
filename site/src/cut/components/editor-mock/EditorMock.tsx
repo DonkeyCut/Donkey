@@ -111,16 +111,18 @@ export function EditorMock({
           {frame === "card" && (
             <div
               aria-hidden
-              className="absolute inset-0 translate-x-[6px] translate-y-[6px] rounded-2xl bg-ink"
+              className="absolute inset-0 translate-x-[6px] translate-y-[6px] rounded-2xl bg-ink max-md:hidden"
             />
           )}
+          {/* On mobile every frame dissolves: mocks sit edge to edge there, so
+              corners, borders, and shadows have no surface to sit on. */}
           <div
             className={cn(
-              "relative h-full w-full overflow-hidden rounded-2xl bg-card",
+              "relative h-full w-full overflow-hidden rounded-2xl bg-card max-md:rounded-none",
               frame === "lifted" &&
-                "shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_24px_64px_rgba(15,14,13,0.25)] max-md:rounded-none",
+                "shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_24px_64px_rgba(15,14,13,0.25)]",
               frame === "flat" && "shadow-[0_0_0_1px_rgba(0,0,0,0.06)]",
-              frame === "card" && "border-2 border-ink",
+              frame === "card" && "border-2 border-ink max-md:border-0",
             )}
           >
             <div

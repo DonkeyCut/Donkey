@@ -18,8 +18,9 @@ export function WelcomeSlide() {
         </p>
       </div>
       {/* Contained rather than width-driven: on a short window the mock gives
-          up size instead of pushing the slide into a scroll. */}
-      <div className="h-[min(56vh,640px)] w-full max-w-[1060px]">
+          up size instead of pushing the slide into a scroll. On mobile it
+          cancels the slide's padding and runs edge to edge. */}
+      <div className="-mx-6 h-[min(56vh,640px)] w-[calc(100%+3rem)] max-w-[1060px] md:mx-0 md:w-full">
         <EditorMock
           project={ONBOARDING_PROJECT}
           fit="contain"
