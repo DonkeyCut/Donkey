@@ -20,12 +20,16 @@ import { readRefText, refsToParts, type InlineImage } from "./refMedia";
 const VIDEO_INSTRUCTIONS = `You prepare prompts for a text+image-to-video model. The numbered images and attached files are the user's references; their request comes last. The model accepts at most one input image and plays it as the video's literal first frame — it can animate what is pictured but cannot change who or what is in it.
 Reply with JSON {"prompt": string, "keepImages": number[]}:
 - keepImages lists at most one image number: the one whose exact pixels should open the video. Keep an image only when the request uses its subject as-is (animate it, continue the shot, have them speak). Keep none when the request transforms or replaces what any reference shows.
-- prompt must stand alone: fold in everything the video needs from every reference — setting, framing, lighting, wardrobe, camera, mood, action, any script or text from attached files — with the requested changes applied. Describe subjects concretely; if anyone speaks, give them a matching voice and the words to say.`;
+- prompt must stand alone: fold in everything the video needs from every reference — setting, framing, lighting, wardrobe, camera, mood, action, any script or text from attached files — with the requested changes applied. Describe subjects concretely; if anyone speaks, give them a matching voice and the words to say.
+- A frame labelled as pinned is the user's chosen moment; frames sampled near it are the same moment a beat earlier/later. Treat the pinned frame as the reference, and when one of them should ride, keep the one that shows the subject best.
+- The video model never hears attached audio. Fold what it carries into the prompt: speech becomes the words a speaker says, music or ambience becomes a concrete description of the video's own sound.`;
 
 const IMAGE_INSTRUCTIONS = `You prepare prompts for an image generation and editing model. The numbered images and attached files are the user's references; their request comes last. The model receives the kept images as inputs it can edit, combine, and draw from.
 Reply with JSON {"prompt": string, "keepImages": number[]}:
 - keepImages lists the image numbers the model should receive: keep the ones the request edits, combines, or borrows a subject or style from; drop ones whose contribution is better said in words.
-- prompt must stand alone given only the kept images: refer to them by their content, and fold in whatever matters from the dropped references and any script or text from attached files, with the requested changes applied.`;
+- prompt must stand alone given only the kept images: refer to them by their content, and fold in whatever matters from the dropped references and any script or text from attached files, with the requested changes applied.
+- A frame labelled as pinned is the user's chosen moment; frames sampled near it are the same moment a beat earlier/later. Treat the pinned frame as the reference, and when one of them should ride, keep the one that shows the subject best.
+- The image model never hears attached audio. Fold what it carries into the prompt: transcribe speech that should appear, translate music or ambience into the mood and setting it implies.`;
 
 const MUSIC_INSTRUCTIONS = `You prepare prompts for a text-to-music model that generates a track from a text description alone — it never hears or sees the references. The attachments are what the user wants the music to match: an audio track to emulate, or video/images whose mood the score should carry. Their request comes last.
 Reply with JSON {"prompt": string}:

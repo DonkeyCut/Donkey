@@ -163,9 +163,9 @@ export interface VideoGenOptions {
    * on-screen text. The model has no negative-prompt parameter, so the
    * adapter folds this into the prompt as an avoid clause. */
   negativePrompt?: string;
-  /** References of any kind — video, image, text file. The model takes one
-   * seed image, so at most one picture seeds the render as its literal
-   * opening frame. */
+  /** References of any kind — video, image, text file, audio. The model takes
+   * one seed image, so at most one picture seeds the render as its literal
+   * opening frame; audio and text contribute through the compose rewrite. */
   refs?: AssetRef[];
   /** Identity anchors (up to the registry's maxReferenceImages): the render
    * keeps these characters/objects/scenes consistent instead of playing one

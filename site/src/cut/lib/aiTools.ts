@@ -31,7 +31,7 @@ import {
   renderAudioSpanWav,
 } from "./media";
 import { requestSidePanel, SIDE_PANEL_TABS, type SidePanelTab } from "./panelRequest";
-import { blobToInlineAudio, refToInlineAudio, type InlineImage } from "./refMedia";
+import { blobToInlineAudio, refToInlineAudio, visualRefs, type InlineImage } from "./refMedia";
 import { characterPrompt, stockTitle } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
@@ -771,6 +771,9 @@ export async function runAiTool(
         input.reference_asset_id === undefined
           ? []
           : resolveRefAssets([input.reference_asset_id]);
+      // Audio references carry no picture: they ride in `refs` for the compose
+      // pass to hear, while anchor rungs take the first ref that has a frame.
+      const anchors = visualRefs(refs);
       // The model renders the whole clip with audio in one pass and picks its
       // own length (up to ~10s) — aspect is the only knob.
       const baseOpts: Omit<VideoGenOptions, "onDone"> = {
@@ -793,12 +796,16 @@ export async function runAiTool(
       // the render untouched — no image-model redesign in between, and no
       // text-only rung (a render without the image isn't what was asked).
       if (refs.length > 0 && input.animate_reference === true) {
+        if (anchors.length === 0)
+          throw new ToolError(
+            "animate_reference needs an image or video reference — audio has no frame to animate."
+          );
         return launchVideoJob(
           projectId,
           input,
           [
-            { prompt, opts: { ...baseOpts, refs: [refs[0]], composeRefs: false } },
-            asReference(refs[0]),
+            { prompt, opts: { ...baseOpts, refs: [anchors[0]], composeRefs: false } },
+            asReference(anchors[0]),
           ],
           {
             note: "Animating the referenced image as the literal opening frame — the clip previews in this chat when it lands, in a minute or two.",
@@ -811,7 +818,7 @@ export async function runAiTool(
       // a chat asset (its card previews above the render's), and the render
       // seeds from it with the prompt as written. Text-only asks skip
       // straight to video; a failed still degrades to the composed-seed hop.
-      if (refs.length > 0) {
+      if (anchors.length > 0) {
         const still = await gen.generateImage(projectId, prompt, {
           refs,
           aspect:
@@ -830,7 +837,7 @@ export async function runAiTool(
             input,
             [
               { prompt, opts: { ...baseOpts, refs: [refFromAsset(stillAsset)], composeRefs: false } },
-              asReference(refs[0]),
+              asReference(anchors[0]),
               textOnly,
             ],
             {
@@ -841,9 +848,14 @@ export async function runAiTool(
         }
         return launchVideoJob(projectId, input, [
           { prompt, opts: { ...baseOpts, refs } },
-          asReference(refs[0]),
+          asReference(anchors[0]),
           textOnly,
         ]);
+      }
+      // Audio-only reference: no frame to anchor, so a single rung renders with
+      // the compose pass folding what it hears into the prompt.
+      if (refs.length > 0) {
+        return launchVideoJob(projectId, input, [{ prompt, opts: { ...baseOpts, refs } }]);
       }
       // No reference: text is the whole request, so the single rung runs ungated.
       return launchVideoJob(projectId, input, [{ prompt, opts: { ...baseOpts } }]);
@@ -1473,7 +1485,7 @@ export async function runAiTool(
       // reference and folds a description of its sound into the prompt. A failed
       // compose falls back to the raw prompt so the render still happens. Keep
       // the user's own words as the track name — the composed prompt is verbose.
-      const refs = resolveMusicRefs(input.reference_asset_ids);
+      const refs = resolveRefAssets(input.reference_asset_ids);
       let sent = prompt;
       if (refs.length > 0) {
         const composed = await composeMusicPrompt(prompt, refs);
@@ -1967,25 +1979,10 @@ function targetSubtitleTrack(input: Record<string, unknown>): number {
   return lane;
 }
 
-/** Map generation reference ids to project assets. Audio can't be looked at,
- * so only image and video assets resolve. */
+/** Map generation reference ids to project asset refs. Any media resolves:
+ * images and video frames ride as pictures; audio rides to the compose pass,
+ * which folds what it hears (speech, sound) into the prompt. */
 function resolveRefAssets(ids: unknown): AssetRef[] {
-  if (ids === undefined || ids === null) return [];
-  const s = useEditor.getState();
-  return (Array.isArray(ids) ? ids : [ids]).map((raw) => {
-    const asset = s.assets.find((a) => a.id === String(raw));
-    if (!asset)
-      throw new ToolError(`No project asset with id ${String(raw)} — see media in the editor state.`);
-    if (asset.type === "audio")
-      throw new ToolError(`"${asset.name}" is audio — visual references must be images or videos.`);
-    return refFromAsset(asset);
-  });
-}
-
-/** Map music-reference ids to project asset refs. Music takes any media as a
- * style reference — an audio track to match, or video/images for tone — so
- * unlike the visual generators, audio resolves here too. */
-function resolveMusicRefs(ids: unknown): AssetRef[] {
   if (ids === undefined || ids === null) return [];
   const s = useEditor.getState();
   return (Array.isArray(ids) ? ids : [ids]).map((raw) => {
