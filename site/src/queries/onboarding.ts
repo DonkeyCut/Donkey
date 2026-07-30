@@ -12,10 +12,11 @@ export type OnboardingState = {
   completedAt: string | null;
   skipped: boolean;
   referralSources: string[];
+  referralOther: string | null;
 };
 
 type OnboardingUpdate =
-  | { referralSources: ReferralSource[] }
+  | { referralSources: ReferralSource[]; referralOther?: string }
   | { completed: true; skipped: boolean };
 
 /** Whether this account still owes us a run of the current sequence. */

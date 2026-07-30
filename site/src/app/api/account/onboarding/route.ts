@@ -7,6 +7,7 @@ import {
 } from "@/lib/donkey-api-auth";
 import {
   ONBOARDING_VERSION,
+  REFERRAL_OTHER_MAX_LENGTH,
   REFERRAL_SOURCES,
   isKnownReferralSource,
 } from "@/lib/onboarding/sequence";
@@ -19,6 +20,7 @@ type OnboardingState = {
   completedAt: string | null;
   skipped: boolean;
   referralSources: string[];
+  referralOther: string | null;
 };
 
 // An account that has never opened the sequence has no row; it reads as an
@@ -28,6 +30,7 @@ const UNSTARTED: OnboardingState = {
   completedAt: null,
   skipped: false,
   referralSources: [],
+  referralOther: null,
 };
 
 export const GET = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) => {
@@ -42,6 +45,7 @@ const updateSchema = z
     referralSources: z
       .array(z.string().refine(isKnownReferralSource))
       .max(REFERRAL_SOURCES.length),
+    referralOther: z.string().trim().max(REFERRAL_OTHER_MAX_LENGTH).optional(),
   })
   .or(z.object({ completed: z.literal(true), skipped: z.boolean() }));
 
@@ -58,6 +62,12 @@ export const PUT = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) =>
     "referralSources" in parsed.data
       ? {
           referralSources: [...new Set(parsed.data.referralSources)],
+          // The text only means anything as the "other" answer; without that
+          // pick it stores nothing.
+          referralOther:
+            (parsed.data.referralSources.includes("other") &&
+              parsed.data.referralOther) ||
+            null,
           referralAnsweredAt: new Date(),
         }
       : {
@@ -79,11 +89,13 @@ function toState(row: {
   completedAt: Date | null;
   skipped: boolean;
   referralSources: string[];
+  referralOther: string | null;
 }): OnboardingState {
   return {
     version: row.version,
     completedAt: row.completedAt?.toISOString() ?? null,
     skipped: row.skipped,
     referralSources: row.referralSources,
+    referralOther: row.referralOther,
   };
 }

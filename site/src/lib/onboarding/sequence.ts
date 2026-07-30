@@ -14,9 +14,14 @@ export const REFERRAL_SOURCES = [
   { id: "youtube", label: "YouTube" },
   { id: "search", label: "Search" },
   { id: "friend", label: "A friend" },
+  { id: "other", label: "Other" },
 ] as const;
 
 export type ReferralSource = (typeof REFERRAL_SOURCES)[number]["id"];
+
+/** Picking "other" opens a free-text field; the slide and the route cap it to
+ * the same length. */
+export const REFERRAL_OTHER_MAX_LENGTH = 120;
 
 export const isKnownReferralSource = (id: string): id is ReferralSource =>
   REFERRAL_SOURCES.some((s) => s.id === id);

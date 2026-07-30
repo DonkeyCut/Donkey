@@ -1,7 +1,7 @@
 // What an account has been through on the way in: the welcome sequence, and
 // the answers it collected. One row per user, written the first time the
 // sequence opens. Referral source ids live in code
-// (src/lib/onboarding/referral-sources.ts); the route accepts only those.
+// (src/lib/onboarding/sequence.ts); the route accepts only those.
 
 model UserOnboarding {
   userId             String    @id
@@ -14,6 +14,8 @@ model UserOnboarding {
   skipped            Boolean   @default(false)
   // Every source the account picked; the question takes more than one answer.
   referralSources    String[] @default([])
+  // The free text that comes with picking "other".
+  referralOther      String?
   referralAnsweredAt DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt

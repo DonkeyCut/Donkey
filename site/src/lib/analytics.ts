@@ -16,7 +16,10 @@ export type AnalyticsEvents = {
   app_install_clicked: { source: "connect_gate_button" | "connect_gate_link" };
   // The welcome sequence a new account sees, and its replay from settings.
   onboarding_started: { source: OnboardingRun };
-  onboarding_referral_selected: { referralSources: ReferralSource[] };
+  onboarding_referral_selected: {
+    referralSources: ReferralSource[];
+    referralOther?: string;
+  };
   onboarding_completed: { source: OnboardingRun; skipped: boolean; step: number };
   // Cut projects home.
   project_created: { source: "projects_home" | "sidebar" | "file_import" };

@@ -62,6 +62,7 @@ export function CutOnboarding() {
   const save = useSaveOnboarding();
   const [rawStep, setStep] = useState(0);
   const [referrals, setReferrals] = useState<ReferralSource[]>([]);
+  const [referralOther, setReferralOther] = useState("");
   const [dismissed, setDismissed] = useState(false);
   const [replaying, setReplaying] = useState(false);
   // Read once per mount: whether this browser can skip the wait below.
@@ -151,6 +152,7 @@ export function CutOnboarding() {
       onOpenOnboarding(() => {
         setStep(0);
         setReferrals([]);
+        setReferralOther("");
         setReplaying(true);
       }),
     [],
@@ -159,12 +161,16 @@ export function CutOnboarding() {
   // The answers go up when the sequence leaves the question, so picking several
   // is one write rather than one per tap. Every way out passes through here.
   const commitReferrals = useCallback(() => {
-    const signature = [...referrals].sort().join(",");
+    const other = referrals.includes("other") ? referralOther.trim() : "";
+    const signature = `${[...referrals].sort().join(",")}|${other}`;
     if (!referrals.length || signature === savedReferrals.current) return;
     savedReferrals.current = signature;
-    track("onboarding_referral_selected", { referralSources: referrals });
-    save.mutate({ referralSources: referrals });
-  }, [referrals, save]);
+    track("onboarding_referral_selected", {
+      referralSources: referrals,
+      ...(other && { referralOther: other }),
+    });
+    save.mutate({ referralSources: referrals, ...(other && { referralOther: other }) });
+  }, [referrals, referralOther, save]);
 
   const finish = useCallback(
     (skipped: boolean) => {
@@ -298,7 +304,12 @@ export function CutOnboarding() {
         <div className="mx-auto w-full max-w-[1100px]">
           {step === 0 && <WelcomeSlide />}
           {step === 1 && (
-            <ReferralSlide selected={referrals} onToggle={toggleReferral} />
+            <ReferralSlide
+              selected={referrals}
+              onToggle={toggleReferral}
+              otherText={referralOther}
+              onOtherTextChange={setReferralOther}
+            />
           )}
           {step === 2 && <ModesSlide />}
           {step === 3 && <CreditsSlide />}
