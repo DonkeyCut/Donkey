@@ -66,7 +66,8 @@ import { formatTime } from "@/cut/lib/time";
 import { cn } from "@/lib/utils";
 import { CopyNameLabel } from "./AssetRefs";
 import { AudioCardFace } from "./AudioPanel";
-import { buildDragGhost, FolderCrumb, FolderShelf, Marquee } from "./desktopFolders";
+import { buildDragGhost, FolderCrumb, FolderShelf, formatBytes, Marquee } from "./desktopFolders";
+import { useMediaFileSize } from "@/cut/hooks/useMediaFileSize";
 
 // A dragged library selection travels as a JSON array of asset ids, so a whole
 // marquee-selected collection can be dropped onto a folder at once.
@@ -590,6 +591,12 @@ export function LibraryCard({
   // An ffmpeg still washes out iPhone HDR (HLG) footage — the browser tone-maps
   // the video correctly, so we render the frame instead of a baked thumbnail.
   const posterT = Math.min(1, Math.max(0.1, (a.duration || 2) / 10));
+  // The size pill only shows on hover, so the lookup waits for the first one.
+  const [hovered, setHovered] = useState(false);
+  const sizeBytes = useMediaFileSize(
+    offline ? "" : libraryMediaUrl(a.fileName, a.residency),
+    hovered
+  );
 
   return (
     <div
@@ -603,7 +610,10 @@ export function LibraryCard({
         onDragStartExtra?.(e);
       }}
       onDragEnd={clearAssetDrag}
-      onMouseEnter={() => void videoRef.current?.play().catch(() => {})}
+      onMouseEnter={() => {
+        setHovered(true);
+        void videoRef.current?.play().catch(() => {});
+      }}
       onMouseLeave={() => {
         const v = videoRef.current;
         if (v) {
@@ -658,6 +668,23 @@ export function LibraryCard({
         {a.type === "video" && (
           <span className="absolute right-1.5 bottom-1.5 rounded-md bg-black/65 px-1.5 py-0.5 font-mono text-[10px] text-white tabular-nums">
             {formatTime(a.duration)}
+          </span>
+        )}
+        {sizeBytes != null && (
+          <span
+            className={cn(
+              "absolute font-mono tabular-nums opacity-0 transition-opacity group-hover:opacity-100",
+              a.type === "audio"
+                ? // Clear of the play circle, matching the face's duration pill.
+                  "bottom-3 left-12 rounded-md bg-[#2b4e42] px-1.5 py-0.5 text-[10px] text-[#d6eddf]"
+                : cn(
+                    "rounded-md bg-black/65 px-1.5 py-0.5 text-[10px] text-white",
+                    // The + button takes the corner on hover; sit beside it.
+                    onUse ? "bottom-2 left-9" : "bottom-1.5 left-1.5"
+                  )
+            )}
+          >
+            {formatBytes(sizeBytes)}
           </span>
         )}
         {onUse && (

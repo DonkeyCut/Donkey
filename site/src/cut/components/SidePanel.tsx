@@ -41,6 +41,8 @@ import { deleteExport, downloadProjectExport, revealExport } from "@/cut/lib/exp
 import { useExports, useWatchExportLands, type ExportJob } from "@/cut/lib/exportStore";
 import { useElapsed } from "@/cut/hooks/useElapsed";
 import { useInView } from "@/cut/hooks/useInView";
+import { useMediaFileSize } from "@/cut/hooks/useMediaFileSize";
+import { formatBytes } from "@/cut/components/desktopFolders";
 import {
   addAssetToLibraryTemplate,
   addLibraryAssetToProject,
@@ -860,6 +862,9 @@ function AssetCard({ asset, projectId }: { asset: MediaAsset; projectId: string 
   // A media-heavy project would open every one of these connections at once;
   // the source waits until the tile has been scrolled near.
   const [tileRef, seen] = useInView<HTMLDivElement>();
+  // The size pill only shows on hover, so the lookup waits for the first one.
+  const [hovered, setHovered] = useState(false);
+  const sizeBytes = useMediaFileSize(asset.url, hovered && !asset.upload);
 
   const add = () => {
     const s = useEditor.getState();
@@ -903,6 +908,7 @@ function AssetCard({ asset, projectId }: { asset: MediaAsset; projectId: string 
       }}
       onDragEnd={clearAssetDrag}
       onMouseEnter={() => {
+        setHovered(true);
         void videoRef.current?.play().catch(() => {});
       }}
       onMouseLeave={() => {
@@ -948,6 +954,19 @@ function AssetCard({ asset, projectId }: { asset: MediaAsset; projectId: string 
         {asset.type === "video" && (
           <span className="absolute right-1 bottom-1 rounded-[5px] bg-black/65 px-1 py-px font-mono text-[9.5px] text-white tabular-nums">
             {formatTime(asset.duration)}
+          </span>
+        )}
+        {sizeBytes != null && (
+          <span
+            className={cn(
+              "absolute font-mono tabular-nums opacity-0 transition-opacity group-hover:opacity-100",
+              asset.type === "audio"
+                ? // Clear of the play circle, matching the face's duration pill.
+                  "bottom-3 left-12 rounded-md bg-[#2b4e42] px-1.5 py-0.5 text-[10px] text-[#d6eddf]"
+                : "bottom-1 left-1 rounded-[5px] bg-black/65 px-1 py-px text-[9.5px] text-white"
+            )}
+          >
+            {formatBytes(sizeBytes)}
           </span>
         )}
         <span
