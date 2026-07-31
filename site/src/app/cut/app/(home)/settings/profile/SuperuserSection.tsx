@@ -115,7 +115,7 @@ export function SuperuserSection() {
           <div className="text-sm font-medium">Delete user</div>
           <p className="mt-0.5 text-sm text-muted-foreground">
             Permanently deletes the account and everything it owns — projects,
-            media, credits, billing, and its Resend contact.
+            media, credits, and billing.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -210,8 +210,8 @@ export function SuperuserSection() {
             <DialogTitle>Delete {target}?</DialogTitle>
             <DialogDescription>
               This permanently deletes the account and all of its data:
-              projects, media, library, chats, credits, billing, and its Resend
-              contact. Type the email to confirm.
+              projects, media, library, chats, credits, and billing. Type the
+              email to confirm.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
