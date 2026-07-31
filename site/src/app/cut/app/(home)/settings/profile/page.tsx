@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Pencil } from "lucide-react";
 
 import { AvatarDialog } from "@/app/cut/app/(home)/settings/profile/AvatarDialog";
+import { EmailSection } from "@/app/cut/app/(home)/settings/profile/EmailSection";
 import { FeatureFlagsSection } from "@/app/cut/app/(home)/settings/profile/FeatureFlagsSection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -97,6 +98,8 @@ export default function CutProfilePage() {
           )}
         </div>
       </div>
+
+      <EmailSection />
 
       <FeatureFlagsSection />
 

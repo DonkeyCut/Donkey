@@ -6,8 +6,9 @@ third-party Vision API developers, who authenticate with an API key.
 
 **The one rule:** every route handler is wrapped in `withDonkeyAuth`. A public
 endpoint is a deliberate exception with a product reason — today only Better
-Auth's own routes, the signature-verified Stripe webhook, and a plain health
-check. Ship a handler without the wrapper and the endpoint is open to anyone.
+Auth's own routes, the signature-verified Stripe and Resend webhooks, the
+HMAC-token-verified one-click email unsubscribe, and a plain health check. Ship
+a handler without the wrapper and the endpoint is open to anyone.
 
 ## Authentication
 

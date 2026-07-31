@@ -64,6 +64,8 @@ const PASSTHROUGH = [
   "/sign-in",
   "/sign-up",
   "/donkeyvision",
+  // Email-footer unsubscribe page.
+  "/unsubscribe",
 ];
 
 // Whole-segment prefix match, so "/cut" covers "/cut/…" but not "/cut-app".
