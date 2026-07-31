@@ -7,7 +7,7 @@ import { GITHUB_REPO_URL } from "@/app/_components/landing/data";
 type FooterLink = { href: string; label: string };
 type FooterColumn = { title: string; links: FooterLink[] };
 
-const DISCORD_URL = "https://discord.gg/CPQu5XXmw";
+const DISCORD_URL = "https://discord.gg/Xv6qGax7sT";
 
 // Cut's own footer, in the shared landing Footer's grouped-column design. The
 // shared Footer links routes that don't exist on donkeycut.com (/sign-in,
