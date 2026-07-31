@@ -299,21 +299,11 @@ export async function serveMedia(
   }
   const size = head?.size ?? 0;
 
-  // Warm the cache with the whole object, streamed. cache.put refuses a 206,
-  // so the stored entry is always the full 200 — which is what lets later
-  // range requests be answered from it.
-  const warm = async () => {
-    const whole = await env.CUT_MEDIA.get(key);
-    if (!whole || !whole.body) return;
-    const headers = baseHeaders(whole, key);
-    headers.set("Content-Length", String(whole.size));
-    await cache.put(storeKey, new Response(whole.body, { status: 200, headers }));
-  };
-
   if (range) {
-    // Serve the asked-for bytes from R2 and warm behind the response. Reading
-    // the whole object to slice it here would risk the Worker's memory ceiling
-    // on exactly the large files that most need the cache.
+    // Serve the asked-for bytes from R2 and fill the cache behind the
+    // response. Reading the whole object to slice it here would risk the
+    // Worker's memory ceiling on exactly the large files that most need the
+    // cache.
     const part = await env.CUT_MEDIA.get(key, {
       range: { offset: range.start, length: range.end - range.start + 1 },
     });
@@ -321,7 +311,7 @@ export async function serveMedia(
     const headers = baseHeaders(part, key);
     headers.set("Content-Range", `bytes ${range.start}-${range.end}/${size}`);
     headers.set("Content-Length", String(range.end - range.start + 1));
-    if (size <= MAX_CACHEABLE_BYTES) ctx.waitUntil(warm());
+    if (size <= MAX_CACHEABLE_BYTES) ctx.waitUntil(fillCache(env, key, storeKey));
     return asDownload(new Response(part.body, { status: 206, headers }), downloadName);
   }
 
@@ -329,9 +319,44 @@ export async function serveMedia(
   if (!object || !object.body) return refuse("Not found.", 404);
   const headers = baseHeaders(object, key);
   headers.set("Content-Length", String(object.size));
-  const full = new Response(object.body, { status: 200, headers });
-  // Past Cloudflare's ceiling the put would fail, so it is not attempted;
-  // those objects stream from R2 every time rather than breaking.
-  if (object.size <= MAX_CACHEABLE_BYTES) ctx.waitUntil(cache.put(storeKey, full.clone()));
-  return asDownload(full, downloadName);
+  // The fill takes its own R2 read rather than a tee of this one, so the put
+  // ingests at R2 speed while this stream goes at the client's pace — a tee
+  // couples the two and buffers the difference in memory.
+  if (object.size <= MAX_CACHEABLE_BYTES) ctx.waitUntil(fillCache(env, key, storeKey));
+  return asDownload(new Response(object.body, { status: 200, headers }), downloadName);
+}
+
+/** Cache fills in flight in this isolate, keyed by the stored URL. A cold open
+ * of a cut fires many ranged misses at the same object over one connection —
+ * and one connection is one isolate — so a fill per miss pulled the whole
+ * object from R2 once per miss. The duplicate pulls exhausted the isolate
+ * mid-burst, which killed the 206 streams it was serving, and the racing puts
+ * on one key aborted each other, so the cache stayed cold and the next open
+ * repeated the storm. An entry clears when its fill settles; a fill that
+ * failed simply runs again on the next miss, alone. */
+const fillsInFlight = new Map<string, Promise<void>>();
+
+/** Store the whole object, streamed, behind the response being served.
+ * cache.put refuses a 206, so the stored entry is always the full 200 — which
+ * is what lets later range requests be answered from it. Past Cloudflare's
+ * ceiling the put would fail, so callers skip the fill and those objects
+ * stream from R2 every time rather than breaking. */
+function fillCache(env: MediaEnv, key: string, storeKey: Request): Promise<void> {
+  const pending = fillsInFlight.get(storeKey.url);
+  if (pending) return pending;
+  const fill = (async () => {
+    const cache = caches.default;
+    // A miss can race in just after a finished fill emptied the map; the
+    // lookup keeps that from pulling the whole object again.
+    if (await cache.match(storeKey)) return;
+    const whole = await env.CUT_MEDIA.get(key);
+    if (!whole || !whole.body) return;
+    const headers = baseHeaders(whole, key);
+    headers.set("Content-Length", String(whole.size));
+    await cache.put(storeKey, new Response(whole.body, { status: 200, headers }));
+  })()
+    .catch(() => {})
+    .finally(() => fillsInFlight.delete(storeKey.url));
+  fillsInFlight.set(storeKey.url, fill);
+  return fill;
 }
