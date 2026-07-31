@@ -19,7 +19,6 @@ import { cn } from "@/lib/utils";
 import { useAccount } from "@/queries/credits";
 import {
   recentJobsQueryKey,
-  useJobStatus,
   useRecentJobs,
   useStartJob,
   type AsyncJobListItem,
@@ -36,24 +35,18 @@ function describeFields(value: unknown): string {
     .join(" · ");
 }
 
-function deletedSentence(
-  email: string,
-  result: Record<string, unknown> | undefined,
-): string {
+// A finished delete-user job reads as one sentence; other kinds (and
+// unfinished jobs) keep the flattened raw fields.
+function doneSummary(item: AsyncJobListItem): string | null {
+  if (item.kind !== "delete-user" || item.state !== "done") return null;
+  const payload = item.payload as { email?: unknown } | null;
+  const email = typeof payload?.email === "string" ? payload.email : "";
+  const result = item.result;
   return (
     `Deleted ${email} — ${String(result?.projects ?? 0)} project(s), ` +
     `${String(result?.libraryAssets ?? 0)} library asset(s), ` +
     `${String(result?.r2Objects ?? 0)} stored object(s).`
   );
-}
-
-// A finished delete-user job reads as the same sentence as the inline status;
-// other kinds (and unfinished jobs) keep the flattened raw fields.
-function doneSummary(item: AsyncJobListItem): string | null {
-  if (item.kind !== "delete-user" || item.state !== "done") return null;
-  const payload = item.payload as { email?: unknown } | null;
-  const email = typeof payload?.email === "string" ? payload.email : "";
-  return deletedSentence(email, item.result);
 }
 
 function formatWhen(iso: string): string {
@@ -74,9 +67,10 @@ const stateDot: Record<AsyncJobListItem["state"], string> = {
 
 // Super-user tooling on the profile page. Today: delete a user and everything
 // they own, for cleaning production test accounts out of the data. The delete
-// runs as a background job on the hosted API; this card starts it and polls
-// the outcome. The confirm dialog makes the super user retype the email so a
-// paste-slip can't take out the wrong account.
+// runs as a background job on the hosted API; this card starts it, and the
+// recent-jobs list below tracks it to completion. The confirm dialog makes
+// the super user retype the email so a paste-slip can't take out the wrong
+// account.
 export function SuperuserSection() {
   const account = useAccount();
   const queryClient = useQueryClient();
@@ -84,14 +78,8 @@ export function SuperuserSection() {
   const [email, setEmail] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmEmail, setConfirmEmail] = useState("");
-  // The job being watched, and the address it was started for — the input
-  // clears on start, so the status line needs its own copy.
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [jobEmail, setJobEmail] = useState("");
-  const job = useJobStatus(jobId);
-  // Every hook here is gated so a non-super user's browser never calls the
-  // job APIs at all: the list is disabled below, and the status poll only
-  // starts once this card has itself started a job.
+  // The jobs hook is gated so a non-super user's browser never calls the
+  // job APIs at all.
   const superUser = account.data?.superUser === true;
   const recent = useRecentJobs(superUser);
 
@@ -113,9 +101,7 @@ export function SuperuserSection() {
     start.mutate(
       { kind: "delete-user", payload: { email: target } },
       {
-        onSuccess: ({ jobId: startedId }) => {
-          setJobId(startedId);
-          setJobEmail(target);
+        onSuccess: () => {
           setEmail("");
           setConfirmOpen(false);
           queryClient.invalidateQueries({ queryKey: recentJobsQueryKey });
@@ -123,9 +109,6 @@ export function SuperuserSection() {
       },
     );
   };
-
-  const state = job.data?.state;
-  const running = jobId !== null && (job.isPending || state === "queued" || state === "running");
 
   return (
     <div className="rounded-xl border bg-card p-5">
@@ -149,7 +132,7 @@ export function SuperuserSection() {
             value={email}
           />
           <Button
-            disabled={target === "" || start.isPending || running}
+            disabled={target === "" || start.isPending}
             onClick={openConfirm}
             variant="destructive"
           >
@@ -157,19 +140,6 @@ export function SuperuserSection() {
           </Button>
         </div>
 
-        {running ? (
-          <p className="text-sm text-muted-foreground">Deleting {jobEmail}…</p>
-        ) : null}
-        {state === "done" ? (
-          <p className="text-sm text-muted-foreground">
-            {deletedSentence(jobEmail, job.data?.result)}
-          </p>
-        ) : null}
-        {state === "error" ? (
-          <p className="text-sm text-destructive">
-            Couldn&apos;t delete {jobEmail}: {job.data?.error ?? "unknown error"}
-          </p>
-        ) : null}
         {start.isError ? (
           <p className="text-sm text-destructive">
             Couldn&apos;t start the delete — check the email and try again.

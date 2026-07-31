@@ -21,11 +21,10 @@ export type AsyncJobListItem = {
   createdAt: string;
 };
 
-export const jobStatusQueryKey = (jobId: string) => ["jobs", jobId] as const;
 export const recentJobsQueryKey = ["jobs", "recent"] as const;
 
-// Super-user only: start a background job on the hosted API. The caller keeps
-// the returned jobId and polls it with useJobStatus.
+// Super-user only: start a background job on the hosted API. The recent-jobs
+// list tracks it to completion.
 export function useStartJob() {
   return useMutation({
     mutationFn: (input: { kind: string; payload: unknown }) =>
@@ -49,18 +48,5 @@ export function useRecentJobs(enabled: boolean) {
       )
         ? 2000
         : false,
-  });
-}
-
-// Poll one job every couple of seconds until it settles.
-export function useJobStatus(jobId: string | null) {
-  return useQuery({
-    enabled: jobId !== null,
-    queryFn: () => apiFetch<AsyncJobStatus>(`/api/jobs/${jobId}`),
-    queryKey: jobStatusQueryKey(jobId ?? "none"),
-    refetchInterval: (query) => {
-      const state = query.state.data?.state;
-      return state === "done" || state === "error" ? false : 2000;
-    },
   });
 }
