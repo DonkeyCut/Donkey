@@ -109,16 +109,18 @@ export function SuperuserSection() {
 
   return (
     <div className="rounded-xl border bg-card p-5">
-      <div className="text-sm font-medium">Super user · Delete a user</div>
-      <p className="mt-0.5 text-sm text-muted-foreground">
-        Permanently deletes the account and everything it owns — projects,
-        media, credits, billing, and its Resend contact. Visible to super users
-        only.
-      </p>
+      <div className="text-sm font-medium">Super user</div>
       <div className="mt-4 space-y-3 border-t pt-4">
-        <div className="space-y-2">
-          <Label htmlFor="delete-user-email">User email</Label>
+        <div>
+          <div className="text-sm font-medium">Delete user</div>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Permanently deletes the account and everything it owns — projects,
+            media, credits, billing, and its Resend contact.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
           <Input
+            aria-label="User email"
             className="max-w-xs"
             id="delete-user-email"
             onChange={(event) => setEmail(event.target.value)}
@@ -126,14 +128,14 @@ export function SuperuserSection() {
             type="email"
             value={email}
           />
+          <Button
+            disabled={target === "" || start.isPending || running}
+            onClick={openConfirm}
+            variant="destructive"
+          >
+            Delete user…
+          </Button>
         </div>
-        <Button
-          disabled={target === "" || start.isPending || running}
-          onClick={openConfirm}
-          variant="destructive"
-        >
-          Delete user…
-        </Button>
 
         {running ? (
           <p className="text-sm text-muted-foreground">Deleting {jobEmail}…</p>
