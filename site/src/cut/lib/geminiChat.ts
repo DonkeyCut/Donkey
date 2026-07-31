@@ -8,6 +8,7 @@ import { runAiTool } from "./aiTools";
 import { normalizeRef } from "./assetRef";
 import { NO_CREDITS_MESSAGE, useGenerate } from "./generate";
 import { hostedPost } from "./hosted";
+import { enforceMediaBudget } from "./mediaBudget";
 import { refsToParts } from "./refMedia";
 import { parseTurnIntent, TURN_INTENT_PROMPT, turnIntentInput, type TurnIntent } from "./turnIntent";
 
@@ -146,6 +147,8 @@ async function emitStepLimitSummary({
 }): Promise<void> {
   let text = STEP_LIMIT_FALLBACK;
   try {
+    // The last round may have appended fresh tool media after its own trim.
+    enforceMediaBudget(input);
     const summaryInput: Item[] = [
       ...input,
       {
@@ -411,6 +414,9 @@ export function streamGeminiChat({
         let scenePlannedThisTurn = false;
 
         for (let round = 0; round < MAX_TOOL_ROUNDS && !settled; round++) {
+          // Media accumulated over past rounds is trimmed to budget first, so
+          // this round's request fits the hosted route whatever came before.
+          enforceMediaBudget(input);
           // The round streams: text lands in the reply bubble as Gemini writes
           // it, instead of popping in whole seconds later when the round-trip
           // settles. The block opens on the first real (non-whitespace) delta,
