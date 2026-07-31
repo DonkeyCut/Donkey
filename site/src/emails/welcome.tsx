@@ -4,7 +4,6 @@ import {
   Head,
   Hr,
   Html,
-  Img,
   Link,
   Preview,
   Tailwind,
@@ -12,6 +11,8 @@ import {
   pixelBasedPreset,
 } from "react-email";
 
+import { CommunityPs } from "./_components/CommunityPs";
+import { DonkeyMark } from "./_components/DonkeyMark";
 import { DONKEY_LOGO_DATA_URI } from "./_components/logo";
 
 // The one email a new account gets: a personal note from David. Sent by
@@ -46,13 +47,7 @@ export default function WelcomeEmail({
       <Tailwind config={{ presets: [pixelBasedPreset] }}>
         <Body className="bg-white font-sans text-[#0F0E0D]">
           <Container className="mx-auto max-w-[520px] px-6 py-12">
-            <Img
-              src={logoSrc}
-              alt="Donkey Cut"
-              width="48"
-              height="48"
-              className="mb-4"
-            />
+            <DonkeyMark src={logoSrc} />
             <Text className="text-[15px] leading-relaxed">Hey {name},</Text>
             <Text className="text-[15px] leading-relaxed">
               Thanks for signing up.
@@ -80,26 +75,6 @@ export default function WelcomeEmail({
               join the Discord. I&apos;m there every day.
             </Text>
             <Text className="text-[15px] leading-relaxed">
-              Discord
-              <br />
-              <Link
-                href="https://discord.gg/Xv6qGax7sT"
-                className="text-[#0F0E0D] underline"
-              >
-                https://discord.gg/Xv6qGax7sT
-              </Link>
-            </Text>
-            <Text className="text-[15px] leading-relaxed">
-              GitHub
-              <br />
-              <Link
-                href="https://github.com/DonkeyUseCorp/Donkey"
-                className="text-[#0F0E0D] underline"
-              >
-                https://github.com/DonkeyUseCorp/Donkey
-              </Link>
-            </Text>
-            <Text className="text-[15px] leading-relaxed">
               This email goes straight to my personal inbox, so feel free to
               reply anytime. I read every email.
             </Text>
@@ -110,6 +85,7 @@ export default function WelcomeEmail({
               Have a great day!
             </Text>
             <Text className="text-[15px] leading-relaxed">David</Text>
+            <CommunityPs />
             <Hr className="mt-6 border-[#0F0E0D]/15" />
             <Text className="text-[12px] leading-relaxed text-[#0F0E0D]/60">
               You&apos;re receiving this because you created a Donkey Cut
