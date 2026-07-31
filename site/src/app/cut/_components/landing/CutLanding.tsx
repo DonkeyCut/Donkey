@@ -1,6 +1,7 @@
 "use client";
 
 import { BG, BLACK } from "@/app/_components/landing/theme";
+import { CutEditing } from "@/app/cut/_components/landing/CutEditing";
 import { CutFinalCTA } from "@/app/cut/_components/landing/CutFinalCTA";
 import { CutFooter } from "@/app/cut/_components/landing/CutFooter";
 import { CutHero } from "@/app/cut/_components/landing/CutHero";
@@ -27,6 +28,7 @@ export function CutLanding() {
     >
       <CutTopNav />
       <CutHero />
+      <CutEditing />
       <CutWorksWith />
       <CutPricing />
       <CutLocal />
