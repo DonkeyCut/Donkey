@@ -244,12 +244,26 @@ export const useExports = create<ExportsState>((set, get) => ({
       }
     };
     // Jobs of both residencies can run at once, so poll every feed this
-    // browser can reach: the cloud always, local once an engine has answered.
+    // browser can reach: local once an engine has answered, the cloud while
+    // the browser is online and the feed isn't backing off after failures.
+    // The local engine is on localhost, so it stays reachable offline.
     const pollLocal = engineOrigin() !== "" || servedFromEngine();
+    const pollCloud =
+      (typeof navigator === "undefined" || navigator.onLine) &&
+      Date.now() >= cloudRetryAt;
     const [localRows, cloudRows] = await Promise.all([
       pollLocal ? fetchFeed(localBackend) : Promise.resolve(null),
-      fetchFeed(cloudBackend),
+      pollCloud ? fetchFeed(cloudBackend) : Promise.resolve(null),
     ]);
+    if (pollCloud) {
+      if (cloudRows === null) {
+        cloudFailures++;
+        cloudRetryAt = Date.now() + Math.min(3000 * 2 ** cloudFailures, 60_000);
+      } else {
+        cloudFailures = 0;
+        cloudRetryAt = 0;
+      }
+    }
     set((s) => {
       // A failed or skipped feed keeps its previous rows; only a fresh answer
       // replaces that backend's slice.
@@ -290,32 +304,54 @@ export function useWatchExportLands(projectId: string) {
 }
 
 // The dock is mounted app-wide, so polling runs the whole time the Cut app is
-// open. It quickens while work is in flight and idles between exports.
+// open. It quickens while work is in flight and idles between exports. The
+// cloud feed drops out while the browser is offline and backs off while the
+// server is unreachable; coming back online resets both and polls right away.
+let cloudFailures = 0;
+let cloudRetryAt = 0;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
+let ticking = false;
 let mounts = 0;
+
+const tick = async () => {
+  if (ticking) return;
+  ticking = true;
+  await useExports.getState().refresh();
+  ticking = false;
+  if (mounts === 0) {
+    pollTimer = null;
+    return;
+  }
+  const s = useExports.getState();
+  const active =
+    s.local.length > 0 ||
+    s.jobs.some((j) => j.status === "queued" || j.status === "running");
+  pollTimer = setTimeout(tick, active ? 700 : 3000);
+};
+
+const handleOnline = () => {
+  cloudFailures = 0;
+  cloudRetryAt = 0;
+  // A tick in flight fails fast offline; the one it schedules polls fresh.
+  if (ticking || pollTimer === null) return;
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(tick, 0);
+};
 
 export function beginExportPolling() {
   mounts++;
   if (pollTimer !== null) return;
-  const tick = async () => {
-    await useExports.getState().refresh();
-    if (mounts === 0) {
-      pollTimer = null;
-      return;
-    }
-    const s = useExports.getState();
-    const active =
-      s.local.length > 0 ||
-      s.jobs.some((j) => j.status === "queued" || j.status === "running");
-    pollTimer = setTimeout(tick, active ? 700 : 3000);
-  };
+  window.addEventListener("online", handleOnline);
   pollTimer = setTimeout(tick, 0);
 }
 
 export function endExportPolling() {
   mounts = Math.max(0, mounts - 1);
-  if (mounts === 0 && pollTimer !== null) {
-    clearTimeout(pollTimer);
-    pollTimer = null;
+  if (mounts === 0) {
+    window.removeEventListener("online", handleOnline);
+    if (pollTimer !== null) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
   }
 }
