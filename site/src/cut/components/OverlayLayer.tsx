@@ -160,7 +160,9 @@ export function OverlayLayer({ stageWidth }: { stageWidth: number }) {
           <OverlayItem
             key={o.id}
             overlay={o}
-            selected={selected}
+            // The skimmer paints the bare frame: the item still renders, its
+            // selection chrome (outline, resize handle) does not.
+            selected={selected && !scrubbing}
             ghost={!inRange && !selected}
             stageWidth={stageWidth}
             registerBox={registerBox}

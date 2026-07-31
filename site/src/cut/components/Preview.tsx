@@ -229,6 +229,11 @@ function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
   const selection = useEditor((s) => s.selection);
   const clips = useEditor((s) => s.clips);
   const currentTime = useEditor((s) => s.currentTime);
+  const skimTime = useEditor((s) => s.skimTime);
+  const playing = useEditor((s) => s.playing);
+  // While hover-scrubbing the preview shows the skimmer's frame, where the
+  // selected clip may not even be on screen — selection stays, the handle hides.
+  if (!playing && skimTime !== null) return null;
 
   // Resolve the selected, live, regioned clip (any track) plus how to patch its
   // rect. A clip's own footprint equals its span length, so one path serves
