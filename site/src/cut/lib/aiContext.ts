@@ -83,6 +83,7 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
           start: r(sp.start),
           len: r(sp.len),
           muted: sp.clip.muted,
+          ...(sp.clip.hidden ? { hidden: true } : {}),
           speed: r(sp.clip.speed ?? 1),
         };
       }
@@ -166,6 +167,7 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
       // A still has no source length; report its placed length instead of 0.
       sourceDuration: r(sp.asset.type === "image" ? sp.len : sp.asset.duration),
       muted: sp.clip.muted,
+      ...(sp.clip.hidden ? { hidden: true } : {}),
       framing: sp.clip.fit ?? "fit",
       speed: r(sp.clip.speed ?? 1),
       // The generated scene shot this clip came from — sceneShot is the
@@ -220,6 +222,7 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
           s.subtitles.tracks?.[i]?.locale ??
           (i === 0 ? s.subtitles.locale ?? "en-US" : undefined),
         cues: laneCues(s.subtitles, i).length,
+        ...(s.subtitles.tracks?.[i]?.hidden ? { hidden: true } : {}),
       })),
       status: s.subtitleStatus,
       // A window of cues by default; when truncated the model calls get_state
@@ -243,7 +246,7 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
 }
 
 function describeAudio(
-  a: { assetId: string; start: number; in: number; out: number; volume: number; fadeIn?: number; fadeOut?: number; speed?: number; duck?: number; lane?: number },
+  a: { assetId: string; start: number; in: number; out: number; volume: number; fadeIn?: number; fadeOut?: number; speed?: number; duck?: number; lane?: number; hidden?: boolean },
   assets: Map<string, { name: string }>
 ) {
   const speed = a.speed && a.speed > 0 ? a.speed : 1;
@@ -258,6 +261,7 @@ function describeAudio(
     fadeOut: r(a.fadeOut ?? 0),
     ...(speed !== 1 ? { speed: r(speed) } : {}),
     ...(a.lane ? { lane: a.lane } : {}),
+    ...(a.hidden ? { hidden: true } : {}),
     // A voiceover: while it plays, other audio ducks to this gain.
     ...(a.duck !== undefined ? { duck: r(a.duck) } : {}),
   };
@@ -288,7 +292,7 @@ function describeOverlayClip(c: VideoClip, assets: Map<string, { name: string }>
 function describeOverlay(o: {
   text: string; start: number; end: number; x: number; y: number;
   size: number; font: string; weight: number; color: string; shadow: boolean; plate: boolean;
-  plateRadius?: number; lane?: number;
+  plateRadius?: number; lane?: number; hidden?: boolean;
 }) {
   return {
     text: o.text,
@@ -304,5 +308,6 @@ function describeOverlay(o: {
     plate: o.plate,
     ...(o.plateRadius !== undefined && { plateRadius: r(o.plateRadius) }),
     ...(o.lane ? { lane: o.lane } : {}),
+    ...(o.hidden ? { hidden: true } : {}),
   };
 }

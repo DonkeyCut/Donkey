@@ -537,6 +537,58 @@ export async function runAiTool(
       return { id: next.id, volume: next.volume ?? 1 };
     }
 
+    case "set_clip_hidden": {
+      const clip = requireItem(s.clips, input.clipId, "video clip");
+      s.updateClip(clip.id, { hidden: input.hidden ? true : undefined });
+      return { id: clip.id, hidden: Boolean(input.hidden) };
+    }
+
+    case "set_track_hidden": {
+      if (!isNum(input.track) || input.track < 0)
+        throw new ToolError("track must be 0 or higher.");
+      const track = Math.round(input.track);
+      const hidden = Boolean(input.hidden);
+      switch (input.kind) {
+        case "video": {
+          const n = s.clips.filter((c) => c.track === track).length;
+          if (!n) throw new ToolError(`No clips on video track ${track}.`);
+          s.setTrackHidden(track, hidden);
+          return { kind: "video", track, hidden, clips: n };
+        }
+        case "soundtrack": {
+          const n = s.audioClips.filter((a) => (a.lane ?? 0) === track).length;
+          if (!n) throw new ToolError(`No clips on soundtrack lane ${track}.`);
+          s.setAudioLaneHidden(track, hidden);
+          return { kind: "soundtrack", track, hidden, clips: n };
+        }
+        case "text": {
+          const n = s.overlays.filter((o) => (o.lane ?? 0) === track).length;
+          if (!n) throw new ToolError(`No titles on text track ${track}.`);
+          s.setTextLaneHidden(track, hidden);
+          return { kind: "text", track, hidden, titles: n };
+        }
+        case "subtitles": {
+          const count = subtitleLaneCount(s.subtitles);
+          if (track >= count)
+            throw new ToolError(`No subtitle track ${track} — tracks 0–${count - 1} exist.`);
+          s.setSubtitleTrackMeta(track, { hidden: hidden ? true : undefined });
+          return { kind: "subtitles", track, hidden, cues: laneCues(s.subtitles, track).length };
+        }
+        default:
+          throw new ToolError('`kind` must be "video", "soundtrack", "text", or "subtitles".');
+      }
+    }
+
+    case "set_track_muted": {
+      if (!isNum(input.track) || input.track < 0)
+        throw new ToolError("track must be 0 or higher.");
+      const track = Math.round(input.track);
+      const n = s.clips.filter((c) => c.track === track).length;
+      if (!n) throw new ToolError(`No clips on video track ${track}.`);
+      s.setTrackMuted(track, Boolean(input.muted));
+      return { track, muted: Boolean(input.muted), clips: n };
+    }
+
     case "detach_audio": {
       const id = input.clipId ? String(input.clipId) : s.selection?.kind === "clip" ? s.selection.id : null;
       if (!id) throw new ToolError("Pass clipId or select a video clip first.");
@@ -611,6 +663,7 @@ export async function runAiTool(
           Math.abs(input.speed - 1) < 1e-4 ? undefined : Math.max(SPEED_FLOOR, input.speed);
       // duck >= 1 clears ducking (undefined); below 1 sets the gain.
       if (isNum(input.duck)) patch.duck = input.duck >= 1 ? undefined : clamp(input.duck, 0, 1);
+      if (typeof input.hidden === "boolean") patch.hidden = input.hidden || undefined;
       if (isNum(patch.in ?? NaN) || isNum(patch.out ?? NaN)) {
         const nIn = patch.in ?? a.in;
         const nOut = patch.out ?? a.out;
@@ -2158,5 +2211,6 @@ function titlePatch(input: Record<string, unknown>) {
   if (typeof input.shadow === "boolean") patch.shadow = input.shadow;
   if (typeof input.plate === "boolean") patch.plate = input.plate;
   if (isNum(input.plateRadius)) patch.plateRadius = clamp(input.plateRadius, 0, 1);
+  if (typeof input.hidden === "boolean") patch.hidden = input.hidden || undefined;
   return patch;
 }

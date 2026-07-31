@@ -156,6 +156,28 @@ export const AI_TOOLS: AiToolDef[] = [
     inputSchema: obj({ clipId: str("Video clip id"), volume: num("0..1.5 (1 = unchanged)") }, ["clipId", "volume"]),
   },
   {
+    name: "set_clip_hidden",
+    description:
+      "Hide or show a video clip on any track. A hidden clip stays on the timeline (grayed) but is excluded from playback and export — its span plays black and silent on track 0; an overlay layer just disappears.",
+    inputSchema: obj({ clipId: str("Video clip id"), hidden: bool("true to hide") }, ["clipId", "hidden"]),
+  },
+  {
+    name: "set_track_hidden",
+    description:
+      "Hide or show a whole timeline row at once — the track header's eye toggle. Applies to every item on that row: a hidden video track plays black and silent, a hidden soundtrack lane is silent, hidden text (title) lanes and subtitle tracks drop out of the picture. Items stay on the timeline, grayed.",
+    inputSchema: obj({
+      kind: { type: "string", enum: ["video", "soundtrack", "text", "subtitles"], description: "Which row kind" },
+      track: num("Track/lane index, 0-based"),
+      hidden: bool("true to hide"),
+    }, ["kind", "track", "hidden"]),
+  },
+  {
+    name: "set_track_muted",
+    description:
+      "Mute or unmute every clip on one video track at once — the track header's speaker toggle. The picture keeps playing.",
+    inputSchema: obj({ track: num("Video track index, 0-based"), muted: bool("true to mute") }, ["track", "muted"]),
+  },
+  {
     name: "detach_audio",
     description:
       "iMovie-style Detach Audio: lift a clip's sound onto the soundtrack track (mutes the clip) so it can be edited independently. Select the clip first or pass its id.",
@@ -256,12 +278,13 @@ export const AI_TOOLS: AiToolDef[] = [
       weight: { type: "number", enum: [400, 700], description: "Font weight" },
       shadow: bool("Drop shadow"),
       plate: bool("Backdrop plate"),
+      hidden: bool("Hide the title without deleting it"),
     }, ["id"]),
   },
   {
     name: "update_audio",
     description:
-      "Update a soundtrack clip: volume (0..1.5), fadeIn/fadeOut seconds, start position, in/out trim, speed, or duck. `duck` is voiceover ducking — while this clip plays, ALL other audio (video-clip sound and other music) drops to that gain (0..1); pass 1 to clear ducking. Use it to make a voiceover sit over quieter music.",
+      "Update a soundtrack clip: volume (0..1.5), fadeIn/fadeOut seconds, start position, in/out trim, speed, hidden, or duck. `duck` is voiceover ducking — while this clip plays, ALL other audio (video-clip sound and other music) drops to that gain (0..1); pass 1 to clear ducking. Use it to make a voiceover sit over quieter music.",
     inputSchema: obj({
       id: str("Soundtrack clip id"),
       volume: num("0..1.5"),
@@ -272,6 +295,7 @@ export const AI_TOOLS: AiToolDef[] = [
       out: num("Source out s"),
       speed: num("Playback rate (1 = normal, no upper limit)"),
       duck: num("Duck other audio to this gain while this clip plays, 0..1 (1 clears ducking)"),
+      hidden: bool("Silence the clip without removing it (grayed on the timeline)"),
     }, ["id"]),
   },
   {
@@ -761,6 +785,7 @@ Times are in seconds on the shared timeline. The playhead is currentTime; a skim
 - set_transition joins a clip into the next one (0–2s, 17 styles); set_animation animates one clip's own entrance/exit; set_look grades its picture with a preset filter — read the transitions-and-fades skill before styling cuts. Splitting or deleting clears the affected transition.
 - split_at cuts the track-0 clip under that time into two clips at the exact frame. With a soundtrack or overlay clip selected it splits that instead.
 - The user can multi-select (⌘/⇧-click) and delete several items at once; a hover chip on each video clip toggles its own audio.
+- Anything can be hidden instead of deleted: it stays on the timeline (grayed) but drops out of playback and export — a hidden video clip plays black and silent. Per item: set_clip_hidden, or the \`hidden\` field on update_overlay_video/update_title/update_audio. Whole rows: set_track_hidden (video/soundtrack/text/subtitles) and set_track_muted (video) — the eye/speaker toggles on the track headers.
 - detach_audio lifts a video clip's sound to the soundtrack track (and mutes the clip) so audio can be cut independently of video.
 - freeze_frame grabs one frame (default: the playhead — what the user currently sees) as a still clip and inserts it, by default at index 0 as a cover/hook frame ("make this the first frame"). The still is baked at the project's current aspect with the clip's framing applied; if the user later switches aspect they should capture a fresh one.
 - set_framing: per-clip Fit (letterbox) vs Fill (crop to cover the project frame). In Fill, panX/panY position the crop window; the user can also drag the video directly in the preview. The control lives in the Inspector under "Framing" when a video clip is selected. Landscape footage usually wants fill + a pan that keeps the subject.
