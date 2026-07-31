@@ -146,6 +146,21 @@ export const AI_TOOLS: AiToolDef[] = [
     inputSchema: obj({ clipId: str("Video clip id"), in: num("New in point (optional)"), out: num("New out point (optional)") }, ["clipId"]),
   },
   {
+    name: "refine_speech_cuts",
+    description:
+      "True up speech-cut edges mechanically: re-scans the audio around each clip's in/out and re-trims so every edge sits a ~0.25s breath inside a real pause — an edge that clips a word moves outward to the next pause, stray dead air trims off. Clip spacing survives: a tightened clip closes up, butted joints stay butted, and deliberate gaps keep their width. An edge with no pause within ~2s stays put and comes back flagged. Run it on every clip you recut for speech, after cutting and before listening; leave out clips whose edge you placed mid-speech on purpose.",
+    inputSchema: obj(
+      {
+        clip_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Video clip ids whose in/out edges are speech cuts",
+        },
+      },
+      ["clip_ids"]
+    ),
+  },
+  {
     name: "set_clip_muted",
     description: "Mute or unmute a video clip's own audio.",
     inputSchema: obj({ clipId: str("Video clip id"), muted: bool("true to mute") }, ["clipId", "muted"]),
@@ -804,16 +819,17 @@ The flow for "edit this for me":
 1. get_state — every clip, its trim (in/out), speed, gaps, and the other tracks.
 2. Speech? subtitles_generate first — cue timings are timeline seconds and say what is said when.
 3. watch_video each distinct source (or the ranges in question); note scene changes and what happens where.
-4. Plan in thoughts: group the cues into sentences and thoughts, decide which thoughts stay whole, then detect_silence to find where the speaker actually pauses. Cue timings approximate the audio — a trailing word often spills past its cue — so place every speech cut inside a detected silence span, padded ~0.2s in from both of its edges; a cue boundary with no silence span around it means the speech runs continuously there, so leave that joint alone.
+4. Plan in thoughts: group the cues into sentences and thoughts, decide which thoughts stay whole, then detect_silence to find where the speaker actually pauses. Cue timings approximate the audio — a trailing word often spills past its cue — so aim every speech cut into a detected silence span, and aim loose: up to a second of spare air on each side beats a tight cut, because the refine step trues the edges after. A cue boundary with no silence span around it means the speech runs continuously there, so leave that joint alone.
 5. Execute: split_at (timeline s) to divide, delete_item to drop a segment, trim_clip (source s) to tighten edges, place_clip/move_clip to close gaps or reorder, set_speed to compress slow stretches.
-6. Verify by ear: listen_audio each recut clip (its trim is the default range; scope a long one with from/to to ~2s around each new edge) and check the first and last words arrive whole and the hand-off into the next thought sounds natural. A clipped word → widen that trim deeper into the silence and listen again. After a heavy edit, listen once end-to-end. seek + capture_frame when the change is visual.
+6. Refine: refine_speech_cuts with every recut clip id. It re-scans the audio at each edge and re-trims it to sit a ~0.25s breath inside the real pause, keeping the clips' spacing. It reads sound, not intent — leave out a clip whose edge you placed mid-speech on purpose.
+7. Verify by ear: listen_audio at each edge the refine flagged, plus a spot-check or two (scope from/to to ~2s around the joint), and check the first and last words arrive whole and the hand-off into the next thought sounds natural. A clipped word → widen that trim deeper into the silence and listen again. After a heavy edit, listen once end-to-end. seek + capture_frame when the change is visual.
 
 Time math (get this right):
 - watch_video, detect_silence, and trim_clip speak SOURCE seconds; split_at and place_clip speak TIMELINE seconds.
 - timeline_t = clip.start + (source_t − clip.in) / clip.speed, valid while source_t is inside [in, out]. Each watch result's clip block carries this formula with the real numbers filled in.
 - The same source can appear in several clips — map per clip.
 
-Cutting speech well: pace is part of the message. Keep a beat of the speaker's own pause between sentences (~0.3s) and a slightly longer one between thoughts (~0.5s) — shorten a long pause to that beat instead of deleting it, and speech butted directly together reads as rushed. Leave ~0.2s of breath on each side of every cut so edges land in true silence. Prefer split_at + delete_item, then place_clip to close the gap (a beat of black may be wanted — ask the cut, not the tool); trim_clip only tightens a clip's edges.`,
+Cutting speech well: pace is part of the message. Keep a beat of the speaker's own pause between sentences (~0.3s) and a slightly longer one between thoughts (~0.5s) — shorten a long pause to that beat instead of deleting it, and speech butted directly together reads as rushed. Cut loose and let refine_speech_cuts set the breath at each edge. Prefer split_at + delete_item, then place_clip to close the gap (a beat of black may be wanted — ask the cut, not the tool); trim_clip only tightens a clip's edges.`,
 
   "transitions-and-fades": `# Transitions, animations, looks & fades
 Route the ask to the right feature:

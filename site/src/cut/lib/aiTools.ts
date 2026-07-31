@@ -30,6 +30,7 @@ import {
   makeStillSheetClientSide,
   renderAudioSpanWav,
 } from "./media";
+import { BREATH, REACH, refineEdge, type SilenceSpan } from "./cutRefine";
 import { requestSidePanel, SIDE_PANEL_TABS } from "./panelRequest";
 import { blobToInlineAudio, refToInlineAudio, visualRefs, type InlineImage } from "./refMedia";
 import { characterPrompt, stockTitle } from "./stock";
@@ -250,46 +251,18 @@ export async function runAiTool(
     case "detect_silence": {
       const { projectId, asset, clip, speed, from, to } = resolveWatchRange(s, input);
       if (asset.type === "image") throw new ToolError(`"${asset.name}" is an image — it has no audio.`);
-      interface SilenceBody {
-        silences: { start: number; end: number; duration: number }[];
-        error?: string;
-      }
-      let body: SilenceBody;
-      if (getBackend().kind === "cloud") {
-        // Same defaults and clamps as the engine's silence handler.
-        body = {
-          silences: await detectSilenceClientSide(asset.url, {
-            from,
-            ...(to !== undefined ? { to } : {}),
-            thresholdDb: clamp(isNum(input.threshold_db) ? input.threshold_db : -30, -90, 0),
-            minSilence: clamp(isNum(input.min_silence) ? input.min_silence : 0.35, 0.05, 10),
-          }).catch((e) => {
-            throw new ToolError(
-              e instanceof Error ? e.message : "Could not scan for silence."
-            );
-          }),
-        };
-      } else {
-        const res = await apiFetch(`/api/cut/projects/${projectId}/silence`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            file: asset.fileName,
-            from,
-            ...(to !== undefined ? { to } : {}),
-            ...(isNum(input.threshold_db) ? { threshold_db: input.threshold_db } : {}),
-            ...(isNum(input.min_silence) ? { min_silence: input.min_silence } : {}),
-          }),
-        });
-        body = await apiJson<SilenceBody>(res);
-        if (!res.ok) throw new ToolError(body.error ?? "Could not scan for silence.");
-      }
+      const silences = await fetchSilences(projectId, asset, {
+        from,
+        ...(to !== undefined ? { to } : {}),
+        ...(isNum(input.threshold_db) ? { thresholdDb: input.threshold_db } : {}),
+        ...(isNum(input.min_silence) ? { minSilence: input.min_silence } : {}),
+      });
       // Pre-map each silence's overlap with the clip's trimmed range onto the
       // timeline so the model cuts on ready numbers.
       const toTimeline = (t: number) =>
         round2(clip!.start + (clamp(t, clip!.in, clip!.out) - clip!.in) / speed);
       return {
-        silences: body.silences.map((x) => ({
+        silences: silences.map((x) => ({
           start: round2(x.start),
           end: round2(x.end),
           duration: round2(x.duration),
@@ -309,7 +282,7 @@ export async function runAiTool(
               },
             }
           : {}),
-        ...(body.silences.length === 0
+        ...(silences.length === 0
           ? { note: "No silence at these settings — a higher threshold_db or shorter min_silence hears more." }
           : {}),
       };
@@ -520,6 +493,139 @@ export async function runAiTool(
       // invariant: extending a clip pushes the following run right.
       s.setClipTrim(clip.id, nextIn, nextOut);
       return { in: nextIn, out: nextOut, len: Math.round((nextOut - nextIn) * 100) / 100 };
+    }
+
+    case "refine_speech_cuts": {
+      const projectId = s.projectId;
+      if (!projectId) throw new ToolError("No project open.");
+      const ids = Array.isArray(input.clip_ids) ? input.clip_ids.map(String) : [];
+      if (ids.length === 0)
+        throw new ToolError("clip_ids is required — the recut clips whose edges are speech cuts.");
+      const chosen = ids.map((id) => requireItem(s.clips, id, "video clip"));
+
+      // Every trim is planned before anything is written, so the re-lay below
+      // can preserve the spacing the cut already has.
+      const plans = new Map<string, { in: number; out: number }>();
+      const flags = new Map<string, string[]>();
+      const flag = (id: string, note: string) =>
+        flags.set(id, [...(flags.get(id) ?? []), note]);
+      await Promise.all(
+        chosen.map(async (clip) => {
+          const asset = s.assets.find((a) => a.id === clip.assetId);
+          if (!asset || asset.type === "image" || !(asset.duration > 0)) {
+            flag(clip.id, "no audio-bearing source — skipped");
+            return;
+          }
+          // One scan spanning both edges when the clip is short, else one
+          // window around each. Fine pauses matter here, so the scan listens
+          // for stretches down to a single breath.
+          const win = REACH + 0.6;
+          const ranges: [number, number][] =
+            clip.out - clip.in <= 2 * win
+              ? [[clip.in - win, clip.out + win]]
+              : [
+                  [clip.in - win, clip.in + win],
+                  [clip.out - win, clip.out + win],
+                ];
+          const spans: SilenceSpan[] = (
+            await Promise.all(
+              ranges.map(([a, b]) =>
+                fetchSilences(projectId, asset, {
+                  from: clamp(a, 0, asset.duration),
+                  to: clamp(b, 0, asset.duration),
+                  thresholdDb: -30,
+                  minSilence: BREATH,
+                })
+              )
+            )
+          ).flat();
+          const inEdge = refineEdge(spans, clip.in, "in");
+          const outEdge = refineEdge(spans, clip.out, "out");
+          if (!inEdge.pause)
+            flag(clip.id, "no pause within reach of the in edge — speech runs continuously; left alone");
+          if (!outEdge.pause)
+            flag(clip.id, "no pause within reach of the out edge — speech runs continuously; left alone");
+          const nextIn = clamp(inEdge.t, 0, asset.duration);
+          const nextOut = clamp(outEdge.t, 0, asset.duration);
+          if (nextOut - nextIn >= 0.15) plans.set(clip.id, { in: nextIn, out: nextOut });
+          else flag(clip.id, "refining would collapse the clip — left as cut");
+        })
+      );
+
+      // Two sides of one removed stretch never cross back into each other's
+      // material, so no word plays twice across a joint.
+      const spd = (c: VideoClip) => (c.speed && c.speed > 0 ? c.speed : 1);
+      const rows = new Map<number, VideoClip[]>();
+      for (const c of s.clips) rows.set(c.track, [...(rows.get(c.track) ?? []), c]);
+      for (const row of rows.values()) {
+        row.sort((a, b) => a.start - b.start);
+        for (let i = 0; i + 1 < row.length; i++) {
+          const a = row[i];
+          const b = row[i + 1];
+          if (a.assetId !== b.assetId || a.out > b.in + 1e-3) continue;
+          const pa = plans.get(a.id);
+          const pb = plans.get(b.id);
+          if ((pa?.out ?? a.out) <= (pb?.in ?? b.in) + 1e-6) continue;
+          if (pa) pa.out = a.out;
+          if (pb) pb.in = b.in;
+          for (const c of [a, b])
+            if (plans.has(c.id)) flag(c.id, "its joint's edges would cross the removed stretch — that edge left as cut");
+        }
+      }
+
+      // Drop no-op plans so the report says which edges already sat right.
+      for (const [id, plan] of [...plans]) {
+        const c = chosen.find((x) => x.id === id)!;
+        if (Math.abs(plan.in - c.in) < 0.005 && Math.abs(plan.out - c.out) < 0.005)
+          plans.delete(id);
+      }
+
+      // One write for the whole call: each planned clip takes its new trim in
+      // place, and every clip after it on the track shifts by the length
+      // change — butted joints stay butted, deliberate beats keep their width,
+      // and a tightened clip closes up instead of opening a gap.
+      if (plans.size > 0) {
+        s.pushHistory();
+        const patches: { id: string; patch: Partial<VideoClip> }[] = [];
+        for (const row of rows.values()) {
+          let delta = 0;
+          for (const c of row) {
+            const plan = plans.get(c.id);
+            const patch: Partial<VideoClip> = {};
+            if (Math.abs(delta) > 1e-6) patch.start = Math.max(0, c.start + delta);
+            if (plan) {
+              patch.in = plan.in;
+              patch.out = plan.out;
+              delta += (plan.out - plan.in - (c.out - c.in)) / spd(c);
+            }
+            if (plan || patch.start !== undefined) patches.push({ id: c.id, patch });
+          }
+        }
+        useEditor.getState().updateClipsTransient(patches);
+        useEditor.getState().sortClips();
+      }
+
+      return {
+        refined: chosen.map((clip) => {
+          const plan = plans.get(clip.id);
+          const notes = flags.get(clip.id);
+          return {
+            clipId: clip.id,
+            ...(plan
+              ? {
+                  in: { from: round2(clip.in), to: round2(plan.in) },
+                  out: { from: round2(clip.out), to: round2(plan.out) },
+                }
+              : {}),
+            ...(notes
+              ? { notes }
+              : plan
+                ? {}
+                : { notes: ["edges already sit in their pauses"] }),
+          };
+        }),
+        note: `Each moved edge sits ~${BREATH}s inside a real pause; clip spacing is preserved. Listen at any flagged edge.`,
+      };
     }
 
     case "set_clip_muted": {
@@ -1984,6 +2090,47 @@ function resolveWatchRange(
   if (to !== undefined && to <= from)
     throw new ToolError("from/to describe an empty range of the source.");
   return { projectId, asset, clip, speed, from, to };
+}
+
+/** Silent stretches of a source range, in source seconds — the engine's
+ * ffmpeg scan locally, the browser's RMS fold in cloud mode. Shared by
+ * detect_silence (the model's ears) and refine_speech_cuts (the mechanical
+ * re-trim). */
+async function fetchSilences(
+  projectId: string,
+  asset: MediaAsset,
+  opts: { from: number; to?: number; thresholdDb?: number; minSilence?: number }
+): Promise<{ start: number; end: number; duration: number }[]> {
+  // Same defaults and clamps as the engine's silence handler.
+  const thresholdDb = clamp(opts.thresholdDb ?? -30, -90, 0);
+  const minSilence = clamp(opts.minSilence ?? 0.35, 0.05, 10);
+  if (getBackend().kind === "cloud") {
+    return detectSilenceClientSide(asset.url, {
+      from: opts.from,
+      ...(opts.to !== undefined ? { to: opts.to } : {}),
+      thresholdDb,
+      minSilence,
+    }).catch((e) => {
+      throw new ToolError(e instanceof Error ? e.message : "Could not scan for silence.");
+    });
+  }
+  const res = await apiFetch(`/api/cut/projects/${projectId}/silence`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      file: asset.fileName,
+      from: opts.from,
+      ...(opts.to !== undefined ? { to: opts.to } : {}),
+      threshold_db: thresholdDb,
+      min_silence: minSilence,
+    }),
+  });
+  const body = await apiJson<{
+    silences: { start: number; end: number; duration: number }[];
+    error?: string;
+  }>(res);
+  if (!res.ok) throw new ToolError(body.error ?? "Could not scan for silence.");
+  return body.silences;
 }
 
 /** Pull a source's audio track off (video and audio alike) and inline it for
