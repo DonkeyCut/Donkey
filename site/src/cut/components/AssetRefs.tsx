@@ -130,13 +130,48 @@ export function RefHandlePill({ token, className }: { token: string; className?:
   );
 }
 
-/** Hover peek: a larger look at the ref, floated above the anchor. */
+/** Hover peek: a larger look at the ref, floated beside the anchor. `side` is
+ * a preference — on open the peek measures the panel it sits in (nearest
+ * clipping ancestor, clamped to the window) and flips below or right-aligns
+ * as needed to stay fully visible. */
 function RefPeek({ item, side = "top" }: { item: AssetRef; side?: "top" | "bottom" }) {
+  const peekEl = useRef<HTMLDivElement>(null);
+  const [place, setPlace] = useState({ side, alignRight: false });
+  useLayoutEffect(() => {
+    const peek = peekEl.current;
+    const anchor = peek?.parentElement;
+    if (!peek || !anchor) return;
+    let clip: HTMLElement | null = anchor.parentElement;
+    while (
+      clip &&
+      getComputedStyle(clip).overflowX === "visible" &&
+      getComputedStyle(clip).overflowY === "visible"
+    )
+      clip = clip.parentElement;
+    const bound = (clip ?? document.documentElement).getBoundingClientRect();
+    const a = anchor.getBoundingClientRect();
+    const top = Math.max(bound.top, 0);
+    const bottom = Math.min(bound.bottom, window.innerHeight);
+    const right = Math.min(bound.right, window.innerWidth) - 8;
+    const left = Math.max(bound.left, 0) + 8;
+    const h = peek.offsetHeight + 6;
+    const fitsAbove = a.top - top >= h;
+    const fitsBelow = bottom - a.bottom >= h;
+    setPlace({
+      side:
+        side === "top" ? (fitsAbove || !fitsBelow ? "top" : "bottom")
+        : fitsBelow || !fitsAbove ? "bottom"
+        : "top",
+      alignRight: a.left + peek.offsetWidth > right && a.right - peek.offsetWidth >= left,
+    });
+  }, [side]);
   return (
     <div
+      ref={peekEl}
       className={cn(
-        "ref-peek pointer-events-none absolute left-0 z-50 w-44 overflow-hidden rounded-xl shadow-xl",
-        side === "top" ? "bottom-full mb-1.5" : "top-full mt-1.5"
+        "ref-peek pointer-events-none absolute z-50 w-44 overflow-hidden rounded-xl shadow-xl",
+        place.side === "top" ? "bottom-full mb-1.5" : "top-full mt-1.5",
+        place.alignRight ? "right-0" : "left-0"
       )}
     >
       {item.kind === "video" && item.t === undefined ? (
