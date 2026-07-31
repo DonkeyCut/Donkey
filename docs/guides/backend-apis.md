@@ -22,6 +22,11 @@ Inside the handler, `request.donkey` carries who the caller is. Its `method`
 field says how they authenticated — by session cookie, API key, or dev bypass —
 and the handler branches on that, never on the path.
 
+A route that requires more than being signed in declares the role in the same
+wrapper: `withSuperUser(handler)` rejects everyone else with a plain 403 before
+the handler runs. Roles are a typed set on the auth options, so a handler never
+hand-rolls its own role check.
+
 Better Auth is the login layer, mounted at `/api/auth/[...all]` and configured
 in one place. The only interactive login is Google OAuth; email-and-password
 stays off unless the product deliberately adds another method. Better Auth's own

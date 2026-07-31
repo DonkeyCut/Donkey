@@ -15,11 +15,18 @@ export type DonkeyAuthContext = {
   apiKeyId: string | null;
 };
 
+// The known roles a route can require beyond being signed in. Add new roles
+// here so every requirement stays part of this one typed set.
+export type DonkeyRole = "SUPER_USER";
+
 export type DonkeyAuthOptions = {
   // Routes are session-only by default. Set true to also accept a Vision API
   // key as a bearer token. This is the typed allowlist for "which routes
   // support API keys" — no path string matching.
   allowApiKey?: boolean;
+  // When set, the authenticated user must hold this role or the request is
+  // rejected with 403 before the handler runs.
+  role?: DonkeyRole;
 };
 
 export type DonkeyAuthenticatedRequest = NextRequest & {
@@ -47,6 +54,11 @@ export function unauthorizedResponse() {
 // descriptive not-found errors.
 export function notFoundResponse() {
   return NextResponse.json({ error: "Not found" }, { status: 404 });
+}
+
+// Generic 403 for a signed-in caller without the role a route requires.
+export function forbiddenResponse() {
+  return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 }
 
 export type DonkeyAuthHandler<
@@ -195,12 +207,31 @@ export function withDonkeyAuth<
       );
     }
 
+    if (
+      options.role === "SUPER_USER" &&
+      !(await isDonkeySuperUser(authContext.userId))
+    ) {
+      return forbiddenResponse();
+    }
+
     const authenticatedRequest = Object.assign(request, {
       donkey: authContext,
     }) as TReq;
 
     return handler(authenticatedRequest, ...args);
   };
+}
+
+// Superuser-only route: withDonkeyAuth with the SUPER_USER role required.
+//   export const POST = withSuperUser(async (request) => { ... });
+export function withSuperUser<
+  TReq extends DonkeyAuthenticatedRequest = DonkeyAuthenticatedRequest,
+  TArgs extends unknown[] = [],
+>(
+  handler: DonkeyAuthHandler<TReq, TArgs>,
+  options: Omit<DonkeyAuthOptions, "role"> = {},
+) {
+  return withDonkeyAuth(handler, { ...options, role: "SUPER_USER" });
 }
 
 export async function isDonkeySuperUser(userId: string) {

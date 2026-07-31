@@ -4,11 +4,7 @@ import { z } from "zod";
 import { creditMicrosToString, creditStringToMicros } from "@/lib/credits/amounts";
 import { getCreditBalance, grantCredits } from "@/lib/credits/inference";
 import { maxCreditGrantDollars } from "@/lib/credits/top-up";
-import {
-  isDonkeySuperUser,
-  notFoundResponse,
-  withDonkeyAuth,
-} from "@/lib/donkey-api-auth";
+import { notFoundResponse, withSuperUser } from "@/lib/donkey-api-auth";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -29,17 +25,7 @@ const creditGrantRequestSchema = z
     message: "Provide a userId or an email.",
   });
 
-export const POST = withDonkeyAuth(async (request) => {
-  if (!(await isDonkeySuperUser(request.donkey.userId))) {
-    return NextResponse.json(
-      {
-        error: "Forbidden",
-        message: "Only super users can grant credits.",
-      },
-      { status: 403 },
-    );
-  }
-
+export const POST = withSuperUser(async (request) => {
   const parsed = creditGrantRequestSchema.safeParse(await request.json());
   if (!parsed.success) {
     return NextResponse.json(
