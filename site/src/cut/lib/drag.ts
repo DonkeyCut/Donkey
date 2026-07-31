@@ -25,6 +25,9 @@ export function isDragActive() {
 
 /** Pointer-drag helper: tracks deltas from pointerdown until release. */
 export function startDrag(e: React.PointerEvent, opts: DragOpts) {
+  // Primary button only: a right-click opens the context menu, which swallows
+  // the pointerup and would leave the drag armed after the menu closes.
+  if (e.button !== 0) return;
   e.preventDefault();
   e.stopPropagation();
   // preventDefault also suppresses the browser's default focus move, so end
