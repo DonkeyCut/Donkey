@@ -13,7 +13,6 @@ import {
 
 import { CommunityPs } from "./_components/CommunityPs";
 import { DonkeyMark } from "./_components/DonkeyMark";
-import { DONKEY_LOGO_DATA_URI } from "./_components/logo";
 
 // The one email a new account gets: a personal note from David. Sent by
 // src/lib/email/send-welcome.ts; preview with `npm run email:dev`. The credit
@@ -26,16 +25,12 @@ type WelcomeEmailProps = {
   name: string;
   credits: string;
   unsubscribeUrl: string;
-  // `cid:` reference in real sends (the sender attaches the bytes); the data
-  // URI in preview.
-  logoSrc: string;
 };
 
 export default function WelcomeEmail({
   name,
   credits,
   unsubscribeUrl,
-  logoSrc,
 }: WelcomeEmailProps) {
   return (
     <Html>
@@ -47,7 +42,7 @@ export default function WelcomeEmail({
       <Tailwind config={{ presets: [pixelBasedPreset] }}>
         <Body className="bg-white font-sans text-[#0F0E0D]">
           <Container className="mx-auto max-w-[520px] px-6 py-12">
-            <DonkeyMark src={logoSrc} />
+            <DonkeyMark />
             <Text className="text-[15px] leading-relaxed">Hey {name},</Text>
             <Text className="text-[15px] leading-relaxed">
               Thanks for signing up.
@@ -109,5 +104,4 @@ WelcomeEmail.PreviewProps = {
   name: "Ada",
   credits: "3",
   unsubscribeUrl: "https://donkeycut.com/unsubscribe?token=preview",
-  logoSrc: DONKEY_LOGO_DATA_URI,
 } satisfies WelcomeEmailProps;

@@ -56,7 +56,6 @@ export async function sendWelcomeEmail(user: EmailUser): Promise<void> {
       subject: "Thanks for signing up ❤️",
       react: WelcomeEmail({
         credits: signupAppCredits,
-        logoSrc: `cid:${DONKEY_LOGO_CID}`,
         name: firstName,
         unsubscribeUrl: unsubscribePageUrl(user.id),
       }),
