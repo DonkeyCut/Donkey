@@ -28,7 +28,7 @@ import type {
 import type { VideoProject } from "./genvideo/types";
 import { fillSlot } from "./genvideo/fillSlot";
 import { apiFetch, apiJson, getBackend, hasLocalCompute } from "./backend";
-import { fetchSignedMediaUrls } from "./backend/cloud";
+import { fetchSignedMediaUrls, pinDocBase } from "./backend/cloud";
 import { markSignedBatch } from "./mediaLinks";
 import {
   dropCachedDoc,
@@ -117,6 +117,9 @@ export interface EditorState {
   loadEpoch: number;
   loadError: string | null;
   saveState: SaveState;
+  /** Raised when an open resumed unsaved edits from the dirty disk snapshot:
+   * autosave sees it, clears it, and pushes the resumed document up. */
+  resumePush: boolean;
   /** Read-only shared view: the set wrapper strips doc-mutating writes, so
    * every edit path is inert by construction. View state stays live. */
   readOnly: boolean;
@@ -836,6 +839,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
     loadEpoch: 0,
     loadError: null,
     saveState: "saved",
+    resumePush: false,
     readOnly: false,
     sharedFeatures: null,
 
@@ -890,6 +894,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
         loaded: false,
         loadError: null,
         saveState: "saved",
+        resumePush: false,
         assets: [],
         clips: [],
         audioClips: [],
@@ -1013,11 +1018,15 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       // instead of a round trip later. Whether it is still on screen when the
       // live document arrives decides how that one is applied.
       let paintedFromCache = false;
+      // The painted snapshot held unsaved edits: they resume as the document,
+      // and autosave pushes them back up.
+      let paintedDirty = false;
+      let dirtyBase: string | null = null;
       try {
         const [cached, ui] = inPlace
           ? [null, null]
           : await Promise.all([readCachedDoc(id), uiReq]);
-        const stored = cached?.value;
+        const stored = cached?.doc;
         const openable = () => !landed && get().projectId === id && !get().loaded;
         if (stored && ui && openable()) {
           const stale = stored.assets ?? [];
@@ -1038,6 +1047,15 @@ export const useEditor = create<EditorState>((baseSet, get) => {
             // arrives: these links do expire.
             markSignedBatch(id, links?.expiresAt ?? null);
             paintedFromCache = true;
+            if (cached?.dirty && !get().readOnly) {
+              paintedDirty = true;
+              dirtyBase = cached.baseVersion;
+              // The push must carry the version these edits were made on top
+              // of, so a server copy that moved on answers 409 instead of
+              // being overwritten. Pinned now, before any save can dispatch.
+              if (getBackend().kind === "cloud") pinDocBase(id, dirtyBase);
+              set({ saveState: "dirty", resumePush: true });
+            }
           }
         }
       } catch {
@@ -1052,14 +1070,14 @@ export const useEditor = create<EditorState>((baseSet, get) => {
           // already on screen. Any other status is a server having a bad
           // moment, which is the same case as not reaching it at all.
           if ([401, 403, 404].includes(res.status)) {
+            pinDocBase(id, null);
             dropCachedDoc(id);
-            set({ loaded: false, loadError: "This project no longer exists." });
+            set({ loaded: false, loadError: "This project no longer exists.", resumePush: false });
             return;
           }
           throw new Error("This project could not be loaded.");
         }
         const doc = (await res.json()) as ProjectDoc;
-        writeCachedDoc(id, doc);
         const assets: MediaAsset[] = doc.assets.map((a) => ({
           ...a,
           url: mediaUrl(id, a.fileName),
@@ -1075,17 +1093,35 @@ export const useEditor = create<EditorState>((baseSet, get) => {
         } else {
           markSignedBatch(id, null);
         }
-        // The snapshot is on screen and has already been edited on top of —
-        // an undoable edit, or a project-level one like a rename that autosave
-        // has already marked dirty. Replacing it would throw that work away,
-        // so only the media links go in; the edits don't touch them and they
-        // do expire. The edits save as usual, and a stored copy that really
-        // has moved on answers that save with a conflict, which reloads
-        // through this same path.
-        if (paintedFromCache && (history.length > 0 || get().saveState !== "saved")) {
+        // A dirty snapshot resumes only onto the version its edits were made
+        // on top of. The server having moved past that base is a conflict,
+        // and the server wins it the way it wins any conflict — even over
+        // edits made in the seconds since the resume painted, which were
+        // built on the losing base.
+        const serverVersion = res.headers.get("x-cut-doc-version");
+        const staleDirty =
+          paintedDirty && getBackend().kind === "cloud" && dirtyBase !== serverVersion;
+        if (staleDirty) {
+          pinDocBase(id, null);
+          set({ saveState: "saved", resumePush: false });
+        }
+        // The snapshot is on screen and is the newer document — resumed
+        // unsaved work, an undoable edit made since it painted, or a
+        // project-level one like a rename that autosave has already marked
+        // dirty. Replacing it would throw that work away, so only the media
+        // links go in; the edits don't touch them and they do expire. The
+        // edits save as usual, and a stored copy that really has moved on
+        // answers that save with a conflict, which reloads through this same
+        // path.
+        if (
+          paintedFromCache &&
+          !staleDirty &&
+          (paintedDirty || history.length > 0 || get().saveState !== "saved")
+        ) {
           get().applyMediaUrls(new Map(assets.map((a) => [a.fileName, a.url])));
           return;
         }
+        writeCachedDoc(id, doc);
         hydrate(doc, assets, ui);
       } catch (err) {
         // Couldn't reach the server. A snapshot already on screen is the

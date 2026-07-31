@@ -14,6 +14,44 @@ const cloudPath = (path: string) => path.replace(/^\/api\/cut\//, "/api/cut-clou
 // keep the engine's unversioned shapes.
 const docVersions = new Map<string, string>();
 
+// Versions only grow, so the map keeps the newest it has seen. A GET response
+// that lands after a save carries the version from before it — writing that
+// back would make the next PUT report a conflict against this same session.
+function noteVersion(projectId: string, v: string | number | undefined | null) {
+  if (v === undefined || v === null) return;
+  const next = Number(v);
+  const known = Number(docVersions.get(projectId));
+  if (!Number.isFinite(next)) return;
+  if (!Number.isFinite(known) || next > known) docVersions.set(projectId, String(next));
+}
+
+/** The doc version the transport last saw acknowledged for a project — what a
+ * dirty snapshot records as the base its edits were made on top of. */
+export function knownDocVersion(projectId: string): string | null {
+  return docVersions.get(projectId) ?? null;
+}
+
+// A dirty snapshot resumed from disk was edited on top of a specific version.
+// Its push must carry that base — not whatever version the open's own GET
+// just reported — so a server copy that moved on answers 409 instead of being
+// silently overwritten. The pin holds until a PUT settles (ok or conflict);
+// transient failures keep it, so the retry still carries the base.
+const basePins = new Map<string, string>();
+
+export function pinDocBase(projectId: string, version: string | null) {
+  if (version === null) basePins.delete(projectId);
+  else basePins.set(projectId, version);
+}
+
+// One doc PUT on the wire per project: each waits for the one before it and
+// reads the version at dispatch. Two saves in flight would carry the same ?v=
+// and the later one would 409 against its own session's write.
+const putChains = new Map<string, Promise<unknown>>();
+
+// Doc GETs in flight, so a PUT racing the open never goes out unversioned —
+// an unversioned PUT is first-save semantics and would apply unconditionally.
+const docGets = new Map<string, Promise<void>>();
+
 // /projects/:id only — /projects/folders is the folder collection, not a doc.
 const PROJECT_DOC = /^\/api\/cut\/projects\/(?!folders$)([^/?]+)$/;
 
@@ -24,21 +62,40 @@ async function cloudFetch(path: string, init?: RequestInit): Promise<Response> {
   const projectId = decodeURIComponent(doc[1]);
 
   if (method === "GET") {
-    const res = await fetch(cloudPath(path), init);
-    const version = res.headers.get("x-cut-doc-version");
-    if (res.ok && version) docVersions.set(projectId, version);
-    return res;
+    const req = fetch(cloudPath(path), init);
+    const tracked = req.then(
+      (res) => {
+        if (res.ok) noteVersion(projectId, res.headers.get("x-cut-doc-version"));
+      },
+      () => {}
+    );
+    docGets.set(projectId, tracked);
+    void tracked.then(() => {
+      if (docGets.get(projectId) === tracked) docGets.delete(projectId);
+    });
+    return req;
   }
 
-  // A PUT with no known version is the first save; it succeeds unconditionally.
-  const v = docVersions.get(projectId);
+  const prev = putChains.get(projectId) ?? Promise.resolve();
+  const run = prev.then(() => putDoc(projectId, path, init));
+  // The chain survives a failed link; the failure is the caller's to handle.
+  putChains.set(projectId, run.catch(() => undefined));
+  return run;
+}
+
+async function putDoc(projectId: string, path: string, init?: RequestInit): Promise<Response> {
+  await docGets.get(projectId);
+  // A pinned base outranks the map; with neither, an unversioned PUT is the
+  // first save and succeeds unconditionally.
+  const v = basePins.get(projectId) ?? docVersions.get(projectId);
   const res = await fetch(cloudPath(path) + (v ? `?v=${encodeURIComponent(v)}` : ""), init);
+  if (res.ok || res.status === 409) basePins.delete(projectId);
   if (res.status === 409) {
     const body = (await res
       .clone()
       .json()
       .catch(() => null)) as { doc?: unknown; version?: number | string } | null;
-    if (body?.version !== undefined) docVersions.set(projectId, String(body.version));
+    noteVersion(projectId, body?.version);
     window.dispatchEvent(
       new CustomEvent("cut-cloud-doc-conflict", {
         detail: { projectId, doc: body?.doc, version: body?.version },
@@ -49,7 +106,7 @@ async function cloudFetch(path: string, init?: RequestInit): Promise<Response> {
       .clone()
       .json()
       .catch(() => null)) as { version?: number | string } | null;
-    if (body?.version !== undefined) docVersions.set(projectId, String(body.version));
+    noteVersion(projectId, body?.version);
   }
   return res;
 }

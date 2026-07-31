@@ -11,8 +11,9 @@ import {
   releaseCutMode,
   subscribeCutMode,
 } from "@/cut/lib/backend";
+import { knownDocVersion } from "@/cut/lib/backend/cloud";
 import { loadedDocVersion } from "@/cut/lib/backend/shared";
-import { writeCachedDoc } from "@/cut/lib/docCache";
+import { flushCachedDocWrites, writeCachedDoc, writeCachedDocDirty } from "@/cut/lib/docCache";
 import {
   refreshShareCard,
   refreshShareLadder,
@@ -408,11 +409,39 @@ export function Editor({
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => void save(), 2000 * 2 ** (failures - 1));
     };
+    // One save on the wire at a time: an edit landing mid-save queues one
+    // trailing save that captures the state as it stands then, instead of
+    // racing a second PUT alongside the first — the engine would apply the
+    // two in whichever order they arrive, and the cloud would answer the
+    // second with a conflict against this same session's write.
+    let inFlight = false;
+    let queued = false;
+    // Bumped on every edit. A save that succeeds only rewrites the disk
+    // snapshot clean when no edit landed while it was on the wire — a newer
+    // dirty record must not be overwritten by the older doc the save carried.
+    let editSeq = 0;
     const save = async () => {
+      if (inFlight) {
+        queued = true;
+        return;
+      }
+      inFlight = true;
+      try {
+        await putDoc();
+      } finally {
+        inFlight = false;
+        if (queued) {
+          queued = false;
+          void save();
+        }
+      }
+    };
+    const putDoc = async () => {
       const s = useEditor.getState();
       if (!s.loaded || s.projectId !== projectId) return;
       s.setSaveState("saving");
       const doc = serializeDoc(s);
+      const seqAtSend = editSeq;
       try {
         const res = await apiFetch(`/api/cut/projects/${projectId}`, {
           method: "PUT",
@@ -424,7 +453,7 @@ export function Editor({
           useEditor.getState().setSaveState("saved");
           // The snapshot the next open paints from is whatever this browser
           // last put on the server, so it tracks every save.
-          writeCachedDoc(projectId, doc);
+          if (editSeq === seqAtSend) writeCachedDoc(projectId, doc);
           return;
         }
         useEditor.getState().setSaveState("error");
@@ -463,6 +492,15 @@ export function Editor({
         assetsChanged(s.assets);
         return;
       }
+      // The open resumed unsaved edits from the dirty disk snapshot: the
+      // document on screen is already ahead of the server, so push it up
+      // without waiting for a fresh edit.
+      if (s.resumePush) {
+        useEditor.setState({ resumePush: false });
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => void save(), 800);
+        return;
+      }
       // Evaluated every tick (not short-circuited) so the asset baseline
       // advances even when another slice triggered this save.
       const assetsDirty = assetsChanged(s.assets);
@@ -493,13 +531,24 @@ export function Editor({
       if (!changed) return;
       last = serializeDoc(s);
       lastName = s.projectName;
+      editSeq++;
+      // Every edit lands on disk marked dirty before it lands on the server,
+      // with the version it was edited on top of: a crash or a closed tab
+      // inside the debounce window resumes on the next open instead of
+      // losing the edit.
+      writeCachedDocDirty(projectId, last, knownDocVersion(projectId));
       if (s.saveState !== "saving") s.setSaveState("dirty");
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => void save(), 800);
     });
+    // Coalesced dirty writes land now or not at all when the page goes away.
+    const onPageHide = () => flushCachedDocWrites();
+    window.addEventListener("pagehide", onPageHide);
     return () => {
       unsub();
       if (timer) clearTimeout(timer);
+      window.removeEventListener("pagehide", onPageHide);
+      flushCachedDocWrites();
     };
   }, [projectId, viewer]);
 
