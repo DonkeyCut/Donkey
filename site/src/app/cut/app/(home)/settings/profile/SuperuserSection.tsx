@@ -232,9 +232,8 @@ export function SuperuserSection() {
           <DialogHeader>
             <DialogTitle>Delete {target}?</DialogTitle>
             <DialogDescription>
-              This permanently deletes the account and all of its data:
-              projects, media, library, chats, credits, and billing. Type the
-              email to confirm.
+              This permanently deletes the account and all of its data. Type
+              to confirm.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
