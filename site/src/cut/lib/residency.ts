@@ -131,7 +131,15 @@ export function projectBackend(projectId: string): Promise<CutBackend> {
  * exists, it is the user's, and nothing can open it until the app is back. */
 export type ProjectPlacement = { mode: CutMode; reachable: boolean };
 
+/** Ids a reachable engine answered 404 for. That answer is definitive — the
+ * engine knows its own inventory and a project never changes residency in
+ * place — so it is asked once per id per page load rather than on every
+ * open and every background job. An engine that couldn't be reached settles
+ * nothing and stays out of this set. */
+const knownCloud = new Set<string>();
+
 export async function resolveProjectPlacement(projectId: string): Promise<ProjectPlacement> {
+  if (knownCloud.has(projectId)) return { mode: "cloud", reachable: true };
   if (!servedFromEngine() && !engineOrigin()) {
     // No engine to ask. A project this browser last saw on this Mac is still
     // that project — saying "cloud" would send the editor to fetch a document
@@ -146,6 +154,7 @@ export async function resolveProjectPlacement(projectId: string): Promise<Projec
     // the status. The doc itself is fetched a moment later by the load.
     const res = await localBackend.fetch(`/api/cut/projects/${projectId}`, { method: "HEAD" });
     if (res.ok) return { mode: "local", reachable: true };
+    if (res.status === 404) knownCloud.add(projectId);
   } catch {
     // The engine dropped since the gate probed it; the cloud copy (if any)
     // is the only reachable one.
