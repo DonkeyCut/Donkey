@@ -48,13 +48,24 @@
     { "pattern": "worker.donkeycut.com", "custom_domain": true }
   ],
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CutRenderWorker"] }],
-  // Share-copy jobs drain serially: one message per batch, one batch in
-  // flight, so a burst of copy requests can't stampede R2 or the database.
-  // Create the queue once: npx wrangler queues create donkey-cut-copy
+  // Share-copy jobs and the site's generic async jobs drain serially: one
+  // message per batch, one batch in flight, so a burst can't stampede R2 or
+  // the database. Create each queue once:
+  //   npx wrangler queues create donkey-cut-copy
+  //   npx wrangler queues create donkey-jobs
+  // The jobs consumer needs JOBS_EXECUTE_URL and JOBS_EXECUTE_SECRET set with
+  // `wrangler secret put`, mirroring the CUT_COPY_EXECUTE_* pair.
   "queues": {
     "consumers": [
       {
         "queue": "donkey-cut-copy",
+        "max_batch_size": 1,
+        "max_concurrency": 1,
+        "max_retries": 10,
+        "retry_delay": 30
+      },
+      {
+        "queue": "donkey-jobs",
         "max_batch_size": 1,
         "max_concurrency": 1,
         "max_retries": 10,
