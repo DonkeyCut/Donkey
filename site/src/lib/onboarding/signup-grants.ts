@@ -2,28 +2,35 @@ import { seedStarterProject } from "@/cut/server/cloud/starter";
 import { creditStringToMicros } from "@/lib/credits/amounts";
 import { grantCredits } from "@/lib/credits/inference";
 import { grantVisionCalls } from "@/lib/credits/vision-grants";
-import { signupAppCredits } from "@/lib/onboarding/sequence";
+import { type EmailUser } from "@/lib/email/resend";
+import { sendWelcomeEmail } from "@/lib/email/send-welcome";
+import { syncResendContact } from "@/lib/email/sync-contact";
+import {
+  signupAppCredits,
+  signupVisionFreeCalls,
+} from "@/lib/onboarding/sequence";
 
-// Single source of truth for what a new account starts with. All three steps
-// are idempotent and keyed to the user, so provisioning can run more than once
-// (e.g. a retried signup) without double-granting or double-seeding. The credit
-// amount itself is in sequence.ts, which the welcome slides can import too.
-export const signupVisionFreeCalls = 100; // lifetime free Vision API calls
-
-export async function provisionSignupGrants(userId: string): Promise<void> {
+// Single source of truth for what a new account starts with. All steps are
+// idempotent and keyed to the user, so provisioning can run more than once
+// (e.g. a retried signup) without double-granting, double-seeding, or
+// double-sending. The grant amounts are in sequence.ts, which the welcome
+// slides and the welcome email import too.
+export async function provisionSignupGrants(user: EmailUser): Promise<void> {
   // Settle the steps independently: one failing must not block the others,
   // and signup itself must never fail because a bonus grant hiccupped.
   const results = await Promise.allSettled([
-    grantSignupAppCredits(userId),
-    grantSignupVisionCalls(userId),
-    seedStarterProject(userId),
+    grantSignupAppCredits(user.id),
+    grantSignupVisionCalls(user.id),
+    seedStarterProject(user.id),
+    sendWelcomeEmail(user),
+    syncResendContact(user),
   ]);
 
   for (const result of results) {
     if (result.status === "rejected") {
       console.error("[signup-grants] failed to provision a signup grant", {
         reason: result.reason,
-        userId,
+        userId: user.id,
       });
     }
   }

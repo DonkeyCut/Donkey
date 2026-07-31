@@ -1,0 +1,16 @@
+// Per-user email posture: whether the one-time welcome email has gone out, and
+// whether the account has opted out of non-essential email. Transactional and
+// security email ignores the opt-out; any other send must check it first
+// (src/lib/email/unsubscribe.ts).
+
+model UserEmailSettings {
+  userId                  String    @id
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Claimed before sending, so a retried signup can never double-send.
+  welcomeEmailSentAt      DateTime?
+  // Null means subscribed. Set by the one-click endpoint, the /unsubscribe
+  // page, the settings toggle, or the Resend webhook.
+  marketingUnsubscribedAt DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+}
