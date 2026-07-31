@@ -36,6 +36,26 @@ function describeFields(value: unknown): string {
     .join(" · ");
 }
 
+function deletedSentence(
+  email: string,
+  result: Record<string, unknown> | undefined,
+): string {
+  return (
+    `Deleted ${email} — ${String(result?.projects ?? 0)} project(s), ` +
+    `${String(result?.libraryAssets ?? 0)} library asset(s), ` +
+    `${String(result?.r2Objects ?? 0)} stored object(s).`
+  );
+}
+
+// A finished delete-user job reads as the same sentence as the inline status;
+// other kinds (and unfinished jobs) keep the flattened raw fields.
+function doneSummary(item: AsyncJobListItem): string | null {
+  if (item.kind !== "delete-user" || item.state !== "done") return null;
+  const payload = item.payload as { email?: unknown } | null;
+  const email = typeof payload?.email === "string" ? payload.email : "";
+  return deletedSentence(email, item.result);
+}
+
 function formatWhen(iso: string): string {
   const then = new Date(iso);
   const mins = Math.floor((Date.now() - then.getTime()) / 60000);
@@ -133,7 +153,7 @@ export function SuperuserSection() {
             onClick={openConfirm}
             variant="destructive"
           >
-            Delete user…
+            Delete User
           </Button>
         </div>
 
@@ -142,10 +162,7 @@ export function SuperuserSection() {
         ) : null}
         {state === "done" ? (
           <p className="text-sm text-muted-foreground">
-            Deleted {jobEmail} — {String(job.data?.result?.projects ?? 0)}{" "}
-            project(s), {String(job.data?.result?.libraryAssets ?? 0)} library
-            asset(s), {String(job.data?.result?.r2Objects ?? 0)} stored
-            object(s).
+            {deletedSentence(jobEmail, job.data?.result)}
           </p>
         ) : null}
         {state === "error" ? (
@@ -180,16 +197,22 @@ export function SuperuserSection() {
                       {formatWhen(item.createdAt)}
                     </span>
                   </div>
-                  {describeFields(item.payload) ? (
-                    <p className="truncate text-muted-foreground">
-                      {describeFields(item.payload)}
-                    </p>
-                  ) : null}
-                  {item.state === "done" && describeFields(item.result) ? (
-                    <p className="truncate text-muted-foreground">
-                      {describeFields(item.result)}
-                    </p>
-                  ) : null}
+                  {doneSummary(item) ? (
+                    <p className="text-muted-foreground">{doneSummary(item)}</p>
+                  ) : (
+                    <>
+                      {describeFields(item.payload) ? (
+                        <p className="truncate text-muted-foreground">
+                          {describeFields(item.payload)}
+                        </p>
+                      ) : null}
+                      {item.state === "done" && describeFields(item.result) ? (
+                        <p className="truncate text-muted-foreground">
+                          {describeFields(item.result)}
+                        </p>
+                      ) : null}
+                    </>
+                  )}
                   {item.state === "error" && item.error ? (
                     <p className="text-destructive">{item.error}</p>
                   ) : null}
