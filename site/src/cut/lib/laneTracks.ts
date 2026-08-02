@@ -345,6 +345,9 @@ export function startLaneMove<V = unknown>(
   id: string,
   ui: LaneMoveUI<V>
 ) {
+  // Primary button only: a right-click belongs to the clip's context menu and
+  // must leave selection and the playhead where they are.
+  if (e.button !== 0) return;
   settleSnapBack();
   const s = useEditor.getState();
   if (e.metaKey || e.shiftKey) {
@@ -588,6 +591,8 @@ export function startLaneTrim(
   side: "l" | "r",
   ui: LaneTrimUI
 ) {
+  // Primary button only, same as the move grab.
+  if (e.button !== 0) return;
   settleSnapBack();
   const s = useEditor.getState();
   if (s.readOnly) return;

@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type ChatTransport, type UIMessage } from "ai";
 import {
@@ -47,6 +47,8 @@ import { localBackend } from "@/cut/lib/backend/local";
 import { buildAiContext } from "@/cut/lib/aiContext";
 import { runAiTool } from "@/cut/lib/aiTools";
 import { setAssetDragData } from "@/cut/lib/assetDrag";
+import { registerChatIntake } from "@/cut/lib/chatIntake";
+import { videoModel } from "@/cut/lib/videoModels";
 import {
   readActiveChat,
   readRawThreads,
@@ -497,6 +499,43 @@ export function AiPanel({
   );
 }
 
+/** Animates the composer's chip area to its content height, so every growth —
+ * the first attachment opening the row, a full row wrapping a new one open —
+ * raises the box smoothly instead of snapping. While growing, the box is
+ * shorter than its content and clips it; settled, it relaxes so chip hover
+ * cards and moment pickers can pop outside. Shrinks (a removed chip, the
+ * emptied row collapsing) animate too — their content already fits, so they
+ * never need the clip. */
+function ChipsReveal({ open, children }: { open: boolean; children: ReactNode }) {
+  const outer = useRef<HTMLDivElement>(null);
+  const inner = useRef<HTMLDivElement>(null);
+  const [h, setH] = useState(0);
+  useEffect(() => {
+    const el = inner.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setH(el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const target = open ? h : 0;
+  useLayoutEffect(() => {
+    const el = outer.current;
+    if (el && el.offsetHeight < target) el.style.overflow = "hidden";
+  }, [target]);
+  return (
+    <div
+      ref={outer}
+      className="transition-[height] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+      style={{ height: target }}
+      onTransitionEnd={(e) => {
+        if (e.propertyName === "height" && outer.current) outer.current.style.overflow = "";
+      }}
+    >
+      <div ref={inner}>{children}</div>
+    </div>
+  );
+}
+
 /** One chat with the agent. Remounts per active thread; its messages and
  * provider session are restored from the saved thread on open. */
 function ChatSession({
@@ -565,6 +604,51 @@ function ChatSession({
     (ref) => setAttachments((prev) => addRefOnce(prev, ref)),
     attachFiles,
   );
+  // A transient warning in the folder tab above the composer — the same slot
+  // the credits tab uses — for refusals like the frame capacity below.
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showNotice = (msg: string) => {
+    setNotice(msg);
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => setNotice(null), 5000);
+  };
+  useEffect(
+    () => () => {
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    },
+    [],
+  );
+  // The timeline's "Add video frame to chat" lands its pinned ref here; the
+  // registration follows the composer box's lifetime (absent on read-only
+  // shares, where there is no composer to receive it). `incoming` marks a
+  // frame still in flight, opening the chip row ahead of the landing.
+  // Grabbed frames stop at the render models' reference capacity, read from
+  // the registry, so every attached frame actually rides a render.
+  const composerBoxRef = useRef<HTMLDivElement>(null);
+  const [incoming, setIncoming] = useState(false);
+  const attachmentsRef = useRef(attachments);
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
+  useEffect(() => {
+    const el = composerBoxRef.current;
+    if (!el) return;
+    const isFrame = (r: AssetRef) => r.scope === "file" && r.kind === "image";
+    const cap = videoModel("omni").maxReferenceImages;
+    return registerChatIntake({
+      el,
+      add: (ref) => setAttachments((p) => upsertRef(p, ref)),
+      expect: setIncoming,
+      acceptFrame: () => {
+        if (attachmentsRef.current.filter(isFrame).length < cap) return true;
+        showNotice(
+          `Renders read up to ${cap} reference frames — remove one to add another.`,
+        );
+        return false;
+      },
+    });
+  }, [readOnly]);
   const sessionKeyRef = useRef<string | null>(null);
   // Resume from the saved thread when this id exists in history.
   const [initialThread] = useState<ChatThread | undefined>(() =>
@@ -949,7 +1033,16 @@ function ChatSession({
               </span>
             </a>
           )}
+          {!outOfCredits && notice && (
+            // The credits tab's folder shape, borrowed for transient
+            // refusals; the credits warning outranks it when both apply.
+            <div className="ai-notice-tab absolute inset-x-1.5 bottom-full -mb-1 flex items-center gap-1.5 rounded-t-lg border border-b-0 border-amber-500/30 bg-amber-50 px-3 pt-1.5 pb-2.5 text-[11px] text-amber-800">
+              <TriangleAlert className="size-3 shrink-0" />
+              <span>{notice}</span>
+            </div>
+          )}
           <div
+            ref={composerBoxRef}
             className={cn(
               "relative rounded-xl border bg-background transition-colors",
               dropActive
@@ -966,16 +1059,23 @@ function ChatSession({
             )}
             {mic.state === "idle" ? (
               <>
-                <RefChips
-                  refs={attachments}
-                  onRemove={(ref) =>
-                    setAttachments((p) => p.filter((x) => !sameRef(x, ref)))
-                  }
-                  onUpdate={(ref) =>
-                    setAttachments((p) => p.map((x) => (sameRef(x, ref) ? ref : x)))
-                  }
-                  className="px-2.5 pt-2.5"
-                />
+                <ChipsReveal open={attachments.length > 0 || incoming}>
+                  <RefChips
+                    refs={attachments}
+                    onRemove={(ref) =>
+                      setAttachments((p) => p.filter((x) => !sameRef(x, ref)))
+                    }
+                    onUpdate={(ref) =>
+                      setAttachments((p) => p.map((x) => (sameRef(x, ref) ? ref : x)))
+                    }
+                    className="px-2.5 pt-2.5"
+                    // Chip-sized spacer riding the chip row while a frame is
+                    // in flight: it claims the arriving chip's exact slot —
+                    // opening the row, or wrapping a fresh one when the row
+                    // is full — so the space is ready before the landing.
+                    trailing={incoming ? <div className="size-14" /> : undefined}
+                  />
+                </ChipsReveal>
                 <MentionTextarea
                   className="ai-input max-h-56 w-full resize-none overflow-y-auto bg-transparent px-3 pt-2 text-[12.5px] leading-relaxed outline-none placeholder:text-muted-foreground/70"
                   rows={5}

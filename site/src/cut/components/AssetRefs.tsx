@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Check, Copy, FileText, X } from "lucide-react";
 import {
   highlightMentions,
@@ -271,6 +271,7 @@ export function RefChips({
   className,
   peekSide = "top",
   thumbClassName = "size-14",
+  trailing,
 }: {
   refs: AssetRef[];
   onRemove: (ref: AssetRef) => void;
@@ -281,9 +282,13 @@ export function RefChips({
   peekSide?: "top" | "bottom";
   /** Thumbnail size, e.g. "size-12" for a compact in-input composer. */
   thumbClassName?: string;
+  /** Extra node laid out in the chip row after the chips — the composer's
+   * incoming-frame spacer reserves the next slot there, wrapping to a fresh
+   * row exactly when the arriving chip would. */
+  trailing?: ReactNode;
 }) {
   const candidates = useRefCandidates();
-  if (refs.length === 0) return null;
+  if (refs.length === 0 && !trailing) return null;
   return (
     <div className={cn("flex flex-wrap gap-2", className)}>
       {refs.map((r) => {
@@ -301,6 +306,7 @@ export function RefChips({
           />
         );
       })}
+      {trailing}
     </div>
   );
 }

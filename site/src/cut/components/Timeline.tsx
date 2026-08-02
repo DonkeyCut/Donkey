@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { ArrowDown, ArrowDownToLine, ArrowLeft, ArrowLeftToLine, ArrowRight, ArrowRightToLine, ArrowUp, ArrowUpToLine, AudioLines, Blend, Check, Circle, Clapperboard, Droplets, EllipsisVertical, Expand, Eye, EyeOff, FolderOpen, FolderPlus, FoldHorizontal, Loader2, Moon, MoreHorizontal, Pause, Play, Scissors, SkipBack, Sun, Target, Trash2, Type, UnfoldHorizontal, Volume2, VolumeX, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowDownToLine, ArrowLeft, ArrowLeftToLine, ArrowRight, ArrowRightToLine, ArrowUp, ArrowUpToLine, AudioLines, Blend, Check, Circle, Clapperboard, Droplets, EllipsisVertical, Expand, Eye, EyeOff, FolderOpen, FolderPlus, FoldHorizontal, Fullscreen, Loader2, Moon, MoreHorizontal, Pause, Play, Scissors, SkipBack, Sun, Target, Trash2, Type, UnfoldHorizontal, Volume2, VolumeX, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -22,7 +22,8 @@ import {
   hasLibraryDrag,
   hasTemplateDrag,
 } from "@/cut/lib/assetDrag";
-import { audioClipRefs, draggingRef, hasRefDrag, type AssetRef } from "@/cut/lib/assetRef";
+import { audioClipRefs, draggingRef, hasRefDrag, refFromAsset, type AssetRef } from "@/cut/lib/assetRef";
+import { sendFrameToChat, type FrameGrabOrigin } from "@/cut/lib/chatIntake";
 import { useCutCaps } from "@/cut/lib/backend/hooks";
 import {
   addProjectTemplateToTimeline,
@@ -234,6 +235,10 @@ export function Timeline() {
   const fileDropHint = useEditor((s) => s.dropActive === "media");
   const scrollRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
+  const timeAt = (clientX: number) => {
+    const rect = innerRef.current!.getBoundingClientRect();
+    return (clientX - rect.left) / pps;
+  };
   // The static ruler band behind the scroller follows vertical scroll so it
   // stays glued under the in-content ruler; overscroll can't move it, so the
   // band runs unbroken through the bounce. (Horizontal position is moot — the
@@ -496,6 +501,59 @@ export function Timeline() {
     return () => window.removeEventListener("keydown", close);
   }, [gapMenu]);
 
+  // Right-click on a video clip: a one-item popover that grabs the frame
+  // under the pointer into the chat composer. The menu carries the grab —
+  // the asset, the source second under the pointer, and the spot the flight
+  // starts from — and the held skimmer line stands at `t` while it is open.
+  const readOnly = useEditor((s) => s.readOnly);
+  const [frameMenu, setFrameMenu] = useState<
+    { x: number; y: number; t: number; asset: MediaAsset; srcT: number; from: FrameGrabOrigin } | null
+  >(null);
+  useEffect(() => {
+    if (!frameMenu) return;
+    const close = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFrameMenu(null);
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [frameMenu]);
+  const openFrameMenu = (
+    e: React.MouseEvent,
+    grab: { asset: MediaAsset; srcT: number; from: FrameGrabOrigin }
+  ) => {
+    if (readOnly) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const s = useEditor.getState();
+    if (s.playing) s.setPlaying(false);
+    setFrameMenu({ x: e.clientX, y: e.clientY, t: timeAt(e.clientX), ...grab });
+  };
+  // While the menu is open, the skimmer holds at the grab time in its darker
+  // held state — the preview shows the frame the line marks, and HoverLine's
+  // pointer listeners stand down so crossing onto the menu can't yank it.
+  // On close the skimmer resumes right under the pointer (tracked while the
+  // menu was up), or clears when the pointer has left the timeline.
+  const menuPointer = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (!frameMenu) return;
+    const scrollEl = scrollRef.current;
+    menuPointer.current = { x: frameMenu.x, y: frameMenu.y };
+    const track = (e: PointerEvent) => {
+      menuPointer.current = { x: e.clientX, y: e.clientY };
+    };
+    window.addEventListener("pointermove", track);
+    useEditor.getState().setSkimTime(frameMenu.t);
+    return () => {
+      window.removeEventListener("pointermove", track);
+      const p = menuPointer.current;
+      const r = scrollEl?.getBoundingClientRect();
+      const inside =
+        !!p && !!r && p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom;
+      useEditor.getState().setSkimTime(inside ? Math.max(0, timeAt(p.x)) : null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- timeAt reads live refs
+  }, [frameMenu]);
+
   // Title tracks: overlays carry a `lane`; used lanes compact to contiguous
   // display rows, so empty tracks disappear on their own.
   const overlayLanes = useMemo(() => {
@@ -602,11 +660,6 @@ export function Timeline() {
     },
     [audioLanes.count]
   );
-
-  const timeAt = (clientX: number) => {
-    const rect = innerRef.current!.getBoundingClientRect();
-    return (clientX - rect.left) / pps;
-  };
 
   // Where a dropped asset should land. An empty timeline has no arrangement to
   // read a position against, so the drop starts the film at 0 no matter where
@@ -1260,6 +1313,7 @@ export function Timeline() {
                   onCrossMove={previewCross}
                   onCrossDrop={onOverlayCrossDrop}
                   onDragActive={setVideoDragging}
+                  onFrameMenu={openFrameMenu}
                 />
               ))}
               {laneDrag?.kind !== "overlayClip" && (
@@ -1344,6 +1398,7 @@ export function Timeline() {
                 onCrossMove={previewCross}
                 onCrossDrop={onClipCrossDrop}
                 onDragActive={setVideoDragging}
+                onFrameMenu={openFrameMenu}
               />
             ))}
             {laneDrag?.kind !== "clip" && (
@@ -1550,7 +1605,12 @@ export function Timeline() {
                 style={{ left: snapX }}
               />
             )}
-            <HoverLine scrollRef={scrollRef} innerRef={innerRef} pps={pps} />
+            <HoverLine
+              scrollRef={scrollRef}
+              innerRef={innerRef}
+              pps={pps}
+              hold={frameMenu !== null}
+            />
             <Playhead pps={pps} scrollRef={scrollRef} onScrub={scrub} />
           </div>
         </div>
@@ -1717,6 +1777,62 @@ export function Timeline() {
           </div>
         </div>
       )}
+      {frameMenu && (
+        <div
+          className="fixed inset-0 z-50"
+          onPointerDown={() => setFrameMenu(null)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setFrameMenu(null);
+          }}
+        >
+          {/* A snug bubble beside the held marker line, speech-balloon style:
+              its tapered tip sits on the side edge facing the line, apex
+              touching it at the grab point. The bubble hangs to the line's
+              right and flips left when the window edge is close. */}
+          {(() => {
+            const flip = frameMenu.x + 240 > window.innerWidth;
+            return (
+              <div
+                className={cn(
+                  "group absolute -translate-y-1/2",
+                  flip ? "pr-[6px]" : "pl-[6px]"
+                )}
+                style={{
+                  top: frameMenu.y,
+                  ...(flip
+                    ? { right: window.innerWidth - frameMenu.x }
+                    : { left: frameMenu.x }),
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                <button
+                  className="flex items-center gap-2 rounded-lg border bg-popover px-3 py-1.5 text-sm whitespace-nowrap text-popover-foreground shadow-md group-hover:bg-accent group-hover:text-accent-foreground"
+                  onClick={() => {
+                    void sendFrameToChat(
+                      { ...refFromAsset(frameMenu.asset), t: frameMenu.srcT },
+                      frameMenu.from
+                    );
+                    setFrameMenu(null);
+                  }}
+                >
+                  <Fullscreen className="size-3.5 text-muted-foreground" /> Capture frame
+                </button>
+                {/* Drawn after the bubble so the diamond's inner half covers
+                    its border along the notch, leaving one seamless outline. */}
+                <div
+                  className={cn(
+                    "pointer-events-none absolute top-1/2 size-2.5 -translate-y-1/2 rotate-45 bg-popover group-hover:bg-accent",
+                    flip
+                      ? "right-[2px] rounded-tr-[2px] border-t border-r"
+                      : "left-[2px] rounded-bl-[2px] border-b border-l"
+                  )}
+                />
+              </div>
+            );
+          })()}
+        </div>
+      )}
     </footer>
   );
 }
@@ -1729,15 +1845,20 @@ function HoverLine({
   scrollRef,
   innerRef,
   pps,
+  hold,
 }: {
   scrollRef: React.RefObject<HTMLDivElement | null>;
   innerRef: React.RefObject<HTMLDivElement | null>;
   pps: number;
+  /** The frame-grab menu owns the skim: the skimmer neither moves nor clears
+   * it, and the line darkens — the marker is the skimmer, held. */
+  hold: boolean;
 }) {
   const skimTime = useEditor((s) => s.skimTime);
+  useEffect(() => () => useEditor.getState().setSkimTime(null), []);
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el) return;
+    if (!el || hold) return;
     const move = (e: PointerEvent) => {
       const inner = innerRef.current;
       const s = useEditor.getState();
@@ -1751,13 +1872,15 @@ function HoverLine({
     return () => {
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerleave", leave);
-      useEditor.getState().setSkimTime(null);
     };
-  }, [scrollRef, innerRef]);
+  }, [scrollRef, innerRef, hold]);
   if (skimTime === null) return null;
   return (
     <div
-      className="tl-hover-line pointer-events-none absolute top-0 bottom-0 z-30 w-px bg-foreground/30"
+      className={cn(
+        "tl-hover-line pointer-events-none absolute top-0 bottom-0 z-30 w-px",
+        hold ? "bg-foreground/70" : "bg-foreground/30"
+      )}
       style={{ transform: `translateX(${skimTime * pps}px)` }}
     />
   );
@@ -2139,6 +2262,7 @@ function ClipView({
   onCrossMove,
   onCrossDrop,
   onDragActive,
+  onFrameMenu,
 }: {
   span: ClipSpan;
   /** Cross-dissolve overlap of the previous clip into this one, timeline
@@ -2164,6 +2288,11 @@ function ClipView({
   onCrossDrop: (id: string, target: TrackTarget, start: number) => void;
   /** Toggle the between-track insertion zones while this clip is dragging. */
   onDragActive: (active: boolean) => void;
+  /** Right-click: offer the frame under the pointer to the chat composer. */
+  onFrameMenu: (
+    e: React.MouseEvent,
+    grab: { asset: MediaAsset; srcT: number; from: FrameGrabOrigin }
+  ) => void;
 }) {
   const { clip, asset } = span;
   const speed = clipSpeed(clip);
@@ -2234,6 +2363,15 @@ function ClipView({
         zIndex: drag ? 20 : undefined,
       }}
       onPointerDown={(e) => startLaneMove(e, "clip", clip.id, ui)}
+      onContextMenu={(e) => {
+        if (asset.type !== "video") return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        onFrameMenu(e, {
+          asset,
+          srcT: filmIn + ((e.clientX - rect.left) / pps) * speed,
+          from: { x: e.clientX, top: rect.top, height: rect.height },
+        });
+      }}
     >
       <Filmstrip frames={filmstrip} grade={clip.grade} />
       {selected && (
@@ -2759,6 +2897,7 @@ function OverlayClipView({
   onCrossMove,
   onCrossDrop,
   onDragActive,
+  onFrameMenu,
 }: {
   clip: VideoClip;
   asset: MediaAsset | undefined;
@@ -2779,6 +2918,11 @@ function OverlayClipView({
   onCrossMove: (target: TrackTarget | null, start?: number, len?: number) => void;
   onCrossDrop: (id: string, target: TrackTarget, start: number) => void;
   onDragActive: (active: boolean) => void;
+  /** Right-click: offer the frame under the pointer to the chat composer. */
+  onFrameMenu: (
+    e: React.MouseEvent,
+    grab: { asset: MediaAsset; srcT: number; from: FrameGrabOrigin }
+  ) => void;
 }) {
   // A cross-dissolve overlaps two clips; inset each box by half the overlap
   // so the pair meets at the overlap midpoint with the same CLIP_GAP gutter
@@ -2851,6 +2995,15 @@ function OverlayClipView({
         zIndex: drag ? 20 : undefined,
       }}
       onPointerDown={(e) => startLaneMove(e, "overlayClip", clip.id, ui)}
+      onContextMenu={(e) => {
+        if (asset.type !== "video") return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        onFrameMenu(e, {
+          asset,
+          srcT: filmIn + ((e.clientX - rect.left) / pps) * speed,
+          from: { x: e.clientX, top: rect.top, height: rect.height },
+        });
+      }}
     >
       <Filmstrip frames={filmstrip} grade={clip.grade} />
       {selected && (
