@@ -942,8 +942,18 @@ export function toolsRanBlock(names: string[]): string {
  * between them. Empty when there is nothing attached. */
 export function attachedAssetsBlock(refs: unknown[]): string {
   if (refs.length === 0) return "";
+  // A ref is described here, never fetched from here: the payload rides as
+  // parts on the newest turn. Its url would be replayed as prompt text on
+  // every later turn — and for a captured frame or a dropped text file that
+  // url IS the payload, a data: URL the media budget cannot see or trim.
+  const described = refs.map((r) => {
+    const rest = { ...(r as Record<string, unknown>) };
+    delete rest.url;
+    delete rest.thumb;
+    return rest;
+  });
   const clipHint = refs.some((r) => (r as { scope?: string }).scope === "clip")
     ? '\nA "clip" attachment means the user is pointing at that segment of the cut: diagnose with read-only looks (watch_video, listen_audio — never subtitles_generate, which writes captions), then revise the clip in place — regenerate_shot for its sceneShot, edit tools otherwise — without deleting it.'
     : "";
-  return `\n\n<attached_assets>\nThe user attached these assets to this message; their text may cite one by @handle or @name. Assets with scope "project" are in the open project (ids usable with the editor tools); "clip" assets are clips on the timeline — a video clip's id matches videoTrack in editor_state (a scene-run clip carries its sceneShot number there), an audio clip's (kind "audio") id matches soundtrack; "library" and "stock" assets live outside the project until imported; "file" assets came straight from the user's computer and exist only on this message. An asset with "t" carries a moment the user pinned, in seconds into it — the attached frame (or audio segment) reads from there, and that moment is what they mean by the reference; when you pass such an asset to a generation tool, forward the pin by appending it to the asset id ("<assetId>@<seconds>"):\n${JSON.stringify(refs)}${clipHint}\n</attached_assets>`;
+  return `\n\n<attached_assets>\nThe user attached these assets to this message; their text may cite one by @handle or @name. Assets with scope "project" are in the open project (ids usable with the editor tools); "clip" assets are clips on the timeline — a video clip's id matches videoTrack in editor_state (a scene-run clip carries its sceneShot number there), an audio clip's (kind "audio") id matches soundtrack; "library" and "stock" assets live outside the project until imported; "file" assets came straight from the user's computer and exist only on this message. An asset with "t" carries a moment the user pinned, in seconds into it — the attached frame (or audio segment) reads from there, and that moment is what they mean by the reference; when you pass such an asset to a generation tool, forward the pin by appending it to the asset id ("<assetId>@<seconds>"):\n${JSON.stringify(described)}${clipHint}\n</attached_assets>`;
 }
