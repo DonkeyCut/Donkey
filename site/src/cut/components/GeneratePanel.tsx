@@ -58,14 +58,16 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
   const jobs = allJobs.filter((j) => j.projectId === projectId && j.kind === "video" && !j.chatId);
   const { prompt, refs, character, aspect } = useVideoGen();
   const candidates = useRefCandidates();
+  // OS files handed to the panel — dropped on it or pasted into the prompt —
+  // attach as references (media files import into the project on the way;
+  // text files ride as-is).
+  const attachFiles = (files: File[]) =>
+    void refsFromDroppedFiles(projectId, files).then((refs) => {
+      for (const r of refs) useVideoGen.getState().addRef(r);
+    });
   const { active: dropActive, attachTarget, targetProps } = useAssetDrop(
     (ref) => useVideoGen.getState().addRef(ref),
-    // OS files dropped on the panel attach as references (media files import
-    // into the project on the way; text files ride as-is).
-    (files) =>
-      void refsFromDroppedFiles(projectId, files).then((refs) => {
-        for (const r of refs) useVideoGen.getState().addRef(r);
-      })
+    attachFiles
   );
   const [tier, setTier] = useLocalPref<VideoModelOption["tier"]>(
     "cut-gen-tier",
@@ -169,6 +171,11 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
             onSubmit={go}
             attachedRefs={refs}
             onUpsertRef={(r) => useVideoGen.getState().updateRef(r)}
+            onPasteFiles={attachFiles}
+            onRemoveLastRef={() => {
+              const last = refs[refs.length - 1];
+              if (last) useVideoGen.getState().removeRef(last);
+            }}
           />
           <DictationControl
             text={prompt}

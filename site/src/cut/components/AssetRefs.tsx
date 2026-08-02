@@ -761,6 +761,8 @@ export function MentionTextarea({
   inputRef,
   attachedRefs,
   onUpsertRef,
+  onPasteFiles,
+  onRemoveLastRef,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -785,6 +787,12 @@ export function MentionTextarea({
    * makes video/audio mention pills clickable: the pill opens the moment
    * picker in place, and the pinned ref lands here so it rides at send. */
   onUpsertRef?: (ref: AssetRef) => void;
+  /** Take files pasted into the textarea (a screenshot on the clipboard, an
+   * image copied off the web) — same handler as the composer's file drop. */
+  onPasteFiles?: (files: File[]) => void;
+  /** Backspace with the caret at the very start (nothing selected, nothing to
+   * delete leftward) removes the newest attachment chip instead. */
+  onRemoveLastRef?: () => void;
 }) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -959,8 +967,28 @@ export function MentionTextarea({
           }
         }}
         onSelect={syncCaret}
+        onPaste={(e) => {
+          if (!onPasteFiles) return;
+          const files = Array.from(e.clipboardData.items)
+            .filter((item) => item.kind === "file")
+            .map((item) => item.getAsFile())
+            .filter((f): f is File => f !== null);
+          if (files.length === 0) return;
+          e.preventDefault();
+          onPasteFiles(files);
+        }}
         onKeyDown={(e) => {
           e.stopPropagation();
+          if (
+            e.key === "Backspace" &&
+            onRemoveLastRef &&
+            e.currentTarget.selectionStart === 0 &&
+            e.currentTarget.selectionEnd === 0
+          ) {
+            e.preventDefault();
+            onRemoveLastRef();
+            return;
+          }
           if (open) {
             if (e.key === "ArrowDown" || e.key === "ArrowUp") {
               e.preventDefault();

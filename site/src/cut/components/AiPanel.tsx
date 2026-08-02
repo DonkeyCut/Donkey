@@ -549,20 +549,21 @@ function ChatSession({
       s.run.projectId === projectId &&
       (!s.run.chatId || s.run.chatId === threadId),
   );
+  // OS files handed to the composer — dropped on it or pasted into it —
+  // attach as references (media files import into the project on the way,
+  // chat-owned so they stay off the Media panel; text files ride as-is).
+  const attachFiles = (files: File[]) => {
+    void refsFromDroppedFiles(projectId, files, { chatId: threadId }).then(
+      (refs) => setAttachments((prev) => refs.reduce(addRefOnce, prev)),
+    );
+  };
   const {
     active: dropActive,
     attachTarget,
     targetProps,
   } = useAssetDrop(
     (ref) => setAttachments((prev) => addRefOnce(prev, ref)),
-    // OS files dropped on the chat attach as references (media files import
-    // into the project on the way, chat-owned so they stay off the Media
-    // panel; text files ride as-is).
-    (files) => {
-      void refsFromDroppedFiles(projectId, files, { chatId: threadId }).then(
-        (refs) => setAttachments((prev) => refs.reduce(addRefOnce, prev)),
-      );
-    },
+    attachFiles,
   );
   const sessionKeyRef = useRef<string | null>(null);
   // Resume from the saved thread when this id exists in history.
@@ -989,6 +990,8 @@ function ChatSession({
                   onSubmit={() => send(input)}
                   attachedRefs={attachments}
                   onUpsertRef={(ref) => setAttachments((p) => upsertRef(p, ref))}
+                  onPasteFiles={attachFiles}
+                  onRemoveLastRef={() => setAttachments((p) => p.slice(0, -1))}
                 />
                 <div className="flex items-center gap-1 px-1.5 pb-1.5">
                   <ModelSelector

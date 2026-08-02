@@ -73,14 +73,16 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
     () => assets.filter((a) => a.origin === "generated" && a.type === "image").reverse(),
     [assets]
   );
+  // OS files handed to the panel — dropped on it or pasted into the prompt —
+  // attach as references (media files import into the project on the way;
+  // text files ride as-is).
+  const attachFiles = (files: File[]) =>
+    void refsFromDroppedFiles(projectId, files).then((refs) => {
+      for (const r of refs) useImageGen.getState().addRef(r);
+    });
   const { active: dropActive, attachTarget, targetProps } = useAssetDrop(
     (ref) => useImageGen.getState().addRef(ref),
-    // OS files dropped on the panel attach as references (media files import
-    // into the project on the way; text files ride as-is).
-    (files) =>
-      void refsFromDroppedFiles(projectId, files).then((refs) => {
-        for (const r of refs) useImageGen.getState().addRef(r);
-      })
+    attachFiles
   );
 
   // Default the size to the project's own orientation when the panel opens, so
@@ -132,6 +134,11 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
             onSubmit={go}
             attachedRefs={refs}
             onUpsertRef={(r) => useImageGen.getState().updateRef(r)}
+            onPasteFiles={attachFiles}
+            onRemoveLastRef={() => {
+              const last = refs[refs.length - 1];
+              if (last) useImageGen.getState().removeRef(last);
+            }}
           />
           <DictationControl
             text={prompt}
