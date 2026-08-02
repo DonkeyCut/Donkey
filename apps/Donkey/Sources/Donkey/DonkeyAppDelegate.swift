@@ -29,7 +29,14 @@ final class DonkeyAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let cutEngineSupervisor = DonkeyCutEngineSupervisor()
         self.cutEngineSupervisor = cutEngineSupervisor
+        // The engine's loopback port is machine-wide, so only the console session runs one: launched
+        // in a fast-user-switched-out session, the supervisor starts suspended and picks the port up
+        // when this session takes the console.
+        if !Self.sessionIsOnConsole {
+            cutEngineSupervisor.setSessionActive(false)
+        }
         cutEngineSupervisor.start()
+        observeSessionSwitches()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -38,6 +45,34 @@ final class DonkeyAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         cutEngineSupervisor?.stop()
+    }
+
+    // MARK: - Console session
+
+    /// Whether this login session currently owns the screen. `CGSessionCopyCurrentDictionary`
+    /// answers for the session this process runs in; a missing dictionary reads as on-console so a
+    /// plain launch never starts suspended.
+    private static var sessionIsOnConsole: Bool {
+        guard let session = CGSessionCopyCurrentDictionary() as? [String: Any] else { return true }
+        return session[kCGSessionOnConsoleKey as String] as? Bool ?? true
+    }
+
+    private func observeSessionSwitches() {
+        let center = NSWorkspace.shared.notificationCenter
+        center.addObserver(
+            forName: NSWorkspace.sessionDidBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.cutEngineSupervisor?.setSessionActive(true) }
+        }
+        center.addObserver(
+            forName: NSWorkspace.sessionDidResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.cutEngineSupervisor?.setSessionActive(false) }
+        }
     }
 
     // MARK: - Status item

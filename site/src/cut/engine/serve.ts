@@ -146,6 +146,12 @@ async function start() {
     })();
   });
 
+  // Exit on a failed bind (typically EADDRINUSE while another session still
+  // holds the port) so the supervisor's backoff drives the retry.
+  server.on("error", (err) => {
+    console.error(`donkey-cut-engine could not listen on 127.0.0.1:${PORT}: ${err.message}`);
+    process.exit(1);
+  });
   server.listen(PORT, "127.0.0.1", () => {
     console.log(`donkey-cut-engine listening on http://127.0.0.1:${PORT}`);
   });

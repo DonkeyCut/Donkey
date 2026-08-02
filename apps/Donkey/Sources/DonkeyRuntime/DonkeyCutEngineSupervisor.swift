@@ -14,6 +14,12 @@ import Foundation
 /// existed, or one whose parent-watch has not fired yet. A version-matched engine (another instance
 /// of this same build) and a developer-run "dev" engine are left alone.
 ///
+/// The loopback port is machine-wide, so it belongs to the console session: the app suspends the
+/// supervisor (terminating its engine) when its session leaves the console and resumes it when the
+/// session returns, so under fast user switching each user's page talks to an engine running as that
+/// user. An engine owned by a different macOS user is never signaled — its own app tears it down —
+/// the supervisor just waits for the port to free up.
+///
 /// Cut is free and standalone, so the engine runs regardless of Donkey sign-in state.
 public final class DonkeyCutEngineSupervisor: @unchecked Sendable {
     /// The loopback port this build's engine binds, probes, and evicts stale engines on. The dev
@@ -32,6 +38,7 @@ public final class DonkeyCutEngineSupervisor: @unchecked Sendable {
     private let queue = DispatchQueue(label: "donkey.cut-engine-supervisor")
     private var process: Process?
     private var stopped = false
+    private var suspended = false
     private var restartDelay: TimeInterval = 2
     private var spawnedAt: Date?
 
@@ -46,6 +53,23 @@ public final class DonkeyCutEngineSupervisor: @unchecked Sendable {
             stopped = true
             process?.terminate()
             process = nil
+        }
+    }
+
+    /// Follows this session's console ownership. Off console the supervisor terminates its engine
+    /// and spawns nothing, releasing the machine-wide port to the session that owns the screen;
+    /// back on console it resumes.
+    public func setSessionActive(_ active: Bool) {
+        queue.async {
+            guard self.suspended == active else { return }
+            self.suspended = !active
+            if active {
+                self.restartDelay = 2
+                self.spawnIfNeeded()
+            } else {
+                self.process?.terminate()
+                self.process = nil
+            }
         }
     }
 
@@ -73,12 +97,13 @@ public final class DonkeyCutEngineSupervisor: @unchecked Sendable {
 
     /// Thread-crossing result box for the synchronous health probe.
     private final class ProbeResult: @unchecked Sendable {
-        var version: String?
+        var served: (version: String, user: String?)?
     }
 
-    /// The version a Cut engine already on the port reports, or nil when no Cut engine answers.
-    /// An engine that answers without a version field maps to "" so it reads as a mismatch.
-    private func servedEngineVersion() -> String? {
+    /// The version and macOS username a Cut engine already on the port reports, or nil when no Cut
+    /// engine answers. An engine that answers without a version field maps to "" so it reads as a
+    /// mismatch; one without a user field (an older build) reads as this user's.
+    private func servedEngine() -> (version: String, user: String?)? {
         guard let url = URL(string: "http://127.0.0.1:\(Self.port)/api/cut/engine/health") else { return nil }
         var request = URLRequest(url: url)
         request.timeoutInterval = 1.0
@@ -90,10 +115,10 @@ public final class DonkeyCutEngineSupervisor: @unchecked Sendable {
                   let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   payload["engine"] as? String == "donkey-cut"
             else { return }
-            probe.version = payload["version"] as? String ?? ""
+            probe.served = (payload["version"] as? String ?? "", payload["user"] as? String)
         }.resume()
         semaphore.wait()
-        return probe.version
+        return probe.served
     }
 
     /// SIGTERM (then SIGKILL) whatever is listening on the engine port. Used only after the health
@@ -114,25 +139,31 @@ public final class DonkeyCutEngineSupervisor: @unchecked Sendable {
             .filter { $0 != own } ?? []
         for pid in pids { kill(pid, SIGTERM) }
         for _ in 0..<20 {
-            if pids.allSatisfy({ kill($0, 0) != 0 }) { return }
+            // kill(pid, 0) fails with ESRCH once the process is gone; EPERM means it is alive but
+            // owned by someone else, so it must keep counting as running.
+            if pids.allSatisfy({ kill($0, 0) != 0 && errno == ESRCH }) { return }
             usleep(100_000)
         }
         for pid in pids { kill(pid, SIGKILL) }
     }
 
     private func spawnIfNeeded() {
-        guard !stopped, process == nil else { return }
+        guard !stopped, !suspended, process == nil else { return }
         guard let binary = Self.engineBinary() else { return }
-        switch servedEngineVersion() {
-        case Self.appVersion?, "dev"?:
-            // Another instance of this same build, or a developer-run engine: leave it, check later.
-            scheduleRespawn(after: 60)
-            return
-        case .some:
+        if let served = servedEngine() {
+            if let owner = served.user, owner != NSUserName() {
+                // Another macOS user's engine holds the port. Signaling it would EPERM; its own
+                // app tears it down when that session leaves the console, so wait for the port.
+                scheduleRespawn(after: 10)
+                return
+            }
+            if served.version == Self.appVersion || served.version == "dev" {
+                // Another instance of this same build, or a developer-run engine: leave it, check later.
+                scheduleRespawn(after: 60)
+                return
+            }
             // An engine from another app build. Replace it so engine fixes ship with the update.
             Self.terminateListeners()
-        case nil:
-            break
         }
 
         var environment = BundledTools.childEnvironment()
@@ -155,7 +186,7 @@ public final class DonkeyCutEngineSupervisor: @unchecked Sendable {
             guard let self else { return }
             self.queue.async {
                 self.process = nil
-                guard !self.stopped else { return }
+                guard !self.stopped, !self.suspended else { return }
                 // A crash after a healthy stretch restarts promptly; rapid crash loops back off.
                 let uptime = self.spawnedAt.map { Date().timeIntervalSince($0) } ?? 0
                 if uptime > 300 { self.restartDelay = 2 }
