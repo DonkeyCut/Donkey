@@ -63,6 +63,7 @@
     "react-dom": "19.2.4",
     "react-email": "^6.9.1",
     "react-markdown": "^10.1.0",
+    "recharts": "^3.8.0",
     "resend": "^6.18.1",
     "shadcn": "^4.7.0",
     "stripe": "^22.2.0",
