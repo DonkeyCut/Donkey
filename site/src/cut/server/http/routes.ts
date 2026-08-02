@@ -1,4 +1,4 @@
-import { adoptLegacyData, isValidCutUser, runWithCutUser } from "../userScope";
+import { isValidCutUser, runWithCutUser } from "../userScope";
 import { matchRouteTable } from "./match";
 import { aiApi } from "./ai";
 import { engineApi } from "./engine";
@@ -120,7 +120,6 @@ export async function runCutRoute(
       { status: 400, headers: { "Content-Type": "application/json" } }
     );
   }
-  await adoptLegacyData(user);
   return runWithCutUser(user, () => match.handler(req, match.params));
 }
 
