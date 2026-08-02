@@ -4,6 +4,7 @@ import { scanSilence, type PcmChunk } from "./audioScan";
 import { apiFetch, apiJson, getBackend, type CutBackend } from "./backend";
 import { quotaErrorMessage } from "./backend/cloud";
 import { encodeWav } from "./cloudTranscribe";
+import { startUpload } from "./importQueue";
 import {
   audioChunks,
   audioPeaks,
@@ -185,7 +186,8 @@ export async function uploadProjectMediaTo(
   backend: CutBackend,
   projectId: string,
   file: Blob,
-  name: string
+  name: string,
+  opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }
 ): Promise<string> {
   if (backend.kind !== "cloud") {
     const form = new FormData();
@@ -193,17 +195,20 @@ export async function uploadProjectMediaTo(
     const res = await backend.fetch(`/api/cut/projects/${projectId}/media`, {
       method: "POST",
       body: form,
+      signal: opts?.signal,
     });
     const body = await apiJson<{ fileName?: string }>(res);
     if (!res.ok || !body.fileName) throw new Error(body.error ?? "Upload failed.");
     return body.fileName;
   }
-  const key = await presignedUpload(
+  const signed = await presignUpload(
     `/api/cut/projects/${projectId}/media/presign`,
     file,
     name,
     backend
   );
+  await putSigned(signed.url, file, file.type || "application/octet-stream", opts);
+  const key = signed.key;
   const res = await backend.fetch(`/api/cut/projects/${projectId}/media/complete`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -329,10 +334,12 @@ export type PendingImport = {
   /** Ready to add to the project: plays from `localUrl`, carries its final
    * `fileName`, and is marked `upload` until the bytes land. */
   asset: MediaAsset;
-  /** The object URL the asset plays from until the stored file takes over. */
+  /** The URL the asset plays from until the stored file takes over — a local
+   * object URL for a dropped file, the source URL for remote media. */
   localUrl: string;
-  /** Send the bytes and mark the object complete. */
-  send: (opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }) => Promise<void>;
+  /** Send the bytes and mark the object complete; resolves to the stored
+   * (deduped) file name the asset swaps to. */
+  send: (opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }) => Promise<string>;
 };
 
 /** Prepare a dropped file so it can appear instantly: reserve its stored name
@@ -385,6 +392,7 @@ export async function prepareImport(
       });
       const body = await apiJson<{ fileName?: string }>(res);
       if (!res.ok || !body.fileName) throw new Error(body.error ?? "Upload failed.");
+      return body.fileName;
     };
     return { asset, localUrl, send };
   } catch (err) {
@@ -453,49 +461,137 @@ function loadImageMeta(url: string): Promise<{ width: number; height: number }> 
   });
 }
 
+/** What `importRemote` needs to register a fetchable source as an asset the
+ * user can edit with right away. Duration and dimensions come from the
+ * caller's catalog entry, so nothing has to be read before the asset exists. */
+type RemoteImportInit = {
+  url: string;
+  name: string;
+  /** Stored name to claim; defaults to the URL's basename. */
+  fileName?: string;
+  type: AssetType;
+  duration: number;
+  width?: number;
+  height?: number;
+  origin?: StoredAsset["origin"];
+};
+
+/** Copy attempts ride out transient blips before the queue marks the asset
+ * failed; an abort (asset deleted, project left) stops immediately. */
+async function withRetries(
+  copy: (opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }) => Promise<string>,
+  opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }
+): Promise<string> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await copy(opts);
+    } catch (err) {
+      if (opts?.signal?.aborted || attempt >= 2) throw err;
+      await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+    }
+  }
+}
+
+/** Register media that lives at a fetchable URL — a stock tile, a library
+ * file — as a project asset that is usable the moment this returns. The asset
+ * plays from the source URL while `copy` moves the bytes into project storage
+ * behind the editor (the import queue); when they land it swaps to the stored
+ * file and joins the saved document, exactly like a dropped OS file. `copy`
+ * defaults to download-and-upload; callers with a server-side copy (the
+ * library's same-shelf route) pass their own and skip the round trip. */
+export function importRemote(
+  projectId: string,
+  init: RemoteImportInit,
+  copy?: (opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }) => Promise<string>
+): MediaAsset {
+  const fileName =
+    init.fileName || init.url.split("/").pop()?.split("?")[0] || `${init.type}-${uid()}`;
+  const asset: MediaAsset = {
+    id: uid(),
+    fileName,
+    name: init.name,
+    type: init.type,
+    duration: init.duration,
+    ...(init.width !== undefined ? { width: init.width } : {}),
+    ...(init.height !== undefined ? { height: init.height } : {}),
+    ...(init.origin ? { origin: init.origin } : {}),
+    url: init.url,
+    upload: { progress: 0 },
+  };
+  useEditor.getState().addAsset(asset);
+  void enrichAsset(asset);
+  // Catalog dimensions are nominal (an aspect, not the file's pixels): read
+  // the real ones behind the placement so the doc stores the truth.
+  if (init.type === "video") {
+    void probeMediaFile(init.url)
+      .then((m) => {
+        if (m.hasVideo) {
+          useEditor.getState().updateAsset(asset.id, { width: m.width, height: m.height });
+        }
+      })
+      .catch(() => {});
+  }
+  const download = async (opts?: {
+    onProgress?: (fraction: number) => void;
+    signal?: AbortSignal;
+  }) => {
+    const dl = await fetch(init.url, { signal: opts?.signal });
+    if (!dl.ok) throw new Error("Could not read the media.");
+    const blob = await dl.blob();
+    return uploadProjectMediaTo(getBackend(), projectId, blob, fileName, opts);
+  };
+  startUpload(projectId, {
+    asset,
+    localUrl: init.url,
+    send: (opts) => withRetries(copy ?? download, opts),
+  });
+  return asset;
+}
+
 /** Store a fetchable image (a stock tile) in the project's media as a
  * first-class image asset at its native resolution — no video baking — and
  * register it, without placing it on the timeline. Callers choose where it
- * lands. */
+ * lands. Ready as soon as the pixel size is read; the bytes copy in behind
+ * the editor. */
 export async function importImage(
   projectId: string,
   image: { url: string; name: string }
 ): Promise<MediaAsset> {
-  const dl = await fetch(image.url);
-  if (!dl.ok) throw new Error("Could not read the image.");
-  const blob = await dl.blob();
-  const body = await uploadProjectImage(projectId, blob, image.url.split("/").pop() || "image.png", {
-    name: image.name,
-  });
+  // The size frames the still (and the first-asset aspect guess); the source
+  // is a same-origin file, so this is one cached header read, not a download.
+  const dims = await loadImageMeta(image.url);
   // A stock image lands on the timeline where the caller places it, not in the
   // Media panel — tag it so it stays out.
-  const asset: MediaAsset = { ...body, origin: "stock" };
-  useEditor.getState().addAsset(asset);
-  void enrichAsset(asset);
-  return asset;
+  return importRemote(projectId, {
+    url: image.url,
+    name: image.name,
+    type: "image",
+    duration: 0,
+    width: dims.width,
+    height: dims.height,
+    origin: "stock",
+  });
 }
 
 /** Store a fetchable video (a stock clip) in the project's media as a regular
  * video asset and register it, without placing it on the timeline. Callers
- * choose where it lands. */
+ * choose where it lands. Instant when the catalog supplies the duration;
+ * otherwise one metadata read stands between the call and the asset. */
 export async function importStockVideo(
   projectId: string,
-  video: { url: string; name: string }
+  video: { url: string; name: string; duration?: number; width?: number; height?: number }
 ): Promise<MediaAsset> {
-  const dl = await fetch(video.url);
-  if (!dl.ok) throw new Error("Could not read the video.");
-  const blob = await dl.blob();
-  const file = new File([blob], video.url.split("/").pop() || "video.mp4", {
-    type: blob.type || "video/mp4",
-  });
-  const asset = await importFileToProject(projectId, file);
-  if (!asset) throw new Error("Could not add the video.");
-  asset.name = video.name;
+  const duration = video.duration ?? (await probeMediaFile(video.url)).duration;
   // Like a stock image, it lands where the caller places it, not in Media.
-  asset.origin = "stock";
-  useEditor.getState().addAsset(asset);
-  void enrichAsset(asset);
-  return asset;
+  return importRemote(projectId, {
+    url: video.url,
+    name: video.name,
+    type: "video",
+    duration,
+    width: video.width,
+    height: video.height,
+    origin: "stock",
+  });
 }
 
 /** Store a bundled stock-music bed in the project's media as a regular audio
@@ -503,21 +599,16 @@ export async function importStockVideo(
  * where it lands (the soundtrack). Tagged "stock" so it stays out of Media. */
 export async function importStockMusic(
   projectId: string,
-  music: { url: string; name: string }
+  music: { url: string; name: string; duration?: number }
 ): Promise<MediaAsset> {
-  const dl = await fetch(music.url);
-  if (!dl.ok) throw new Error("Could not read the music.");
-  const blob = await dl.blob();
-  const file = new File([blob], music.url.split("/").pop() || "music.mp3", {
-    type: blob.type || "audio/mpeg",
+  const duration = music.duration ?? (await probeMediaFile(music.url)).duration;
+  return importRemote(projectId, {
+    url: music.url,
+    name: music.name,
+    type: "audio",
+    duration,
+    origin: "stock",
   });
-  const asset = await importFileToProject(projectId, file);
-  if (!asset) throw new Error("Could not add the music.");
-  asset.name = music.name;
-  asset.origin = "stock";
-  useEditor.getState().addAsset(asset);
-  void enrichAsset(asset);
-  return asset;
 }
 
 /** Download a URL (TikTok, YouTube, an X post, an article, …) into the project

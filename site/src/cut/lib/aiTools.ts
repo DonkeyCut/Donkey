@@ -33,7 +33,7 @@ import {
 import { BREATH, REACH, refineEdge, type SilenceSpan } from "./cutRefine";
 import { requestSidePanel, SIDE_PANEL_TABS } from "./panelRequest";
 import { blobToInlineAudio, refToInlineAudio, visualRefs, type InlineImage } from "./refMedia";
-import { characterPrompt, stockTitle } from "./stock";
+import { characterPrompt, stockAspectDims, stockTitle } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
 import { applyOverlayPatchSettled, track0Clips, trackGapAt, getClipSpans, nextFreeStart, overlayLayers, TIMELINE_H_MAX, TIMELINE_H_MIN, totalDuration, useEditor } from "./store";
@@ -1260,7 +1260,12 @@ export async function runAiTool(
       // asked, even if the user switches threads while it downloads.
       const chatId = chatOwner();
       const asset = vid
-        ? await importStockVideo(projectId, { url: vid.file, name: stockTitle(vid.id) })
+        ? await importStockVideo(projectId, {
+            url: vid.file,
+            name: stockTitle(vid.id),
+            duration: vid.duration,
+            ...stockAspectDims(vid.aspect),
+          })
         : await importImage(projectId, { url: img!.file, name: stockTitle(img!.id) });
       tagChatAsset(asset.id, chatId);
       const addToTimeline = wantsTimeline(input, "start");

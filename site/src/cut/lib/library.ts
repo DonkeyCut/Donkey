@@ -2,7 +2,13 @@
 
 import { apiJson, getBackend } from "./backend";
 import { readSnapshot, writeSnapshot } from "./cache";
-import { enrichAsset, presignedUpload, probeFileMeta, uploadProjectMediaTo } from "./media";
+import {
+  enrichAsset,
+  importRemote,
+  presignedUpload,
+  probeFileMeta,
+  uploadProjectMediaTo,
+} from "./media";
 import {
   activeResidency,
   availableResidencies,
@@ -223,7 +229,8 @@ async function copyLibraryFileToProject(
   projectId: string,
   residency: Residency,
   fileName: string,
-  assetId?: string
+  assetId?: string,
+  opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }
 ): Promise<string> {
   const target = getBackend();
   if (assetId && residency === target.kind) {
@@ -231,41 +238,42 @@ async function copyLibraryFileToProject(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ assetId, projectId }),
+      signal: opts?.signal,
     });
     const body = await apiJson<{ fileName?: string }>(res);
     if (!res.ok || !body.fileName) throw new Error(body.error ?? "Could not add from library.");
     return body.fileName;
   }
   const bytes = await backendFor(residency).fetch(
-    `/api/cut/library/media/${encodeURIComponent(fileName)}`
+    `/api/cut/library/media/${encodeURIComponent(fileName)}`,
+    { signal: opts?.signal }
   );
   if (!bytes.ok) throw new Error("Could not read that library file.");
-  return uploadProjectMediaTo(target, projectId, await bytes.blob(), fileName);
+  return uploadProjectMediaTo(target, projectId, await bytes.blob(), fileName, opts);
 }
 
-/** Copy a library asset into the open project's media and register it, without
- * placing it on the timeline. Callers choose where it lands. */
+/** Register a library asset in the open project's media, without placing it on
+ * the timeline. Callers choose where it lands. Usable immediately: it plays
+ * from the library's own route while the copy into the project runs behind
+ * the editor (server-side on the asset's own shelf, download-and-upload
+ * across residencies). */
 export async function importLibraryAsset(
   projectId: string,
   lib: LibraryAsset
 ): Promise<MediaAsset> {
-  const fileName = await copyLibraryFileToProject(projectId, lib.residency, lib.fileName, lib.id);
-
-  const asset: MediaAsset = {
-    id: crypto.randomUUID().slice(0, 8),
-    fileName,
-    name: lib.name,
-    type: lib.type,
-    duration: lib.duration,
-    width: lib.width,
-    height: lib.height,
-    url: mediaUrl(projectId, fileName),
-  };
-  useEditor.getState().addAsset(asset);
-  // Generate filmstrip thumbnails / waveform peaks so the clip renders like any
-  // other on the timeline (project uploads get this via the editor on add).
-  void enrichAsset(asset);
-  return asset;
+  return importRemote(
+    projectId,
+    {
+      url: libraryMediaUrl(lib.fileName, lib.residency),
+      name: lib.name,
+      fileName: lib.fileName,
+      type: lib.type,
+      duration: lib.duration,
+      width: lib.width,
+      height: lib.height,
+    },
+    (opts) => copyLibraryFileToProject(projectId, lib.residency, lib.fileName, lib.id, opts)
+  );
 }
 
 /** Copy a library asset into the open project and append it to the timeline. */

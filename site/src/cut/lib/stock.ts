@@ -64,6 +64,13 @@ export interface StockMusic {
   peaks: number[];
 }
 
+/** Nominal pixel size for a stock clip's aspect. The catalog stores only the
+ * ratio; these stand in until the file's real dimensions are probed, and all
+ * that reads them before then is orientation (the first-asset aspect guess)
+ * and framing math, which only use the ratio. */
+export const stockAspectDims = (aspect: StockVideoAspect): { width: number; height: number } =>
+  aspect === "9:16" ? { width: 1080, height: 1920 } : { width: 1920, height: 1080 };
+
 export const STOCK_MUSIC_CATEGORIES = [
   "Songs",
   "Cinematic",

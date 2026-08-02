@@ -79,7 +79,11 @@ export function SampleLibrary({ projectId }: { projectId: string }) {
                   playing={playingUrl === s.file}
                   onTogglePlay={() => togglePlay(s.file)}
                   onAdd={() =>
-                    void importStockMusic(projectId, { url: s.file, name: sampleName(s.id) })
+                    void importStockMusic(projectId, {
+                      url: s.file,
+                      name: sampleName(s.id),
+                      duration: s.duration,
+                    })
                       .then((a) => useEditor.getState().addAudioFromAsset(a.id))
                       .catch(() => {})
                   }

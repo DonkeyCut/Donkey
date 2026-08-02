@@ -1,9 +1,10 @@
 "use client";
 
 // Imports that are on screen before they are stored. A dropped file is probed
-// from its own bytes and placed straight away; the upload runs here, behind the
-// editor, and the asset swaps from its local object URL to the stored one when
-// the bytes land.
+// from its own bytes and placed straight away; a stock tile or library clip is
+// registered against its source URL. The copy into project storage runs here,
+// behind the editor, and the asset swaps from the URL it arrived on to the
+// stored one when the bytes land.
 //
 // Three things keep that honest:
 // - Nothing about a pending asset reaches the saved document (see storedAssets
@@ -81,7 +82,7 @@ async function run(job: Job) {
   try {
     if (!wanted(job)) return cancelUpload(asset.id);
     let shown = -1;
-    await send({
+    const fileName = await send({
       signal: job.controller.signal,
       onProgress: (fraction) => {
         // The progress stream is the cheapest place to notice the asset is
@@ -95,11 +96,14 @@ async function run(job: Job) {
     });
     if (!wanted(job)) return cancelUpload(asset.id);
     jobs.delete(asset.id);
-    // The stored file takes over from the local bytes. Filmstrips are
-    // self-contained frames and survive the swap; a still's single "frame" is
-    // the source itself, so it repoints with the asset.
-    const url = mediaUrl(job.projectId, asset.fileName);
+    // The stored file takes over from the source bytes, under the name the
+    // copy resolved to (a dropped file reserved it up front; a remote import
+    // learns it here). Filmstrips are self-contained frames and survive the
+    // swap; a still's single "frame" is the source itself, so it repoints
+    // with the asset.
+    const url = mediaUrl(job.projectId, fileName);
     useEditor.getState().updateAsset(asset.id, {
+      fileName,
       url,
       upload: undefined,
       ...(asset.type === "image" ? { thumbs: [url] } : {}),
