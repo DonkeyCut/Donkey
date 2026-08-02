@@ -9,10 +9,13 @@
 // Three things keep that honest:
 // - Nothing about a pending asset reaches the saved document (see storedAssets
 //   / docClips), so a tab that dies mid-upload leaves no broken reference.
-// - Deleting a pending asset aborts its upload; the claimed object is never
-//   completed and is collected server-side.
+// - Deleting a pending asset aborts its upload. A dropped file's claimed
+//   object is never completed and is collected server-side; a remote copy
+//   completes inside a single call, so one that lands after the asset is gone
+//   is deleted here rather than left to count against the account.
 // - A failed upload leaves the asset in place with an error, so the user can
 //   retry it rather than discover later that it was never saved.
+import { getBackend, type CutBackend } from "./backend";
 import type { PendingImport } from "./media";
 import { useEditor } from "./store";
 import { mediaUrl } from "./types";
@@ -38,14 +41,26 @@ function release() {
   else active--;
 }
 
-type Job = { pending: PendingImport; projectId: string; controller: AbortController };
+type Job = {
+  pending: PendingImport;
+  projectId: string;
+  /** Pinned at start: the copy can outlast a move to a project of the other
+   * residency, and its cleanup has to reach the backend it landed on. */
+  backend: CutBackend;
+  controller: AbortController;
+};
 
 const jobs = new Map<string, Job>();
 
 /** Start the background upload for a prepared import. The asset must already
  * be in the store. */
 export function startUpload(projectId: string, pending: PendingImport) {
-  const job: Job = { pending, projectId, controller: new AbortController() };
+  const job: Job = {
+    pending,
+    projectId,
+    backend: getBackend(),
+    controller: new AbortController(),
+  };
   jobs.set(pending.asset.id, job);
   void run(job);
 }
@@ -59,8 +74,19 @@ export function retryUpload(assetId: string) {
   void run(job);
 }
 
-/** Stop an upload whose asset is gone. The claimed object is left incomplete
- * on purpose — it was never counted against the account. */
+/** Drop bytes that landed for an asset that is no longer here. A copy that
+ * completes counts against the account's storage, so a cancel that arrives
+ * once it has finished has to take the file back out. */
+function dropLanded(job: Job, fileName: string) {
+  void job.backend
+    .fetch(`/api/cut/projects/${job.projectId}/media/${encodeURIComponent(fileName)}`, {
+      method: "DELETE",
+    })
+    .catch(() => {});
+}
+
+/** Stop an upload whose asset is gone. A claim the copy never completed is
+ * left incomplete on purpose — it was never counted against the account. */
 export function cancelUpload(assetId: string) {
   const job = jobs.get(assetId);
   if (!job) return;
@@ -94,7 +120,12 @@ async function run(job: Job) {
         useEditor.getState().updateAsset(asset.id, { upload: { progress: fraction } });
       },
     });
-    if (!wanted(job)) return cancelUpload(asset.id);
+    if (!wanted(job)) {
+      // The bytes beat the cancel: they are stored and counted, and nothing
+      // in the document points at them any more.
+      cancelUpload(asset.id);
+      return dropLanded(job, fileName);
+    }
     jobs.delete(asset.id);
     // The stored file takes over from the source bytes, under the name the
     // copy resolved to (a dropped file reserved it up front; a remote import

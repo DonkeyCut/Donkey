@@ -104,7 +104,9 @@ export function Editor({
   const [importing, setImporting] = useState(0);
   // Files being probed and named, plus the ones already placed whose bytes are
   // still going out — both are work the save indicator reports.
-  const sending = useEditor((s) => s.assets.reduce((n, a) => (a.upload ? n + 1 : n), 0));
+  const sending = useEditor((s) =>
+    s.assets.reduce((n, a) => (a.upload && !a.upload.error ? n + 1 : n), 0)
+  );
   const [conflictReloaded, setConflictReloaded] = useState(false);
   const [shareGone, setShareGone] = useState(false);
   // This project lives on this Mac and the Donkey app isn't answering. Nothing

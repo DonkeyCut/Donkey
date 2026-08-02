@@ -28,6 +28,7 @@ import { cloudBackend } from "@/cut/lib/backend/cloud";
 import { cloudUsageQueryKey, useCutMode } from "@/cut/lib/backend/hooks";
 import { localBackend } from "@/cut/lib/backend/local";
 import { clearProjectThreads } from "@/cut/lib/chatThreads";
+import { retryUpload } from "@/cut/lib/importQueue";
 import { backTarget, projectHref, useCutBase } from "@/cut/lib/nav";
 import { copyProjectAcross } from "@/cut/lib/projectCopy";
 import { useEditor } from "@/cut/lib/store";
@@ -243,6 +244,14 @@ export function TopBar({
   // Cloud imports are real uploads worth reporting; local imports are instant
   // disk copies, so they report nothing.
   const cloudUploading = uploading > 0 && cutMode === "cloud";
+  // An import whose bytes never landed is absent from the saved document, so
+  // its clip disappears on the next open. The Media panel shows this for a
+  // dropped file, but a stock or library import lives on the timeline and has
+  // no tile there — the save indicator is the one place every import reports.
+  const failedImports = useEditor((s) => s.assets.filter((a) => a.upload?.error).length);
+  const retryFailedImports = () => {
+    for (const a of useEditor.getState().assets) if (a.upload?.error) retryUpload(a.id);
+  };
   // Uploads settle in bursts; refresh the storage pill's number when a burst
   // ends. Only the settling edge counts — on mount nothing has landed yet.
   const queryClient = useQueryClient();
@@ -338,10 +347,18 @@ export function TopBar({
         size={compact ? "icon-sm" : "sm"}
         aria-label="Export"
         // A render reads the saved document, which an import still uploading
-        // is deliberately absent from — exporting now would quietly leave it
-        // out of the video.
-        disabled={!hasClips || cloudUploading}
-        title={cloudUploading ? "Finishing uploads…" : compact ? "Export" : undefined}
+        // (or one that failed) is deliberately absent from — exporting now
+        // would quietly leave it out of the video.
+        disabled={!hasClips || cloudUploading || failedImports > 0}
+        title={
+          failedImports > 0
+            ? "Retry the failed imports first"
+            : cloudUploading
+              ? "Finishing uploads…"
+              : compact
+                ? "Export"
+                : undefined
+        }
         onClick={() => {
           const s = useEditor.getState();
           s.setPlaying(false);
@@ -424,7 +441,20 @@ export function TopBar({
             saveState === "saved" && !cloudUploading && "opacity-60"
           )}
         >
-          {cloudUploading ? (
+          {failedImports > 0 ? (
+            <>
+              <span className="text-destructive">
+                {failedImports === 1 ? "1 import failed" : `${failedImports} imports failed`}
+              </span>
+              <button
+                type="button"
+                className="font-medium underline underline-offset-2"
+                onClick={retryFailedImports}
+              >
+                Retry
+              </button>
+            </>
+          ) : cloudUploading ? (
             <>
               <Loader2 className="size-3 animate-spin" />{" "}
               {uploading === 1 ? "Uploading" : `Uploading ${uploading} files`}

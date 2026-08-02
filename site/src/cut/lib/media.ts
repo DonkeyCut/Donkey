@@ -467,7 +467,7 @@ function loadImageMeta(url: string): Promise<{ width: number; height: number }> 
 type RemoteImportInit = {
   url: string;
   name: string;
-  /** Stored name to claim; defaults to the URL's basename. */
+  /** Name to store the bytes under; defaults to the URL's basename. */
   fileName?: string;
   type: AssetType;
   duration: number;
@@ -504,11 +504,17 @@ export function importRemote(
   init: RemoteImportInit,
   copy?: (opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }) => Promise<string>
 ): MediaAsset {
-  const fileName =
-    init.fileName || init.url.split("/").pop()?.split("?")[0] || `${init.type}-${uid()}`;
+  const id = uid();
+  // The name the bytes will be stored under is the copy's to decide — the
+  // server dedupes it against what the project already holds — so until they
+  // land the asset answers to a name of its own. A name borrowed from the
+  // source would collide with a file already in the project and speak for it:
+  // the delete guard and the filmstrip cache both key on this field.
+  const storeAs =
+    init.fileName || init.url.split("/").pop()?.split("?")[0] || `${init.type}-${id}`;
   const asset: MediaAsset = {
-    id: uid(),
-    fileName,
+    id,
+    fileName: `pending-${id}`,
     name: init.name,
     type: init.type,
     duration: init.duration,
@@ -538,7 +544,7 @@ export function importRemote(
     const dl = await fetch(init.url, { signal: opts?.signal });
     if (!dl.ok) throw new Error("Could not read the media.");
     const blob = await dl.blob();
-    return uploadProjectMediaTo(getBackend(), projectId, blob, fileName, opts);
+    return uploadProjectMediaTo(getBackend(), projectId, blob, storeAs, opts);
   };
   startUpload(projectId, {
     asset,
@@ -560,6 +566,11 @@ export async function importImage(
   // The size frames the still (and the first-asset aspect guess); the source
   // is a same-origin file, so this is one cached header read, not a download.
   const dims = await loadImageMeta(image.url);
+  // 0×0 is how the read reports a source it could not open (a stock id that
+  // no longer resolves, a dead link). Registering that would place a broken
+  // still and hand the first-asset aspect guess a meaningless size, so the
+  // import fails here instead.
+  if (dims.width === 0 || dims.height === 0) throw new Error("Could not read the image.");
   // A stock image lands on the timeline where the caller places it, not in the
   // Media panel — tag it so it stays out.
   return importRemote(projectId, {
