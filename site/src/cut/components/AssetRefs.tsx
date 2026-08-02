@@ -988,6 +988,14 @@ export function MentionTextarea({
           if (
             e.key === "Backspace" &&
             onRemoveLastRef &&
+            // One deliberate press, one chip. A held Backspace repeats about
+            // thirty times a second, so the run that clears a prompt would
+            // otherwise carry straight on through the attachments; the
+            // word/line deletions do not touch them at all.
+            !e.repeat &&
+            !e.metaKey &&
+            !e.altKey &&
+            !e.ctrlKey &&
             e.currentTarget.selectionStart === 0 &&
             e.currentTarget.selectionEnd === 0
           ) {
