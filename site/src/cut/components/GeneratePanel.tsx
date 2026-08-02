@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Copy, Film, Loader2, Maximize2, Plus, RotateCw, Sparkles, Trash2, X } from "lucide-react";
+import { Copy, Film, Loader2, Maximize2, Plus, RotateCw, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
@@ -422,20 +422,13 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
               <Copy /> Copy reference
             </DropdownMenuItem>
           }
-          after={
-            <DropdownMenuItem
-              variant="destructive"
-              onClick={() => {
-                // The render dies for real: the tile goes with its job row,
-                // and the asset takes its media file (and any clips playing
-                // it) along — same delete the image tiles offer.
-                useGenerate.getState().dismiss(job.id);
-                useEditor.getState().removeAsset(asset.id);
-              }}
-            >
-              <Trash2 /> Delete
-            </DropdownMenuItem>
-          }
+          onDelete={() => {
+            // The render dies for real: the tile goes with its job row, and
+            // the asset takes its media file (and any clips playing it)
+            // along — same delete the image tiles offer.
+            useGenerate.getState().dismiss(job.id);
+            useEditor.getState().removeAsset(asset.id);
+          }}
         />
       </div>
       {pulse && <div aria-hidden className={genPulseOverlay} />}
