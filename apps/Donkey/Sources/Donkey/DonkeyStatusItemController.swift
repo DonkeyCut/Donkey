@@ -138,6 +138,8 @@ final class DonkeyStatusItemController: NSObject, NSMenuDelegate {
             return ("Checking for Updates…", false, true)
         case .installing:
             return ("Updating…", false, true)
+        case .requiresAdmin:
+            return ("Update Requires an Admin", false, false)
         default:
             return ("Check for Updates", true, false)
         }

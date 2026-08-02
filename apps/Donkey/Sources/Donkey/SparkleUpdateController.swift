@@ -117,6 +117,14 @@ final class SparkleUpdateController: NSObject, DonkeyUpdateChecking, SPUUserDriv
         state: SPUUserUpdateState,
         reply: @escaping (SPUUserUpdateChoice) -> Void
     ) {
+        // The silent install replaces the app bundle in place. When this user cannot write it
+        // (a non-admin account with the app in /Applications), installing would dead-end in an
+        // admin credentials prompt, so surface that state instead of offering the install.
+        guard FileManager.default.isWritableFile(atPath: Bundle.main.bundlePath) else {
+            reply(.dismiss)
+            emit(.requiresAdmin, latestVersion: appcastItem.displayVersionString)
+            return
+        }
         // Hold the decision and light up the notch button instead of installing immediately.
         pendingInstall = reply
         emit(.available, latestVersion: appcastItem.displayVersionString)

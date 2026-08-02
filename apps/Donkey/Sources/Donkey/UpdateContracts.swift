@@ -8,6 +8,9 @@ public enum DonkeyUpdateStatus: String, Equatable, Sendable {
     case upToDate
     case available
     case installing
+    /// An update exists but the app bundle is not writable by this user, so the silent install
+    /// would dead-end in an admin prompt this user cannot answer.
+    case requiresAdmin
     case unavailable
     case failed
 }
