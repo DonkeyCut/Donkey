@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { fetchLibrary, libraryMediaUrl, type LibraryAsset } from "./library";
-import { stockTitle, type StockImage, type StockMusic, type StockVideo } from "./stock";
+import { stockAspectDims, stockTitle, type StockImage, type StockMusic, type StockVideo } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
 import { clipLen, getClipSpans, useEditor } from "./store";
@@ -42,6 +42,14 @@ export interface AssetRef {
   /** Fetchable URL for the media itself (previews and frame capture). */
   url: string;
   duration?: number;
+  /** Source pixel size when the catalog knows it — lets a drop register the
+   * asset (and frame it) without reading the file first. Stock clips carry
+   * nominal sizes for their aspect; the import corrects them from the file. */
+  width?: number;
+  height?: number;
+  /** Poster frame, when the source has one — what a drag ghost repeats while
+   * true frames are read. */
+  thumb?: string;
   /** The moment the user pinned on this reference, seconds into the source —
    * set only by an explicit pick in the chip's moment picker. When present,
    * a video ref reads from this frame (with a little sampling around it) and
@@ -70,6 +78,8 @@ export const refFromLibrary = (a: LibraryAsset): AssetRef => ({
   kind: a.type,
   url: libraryMediaUrl(a.fileName, a.residency),
   duration: a.duration,
+  ...(a.width !== undefined ? { width: a.width } : {}),
+  ...(a.height !== undefined ? { height: a.height } : {}),
 });
 
 export const refFromStock = (i: StockImage): AssetRef => ({
@@ -87,6 +97,8 @@ export const refFromStockVideo = (v: StockVideo): AssetRef => ({
   kind: "video",
   url: v.file,
   duration: v.duration,
+  ...stockAspectDims(v.aspect),
+  thumb: v.thumb,
 });
 
 export const refFromStockMusic = (m: StockMusic): AssetRef => ({
@@ -162,6 +174,9 @@ export function normalizeRef(v: unknown): AssetRef | null {
     kind: o.kind ?? o.type ?? "video",
     url: liveRefUrl(scope, o.id, o.url),
     duration: o.duration,
+    ...(typeof o.width === "number" ? { width: o.width } : {}),
+    ...(typeof o.height === "number" ? { height: o.height } : {}),
+    ...(o.thumb ? { thumb: o.thumb } : {}),
     ...(typeof o.t === "number" && Number.isFinite(o.t) ? { t: o.t } : {}),
   };
 }

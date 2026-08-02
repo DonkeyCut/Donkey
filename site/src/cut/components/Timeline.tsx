@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { ArrowDown, ArrowDownToLine, ArrowLeft, ArrowLeftToLine, ArrowRight, ArrowRightToLine, ArrowUp, ArrowUpToLine, AudioLines, Blend, Check, Circle, Clapperboard, Droplets, EllipsisVertical, Expand, Eye, EyeOff, FolderOpen, FolderPlus, FoldHorizontal, Fullscreen, Loader2, Moon, MoreHorizontal, Pause, Play, Scissors, SkipBack, Sun, Target, Trash2, Type, UnfoldHorizontal, Volume2, VolumeX, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,6 +29,7 @@ import {
   addProjectTemplateToTimeline,
   addTemplateToProject,
   importLibraryAsset,
+  libraryMediaUrl,
   saveAssetToLibrary,
 } from "@/cut/lib/library";
 import { originalSettings, type ExportDoc } from "@/cut/lib/exportClient";
@@ -396,9 +397,10 @@ export function Timeline() {
   const contentW = heldContentW.current;
 
   // Drop preview while dragging a media asset onto video track 0: where the
-  // clip would land, how long it runs, and a poster frame so the preview reads
-  // as the segment itself sliding along the row rather than an empty slot.
-  const [assetDrop, setAssetDrop] = useState<{ t: number; len: number; thumb?: string } | null>(
+  // clip would land, how long it runs, and what the source looks like, so the
+  // preview reads as the segment itself sliding along the row rather than an
+  // empty slot.
+  const [assetDrop, setAssetDrop] = useState<{ t: number; len: number; ghost?: DropGhost } | null>(
     null
   );
   // Kind of external media being dragged over the timeline (audio vs video).
@@ -886,7 +888,13 @@ export function Timeline() {
         return;
       }
       if (stockVideo && projectId) {
-        void importStockVideo(projectId, { url: stockVideo.url, name: stockVideo.name })
+        void importStockVideo(projectId, {
+          url: stockVideo.url,
+          name: stockVideo.name,
+          duration: stockVideo.duration,
+          width: stockVideo.width,
+          height: stockVideo.height,
+        })
           .then((vid) => useEditor.getState().addVideoFromAsset(vid.id, place, t))
           .catch(() => {});
         return;
@@ -992,27 +1000,56 @@ export function Timeline() {
         // stock drags carry their own shape since they aren't in the project yet.
         let type: "video" | "audio" | "image" | undefined;
         let duration = 0;
-        // Poster frame for the on-track ghost, when the source can offer one.
-        let thumb: string | undefined;
+        // What the ghost paints: the source's frames, from wherever it lives.
+        let ghost: DropGhost | undefined;
         if (isLib) {
           const lib = draggingLibrary();
           type = lib?.type;
           duration = lib?.duration ?? 0;
+          if (lib && isClipMedia(lib.type)) {
+            ghost = {
+              url: libraryMediaUrl(lib.fileName, lib.residency),
+              kind: lib.type,
+              aspect: lib.width && lib.height ? lib.width / lib.height : undefined,
+            };
+          }
         } else if (stockMusic) {
           type = "audio";
           duration = stockMusic.duration ?? 0;
         } else if (stockVideo) {
           type = "video";
           duration = stockVideo.duration ?? 0;
+          ghost = {
+            url: stockVideo.url,
+            kind: "video",
+            aspect:
+              stockVideo.width && stockVideo.height
+                ? stockVideo.width / stockVideo.height
+                : undefined,
+            poster: stockVideo.thumb,
+          };
         } else if (still) {
           type = "video";
           duration = STILL_SECONDS;
+          ghost = { url: still.url, kind: "image" };
         } else {
           const id = draggingAssetId();
           const asset = id ? useEditor.getState().assets.find((a) => a.id === id) : null;
           type = asset?.type;
           duration = asset?.type === "image" ? STILL_SECONDS : asset?.duration ?? 0;
-          thumb = asset?.type === "image" ? asset.url : asset?.thumbs?.[0];
+          if (asset && isClipMedia(asset.type)) {
+            ghost =
+              asset.type === "image"
+                ? { url: asset.url, kind: "image" }
+                : {
+                    url: asset.url,
+                    kind: "video",
+                    aspect: asset.width && asset.height ? asset.width / asset.height : undefined,
+                    thumbs: asset.thumbs,
+                    thumbStep: asset.thumbStep,
+                    poster: asset.thumbs?.[0],
+                  };
+          }
         }
         // A still rides the video tracks: reveal their guides and new-track rows.
         setDropType(isClipMedia(type) ? "video" : type ?? null);
@@ -1045,7 +1082,7 @@ export function Timeline() {
         // actually land — a box under the pointer that lands minutes away lies.
         const cur = useEditor.getState();
         const { start } = rippleInsert(track0Clips(cur.clips), dropTimeAt(e.clientX), duration);
-        setAssetDrop({ t: start, len: duration, thumb });
+        setAssetDrop({ t: start, len: duration, ghost });
       }}
       onDragLeave={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
@@ -1100,7 +1137,11 @@ export function Timeline() {
         // hovered soundtrack lane.
         if (stockMusic && projectId) {
           e.preventDefault();
-          void importStockMusic(projectId, { url: stockMusic.url, name: stockMusic.name })
+          void importStockMusic(projectId, {
+            url: stockMusic.url,
+            name: stockMusic.name,
+            duration: stockMusic.duration,
+          })
             .then((asset) => placeAssetAt(asset.id, "audio", t, audioRow))
             .catch(() => {});
           return;
@@ -1110,7 +1151,13 @@ export function Timeline() {
         // lands in the resolved video slot.
         if (stockVideo && projectId) {
           e.preventDefault();
-          void importStockVideo(projectId, { url: stockVideo.url, name: stockVideo.name })
+          void importStockVideo(projectId, {
+            url: stockVideo.url,
+            name: stockVideo.name,
+            duration: stockVideo.duration,
+            width: stockVideo.width,
+            height: stockVideo.height,
+          })
             .then((asset) => placeAssetAt(asset.id, "video", t, 0, videoPlace))
             .catch(() => {});
           return;
@@ -1357,8 +1404,8 @@ export function Timeline() {
               />
             )}
             {assetDrop && (
-              // The dragged clip as a floating segment: the poster fills it and
-              // it rides above the row's clips (z-20), so a drag reads as a
+              // The dragged clip as a floating segment: its filmstrip fills it
+              // and it rides above the row's clips (z-20), so a drag reads as a
               // placed segment sliding to its landing spot, not a hole to fill.
               <div
                 className="tl-asset-drop-slot pointer-events-none absolute top-0.5 z-20 overflow-hidden rounded-lg bg-neutral-200 opacity-90 shadow-2xl ring-[1.5px] ring-[#0a84ff]/70 transition-[left] duration-100 ease-out"
@@ -1368,13 +1415,12 @@ export function Timeline() {
                   height: VIDEO_H - 4,
                 }}
               >
-                {assetDrop.thumb && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={assetDrop.thumb}
-                    alt=""
-                    draggable={false}
-                    className="absolute inset-0 h-full w-full object-cover"
+                {assetDrop.ghost && (
+                  <DropGhostFilm
+                    ghost={assetDrop.ghost}
+                    w={Math.max(10, assetDrop.len * pps - CLIP_GAP)}
+                    h={VIDEO_H - 4}
+                    pps={pps}
                   />
                 )}
                 <span className="absolute top-1 left-1 rounded-[5px] bg-black/65 px-1.5 py-px font-mono text-[10px] tabular-nums text-white">
@@ -2531,6 +2577,109 @@ function ClipMenu({
         )}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** What the drag ghost knows about the media under the cursor — enough to
+ * tile the segment at the source's aspect before the asset exists in the
+ * project. */
+type DropGhost = {
+  /** Playable source: a project media URL, a stock file, a library route. */
+  url: string;
+  kind: "video" | "image";
+  /** Source width/height ratio when known; 16:9 stands in until a frame says. */
+  aspect?: number;
+  /** Pre-sampled filmstrip (project assets) — true frames with no reads. */
+  thumbs?: string[];
+  thumbStep?: number;
+  /** One known frame (a poster) to repeat while true frames are read. */
+  poster?: string;
+};
+
+/** The ghost segment's filmstrip. An image tiles itself at its natural aspect.
+ * A video with a filmstrip samples it exactly like a placed clip. Anything
+ * else paints every tile with the best frame in hand — the poster at first —
+ * and swaps each tile to the true frame at its source time as the edge-frame
+ * reader captures them, so a fresh drag sharpens into a real strip within a
+ * beat. Tile times depend on the source alone, not the drop position, so the
+ * strip never re-reads while the segment slides along the row. */
+function DropGhostFilm({
+  ghost,
+  w,
+  h,
+  pps,
+}: {
+  ghost: DropGhost;
+  w: number;
+  h: number;
+  pps: number;
+}) {
+  const [, bump] = useReducer((x: number) => x + 1, 0);
+  const aspect = ghost.aspect ?? 16 / 9;
+  const natural = Math.max(24, Math.round(h * aspect));
+  const count = Math.max(1, Math.min(120, Math.ceil(w / natural)));
+  const imgW = Math.max(natural, w / count);
+  const needsReads = ghost.kind === "video" && !ghost.thumbs?.length;
+  useEffect(() => {
+    if (!needsReads) return;
+    let live = true;
+    for (let k = 0; k < count; k++) {
+      const t = (k * imgW + imgW / 2) / pps;
+      if (peekEdgeFrame(ghost.url, t)) continue;
+      void requestEdgeFrame(`drop-ghost:${k}`, ghost.url, t).then((src) => {
+        if (live && src) bump();
+      });
+    }
+    return () => {
+      live = false;
+    };
+  }, [needsReads, ghost.url, count, imgW, pps]);
+  if (ghost.kind === "image") {
+    // The browser tiles the image at its own aspect — no measuring needed.
+    return (
+      <div
+        className="absolute inset-0"
+        style={{
+          backgroundImage: `url("${ghost.url}")`,
+          backgroundSize: "auto 100%",
+          backgroundRepeat: "repeat-x",
+        }}
+      />
+    );
+  }
+  const tiles: { src: string | null; left: number }[] = [];
+  let known: string | null = ghost.poster ?? null;
+  for (let k = 0; k < count; k++) {
+    const t = (k * imgW + imgW / 2) / pps;
+    let src: string | null = null;
+    if (ghost.thumbs?.length && ghost.thumbStep) {
+      src =
+        ghost.thumbs[
+          Math.min(ghost.thumbs.length - 1, Math.max(0, Math.floor(t / ghost.thumbStep)))
+        ];
+    } else {
+      src = peekEdgeFrame(ghost.url, t);
+    }
+    if (src) known = src;
+    tiles.push({ src: src ?? known, left: k * imgW });
+  }
+  return (
+    <div className="pointer-events-none absolute inset-0">
+      {tiles.map(
+        (tile, k) =>
+          tile.src && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={k}
+              src={tile.src}
+              alt=""
+              draggable={false}
+              className="absolute top-0 h-full object-cover"
+              style={{ left: tile.left, width: imgW }}
+            />
+          )
+      )}
+    </div>
   );
 }
 
