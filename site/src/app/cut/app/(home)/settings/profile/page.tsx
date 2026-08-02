@@ -6,7 +6,6 @@ import { Pencil } from "lucide-react";
 import { AvatarDialog } from "@/app/cut/app/(home)/settings/profile/AvatarDialog";
 import { EmailSection } from "@/app/cut/app/(home)/settings/profile/EmailSection";
 import { FeatureFlagsSection } from "@/app/cut/app/(home)/settings/profile/FeatureFlagsSection";
-import { SuperuserSection } from "@/app/cut/app/(home)/settings/profile/SuperuserSection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -126,8 +125,6 @@ export default function CutProfilePage() {
       <EmailSection />
 
       <FeatureFlagsSection />
-
-      <SuperuserSection />
 
       <AvatarDialog
         open={editingAvatar}

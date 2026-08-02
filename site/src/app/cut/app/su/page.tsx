@@ -16,7 +16,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { useAccount } from "@/queries/credits";
 import {
   recentJobsQueryKey,
   useRecentJobs,
@@ -25,7 +24,7 @@ import {
 } from "@/queries/jobs";
 
 // The list shows each job's stored payload and result as-is, so it stays
-// honest for job kinds this card doesn't know about: flatten the primitive
+// honest for job kinds this page doesn't know about: flatten the primitive
 // fields into "email: x@y.com · projects: 3".
 function describeFields(value: unknown): string {
   if (typeof value !== "object" || value === null) return "";
@@ -65,28 +64,19 @@ const stateDot: Record<AsyncJobListItem["state"], string> = {
   error: "bg-destructive",
 };
 
-// Super-user tooling on the profile page. Today: delete a user and everything
-// they own, for cleaning production test accounts out of the data. The delete
-// runs as a background job on the hosted API; this card starts it, and the
-// recent-jobs list below tracks it to completion. The confirm dialog makes
-// the super user retype the email so a paste-slip can't take out the wrong
-// account.
-export function SuperuserSection() {
-  const account = useAccount();
+// User actions. Today: delete a user and everything they own, for cleaning
+// production test accounts out of the data. The delete runs as a background
+// job on the hosted API; this page starts it, and the recent-jobs list below
+// tracks it to completion. The confirm dialog makes the super user retype the
+// email so a paste-slip can't take out the wrong account. The layout gates
+// this route to super users, so the job hooks run unconditionally here.
+export default function SuUsersPage() {
   const queryClient = useQueryClient();
   const start = useStartJob();
+  const recent = useRecentJobs(true);
   const [email, setEmail] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmEmail, setConfirmEmail] = useState("");
-  // The jobs hook is gated so a non-super user's browser never calls the
-  // job APIs at all.
-  const superUser = account.data?.superUser === true;
-  const recent = useRecentJobs(superUser);
-
-  // Render nothing for non-super users (and while we don't yet know).
-  if (!superUser) {
-    return null;
-  }
 
   const target = email.trim();
   const confirmed = target !== "" && confirmEmail.trim() === target;
@@ -111,43 +101,44 @@ export function SuperuserSection() {
   };
 
   return (
-    <div className="rounded-xl border bg-card p-5">
-      <div className="text-sm font-medium">Super user</div>
-      <div className="mt-4 space-y-3 border-t pt-4">
-        <div>
-          <div className="text-sm font-medium">Delete user</div>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            Permanently deletes the account and everything it owns — projects,
-            media, credits, and billing.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Input
-            aria-label="User email"
-            className="max-w-xs"
-            id="delete-user-email"
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="user@example.com"
-            type="email"
-            value={email}
-          />
-          <Button
-            disabled={target === "" || start.isPending}
-            onClick={openConfirm}
-            variant="destructive"
-          >
-            Delete User
-          </Button>
-        </div>
+    <div className="max-w-2xl space-y-6 pb-9">
+      <div className="rounded-xl border bg-card p-5">
+        <div className="space-y-3">
+          <div>
+            <div className="text-sm font-medium">Delete user</div>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Permanently deletes the account and everything it owns — projects,
+              media, credits, and billing.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Input
+              aria-label="User email"
+              className="max-w-xs"
+              id="delete-user-email"
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="user@example.com"
+              type="email"
+              value={email}
+            />
+            <Button
+              disabled={target === "" || start.isPending}
+              onClick={openConfirm}
+              variant="destructive"
+            >
+              Delete User
+            </Button>
+          </div>
 
-        {start.isError ? (
-          <p className="text-sm text-destructive">
-            Couldn&apos;t start the delete — check the email and try again.
-          </p>
-        ) : null}
+          {start.isError ? (
+            <p className="text-sm text-destructive">
+              Couldn&apos;t start the delete — check the email and try again.
+            </p>
+          ) : null}
+        </div>
       </div>
 
-      <div className="mt-4 border-t pt-4">
+      <div className="rounded-xl border bg-card p-5">
         <div className="text-sm font-medium">Recent jobs</div>
         {recent.data?.jobs.length ? (
           <ul className="mt-3 space-y-3">
