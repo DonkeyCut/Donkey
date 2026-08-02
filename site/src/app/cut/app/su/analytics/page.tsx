@@ -33,10 +33,14 @@ function formatMicros(micros: bigint): string {
   return `$${(Number(micros) / 1e6).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 }
 
+// Activity is null for a day the pipeline never extracted: the masks are
+// empty because there was nothing to read, which is not the same as a day
+// nobody worked. Those days leave a gap in the charts and an unknown dot in
+// the grid. Signups come from the user snapshot, so they are always known.
 type DayPoint = {
   day: string;
-  active: number;
-  working: number;
+  active: number | null;
+  working: number | null;
   signups: number;
   totalRegistered: number;
 };
@@ -44,12 +48,13 @@ type DayPoint = {
 type RollupView = {
   series: DayPoint[];
   workBits: number;
+  missingDays: Set<string>;
   registered: number;
   signups7d: number;
   signupsWindow: number;
-  activeYesterday: number;
-  active7d: number;
-  activePrior7d: number;
+  activeYesterday: number | null;
+  active7d: number | null;
+  activePrior7d: number | null;
   totalBalanceMicros: bigint;
 };
 
@@ -72,7 +77,17 @@ function deriveView(rollup: AnalyticsRollup): RollupView {
     (user) => user.registeredAt.slice(0, 10) < firstDay,
   ).length;
 
+  // Any day the consolidation could not read a source for is undercounted at
+  // best, and indistinguishable from a quiet day — so it reports as unknown
+  // rather than as a number the reader would trust.
+  const missingDays = new Set(rollup.missing.map((entry) => entry.day));
+
   const series = rollup.days.map((day, i) => {
+    const signups = signupsByDay.get(day) ?? 0;
+    totalRegistered += signups;
+    if (missingDays.has(day)) {
+      return { active: null, day, signups, totalRegistered, working: null };
+    }
     let active = 0;
     let working = 0;
     for (const user of rollup.users) {
@@ -80,20 +95,20 @@ function deriveView(rollup: AnalyticsRollup): RollupView {
       if (mask !== 0) active++;
       if ((mask & workBits) !== 0) working++;
     }
-    const signups = signupsByDay.get(day) ?? 0;
-    totalRegistered += signups;
     return { active, day, signups, totalRegistered, working };
   });
 
-  const activeInRange = (from: number, to: number) => {
+  // Null when the whole range went unextracted; otherwise it counts over the
+  // days there is data for, so one missing day doesn't drag the number down.
+  const activeInRange = (from: number, to: number): number | null => {
+    const known: number[] = [];
+    for (let i = Math.max(0, from); i < to; i++) {
+      if (!missingDays.has(rollup.days[i])) known.push(i);
+    }
+    if (known.length === 0) return null;
     let count = 0;
     for (const user of rollup.users) {
-      for (let i = Math.max(0, from); i < to; i++) {
-        if ((user.activity[i] ?? 0) !== 0) {
-          count++;
-          break;
-        }
-      }
+      if (known.some((i) => (user.activity[i] ?? 0) !== 0)) count++;
     }
     return count;
   };
@@ -103,7 +118,8 @@ function deriveView(rollup: AnalyticsRollup): RollupView {
   return {
     active7d: activeInRange(len - 7, len),
     activePrior7d: activeInRange(len - 14, len - 7),
-    activeYesterday: series[len - 1]?.active ?? 0,
+    activeYesterday: series[len - 1]?.active ?? null,
+    missingDays,
     registered: rollup.users.length,
     series,
     signups7d: last7.reduce((sum, day) => sum + (signupsByDay.get(day) ?? 0), 0),
@@ -162,26 +178,47 @@ function ChartCard({
   );
 }
 
-function ActivityDot({ mask, workBits, label }: { mask: number; workBits: number; label: string }) {
+function ActivityDot({
+  mask,
+  workBits,
+  label,
+  unknown,
+}: {
+  mask: number;
+  workBits: number;
+  label: string;
+  unknown: boolean;
+}) {
   const worked = (mask & workBits) !== 0;
   const visited = mask !== 0;
   return (
     <span
       className={cn(
         "block size-2 rounded-full",
-        worked
-          ? "bg-[var(--chart-1)]"
-          : visited
-            ? "bg-[var(--chart-1)] opacity-40"
-            : "bg-muted",
+        unknown
+          ? "border border-dashed border-muted-foreground/50"
+          : worked
+            ? "bg-[var(--chart-1)]"
+            : visited
+              ? "bg-[var(--chart-1)] opacity-40"
+              : "bg-muted",
       )}
       title={label}
     />
   );
 }
 
-function ActivityGrid({ rollup, workBits }: { rollup: AnalyticsRollup; workBits: number }) {
+function ActivityGrid({
+  rollup,
+  workBits,
+  missingDays,
+}: {
+  rollup: AnalyticsRollup;
+  workBits: number;
+  missingDays: Set<string>;
+}) {
   const dotLabel = (email: string, day: string, mask: number) => {
+    if (missingDays.has(day)) return `${email} — ${formatDay(day)}: no data`;
     if (mask === 0) return `${email} — ${formatDay(day)}: inactive`;
     const sources = rollup.sources.filter((_, i) => (mask & (1 << i)) !== 0);
     return `${email} — ${formatDay(day)}: ${sources.join(", ")}`;
@@ -191,6 +228,7 @@ function ActivityGrid({ rollup, workBits }: { rollup: AnalyticsRollup; workBits:
       <p className="font-medium">User activity</p>
       <p className="text-sm text-muted-foreground">
         One dot per user per day, last {rollup.days.length} days
+        {missingDays.size > 0 && ` · ${missingDays.size} without data`}
       </p>
       <div className="mt-4 overflow-x-auto">
         <table className="border-separate border-spacing-0">
@@ -224,6 +262,7 @@ function ActivityGrid({ rollup, workBits }: { rollup: AnalyticsRollup; workBits:
                     <ActivityDot
                       label={dotLabel(user.email, day, user.activity[i] ?? 0)}
                       mask={user.activity[i] ?? 0}
+                      unknown={missingDays.has(day)}
                       workBits={workBits}
                     />
                   </td>
@@ -242,6 +281,10 @@ function ActivityGrid({ rollup, workBits }: { rollup: AnalyticsRollup; workBits:
         </span>
         <span className="flex items-center gap-1.5">
           <span className="size-2 rounded-full bg-muted" /> inactive
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="size-2 rounded-full border border-dashed border-muted-foreground/50" /> no
+          data
         </span>
       </p>
     </div>
@@ -270,9 +313,11 @@ export default function SuAnalyticsPage() {
 
   const data = rollup.data;
   const deltaPct =
-    view.activePrior7d > 0
+    view.active7d !== null && view.activePrior7d !== null && view.activePrior7d > 0
       ? `${(((view.active7d - view.activePrior7d) / view.activePrior7d) * 100).toFixed(1)}%`
       : null;
+  const count = (n: number | null) => (n === null ? "—" : n.toLocaleString("en-US"));
+  const lastDay = data.days[data.days.length - 1];
 
   return (
     <div className="space-y-6 pb-9">
@@ -284,14 +329,20 @@ export default function SuAnalyticsPage() {
         />
         <StatTile
           label="Active yesterday"
-          value={view.activeYesterday.toLocaleString("en-US")}
-          sub={`of ${view.registered.toLocaleString("en-US")} registered`}
+          value={count(view.activeYesterday)}
+          sub={
+            view.activeYesterday === null
+              ? `no extract for ${formatDay(lastDay)} yet`
+              : `of ${view.registered.toLocaleString("en-US")} registered`
+          }
         />
         <StatTile
           label="Active last 7 days"
-          value={view.active7d.toLocaleString("en-US")}
+          value={count(view.active7d)}
           sub={
-            deltaPct === null ? (
+            view.active7d === null ? (
+              "no extracts for the last 7 days"
+            ) : deltaPct === null ? (
               "no prior-week baseline"
             ) : (
               <>
@@ -317,7 +368,14 @@ export default function SuAnalyticsPage() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
-        <ChartCard title="Active users" subtitle="Daily actives, last 60 days">
+        <ChartCard
+          title="Active users"
+          subtitle={
+            view.missingDays.size > 0
+              ? `Daily actives, last 60 days · ${view.missingDays.size} days without data are left blank`
+              : "Daily actives, last 60 days"
+          }
+        >
           <ChartContainer className="w-full" config={activesConfig}>
             <AreaChart accessibilityLayer data={view.series} margin={{ left: -16 }}>
               <CartesianGrid vertical={false} />
@@ -421,7 +479,7 @@ export default function SuAnalyticsPage() {
         </ChartContainer>
       </ChartCard>
 
-      <ActivityGrid rollup={data} workBits={view.workBits} />
+      <ActivityGrid missingDays={view.missingDays} rollup={data} workBits={view.workBits} />
 
       <p className="text-xs text-muted-foreground">
         From the nightly rollup generated{" "}
