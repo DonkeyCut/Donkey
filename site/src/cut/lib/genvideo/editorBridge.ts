@@ -7,8 +7,9 @@
  * seconds, and every method here divides or multiplies by GEN_FPS exactly once.
  *
  * Placement forwards to the store's id-returning gen actions (placeGenClip /
- * placeGenAudio / removeClipById / removeAudioById), which place at an exact
- * time without sliding and never touch the user's selection — so a run
+ * placeGenAudio / removeClipById / removeAudioById), which land through the
+ * store's run placement primitive — anchored to the run's own clips, slid
+ * clear of everything else — and never touch the user's selection, so a run
  * populates the track in the background while the user keeps editing. A
  * provided-audio scene mutes its b-roll under the user's spine; a generated
  * scene leaves the shot's burned-in narration audible. `importMedia` is
@@ -101,7 +102,7 @@ export class StoreEditorBridge implements EditorBridge {
     mediaId: string,
     startFrame: number,
     endFrame: number,
-    opts?: { srcInSec?: number; muted?: boolean }
+    opts?: { srcInSec?: number; muted?: boolean; anchorAfterIds?: string[]; followClipIds?: string[] }
   ): Promise<string> {
     if ((await this.mode()) === "store") {
       const id = useEditor.getState().placeGenClip(mediaId, toSec(startFrame), toSec(endFrame), opts);
@@ -110,7 +111,7 @@ export class StoreEditorBridge implements EditorBridge {
     }
     let placed: string | null = null;
     await withProjectDoc(this.projectId, (doc) => {
-      placed = docPlaceGenClip(doc, mediaId, toSec(startFrame), toSec(endFrame), opts?.srcInSec, opts?.muted ?? true);
+      placed = docPlaceGenClip(doc, mediaId, toSec(startFrame), toSec(endFrame), opts);
     });
     if (!placed) throw new Error(`placeClip: no placeable asset ${mediaId}`);
     return placed;

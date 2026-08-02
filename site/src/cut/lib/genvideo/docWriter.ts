@@ -16,7 +16,7 @@
 
 import { apiJson, getBackend, type CutBackend } from "../backend";
 import { projectBackend } from "../residency";
-import { RENDERS_CAP, storedAssets, useEditor } from "../store";
+import { footprints, nextFreeStart, placeInRun, RENDERS_CAP, storedAssets, useEditor } from "../store";
 import { mediaUrl, SPEED_MIN } from "../types";
 import type { AudioClip, MediaAsset, ProjectDoc, RenderRecord, VideoClip } from "../types";
 import { fillSlot } from "./fillSlot";
@@ -150,37 +150,55 @@ export async function findRunAsset(
   return stored ? { ...stored, url: mediaUrl(projectId, stored.fileName, backend) } : undefined;
 }
 
-/** placeGenClip against a doc: fill [startSec, endSec) exactly on track 0,
- * honoring the reviewer's source window. Muted only when asked (a provided-audio
- * scene mutes its b-roll; a generated scene keeps the burned-in narration
- * audible). Returns the new clip id. */
+/** placeGenClip against a doc: fill a [startSec, endSec)-sized slot on track 0,
+ * honoring the reviewer's source window, landing through the same `placeInRun`
+ * primitive as the live store — after the run's earlier clips, never past its
+ * later ones, slid clear of everything else. Muted only when asked (a
+ * provided-audio scene mutes its b-roll; a generated scene keeps the burned-in
+ * narration audible). Returns the new clip id. */
 export function docPlaceGenClip(
   doc: ProjectDoc,
   assetId: string,
   startSec: number,
   endSec: number,
-  srcInSec?: number,
-  muted = true
+  opts?: { srcInSec?: number; muted?: boolean; anchorAfterIds?: string[]; followClipIds?: string[] }
 ): string | null {
   const asset = doc.assets.find((a) => a.id === assetId);
   if (!asset || (asset.type !== "video" && asset.type !== "image")) return null;
   const slot = Math.max(MIN_LEN, endSec - startSec);
   const srcIn =
     asset.type === "video"
-      ? Math.min(Math.max(0, srcInSec ?? 0), Math.max(0, asset.duration - slot))
+      ? Math.min(Math.max(0, opts?.srcInSec ?? 0), Math.max(0, asset.duration - slot))
       : 0;
   const { out, speed } = fillSlot(asset.type, Math.max(MIN_LEN, asset.duration - srcIn), slot, SPEED_MIN);
+  const row = doc.clips.filter((c) => c.track === 0);
+  const spans = row.map((c) => {
+    const sp = c.speed && c.speed > 0 ? c.speed : 1;
+    return { id: c.id, start: c.start, end: c.start + (c.out - c.in) / sp };
+  });
+  const anchorIds = new Set(opts?.anchorAfterIds ?? []);
+  const prevEnd = spans.filter((s) => anchorIds.has(s.id)).reduce((m, s) => Math.max(m, s.end), -1);
+  const len = speed !== undefined && speed > 0 ? out / speed : out;
+  const { start, shifts } = placeInRun(
+    spans,
+    prevEnd >= 0 ? prevEnd : Math.max(0, startSec),
+    Math.max(MIN_LEN, len),
+    new Set(opts?.followClipIds ?? [])
+  );
+  const move = new Map(shifts.map((sh) => [sh.id, sh.start]));
   const clip: VideoClip = {
     id: uid(),
     assetId,
     track: 0,
-    start: Math.max(0, startSec),
+    start,
     in: srcIn,
     out: srcIn + out,
-    muted,
+    muted: opts?.muted ?? true,
     ...(speed !== undefined ? { speed } : {}),
   };
-  doc.clips = [...doc.clips, clip].sort((a, b) => a.start - b.start);
+  doc.clips = [...doc.clips.map((c) => (move.has(c.id) ? { ...c, start: move.get(c.id)! } : c)), clip].sort(
+    (a, b) => a.start - b.start
+  );
   return clip.id;
 }
 
@@ -197,10 +215,13 @@ export function docPlaceGenAudio(
   if (!asset || asset.type !== "audio") return null;
   const out = Math.min(asset.duration, Math.max(MIN_LEN, durSec));
   const lane = opts?.lane ?? 0;
+  // Same lane rule as the live store: slide to the next free slot, never land
+  // on top of a sound already there.
+  const taken = footprints((doc.audioClips ?? []).filter((a) => (a.lane ?? 0) === lane));
   const clip: AudioClip = {
     id: uid(),
     assetId,
-    start: Math.max(0, startSec),
+    start: nextFreeStart(taken, Math.max(0, startSec), out),
     in: 0,
     out,
     volume: opts?.volume ?? 1,

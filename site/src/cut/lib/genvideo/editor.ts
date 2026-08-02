@@ -28,18 +28,23 @@ export interface EditorBridge {
   /** Bring a generated media asset into the project pool; returns its media id. */
   importMedia(mediaId: string): Promise<string>;
   /**
-   * Place a video clip on the video track so it exactly fills
-   * [startFrame, endFrame). `srcInSec` starts the clip's source window there
-   * (the reviewer's chosen moment) instead of at 0. `muted` silences the clip's
-   * own audio — set for a provided-audio scene's b-roll, cleared for a generated
-   * scene whose shot carries its own burned-in narration (defaults to muted).
+   * Place a video clip on the video track filling a [startFrame, endFrame)-
+   * sized slot. Where it lands is the editor's call: the planned frames are the
+   * target, and the anchors keep a moving timeline honest — the clip lands
+   * after the furthest of `anchorAfterIds` (clips the run's earlier shots still
+   * hold), never slides past any of `followClipIds` (clips its later shots
+   * hold; those push right instead), and clears whatever else occupies the row.
+   * `srcInSec` starts the clip's source window there (the reviewer's chosen
+   * moment) instead of at 0. `muted` silences the clip's own audio — set for a
+   * provided-audio scene's b-roll, cleared for a generated scene whose shot
+   * carries its own burned-in narration (defaults to muted).
    * Returns the new timeline clip id.
    */
   placeClip(
     mediaId: string,
     startFrame: number,
     endFrame: number,
-    opts?: { srcInSec?: number; muted?: boolean }
+    opts?: { srcInSec?: number; muted?: boolean; anchorAfterIds?: string[]; followClipIds?: string[] }
   ): Promise<string>;
   /** Swap the media under an existing clip (regeneration), keeping its slot. */
   replaceClipMedia(clipId: string, mediaId: string): Promise<void>;
@@ -105,7 +110,7 @@ export class FakeEditor implements EditorBridge {
     mediaId: string,
     startFrame: number,
     endFrame: number,
-    opts?: { srcInSec?: number; muted?: boolean }
+    opts?: { srcInSec?: number; muted?: boolean; anchorAfterIds?: string[]; followClipIds?: string[] }
   ): Promise<string> {
     const clipId = `clip:${this.seq++}`;
     this.placed.push({

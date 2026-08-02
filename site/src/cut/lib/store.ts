@@ -222,13 +222,16 @@ export interface EditorState {
   /** Set (or clear) the persisted brief-to-video run. Replaces the object by
    * reference so autosave detects the change. */
   setGenvideo: (project: VideoProject | undefined) => void;
-  /** Brief-to-video placement: place a generated clip so it fills exactly
-   * [startSec, endSec) on track 0 — exact start (no slide), muted, time-stretched
-   * or trimmed to the slot — and return its id. Leaves selection untouched (the
-   * run is a background process). */
-  placeGenClip: (assetId: string, startSec: number, endSec: number, opts?: { srcInSec?: number; muted?: boolean }) => string | null;
-  /** Brief-to-video placement: place a generated audio clip at startSec spanning
-   * up to durSec on the soundtrack (duck/lane/volume optional), returning its id. */
+  /** Brief-to-video placement: place a generated clip filling a [startSec,
+   * endSec)-sized slot on track 0 — muted, time-stretched or trimmed to the
+   * slot — and return its id. Where it lands goes through `placeInRun`:
+   * anchored after the run's earlier clips, never past its later ones, slid
+   * clear of everything else. Leaves selection untouched (the run is a
+   * background process). */
+  placeGenClip: (assetId: string, startSec: number, endSec: number, opts?: { srcInSec?: number; muted?: boolean; anchorAfterIds?: string[]; followClipIds?: string[] }) => string | null;
+  /** Brief-to-video placement: place a generated audio clip at the next free
+   * slot at/after startSec on its soundtrack lane, spanning up to durSec
+   * (duck/lane/volume optional), returning its id. */
   placeGenAudio: (assetId: string, startSec: number, durSec: number, opts?: { duck?: number; lane?: number; volume?: number }) => string | null;
   /** Remove a video clip by id (a background gen swap; leaves its slot empty). */
   removeClipById: (id: string) => void;
@@ -639,6 +642,42 @@ export function nextFreeStart(spans: { start: number; end: number }[], t: number
  * shape, so they share this instead of re-deriving `start + clipLen` inline. */
 export function footprints(items: (VideoClip | AudioClip)[]): { start: number; end: number }[] {
   return items.map((c) => ({ start: c.start, end: c.start + clipLen(c) }));
+}
+
+/** Where a scene run's clip lands on a lane that may have moved since the
+ * plan. `want` is the target spot (the plan's, or the live end of the run's
+ * previous shot). Free residents slide the landing right exactly like
+ * `nextFreeStart`; clips in `follow` — the run's own later shots — are never
+ * slid past, because that would reorder the story: the landing pushes them
+ * (and everything at or after them) right as one run instead. So takes that
+ * render out of order still assemble in shot order, whatever the user moved
+ * meanwhile. The one placement primitive for generated-scene clips, shared by
+ * the live store and the background doc writer. */
+export function placeInRun(
+  row: { id: string; start: number; end: number }[],
+  want: number,
+  len: number,
+  follow: ReadonlySet<string>
+): { start: number; shifts: { id: string; start: number }[] } {
+  const sorted = [...row].sort((a, b) => a.start - b.start);
+  const followStart = sorted
+    .filter((s) => follow.has(s.id))
+    .reduce((m, s) => Math.min(m, s.start), Infinity);
+  let at = Math.max(0, want);
+  for (const sp of sorted) {
+    if (sp.start >= followStart - 1e-6) break; // the push below clears these
+    if (sp.end <= at + 1e-3) continue;
+    if (sp.start >= at + len - 1e-3) break;
+    at = sp.end;
+  }
+  const delta = at + len - followStart;
+  const shifts =
+    Number.isFinite(followStart) && delta > 1e-9
+      ? sorted
+          .filter((s) => s.start >= followStart - 1e-6)
+          .map((s) => ({ id: s.id, start: s.start + delta }))
+      : [];
+  return { start: at, shifts };
 }
 
 /** Where a `len`-long clip dropped at pointer-time `t` lands on its row,
@@ -1171,11 +1210,28 @@ export const useEditor = create<EditorState>((baseSet, get) => {
         slot,
         SPEED_MIN
       );
+      // Land through the run placement primitive against the live row: after
+      // the furthest clip the run's earlier shots still hold, never past a
+      // later shot's clip, slid clear of everything else on the track.
+      const row = track0Clips(get().clips);
+      const spans = row.map((c) => ({ id: c.id, start: c.start, end: c.start + clipLen(c) }));
+      const anchorIds = new Set(opts?.anchorAfterIds ?? []);
+      const prevEnd = spans
+        .filter((s) => anchorIds.has(s.id))
+        .reduce((m, s) => Math.max(m, s.end), -1);
+      const len = speed !== undefined && speed > 0 ? out / speed : out;
+      const { start, shifts } = placeInRun(
+        spans,
+        prevEnd >= 0 ? prevEnd : Math.max(0, startSec),
+        Math.max(MIN_LEN, len),
+        new Set(opts?.followClipIds ?? [])
+      );
+      const move = new Map(shifts.map((sh) => [sh.id, sh.start]));
       const clip: VideoClip = {
         id: uid(),
         assetId,
         track: 0,
-        start: Math.max(0, startSec),
+        start,
         in: srcIn,
         out: srcIn + out,
         // Muted only when the caller asks — a provided-audio scene mutes its
@@ -1188,7 +1244,11 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       // the orchestrator manages this clip (it swaps clips idempotently), so a
       // mid-render Cmd+Z must not pull a shot out from under the run.
       genClipIds.add(clip.id);
-      set((s) => ({ clips: [...s.clips, clip].sort((a, b) => a.start - b.start) }));
+      set((s) => ({
+        clips: [...s.clips.map((c) => (move.has(c.id) ? { ...c, start: move.get(c.id)! } : c)), clip].sort(
+          (a, b) => a.start - b.start
+        ),
+      }));
       return clip.id;
     },
 
@@ -1197,10 +1257,13 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       if (!asset || asset.type !== "audio") return null;
       const out = Math.min(asset.duration, Math.max(MIN_LEN, durSec));
       const lane = opts?.lane ?? 0;
+      // Slide to the lane's next free slot so a background run never lands a
+      // bed or voiceover on top of a sound the user placed meanwhile.
+      const taken = footprints(get().audioClips.filter((a) => (a.lane ?? 0) === lane));
       const clip: AudioClip = {
         id: uid(),
         assetId,
-        start: Math.max(0, startSec),
+        start: nextFreeStart(taken, Math.max(0, startSec), out),
         in: 0,
         out,
         volume: opts?.volume ?? 1,
@@ -1357,8 +1420,18 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       const st = get();
       const gone = st.assets.find((a) => a.id === id);
       if (!gone) return;
-      // The media file dies with its last referencing asset — history
-      // snapshots don't cover the asset list, so nothing can resurrect it.
+      // The media file dies with its last referencing asset, so no undo may
+      // bring a clip of it back to point at bytes that no longer exist: take
+      // this asset's clips out of every snapshot that holds them. Deleting an
+      // asset is not itself undoable, and the asset list is not in a snapshot,
+      // so nothing can resurrect either the clips or the file.
+      const scrub = (snap: DocSnapshot) => {
+        snap.clips = snap.clips.filter((c) => c.assetId !== id);
+        snap.audioClips = snap.audioClips.filter((c) => c.assetId !== id);
+      };
+      for (const snap of history) scrub(snap);
+      for (const snap of future) scrub(snap);
+      if (pending) scrub(pending.snap);
       const dropFile = () => {
         const s = get();
         if (!s.projectId || s.assets.some((a) => a.fileName === gone.fileName)) return;
@@ -1379,7 +1452,6 @@ export const useEditor = create<EditorState>((baseSet, get) => {
         dropFile();
         return;
       }
-      push();
       // Cascade removes this asset's clips; every clip is free-positioned, so
       // the rest of the timeline (and its annotations) stays where it is.
       set((s) => {

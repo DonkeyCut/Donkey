@@ -530,6 +530,7 @@ export class VideoOrchestrator {
           // Generated mode: the clip carries its own burned-in narration, so it
           // plays. Provided mode: mute the b-roll under the user's audio spine.
           muted: this.project.audioMode === "provided",
+          ...this.placementAnchors(shot),
         });
         this.updateShot(shot, { status: "placed", error: undefined });
         this.emitProgress();
@@ -598,7 +599,7 @@ export class VideoOrchestrator {
       // `still` is already an imported project media id; placing it directly
       // avoids re-importing an id the pool already holds.
       shot.clip = still;
-      shot.timelineClipId = await this.deps.editor.placeClip(still, shot.startFrame, shot.endFrame);
+      shot.timelineClipId = await this.deps.editor.placeClip(still, shot.startFrame, shot.endFrame, this.placementAnchors(shot));
     } else {
       // Nothing to hold — keep whatever was there rather than opening a hole.
       this.deps.emit({ type: "error", message: `Shot ${shot.id} could not be generated or filled.` });
@@ -632,6 +633,32 @@ export class VideoOrchestrator {
       if (next.startKeyframe) return next.startKeyframe;
     }
     return undefined;
+  }
+
+  /** The run's ordering anchors for one shot's landing: every clip an earlier
+   * shot still holds on the track (the take lands after the furthest of them)
+   * and every clip a later shot holds (the take never slides past those — they
+   * push right instead). Renders finish out of order, so this — not the plan's
+   * absolute frames — is what keeps shots assembling in story order on a
+   * timeline the user may be editing while the run works. */
+  private placementAnchors(shot: Shot): { anchorAfterIds?: string[]; followClipIds?: string[] } {
+    const shots = this.project.shots;
+    const idx = shots.findIndex((s) => s.id === shot.id);
+    if (idx < 0) return {};
+    const held = (s: Shot) =>
+      [s.timelineClipId, ...(s.replacesClipIds ?? [])].filter((id): id is string => !!id);
+    const anchorAfterIds = shots.slice(0, idx).flatMap(held);
+    // A re-cut's replaced clip can span several fresh shots and so be held on
+    // both sides; the earlier side wins — it anchors, it must not also push.
+    const anchored = new Set(anchorAfterIds);
+    const followClipIds = shots
+      .slice(idx + 1)
+      .flatMap(held)
+      .filter((id) => !anchored.has(id));
+    return {
+      ...(anchorAfterIds.length ? { anchorAfterIds } : {}),
+      ...(followClipIds.length ? { followClipIds } : {}),
+    };
   }
 
   private async clearVideoPlacement(shot: Shot): Promise<void> {

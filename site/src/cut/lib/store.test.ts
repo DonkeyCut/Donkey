@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { clipLen, useEditor } from "./store";
+import { clipLen, placeInRun, useEditor } from "./store";
 import { emptySubtitles } from "./types";
 import type { AudioClip, MediaAsset, SubtitleCue, TextOverlay, VideoClip } from "./types";
 
@@ -532,5 +532,69 @@ describe("last pick wins per edge", () => {
     expect(clipById(a.id).transition).toBeCloseTo(0.8);
     expect(clipById(a.id).animIn).toEqual({ style: "fade", seconds: 0.5 });
     expect(clipById(b.id).animOut).toEqual({ style: "fade", seconds: 0.5 });
+  });
+});
+
+describe("generated-scene placement (placeInRun)", () => {
+  const span = (id: string, start: number, end: number) => ({ id, start, end });
+
+  test("with no run neighbors it slides right past residents", () => {
+    const { start, shifts } = placeInRun([span("u1", 0, 4)], 2, 3, new Set());
+    expect(start).toBeCloseTo(4);
+    expect(shifts).toEqual([]);
+  });
+
+  test("never slides past a later shot's clip — pushes it right instead", () => {
+    const row = [span("u1", 0, 4), span("s2", 4, 8), span("u2", 8, 10)];
+    const { start, shifts } = placeInRun(row, 0, 4, new Set(["s2"]));
+    expect(start).toBeCloseTo(4); // slid clear of the resident, not past s2
+    // s2 and everything after it open the slot as one run.
+    expect(shifts).toEqual([
+      { id: "s2", start: 8 },
+      { id: "u2", start: 12 },
+    ]);
+  });
+
+  test("out-of-order landings assemble gapless in shot order on an empty track", () => {
+    const row: { id: string; start: number; end: number }[] = [];
+    const p3 = placeInRun(row, 15, 5, new Set());
+    row.push(span("s3", p3.start, p3.start + 5));
+    const p1 = placeInRun(row, 0, 8, new Set(["s3"]));
+    expect(p1.start).toBeCloseTo(0);
+    expect(p1.shifts).toEqual([]);
+    row.push(span("s1", 0, 8));
+    const p2 = placeInRun(row, 8, 7, new Set(["s3"])); // want = live end of s1
+    expect(p2.start).toBeCloseTo(8);
+    expect(p2.shifts).toEqual([]);
+  });
+
+  test("placeGenClip anchors after the run's earlier clip when the plan's frames are stale", () => {
+    const av = asset(4);
+    const user = vclip({ start: 0, out: 4, assetId: "x" });
+    const s1 = vclip({ start: 4, out: 4, assetId: "x" });
+    useEditor.setState({ assets: [av], clips: [user, s1] });
+    // Planned [4, 8) went stale when the user's clip pushed the run to 4..8.
+    const id = s().placeGenClip(av.id, 4, 8, { anchorAfterIds: [s1.id] })!;
+    expect(clipById(id).start).toBeCloseTo(8);
+    expectLaneSound(videoLane(0));
+  });
+
+  test("placeGenClip pushes a later shot's clip instead of landing on or past it", () => {
+    const av = asset(4);
+    const user = vclip({ start: 0, out: 4, assetId: "x" });
+    const s2 = vclip({ start: 4, out: 4, assetId: "x" });
+    useEditor.setState({ assets: [av], clips: [user, s2] });
+    const id = s().placeGenClip(av.id, 0, 4, { followClipIds: [s2.id] })!;
+    expect(clipById(id).start).toBeCloseTo(4); // after the resident
+    expect(clipById(s2.id).start).toBeCloseTo(8); // pushed, still after the new take
+    expectLaneSound(videoLane(0));
+  });
+
+  test("placeGenAudio slides to its lane's next free slot", () => {
+    const aa = asset(4, "audio");
+    const resident = aclip({ start: 0, out: 4, assetId: "x" });
+    useEditor.setState({ assets: [aa], audioClips: [resident] });
+    const id = s().placeGenAudio(aa.id, 1, 4)!;
+    expect(audioById(id).start).toBeCloseTo(4);
   });
 });
