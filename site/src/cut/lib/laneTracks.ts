@@ -345,9 +345,19 @@ export function startLaneMove<V = unknown>(
   id: string,
   ui: LaneMoveUI<V>
 ) {
-  // Primary button only: a right-click belongs to the clip's context menu and
-  // must leave selection and the playhead where they are.
-  if (e.button !== 0) return;
+  // A secondary button belongs to the clip's context menu, not to a drag: it
+  // selects what it points at — so the menu, and the next keystroke, act on
+  // that item — and leaves the playhead where it is. Pointing at something
+  // already in a multi-selection keeps the whole selection.
+  if (e.button !== 0) {
+    const st = useEditor.getState();
+    const sel = { kind: laneSelectionKind(kind), id };
+    const held =
+      (st.selection?.kind === sel.kind && st.selection.id === sel.id) ||
+      st.multiSelection.some((m) => m?.kind === sel.kind && m.id === sel.id);
+    if (!held) st.select(sel);
+    return;
+  }
   settleSnapBack();
   const s = useEditor.getState();
   if (e.metaKey || e.shiftKey) {
