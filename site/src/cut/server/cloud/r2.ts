@@ -165,6 +165,32 @@ export async function listUnder(prefix: string, limit = 10_000): Promise<string[
   return out;
 }
 
+/** Keys and last-write times under `prefix` — freshness checks without
+ * per-object GETs. */
+export async function listObjectsWithDates(
+  prefix: string,
+  limit = 10_000
+): Promise<{ key: string; lastModified: Date }[]> {
+  const out: { key: string; lastModified: Date }[] = [];
+  let token: string | undefined;
+  do {
+    const res = await r2().send(
+      new ListObjectsV2Command({
+        Bucket: R2_BUCKET,
+        Prefix: prefix,
+        ContinuationToken: token,
+        MaxKeys: 1000,
+      })
+    );
+    for (const o of res.Contents ?? []) {
+      if (o.Key && o.LastModified) out.push({ key: o.Key, lastModified: o.LastModified });
+      if (out.length >= limit) return out;
+    }
+    token = res.IsTruncated ? res.NextContinuationToken : undefined;
+  } while (token);
+  return out;
+}
+
 /** Keys under `prefix` last written before `before`, paged to `limit` objects.
  * For prefix sweeps of objects no database row tracks. */
 export async function listOlderThan(
