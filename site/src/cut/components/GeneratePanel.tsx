@@ -309,7 +309,7 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
               className={cn(cardIconButton, "opacity-0 group-hover:opacity-100")}
               onClick={() => useGenerate.getState().dismiss(job.id)}
             >
-              <Trash2 className="size-3.5" />
+              <X className="size-3.5" />
             </button>
           </div>
         )}
@@ -416,8 +416,17 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
             </DropdownMenuItem>
           }
           after={
-            <DropdownMenuItem onClick={() => useGenerate.getState().dismiss(job.id)}>
-              <Trash2 /> Dismiss
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => {
+                // The render dies for real: the tile goes with its job row,
+                // and the asset takes its media file (and any clips playing
+                // it) along — same delete the image tiles offer.
+                useGenerate.getState().dismiss(job.id);
+                useEditor.getState().removeAsset(asset.id);
+              }}
+            >
+              <Trash2 /> Delete
             </DropdownMenuItem>
           }
         />

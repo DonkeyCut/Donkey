@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
-import { Copy, Loader2, Maximize2, Sparkles, Trash2 } from "lucide-react";
+import { Copy, Loader2, Maximize2, Sparkles, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { SectionTitle } from "@/cut/components/SectionTitle";
@@ -348,7 +348,7 @@ function ImageJobRow({ job }: { job: GenerateJob }) {
           className={cn(cardIconButton, "opacity-0 group-hover:opacity-100")}
           onClick={() => useGenerate.getState().dismiss(job.id)}
         >
-          <Trash2 className="size-3.5" />
+          <X className="size-3.5" />
         </button>
       )}
     </div>
