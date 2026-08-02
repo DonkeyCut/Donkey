@@ -647,6 +647,7 @@ function ChatSession({
         );
         return false;
       },
+      notice: showNotice,
     });
   }, [readOnly]);
   const sessionKeyRef = useRef<string | null>(null);

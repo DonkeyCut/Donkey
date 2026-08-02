@@ -19,6 +19,8 @@ interface ChatIntake {
    * reference capacity it declines — surfacing why in its own notice tab —
    * and the grab ends before any capture or flight. */
   acceptFrame?: () => boolean;
+  /** Say why a grab ended with nothing, in the composer's notice tab. */
+  notice?: (message: string) => void;
 }
 
 let intake: ChatIntake | null = null;
@@ -93,7 +95,9 @@ export async function sendFrameToChat(ref: AssetRef, from: FrameGrabOrigin): Pro
   // Capture before the flight so it shows the exact frame it delivers.
   const frame = await refToInlineImage(ref).catch(() => null);
   if (!frame) {
-    target.add(ref);
+    // The clip itself is a heavier, different thing than the moment that was
+    // asked for, so nothing is attached — the grab says why and ends.
+    target.notice?.(`Couldn’t read a frame from “${ref.name}”.`);
     return;
   }
   const frameRef: AssetRef = {
