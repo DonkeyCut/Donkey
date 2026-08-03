@@ -52,21 +52,27 @@ into short ones with space between, so a reader can scan.
 
 ## Sentences
 
-- Say it straight: "adapters never hold task state," not "adapters should
-  generally avoid holding task state."
+- **State what a thing is, then stop.** Never frame it against what it is not.
+  Cut every "X, not Y", "X rather than Y", "X instead of Z", and "*not* the
+  other thing" aside. If a reader would not have assumed Y, naming Y teaches
+  them a wrong idea on the way to the right one. This holds everywhere prose
+  goes: guides, code comments, commit messages, tooltips, and UI copy.
+  - Write: the safety class decides whether the action stops.
+  - Cut: the class, *not the tool's name*, decides.
+  - Write: the preset plays on top of any keyframes.
+  - Cut: the preset plays on top of keyframes rather than replacing them.
+- Say it straight, with the strong verb.
+  - Write: adapters never hold task state.
+  - Cut: adapters should generally avoid holding task state.
 - Short sentences for rules, longer ones for the why. A rule over ~20 words is
   probably two.
-- Active voice, named actor: "the planner picks the tool," not "the tool is
-  selected."
-- Bold only for rule names and key contrasts. If half the paragraph is bold,
-  none of it is.
+- Active voice, named actor.
+  - Write: the planner picks the tool.
+  - Cut: the tool is selected.
+- Bold only for rule names. If half the paragraph is bold, none of it is.
 - Italics only for word-level contrast (*what* vs *whether*).
-- State what a thing is; skip the strawman. Write "the safety class decides
-  whether the action stops," not "the class, *not the tool's name*, decides." (A
-  real two-actor contrast like the model/runtime split above is fine — the foil
-  is only bad when nobody would have assumed the opposite.)
 - Code font only for what someone will actually type — a real command or flag.
-  Tool names, types, and paths get described, not back-ticked.
+  Tool names, types, and paths get described in prose.
 
 ## Shape of a Doc
 

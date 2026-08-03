@@ -25,7 +25,7 @@ Before changing `site/` UI, routes, API handlers, or data access patterns:
 - Do not touch repository-root `prototype/` unless the user explicitly asks for that filesystem path. By default, assume requested product changes are for the Mac app or the site/landing page.
 - Ask before creating any new plan document.
 - When writing or editing any engineering doc under `docs/`, follow `docs/guides/eng-doc-style.md`.
-- Write straight up — in prompts, docs, and summaries. State what to do affirmatively and once; cut filler and negated foils (e.g. "…, which is exactly what not to do", "never re-create it").
+- Write straight up — in prompts, docs, commits, code comments, summaries, and UI copy. State what a thing is, once, and stop. Never frame it against what it is not: no "X, not Y", no "X rather than Y", no "instead of Z", no "…, which is exactly what not to do". Cut filler.
 - Update guides in `docs/guides/` only for major features or durable supported-behavior changes. Do not update guide docs for small styling tweaks, layout adjustments, copy changes, or implementation-only refactors.
 - Keep guides explanatory. They should teach what the system is, how it works, and which boundaries matter; do not turn guides into feature inventories, implementation logs, duplicated code, or long file lists.
 - Optimize guides for readability: use plain language, short sections, and only the detail a maintainer needs to understand the supported boundary. Prefer trimming outdated or repetitive detail over adding more paragraphs.
