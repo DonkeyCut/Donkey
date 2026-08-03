@@ -13,6 +13,7 @@ import { STOCK_MUSIC } from "@/cut/lib/stockMusicManifest";
 import { useEditor } from "@/cut/lib/store";
 import { formatTime } from "@/cut/lib/time";
 import { cn } from "@/lib/utils";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 /** The category header already names the genre, so drop the id's leading
  * category segment: "cinematic-rising-strings" → "Rising Strings". */
@@ -66,7 +67,7 @@ export function SampleLibrary({ projectId }: { projectId: string }) {
           ))}
         </div>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3.5 pb-4">
+      <ScrollArea className="min-h-0 flex-1" contentClassName="flex flex-col gap-4 px-3.5 pb-4">
         {sections.map(({ category, items }) => (
           <div key={category} className="flex flex-col gap-2">
             <div className="text-[13px] font-semibold tracking-tight">{category}</div>
@@ -92,7 +93,7 @@ export function SampleLibrary({ projectId }: { projectId: string }) {
             </div>
           </div>
         ))}
-      </div>
+      </ScrollArea>
     </>
   );
 }

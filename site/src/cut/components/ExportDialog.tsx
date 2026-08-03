@@ -29,9 +29,10 @@ export function ExportDialog() {
   const clips = useEditor((s) => s.clips);
   const assets = useEditor((s) => s.assets);
   const audioClips = useEditor((s) => s.audioClips);
+  const overlays = useEditor((s) => s.overlays);
   const duration = useMemo(
-    () => projectDuration({ clips, audioClips }),
-    [clips, audioClips]
+    () => projectDuration({ clips, audioClips, overlays }),
+    [clips, audioClips, overlays]
   );
   // "Original" leads: sized from the footage on the timeline, so it is always
   // the highest option. The fixed presets follow, flipped to the aspect.

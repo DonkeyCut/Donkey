@@ -7,6 +7,7 @@ import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { SectionTitle } from "@/cut/components/SectionTitle";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { clearAssetDrag, setAssetDragData } from "@/cut/lib/assetDrag";
+import { PICKED_RING, useAssetPick } from "@/cut/lib/assetPick";
 import { collectRefs, mentionToken, useRefCandidates, useAssetDrop } from "@/cut/lib/assetRef";
 import { genPulseOverlay, useGenPulse } from "@/cut/lib/genNotify";
 import { useElapsed } from "@/cut/hooks/useElapsed";
@@ -23,12 +24,13 @@ import { refsFromDroppedFiles } from "@/cut/lib/refMedia";
 import { useEditor } from "@/cut/lib/store";
 import { nearestAspect, type MediaAsset } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
-import { MentionTextarea, RefChips, RefHandlePill } from "./AssetRefs";
+import { CopyHandlePill, MentionTextarea, RefChips } from "./AssetRefs";
 import { DictationControl } from "./MicDictation";
 import { cardIconButton } from "./iconButton";
 import { PillSelect } from "./PillSelect";
 import { GeneratedAssetMenu } from "./GeneratedAssetMenu";
 import { HostedErrorText } from "./hostedError";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 // The generate-image panel: an always-on column in the Image tab, sitting left
 // of the stock browser. Clicking a stock tile loads its saved prompt here; the
@@ -106,7 +108,7 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
         <span className="text-sm font-semibold tracking-tight">Generate image</span>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3.5 pb-4">
+      <ScrollArea className="min-h-0 flex-1" contentClassName="flex flex-col gap-3 px-3.5 pb-4">
         {!readOnly && (<>
         {/* Composer: attached references ride as little image thumbnails inside
             the input box, above the prompt (Claude-style). */}
@@ -216,7 +218,7 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
             ))}
           </div>
         )}
-      </div>
+      </ScrollArea>
     </div>
   );
 }
@@ -237,8 +239,12 @@ function GeneratedTile({
 }) {
   const tileRef = useRef<HTMLDivElement>(null);
   const pulse = useGenPulse("image", asset.id);
+  const { picked, pick } = useAssetPick(asset.id);
   return (
-    <div ref={tileRef} className="group relative overflow-hidden rounded-lg">
+    <div
+      ref={tileRef}
+      className={cn("group relative overflow-hidden rounded-lg", picked && PICKED_RING)}
+    >
       <button
         className="block w-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
         title={asset.name}
@@ -257,7 +263,7 @@ function GeneratedTile({
           }
         }}
         onDragEnd={clearAssetDrag}
-        onClick={() => useImageGen.getState().openWith(asset.name)}
+        onClick={pick}
       >
         {/* eslint-disable-next-line @next/next/no-img-element -- engine media file, not Next-optimizable */}
         <img crossOrigin={MEDIA_CORS}
@@ -267,12 +273,7 @@ function GeneratedTile({
           className="aspect-[16/10] w-full bg-black object-cover transition-transform group-hover:scale-[1.04]"
         />
       </button>
-      {handle && (
-        <RefHandlePill
-          token={`@${handle}`}
-          className="absolute top-1 left-1 opacity-0 transition-opacity group-hover:opacity-100"
-        />
-      )}
+      <CopyHandlePill handle={handle} name={asset.name} />
       <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2 py-1.5 opacity-0 transition-opacity group-hover:opacity-100">
         <span className="block truncate text-[11px] font-medium text-white">{asset.name}</span>
       </div>
@@ -297,15 +298,20 @@ function GeneratedTile({
           projectId={projectId}
           triggerClassName="grid size-5 place-items-center rounded-full bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100 data-popup-open:opacity-100 hover:bg-black/65"
           before={
-            <DropdownMenuItem
-              onClick={() =>
-                void navigator.clipboard
-                  .writeText(handle ? `@${handle}` : mentionToken(asset.name))
-                  .catch(() => {})
-              }
-            >
-              <Copy /> Copy reference
-            </DropdownMenuItem>
+            <>
+              <DropdownMenuItem onClick={() => useImageGen.getState().openWith(asset.name)}>
+                <Sparkles /> Use this prompt
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() =>
+                  void navigator.clipboard
+                    .writeText(handle ? `@${handle}` : mentionToken(asset.name))
+                    .catch(() => {})
+                }
+              >
+                <Copy /> Copy reference
+              </DropdownMenuItem>
+            </>
           }
           after={
             <DropdownMenuItem

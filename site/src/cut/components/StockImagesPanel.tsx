@@ -10,6 +10,7 @@ import { STOCK_CATEGORIES, type StockCategory, type StockImage } from "@/cut/lib
 import { STOCK_IMAGES } from "@/cut/lib/stockManifest";
 import { cn } from "@/lib/utils";
 import { CopyRefButton, RefHandlePill } from "./AssetRefs";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 /** A readable title from a stock id, e.g. "business-boardroom" → "Business Boardroom". */
 const titleFromId = (id: string) =>
@@ -71,7 +72,7 @@ export function StockImagesPanel() {
         </span>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3.5 pb-4">
+      <ScrollArea className="min-h-0 flex-1" contentClassName="flex flex-col gap-3 px-3.5 pb-4">
         <label className="flex shrink-0 items-center gap-2 rounded-lg border border-input px-2.5 py-1.5 focus-within:border-ring">
           <Search className="size-3.5 shrink-0 text-muted-foreground" />
           <input
@@ -125,7 +126,7 @@ export function StockImagesPanel() {
             );
           })()
         )}
-      </div>
+      </ScrollArea>
     </>
   );
 }

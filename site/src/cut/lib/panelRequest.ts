@@ -12,6 +12,9 @@ import type { SidePanelTab } from "./types";
 export const SIDE_PANEL_TABS: SidePanelTab[] = [
   "media",
   "library",
+  "elements",
+  "effects",
+  "transitions",
   "video",
   "image",
   "audio",

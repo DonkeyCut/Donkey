@@ -1,8 +1,9 @@
 "use client";
 
 import { Fragment, useEffect, useRef, useState } from "react";
-import { Captions, Check, Clapperboard, ClipboardList, Copy, Download, Ellipsis, Film, FolderOpen, FolderPlus, Image as ImageIcon, Loader2, Music, Plus, Trash2, Upload, X } from "lucide-react";
+import { Captions, Check, Clapperboard, ClipboardList, Copy, Download, Ellipsis, Film, FolderOpen, FolderPlus, Image as ImageIcon, Loader2, Music, Plus, Shapes, Sparkles, Trash2, Upload, X, Blend } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { LiveElapsed } from "@/cut/components/Elapsed";
 import {
   AlertDialog,
@@ -66,6 +67,7 @@ import {
   type LibraryTemplateItem,
 } from "@/cut/lib/library";
 import { activeResidency, availableResidencies, type Residency } from "@/cut/lib/residency";
+import { isStylePresetTemplate } from "@/cut/lib/stylePresets";
 import { retryUpload } from "@/cut/lib/importQueue";
 import { isMediaFile, revealMedia } from "@/cut/lib/media";
 import { mediaUrl, TRANSITION_MAX } from "@/cut/lib/types";
@@ -85,6 +87,9 @@ import { FolderCrumb, FolderShelf } from "./desktopFolders";
 import { TemplateCard } from "./TemplateCard";
 import { GenerateVideoPanel } from "./GeneratePanel";
 import { ImageGenPanel } from "./ImageGenPanel";
+import { EffectsPanel } from "./EffectsPanel";
+import { TransitionsPanel } from "./TransitionsPanel";
+import { ElementsPanel } from "./ElementsPanel";
 import { StockImagesPanel } from "./StockImagesPanel";
 import { SampleLibrary } from "./StockMusicPanel";
 import { StockVideosPanel } from "./StockVideosPanel";
@@ -102,6 +107,9 @@ type Tab = SidePanelTab;
 const TABS: { id: Tab; label: string; icon: typeof Film }[] = [
   { id: "media", label: "Media", icon: Clapperboard },
   { id: "library", label: "Library", icon: FolderOpen },
+  { id: "elements", label: "Elements", icon: Shapes },
+  { id: "effects", label: "Effects", icon: Sparkles },
+  { id: "transitions", label: "Transitions", icon: Blend },
   { id: "video", label: "Video", icon: Film },
   { id: "image", label: "Image", icon: ImageIcon },
   { id: "audio", label: "Audio", icon: Music },
@@ -229,17 +237,16 @@ export function SidePanel({
   return (
     <div className="flex min-h-0 border-r border-border bg-card">
       {/* Icon rail — its divider drops when collapsed so the panel's outer
-          border becomes the single line between the rail and the canvas.
-          It scrolls down its own length when a short window cannot show every
-          tab, and never sideways: `overflow-y-auto` alone would not say that,
-          since an axis left visible beside a scrolling one computes to auto,
-          and a scrollbar that takes its width out of a fixed 68px is enough to
-          push the widest label past the edge. */}
-      <div
+          border becomes the single line between the rail and the canvas. It
+          scrolls down its own length when a short window cannot show every tab;
+          the floating scrollbar keeps all 68px for the tiles, so the widest
+          label still fits. */}
+      <ScrollArea
         className={cn(
-          "flex min-h-0 w-[68px] shrink-0 flex-col items-center gap-1 overflow-x-hidden overflow-y-auto py-3",
+          "min-h-0 w-[68px] shrink-0",
           tab !== null && "border-r border-border"
         )}
+        contentClassName="flex flex-col items-center gap-1 py-3"
       >
         {visibleTabs.map(({ id, label, icon: Icon }, tabIndex) => {
           // The open tab never badges — its completions are already on screen.
@@ -247,8 +254,11 @@ export function SidePanel({
           // Full width of the rail, whatever a scrollbar has left of it, so a
           // label that no longer fits ellipsises inside the tile rather than
           // running out past both edges of a centred one.
+          // Side padding stays off the label: the rail is 68px and the longest
+          // name needs all of it, so the tile pads the tap area vertically and
+          // the label runs edge to edge.
           const tileClass =
-            "flex w-full min-w-0 shrink-0 flex-col items-center gap-1 rounded-lg px-2 py-1.5 text-muted-foreground transition-colors hover:text-foreground";
+            "flex w-full min-w-0 shrink-0 flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-muted-foreground transition-colors hover:text-foreground";
           const inner = (
             <>
               <span
@@ -263,7 +273,7 @@ export function SidePanel({
               </span>
               <span
                 className={cn(
-                  "w-full truncate text-center text-[10px] font-medium",
+                  "w-full truncate text-center text-[10px] font-medium tracking-tight",
                   tab === id && "text-foreground"
                 )}
               >
@@ -325,7 +335,7 @@ export function SidePanel({
             </Fragment>
           );
         })}
-      </div>
+      </ScrollArea>
 
       {tab === null ? null : (
         <div className="flex min-h-0">
@@ -391,6 +401,9 @@ export function SidePanel({
             <MediaPanel projectId={projectId} onImport={onImport} importing={importing} />
           )}
           {tab === "library" && <LibraryPanel projectId={projectId} />}
+          {tab === "elements" && <ElementsPanel projectId={projectId} />}
+          {tab === "effects" && <EffectsPanel />}
+          {tab === "transitions" && <TransitionsPanel />}
           {tab === "subtitles" && <SubtitlesPanel />}
           {tab === "publish" && <PublishPanel />}
         </div>
@@ -531,7 +544,9 @@ function MediaPanel({
   // Only user-imported media lives here; anything Cut created (recordings, AI
   // generations, voiceovers, freeze frames, stock adds) is tagged with an
   // `origin` and stays where it was made.
-  const assets = useEditor((s) => s.assets).filter((a) => a.origin == null);
+  // Fonts are project assets (their bytes live in media/) but they belong to
+  // the text inspector's font menu, never the Media grid.
+  const assets = useEditor((s) => s.assets).filter((a) => a.origin == null && a.type !== "font");
   const templates = useEditor((s) => s.templates);
   const exportOpen = useEditor((s) => s.exportOpen);
   // A render that finishes in the background (dialog closed) drops a new file in
@@ -641,7 +656,7 @@ function MediaPanel({
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto pb-3.5">
+      <ScrollArea className="min-h-0 flex-1" contentClassName="pb-3.5">
         {templates.length > 0 && (
           <div className="flex flex-col gap-1.5 px-3.5 pb-3">
             {templates.map((t) => (
@@ -783,7 +798,7 @@ function MediaPanel({
             </div>
           </div>
         )}
-      </div>
+      </ScrollArea>
       {preview && (
         <PlatformPreviewDialog
           projectId={projectId}
@@ -1068,7 +1083,9 @@ function LibraryPanel({ projectId }: { projectId: string }) {
       .then((d) => {
         setAssets(d.assets);
         setFolders(d.folders);
-        setTemplates(d.templates);
+        // Saved text styles ride the template rails but are not templates:
+        // they belong to the text inspector, not this shelf.
+        setTemplates(d.templates.filter((t) => !isStylePresetTemplate(t)));
       })
       .catch(() => setAssets([]));
 
@@ -1309,7 +1326,10 @@ function LibraryPanel({ projectId }: { projectId: string }) {
           </div>
         ) : null
       ) : (
-        <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-2.5 overflow-y-auto px-3.5 pb-3.5">
+        <ScrollArea
+          className="min-h-0 flex-1"
+          contentClassName="grid grid-cols-2 content-start gap-2.5 px-3.5 pb-3.5"
+        >
           {shown.map((a) => (
             <LibraryCard
               key={a.id}
@@ -1327,7 +1347,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
               </span>
             </div>
           )}
-        </div>
+        </ScrollArea>
       )}
 
       <AlertDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)}>
@@ -1420,7 +1440,7 @@ function PublishPanel() {
   return (
     <>
       <PanelHead title="Details" />
-      <div className="flex min-h-0 flex-col gap-4 overflow-y-auto px-3.5 pb-4">
+      <ScrollArea className="min-h-0" contentClassName="flex flex-col gap-4 px-3.5 pb-4">
         {!readOnly && (
           <div className="flex flex-col gap-1.5">
             <SectionTitle>Video</SectionTitle>
@@ -1553,7 +1573,7 @@ function PublishPanel() {
             {count.toLocaleString()} / {CAPTION_LIMIT.toLocaleString()}
           </p>
         </div>
-      </div>
+      </ScrollArea>
     </>
   );
 }

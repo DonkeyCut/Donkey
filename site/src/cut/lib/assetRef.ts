@@ -66,7 +66,9 @@ export const refFromAsset = (a: MediaAsset): AssetRef => ({
   scope: "project",
   id: a.id,
   name: a.name,
-  kind: a.type,
+  // Fonts have no card and no drag source, and `projectRefs` keeps them out
+  // of the @-mention candidates; the arm only keeps the mapping total.
+  kind: a.type === "font" ? "text" : a.type,
   url: a.url,
   duration: a.duration,
 });
@@ -376,11 +378,13 @@ let libraryLoad: Promise<LibraryAsset[]> | null = null;
  * anything that shows one resolves it from the current asset list.
  * Chat-owned assets (origin "chat") are a run's internals — character sheets,
  * keyframes, takes — visible nowhere the user works, so they don't become
- * candidates; a take placed on the timeline is reachable as its clip (@c2). */
+ * candidates; a take placed on the timeline is reachable as its clip (@c2).
+ * Uploaded fonts are project assets too, but there is nothing to say about a
+ * typeface file in a prompt, so they stay out of the handle numbering. */
 export function projectRefs(assets: MediaAsset[]): AssetRef[] {
   const counters = { v: 0, i: 0, a: 0 };
   return assets
-    .filter((a) => a.origin !== "chat")
+    .filter((a) => a.origin !== "chat" && a.type !== "font")
     .map((a) => {
       const prefix = a.type === "image" ? "i" : a.type === "video" ? "v" : "a";
       counters[prefix] += 1;

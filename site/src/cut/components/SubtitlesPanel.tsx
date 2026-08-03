@@ -36,6 +36,7 @@ import {
   type WordAccentMode,
 } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 const LOCALES = [
   ["en-US", "English (US)"],
@@ -210,7 +211,10 @@ function OptionsTab() {
   const look = karaokeLook(captionStyle(subtitles.style), subtitles);
 
   return (
-    <div className="sub-options flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-4 py-3">
+    <ScrollArea
+      className="sub-options min-h-0 flex-1"
+      contentClassName="flex flex-col gap-2.5 px-4 py-3"
+    >
       <div className="mb-1 border-b border-border pb-3">
         <GenerateSubtitlesAudio />
       </div>
@@ -360,7 +364,7 @@ function OptionsTab() {
       <p className="sub-position-hint -mt-1 text-[11px] leading-relaxed text-muted-foreground">
         Drag the caption on the video to reposition every subtitle.
       </p>
-    </div>
+    </ScrollArea>
   );
 }
 
@@ -371,7 +375,10 @@ function StylesTab() {
   const style = subtitles.style ?? "clean";
 
   return (
-    <div className="sub-styles flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-4 py-3">
+    <ScrollArea
+      className="sub-styles min-h-0 flex-1"
+      contentClassName="flex flex-col gap-2.5 px-4 py-3"
+    >
       <div className="flex flex-col gap-1.5">
         {Object.values(CAPTION_STYLES).map((cs) => (
           <button
@@ -410,7 +417,7 @@ function StylesTab() {
           </button>
         ))}
       </div>
-    </div>
+    </ScrollArea>
   );
 }
 
@@ -529,7 +536,10 @@ function Transcript({ cues }: { cues: SubtitleCue[] }) {
   });
 
   return (
-    <div className="sub-transcript min-h-0 flex-1 select-text overflow-y-auto px-4 py-3">
+    <ScrollArea
+      className="sub-transcript min-h-0 flex-1"
+      contentClassName="select-text px-4 py-3"
+    >
       {paragraphs.map((para) => (
         <p key={para[0].cue.id} className="mb-4 text-[12.5px] leading-[1.9]">
           {para.map(({ cue, gap }) => (
@@ -537,7 +547,7 @@ function Transcript({ cues }: { cues: SubtitleCue[] }) {
           ))}
         </p>
       ))}
-    </div>
+    </ScrollArea>
   );
 }
 

@@ -4,7 +4,8 @@ import type React from "react";
 import { clearRefDrag, refFromAsset, refFromLibrary, setRefDragData } from "./assetRef";
 import type { LibraryAsset, LibraryTemplateItem } from "./library";
 import { useEditor } from "./store";
-import type { LibraryTemplate } from "./types";
+import type { LibraryTemplate, ShapeKind, TransitionStyle } from "./types";
+import type { EffectId } from "@donkeycut/effects-kit";
 
 /** Internal HTML5 drag payload for project media assets. The custom MIME
  * keeps these drags invisible to the window-level OS-file import overlay,
@@ -87,6 +88,45 @@ export function draggingTemplate() {
 export function hasTemplateDrag(e: React.DragEvent | DragEvent): boolean {
   const dt = "dataTransfer" in e ? e.dataTransfer : null;
   return !!dt && Array.from(dt.types).includes(TEMPLATE_MIME);
+}
+
+/**
+ * A new element dragged out of a panel — a shape or an effect. It exists
+ * nowhere yet, so the drag carries what to build rather than an id, and the
+ * timeline makes it where it lands.
+ */
+export const ELEMENT_MIME = "application/x-cut-element";
+
+export type ElementDrag =
+  | { kind: "shape"; shape: ShapeKind }
+  | { kind: "effect"; effect: EffectId }
+  /** A transition joins two clips, so this one lands on a cut rather than at
+   * the pointer's exact time. */
+  | { kind: "transition"; style: TransitionStyle };
+
+let inFlightElement: ElementDrag | null = null;
+
+export function setElementDragData(e: React.DragEvent, spec: ElementDrag) {
+  e.dataTransfer.setData(
+    ELEMENT_MIME,
+    spec.kind === "shape" ? spec.shape : spec.kind === "effect" ? spec.effect : spec.style
+  );
+  e.dataTransfer.effectAllowed = "copy";
+  inFlightElement = spec;
+}
+
+/** The element being dragged, readable during `dragover` and on drop. */
+export function draggingElement(): ElementDrag | null {
+  return inFlightElement;
+}
+
+export function hasElementDrag(e: React.DragEvent | DragEvent): boolean {
+  const dt = "dataTransfer" in e ? e.dataTransfer : null;
+  return !!dt && Array.from(dt.types).includes(ELEMENT_MIME);
+}
+
+export function clearElementDrag() {
+  inFlightElement = null;
 }
 
 /** Use the card itself as the drag ghost: a clone at rendered size, so the

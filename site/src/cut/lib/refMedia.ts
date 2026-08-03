@@ -246,6 +246,35 @@ export async function refToInlineImage(ref: AssetRef): Promise<InlineImage> {
   return captureFrame(ref.url, sourceDuration(ref), ref.t !== undefined ? { at: ref.t } : undefined);
 }
 
+/**
+ * Put the picture a ref points at on the system clipboard, as a PNG so it
+ * pastes into anything that takes an image.
+ *
+ * The blob goes in as a promise rather than an awaited value: Safari ties a
+ * clipboard write to the gesture that asked for it, and decoding a frame first
+ * spends that gesture. Throws when the frame cannot be read or the browser
+ * refuses the write, which is the caller's cue to say so.
+ */
+export async function copyRefImage(ref: AssetRef): Promise<void> {
+  const png = (async () => {
+    const inline = await refToInlineImage(ref);
+    const bytes = Uint8Array.from(atob(inline.data), (c) => c.charCodeAt(0));
+    const blob = new Blob([bytes], { type: inline.mimeType });
+    if (inline.mimeType === "image/png") return blob;
+    // Clipboard image writes are PNG everywhere; a JPEG frame re-encodes.
+    const bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    return new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not encode the frame."))), "image/png")
+    );
+  })();
+  await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+}
+
 /** Reference images for a whole ref list, in order; skips nothing — a broken
  * ref fails the call so the user knows the reference didn't ride along. */
 export function refsToInlineImages(refs: AssetRef[]): Promise<InlineImage[]> {

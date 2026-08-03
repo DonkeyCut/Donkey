@@ -10,6 +10,7 @@ import { STOCK_CATEGORIES, stockTitle, type StockCategory, type StockVideo } fro
 import { STOCK_VIDEOS } from "@/cut/lib/stockVideoManifest";
 import { cn } from "@/lib/utils";
 import { CopyRefButton, RefHandlePill } from "./AssetRefs";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 // The Video tab's reference browser: a catalog of AI-generated stock clips.
 // Every clip carries the prompt that made it — clicking one loads that
@@ -94,7 +95,7 @@ export function StockVideosPanel() {
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3.5 pt-3 pb-4">
+    <ScrollArea className="min-h-0 flex-1" contentClassName="flex flex-col gap-3 px-3.5 pt-3 pb-4">
       {STOCK_VIDEOS.length === 0 ? (
         <p className="text-[11px] leading-relaxed text-muted-foreground">
           No stock videos are bundled yet.
@@ -147,7 +148,7 @@ export function StockVideosPanel() {
           )}
         </>
       )}
-    </div>
+    </ScrollArea>
   );
 }
 

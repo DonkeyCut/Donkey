@@ -57,6 +57,7 @@ import { useSpeakerVoice, useSpeechLanguage, VoicePicker } from "@/cut/component
 import { GeneratedAssetMenu } from "@/cut/components/GeneratedAssetMenu";
 import { cn } from "@/lib/utils";
 import { scrimIconButton } from "@/cut/components/iconButton";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 /** Starting points for the direction prompt — picking one fills the input so
  * it can be tweaked before generating. */
@@ -113,7 +114,7 @@ export function AudioPanel({
         <AudioSubTabs value={sub} onChange={onSub} />
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-3.5 pb-4">
+      <ScrollArea className="min-h-0 flex-1" contentClassName="flex flex-col gap-5 px-3.5 pb-4">
         {sub === "voice" ? (
           <>
             {!readOnly && <VoiceGenerator projectId={projectId} />}
@@ -130,7 +131,7 @@ export function AudioPanel({
             <ProjectMusic projectId={projectId} onTogglePlay={togglePlay} playingUrl={playingUrl} />
           </>
         )}
-      </div>
+      </ScrollArea>
     </>
   );
 }

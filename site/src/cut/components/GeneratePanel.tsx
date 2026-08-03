@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { clearAssetDrag, setAssetDragData } from "@/cut/lib/assetDrag";
+import { PICKED_RING, useAssetPick } from "@/cut/lib/assetPick";
 import {
   collectRefs,
   mentionToken,
@@ -31,12 +32,13 @@ import {
   type VideoModelOption,
 } from "@/cut/lib/videoModels";
 import { cn } from "@/lib/utils";
-import { MentionTextarea, RefChips, RefHandlePill } from "./AssetRefs";
+import { CopyHandlePill, MentionTextarea, RefChips } from "./AssetRefs";
 import { DictationControl } from "./MicDictation";
 import { GeneratedAssetMenu } from "./GeneratedAssetMenu";
 import { HostedErrorText } from "./hostedError";
 import { cardIconButton } from "./iconButton";
 import { PillSelect } from "./PillSelect";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 // The generate-video panel: an always-on column in the Video tab, sitting left
 // of the stock-clip browser. Clicking a stock tile loads its saved prompt here.
@@ -114,10 +116,11 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
         <span className="text-sm font-semibold tracking-tight">Generate video</span>
       </div>
 
-      <div
+      <ScrollArea
         ref={attachTarget}
         {...targetProps}
-        className="relative flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3.5 pb-4"
+        className="min-h-0 flex-1"
+        contentClassName="flex flex-col gap-3 px-3.5 pb-4"
       >
         {!readOnly && (<>
         {/* Composer: the character and attached references ride inside the
@@ -251,7 +254,7 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
             ))}
           </div>
         )}
-      </div>
+      </ScrollArea>
     </>
   );
 }
@@ -267,6 +270,7 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
   const elapsed = useElapsed(job.status === "running" ? job.startedAt : null);
   const tileRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const { picked, pick } = useAssetPick(job.assetId ?? "");
   // Render history keeps every settled job; a preview loads only on screen.
   const [inViewRef, seen] = useInView<HTMLButtonElement>();
 
@@ -327,7 +331,7 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
   return (
     <div
       ref={tileRef}
-      className="gen-job group relative overflow-hidden rounded-lg"
+      className={cn("gen-job group relative overflow-hidden rounded-lg", picked && PICKED_RING)}
       onMouseEnter={() => {
         const v = videoRef.current;
         if (!v) return;
@@ -362,7 +366,7 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
           }
         }}
         onDragEnd={clearAssetDrag}
-        onClick={() => useVideoGen.getState().openWith(job.prompt)}
+        onClick={pick}
       >
         <video
           crossOrigin={MEDIA_CORS}
@@ -375,12 +379,7 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
           className="aspect-[16/10] w-full bg-black object-cover"
         />
       </button>
-      {handle && (
-        <RefHandlePill
-          token={`@${handle}`}
-          className="absolute top-1 left-1 opacity-0 transition-opacity group-hover:opacity-100"
-        />
-      )}
+      <CopyHandlePill handle={handle} name={asset.name} />
       <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2 py-1.5 opacity-0 transition-opacity group-hover:opacity-100">
         <span className="block truncate text-[11px] font-medium text-white">{job.prompt}</span>
       </div>
@@ -412,15 +411,20 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
           projectId={job.projectId}
           triggerClassName="grid size-5 place-items-center rounded-full bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100 data-popup-open:opacity-100 hover:bg-black/65"
           before={
-            <DropdownMenuItem
-              onClick={() =>
-                void navigator.clipboard
-                  .writeText(handle ? `@${handle}` : mentionToken(asset.name))
-                  .catch(() => {})
-              }
-            >
-              <Copy /> Copy reference
-            </DropdownMenuItem>
+            <>
+              <DropdownMenuItem onClick={() => useVideoGen.getState().openWith(job.prompt)}>
+                <Sparkles /> Use this prompt
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() =>
+                  void navigator.clipboard
+                    .writeText(handle ? `@${handle}` : mentionToken(asset.name))
+                    .catch(() => {})
+                }
+              >
+                <Copy /> Copy reference
+              </DropdownMenuItem>
+            </>
           }
           onDelete={() => {
             // The render dies for real: the tile goes with its job row, and

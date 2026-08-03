@@ -26,6 +26,10 @@ import { enrichAsset, importFileToProject, prepareImport } from "@/cut/lib/media
 // Side-effect import: registers the brief-to-video resume subscription, so a
 // persisted run resumes on project load even when the AI panel never mounts.
 import "@/cut/lib/genScene";
+// Side-effect import: registers the bundled Google font families (build-time
+// self-hosted) into the shared font registry before any text renders.
+import "@/cut/lib/googleFonts";
+import { syncFontAssets } from "@/cut/lib/fontAssets";
 import { installDevHooks } from "@/cut/lib/devHooks";
 import { ensureCloudThreads } from "@/cut/lib/chatCloud";
 import { readProjectThreads, writeActiveChat } from "@/cut/lib/chatThreads";
@@ -36,6 +40,7 @@ import { resolveProjectPlacement } from "@/cut/lib/residency";
 import {
   docAudioClips,
   docClips,
+  docOverlays,
   projectDuration,
   serializeDoc,
   storedAssets,
@@ -96,10 +101,15 @@ export function Editor({
   const aiOpen = useEditor((s) => s.aiOpen);
   const sharedFeatures = useEditor((s) => s.sharedFeatures);
   // The inspector only earns its column when the selection has a panel to
-  // show; otherwise (nothing selected, or a subtitle cue) it is an empty white
-  // panel, so collapse it and let the preview take the space.
+  // show; otherwise (nothing selected, a subtitle cue, a transition bar — the
+  // Transitions tab is its panel) it is an empty white panel, so collapse it
+  // and let the preview take the space.
   const hasInspector = useEditor(
-    (s) => !s.readOnly && s.selection != null && s.selection.kind !== "cue"
+    (s) =>
+      !s.readOnly &&
+      s.selection != null &&
+      s.selection.kind !== "cue" &&
+      s.selection.kind !== "transition"
   );
   const [importing, setImporting] = useState(0);
   // Files being probed and named, plus the ones already placed whose bytes are
@@ -107,6 +117,10 @@ export function Editor({
   const sending = useEditor((s) =>
     s.assets.reduce((n, a) => (a.upload && !a.upload.error ? n + 1 : n), 0)
   );
+  // Uploaded fonts become live FontFaces the moment their assets exist (and
+  // drop out when deleted), so titles set in them never measure a fallback.
+  const assetsForFonts = useEditor((s) => s.assets);
+  useEffect(() => syncFontAssets(assetsForFonts), [assetsForFonts]);
   const [conflictReloaded, setConflictReloaded] = useState(false);
   const [shareGone, setShareGone] = useState(false);
   // This project lives on this Mac and the Donkey app isn't answering. Nothing
@@ -512,7 +526,7 @@ export function Editor({
         // held out of the document, and holding one is not an edit.
         docClips(s.clips, s.assets) !== (last.clips as unknown) ||
         docAudioClips(s.audioClips, s.assets) !== (last.audioClips as unknown) ||
-        s.overlays !== (last.overlays as unknown) ||
+        docOverlays(s.overlays) !== (last.overlays as unknown) ||
         s.templates !== (last.templates as unknown) ||
         s.subtitles !== (last.subtitles as unknown) ||
         s.aspect !== last.aspect ||
@@ -760,7 +774,7 @@ export function Editor({
         s.setAiOpen(!s.aiOpen);
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
         e.preventDefault();
-        // iMovie: cut at the skimmer when the mouse is over the timeline.
+        // Cut at the skimmer when the mouse is over the timeline.
         s.splitAtPlayhead(s.skimTime ?? undefined);
       } else if (e.key.toLowerCase() === "s" && !e.metaKey && !e.ctrlKey) {
         s.splitAtPlayhead(s.skimTime ?? undefined);

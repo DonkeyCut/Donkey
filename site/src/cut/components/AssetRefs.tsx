@@ -117,6 +117,49 @@ export function RefHandleBadge({ handle, className }: { handle: string; classNam
 /** A legible reference-token pill for image tiles: dark so it reads over any
  * image, showing the mention to type (`@i2`, `@nature-dunes`). Caller controls
  * visibility (shown on hover). */
+/**
+ * A generated asset's @handle on its tile: shown on hover or focus, and a
+ * button — clicking it puts the reference on the clipboard, which is how a
+ * sticker or a render made earlier gets typed into a prompt somewhere else.
+ * The same pill on every generation tab, so the gesture is learned once.
+ */
+export function CopyHandlePill({
+  handle,
+  name,
+  className,
+}: {
+  handle?: string;
+  name: string;
+  className?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const token = handle ? `@${handle}` : mentionToken(name);
+  return (
+    <button
+      type="button"
+      title="Copy reference"
+      aria-label={`Copy reference ${token}`}
+      className={cn(
+        "absolute top-1 left-1 max-w-[calc(100%-0.5rem)] rounded-[5px] opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100",
+        className
+      )}
+      onClick={(e) => {
+        // The tile under it takes a click as "pick me"; copying is its own act.
+        e.stopPropagation();
+        void navigator.clipboard
+          .writeText(token)
+          .then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1200);
+          })
+          .catch(() => {});
+      }}
+    >
+      <RefHandlePill token={copied ? "Copied" : token} />
+    </button>
+  );
+}
+
 export function RefHandlePill({ token, className }: { token: string; className?: string }) {
   return (
     <span
