@@ -1,27 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import {
-  ArrowDown,
-  ArrowDownToLine,
-  ArrowLeft,
-  ArrowLeftToLine,
-  ArrowRight,
-  ArrowRightToLine,
-  ArrowUp,
-  ArrowUpToLine,
-  Blend,
-  Circle,
-  Droplets,
-  Expand,
-  FoldHorizontal,
-  Moon,
-  Sun,
-  Target,
-  Trash2,
-  UnfoldHorizontal,
-  type LucideIcon,
-} from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Trash2 } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -30,11 +10,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
-import { Tile } from "@/cut/components/PanelTile";
+import { SwatchScene, useSwatchClock } from "@/cut/components/EffectsPanel";
 import { parseSecondsInput, ScrubValue } from "@/cut/components/ScrubValue";
 import { SectionTitle } from "@/cut/components/SectionTitle";
 import { clearElementDrag, setElementDragData } from "@/cut/lib/assetDrag";
-import { PICKED_RING, useAssetPick } from "@/cut/lib/assetPick";
+import { PICKED_RING, pickGridNav, useAssetPick } from "@/cut/lib/assetPick";
 import { getClipSpans, resolveTransitions, useEditor } from "@/cut/lib/store";
 import {
   ANIM_DEFAULT_SECONDS,
@@ -44,33 +24,14 @@ import {
   TRANSITION_STYLE_GROUPS,
   TRANSITION_STYLE_IDS,
   TRANSITION_STYLE_LABELS,
-  type AnimStyle,
+  type MediaAsset,
   type TimelineTransition,
   type TransitionStyle,
   type VideoClip,
+  type AnimStyle,
 } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
-
-const TILE_ICONS: Record<TransitionStyle, LucideIcon> = {
-  crossfade: Blend,
-  crosszoom: Expand,
-  dipblack: Moon,
-  dipwhite: Sun,
-  blur: Droplets,
-  pushleft: ArrowLeft,
-  pushright: ArrowRight,
-  pushup: ArrowUp,
-  pushdown: ArrowDown,
-  wipeleft: ArrowLeftToLine,
-  wiperight: ArrowRightToLine,
-  wipeup: ArrowUpToLine,
-  wipedown: ArrowDownToLine,
-  circleopen: Circle,
-  circleclose: Target,
-  splitopen: UnfoldHorizontal,
-  splitclose: FoldHorizontal,
-};
 
 /**
  * The Transitions tab: how one clip hands over to the next, and how a clip
@@ -103,39 +64,97 @@ export function TransitionsPanel() {
       }) ?? null
     );
   });
+  const { a, b } = useCutFrames();
   return (
     <>
-      <div className="flex h-12 shrink-0 items-center pr-2.5 pl-4">
-        <span className="text-sm font-semibold tracking-tight">Transitions</span>
-      </div>
-
-      <ScrollArea className="min-h-0 flex-1" contentClassName="px-3.5 pb-4">
+      {/* No header row. The top padding clears the side panel's floating
+          close button: the first group's title runs beside it on the left,
+          and the first tile row starts below it. */}
+      <ScrollArea className="min-h-0 flex-1" contentClassName="px-3.5 pt-5 pb-4">
         <SelectedClip />
-        {TRANSITION_STYLE_GROUPS.map((g) => (
-          <section key={g.label} className="mb-3 flex flex-col gap-1.5">
-            <SectionTitle>{g.label}</SectionTitle>
-            <div className="grid grid-cols-2 gap-1.5">
-              {g.ids.map((id) => (
-                <TransitionTile key={id} style={id} live={live} />
-              ))}
-            </div>
-          </section>
-        ))}
+        {/* One key handler over every group, so arrows walk the whole list
+            across section boundaries. It wraps only the tile grids — the
+            selected clip's sliders and selects keep their own arrow keys. */}
+        <div onKeyDown={pickGridNav}>
+          {TRANSITION_STYLE_GROUPS.map((g) => (
+            <section key={g.label} className="mb-3 flex flex-col gap-1.5">
+              <SectionTitle>{g.label}</SectionTitle>
+              <div className="grid grid-cols-2 gap-2">
+                {g.ids.map((id) => (
+                  <TransitionTile key={id} style={id} live={live} a={a} b={b} />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
       </ScrollArea>
     </>
   );
 }
 
+/** The frame an asset shows at `srcT` seconds into its source: the nearest
+ * filmstrip thumb for video, the picture itself for an image. */
+function frameAt(asset: MediaAsset, srcT: number): string | null {
+  if (asset.thumbs?.length) {
+    const step = asset.thumbStep || 1;
+    const i = Math.max(0, Math.min(asset.thumbs.length - 1, Math.round(srcT / step)));
+    return asset.thumbs[i];
+  }
+  if (asset.type === "image") return asset.url;
+  return null;
+}
+
+/** The two frames either side of the cut nearest the playhead — the real
+ * footage a transition dropped there would blend. Null sides fall back to the
+ * tiles' stand-in scenes. */
+function useCutFrames(): { a: string | null; b: string | null } {
+  const clips = useEditor((s) => s.clips);
+  const assets = useEditor((s) => s.assets);
+  // Re-pick the cut as the playhead crosses half-second marks.
+  const tick = useEditor((s) => Math.round(s.currentTime * 2));
+  return useMemo(() => {
+    const spans = getClipSpans(clips, assets);
+    let best: { a: string | null; b: string | null } | null = null;
+    let bestDist = Infinity;
+    for (let i = 0; i + 1 < spans.length; i++) {
+      const out = spans[i];
+      const inc = spans[i + 1];
+      const cut = inc.start;
+      const dist = Math.abs(tick / 2 - cut);
+      if (dist >= bestDist) continue;
+      bestDist = dist;
+      best = {
+        a: frameAt(out.asset, out.clip.in + out.len * (out.clip.speed ?? 1)),
+        b: frameAt(inc.asset, inc.clip.in),
+      };
+    }
+    return best ?? { a: null, b: null };
+  }, [clips, assets, tick]);
+}
+
+/** How a transition tile's loop spends its time: a beat on the first shot,
+ * the handover, a beat on the second. */
+const X_LOOP = 2.4;
+const X_HOLD = 0.5;
+const X_RUN = 1.2;
+
 function TransitionTile({
   style,
   live,
+  a,
+  b,
 }: {
   style: TransitionStyle;
   live: TimelineTransition | null;
+  a: string | null;
+  b: string | null;
 }) {
   const { picked, pick } = useAssetPick(`transition:${style}`);
   const ref = useRef<HTMLButtonElement>(null);
-  const Icon = TILE_ICONS[style];
+  // Hovering a tile starts its handover over from the top, so the pointer
+  // never lands mid-blend waiting for the loop to come around.
+  const [runEpoch, setRunEpoch] = useState(0);
+  const t = useSwatchClock(true, X_LOOP, runEpoch);
   // What the selection means for this tile: it wears the ring when it is the
   // live bar's style, and a click swaps that bar onto it.
   const isLive = !!live && live.style === style;
@@ -146,29 +165,219 @@ function TransitionTile({
     if (isLive) ref.current?.scrollIntoView({ block: "nearest" });
   }, [isLive]);
   return (
-    <Tile
+    <button
       ref={ref}
-      selected={marked}
-      label={TRANSITION_STYLE_LABELS[style]}
-      title={
-        live
-          ? `Change the selected transition to ${TRANSITION_STYLE_LABELS[style]}`
-          : `Drag ${TRANSITION_STYLE_LABELS[style]} onto the transition track`
-      }
-      // Scroll margin keeps the whole tile — selection ring included — clear
-      // of the scroller's edges when scrollIntoView lands it there.
-      className={cn("scroll-m-2", marked && PICKED_RING)}
+      type="button"
+      data-pick-id={`transition:${style}`}
+      aria-pressed={marked}
+      draggable
+      onDragStart={(e) => setElementDragData(e, { kind: "transition", style })}
+      onDragEnd={clearElementDrag}
+      onPointerEnter={() => setRunEpoch((n) => n + 1)}
+      onFocus={() => setRunEpoch((n) => n + 1)}
       onClick={() => {
         if (!live) return pick();
         if (!isLive) useEditor.getState().updateTransition(live.id, { style });
         previewBar(live);
       }}
-      draggable
-      onDragStart={(e) => setElementDragData(e, { kind: "transition", style })}
-      onDragEnd={clearElementDrag}
+      // Scroll margin keeps the whole tile — selection ring included — clear
+      // of the scroller's edges when scrollIntoView lands it there. The picked
+      // ring is the focus indicator; the browser outline stays off.
+      className="flex scroll-m-2 flex-col gap-1.5 text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:text-foreground"
     >
-      <Icon className="size-4" />
-    </Tile>
+      <TransitionSwatch
+        style={style}
+        a={a}
+        b={b}
+        t={t}
+        className={cn("h-24 w-full rounded-lg border border-border", marked && PICKED_RING)}
+      />
+      <span className="leading-none">{TRANSITION_STYLE_LABELS[style]}</span>
+    </button>
+  );
+}
+
+/** One full-tile layer of the handover — a shot, transformed or clipped as
+ * the style's moment demands. */
+function Layer({
+  frame,
+  variant,
+  style,
+}: {
+  frame: string | null;
+  variant: "day" | "dusk";
+  style?: React.CSSProperties;
+}) {
+  return (
+    <span className="absolute inset-0 overflow-hidden" style={style}>
+      <SwatchScene frame={frame} variant={variant} />
+    </span>
+  );
+}
+
+/** The handover itself, played on the two shots: each style renders its own
+ * moment at progress `p` — sliding, wiping, dipping or blending shot A into
+ * shot B the way the real render does. */
+function TransitionSwatch({
+  style,
+  a,
+  b,
+  t,
+  className,
+}: {
+  style: TransitionStyle;
+  a: string | null;
+  b: string | null;
+  t: number;
+  className?: string;
+}) {
+  const p0 = Math.min(1, Math.max(0, (t - X_HOLD) / X_RUN));
+  const p = p0 * p0 * (3 - 2 * p0);
+  const pc = (n: number) => `${(n * 100).toFixed(1)}%`;
+  const A = (s?: React.CSSProperties) => <Layer frame={a} variant="day" style={s} />;
+  const B = (s?: React.CSSProperties) => <Layer frame={b} variant="dusk" style={s} />;
+  let layers: React.ReactNode;
+  switch (style) {
+    case "crossfade":
+      layers = (
+        <>
+          {A()}
+          {B({ opacity: p })}
+        </>
+      );
+      break;
+    case "crosszoom":
+      layers = (
+        <>
+          {A({ transform: `scale(${(1 + 0.4 * p).toFixed(3)})` })}
+          {B({ opacity: p, transform: `scale(${(1.4 - 0.4 * p).toFixed(3)})` })}
+        </>
+      );
+      break;
+    case "dipblack":
+    case "dipwhite":
+      layers = (
+        <>
+          {p < 0.5 ? A() : B()}
+          <span
+            className="absolute inset-0"
+            style={{
+              background: style === "dipblack" ? "#000" : "#fff",
+              opacity: 1 - Math.abs(2 * p - 1),
+            }}
+          />
+        </>
+      );
+      break;
+    case "blur":
+      layers = (
+        <>
+          {A({ filter: `blur(${(p * 3).toFixed(2)}px)` })}
+          {B({ opacity: p, filter: `blur(${((1 - p) * 3).toFixed(2)}px)` })}
+        </>
+      );
+      break;
+    case "pushleft":
+      layers = (
+        <>
+          {A({ transform: `translateX(${pc(-p)})` })}
+          {B({ transform: `translateX(${pc(1 - p)})` })}
+        </>
+      );
+      break;
+    case "pushright":
+      layers = (
+        <>
+          {A({ transform: `translateX(${pc(p)})` })}
+          {B({ transform: `translateX(${pc(-(1 - p))})` })}
+        </>
+      );
+      break;
+    case "pushup":
+      layers = (
+        <>
+          {A({ transform: `translateY(${pc(-p)})` })}
+          {B({ transform: `translateY(${pc(1 - p)})` })}
+        </>
+      );
+      break;
+    case "pushdown":
+      layers = (
+        <>
+          {A({ transform: `translateY(${pc(p)})` })}
+          {B({ transform: `translateY(${pc(-(1 - p))})` })}
+        </>
+      );
+      break;
+    case "wipeleft":
+      layers = (
+        <>
+          {A()}
+          {B({ clipPath: `inset(0 0 0 ${pc(1 - p)})` })}
+        </>
+      );
+      break;
+    case "wiperight":
+      layers = (
+        <>
+          {A()}
+          {B({ clipPath: `inset(0 ${pc(1 - p)} 0 0)` })}
+        </>
+      );
+      break;
+    case "wipeup":
+      layers = (
+        <>
+          {A()}
+          {B({ clipPath: `inset(${pc(1 - p)} 0 0 0)` })}
+        </>
+      );
+      break;
+    case "wipedown":
+      layers = (
+        <>
+          {A()}
+          {B({ clipPath: `inset(0 0 ${pc(1 - p)} 0)` })}
+        </>
+      );
+      break;
+    case "circleopen":
+      layers = (
+        <>
+          {A()}
+          {B({ clipPath: `circle(${(p * 72).toFixed(1)}% at 50% 50%)` })}
+        </>
+      );
+      break;
+    case "circleclose":
+      layers = (
+        <>
+          {B()}
+          {A({ clipPath: `circle(${((1 - p) * 72).toFixed(1)}% at 50% 50%)` })}
+        </>
+      );
+      break;
+    case "splitopen":
+      layers = (
+        <>
+          {A()}
+          {B({ clipPath: `inset(0 ${pc((1 - p) / 2)})` })}
+        </>
+      );
+      break;
+    case "splitclose":
+      layers = (
+        <>
+          {B()}
+          {A({ clipPath: `inset(0 ${pc(p / 2)})` })}
+        </>
+      );
+      break;
+  }
+  return (
+    <span className={cn("relative block overflow-hidden rounded-md bg-black", className)}>
+      {layers}
+    </span>
   );
 }
 

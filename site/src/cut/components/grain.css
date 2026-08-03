@@ -1,0 +1,31 @@
+/* Film grain for DOM surfaces (the preview stage and the effect tiles): the
+   element's background-image is the effects-kit grain tile (grainTileUrl, set
+   inline), overlay-blended so grain holds in the midtones, jumping to a new
+   offset a dozen times a second so it boils. The effect's amount sets the
+   layer's opacity inline. */
+.cut-grain {
+  background-size: 256px 256px;
+  mix-blend-mode: overlay;
+  animation: cut-grain-boil 0.5s steps(1) infinite;
+}
+
+@keyframes cut-grain-boil {
+  0% {
+    background-position: 0px 0px;
+  }
+  17% {
+    background-position: 96px 37px;
+  }
+  33% {
+    background-position: 201px 153px;
+  }
+  50% {
+    background-position: 58px 219px;
+  }
+  67% {
+    background-position: 173px 90px;
+  }
+  83% {
+    background-position: 33px 141px;
+  }
+}

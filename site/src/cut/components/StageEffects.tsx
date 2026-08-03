@@ -1,10 +1,16 @@
 "use client";
 
 import { useMemo } from "react";
-import { effectPreviewState, type EffectPreviewState } from "@donkeycut/effects-kit";
+import {
+  effectPreviewState,
+  grainTileUrl,
+  leakGradient,
+  type EffectPreviewState,
+} from "@donkeycut/effects-kit";
 import { useEditor } from "@/cut/lib/store";
 import { isEffectOverlay, laneOf } from "@/cut/lib/types";
 import type { LiveEffect } from "@/cut/lib/effectStack";
+import "./grain.css";
 
 /**
  * Effect elements in the preview's stack.
@@ -57,17 +63,19 @@ export function useEffectLanes(): number[] {
  * them and under everything above. */
 export function StageEffectPaint({ states }: { states: EffectPreviewState[] }) {
   if (states.length === 0) return null;
+  const grainUrl = grainTileUrl();
   const grain = Math.max(0, ...states.map((s) => s.grain ?? 0));
   const vignette = Math.max(0, ...states.map((s) => s.vignette ?? 0));
   const flash = Math.max(0, ...states.map((s) => s.flash ?? 0));
   const washes = states.flatMap((s) => s.washes ?? []);
-  if (!grain && !vignette && !flash && washes.length === 0) return null;
+  const leaks = states.flatMap((s) => (s.leak ? [s.leak] : []));
+  if (!grain && !vignette && !flash && washes.length === 0 && leaks.length === 0) return null;
   return (
     <div className="pointer-events-none absolute inset-0">
-      {grain > 0 && (
+      {grain > 0 && grainUrl && (
         <div
-          className="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,#fff_0.6px,transparent_0)] bg-[length:3px_3px]"
-          style={{ opacity: grain }}
+          className="cut-grain absolute inset-0"
+          style={{ opacity: grain, backgroundImage: `url(${grainUrl})` }}
         />
       )}
       {vignette > 0 && (
@@ -78,6 +86,13 @@ export function StageEffectPaint({ states }: { states: EffectPreviewState[] }) {
           }}
         />
       )}
+      {leaks.map((l, i) => (
+        <div
+          key={`leak-${i}`}
+          className="absolute inset-0 mix-blend-screen"
+          style={{ opacity: l.alpha, background: leakGradient(l.x, l.y) }}
+        />
+      ))}
       {washes.map((w, i) => (
         <div
           key={i}
