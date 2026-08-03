@@ -30,13 +30,13 @@
 import type React from "react";
 import { refFromAsset, startPointerRefDrag } from "./assetRef";
 import { startDrag } from "./drag";
-import { track0Clips, clipLen, getClipSpans, overlayLayers, projectDuration, transitionOverlap, useEditor } from "./store";
+import { track0Clips, clipLen, getClipSpans, moveOverlayGroup, overlayLaneOrder, overlayLayers, projectDuration, useEditor } from "./store";
 import type {
   AudioClip,
   MediaAsset,
+  Overlay,
   Selection,
   SubtitleCue,
-  TextOverlay,
   VideoClip,
 } from "./types";
 
@@ -44,14 +44,15 @@ type S = ReturnType<typeof useEditor.getState>;
 
 // A drag lane. "clip" is track 0, "overlayClip" a layer track —
 // distinct adapters, but both select as a plain video-clip selection.
-export type LaneKind = "clip" | "audio" | "text" | "overlayClip" | "cue";
+// "overlay" is the title lanes: every overlay element kind rides one adapter.
+export type LaneKind = "clip" | "audio" | "overlay" | "overlayClip" | "cue";
 
 /** The Selection kind a lane maps to. Track-0 and layer video lanes both select
  * as `"clip"` — a video clip is a video clip whatever track it sits on. */
 const laneSelectionKind = (kind: LaneKind): NonNullable<Selection>["kind"] =>
   kind === "overlayClip" ? "clip" : kind;
 
-/** Visual gutter between adjacent clips (iMovie); time math stays exact. */
+/** Visual gutter between adjacent clips; time math stays exact. */
 export const CLIP_GAP = 4;
 /** Pull a dragged or resized edge to a logical time within this many px. */
 export const SNAP_PX = 6;
@@ -94,10 +95,9 @@ interface LaneAdapter<T> {
   assetOf?(s: S, raw: T): MediaAsset | undefined;
   /** After a committed move (e.g. keep cues sorted). */
   onMoved?(): void;
-  /** Legal physical overlap (seconds) of `raw` into the same-lane item after
-   * it — a video cross-dissolve's declared width. Gestures treat overlap up
-   * to this as contact, not intrusion. Absent = footprints are solid. */
-  overlapInto?(raw: T, next: T): number;
+  /** After a committed move, shift companions that ride along — a grouped
+   * overlay's peers keep their relative timing. Same undo step. */
+  afterMove?(raw: T, delta: number): void;
 }
 
 const speedOf = (c: { speed?: number }) => (c.speed && c.speed > 0 ? c.speed : 1);
@@ -128,7 +128,6 @@ const clipAdapter: LaneAdapter<VideoClip> = {
   },
   assetOf: (s, c) => s.assets.find((x) => x.id === c.assetId),
   onMoved: () => useEditor.getState().sortClips(),
-  overlapInto: (c, next) => transitionOverlap(c, next),
 };
 
 const audioAdapter: LaneAdapter<AudioClip> = {
@@ -153,7 +152,7 @@ const audioAdapter: LaneAdapter<AudioClip> = {
   assetOf: (s, a) => s.assets.find((x) => x.id === a.assetId),
 };
 
-const textAdapter: LaneAdapter<TextOverlay> = {
+const textAdapter: LaneAdapter<Overlay> = {
   minLen: 0.2,
   multiLane: true,
   raws: (s) => s.overlays,
@@ -165,6 +164,7 @@ const textAdapter: LaneAdapter<TextOverlay> = {
   leftFloor: () => 0,
   maxLen: () => Infinity,
   lanePatch: (o, lane) => ({ id: o.id, patch: { lane } }),
+  afterMove: (o, delta) => moveOverlayGroup(o, delta),
 };
 
 const overlayClipAdapter: LaneAdapter<VideoClip> = {
@@ -188,7 +188,6 @@ const overlayClipAdapter: LaneAdapter<VideoClip> = {
   maxLen: (s, c) =>
     ((s.assets.find((x) => x.id === c.assetId)?.duration ?? c.out) - c.in) / speedOf(c),
   assetOf: (s, c) => s.assets.find((x) => x.id === c.assetId),
-  overlapInto: (c, next) => transitionOverlap(c, next),
 };
 
 const cueAdapter: LaneAdapter<SubtitleCue> = {
@@ -216,13 +215,13 @@ const cueAdapter: LaneAdapter<SubtitleCue> = {
   onMoved: () => useEditor.getState().sortCues(),
 };
 
-type LaneRaw = VideoClip | AudioClip | TextOverlay | SubtitleCue;
+type LaneRaw = VideoClip | AudioClip | Overlay | SubtitleCue;
 // The generic parameter is erased at the registry boundary; each gesture only
 // feeds an adapter values that came out of that same adapter, so this is safe.
 const ADAPTERS: Record<LaneKind, LaneAdapter<LaneRaw>> = {
   clip: clipAdapter as unknown as LaneAdapter<LaneRaw>,
   audio: audioAdapter as unknown as LaneAdapter<LaneRaw>,
-  text: textAdapter as unknown as LaneAdapter<LaneRaw>,
+  overlay: textAdapter as unknown as LaneAdapter<LaneRaw>,
   overlayClip: overlayClipAdapter as unknown as LaneAdapter<LaneRaw>,
   cue: cueAdapter as unknown as LaneAdapter<LaneRaw>,
 };
@@ -233,9 +232,9 @@ const ADAPTERS: Record<LaneKind, LaneAdapter<LaneRaw>> = {
 function snapTargets(s: S, kind: LaneKind, selfId: string): number[] {
   const pts = new Set<number>([0]);
   for (const sp of getClipSpans(s.clips, s.assets)) {
-    // The visible joint: a dissolved pair meets at the overlap midpoint (where
-    // the clip boxes are inset to), a hard cut at the footprint end.
-    pts.add(sp.start + sp.len - sp.transitionOut / 2);
+    // The joint: every pair meets at the footprint end — a transition is a
+    // blend at that cut, never an overlap.
+    pts.add(sp.start + sp.len);
   }
   pts.add(projectDuration(s));
   pts.add(s.currentTime);
@@ -300,7 +299,9 @@ function settleSnapBack() {
 export interface LaneDrag {
   kind: LaneKind;
   id: string;
-  targetRow: number; // hovered display row (one past the end = new track)
+  /** Hovered display row. One past the end opens a new row below; -1 opens
+   * one above the top, for a stack whose order is z-order. */
+  targetRow: number;
   ghostX: number; // ghost left in px — follows the pointer
   ghostY: number; // ghost vertical offset in px from its resting row — follows the pointer
   slotStart: number; // resolved landing start, seconds
@@ -315,6 +316,9 @@ export interface LaneMoveUI<V = unknown> {
   rowH: number;
   /** Display rows currently in use; targetRow may go one past to open a new track. */
   laneCount: number;
+  /** Dragging above the top row opens a new one there. On for stacks where a
+   * row's place is its z-order — the element rows — so the top is reachable. */
+  topInsert?: boolean;
   /** The grabbed item's current display row. */
   homeRow: number;
   /** Timeline second the item's box is rendered at, when it differs from the
@@ -391,12 +395,9 @@ export function startLaneMove<V = unknown>(
     .raws(s)
     .filter((r) => ad.view(r).id !== id)
     .map((r) => ({ raw: r, view: ad.view(r) }));
-  const usedLanes = [...new Set([...rest.map((x) => x.view.lane), self.lane])].sort(
-    (a, b) => a - b
-  );
+  const usedLanes = laneOrder(kind, s, [...rest.map((x) => x.view.lane), self.lane]);
   const targets = snapTargets(s, kind, id);
   const tol = SNAP_PX / ui.pps;
-  const allow = (a: LaneRaw, b: LaneRaw) => ad.overlapInto?.(a, b) ?? 0;
   // Dragging a media-backed item can also hand its asset to a reference drop
   // zone (AI chat, the image/video creators).
   const asset = ad.assetOf?.(s, raw0);
@@ -480,16 +481,21 @@ export function startLaneMove<V = unknown>(
 
       // Vertical drag retracks the item; one row past the end opens a new one.
       targetRow = ad.multiLane
-        ? Math.min(ui.laneCount, Math.max(0, ui.homeRow + Math.round(dy / ui.rowH)))
+        ? Math.min(
+            ui.laneCount,
+            Math.max(ui.topInsert ? -1 : 0, ui.homeRow + Math.round(dy / ui.rowH))
+          )
         : ui.homeRow;
       // Which lane to part/collide on: multi-lane rows are display indexes
       // into the compacted used-lane list (a row past the end is a brand-new
       // lane with no neighbors); single-lane kinds stay on their own lane —
       // their row number is not an index into that list.
       const lane = ad.multiLane
-        ? targetRow < usedLanes.length
-          ? usedLanes[targetRow]
-          : Infinity
+        ? targetRow < 0
+          ? -Infinity
+          : targetRow < usedLanes.length
+            ? usedLanes[targetRow]
+            : Infinity
         : self.lane;
 
       // Snap whichever edge of the moving item lands nearest a logical time.
@@ -529,14 +535,14 @@ export function startLaneMove<V = unknown>(
         ? Math.max(
             0,
             ...before.slice(0, -1).map((b) => b.view.start + b.view.len),
-            prev.view.start + prev.view.len - allow(prev.raw, raw0)
+            prev.view.start + prev.view.len
           )
         : 0;
       const clamped = Math.max(start, clampFloor);
       if (clamped !== start) guide = null;
       slotStart = clamped;
       const delta = after.length
-        ? Math.max(0, clamped + len - allow(raw0, after[0].raw) - after[0].view.start)
+        ? Math.max(0, clamped + len - after[0].view.start)
         : 0;
       const pushed = new Set(after.map((x) => x.view.id));
       ui.onSnap(guide);
@@ -559,6 +565,7 @@ export function startLaneMove<V = unknown>(
       }
       if (!live || !moved) return;
       ad.apply([ad.movePatch(raw0, slotStart)]);
+      ad.afterMove?.(raw0, slotStart - start0);
       commitRow(kind, id, targetRow);
       ad.onMoved?.();
     },
@@ -569,16 +576,31 @@ export function startLaneMove<V = unknown>(
  * brand-new track after the current max, then lanes renumber to stay
  * contiguous so empty tracks collapse. The move's pointer-down already
  * checkpointed history, so the whole gesture is one undo step. */
+/** The display rows a kind shows, top first — the same order the timeline
+ * paints, so a row index means one thing to both. Overlay rows lead with the
+ * effect rows; every other kind is plain lane order. */
+function laneOrder(kind: LaneKind, s: S, lanes: number[]): number[] {
+  if (kind === "overlay") return overlayLaneOrder(s.overlays);
+  return [...new Set(lanes)].sort((a, b) => a - b);
+}
+
 function commitRow(kind: LaneKind, id: string, targetRow: number) {
   const s = useEditor.getState();
   const ad = ADAPTERS[kind];
   if (!ad.multiLane || !ad.lanePatch) return;
   const raws = ad.raws(s);
   const views = raws.map((r) => ad.view(r));
-  const used = [...new Set(views.map((v) => v.lane))].sort((a, b) => a - b);
+  const used = laneOrder(kind, s, views.map((v) => v.lane));
   const cur = views.find((v) => v.id === id);
   if (!cur || targetRow === used.indexOf(cur.lane)) return;
-  const lane = targetRow < used.length ? used[targetRow] : (used[used.length - 1] ?? -1) + 1;
+  // A row past either end opens a brand-new lane, clear of the ones in use;
+  // the remap below renumbers everything back to 0..n-1.
+  const lane =
+    targetRow < 0
+      ? Math.min(0, ...used) - 1
+      : targetRow < used.length
+        ? used[targetRow]
+        : Math.max(-1, ...used) + 1;
   const moved = views.map((v) => (v.id === id ? lane : v.lane));
   const usedNext = [...new Set(moved)].sort((a, b) => a - b);
   const remap = new Map(usedNext.map((l, i) => [l, i]));
@@ -616,7 +638,6 @@ export function startLaneTrim(
   s.pushHistory();
   const targets = snapTargets(s, kind, id);
   const tol = SNAP_PX / ui.pps;
-  const allow = (a: LaneRaw, b: LaneRaw) => ad.overlapInto?.(a, b) ?? 0;
   const sameLane = ad
     .raws(s)
     .map((r) => ({ raw: r, view: ad.view(r) }))
@@ -629,23 +650,12 @@ export function startLaneTrim(
     // edge grows freely into the open gap; past the neighbor it shoves the
     // run left, closing gap after gap until everything sits flush against 0 —
     // plus a media item's own floor: the edge can't reveal earlier than its
-    // first sample. The nearest leader may be a cross-dissolve partner whose
-    // footprint crosses this item's start: it yields its declared overlap
-    // before the edge starts pushing it.
+    // first sample.
     const leaders = sameLane
       .filter((x) => x.view.start < start0 - 1e-3)
       .sort((a, b) => a.view.start - b.view.start);
-    const last = leaders[leaders.length - 1];
-    const lastAllow = last ? allow(last.raw, raw0) : 0;
-    // Each leader's declared dissolve into the item after it (the last one's
-    // into the trimmed item itself): packing the run keeps those overlaps, so
-    // they come off the floor and stay in the re-lay.
-    const pairAllow = leaders.map((l, i) =>
-      i + 1 < leaders.length ? allow(l.raw, leaders[i + 1].raw) : lastAllow
-    );
-    const prevEnd =
-      leaders.reduce((m, l) => Math.max(m, l.view.start + l.view.len), 0) - lastAllow;
-    const runFloor = leaders.reduce((sum, l, i) => sum + l.view.len - pairAllow[i], 0);
+    const prevEnd = leaders.reduce((m, l) => Math.max(m, l.view.start + l.view.len), 0);
+    const runFloor = leaders.reduce((sum, l) => sum + l.view.len, 0);
     const floor = Math.max(runFloor, ad.leftFloor(raw0));
     const free = Math.max(prevEnd, ad.leftFloor(raw0));
     const moved = new Map<string, number>();
@@ -675,11 +685,10 @@ export function startLaneTrim(
         }
         // Re-lay the leaders right-to-left from their resting spots: each one
         // slides only as far as the pushed edge (or the item it now abuts)
-        // forces it, so a retreating drag lets the run flow back — and a
-        // cross-dissolved pair keeps its overlap while it slides. Unmoved
+        // forces it, so a retreating drag lets the run flow back. Unmoved
         // leaders get no patch (they'd re-render for nothing).
         const patches = [ad.trimLeftPatch(raw0, start)];
-        let limit = Math.max(start, runFloor) + lastAllow;
+        let limit = Math.max(start, runFloor);
         for (let i = leaders.length - 1; i >= 0; i--) {
           const l = leaders[i];
           const end = Math.min(l.view.start + l.view.len, limit);
@@ -690,8 +699,7 @@ export function startLaneTrim(
             if (Math.abs(ns - l.view.start) > 1e-9) moved.set(l.view.id, ns);
             else moved.delete(l.view.id);
           }
-          // The leader before this one may keep its dissolve overlap into it.
-          limit = ns + (i > 0 ? pairAllow[i - 1] : 0);
+          limit = ns;
         }
         ad.apply(patches);
       },
@@ -725,15 +733,11 @@ export function startLaneTrim(
   const ceil = self.start + ad.maxLen(s, raw0);
   // Items after this one, at their original spots: extending the edge past
   // the first of them pushes the whole run right (their gaps preserved);
-  // pulling back lets them return. A cross-dissolve into the first follower
-  // is contact, not intrusion — the edge only pushes once the overlap
-  // exceeds the declared transition, so grabbing a dissolved clip's handle
-  // never shoves its partner.
+  // pulling back lets them return.
   const followers = sameLane
     .filter((x) => x.view.start >= self.start)
     .sort((a, b) => a.view.start - b.view.start);
   const nextStart = followers.length ? followers[0].view.start : Infinity;
-  const nextAllow = followers.length ? allow(raw0, followers[0].raw) : 0;
   let lastDelta = 0;
   startDrag(e, {
     onMove: (dx, _dy, ev) => {
@@ -756,7 +760,7 @@ export function startLaneTrim(
       // Followers respond only to growth up to the ceiling, so the overshoot
       // gives visually without shoving the run — and springing back needs no
       // re-lay, just as packed leaders hold at the floor on the left edge.
-      const delta = Math.max(0, Math.min(end, ceil) - nextAllow - nextStart);
+      const delta = Math.max(0, Math.min(end, ceil) - nextStart);
       const run =
         delta === lastDelta
           ? []

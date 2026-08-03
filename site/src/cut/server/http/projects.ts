@@ -109,6 +109,7 @@ export const projectsApi = {
         name: typeof body.name === "string" && body.name.trim() ? body.name.trim() : existing.name,
         assets: Array.isArray(body.assets) ? body.assets : existing.assets,
         clips: Array.isArray(body.clips) ? body.clips : existing.clips,
+        transitions: Array.isArray(body.transitions) ? body.transitions : existing.transitions,
         audioClips: Array.isArray(body.audioClips) ? body.audioClips : existing.audioClips,
         // Layer clips now live in `clips` (each with its `track`). A merged
         // client saves `clips` with no `overlayClips`, which clears the legacy
@@ -336,7 +337,8 @@ export const projectsApi = {
       if (!(file instanceof File)) return err("No image in upload.", 400);
       const nameField = form.get("name");
       const name = typeof nameField === "string" && nameField.trim() ? nameField.trim() : file.name;
-      const origin = form.get("origin") === "generated" ? "generated" : undefined;
+      const raw = form.get("origin");
+      const origin = raw === "generated" || raw === "sticker" ? raw : undefined;
       const fileName = await saveMedia(id, file);
       const dims = await probeDims(mediaPath(id, fileName));
       return Response.json({

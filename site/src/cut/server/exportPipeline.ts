@@ -3,8 +3,7 @@ import { stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { atempoChain, hasStream, num, videoColorInfo } from "./util";
 import { projectFadeSeconds, TRANSITION_XFADE, TRANSITION_ZOOM, type ColorGrade, type TransitionStyle } from "../lib/types";
-import { gradeToFfmpegFilter } from "../lib/colorGrade";
-import { lookFilterLines } from "../lib/looks";
+import { effectFilterLines, gradeToFfmpegFilter, lookFilterLines } from "@donkeycut/effects-kit";
 
 // The render pipeline itself: spec in, finished mp4 out. Shared by the local
 // engine's job registry (jobs.ts) and the cloud render worker, which stage
@@ -111,7 +110,45 @@ export interface ExportSpec {
      * this gain (0..1). Ducking clips never duck each other. */
     duck?: number;
   }[];
-  overlays: { file: string; start: number; end: number }[];
+  /** Overlay elements. A static element is one full-frame PNG windowed with
+   * `enable`. An animated element ships `frames` — a region-cropped slideshow
+   * (file + seconds each, repeats allowed) played via the concat demuxer and
+   * overlaid at (x, y), with `blank` (a region-sized transparent PNG) padding
+   * the timeline before and after its window. */
+  overlays: {
+    file?: string;
+    start: number;
+    end: number;
+    x?: number;
+    y?: number;
+    blank?: string;
+    frames?: { file: string; duration: number }[];
+    /** Text-behind-speaker: composite this element beneath the alphamerged
+     * person cutout (needs `behindMask`). */
+    behind?: boolean;
+    /** Its row: lane 0 is the top of the stack. Elements composite deepest
+     * lane first, and effects interleave with them by the same number. */
+    lane?: number;
+  }[];
+  /** The page-rendered person mask video (grayscale, white = person) for the
+   * behind-tagged overlays: starts at `from` timeline seconds and covers the
+   * union of their windows. */
+  behindMask?: { file: string; from: number };
+  /** Time-ranged effect elements — the spec carries ids and knobs; the
+   * LGPL-safe chains are built here from the kit's recipes. Each one grades
+   * what plays under it: the video, the overlay tracks, and every element on
+   * a lane below its own. */
+  effects?: {
+    effect: string;
+    amount?: number;
+    focus?: { x: number; y: number };
+    /** Seconds a zoom takes to reach its depth. */
+    ramp?: number;
+    /** Its row in the element stack; lane 0 is the top. */
+    lane?: number;
+    start: number;
+    end: number;
+  }[];
   /** Burned-in subtitle stills. Kept apart from `overlays` (titles may
    * overlap each other): each subtitle track (`lane`, absent = 0) is
    * non-overlapping and chronological within itself and renders as one
@@ -345,9 +382,41 @@ export async function runExport(
       colorFix.set(f, sdrConvert(await videoColorInfo(paths[i])));
     })
   );
-  for (const o of spec.overlays) {
-    inputIndex.set(o.file, nInputs++);
-    inputs.push("-i", path.join(job.tmpDir, path.basename(o.file)));
+  // Animated overlays: each is its own concat-demuxer slideshow (region-sized
+  // frames with transparent filler around the element's window), the exact
+  // mechanism the caption lanes use. Static overlays stay single PNG inputs.
+  const animOverlayInput = new Map<number, number>();
+  for (let k = 0; k < spec.overlays.length; k++) {
+    const o = spec.overlays[k];
+    if (o.frames?.length && o.blank) {
+      const blank = path.join(job.tmpDir, path.basename(o.blank));
+      const lines = ["ffconcat version 1.0"];
+      if (o.start > 1e-3) lines.push(`file '${blank}'`, `duration ${num(o.start)}`);
+      let cursor = o.start;
+      for (const f of o.frames) {
+        if (f.duration < 1e-4) continue;
+        lines.push(
+          `file '${path.join(job.tmpDir, path.basename(f.file))}'`,
+          `duration ${num(f.duration)}`
+        );
+        cursor += f.duration;
+      }
+      if (spec.duration - cursor > 1e-3) {
+        lines.push(`file '${blank}'`, `duration ${num(spec.duration - cursor)}`);
+      }
+      const list = path.join(job.tmpDir, `overlay_anim_${k}.ffconcat`);
+      await writeFile(list, lines.join("\n") + "\n");
+      animOverlayInput.set(k, nInputs++);
+      inputs.push("-f", "concat", "-safe", "0", "-i", list);
+    } else if (o.file) {
+      inputIndex.set(o.file, nInputs++);
+      inputs.push("-i", path.join(job.tmpDir, path.basename(o.file)));
+    }
+  }
+  let behindMaskInput: number | undefined;
+  if (spec.behindMask) {
+    behindMaskInput = nInputs++;
+    inputs.push("-i", path.join(job.tmpDir, path.basename(spec.behindMask.file)));
   }
 
   // Looped input per still image, sized to the clip's timeline length so the
@@ -782,16 +851,20 @@ export async function runExport(
     }
   });
 
-  // Join the segments. Adjacent clips with a transition cross-dissolve
-  // (xfade/acrossfade, overlapping by the transition length); the rest hard-cut
-  // (concat). Fold left so mixed sequences chain correctly.
+  // Join the segments. Clips abut — a transition claims no layout — so every
+  // join keeps the accumulator's full length. A transitioned join pads the
+  // incoming segment's head with its cloned first frame and runs the xfade
+  // across the outgoing clip's last blend-window seconds: the held frame
+  // arrives over the live tail, and the real segment starts exactly at the
+  // cut. Its sound is a tail fade on the outgoing side and a hard join. The
+  // rest hard-cut (concat). Fold left so mixed sequences chain correctly.
   let vAcc = segLabel[0];
   let aAcc = "a0";
   let acc = clipDur(spec.clips[0]); // running timeline length of the accumulator
   for (let j = 1; j < spec.clips.length; j++) {
     const prev = spec.clips[j - 1];
     const durJ = clipDur(spec.clips[j]);
-    // The overlap can't exceed most of either clip, matching the editor clamp.
+    // The blend can't exceed most of either clip, matching the editor clamp.
     const d = Math.min(prev.transition ?? 0, acc * 0.9, durJ * 0.9);
     const vOut = `vj${j}`;
     const aOut = `aj${j}`;
@@ -800,14 +873,15 @@ export async function runExport(
       // The style id resolves through the allowlist map; anything unknown
       // (or an old spec without a style) renders as a plain fade.
       const kind = TRANSITION_XFADE[prev.transitionStyle as TransitionStyle] ?? "fade";
-      filters.push(`[${vAcc}][${segLabel[j]}]xfade=transition=${kind}:duration=${num(d)}:offset=${num(offset)}[${vOut}]`);
-      filters.push(`[${aAcc}][a${j}]acrossfade=d=${num(d)}[${aOut}]`);
-      acc = acc + durJ - d;
+      filters.push(`[${segLabel[j]}]tpad=start_duration=${num(d)}:start_mode=clone[vh${j}]`);
+      filters.push(`[${vAcc}][vh${j}]xfade=transition=${kind}:duration=${num(d)}:offset=${num(offset)}[${vOut}]`);
+      filters.push(`[${aAcc}]afade=t=out:st=${num(offset)}:d=${num(d)}[ah${j}]`);
+      filters.push(`[ah${j}][a${j}]concat=n=2:v=0:a=1[${aOut}]`);
     } else {
       filters.push(`[${vAcc}][${segLabel[j]}]concat=n=2:v=1:a=0[${vOut}]`);
       filters.push(`[${aAcc}][a${j}]concat=n=2:v=0:a=1[${aOut}]`);
-      acc = acc + durJ;
     }
+    acc = acc + durJ;
     vAcc = vOut;
     aAcc = aOut;
   }
@@ -926,20 +1000,96 @@ export async function runExport(
   let vLabel = vAcc;
   for (const oc of overlayVideos) vLabel = addOverlay(oc, vLabel);
 
-  // Burn in text overlays, each windowed to its timeline range. Half-open so
-  // back-to-back overlays sharing a boundary never composite on the same frame.
-  spec.overlays.forEach((o, k) => {
-    const idx = inputIndex.get(o.file)!;
+  // Burn in overlay elements. Static ones are full-frame PNGs windowed with
+  // `enable` (half-open, so back-to-back overlays sharing a boundary never
+  // composite on the same frame); animated ones play their region slideshow
+  // at the region's own position — the transparent filler covers the rest of
+  // the timeline, so no enable window is needed.
+  const compositeOverlayEntry = (k: number, onto: string): string => {
+    const o = spec.overlays[k];
     const next = `vov${k}`;
+    const animIdx = animOverlayInput.get(k);
+    if (animIdx !== undefined) {
+      filters.push(`[${animIdx}:v]fps=${fps},format=yuva420p,setsar=1[oanim${k}]`);
+      filters.push(
+        `[${onto}][oanim${k}]overlay=${num(o.x ?? 0)}:${num(o.y ?? 0)}:eof_action=pass[${next}]`
+      );
+    } else if (o.file) {
+      const idx = inputIndex.get(o.file)!;
+      filters.push(
+        `[${onto}][${idx}:v]overlay=0:0:enable='gte(t,${num(o.start)})*lt(t,${num(o.end)})'[${next}]`
+      );
+    } else {
+      return onto;
+    }
+    return next;
+  };
+
+  // Text-behind-speaker: the composite splits, the behind-tagged elements
+  // burn onto one branch, and the other branch — alphamerged with the
+  // page-rendered person mask (standard LGPL filters) — lays the subject
+  // back over them. Front overlays then continue on the merged stream.
+  const behindKs = spec.behindMask
+    ? spec.overlays.flatMap((o, k) => (o.behind ? [k] : []))
+    : [];
+  if (spec.behindMask && behindMaskInput !== undefined && behindKs.length > 0) {
+    filters.push(`[${vLabel}]split[bh_text][bh_person]`);
+    let textLab = "bh_text";
+    for (const k of behindKs) textLab = compositeOverlayEntry(k, textLab);
     filters.push(
-      `[${vLabel}][${idx}:v]overlay=0:0:enable='gte(t,${num(o.start)})*lt(t,${num(o.end)})'[${next}]`
+      `[${behindMaskInput}:v]fps=${fps},scale=${spec.width}:${spec.height},format=gray,` +
+        `tpad=start_duration=${num(Math.max(0, spec.behindMask.from))}:color=black[bh_mask]`
     );
-    vLabel = next;
-  });
+    filters.push(`[bh_person]format=rgba[bh_rgba]`);
+    filters.push(`[bh_rgba][bh_mask]alphamerge[bh_cut]`);
+    filters.push(`[${textLab}][bh_cut]overlay=0:0:eof_action=pass[bh_done]`);
+    vLabel = "bh_done";
+  }
+  // The element stack, deepest lane first, with the effects standing in it:
+  // an effect grades what plays under it, so everything below its lane is
+  // composited before its chain runs, and the elements above it land on the
+  // graded picture untouched. Each chain is gated to its own window (the shake
+  // recipe swaps in a jittered branch through an overlay instead, so nothing
+  // else rescales).
+  const laneOfEntry = (k: number) => spec.overlays[k].lane ?? 0;
+  const stacked = spec.overlays
+    .map((o, k) => k)
+    .filter((k) => !(spec.overlays[k].behind && behindKs.includes(k)))
+    .sort((a, b) => laneOfEntry(b) - laneOfEntry(a));
+  const effects = (spec.effects ?? [])
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => (b.e.lane ?? 0) - (a.e.lane ?? 0));
+  let placed = 0;
+  const compositeDownTo = (lane: number) => {
+    while (placed < stacked.length && laneOfEntry(stacked[placed]) > lane) {
+      vLabel = compositeOverlayEntry(stacked[placed++], vLabel);
+    }
+  };
+  for (const { e, i } of effects) {
+    compositeDownTo(e.lane ?? 0);
+    const lines = effectFilterLines(
+      vLabel,
+      `vfx${i}`,
+      e.effect,
+      e.amount,
+      Math.max(0, e.start),
+      Math.min(e.end, spec.duration),
+      spec.width,
+      spec.height,
+      `fx${i}`,
+      e.focus,
+      e.ramp
+    );
+    if (!lines) continue;
+    filters.push(...lines);
+    vLabel = `vfx${i}`;
+  }
+  compositeDownTo(-Infinity);
 
   // Subtitle stills ride one concat-demuxer slideshow per track (transparent
   // filler in the gaps), so a karaoke cut with hundreds of word windows still
-  // costs one ffmpeg input per language instead of one per still.
+  // costs one ffmpeg input per language instead of one per still. They sit
+  // over every element and every effect.
   captionInputs.forEach((idx, k) => {
     filters.push(`[${idx}:v]fps=${fps},format=yuva420p,setsar=1[caps${k}]`);
     filters.push(`[${vLabel}][caps${k}]overlay=0:0:eof_action=pass[vcaps${k}]`);

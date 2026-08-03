@@ -79,19 +79,18 @@ const itemDur = (a: MixItem) => Math.max(0, (a.out - a.in) / speedOf(a.speed));
 
 /**
  * Where the sequential fold puts each track-0 clip, and how long its
- * cross-dissolve edges are. Each dissolve pulls the next clip back by the
- * (clamped) overlap, exactly like the engine's acrossfade chain.
+ * transition edges are. Clips abut — a transition claims no layout — and its
+ * sound is the outgoing clip fading across the blend window while the next
+ * enters clean at the cut, exactly like the engine's tail-fade + hard join.
  */
 export function foldClips(clips: MixClip[]) {
   const geo = clips.map((clip) => ({ clip, at: 0, dur: clipDur(clip), fadeIn: 0, fadeOut: 0 }));
   let acc = 0;
   geo.forEach((g, j) => {
-    const overlap = j > 0 ? Math.min(clips[j - 1].transition ?? 0, acc * 0.9, g.dur * 0.9) : 0;
-    const fade = overlap > 0.01 ? overlap : 0;
-    g.at = j === 0 ? 0 : acc - fade;
-    g.fadeIn = fade;
-    if (j > 0) geo[j - 1].fadeOut = fade;
-    acc = g.at + g.dur;
+    g.at = acc;
+    acc += g.dur;
+    const fade = geo[j + 1] ? Math.min(g.clip.transition ?? 0, g.dur * 0.9) : 0;
+    if (fade > 0.01) g.fadeOut = fade;
   });
   return geo;
 }

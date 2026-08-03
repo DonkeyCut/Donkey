@@ -7,7 +7,7 @@
  * the exact same state the user sees.
  */
 
-import { ANIM_STYLE_IDS, LOOK_IDS, TRANSITION_STYLE_IDS } from "../../lib/types";
+import { ANIM_STYLE_IDS, TRANSITION_STYLE_IDS } from "../../lib/types";
 
 export interface AiToolDef {
   name: string;
@@ -35,7 +35,7 @@ export const AI_TOOLS: AiToolDef[] = [
   {
     name: "get_state",
     description:
-      "Read the full current editor state: clips, soundtrack, titles, subtitles, selection, playhead, view settings, publish metadata. Use this whenever the context snapshot is not enough or might be stale.",
+      "Read the full current editor state: clips, soundtrack, overlay elements (titles, shapes, stickers), subtitles, selection, playhead, view settings, publish metadata. Use this whenever the context snapshot is not enough or might be stale.",
     inputSchema: obj({}),
   },
   {
@@ -93,9 +93,9 @@ export const AI_TOOLS: AiToolDef[] = [
   {
     name: "select",
     description:
-      "Select a video clip (on any track), soundtrack clip, or title (or clear the selection). Selection drives the inspector panel.",
+      "Select a video clip (on any track), soundtrack clip, or overlay element — title, shape, or sticker (or clear the selection). Selection drives the inspector panel.",
     inputSchema: obj({
-      kind: { type: "string", enum: ["clip", "audio", "text", "none"], description: "What to select — 'clip' is any video clip, whatever track" },
+      kind: { type: "string", enum: ["clip", "audio", "overlay", "none"], description: "What to select — 'clip' is any video clip, whatever track; 'overlay' is any title-lane element" },
       id: str("The item id (omit for kind=none)"),
     }, ["kind"]),
   },
@@ -106,7 +106,7 @@ export const AI_TOOLS: AiToolDef[] = [
     inputSchema: obj({
       panel: {
         type: "string",
-        enum: ["media", "library", "video", "image", "audio", "subtitles", "publish", "none"],
+        enum: ["media", "library", "elements", "effects", "transitions", "video", "image", "audio", "subtitles", "publish", "none"],
         description: "Tab to open, or 'none' to collapse the panel",
       },
     }, ["panel"]),
@@ -195,15 +195,15 @@ export const AI_TOOLS: AiToolDef[] = [
   {
     name: "detach_audio",
     description:
-      "iMovie-style Detach Audio: lift a clip's sound onto the soundtrack track (mutes the clip) so it can be edited independently. Select the clip first or pass its id.",
+      "Detach Audio: lift a clip's sound onto the soundtrack track (mutes the clip) so it can be edited independently. Select the clip first or pass its id.",
     inputSchema: obj({ clipId: str("Video clip id (optional if one is selected)") }),
   },
   {
     name: "delete_item",
     description:
-      "Delete a video clip (any track), soundtrack clip, or title by id. While track 0 is the only video track, deleting a track-0 clip ripples: its footprint closes and everything after it — clips, titles, captions, soundtrack — slides left in sync; items wholly inside that span are removed with it, straddlers are trimmed. With overlay video tracks present the delete leaves its gap in place (remove_gap closes it). Deletes on other tracks remove just that item.",
+      "Delete a video clip (any track), soundtrack clip, or overlay element (title/shape/sticker) by id. While track 0 is the only video track, deleting a track-0 clip ripples: its footprint closes and everything after it — clips, titles, captions, soundtrack — slides left in sync; items wholly inside that span are removed with it, straddlers are trimmed. With overlay video tracks present the delete leaves its gap in place (remove_gap closes it). Deletes on other tracks remove just that item.",
     inputSchema: obj({
-      kind: { type: "string", enum: ["clip", "audio", "text"], description: "Item kind — 'clip' is any video clip, whatever track" },
+      kind: { type: "string", enum: ["clip", "audio", "overlay"], description: "Item kind — 'clip' is any video clip, whatever track; 'overlay' is any title-lane element" },
       id: str("Item id"),
     }, ["kind", "id"]),
   },
@@ -261,7 +261,7 @@ export const AI_TOOLS: AiToolDef[] = [
   {
     name: "add_title",
     description:
-      "Add a text title overlay. Position is the text center as a fraction of the frame (x,y in 0..1; y=0.42 is the default band). Size is px at 1080-wide.",
+      "Add a text title overlay. Position is the text center as a fraction of the frame (x,y in 0..1; y=0.42 is the default band). Size is px at 1080-wide. Font ids come from the graphics skill (system set + the bundled Google families).",
     inputSchema: obj({
       text: str("The title text (\\n for line breaks)"),
       start: num("Start time s (default: playhead)"),
@@ -270,31 +270,156 @@ export const AI_TOOLS: AiToolDef[] = [
       y: num("Center y 0..1 (default 0.42)"),
       size: num("Font size px at 1080w (default 88)"),
       color: str("CSS color (default #FFFFFF)"),
-      font: { type: "string", enum: ["sf", "serif", "rounded", "mono", "impact"], description: "Font family id" },
+      font: str("Font id (see the graphics skill; default sf)"),
       weight: { type: "number", enum: [400, 700], description: "Font weight" },
+      italic: bool("Italic"),
+      align: { type: "string", enum: ["left", "center", "right"], description: "Multi-line alignment (default center)" },
+      letter_spacing: num("Tracking in em (0 = normal, 0.1 = airy)"),
+      line_height: num("Line height multiplier (default 1.25)"),
+      stroke_color: str("Text outline color"),
+      stroke_width: num("Text outline width in em (0..0.15; 0 removes it)"),
       shadow: bool("Drop shadow (default true)"),
       plate: bool("Translucent plate behind text (default false)"),
+      behind_subject: bool("Sit the text behind the person in the shot (needs a clearly separated speaker)"),
+      rotation: num("Degrees clockwise, -180..180"),
+      opacity: num("Whole-element opacity 0..1"),
     }, ["text"]),
   },
   {
-    name: "update_title",
+    name: "add_shape",
     description:
-      "Update any properties of an existing title overlay (text, timing, position, size, font, weight, color, shadow, plate). This is the tool for 'make this text better' requests — pass the overlay id from the selection or state.",
+      "Add a vector shape overlay: rect, ellipse, line, or arrow. Position is the shape center as frame fractions; w/h are frame fractions too (a line/arrow's h is its stroke thickness). Rotation gives lines and arrows their direction.",
     inputSchema: obj({
-      id: str("Overlay id"),
-      text: str("New text"),
+      shape: { type: "string", enum: ["rect", "ellipse", "line", "arrow"], description: "Shape kind" },
+      start: num("Start time s (default: playhead)"),
+      end: num("End time s (default: start+3)"),
+      x: num("Center x 0..1 (default 0.5)"),
+      y: num("Center y 0..1 (default 0.5)"),
+      w: num("Width, fraction of frame width"),
+      h: num("Height, fraction of frame height (line/arrow: thickness)"),
+      fill: str("CSS color (default #FFFFFF)"),
+      fill_opacity: num("Fill opacity 0..1 (rect/ellipse)"),
+      radius: num("Rect corner radius, px at 1080 short side"),
+      stroke_color: str("Outline color (rect/ellipse)"),
+      stroke_width: num("Outline width px at 1080 short side (0 removes it)"),
+      rotation: num("Degrees clockwise, -180..180"),
+      opacity: num("Whole-element opacity 0..1"),
+    }, ["shape"]),
+  },
+  {
+    name: "add_sticker",
+    description:
+      "Add a sticker overlay from a project image asset (asset ids come from `media`; sticker uploads carry origin \"sticker\"). Width is a frame-width fraction; height follows the source's own aspect.",
+    inputSchema: obj({
+      asset_id: str("Project image asset id"),
+      start: num("Start time s (default: playhead)"),
+      end: num("End time s (default: start+3)"),
+      x: num("Center x 0..1 (default 0.5)"),
+      y: num("Center y 0..1 (default 0.5)"),
+      w: num("Width, fraction of frame width (default 0.25)"),
+      rotation: num("Degrees clockwise, -180..180"),
+      opacity: num("Whole-element opacity 0..1"),
+    }),
+  },
+  {
+    name: "update_overlay",
+    description:
+      "Update any overlay element — title, shape, or sticker — by id (from the selection or state). Titles take text/size/font/weight/color/shadow/plate; shapes take w/h/fill/fill_opacity/radius/stroke; stickers take w. Every kind takes timing, position, rotation, opacity, hidden. This is the tool for 'make this text better' requests too.",
+    inputSchema: obj({
+      id: str("Overlay element id"),
+      text: str("New text (titles)"),
       start: num("Start s"),
       end: num("End s"),
       x: num("Center x 0..1"),
       y: num("Center y 0..1"),
-      size: num("Font size px at 1080w"),
-      color: str("CSS color"),
-      font: { type: "string", enum: ["sf", "serif", "rounded", "mono", "impact"], description: "Font family id" },
-      weight: { type: "number", enum: [400, 700], description: "Font weight" },
-      shadow: bool("Drop shadow"),
-      plate: bool("Backdrop plate"),
-      hidden: bool("Hide the title without deleting it"),
+      size: num("Font size px at 1080w (titles)"),
+      color: str("CSS text color (titles)"),
+      font: str("Font id (titles; see the graphics skill)"),
+      weight: { type: "number", enum: [400, 700], description: "Font weight (titles)" },
+      italic: bool("Italic (titles)"),
+      align: { type: "string", enum: ["left", "center", "right"], description: "Multi-line alignment (titles)" },
+      letter_spacing: num("Tracking in em (titles; 0 = normal)"),
+      line_height: num("Line height multiplier (titles; default 1.25)"),
+      shadow: bool("Drop shadow (titles)"),
+      plate: bool("Backdrop plate (titles)"),
+      behind_subject: bool("Sit the text behind the person in the shot (titles)"),
+      w: num("Width, fraction of frame width (shapes/stickers)"),
+      h: num("Height, fraction of frame height (shapes)"),
+      fill: str("Fill color (shapes)"),
+      fill_opacity: num("Fill opacity 0..1 (rect/ellipse)"),
+      radius: num("Rect corner radius, px at 1080 short side"),
+      stroke_color: str("Outline color — text or shape"),
+      stroke_width: num("Outline width: em for titles (0..0.15), px at 1080 for shapes; 0 removes it"),
+      rotation: num("Degrees clockwise, -180..180 (0 clears)"),
+      opacity: num("Whole-element opacity 0..1 (1 clears)"),
+      hidden: bool("Hide the element without deleting it"),
     }, ["id"]),
+  },
+  {
+    name: "create_sticker",
+    description:
+      "Create a custom sticker from an idea: the hosted image model draws it (signed in, spends credits), the background is removed (people on-device, other subjects via hosted matting), a white die-cut outline is added, and it lands as an origin-\"sticker\" asset placed on the timeline at the playhead. Takes ~10-20s; the tool returns when the sticker is placed.",
+    inputSchema: obj({
+      idea: str("What the sticker shows, e.g. \"a corgi in sunglasses\""),
+      start: num("Start time s (default: playhead)"),
+      end: num("End time s (default: start+3)"),
+      x: num("Center x 0..1 (default 0.5)"),
+      y: num("Center y 0..1 (default 0.5)"),
+      w: num("Width, fraction of frame width (default 0.25)"),
+    }, ["idea"]),
+  },
+  {
+    name: "add_effect",
+    description:
+      "Add a time-ranged visual effect element over the video: a zoom into part of the frame, the treatments (grain, vhs, glitch, blur, vignette, lightleak, flash, shake) or a graded look (vintage, horror, halation, tech, noir, pastel, blockbuster, dreamy). It filters everything under it for its window (start..end) and stacks with other effects. Tasteful default: one effect at a time, amount under ~0.5.",
+    inputSchema: obj({
+      effect: { type: "string", enum: ["zoom", "grain", "vhs", "glitch", "blur", "vignette", "lightleak", "flash", "shake", "vintage", "horror", "halation", "tech", "noir", "pastel", "blockbuster", "dreamy"], description: "Effect id" },
+      start: num("Start time s (default: playhead)"),
+      end: num("End time s (default: start+3)"),
+      amount: num("Strength 0.05..1 (default 0.5). For zoom it is the depth: 0.25 shallow, 0.5 moderate, 1 deep"),
+      focus_x: num("Zoom only: the x of the point to zoom into, 0..1 (default 0.5)"),
+      focus_y: num("Zoom only: the y of the point to zoom into, 0..1 (default 0.5)"),
+    }, ["effect"]),
+  },
+  {
+    name: "set_overlay_animation",
+    description:
+      "Animate an overlay element (title, shape, or sticker): preset In/Out ramps plus a Loop that runs its whole duration. Omitted slots keep their setting; pass \"none\" to clear one. In/Out styles: fade, pop, zoom, slideleft/slideright/slideup/slidedown (names are the motion direction), typewriter (titles only). Loop styles: pulse, wiggle, spin, float.",
+    inputSchema: obj({
+      id: str("Overlay element id"),
+      in_style: str("Entrance style, or \"none\" to clear"),
+      in_seconds: num("Entrance ramp seconds 0.1..2 (default 0.5)"),
+      out_style: str("Exit style, or \"none\" to clear"),
+      out_seconds: num("Exit ramp seconds 0.1..2 (default 0.5)"),
+      loop_style: str("Loop style, or \"none\" to clear"),
+      loop_speed: num("Loop rate multiplier 0.25..4 (default 1)"),
+    }, ["id"]),
+  },
+  {
+    name: "set_overlay_keyframes",
+    description:
+      "Give an overlay element a keyframed pose track, for motion the presets cannot express (a path across the frame, a slow push in, a hold-then-drift). Each key is a whole pose at a time measured in seconds from the element's own start; the pose moves linearly between keys and holds outside them. Omitted fields on a key take the element's current value. Pass an empty list to clear the track and return the element to its resting pose. Preset In/Out/Loop animation still composes on top, so a keyframed title can also fade in.",
+    inputSchema: obj(
+      {
+        id: str("Overlay element id"),
+        keys: {
+          type: "array",
+          description: "Keys in any order; two at the same time collapse to one",
+          items: obj(
+            {
+              t: num("Seconds from the element's start"),
+              x: num("Center x, fraction of frame width 0..1"),
+              y: num("Center y, fraction of frame height 0..1"),
+              scale: num("Size multiplier, 1 = the element's own size (0.1..4)"),
+              rotation: num("Degrees clockwise, -180..180"),
+              opacity: num("0..1"),
+            },
+            ["t"]
+          ),
+        },
+      },
+      ["id", "keys"]
+    ),
   },
   {
     name: "update_audio",
@@ -698,7 +823,7 @@ export const AI_TOOLS: AiToolDef[] = [
   {
     name: "set_transition",
     description:
-      "Set the transition from this clip into the next clip on its track (any video track), in seconds (0 clears it, max 2). Every style overlaps the two clips, so the cut shortens by the duration. On upper tracks every style blends as an alpha dissolve (the tracks beneath show through). Only valid when a next same-track clip exists. Each edge holds one effect: setting a transition clears the animations adjacent to its joint (and set_animation on that edge replaces the transition). Read the transitions-and-fades skill before styling cuts.",
+      "Set the transition from this clip into the next clip on its track (any video track), in seconds (0 clears it, max 2). A transition is a blend across the cut — it never moves, trims or overlaps clips, and it plays only while the pair touches. On upper tracks every style blends as an alpha dissolve (the tracks beneath show through). Only valid when a next same-track clip exists. Each edge holds one effect: setting a transition clears the animations adjacent to its joint (and set_animation on that edge replaces the transition). Read the transitions-and-fades skill before styling cuts.",
     inputSchema: obj({
       clipId: str("Video clip id (the clip the transition starts from)"),
       seconds: num("Transition length in seconds, 0–2 (0 = hard cut)"),
@@ -712,7 +837,7 @@ export const AI_TOOLS: AiToolDef[] = [
   {
     name: "set_animation",
     description:
-      "Animate one clip's own entrance (which:'in') or exit (which:'out'): fade, zoom, pop, or a slide named by its motion direction. style 'none' clears. Track-0 clips take every style; upper-track clips only fade and zoom. Each edge holds one effect, last pick wins: animating an edge a transition owns replaces that transition (the pair returns to a hard cut), and setting a transition clears the animations adjacent to its joint. At an abutting cut the animation plays over the neighbor's held frame; at the timeline's ends and across gaps it plays against black.",
+      "Animate one clip's own entrance (which:'in') or exit (which:'out'): fade, zoom, pop, or a slide named by its motion direction. style 'none' clears. Track-0 clips take every style; upper-track clips only fade and zoom. Each edge holds one effect, last pick wins: animating an edge a transition owns replaces that transition, and setting a transition clears the animations adjacent to its joint. At an abutting cut the animation plays over the neighbor's held frame; at the timeline's ends and across gaps it plays against black.",
     inputSchema: obj({
       clipId: str("Video clip id"),
       which: { type: "string", enum: ["in", "out"], description: "Entrance or exit" },
@@ -723,20 +848,6 @@ export const AI_TOOLS: AiToolDef[] = [
       },
       seconds: num("Ramp length in seconds, 0.1–2 (default 0.5)"),
     }, ["clipId", "which", "style"]),
-  },
-  {
-    name: "set_look",
-    description:
-      "Apply a preset filter look to a video clip's picture (any track; stills too): vintage, vhs, horror (analogue horror), halation (highlight bloom), tech, noir, grain, pastel, blockbuster (teal-orange), dreamy. amount 0.05–1 scales the strength (default 1); style 'none' clears. Composes with set_color_grade — the look is the base, the grade rides on top.",
-    inputSchema: obj({
-      clipId: str("Video clip id"),
-      style: {
-        type: "string",
-        enum: [...LOOK_IDS, "none"],
-        description: "Look id, or 'none' to clear",
-      },
-      amount: num("Strength 0.05–1 (default 1)"),
-    }, ["clipId", "style"]),
   },
   {
     name: "merge_cue",
@@ -794,13 +905,13 @@ Times are in seconds on the shared timeline. The playhead is currentTime; a skim
 - Two ways to move a track-0 clip: place_clip sets its start (respects gaps, slides right if the spot is taken); move_clip reorders by index, opening a slot at the landing point — clips after it shift right, every other gap survives. Index-based inserts (freeze_frame, generated clips) open a slot the same way.
 - add_clip puts a project asset on the timeline the way a drag does: video/image onto track 0 (a \`start\`, an \`index\` insert, or appended at the end), audio onto the soundtrack.
 - Overlay video: a video/image asset can sit on a track above track 0 (track 1, 2… — topmost wins). A full-frame overlay covers everything below it; give it a layout to share the frame — top/bottom/left/right halves for a split screen, pip for a floating corner box, or a custom region rect. add_overlay_video creates one from a media asset; update_overlay_video moves/trims/regions/mutes/hides it. The user makes them by dragging media above track 0; they drag the region in the preview.
-- A clip's timeline length is (out-in)/speed; total duration runs to the last clip's end, gaps included, minus cross-style transition overlaps.
+- A clip's timeline length is (out-in)/speed; total duration runs to the last clip's end, gaps included. Transitions blend at cuts and never change layout or length.
 - trim_clip changes in/out inside the source media. in >= 0, out <= source duration, out-in >= 0.1.
 - set_speed sets a clip's playback rate; it changes the clip's timeline length, and later titles/captions ripple to stay in sync.
-- set_transition joins a clip into the next one (0–2s, 17 styles); set_animation animates one clip's own entrance/exit; set_look grades its picture with a preset filter — read the transitions-and-fades skill before styling cuts. Splitting or deleting clears the affected transition.
+- set_transition joins a clip into the next one (0–2s, 17 styles); set_animation animates one clip's own entrance/exit — read the transitions-and-fades skill before styling cuts. Splitting or deleting clears the affected transition. Grading a clip's picture is add_effect: an effect dropped over a clip opens covering it.
 - split_at cuts the track-0 clip under that time into two clips at the exact frame. With a soundtrack or overlay clip selected it splits that instead.
 - The user can multi-select (⌘/⇧-click) and delete several items at once; a hover chip on each video clip toggles its own audio.
-- Anything can be hidden instead of deleted: it stays on the timeline (grayed) but drops out of playback and export — a hidden video clip plays black and silent. Per item: set_clip_hidden, or the \`hidden\` field on update_overlay_video/update_title/update_audio. Whole rows: set_track_hidden (video/soundtrack/text/subtitles) and set_track_muted (video) — the eye/speaker toggles on the track headers.
+- Anything can be hidden instead of deleted: it stays on the timeline (grayed) but drops out of playback and export — a hidden video clip plays black and silent. Per item: set_clip_hidden, or the \`hidden\` field on update_overlay_video/update_overlay/update_audio. Whole rows: set_track_hidden (video/soundtrack/text/subtitles) and set_track_muted (video) — the eye/speaker toggles on the track headers.
 - detach_audio lifts a video clip's sound to the soundtrack track (and mutes the clip) so audio can be cut independently of video.
 - freeze_frame grabs one frame (default: the playhead — what the user currently sees) as a still clip and inserts it, by default at index 0 as a cover/hook frame ("make this the first frame"). The still is baked at the project's current aspect with the clip's framing applied; if the user later switches aspect they should capture a fresh one.
 - set_framing: per-clip Fit (letterbox) vs Fill (crop to cover the project frame). In Fill, panX/panY position the crop window; the user can also drag the video directly in the preview. The control lives in the Inspector under "Framing" when a video clip is selected. Landscape footage usually wants fill + a pan that keeps the subject.
@@ -833,9 +944,8 @@ Cutting speech well: pace is part of the message. Keep a beat of the speaker's o
 
   "transitions-and-fades": `# Transitions, animations, looks & fades
 Route the ask to the right feature:
-- set_transition: a styled join between one video clip and the next. Every style overlaps the clips, so the cut shortens by the duration.
+- set_transition: a styled join between one video clip and the next, blended across the cut. It never moves clips or shortens anything, and it plays only while the pair touches.
 - set_animation: one clip's own entrance ("in") or exit ("out") — the clip fades/zooms/pops/slides on its own edge. Never moves neighbors. For "fade this clip in", "make it slide in", use this. A wipe is a transition, not an animation.
-- set_look: a preset filter over one clip's whole picture (vintage, vhs, horror, halation, tech, noir, grain, pastel, blockbuster, dreamy) with an amount knob.
 - set_project_fade: the whole video fades in from black at the start and/or out to black at the end — picture and full mix (titles, captions, soundtrack). Survives clip reordering. For "fade in the video", "fade to black at the end", use this.
 - update_audio fadeIn/fadeOut: audio-only ramps on one soundtrack clip ("fade the music out").
 
@@ -844,11 +954,20 @@ set_animation styles: fade (audio follows), zoom, pop, slideleft/right/up/down �
 Picking for a vibe: "smooth" → crossfade; "punchy/energetic" → crosszoom or a push; "dramatic scene change" → dipblack 0.5–0.8s; "dreamy" → blur (or the dreamy look); "retro" → vhs or vintage look. Between clips 0.4–0.8s reads well; 1s+ is slow and cuts total duration.
 UI: select a clip → Inspector "Effects" opens the panel (Transition / In / Out / Looks tabs); a blue badge marks each styled joint on the timeline. Preview and export render the same treatment.`,
 
-  "titles": `# Titles (text overlays)
-Each overlay: text, start/end (seconds visible), x/y center (fractions 0..1 of the project frame), size (frame px; the design short side is 1080), font (sf=SF Pro, serif=New York, rounded, mono, impact), weight (400/700), color (any CSS color), shadow (bool), plate (translucent dark plate behind the text).
-Inspector shows these when a title is selected. The color row has fixed swatches, a custom picker, and the last 3 custom colors.
+  "graphics": `# Graphics: titles, shapes & stickers
+The title lanes hold three overlay element kinds, all sharing timing (start/end), center position (x/y fractions 0..1), rotation (degrees), opacity, and a lane; \`overlays\` in editor_state lists them with their \`kind\`. All burn into the export exactly as previewed.
+Titles (add_title / update_overlay): text, size (frame px; the design short side is 1080), font (sf=SF Pro, serif=New York, rounded, mono, impact), weight (400/700), color, shadow, plate (translucent dark backdrop).
+Shapes (add_shape): rect, ellipse, line, arrow. w/h are frame fractions; rect/ellipse take fill + fill_opacity, corner radius (rect), and an outline (stroke_color/stroke_width); line/arrow draw in \`fill\` with h as their thickness, and rotation gives them their direction (0° points right, 90° points down).
+Stickers (add_sticker): a project image asset (generated cutouts in the Elements panel carry origin "sticker"); w is a frame-width fraction and height follows the source's aspect. Lottie JSON uploads become animated stickers that loop for the element's duration.
+Custom stickers (create_sticker): one call generates the image, removes the background, adds the die-cut outline, and places it — use it when the user asks for a sticker of something they don't have (it spends credits like image generation).
+Effects (add_effect): time-ranged treatments over the finished picture — the footage and everything laid over it. Two families, one list: the treatments (grain, vhs, glitch, blur, vignette, lightleak, flash, shake) and the graded looks (vintage, horror, halation, tech, noir, pastel, blockbuster, dreamy). Placed like any element and tuned with \`amount\` (update_overlay); an effect added over a clip opens covering that clip, and trims like anything else. One effect at a time reads best, amounts under ~0.5.
+Advanced text (update_overlay): italic, align (multi-line), letter_spacing (em), line_height, stroke_color/stroke_width (em outline behind the fill), and richer shadows. Bundled Google families join the system set — inter, montserrat, poppins, oswald, space-grotesk, playfair, caveat, bebas, anton, archivo-black, bangers, lobster, pacifico, permanent-marker, dm-serif — and the user can upload .ttf/.otf fonts (they appear as font ids like "asset:<id>").
+Animation (set_overlay_animation): every element takes preset In/Out ramps (fade, pop, zoom, slides, typewriter for titles) and a Loop (pulse, wiggle, spin, float) that runs its whole duration. Entrances 0.3–0.6s read well; one loop per scene, sparingly.
+Keyframes (set_overlay_keyframes): for motion no preset covers — a path across the frame, a slow push in, a drift that holds first. A key is a whole pose (position, scale, rotation, opacity) at a time in seconds from the element's start; the pose moves linearly between keys and holds outside them, and presets still compose on top. Two or three keys carry almost everything; reach for a preset first and keyframes when the user describes a specific path or timing. In the UI the diamond in the inspector adds a key at the playhead, and dragging the element then records into it.
+Behind the speaker: a title with behind_subject sits behind the person in the shot (on-device person segmentation; preview and export match). It reads well when the speaker is clearly separated from the background; with no detectable person it degrades to a normal front title. Groups: the user can group elements (select several, Group in the inspector) — selecting one selects all, and moves/resize/rotate/timing ride together.
 Good TikTok titles: short punchy lines, high contrast (white/yellow + shadow or plate), size 72–110, keep inside the middle 80% of the frame (x 0.1..0.9, y 0.1..0.9), avoid the caption band (y≈0.8) when subtitles are on.
-Titles burn into the export exactly as previewed.`,
+Tasteful graphics: shapes read best as accents (a highlight box behind a stat, an arrow pointing at the subject, a color bar under a title) — semi-transparent fills (fill_opacity 0.2–0.5) sit better over footage than solid blocks. One or two stickers a scene; size 0.15–0.3 of the frame width.
+In the UI: the timeline toolbar adds Text; the Elements side-panel tab browses stickers and shapes and creates sticker images, and the Effects tab holds the effects — a click in any panel picks a tile, and dragging one onto the timeline is what places it; dragging in the preview places an element, its corner handle resizes, the top handle rotates; the Inspector edits every field.`,
 
   "audio-and-subtitles": `# Audio, voiceover & subtitles
 Soundtrack clips: volume 0..1.5, fadeIn/fadeOut seconds (max half the clip), start = timeline position, in/out = trim inside the source; clips can spread across several soundtrack lanes (the \`lane\` field), new sounds slide to free space in their lane. Fades render with ffmpeg afade on export.

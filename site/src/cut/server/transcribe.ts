@@ -112,7 +112,8 @@ export async function ensureStt(): Promise<string> {
   return bin;
 }
 
-/** Group word timings into short caption-sized cues (CapCut/Opus style). */
+/** Group word timings into short caption-sized cues — a few words at a time,
+ * the way captions read on a phone. */
 export function groupWords(words: Word[]): Cue[] {
   const MAX_CHARS = 38;
   const MAX_DUR = 3.5;
@@ -357,10 +358,10 @@ async function runTranscribe(job: TranscribeJob, spec: TranscribeSpec) {
         filters.push(`anullsrc=r=16000:cl=mono,atrim=0:${num(dur)},asetpts=PTS-STARTPTS[a${j}]`);
       }
     });
-    // Join clip audio exactly as the timeline (and export) do: adjacent clips
-    // with a cross-dissolve overlap by the transition length (acrossfade), the
-    // rest concatenate. A flat concat would run longer than the timeline, so
-    // every cue after a dissolve would land progressively late.
+    // Join clip audio exactly as the timeline (and export) do: clips abut, a
+    // transition fades the outgoing clip's tail while the next enters clean at
+    // the cut, so the chain is a flat concat with tail fades — the mix runs
+    // exactly the timeline's length and every cue lands where it plays.
     // Skipped entirely for an audio-only cut (no clips) — there is no clip-audio
     // chain to build, only the soundtrack, mixed below. (`spec.clips[0]` would be
     // undefined otherwise.)
@@ -374,12 +375,12 @@ async function runTranscribe(job: TranscribeJob, spec: TranscribeSpec) {
         const d = Math.min(prev.transition ?? 0, acc * 0.9, durJ * 0.9);
         const out = `aj${j}`;
         if (d > 0.01) {
-          filters.push(`[${aAcc}][a${j}]acrossfade=d=${num(d)}[${out}]`);
-          acc = acc + durJ - d;
+          filters.push(`[${aAcc}]afade=t=out:st=${num(acc - d)}:d=${num(d)}[af${j}]`);
+          filters.push(`[af${j}][a${j}]concat=n=2:v=0:a=1[${out}]`);
         } else {
           filters.push(`[${aAcc}][a${j}]concat=n=2:v=0:a=1[${out}]`);
-          acc = acc + durJ;
         }
+        acc = acc + durJ;
         aAcc = out;
       }
     }

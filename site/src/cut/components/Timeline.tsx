@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { ArrowDown, ArrowDownToLine, ArrowLeft, ArrowLeftToLine, ArrowRight, ArrowRightToLine, ArrowUp, ArrowUpToLine, AudioLines, Blend, Check, Circle, Clapperboard, Droplets, EllipsisVertical, Expand, Eye, EyeOff, FolderOpen, FolderPlus, FoldHorizontal, Fullscreen, Loader2, Moon, MoreHorizontal, Pause, Play, Scissors, SkipBack, Sun, Target, Trash2, Type, UnfoldHorizontal, Volume2, VolumeX, type LucideIcon } from "lucide-react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { ArrowDown, ArrowDownToLine, ArrowLeft, ArrowLeftToLine, ArrowRight, ArrowRightToLine, ArrowUp, ArrowUpToLine, AudioLines, Blend, Check, Circle, Clapperboard, Copy, Diamond, Droplets, EllipsisVertical, Expand, Eye, EyeOff, FolderOpen, FolderPlus, FoldHorizontal, Fullscreen, Loader2, Minus, Moon, MoreHorizontal, MoveRight, Pause, Play, Scissors, SkipBack, Sparkles, Square, Sticker, Sun, Target, Trash2, Type, UnfoldHorizontal, Volume2, VolumeX, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -13,17 +13,21 @@ import {
 import { Slider } from "@/components/ui/slider";
 import {
   clearAssetDrag,
+  clearElementDrag,
   draggedAssetId,
   draggedLibraryId,
   draggingAssetId,
+  draggingElement,
   draggingLibrary,
   draggingTemplate,
   hasAssetDrag,
+  hasElementDrag,
   hasLibraryDrag,
   hasTemplateDrag,
 } from "@/cut/lib/assetDrag";
 import { audioClipRefs, draggingRef, hasRefDrag, refFromAsset, type AssetRef } from "@/cut/lib/assetRef";
 import { sendFrameToChat, type FrameGrabOrigin } from "@/cut/lib/chatIntake";
+import { copyRefImage } from "@/cut/lib/refMedia";
 import { useCutCaps } from "@/cut/lib/backend/hooks";
 import {
   addProjectTemplateToTimeline,
@@ -37,13 +41,15 @@ import { useExports } from "@/cut/lib/exportStore";
 import { isDragActive, startDrag, subscribeDragActive } from "@/cut/lib/drag";
 import { CLIP_GAP, startLaneMove, startLaneTrim, type LaneDrag } from "@/cut/lib/laneTracks";
 import { ensurePeaks, importImage, importStockMusic, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia } from "@/cut/lib/media";
-import { track0Clips, trackGapAt, clipLen, clipSpeed, footprints, getClipSpans, nextFreeStart, overlayLayers, projectDuration, rippleInsert, TIMELINE_H_MAX, useEditor } from "@/cut/lib/store";
+import { track0Clips, laneGapAt, sameLane, type LaneRef, clipLen, clipSpeed, footprints, getClipSpans, nextFreeStart, overlayLaneOrder, overlayLayers, projectDuration, resolveTransitions, rippleInsert, TIMELINE_H_MAX, useEditor } from "@/cut/lib/store";
 import type { VideoTrackPlacement } from "@/cut/lib/store";
 import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
-import { emptySubtitles, IMAGE_CLIP_SECONDS, TRANSITION_STYLE_LABELS } from "@/cut/lib/types";
-import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, SubtitleCue, TextOverlay, TransitionStyle, VideoClip } from "@/cut/lib/types";
-import { gradeTint, gradeToCssFilter } from "@/cut/lib/colorGrade";
+import { EFFECT_LABELS } from "@donkeycut/effects-kit";
+import { emptySubtitles, IMAGE_CLIP_SECONDS, SHAPE_LABELS, TRANSITION_DEFAULT_SECONDS, TRANSITION_MAX, TRANSITION_STYLE_LABELS } from "@/cut/lib/types";
+import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, StickerOverlay, SubtitleCue, TimelineTransition, TransitionStyle, VideoClip } from "@/cut/lib/types";
+import { isLottieAsset } from "@/cut/lib/lottieAssets";
+import { gradeTint, gradeToCssFilter } from "@donkeycut/effects-kit";
 import { cn } from "@/lib/utils";
 
 const TRANSITION_ICONS: Record<TransitionStyle, LucideIcon> = {
@@ -108,11 +114,13 @@ const ZOOM_MAX = 800;
 /** px/sec at which `dur` seconds fill a `width`-px viewport, with room spared
  * for the side padding. */
 const fitZoom = (width: number, dur: number) => Math.max((width - 60) / dur, 0.01);
-/** The slider's left end. ZOOM_MIN suits short projects, but a long one still
- * overflows there, so the floor drops with duration until full-left always
- * means the whole project in view. */
+/** The slider's left end: zoomed all the way out, the project still fills at
+ * least 70% of the viewport, so the timeline never shrinks into a corner. A
+ * very short project caps at half of ZOOM_MAX to keep the slider some travel. */
 const zoomFloor = (width: number, dur: number) =>
-  dur > 0 ? Math.min(ZOOM_MIN, fitZoom(width, dur)) : ZOOM_MIN;
+  dur > 0
+    ? Math.min(Math.max((width * 0.7) / dur, 0.01), ZOOM_MAX / 2)
+    : ZOOM_MIN;
 /**
  * Zoom reads as a ratio — doubling px/sec feels like one step whether you start
  * at 20 or at 400 — so the slider travels in log space. A linear track would
@@ -131,6 +139,70 @@ const sliderToZoom = (pos: number, min: number) => min * (ZOOM_MAX / min) ** (po
 // ring at full width on top of this one.
 const SELECTED_SHADOW =
   "z-10 shadow-[0_0_0_2px_#0a84ff,0_2px_11px_rgba(10,132,255,0.6)]";
+
+/**
+ * Element bars carry their family's color: text purple, elements (shapes and
+ * stickers) magenta, effects teal — the three places they come from, so a row
+ * reads as what it holds before any label does. The drag highlights take the
+ * carried item's color too, so a move keeps the same identity the whole way.
+ *
+ * Written out rather than composed, since Tailwind reads whole class names.
+ */
+type OverlayFamily = "text" | "element" | "effect";
+
+/**
+ * A place on the transition track a transition can sit: a cut between two
+ * clips that touch, or an open edge — a clip's head or tail with nothing
+ * against it, where the picture arrives from or leaves to nothing.
+ *
+ * `at` is the boundary itself (the cut, the head, the tail) and `len` the room
+ * a transition takes there.
+ */
+type Anchor = { kind: "cut" | "in" | "out"; clipId: string; at: number; len: number };
+
+/** One transition bar drawn on the row: the store object itself, the place it
+ * resolved to (null while it sits inert), and how it reads. */
+type XBar = {
+  t: TimelineTransition;
+  role: { kind: Anchor["kind"]; clipId: string } | null;
+  label: string;
+};
+
+/** How far an anchor reaches while a bar is in flight, px. Inside it the drop
+ * aligns to the anchor; outside it the bar lands exactly where it is. */
+const XBAR_MAGNET_PX = 16;
+
+
+const overlayFamily = (o: Overlay): OverlayFamily =>
+  o.kind === "effect" ? "effect" : o.kind === "shape" || o.kind === "sticker" ? "element" : "text";
+
+const FAMILY_STYLE: Record<
+  OverlayFamily,
+  { bar: string; row: string; rowIdle: string; slot: string }
+> = {
+  text: {
+    bar: "bg-[#7B4BD1]",
+    row: "border-[#7B4BD1]/70 bg-[#7B4BD1]/5",
+    rowIdle: "border-[#7B4BD1]/25",
+    slot: "bg-[#7B4BD1]/10 shadow-[inset_0_0_0_1.5px_rgba(123,75,209,0.5)]",
+  },
+  element: {
+    bar: "bg-[#C43C87]",
+    row: "border-[#C43C87]/70 bg-[#C43C87]/5",
+    rowIdle: "border-[#C43C87]/25",
+    slot: "bg-[#C43C87]/10 shadow-[inset_0_0_0_1.5px_rgba(196,60,135,0.5)]",
+  },
+  effect: {
+    bar: "bg-[#0D8577]",
+    row: "border-[#0D8577]/70 bg-[#0D8577]/5",
+    rowIdle: "border-[#0D8577]/25",
+    slot: "bg-[#0D8577]/10 shadow-[inset_0_0_0_1.5px_rgba(13,133,119,0.5)]",
+  },
+};
+
+/** Width of the trim grab zone at each end of a bar — paired with the `w-`
+ * in `trimHandle` below; anything else drawn on a bar keeps clear of it. */
+const TRIM_W = 10;
 
 const trimHandle =
   "tl-trim absolute top-0 bottom-0 z-3 w-[10px] cursor-ew-resize after:absolute after:top-1/2 after:left-[3px] after:h-[calc(100%-10px)] after:w-1 after:-translate-y-1/2 after:rounded-full after:bg-white after:opacity-0 after:shadow-[0_0_0_1px_rgba(0,0,0,0.35)] after:transition-opacity group-hover:after:opacity-90 hover:after:opacity-100";
@@ -154,9 +226,20 @@ const laneRail = (top: number, key?: React.Key) => (
  * the overscroll underlay so both paint the identical picture. */
 const REST_RAILS = `repeating-linear-gradient(to bottom, transparent 0 ${VIDEO_H + 4}px, var(--border) ${VIDEO_H + 4}px ${VIDEO_H + 5}px, transparent ${VIDEO_H + 5}px ${VIDEO_H + 6}px)`;
 
-/** The timeline with nothing on it: the card-white ruler band over the track
- * gray, a hairline under each occupied row, and the resting rails where a
- * project has no rows yet.
+/** The card-white ruler band with its baseline. Pinned wherever it paints —
+ * the ruler stays put while the rows scroll, so its surface never follows the
+ * vertical scroll either. */
+function RulerBand() {
+  return (
+    <div
+      className="pointer-events-none absolute inset-x-0 top-0 border-b border-border bg-card"
+      style={{ height: RULER_H }}
+    />
+  );
+}
+
+/** The timeline with nothing on it: a hairline under each occupied row, and
+ * the resting rails where a project has no rows yet.
  *
  * Painted twice, in the two places the tracks are not. Behind the scroller it
  * is what a rubber-band bounce reveals; in the pinned gutter it is what the
@@ -173,10 +256,6 @@ function RestingSurface({
 }) {
   return (
     <>
-      <div
-        className="absolute inset-x-0 top-0 border-b border-border bg-card"
-        style={{ height: RULER_H }}
-      />
       {railYs.map((y, i) => (
         <div key={i} className="absolute inset-x-0 h-px bg-border" style={{ top: y }} />
       ))}
@@ -193,6 +272,17 @@ function RestingSurface({
 /** An asset type that lands as a video clip — footage or a still image. */
 const isClipMedia = (t: string | undefined): t is "video" | "image" =>
   t === "video" || t === "image";
+
+/** A sticker asset lands as a sticker element, never as a clip: it is a
+ * cut-out to lay over the picture, so a drop on the timeline goes to the
+ * element rows however it arrives. */
+const stickerOf = (a: MediaAsset | undefined | null): MediaAsset | null =>
+  a && a.origin === "sticker" ? a : null;
+
+const draggedSticker = (): MediaAsset | null => {
+  const id = draggingAssetId();
+  return stickerOf(id ? useEditor.getState().assets.find((a) => a.id === id) : null);
+};
 
 /** The image ref being dragged (a stock tile), null for any other drag —
  * asset and library drags carry the ref MIME too but with video/audio kinds.
@@ -240,10 +330,10 @@ export function Timeline() {
     const rect = innerRef.current!.getBoundingClientRect();
     return (clientX - rect.left) / pps;
   };
-  // The static ruler band behind the scroller follows vertical scroll so it
-  // stays glued under the in-content ruler; overscroll can't move it, so the
-  // band runs unbroken through the bounce. (Horizontal position is moot — the
-  // band is uniform across the full width.)
+  // The rail copies behind the scroller follow vertical scroll so they stay
+  // glued under the live rails; overscroll can't move them, so the surface
+  // runs unbroken through the bounce. (Horizontal position is moot — every
+  // line is uniform across the full width.)
   const rulerUnderlayRef = useRef<HTMLDivElement>(null);
   // The left gutter paints that same surface out in front of the scroller, and
   // is glued to the content the same way — it is held out of the horizontal
@@ -384,7 +474,7 @@ export function Timeline() {
       if (!m.has(c.track)) m.set(c.track, getClipSpans(clips, assets, c.track));
     return m;
   }, [overlayClips, clips, assets]);
-  const total = projectDuration({ clips, audioClips });
+  const total = projectDuration({ clips, audioClips, overlays });
   const zoomMin = zoomFloor(viewportW, total);
   // Fill the viewport at minimum so a wide window never leaves the ruler/tracks
   // cut off; grow past it once the content is longer. While a trim/slide drag
@@ -487,12 +577,12 @@ export function Timeline() {
   // landing slot, and grow its row stack while a new row is hovered.
   const [laneDrag, setLaneDrag] = useState<LaneDrag | null>(null);
 
-  // Right-click on a video row's empty space: a small popover offering to
-  // close that track's gap under the cursor. The cut is track-local — only
-  // the clicked track's later clips slide left — so the menu carries the gap
-  // it would cut and the row tints it red while the menu is open.
+  // Right-click on any row's empty space — video, audio, or title: a small
+  // popover offering to close that row's gap under the cursor. The cut is
+  // row-local — only that row's later items slide left — so the menu carries
+  // the gap it would cut and the row tints it red while the menu is open.
   const [gapMenu, setGapMenu] = useState<
-    { x: number; y: number; track: number; gap: { start: number; len: number } } | null
+    { x: number; y: number; lane: LaneRef; gap: { start: number; len: number } } | null
   >(null);
   useEffect(() => {
     if (!gapMenu) return;
@@ -502,6 +592,20 @@ export function Timeline() {
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
   }, [gapMenu]);
+
+  // Right-click on an element bar: a small popover to hide or show it — and,
+  // when the click landed on a keyframe diamond, to remove that key.
+  const [barMenu, setBarMenu] = useState<
+    { x: number; y: number; id: string; key?: number } | null
+  >(null);
+  useEffect(() => {
+    if (!barMenu) return;
+    const close = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setBarMenu(null);
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [barMenu]);
 
   // Right-click on a video clip: a one-item popover that grabs the frame
   // under the pointer into the chat composer. The menu carries the grab —
@@ -556,13 +660,20 @@ export function Timeline() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- timeAt reads live refs
   }, [frameMenu]);
 
-  // Title tracks: overlays carry a `lane`; used lanes compact to contiguous
-  // display rows, so empty tracks disappear on their own.
+  // Element rows: overlays carry a `lane`; used lanes compact to contiguous
+  // display rows, so an emptied row disappears on its own. The order is the
+  // store's, shared with the lane drags so a drop lands where it was aimed.
   const overlayLanes = useMemo(() => {
-    const used = [...new Set(overlays.map((o) => o.lane ?? 0))].sort((a, b) => a - b);
+    const used = overlayLaneOrder(overlays);
     const rowOf = new Map(used.map((l, i) => [l, i]));
     return { used, rowOf, count: used.length };
   }, [overlays]);
+  // The color an element drag paints its landing rows with: the carried item's
+  // own, so the move reads as one thing from grab to drop.
+  const draggedFamily = useMemo<OverlayFamily>(() => {
+    const held = laneDrag?.kind === "overlay" ? overlays.find((o) => o.id === laneDrag.id) : null;
+    return held ? overlayFamily(held) : "text";
+  }, [laneDrag, overlays]);
 
   // Video tracks above track 0 (PiP / composited layers), listed highest-first
   // so the top row is the frontmost layer and track 0 sits at the bottom of
@@ -582,6 +693,7 @@ export function Timeline() {
   // (one past the end = new track), at what time, for how long.
   const [audioDrop, setAudioDrop] = useState<{ row: number; t: number; len: number } | null>(null);
   const audioRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const audioLanes = useMemo(() => {
     const used = [...new Set(audioClips.map((a) => a.lane ?? 0))].sort((a, b) => a - b);
     const rowOf = new Map(used.map((l, i) => [l, i]));
@@ -663,6 +775,200 @@ export function Timeline() {
     [audioLanes.count]
   );
 
+  // The element row under the pointer, or undefined for a point outside the
+  // band — a drop there takes the element's home row.
+  const overlayRowAt = useCallback(
+    (clientY: number): number | undefined => {
+      const el = overlayRef.current;
+      if (!el || overlayLanes.count === 0) return undefined;
+      const r = el.getBoundingClientRect();
+      if (clientY < r.top || clientY > r.bottom) return undefined;
+      return Math.min(overlayLanes.count - 1, Math.max(0, Math.floor((clientY - r.top) / TEXT_H)));
+    },
+    [overlayLanes]
+  );
+  const overlayLaneAt = (clientY: number): number | undefined => {
+    const row = overlayRowAt(clientY);
+    return row === undefined ? undefined : overlayLanes.used[row];
+  };
+  // Every place on every video track a transition can sit: the cuts, where one
+  // clip hands over to the next, and the open edges — a clip's head with
+  // nothing before it, its tail with nothing after — where it arrives from or
+  // leaves to nothing. Each boundary offers exactly one: two clips that touch
+  // make a cut, and anything else is an edge. `len` is the room a transition
+  // takes there, so a drop can show its footprint before it lands.
+  const anchors = useMemo(() => {
+    const out: Anchor[] = [];
+    const collect = (list: ClipSpan[]) =>
+      list.forEach((sp, i) => {
+        const prev = list[i - 1];
+        const next = list[i + 1];
+        const end = sp.start + sp.len;
+        // The same touch tolerance the blend goes live with, so an anchor is
+        // a cut exactly when a transition dropped there would play.
+        const openHead = !prev || prev.start + prev.len < sp.start - 0.02;
+        const touchesNext = next && next.start <= end + 0.02;
+        if (openHead) {
+          out.push({
+            kind: "in",
+            clipId: sp.clip.id,
+            at: sp.start,
+            len: sp.clip.animIn?.seconds || TRANSITION_DEFAULT_SECONDS,
+          });
+        }
+        if (touchesNext) {
+          out.push({
+            kind: "cut",
+            clipId: sp.clip.id,
+            at: end,
+            len: sp.clip.transition || TRANSITION_DEFAULT_SECONDS,
+          });
+        } else {
+          out.push({
+            kind: "out",
+            clipId: sp.clip.id,
+            at: end,
+            len: sp.clip.animOut?.seconds || TRANSITION_DEFAULT_SECONDS,
+          });
+        }
+      });
+    collect(spans);
+    overlayTrackSpans.forEach(collect);
+    return out;
+  }, [spans, overlayTrackSpans]);
+  const nearestAnchor = (t: number) =>
+    anchors.reduce<Anchor | null>(
+      (best, a) => (!best || Math.abs(a.at - t) < Math.abs(best.at - t) ? a : best),
+      null
+    );
+
+  // Every transition bar in the doc, live or parked. A bar is its own object
+  // on the row: the clips it happens to line up with decide whether it plays,
+  // and moving or deleting clips leaves it exactly where it is.
+  const bars = useEditor((s) => s.transitions);
+  const barRoles = useMemo(() => resolveTransitions(clips, bars), [clips, bars]);
+  const transitions = useMemo<XBar[]>(
+    () =>
+      bars
+        .map((t) => {
+          const role = barRoles.get(t.id) ?? null;
+          const base = TRANSITION_STYLE_LABELS[t.style];
+          const label =
+            role?.kind === "in" ? `${base} in` : role?.kind === "out" ? `${base} out` : base;
+          return { t, role, label };
+        })
+        .sort((a, b) => a.t.start - b.t.start),
+    [bars, barRoles]
+  );
+
+  /** Where a bar of `len` seconds sits when it lands on this anchor: an
+   * entrance starts at the clip's head, everything else ends on its edge. */
+  const anchorBarStart = (a: Anchor, len: number) => (a.kind === "in" ? a.at : a.at - len);
+
+  /** The bar already playing this anchor's boundary, if any. */
+  const barAt = (a: Anchor) =>
+    transitions.find((x) => x.role && x.role.kind === a.kind && x.role.clipId === a.clipId)?.t ??
+    null;
+
+  /** Land a new bar from the panel: it takes the nearest anchor when one is
+   * around, replacing whatever played there, and sits free anywhere else. */
+  const dropTransitionAt = (time: number, style: TransitionStyle) => {
+    const st = useEditor.getState();
+    if (st.readOnly) return;
+    const a = nearestAnchor(time);
+    const len = a?.len ?? TRANSITION_DEFAULT_SECONDS;
+    st.beginHistoryBatch();
+    const incumbent = a ? barAt(a) : null;
+    if (incumbent) st.removeTransition(incumbent.id);
+    const id = st.addTransition({
+      start: a ? anchorBarStart(a, len) : time,
+      seconds: len,
+      style,
+    });
+    st.endHistoryBatch();
+    st.select({ kind: "transition", id });
+  };
+
+  // Drag a bar anywhere along the row. An anchor within reach pulls the drop
+  // onto itself and lights the room it takes; released anywhere else the bar
+  // stays exactly there — parked, playing nothing until a cut or a clip edge
+  // lines up with it. A press that never moved selects the bar.
+  const moveTransition = (e: React.PointerEvent, x: XBar) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    const s = useEditor.getState();
+    if (s.readOnly) return;
+    let landing: { start: number; anchor: Anchor | null } | null = null;
+    startDrag(e, {
+      onMove: (dx) => {
+        const free = Math.max(-x.t.seconds + 0.1, x.t.start + dx / pps);
+        const near = anchors.reduce<{ a: Anchor; gap: number } | null>((best, a) => {
+          const gap = Math.abs(anchorBarStart(a, x.t.seconds) - free);
+          return !best || gap < best.gap ? { a, gap } : best;
+        }, null);
+        const snapped = near && near.gap <= XBAR_MAGNET_PX / pps ? near.a : null;
+        landing = snapped
+          ? { start: anchorBarStart(snapped, x.t.seconds), anchor: snapped }
+          : { start: free, anchor: null };
+        setSnapX(snapped ? snapped.at * pps : null);
+        setJointDrop(snapped ? { ...snapped, len: x.t.seconds } : null);
+        setTransitionDrag({ ...x, t: { ...x.t, start: landing.start } });
+      },
+      onUp: (_dx, _dy, moved) => {
+        setSnapX(null);
+        setJointDrop(null);
+        setTransitionDrag(null);
+        const st = useEditor.getState();
+        if (!moved || !landing) return st.select({ kind: "transition", id: x.t.id });
+        st.beginHistoryBatch();
+        const incumbent = landing.anchor ? barAt(landing.anchor) : null;
+        if (incumbent && incumbent.id !== x.t.id) st.removeTransition(incumbent.id);
+        st.updateTransition(x.t.id, { start: landing.start });
+        st.endHistoryBatch();
+      },
+    });
+  };
+
+  // Drag the loose edge to retime. A playing bar keeps the boundary end still —
+  // an entrance grows forward from its start, everything else backward from
+  // its end — so retiming never un-aligns it.
+  const trimTransition = (e: React.PointerEvent, x: XBar) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    const st0 = useEditor.getState();
+    if (st0.readOnly) return;
+    const growsForward = x.role?.kind === "in";
+    const fixed = growsForward ? x.t.start : x.t.start + x.t.seconds;
+    st0.beginHistoryBatch();
+    startDrag(e, {
+      onMove: (dx) => {
+        const loose = (growsForward ? x.t.start + x.t.seconds : x.t.start) + dx / pps;
+        const seconds = Math.max(0.1, Math.min(TRANSITION_MAX, Math.abs(loose - fixed)));
+        useEditor.getState().updateTransitionTransient(x.t.id, {
+          seconds,
+          start: growsForward ? fixed : fixed - seconds,
+        });
+      },
+      onUp: () => useEditor.getState().endHistoryBatch(),
+    });
+  };
+
+  // The row a shape or effect dragged out of a panel would land on, so the
+  // band shows where it is going.
+  const [elementDropRow, setElementDropRow] = useState<number | null>(null);
+  // The place a dragged transition would land on, marked with the footprint it
+  // would take while it is in flight.
+  const [jointDrop, setJointDrop] = useState<Anchor | null>(null);
+  // A transition tile from the panel is over the timeline: the row lights
+  // every place a drop could play, the same as a bar drag does.
+  const [xTileDrag, setXTileDrag] = useState(false);
+  // A transition bar mid-drag, drawn where the pointer has it.
+  const [transitionDrag, setTransitionDrag] = useState<XBar | null>(null);
+  // A drag past the top edge opens a row there, pushing the stack down by one
+  // for as long as it is aimed that way.
+  const topRowShift =
+    laneDrag?.kind === "overlay" && laneDrag.targetRow < 0 ? TEXT_H : 0;
+
   // Where a dropped asset should land. An empty timeline has no arrangement to
   // read a position against, so the drop starts the film at 0 no matter where
   // the cursor released.
@@ -686,7 +992,7 @@ export function Timeline() {
     });
   };
 
-  // Clicking empty track space deselects AND moves the playhead (iMovie).
+  // Clicking empty track space deselects AND moves the playhead.
   const deselectIfSelf = (e: React.PointerEvent) => {
     if (e.target === e.currentTarget) {
       useEditor.getState().select(null);
@@ -811,9 +1117,21 @@ export function Timeline() {
     type: "video" | "audio" | "image",
     t: number,
     audioRow = 0,
-    place: TrackTarget = TRACK_ZERO
+    place: TrackTarget = TRACK_ZERO,
+    /** The element row the pointer came down on, when it was over the band. */
+    elementLane?: number
   ) => {
     const s = useEditor.getState();
+    const sticker = stickerOf(s.assets.find((a) => a.id === assetId));
+    if (sticker) {
+      s.addSticker({
+        assetId,
+        ...(isLottieAsset(sticker) ? { lottie: true } : {}),
+        at: t,
+        ...(elementLane !== undefined ? { lane: elementLane } : {}),
+      });
+      return;
+    }
     if (isClipMedia(type)) {
       if (place.kind === "insert") s.addVideoFromAsset(assetId, place, t);
       // Drop at the pointer, rippling later clips right — so a drop into a
@@ -838,7 +1156,7 @@ export function Timeline() {
     const id = draggingAssetId();
     if (id) {
       const asset = useEditor.getState().assets.find((a) => a.id === id);
-      if (!asset || !isClipMedia(asset.type)) return null;
+      if (!asset || stickerOf(asset) || !isClipMedia(asset.type)) return null;
       return { duration: asset.type === "image" ? STILL_SECONDS : asset.duration };
     }
     const stockVideo = draggingStockVideo(e);
@@ -864,6 +1182,9 @@ export function Timeline() {
       if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOverlayDrop(null);
     },
     onDrop: (e: React.DragEvent) => {
+      // A sticker crossing a video row is still headed for the element rows;
+      // leave it to the timeline's own drop rather than swallowing it here.
+      if (draggedSticker()) return;
       e.preventDefault();
       e.stopPropagation();
       const t = Math.max(0, timeAt(e.clientX));
@@ -883,7 +1204,7 @@ export function Timeline() {
       }
       const id = draggedAssetId(e);
       const asset = id ? useEditor.getState().assets.find((a) => a.id === id) : null;
-      if (id && isClipMedia(asset?.type)) {
+      if (id && !stickerOf(asset) && isClipMedia(asset?.type)) {
         useEditor.getState().addVideoFromAsset(id, place, t);
         return;
       }
@@ -933,25 +1254,37 @@ export function Timeline() {
       />
     ) : null;
 
-  // Only empty space gets the menu: a right-click on a clip sits on a
+  // Only empty space gets the menu: a right-click on an item sits on a
   // footprint, so the gap lookup misses and the event falls through to the
   // browser.
-  const openGapMenu = (track: number) => (e: React.MouseEvent) => {
-    const gap = trackGapAt(useEditor.getState().clips, track, timeAt(e.clientX));
+  const openGapMenu = (lane: LaneRef) => (e: React.MouseEvent) => {
+    const gap = laneGapAt(useEditor.getState(), lane, timeAt(e.clientX));
     if (!gap) return;
     e.preventDefault();
-    setGapMenu({ x: e.clientX, y: e.clientY, track, gap });
+    setGapMenu({ x: e.clientX, y: e.clientY, lane, gap });
   };
 
-  // The span the open gap menu would cut, tinted red on its own track.
-  const gapHighlight = (track: number, h: number) =>
-    gapMenu?.track === track ? (
+  // Audio and title rows stack inside one container, so the row comes from
+  // where the pointer landed and the display row maps back to the lane the
+  // items actually carry.
+  const openStackedGapMenu =
+    (kind: "audio" | "overlay", rowH: number, used: number[]) => (e: React.MouseEvent) => {
+      const top = e.currentTarget.getBoundingClientRect().top;
+      const index = used[Math.floor((e.clientY - top) / rowH)];
+      if (index === undefined) return;
+      openGapMenu({ kind, index })(e);
+    };
+
+  // The span the open gap menu would cut, tinted red on its own row.
+  const gapHighlight = (lane: LaneRef, h: number, top = 0) =>
+    gapMenu && sameLane(gapMenu.lane, lane) ? (
       <div
-        className="pointer-events-none absolute top-0.5 z-10 rounded-lg bg-red-500/15"
+        className="pointer-events-none absolute z-10 rounded-lg bg-red-500/15"
         style={{
           left: gapMenu.gap.start * pps,
           width: Math.max(2, gapMenu.gap.len * pps - CLIP_GAP),
           height: h,
+          top: top + 2,
         }}
       />
     ) : null;
@@ -993,9 +1326,32 @@ export function Timeline() {
         const still = draggingStill(e);
         const stockVideo = draggingStockVideo(e);
         const stockMusic = draggingStockMusic(e);
-        if (!hasAssetDrag(e) && !isLib && !still && !stockVideo && !stockMusic) return;
+        const element = hasElementDrag(e) ? draggingElement() : null;
+        if (!hasAssetDrag(e) && !isLib && !still && !stockVideo && !stockMusic && !element)
+          return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "copy";
+        // An element — a sticker, or a shape or effect from a panel — lands on
+        // the element rows, so none of the clip previews apply to it.
+        if (element || draggedSticker()) {
+          setAssetDrop(null);
+          setOverlayDrop(null);
+          setAudioDrop(null);
+          setDropType(null);
+          setElementDropRow(
+            element && element.kind !== "transition" ? overlayRowAt(e.clientY) ?? null : null
+          );
+          setXTileDrag(element?.kind === "transition");
+          setJointDrop(
+            element?.kind === "transition"
+              ? nearestAnchor(Math.max(0, timeAt(e.clientX)))
+              : null
+          );
+          return;
+        }
+        setElementDropRow(null);
+        setJointDrop(null);
+        setXTileDrag(false);
         // Preview where a video would land; audio drops free-form. Library and
         // stock drags carry their own shape since they aren't in the project yet.
         let type: "video" | "audio" | "image" | undefined;
@@ -1035,9 +1391,9 @@ export function Timeline() {
         } else {
           const id = draggingAssetId();
           const asset = id ? useEditor.getState().assets.find((a) => a.id === id) : null;
-          type = asset?.type;
+          type = asset && asset.type !== "font" ? asset.type : undefined;
           duration = asset?.type === "image" ? STILL_SECONDS : asset?.duration ?? 0;
-          if (asset && isClipMedia(asset.type)) {
+          if (asset && !stickerOf(asset) && isClipMedia(asset.type)) {
             ghost =
               asset.type === "image"
                 ? { url: asset.url, kind: "image" }
@@ -1090,11 +1446,18 @@ export function Timeline() {
           setOverlayDrop(null);
           setAudioDrop(null);
           setDropType(null);
+          setElementDropRow(null);
+          setJointDrop(null);
+          setXTileDrag(false);
         }
       }}
       onDrop={(e) => {
         // Resolve the hovered rows before the previews (and their rows) clear.
         const audioRow = audioRowAt(e.clientY);
+        const elementLane = overlayLaneAt(e.clientY);
+        setElementDropRow(null);
+        setJointDrop(null);
+        setXTileDrag(false);
         const videoPlace = resolveDropTrack(e.clientX, e.clientY);
         setAssetDrop(null);
         setOverlayDrop(null);
@@ -1109,8 +1472,18 @@ export function Timeline() {
         const stockVideo = draggingStockVideo(e);
         const stockMusic = draggingStockMusic(e);
         const tpl = draggingTemplate();
+        const element = hasElementDrag(e) ? draggingElement() : null;
         const projectId = useEditor.getState().projectId;
         clearAssetDrag();
+        clearElementDrag();
+        if (element) {
+          e.preventDefault();
+          const aim = { at: t, ...(elementLane !== undefined ? { lane: elementLane } : {}) };
+          if (element.kind === "shape") useEditor.getState().addShape(element.shape, aim);
+          else if (element.kind === "effect") useEditor.getState().addEffect(element.effect, aim);
+          else dropTransitionAt(t, element.style);
+          return;
+        }
         if (tpl && projectId) {
           e.preventDefault();
           if (tpl.scope === "project") addProjectTemplateToTimeline(projectId, tpl.template, t);
@@ -1120,7 +1493,9 @@ export function Timeline() {
         if (libId && lib && projectId) {
           e.preventDefault();
           void importLibraryAsset(projectId, lib)
-            .then((asset) => placeAssetAt(asset.id, asset.type, t, audioRow, videoPlace))
+            .then((asset) => {
+              if (asset.type !== "font") placeAssetAt(asset.id, asset.type, t, audioRow, videoPlace);
+            })
             .catch(() => {});
           return;
         }
@@ -1129,7 +1504,8 @@ export function Timeline() {
         if (id) {
           e.preventDefault();
           const asset = useEditor.getState().assets.find((a) => a.id === id);
-          if (asset) placeAssetAt(id, asset.type, t, audioRow, videoPlace);
+          if (asset && asset.type !== "font")
+            placeAssetAt(id, asset.type, t, audioRow, videoPlace, elementLane);
           return;
         }
 
@@ -1274,9 +1650,12 @@ export function Timeline() {
         onPointerEnter={() => setTrackHover(true)}
         onPointerLeave={() => setTrackHover(false)}
       >
-      <div ref={rulerUnderlayRef} className="pointer-events-none absolute inset-x-0 top-0">
-        <RestingSurface railYs={railYs} empty={total <= 0} timelineH={timelineH} />
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div ref={rulerUnderlayRef} className="absolute inset-x-0 top-0">
+          <RestingSurface railYs={railYs} empty={total <= 0} timelineH={timelineH} />
+        </div>
       </div>
+      <RulerBand />
       <div
         ref={scrollRef}
         data-tl-scroll
@@ -1309,7 +1688,210 @@ export function Timeline() {
               }}
             />
           )}
-          <Ruler pps={pps} width={contentW} onScrub={scrub} />
+          {/* Pinned over the vertical scroll: the rows slide under the band,
+              the way the timeline runs under the gutter. The band paints its
+              own surface pad to pad, and the playhead cap rides in it so the
+              time being pointed at can always be grabbed. */}
+          <div className="sticky top-0 z-50" style={{ height: RULER_H }}>
+            <div
+              className="absolute top-0 border-b border-border bg-card"
+              style={{ height: RULER_H, left: -PAD_SIDE, width: contentW + PAD_SIDE * 2 }}
+            />
+            <Ruler pps={pps} width={contentW} onScrub={scrub} />
+            <PlayheadCap pps={pps} onScrub={scrub} />
+          </div>
+
+          {/* Elements ride above the clip stack, the way they sit over the
+              picture. New effects open the top row; a drag moves any of them
+              to any row. */}
+          {overlays.length > 0 && (
+            <div
+              ref={overlayRef}
+              data-tl-trows=""
+              className="relative mt-1.5"
+              style={{
+                height:
+                  Math.max(
+                    overlayLanes.count,
+                    // An in-flight element drag shows the whole landing area,
+                    // the would-be new row below included.
+                    laneDrag?.kind === "overlay" ? overlayLanes.count + 1 : 0
+                  ) *
+                    TEXT_H +
+                  topRowShift,
+              }}
+              onPointerDown={deselectIfSelf}
+              onContextMenu={openStackedGapMenu("overlay", TEXT_H, overlayLanes.used)}
+            >
+              {Array.from({ length: overlayLanes.count }, (_, r) =>
+                laneRail((r + 1) * TEXT_H - 4 + topRowShift, r)
+              )}
+              {overlayLanes.used.map((lane, r) => (
+                <Fragment key={`tgap-${lane}`}>
+                  {gapHighlight(
+                    { kind: "overlay", index: lane },
+                    TEXT_H - 6,
+                    r * TEXT_H + topRowShift
+                  )}
+                </Fragment>
+              ))}
+              {elementDropRow !== null && (
+                <div
+                  className={cn(
+                    "pointer-events-none absolute inset-x-0 rounded-md border border-dashed",
+                    FAMILY_STYLE[
+                      draggingElement()?.kind === "effect" ? "effect" : "element"
+                    ].row
+                  )}
+                  style={{ top: elementDropRow * TEXT_H + 2, height: TEXT_H - 6 }}
+                />
+              )}
+              {/* The new row above, revealed once the drag heads past the top
+                  edge — showing it any earlier would push every row down
+                  under a freshly grabbed bar. */}
+              {topRowShift > 0 && (
+                <div
+                  className={cn(
+                    "pointer-events-none absolute inset-x-0 rounded-md border border-dashed",
+                    FAMILY_STYLE[draggedFamily].row
+                  )}
+                  style={{ top: 2, height: TEXT_H - 6 }}
+                />
+              )}
+              {laneDrag?.kind === "overlay" &&
+                Array.from({ length: overlayLanes.count + 1 }, (_, r) => (
+                  <div
+                    key={r}
+                    className={cn(
+                      "pointer-events-none absolute inset-x-0 rounded-md border border-dashed transition-colors",
+                      r === laneDrag.targetRow
+                        ? FAMILY_STYLE[draggedFamily].row
+                        : FAMILY_STYLE[draggedFamily].rowIdle
+                    )}
+                    style={{ top: r * TEXT_H + 2 + topRowShift, height: TEXT_H - 6 }}
+                  />
+                ))}
+              {laneDrag?.kind === "overlay" && (
+                <LaneSlot
+                  drag={laneDrag}
+                  pps={pps}
+                  rowH={TEXT_H}
+                  barH={TEXT_H - 6}
+                  shift={topRowShift}
+                  className={cn("rounded-md", FAMILY_STYLE[draggedFamily].slot)}
+                />
+              )}
+              {overlays.map((o) => {
+                const homeRow = overlayLanes.rowOf.get(o.lane ?? 0) ?? 0;
+                const drag = laneDrag?.kind === "overlay" && laneDrag.id === o.id ? laneDrag : null;
+                return (
+                  <TextBar
+                    key={o.id}
+                    overlay={o}
+                    pps={pps}
+                    top={homeRow * TEXT_H + topRowShift}
+                    homeRow={homeRow}
+                    laneCount={overlayLanes.count}
+                    selected={selKeys.has(`overlay:${o.id}`)}
+                    drag={drag}
+                    parting={laneDrag?.kind === "overlay" && laneDrag.id !== o.id}
+                    onDrag={setLaneDrag}
+                    onSnap={setSnapX}
+                    onMenu={setBarMenu}
+                  />
+                );
+              })}
+            </div>
+          )}
+
+          {/* Transitions: free bars on their own row. Each plays the cut or
+              clip edge it lines up with, and sits parked anywhere else. */}
+          {(transitions.length > 0 || jointDrop !== null || xTileDrag) && (
+            <div
+              data-tl-xrows=""
+              className="relative mt-1.5"
+              style={{ height: TEXT_H }}
+              onPointerDown={deselectIfSelf}
+            >
+              {laneRail(TEXT_H - 4, "xrail")}
+              {(transitionDrag !== null || xTileDrag) &&
+                // While a transition is in flight, every place it could play
+                // lights up in the timeline's usual drop-zone dress: one slot
+                // per cut and open edge, each the size the bar would take
+                // there.
+                anchors.map((a) => {
+                  const len = transitionDrag ? transitionDrag.t.seconds : a.len;
+                  return (
+                    <div
+                      key={`xzone-${a.kind}-${a.clipId}`}
+                      className="pointer-events-none absolute rounded-md bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4)]"
+                      style={{
+                        left: anchorBarStart(a, len) * pps,
+                        top: 2,
+                        width: Math.max(14, len * pps - CLIP_GAP),
+                        height: TEXT_H - 6,
+                      }}
+                    />
+                  );
+                })}
+              {jointDrop && (
+                // The zone the drop is aimed at burns brighter than the rest.
+                <div
+                  className="pointer-events-none absolute rounded-md bg-[#0a84ff]/25 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.85)]"
+                  style={{
+                    left: anchorBarStart(jointDrop, jointDrop.len) * pps,
+                    top: 2,
+                    width: Math.max(14, jointDrop.len * pps - CLIP_GAP),
+                    height: TEXT_H - 6,
+                  }}
+                />
+              )}
+              {transitions.map((live) => {
+                const x = transitionDrag?.t.id === live.t.id ? transitionDrag : live;
+                const Icon = TRANSITION_ICONS[x.t.style];
+                const playing = !!x.role;
+                return (
+                  <div
+                    key={x.t.id}
+                    role="button"
+                    tabIndex={0}
+                    title={`${x.label} ${x.t.seconds.toFixed(1)}s — drag it anywhere along the row; it plays where it lines up with a cut or a clip edge`}
+                    className={cn(
+                      "tl-xfade-bar group absolute flex cursor-grab items-center gap-1 overflow-hidden rounded-md px-1.5 text-[10.5px] font-medium text-white shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
+                      // A parked bar reads muted: it is on the row but playing
+                      // nothing until a boundary lines up with it.
+                      playing ? "bg-[#2B6FD4]" : "bg-muted-foreground/50",
+                      selKeys.has(`transition:${x.t.id}`) && SELECTED_SHADOW,
+                      // Mid-drag it rides over the zone it would land on, so
+                      // the marked room stays readable underneath.
+                      x === transitionDrag && "opacity-75"
+                    )}
+                    style={{
+                      left: x.t.start * pps,
+                      top: 2,
+                      width: Math.max(14, x.t.seconds * pps - CLIP_GAP),
+                      height: TEXT_H - 6,
+                    }}
+                    onPointerDown={(e) => moveTransition(e, x)}
+                  >
+                    <Icon className="size-2.5 shrink-0" />
+                    <span className="truncate">{x.label}</span>
+                    {/* Retiming pulls the loose end: an entrance runs forward
+                        from the clip's head, everything else backward from the
+                        boundary it sits on. */}
+                    <span
+                      title="Drag to retime"
+                      className={cn(
+                        trimHandle,
+                        x.role?.kind === "in" ? "tl-trim-r right-0" : "tl-trim-l left-0"
+                      )}
+                      onPointerDown={(e) => trimTransition(e, x)}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {/* The top-side new track reveals once the drag heads past the
               stack's upper edge; mounting it earlier would shift every row
@@ -1325,11 +1907,11 @@ export function Timeline() {
               data-tl-vrow={track}
               data-drop={placementAttr({ kind: "track", track })}
               onPointerDown={deselectIfSelf}
-              onContextMenu={openGapMenu(track)}
+              onContextMenu={openGapMenu({ kind: "video", index: track })}
               {...overlayDropHandlers({ kind: "track", track })}
             >
               {laneRail(OVERLAY_H - 2)}
-              {gapHighlight(track, OVERLAY_H - 4)}
+              {gapHighlight({ kind: "video", index: track }, OVERLAY_H - 4)}
               {draggedOverlayTrack === track && laneDrag && (
                 <LaneSlot
                   drag={laneDrag}
@@ -1339,13 +1921,11 @@ export function Timeline() {
                   className="rounded-lg bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4)]"
                 />
               )}
-              {(overlayTrackSpans.get(track) ?? []).map((span, i, tSpans) => (
+              {(overlayTrackSpans.get(track) ?? []).map((span) => (
                 <OverlayClipView
                   key={span.clip.id}
                   clip={span.clip}
                   asset={span.asset}
-                  prevOverlap={tSpans[i - 1]?.transitionOut ?? 0}
-                  overlap={span.transitionOut}
                   pps={pps}
                   selected={selKeys.has(`clip:${span.clip.id}`)}
                   drag={
@@ -1363,13 +1943,6 @@ export function Timeline() {
                   onFrameMenu={openFrameMenu}
                 />
               ))}
-              {laneDrag?.kind !== "overlayClip" && (
-                <TransitionBadges
-                  spans={overlayTrackSpans.get(track) ?? []}
-                  pps={pps}
-                  rowH={OVERLAY_H}
-                />
-              )}
               {trackSlot({ kind: "track", track }, OVERLAY_H - 4)}
             </div>
           ))}
@@ -1389,10 +1962,10 @@ export function Timeline() {
             data-tl-vrow={0}
             data-drop={placementAttr(TRACK_ZERO)}
             onPointerDown={deselectIfSelf}
-            onContextMenu={openGapMenu(0)}
+            onContextMenu={openGapMenu({ kind: "video", index: 0 })}
           >
             {spans.length > 0 && laneRail(VIDEO_H - 2)}
-            {gapHighlight(0, VIDEO_H - 4)}
+            {gapHighlight({ kind: "video", index: 0 }, VIDEO_H - 4)}
             {trackSlot(TRACK_ZERO, VIDEO_H - 4)}
             {laneDrag?.kind === "clip" && !laneDrag.away && (
               <LaneSlot
@@ -1432,7 +2005,6 @@ export function Timeline() {
               <ClipView
                 key={span.clip.id}
                 span={span}
-                prevOverlap={spans[i - 1]?.transitionOut ?? 0}
                 mention={`@c${i + 1}`}
                 pps={pps}
                 selected={selKeys.has(`clip:${span.clip.id}`)}
@@ -1447,9 +2019,6 @@ export function Timeline() {
                 onFrameMenu={openFrameMenu}
               />
             ))}
-            {laneDrag?.kind !== "clip" && (
-              <TransitionBadges spans={spans} pps={pps} rowH={VIDEO_H} />
-            )}
           </div>
           )}
 
@@ -1475,10 +2044,16 @@ export function Timeline() {
                   ) * AUDIO_H,
               }}
               onPointerDown={deselectIfSelf}
+              onContextMenu={openStackedGapMenu("audio", AUDIO_H, audioLanes.used)}
             >
               {Array.from({ length: audioLanes.count }, (_, r) =>
                 laneRail((r + 1) * AUDIO_H - 2, r)
               )}
+              {audioLanes.used.map((lane, r) => (
+                <Fragment key={`agap-${lane}`}>
+                  {gapHighlight({ kind: "audio", index: lane }, AUDIO_H - 4, r * AUDIO_H)}
+                </Fragment>
+              ))}
               {laneDrag?.kind === "audio" &&
                 Array.from({ length: audioLanes.count + 1 }, (_, r) => (
                   <div
@@ -1528,68 +2103,6 @@ export function Timeline() {
                     selected={selKeys.has(`audio:${a.id}`)}
                     drag={drag}
                     parting={laneDrag?.kind === "audio" && laneDrag.id !== a.id}
-                    onDrag={setLaneDrag}
-                    onSnap={setSnapX}
-                  />
-                );
-              })}
-            </div>
-          )}
-
-          {overlays.length > 0 && (
-            <div
-              data-tl-trows=""
-              className="relative mt-1.5"
-              style={{
-                height:
-                  Math.max(
-                    overlayLanes.count,
-                    // An in-flight title drag shows the whole landing area,
-                    // the would-be new track included.
-                    laneDrag?.kind === "text" ? overlayLanes.count + 1 : 0
-                  ) * TEXT_H,
-              }}
-              onPointerDown={deselectIfSelf}
-            >
-              {Array.from({ length: overlayLanes.count }, (_, r) =>
-                laneRail((r + 1) * TEXT_H - 4, r)
-              )}
-              {laneDrag?.kind === "text" &&
-                Array.from({ length: overlayLanes.count + 1 }, (_, r) => (
-                  <div
-                    key={r}
-                    className={cn(
-                      "pointer-events-none absolute inset-x-0 rounded-md border border-dashed transition-colors",
-                      r === laneDrag.targetRow
-                        ? "border-purple-500/70 bg-purple-500/5"
-                        : "border-purple-500/25"
-                    )}
-                    style={{ top: r * TEXT_H + 2, height: TEXT_H - 6 }}
-                  />
-                ))}
-              {laneDrag?.kind === "text" && (
-                <LaneSlot
-                  drag={laneDrag}
-                  pps={pps}
-                  rowH={TEXT_H}
-                  barH={TEXT_H - 6}
-                  className="rounded-md bg-purple-500/10 shadow-[inset_0_0_0_1.5px_rgba(168,85,247,0.5)]"
-                />
-              )}
-              {overlays.map((o) => {
-                const homeRow = overlayLanes.rowOf.get(o.lane ?? 0) ?? 0;
-                const drag = laneDrag?.kind === "text" && laneDrag.id === o.id ? laneDrag : null;
-                return (
-                  <TextBar
-                    key={o.id}
-                    overlay={o}
-                    pps={pps}
-                    top={homeRow * TEXT_H}
-                    homeRow={homeRow}
-                    laneCount={overlayLanes.count}
-                    selected={selKeys.has(`text:${o.id}`)}
-                    drag={drag}
-                    parting={laneDrag?.kind === "text" && laneDrag.id !== o.id}
                     onDrag={setLaneDrag}
                     onSnap={setSnapX}
                   />
@@ -1666,8 +2179,8 @@ export function Timeline() {
           It is the width of the content's left pad, so at rest it sits over
           empty surface and the timeline looks no different — but the column
           is now a fixed place on screen, which is what per-track controls
-          need. It paints the resting surface (following vertical scroll, so
-          its ruler band and rails stay glued to the live ones) and passes
+          need. It paints the resting surface (rails following vertical
+          scroll, the ruler band pinned like the live one) and passes
           presses through to the scrubbing surface beneath; controls will take
           their own pointer events when they land. Its face shows only once
           the timeline has scrolled: at rest the underlay behind the scroller
@@ -1681,6 +2194,7 @@ export function Timeline() {
         <div ref={gutterRef} className="absolute inset-0">
           <RestingSurface railYs={railYs} empty={total <= 0} timelineH={timelineH} />
         </div>
+        <RulerBand />
       </div>
       {/* Cast off the gutter's right edge alone, once the timeline has scrolled
           — that shadow is the whole tell that clips are running underneath
@@ -1698,10 +2212,12 @@ export function Timeline() {
           one whose track has anything off stays visible so the strip reads as
           the enabled/disabled readout. */}
       <div
-        className="pointer-events-none absolute inset-y-0 left-0 z-50"
-        style={{ width: PAD_SIDE }}
+        // Clipped below the ruler band, so a toggle scrolled to the top slides
+        // under the band instead of riding up over it and the toolbar.
+        className="pointer-events-none absolute bottom-0 left-0 z-50 overflow-hidden"
+        style={{ width: PAD_SIDE, top: RULER_H }}
       >
-        <div ref={gutterCtlRef} className="absolute inset-0">
+        <div ref={gutterCtlRef} className="absolute inset-x-0 bottom-0" style={{ top: -RULER_H }}>
           {gutterYs.video.map(({ track, y }) => {
             const t = trackState.get(track);
             if (!t) return null;
@@ -1814,7 +2330,7 @@ export function Timeline() {
             <button
               className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
               onClick={() => {
-                useEditor.getState().removeGap(gapMenu.track, gapMenu.gap.start);
+                useEditor.getState().removeLaneGap(gapMenu.lane, gapMenu.gap.start);
                 setGapMenu(null);
               }}
             >
@@ -1823,6 +2339,60 @@ export function Timeline() {
           </div>
         </div>
       )}
+      {barMenu &&
+        (() => {
+          const o = overlays.find((x) => x.id === barMenu.id);
+          if (!o) return null;
+          const item =
+            "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground";
+          return (
+            <div
+              className="fixed inset-0 z-50"
+              onPointerDown={() => setBarMenu(null)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setBarMenu(null);
+              }}
+            >
+              <div
+                className="absolute min-w-44 rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+                style={{ left: barMenu.x, top: barMenu.y }}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                {barMenu.key !== undefined && (
+                  <button
+                    className={item}
+                    onClick={() => {
+                      const s = useEditor.getState();
+                      s.pushHistory();
+                      s.removeOverlayKey(barMenu.id, barMenu.key!);
+                      setBarMenu(null);
+                    }}
+                  >
+                    <Diamond className="size-3.5 text-muted-foreground" /> Remove keyframe
+                  </button>
+                )}
+                <button
+                  className={item}
+                  onClick={() => {
+                    useEditor.getState().updateOverlay(barMenu.id, { hidden: !o.hidden });
+                    setBarMenu(null);
+                  }}
+                >
+                  {o.hidden ? (
+                    <>
+                      <Eye className="size-3.5 text-muted-foreground" /> Show
+                    </>
+                  ) : (
+                    <>
+                      <EyeOff className="size-3.5 text-muted-foreground" /> Hide
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
       {frameMenu && (
         <div
           className="fixed inset-0 z-50"
@@ -1840,10 +2410,7 @@ export function Timeline() {
             const flip = frameMenu.x + 240 > window.innerWidth;
             return (
               <div
-                className={cn(
-                  "group absolute -translate-y-1/2",
-                  flip ? "pr-[6px]" : "pl-[6px]"
-                )}
+                className={cn("absolute -translate-y-1/2", flip ? "pr-[6px]" : "pl-[6px]")}
                 style={{
                   top: frameMenu.y,
                   ...(flip
@@ -1852,23 +2419,37 @@ export function Timeline() {
                 }}
                 onPointerDown={(e) => e.stopPropagation()}
               >
-                <button
-                  className="flex items-center gap-2 rounded-lg border bg-popover px-3 py-1.5 text-sm whitespace-nowrap text-popover-foreground shadow-md group-hover:bg-accent group-hover:text-accent-foreground"
-                  onClick={() => {
-                    void sendFrameToChat(
-                      { ...refFromAsset(frameMenu.asset), t: frameMenu.srcT },
-                      frameMenu.from
-                    );
-                    setFrameMenu(null);
-                  }}
-                >
-                  <Fullscreen className="size-3.5 text-muted-foreground" /> Capture frame
-                </button>
+                <div className="rounded-lg border bg-popover p-1 text-popover-foreground shadow-md">
+                  <button
+                    className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm whitespace-nowrap hover:bg-accent hover:text-accent-foreground"
+                    onClick={() => {
+                      void sendFrameToChat(
+                        { ...refFromAsset(frameMenu.asset), t: frameMenu.srcT },
+                        frameMenu.from
+                      );
+                      setFrameMenu(null);
+                    }}
+                  >
+                    <Fullscreen className="size-3.5 text-muted-foreground" /> Capture frame
+                  </button>
+                  <button
+                    className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm whitespace-nowrap hover:bg-accent hover:text-accent-foreground"
+                    onClick={() => {
+                      void copyRefImage({
+                        ...refFromAsset(frameMenu.asset),
+                        t: frameMenu.srcT,
+                      }).catch(() => {});
+                      setFrameMenu(null);
+                    }}
+                  >
+                    <Copy className="size-3.5 text-muted-foreground" /> Copy frame
+                  </button>
+                </div>
                 {/* Drawn after the bubble so the diamond's inner half covers
                     its border along the notch, leaving one seamless outline. */}
                 <div
                   className={cn(
-                    "pointer-events-none absolute top-1/2 size-2.5 -translate-y-1/2 rotate-45 bg-popover group-hover:bg-accent",
+                    "pointer-events-none absolute top-1/2 size-2.5 -translate-y-1/2 rotate-45 bg-popover",
                     flip
                       ? "right-[2px] rounded-tr-[2px] border-t border-r"
                       : "left-[2px] rounded-bl-[2px] border-b border-l"
@@ -1884,7 +2465,7 @@ export function Timeline() {
 }
 
 /**
- * iMovie skimmer: a line that follows the mouse over the timeline. It marks
+ * The skimmer: a line that follows the mouse over the timeline. It marks
  * where Split (⌘B / S) will cut; clicking still moves the playhead itself.
  */
 function HoverLine({
@@ -2237,66 +2818,38 @@ function Playhead({
   return (
     <div
       // Over the gutter as well as the clips: at 0 the playhead stands on the
-      // gutter's own edge, and the side padding is there so its cap is never
-      // clipped. The clips pass under the gutter; the time it is showing does
-      // not.
+      // gutter's own edge. The clips pass under the gutter; the time it is
+      // showing does not. The grab cap lives in the pinned ruler.
       className="pointer-events-none absolute top-0 bottom-0 left-0 z-50 w-[1.5px] bg-[#0a84ff] shadow-[0_0_8px_rgba(10,132,255,0.6)]"
       style={{ transform: `translateX(${x}px)` }}
+    />
+  );
+}
+
+/** The playhead's grab cap, riding the pinned ruler band — the side padding
+ * is there so it is never clipped at 0. */
+function PlayheadCap({
+  pps,
+  onScrub,
+}: {
+  pps: number;
+  onScrub: (e: React.PointerEvent) => void;
+}) {
+  const t = useEditor((s) => s.currentTime);
+  return (
+    <div
+      className="tl-playhead-cap absolute top-0 left-[-7px] h-5 w-4 cursor-ew-resize"
+      style={{ transform: `translateX(${t * pps}px)` }}
+      onPointerDown={onScrub}
     >
-      <div
-        className="tl-playhead-cap pointer-events-auto absolute -top-0 -left-[7px] h-5 w-4 cursor-ew-resize"
-        onPointerDown={onScrub}
-      >
-        <div className="mx-auto h-3 w-2.5 rounded-t-[3px] bg-[#0a84ff] [clip-path:polygon(0_0,100%_0,100%_58%,50%_100%,0_58%)]" />
-      </div>
+      <div className="mx-auto h-3 w-2.5 rounded-t-[3px] bg-[#0a84ff] [clip-path:polygon(0_0,100%_0,100%_58%,50%_100%,0_58%)]" />
     </div>
   );
 }
 
-/** Transition badges for one track row, floating in the gutter where each
- * pair meets (the overlap midpoint; a hard cut for edge styles), vertically
- * centered on the row. Shared by track 0 and the upper tracks. */
-function TransitionBadges({
-  spans,
-  pps,
-  rowH,
-}: {
-  spans: ClipSpan[];
-  pps: number;
-  rowH: number;
-}) {
-  return (
-    <>
-      {spans.map((span, i) => {
-        const d = span.clip.transition ?? 0;
-        if (!spans[i + 1] || d <= 0) return null;
-        const style = span.clip.transitionStyle ?? "crossfade";
-        const Icon = TRANSITION_ICONS[style];
-        return (
-          <div
-            key={`xf-${span.clip.id}`}
-            // Above SELECTED_SHADOW's z-10: the badge marks the joint even
-            // when a selected clip's ring runs under it.
-            className="tl-xfade pointer-events-none absolute z-11 flex -translate-x-1/2 items-center justify-center rounded-full bg-[#0a84ff] text-white shadow-[0_0_0_2px_rgba(255,255,255,0.9)]"
-            style={{
-              left: (span.start + span.len - span.transitionOut / 2) * pps - CLIP_GAP / 2,
-              top: 2 + (rowH - 4) / 2 - 8,
-              width: 16,
-              height: 16,
-            }}
-            title={`${TRANSITION_STYLE_LABELS[style]} ${d.toFixed(1)}s`}
-          >
-            <Icon className="size-2.5" />
-          </div>
-        );
-      })}
-    </>
-  );
-}
 
 function ClipView({
   span,
-  prevOverlap,
   mention,
   pps,
   selected,
@@ -2311,10 +2864,6 @@ function ClipView({
   onFrameMenu,
 }: {
   span: ClipSpan;
-  /** Cross-dissolve overlap of the previous clip into this one, timeline
-   * seconds — the room the incoming transition block claims on this clip's
-   * left. This clip's own `span.transitionOut` claims the right. */
-  prevOverlap: number;
   /** The clip's chat mention token ("@c2"), shown on hover so the user can
    * point the assistant at this exact segment. */
   mention: string;
@@ -2342,18 +2891,12 @@ function ClipView({
 }) {
   const { clip, asset } = span;
   const speed = clipSpeed(clip);
-  // A cross-dissolve overlaps two clips; inset each box by half the overlap so
-  // the pair meets at the overlap midpoint with the same CLIP_GAP gutter as a
-  // hard cut (the dissolve badge floats in that gap).
-  const leftXf = prevOverlap / 2;
-  const rightXf = span.transitionOut / 2;
-  const visStart = span.start + leftXf;
-  const visLen = Math.max(0, span.len - leftXf - rightXf);
-  const w = visLen * pps;
-  // Frames start where the box does: skip the source seconds the left dissolve
-  // consumed so the filmstrip stays aligned under the inset edge.
-  const filmIn = clip.in + leftXf * speed;
-  const filmOut = filmIn + (w / pps) * speed;
+  // Every box is its clip's whole footprint. Clips never overlap — a
+  // transition is a render-time blend at the cut, drawn as the bar above the
+  // tracks — so a box's width is the clip's own length, whatever joins it.
+  const w = span.len * pps;
+  const filmIn = clip.in;
+  const filmOut = filmIn + span.len * speed;
 
   const startFrame = useEdgeFrame(asset, filmIn, `${clip.id}:in`);
   const endFrame = useEdgeFrame(asset, filmOut, `${clip.id}:out`);
@@ -2374,9 +2917,7 @@ function ClipView({
     rowH: VIDEO_H,
     laneCount: 0,
     homeRow: 0,
-    // The box is inset by half the incoming dissolve; click-to-seek anchors
-    // on where the box is drawn, not the clip's footprint start.
-    visStart,
+    visStart: span.start,
     onDrag,
     onSnap,
     vertical: {
@@ -2400,8 +2941,7 @@ function ClipView({
           : parting && "transition-[left] duration-150 ease-out"
       )}
       style={{
-        // The ghost keeps the box's dissolve insets, offset to follow the pointer.
-        left: drag ? drag.ghostX + leftXf * pps : visStart * pps,
+        left: drag ? drag.ghostX : span.start * pps,
         top: drag ? 2 + drag.ghostY : undefined,
         width: Math.max(10, w - CLIP_GAP),
         height: VIDEO_H - 4,
@@ -2835,10 +3375,13 @@ function HideChip({
   hidden,
   onToggle,
   className,
+  small,
 }: {
   hidden: boolean;
   onToggle: () => void;
   className?: string;
+  /** The element bars are low; the chip steps down to fit them. */
+  small?: boolean;
 }) {
   return (
     <button
@@ -2846,14 +3389,19 @@ function HideChip({
       title={hidden ? "Enable clip" : "Disable clip"}
       aria-label={hidden ? "Enable clip" : "Disable clip"}
       className={cn(
-        "tl-hide-chip absolute z-4 grid size-[18px] place-items-center rounded-[5px] bg-black/55 text-white transition-opacity hover:bg-black/75",
+        "tl-hide-chip absolute z-4 grid place-items-center rounded-[5px] bg-black/55 text-white transition-opacity hover:bg-black/75",
+        small ? "size-[13px]" : "size-[18px]",
         hidden ? "opacity-100" : "opacity-0 group-hover:opacity-100",
         className
       )}
       onPointerDown={(e) => e.stopPropagation()}
       onClick={onToggle}
     >
-      {hidden ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
+      {hidden ? (
+        <EyeOff className={small ? "size-2" : "size-3"} />
+      ) : (
+        <Eye className={small ? "size-2" : "size-3"} />
+      )}
     </button>
   );
 }
@@ -3034,8 +3582,6 @@ function overlayLen(c: VideoClip) {
 function OverlayClipView({
   clip,
   asset,
-  prevOverlap,
-  overlap,
   pps,
   selected,
   drag,
@@ -3050,11 +3596,6 @@ function OverlayClipView({
 }: {
   clip: VideoClip;
   asset: MediaAsset | undefined;
-  /** Cross-dissolve overlap of the previous same-track clip into this one —
-   * the room the incoming transition claims on this clip's left. */
-  prevOverlap: number;
-  /** This clip's own dissolve into the next same-track clip (its right). */
-  overlap: number;
   pps: number;
   selected: boolean;
   /** This clip's live drag when it is the one being carried (ghost mode). */
@@ -3073,17 +3614,11 @@ function OverlayClipView({
     grab: { asset: MediaAsset; srcT: number; from: FrameGrabOrigin }
   ) => void;
 }) {
-  // A cross-dissolve overlaps two clips; inset each box by half the overlap
-  // so the pair meets at the overlap midpoint with the same CLIP_GAP gutter
-  // as a hard cut — identical to the track-0 boxes.
+  // Its whole footprint, like a track-0 box: clips never overlap, and a
+  // transition is the bar above the tracks, never a bite out of a box.
   const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
-  const leftXf = prevOverlap / 2;
-  const rightXf = overlap / 2;
-  const visStart = clip.start + leftXf;
-  const w = Math.max(10, Math.max(0, overlayLen(clip) - leftXf - rightXf) * pps);
-  // Frames start where the box does: skip the source seconds the left
-  // dissolve consumed so the filmstrip stays aligned under the inset edge.
-  const filmIn = clip.in + leftXf * speed;
+  const w = Math.max(10, overlayLen(clip) * pps);
+  const filmIn = clip.in;
   const filmOut = filmIn + (w / pps) * speed;
 
   // Same filmstrip as a track-0 clip so an overlay reads as a video, not a
@@ -3109,9 +3644,7 @@ function OverlayClipView({
     rowH: OVERLAY_H,
     laneCount: 0,
     homeRow: 0,
-    // The box is inset by half the incoming dissolve; click-to-seek anchors
-    // on where the box is drawn, not the clip's footprint start.
-    visStart,
+    visStart: clip.start,
     onDrag,
     onSnap,
     vertical: {
@@ -3135,8 +3668,7 @@ function OverlayClipView({
           : parting && "transition-[left] duration-150 ease-out"
       )}
       style={{
-        // The ghost keeps the box's dissolve insets, offset to follow the pointer.
-        left: drag ? drag.ghostX + leftXf * pps : visStart * pps,
+        left: drag ? drag.ghostX : clip.start * pps,
         top: drag ? 2 + drag.ghostY : undefined,
         width: Math.max(10, w - CLIP_GAP),
         height: OVERLAY_H - 4,
@@ -3191,6 +3723,102 @@ function OverlayClipView({
   );
 }
 
+/** The keyframe diamond's grab square — wider than the diamond itself, since
+ * a 6px target is not one. Paired with the `size-` on the marker below. */
+const KEY_HIT = 14;
+
+/**
+ * One keyframe on an element's bar: a diamond where the key falls, dragged
+ * left and right to retime it. The grab is kept off the bar underneath, so
+ * moving a key never moves the element it belongs to.
+ */
+function KeyMarker({
+  overlay: o,
+  t,
+  pps,
+  width,
+  onMenu,
+}: {
+  overlay: Overlay;
+  t: number;
+  pps: number;
+  width: number;
+  /** The bar's right-click menu; a key click carries its time, so the menu
+   * offers to remove it. */
+  onMenu: (m: { x: number; y: number; id: string; key?: number }) => void;
+}) {
+  const picked = useEditor(
+    (s) => !!s.selectedKey && s.selectedKey.overlayId === o.id && s.selectedKey.t === t
+  );
+  // Park clear of the trim handles: a key dragged to the very end would
+  // otherwise sit under one and stop being grabbable. Those last few pixels
+  // cost some positional accuracy, which the bar's own edge already conveys.
+  const inset = Math.min(TRIM_W + KEY_HIT / 2, Math.max(3, (width - 8) / 2));
+  return (
+    <span
+      className="tl-key absolute top-1/2 z-3 grid size-3.5 cursor-ew-resize place-items-center"
+      style={{
+        left: Math.min(width - inset, Math.max(inset, t * pps)),
+        transform: "translate(-50%, -50%)",
+      }}
+      title="Drag to retime, Delete to remove"
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onMenu({ x: e.clientX, y: e.clientY, id: o.id, key: t });
+      }}
+      onPointerDown={(e) => {
+        const s = useEditor.getState();
+        s.selectOverlayKey(o.id, t);
+        let live = t;
+        // The undo step opens on the first movement, so a click that only
+        // seeks does not leave one behind.
+        let checkpointed = false;
+        startDrag(e, {
+          onMove: (dx) => {
+            if (!checkpointed) {
+              checkpointed = true;
+              s.pushHistory();
+            }
+            const next = Math.max(0, t + dx / pps);
+            s.moveOverlayKey(o.id, live, next, { transient: true });
+            live = Math.max(0, Math.min(next, Math.max(0.1, o.end - o.start)));
+          },
+          // A click that never moved reads as "show me this key": the playhead
+          // goes there, and the inspector's rows follow it.
+          onUp: (_dx, _dy, moved) => {
+            if (!moved) s.seek(o.start + live);
+          },
+        });
+      }}
+    >
+      <span
+        className={cn(
+          "pointer-events-none rotate-45 bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.35)] transition-[width,height]",
+          picked ? "size-[9px] ring-[1.5px] ring-[#0a84ff]" : "size-[6px]"
+        )}
+      />
+    </span>
+  );
+}
+
+/** The sticker itself, small, at the head of its bar — a row of stickers reads
+ * as which stickers they are. A Lottie has no still to show, so it keeps the
+ * glyph. */
+function StickerThumb({ overlay: o }: { overlay: StickerOverlay }) {
+  const asset = useEditor((s) => (o.assetId ? s.assets.find((a) => a.id === o.assetId) : undefined));
+  if (!asset || o.lottie) return <Sticker className="mr-1 size-2.5 shrink-0" />;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- project media URL
+    <img
+      src={asset.url}
+      alt=""
+      loading="lazy"
+      className="mr-1 size-4 shrink-0 object-contain"
+    />
+  );
+}
+
 function TextBar({
   overlay: o,
   pps,
@@ -3202,8 +3830,9 @@ function TextBar({
   parting,
   onDrag,
   onSnap,
+  onMenu,
 }: {
-  overlay: TextOverlay;
+  overlay: Overlay;
   pps: number;
   top: number;
   homeRow: number;
@@ -3217,14 +3846,48 @@ function TextBar({
   onDrag: (d: LaneDrag | null) => void;
   /** Paint (or clear) the snap guide at this stage-x pixel. */
   onSnap: (x: number | null) => void;
+  /** Open the bar's right-click menu; `key` set when it landed on a keyframe. */
+  onMenu: (m: { x: number; y: number; id: string; key?: number }) => void;
 }) {
   const w = Math.max(8, (o.end - o.start) * pps);
-  const ui = { pps, rowH: TEXT_H, laneCount, homeRow, onDrag, onSnap };
+  // Element rows are a z-order, so the top of the stack is a place a drag
+  // can reach: past the top edge opens a row there.
+  const ui = { pps, rowH: TEXT_H, laneCount, homeRow, topInsert: true, onDrag, onSnap };
+  // Per-kind chip content: a title shows its text, a shape its name behind a
+  // shape glyph, a sticker its glyph and name.
+  const chip =
+    o.kind === "shape" ? (
+      <>
+        {o.shape === "ellipse" ? (
+          <Circle className="mr-1 size-2.5 shrink-0" />
+        ) : o.shape === "line" ? (
+          <Minus className="mr-1 size-2.5 shrink-0" />
+        ) : o.shape === "arrow" ? (
+          <MoveRight className="mr-1 size-2.5 shrink-0" />
+        ) : (
+          <Square className="mr-1 size-2.5 shrink-0" />
+        )}
+        {SHAPE_LABELS[o.shape]}
+      </>
+    ) : o.kind === "sticker" ? (
+      <>
+        <StickerThumb overlay={o} />
+        Sticker
+      </>
+    ) : o.kind === "effect" ? (
+      <>
+        <Sparkles className="mr-1 size-2.5 shrink-0" />
+        {EFFECT_LABELS[o.effect]}
+      </>
+    ) : (
+      o.text.replace(/\n/g, " ")
+    );
 
   return (
     <div
       className={cn(
-        "tl-text-bar group absolute flex cursor-grab items-center overflow-hidden rounded-md bg-gradient-to-b from-purple-500 to-purple-600 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
+        "tl-text-bar group absolute flex cursor-grab items-center overflow-hidden rounded-md shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
+        FAMILY_STYLE[overlayFamily(o)].bar,
         o.hidden && "opacity-40 grayscale",
         selected && SELECTED_SHADOW,
         drag
@@ -3239,18 +3902,33 @@ function TextBar({
         // Inline so it beats SELECTED_SHADOW's z-10 class on the same element.
         zIndex: drag ? 20 : undefined,
       }}
-      onPointerDown={(e) => startLaneMove(e, "text", o.id, ui)}
+      onPointerDown={(e) => startLaneMove(e, "overlay", o.id, ui)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onMenu({ x: e.clientX, y: e.clientY, id: o.id });
+      }}
     >
-      <span className="pointer-events-none truncate px-2 text-[10.5px] font-medium text-white">
-        {o.text.replace(/\n/g, " ")}
+      <span className="pointer-events-none flex min-w-0 items-center truncate px-2 text-[10.5px] font-medium text-white">
+        {chip}
       </span>
+      {/* Keys sit on the bar where they fall, so a track is visible without
+          opening the inspector. */}
+      {(o.kf ?? []).map((k) => (
+        <KeyMarker key={k.t} overlay={o} t={k.t} pps={pps} width={w} onMenu={onMenu} />
+      ))}
+      <HideChip
+        hidden={!!o.hidden}
+        small
+        className="top-1/2 right-2 -translate-y-1/2"
+        onToggle={() => useEditor.getState().updateOverlay(o.id, { hidden: !o.hidden })}
+      />
       <span
         className={cn(trimHandle, "tl-trim-l left-0")}
-        onPointerDown={(e) => startLaneTrim(e, "text", o.id, "l", ui)}
+        onPointerDown={(e) => startLaneTrim(e, "overlay", o.id, "l", ui)}
       />
       <span
         className={cn(trimHandle, "tl-trim-r right-0")}
-        onPointerDown={(e) => startLaneTrim(e, "text", o.id, "r", ui)}
+        onPointerDown={(e) => startLaneTrim(e, "overlay", o.id, "r", ui)}
       />
     </div>
   );
@@ -3331,12 +4009,15 @@ function LaneSlot({
   pps,
   rowH,
   barH,
+  shift = 0,
   className,
 }: {
   drag: LaneDrag;
   pps: number;
   rowH: number;
   barH: number;
+  /** Rows pushed down by a new row opening above them. */
+  shift?: number;
   className?: string;
 }) {
   return (
@@ -3347,7 +4028,7 @@ function LaneSlot({
       )}
       style={{
         left: drag.slotStart * pps,
-        top: drag.targetRow * rowH + 2,
+        top: drag.targetRow * rowH + 2 + shift,
         width: Math.max(8, drag.len * pps - CLIP_GAP),
         height: barH,
       }}

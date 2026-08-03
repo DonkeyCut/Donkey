@@ -4,6 +4,7 @@ import { useEffect, type RefObject } from "react";
 import { clipSpeed, getClipSpans, overlayLayers, projectDuration, useEditor } from "@/cut/lib/store";
 import { isFullRect, projectFadeSeconds, rectOf } from "@/cut/lib/types";
 import type { ClipSpan, MediaAsset, VideoClip } from "@/cut/lib/types";
+import { BehindCompositor } from "@/cut/lib/behindPass";
 import { FrameCompositor, MISSING_FRAME, PENDING_FRAME, type Frame } from "@/cut/lib/composite";
 import { duckGainAt, overlayPlan, prerollLead, trackZeroPlan } from "@/cut/lib/framePlan";
 import { reportMediaElementError } from "@/cut/lib/mediaLinks";
@@ -280,11 +281,18 @@ class Engine {
    * start-ordered, so we can stop once one is past the horizon. */
   private warmAhead(spans: ClipSpan[], t: number) {
     let warmed = 0;
-    for (const span of spans) {
+    for (let i = 0; i < spans.length; i++) {
+      const span = spans[i];
       if (span.start <= t) continue; // current or past — not ours to warm
       if (span.start > t + WARM_HORIZON_S) break;
       const speed = clipSpeed(span.clip);
-      const lead = prerollLead(span.clip.in, speed);
+      // A clip a transition blends in shows its entrance frame for the whole
+      // blend window, so it parks exactly there, as early as possible — a
+      // seek at window-open would leave the frame undecodable mid-blend, and
+      // the push/wipe geometry would carve a black region where the picture
+      // belongs. It never pre-rolls: the blend is its warm-up.
+      const blended = (spans[i - 1]?.transitionOut ?? 0) > 0;
+      const lead = blended ? 0 : prerollLead(span.clip.in, speed);
       // The imminent clip inside its own pre-roll window is `warmNext`'s to
       // play hot; a parking seek here would fight it, so leave it alone. A clip
       // with no roll to give (an untrimmed one) has no such window, and stays
@@ -364,6 +372,19 @@ class Engine {
     if (el.readyState >= 2 && !el.seeking) void el.play().catch(() => {});
   }
 
+  /** Park a clip's element on its entrance frame, paused and silent — the
+   * picture a transition blends in before the clip starts playing. */
+  private holdAtEntrance(span: ClipSpan): MediaEl {
+    const el = this.videoFor(span.clip, span.asset);
+    if (isImageEl(el)) return el;
+    el.muted = true;
+    if (!el.paused) el.pause();
+    else if (!el.seeking && Math.abs(el.currentTime - span.clip.in) > 0.05) {
+      el.currentTime = span.clip.in;
+    }
+    return el;
+  }
+
   /** Seek/rate/play one clip's element toward its frame at timeline time `t`,
    * without touching any other element (the caller pauses stale ones). */
   private prepare(span: ClipSpan, t: number, play: boolean, muted: boolean): MediaEl {
@@ -436,15 +457,24 @@ class Engine {
     // Prime the next clip's decoder+audio pipeline shortly before its entrance
     // (the dissolve start, or the hard cut) so the handoff `play()` resumes hot
     // — no cold-start spin-up freezing the picture and playhead at the cut.
-    if (plan.upcoming) {
-      this.warmNext(plan.upcoming, t, play);
+    // A transitioned cut holds its incoming clip on the entrance frame instead
+    // of rolling it: the blend draws that exact frame for the whole window, and
+    // a pre-roll would park the decoder on the wrong one — the seek at
+    // window-open then leaves the push/wipe geometry a black region until the
+    // frame decodes.
+    if (plan.upcoming && plan.upcoming !== plan.incoming) {
+      if (masterSpan.transitionOut > 0) this.holdAtEntrance(plan.upcoming);
+      else this.warmNext(plan.upcoming, t, play);
       keep.add(plan.upcoming.clip.id);
     }
     // Each clip owns its element, so a transition's two clips decode side by
-    // side — a true blend even when they are trims of the same source.
+    // side — a true blend even when they are trims of the same source. The
+    // incoming clip has not started yet (the blend window sits before its
+    // footprint), so it holds parked on its entrance frame; it starts playing
+    // when the cut lands and it becomes the master.
     let incEl: MediaEl | null = null;
     if (plan.incoming) {
-      incEl = this.prepare(plan.incoming, t, play, true); // the outgoing clip keeps the audio
+      incEl = this.holdAtEntrance(plan.incoming);
       keep.add(plan.incoming.clip.id);
     }
     // A live voiceover ducks the master clip's sound under it. The clip's own
@@ -489,6 +519,20 @@ class Engine {
   private overlayVideoFor(clip: VideoClip, asset: MediaAsset): MediaEl {
     return this.elFor(this.overlayEls, clip.id, asset);
   }
+
+  // Text-behind-speaker: behind-tagged titles leave the DOM overlay path and
+  // composite here — video, then the text raster, then the segmented person
+  // back on top (see behindPass.ts). Cheap no-op when nothing is tagged.
+  private behind = new BehindCompositor();
+
+  private drawBehind(t: number) {
+    const s = useEditor.getState();
+    this.behind.draw(this.canvas, s.overlays, s.assets, t);
+  }
+
+  // Effect elements are not a canvas pass: they filter the finished picture,
+  // elements included, so the stage applies them over everything (see
+  // StageEffects) exactly as the export does.
 
   /** Draw a neighbor clip's held frame full-frame beneath an edge animation.
    * A paused element parks on the wanted frame (the previous clip already
@@ -735,11 +779,17 @@ class Engine {
     // soundtrack) is still reachable while scrubbing and playing.
     const total = projectDuration(s);
 
-    // Nothing anywhere — no track-0 clip, no overlay layer, no soundtrack —
-    // resets to a black frame at 0. An empty track 0 with an overlay clip or
-    // audio still plays: the tick body draws those layers and advances the wall
-    // clock, so the guard must not bail on `spans.length === 0` alone.
-    if (spans.length === 0 && overlayLayers(s.clips).length === 0 && s.audioClips.length === 0) {
+    // Nothing anywhere — no track-0 clip, no overlay layer, no soundtrack, no
+    // title or sticker — resets to a black frame at 0. An empty track 0 with
+    // any one of those still plays: the tick body draws those layers and
+    // advances the wall clock, so the guard must not bail on
+    // `spans.length === 0` alone.
+    if (
+      spans.length === 0 &&
+      overlayLayers(s.clips).length === 0 &&
+      s.audioClips.length === 0 &&
+      s.overlays.length === 0
+    ) {
       this.pauseExcept(new Set());
       this.comp.drawLayer(MISSING_FRAME, undefined, true, 1, 0);
       this.syncSoundtrack(0, false);
@@ -749,7 +799,7 @@ class Engine {
 
     let t = Math.min(s.currentTime, total);
 
-    // iMovie skimming: while paused with the mouse over the timeline, the
+    // Skimming: while paused with the mouse over the timeline, the
     // frame on screen lives at the skim point, not the playhead. The playhead
     // (currentTime) is never touched.
     const pt =
@@ -805,6 +855,7 @@ class Engine {
       if (span) this.composite(span, spans, Math.min(pt, span.start + span.len), false);
       else this.pauseExcept(new Set());
       this.drawOverlays(pt, false, active, overlaysLive);
+      this.drawBehind(pt);
       this.comp.drawProjectFade(this.projectFadeGain(pt, total));
       this.cleanupOverlays(active);
       this.syncSoundtrack(t, false);
@@ -886,6 +937,7 @@ class Engine {
           useEditor.setState({ playing: false, currentTime: total, previewStopAt: null });
           pauseEl(el);
           this.drawOverlays(t, true, active);
+          this.drawBehind(t);
           this.comp.drawProjectFade(this.projectFadeGain(total, total));
           this.cleanupOverlays(active);
           this.syncSoundtrack(total, false);
@@ -904,6 +956,7 @@ class Engine {
       if (t >= total - 0.001) {
         useEditor.setState({ playing: false, currentTime: total, previewStopAt: null });
         this.drawOverlays(t, true, active);
+        this.drawBehind(t);
         this.comp.drawProjectFade(this.projectFadeGain(total, total));
         this.cleanupOverlays(active);
         this.syncSoundtrack(total, false);
@@ -912,6 +965,7 @@ class Engine {
     }
 
     this.drawOverlays(t, true, active);
+    this.drawBehind(t);
     // The whole-video fade veils the finished frame and dims the sound —
     // the master's element volume (set by composite) and the soundtrack.
     const fadeGain = this.projectFadeGain(t, total);

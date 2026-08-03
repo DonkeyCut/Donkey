@@ -5,6 +5,10 @@ import type React from "react";
 interface DragOpts {
   onMove: (dx: number, dy: number, ev: PointerEvent) => void;
   onUp?: (dx: number, dy: number, moved: boolean) => void;
+  /** Cursor to hold for the whole gesture, wherever the pointer travels. Read
+   * again after every move, so a cursor that turns with what it is dragging
+   * keeps up. */
+  cursor?: () => string;
 }
 
 // Live count of in-flight pointer drags, so layout that depends on clip
@@ -42,16 +46,35 @@ export function startDrag(e: React.PointerEvent, opts: DragOpts) {
   activeDrags++;
   dragListeners.forEach((fn) => fn());
 
+  // A drag pulls the pointer off the handle within a few pixels, and from there
+  // the cursor belongs to whatever it happens to be over. One document-wide
+  // rule outranks all of them until the gesture ends.
+  const pin = opts.cursor ? document.createElement("style") : null;
+  let pinned = "";
+  const holdCursor = () => {
+    if (!pin || !opts.cursor) return;
+    const next = opts.cursor();
+    if (next === pinned) return;
+    pinned = next;
+    pin.textContent = `*, *::before, *::after { cursor: ${next} !important; }`;
+  };
+  if (pin) {
+    holdCursor();
+    document.head.append(pin);
+  }
+
   const move = (ev: PointerEvent) => {
     const dx = ev.clientX - startX;
     const dy = ev.clientY - startY;
     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
     opts.onMove(dx, dy, ev);
+    holdCursor();
   };
   const up = (ev: PointerEvent) => {
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
     window.removeEventListener("pointercancel", up);
+    pin?.remove();
     activeDrags--;
     dragListeners.forEach((fn) => fn());
     opts.onUp?.(ev.clientX - startX, ev.clientY - startY, moved);

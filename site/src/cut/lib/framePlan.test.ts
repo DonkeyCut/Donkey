@@ -31,13 +31,13 @@ function spansOf(count: number, len = 4, transitions: number[] = []): ClipSpan[]
   for (let i = 0; i < count; i++) {
     const transitionOut = transitions[i] ?? 0;
     spans.push({
-      clip: videoClip({ start: at, out: len }),
+      clip: videoClip({ start: at, out: len, transitionStyle: undefined }),
       asset,
       start: at,
       len,
       transitionOut,
     });
-    at += len - transitionOut;
+    at += len; // clips abut — a transition is a blend at the cut, never overlap
   }
   return spans;
 }
@@ -52,26 +52,38 @@ describe("trackZeroPlan", () => {
     expect(plan.masterZoom).toBe(1);
   });
 
-  test("ramps a dissolve from 0 to 1 across the overlap", () => {
+  test("ramps a dissolve from 0 to 1 across the blend window before the cut", () => {
     const spans = spansOf(2, 4, [2]);
-    const start = spans[1].start;
-    expect(trackZeroPlan(spans[0], spans, start).p).toBeCloseTo(0, 5);
-    expect(trackZeroPlan(spans[0], spans, start + 1).p).toBeCloseTo(0.5, 5);
-    expect(trackZeroPlan(spans[0], spans, start + 2).p).toBeCloseTo(1, 5);
+    const cut = spans[1].start;
+    expect(trackZeroPlan(spans[0], spans, cut - 2).p).toBeCloseTo(0, 5);
+    expect(trackZeroPlan(spans[0], spans, cut - 1).p).toBeCloseTo(0.5, 5);
+    expect(trackZeroPlan(spans[0], spans, cut - 0.001).p).toBeCloseTo(1, 2);
   });
 
-  test("names the incoming clip only while its overlap is live", () => {
+  test("names the incoming clip only while its blend window is live", () => {
     const spans = spansOf(2, 4, [2]);
-    expect(trackZeroPlan(spans[0], spans, spans[1].start - 0.1).incoming).toBe(null);
-    expect(trackZeroPlan(spans[0], spans, spans[1].start + 0.1).incoming).toBe(spans[1]);
+    const cut = spans[1].start;
+    expect(trackZeroPlan(spans[0], spans, cut - 2.1).incoming).toBe(null);
+    expect(trackZeroPlan(spans[0], spans, cut - 0.1).incoming).toBe(spans[1]);
   });
 
-  test("pushes the outgoing clip in and settles the incoming one on a cross zoom", () => {
+  test("fades the outgoing sound across the blend window", () => {
+    const spans = spansOf(2, 4, [2]);
+    const cut = spans[1].start;
+    expect(trackZeroPlan(spans[0], spans, cut - 2).gain).toBeCloseTo(1, 5);
+    expect(trackZeroPlan(spans[0], spans, cut - 1).gain).toBeCloseTo(0.5, 5);
+  });
+
+  test("pushes the outgoing clip in, holds the incoming one pushed, settles it after the cut", () => {
     const spans = spansOf(2, 4, [2]);
     spans[0].clip.transitionStyle = "crosszoom";
-    const mid = trackZeroPlan(spans[0], spans, spans[1].start + 1);
+    const cut = spans[1].start;
+    const mid = trackZeroPlan(spans[0], spans, cut - 1);
     expect(mid.masterZoom).toBeCloseTo(1 + (TRANSITION_ZOOM - 1) * 0.5, 5);
-    expect(mid.incZoom).toBeCloseTo(TRANSITION_ZOOM - (TRANSITION_ZOOM - 1) * 0.5, 5);
+    expect(mid.incZoom).toBeCloseTo(TRANSITION_ZOOM, 5);
+    // Past the cut the incoming clip is the master, settling over its head.
+    const after = trackZeroPlan(spans[1], spans, cut + 1);
+    expect(after.masterZoom).toBeCloseTo(TRANSITION_ZOOM - (TRANSITION_ZOOM - 1) * 0.5, 5);
   });
 
   test("veils a fade-in from black at the head of the timeline", () => {

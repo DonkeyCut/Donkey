@@ -184,6 +184,7 @@ export const projectsCloud = {
         name: typeof body.name === "string" && body.name.trim() ? body.name.trim() : existing.name,
         assets: Array.isArray(body.assets) ? body.assets : existing.assets,
         clips: Array.isArray(body.clips) ? body.clips : existing.clips,
+        transitions: Array.isArray(body.transitions) ? body.transitions : existing.transitions,
         audioClips: Array.isArray(body.audioClips) ? body.audioClips : existing.audioClips,
         // Same legacy-shape handling as the engine: a merged client saving
         // `clips` clears the old separate overlay array.

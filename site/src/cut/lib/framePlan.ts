@@ -46,7 +46,9 @@ export function overlayTransitionFx(
   let gain = 1;
   const style = span.clip.transitionStyle ?? "crossfade";
   const prevStyle = prev?.clip.transitionStyle ?? "crossfade";
-  // Incoming side of the previous clip's transition: blend in.
+  // Incoming side of the previous clip's transition: the clip blends in over
+  // its own head — upper tracks composite through alpha, so the arrival is an
+  // alpha ramp against whatever is beneath.
   if (prev && prev.transitionOut > 0) {
     const rel = t - span.start;
     if (rel < prev.transitionOut) {
@@ -56,12 +58,14 @@ export function overlayTransitionFx(
       if (prevStyle === "crosszoom") zoom = TRANSITION_ZOOM - (TRANSITION_ZOOM - 1) * p;
     }
   }
-  // Outgoing side of this clip's own cross zoom: the picture pushes in while
-  // the incoming clip settles back (it stays opaque — the blend is the
-  // incoming clip's alpha).
-  if (next && span.transitionOut > 0 && t >= next.start && style === "crosszoom") {
-    const p = Math.min(1, (t - next.start) / span.transitionOut);
-    zoom = 1 + (TRANSITION_ZOOM - 1) * p;
+  // Outgoing side of this clip's own cross zoom: the picture pushes in across
+  // its last blend-window seconds, handing over at the cut.
+  if (next && span.transitionOut > 0 && style === "crosszoom") {
+    const from = span.start + span.len - span.transitionOut;
+    if (t >= from) {
+      const p = Math.min(1, (t - from) / span.transitionOut);
+      zoom = 1 + (TRANSITION_ZOOM - 1) * p;
+    }
   }
   // The clip's own entrance/exit animations. A transitioned joint owns its
   // edges: the transition plays there and the adjacent animation is held
@@ -257,19 +261,30 @@ export function trackZeroPlan(master: ClipSpan, spans: ClipSpan[], t: number): T
   let masterZoom = 1;
   let incZoom = 1;
   let incoming: ClipSpan | null = null;
-  // Once the incoming footprint starts, blend it in over the master.
-  if (master.transitionOut > 0 && next && t >= next.start) {
-    p = Math.min(1, (t - next.start) / master.transitionOut);
+  const rel = t - master.start;
+  // The blend window is the master's last `transitionOut` seconds: the next
+  // clip's held first frame arrives over the live tail, fully there at the
+  // cut, where the next clip starts playing. Clips never intersect — the
+  // window claims no layout.
+  if (master.transitionOut > 0 && next && t >= next.start - master.transitionOut) {
+    p = Math.min(1, (t - (next.start - master.transitionOut)) / master.transitionOut);
     incAlpha = p;
     incoming = next;
     if (style === "crosszoom") {
-      // The outgoing picture pushes in while the incoming one settles back.
+      // The outgoing picture pushes in; the incoming one waits pushed in and
+      // settles back over its own head once it starts (mirroring the export's
+      // head ramp on the incoming segment).
       masterZoom = 1 + (TRANSITION_ZOOM - 1) * p;
-      incZoom = TRANSITION_ZOOM - (TRANSITION_ZOOM - 1) * p;
+      incZoom = TRANSITION_ZOOM;
     }
   }
-
-  const rel = t - master.start;
+  // The incoming side of the previous clip's cross zoom: settle back to 1
+  // over this clip's own head.
+  if (prev && prev.transitionOut > 0 && (prev.clip.transitionStyle ?? "crossfade") === "crosszoom") {
+    if (rel < prev.transitionOut) {
+      masterZoom *= TRANSITION_ZOOM - (TRANSITION_ZOOM - 1) * Math.max(0, rel / prev.transitionOut);
+    }
+  }
   const abutPrev =
     !!prev &&
     !prev.clip.hidden &&
@@ -310,7 +325,10 @@ export function trackZeroPlan(master: ClipSpan, spans: ClipSpan[], t: number): T
     incAlpha,
     incZoom,
     veil: anim.veil,
-    gain: anim.gain,
+    // The outgoing sound leaves with the picture: it fades across the blend
+    // window and the incoming clip enters clean at the cut, matching the
+    // export's tail fade + hard join.
+    gain: anim.gain * (1 - p),
     backdrop,
     upcoming: next && t < next.start && t >= next.start - PREROLL_LEAD_S ? next : null,
   };

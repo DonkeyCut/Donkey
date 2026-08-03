@@ -1,10 +1,11 @@
 "use client";
 
+import { hasOverlayAnim } from "@donkeycut/effects-kit";
 import { chatOwner } from "./chatAssets";
 import { useGenerate } from "./generate";
 import { getClipSpans, overlayLayers, totalDuration, useEditor } from "./store";
 import { laneCues, subtitleLaneCount } from "./subtitles";
-import { frameOf, rectOf, regionLabel, type ClipSpan, type VideoClip } from "./types";
+import { frameOf, rectOf, regionLabel, type ClipSpan, type Overlay, type VideoClip } from "./types";
 
 const r = (n: number) => Math.round(n * 100) / 100;
 
@@ -102,8 +103,12 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
         ? { kind, id, text: c.text, start: r(c.start), end: r(c.end), track: c.lane ?? 0 }
         : { kind, id };
     }
+    // The selection's kind stays "overlay" (what select/delete take); the
+    // element's own kind rides in from describeOverlay as `element`.
     const o = s.overlays.find((x) => x.id === id);
-    return o ? { kind, id, ...describeOverlay(o) } : { kind, id };
+    if (!o) return { kind, id };
+    const { kind: element, ...rest } = describeOverlay(o);
+    return { kind, id, element, ...rest };
   })();
 
   return {
@@ -208,7 +213,9 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
       }));
     }),
     soundtrack: s.audioClips.map((a) => ({ id: a.id, ...describeAudio(a, assetById) })),
-    titles: s.overlays.map((o) => ({ id: o.id, ...describeOverlay(o) })),
+    // Every overlay element on the title lanes: titles, shapes, stickers —
+    // each entry carries its `kind`.
+    overlays: s.overlays.map((o) => ({ id: o.id, ...describeOverlay(o) })),
     subtitles: {
       count: s.subtitles.cues.length,
       showOnVideo: s.subtitles.showOnVideo,
@@ -289,25 +296,58 @@ function describeOverlayClip(c: VideoClip, assets: Map<string, { name: string }>
   };
 }
 
-function describeOverlay(o: {
-  text: string; start: number; end: number; x: number; y: number;
-  size: number; font: string; weight: number; color: string; shadow: boolean; plate: boolean;
-  plateRadius?: number; lane?: number; hidden?: boolean;
-}) {
-  return {
-    text: o.text,
+function describeOverlay(o: Overlay) {
+  const base = {
+    kind: o.kind ?? "text",
     start: r(o.start),
     end: r(o.end),
     x: r(o.x),
     y: r(o.y),
+    ...(o.rotation ? { rotation: o.rotation } : {}),
+    ...(o.opacity !== undefined ? { opacity: r(o.opacity) } : {}),
+    ...(hasOverlayAnim(o.anim) ? { anim: o.anim } : {}),
+    ...(o.kf?.length
+      ? { keyframes: o.kf.map((k) => ({ ...k, t: r(k.t), x: r(k.x), y: r(k.y) })) }
+      : {}),
+    ...(o.lane ? { lane: o.lane } : {}),
+    ...(o.hidden ? { hidden: true } : {}),
+  };
+  if (o.kind === "shape") {
+    return {
+      ...base,
+      shape: o.shape,
+      w: r(o.w),
+      h: r(o.h),
+      fill: o.fill,
+      ...(o.fillOpacity !== undefined ? { fillOpacity: r(o.fillOpacity) } : {}),
+      ...(o.radius ? { radius: o.radius } : {}),
+      ...(o.stroke ? { stroke: o.stroke } : {}),
+    };
+  }
+  if (o.kind === "sticker") {
+    return { ...base, assetId: o.assetId, w: r(o.w) };
+  }
+  if (o.kind === "effect") {
+    return {
+      ...base,
+      effect: o.effect,
+      amount: r(o.amount ?? 0.5),
+      ...(o.effect === "zoom"
+        ? { focus: { x: r(o.focus?.x ?? 0.5), y: r(o.focus?.y ?? 0.5) } }
+        : {}),
+    };
+  }
+  return {
+    ...base,
+    text: o.text,
     size: o.size,
     font: o.font,
     weight: o.weight,
     color: o.color,
     shadow: o.shadow,
     plate: o.plate,
+    ...(o.behindSubject ? { behindSubject: true } : {}),
+    ...(o.groupId ? { groupId: o.groupId } : {}),
     ...(o.plateRadius !== undefined && { plateRadius: r(o.plateRadius) }),
-    ...(o.lane ? { lane: o.lane } : {}),
-    ...(o.hidden ? { hidden: true } : {}),
   };
 }

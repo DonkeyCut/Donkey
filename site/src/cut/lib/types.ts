@@ -1,7 +1,22 @@
+import {
+  overlayKind,
+  stampOverlayKinds,
+  stripDefaultOverlayKinds,
+  type ColorGrade,
+  type EffectOverlay,
+  type LookStyle,
+  type OverlayBase,
+  type OverlayKind,
+  type ShapeKind,
+  type ShapeOverlay,
+  type StickerOverlay,
+  type TextOverlay as KitTextOverlay,
+  type WordAccentMode,
+} from "@donkeycut/effects-kit";
 import { getBackend, type CutBackend } from "./backend";
 import type { VideoProject } from "./genvideo/types";
 
-export type AssetType = "video" | "audio" | "image";
+export type AssetType = "video" | "audio" | "image" | "font";
 
 /** Default on-timeline length (seconds) a still image occupies when placed —
  * an image has no intrinsic duration, so the clip carries this as its `out`. */
@@ -43,6 +58,12 @@ export function normalizeAspect(a: string | undefined | null): Aspect | null {
   if (w > 999 || h > 999) return null;
   return `${w}:${h}`;
 }
+
+/** An overlay's center, held far enough inside the frame that the element it
+ * belongs to always has a grabbable piece on screen. Every path that writes a
+ * position — dragging in the preview, the inspector's own fields — passes
+ * through it, so no route can strand an element off-frame. */
+export const clampOverlayPos = (v: number) => Math.min(0.98, Math.max(0.02, v));
 
 /** Output frame in pixels. The short side is pinned to 1080 — the design
  * short side that text scaling and overlay math assume — and the long side
@@ -104,7 +125,7 @@ export interface StoredAsset {
    * drop, or upload), so it belongs in the Media panel. Any value marks media
    * Cut created or fetched — it lives where it was made (the timeline, a
    * generation panel, or an AI chat card) and is kept out of the Media panel. */
-  origin?: "voiceover" | "generated" | "recording" | "stock" | "freeze" | "chat";
+  origin?: "voiceover" | "generated" | "recording" | "stock" | "freeze" | "chat" | "sticker";
   /** BCP-47 of the audio's spoken language, when known (stamped on voiceovers
    * at synthesis) — what transcription should run its recognizer in. */
   language?: string;
@@ -247,20 +268,10 @@ export interface VideoClip {
   grade?: ColorGrade;
 }
 
-/** Per-clip manual color adjustments. Integer sliders, 0 = neutral; the whole
- * field is absent when every value is 0, so untouched clips carry nothing. */
-export interface ColorGrade {
-  brightness?: number; // -50..50
-  contrast?: number; // -50..50
-  saturation?: number; // -50..50
-  exposure?: number; // -50..50 (±1 EV)
-  temperature?: number; // -50..50, positive = warm
-  hue?: number; // -180..180 degrees
-}
-
-/** Slider range for every grade parameter except hue. */
-export const GRADE_MAX = 50;
-export const GRADE_HUE_MAX = 180;
+// Color grading (the dual-renderer math) lives in the effects kit; the model
+// types and ranges re-export here so doc-model consumers keep one import.
+export { GRADE_HUE_MAX, GRADE_MAX } from "@donkeycut/effects-kit";
+export type { ColorGrade } from "@donkeycut/effects-kit";
 
 /** Speed slider range. Typed entry and tools may go beyond it; SPEED_FLOOR is
  * the only hard bound, keeping rates positive so length math stays finite. */
@@ -269,6 +280,22 @@ export const SPEED_MAX = 4;
 export const SPEED_FLOOR = 0.05;
 /** Longest transition offered; also clamps against the clips it joins. */
 export const TRANSITION_MAX = 2;
+/** What a transition runs for when one is placed on a bare cut. */
+export const TRANSITION_DEFAULT_SECONDS = 0.5;
+
+/** A transition as a timeline object of its own: a bar on the transitions row
+ * at an absolute time, belonging to no clip. It plays when its window lines up
+ * with a place that has a handover to make — a cut it ends on, an open head it
+ * starts on, an open tail it ends on — and sits inert anywhere else. Clips
+ * moving or deleting leave it exactly where it is. */
+export interface TimelineTransition {
+  id: string;
+  /** Bar start on the timeline, seconds; the window is [start, start+seconds]. */
+  start: number;
+  /** Blend length, 0.1..TRANSITION_MAX. */
+  seconds: number;
+  style: TransitionStyle;
+}
 
 /** Effective whole-video fade length: the stored seconds, capped at half the
  * project so a fade-in and fade-out never overlap. The one clamp preview and
@@ -278,10 +305,12 @@ export function projectFadeSeconds(fade: number | undefined, duration: number): 
   return Math.max(0, Math.min(fade ?? 0, duration / 2));
 }
 
-/** How a clip hands off to the next one. Every style is a physical overlap:
- * the two clips run together for the transition length and the cut shortens
- * by it. Directional names describe the motion (pushleft pushes the frame
- * leftward; wipeleft's reveal edge travels leftward). */
+/** How a clip hands off to the next one. Every style is a render-time blend
+ * across the outgoing clip's last transition-length seconds: the incoming
+ * clip's first frame arrives over the live tail and playback hands over at
+ * the cut. Layout never moves. Directional names describe the motion
+ * (pushleft pushes the frame leftward; wipeleft's reveal edge travels
+ * leftward). */
 export type TransitionStyle =
   | "crossfade"
   | "crosszoom"
@@ -411,45 +440,54 @@ export function overlayAnimStyle(style: AnimStyle): "fade" | "zoom" {
   return style === "zoom" ? "zoom" : "fade";
 }
 
-/** Preset filter looks: a named color/effect treatment baked over a clip's
- * picture in both preview and export. */
-export type LookStyle =
-  | "vintage"
-  | "vhs"
-  | "horror"
-  | "halation"
-  | "tech"
-  | "noir"
-  | "grain"
-  | "pastel"
-  | "blockbuster"
-  | "dreamy";
-
-export const LOOK_IDS: LookStyle[] = [
-  "vintage",
-  "vhs",
-  "horror",
-  "halation",
-  "tech",
-  "noir",
-  "grain",
-  "pastel",
-  "blockbuster",
-  "dreamy",
-];
-
-export const LOOK_LABELS: Record<LookStyle, string> = {
-  vintage: "Vintage",
-  vhs: "VHS",
-  horror: "Analogue horror",
-  halation: "Halation",
-  tech: "Modern tech",
-  noir: "Noir",
-  grain: "Film grain",
-  pastel: "Pastel",
-  blockbuster: "Blockbuster",
-  dreamy: "Dreamy",
+/**
+ * The entrance/exit a transition style becomes on an open edge.
+ *
+ * A cut has two pictures to blend; a clip's head or tail has one and nothing
+ * against it, so the same drag reads as the clip arriving or leaving. The
+ * directional styles keep their direction, the zooms keep their push, and the
+ * shaped wipes — which need a second picture to reveal — come through as the
+ * ramp closest to them.
+ */
+const EDGE_ANIM: Record<TransitionStyle, AnimStyle> = {
+  crossfade: "fade",
+  dipblack: "fade",
+  dipwhite: "fade",
+  blur: "fade",
+  crosszoom: "zoom",
+  circleopen: "pop",
+  circleclose: "pop",
+  splitopen: "pop",
+  splitclose: "pop",
+  pushleft: "slideleft",
+  pushright: "slideright",
+  pushup: "slideup",
+  pushdown: "slidedown",
+  wipeleft: "slideleft",
+  wiperight: "slideright",
+  wipeup: "slideup",
+  wipedown: "slidedown",
 };
+
+const ANIM_TRANSITION: Record<AnimStyle, TransitionStyle> = {
+  fade: "crossfade",
+  zoom: "crosszoom",
+  pop: "circleopen",
+  slideleft: "pushleft",
+  slideright: "pushright",
+  slideup: "pushup",
+  slidedown: "pushdown",
+};
+
+export const animStyleOfTransition = (style: TransitionStyle): AnimStyle => EDGE_ANIM[style];
+
+export const transitionStyleOfAnim = (style: AnimStyle): TransitionStyle =>
+  ANIM_TRANSITION[style] ?? "crossfade";
+
+// Looks (dual preview/export recipes) live in the effects kit; the ids and
+// labels re-export here so doc-model consumers keep one import.
+export { LOOK_IDS, LOOK_LABELS } from "@donkeycut/effects-kit";
+export type { LookStyle } from "@donkeycut/effects-kit";
 
 /** Migrate docs saved before per-clip animations existed: the retired edge
  * transition styles (fadein/fadeout/zoomin/zoomout ramped one side of a hard
@@ -575,13 +613,15 @@ export interface LibraryTemplate {
   media: TemplateMedia[];
   layers: TemplateLayer[];
   audio: TemplateAudio[];
-  texts: TextOverlay[];
+  texts: Overlay[];
   cues: SubtitleCue[];
 }
 /** What the client sends to save a selection (media are project file names). */
 export type TemplateSaveInput = Omit<LibraryTemplate, "id" | "addedAt">;
 
-export type FontId = "sf" | "serif" | "rounded" | "mono" | "impact";
+/** A font id: one of the base system set, a bundled Google family, or an
+ * uploaded font ("asset:<assetId>"). Unknown ids fall back tolerantly. */
+export type FontId = string;
 
 export interface FontDef {
   id: FontId;
@@ -589,6 +629,7 @@ export interface FontDef {
   stack: string;
 }
 
+/** The base system font set, available everywhere with no loading step. */
 export const FONTS: FontDef[] = [
   { id: "sf", label: "SF Pro", stack: '-apple-system, "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif' },
   { id: "serif", label: "New York", stack: '"New York", ui-serif, Georgia, "Times New Roman", serif' },
@@ -597,43 +638,103 @@ export const FONTS: FontDef[] = [
   { id: "impact", label: "Impact", stack: 'Impact, "Arial Black", "Helvetica Neue", sans-serif' },
 ];
 
-export const fontStack = (id: FontId) =>
-  FONTS.find((f) => f.id === id)?.stack ?? FONTS[0].stack;
+// Fonts registered at runtime: the bundled Google families (build-time
+// self-hosted via next/font) and per-project uploaded fonts. The page
+// registers them before text renders; the engine imports this module but
+// never rasterizes, so an empty registry there is fine.
+const registeredFonts: FontDef[] = [];
+const fontListeners = new Set<() => void>();
 
-export interface TextOverlay {
-  id: string;
-  text: string;
-  start: number; // timeline seconds
-  end: number;
-  x: number; // center, fraction of frame width 0..1
-  y: number; // center, fraction of frame height 0..1
-  size: number; // px at a 1080-wide frame
-  font: FontId;
-  weight: 400 | 700;
-  color: string;
-  shadow: boolean;
-  plate: boolean; // rounded plate behind the text
-  plateRadius?: number; // plate corner radius in em (default PLATE_RADIUS)
-  plateColor?: string; // plate fill color (default black)
-  plateOpacity?: number; // plate fill opacity 0..1 (default PLATE_OPACITY)
-  /** Which title track (row) this sits on, 0-based. Tracks are kept
-   * contiguous: empty ones collapse and dragging past the last adds one. */
-  lane?: number;
-  /** Hidden titles stay on the timeline (grayed) but are excluded from the
-   * played/exported picture. */
-  hidden?: boolean;
-  /** Karaoke burn-in: index of the display word (whitespace-split across all
-   * lines) drawn per the accent treatment — recolored, underlined, or on an
-   * accent box with a contrast text color. */
-  highlightWord?: number;
-  highlightColor?: string;
-  highlightMode?: WordAccentMode;
-  highlightText?: string;
+export function registerFonts(defs: FontDef[]): void {
+  let added = false;
+  for (const d of defs) {
+    if (FONTS.some((f) => f.id === d.id) || registeredFonts.some((f) => f.id === d.id)) continue;
+    registeredFonts.push(d);
+    added = true;
+  }
+  if (added) for (const cb of fontListeners) cb();
 }
 
-/** How the spoken word lights up in karaoke mode: accent color only, accent
- * color plus underline, or an accent box behind the word. */
-export type WordAccentMode = "color" | "underline" | "box";
+/** Remove runtime fonts by id (a deleted font asset drops out of the menu). */
+export function unregisterFonts(ids: string[]): void {
+  let removed = false;
+  for (const id of ids) {
+    const i = registeredFonts.findIndex((f) => f.id === id);
+    if (i >= 0) {
+      registeredFonts.splice(i, 1);
+      removed = true;
+    }
+  }
+  if (removed) for (const cb of fontListeners) cb();
+}
+
+/** Every available font: the base set plus everything registered. */
+export function allFonts(): FontDef[] {
+  return [...FONTS, ...registeredFonts];
+}
+
+/** The registry id an uploaded font asset answers to. */
+export const uploadedFontId = (assetId: string) => `asset:${assetId}`;
+
+/** Subscribe to registry changes (UI font menus re-render on registration). */
+export function onFontsChanged(cb: () => void): () => void {
+  fontListeners.add(cb);
+  return () => fontListeners.delete(cb);
+}
+
+/** CSS stack for a font id, tolerant of unknown ids (falls back to the first
+ * font) so kit-typed elements and older docs always resolve to something. */
+export const fontStack = (id: string) =>
+  FONTS.find((f) => f.id === id)?.stack ??
+  registeredFonts.find((f) => f.id === id)?.stack ??
+  FONTS[0].stack;
+
+/** Cut's text element: the kit's, with the font narrowed to the app's ids.
+ * `kind` may be absent (docs written before shapes/stickers existed store
+ * bare titles); the loader stamps `"text"` and the serializer strips it. */
+export interface TextOverlay extends KitTextOverlay {
+  font: FontId;
+}
+
+/** Every overlay element kind on the title lanes. Lane order is the single
+ * z-order authority, whatever the kind. */
+export type Overlay = TextOverlay | ShapeOverlay | StickerOverlay | EffectOverlay;
+
+/** An element's place in the stack: lane 0 is the top row, and a bigger lane
+ * number sits further under it. Every renderer stacks by this. */
+export const laneOf = (o: { lane?: number }) => o.lane ?? 0;
+
+export const isTextOverlay = (o: Overlay): o is TextOverlay => (o.kind ?? "text") === "text";
+export const isShapeOverlay = (o: Overlay): o is ShapeOverlay => o.kind === "shape";
+export const isStickerOverlay = (o: Overlay): o is StickerOverlay => o.kind === "sticker";
+export const isEffectOverlay = (o: Overlay): o is EffectOverlay => o.kind === "effect";
+
+export const SHAPE_LABELS: Record<ShapeKind, string> = {
+  rect: "Rectangle",
+  ellipse: "Ellipse",
+  line: "Line",
+  arrow: "Arrow",
+};
+
+/** A patch that may touch any kind's fields (never the discriminant). The
+ * kit's shape, narrowed to the app's font ids. */
+export type OverlayPatch = Partial<
+  Omit<TextOverlay, "kind"> &
+    Omit<ShapeOverlay, "kind"> &
+    Omit<StickerOverlay, "kind"> &
+    Omit<EffectOverlay, "kind">
+>;
+
+export { overlayKind, stampOverlayKinds, stripDefaultOverlayKinds };
+export type {
+  EffectOverlay,
+  OverlayBase,
+  OverlayKind,
+  ShapeKind,
+  ShapeOverlay,
+  StickerOverlay,
+  WordAccentMode,
+};
 
 /** One subtitle caption, timed against the timeline (not the source files). */
 export interface SubtitleCue {
@@ -724,8 +825,9 @@ export const emptySubtitles = (): SubtitlesBlock => ({
 export type Selection =
   | { kind: "clip"; id: string }
   | { kind: "audio"; id: string }
-  | { kind: "text"; id: string }
+  | { kind: "overlay"; id: string }
   | { kind: "cue"; id: string }
+  | { kind: "transition"; id: string }
   | null;
 
 export interface ClipSpan {
@@ -733,8 +835,10 @@ export interface ClipSpan {
   asset: MediaAsset;
   start: number; // timeline start
   len: number; // own timeline footprint (source length / speed)
-  /** Cross-dissolve overlap into the next span, in timeline seconds. The next
-   * span's start already sits `transitionOut` earlier, so the two intersect. */
+  /** Blend length into the next span, in timeline seconds: the window
+   * `[end - transitionOut, end]` where the next clip's first frame arrives
+   * over this clip's live tail. Spans never intersect — the next one starts
+   * exactly at this one's end, and plays from its head there. */
   transitionOut: number;
 }
 
@@ -753,6 +857,9 @@ export interface ShareFeatures {
 export type SidePanelTab =
   | "media"
   | "library"
+  | "elements"
+  | "effects"
+  | "transitions"
   | "video"
   | "image"
   | "audio"
@@ -770,10 +877,14 @@ export interface ProjectDoc {
    * folds that shape into this one. */
   clips: VideoClip[];
   audioClips: AudioClip[];
+  /** Transition bars, free objects on the transitions row. Older docs stored
+   * transitions and edge animations as clip fields; the loader converts those
+   * into bars once. */
+  transitions?: TimelineTransition[];
   /** Legacy: video clips on tracks other than 0, kept a separate array in older
    * docs. Read on open and merged into `clips`; new saves never write it. */
   overlayClips?: VideoClip[];
-  overlays: TextOverlay[];
+  overlays: Overlay[];
   /** Output frame; absent in older projects (which are all 9:16). */
   aspect?: Aspect;
   /** Whole-video fades, seconds: in from black at the start, out to black at

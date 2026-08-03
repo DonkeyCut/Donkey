@@ -19,8 +19,7 @@
  * it was reached by playing there or by rendering the 135th frame.
  */
 
-import { gradeTint, gradeToCssFilter, isNeutralGrade } from "./colorGrade";
-import { grainTile, lookCssFilter, lookPost } from "./looks";
+import { gradeTint, gradeToCssFilter, grainTile, isNeutralGrade, lookCssFilter, lookPost } from "@donkeycut/effects-kit";
 import { isFullRect, rectOf } from "./types";
 import type { FrameRect, TransitionStyle, VideoClip } from "./types";
 
@@ -454,12 +453,22 @@ export class FrameCompositor {
       ctx.restore();
     };
     // Only the absence of an incoming clip cancels the transition. One whose
-    // picture merely hasn't decoded yet still runs its style: the geometry —
-    // a dip's veil, a circle's clip path — is what the frame should look like
-    // mid-transition, and skipping it flashes the outgoing clip at full
-    // brightness for as long as the decoder lags. `drawLayer` declines to draw
-    // the pending picture itself.
+    // picture merely hasn't decoded yet still runs the layered styles: a dip's
+    // veil and a fade's ramp sit over the master, so the geometry is what the
+    // frame should look like mid-transition. The region styles are different —
+    // a push shoves the master aside and a circle carves it away, and with no
+    // incoming picture yet the vacated region renders black — so those hold
+    // the master in place until the frame decodes.
     if (d.incFrame.kind === "missing" || p <= 0) {
+      drawMaster();
+      return;
+    }
+    const carves =
+      style.startsWith("push") ||
+      style.startsWith("wipe") ||
+      style.startsWith("circle") ||
+      style.startsWith("split");
+    if (carves && d.incFrame.kind === "pending") {
       drawMaster();
       return;
     }

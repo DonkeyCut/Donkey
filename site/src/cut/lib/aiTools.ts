@@ -1,5 +1,19 @@
 "use client";
 
+import {
+  autoGradeFromImageData,
+  EFFECT_IDS,
+  normalizeGrade,
+  type EffectId,
+  OVERLAY_ANIM_DEFAULT_SECONDS,
+  OVERLAY_ANIM_MAX_SECONDS,
+  OVERLAY_ANIM_MIN_SECONDS,
+  OVERLAY_ANIM_STYLE_IDS,
+  OVERLAY_LOOP_STYLE_IDS,
+  type OverlayAnim,
+  type OverlayAnimStyle,
+  type OverlayLoopStyle,
+} from "@donkeycut/effects-kit";
 import { apiFetch, apiJson, getBackend } from "./backend";
 import { refFromAsset, refFromStockVideo, type AssetRef } from "./assetRef";
 import { chatOwner, tagChatAsset } from "./chatAssets";
@@ -30,15 +44,15 @@ import {
   makeStillSheetClientSide,
   renderAudioSpanWav,
 } from "./media";
+import { isLottieAsset } from "./lottieAssets";
 import { BREATH, REACH, refineEdge, type SilenceSpan } from "./cutRefine";
 import { requestSidePanel, SIDE_PANEL_TABS } from "./panelRequest";
 import { blobToInlineAudio, refToInlineAudio, visualRefs, type InlineImage } from "./refMedia";
 import { characterPrompt, stockAspectDims, stockTitle } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
-import { applyOverlayPatchSettled, track0Clips, trackGapAt, getClipSpans, nextFreeStart, overlayLayers, TIMELINE_H_MAX, TIMELINE_H_MIN, totalDuration, useEditor } from "./store";
+import { applyOverlayPatchSettled, track0Clips, laneGapAt, getClipSpans, nextFreeStart, overlayLayers, TIMELINE_H_MAX, TIMELINE_H_MIN, totalDuration, useEditor } from "./store";
 import { buildAiContext } from "./aiContext";
-import { autoGradeFromImageData, normalizeGrade } from "./colorGrade";
 import { sampleClipFrameData } from "./previewCanvas";
 import { laneCues, subtitleLaneCount } from "./subtitles";
 import { synthesizeMusic } from "./audioGen";
@@ -48,12 +62,13 @@ import { resolveVoice, synthesizeSpeech, SPEECH_VOICES } from "./tts";
 import { defaultVideoAspects } from "./videoModels";
 import { DUCK_DEFAULT, generateSubtitlesReadout } from "./voiceover";
 import {
+  allFonts,
   ANIM_DEFAULT_SECONDS,
   ANIM_STYLE_IDS,
   frameOf,
   IMAGE_CLIP_SECONDS,
+  isTextOverlay,
   LAYOUTS,
-  LOOK_IDS,
   MAX_SUBTITLE_LANES,
   mediaUrl,
   nearestAspect,
@@ -61,6 +76,7 @@ import {
   overlayAnimStyle,
   rectOf,
   regionLabel,
+  SHAPE_LABELS,
   SPEED_FLOOR,
   TRANSITION_STYLE_IDS,
   type AnimStyle,
@@ -69,6 +85,7 @@ import {
   type FontId,
   type MediaAsset,
   type Selection,
+  type ShapeKind,
   type SidePanelTab,
   type TransitionStyle,
   type VideoClip,
@@ -333,18 +350,19 @@ export async function runAiTool(
       }
       const id = String(input.id ?? "");
       // A video clip on any track selects as "clip"; "overlayClip" is accepted
-      // as a legacy alias for a layer clip and resolves the same way.
+      // as a legacy alias for a layer clip and "text" for an overlay element.
       const pool =
         kind === "clip" || kind === "overlayClip"
           ? s.clips
           : kind === "audio"
             ? s.audioClips
-            : kind === "text"
+            : kind === "overlay" || kind === "text"
               ? s.overlays
               : null;
       if (!pool) throw new ToolError(`Unknown kind: ${kind}`);
       if (!pool.some((x) => x.id === id)) throw new ToolError(`No ${kind} with id ${id}.`);
-      const selKind = kind === "overlayClip" ? "clip" : (kind as "clip" | "audio" | "text");
+      const selKind =
+        kind === "overlayClip" ? "clip" : kind === "text" ? "overlay" : (kind as "clip" | "audio" | "overlay");
       s.select({ kind: selKind, id });
       return { selection: { kind: selKind, id } };
     }
@@ -709,7 +727,7 @@ export async function runAiTool(
     }
 
     case "delete_item": {
-      const kind = String(input.kind) as "clip" | "overlayClip" | "audio" | "text";
+      const kind = String(input.kind) as "clip" | "overlayClip" | "audio" | "overlay" | "text";
       const id = String(input.id ?? "");
       const pool =
         kind === "clip" || kind === "overlayClip"
@@ -718,7 +736,8 @@ export async function runAiTool(
             ? s.audioClips
             : s.overlays;
       if (!pool.some((x) => x.id === id)) throw new ToolError(`No ${kind} with id ${id}.`);
-      const selKind = kind === "overlayClip" ? "clip" : (kind as "clip" | "audio" | "text");
+      const selKind =
+        kind === "overlayClip" ? "clip" : kind === "text" ? "overlay" : (kind as "clip" | "audio" | "overlay");
       s.select({ kind: selKind, id });
       s.deleteSelection();
       return { deleted: { kind: selKind, id } };
@@ -727,9 +746,10 @@ export async function runAiTool(
     case "remove_gap": {
       if (!isNum(input.at)) throw new ToolError("at (seconds) is required.");
       const track = isNum(input.track) ? input.track : 0;
-      const gap = trackGapAt(s.clips, track, input.at);
+      const lane = { kind: "video", index: track } as const;
+      const gap = laneGapAt(s, lane, input.at);
       if (!gap) throw new ToolError(`No track-${track} gap at ${input.at}s — pass a time inside the empty span.`);
-      s.removeGap(track, input.at);
+      s.removeLaneGap(lane, input.at);
       return { closed: { track, ...gap } };
     }
 
@@ -738,19 +758,165 @@ export async function runAiTool(
         throw new ToolError("text is required.");
       if (isNum(input.start)) s.seek(input.start);
       s.addOverlay();
-      const cur = useEditor.getState();
-      const sel = cur.selection;
-      if (sel?.kind !== "text") throw new ToolError("Could not create the title.");
-      applyOverlayPatchSettled(sel.id, titlePatch({ ...input, id: sel.id }));
+      const sel = useEditor.getState().selection;
+      if (sel?.kind !== "overlay") throw new ToolError("Could not create the title.");
+      applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "text"));
       const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
-      return { id: o.id, text: o.text, start: o.start, end: o.end };
+      return { id: o.id, ...(isTextOverlay(o) ? { text: o.text } : {}), start: o.start, end: o.end };
     }
 
-    case "update_title": {
-      const o = requireItem(s.overlays, input.id, "title");
-      s.updateOverlay(o.id, titlePatch(input));
+    case "add_shape": {
+      const shape = String(input.shape) as ShapeKind;
+      if (!(shape in SHAPE_LABELS)) throw new ToolError("shape must be rect, ellipse, line, or arrow.");
+      if (isNum(input.start)) s.seek(input.start);
+      s.addShape(shape);
+      const sel = useEditor.getState().selection;
+      if (sel?.kind !== "overlay") throw new ToolError("Could not create the shape.");
+      applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "shape"));
+      const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
+      return { id: o.id, shape, start: round2(o.start), end: round2(o.end) };
+    }
+
+    case "add_sticker": {
+      const assetId = typeof input.asset_id === "string" && input.asset_id ? input.asset_id : undefined;
+      if (!assetId) throw new ToolError("Pass asset_id.");
+      const stickerAsset = s.assets.find((a) => a.id === assetId);
+      if (stickerAsset?.type !== "image") throw new ToolError(`No image asset with id ${assetId}.`);
+      if (isNum(input.start)) s.seek(input.start);
+      s.addSticker({ assetId, ...(isLottieAsset(stickerAsset) ? { lottie: true } : {}) });
+      const sel = useEditor.getState().selection;
+      if (sel?.kind !== "overlay") throw new ToolError("Could not create the sticker.");
+      applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "sticker"));
+      const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
+      return { id: o.id, assetId, start: round2(o.start), end: round2(o.end) };
+    }
+
+    case "add_effect": {
+      const effect = String(input.effect ?? "");
+      if (!(EFFECT_IDS as string[]).includes(effect))
+        throw new ToolError(`effect must be one of ${EFFECT_IDS.join(", ")}.`);
+      if (isNum(input.start)) s.seek(input.start);
+      s.addEffect(effect as EffectId);
+      const sel = useEditor.getState().selection;
+      if (sel?.kind !== "overlay") throw new ToolError("Could not create the effect.");
+      applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "effect"));
+      // Where a zoom holds: the rest of the effects fill the frame, so the
+      // point only means anything for this one.
+      if (effect === "zoom" && (isNum(input.focus_x) || isNum(input.focus_y))) {
+        useEditor.getState().updateOverlay(sel.id, {
+          focus: {
+            x: clamp(isNum(input.focus_x) ? input.focus_x : 0.5, 0, 1),
+            y: clamp(isNum(input.focus_y) ? input.focus_y : 0.5, 0, 1),
+          },
+        });
+      }
+      const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
+      return { id: o.id, effect, start: round2(o.start), end: round2(o.end) };
+    }
+
+    case "create_sticker": {
+      const idea = String(input.idea ?? "").trim();
+      if (!idea) throw new ToolError("idea is required.");
+      if (!s.projectId) throw new ToolError("No project open.");
+      const { createCustomSticker } = await import("./stickerCreate");
+      const asset = await createCustomSticker(s.projectId, idea);
+      if (isNum(input.start)) s.seek(input.start);
+      useEditor.getState().addSticker({ assetId: asset.id });
+      const sel = useEditor.getState().selection;
+      if (sel?.kind !== "overlay") throw new ToolError("Could not place the sticker.");
+      applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "sticker"));
+      const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
+      return { id: o.id, assetId: asset.id, start: round2(o.start), end: round2(o.end) };
+    }
+
+    case "set_overlay_animation": {
+      const o = requireItem(s.overlays, input.id, "overlay element");
+      const anim: OverlayAnim = { ...(o.anim ?? {}) };
+      const edge = (slot: "in" | "out", styleKey: string, secondsKey: string) => {
+        const raw = input[styleKey];
+        const secs = isNum(input[secondsKey])
+          ? clamp(input[secondsKey], OVERLAY_ANIM_MIN_SECONDS, OVERLAY_ANIM_MAX_SECONDS)
+          : undefined;
+        if (typeof raw === "string") {
+          if (raw === "none") {
+            delete anim[slot];
+            return;
+          }
+          if (!(OVERLAY_ANIM_STYLE_IDS as string[]).includes(raw))
+            throw new ToolError(`Unknown ${slot} style: ${raw}`);
+          if (raw === "typewriter" && (o.kind ?? "text") !== "text")
+            throw new ToolError("typewriter animates titles only.");
+          anim[slot] = {
+            style: raw as OverlayAnimStyle,
+            seconds: secs ?? anim[slot]?.seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS,
+          };
+        } else if (secs !== undefined && anim[slot]) {
+          anim[slot] = { ...anim[slot]!, seconds: secs };
+        }
+      };
+      edge("in", "in_style", "in_seconds");
+      edge("out", "out_style", "out_seconds");
+      const rawLoop = input.loop_style;
+      const speed = isNum(input.loop_speed) ? clamp(input.loop_speed, 0.25, 4) : undefined;
+      if (typeof rawLoop === "string") {
+        if (rawLoop === "none") delete anim.loop;
+        else if (!(OVERLAY_LOOP_STYLE_IDS as string[]).includes(rawLoop))
+          throw new ToolError(`Unknown loop style: ${rawLoop}`);
+        else anim.loop = { style: rawLoop as OverlayLoopStyle, speed: speed ?? anim.loop?.speed ?? 1 };
+      } else if (speed !== undefined && anim.loop) {
+        anim.loop = { ...anim.loop, speed };
+      }
+      s.updateOverlay(o.id, { anim: anim.in || anim.out || anim.loop ? anim : undefined });
       const next = useEditor.getState().overlays.find((x) => x.id === o.id)!;
-      return { id: next.id, text: next.text, color: next.color, size: next.size };
+      return { id: next.id, anim: next.anim ?? null };
+    }
+
+    case "set_overlay_keyframes": {
+      const o = requireItem(s.overlays, input.id, "overlay element");
+      const raw = input.keys;
+      if (!Array.isArray(raw)) throw new ToolError("keys must be a list.");
+      const dur = Math.max(0.1, o.end - o.start);
+      let kf = o.kf;
+      if (raw.length === 0) {
+        s.clearOverlayKeys(o.id);
+        kf = undefined;
+      } else {
+        // Each key builds on the pose already at its time, so a key that only
+        // names `x` keeps whatever the element was doing otherwise.
+        s.pushHistory();
+        for (const k of raw as Record<string, unknown>[]) {
+          if (!isNum(k.t)) throw new ToolError("Every key needs a time `t`.");
+          s.setOverlayKey(
+            o.id,
+            clamp(k.t, 0, dur),
+            {
+              ...(isNum(k.x) ? { x: clamp(k.x, 0.02, 0.98) } : {}),
+              ...(isNum(k.y) ? { y: clamp(k.y, 0.02, 0.98) } : {}),
+              ...(isNum(k.scale) ? { scale: clamp(k.scale, 0.1, 4) } : {}),
+              ...(isNum(k.rotation) ? { rotation: clamp(Math.round(k.rotation), -180, 180) } : {}),
+              ...(isNum(k.opacity) ? { opacity: clamp(k.opacity, 0, 1) } : {}),
+            },
+            { transient: true }
+          );
+        }
+        kf = useEditor.getState().overlays.find((x) => x.id === o.id)?.kf;
+      }
+      return { id: o.id, keys: (kf ?? []).map((k) => ({ ...k, t: round2(k.t) })) };
+    }
+
+    // "update_title" stays as an alias so older threads keep working.
+    case "update_title":
+    case "update_overlay": {
+      const o = requireItem(s.overlays, input.id, "overlay element");
+      s.updateOverlay(o.id, overlayPatch(input, o.kind ?? "text"));
+      const next = useEditor.getState().overlays.find((x) => x.id === o.id)!;
+      return {
+        id: next.id,
+        kind: next.kind ?? "text",
+        ...(isTextOverlay(next) ? { text: next.text, color: next.color, size: next.size } : {}),
+        start: round2(next.start),
+        end: round2(next.end),
+      };
     }
 
     case "update_audio": {
@@ -1382,7 +1548,7 @@ export async function runAiTool(
       const sels = ids.map((id): NonNullable<Selection> => {
         if (s.clips.some((c) => c.id === id)) return { kind: "clip", id };
         if (s.audioClips.some((c) => c.id === id)) return { kind: "audio", id };
-        if (s.overlays.some((o) => o.id === id)) return { kind: "text", id };
+        if (s.overlays.some((o) => o.id === id)) return { kind: "overlay", id };
         if (s.subtitles.cues.some((c) => c.id === id)) return { kind: "cue", id };
         throw new ToolError(`No timeline item with id ${id}. Call get_state for current ids.`);
       });
@@ -1884,20 +2050,6 @@ export async function runAiTool(
       return { id: next.id, which, style: anim?.style ?? "none", seconds: anim?.seconds ?? 0 };
     }
 
-    case "set_look": {
-      const clip = requireItem(s.clips, input.clipId, "video clip");
-      if (input.style === "none") {
-        s.setClipLook(clip.id, null);
-        return { id: clip.id, look: "none" };
-      }
-      const style = LOOK_IDS.find((x) => x === input.style);
-      if (!style)
-        throw new ToolError(`Unknown look. Use one of: ${LOOK_IDS.join(", ")}, none.`);
-      s.setClipLook(clip.id, style, isNum(input.amount) ? input.amount : undefined);
-      const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
-      return { id: next.id, look: next.look ?? "none", amount: next.lookAmount ?? 1 };
-    }
-
     case "merge_cue": {
       const cue = requireItem(s.subtitles.cues, input.id, "subtitle cue");
       const mates = laneCues(s.subtitles, cue.lane ?? 0);
@@ -2348,21 +2500,75 @@ async function launchVideoJob(
   };
 }
 
-function titlePatch(input: Record<string, unknown>) {
+/** Sanitize an overlay-element patch from tool input: shared fields (timing,
+ * position, rotation, opacity, hidden) plus the target kind's own fields.
+ * Outline width is em for text (scales with the type) and design px for
+ * shapes, so the interpretation follows the element being patched. */
+function overlayPatch(input: Record<string, unknown>, kind: "text" | "shape" | "sticker" | "effect") {
   const patch: Record<string, unknown> = {};
-  if (typeof input.text === "string" && input.text.trim()) patch.text = input.text;
   if (isNum(input.start)) patch.start = Math.max(0, input.start);
   if (isNum(input.end)) patch.end = input.end;
   if (isNum(input.x)) patch.x = clamp(input.x, 0.02, 0.98);
   if (isNum(input.y)) patch.y = clamp(input.y, 0.02, 0.98);
-  if (isNum(input.size)) patch.size = clamp(Math.round(input.size), 16, 320);
-  if (typeof input.color === "string") patch.color = input.color;
-  if (["sf", "serif", "rounded", "mono", "impact"].includes(String(input.font)))
-    patch.font = input.font as FontId;
-  if (input.weight === 400 || input.weight === 700) patch.weight = input.weight;
-  if (typeof input.shadow === "boolean") patch.shadow = input.shadow;
-  if (typeof input.plate === "boolean") patch.plate = input.plate;
-  if (isNum(input.plateRadius)) patch.plateRadius = clamp(input.plateRadius, 0, 1);
+  if (isNum(input.rotation))
+    patch.rotation = Math.round(clamp(input.rotation, -180, 180)) || undefined;
+  if (isNum(input.opacity))
+    patch.opacity = input.opacity >= 0.995 ? undefined : clamp(input.opacity, 0, 1);
   if (typeof input.hidden === "boolean") patch.hidden = input.hidden || undefined;
+
+  if (kind === "text") {
+    if (typeof input.text === "string" && input.text.trim()) patch.text = input.text;
+    if (isNum(input.size)) patch.size = clamp(Math.round(input.size), 16, 320);
+    if (typeof input.color === "string") patch.color = input.color;
+    // Only ids the registry knows: an unknown one resolves to the default
+    // face, so storing it would silently render a font the user never chose
+    // and leave the Inspector's font menu blank.
+    if (typeof input.font === "string" && allFonts().some((f) => f.id === input.font))
+      patch.font = input.font as FontId;
+    if (input.weight === 400 || input.weight === 700) patch.weight = input.weight;
+    if (typeof input.italic === "boolean") patch.italic = input.italic || undefined;
+    if (["left", "center", "right"].includes(String(input.align)))
+      patch.align = input.align === "center" ? undefined : input.align;
+    if (isNum(input.letter_spacing))
+      patch.letterSpacing = Math.abs(input.letter_spacing) < 0.0025 ? undefined : clamp(input.letter_spacing, -0.05, 0.5);
+    if (isNum(input.line_height))
+      patch.lineHeight = Math.abs(input.line_height - 1.25) < 0.01 ? undefined : clamp(input.line_height, 0.7, 2.5);
+    if (typeof input.shadow === "boolean") patch.shadow = input.shadow;
+    if (typeof input.plate === "boolean") patch.plate = input.plate;
+    if (typeof input.behind_subject === "boolean") patch.behindSubject = input.behind_subject || undefined;
+    if (isNum(input.plateRadius)) patch.plateRadius = clamp(input.plateRadius, 0, 1);
+    if (typeof input.stroke_color === "string" || isNum(input.stroke_width)) {
+      const width = isNum(input.stroke_width) ? clamp(input.stroke_width, 0, 0.3) : 0.04;
+      patch.stroke =
+        width > 0
+          ? { color: typeof input.stroke_color === "string" ? input.stroke_color : "#111114", width }
+          : undefined;
+    }
+    return patch;
+  }
+
+  if (kind === "shape") {
+    if (isNum(input.w)) patch.w = clamp(input.w, 0.01, 2);
+    if (isNum(input.h)) patch.h = clamp(input.h, 0.002, 2);
+    if (typeof input.fill === "string") patch.fill = input.fill;
+    if (isNum(input.fill_opacity))
+      patch.fillOpacity = input.fill_opacity >= 0.995 ? undefined : clamp(input.fill_opacity, 0, 1);
+    if (isNum(input.radius)) patch.radius = clamp(input.radius, 0, 200) || undefined;
+    if (typeof input.stroke_color === "string" || isNum(input.stroke_width)) {
+      const width = isNum(input.stroke_width) ? clamp(input.stroke_width, 0, 60) : 6;
+      patch.stroke =
+        width > 0
+          ? { color: typeof input.stroke_color === "string" ? input.stroke_color : "#111114", width }
+          : undefined;
+    }
+    return patch;
+  }
+
+  if (kind === "effect") {
+    if (isNum(input.amount)) patch.amount = clamp(input.amount, 0.05, 1);
+    return patch;
+  }
+
+  if (isNum(input.w)) patch.w = clamp(input.w, 0.02, 1.5);
   return patch;
 }

@@ -25,20 +25,19 @@ describe("foldClips", () => {
     expect(geo.every((g) => g.fadeIn === 0 && g.fadeOut === 0)).toBe(true);
   });
 
-  test("pulls a clip back by the dissolve it inherits", () => {
+  test("fades the outgoing clip across the blend and joins hard at the cut", () => {
     const geo = foldClips([clip({ transition: 1 }), clip()]);
     expect(geo[0].at).toBe(0);
-    // The second clip starts a second early so the two overlap.
-    expect(geo[1].at).toBe(3);
+    // The second clip starts exactly at the cut — a transition claims no layout.
+    expect(geo[1].at).toBe(4);
     expect(geo[0].fadeOut).toBe(1);
-    expect(geo[1].fadeIn).toBe(1);
+    expect(geo[1].fadeIn).toBe(0);
   });
 
-  test("scales a dissolve down so it cannot swallow its clips", () => {
-    // A two-second overlap between one-second clips would run past both.
+  test("scales a blend down so it cannot swallow its clip", () => {
     const geo = foldClips([clip({ out: 1, transition: 2 }), clip({ out: 1 })]);
     expect(geo[0].fadeOut).toBeLessThanOrEqual(0.9);
-    expect(geo[1].at).toBeGreaterThan(0);
+    expect(geo[1].at).toBe(1);
   });
 
   test("counts a speed change against the footprint, not the source span", () => {
