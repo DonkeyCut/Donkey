@@ -2,20 +2,20 @@
 
 import { apiFetch, apiJson, getBackend, type CutBackend } from "./backend";
 import { quotaErrorMessage } from "./backend/cloud";
-import { normalizeGrade } from "./colorGrade";
 import { renderProjectToMp4 } from "./exportRender";
 import { putSigned } from "./media";
 import { clipSpeed, getClipSpans, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
 import { captionStyle, cueOverlay, cueWordWindows, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
-import { renderOverlayPng } from "./textRender";
-import { frameOf, overlayAnimStyle } from "./types";
+import { isOverlayAnimated, normalizeGrade } from "@donkeycut/effects-kit";
+import { renderElementFrames, renderElementPng } from "./textRender";
+import { frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle } from "./types";
 import type {
   Aspect,
   AudioClip,
   ClipAnim,
   MediaAsset,
+  Overlay,
   SubtitlesBlock,
-  TextOverlay,
   VideoClip,
 } from "./types";
 
@@ -171,7 +171,7 @@ export interface ExportDoc {
   /** Every video clip, any track (track 0 folds sequentially, others composite). */
   clips: VideoClip[];
   audioClips: AudioClip[];
-  overlays: TextOverlay[];
+  overlays: Overlay[];
   subtitles: SubtitlesBlock;
   /** Whole-video fades (seconds): in from black / out to black on the final
    * composite. */
@@ -343,14 +343,90 @@ async function buildExportPayload(
       duck: a.duck,
     }));
 
-  const overlays: { file: string; start: number; end: number }[] = [];
+  // Text-behind-speaker: the mask video renders first so the loop below tags
+  // behind elements only when the effect will actually composite (no person
+  // segmenter, or no person → the text stays a normal front title).
+  let behindMask: { file: string; from: number } | undefined;
+  if (doc.overlays.some((o) => isTextOverlay(o) && !!o.behindSubject && !o.hidden)) {
+    const mask = await import("./maskVideo")
+      .then((m) => m.renderBehindMask(doc, duration))
+      .catch(() => null);
+    if (mask) {
+      pngs.push({ name: "behind_mask.mp4", blob: mask.blob });
+      behindMask = { file: "behind_mask.mp4", from: mask.from };
+    }
+  }
+
+  const overlays: {
+    file?: string;
+    start: number;
+    end: number;
+    x?: number;
+    y?: number;
+    blank?: string;
+    frames?: { file: string; duration: number }[];
+    behind?: boolean;
+    /** Its row: lane 0 is the top of the stack, and the effects interleave
+     * with these by lane. */
+    lane?: number;
+  }[] = [];
+  // Effect elements never rasterize: they ship as time-gated filter recipes
+  // the server builds into the graph (the ids ride, never filter text).
+  const effects = doc.overlays
+    .filter((o) => o.kind === "effect" && !o.hidden && o.start < duration)
+    .map((o) => ({
+      effect: (o as { effect: string }).effect,
+      amount: (o as { amount?: number }).amount,
+      focus: (o as { focus?: { x: number; y: number } }).focus,
+      ramp: (o as { ramp?: number }).ramp,
+      lane: laneOf(o),
+      start: o.start,
+      end: Math.min(o.end, duration),
+    }));
+
   for (let i = 0; i < doc.overlays.length; i++) {
     const o = doc.overlays[i];
-    if (o.hidden || o.start >= duration || !o.text.trim()) continue;
-    const png = await renderOverlayPng(o, settings.width, settings.height);
+    if (o.hidden || o.start >= duration) continue;
+    if (o.kind === "effect") continue;
+    // A blank title has no pixels to burn; shapes and stickers always render.
+    if (isTextOverlay(o) && !o.text.trim()) continue;
+    // A Lottie sticker's pixels move on their own, so it exports as frames
+    // even with no transform animation set.
+    if (isOverlayAnimated(o) || (isStickerOverlay(o) && o.lottie)) {
+      // Animated: a region-cropped 30fps frame sequence that the server plays
+      // as a concat-demuxer slideshow overlaid at the region. Presets sample
+      // their heads and tails and reuse the middle; a keyframed pose changes
+      // on its own schedule, so its whole span is sampled frame by frame.
+      const set = await renderElementFrames(o, settings.width, settings.height, 30, doc.assets);
+      const names = set.images.map((blob, j) => {
+        const name = `overlay_${i}_f${j}.png`;
+        pngs.push({ name, blob });
+        return name;
+      });
+      const blank = `overlay_${i}_blank.png`;
+      pngs.push({ name: blank, blob: set.blank });
+      overlays.push({
+        start: o.start,
+        end: Math.min(o.end, duration),
+        x: set.x,
+        y: set.y,
+        blank,
+        frames: set.entries.map((e) => ({ file: names[e.image], duration: e.duration })),
+        lane: laneOf(o),
+        ...(behindMask && isTextOverlay(o) && o.behindSubject ? { behind: true } : {}),
+      });
+      continue;
+    }
+    const png = await renderElementPng(o, settings.width, settings.height, doc.assets);
     const key = `overlay_${i}.png`;
     pngs.push({ name: key, blob: png });
-    overlays.push({ file: key, start: o.start, end: Math.min(o.end, duration) });
+    overlays.push({
+      file: key,
+      start: o.start,
+      end: Math.min(o.end, duration),
+      lane: laneOf(o),
+      ...(behindMask && isTextOverlay(o) && o.behindSubject ? { behind: true } : {}),
+    });
   }
 
   // Subtitle stills travel in their own spec lane: the server plays each
@@ -376,7 +452,7 @@ async function buildExportPayload(
         for (let wi = 0; wi < windows.length; wi++) {
           const win = windows[wi];
           if (win.start >= duration) break;
-          const png = await renderOverlayPng(
+          const png = await renderElementPng(
             cueOverlay(
               cue,
               capStyle,
@@ -425,6 +501,8 @@ async function buildExportPayload(
       overlayVideos,
       overlays,
       captions,
+      ...(effects.length ? { effects } : {}),
+      ...(behindMask ? { behindMask } : {}),
     },
     pngs,
   };
@@ -474,7 +552,7 @@ async function postExport(
       payload.pngs.map(async (p) => {
         const target = byName.get(p.name);
         if (!target) throw new Error("Export failed to start.");
-        await putSigned(target.url, p.blob, "image/png");
+        await putSigned(target.url, p.blob, p.blob.type || "image/png");
       })
     );
     for (const p of payload.pngs) overlays.push({ name: p.name, key: byName.get(p.name)!.key });

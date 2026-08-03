@@ -4,12 +4,15 @@
   "private": true,
   "homepage": "https://donkeycut.com",
   "license": "Apache-2.0",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "prisma generate",
+    "postinstall": "prisma generate && node scripts/copy-mediapipe-assets.mjs",
     "db:generate": "prisma generate",
     "db:pull": "prisma db pull",
     "prisma:dev": "dotenv -e .env.development -- npx prisma migrate dev",
@@ -19,7 +22,7 @@
     "worker:build": "bun build --target=node --minify --external=pg-native src/cut/worker/main.ts --outfile dist/cut-worker/main.js",
     "eval:cut-chat": "bun run scripts/eval-cut-chat.ts",
     "email:dev": "email dev --dir src/emails --port 3001",
-    "test": "bun test src",
+    "test": "bun test src packages/effects-kit/src",
     "test:genvideo": "bun run scripts/genvideo-selftest.ts",
     "eval:genvideo": "bun run scripts/genvideo-eval.ts"
   },
@@ -33,10 +36,12 @@
     "@better-auth/core": "1.6.11",
     "@better-auth/kysely-adapter": "1.6.11",
     "@better-auth/utils": "0.4.0",
+    "@donkeycut/effects-kit": "*",
     "@elevenlabs/elevenlabs-js": "^2.49.1",
     "@google/genai": "^2.6.0",
     "@mdx-js/loader": "^3.1.1",
     "@mdx-js/react": "^3.1.1",
+    "@mediapipe/tasks-vision": "^1.0.1",
     "@next/mdx": "^16.2.6",
     "@posthog/react": "^1.10.3",
     "@prisma/adapter-pg": "^7.8.0",

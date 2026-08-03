@@ -173,7 +173,8 @@ export const mediaCloud = {
       if (over) return over;
       const nameField = form.get("name");
       const name = typeof nameField === "string" && nameField.trim() ? nameField.trim() : file.name;
-      const origin = form.get("origin") === "generated" ? "generated" : undefined;
+      const raw = form.get("origin");
+      const origin = raw === "generated" || raw === "sticker" ? raw : undefined;
       const fileName = dedupeName(
         safeFileName(file.name),
         await takenMediaNames(userId, projectId)

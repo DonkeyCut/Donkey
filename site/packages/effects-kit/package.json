@@ -1,0 +1,18 @@
+{
+  "name": "@donkeycut/effects-kit",
+  "version": "0.1.0",
+  "description": "Host-agnostic graphics elements for web video editors: overlay model, canvas painters, plugin registry.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "lottie-web": "^5.13.0"
+  }
+}

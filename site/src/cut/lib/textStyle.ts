@@ -1,12 +1,7 @@
-import type { TextOverlay } from "./types";
-
-// The style fields a title carries, minus its text/position/id/timing. Remembered
-// across clips and projects so repeated titles share one look. Position and size
-// stay at sensible defaults; only the visual style is reused.
-export type TextStyle = Pick<
-  TextOverlay,
-  "size" | "font" | "weight" | "color" | "shadow" | "plate" | "plateColor" | "plateOpacity" | "plateRadius"
->;
+// What a title's look is made of lives with the element model; this module is
+// about remembering one across clips and projects so repeated titles share it.
+export type { TextStyle } from "@donkeycut/effects-kit";
+import type { TextStyle } from "@donkeycut/effects-kit";
 
 const KEY = "cut-text-style";
 

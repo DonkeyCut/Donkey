@@ -1,5 +1,17 @@
-import { GRADE_HUE_MAX, GRADE_MAX } from "./types";
-import type { ColorGrade } from "./types";
+/** Per-clip manual color adjustments. Integer sliders, 0 = neutral; the whole
+ * field is absent when every value is 0, so untouched clips carry nothing. */
+export interface ColorGrade {
+  brightness?: number; // -50..50
+  contrast?: number; // -50..50
+  saturation?: number; // -50..50
+  exposure?: number; // -50..50 (±1 EV)
+  temperature?: number; // -50..50, positive = warm
+  hue?: number; // -180..180 degrees
+}
+
+/** Slider range for every grade parameter except hue. */
+export const GRADE_MAX = 50;
+export const GRADE_HUE_MAX = 180;
 
 /**
  * One mapping, two renderers. The preview canvas and the export filtergraph

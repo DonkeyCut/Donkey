@@ -240,7 +240,7 @@ function toReferences(ids: string[] | undefined): RefAsset[] {
   const out: RefAsset[] = [];
   for (const id of ids) {
     const a = assets.find((x) => x.id === id);
-    if (a) out.push({ mediaId: a.id, kind: a.type, purpose: "style", name: a.name });
+    if (a && a.type !== "font") out.push({ mediaId: a.id, kind: a.type, purpose: "style", name: a.name });
   }
   return out;
 }

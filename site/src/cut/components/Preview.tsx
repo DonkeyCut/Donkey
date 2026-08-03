@@ -15,6 +15,7 @@ import { setPreviewCanvas } from "@/cut/lib/previewCanvas";
 import { frameOf, isFullRect, rectOf, type Aspect, type ClipSpan, type FrameRect, type MediaAsset, type VideoClip } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 import { OverlayLayer } from "./OverlayLayer";
+import { StageEffectPaint, stageSlices, useEffectLanes, useStageEffects } from "./StageEffects";
 
 /** The clip under the playhead, when it overflows the frame in fill mode. */
 function pannableSpan(s: {
@@ -77,6 +78,12 @@ export function Preview() {
   const frame = frameOf(aspect);
 
   usePlayback(canvasRef);
+  // An effect grades what plays under it, so the stage is built in slices:
+  // the picture, then the elements of each lane band with the look of the
+  // effects above them, and each effect's paints sitting where the effect does.
+  const stageFx = useStageEffects();
+  const effectLanes = useEffectLanes();
+  const { picture, slices } = stageSlices(stageFx, effectLanes);
 
   useEffect(() => {
     setPreviewCanvas(canvasRef.current);
@@ -193,6 +200,7 @@ export function Preview() {
             width={frame.w}
             height={frame.h}
             className="block size-full"
+            style={{ transform: picture.transform, filter: picture.filter }}
             // Drag the viewport to reference what's on screen: the clip under
             // the playhead travels as a media drag (timeline placement, chat
             // attachment, generation reference). Pan on a fill clip wins —
@@ -211,7 +219,21 @@ export function Preview() {
             onDragEnd={clearAssetDrag}
           />
           <OverlayPipHandle stage={stage} />
-          <OverlayLayer stageWidth={stage.w} />
+          {slices.map((slice) =>
+            slice.kind === "elements" ? (
+              <OverlayLayer
+                key={slice.key}
+                stageWidth={stage.w}
+                transform={slice.transform}
+                filter={slice.filter}
+                from={slice.from}
+                to={slice.to}
+                captions={slice.captions}
+              />
+            ) : (
+              <StageEffectPaint key={slice.key} states={slice.states} />
+            )
+          )}
         </div>
       </div>
     </section>

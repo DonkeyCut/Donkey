@@ -1,4 +1,42 @@
-import type { LookStyle } from "./types";
+/** Preset filter looks: a named color/effect treatment baked over a clip's
+ * picture in both preview and export. */
+export type LookStyle =
+  | "vintage"
+  | "vhs"
+  | "horror"
+  | "halation"
+  | "tech"
+  | "noir"
+  | "grain"
+  | "pastel"
+  | "blockbuster"
+  | "dreamy";
+
+export const LOOK_IDS: LookStyle[] = [
+  "vintage",
+  "vhs",
+  "horror",
+  "halation",
+  "tech",
+  "noir",
+  "grain",
+  "pastel",
+  "blockbuster",
+  "dreamy",
+];
+
+export const LOOK_LABELS: Record<LookStyle, string> = {
+  vintage: "Vintage",
+  vhs: "VHS",
+  horror: "Analogue horror",
+  halation: "Halation",
+  tech: "Modern tech",
+  noir: "Noir",
+  grain: "Film grain",
+  pastel: "Pastel",
+  blockbuster: "Blockbuster",
+  dreamy: "Dreamy",
+};
 
 /**
  * Preset filter looks, one recipe per style with two renderers — the preview

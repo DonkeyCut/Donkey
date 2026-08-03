@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { lookCssFilter, lookFilterLines, lookPost } from "./looks";
-import { LOOK_IDS } from "./types";
+import { LOOK_IDS } from "./index";
 
 describe("lookFilterLines", () => {
   test("every look renders lines from [in] to [out] ending in the format", () => {

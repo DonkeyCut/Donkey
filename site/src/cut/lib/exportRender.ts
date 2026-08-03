@@ -32,9 +32,11 @@ import { overlayPlan, trackZeroPlan } from "./framePlan";
 import { frameSink, openMedia, videoTrackOf } from "./mediaRead";
 import { getClipSpans, overlayLayers, projectDuration, spanSequence } from "./store";
 import { captionStyle, cueOverlay, cueWordWindows, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
-import { renderOverlayPng } from "./textRender";
-import { frameOf, isFullRect, overlayAnimStyle, projectFadeSeconds, rectOf } from "./types";
-import type { ClipSpan, MediaAsset, TextOverlay } from "./types";
+import { applyEffectToCanvas, evalOverlayFrame, grainTile, isOverlayAnimated, planAnimatedLayers, type LottieHandle, type OverlayAnim } from "@donkeycut/effects-kit";
+import { BehindCompositor, hasBehindOverlays } from "./behindPass";
+import { renderElementPng } from "./textRender";
+import { frameOf, isEffectOverlay, isFullRect, isTextOverlay, laneOf, overlayAnimStyle, projectFadeSeconds, rectOf } from "./types";
+import type { ClipSpan, EffectOverlay, MediaAsset, Overlay, StickerOverlay } from "./types";
 import type { ExportDoc, ExportSettings } from "./exportClient";
 
 /** Audio is written at the rate and width a delivery file wants, rather than
@@ -43,7 +45,7 @@ const AUDIO_RATE = 48000;
 const AUDIO_CHANNELS = 2;
 
 /** Video codecs to try, best first. */
-const VIDEO_CODECS: VideoCodec[] = ["avc", "hevc", "vp9", "av1"];
+export const VIDEO_CODECS: VideoCodec[] = ["avc", "hevc", "vp9", "av1"];
 
 export interface RenderProgress {
   /** 0..1 across the whole render. */
@@ -134,7 +136,7 @@ function sourceTimeAt(span: ClipSpan, t: number): number {
  * rather than seeking back to the start for every frame. A still decodes once
  * and is handed back for as long as its clip is on screen.
  */
-class ClipReader {
+export class ClipReader {
   private input: ReturnType<typeof openMedia> | null = null;
   private sink: ClipSink | null = null;
   private still: Frame | null = null;
@@ -223,10 +225,39 @@ class ClipReader {
 
 /** A text layer and the window it is on screen for. The picture is drawn when
  * the render reaches it, not up front. */
+/** The effect elements live at `t`, deepest lane first — the order the stack
+ * is walked in. */
+function liveEffectsAt(overlays: Overlay[], t: number): EffectOverlay[] {
+  return overlays
+    .filter(isEffectOverlay)
+    .filter((o) => !o.hidden && t >= o.start && t < o.end)
+    .sort((a, b) => laneOf(b) - laneOf(a));
+}
+
+/** Captions sit above every element and every effect; lane 0 is the topmost
+ * element row, so they need a place above that. */
+const CAPTION_LANE = -1;
+
 interface StampedLayer {
-  overlay: TextOverlay;
+  overlay: Overlay;
   start: number;
   end: number;
+  /** Where this layer sits in the stack: the element's lane, or -1 for a
+   * caption, which rides above every element and every effect. */
+  stackLane: number;
+  /** Animated element: drawStamps evaluates this at (t − animStart) over
+   * animDur and applies the result as a canvas transform about the element
+   * center. Typewriter windows are pre-sliced into per-char layers, so their
+   * anim carries the remaining slots only. */
+  anim?: OverlayAnim;
+  animStart?: number;
+  animDur?: number;
+  /** The element this layer came from, before the picture was neutralized or
+   * a typewriter slice trimmed its text. The per-frame pose is evaluated from
+   * it, so keys and the element's own rotation/opacity survive. */
+  source?: Overlay;
+  /** Lottie sticker: seek this per frame instead of caching one bitmap. */
+  lottie?: LottieHandle;
 }
 
 /**
@@ -242,13 +273,40 @@ interface StampedLayer {
  * The layout itself is the same rendering the ffmpeg path burns in, so the
  * words land in the same place whichever renderer produced the file.
  */
-function stampText(doc: ExportDoc): StampedLayer[] {
+async function stampText(doc: ExportDoc): Promise<StampedLayer[]> {
   const duration = projectDuration(doc);
   const layers: StampedLayer[] = [];
 
   for (const o of doc.overlays) {
-    if (o.hidden || o.start >= duration || !o.text.trim()) continue;
-    layers.push({ overlay: o, start: o.start, end: Math.min(o.end, duration) });
+    if (o.hidden || o.start >= duration) continue;
+    // A blank title has no pixels to draw; shapes and stickers always render.
+    if (isTextOverlay(o) && !o.text.trim()) continue;
+    // Behind-speaker titles composite in the behind pass, under the person.
+    if (isTextOverlay(o) && o.behindSubject) continue;
+    // Effect elements filter the video per frame; nothing to stamp.
+    if (o.kind === "effect") continue;
+    // A Lottie sticker seeks per frame; its handle rides the layer.
+    const lottie =
+      o.kind === "sticker" && o.lottie && o.assetId
+        ? ((await import("./lottieAssets").then((m) =>
+            m.sharedLottieHandle(o.assetId!, doc.assets)
+          )) ?? undefined)
+        : undefined;
+    if (isOverlayAnimated(o) || lottie) {
+      const before = layers.length;
+      pushAnimatedLayers(layers, o, Math.min(o.end, duration));
+      for (let i = before; i < layers.length; i++) {
+        layers[i].stackLane = laneOf(o);
+        if (lottie) layers[i].lottie = lottie;
+      }
+      continue;
+    }
+    layers.push({
+      overlay: o,
+      start: o.start,
+      end: Math.min(o.end, duration),
+      stackLane: laneOf(o),
+    });
   }
 
   if (doc.subtitles.showOnVideo) {
@@ -280,6 +338,7 @@ function stampText(doc: ExportDoc): StampedLayer[] {
             ),
             start: win.start,
             end: Math.min(win.end, duration),
+            stackLane: CAPTION_LANE,
           });
         }
       }
@@ -301,13 +360,14 @@ class StampCache {
 
   constructor(
     private width: number,
-    private height: number
+    private height: number,
+    private assets: MediaAsset[]
   ) {}
 
   async bitmapFor(layer: StampedLayer): Promise<ImageBitmap> {
     let bitmap = this.drawn.get(layer);
     if (!bitmap) {
-      const png = await renderOverlayPng(layer.overlay, this.width, this.height);
+      const png = await renderElementPng(layer.overlay, this.width, this.height, this.assets);
       bitmap = await createImageBitmap(png);
       this.drawn.set(layer, bitmap);
     }
@@ -515,7 +575,7 @@ export async function renderProjectToMp4(
     target: new StreamTarget(writable, { chunked: true }),
   });
 
-  const stamps = new StampCache(settings.width, settings.height);
+  const stamps = new StampCache(settings.width, settings.height, doc.assets);
   const readers = new Map<string, ClipReader>();
   const readerFor = (asset: MediaAsset) => {
     let r = readers.get(asset.id);
@@ -547,7 +607,17 @@ export async function renderProjectToMp4(
     // frames rather than being interleaved with them.
     if (audio && mix) await audio.add(mix);
 
-    const layers = stampText(doc);
+    const layers = await stampText(doc);
+    // Deepest lane first, so a walk of it is a walk up the stack.
+    const stacked = [...layers].sort((a, b) => b.stackLane - a.stackLane);
+    // The behind pass is created only when something is tagged; prepare()
+    // makes rasters and the segmenter resident before the first frame.
+    let fxScratch: OffscreenCanvas | null = null;
+    let behind: BehindCompositor | null = null;
+    if (hasBehindOverlays(doc.overlays)) {
+      behind = new BehindCompositor();
+      await behind.prepare(doc.overlays, settings.width, settings.height, doc.assets);
+    }
     stop();
 
     const spans = getClipSpans(doc.clips, doc.assets, 0);
@@ -608,7 +678,36 @@ export async function renderProjectToMp4(
         comp.drawIntoRect(frame, rect, cover, layer.alpha, t, layer.zoom, layer.clip);
       }
 
-      await drawStamps(canvas, layers, stamps, t);
+      // Behind-speaker titles: video → text → segmented person, exactly the
+      // preview's pass, sampled per exported frame (no mask throttling).
+      behind?.draw(canvas, doc.overlays, doc.assets, t, { minMaskInterval: 0 });
+
+      // The stack, bottom up: an effect grades what plays under it, so the
+      // elements below it burn in first, the effect runs over that much of the
+      // frame, and the elements above it land on the graded picture. Same
+      // order as the live preview and the ffmpeg graph.
+      let drawn = 0;
+      for (const o of liveEffectsAt(doc.overlays, t)) {
+        const upto = stacked.findIndex((l) => l.stackLane <= laneOf(o));
+        const end = upto < 0 ? stacked.length : upto;
+        if (end > drawn) await drawStamps(canvas, stacked.slice(drawn, end), stamps, t);
+        drawn = Math.max(drawn, end);
+        if (!fxScratch) {
+          fxScratch = new OffscreenCanvas(canvas.width, canvas.height);
+        }
+        applyEffectToCanvas(
+          canvas,
+          fxScratch,
+          o.effect,
+          o.amount,
+          t - o.start,
+          grainTile,
+          o.focus,
+          o.ramp,
+          o.end - o.start
+        );
+      }
+      await drawStamps(canvas, stacked.slice(drawn), stamps, t);
       stamps.retire(t);
       comp.drawProjectFade(projectFadeGain(doc, t, duration));
 
@@ -638,6 +737,19 @@ export async function renderProjectToMp4(
 }
 
 /** Draw the text layers live at `t` over the finished picture. */
+/** Stamped layers for one animated element: the kit plans the windows (the
+ * same split its frame sequences use), and the render hangs what only it knows
+ * on them — the element they came from, and a Lottie handle to seek. */
+function pushAnimatedLayers(layers: StampedLayer[], o: Overlay, end: number) {
+  const shared = {
+    animStart: o.start,
+    animDur: Math.max(0.1, o.end - o.start),
+    source: o,
+    stackLane: laneOf(o),
+  };
+  for (const layer of planAnimatedLayers(o, end)) layers.push({ ...layer, ...shared });
+}
+
 async function drawStamps(
   canvas: HTMLCanvasElement | OffscreenCanvas,
   layers: StampedLayer[],
@@ -651,7 +763,53 @@ async function drawStamps(
   if (!ctx) return;
   for (const layer of layers) {
     if (t < layer.start || t >= layer.end) continue;
-    ctx.drawImage(await stamps.bitmapFor(layer), 0, 0, canvas.width, canvas.height);
+    if (layer.lottie) {
+      // Nothing to cache: the animation's own canvas is sought per frame and
+      // drawn at the sticker's rect under the same delta transform.
+      const o = layer.overlay as StickerOverlay;
+      const ev = evalOverlayFrame(
+        { ...(layer.source ?? o), anim: layer.anim },
+        t - (layer.animStart ?? layer.start)
+      );
+      if (ev.opacity <= 0.001) continue;
+      const scale = Math.min(canvas.width, canvas.height) / 1080;
+      const w = Math.max(1, o.w * canvas.width);
+      const aspect = layer.lottie.width > 0 ? layer.lottie.width / layer.lottie.height : 1;
+      const h = w / aspect;
+      ctx.save();
+      ctx.globalAlpha = ev.opacity;
+      ctx.translate(ev.x * canvas.width + ev.dx * scale, ev.y * canvas.height + ev.dy * scale);
+      ctx.rotate((ev.rotation * Math.PI) / 180);
+      ctx.scale(ev.scale, ev.scale);
+      ctx.drawImage(layer.lottie.seek(t - (layer.animStart ?? layer.start)), -w / 2, -h / 2, w, h);
+      ctx.restore();
+      continue;
+    }
+    const bitmap = await stamps.bitmapFor(layer);
+    if (!layer.anim) {
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      continue;
+    }
+    // Unkeyed, the bitmap bakes the element's own rotation/opacity and only
+    // the preset's delta composes on top. Keyed, the bitmap is neutral and the
+    // pose supplies position, scale, rotation and opacity outright — either
+    // way this samples the evaluator the ffmpeg path rasterized into frames.
+    const ev = evalOverlayFrame(
+      { ...(layer.source ?? layer.overlay), anim: layer.anim },
+      t - (layer.animStart ?? layer.start)
+    );
+    if (ev.opacity <= 0.001) continue;
+    const scale = Math.min(canvas.width, canvas.height) / 1080;
+    const cx = layer.overlay.x * canvas.width;
+    const cy = layer.overlay.y * canvas.height;
+    ctx.save();
+    ctx.globalAlpha = ev.opacity;
+    ctx.translate(ev.x * canvas.width + ev.dx * scale, ev.y * canvas.height + ev.dy * scale);
+    ctx.rotate((ev.rotation * Math.PI) / 180);
+    ctx.scale(ev.scale, ev.scale);
+    ctx.translate(-cx, -cy);
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
   }
 }
 

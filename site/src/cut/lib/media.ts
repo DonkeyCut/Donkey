@@ -231,7 +231,7 @@ export async function uploadProjectImage(
   projectId: string,
   file: Blob,
   fileName: string,
-  opts?: { name?: string; origin?: "generated"; failMessage?: string; backend?: CutBackend }
+  opts?: { name?: string; origin?: "generated" | "sticker"; failMessage?: string; backend?: CutBackend }
 ): Promise<MediaAsset> {
   // Callers whose work outlives navigation (finishing AI generations) pin the
   // backend they started on; everyone else rides the active one.

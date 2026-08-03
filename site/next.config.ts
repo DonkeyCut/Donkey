@@ -3,6 +3,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   pageExtensions: ["js", "jsx", "ts", "tsx", "md", "mdx"],
+  // Workspace packages ship TypeScript source; the app build transpiles them.
+  transpilePackages: ["@donkeycut/effects-kit"],
   // Cut (the video editor) uploads large media. Two independent limits apply:
   // its media route reads req.formData() (a route handler), so it isn't covered
   // by serverActions.bodySizeLimit; and src/proxy.ts runs on /api/cut/* on every

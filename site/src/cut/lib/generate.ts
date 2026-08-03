@@ -296,7 +296,7 @@ const providerError = (error: unknown): string | null => {
  * compose step (see composeGen.ts) unless the caller opted out; on a compose
  * failure, falls back to the visual refs as-is with text-ref contents folded
  * into the prompt. `maxImages` caps what the generator accepts (video: 1 seed). */
-async function promptAndImages(
+export async function promptAndImages(
   target: "video" | "image",
   prompt: string,
   refs: AssetRef[],

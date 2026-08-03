@@ -16,6 +16,24 @@ const eslintConfig = defineConfig([
     // against workers types, excluded from the site's tsconfig.
     "src/cut/worker/cf/**",
   ]),
+  {
+    // effects-kit is a standalone package: it must build for any host, so it
+    // never reaches into the app's source or aliases.
+    files: ["packages/effects-kit/**/*.ts", "packages/effects-kit/**/*.tsx"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/*", "**/src/cut/*", "next", "next/*"],
+              message: "effects-kit is host-agnostic — no site/src or Next.js imports.",
+            },
+          ],
+        },
+      ],
+    },
+  },
 ]);
 
 export default eslintConfig;

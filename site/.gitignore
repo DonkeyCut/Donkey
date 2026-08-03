@@ -54,3 +54,6 @@ next-env.d.ts
 
 # Cut engine build output
 /dist/
+
+# MediaPipe wasm runtime, staged from node_modules by postinstall
+/public/mediapipe/wasm/
