@@ -95,7 +95,7 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "GET", path: "/api/cut-cloud/usage", handler: (_r, u) => usageApi.get(u) },
 
   // GC also runs unauthenticated from the Vercel cron — see the catch-all
-  // route, which checks the x-vercel-cron header before auth. Any other
+  // route, which checks the CRON_SECRET bearer token before auth. Any other
   // non-superuser caller sees a plain 404.
   {
     method: "GET",

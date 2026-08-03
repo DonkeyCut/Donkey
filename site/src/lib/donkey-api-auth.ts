@@ -61,6 +61,13 @@ export function forbiddenResponse() {
   return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 }
 
+// True when the request comes from Vercel's cron scheduler, which sends the
+// project's CRON_SECRET env var as a bearer token on every invocation.
+export function isVercelCron(request: Request): boolean {
+  const secret = process.env.CRON_SECRET;
+  return !!secret && request.headers.get("authorization") === `Bearer ${secret}`;
+}
+
 export type DonkeyAuthHandler<
   TReq extends DonkeyAuthenticatedRequest = DonkeyAuthenticatedRequest,
   TArgs extends unknown[] = [],

@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { withDonkeyAuth } from "@/lib/donkey-api-auth";
+import { isVercelCron, withDonkeyAuth } from "@/lib/donkey-api-auth";
 import { runGc } from "@/cut/server/cloud/gc";
 import { cutCloudCatchAll } from "@/cut/server/cloud/routes";
 
@@ -11,12 +11,11 @@ export const runtime = "nodejs";
 
 const handle = withDonkeyAuth((request) => cutCloudCatchAll(request));
 
-// The daily GC cron has no session; Vercel marks its requests with the
-// x-vercel-cron header, which the platform strips from outside traffic.
-// Everything else goes through auth (a superuser can also GET /gc directly).
+// The daily GC cron has no session; Vercel authenticates its invocations with
+// the CRON_SECRET bearer token. Everything else goes through auth (a superuser
+// can also GET /gc directly).
 export const GET = (request: NextRequest) =>
-  new URL(request.url).pathname === "/api/cut-cloud/gc" &&
-  request.headers.get("x-vercel-cron") === "1"
+  new URL(request.url).pathname === "/api/cut-cloud/gc" && isVercelCron(request)
     ? runGc()
     : handle(request);
 export const POST = handle;
