@@ -294,8 +294,8 @@ async function runFake(emit: UIChunkWriter["write"], sessionKey: string, userTex
   const state = st.output as {
     selection?: { kind: string; id: string } | null;
   };
-  if (state.selection?.kind === "text") {
-    const r = await callBrowserTool(sessionKey, "update_title", {
+  if (state.selection?.kind === "overlay") {
+    const r = await callBrowserTool(sessionKey, "update_overlay", {
       id: state.selection.id,
       text: "TESTMARK improved",
       color: "#FFD60A",
@@ -314,7 +314,9 @@ function probe(cmd: string, args: string[]): Promise<{ ok: boolean; note: string
         // ENOENT means the binary isn't on PATH; any other error means it ran
         // (installed) but exited non-zero. The page hides an uninstalled
         // provider while still showing a sign-in prompt for an installed one.
-        const missing = err.message.includes("ENOENT");
+        // Check err.code, not the message: Bun (the shipped engine runtime)
+        // words the error `Executable not found in $PATH` with no "ENOENT".
+        const missing = err.code === "ENOENT";
         const note = missing
           ? `${cmd} is not installed`
           : (stderr || err.message).trim().split("\n")[0];
