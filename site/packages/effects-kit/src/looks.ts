@@ -134,35 +134,73 @@ export function lookPost(style: LookStyle | undefined, amount?: number): LookPos
   }
 }
 
-/** Pre-rendered monochrome noise tiles, cycled per frame for shimmer. Built
- * once on first use (client only) — never per-frame pixel work. */
+/** Pre-rendered grain tiles, cycled per frame for shimmer. The grain follows
+ * filmgrainer's model of film response (github.com/larspontoppidan/filmgrainer):
+ * gaussian noise about mid-gray, generated coarse
+ * and upscaled with smoothing so grains clump like crystals, and laid over the
+ * picture with the overlay blend, which holds grain in the midtones and lets
+ * it sink into deep shadows and highlights. Built once on first use (client
+ * only) — never per-frame pixel work. */
 const GRAIN_TILE = 256;
 const GRAIN_COUNT = 3;
+/** Std dev of the gaussian noise about 128 — filmgrainer's "power". */
+const GRAIN_SD = 50;
+/** Grain coarseness: the noise is generated this many times smaller than the
+ * tile and upscaled smooth, so a grain spans a couple of pixels. */
+const GRAIN_SIZE = 1.6;
 let grainTiles: HTMLCanvasElement[] | null = null;
 
 export function grainTile(tick: number): HTMLCanvasElement | null {
   if (typeof document === "undefined") return null;
   if (!grainTiles) {
     grainTiles = [];
+    const side = Math.round(GRAIN_TILE / GRAIN_SIZE);
     for (let n = 0; n < GRAIN_COUNT; n++) {
-      const c = document.createElement("canvas");
-      c.width = GRAIN_TILE;
-      c.height = GRAIN_TILE;
-      const ctx = c.getContext("2d");
-      if (!ctx) return null;
-      const img = ctx.createImageData(GRAIN_TILE, GRAIN_TILE);
+      const small = document.createElement("canvas");
+      small.width = side;
+      small.height = side;
+      const sctx = small.getContext("2d");
+      if (!sctx) return null;
+      const img = sctx.createImageData(side, side);
       for (let i = 0; i < img.data.length; i += 4) {
-        const v = Math.floor(Math.random() * 256);
+        // Box–Muller gaussian, clipped to 8-bit.
+        const g =
+          128 +
+          GRAIN_SD *
+            Math.sqrt(-2 * Math.log(1 - Math.random())) *
+            Math.cos(2 * Math.PI * Math.random());
+        const v = Math.max(0, Math.min(255, Math.round(g)));
         img.data[i] = v;
         img.data[i + 1] = v;
         img.data[i + 2] = v;
         img.data[i + 3] = 255;
       }
-      ctx.putImageData(img, 0, 0);
+      sctx.putImageData(img, 0, 0);
+      const c = document.createElement("canvas");
+      c.width = GRAIN_TILE;
+      c.height = GRAIN_TILE;
+      const ctx = c.getContext("2d");
+      if (!ctx) return null;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(small, 0, 0, GRAIN_TILE, GRAIN_TILE);
       grainTiles.push(c);
     }
   }
   return grainTiles[(tick >> 1) % GRAIN_COUNT];
+}
+
+let grainUrl: string | null = null;
+
+/** The first grain tile as a data URL, for the DOM surfaces that paint grain
+ * with CSS — the preview stage and the effect tiles. Overlay-blend it and set
+ * the layer's opacity to the effect's grain amount. */
+export function grainTileUrl(): string | null {
+  if (grainUrl) return grainUrl;
+  const tile = grainTile(0);
+  if (!tile) return null;
+  grainUrl = tile.toDataURL("image/png");
+  return grainUrl;
 }
 
 /* ---------------------------------------------------------------- ffmpeg */

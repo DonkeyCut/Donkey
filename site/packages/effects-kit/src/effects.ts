@@ -111,6 +111,13 @@ export const EFFECT_LABELS: Record<EffectId, string> = {
 const clampAmount = (k: number | undefined) => Math.max(0.05, Math.min(1, k ?? 0.5));
 const fmt = (n: number) => (Math.round(n * 1000) / 1000).toString();
 
+/** The CSS background of a leak's bloom at (x, y) frame fractions — the DOM
+ * twin of the canvas pass's radial gradient; screen-blend it at the leak's
+ * alpha. */
+export const leakGradient = (x: number, y: number) =>
+  `radial-gradient(circle at ${(x * 100).toFixed(1)}% ${(y * 100).toFixed(1)}%, ` +
+  `rgba(255,190,120,0.9) 0%, rgba(255,150,60,0.5) 38%, rgba(255,120,40,0) 72%)`;
+
 /** What one effect asks the preview canvas to do at `tLocal` seconds in. */
 export interface EffectPreviewState {
   /** ctx.filter for a self-redraw of the frame; "" = none. */
@@ -121,6 +128,9 @@ export interface EffectPreviewState {
   vignette?: number;
   /** Flat washes over the picture. */
   washes?: { color: string; alpha: number; mode: GlobalCompositeOperation }[];
+  /** A light leak's bloom: a warm radial glow centered at (x, y) in frame
+   * fractions, screen-blended over the picture at `alpha`. */
+  leak?: { x: number; y: number; alpha: number };
   /** Chroma ghosting: tinted copies offset by this frame-width fraction. */
   ghostFrac?: number;
   /** Whole-frame white flash alpha 0..1. */
@@ -252,11 +262,11 @@ export function effectPreviewState(
         origin: focusOf(focus),
       };
     case "grain":
-      return { cssFilter: "", grain: 0.06 + 0.18 * k };
+      return { cssFilter: "", grain: 0.25 + 0.55 * k };
     case "vhs":
       return {
         cssFilter: `saturate(${fmt(1 - 0.35 * k)}) contrast(${fmt(1 - 0.05 * k)}) blur(${fmt(0.6 * k)}px)`,
-        grain: 0.1 * k,
+        grain: 0.25 * k,
         ghostFrac: 0.004 * k,
       };
     case "glitch": {
@@ -264,7 +274,7 @@ export function effectPreviewState(
       // reads as digital tearing rather than a steady fringe.
       const step = Math.floor(tLocal * 9);
       const jitter = ((step * 7919) % 5) - 2; // -2..2, deterministic
-      return { cssFilter: "", ghostFrac: (0.004 + 0.003 * jitter) * k, grain: 0.04 * k };
+      return { cssFilter: "", ghostFrac: (0.004 + 0.003 * jitter) * k, grain: 0.12 * k };
     }
     case "blur":
       return { cssFilter: `blur(${fmt(10 * k)}px)` };
@@ -272,9 +282,15 @@ export function effectPreviewState(
       return { cssFilter: "", vignette: 0.75 * k };
     case "lightleak":
       return {
-        cssFilter: `brightness(${fmt(1 + 0.1 * k)}) saturate(${fmt(1 + 0.15 * k)})`,
-        washes: [{ color: "#ff9a3c", alpha: 0.18 * k, mode: "soft-light" }],
-        vignette: -0.0, // leaks brighten; no darkening
+        cssFilter: `saturate(${fmt(1 + 0.15 * k)})`,
+        washes: [{ color: "#ff9a3c", alpha: 0.1 * k, mode: "soft-light" }],
+        // The bloom wanders around the top-left corner and breathes a little,
+        // the way a leak moves as the camera does.
+        leak: {
+          x: 0.16 + 0.1 * Math.sin(tLocal * 0.9),
+          y: 0.2 + 0.08 * Math.cos(tLocal * 0.6),
+          alpha: (0.6 + 0.12 * Math.sin(tLocal * 1.3)) * k,
+        },
       };
     case "flash": {
       // One bright pop at the element start, decaying over ~0.4s.
@@ -380,6 +396,22 @@ export function applyEffectToCanvas(
       ctx.fillStyle = w.color;
       ctx.fillRect(0, 0, W, H);
     }
+    ctx.restore();
+  }
+
+  if (state.leak) {
+    const { x, y, alpha } = state.leak;
+    const r = Math.max(W, H) * 0.7;
+    const g = ctx.createRadialGradient(x * W, y * H, 0, x * W, y * H, r);
+    g.addColorStop(0, "rgba(255,190,120,0.9)");
+    g.addColorStop(0.38, "rgba(255,150,60,0.5)");
+    g.addColorStop(0.72, "rgba(255,120,40,0)");
+    g.addColorStop(1, "rgba(255,120,40,0)");
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.globalCompositeOperation = "screen";
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
     ctx.restore();
   }
 
@@ -506,7 +538,7 @@ export function effectFilterLines(
       ];
     }
     case "grain":
-      return [`[${inLabel}]noise=alls=${Math.round(6 + 22 * k)}:allf=t+u:${en}[${outLabel}]`];
+      return [`[${inLabel}]noise=alls=${Math.round(12 + 40 * k)}:allf=t+u:${en}[${outLabel}]`];
     case "vhs":
       return [
         `[${inLabel}]rgbashift=rh=${Math.round(3 * k)}:bh=${-Math.round(3 * k)}:${en},` +
@@ -524,8 +556,13 @@ export function effectFilterLines(
     case "vignette":
       return [`[${inLabel}]vignette=angle=${fmt((k * Math.PI) / 3.5)}:${en}[${outLabel}]`];
     case "lightleak":
+      // The bloom: a warm tint, then a backward vignette whose center drifts
+      // around the bottom-right, so the far corner — the top-left — glows and
+      // wanders the way the preview's leak does.
       return [
-        `[${inLabel}]eq=brightness=${fmt(0.08 * k)}:saturation=${fmt(1 + 0.15 * k)}:gamma_r=${fmt(1 + 0.22 * k)}:gamma_b=${fmt(1 - 0.08 * k)}:${en}[${outLabel}]`,
+        `[${inLabel}]eq=saturation=${fmt(1 + 0.15 * k)}:gamma_r=${fmt(1 + 0.22 * k)}:gamma_b=${fmt(1 - 0.08 * k)}:${en},` +
+          `vignette=angle=${fmt((k * Math.PI) / 4.8)}:mode=backward:` +
+          `x0='w*(0.84-0.1*sin(t*0.9))':y0='h*(0.8-0.08*cos(t*0.6))':eval=frame:${en}[${outLabel}]`,
       ];
     case "flash":
       // A decaying brightness pop from the element start. `eq` reads its
