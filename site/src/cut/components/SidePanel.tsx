@@ -16,7 +16,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { SectionTitle } from "@/cut/components/SectionTitle";
-import { Slider } from "@/components/ui/slider";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -70,7 +69,7 @@ import { activeResidency, availableResidencies, type Residency } from "@/cut/lib
 import { isStylePresetTemplate } from "@/cut/lib/stylePresets";
 import { retryUpload } from "@/cut/lib/importQueue";
 import { isMediaFile, revealMedia } from "@/cut/lib/media";
-import { mediaUrl, TRANSITION_MAX } from "@/cut/lib/types";
+import { mediaUrl } from "@/cut/lib/types";
 import { genPulseOverlay, isGenTab, useGenNotify, useGenPulse, useWatchGenTab } from "@/cut/lib/genNotify";
 import { useGenerate, type GenerateJob } from "@/cut/lib/generate";
 import { CAPTION_LIMIT, normalizeTags } from "@/cut/lib/publish";
@@ -96,6 +95,7 @@ import { StockVideosPanel } from "./StockVideosPanel";
 import { STOCK_MUSIC } from "@/cut/lib/stockMusicManifest";
 import { STOCK_VIDEOS } from "@/cut/lib/stockVideoManifest";
 import { LibraryCard, ShelfBadge } from "./LibraryView";
+import { SubTabs } from "./SubTabs";
 
 // Drag a library clip onto a folder tile to file it (side panel, single card).
 const LIBRARY_MOVE_MIME = "application/x-cut-library-move";
@@ -106,7 +106,6 @@ type Tab = SidePanelTab;
 
 const TABS: { id: Tab; label: string; icon: typeof Film }[] = [
   { id: "media", label: "Media", icon: Clapperboard },
-  { id: "library", label: "Library", icon: FolderOpen },
   { id: "elements", label: "Elements", icon: Shapes },
   { id: "effects", label: "Effects", icon: Sparkles },
   { id: "transitions", label: "Transitions", icon: Blend },
@@ -156,28 +155,20 @@ export function SidePanel({
     "voice",
     (v) => v === "voice" || v === "music"
   );
-  // Rail tiles as drop targets: a Library card (asset or template) dropped on
-  // Media joins the project; a Media card dropped on Library saves it there.
-  // Project media (cards and timeline clips) arrives through the ref zones
-  // below; these HTML5 handlers cover the library-asset and template drags.
+  // The Media rail tile as a drop target: a Library card (asset or template)
+  // dropped on it joins the project. Project media (cards and timeline clips)
+  // arrives through the ref zone below; these HTML5 handlers cover the
+  // library-asset and template drags.
   const [dropTab, setDropTab] = useState<Tab | null>(null);
   const acceptsDrop = (id: Tab, e: React.DragEvent) => {
     const tpl = hasTemplateDrag(e) ? draggingTemplate() : null;
-    if (id === "media") return hasLibraryDrag(e) || tpl?.scope === "library";
-    if (id === "library") return tpl?.scope === "project";
-    return false;
+    return id === "media" && (hasLibraryDrag(e) || tpl?.scope === "library");
   };
-  // A project asset dropped on a rail tile — from a Media card or dragged
-  // straight off the timeline: Media reveals it in the panel (clears its
-  // origin tag), Library saves a copy to the shared library.
-  const dropRefOnTab = (id: Tab, ref: AssetRef) => {
+  // A project asset dropped on the Media tile — from a card or dragged
+  // straight off the timeline — reveals it in the panel (clears its origin tag).
+  const dropRefOnTab = (ref: AssetRef) => {
     if (ref.scope !== "project") return;
-    if (id === "media") {
-      useEditor.getState().updateAsset(ref.id, { origin: undefined, chatId: undefined });
-    } else {
-      const asset = useEditor.getState().assets.find((a) => a.id === ref.id);
-      if (asset) void saveAssetToLibrary(projectId, asset);
-    }
+    useEditor.getState().updateAsset(ref.id, { origin: undefined, chatId: undefined });
   };
   // Generations that finished while their tab was closed: a blue count rides
   // the rail icon, and opening the tab lets the new tiles pulse for a beat.
@@ -216,13 +207,11 @@ export function SidePanel({
   // owns the asset; the matching card scrolls into view and flashes.
   useRevealEffect((ref) => {
     setTab(
-      ref.scope === "project"
+      ref.scope === "project" || ref.scope === "library"
         ? "media"
-        : ref.scope === "library"
-          ? "library"
-          : STOCK_VIDEOS.some((v) => v.id === ref.id)
-            ? "video"
-            : "image"
+        : STOCK_VIDEOS.some((v) => v.id === ref.id)
+          ? "video"
+          : "image"
     );
   });
 
@@ -253,18 +242,18 @@ export function SidePanel({
           const unseenCount = isGenTab(id) && id !== tab ? unseen[id].length : 0;
           // Full width of the rail, whatever a scrollbar has left of it, so a
           // label that no longer fits ellipsises inside the tile rather than
-          // running out past both edges of a centred one.
-          // Side padding stays off the label: the rail is 68px and the longest
-          // name needs all of it, so the tile pads the tap area vertically and
-          // the label runs edge to edge.
+          // running out past both edges of a centred one. The open tab reads
+          // from its icon chip's deeper fill; no ring, so nothing to keep off
+          // the rail edges. The outline stays off — click focus otherwise
+          // draws one around the tile.
           const tileClass =
-            "flex w-full min-w-0 shrink-0 flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-muted-foreground transition-colors hover:text-foreground";
+            "flex w-full min-w-0 shrink-0 flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-muted-foreground outline-none transition-colors hover:text-foreground";
           const inner = (
             <>
               <span
                 className={cn(
                   "relative grid size-9 place-items-center rounded-lg transition-colors",
-                  tab === id ? "bg-muted text-foreground" : "hover:bg-muted/60",
+                  tab === id ? "bg-foreground/10 text-foreground" : "hover:bg-muted/60",
                   dropTab === id && "bg-primary/15 text-primary"
                 )}
               >
@@ -299,14 +288,10 @@ export function SidePanel({
                 e.preventDefault();
                 setDropTab(null);
                 const tpl = draggingTemplate();
-                if (id === "media") {
-                  if (tpl?.scope === "library") void importTemplateToProject(projectId, tpl.template);
-                  else {
-                    const lib = draggingLibrary();
-                    if (lib) void importLibraryAsset(projectId, lib);
-                  }
-                } else if (tpl?.scope === "project") {
-                  void saveTemplate(projectId, tpl.template);
+                if (tpl?.scope === "library") void importTemplateToProject(projectId, tpl.template);
+                else {
+                  const lib = draggingLibrary();
+                  if (lib) void importLibraryAsset(projectId, lib);
                 }
                 clearAssetDrag();
               }}
@@ -321,9 +306,9 @@ export function SidePanel({
               {(id === "video" || id === "subtitles") && tabIndex > 0 && (
                 <div aria-hidden className="my-1 h-px w-8 shrink-0 bg-border" />
               )}
-              {id === "media" || id === "library" ? (
+              {id === "media" ? (
                 <RefDropZone
-                  onRef={(ref) => dropRefOnTab(id, ref)}
+                  onRef={dropRefOnTab}
                   className="w-full shrink-0 rounded-lg"
                   activeClassName="bg-primary/10"
                 >
@@ -400,7 +385,6 @@ export function SidePanel({
           {tab === "media" && (
             <MediaPanel projectId={projectId} onImport={onImport} importing={importing} />
           )}
-          {tab === "library" && <LibraryPanel projectId={projectId} />}
           {tab === "elements" && <ElementsPanel projectId={projectId} />}
           {tab === "effects" && <EffectsPanel />}
           {tab === "transitions" && <TransitionsPanel />}
@@ -531,7 +515,59 @@ function ExportingRow({ job }: { job: ExportJob }) {
   );
 }
 
+/** The Media tab: Project Files is this project's own imports and exports;
+ * Library is the shared cross-project shelf. */
 function MediaPanel({
+  projectId,
+  onImport,
+  importing,
+}: {
+  projectId: string;
+  onImport: (files: FileList | File[], opts?: { mediaOnly?: boolean }) => void;
+  importing: boolean;
+}) {
+  // A shared view shows only the project's own files — the Library is the
+  // viewer's cross-project shelf, so the toggle drops and a plain head stays.
+  const sharedFeatures = useEditor((s) => s.sharedFeatures);
+  const [sub, setSub] = useLocalPref<"project" | "library">(
+    "cut-media-subtab",
+    "project",
+    (v) => v === "project" || v === "library"
+  );
+  const view = sharedFeatures ? "project" : sub;
+  // A revealed card may sit on the other sub-tab; bring its side on screen.
+  useRevealEffect((ref) => {
+    if (ref.scope === "project") setSub("project");
+    else if (ref.scope === "library") setSub("library");
+  });
+  return (
+    <>
+      {sharedFeatures ? (
+        <PanelHead title="Media" />
+      ) : (
+        /* PanelHead's height, so the side panel's floating close button lands
+           on the toggle's centerline; the right padding keeps clear of it. */
+        <div className="flex h-12 shrink-0 items-center pr-12 pl-3.5">
+          <SubTabs
+            tabs={[
+              { id: "project", label: "Project Files" },
+              { id: "library", label: "Library" },
+            ]}
+            value={view}
+            onChange={setSub}
+          />
+        </div>
+      )}
+      {view === "project" ? (
+        <ProjectFilesPanel projectId={projectId} onImport={onImport} importing={importing} />
+      ) : (
+        <LibraryPanel projectId={projectId} />
+      )}
+    </>
+  );
+}
+
+function ProjectFilesPanel({
   projectId,
   onImport,
   importing,
@@ -636,7 +672,6 @@ function MediaPanel({
       )}
     >
       {/* An export in flight spins on the Media rail tile, not here. */}
-      <PanelHead title="Media" />
       {!readOnly && (
         <div className="px-3.5 pb-3">
           <Button variant="outline" className="w-full" onClick={() => inputRef.current?.click()}>
@@ -1210,7 +1245,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
           "rounded-xl bg-[#0a84ff]/5 outline-2 outline-dashed outline-offset-[-4px] outline-[#0a84ff]/60"
       )}
     >
-      {openFolder !== null ? (
+      {openFolder !== null && (
         <div className="flex h-12 shrink-0 items-center pr-2.5 pl-2.5">
           <FolderCrumb
             className="text-sm"
@@ -1221,8 +1256,6 @@ function LibraryPanel({ projectId }: { projectId: string }) {
             onDropOut={(ids) => ids.forEach((id) => void move(id, null))}
           />
         </div>
-      ) : (
-        <PanelHead title="Library" />
       )}
       {openFolder === null && folders.length > 0 ? (
         <div className="shrink-0 px-3.5">
@@ -1396,42 +1429,12 @@ function CopyChip({ text, label }: { text: string; label: string }) {
   );
 }
 
-/** Whole-video fade slider (project-level: veils picture, titles, captions,
- * and the mix at the cut's start or end). Lives here — the only
- * project-scoped panel — since per-clip fades moved into clip Effects. */
-function ProjectFadeRow({ label, value, onChange }: {
-  label: string;
-  value: number;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <label className="flex items-center justify-between gap-3 text-[12px] text-muted-foreground">
-      {label}
-      <span className="flex items-center gap-2">
-        <Slider
-          className={`project-${label.toLowerCase().replace(" ", "-")} data-horizontal:w-28`}
-          min={0}
-          max={TRANSITION_MAX}
-          step={0.1}
-          value={value}
-          onValueChange={(v) => onChange(Number(v))}
-        />
-        <span className="w-9 text-right font-mono text-[11.5px]">
-          {value < 0.05 ? "Off" : `${value.toFixed(1)}s`}
-        </span>
-      </span>
-    </label>
-  );
-}
-
 function PublishPanel() {
   const readOnly = useEditor((s) => s.readOnly);
   const publish = useEditor((s) => s.publish);
   const setPublish = useEditor((s) => s.setPublish);
   const notes = useEditor((s) => s.notes);
   const setNotes = useEditor((s) => s.setNotes);
-  const fadeIn = useEditor((s) => s.fadeIn);
-  const fadeOut = useEditor((s) => s.fadeOut);
   const tagsLine = normalizeTags(publish.tags);
   const combined = [publish.caption.trim(), tagsLine].filter(Boolean).join("\n\n");
   const count = combined.length;
@@ -1441,22 +1444,6 @@ function PublishPanel() {
     <>
       <PanelHead title="Details" />
       <ScrollArea className="min-h-0" contentClassName="flex flex-col gap-4 px-3.5 pb-4">
-        {!readOnly && (
-          <div className="flex flex-col gap-1.5">
-            <SectionTitle>Video</SectionTitle>
-            <ProjectFadeRow
-              label="Fade in"
-              value={fadeIn}
-              onChange={(v) => useEditor.getState().setProjectFade({ fadeIn: v })}
-            />
-            <ProjectFadeRow
-              label="Fade out"
-              value={fadeOut}
-              onChange={(v) => useEditor.getState().setProjectFade({ fadeOut: v })}
-            />
-          </div>
-        )}
-
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
             <SectionTitle>Caption</SectionTitle>
@@ -1509,10 +1496,6 @@ function PublishPanel() {
             readOnly={readOnly}
             onChange={(e) => setPublish({ soundTitle: e.target.value })}
           />
-          <p className="text-[11px] leading-relaxed text-muted-foreground">
-            TikTok names uploads “original sound – you”. You can rename the
-            sound once after posting — paste this then.
-          </p>
         </div>
 
         <div className="flex flex-col gap-1.5 border-t border-border pt-4">

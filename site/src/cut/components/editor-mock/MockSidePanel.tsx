@@ -6,7 +6,6 @@ import {
   Clapperboard,
   ClipboardList,
   Film,
-  FolderOpen,
   Image as ImageIcon,
   Layers,
   Music,
@@ -30,7 +29,6 @@ import type {
 
 const TABS: { id: MockPanelTab; label: string; icon: typeof Film }[] = [
   { id: "media", label: "Media", icon: Clapperboard },
-  { id: "library", label: "Library", icon: FolderOpen },
   { id: "video", label: "Video", icon: Film },
   { id: "image", label: "Image", icon: ImageIcon },
   { id: "audio", label: "Audio", icon: Music },
@@ -106,8 +104,15 @@ export function MockSidePanel({ project }: { project: MockProject }) {
 function MediaPanel({ panel }: { panel: Extract<MockPanel, { tab: "media" }> }) {
   return (
     <>
-      <div className="flex h-12 shrink-0 items-center pr-2.5 pl-4">
-        <span className="text-sm font-semibold tracking-tight">Media</span>
+      <div className="flex h-12 shrink-0 items-center px-3.5">
+        <div className="flex w-full rounded-lg bg-muted p-0.5 text-[11.5px]">
+          <span className="flex-1 rounded-md bg-background px-3 py-0.5 text-center font-medium text-foreground shadow-sm">
+            Project Files
+          </span>
+          <span className="flex-1 rounded-md px-3 py-0.5 text-center font-medium text-muted-foreground">
+            Library
+          </span>
+        </div>
       </div>
       <div className="shrink-0 px-3.5 pb-3">
         <span className="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-input text-sm font-medium">

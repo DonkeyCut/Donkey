@@ -102,11 +102,11 @@ export const AI_TOOLS: AiToolDef[] = [
   {
     name: "set_side_panel",
     description:
-      "Open a side-panel tab, or collapse the panel to the icon rail with 'none' so the preview canvas takes the freed width — use 'none' when the user asks to clean up or maximize the workspace. 'publish' is the Details tab.",
+      "Open a side-panel tab, or collapse the panel to the icon rail with 'none' so the preview canvas takes the freed width — use 'none' when the user asks to clean up or maximize the workspace. 'publish' is the Details tab; 'media' holds the project's files and the shared Library.",
     inputSchema: obj({
       panel: {
         type: "string",
-        enum: ["media", "library", "elements", "effects", "transitions", "video", "image", "audio", "subtitles", "publish", "none"],
+        enum: ["media", "elements", "effects", "transitions", "video", "image", "audio", "subtitles", "publish", "none"],
         description: "Tab to open, or 'none' to collapse the panel",
       },
     }, ["panel"]),

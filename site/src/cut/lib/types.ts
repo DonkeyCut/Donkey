@@ -856,7 +856,6 @@ export interface ShareFeatures {
 /** The editor's side-panel tabs ("publish" shows as Details). */
 export type SidePanelTab =
   | "media"
-  | "library"
   | "elements"
   | "effects"
   | "transitions"

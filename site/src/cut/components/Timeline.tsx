@@ -3099,7 +3099,7 @@ function ClipMenu({
             });
           }}
         >
-          <FolderPlus /> Add to library
+          <FolderPlus /> Add to Library
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => exportSegment(asset, clip)}>
           <ArrowDownToLine /> Export segment

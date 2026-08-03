@@ -91,7 +91,7 @@ export function GeneratedAssetMenu({
             })
           }
         >
-          <FolderPlus /> Add to library
+          <FolderPlus /> Add to Library
         </DropdownMenuItem>
         {(after != null || onDelete) && <DropdownMenuSeparator />}
         {after}

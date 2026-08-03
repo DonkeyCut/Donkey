@@ -1236,7 +1236,7 @@ function MessageAssetCard({ asset }: { asset: AssetRef }) {
                 });
               }}
             >
-              <FolderPlus /> Add to library
+              <FolderPlus /> Add to Library
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>

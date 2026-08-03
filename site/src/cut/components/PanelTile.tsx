@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 export function Tile({
   ref,
   selected,
+  pickId,
   onClick,
   onHover,
   label,
@@ -23,6 +24,8 @@ export function Tile({
   /** For a grid that scrolls a tile into view. */
   ref?: React.Ref<HTMLButtonElement>;
   selected: boolean;
+  /** The tile's id for a grid with arrow-key navigation (`pickGridNav`). */
+  pickId?: string;
   onClick: () => void;
   /** Pointer entering or leaving — a tile whose preview only plays on hover. */
   onHover?: (inside: boolean) => void;
@@ -39,6 +42,7 @@ export function Tile({
     <button
       ref={ref}
       type="button"
+      data-pick-id={pickId}
       aria-pressed={selected}
       title={title}
       draggable={draggable}
@@ -49,7 +53,7 @@ export function Tile({
       onFocus={() => onHover?.(true)}
       onBlur={() => onHover?.(false)}
       className={cn(
-        "flex flex-col items-center gap-1.5 rounded-lg border border-border p-2.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground",
+        "flex flex-col items-center gap-1.5 rounded-lg border border-border p-2.5 text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:bg-muted/60 hover:text-foreground",
         selected && "bg-primary/10 text-foreground ring-2 ring-[#0a84ff] ring-offset-1 ring-offset-card",
         className
       )}

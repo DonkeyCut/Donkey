@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { DictationControl } from "@/cut/components/MicDictation";
 import { PillSelect } from "@/cut/components/PillSelect";
 import { SectionTitle } from "@/cut/components/SectionTitle";
+import { SubTabs } from "@/cut/components/SubTabs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -108,10 +109,17 @@ export function AudioPanel({
 
   return (
     <>
-      {/* The side panel's floating close button sits on this corner; the
-          right padding keeps the toggle clear of it. */}
-      <div className="shrink-0 pt-4 pb-3 pr-12 pl-3.5">
-        <AudioSubTabs value={sub} onChange={onSub} />
+      {/* PanelHead's height, so the side panel's floating close button lands
+          on the toggle's centerline; the right padding keeps clear of it. */}
+      <div className="flex h-12 shrink-0 items-center pr-12 pl-3.5">
+        <SubTabs
+          tabs={[
+            { id: "voice", label: "Voice" },
+            { id: "music", label: "Music" },
+          ]}
+          value={sub}
+          onChange={onSub}
+        />
       </div>
 
       <ScrollArea className="min-h-0 flex-1" contentClassName="flex flex-col gap-5 px-3.5 pb-4">
@@ -133,39 +141,6 @@ export function AudioPanel({
         )}
       </ScrollArea>
     </>
-  );
-}
-
-/** Voice / Music segmented toggle at the top of the Audio tab. */
-function AudioSubTabs({
-  value,
-  onChange,
-}: {
-  value: "voice" | "music";
-  onChange: (v: "voice" | "music") => void;
-}) {
-  const tabs: { id: "voice" | "music"; label: string }[] = [
-    { id: "voice", label: "Voice" },
-    { id: "music", label: "Music" },
-  ];
-  return (
-    <div className="flex rounded-lg bg-muted p-0.5 text-[11.5px]">
-      {tabs.map((t) => (
-        <button
-          key={t.id}
-          type="button"
-          onClick={() => onChange(t.id)}
-          className={cn(
-            "flex-1 rounded-md px-3 py-0.5 font-medium transition-colors",
-            value === t.id
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          )}
-        >
-          {t.label}
-        </button>
-      ))}
-    </div>
   );
 }
 

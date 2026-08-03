@@ -5,7 +5,6 @@ export type MockAspect = "9:16" | "16:9";
 
 export type MockPanelTab =
   | "media"
-  | "library"
   | "video"
   | "image"
   | "audio"

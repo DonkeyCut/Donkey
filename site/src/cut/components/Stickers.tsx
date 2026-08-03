@@ -76,7 +76,8 @@ export function StickerTile({
     <div className={cn("group relative rounded-lg", picked && PICKED_RING)}>
       <button
         title={a.name}
-        className="block w-full overflow-hidden rounded-lg bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        data-pick-id={a.id}
+        className="block w-full overflow-hidden rounded-lg bg-muted outline-none"
         draggable
         onDragStart={(e) => {
           setAssetDragData(e, a.id);
