@@ -35,7 +35,8 @@ export const TRANSITIONS_TOOLS = [
       style: {
         type: "string",
         enum: [...ANIM_STYLE_IDS, "none"],
-        description: "Animation style, or 'none' to clear",
+        description:
+          "Animation style, or 'none' to clear. Slide names give the motion direction: entering from the left edge is slideright, from the right slideleft, from the top slidedown, from the bottom slideup.",
       },
       seconds: num("Ramp length in seconds, 0.1–2 (default 0.5)"),
     }, ["clipId", "which", "style"]),

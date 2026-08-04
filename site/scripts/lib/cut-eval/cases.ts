@@ -204,6 +204,8 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
           throw new Error("delete_item — iterating is not a delete/replace; the existing clip must stay");
         if (name === "delete_asset")
           throw new Error("delete_asset — iterating must not remove the existing clip's media");
+        // A reversible grade toward the asked-for look may ride along.
+        if (name === "set_color_grade") return { ok: true };
         return undefined;
       },
       stubs: {
