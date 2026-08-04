@@ -541,7 +541,8 @@ async function postExport(
         files: payload.pngs.map((p) => ({ name: p.name, bytes: p.blob.size })),
       }),
     });
-    const preBody = await apiJson<{ files?: { name: string; key: string; url: string }[] }>(pre);
+    const preBody =
+      await apiJson<{ files?: { name: string; key: string; type?: string; url: string }[] }>(pre);
     if (!pre.ok || !preBody.files) {
       throw new Error(
         quotaErrorMessage(pre.status, preBody) ?? preBody.error ?? "Export failed to start."
@@ -552,7 +553,10 @@ async function postExport(
       payload.pngs.map(async (p) => {
         const target = byName.get(p.name);
         if (!target) throw new Error("Export failed to start.");
-        await putSigned(target.url, p.blob, p.blob.type || "image/png");
+        // The content type the URL was signed with, not the blob's: they agree
+        // for the PNG frames and differ for the behind-speaker mask clip, and
+        // sending anything but the signed one fails the signature.
+        await putSigned(target.url, p.blob, target.type || "image/png");
       })
     );
     for (const p of payload.pngs) overlays.push({ name: p.name, key: byName.get(p.name)!.key });

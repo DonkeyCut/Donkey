@@ -77,8 +77,13 @@ async function exportName(
 }
 
 export const jobsCloud = {
-  /** Presign overlay-PNG uploads for an export. Overlays are transient worker
-   * inputs — no CutMediaObject bookkeeping, no quota. */
+  /** Presign the overlay uploads for an export — stamped title and effect
+   * frames, and the behind-speaker mask clip. Transient worker inputs: no
+   * CutMediaObject bookkeeping, no quota.
+   *
+   * The content type is part of a presigned PUT's signature, so the answer
+   * carries the one that was signed and the uploader sends it back verbatim.
+   * Anything else is a 403 at R2. */
   async exportPresign(userId: string, req: Request) {
     try {
       const { files } = (await req.json()) as { files?: { name?: string; bytes?: number }[] };
@@ -89,7 +94,8 @@ export const jobsCloud = {
           const name = String(f.name ?? "").replace(/[/\\]/g, "");
           if (!name) throw new Error("Every overlay needs a name.");
           const key = overlayKey(userId, batchId, name);
-          return { name, key, url: await presignPut(key, "image/png") };
+          const type = name.toLowerCase().endsWith(".mp4") ? "video/mp4" : "image/png";
+          return { name, key, type, url: await presignPut(key, type) };
         })
       );
       return Response.json({ files: out });
