@@ -85,6 +85,10 @@ interface LaneAdapter<T> {
   movePatch(raw: T, start: number): Patch<T>;
   trimLeftPatch(raw: T, newStart: number): Patch<T>;
   trimRightPatch(raw: T, newEnd: number): Patch<T>;
+  /** Left-trim with the edge at `start` while the source reads from the
+   * start-equivalent `reveal` — when the edge pins at its floor, `reveal`
+   * keeps walking the source back and the tail grows. Media kinds only. */
+  revealLeftPatch?(raw: T, start: number, reveal: number): Patch<T>;
   /** Earliest timeline start the left edge can reveal to (media source floor). */
   leftFloor(raw: T): number;
   /** Longest timeline footprint the item can grow to (media source bound). */
@@ -119,6 +123,10 @@ const clipAdapter: LaneAdapter<VideoClip> = {
     id: c.id,
     patch: { out: c.in + (newEnd - c.start) * speedOf(c) },
   }),
+  revealLeftPatch: (c, start, reveal) => ({
+    id: c.id,
+    patch: { start, in: c.in + (reveal - c.start) * speedOf(c) },
+  }),
   leftFloor: (c) => Math.max(0, c.start - c.in / speedOf(c)),
   maxLen: (s, c) => {
     const a = s.assets.find((x) => x.id === c.assetId);
@@ -144,6 +152,10 @@ const audioAdapter: LaneAdapter<AudioClip> = {
   trimRightPatch: (a, newEnd) => ({
     id: a.id,
     patch: { out: a.in + (newEnd - a.start) * speedOf(a) },
+  }),
+  revealLeftPatch: (a, start, reveal) => ({
+    id: a.id,
+    patch: { start, in: a.in + (reveal - a.start) * speedOf(a) },
   }),
   leftFloor: (a) => Math.max(0, a.start - a.in / speedOf(a)),
   maxLen: (s, a) =>
@@ -183,6 +195,10 @@ const overlayClipAdapter: LaneAdapter<VideoClip> = {
   trimRightPatch: (c, newEnd) => ({
     id: c.id,
     patch: { out: c.in + (newEnd - c.start) * speedOf(c) },
+  }),
+  revealLeftPatch: (c, start, reveal) => ({
+    id: c.id,
+    patch: { start, in: c.in + (reveal - c.start) * speedOf(c) },
   }),
   leftFloor: (c) => Math.max(0, c.start - c.in / speedOf(c)),
   maxLen: (s, c) =>
@@ -645,7 +661,8 @@ export function startLaneTrim(
 
   if (side === "l") {
     const start0 = self.start;
-    const maxStart = start0 + self.len - ad.minLen;
+    const len0 = self.len;
+    const maxStart = start0 + len0 - ad.minLen;
     // Items before this one (start-ordered), at their original spots. The
     // edge grows freely into the open gap; past the neighbor it shoves the
     // run left, closing gap after gap until everything sits flush against 0 —
@@ -656,14 +673,28 @@ export function startLaneTrim(
       .sort((a, b) => a.view.start - b.view.start);
     const prevEnd = leaders.reduce((m, l) => Math.max(m, l.view.start + l.view.len), 0);
     const runFloor = leaders.reduce((sum, l) => sum + l.view.len, 0);
-    const floor = Math.max(runFloor, ad.leftFloor(raw0));
-    const free = Math.max(prevEnd, ad.leftFloor(raw0));
+    const srcFloor = ad.leftFloor(raw0);
+    const floor = Math.max(runFloor, srcFloor);
+    const free = Math.max(prevEnd, srcFloor);
+    // With the edge pinned at the floor, a media item that still has source
+    // head keeps revealing: `in` walks back toward the first sample, the tail
+    // grows, and the followers get pushed right — the mirror of the right
+    // edge's run push.
+    const reveals = !!ad.revealLeftPatch && srcFloor < floor - 1e-9;
+    const followers = sameLane
+      .filter((x) => x.view.start >= self.start)
+      .sort((a, b) => a.view.start - b.view.start);
+    const nextStart = followers.length ? followers[0].view.start : Infinity;
+    const selfPatch = (start: number, reveal: number) =>
+      ad.revealLeftPatch ? ad.revealLeftPatch(raw0, start, reveal) : ad.trimLeftPatch(raw0, start);
     const moved = new Map<string, number>();
+    let lastDelta = 0;
     startDrag(e, {
       onMove: (dx, _dy, ev) => {
         settleSnapBack();
         const desired = Math.min(maxStart, start0 + dx / ui.pps);
         let start: number;
+        let reveal: number;
         if (desired >= free) {
           // Room to the left: grow freely, snapping to logical times.
           start = desired;
@@ -672,22 +703,33 @@ export function startLaneTrim(
             start = hit;
             ui.onSnap(leftGuide(hit, ui.pps));
           } else ui.onSnap(null);
+          reveal = start;
+        } else if (desired >= floor) {
+          // Pushing: shove the leader run left, closing its gaps.
+          start = desired;
+          reveal = start;
+          ui.onSnap(null);
+        } else if (reveals && desired >= srcFloor) {
+          // Pinned reveal: the edge holds at the floor while the source keeps
+          // walking back and the tail grows into the followers.
+          start = floor;
+          reveal = desired;
+          ui.onSnap(null);
         } else {
-          // Pushing: past the floor it drags with resistance and springs back.
-          start =
-            desired >= floor
-              ? desired
-              : Math.max(
-                  0,
-                  floor - rubberBand((floor - desired) * ui.pps, RUBBER_PX) / ui.pps
-                );
+          // Out of room and out of source: drag with resistance, spring back.
+          const bound = reveals ? srcFloor : floor;
+          start = Math.max(
+            0,
+            floor - rubberBand((bound - desired) * ui.pps, RUBBER_PX) / ui.pps
+          );
+          reveal = Math.max(desired, srcFloor);
           ui.onSnap(null);
         }
         // Re-lay the leaders right-to-left from their resting spots: each one
         // slides only as far as the pushed edge (or the item it now abuts)
         // forces it, so a retreating drag lets the run flow back. Unmoved
         // leaders get no patch (they'd re-render for nothing).
-        const patches = [ad.trimLeftPatch(raw0, start)];
+        const patches = [selfPatch(start, reveal)];
         let limit = Math.max(start, runFloor);
         for (let i = leaders.length - 1; i >= 0; i--) {
           const l = leaders[i];
@@ -701,6 +743,17 @@ export function startLaneTrim(
           }
           limit = ns;
         }
+        // The tail: fixed while the edge itself moves, growing once the
+        // reveal is on. The rubber overshoot gives visually without pulling
+        // the run back, so springing back needs no re-lay.
+        const end = ad.revealLeftPatch
+          ? Math.max(start, floor) + len0 + (start0 - reveal)
+          : start0 + len0;
+        const delta = Math.max(0, end - nextStart);
+        if (delta !== lastDelta) {
+          patches.push(...followers.map((f) => ad.movePatch(f.raw, f.view.start + delta)));
+          lastDelta = delta;
+        }
         ad.apply(patches);
       },
       onUp: () => {
@@ -710,12 +763,14 @@ export function startLaneTrim(
         if (from >= floor - 1e-4) return; // settled within the room
         // Elastic spring back to the floor. `finish` lands the floor exactly,
         // so an interrupting gesture settles rather than strands the trim.
+        // The rubber engages only past the source floor, so the sprung patch
+        // keeps the full reveal.
         const t0 = performance.now();
-        const finish = () => ad.apply([ad.trimLeftPatch(raw0, floor)]);
+        const finish = () => ad.apply([selfPatch(floor, srcFloor)]);
         const step = (now: number) => {
           const p = Math.min(1, (now - t0) / 240);
           const v = Math.max(0, from + (floor - from) * easeOutBack(p));
-          ad.apply([ad.trimLeftPatch(raw0, p < 1 ? v : floor)]);
+          ad.apply([selfPatch(p < 1 ? v : floor, srcFloor)]);
           snapBack = p < 1 ? { raf: requestAnimationFrame(step), finish } : null;
         };
         snapBack = { raf: requestAnimationFrame(step), finish };
