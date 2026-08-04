@@ -414,6 +414,10 @@ export function Editor({
     let timer: ReturnType<typeof setTimeout> | null = null;
     let last = serializeDoc(useEditor.getState());
     let lastName = useEditor.getState().projectName;
+    // serializeDoc copies the bars, so the store's array is the baseline: a
+    // parked bar changes no clip field, and comparing the copies would never
+    // see it.
+    let lastBars = useEditor.getState().transitions;
 
     // Transient failures (the network coming back up after a laptop wake, a
     // 5xx) retry on a capped backoff so unsaved work never parks on a dead
@@ -505,6 +509,7 @@ export function Editor({
         primedEpoch = s.loadEpoch;
         last = serializeDoc(s);
         lastName = s.projectName;
+        lastBars = s.transitions;
         assetsChanged(s.assets);
         return;
       }
@@ -527,6 +532,7 @@ export function Editor({
         docClips(s.clips, s.assets) !== (last.clips as unknown) ||
         docAudioClips(s.audioClips, s.assets) !== (last.audioClips as unknown) ||
         docOverlays(s.overlays) !== (last.overlays as unknown) ||
+        s.transitions !== lastBars ||
         s.templates !== (last.templates as unknown) ||
         s.subtitles !== (last.subtitles as unknown) ||
         s.aspect !== last.aspect ||
@@ -547,6 +553,7 @@ export function Editor({
       if (!changed) return;
       last = serializeDoc(s);
       lastName = s.projectName;
+      lastBars = s.transitions;
       editSeq++;
       // Every edit lands on disk marked dirty before it lands on the server,
       // with the version it was edited on top of: a crash or a closed tab
