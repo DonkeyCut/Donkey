@@ -537,6 +537,37 @@ describe("delete ripple and gaps", () => {
     expect(s().overlays[0].start).toBeCloseTo(1);
   });
 
+  test("a ripple delete carries the transitions and drops the deleted clip's own", () => {
+    const av = asset(2);
+    const a = vclip({ track: 0, start: 0, out: 2, assetId: av.id });
+    const b = vclip({ track: 0, start: 2, out: 2, assetId: av.id });
+    const c = vclip({ track: 0, start: 4, out: 2, assetId: av.id });
+    useEditor.setState({ assets: [av], clips: [a, b, c] });
+    s().setClipTransition(a.id, 0.5);
+    s().setClipTransition(b.id, 0.5);
+    s().select({ kind: "clip", id: a.id });
+    s().deleteSelection();
+    // a's own blend goes with it; b's rides the slide and keeps playing.
+    expect(s().transitions.length).toBe(1);
+    expect(clipById(b.id).start).toBeCloseTo(0);
+    expect(clipById(b.id).transition).toBeCloseTo(0.5);
+    expect(s().transitions[0].start).toBeCloseTo(1.5);
+  });
+
+  test("a trim that pushes the run takes the blends along", () => {
+    const av = asset(8);
+    const a = vclip({ track: 0, start: 0, in: 0, out: 2, assetId: av.id });
+    const b = vclip({ track: 0, start: 2, in: 0, out: 2, assetId: av.id });
+    const c = vclip({ track: 0, start: 4, in: 0, out: 2, assetId: av.id });
+    useEditor.setState({ assets: [av], clips: [a, b, c] });
+    s().setClipTransition(a.id, 0.5);
+    s().setClipTransition(b.id, 0.5);
+    s().updateClip(a.id, { out: 3 }); // a grows by 1s, pushing b and c right
+    expect(clipById(b.id).start).toBeCloseTo(3);
+    expect(clipById(a.id).transition).toBeCloseTo(0.5);
+    expect(clipById(b.id).transition).toBeCloseTo(0.5);
+  });
+
   test("delete with an overlay video track leaves the gap in place", () => {
     const a = vclip({ track: 0, start: 0, out: 2 });
     const b = vclip({ track: 0, start: 2, out: 2 });

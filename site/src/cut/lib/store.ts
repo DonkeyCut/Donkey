@@ -726,6 +726,7 @@ function pushOverlaysClearOf(ids: Set<string>) {
  * annotations keep the timing they were placed at. One undo step. */
 function resizeClipFootprint(clip: VideoClip, patch: Partial<VideoClip>, newLen: number) {
   useEditor.getState().pushHistory();
+  const before = useEditor.getState().clips;
   const next = useEditor
     .getState()
     .clips.filter((c) => c.id !== clip.id && c.track === clip.track && c.start >= clip.start)
@@ -749,6 +750,12 @@ function resizeClipFootprint(clip: VideoClip, patch: Partial<VideoClip>, newLen:
         .sort((a, b) => a.start - b.start),
     }));
   }
+  // The resized clip's own edge moved, and the run behind it with it, so the
+  // bars playing those cuts follow.
+  if (useEditor.getState().transitions.length)
+    useEditor.setState((st) => ({
+      transitions: reanchorTransitions(before, st.clips, st.transitions),
+    }));
 }
 const staleLaneError = {
   subtitleStatus: "error" as const,
@@ -1469,11 +1476,13 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       // the orchestrator manages this clip (it swaps clips idempotently), so a
       // mid-render Cmd+Z must not pull a shot out from under the run.
       genClipIds.add(clip.id);
-      set((s) => ({
-        clips: [...s.clips.map((c) => (move.has(c.id) ? { ...c, start: move.get(c.id)! } : c)), clip].sort(
-          (a, b) => a.start - b.start
-        ),
-      }));
+      set((s) => {
+        const clips = [
+          ...s.clips.map((c) => (move.has(c.id) ? { ...c, start: move.get(c.id)! } : c)),
+          clip,
+        ].sort((a, b) => a.start - b.start);
+        return { clips, transitions: reanchorTransitions(s.clips, clips, s.transitions) };
+      });
       return clip.id;
     },
 
@@ -1735,13 +1744,17 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       const { start, shifts } = rippleInsert(track0Clips(get().clips), Math.max(0, t), len);
       const move = new Map(shifts.map((sh) => [sh.id, sh.start]));
       const clip: VideoClip = { id: uid(), assetId, track: 0, start, in: 0, out, muted: false };
-      set((s) => ({
-        clips: [
+      set((s) => {
+        const clips = [
           ...s.clips.map((c) => (move.has(c.id) ? { ...c, start: move.get(c.id)! } : c)),
           clip,
-        ].sort((a, b) => a.start - b.start),
-        ...sole({ kind: "clip", id: clip.id }),
-      }));
+        ].sort((a, b) => a.start - b.start);
+        return {
+          clips,
+          transitions: reanchorTransitions(s.clips, clips, s.transitions),
+          ...sole({ kind: "clip", id: clip.id }),
+        };
+      });
     },
 
     addAudioFromAsset: (assetId, start, opts) => {
@@ -1881,8 +1894,18 @@ export const useEditor = create<EditorState>((baseSet, get) => {
     // The non-transient updaters are just a checkpoint plus the live update.
     updateClip: (id, patch) => {
       push();
+      const before = get().clips;
       get().updateClipTransient(id, patch);
       settleClipFootprint(id, patch);
+      // A resize moves the clip's own edge and pushes the run behind it, so
+      // the bars playing those cuts follow. A move is the user placing the
+      // clip somewhere, and a bar stays exactly where it was left.
+      if (
+        get().transitions.length &&
+        !touches(patch, ["start", "track"]) &&
+        touches(patch, ["in", "out", "speed"])
+      )
+        set((s) => ({ transitions: reanchorTransitions(before, s.clips, s.transitions) }));
     },
 
     setClipSpeed: (id, speed) => {
@@ -2526,11 +2549,21 @@ export const useEditor = create<EditorState>((baseSet, get) => {
             delta
           ));
         }
+        clips = clips.sort((a, b) => a.start - b.start);
+        // A blend playing a deleted clip's own edge goes with the clip; the
+        // rest ride the ripple to wherever their cut ended up.
+        const roles = s.transitions.length
+          ? resolveTransitions(s.clips, s.transitions)
+          : new Map<string, TransitionRole>();
+        const dropped = (t: TimelineTransition) =>
+          barIds.has(t.id) || clipIds.has(roles.get(t.id)?.clipId ?? "");
+        const kept = s.transitions.some(dropped)
+          ? s.transitions.filter((t) => !dropped(t))
+          : s.transitions;
+        const transitions = reanchorTransitions(s.clips, clips, kept);
         return {
-          clips: clips.sort((a, b) => a.start - b.start),
-          ...(barIds.size
-            ? { transitions: s.transitions.filter((t) => !barIds.has(t.id)) }
-            : {}),
+          clips,
+          ...(transitions !== s.transitions ? { transitions } : {}),
           audioClips,
           overlays,
           subtitles: { ...s.subtitles, cues },
@@ -2547,14 +2580,14 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       const after = gap.start + gap.len - 0.001;
       const shift = gap.len;
       set((s) => {
-        if (lane.kind === "video")
-          return {
-            clips: s.clips
-              .map((c) =>
-                c.track === lane.index && c.start >= after ? { ...c, start: c.start - shift } : c
-              )
-              .sort((a, b) => a.start - b.start),
-          };
+        if (lane.kind === "video") {
+          const clips = s.clips
+            .map((c) =>
+              c.track === lane.index && c.start >= after ? { ...c, start: c.start - shift } : c
+            )
+            .sort((a, b) => a.start - b.start);
+          return { clips, transitions: reanchorTransitions(s.clips, clips, s.transitions) };
+        }
         if (lane.kind === "audio")
           return {
             audioClips: s.audioClips
@@ -3903,6 +3936,40 @@ export function resolveTransitions(
     roles.set(t.id, { kind: fit.kind, clipId: fit.clipId });
   }
   return roles;
+}
+
+/**
+ * Carry the bars through a retime: every bar keeps playing the boundary it
+ * played, at wherever that boundary moved to.
+ *
+ * A bar is a free object — dragging a clip somewhere else leaves it where it
+ * is, and it plays again when something lines up with it. A retime is the
+ * other thing: closing a hole, pushing a run, growing a footprint all move
+ * footage the user never aimed at, so the blends riding those cuts travel with
+ * them. The retiming edits call this with the row as it stood before; bars
+ * playing nothing, and bars whose clip is gone, stay put.
+ */
+export function reanchorTransitions(
+  before: VideoClip[],
+  after: VideoClip[],
+  transitions: TimelineTransition[]
+): TimelineTransition[] {
+  if (transitions.length === 0) return transitions;
+  const roles = resolveTransitions(before, transitions);
+  if (roles.size === 0) return transitions;
+  const byId = new Map(after.map((c) => [c.id, c]));
+  let changed = false;
+  const out = transitions.map((t) => {
+    const role = roles.get(t.id);
+    const clip = role && byId.get(role.clipId);
+    if (!clip) return t;
+    const at = role.kind === "in" ? clip.start : clip.start + clipLen(clip);
+    const start = role.kind === "in" ? at : at - t.seconds;
+    if (Math.abs(start - t.start) <= TOUCH_EPS) return t;
+    changed = true;
+    return { ...t, start };
+  });
+  return changed ? out : transitions;
 }
 
 const sameAnim = (a: ClipAnim | undefined, b: ClipAnim | undefined) =>
