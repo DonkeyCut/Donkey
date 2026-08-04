@@ -217,26 +217,53 @@ function EffectTile({
 const SWATCH_T = 0.12; // seconds in — past a flash's white peak
 const LOOP_S = 1.4;
 
-/** A looping clock for tile previews, shared with the Transitions tab. A
- * `resetKey` change starts the loop over from the top. */
-export function useSwatchClock(running: boolean, loop = LOOP_S, resetKey = 0): number {
-  const [t, setT] = useState(SWATCH_T);
-  useEffect(() => {
-    if (!running) return;
-    let raf = 0;
-    let from = 0;
-    const step = (now: number) => {
-      if (!from) from = now;
-      setT(((now - from) / 1000) % loop);
-      raf = requestAnimationFrame(step);
+/** One frame callback for every swatch on screen. A tab holds a dozen-odd
+ * tiles, and a rAF each would be a dozen wake-ups a frame competing with the
+ * preview for the same main thread; they all read this clock instead, so the
+ * cost of a running tab is one callback and one batched render. */
+const swatchClock = {
+  now: 0,
+  raf: 0,
+  from: 0,
+  readers: new Set<() => void>(),
+  step(t: number) {
+    if (!swatchClock.from) swatchClock.from = t;
+    swatchClock.now = (t - swatchClock.from) / 1000;
+    for (const read of swatchClock.readers) read();
+    swatchClock.raf = requestAnimationFrame(swatchClock.step);
+  },
+  join(read: () => void) {
+    swatchClock.readers.add(read);
+    if (!swatchClock.raf) swatchClock.raf = requestAnimationFrame(swatchClock.step);
+    return () => {
+      swatchClock.readers.delete(read);
+      if (swatchClock.readers.size === 0) {
+        cancelAnimationFrame(swatchClock.raf);
+        swatchClock.raf = 0;
+        swatchClock.from = 0;
+        swatchClock.now = 0;
+      }
     };
-    raf = requestAnimationFrame(step);
+  },
+};
+
+/** A looping clock for tile previews, shared with the Transitions tab. A
+ * `resetKey` change starts the loop over from the top. Swatches stand still
+ * while the cut is playing: the picture is what the frames are for then. */
+export function useSwatchClock(running: boolean, loop = LOOP_S, resetKey = 0): number {
+  const playing = useEditor((s) => s.playing);
+  const [t, setT] = useState(SWATCH_T);
+  const live = running && !playing;
+  useEffect(() => {
+    if (!live) return;
+    const from = swatchClock.now;
+    const leave = swatchClock.join(() => setT((swatchClock.now - from) % loop));
     // Back to the resting frame as the pointer leaves.
     return () => {
-      cancelAnimationFrame(raf);
+      leave();
       setT(SWATCH_T);
     };
-  }, [running, loop, resetKey]);
+  }, [live, loop, resetKey]);
   return t;
 }
 
