@@ -241,14 +241,40 @@ describe("committed video updates (AI chat / inspector)", () => {
     const b = vclip({ track: 0, start: 3, out: 4 });
     const c = vclip({ track: 0, start: 8, out: 2 });
     const other = vclip({ track: 1, start: 3, out: 2 });
-    const out = separateOverlaps([a, b, c, other]);
-    const by = (id: string) => out.find((x) => x.id === id)!;
+    const out = separateOverlaps({
+      clips: [a, b, c, other],
+      audioClips: [],
+      overlays: [],
+      cues: [],
+    });
+    const by = (id: string) => out.clips.find((x) => x.id === id)!;
     expect(by(b.id).start).toBeCloseTo(4); // pushed out to the cut
     expect(by(c.id).start).toBeCloseTo(9); // the run keeps its gap
     expect(by(other.id).start).toBeCloseTo(3); // other tracks untouched
-    // A doc with nothing intruding passes through as the same array.
-    const clean = [vclip({ start: 0, out: 2 }), vclip({ start: 2, out: 2 })];
+    // A doc with nothing intruding passes through untouched.
+    const clean = { clips: [vclip({ start: 0, out: 2 }), vclip({ start: 2, out: 2 })], audioClips: [], overlays: [], cues: [] };
     expect(separateOverlaps(clean)).toBe(clean);
+  });
+
+  test("the cut getting longer carries the sound, titles and captions with it", () => {
+    // Same doc, now annotated: a voiceover, a title and a caption timed
+    // against the shorter overlapped timeline.
+    const a = vclip({ track: 0, start: 0, out: 4, transition: 1 });
+    const b = vclip({ track: 0, start: 3, out: 4 });
+    const out = separateOverlaps({
+      clips: [a, b],
+      audioClips: [aclip({ start: 0, out: 2 }), aclip({ start: 5, out: 2 })],
+      overlays: [title({ start: 1, end: 2 }), title({ start: 4, end: 6 })],
+      cues: [cue({ start: 5, end: 6, words: [{ w: "hi", t0: 5, t1: 6 }] })],
+    });
+    expect(out.clips.find((c) => c.id === b.id)!.start).toBeCloseTo(4);
+    // Before the joint nothing moves; after it, everything moves with b.
+    expect(out.audioClips[0].start).toBeCloseTo(0);
+    expect(out.audioClips[1].start).toBeCloseTo(6);
+    expect(out.overlays[0].start).toBeCloseTo(1);
+    expect(out.overlays[1].start).toBeCloseTo(5);
+    expect(out.cues[0].start).toBeCloseTo(6);
+    expect(out.cues[0].words![0].t0).toBeCloseTo(6);
   });
 
   test("clips never overlap, transition or not", () => {
@@ -768,6 +794,22 @@ describe("bars and clip edges", () => {
     expect(adoptTransitionFields(derived, bars)).toBe(bars);
   });
 
+  test("a pre-bar entrance at a joint becomes that joint's blend", () => {
+    // The old model let a clip fade in against the previous clip's held frame.
+    // A joint carries one blend now, so the entrance becomes it — no bar is
+    // left on the row with nothing to play.
+    const a = vclip({ track: 0, start: 0, out: 4 });
+    const b = vclip({ track: 0, start: 4, out: 4, animIn: { style: "fade", seconds: 0.5 } });
+    const bars = adoptTransitionFields([a, b], []);
+    expect(bars.length).toBe(1);
+    expect(bars[0].start).toBeCloseTo(3.5);
+    const derived = deriveTransitionFields([a, b], bars);
+    expect(derived.find((c) => c.id === a.id)!.transition).toBeCloseTo(0.5);
+    // The joint's own blend outranks it: nothing extra is adopted.
+    const withCut = [{ ...a, transition: 0.8 }, b];
+    expect(adoptTransitionFields(withCut, []).length).toBe(1);
+  });
+
   test("a bar is not tied to a clip: the pair separating turns its cut into an exit, and moving further parks it", () => {
     const av = asset(4);
     const a = vclip({ track: 0, start: 0, out: 4, assetId: av.id });
@@ -914,6 +956,25 @@ describe("overlay row order", () => {
     expect(out.clips[0].look).toBeUndefined();
     // A doc with no looks is left alone.
     expect(liftClipLooks([c2], [], spans)).toBe(null);
+  });
+
+  test("a look saved at full strength lifts at full strength", () => {
+    // The old store left lookAmount off at full strength, and an effect with
+    // no amount is half — so the lift has to say it.
+    const a = asset(4);
+    const c = vclip({ start: 0, out: 4, assetId: a.id, look: "noir" });
+    const out = liftClipLooks([c], [], [{ clip: c, start: 0, len: 4 }])!;
+    expect(out.overlays.find((o) => o.kind === "effect")!.amount).toBe(1);
+  });
+
+  test("a graded layer clip keeps its look, which grades that layer alone", () => {
+    const a = asset(4);
+    const spine = vclip({ track: 0, start: 0, out: 4, assetId: a.id, look: "noir" });
+    const layer = vclip({ track: 1, start: 0, out: 2, assetId: a.id, look: "vintage" });
+    const out = liftClipLooks([spine, layer], [], [{ clip: spine, start: 0, len: 4 }])!;
+    expect(out.overlays.filter((o) => o.kind === "effect").length).toBe(1);
+    expect(out.clips.find((c) => c.id === spine.id)!.look).toBeUndefined();
+    expect(out.clips.find((c) => c.id === layer.id)!.look).toBe("vintage");
   });
 
   test("an added effect opens the top row, and later ones join it", () => {

@@ -1196,21 +1196,28 @@ export const useEditor = create<EditorState>((baseSet, get) => {
         const joined = [...folded, ...legacyLayers];
         const lift = Math.max(0, ...joined.map((c) => -c.track));
         const lifted = lift ? joined.map((c) => ({ ...c, track: c.track + lift })) : joined;
-        // Docs saved when edge transition styles existed convert them into the
-        // equivalent clip animations, and docs saved when a transition was a
-        // physical overlap pull their intruding clips apart — clips never
-        // overlap, whatever wrote the file.
-        const merged = separateOverlaps(migrateLegacyTransitions(lifted));
         // Stamp `kind: "text"` on pre-union titles so every in-memory element
         // carries its discriminant; the serializer strips it back. Effects
         // saved onto a shared row move to one of their own, and a clip graded
         // back when a look was a clip property gets that grade as an element
         // over it — so a project made before either rule reads like a new one.
         const stamped = normalizeElementLanes(stampOverlayKinds(doc.overlays ?? []));
+        const subtitles = doc.subtitles ?? emptySubtitles();
+        // Docs saved when edge transition styles existed convert them into the
+        // equivalent clip animations, and docs saved when a transition was a
+        // physical overlap pull their intruding clips apart — clips never
+        // overlap, whatever wrote the file. Pulling them apart lengthens the
+        // cut, so the whole document goes through it together.
+        const merged = separateOverlaps({
+          clips: migrateLegacyTransitions(lifted),
+          audioClips: doc.audioClips ?? [],
+          overlays: stamped,
+          cues: subtitles.cues,
+        });
         const withLooks =
-          liftClipLooks(merged, stamped, getClipSpans(merged, assets)) ?? {
-            clips: merged,
-            overlays: stamped,
+          liftClipLooks(merged.clips, merged.overlays, getClipSpans(merged.clips, assets)) ?? {
+            clips: merged.clips,
+            overlays: merged.overlays,
           };
         hydrating = true;
         set({
@@ -1223,7 +1230,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
             withLooks.clips,
             sanitizeTransitions(doc.transitions)
           ),
-          audioClips: doc.audioClips ?? [],
+          audioClips: merged.audioClips,
           overlays: withLooks.overlays,
           templates: doc.templates ?? [],
           aspect: normalizeAspect(doc.aspect) ?? "9:16",
@@ -1248,8 +1255,8 @@ export const useEditor = create<EditorState>((baseSet, get) => {
             publishedAt: doc.notes?.publishedAt ?? "",
             links: doc.notes?.links ?? [],
           },
-          subtitles: doc.subtitles ?? emptySubtitles(),
-          subtitleStatus: (doc.subtitles?.cues.length ?? 0) > 0 ? "ready" : "idle",
+          subtitles: { ...subtitles, cues: merged.cues },
+          subtitleStatus: merged.cues.length > 0 ? "ready" : "idle",
           genvideo: doc.genvideo ?? undefined,
           renders: Array.isArray(doc.renders) ? doc.renders : [],
           firstOpen: doc.firstOpen,
@@ -3973,13 +3980,29 @@ export function adoptTransitionFields(
   const roles = resolveTransitions(clips, transitions);
   const claimed = new Set([...roles.values()].map((r) => `${r.kind}:${r.clipId}`));
   const out = [...transitions];
-  const add = (bar: Omit<TimelineTransition, "id">) => out.push({ id: uid(), ...bar });
+  const add = (key: string, bar: Omit<TimelineTransition, "id">) => {
+    claimed.add(key);
+    out.push({ id: uid(), ...bar });
+  };
+  // The clip each head touches, when one does. A joint carries exactly one
+  // blend, so an entrance stored on a clip arriving at one becomes that blend
+  // rather than a bar with nothing to play.
+  const joints = new Map<string, VideoClip>();
+  for (const track of new Set(clips.map((c) => c.track))) {
+    const row = clips.filter((c) => c.track === track).sort((a, b) => a.start - b.start);
+    row.forEach((c, i) => {
+      const prev = row[i - 1];
+      if (prev && prev.start + clipLen(prev) >= c.start - TOUCH_EPS) joints.set(c.id, prev);
+    });
+  }
+  // Tails first, so a clip's own blend takes its joint before the clip
+  // arriving there offers an entrance for it.
   for (const c of clips) {
     const end = c.start + clipLen(c);
     const d = Math.min(c.transition ?? 0, TRANSITION_MAX);
     const tailFree = !claimed.has(`cut:${c.id}`) && !claimed.has(`out:${c.id}`);
     if (d > 0 && tailFree) {
-      add({
+      add(`cut:${c.id}`, {
         start: end - d,
         seconds: clampBarSeconds(d),
         style: TRANSITION_STYLE_IDS.includes(c.transitionStyle as TransitionStyle)
@@ -3988,14 +4011,24 @@ export function adoptTransitionFields(
       });
     } else if (c.animOut && tailFree) {
       const seconds = clampBarSeconds(c.animOut.seconds);
-      add({ start: end - seconds, seconds, style: transitionStyleOfAnim(c.animOut.style) });
-    }
-    if (c.animIn && !claimed.has(`in:${c.id}`)) {
-      add({
-        start: c.start,
-        seconds: clampBarSeconds(c.animIn.seconds),
-        style: transitionStyleOfAnim(c.animIn.style),
+      add(`cut:${c.id}`, {
+        start: end - seconds,
+        seconds,
+        style: transitionStyleOfAnim(c.animOut.style),
       });
+    }
+  }
+  for (const c of clips) {
+    if (!c.animIn) continue;
+    const seconds = clampBarSeconds(c.animIn.seconds);
+    const style = transitionStyleOfAnim(c.animIn.style);
+    const joint = joints.get(c.id);
+    if (!joint) {
+      if (!claimed.has(`in:${c.id}`)) add(`in:${c.id}`, { start: c.start, seconds, style });
+    } else if (!claimed.has(`cut:${joint.id}`) && !claimed.has(`out:${joint.id}`)) {
+      // The entrance played against the clip before it; at a joint that is the
+      // blend at the cut, and it keeps the length and look it was saved with.
+      add(`cut:${joint.id}`, { start: c.start - seconds, seconds, style });
     }
   }
   return out.length === transitions.length ? transitions : out;
@@ -4008,17 +4041,32 @@ export function adoptTransitionFields(
  * clip inside the outgoing one's footprint. On load, each intruding clip —
  * and everything after it on its track, gaps preserved — moves right until
  * the pair abuts, so the transition still sits on a cut and nothing plays
- * differently twice. Same array back when nothing intrudes.
+ * differently twice.
+ *
+ * Pulling the picture apart makes the cut longer, so everything timed against
+ * it comes along: track 0 is the spine, and each title, caption and soundtrack
+ * clip moves by whatever the footage under it moved. The same document back
+ * when nothing intrudes.
  */
-export function separateOverlaps(clips: VideoClip[]): VideoClip[] {
-  const tracks = new Set(clips.map((c) => c.track));
-  let out = clips;
+export function separateOverlaps<
+  T extends {
+    clips: VideoClip[];
+    audioClips: AudioClip[];
+    overlays: Overlay[];
+    cues: SubtitleCue[];
+  },
+>(doc: T): T {
+  const tracks = new Set(doc.clips.map((c) => c.track));
+  let out = doc.clips;
+  // Where the spine moved, as (old time, shift) steps in play order.
+  let spine: { at: number; shift: number }[] = [];
   for (const track of tracks) {
     const row = out
       .filter((c) => c.track === track)
       .sort((a, b) => a.start - b.start);
     let shift = 0;
     const moved = new Map<string, number>();
+    const steps: { at: number; shift: number }[] = [];
     for (let i = 0; i < row.length; i++) {
       const start = row[i].start + shift;
       if (i > 0) {
@@ -4026,6 +4074,7 @@ export function separateOverlaps(clips: VideoClip[]): VideoClip[] {
         if (start < prevEnd - 1e-3) shift += prevEnd - start;
       }
       moved.set(row[i].id, row[i].start + shift);
+      steps.push({ at: row[i].start, shift });
     }
     if (shift > 0) {
       out = out.map((c) =>
@@ -4033,9 +4082,31 @@ export function separateOverlaps(clips: VideoClip[]): VideoClip[] {
           ? { ...c, start: moved.get(c.id)! }
           : c
       );
+      if (track === 0) spine = steps;
     }
   }
-  return out;
+  if (out === doc.clips) return doc;
+  if (spine.length === 0) return { ...doc, clips: out };
+  const at = (t: number) => {
+    let shift = 0;
+    for (const step of spine) {
+      if (step.at > t + 1e-3) break;
+      shift = step.shift;
+    }
+    return t + shift;
+  };
+  return {
+    ...doc,
+    clips: out,
+    audioClips: doc.audioClips.map((a) => ({ ...a, start: at(a.start) })),
+    overlays: doc.overlays.map((o) => ({ ...o, start: at(o.start), end: at(o.end) })),
+    cues: doc.cues.map((c) => ({
+      ...c,
+      start: at(c.start),
+      end: at(c.end),
+      words: c.words?.map((w) => ({ ...w, t0: at(w.t0), t1: at(w.t1) })),
+    })),
+  };
 }
 
 export function getClipSpans(
@@ -4320,6 +4391,10 @@ function splitEffectLanes(overlays: Overlay[]): Overlay[] {
  * the timeline you can trim, move, or run across several clips — so a doc
  * written before that opens with its grades as elements, covering exactly the
  * clips they graded.
+ *
+ * An element grades the whole frame for its stretch, which is the spine's
+ * grade and nothing else, so only track 0 lifts. A layer clip keeps the look
+ * on the clip, where it still renders over that layer alone.
  */
 export function liftClipLooks(
   clips: VideoClip[],
@@ -4329,9 +4404,11 @@ export function liftClipLooks(
   const graded = clips.filter((c) => c.look);
   if (graded.length === 0) return null;
   const lifted: Overlay[] = [];
+  const done = new Set<string>();
   for (const c of graded) {
     const sp = spans.find((x) => x.clip.id === c.id);
     if (!sp) continue;
+    done.add(c.id);
     // One row per overlapping grade, so two clips graded back to back share a
     // row and a layered pair does not.
     let lane = 0;
@@ -4341,7 +4418,9 @@ export function liftClipLooks(
       id: uid(),
       kind: "effect",
       effect: c.look as EffectId,
-      amount: c.lookAmount,
+      // A look with no stored strength is full strength; an effect with none
+      // is half, so the lift has to say what the grade was set to.
+      amount: c.lookAmount ?? 1,
       start: sp.start,
       end: sp.start + sp.len,
       x: 0.5,
@@ -4354,7 +4433,9 @@ export function liftClipLooks(
   // elements that were already there keep their order below them.
   const rows = Math.max(...lifted.map((o) => o.lane ?? 0)) + 1;
   return {
-    clips: clips.map((c) => (c.look ? { ...c, look: undefined, lookAmount: undefined } : c)),
+    clips: clips.map((c) =>
+      done.has(c.id) ? { ...c, look: undefined, lookAmount: undefined } : c
+    ),
     overlays: [...overlays.map((o) => ({ ...o, lane: (o.lane ?? 0) + rows })), ...lifted],
   };
 }
