@@ -238,7 +238,8 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
         userTurn("mute all clips", { state: STYLED_STATE }),
       ],
       reply: /mut/i,
-      requiredTools: ["set_clip_muted"],
+      // Per-clip mutes or the track header's speaker toggle both land it.
+      anyTools: ["set_clip_muted", "set_track_muted"],
       maxToolCalls: 3,
       state: STYLED_STATE,
       simulate: () => (name) => {
@@ -246,7 +247,7 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
           throw new Error(`${name} — the previous turn already ran it; "mute all clips" only mutes`);
         return undefined;
       },
-      stubs: { set_clip_muted: { muted: true } },
+      stubs: { set_clip_muted: { muted: true }, set_track_muted: { muted: true } },
     },
     {
       // The tweet-import flow: after import_url landed a photo in an earlier
@@ -310,21 +311,30 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       },
     },
     {
-      // Background music goes straight to generate_music (not voiceover, which
-      // is speech; not generate_scene, which is a whole narrated production).
+      // Background music goes straight to generate_music (voiceover_generate
+      // is speech; generate_scene is a whole narrated production). "Add … to
+      // this video" asks for placement, so the call carries add_to_timeline
+      // and the soundtrack gets the bed in the same tool call.
       name: "music-ask-single-generate",
       bucket: "single-tool",
       input: () => [userTurn("add some chill background music to this video")],
       reply: /music|track|bed|chill|background/i,
       requiredTools: ["generate_music"],
       maxToolCalls: 3,
-      stubs: {
-        generate_music: {
+      simulate: () => (name, args) => {
+        if (name !== "generate_music") return undefined;
+        if (args.add_to_timeline !== true && typeof args.start !== "number")
+          throw new Error(
+            "generate_music without placement — the user asked for music in the video, pass add_to_timeline"
+          );
+        return {
           assetId: "a-music1",
           name: "chill background music",
           duration: 30,
-          addedToTimeline: false,
-        },
+          addedToTimeline: true,
+          start: 0,
+          volume: 0.35,
+        };
       },
     },
     {
@@ -381,22 +391,26 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       },
     },
     {
-      // Looks route to set_look with a catalog id — not a hand-rolled
-      // set_color_grade approximation.
+      // Looks and treatments are timeline effects: a VHS ask on a clip is one
+      // add_effect with the catalog's vhs id spanning that clip's window. A
+      // hand-rolled set_color_grade approximation stays a violation.
       name: "look-ask-single-tool",
       bucket: "single-tool",
       input: () => [
         userTurn("give the second clip a retro VHS look", { state: TWO_CLIP_STATE }),
       ],
       reply: /vhs|retro|look/i,
-      requiredTools: ["set_look"],
+      requiredTools: ["add_effect"],
       maxToolCalls: 3,
       state: TWO_CLIP_STATE,
       simulate: () => (name, args) => {
-        if (name !== "set_look") return undefined;
-        if (args.clipId !== "c2") throw new Error(`set_look on ${args.clipId} — expected c2`);
-        if (args.style !== "vhs") throw new Error(`style ${args.style} — expected vhs`);
-        return { id: "c2", look: "vhs", amount: 1 };
+        if (name !== "add_effect") return undefined;
+        if (args.effect !== "vhs") throw new Error(`effect ${args.effect} — expected vhs`);
+        const start = Number(args.start ?? 0);
+        const end = Number(args.end ?? start + 3);
+        if (start > 6.5 || end < 11.5)
+          throw new Error(`effect spans ${start}..${end} — the second clip runs 6..12.5`);
+        return { id: "fx1", effect: "vhs", start, end, amount: Number(args.amount) || 0.5 };
       },
     },
     {
@@ -428,8 +442,10 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
     {
       // Driving the editor on the user's behalf: with a transcript in the
       // snapshot, "cut the filler words" must land real timeline cuts (split
-      // then delete, or a trim) — not just talk about them, and not merely
-      // rewrite the captions.
+      // then delete, or a trim) — talking about them or only rewriting the
+      // captions fails. Post-cut cleanup rides along: refine_speech_cuts on
+      // the recut edges, soundtrack re-alignment, and a caption refresh over
+      // the tightened cut.
       name: "filler-words-cut-with-editor",
       bucket: "multi-tool",
       input: () => [userTurn("cut the filler words out of my video", { state: FILLER_STATE })],
@@ -437,6 +453,16 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       anyTools: ["split_at", "delete_item", "trim_clip"],
       state: FILLER_STATE,
       simulate: () => makeTimelineSim(FILLER_STATE),
+      stubs: {
+        subtitles_generate: {
+          status: "done",
+          track: 0,
+          locale: "en-US",
+          cues: 3,
+          note: "Re-transcribed the tightened cut.",
+        },
+        subtitles_remove_track: { removed: 0 },
+      },
     },
     {
       // Control: a real edit request must still act with tools — guards
@@ -541,8 +567,10 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
     {
       // Timeline mentions: "@c1 and @c2 are too similar" must map through the
       // clip attachments to videoTrack's sceneShot numbers and revise those
-      // exact shots — regenerate_shot with the complaint riding as the note,
-      // never a fresh generate_video/generate_scene.
+      // exact shots on the revision ladder — regenerate_shot per shot with the
+      // complaint riding as the note, or one recut_scene over the 1..2 span.
+      // Waiting on the new takes with wait_for_renders is part of finishing
+      // the ask. A fresh generate_video/generate_scene orphans the shots.
       name: "clip-mentions-redo-their-shots",
       bucket: "multi-tool",
       input: () => [
@@ -551,8 +579,8 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
           { attachRefs: CLIP_REFS, state: SCENE_DONE_STATE }
         ),
       ],
-      reply: /shot|redo|regenerat/i,
-      requiredTools: ["regenerate_shot"],
+      reply: /shot|redo|regenerat|recut|replan/i,
+      anyTools: ["regenerate_shot", "recut_scene"],
       state: SCENE_DONE_STATE,
       simulate: () => {
         const redone = new Set<number>();
@@ -564,8 +592,19 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
             redone.add(n);
             return { ok: true, message: `Redoing shot ${n}…` };
           }
+          if (name === "recut_scene") {
+            if (Number(args.from_shot) !== 1 || Number(args.to_shot) !== 2)
+              throw new Error(
+                `recut_scene ${args.from_shot}..${args.to_shot} — the mentions were shots 1 and 2`
+              );
+            if (!String(args.instruction ?? "").trim())
+              throw new Error("recut_scene without the user's ask as its instruction");
+            return { ok: true, replanning: [1, 2], note: "Replanning shots 1-2 over the same audio; new takes are rendering." };
+          }
+          if (name === "wait_for_renders")
+            return { renders: [{ status: "landed", note: "eval: revised takes swapped into their shots" }] };
           if (name === "generate_video" || name === "generate_scene" || name === "restyle_scene")
-            throw new Error(`${name} called — a clip complaint revises its shot, not a new render`);
+            throw new Error(`${name} called — a clip complaint revises its shots in place`);
           return undefined;
         };
       },

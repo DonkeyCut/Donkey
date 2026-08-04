@@ -438,6 +438,13 @@ export function makeTimelineSim(base: typeof FILLER_STATE) {
   });
   return (name: string, args: Record<string, unknown>): unknown => {
     if (name === "get_state") return snapshot();
+    if (name === "refine_speech_cuts") {
+      const ids = Array.isArray(args.clip_ids) ? args.clip_ids.map(String) : [];
+      const missing = ids.filter((id) => !clips.some((c) => c.id === id));
+      if (ids.length === 0 || missing.length > 0)
+        return { error: `No such clip(s): ${missing.join(", ") || "(none given)"}.` };
+      return { refined: ids, note: "Edges re-trimmed into the nearest pauses." };
+    }
     if (name === "split_at") {
       const t = Number(args.t);
       const splittable = (x: SimClip) => t > x.start + 0.05 && t < x.start + (x.out - x.in) - 0.05;
@@ -495,6 +502,22 @@ export function makeTimelineSim(base: typeof FILLER_STATE) {
         .sort((a, b) => a.start - b.start);
       ripple();
       return { start: at };
+    }
+    if (name === "update_audio") {
+      const a = audio.find((x) => x.id === String(args.id));
+      if (!a) return { error: `No soundtrack clip with id ${String(args.id)}.` };
+      remember();
+      audio = audio.map((x) =>
+        x === a
+          ? {
+              ...x,
+              start: typeof args.start === "number" ? args.start : x.start,
+              in: typeof args.in === "number" ? args.in : x.in,
+              out: typeof args.out === "number" ? args.out : x.out,
+            }
+          : x
+      );
+      return { id: a.id, ok: true };
     }
     if (name === "undo") {
       const prev = history.pop();
