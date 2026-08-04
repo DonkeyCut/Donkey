@@ -21,6 +21,7 @@
     "engine:build": "bash scripts/build-cut-engine.sh",
     "worker:build": "bun build --target=node --minify --external=pg-native src/cut/worker/main.ts --outfile dist/cut-worker/main.js",
     "eval:cut-chat": "bun run scripts/eval-cut-chat.ts",
+    "eval:cut-latency": "bun run scripts/eval-cut-latency.ts",
     "email:dev": "email dev --dir src/emails --port 3001",
     "test": "bun test src packages/effects-kit/src",
     "test:genvideo": "bun run scripts/genvideo-selftest.ts",
