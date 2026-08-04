@@ -3228,10 +3228,12 @@ function DropGhostFilm({
   );
 }
 
-/** Sample a clip's filmstrip tiles across its drawn width. Tiles keep the
- * asset's aspect until the tile cap would leave the tail of a long clip bare;
- * past that they widen so the capped count still spans the whole box. The
- * first and last tiles pin to the segment's exact boundary frames once
+/** Sample a clip's filmstrip tiles across its drawn width. Tiles sit on a
+ * source-time grid: the strip holds still while a trimmed edge sweeps across
+ * it, hiding frames under the handle (the box's overflow clips the partial
+ * tiles at each end). Tiles keep the asset's aspect until the box would blow
+ * the tile cap; past that they widen by whole grid cells, still on the grid.
+ * The first and last tiles pin to the segment's exact boundary frames once
  * captured; middle tiles keep the nearest pre-sampled thumb. */
 function filmstripFrames(
   asset: MediaAsset | undefined,
@@ -3246,15 +3248,20 @@ function filmstripFrames(
   if (!asset?.thumbs?.length || !asset.thumbStep) return [];
   const aspect = (asset.width ?? 16) / Math.max(1, asset.height ?? 9);
   const natural = Math.max(minTileW, Math.round(tileH * aspect));
-  const count = Math.max(1, Math.min(120, Math.ceil(w / natural)));
-  const imgW = Math.max(natural, w / count);
-  const frames = Array.from({ length: count }, (_, k) => {
-    const timeAt = filmIn + ((k * imgW + imgW / 2) / pps) * speed;
+  const cells = Math.max(1, Math.ceil(w / natural));
+  const imgW = natural * Math.ceil(cells / 120);
+  const stepT = (imgW / pps) * speed;
+  const filmOut = filmIn + (w / pps) * speed;
+  const first = Math.max(0, Math.floor(filmIn / stepT));
+  const last = Math.max(first, Math.ceil(filmOut / stepT) - 1);
+  const frames = Array.from({ length: last - first + 1 }, (_, i) => {
+    const k = first + i;
+    const timeAt = (k + 0.5) * stepT;
     const idx = Math.min(
       asset.thumbs!.length - 1,
       Math.max(0, Math.floor(timeAt / asset.thumbStep!))
     );
-    return { src: asset.thumbs![idx], left: k * imgW, width: imgW };
+    return { src: asset.thumbs![idx], left: ((k * stepT - filmIn) / speed) * pps, width: imgW };
   });
   if (edges?.start) frames[0] = { ...frames[0], src: edges.start };
   if (edges?.end && frames.length > 1) {
