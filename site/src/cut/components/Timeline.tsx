@@ -836,11 +836,16 @@ export function Timeline() {
     overlayTrackSpans.forEach(collect);
     return out;
   }, [spans, overlayTrackSpans]);
-  const nearestAnchor = (t: number) =>
-    anchors.reduce<Anchor | null>(
-      (best, a) => (!best || Math.abs(a.at - t) < Math.abs(best.at - t) ? a : best),
+  // The boundary a drop lands on: the closest one within the same magnet reach
+  // a dragged bar snaps by. Past that there is no boundary in play and the bar
+  // parks where it was dropped.
+  const nearestAnchor = (t: number) => {
+    const best = anchors.reduce<Anchor | null>(
+      (found, a) => (!found || Math.abs(a.at - t) < Math.abs(found.at - t) ? a : found),
       null
     );
+    return best && Math.abs(best.at - t) <= XBAR_MAGNET_PX / pps ? best : null;
+  };
 
   // Every transition bar in the doc, live or parked. A bar is its own object
   // on the row: the clips it happens to line up with decide whether it plays,
