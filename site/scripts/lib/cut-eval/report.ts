@@ -1,6 +1,6 @@
 /**
- * The latency eval's report: schema cut-chat-latency/v1. One report holds one
- * or more model configs; each config holds per-case runs with full timings and
+ * The eval's report: schema cut-chat-eval/v1. One report holds one or more
+ * model configs; each config holds per-case runs with full timings and
  * per-bucket aggregates. Latency aggregates count passing runs only — a wrong
  * answer's speed means nothing — with pass rate reported alongside so a
  * fast-but-wrong config stays visible.
@@ -63,7 +63,7 @@ export interface ConfigReport {
 }
 
 export interface LatencyReport {
-  schema: "cut-chat-latency/v1";
+  schema: "cut-chat-eval/v1";
   generatedAt: string;
   base: string;
   runsPerCase: number;

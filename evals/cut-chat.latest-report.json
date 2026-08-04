@@ -1,5 +1,5 @@
 {
-  "schema": "cut-chat-latency/v1",
+  "schema": "cut-chat-eval/v1",
   "generatedAt": "2026-08-04T12:45:08.327Z",
   "base": "http://localhost:3000",
   "runsPerCase": 3,
