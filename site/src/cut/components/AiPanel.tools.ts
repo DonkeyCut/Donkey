@@ -1,0 +1,82 @@
+/**
+ * The assistant's own tools — its senses on the project (state snapshot,
+ * watching footage, listening, silence detection), the chat-driven fetch and
+ * wait flows, and the server-handled skills library — kept beside the chat
+ * panel that exposes the assistant. The catalog spreads this list into the
+ * model's toolset and `aiTools.ts` keys its handlers on `AiPanelToolName`
+ * (the `server: true` tools run in the engine and take no browser handler).
+ */
+
+import { num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
+
+export const AI_PANEL_TOOLS = [
+  {
+    name: "get_state",
+    description:
+      "Read the full current editor state: clips, soundtrack, overlay elements (titles, shapes, stickers), subtitles, selection, playhead, view settings, publish metadata. Use this whenever the context snapshot is not enough or might be stale.",
+    inputSchema: obj({}),
+  },
+  {
+    name: "watch_video",
+    description:
+      "Watch a video source with your own eyes: samples its frames at scene changes plus a steady floor into timestamped contact-sheet images, and returns the detected scene-change times (natural cut candidates). Pass clip_id to watch a timeline clip's source (the result includes that clip's source↔timeline time math) or asset_id for any project video or image. The stamp burned into each cell is SOURCE seconds — what trim_clip's in/out use — not timeline seconds. Coverage is capped per call: survey the whole range first, then call again with a narrow from/to and a small interval_seconds where the cut needs care; the result says where coverage stopped. Read the watching-and-cutting skill before editing footage by content.",
+    inputSchema: obj({
+      clip_id: str("Video clip id, track 0 or overlay (defaults from/to to its trimmed in/out)"),
+      asset_id: str("Project asset id (video or image) — watch the source itself"),
+      from: num("Source start s (default: the clip's in, else 0)"),
+      to: num("Source end s (default: the clip's out, else the source's end; spans at most 600s per call)"),
+      interval_seconds: num("Target seconds between sampled frames, 0.5–30 (default spreads ~32 frames across the range)"),
+    }),
+  },
+  {
+    name: "detect_silence",
+    description:
+      "Find silent stretches in a source's audio — dead air, long pauses, gaps between takes. Returns [{start,end,duration}] in SOURCE seconds, plus each one's timeline times when clip_id is passed. Cheap and image-free; pair it with the transcript's cue timings to find filler, then cut with split_at / trim_clip / delete_item — place speech cuts inside these spans (cue timings drift from the audio), and read the watching-and-cutting skill for the pacing rules.",
+    inputSchema: obj({
+      clip_id: str("Clip id — video, overlay, or soundtrack; scopes to its trimmed range and maps results to timeline seconds"),
+      asset_id: str("Project asset id (video or audio)"),
+      from: num("Source start s (default: the clip's in, else 0)"),
+      to: num("Source end s (default: the clip's out, else the source's end)"),
+      threshold_db: num("Loudness below this counts as silence, dBFS (default -30)"),
+      min_silence: num("Shortest silent stretch to report, seconds (default 0.35)"),
+    }),
+  },
+  {
+    name: "listen_audio",
+    description:
+      "Listen with your own ears to a project asset's sound — an audio asset, or the audio track of a video (its speech, music, burned-in narration) — so you can answer what it says or how it sounds. The sound rides back inline (≈12MB cap). Pass clip_id for a timeline clip's source (scopes to its trim) or asset_id for the whole source; add from/to (source seconds) to hear one stretch of a long file. Audio the user attached to their message already plays in it. To WRITE a caption track, use subtitles_generate.",
+    inputSchema: obj({
+      clip_id: str("Clip id — video or soundtrack (defaults from/to to its trimmed in/out)"),
+      asset_id: str("Project asset id (audio or video) — listen to the whole source"),
+      from: num("Source start s (default: the clip's in, else 0)"),
+      to: num("Source end s (default: the clip's out, else the source's end)"),
+    }),
+  },
+  {
+    name: "wait_for_renders",
+    description:
+      "Block until this project's in-flight video renders settle (up to ~100s), then report each one: landed (with its asset id, ready to place) or failed (with the error). Call it whenever the user's ask depends on a render that `renders` in the state shows as running — \"add it when it's done\", \"assemble the clips\" — and then finish the job in the same turn; never tell the user to come back and report when a card appears. If some renders are still running when it returns, say how long they've been going and call it again on the user's go-ahead.",
+    inputSchema: obj({}),
+  },
+  {
+    name: "import_url",
+    description:
+      "Read any URL — TikTok, YouTube, Instagram Reels, an X/Twitter post or Article, an ordinary web page, or a direct video/audio/image link — with the bundled downloader and import what it holds into the project. Free and local. A web page comes back as its article text plus the pictures on it; a post as its video or photos; and the source's own words (returned as sourceText) are quoted for the user beside the media automatically — don't retype them in your reply. A source that is only words returns sourceText with no assets, which is a success: read it and answer from it. This is how you look something up: point it at the page and read what comes back. Media lands on a card in this chat and the user drags it to the timeline, Media, or the Library; place it yourself (add_clip) only when they asked for it in the cut. A short clip downloads in seconds; a long video can take a couple of minutes.",
+    inputSchema: obj({ url: str("The page or media URL to download") }, ["url"]),
+  },
+  {
+    name: "list_skills",
+    description: "List the available skill documents about how this editor works.",
+    inputSchema: obj({}),
+    server: true,
+  },
+  {
+    name: "read_skill",
+    description:
+      "Read a skill document (detailed docs for a part of the editor: every setting, where it lives, and how it behaves). Use before working in an unfamiliar area.",
+    inputSchema: obj({ name: str("Skill name from list_skills") }, ["name"]),
+    server: true,
+  },
+] as const satisfies readonly AiToolDef[];
+
+export type AiPanelToolName = (typeof AI_PANEL_TOOLS)[number]["name"];

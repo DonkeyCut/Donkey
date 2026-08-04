@@ -865,6 +865,18 @@ export type SidePanelTab =
   | "subtitles"
   | "publish";
 
+export const SIDE_PANEL_TABS: SidePanelTab[] = [
+  "media",
+  "elements",
+  "effects",
+  "transitions",
+  "video",
+  "image",
+  "audio",
+  "subtitles",
+  "publish",
+];
+
 export interface ProjectDoc {
   version: 1;
   name: string;

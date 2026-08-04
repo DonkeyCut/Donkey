@@ -9,18 +9,6 @@ import { create } from "zustand";
 
 import type { SidePanelTab } from "./types";
 
-export const SIDE_PANEL_TABS: SidePanelTab[] = [
-  "media",
-  "elements",
-  "effects",
-  "transitions",
-  "video",
-  "image",
-  "audio",
-  "subtitles",
-  "publish",
-];
-
 interface PanelRequestState {
   target: SidePanelTab | null;
   /** Bumps per request so repeating the same target still fires the effect. */

@@ -14,6 +14,24 @@ import {
   type OverlayAnimStyle,
   type OverlayLoopStyle,
 } from "@donkeycut/effects-kit";
+import type { AiPanelToolName } from "@/cut/components/AiPanel.tools";
+import type { OverlayAnimationToolName } from "@/cut/components/AnimationTiles.tools";
+import type { AudioToolName } from "@/cut/components/AudioPanel.tools";
+import type { EditorToolName } from "@/cut/components/Editor.tools";
+import type { EffectsToolName } from "@/cut/components/EffectsPanel.tools";
+import { SHAPE_KINDS, type ElementsToolName } from "@/cut/components/ElementsPanel.tools";
+import type { VideoGenToolName } from "@/cut/components/GeneratePanel.tools";
+import type { ImageGenToolName } from "@/cut/components/ImageGenPanel.tools";
+import type { InspectorToolName } from "@/cut/components/Inspector.tools";
+import type { LibraryToolName } from "@/cut/components/LibraryView.tools";
+import type { PreviewToolName } from "@/cut/components/Preview.tools";
+import type { SceneToolName } from "@/cut/components/SceneCard.tools";
+import type { SidePanelToolName } from "@/cut/components/SidePanel.tools";
+import type { StockToolName } from "@/cut/components/StockPanels.tools";
+import type { SubtitlesToolName } from "@/cut/components/SubtitlesPanel.tools";
+import type { TimelineToolName } from "@/cut/components/Timeline.tools";
+import type { TopBarToolName } from "@/cut/components/TopBar.tools";
+import type { TransitionsToolName } from "@/cut/components/TransitionsPanel.tools";
 import { apiFetch, apiJson, getBackend } from "./backend";
 import { refFromAsset, refFromStockVideo, type AssetRef } from "./assetRef";
 import { chatOwner, tagChatAsset } from "./chatAssets";
@@ -46,7 +64,7 @@ import {
 } from "./media";
 import { isLottieAsset } from "./lottieAssets";
 import { BREATH, REACH, refineEdge, type SilenceSpan } from "./cutRefine";
-import { requestSidePanel, SIDE_PANEL_TABS } from "./panelRequest";
+import { requestSidePanel } from "./panelRequest";
 import { blobToInlineAudio, refToInlineAudio, visualRefs, type InlineImage } from "./refMedia";
 import { characterPrompt, stockAspectDims, stockTitle } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
@@ -77,6 +95,7 @@ import {
   rectOf,
   regionLabel,
   SHAPE_LABELS,
+  SIDE_PANEL_TABS,
   SPEED_FLOOR,
   TRANSITION_STYLE_IDS,
   type AnimStyle,
@@ -135,25 +154,224 @@ const GRADE_KEYS = ["brightness", "contrast", "saturation", "exposure", "tempera
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
-class ToolError extends Error {}
+/** Every tool that runs in the browser: the full catalog minus the
+ * `server: true` skills tools the engine answers itself. */
+type BrowserToolName = Exclude<
+  | AiPanelToolName
+  | AudioToolName
+  | EditorToolName
+  | EffectsToolName
+  | ElementsToolName
+  | ImageGenToolName
+  | InspectorToolName
+  | LibraryToolName
+  | OverlayAnimationToolName
+  | PreviewToolName
+  | SceneToolName
+  | SidePanelToolName
+  | StockToolName
+  | SubtitlesToolName
+  | TimelineToolName
+  | TopBarToolName
+  | TransitionsToolName
+  | VideoGenToolName,
+  "list_skills" | "read_skill"
+>;
 
-/**
- * Execute an assistant tool call against the live editor store.
- * Returns a small JSON-safe result; throws ToolError with a readable message.
- */
-export async function runAiTool(
-  name: string,
-  input: Record<string, unknown>
-): Promise<unknown> {
-  const s = useEditor.getState();
+type Editor = ReturnType<typeof useEditor.getState>;
 
-  switch (name) {
-    case "get_state":
+type ToolRun = (s: Editor, input: Record<string, unknown>) => Promise<unknown> | unknown;
+
+/** The browser handler for every tool, keyed by the names the `*.tools.ts`
+ * modules beside the components export, so a tool added, removed, or renamed
+ * there refuses to compile until this map matches. */
+const toolRuns: Record<BrowserToolName, ToolRun> = {
+  add_shape: (s, input) => {
+    const shape = String(input.shape) as ShapeKind;
+    if (!(shape in SHAPE_LABELS))
+      throw new ToolError(`shape must be one of ${SHAPE_KINDS.join(", ")}.`);
+    if (isNum(input.start)) s.seek(input.start);
+    s.addShape(shape);
+    const sel = useEditor.getState().selection;
+    if (sel?.kind !== "overlay") throw new ToolError("Could not create the shape.");
+    applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "shape"));
+    const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
+    return { id: o.id, shape, start: round2(o.start), end: round2(o.end) };
+  },
+
+  add_sticker: (s, input) => {
+    const assetId = typeof input.asset_id === "string" && input.asset_id ? input.asset_id : undefined;
+    if (!assetId) throw new ToolError("Pass asset_id.");
+    const stickerAsset = s.assets.find((a) => a.id === assetId);
+    if (stickerAsset?.type !== "image") throw new ToolError(`No image asset with id ${assetId}.`);
+    if (isNum(input.start)) s.seek(input.start);
+    s.addSticker({ assetId, ...(isLottieAsset(stickerAsset) ? { lottie: true } : {}) });
+    const sel = useEditor.getState().selection;
+    if (sel?.kind !== "overlay") throw new ToolError("Could not create the sticker.");
+    applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "sticker"));
+    const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
+    return { id: o.id, assetId, start: round2(o.start), end: round2(o.end) };
+  },
+
+  create_sticker: async (s, input) => {
+    const idea = String(input.idea ?? "").trim();
+    if (!idea) throw new ToolError("idea is required.");
+    if (!s.projectId) throw new ToolError("No project open.");
+    const { createCustomSticker } = await import("./stickerCreate");
+    const asset = await createCustomSticker(s.projectId, idea);
+    if (isNum(input.start)) s.seek(input.start);
+    useEditor.getState().addSticker({ assetId: asset.id });
+    const sel = useEditor.getState().selection;
+    if (sel?.kind !== "overlay") throw new ToolError("Could not place the sticker.");
+    applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "sticker"));
+    const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
+    return { id: o.id, assetId: asset.id, start: round2(o.start), end: round2(o.end) };
+  },
+
+  add_effect: (s, input) => {
+    const effect = String(input.effect ?? "");
+    if (!(EFFECT_IDS as string[]).includes(effect))
+      throw new ToolError(`effect must be one of ${EFFECT_IDS.join(", ")}.`);
+    if (isNum(input.start)) s.seek(input.start);
+    s.addEffect(effect as EffectId);
+    const sel = useEditor.getState().selection;
+    if (sel?.kind !== "overlay") throw new ToolError("Could not create the effect.");
+    applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "effect"));
+    // Where a zoom holds: the rest of the effects fill the frame, so the
+    // point only means anything for this one.
+    if (effect === "zoom" && (isNum(input.focus_x) || isNum(input.focus_y))) {
+      useEditor.getState().updateOverlay(sel.id, {
+        focus: {
+          x: clamp(isNum(input.focus_x) ? input.focus_x : 0.5, 0, 1),
+          y: clamp(isNum(input.focus_y) ? input.focus_y : 0.5, 0, 1),
+        },
+      });
+    }
+    const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
+    return { id: o.id, effect, start: round2(o.start), end: round2(o.end) };
+  },
+
+  set_overlay_animation: (s, input) => {
+    const o = requireItem(s.overlays, input.id, "overlay element");
+    const anim: OverlayAnim = { ...(o.anim ?? {}) };
+    const edge = (slot: "in" | "out", styleKey: string, secondsKey: string) => {
+      const raw = input[styleKey];
+      const secs = isNum(input[secondsKey])
+        ? clamp(input[secondsKey], OVERLAY_ANIM_MIN_SECONDS, OVERLAY_ANIM_MAX_SECONDS)
+        : undefined;
+      if (typeof raw === "string") {
+        if (raw === "none") {
+          delete anim[slot];
+          return;
+        }
+        if (!(OVERLAY_ANIM_STYLE_IDS as string[]).includes(raw))
+          throw new ToolError(`Unknown ${slot} style: ${raw}`);
+        if (raw === "typewriter" && (o.kind ?? "text") !== "text")
+          throw new ToolError("typewriter animates titles only.");
+        anim[slot] = {
+          style: raw as OverlayAnimStyle,
+          seconds: secs ?? anim[slot]?.seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS,
+        };
+      } else if (secs !== undefined && anim[slot]) {
+        anim[slot] = { ...anim[slot]!, seconds: secs };
+      }
+    };
+    edge("in", "in_style", "in_seconds");
+    edge("out", "out_style", "out_seconds");
+    const rawLoop = input.loop_style;
+    const speed = isNum(input.loop_speed) ? clamp(input.loop_speed, 0.25, 4) : undefined;
+    if (typeof rawLoop === "string") {
+      if (rawLoop === "none") delete anim.loop;
+      else if (!(OVERLAY_LOOP_STYLE_IDS as string[]).includes(rawLoop))
+        throw new ToolError(`Unknown loop style: ${rawLoop}`);
+      else anim.loop = { style: rawLoop as OverlayLoopStyle, speed: speed ?? anim.loop?.speed ?? 1 };
+    } else if (speed !== undefined && anim.loop) {
+      anim.loop = { ...anim.loop, speed };
+    }
+    s.updateOverlay(o.id, { anim: anim.in || anim.out || anim.loop ? anim : undefined });
+    const next = useEditor.getState().overlays.find((x) => x.id === o.id)!;
+    return { id: next.id, anim: next.anim ?? null };
+  },
+
+  set_overlay_keyframes: (s, input) => {
+    const o = requireItem(s.overlays, input.id, "overlay element");
+    const raw = input.keys;
+    if (!Array.isArray(raw)) throw new ToolError("keys must be a list.");
+    const dur = Math.max(0.1, o.end - o.start);
+    let kf = o.kf;
+    if (raw.length === 0) {
+      s.clearOverlayKeys(o.id);
+      kf = undefined;
+    } else {
+      // Each key builds on the pose already at its time, so a key that only
+      // names `x` keeps whatever the element was doing otherwise.
+      s.pushHistory();
+      for (const k of raw as Record<string, unknown>[]) {
+        if (!isNum(k.t)) throw new ToolError("Every key needs a time `t`.");
+        s.setOverlayKey(
+          o.id,
+          clamp(k.t, 0, dur),
+          {
+            ...(isNum(k.x) ? { x: clamp(k.x, 0.02, 0.98) } : {}),
+            ...(isNum(k.y) ? { y: clamp(k.y, 0.02, 0.98) } : {}),
+            ...(isNum(k.scale) ? { scale: clamp(k.scale, 0.1, 4) } : {}),
+            ...(isNum(k.rotation) ? { rotation: clamp(Math.round(k.rotation), -180, 180) } : {}),
+            ...(isNum(k.opacity) ? { opacity: clamp(k.opacity, 0, 1) } : {}),
+          },
+          { transient: true }
+        );
+      }
+      kf = useEditor.getState().overlays.find((x) => x.id === o.id)?.kf;
+    }
+    return { id: o.id, keys: (kf ?? []).map((k) => ({ ...k, t: round2(k.t) })) };
+  },
+
+  set_transition: (s, input) => {
+    const clip = requireItem(s.clips, input.clipId, "video clip");
+    // A transition joins a clip to the next one on its own track.
+    const row = s.clips.filter((c) => c.track === clip.track);
+    if (row.findIndex((c) => c.id === clip.id) === row.length - 1)
+      throw new ToolError("That is its track's last clip — nothing after it to transition into.");
+    if (!isNum(input.seconds)) throw new ToolError("seconds is required (0 clears the transition).");
+    let style: TransitionStyle | undefined;
+    if (input.style !== undefined) {
+      const requested = TRANSITION_STYLE_SYNONYMS[input.style as string] ?? input.style;
+      style = TRANSITION_STYLE_IDS.find((x) => x === requested);
+      if (!style) throw new ToolError(`Unknown style. Use one of: ${TRANSITION_STYLE_IDS.join(", ")}.`);
+    }
+    s.setClipTransition(clip.id, input.seconds, style);
+    const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
+    return { id: next.id, transition: next.transition ?? 0, style: next.transitionStyle ?? "crossfade" };
+  },
+
+  set_animation: (s, input) => {
+    const clip = requireItem(s.clips, input.clipId, "video clip");
+    const which = input.which === "in" || input.which === "out" ? input.which : null;
+    if (!which) throw new ToolError('which must be "in" or "out".');
+    if (input.style === "none") {
+      s.setClipAnim(clip.id, which, null);
+      return { id: clip.id, which, style: "none" };
+    }
+    const requested = ANIM_STYLE_SYNONYMS[input.style as string] ?? input.style;
+    const style = ANIM_STYLE_IDS.find((x) => x === requested);
+    if (!style)
+      throw new ToolError(`Unknown style. Use one of: ${ANIM_STYLE_IDS.join(", ")}, none.`);
+    if (clip.track > 0 && overlayAnimStyle(style) !== style)
+      throw new ToolError("Upper-track clips animate with fade or zoom only.");
+    const seconds = isNum(input.seconds) ? input.seconds : ANIM_DEFAULT_SECONDS;
+    s.setClipAnim(clip.id, which, { style, seconds });
+    const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
+    const anim = which === "in" ? next.animIn : next.animOut;
+    return { id: next.id, which, style: anim?.style ?? "none", seconds: anim?.seconds ?? 0 };
+  },
+
+  get_state: () => {
       // The tool result carries the whole transcript; the per-message context
       // snapshot trims it, so this is how the model pulls every cue when needed.
       return buildAiContext({ fullCues: true });
+  },
 
-    case "capture_frame": {
+  capture_frame: () => {
       const canvas = document.querySelector<HTMLCanvasElement>(".stage canvas");
       if (!canvas) throw new ToolError("No preview canvas on screen.");
       const scaled = document.createElement("canvas");
@@ -165,9 +383,9 @@ export async function runAiTool(
       ctx.drawImage(canvas, 0, 0, scaled.width, scaled.height);
       // Overlays/captions are DOM, not canvas — note that for the model.
       return { image: scaled.toDataURL("image/jpeg", 0.75), note: "Video frame only; titles and captions overlay this in the UI." };
-    }
+  },
 
-    case "watch_video": {
+  watch_video: async (s, input) => {
       const { projectId, asset, clip, speed, from, to } = resolveWatchRange(s, input);
       if (asset.type === "audio")
         throw new ToolError(`"${asset.name}" is audio — listen_audio hears it, detect_silence finds its dead air.`);
@@ -263,9 +481,9 @@ export async function runAiTool(
             : "") +
           (stamped ? "" : " (Stamps unavailable — sheetFrames lists each cell's time.)"),
       };
-    }
+  },
 
-    case "detect_silence": {
+  detect_silence: async (s, input) => {
       const { projectId, asset, clip, speed, from, to } = resolveWatchRange(s, input);
       if (asset.type === "image") throw new ToolError(`"${asset.name}" is an image — it has no audio.`);
       const silences = await fetchSilences(projectId, asset, {
@@ -303,9 +521,9 @@ export async function runAiTool(
           ? { note: "No silence at these settings — a higher threshold_db or shorter min_silence hears more." }
           : {}),
       };
-    }
+  },
 
-    case "listen_audio": {
+  listen_audio: async (s, input) => {
       const { projectId, asset, clip, from, to } = resolveWatchRange(s, input);
       if (asset.type === "image")
         throw new ToolError(`"${asset.name}" is an image — it has no sound. watch_video shows it.`);
@@ -330,19 +548,20 @@ export async function runAiTool(
         ...(to !== undefined ? { to: round2(to) } : {}),
         audio: `data:${inline.mimeType};base64,${inline.data}`,
       };
-    }
+  },
 
-    case "seek": {
+  seek: (s, input) => {
       if (!isNum(input.t)) throw new ToolError("t (seconds) is required.");
       s.seek(input.t);
       return { playhead: useEditor.getState().currentTime };
-    }
+  },
 
-    case "set_playing":
+  set_playing: (s, input) => {
       s.setPlaying(Boolean(input.playing));
       return { playing: Boolean(input.playing) };
+  },
 
-    case "select": {
+  select: (s, input) => {
       const kind = String(input.kind);
       if (kind === "none") {
         s.select(null);
@@ -365,26 +584,26 @@ export async function runAiTool(
         kind === "overlayClip" ? "clip" : kind === "text" ? "overlay" : (kind as "clip" | "audio" | "overlay");
       s.select({ kind: selKind, id });
       return { selection: { kind: selKind, id } };
-    }
+  },
 
-    case "set_side_panel": {
+  set_side_panel: (_s, input) => {
       const panel = String(input.panel);
       if (panel !== "none" && !SIDE_PANEL_TABS.some((t) => t === panel))
         throw new ToolError(`Unknown panel: ${panel}`);
       requestSidePanel(panel === "none" ? null : (panel as SidePanelTab));
       return { panel };
-    }
+  },
 
-    case "split_at": {
+  split_at: (s, input) => {
       const before = s.clips.length + s.audioClips.length;
       s.splitAtPlayhead(isNum(input.t) ? input.t : undefined);
       const after = useEditor.getState();
       const made = after.clips.length + after.audioClips.length - before;
       if (made === 0) throw new ToolError("Nothing to split at that time.");
       return { split: true, videoClips: after.clips.length };
-    }
+  },
 
-    case "move_clip": {
+  move_clip: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
       // Reordering by index is a base-sequence operation; a layer clip is
       // free-positioned — move it with update_overlay_video (start/track).
@@ -396,9 +615,9 @@ export async function runAiTool(
       const row = track0Clips(s.clips);
       s.moveClip(clip.id, clamp(Math.round(input.toIndex), 0, row.length - 1));
       return { order: track0Clips(useEditor.getState().clips).map((c) => c.id) };
-    }
+  },
 
-    case "place_clip": {
+  place_clip: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
       if (!isNum(input.start)) throw new ToolError("start (seconds) is required.");
       const len = (clip.out - clip.in) / (clip.speed && clip.speed > 0 ? clip.speed : 1);
@@ -418,14 +637,14 @@ export async function runAiTool(
           ? { note: "That spot was taken — slid right to the next free one." }
           : {}),
       };
-    }
+  },
 
-    case "add_clip": {
+  add_clip: (s, input) => {
       const asset = requireItem(s.assets, input.asset_id, "project asset");
       return placeAssetOnTimeline(asset, input);
-    }
+  },
 
-    case "add_overlay_video": {
+  add_overlay_video: (s, input) => {
       const asset = requireItem(s.assets, input.asset_id, "project asset");
       if (asset.type !== "video" && asset.type !== "image")
         throw new ToolError("Only video or image assets can sit on a video track.");
@@ -451,9 +670,9 @@ export async function runAiTool(
         len: round2((c.out - c.in) / (c.speed && c.speed > 0 ? c.speed : 1)),
         layout: regionLabel(rectOf(c)),
       };
-    }
+  },
 
-    case "update_overlay_video": {
+  update_overlay_video: (s, input) => {
       const c = requireItem(overlayLayers(s.clips), input.id, "overlay video clip");
       const asset = s.assets.find((a) => a.id === c.assetId);
       // A still has no source bound, so its clip can stretch to any length.
@@ -497,9 +716,9 @@ export async function runAiTool(
         muted: next.muted,
         ...(next.hidden ? { hidden: true } : {}),
       };
-    }
+  },
 
-    case "trim_clip": {
+  trim_clip: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
       const asset = s.assets.find((a) => a.id === clip.assetId);
       // A still has no source bound, so its clip can stretch to any length.
@@ -511,9 +730,9 @@ export async function runAiTool(
       // invariant: extending a clip pushes the following run right.
       s.setClipTrim(clip.id, nextIn, nextOut);
       return { in: nextIn, out: nextOut, len: Math.round((nextOut - nextIn) * 100) / 100 };
-    }
+  },
 
-    case "refine_speech_cuts": {
+  refine_speech_cuts: async (s, input) => {
       const projectId = s.projectId;
       if (!projectId) throw new ToolError("No project open.");
       const ids = Array.isArray(input.clip_ids) ? input.clip_ids.map(String) : [];
@@ -644,30 +863,30 @@ export async function runAiTool(
         }),
         note: `Each moved edge sits ~${BREATH}s inside a real pause; clip spacing is preserved. Listen at any flagged edge.`,
       };
-    }
+  },
 
-    case "set_clip_muted": {
+  set_clip_muted: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
       s.updateClip(clip.id, { muted: Boolean(input.muted) });
       return { muted: Boolean(input.muted) };
-    }
+  },
 
-    case "set_clip_volume": {
+  set_clip_volume: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
       if (!isNum(input.volume)) throw new ToolError("volume is required (0..1.5).");
       const volume = clamp(input.volume, 0, 1.5);
       s.updateClip(clip.id, { volume: Math.abs(volume - 1) < 1e-4 ? undefined : volume });
       const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
       return { id: next.id, volume: next.volume ?? 1 };
-    }
+  },
 
-    case "set_clip_hidden": {
+  set_clip_hidden: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
       s.updateClip(clip.id, { hidden: input.hidden ? true : undefined });
       return { id: clip.id, hidden: Boolean(input.hidden) };
-    }
+  },
 
-    case "set_track_hidden": {
+  set_track_hidden: (s, input) => {
       if (!isNum(input.track) || input.track < 0)
         throw new ToolError("track must be 0 or higher.");
       const track = Math.round(input.track);
@@ -701,9 +920,9 @@ export async function runAiTool(
         default:
           throw new ToolError('`kind` must be "video", "soundtrack", "text", or "subtitles".');
       }
-    }
+  },
 
-    case "set_track_muted": {
+  set_track_muted: (s, input) => {
       if (!isNum(input.track) || input.track < 0)
         throw new ToolError("track must be 0 or higher.");
       const track = Math.round(input.track);
@@ -711,9 +930,9 @@ export async function runAiTool(
       if (!n) throw new ToolError(`No clips on video track ${track}.`);
       s.setTrackMuted(track, Boolean(input.muted));
       return { track, muted: Boolean(input.muted), clips: n };
-    }
+  },
 
-    case "detach_audio": {
+  detach_audio: (s, input) => {
       const id = input.clipId ? String(input.clipId) : s.selection?.kind === "clip" ? s.selection.id : null;
       if (!id) throw new ToolError("Pass clipId or select a video clip first.");
       const clip = requireItem(s.clips, id, "video clip");
@@ -724,9 +943,9 @@ export async function runAiTool(
       if (asset) void ensurePeaks(asset);
       const sel = useEditor.getState().selection;
       return { audioClipId: sel?.kind === "audio" ? sel.id : null };
-    }
+  },
 
-    case "delete_item": {
+  delete_item: (s, input) => {
       const kind = String(input.kind) as "clip" | "overlayClip" | "audio" | "overlay" | "text";
       const id = String(input.id ?? "");
       const pool =
@@ -741,9 +960,9 @@ export async function runAiTool(
       s.select({ kind: selKind, id });
       s.deleteSelection();
       return { deleted: { kind: selKind, id } };
-    }
+  },
 
-    case "remove_gap": {
+  remove_gap: (s, input) => {
       if (!isNum(input.at)) throw new ToolError("at (seconds) is required.");
       const track = isNum(input.track) ? input.track : 0;
       const lane = { kind: "video", index: track } as const;
@@ -751,9 +970,9 @@ export async function runAiTool(
       if (!gap) throw new ToolError(`No track-${track} gap at ${input.at}s — pass a time inside the empty span.`);
       s.removeLaneGap(lane, input.at);
       return { closed: { track, ...gap } };
-    }
+  },
 
-    case "add_title": {
+  add_title: (s, input) => {
       if (typeof input.text !== "string" || !input.text.trim())
         throw new ToolError("text is required.");
       if (isNum(input.start)) s.seek(input.start);
@@ -763,150 +982,9 @@ export async function runAiTool(
       applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "text"));
       const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
       return { id: o.id, ...(isTextOverlay(o) ? { text: o.text } : {}), start: o.start, end: o.end };
-    }
+  },
 
-    case "add_shape": {
-      const shape = String(input.shape) as ShapeKind;
-      if (!(shape in SHAPE_LABELS)) throw new ToolError("shape must be rect, ellipse, line, or arrow.");
-      if (isNum(input.start)) s.seek(input.start);
-      s.addShape(shape);
-      const sel = useEditor.getState().selection;
-      if (sel?.kind !== "overlay") throw new ToolError("Could not create the shape.");
-      applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "shape"));
-      const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
-      return { id: o.id, shape, start: round2(o.start), end: round2(o.end) };
-    }
-
-    case "add_sticker": {
-      const assetId = typeof input.asset_id === "string" && input.asset_id ? input.asset_id : undefined;
-      if (!assetId) throw new ToolError("Pass asset_id.");
-      const stickerAsset = s.assets.find((a) => a.id === assetId);
-      if (stickerAsset?.type !== "image") throw new ToolError(`No image asset with id ${assetId}.`);
-      if (isNum(input.start)) s.seek(input.start);
-      s.addSticker({ assetId, ...(isLottieAsset(stickerAsset) ? { lottie: true } : {}) });
-      const sel = useEditor.getState().selection;
-      if (sel?.kind !== "overlay") throw new ToolError("Could not create the sticker.");
-      applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "sticker"));
-      const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
-      return { id: o.id, assetId, start: round2(o.start), end: round2(o.end) };
-    }
-
-    case "add_effect": {
-      const effect = String(input.effect ?? "");
-      if (!(EFFECT_IDS as string[]).includes(effect))
-        throw new ToolError(`effect must be one of ${EFFECT_IDS.join(", ")}.`);
-      if (isNum(input.start)) s.seek(input.start);
-      s.addEffect(effect as EffectId);
-      const sel = useEditor.getState().selection;
-      if (sel?.kind !== "overlay") throw new ToolError("Could not create the effect.");
-      applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "effect"));
-      // Where a zoom holds: the rest of the effects fill the frame, so the
-      // point only means anything for this one.
-      if (effect === "zoom" && (isNum(input.focus_x) || isNum(input.focus_y))) {
-        useEditor.getState().updateOverlay(sel.id, {
-          focus: {
-            x: clamp(isNum(input.focus_x) ? input.focus_x : 0.5, 0, 1),
-            y: clamp(isNum(input.focus_y) ? input.focus_y : 0.5, 0, 1),
-          },
-        });
-      }
-      const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
-      return { id: o.id, effect, start: round2(o.start), end: round2(o.end) };
-    }
-
-    case "create_sticker": {
-      const idea = String(input.idea ?? "").trim();
-      if (!idea) throw new ToolError("idea is required.");
-      if (!s.projectId) throw new ToolError("No project open.");
-      const { createCustomSticker } = await import("./stickerCreate");
-      const asset = await createCustomSticker(s.projectId, idea);
-      if (isNum(input.start)) s.seek(input.start);
-      useEditor.getState().addSticker({ assetId: asset.id });
-      const sel = useEditor.getState().selection;
-      if (sel?.kind !== "overlay") throw new ToolError("Could not place the sticker.");
-      applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "sticker"));
-      const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
-      return { id: o.id, assetId: asset.id, start: round2(o.start), end: round2(o.end) };
-    }
-
-    case "set_overlay_animation": {
-      const o = requireItem(s.overlays, input.id, "overlay element");
-      const anim: OverlayAnim = { ...(o.anim ?? {}) };
-      const edge = (slot: "in" | "out", styleKey: string, secondsKey: string) => {
-        const raw = input[styleKey];
-        const secs = isNum(input[secondsKey])
-          ? clamp(input[secondsKey], OVERLAY_ANIM_MIN_SECONDS, OVERLAY_ANIM_MAX_SECONDS)
-          : undefined;
-        if (typeof raw === "string") {
-          if (raw === "none") {
-            delete anim[slot];
-            return;
-          }
-          if (!(OVERLAY_ANIM_STYLE_IDS as string[]).includes(raw))
-            throw new ToolError(`Unknown ${slot} style: ${raw}`);
-          if (raw === "typewriter" && (o.kind ?? "text") !== "text")
-            throw new ToolError("typewriter animates titles only.");
-          anim[slot] = {
-            style: raw as OverlayAnimStyle,
-            seconds: secs ?? anim[slot]?.seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS,
-          };
-        } else if (secs !== undefined && anim[slot]) {
-          anim[slot] = { ...anim[slot]!, seconds: secs };
-        }
-      };
-      edge("in", "in_style", "in_seconds");
-      edge("out", "out_style", "out_seconds");
-      const rawLoop = input.loop_style;
-      const speed = isNum(input.loop_speed) ? clamp(input.loop_speed, 0.25, 4) : undefined;
-      if (typeof rawLoop === "string") {
-        if (rawLoop === "none") delete anim.loop;
-        else if (!(OVERLAY_LOOP_STYLE_IDS as string[]).includes(rawLoop))
-          throw new ToolError(`Unknown loop style: ${rawLoop}`);
-        else anim.loop = { style: rawLoop as OverlayLoopStyle, speed: speed ?? anim.loop?.speed ?? 1 };
-      } else if (speed !== undefined && anim.loop) {
-        anim.loop = { ...anim.loop, speed };
-      }
-      s.updateOverlay(o.id, { anim: anim.in || anim.out || anim.loop ? anim : undefined });
-      const next = useEditor.getState().overlays.find((x) => x.id === o.id)!;
-      return { id: next.id, anim: next.anim ?? null };
-    }
-
-    case "set_overlay_keyframes": {
-      const o = requireItem(s.overlays, input.id, "overlay element");
-      const raw = input.keys;
-      if (!Array.isArray(raw)) throw new ToolError("keys must be a list.");
-      const dur = Math.max(0.1, o.end - o.start);
-      let kf = o.kf;
-      if (raw.length === 0) {
-        s.clearOverlayKeys(o.id);
-        kf = undefined;
-      } else {
-        // Each key builds on the pose already at its time, so a key that only
-        // names `x` keeps whatever the element was doing otherwise.
-        s.pushHistory();
-        for (const k of raw as Record<string, unknown>[]) {
-          if (!isNum(k.t)) throw new ToolError("Every key needs a time `t`.");
-          s.setOverlayKey(
-            o.id,
-            clamp(k.t, 0, dur),
-            {
-              ...(isNum(k.x) ? { x: clamp(k.x, 0.02, 0.98) } : {}),
-              ...(isNum(k.y) ? { y: clamp(k.y, 0.02, 0.98) } : {}),
-              ...(isNum(k.scale) ? { scale: clamp(k.scale, 0.1, 4) } : {}),
-              ...(isNum(k.rotation) ? { rotation: clamp(Math.round(k.rotation), -180, 180) } : {}),
-              ...(isNum(k.opacity) ? { opacity: clamp(k.opacity, 0, 1) } : {}),
-            },
-            { transient: true }
-          );
-        }
-        kf = useEditor.getState().overlays.find((x) => x.id === o.id)?.kf;
-      }
-      return { id: o.id, keys: (kf ?? []).map((k) => ({ ...k, t: round2(k.t) })) };
-    }
-
-    // "update_title" stays as an alias so older threads keep working.
-    case "update_title":
-    case "update_overlay": {
+  update_overlay: (s, input) => {
       const o = requireItem(s.overlays, input.id, "overlay element");
       s.updateOverlay(o.id, overlayPatch(input, o.kind ?? "text"));
       const next = useEditor.getState().overlays.find((x) => x.id === o.id)!;
@@ -917,9 +995,9 @@ export async function runAiTool(
         start: round2(next.start),
         end: round2(next.end),
       };
-    }
+  },
 
-    case "update_audio": {
+  update_audio: (s, input) => {
       const a = requireItem(s.audioClips, input.id, "soundtrack clip");
       const aSpeed = a.speed && a.speed > 0 ? a.speed : 1;
       const len = (a.out - a.in) / aSpeed;
@@ -952,9 +1030,9 @@ export async function runAiTool(
         ...patch,
         ...("start" in patch ? { start: round2(landed.start) } : {}),
       };
-    }
+  },
 
-    case "set_framing": {
+  set_framing: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
       const mode = input.mode === "fill" ? "fill" : "fit";
       s.updateClip(clip.id, {
@@ -964,9 +1042,9 @@ export async function runAiTool(
       });
       const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
       return { id: next.id, fit: next.fit, panX: next.panX ?? 0, panY: next.panY ?? 0 };
-    }
+  },
 
-    case "freeze_frame": {
+  freeze_frame: async (s, input) => {
       const projectId = s.projectId;
       if (!projectId) throw new ToolError("No project open.");
       const spans = getClipSpans(s.clips, s.assets);
@@ -1033,9 +1111,9 @@ export async function runAiTool(
         duration: body.duration,
         from: { time: Math.round(t * 100) / 100, source: span.asset.name },
       };
-    }
+  },
 
-    case "generate_image": {
+  generate_image: async (s, input) => {
       const projectId = s.projectId;
       if (!projectId) throw new ToolError("No project open.");
       const prompt = String(input.prompt ?? "").trim();
@@ -1077,9 +1155,9 @@ export async function runAiTool(
         clipId: placed.clipId,
         index: placed.index,
       };
-    }
+  },
 
-    case "generate_video": {
+  generate_video: async (s, input) => {
       const projectId = s.projectId;
       if (!projectId) throw new ToolError("No project open.");
       const prompt = String(input.prompt ?? "").trim();
@@ -1185,9 +1263,9 @@ export async function runAiTool(
       }
       // No reference: text is the whole request, so the single rung runs ungated.
       return launchVideoJob(projectId, input, [{ prompt, opts: { ...baseOpts } }]);
-    }
+  },
 
-    case "wait_for_renders": {
+  wait_for_renders: async (s) => {
       const projectId = s.projectId;
       if (!projectId) throw new ToolError("No project open.");
       const watched = useGenerate
@@ -1228,9 +1306,9 @@ export async function runAiTool(
           ? { note: `${stillRunning} still rendering — call wait_for_renders again to keep waiting.` }
           : {}),
       };
-    }
+  },
 
-    case "generate_character_video": {
+  generate_character_video: async (s, input) => {
       const projectId = s.projectId;
       if (!projectId) throw new ToolError("No project open.");
       const id = String(input.character_id ?? "");
@@ -1260,9 +1338,9 @@ export async function runAiTool(
         ],
         { extra: { character: character.id } }
       );
-    }
+  },
 
-    case "generate_scene": {
+  generate_scene: async (s, input) => {
       const projectId = s.projectId;
       if (!projectId) throw new ToolError("No project open.");
       const gen = useGenerate.getState();
@@ -1309,29 +1387,29 @@ export async function runAiTool(
         shots: res.shotCount,
         note: `${res.message} A storyboard card below shows each shot's opening frame for the user, so keep your reply to one short line — don't re-describe the shots or the timing. Ask them to review it; if they want a frame changed, call regenerate_shot (at this stage it just redraws that frame, no credits). When they approve, call approve_scene — that starts the paid video renders, so don't approve on your own.`,
       };
-    }
+  },
 
-    case "approve_scene": {
+  approve_scene: () => {
       const res = useGenScene.getState().approve();
       if (!res.ok) throw new ToolError(res.message);
       return { rendering: true, note: res.message };
-    }
+  },
 
-    case "cancel_scene": {
+  cancel_scene: () => {
       const res = useGenScene.getState().cancel();
       if (!res.ok) throw new ToolError(res.message);
       return { stopped: true, note: res.message };
-    }
+  },
 
-    case "regenerate_shot": {
+  regenerate_shot: (_s, input) => {
       if (!isNum(input.n)) throw new ToolError("n (the 1-based shot number) is required.");
       const note = typeof input.note === "string" && input.note.trim() ? input.note.trim() : undefined;
       const res = useGenScene.getState().regenerateShot(Math.round(input.n), note);
       if (!res.ok) throw new ToolError(res.message);
       return { note: res.message };
-    }
+  },
 
-    case "recut_scene": {
+  recut_scene: (_s, input) => {
       if (!isNum(input.from_shot) || !isNum(input.to_shot))
         throw new ToolError("from_shot and to_shot (1-based, inclusive) are required.");
       const instruction = String(input.instruction ?? "").trim();
@@ -1341,17 +1419,17 @@ export async function runAiTool(
         .recutShots(Math.round(input.from_shot), Math.round(input.to_shot), instruction);
       if (!res.ok) throw new ToolError(res.message);
       return { note: res.message };
-    }
+  },
 
-    case "restyle_scene": {
+  restyle_scene: (_s, input) => {
       const style = String(input.style ?? "").trim();
       if (!style) throw new ToolError("style is required — the new look for the whole video.");
       const res = useGenScene.getState().restyle(style);
       if (!res.ok) throw new ToolError(res.message);
       return { note: res.message };
-    }
+  },
 
-    case "stock_search": {
+  stock_search: (s, input) => {
       const q = String(input.query ?? "").trim().toLowerCase();
       const kindIn =
         input.kind === "video" || input.kind === "image" || input.kind === "character"
@@ -1412,9 +1490,9 @@ export async function runAiTool(
         total: matches.length,
         ...(matches.length > 12 ? { truncated: true } : {}),
       };
-    }
+  },
 
-    case "stock_add": {
+  stock_add: async (s, input) => {
       const projectId = s.projectId;
       if (!projectId) throw new ToolError("No project open.");
       const id = String(input.id ?? "");
@@ -1451,9 +1529,9 @@ export async function runAiTool(
         addedToTimeline: addToTimeline,
         clipId,
       };
-    }
+  },
 
-    case "import_url": {
+  import_url: async (s, input) => {
       const projectId = s.projectId;
       if (!projectId) throw new ToolError("No project open.");
       const url = String(input.url ?? "").trim();
@@ -1472,9 +1550,9 @@ export async function runAiTool(
         })),
         ...(text ? { sourceText: text } : {}),
       };
-    }
+  },
 
-    case "library_list": {
+  library_list: async () => {
       const lib = await fetchLibrary();
       return {
         folders: lib.folders.map((f) => ({ id: f.id, name: f.name })),
@@ -1492,9 +1570,9 @@ export async function runAiTool(
           parts: t.layers.length + t.audio.length + t.texts.length + t.cues.length,
         })),
       };
-    }
+  },
 
-    case "library_add": {
+  library_add: async (s, input) => {
       const projectId = s.projectId;
       if (!projectId) throw new ToolError("No project open.");
       const lib = (await fetchLibrary()).assets.find((a) => a.id === String(input.id ?? ""));
@@ -1516,9 +1594,9 @@ export async function runAiTool(
           ? { addedToTimeline: true, clip: placeAssetOnTimeline(asset, input) }
           : { addedToTimeline: false }),
       };
-    }
+  },
 
-    case "template_add": {
+  template_add: async (s, input) => {
       const projectId = s.projectId;
       if (!projectId) throw new ToolError("No project open.");
       const t = (await fetchLibrary()).templates.find((x) => x.id === String(input.id ?? ""));
@@ -1537,9 +1615,9 @@ export async function runAiTool(
         duration: round2(t.duration),
         parts: t.layers.length + t.audio.length + t.texts.length + t.cues.length,
       };
-    }
+  },
 
-    case "save_template": {
+  save_template: (s, input) => {
       if (!s.projectId) throw new ToolError("No project open.");
       const name = String(input.name ?? "").trim();
       if (!name) throw new ToolError("A template name is required.");
@@ -1560,9 +1638,9 @@ export async function runAiTool(
       if (!built) throw new ToolError("Could not build a template from those items.");
       const saved = useEditor.getState().addTemplate({ ...built, name });
       return { id: saved.id, name: saved.name, duration: round2(saved.duration) };
-    }
+  },
 
-    case "library_organize": {
+  library_organize: async (_s, input) => {
       // The library spans both shelves, so every id is resolved against the
       // current listing to find the backend that owns it.
       const lib = await fetchLibrary();
@@ -1622,9 +1700,9 @@ export async function runAiTool(
         default:
           throw new ToolError(`Unknown action "${String(input.action)}".`);
       }
-    }
+  },
 
-    case "file_asset": {
+  file_asset: async (s, input) => {
       const asset = requireItem(s.assets, input.asset_id, "project asset");
       if (input.to === "media") {
         s.updateAsset(asset.id, { origin: undefined, chatId: undefined });
@@ -1637,18 +1715,18 @@ export async function runAiTool(
         return { filed: "library", libraryId: saved.id, name: saved.name };
       }
       throw new ToolError('`to` must be "media" or "library".');
-    }
+  },
 
-    case "delete_asset": {
+  delete_asset: (s, input) => {
       const asset = requireItem(s.assets, input.asset_id, "project asset");
       const uses =
         s.clips.filter((c) => c.assetId === asset.id).length +
         s.audioClips.filter((c) => c.assetId === asset.id).length;
       s.removeAsset(asset.id);
       return { removed: asset.name, clipsRemoved: uses };
-    }
+  },
 
-    case "subtitles_generate": {
+  subtitles_generate: async (_s, input) => {
       const lane = targetSubtitleTrack(input);
       if (typeof input.locale === "string" && input.locale)
         useEditor.getState().setSubtitleTrackMeta(lane, { locale: input.locale });
@@ -1667,9 +1745,9 @@ export async function runAiTool(
             ? "No speech found — no subtitles were added to the video."
             : undefined,
       };
-    }
+  },
 
-    case "captions_generate": {
+  captions_generate: async (_s, input) => {
       const raw = typeof input.style === "string" ? input.style : "hook";
       const style = (["clean", "hook", "punchy"].includes(raw) ? raw : "hook") as
         | "clean"
@@ -1692,9 +1770,9 @@ export async function runAiTool(
             ? "No speech found — no captions were added to the video."
             : undefined,
       };
-    }
+  },
 
-    case "subtitles_from_visuals": {
+  subtitles_from_visuals: async (_s, input) => {
       const lane = targetSubtitleTrack(input);
       if (typeof input.locale === "string" && input.locale)
         useEditor.getState().setSubtitleTrackMeta(lane, { locale: input.locale });
@@ -1705,9 +1783,9 @@ export async function runAiTool(
       const made = laneCues(cur.subtitles, lane).length;
       if (made > 0 && cur.timelineH < 276) cur.setTimelineH(276);
       return { status: cur.subtitleStatus, track: lane, cues: made };
-    }
+  },
 
-    case "subtitles_add_track": {
+  subtitles_add_track: (s, input) => {
       const count = subtitleLaneCount(s.subtitles);
       if (count >= MAX_SUBTITLE_LANES)
         throw new ToolError(`Already at ${MAX_SUBTITLE_LANES} subtitle tracks.`);
@@ -1717,9 +1795,9 @@ export async function runAiTool(
           : undefined
       );
       return { track: count, tracks: count + 1 };
-    }
+  },
 
-    case "subtitles_remove_track": {
+  subtitles_remove_track: (s, input) => {
       if (!isNum(input.track)) throw new ToolError("track is required.");
       const lane = Math.round(input.track);
       const count = subtitleLaneCount(s.subtitles);
@@ -1733,9 +1811,9 @@ export async function runAiTool(
       }
       s.removeSubtitleTrack(lane);
       return { removed: lane, tracks: count - 1 };
-    }
+  },
 
-    case "subtitles_translate_track": {
+  subtitles_translate_track: async (s, input) => {
       const language = typeof input.language === "string" ? input.language.trim() : "";
       if (!language) throw new ToolError("language (BCP-47, e.g. ko-KR) is required.");
       const subs = s.subtitles;
@@ -1773,17 +1851,17 @@ export async function runAiTool(
         from,
         cues: laneCues(cur.subtitles, target).length,
       };
-    }
+  },
 
-    case "list_voices": {
+  list_voices: () => {
       // Gemini's prebuilt voice catalog is fixed and ships hardcoded.
       return {
         voices: SPEECH_VOICES.map((v) => ({ name: v.name, style: v.style })),
         total: SPEECH_VOICES.length,
       };
-    }
+  },
 
-    case "voiceover_generate": {
+  voiceover_generate: (s, input) => {
       if (typeof input.script !== "string" || !input.script.trim())
         throw new ToolError("script is required.");
       const start = isNum(input.start) ? Math.max(0, input.start) : s.currentTime;
@@ -1797,9 +1875,9 @@ export async function runAiTool(
         input,
         place
       );
-    }
+  },
 
-    case "generate_music": {
+  generate_music: async (s, input) => {
       const projectId = s.projectId;
       if (!projectId) throw new ToolError("No project open.");
       const prompt = String(input.prompt ?? "").trim();
@@ -1883,9 +1961,9 @@ export async function runAiTool(
         volume,
         addedToTimeline: true,
       };
-    }
+  },
 
-    case "read_subtitles_aloud": {
+  read_subtitles_aloud: async (s, input) => {
       const lane = targetSubtitleTrack(input);
       if (!laneCues(useEditor.getState().subtitles, lane).some((c) => c.text.trim()))
         throw new ToolError("No subtitles on that track — generate subtitles first.");
@@ -1911,18 +1989,18 @@ export async function runAiTool(
         duck: out.duck,
         lines: out.lines,
       };
-    }
+  },
 
-    case "subtitles_set_view": {
+  subtitles_set_view: (s, input) => {
       const patch: { showOnVideo?: boolean; showOnTimeline?: boolean } = {};
       if (typeof input.showOnVideo === "boolean") patch.showOnVideo = input.showOnVideo;
       if (typeof input.showOnTimeline === "boolean") patch.showOnTimeline = input.showOnTimeline;
       s.setSubtitlesView(patch);
       if (patch.showOnTimeline && s.subtitles.cues.length > 0 && s.timelineH < 276) s.setTimelineH(276);
       return patch;
-    }
+  },
 
-    case "update_cue": {
+  update_cue: (s, input) => {
       const cue = requireItem(s.subtitles.cues, input.id, "subtitle cue");
       if (typeof input.text === "string") s.setCueText(cue.id, input.text);
       if (isNum(input.start) || isNum(input.end)) {
@@ -1933,15 +2011,15 @@ export async function runAiTool(
       }
       const next = useEditor.getState().subtitles.cues.find((c) => c.id === cue.id);
       return next ? { id: next.id, start: next.start, end: next.end, text: next.text } : { deleted: cue.id };
-    }
+  },
 
-    case "delete_cue": {
+  delete_cue: (s, input) => {
       const cue = requireItem(s.subtitles.cues, input.id, "subtitle cue");
       s.deleteCue(cue.id);
       return { deleted: cue.id };
-    }
+  },
 
-    case "set_publish": {
+  set_publish: (s, input) => {
       const patch: Record<string, string> = {};
       for (const k of ["caption", "tags", "soundTitle", "handle"] as const) {
         if (typeof input[k] === "string") patch[k] = input[k] as string;
@@ -1949,9 +2027,9 @@ export async function runAiTool(
       if (Object.keys(patch).length === 0) throw new ToolError("Nothing to change.");
       s.setPublish(patch);
       return patch;
-    }
+  },
 
-    case "set_view": {
+  set_view: (s, input) => {
       const out: Record<string, number> = {};
       if (input.fit) {
         const el = document.querySelector<HTMLElement>(".tl-scroll");
@@ -1970,31 +2048,34 @@ export async function runAiTool(
         out.timelineH = useEditor.getState().timelineH;
       }
       return out;
-    }
+  },
 
-    case "undo":
+  undo: (s) => {
       s.undo();
       return { ok: true };
-    case "redo":
+  },
+
+  redo: (s) => {
       s.redo();
       return { ok: true };
+  },
 
-    case "open_export": {
+  open_export: (s) => {
       if (getClipSpans(s.clips, s.assets).length === 0)
         throw new ToolError("Add a video to the timeline first.");
       s.setExportOpen(true);
       return { open: true };
-    }
+  },
 
-    case "set_speed": {
+  set_speed: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
       if (!isNum(input.speed)) throw new ToolError("speed is required (e.g. 1.5).");
       s.setClipSpeed(clip.id, input.speed);
       const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
       return { id: next.id, speed: next.speed ?? 1 };
-    }
+  },
 
-    case "set_color_grade": {
+  set_color_grade: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
       let grade: ColorGrade = input.reset === true ? {} : { ...clip.grade };
       if (input.auto === true) {
@@ -2009,57 +2090,18 @@ export async function runAiTool(
       s.updateClip(clip.id, { grade: normalizeGrade(grade) });
       const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
       return { id: next.id, grade: next.grade ?? "neutral" };
-    }
+  },
 
-    case "set_transition": {
-      const clip = requireItem(s.clips, input.clipId, "video clip");
-      // A transition joins a clip to the next one on its own track.
-      const row = s.clips.filter((c) => c.track === clip.track);
-      if (row.findIndex((c) => c.id === clip.id) === row.length - 1)
-        throw new ToolError("That is its track's last clip — nothing after it to transition into.");
-      if (!isNum(input.seconds)) throw new ToolError("seconds is required (0 clears the transition).");
-      let style: TransitionStyle | undefined;
-      if (input.style !== undefined) {
-        const requested = TRANSITION_STYLE_SYNONYMS[input.style as string] ?? input.style;
-        style = TRANSITION_STYLE_IDS.find((x) => x === requested);
-        if (!style) throw new ToolError(`Unknown style. Use one of: ${TRANSITION_STYLE_IDS.join(", ")}.`);
-      }
-      s.setClipTransition(clip.id, input.seconds, style);
-      const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
-      return { id: next.id, transition: next.transition ?? 0, style: next.transitionStyle ?? "crossfade" };
-    }
-
-    case "set_animation": {
-      const clip = requireItem(s.clips, input.clipId, "video clip");
-      const which = input.which === "in" || input.which === "out" ? input.which : null;
-      if (!which) throw new ToolError('which must be "in" or "out".');
-      if (input.style === "none") {
-        s.setClipAnim(clip.id, which, null);
-        return { id: clip.id, which, style: "none" };
-      }
-      const requested = ANIM_STYLE_SYNONYMS[input.style as string] ?? input.style;
-      const style = ANIM_STYLE_IDS.find((x) => x === requested);
-      if (!style)
-        throw new ToolError(`Unknown style. Use one of: ${ANIM_STYLE_IDS.join(", ")}, none.`);
-      if (clip.track > 0 && overlayAnimStyle(style) !== style)
-        throw new ToolError("Upper-track clips animate with fade or zoom only.");
-      const seconds = isNum(input.seconds) ? input.seconds : ANIM_DEFAULT_SECONDS;
-      s.setClipAnim(clip.id, which, { style, seconds });
-      const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
-      const anim = which === "in" ? next.animIn : next.animOut;
-      return { id: next.id, which, style: anim?.style ?? "none", seconds: anim?.seconds ?? 0 };
-    }
-
-    case "merge_cue": {
+  merge_cue: (s, input) => {
       const cue = requireItem(s.subtitles.cues, input.id, "subtitle cue");
       const mates = laneCues(s.subtitles, cue.lane ?? 0);
       if (mates.findIndex((c) => c.id === cue.id) <= 0)
         throw new ToolError("That is its track's first cue — nothing before it to merge into.");
       s.mergeCueIntoPrev(cue.id);
       return { mergedInto: "previous cue" };
-    }
+  },
 
-    case "set_aspect": {
+  set_aspect: (s, input) => {
       const a = typeof input.aspect === "string" ? normalizeAspect(input.aspect) : null;
       if (!a)
         throw new ToolError(
@@ -2068,9 +2110,9 @@ export async function runAiTool(
       s.setAspect(a);
       const f = frameOf(a);
       return { aspect: a, frame: `${f.w}x${f.h}` };
-    }
+  },
 
-    case "set_project_fade": {
+  set_project_fade: (s, input) => {
       if (!isNum(input.fadeIn) && !isNum(input.fadeOut))
         throw new ToolError("Pass fadeIn and/or fadeOut seconds (0 clears).");
       s.setProjectFade({
@@ -2079,18 +2121,33 @@ export async function runAiTool(
       });
       const after = useEditor.getState();
       return { fadeIn: after.fadeIn, fadeOut: after.fadeOut };
-    }
+  },
 
-    case "set_project_name": {
+  set_project_name: (s, input) => {
       if (typeof input.name !== "string" || !input.name.trim())
         throw new ToolError("name is required.");
       s.setProjectName(input.name.trim());
       return { name: input.name.trim() };
-    }
+  },
+};
 
-    default:
-      throw new ToolError(`Unknown tool: ${name}`);
-  }
+class ToolError extends Error {}
+
+/**
+ * Execute an assistant tool call against the live editor store.
+ * Returns a small JSON-safe result; throws ToolError with a readable message.
+ */
+export async function runAiTool(
+  name: string,
+  input: Record<string, unknown>
+): Promise<unknown> {
+  const s = useEditor.getState();
+
+  // "update_title" stays as an alias so older threads keep working.
+  const key = name === "update_title" ? "update_overlay" : name;
+  const run = (toolRuns as Partial<Record<string, ToolRun>>)[key];
+  if (!run) throw new ToolError(`Unknown tool: ${name}`);
+  return run(s, input);
 }
 
 /** Synthesize speech segments with hosted Gemini voices (the user's Donkey

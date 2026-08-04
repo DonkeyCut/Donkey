@@ -74,7 +74,7 @@ export const EFFECT_IDS: EffectId[] = [
  * `vhs` and `grain` are not here — they are effects in their own right above,
  * with tearing and moving grain the grades never had.
  */
-const LOOK_EFFECTS: LookStyle[] = [
+export const LOOK_EFFECTS: LookStyle[] = [
   "vintage",
   "horror",
   "halation",

@@ -6,6 +6,7 @@ import { clearElementDrag, setElementDragData } from "@/cut/lib/assetDrag";
 import { PICKED_RING, pickGridNav, useAssetPick } from "@/cut/lib/assetPick";
 import { useEditor } from "@/cut/lib/store";
 import { SHAPE_LABELS, type ShapeKind } from "@/cut/lib/types";
+import { SHAPE_KINDS } from "@/cut/components/ElementsPanel.tools";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { cn } from "@/lib/utils";
 import { CreateSticker, StickerTile, useProjectStickers } from "./Stickers";
@@ -24,8 +25,6 @@ const CATEGORIES = [
   { id: "stickers", label: "Stickers" },
   { id: "shapes", label: "Shapes" },
 ] as const;
-
-const SHAPE_KINDS = Object.keys(SHAPE_LABELS) as ShapeKind[];
 
 export function ElementsPanel({ projectId }: { projectId: string }) {
   const readOnly = useEditor((s) => s.readOnly);
