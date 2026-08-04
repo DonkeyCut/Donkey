@@ -62,7 +62,7 @@ The shared dispatch also binds each request to the account id the page sends, an
 
 ## The engine
 
-The engine is a single compiled binary built from the site's Cut code and version-locked to the app: the app's dev run script and release packaging build and bundle it automatically (no separate step), and the app stamps its own release version into the engine's environment, so updates ride app releases. The Donkey app spawns it at launch — regardless of sign-in, since Cut is free and standalone — restarts it with backoff if it dies, and stops it on quit. The engine's lifetime is tied to the app process: the engine watches the pid that spawned it and exits when that process is gone, and at launch the app replaces an engine on the port stamped with a different version, so engine fixes always ship with the app update. An engine matching the app's version (another instance) or a developer-run "dev" engine is left alone. Its data lives under the user's Application Support, one folder per Donkey account; its logs under the user's Logs folder.
+The engine is a single compiled binary built from the site's Cut code and version-locked to the app: the app's dev run script and release packaging build and bundle it automatically (no separate step), and the app stamps its own release version into the engine's environment, so updates ride app releases. The Donkey app spawns it at launch — regardless of sign-in, since Cut is free and standalone — restarts it with backoff if it dies, and stops it on quit. The engine's lifetime is tied to the app process: the engine watches the pid that spawned it and exits when that process is gone, and at launch the app replaces an engine on the port stamped with a different version, so engine fixes always ship with the app update. An engine matching the app's version (another instance) or a developer-run "dev" engine is left alone. Its data lives in the user's Movies folder (`~/Movies/DonkeyCut`), one folder per Donkey account, so projects and exports are visible in Finder and openable by other apps; its logs under the user's Logs folder.
 
 Because a GUI-spawned process inherits a bare PATH, the engine rebuilds it: tools shipped beside the engine binary first (they version with the app), then the app's bundled tools (bundled tool always wins), then the user's login-shell PATH and common install dirs. That is how it finds the speech tool, ffmpeg, and the user's `claude` and `codex`.
 
@@ -88,7 +88,7 @@ Missing tools disable the matching feature; they never affect the rest of the si
 | Transcription, subtitles, and voice dictation in prompt inputs (assistant, image/video/audio generation) | prebuilt `cut-stt` shipped beside the engine binary (the plain dev server falls back to compiling it); dictation streams live mic audio through its `--live` mode |
 | AI assistant | the user's own `claude` and `codex` CLI logins; its Gemini models use a Donkey sign-in and credits instead |
 | AI generation (image / video / voiceover) | a Donkey sign-in and credits |
-| Projects, library, exports | writable local disk (Application Support when run as the engine) |
+| Projects, library, exports | writable local disk (the user's Movies folder when run as the engine) |
 
 ## The assistant's knowledge
 
