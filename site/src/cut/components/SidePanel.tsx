@@ -156,6 +156,11 @@ export function SidePanel({
     "voice",
     (v) => v === "voice" || v === "music"
   );
+  // Each library column folds away behind its edge knob; every choice sticks.
+  const videoFold = useLibraryFold("cut-video-library");
+  const imageFold = useLibraryFold("cut-image-library");
+  const musicFold = useLibraryFold("cut-music-library");
+  const genFold = tab === "image" ? imageFold : videoFold;
   // The Media rail tile as a drop target: a Library card (asset or template)
   // dropped on it joins the project. Project media (cards and timeline clips)
   // arrives through the ref zone below; these HTML5 handlers cover the
@@ -207,13 +212,18 @@ export function SidePanel({
   // Clicking a reference token anywhere jumps here: switch to the tab that
   // owns the asset; the matching card scrolls into view and flashes.
   useRevealEffect((ref) => {
-    setTab(
-      ref.scope === "project" || ref.scope === "library"
-        ? "media"
-        : STOCK_VIDEOS.some((v) => v.id === ref.id)
-          ? "video"
-          : "image"
-    );
+    if (ref.scope === "project" || ref.scope === "library") {
+      setTab("media");
+      return;
+    }
+    // The revealed tile lives in a library column; unfold it if hidden.
+    if (STOCK_VIDEOS.some((v) => v.id === ref.id)) {
+      setTab("video");
+      videoFold.setOpen(true);
+    } else {
+      setTab("image");
+      imageFold.setOpen(true);
+    }
   });
 
   // The assistant's set_side_panel tool: open the tab it wants on screen, or
@@ -333,7 +343,7 @@ export function SidePanel({
           <div
             className={cn(
               "relative flex w-[252px] min-h-0 shrink-0 flex-col",
-              !sharedFeatures && "border-r border-border"
+              !sharedFeatures && genFold.open && "border-r border-border"
             )}
           >
             <ClosePanelButton onClose={() => setTab(null)} />
@@ -342,17 +352,19 @@ export function SidePanel({
             ) : (
               <GenerateVideoPanel projectId={projectId} />
             )}
+            {!sharedFeatures && !genFold.open && genFold.knob}
           </div>
           {/* Video browses wider: 16:9 clip tiles need the room. A shared view
               shows only the project's own generations — no stock browsing. */}
-          {!sharedFeatures && (
+          {!sharedFeatures && genFold.open && (
             <div
               className={cn(
-                "flex min-h-0 shrink-0 flex-col",
+                "relative flex min-h-0 shrink-0 flex-col",
                 tab === "image" ? "w-[264px]" : "w-[340px]"
               )}
             >
               {tab === "image" ? <StockImagesPanel /> : <StockVideosPanel />}
+              {genFold.knob}
             </div>
           )}
         </>
@@ -363,7 +375,7 @@ export function SidePanel({
           <div
             className={cn(
               "relative flex w-[264px] min-h-0 shrink-0 flex-col",
-              musicLibrary && "border-r border-border"
+              musicLibrary && musicFold.open && "border-r border-border"
             )}
           >
             <ClosePanelButton onClose={() => setTab(null)} />
@@ -373,10 +385,12 @@ export function SidePanel({
               sub={audioSub}
               onSub={setAudioSub}
             />
+            {musicLibrary && !musicFold.open && musicFold.knob}
           </div>
-          {musicLibrary && (
-            <div className="flex w-[340px] min-h-0 shrink-0 flex-col">
+          {musicLibrary && musicFold.open && (
+            <div className="relative flex w-[340px] min-h-0 shrink-0 flex-col">
               <SampleLibrary projectId={projectId} />
+              {musicFold.knob}
             </div>
           )}
         </>
@@ -442,6 +456,36 @@ function ClosePanelButton({ onClose }: { onClose: () => void }) {
       onClick={onClose}
     >
       <X className="size-4" />
+    </button>
+  );
+}
+
+/** One library column's fold: the remembered open flag plus its edge knob.
+ * Render the knob inside the library column while open (it folds the column
+ * away), and inside the column left of it while folded (it brings the library
+ * back). The host column must be `relative`. */
+function useLibraryFold(key: string) {
+  const [open, setOpen] = useLocalPref<boolean>(key, true, (v) => typeof v === "boolean");
+  return {
+    open,
+    setOpen,
+    knob: <LibraryKnob open={open} onToggle={() => setOpen(!open)} />,
+  };
+}
+
+/** The fold's handle: a thin pill floating over the canvas at the vertical
+ * middle, a small gap right of the panel border. The hit target is wider than
+ * the pill so it stays easy to grab. */
+function LibraryKnob({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={open ? "Hide library" : "Show library"}
+      title={open ? "Hide library" : "Show library"}
+      className="group absolute top-1/2 -right-[16px] z-20 flex h-16 w-4 -translate-y-1/2 items-center justify-center outline-none"
+      onClick={onToggle}
+    >
+      <span className="h-9 w-[5px] rounded-full bg-muted-foreground/35 transition-colors group-hover:bg-muted-foreground/70" />
     </button>
   );
 }
