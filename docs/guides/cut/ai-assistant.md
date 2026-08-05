@@ -107,6 +107,12 @@ Three narrow AI calls run beside the chat, each a single engine round-trip throu
 
 A hidden hermetic test provider exercises the full engine bridge — context, tool round-trips, streaming — without spending tokens; end-to-end tests select it as their model.
 
+## Measuring the assistant
+
+A live eval scores the chat brain's behavior and speed together. Each of its cases replays a real composer turn against the live model and asserts what came back — the reply, the tools called, the gate verdict, tools that must stay sheathed — while timing the whole path: the gate call, time to first token, every round, every tool serve. Cases carry a bucket (chat turns, single-tool edits, multi-tool composed edits) so the numbers aggregate by the kind of turn a user feels.
+
+The committed report at `evals/cut-chat.latest-report.json` is the baseline. The improvement loop: make one change — a model role, a prompt line, a tool description — run the eval, and keep the change only when pass rates hold and the medians improve; the new report commits with the change, so the baseline always describes what ships. This is how the complexity router and the batched-round cutting flow earned their way in. Run it with the dev server up: `npm run eval:cut-chat` (add `--matrix --runs 3` to compare model configs); the README beside the harness under the site's `scripts/lib/cut-eval/` folder covers the flags, the report schema, and how to add a case.
+
 ## Where it lives
 
 The shared catalog (system prompt, tools, skills), the chat route with its provider runners, the browser-tool bridge, and the stdio MCP proxy live with the engine's AI code under the site's Cut folder (`server/ai/`, `server/http/ai.ts`). The page side holds the snapshot builder (`lib/aiContext.ts`), the tool implementations (`lib/aiTools.ts`), the Gemini loop (`lib/geminiChat.ts`), the model catalog (`lib/aiModels.ts`), and the chat panel with threads and transport (`components/AiPanel.tsx`).
