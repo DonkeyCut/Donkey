@@ -116,7 +116,57 @@ const fmt = (n: number) => (Math.round(n * 1000) / 1000).toString();
  * alpha. */
 export const leakGradient = (x: number, y: number) =>
   `radial-gradient(circle at ${(x * 100).toFixed(1)}% ${(y * 100).toFixed(1)}%, ` +
-  `rgba(255,190,120,0.9) 0%, rgba(255,150,60,0.5) 38%, rgba(255,120,40,0) 72%)`;
+  `rgba(255,190,120,0.9) 0%, rgba(255,150,60,0.5) 30%, rgba(255,120,40,0) 58%)`;
+
+/** The bloom's plain-blend share of the leak alpha. Screen alone dies on a
+ * bright frame, so every renderer lays the gradient down twice: screen at the
+ * leak's alpha, plain at this fraction of it. */
+export const LEAK_TINT = 0.5;
+
+/** One band of leaked light: a soft tilted streak, described on the CSS
+ * gradient axis so every renderer draws the same band. */
+export interface LeakStreak {
+  /** Tilt in CSS gradient degrees. */
+  angle: number;
+  /** The band center's position along the gradient axis, 0..1. */
+  p: number;
+  /** The band's half-width as a fraction of the axis. */
+  w: number;
+  alpha: number;
+}
+
+/** The leak's streak family: each band's tilt, width, sweep and pulse. The
+ * amount slider brings them in — one band low, all of them near the top —
+ * and each sweeps across the frame and flares on its own clock. */
+export const STREAK_BANDS = [
+  { angle: 62, w: 0.045, base: 0.3, drift: 0.22, sweep: 0.5, pulse: 0.9, phase: 0 },
+  { angle: 74, w: 0.1, base: 0.62, drift: 0.24, sweep: 0.33, pulse: 0.6, phase: 2.1 },
+  { angle: 57, w: 0.028, base: 0.44, drift: 0.3, sweep: 0.75, pulse: 1.2, phase: 4.2 },
+] as const;
+
+export const streakCount = (k: number) =>
+  Math.max(1, Math.min(STREAK_BANDS.length, Math.round(3 * k)));
+
+/** How bright the bands run at amount `k`. A floor keeps a streak plainly
+ * visible at the low end of the slider — the amount chooses how many bands
+ * and how hard they flare, never whether the effect shows at all. */
+export const streakGain = (k: number) => 0.45 + 0.55 * k;
+
+function leakStreaksAt(tLocal: number, k: number): LeakStreak[] {
+  return STREAK_BANDS.slice(0, streakCount(k)).map((b) => ({
+    angle: b.angle,
+    p: b.base + b.drift * Math.sin(tLocal * b.sweep + b.phase),
+    w: b.w,
+    alpha: (0.55 + 0.3 * Math.sin(tLocal * b.pulse + b.phase * 1.7)) * streakGain(k),
+  }));
+}
+
+/** The CSS background of one streak — the DOM twin of the canvas pass's
+ * linear gradient; blend it the same two ways as the bloom. */
+export const streakGradient = (s: LeakStreak) =>
+  `linear-gradient(${s.angle}deg, rgba(255,200,140,0) ${((s.p - 2 * s.w) * 100).toFixed(1)}%, ` +
+  `rgba(255,200,140,0.9) ${(s.p * 100).toFixed(1)}%, ` +
+  `rgba(255,200,140,0) ${((s.p + 2 * s.w) * 100).toFixed(1)}%)`;
 
 /** What one effect asks the preview canvas to do at `tLocal` seconds in. */
 export interface EffectPreviewState {
@@ -129,8 +179,9 @@ export interface EffectPreviewState {
   /** Flat washes over the picture. */
   washes?: { color: string; alpha: number; mode: GlobalCompositeOperation }[];
   /** A light leak's bloom: a warm radial glow centered at (x, y) in frame
-   * fractions, screen-blended over the picture at `alpha`. */
-  leak?: { x: number; y: number; alpha: number };
+   * fractions, screen-blended over the picture at `alpha`, with the streak
+   * bands sweeping over it. */
+  leak?: { x: number; y: number; alpha: number; streaks: LeakStreak[] };
   /** Chroma ghosting: tinted copies offset by this frame-width fraction. */
   ghostFrac?: number;
   /** Whole-frame white flash alpha 0..1. */
@@ -282,14 +333,17 @@ export function effectPreviewState(
       return { cssFilter: "", vignette: 0.75 * k };
     case "lightleak":
       return {
-        cssFilter: `saturate(${fmt(1 + 0.15 * k)})`,
-        washes: [{ color: "#ff9a3c", alpha: 0.1 * k, mode: "soft-light" }],
-        // The bloom wanders around the top-left corner and breathes a little,
-        // the way a leak moves as the camera does.
+        // The frame keeps its own color: the cast stays faint so the streaks
+        // and the corner bloom carry the effect by contrast.
+        cssFilter: `saturate(${fmt(1 + 0.06 * k)})`,
+        washes: [{ color: "#ff9a3c", alpha: 0.06 * k, mode: "soft-light" }],
+        // The bloom hugs its corner and breathes a little, the way a leak
+        // moves as the camera does.
         leak: {
-          x: 0.16 + 0.1 * Math.sin(tLocal * 0.9),
-          y: 0.2 + 0.08 * Math.cos(tLocal * 0.6),
-          alpha: (0.6 + 0.12 * Math.sin(tLocal * 1.3)) * k,
+          x: 0.16 + 0.14 * Math.sin(tLocal * 0.9),
+          y: 0.2 + 0.11 * Math.cos(tLocal * 0.6),
+          alpha: (0.55 + 0.12 * Math.sin(tLocal * 1.3)) * k,
+          streaks: leakStreaksAt(tLocal, k),
         },
       };
     case "flash": {
@@ -412,6 +466,37 @@ export function applyEffectToCanvas(
     ctx.globalCompositeOperation = "screen";
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
+    // The screen pass lights the darks and dies on a bright frame; a plain
+    // pass at a fraction of the alpha tints the brights, so the bloom reads
+    // on footage of any brightness.
+    ctx.globalAlpha = alpha * LEAK_TINT;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillRect(0, 0, W, H);
+    // The streak bands, each a linear gradient along its own tilt, blended
+    // the same two ways as the bloom.
+    for (const s of state.leak.streaks) {
+      const th = (s.angle * Math.PI) / 180;
+      const dx = Math.sin(th);
+      const dy = -Math.cos(th);
+      const L = W * Math.abs(dx) + H * Math.abs(dy);
+      const sg = ctx.createLinearGradient(
+        W / 2 - (dx * L) / 2,
+        H / 2 - (dy * L) / 2,
+        W / 2 + (dx * L) / 2,
+        H / 2 + (dy * L) / 2
+      );
+      const cl = (f: number) => Math.min(1, Math.max(0, f));
+      sg.addColorStop(cl(s.p - 2 * s.w), "rgba(255,200,140,0)");
+      sg.addColorStop(cl(s.p), "rgba(255,200,140,0.9)");
+      sg.addColorStop(cl(s.p + 2 * s.w), "rgba(255,200,140,0)");
+      ctx.fillStyle = sg;
+      ctx.globalAlpha = s.alpha;
+      ctx.globalCompositeOperation = "screen";
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = s.alpha * LEAK_TINT;
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillRect(0, 0, W, H);
+    }
     ctx.restore();
   }
 
@@ -542,7 +627,7 @@ export function effectFilterLines(
     case "vhs":
       return [
         `[${inLabel}]rgbashift=rh=${Math.round(3 * k)}:bh=${-Math.round(3 * k)}:${en},` +
-          `eq=saturation=${fmt(1 - 0.35 * k)}:${en},` +
+          `hue=s=${fmt(1 - 0.35 * k)}:${en},` +
           `gblur=sigma=${fmt((0.8 * k * h) / 1080)}:${en},` +
           `noise=alls=${Math.round(14 * k)}:allf=t+u:${en}[${outLabel}]`,
       ];
@@ -555,21 +640,42 @@ export function effectFilterLines(
       return [`[${inLabel}]gblur=sigma=${fmt((10 * k * h) / 1080)}:${en}[${outLabel}]`];
     case "vignette":
       return [`[${inLabel}]vignette=angle=${fmt((k * Math.PI) / 3.5)}:${en}[${outLabel}]`];
-    case "lightleak":
+    case "lightleak": {
       // The bloom: a warm tint, then a backward vignette whose center drifts
       // around the bottom-right, so the far corner — the top-left — glows and
-      // wanders the way the preview's leak does.
+      // wanders the way the preview's leak does. The streak bands land last,
+      // drawn straight into the frame by geq with the preview's own tilt,
+      // sweep and pulse: luma screened toward white, chroma pushed toward
+      // orange. Every term is a ratio of the plane's W and H, so the
+      // subsampled chroma planes stay in register with luma.
+      const tl = `(T-${fmt(start)})`;
+      const bandSum = STREAK_BANDS.slice(0, streakCount(k))
+        .map((b) => {
+          const th = (b.angle * Math.PI) / 180;
+          const len = `(W*${fmt(Math.abs(Math.sin(th)))}+H*${fmt(Math.abs(Math.cos(th)))})`;
+          const q = `((X-W/2)*${fmt(Math.sin(th))}+(Y-H/2)*${fmt(-Math.cos(th))})/${len}+0.5`;
+          const p = `(${fmt(b.base)}+${fmt(b.drift)}*sin(${tl}*${fmt(b.sweep)}+${fmt(b.phase)}))`;
+          const g = streakGain(k);
+          const a = `(${fmt(0.55 * g)}+${fmt(0.3 * g)}*sin(${tl}*${fmt(b.pulse)}+${fmt(b.phase * 1.7)}))`;
+          return `${a}*exp(-0.5*pow((${q}-${p})/${fmt(b.w)},2))`;
+        })
+        .join("+");
+      const G = `min(${bandSum},1)`;
       return [
-        `[${inLabel}]eq=saturation=${fmt(1 + 0.15 * k)}:gamma_r=${fmt(1 + 0.22 * k)}:gamma_b=${fmt(1 - 0.08 * k)}:${en},` +
-          `vignette=angle=${fmt((k * Math.PI) / 4.8)}:mode=backward:` +
-          `x0='w*(0.84-0.1*sin(t*0.9))':y0='h*(0.8-0.08*cos(t*0.6))':eval=frame:${en}[${outLabel}]`,
+        `[${inLabel}]hue=s=${fmt(1 + 0.06 * k)}:${en},` +
+          `colortemperature=temperature=${Math.round(6500 - 500 * k)}:${en},` +
+          `vignette=angle=${fmt((k * Math.PI) / 5)}:mode=backward:` +
+          `x0='w*(0.84-0.14*sin(t*0.9))':y0='h*(0.8-0.11*cos(t*0.6))':eval=frame:${en},` +
+          `geq=lum='lum(X,Y)+(235-lum(X,Y))*${G}':cb='cb(X,Y)-40*${G}':cr='cr(X,Y)+26*${G}':${en}[${outLabel}]`,
       ];
+    }
     case "flash":
-      // A decaying brightness pop from the element start. `eq` reads its
-      // expressions once at init unless told otherwise, so the decay needs
-      // eval=frame — without it the whole window renders at the t=0 peak.
+      // A decaying brightness pop from the element start, added to luma per
+      // frame by geq — `T` is the frame's time, so the decay rides every
+      // frame of the window.
       return [
-        `[${inLabel}]eq=brightness='${fmt(0.85 * k)}*exp(-9*(t-${fmt(start)}))':eval=frame:${en}[${outLabel}]`,
+        `[${inLabel}]geq=lum='min(235,lum(X,Y)+${fmt(200 * k)}*exp(-9*(T-${fmt(start)})))':` +
+          `cb='cb(X,Y)':cr='cr(X,Y)':${en}[${outLabel}]`,
       ];
     case "shake": {
       // The shaken copy renders on its own branch (overscaled, then cropped

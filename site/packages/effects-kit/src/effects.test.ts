@@ -3,10 +3,11 @@ import { EFFECT_IDS, effectFilterLines, effectPreviewState } from "./effects";
 
 // The bundled engine ffmpeg is LGPL: a recipe reaching for a GPL-only filter
 // renders on a dev machine (Homebrew ffmpeg) and fails in the shipped app.
+// `eq` is NOT here: it is GPL-licensed and absent from the shipped binary,
+// which a dev machine's Homebrew ffmpeg (a GPL build) hides.
 const LGPL_FILTERS = new Set([
   "noise",
   "rgbashift",
-  "eq",
   "gblur",
   "vignette",
   "scale",
@@ -25,6 +26,7 @@ const LGPL_FILTERS = new Set([
   "vibrance",
   "unsharp",
   "colortemperature",
+  "geq",
 ]);
 
 const filterNamesOf = (lines: string[]): string[] => {
@@ -63,12 +65,12 @@ describe("effect recipes", () => {
     expect(effectFilterLines("in", "out", "nope", 1, 0, 1, 1080, 1920, "t")).toBe(null);
   });
 
-  test("time-varying expressions are evaluated per frame, not at init", () => {
-    // `eq` reads its expressions once at init by default, which pins a decay
-    // at its t=0 peak for the whole window.
+  test("flash decays on the element clock, per frame", () => {
+    // geq's `T` is the frame's own time, so the decay renders fresh each
+    // frame; the element-local offset keeps the peak at the element start.
     const flash = effectFilterLines("in", "out", "flash", 1, 2.5, 6, 1920, 1080, "t")![0];
     expect(flash.includes("exp(")).toBe(true);
-    expect(flash.includes("eval=frame")).toBe(true);
+    expect(flash.includes("(T-2.5)")).toBe(true);
   });
 
   test("shake reads the same clock and travel as its canvas twin", () => {

@@ -4,7 +4,9 @@ import { useMemo } from "react";
 import {
   effectPreviewState,
   grainTileUrl,
+  LEAK_TINT,
   leakGradient,
+  streakGradient,
   type EffectPreviewState,
 } from "@donkeycut/effects-kit";
 import { useEditor } from "@/cut/lib/store";
@@ -87,11 +89,26 @@ export function StageEffectPaint({ states }: { states: EffectPreviewState[] }) {
         />
       )}
       {leaks.map((l, i) => (
-        <div
-          key={`leak-${i}`}
-          className="absolute inset-0 mix-blend-screen"
-          style={{ opacity: l.alpha, background: leakGradient(l.x, l.y) }}
-        />
+        // Each gradient — the bloom, then every streak band — lands twice,
+        // the canvas pass's two blends: screen lights the darks, the plain
+        // layer tints the brights.
+        <div key={`leak-${i}`} className="absolute inset-0">
+          {[leakGradient(l.x, l.y), ...l.streaks.map(streakGradient)].map((bg, j) => {
+            const alpha = j === 0 ? l.alpha : l.streaks[j - 1].alpha;
+            return (
+              <div key={j} className="absolute inset-0">
+                <div
+                  className="absolute inset-0 mix-blend-screen"
+                  style={{ opacity: alpha, background: bg }}
+                />
+                <div
+                  className="absolute inset-0"
+                  style={{ opacity: alpha * LEAK_TINT, background: bg }}
+                />
+              </div>
+            );
+          })}
+        </div>
       ))}
       {washes.map((w, i) => (
         <div
