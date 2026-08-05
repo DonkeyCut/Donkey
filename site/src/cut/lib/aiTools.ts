@@ -112,6 +112,31 @@ import {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+/** The timeline rows a mutation touched, small enough to ride every result:
+ * ids, starts, and lengths for track 0 and the soundtrack, read fresh after
+ * the store settled. The model keeps editing from these — new ids after a
+ * split, closed-up starts after a delete — with no get_state poll between
+ * steps. */
+function tracksAfter() {
+  const cur = useEditor.getState();
+  const row = track0Clips(cur.clips).map((c) => ({
+    id: c.id,
+    start: round2(c.start),
+    len: round2((c.out - c.in) / (c.speed && c.speed > 0 ? c.speed : 1)),
+  }));
+  const lanes = cur.audioClips.map((a) => ({
+    id: a.id,
+    start: round2(a.start),
+    len: round2(a.out - a.in),
+  }));
+  return {
+    track0: row.slice(0, 60),
+    ...(row.length > 60 ? { track0Truncated: true } : {}),
+    soundtrack: lanes.slice(0, 60),
+    ...(lanes.length > 60 ? { soundtrackTruncated: true } : {}),
+  };
+}
+
 /** The model crosses the transition and animation vocabularies — the retired
  * edge styles (fadein/zoomin/…) especially. Style ids arrive as structured
  * tool input, so resolve each known synonym to the nearest supported style. */
@@ -600,7 +625,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const after = useEditor.getState();
       const made = after.clips.length + after.audioClips.length - before;
       if (made === 0) throw new ToolError("Nothing to split at that time.");
-      return { split: true, videoClips: after.clips.length };
+      return { split: true, ...tracksAfter() };
   },
 
   move_clip: (s, input) => {
@@ -614,7 +639,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (!isNum(input.toIndex)) throw new ToolError("toIndex is required.");
       const row = track0Clips(s.clips);
       s.moveClip(clip.id, clamp(Math.round(input.toIndex), 0, row.length - 1));
-      return { order: track0Clips(useEditor.getState().clips).map((c) => c.id) };
+      return { moved: clip.id, ...tracksAfter() };
   },
 
   place_clip: (s, input) => {
@@ -636,6 +661,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         ...(Math.abs(at - Math.max(0, input.start)) > 0.005
           ? { note: "That spot was taken — slid right to the next free one." }
           : {}),
+        ...tracksAfter(),
       };
   },
 
@@ -729,7 +755,12 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // Trim through the store's resize path so track 0 keeps its no-overlap
       // invariant: extending a clip pushes the following run right.
       s.setClipTrim(clip.id, nextIn, nextOut);
-      return { in: nextIn, out: nextOut, len: Math.round((nextOut - nextIn) * 100) / 100 };
+      return {
+        in: nextIn,
+        out: nextOut,
+        len: Math.round((nextOut - nextIn) * 100) / 100,
+        ...tracksAfter(),
+      };
   },
 
   refine_speech_cuts: async (s, input) => {
@@ -862,6 +893,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           };
         }),
         note: `Each moved edge sits ~${BREATH}s inside a real pause; clip spacing is preserved. Listen at any flagged edge.`,
+        ...tracksAfter(),
       };
   },
 
@@ -959,7 +991,10 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         kind === "overlayClip" ? "clip" : kind === "text" ? "overlay" : (kind as "clip" | "audio" | "overlay");
       s.select({ kind: selKind, id });
       s.deleteSelection();
-      return { deleted: { kind: selKind, id } };
+      return {
+        deleted: { kind: selKind, id },
+        ...(selKind === "overlay" ? {} : tracksAfter()),
+      };
   },
 
   remove_gap: (s, input) => {
@@ -969,7 +1004,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const gap = laneGapAt(s, lane, input.at);
       if (!gap) throw new ToolError(`No track-${track} gap at ${input.at}s — pass a time inside the empty span.`);
       s.removeLaneGap(lane, input.at);
-      return { closed: { track, ...gap } };
+      return { closed: { track, ...gap }, ...tracksAfter() };
   },
 
   add_title: (s, input) => {
@@ -1734,12 +1769,18 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const cur = useEditor.getState();
       if (cur.subtitleStatus === "error")
         throw new ToolError(cur.subtitleError ?? "Transcription failed.");
-      const made = laneCues(cur.subtitles, lane).length;
-      if (made > 0 && cur.timelineH < 276) cur.setTimelineH(276);
+      const made = laneCues(cur.subtitles, lane);
+      if (made.length > 0 && cur.timelineH < 276) cur.setTimelineH(276);
+      // The cues ride the result — the model's next move is usually editing
+      // them, and the ids are what update_cue/delete_cue/merge_cue take.
       return {
         status: cur.subtitleStatus,
         track: lane,
-        cues: made,
+        count: made.length,
+        cues: made
+          .slice(0, 60)
+          .map((q) => ({ id: q.id, start: round2(q.start), end: round2(q.end), text: q.text })),
+        ...(made.length > 60 ? { cuesTruncated: true } : {}),
         note:
           cur.subtitleStatus === "empty"
             ? "No speech found — no subtitles were added to the video."

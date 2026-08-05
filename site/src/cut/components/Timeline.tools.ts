@@ -21,7 +21,7 @@ export const TIMELINE_TOOLS = [
   {
     name: "split_at",
     description:
-      "Split the video (or a selected soundtrack/overlay clip) at a time, like pressing S. Omit t to split at the playhead.",
+      "Split the video (or a selected soundtrack/overlay clip) at a time, like pressing S. Omit t to split at the playhead. Splits don't move times, so issue every planned split together in one round. The result carries the updated track-0 and soundtrack rows (ids, starts, lengths) — read the new ids from there.",
     inputSchema: obj({ t: num("Timeline seconds to cut at (optional)") }),
   },
   {
