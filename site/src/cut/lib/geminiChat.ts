@@ -176,18 +176,20 @@ async function emitStepLimitSummary({
 
 type Item = Record<string, unknown>;
 
-/** The turn's tool gate: judge the newest message before the first round, and
- * withhold every tool declaration when it asks for nothing. A message carrying
- * attachments is work by construction (the user brought media to act on), so
- * it skips the model call. Single attempt, fails open to "work" — a classifier
- * hiccup must never block a real request. */
+/** The turn's tool gate and router: judge the newest message before the first
+ * round — a "chat" verdict withholds every tool declaration, a "simple"
+ * verdict runs the turn on the light chat model, "complex" keeps the full
+ * model. A message carrying attachments is complex by construction (the user
+ * brought media to act on), so it skips the model call. Single attempt, fails
+ * open to "complex" — a classifier hiccup must never block or downgrade a
+ * real request. */
 async function classifyTurnIntent(
   messages: UIMessage[],
   abortSignal?: AbortSignal
 ): Promise<TurnIntent> {
   const lastUser = messages.findLast((m) => m.role === "user");
   const attached = (lastUser?.metadata as { attachments?: unknown[] } | undefined)?.attachments;
-  if (Array.isArray(attached) && attached.length > 0) return "work";
+  if (Array.isArray(attached) && attached.length > 0) return "complex";
   const turns = messages.map((m) => ({
     role: m.role === "user" ? ("user" as const) : ("assistant" as const),
     text: m.parts
@@ -206,11 +208,11 @@ async function classifyTurnIntent(
       },
       abortSignal
     );
-    if (!res.ok) return "work";
+    if (!res.ok) return "complex";
     const body = (await res.json()) as ResponseBody;
     return parseTurnIntent(body.output_text);
   } catch {
-    return "work";
+    return "complex";
   }
 }
 
@@ -401,10 +403,14 @@ export function streamGeminiChat({
       try {
         // The gate classifies while the input assembles; a "chat" verdict
         // (nothing asked) drops the tool declarations from the whole turn, so
-        // the model can only answer in words.
+        // the model can only answer in words. The verdict also routes the
+        // turn's model: one self-contained ask runs on the light chat model,
+        // and a composed job — or any doubt — stays on the picked model.
         const intentPromise = classifyTurnIntent(messages, abortSignal);
         const input = await inputFromMessages(messages);
-        const tools = (await intentPromise) === "work" ? toolDeclarations() : undefined;
+        const intent = await intentPromise;
+        const tools = intent === "chat" ? undefined : toolDeclarations();
+        const roundModel = intent === "simple" ? geminiModelRoles.chatSimple : model;
         let textCount = 0;
         let settled = false;
         let emptyRounds = 0;
@@ -425,7 +431,7 @@ export function streamGeminiChat({
           let body: ResponseBody;
           try {
             body = await postRound(
-              { donkeyProvider: "gemini", model, instructions: systemPrompt(), input, ...(tools ? { tools } : {}) },
+              { donkeyProvider: "gemini", model: roundModel, instructions: systemPrompt(), input, ...(tools ? { tools } : {}) },
               abortSignal,
               (delta) => {
                 if (!textId) {
@@ -532,7 +538,7 @@ export function streamGeminiChat({
 
         if (!settled && !abortSignal?.aborted) {
           await emitStepLimitSummary({
-            model,
+            model: roundModel,
             input,
             emit,
             textId: `t${textCount + 1}`,

@@ -62,6 +62,9 @@ export type GeminiMusicModel = (typeof geminiMusicModels)[keyof typeof geminiMus
 export const geminiModelRoles = {
   // General chat and non-decision Responses calls — the latest full flash.
   chat: geminiModels.flash,
+  // Chat turns the gate judges simple — one self-contained ask runs on the
+  // light chat model; complex turns stay on `chat`.
+  chatSimple: geminiModels.flashLite,
   // Fast structured task-intent and follow-up decisions.
   fastDecision: geminiModels.flashLite,
   // Computer Use tool calls (browser and macOS desktop environments). Computer
