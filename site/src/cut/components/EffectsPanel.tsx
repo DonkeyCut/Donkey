@@ -6,7 +6,9 @@ import {
   EFFECT_LABELS,
   effectPreviewState,
   grainTileUrl,
+  LEAK_TINT,
   leakGradient,
+  streakGradient,
   type EffectId,
 } from "@donkeycut/effects-kit";
 import { PICKED_RING, pickGridNav, useAssetPick } from "@/cut/lib/assetPick";
@@ -14,7 +16,7 @@ import { clearElementDrag, setElementDragData } from "@/cut/lib/assetDrag";
 import { SubTabs } from "@/cut/components/SubTabs";
 import { getPreviewCanvas } from "@/cut/lib/previewCanvas";
 import { useEditor } from "@/cut/lib/store";
-import { isEffectOverlay, type EffectOverlay } from "@/cut/lib/types";
+import { frameOf, isEffectOverlay, type EffectOverlay } from "@/cut/lib/types";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -83,30 +85,27 @@ export function EffectsPanel() {
   );
 }
 
-/** How wide the sampled preview frame is, doubled from the tile swatch's
+/** The sampled preview frame's short side, doubled from the tile swatch's
  * on-screen size so it stays sharp on retina displays. */
-const FRAME_W = 280;
-const FRAME_H = 192;
+const FRAME_SHORT = 360;
 
-/** A cover-cropped snapshot of the live preview canvas — the frame under the
- * playhead — encoded small for the tile swatches; null when the canvas has no
- * picture yet. */
+/** A snapshot of the live preview canvas — the whole frame under the playhead,
+ * at the canvas's own aspect — encoded small for the tile swatches; null when
+ * the canvas has no picture yet. */
 function snapshotPreview(): string | null {
   const src = getPreviewCanvas();
   if (!src || !src.width || !src.height) return null;
+  const scale = FRAME_SHORT / Math.min(src.width, src.height);
   const c = document.createElement("canvas");
-  c.width = FRAME_W;
-  c.height = FRAME_H;
+  c.width = Math.round(src.width * scale);
+  c.height = Math.round(src.height * scale);
   const ctx = c.getContext("2d", { willReadFrequently: true });
   if (!ctx) return null;
-  const scale = Math.max(FRAME_W / src.width, FRAME_H / src.height);
-  const sw = FRAME_W / scale;
-  const sh = FRAME_H / scale;
   try {
-    ctx.drawImage(src, (src.width - sw) / 2, (src.height - sh) / 2, sw, sh, 0, 0, FRAME_W, FRAME_H);
+    ctx.drawImage(src, 0, 0, c.width, c.height);
     // The engine leaves the canvas untouched until a decoder has a frame; a
     // fully transparent readback means there is no picture to show yet.
-    const px = ctx.getImageData(0, 0, FRAME_W, FRAME_H).data;
+    const px = ctx.getImageData(0, 0, c.width, c.height).data;
     let lit = false;
     for (let i = 3; i < px.length; i += 397 * 4) {
       if (px[i] > 0) {
@@ -168,8 +167,10 @@ function EffectTile({
   const { picked, pick } = useAssetPick(`effect:${id}`);
   const [hover, setHover] = useState(false);
   // A moving effect's whole point is its motion, so its swatch always plays;
-  // a filter swatch stands still until the pointer asks it to run.
-  const t = useSwatchClock(hover || groupOf(id) === "moving");
+  // a filter swatch stands still until the pointer asks it to run. The leak's
+  // motion is a slow continuous wander — the shared 1.4s loop samples a sliver
+  // of it and snaps back, so its clock never wraps and the bloom just roams.
+  const t = useSwatchClock(hover || groupOf(id) === "moving", id === "lightleak" ? Infinity : LOOP_S);
   const ref = useRef<HTMLButtonElement>(null);
   // What the selection means for this tile: it wears the ring when it is the
   // selected element's effect, and a click swaps that element onto it.
@@ -205,7 +206,7 @@ function EffectTile({
         id={id}
         t={t}
         frame={frame}
-        className={cn("h-24 w-full rounded-lg border border-border", marked && PICKED_RING)}
+        className={cn("w-full rounded-lg border border-border", marked && PICKED_RING)}
       />
       <span className="leading-none">{EFFECT_LABELS[id]}</span>
     </button>
@@ -265,6 +266,17 @@ export function useSwatchClock(running: boolean, loop = LOOP_S, resetKey = 0): n
     };
   }, [live, loop, resetKey]);
   return t;
+}
+
+/** The tile swatch's shape: the project frame's own, so the sampled preview
+ * fills the tile with the whole picture in view. Clamped between 9:16 and 2:1
+ * so a custom extreme keeps the grid readable. Shared with the Transitions
+ * tab. */
+export function useSwatchRatio(): number {
+  return useEditor((s) => {
+    const f = frameOf(s.aspect);
+    return Math.min(2, Math.max(9 / 16, f.w / f.h));
+  });
 }
 
 /** The picture a swatch treats: the given frame when there is one, and a small
@@ -333,7 +345,10 @@ export function EffectSwatch({
   frame?: string | null;
   className?: string;
 }) {
-  const st = effectPreviewState(id, 0.9, t);
+  const ratio = useSwatchRatio();
+  // The leak wanders at a pace tuned to a clip's seconds; the tile doubles its
+  // clock so the roaming reads without a long watch.
+  const st = effectPreviewState(id, 0.9, id === "lightleak" ? t * 2 : t);
   const grainUrl = grainTileUrl();
   const wash = st.washes?.[0];
   // Filter blur radii are design px against the full frame; the swatch is a
@@ -353,8 +368,27 @@ export function EffectSwatch({
       : undefined;
   // A zoom scales about the point it holds; everything else about the middle.
   const origin = st.origin ? `${st.origin.x * 100}% ${st.origin.y * 100}%` : undefined;
+  // The glitch's chroma ghost is a few pixels of screen blend, and bright
+  // footage swallows it at tile size. The swatch tears the picture the way
+  // the full-size channel shift reads: strips of the frame knocked sideways,
+  // jumping on the preview state's quantized clock.
+  const tears =
+    id === "glitch"
+      ? [0, 1].map((i) => {
+          const step = Math.floor(t * 9) + 3 * i;
+          const j = ((step * 7919) % 5) - 2; // -2..2, deterministic
+          return {
+            top: i ? 58 : 22,
+            h: i ? 8 : 12,
+            dx: (j || 1) * (i ? -2.6 : 3.2),
+          };
+        })
+      : [];
   return (
-    <span className={cn("relative block overflow-hidden rounded-md bg-black", className)}>
+    <span
+      className={cn("relative block overflow-hidden rounded-md bg-black", className)}
+      style={{ aspectRatio: ratio }}
+    >
       {!!st.ghostFrac && (
         <span
           className="absolute inset-0 opacity-60 mix-blend-screen"
@@ -369,6 +403,18 @@ export function EffectSwatch({
       >
         <SwatchScene frame={frame} />
       </span>
+      {tears.map((tear) => (
+        <span
+          key={tear.top}
+          className="absolute inset-0"
+          style={{
+            clipPath: `inset(${tear.top}% 0 ${100 - tear.top - tear.h}% 0)`,
+            transform: `translateX(${tear.dx.toFixed(2)}%)`,
+          }}
+        >
+          <SwatchScene frame={frame} />
+        </span>
+      ))}
       {!!st.grain && grainUrl && (
         <span
           className="cut-grain absolute inset-0"
@@ -396,10 +442,26 @@ export function EffectSwatch({
         />
       )}
       {st.leak && (
-        <span
-          className="absolute inset-0 mix-blend-screen"
-          style={{ opacity: st.leak.alpha, background: leakGradient(st.leak.x, st.leak.y) }}
-        />
+        // Each gradient — the bloom, then every streak band — lands twice,
+        // the canvas pass's two blends: screen lights the darks, the plain
+        // layer tints the brights.
+        <span className="absolute inset-0">
+          {[
+            { bg: leakGradient(st.leak.x, st.leak.y), alpha: st.leak.alpha },
+            ...st.leak.streaks.map((s) => ({ bg: streakGradient(s), alpha: s.alpha })),
+          ].map((l, j) => (
+            <span key={j} className="absolute inset-0">
+              <span
+                className="absolute inset-0 mix-blend-screen"
+                style={{ opacity: l.alpha, background: l.bg }}
+              />
+              <span
+                className="absolute inset-0"
+                style={{ opacity: l.alpha * LEAK_TINT, background: l.bg }}
+              />
+            </span>
+          ))}
+        </span>
       )}
       {!!st.flash && (
         <span className="absolute inset-0 bg-white" style={{ opacity: Math.min(0.75, st.flash) }} />
