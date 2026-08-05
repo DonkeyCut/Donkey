@@ -1142,32 +1142,43 @@ const EDGE_POOL_CAP = 4;
 type EdgeRequest = {
   url: string;
   time: number;
+  height: number;
   key: string;
   resolvers: ((src: string | null) => void)[];
 };
 
-/** A file held open for repeated frame reads, with the sink that decodes it. */
-type EdgeReader = { input: ReturnType<typeof openMedia>; sink: ReturnType<typeof frameSink> };
+/** A file held open for repeated frame reads, with a decoding sink per capture
+ * height — trim edges and tile previews read different sizes from the same
+ * warm reader. */
+type EdgeReader = {
+  input: ReturnType<typeof openMedia>;
+  sinkFor: (height: number) => ReturnType<typeof frameSink>;
+};
 
 const edgeCache = new Map<string, string>();
 const edgeQueue = new Map<string, EdgeRequest>();
 const edgePool = new Map<string, Promise<EdgeReader>>();
 let edgePumping = false;
 
-function edgeKey(url: string, time: number) {
-  return `${url}#${time.toFixed(2)}`;
+function edgeKey(url: string, time: number, height: number) {
+  return `${url}#${time.toFixed(2)}@${height}`;
 }
 
 /** Synchronous cache read — the frame if a matching capture already landed. */
-export function peekEdgeFrame(url: string, time: number): string | null {
-  return edgeCache.get(edgeKey(url, time)) ?? null;
+export function peekEdgeFrame(url: string, time: number, height = THUMB_H): string | null {
+  return edgeCache.get(edgeKey(url, time, height)) ?? null;
 }
 
 /** Capture the frame at `time`, latest-wins per `slot` (a clip edge). Resolves
  * with the frame, or null when superseded by a newer request or on a failed
  * read. */
-export function requestEdgeFrame(slot: string, url: string, time: number): Promise<string | null> {
-  const key = edgeKey(url, time);
+export function requestEdgeFrame(
+  slot: string,
+  url: string,
+  time: number,
+  height = THUMB_H
+): Promise<string | null> {
+  const key = edgeKey(url, time, height);
   const hit = edgeCache.get(key);
   if (hit) return Promise.resolve(hit);
   return new Promise((resolve) => {
@@ -1176,7 +1187,7 @@ export function requestEdgeFrame(slot: string, url: string, time: number): Promi
       prev.resolvers.push(resolve);
     } else {
       prev?.resolvers.forEach((r) => r(null));
-      edgeQueue.set(slot, { url, time, key, resolvers: [resolve] });
+      edgeQueue.set(slot, { url, time, height, key, resolvers: [resolve] });
     }
     void pumpEdgeFrames();
   });
@@ -1197,9 +1208,18 @@ function edgeReader(url: string): Promise<EdgeReader> {
       input.dispose();
       throw new UnreadableMediaError("This file has no readable video.");
     }
-    // A pool of canvases the sink cycles through, so a drag that reads hundreds
-    // of frames keeps its allocation flat.
-    return { input, sink: frameSink(track, { height: THUMB_H }, 4) };
+    // A pool of canvases each sink cycles through, so a drag that reads
+    // hundreds of frames keeps its allocation flat.
+    const sinks = new Map<number, ReturnType<typeof frameSink>>();
+    const sinkFor = (height: number) => {
+      let sink = sinks.get(height);
+      if (!sink) {
+        sink = frameSink(track, { height }, 4);
+        sinks.set(height, sink);
+      }
+      return sink;
+    };
+    return { input, sinkFor };
   })();
   edgePool.set(url, opening);
   while (edgePool.size > EDGE_POOL_CAP) {
@@ -1222,8 +1242,8 @@ async function pumpEdgeFrames() {
       let src = edgeCache.get(req.key) ?? null;
       if (!src) {
         try {
-          const { sink } = await edgeReader(req.url);
-          const frame = await sink.getCanvas(Math.max(0, req.time));
+          const { sinkFor } = await edgeReader(req.url);
+          const frame = await sinkFor(req.height).getCanvas(Math.max(0, req.time));
           if (!frame) throw new Error("No frame at that time.");
           src = await canvasDataUrl(frame.canvas, "image/jpeg", 0.92);
           edgeCache.set(req.key, src);

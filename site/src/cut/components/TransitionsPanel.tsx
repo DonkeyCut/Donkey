@@ -10,10 +10,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
-import { SwatchScene, useSwatchClock } from "@/cut/components/EffectsPanel";
+import { SwatchScene, useSwatchClock, useSwatchRatio } from "@/cut/components/EffectsPanel";
 import { parseSecondsInput, ScrubValue } from "@/cut/components/ScrubValue";
 import { SectionTitle } from "@/cut/components/SectionTitle";
 import { clearElementDrag, setElementDragData } from "@/cut/lib/assetDrag";
+import { peekEdgeFrame, requestEdgeFrame } from "@/cut/lib/media";
 import { PICKED_RING, pickGridNav, useAssetPick } from "@/cut/lib/assetPick";
 import { getClipSpans, resolveTransitions, useEditor } from "@/cut/lib/store";
 import {
@@ -104,6 +105,36 @@ function frameAt(asset: MediaAsset, srcT: number): string | null {
   return null;
 }
 
+/** Tile-height capture for the swatch previews: covers a 2× retina portrait
+ * tile whichever way the source is oriented. */
+const TILE_FRAME_H = 640;
+
+/** One side of the cut: the sharp capture at the exact source time once it
+ * lands, the nearest filmstrip thumb (or the image itself) until then. */
+function useCutFrame(
+  slot: string,
+  side: { asset: MediaAsset; srcT: number } | null
+): string | null {
+  const url = side?.asset.type === "video" ? side.asset.url : null;
+  const time = side?.srcT ?? 0;
+  const id = url ? `${url}#${time.toFixed(2)}` : "";
+  const cached = url ? peekEdgeFrame(url, time, TILE_FRAME_H) : null;
+  const [frame, setFrame] = useState<{ id: string; src: string } | null>(null);
+  useEffect(() => {
+    if (!url || cached) return;
+    let live = true;
+    void requestEdgeFrame(slot, url, time, TILE_FRAME_H).then((src) => {
+      if (live && src) setFrame({ id, src });
+    });
+    return () => {
+      live = false;
+    };
+  }, [url, time, slot, id, cached]);
+  if (!side) return null;
+  const sharp = cached ?? (frame?.id === id ? frame.src : null);
+  return sharp ?? frameAt(side.asset, time);
+}
+
 /** The two frames either side of the cut nearest the playhead — the real
  * footage a transition dropped there would blend. Null sides fall back to the
  * tiles' stand-in scenes. */
@@ -112,24 +143,29 @@ function useCutFrames(): { a: string | null; b: string | null } {
   const assets = useEditor((s) => s.assets);
   // Re-pick the cut as the playhead crosses half-second marks.
   const tick = useEditor((s) => Math.round(s.currentTime * 2));
-  return useMemo(() => {
+  const cut = useMemo(() => {
     const spans = getClipSpans(clips, assets);
-    let best: { a: string | null; b: string | null } | null = null;
+    let best: {
+      a: { asset: MediaAsset; srcT: number };
+      b: { asset: MediaAsset; srcT: number };
+    } | null = null;
     let bestDist = Infinity;
     for (let i = 0; i + 1 < spans.length; i++) {
       const out = spans[i];
       const inc = spans[i + 1];
-      const cut = inc.start;
-      const dist = Math.abs(tick / 2 - cut);
+      const dist = Math.abs(tick / 2 - inc.start);
       if (dist >= bestDist) continue;
       bestDist = dist;
       best = {
-        a: frameAt(out.asset, out.clip.in + out.len * (out.clip.speed ?? 1)),
-        b: frameAt(inc.asset, inc.clip.in),
+        a: { asset: out.asset, srcT: out.clip.in + out.len * (out.clip.speed ?? 1) },
+        b: { asset: inc.asset, srcT: inc.clip.in },
       };
     }
-    return best ?? { a: null, b: null };
+    return best;
   }, [clips, assets, tick]);
+  const a = useCutFrame("xtile-a", cut?.a ?? null);
+  const b = useCutFrame("xtile-b", cut?.b ?? null);
+  return { a, b };
 }
 
 /** How a transition tile's loop spends its time: a beat on the first shot,
@@ -190,7 +226,7 @@ function TransitionTile({
         a={a}
         b={b}
         t={t}
-        className={cn("h-24 w-full rounded-lg border border-border", marked && PICKED_RING)}
+        className={cn("w-full rounded-lg border border-border", marked && PICKED_RING)}
       />
       <span className="leading-none">{TRANSITION_STYLE_LABELS[style]}</span>
     </button>
@@ -231,6 +267,7 @@ function TransitionSwatch({
   t: number;
   className?: string;
 }) {
+  const ratio = useSwatchRatio();
   const p0 = Math.min(1, Math.max(0, (t - X_HOLD) / X_RUN));
   const p = p0 * p0 * (3 - 2 * p0);
   const pc = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -375,7 +412,10 @@ function TransitionSwatch({
       break;
   }
   return (
-    <span className={cn("relative block overflow-hidden rounded-md bg-black", className)}>
+    <span
+      className={cn("relative block overflow-hidden rounded-md bg-black", className)}
+      style={{ aspectRatio: ratio }}
+    >
       {layers}
     </span>
   );
