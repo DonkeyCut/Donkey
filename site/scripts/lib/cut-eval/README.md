@@ -4,8 +4,8 @@ One command measures the chat assistant's behavior and speed together:
 
 ```
 npm run eval:cut-chat -- [--runs N] [--only <case>] [--bucket chat|single-tool|multi-tool]
-                         [--model flash|flashLite|<raw id>] [--gate-model ...]
-                         [--matrix] [--enforce-budgets] [--out <path>]
+                         [--model <id>] [--simple-model <id>] [--complex-model <id>]
+                         [--gate-model <id>] [--matrix] [--enforce-budgets] [--out <path>]
 ```
 
 It replays real composer turns against the live chat model through the dev
@@ -27,9 +27,14 @@ fast path), `single-tool` edits (one decisive call), and `multi-tool` edits
 with input assembly, which is negligible, so this is the same critical path
 the user perceives.
 
-`--matrix` runs every row of `CANDIDATES` in `eval-cut-chat.ts` and prints a
-comparison table. Model flags and candidate rows resolve through the registry
-in `src/lib/inference/gemini-models.ts`; raw model ids pass through.
+The default config is production's: the gate's three-way verdict (chat /
+simple / complex) withholds tools on chat turns and routes simple turns to the
+light chat model. `--model` pins both roles to one model for an unrouted
+comparison; each run's report records the model every turn actually ran on
+(`roundModel`). `--matrix` runs every row of `CANDIDATES` in
+`eval-cut-chat.ts` and prints a comparison table. Model flags and candidate
+rows resolve through the registry in `src/lib/inference/gemini-models.ts`; raw
+model ids pass through.
 
 Per-case `budget` values in `cases.ts` are checked against passing-run p50s.
 They report by default; `--enforce-budgets` turns a breach into exit 1. The run

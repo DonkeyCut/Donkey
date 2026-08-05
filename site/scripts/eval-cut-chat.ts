@@ -14,7 +14,8 @@
  *     [--base http://localhost:3000]
  *     [--only <case>] [--bucket chat|single-tool|multi-tool]
  *     [--runs N]                      default 1; use 3+ for latency stats
- *     [--model <registryKey|rawId>]   chat model (flash, flashLite, or a raw id)
+ *     [--model <registryKey|rawId>]   pin BOTH chat roles to one model (unrouted)
+ *     [--simple-model <id>] [--complex-model <id>]  override one routed role
  *     [--gate-model <registryKey|rawId>]
  *     [--matrix]                      run every CANDIDATES row, compare
  *     [--enforce-budgets]             exit 1 when a case breaches its budget
@@ -47,11 +48,26 @@ import {
 
 // Model configs the --matrix mode compares. Add a row when trialing a new
 // model id; keep "baseline" matching geminiModelRoles so the comparison always
-// includes what production runs.
-const CANDIDATES: { label: string; chat: string; gate: string }[] = [
-  { label: "baseline", chat: geminiModelRoles.chat, gate: geminiModelRoles.fastDecision },
-  { label: "chat=flashLite", chat: geminiModels.flashLite, gate: geminiModelRoles.fastDecision },
-  { label: "gate=flash", chat: geminiModelRoles.chat, gate: geminiModels.flash },
+// includes what production runs (the routed pair).
+const CANDIDATES: { label: string; simple: string; complex: string; gate: string }[] = [
+  {
+    label: "baseline",
+    simple: geminiModelRoles.chatSimple,
+    complex: geminiModelRoles.chat,
+    gate: geminiModelRoles.fastDecision,
+  },
+  {
+    label: "all-flash",
+    simple: geminiModels.flash,
+    complex: geminiModels.flash,
+    gate: geminiModelRoles.fastDecision,
+  },
+  {
+    label: "all-flashLite",
+    simple: geminiModels.flashLite,
+    complex: geminiModels.flashLite,
+    gate: geminiModelRoles.fastDecision,
+  },
 ];
 
 const args = process.argv.slice(2);
@@ -95,7 +111,11 @@ async function runConfig(
   cfg: RunConfig,
   selected: EvalCase[]
 ): Promise<ConfigReport> {
-  console.log(`\n== ${label}  chat=${cfg.chatModel}  gate=${cfg.gateModel}`);
+  const chatDesc =
+    cfg.simpleModel === cfg.complexModel
+      ? cfg.simpleModel
+      : `${cfg.simpleModel} | complex→${cfg.complexModel}`;
+  console.log(`\n== ${label}  chat=${chatDesc}  gate=${cfg.gateModel}`);
   const caseReports: CaseReport[] = [];
   for (const c of selected) {
     const runs: RunReport[] = [];
@@ -123,7 +143,7 @@ async function runConfig(
   }
   return {
     label,
-    chatModel: cfg.chatModel,
+    chatModel: chatDesc,
     gateModel: cfg.gateModel,
     buckets: buildBucketSummaries(caseReports),
     cases: caseReports,
@@ -138,17 +158,26 @@ async function main() {
   if (selected.length === 0)
     throw new Error(ONLY ? `No case named "${ONLY}".` : `No cases in bucket "${BUCKET}".`);
 
+  // --model pins BOTH chat roles to one model (an unrouted config);
+  // --simple-model / --complex-model override a role each. The default is
+  // production's routed pair.
+  const both = argValue("--model");
   const configs = MATRIX
     ? CANDIDATES.map((cand) => ({
         label: cand.label,
-        cfg: { base: BASE, chatModel: cand.chat, gateModel: cand.gate },
+        cfg: { base: BASE, simpleModel: cand.simple, complexModel: cand.complex, gateModel: cand.gate },
       }))
     : [
         {
           label: "config",
           cfg: {
             base: BASE,
-            chatModel: resolveModel(argValue("--model") ?? geminiModelRoles.chat),
+            simpleModel: resolveModel(
+              argValue("--simple-model") ?? both ?? geminiModelRoles.chatSimple
+            ),
+            complexModel: resolveModel(
+              argValue("--complex-model") ?? both ?? geminiModelRoles.chat
+            ),
             gateModel: resolveModel(argValue("--gate-model") ?? geminiModelRoles.fastDecision),
           },
         },

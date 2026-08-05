@@ -436,6 +436,12 @@ export function makeTimelineSim(base: typeof FILLER_STATE) {
       speed: 1,
     })),
   });
+  // Mirrors production aiTools: every timeline mutation returns the updated
+  // rows so the model keeps cutting from ids in the result.
+  const rows = () => ({
+    track0: clips.map((c) => ({ id: c.id, start: c.start, len: r2(c.out - c.in) })),
+    soundtrack: audio.map((a) => ({ id: a.id, start: a.start, len: r2(a.out - a.in) })),
+  });
   return (name: string, args: Record<string, unknown>): unknown => {
     if (name === "get_state") return snapshot();
     if (name === "refine_speech_cuts") {
@@ -443,7 +449,7 @@ export function makeTimelineSim(base: typeof FILLER_STATE) {
       const missing = ids.filter((id) => !clips.some((c) => c.id === id));
       if (ids.length === 0 || missing.length > 0)
         return { error: `No such clip(s): ${missing.join(", ") || "(none given)"}.` };
-      return { refined: ids, note: "Edges re-trimmed into the nearest pauses." };
+      return { refined: ids, note: "Edges re-trimmed into the nearest pauses.", ...rows() };
     }
     if (name === "split_at") {
       const t = Number(args.t);
@@ -462,7 +468,7 @@ export function makeTimelineSim(base: typeof FILLER_STATE) {
       remember();
       clips = cut(clips);
       audio = cut(audio);
-      return { split: true, videoClips: clips.length };
+      return { split: true, ...rows() };
     }
     if (name === "delete_item") {
       const id = String(args.id);
@@ -471,13 +477,13 @@ export function makeTimelineSim(base: typeof FILLER_STATE) {
         remember();
         clips = clips.filter((c) => c.id !== id);
         ripple();
-        return { deleted: { kind: "clip", id } };
+        return { deleted: { kind: "clip", id }, ...rows() };
       }
       if (args.kind === "audio") {
         if (!audio.some((a) => a.id === id)) return { error: `No audio with id ${id}.` };
         remember();
         audio = audio.filter((a) => a.id !== id);
-        return { deleted: { kind: "audio", id } };
+        return { deleted: { kind: "audio", id }, ...rows() };
       }
       return undefined;
     }
@@ -490,7 +496,7 @@ export function makeTimelineSim(base: typeof FILLER_STATE) {
       remember();
       clips = clips.map((x) => (x === c ? { ...x, in: nextIn, out: nextOut } : x));
       ripple();
-      return { in: nextIn, out: nextOut, len: r2(nextOut - nextIn) };
+      return { in: nextIn, out: nextOut, len: r2(nextOut - nextIn), ...rows() };
     }
     if (name === "place_clip") {
       const c = clips.find((x) => x.id === String(args.clipId));
@@ -501,7 +507,7 @@ export function makeTimelineSim(base: typeof FILLER_STATE) {
         .map((x) => (x === c ? { ...x, start: at } : x))
         .sort((a, b) => a.start - b.start);
       ripple();
-      return { start: at };
+      return { start: at, ...rows() };
     }
     if (name === "update_audio") {
       const a = audio.find((x) => x.id === String(args.id));
@@ -525,7 +531,7 @@ export function makeTimelineSim(base: typeof FILLER_STATE) {
         clips = prev.clips;
         audio = prev.audio;
       }
-      return { ok: true, videoClips: clips.length };
+      return { ok: true, ...rows() };
     }
     if (name === "delete_cue") {
       const cue = cues.find((c) => c.id === String(args.id));

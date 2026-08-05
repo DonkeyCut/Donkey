@@ -34,15 +34,19 @@ const TRANSIENT_RETRIES = 2;
 export interface RunConfig {
   /** Dev server base URL. */
   base: string;
-  /** Model the chat rounds run on. */
-  chatModel: string;
-  /** Model the tool gate runs on. */
+  /** Model a simple-verdict turn's rounds run on. */
+  simpleModel: string;
+  /** Model a complex-verdict (or fail-open) turn's rounds run on. */
+  complexModel: string;
+  /** Model the gate/router call runs on. */
   gateModel: string;
 }
 
+/** Production's config: the three-way gate routes between the two chat roles. */
 export const defaultRunConfig = (base: string): RunConfig => ({
   base,
-  chatModel: geminiModelRoles.chat,
+  simpleModel: geminiModelRoles.chatSimple,
+  complexModel: geminiModelRoles.chat,
   gateModel: geminiModelRoles.fastDecision,
 });
 
@@ -90,6 +94,8 @@ export interface CaseResult {
   violations: string[];
   notes: string[];
   intent: TurnIntent;
+  /** The model the rounds ran on — differs per turn under a router config. */
+  roundModel: string;
   timings: RunTimings;
 }
 
@@ -145,19 +151,21 @@ const itemText = (item: Item): string => {
     .trim();
 };
 
-/** The production tool gate, replicated from geminiChat.ts: a message with
- * attachments is work by construction; otherwise the fast-decision model
- * judges the newest message. Fails open to "work". */
+/** The production gate and router, replicated from geminiChat.ts: a message
+ * with attachments is complex by construction; otherwise the gate model's
+ * three-way verdict withholds tools (chat) or picks the loop's model (simple /
+ * complex). Fails open to complex. */
 export async function classifyIntent(
   input: Item[],
   cfg: RunConfig,
   tally: RetryTally
-): Promise<{ intent: TurnIntent; gateMs: number; gateSkipped: boolean }> {
+): Promise<{ intent: TurnIntent; roundModel: string; gateMs: number; gateSkipped: boolean }> {
   const lastUser = [...input].reverse().find((i) => i.role === "user");
   const raw =
     ((lastUser?.content as { text?: string }[]) ?? []).find((p) => typeof p.text === "string")
       ?.text ?? "";
-  if (raw.includes("<attached_assets>")) return { intent: "work", gateMs: 0, gateSkipped: true };
+  if (raw.includes("<attached_assets>"))
+    return { intent: "complex", roundModel: cfg.complexModel, gateMs: 0, gateSkipped: true };
   const turns = input.map((i) => ({
     role: (i.role === "user" ? "user" : "assistant") as "user" | "assistant",
     text: itemText(i),
@@ -172,8 +180,10 @@ export async function classifyIntent(
     });
     if (res.ok) {
       const body = (await res.json()) as { output_text?: string };
+      const intent = parseTurnIntent(body.output_text);
       return {
-        intent: parseTurnIntent(body.output_text),
+        intent,
+        roundModel: intent === "complex" ? cfg.complexModel : cfg.simpleModel,
         gateMs: performance.now() - t0,
         gateSkipped: false,
       };
@@ -181,7 +191,7 @@ export async function classifyIntent(
     tally.retries++;
     tally.retryMs += performance.now() - t0;
     if (!RETRYABLE_STATUS.has(res.status) || attempt >= TRANSIENT_RETRIES)
-      return { intent: "work", gateMs: 0, gateSkipped: false };
+      return { intent: "complex", roundModel: cfg.complexModel, gateMs: 0, gateSkipped: false };
     await sleepTallied(800 * (attempt + 1), tally);
   }
 }
@@ -291,7 +301,7 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
   // with input assembly, which is negligible — serial gate + round 1 is the
   // same critical path the user perceives.)
   const gate = await classifyIntent(input, cfg, tally);
-  const tools = gate.intent === "work" ? toolDeclarations : undefined;
+  const tools = gate.intent === "chat" ? undefined : toolDeclarations;
   const sim = c.simulate?.();
   const trace: TraceEntry[] = [];
   const rounds: RoundTiming[] = [];
@@ -308,7 +318,7 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
       cfg,
       {
         donkeyProvider: "gemini",
-        model: cfg.chatModel,
+        model: gate.roundModel,
         instructions: systemPrompt(),
         input,
         ...(tools ? { tools } : {}),
@@ -392,7 +402,10 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
     input.push({ role: "user", content: responseParts });
   }
 
-  if (c.gate && gate.intent !== c.gate) notes.push(`gate said ${gate.intent}, expected ${c.gate}`);
+  // Cases assert the gate side of the verdict; simple-vs-complex is routing,
+  // scored by latency, so either satisfies a "work" expectation.
+  const gateSide = gate.intent === "chat" ? "chat" : "work";
+  if (c.gate && gateSide !== c.gate) notes.push(`gate said ${gate.intent}, expected ${c.gate}`);
   if (!c.reply.test(reply)) notes.push(`reply did not match ${c.reply}`);
   for (const t of c.requiredTools ?? []) {
     if (!trace.some((e) => e.name === t)) notes.push(`required tool ${t} was never called`);
@@ -421,6 +434,7 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
     violations,
     notes,
     intent: gate.intent,
+    roundModel: gate.roundModel,
     timings,
   };
 }

@@ -19,6 +19,8 @@ export interface Agg {
 export interface RunReport {
   pass: boolean;
   intent: string;
+  /** The model the rounds ran on — differs per turn under a router config. */
+  roundModel?: string;
   notes: string[];
   trace: TraceEntry[];
   timings: RunTimings | null;
@@ -94,6 +96,7 @@ export function toRunReport(result: CaseResult | null, error?: string): RunRepor
   return {
     pass: result.pass,
     intent: result.intent,
+    roundModel: result.roundModel,
     notes: result.notes,
     trace: result.trace,
     timings: result.timings,

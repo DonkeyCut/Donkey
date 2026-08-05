@@ -9,7 +9,6 @@
  *   multi-tool  — composed edits over several calls
  */
 
-import type { TurnIntent } from "../../../src/cut/lib/turnIntent";
 import {
   AUDIO_STATE,
   CLIP_REFS,
@@ -48,9 +47,10 @@ export interface EvalCase {
   /** Latency guard: the turn fails if the trace exceeds this many calls. A
    * simple ask must not detour through skill reads or state polls. */
   maxToolCalls?: number;
-  /** The tool gate's required verdict for the turn ("chat" turns run with no
-   * tool declarations, so tool calls become impossible). */
-  gate?: TurnIntent;
+  /** The gate side the turn must classify to: "chat" turns run with no tool
+   * declarations (tool calls become impossible), "work" covers both routing
+   * verdicts (simple and complex). */
+  gate?: "chat" | "work";
   /** Editor snapshot served to get_state for this case (default EDITOR_STATE). */
   state?: unknown;
   /** Per-run tool interceptor (fresh per run); a non-undefined return serves
@@ -460,7 +460,12 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
           status: "done",
           track: 0,
           locale: "en-US",
-          cues: 3,
+          count: 3,
+          cues: [
+            { id: "ncue1", start: 0, end: 2.1, text: "So today we're at the beach with the dogs" },
+            { id: "ncue2", start: 2.1, end: 4.9, text: "they absolutely love the water" },
+            { id: "ncue3", start: 4.9, end: 7.5, text: "so let's watch them play" },
+          ],
           note: "Re-transcribed the tightened cut.",
         },
         subtitles_remove_track: { removed: 0 },
