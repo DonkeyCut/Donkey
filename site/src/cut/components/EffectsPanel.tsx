@@ -12,11 +12,11 @@ import {
   type EffectId,
 } from "@donkeycut/effects-kit";
 import { PICKED_RING, pickGridNav, useAssetPick } from "@/cut/lib/assetPick";
-import { clearElementDrag, setElementDragData } from "@/cut/lib/assetDrag";
+import { clearElementDrag, setElementDragData, setObjectDragImage } from "@/cut/lib/assetDrag";
 import { SubTabs } from "@/cut/components/SubTabs";
 import { getPreviewCanvas } from "@/cut/lib/previewCanvas";
 import { useEditor } from "@/cut/lib/store";
-import { frameOf, isEffectOverlay, type EffectOverlay } from "@/cut/lib/types";
+import { isEffectOverlay, type EffectOverlay } from "@/cut/lib/types";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -187,7 +187,10 @@ function EffectTile({
       data-pick-id={`effect:${id}`}
       aria-pressed={marked}
       draggable
-      onDragStart={(e) => setElementDragData(e, { kind: "effect", effect: id })}
+      onDragStart={(e) => {
+        setElementDragData(e, { kind: "effect", effect: id });
+        setObjectDragImage(e);
+      }}
       onDragEnd={clearElementDrag}
       onPointerEnter={() => setHover(true)}
       onPointerLeave={() => setHover(false)}
@@ -268,22 +271,12 @@ export function useSwatchClock(running: boolean, loop = LOOP_S, resetKey = 0): n
   return t;
 }
 
-/** The tile swatch's shape: the project frame's own, so the sampled preview
- * fills the tile with the whole picture in view. Clamped between 9:16 and 2:1
- * so a custom extreme keeps the grid readable. Shared with the Transitions
- * tab. */
-export function useSwatchRatio(): number {
-  return useEditor((s) => {
-    const f = frameOf(s.aspect);
-    return Math.min(2, Math.max(9 / 16, f.w / f.h));
-  });
-}
-
-/** The picture a swatch treats: the given frame when there is one, and a small
- * colored landscape as the stand-in, so every treatment reads at tile size.
- * The stand-in comes in two casts — day (sun over green hills) and dusk (moon
- * over dark ones) — so a transition tile can hand over between two scenes that
- * read as different shots. Shared with the Transitions tab. */
+/** The picture a swatch treats: the given frame when there is one, fit whole
+ * inside the square tile, and a small colored landscape as the stand-in, so
+ * every treatment reads at tile size. The stand-in comes in two casts — day
+ * (sun over green hills) and dusk (moon over dark ones) — so a transition
+ * tile can hand over between two scenes that read as different shots. Shared
+ * with the Transitions tab. */
 export function SwatchScene({
   frame,
   variant = "day",
@@ -294,19 +287,18 @@ export function SwatchScene({
   if (frame) {
     return (
       // eslint-disable-next-line @next/next/no-img-element -- a transient data URL or filmstrip thumb; the image optimizer has no role
-      <img src={frame} alt="" draggable={false} className="absolute inset-0 size-full object-cover" />
+      <img src={frame} alt="" draggable={false} className="absolute inset-0 size-full object-contain" />
     );
   }
   if (variant === "dusk") {
     return (
       <>
         <span className="absolute inset-0 bg-[linear-gradient(165deg,#2b3f77_0%,#5a4a8a_55%,#c26d4a_100%)]" />
-        <span className="absolute top-[14%] right-[16%] size-[22%] rounded-full bg-[#f3ead0]" />
+        <span className="absolute top-[14%] right-[16%] aspect-square w-[15%] rounded-full bg-[#f3ead0]" />
         <svg
           viewBox="0 0 100 56"
-          preserveAspectRatio="none"
           aria-hidden
-          className="absolute inset-x-0 bottom-0 h-[62%] w-full"
+          className="absolute inset-x-0 bottom-0 h-[56%] w-full"
         >
           <polygon points="0,56 30,8 60,56" fill="#17293c" />
           <polygon points="38,56 70,22 100,52 100,56" fill="#1f3a4d" />
@@ -317,12 +309,11 @@ export function SwatchScene({
   return (
     <>
       <span className="absolute inset-0 bg-[linear-gradient(165deg,#6ea8f5_0%,#a97ee0_55%,#f0a12e_100%)]" />
-      <span className="absolute top-[12%] left-[14%] size-[34%] rounded-full bg-[#fdf0c2]" />
+      <span className="absolute top-[12%] left-[14%] aspect-square w-[22%] rounded-full bg-[#fdf0c2]" />
       <svg
         viewBox="0 0 100 56"
-        preserveAspectRatio="none"
         aria-hidden
-        className="absolute inset-x-0 bottom-0 h-[62%] w-full"
+        className="absolute inset-x-0 bottom-0 h-[56%] w-full"
       >
         <polygon points="0,56 30,8 60,56" fill="#255c3f" />
         <polygon points="38,56 70,22 100,52 100,56" fill="#3a7a52" />
@@ -345,7 +336,6 @@ export function EffectSwatch({
   frame?: string | null;
   className?: string;
 }) {
-  const ratio = useSwatchRatio();
   // The leak wanders at a pace tuned to a clip's seconds; the tile doubles its
   // clock so the roaming reads without a long watch.
   const st = effectPreviewState(id, 0.9, id === "lightleak" ? t * 2 : t);
@@ -386,8 +376,8 @@ export function EffectSwatch({
       : [];
   return (
     <span
-      className={cn("relative block overflow-hidden rounded-md bg-black", className)}
-      style={{ aspectRatio: ratio }}
+      data-drag-object
+      className={cn("relative block aspect-square overflow-hidden rounded-md bg-black", className)}
     >
       {!!st.ghostFrac && (
         <span
