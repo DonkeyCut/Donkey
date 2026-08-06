@@ -963,9 +963,12 @@ export function Timeline() {
   };
 
   // The landing preview for a shape, sticker or effect dragged out of a
-  // panel: the row it would land on and the segment it would take there, so
-  // the drag reads on the band the way a bar drag does.
-  const [elementDrop, setElementDrop] = useState<{ row: number; t: number } | null>(null);
+  // panel, drawn the way a bar drag is: the slot outline on the target row
+  // where the drop lands, and the bar itself carried at the pointer (`y` is
+  // the bar's top in band pixels).
+  const [elementDrop, setElementDrop] = useState<{ row: number; t: number; y: number } | null>(
+    null
+  );
   // The place a dragged transition would land on, marked with the footprint it
   // would take while it is in flight.
   const [jointDrop, setJointDrop] = useState<Anchor | null>(null);
@@ -1354,9 +1357,28 @@ export function Timeline() {
           setOverlayDrop(null);
           setAudioDrop(null);
           setDropType(null);
+          // An empty band has no rows to hit; the drag opens the first one,
+          // where the drop will land.
+          const hit = overlayRowAt(e.clientY);
           const row =
-            !element || element.kind !== "transition" ? overlayRowAt(e.clientY) ?? null : null;
-          setElementDrop(row !== null ? { row, t: dropTimeAt(e.clientX) } : null);
+            !element || element.kind !== "transition"
+              ? hit ?? (overlayLanes.count === 0 ? 0 : null)
+              : null;
+          // The pointer's own time, not `dropTimeAt`: an empty timeline pins
+          // clip drops to 0, but an element rides wherever it is held.
+          const bandTop = overlayRef.current?.getBoundingClientRect().top;
+          setElementDrop(
+            row !== null
+              ? {
+                  row,
+                  t: Math.max(0, timeAt(e.clientX)),
+                  y:
+                    bandTop !== undefined
+                      ? e.clientY - bandTop - (TEXT_H - 6) / 2
+                      : row * TEXT_H + 2,
+                }
+              : null
+          );
           setXTileDrag(element?.kind === "transition");
           setJointDrop(
             element?.kind === "transition"
@@ -1492,9 +1514,16 @@ export function Timeline() {
         const projectId = useEditor.getState().projectId;
         clearAssetDrag();
         clearElementDrag();
+        // Elements land at the pointer's own time, not `dropTimeAt`, which
+        // pins everything to 0 on an empty timeline — a clip starts the film
+        // there, but an element lands where it was dropped.
+        const atElement = Math.max(0, timeAt(e.clientX));
         if (element) {
           e.preventDefault();
-          const aim = { at: t, ...(elementLane !== undefined ? { lane: elementLane } : {}) };
+          const aim = {
+            at: atElement,
+            ...(elementLane !== undefined ? { lane: elementLane } : {}),
+          };
           if (element.kind === "shape") useEditor.getState().addShape(element.shape, aim);
           else if (element.kind === "effect") useEditor.getState().addEffect(element.effect, aim);
           else dropTransitionAt(t, element.style);
@@ -1510,7 +1539,14 @@ export function Timeline() {
           e.preventDefault();
           void importLibraryAsset(projectId, lib)
             .then((asset) => {
-              if (asset.type !== "font") placeAssetAt(asset.id, asset.type, t, audioRow, videoPlace);
+              if (asset.type !== "font")
+                placeAssetAt(
+                  asset.id,
+                  asset.type,
+                  stickerOf(asset) ? atElement : t,
+                  audioRow,
+                  videoPlace
+                );
             })
             .catch(() => {});
           return;
@@ -1521,7 +1557,14 @@ export function Timeline() {
           e.preventDefault();
           const asset = useEditor.getState().assets.find((a) => a.id === id);
           if (asset && asset.type !== "font")
-            placeAssetAt(id, asset.type, t, audioRow, videoPlace, elementLane);
+            placeAssetAt(
+              id,
+              asset.type,
+              stickerOf(asset) ? atElement : t,
+              audioRow,
+              videoPlace,
+              elementLane
+            );
           return;
         }
 
@@ -1720,7 +1763,7 @@ export function Timeline() {
           {/* Elements ride above the clip stack, the way they sit over the
               picture. New effects open the top row; a drag moves any of them
               to any row. */}
-          {overlays.length > 0 && (
+          {(overlays.length > 0 || elementDrop !== null) && (
             <div
               ref={overlayRef}
               data-tl-trows=""
@@ -1731,7 +1774,10 @@ export function Timeline() {
                     overlayLanes.count,
                     // An in-flight element drag shows the whole landing area,
                     // the would-be new row below included.
-                    laneDrag?.kind === "overlay" ? overlayLanes.count + 1 : 0
+                    laneDrag?.kind === "overlay" ? overlayLanes.count + 1 : 0,
+                    // A panel drag over an empty band opens the first row for
+                    // its landing preview.
+                    elementDrop !== null ? elementDrop.row + 1 : 0
                   ) *
                     TEXT_H +
                   topRowShift,
@@ -1794,16 +1840,28 @@ export function Timeline() {
                         )}
                         style={{ top: elementDrop.row * TEXT_H + 2, height: TEXT_H - 6 }}
                       />
-                      {/* The bar the drop would make, carried under the
-                          pointer the way a bar drag's ghost is, so the panel
-                          drag reads as holding a track segment. */}
+                      {/* The slot the drop takes on its row... */}
+                      <div
+                        className={cn(
+                          "pointer-events-none absolute rounded-md",
+                          FAMILY_STYLE[family].slot
+                        )}
+                        style={{
+                          top: elementDrop.row * TEXT_H + 2,
+                          height: TEXT_H - 6,
+                          left: elementDrop.t * pps,
+                          width: Math.max(14, ELEMENT_DROP_SECONDS * pps - CLIP_GAP),
+                        }}
+                      />
+                      {/* ...and the bar itself carried at the pointer, the
+                          way a bar drag's ghost rides. */}
                       <div
                         className={cn(
                           "pointer-events-none absolute z-20 flex items-center overflow-hidden rounded-md opacity-80 shadow-2xl",
                           FAMILY_STYLE[family].bar
                         )}
                         style={{
-                          top: elementDrop.row * TEXT_H + 2,
+                          top: elementDrop.y,
                           height: TEXT_H - 6,
                           left: elementDrop.t * pps,
                           width: Math.max(14, ELEMENT_DROP_SECONDS * pps - CLIP_GAP),

@@ -1067,7 +1067,9 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       .filter((o) => (o.lane ?? 0) === place.lane)
       .map((o) => ({ start: o.start, end: o.end }));
     const len = aim.len ?? 3;
-    const start = nextFreeStart(taken, Math.min(t, Math.max(0, total - 0.5)), len);
+    // Keep the element within the film; with no clips yet there is no film
+    // to stay inside, so it lands where it was aimed.
+    const start = nextFreeStart(taken, total > 0 ? Math.min(t, Math.max(0, total - 0.5)) : t, len);
     const overlay = build(start, Math.min(start + len, Math.max(total, start + len)), place.lane);
     set(() => ({
       overlays: [...rest, overlay],
