@@ -194,9 +194,13 @@ function vtQuality(crf: number) {
   return Math.round(Math.max(35, Math.min(80, 100 - crf * 1.8)));
 }
 
-async function resolveMedia(mediaPathFor: (file: string) => string, file: string) {
+async function resolveMedia(
+  statFn: typeof stat,
+  mediaPathFor: (file: string) => string,
+  file: string
+) {
   const p = mediaPathFor(file);
-  const info = await stat(p).catch(() => null);
+  const info = await statFn(p).catch(() => null);
   if (!info?.isFile()) throw new Error(`Media file missing from project: ${file}`);
   return p;
 }
@@ -313,6 +317,21 @@ export function runFfmpeg(
   });
 }
 
+/** The pipeline's edges into the world: staged-media checks, list-file
+ * writes, stream probes, the encoder probe, and the ffmpeg runs. `runExport`
+ * takes them as a parameter so the filtergraph tests can build the real graph
+ * for a spec with these stubbed. */
+export interface ExportPipelineIO {
+  stat: typeof stat;
+  writeFile: typeof writeFile;
+  hasStream: typeof hasStream;
+  videoColorInfo: typeof videoColorInfo;
+  h264Encoder: () => Promise<"libx264" | "h264_videotoolbox">;
+  runFfmpeg: typeof runFfmpeg;
+}
+
+const realIO: ExportPipelineIO = { stat, writeFile, hasStream, videoColorInfo, h264Encoder, runFfmpeg };
+
 /** Render `spec` into `job.outPath`. `mediaPathFor` maps a spec media file
  * name to its staged path on disk (the engine reads the project folder; the
  * worker reads its download dir); overlay/caption PNGs are read from
@@ -320,7 +339,8 @@ export function runFfmpeg(
 export async function runExport(
   job: RenderHandle,
   spec: ExportSpec,
-  mediaPathFor: (file: string) => string
+  mediaPathFor: (file: string) => string,
+  io: ExportPipelineIO = realIO
 ) {
   if (spec.clips.length === 0) throw new Error("Nothing to export.");
   const { width: W, height: H, fps } = spec;
@@ -361,7 +381,7 @@ export async function runExport(
   let nInputs = 0;
   // Resolve paths in order first so ffmpeg input indices stay deterministic,
   // then probe every file's streams concurrently.
-  const paths = await Promise.all(mediaFiles.map((f) => resolveMedia(mediaPathFor, f)));
+  const paths = await Promise.all(mediaFiles.map((f) => resolveMedia(io.stat, mediaPathFor, f)));
   mediaFiles.forEach((f, i) => {
     inputIndex.set(f, nInputs++);
     inputs.push("-i", paths[i]);
@@ -373,13 +393,13 @@ export async function runExport(
       // video to black. Genuine absence returns false with no error, so on a
       // probe error we assume the stream is present and let ffmpeg map it.
       let audioProbeFailed = false;
-      const hasAudio = await hasStream(paths[i], "a", () => (audioProbeFailed = true));
+      const hasAudio = await io.hasStream(paths[i], "a", () => (audioProbeFailed = true));
       audioPresence.set(f, hasAudio || audioProbeFailed);
       let videoProbeFailed = false;
-      const hasVideo = await hasStream(paths[i], "v", () => (videoProbeFailed = true));
+      const hasVideo = await io.hasStream(paths[i], "v", () => (videoProbeFailed = true));
       videoPresence.set(f, hasVideo || videoProbeFailed);
       // A failed color probe (null) means no conversion — SDR passthrough.
-      colorFix.set(f, sdrConvert(await videoColorInfo(paths[i])));
+      colorFix.set(f, sdrConvert(await io.videoColorInfo(paths[i])));
     })
   );
   // Animated overlays: each is its own concat-demuxer slideshow (region-sized
@@ -405,7 +425,7 @@ export async function runExport(
         lines.push(`file '${blank}'`, `duration ${num(spec.duration - cursor)}`);
       }
       const list = path.join(job.tmpDir, `overlay_anim_${k}.ffconcat`);
-      await writeFile(list, lines.join("\n") + "\n");
+      await io.writeFile(list, lines.join("\n") + "\n");
       animOverlayInput.set(k, nInputs++);
       inputs.push("-f", "concat", "-safe", "0", "-i", list);
     } else if (o.file) {
@@ -428,7 +448,7 @@ export async function runExport(
     if (!c.image || !c.file) continue;
     const dur = Math.max(0.1, (c.out - c.in) / clipRate(c));
     imageClipInput.set(j, nInputs++);
-    inputs.push("-loop", "1", "-t", num(dur), "-framerate", String(fps), "-i", await resolveMedia(mediaPathFor, c.file));
+    inputs.push("-loop", "1", "-t", num(dur), "-framerate", String(fps), "-i", await resolveMedia(io.stat, mediaPathFor, c.file));
   }
   const imageOverlayInput = new Map<(typeof overlayVideos)[number], number>();
   for (const oc of overlayVideos) {
@@ -436,7 +456,7 @@ export async function runExport(
     const ospeed = oc.speed && oc.speed > 0 ? oc.speed : 1;
     const olen = Math.max(0.1, (oc.out - oc.in) / ospeed);
     imageOverlayInput.set(oc, nInputs++);
-    inputs.push("-loop", "1", "-t", num(olen), "-framerate", String(fps), "-i", await resolveMedia(mediaPathFor, oc.file));
+    inputs.push("-loop", "1", "-t", num(olen), "-framerate", String(fps), "-i", await resolveMedia(io.stat, mediaPathFor, oc.file));
   }
 
   // One concat-demuxer input per subtitle track: within a track cues never
@@ -470,7 +490,7 @@ export async function runExport(
       lines.push(`file '${blank}'`, `duration ${num(spec.duration - cursor)}`);
     }
     const list = path.join(job.tmpDir, `captions_${lane}.ffconcat`);
-    await writeFile(list, lines.join("\n") + "\n");
+    await io.writeFile(list, lines.join("\n") + "\n");
     captionInputs.push(nInputs++);
     inputs.push("-f", "concat", "-safe", "0", "-i", list);
   }
@@ -1197,7 +1217,7 @@ export async function runExport(
     aLabel = "afinal";
   }
 
-  const enc = await h264Encoder();
+  const enc = await io.h264Encoder();
   const videoCodecArgs =
     enc === "libx264"
       ? ["-c:v", "libx264", "-preset", spec.preset, "-crf", String(spec.crf)]
@@ -1207,7 +1227,7 @@ export async function runExport(
   // rotation flag (see the strip pass below). Keeping the encode intermediate
   // lets the second pass own faststart.
   const encodePath = path.join(job.tmpDir, "encode.mp4");
-  await runFfmpeg(
+  await io.runFfmpeg(
     job,
     [
       "-y",
@@ -1238,7 +1258,7 @@ export async function runExport(
   // "desktop" frame. `-display_rotation 0` overrides that matrix to identity; a
   // stream copy re-emits the (already correct) pixels and audio unchanged and
   // writes the faststart-optimized final file.
-  await runFfmpeg(job, [
+  await io.runFfmpeg(job, [
     "-y",
     "-display_rotation", "0",
     "-i", encodePath,
