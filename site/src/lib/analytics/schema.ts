@@ -70,6 +70,9 @@ export const analyticsSnapshotFileSchema = z.object({
       email: z.string(),
       name: z.string(),
       createdAt: z.string(),
+      // The onboarding referral answer; present once the user answered.
+      referralAnsweredAt: z.string().optional(),
+      referralSources: z.array(z.string()).optional(),
     }),
   ),
   balances: z.array(z.object({ userId: z.string(), balanceMicros: z.string() })),
@@ -88,6 +91,23 @@ export const analyticsRollupSchema = z.object({
   // Day files that were absent or unreadable at consolidation; the UI can gray
   // those columns out. Entries name the file kind: "db" or "posthog".
   missing: z.array(z.object({ day: analyticsDaySchema, sources: z.array(z.string()) })),
+  // All-time onboarding referral answers, one entry per UTC day from the first
+  // answer through yesterday, zero-filled. Source ids copy REFERRAL_SOURCES at
+  // write time, plus any stored id beyond that list appended; counts align
+  // with sources. The question is multi-select, so a day's counts can sum past
+  // its respondents. Absent from rollups written before this shipped.
+  referrals: z
+    .object({
+      sources: z.array(z.string()),
+      days: z.array(
+        z.object({
+          day: analyticsDaySchema,
+          respondents: z.number(),
+          counts: z.array(z.number()),
+        }),
+      ),
+    })
+    .optional(),
   users: z.array(
     z.object({
       id: z.string(),
@@ -103,3 +123,4 @@ export const analyticsRollupSchema = z.object({
 });
 export type AnalyticsRollup = z.infer<typeof analyticsRollupSchema>;
 export type AnalyticsRollupUser = AnalyticsRollup["users"][number];
+export type AnalyticsReferrals = NonNullable<AnalyticsRollup["referrals"]>;

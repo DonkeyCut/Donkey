@@ -23,6 +23,7 @@ import {
   type AnalyticsSnapshotFile,
   utcDayOf,
 } from "@/lib/analytics/schema";
+import { REFERRAL_SOURCES } from "@/lib/onboarding/sequence";
 import { prisma } from "@/lib/prisma";
 
 const ANALYTICS_PREFIX = "analytics/";
@@ -166,12 +167,29 @@ async function writeSnapshot(): Promise<AnalyticsSnapshotFile> {
   for (;;) {
     const page = await prisma.user.findMany({
       orderBy: { id: "asc" },
-      select: { createdAt: true, email: true, id: true, name: true },
+      select: {
+        createdAt: true,
+        email: true,
+        id: true,
+        name: true,
+        onboarding: { select: { referralAnsweredAt: true, referralSources: true } },
+      },
       take: SNAPSHOT_PAGE_SIZE,
       ...(userCursor === undefined ? {} : { cursor: { id: userCursor }, skip: 1 }),
     });
     for (const u of page) {
-      users.push({ createdAt: u.createdAt.toISOString(), email: u.email, id: u.id, name: u.name });
+      users.push({
+        createdAt: u.createdAt.toISOString(),
+        email: u.email,
+        id: u.id,
+        name: u.name,
+        ...(u.onboarding?.referralAnsweredAt
+          ? {
+              referralAnsweredAt: u.onboarding.referralAnsweredAt.toISOString(),
+              referralSources: u.onboarding.referralSources,
+            }
+          : {}),
+      });
     }
     if (page.length < SNAPSHOT_PAGE_SIZE) break;
     userCursor = page[page.length - 1].id;
@@ -268,12 +286,51 @@ async function consolidate(
     days,
     generatedAt: new Date().toISOString(),
     missing,
+    referrals: buildReferrals(snapshot, yesterday),
     sources: [...ANALYTICS_SOURCES],
     users,
     version: ANALYTICS_ROLLUP_VERSION,
   };
   await putJson(ROLLUP_KEY, rollup);
   return rollup;
+}
+
+// The snapshot covers every user, so this recomputes the whole referral
+// history each run — an answer moved by a replayed onboarding lands on its
+// new day with nothing left behind on the old one.
+function buildReferrals(
+  snapshot: AnalyticsSnapshotFile,
+  through: string,
+): AnalyticsRollup["referrals"] {
+  const answered = snapshot.users
+    .flatMap((u) =>
+      u.referralAnsweredAt === undefined
+        ? []
+        : [{ day: utcDayOf(new Date(u.referralAnsweredAt)), sources: u.referralSources ?? [] }],
+    )
+    .filter((a) => a.day <= through);
+  if (answered.length === 0) return undefined;
+
+  const sources: string[] = REFERRAL_SOURCES.map((s) => s.id);
+  for (const a of answered) {
+    for (const id of a.sources) if (!sources.includes(id)) sources.push(id);
+  }
+
+  const first = answered.reduce((min, a) => (a.day < min ? a.day : min), through);
+  const byDay = new Map<string, { day: string; respondents: number; counts: number[] }>();
+  const days: NonNullable<AnalyticsRollup["referrals"]>["days"] = [];
+  for (let day = first; day <= through; day = addUtcDays(day, 1)) {
+    const entry = { counts: sources.map(() => 0), day, respondents: 0 };
+    byDay.set(day, entry);
+    days.push(entry);
+  }
+  for (const a of answered) {
+    const entry = byDay.get(a.day);
+    if (!entry) continue;
+    entry.respondents++;
+    for (const id of a.sources) entry.counts[sources.indexOf(id)]++;
+  }
+  return { days, sources };
 }
 
 async function putJson(key: string, value: unknown): Promise<void> {

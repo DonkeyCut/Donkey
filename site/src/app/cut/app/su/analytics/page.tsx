@@ -11,7 +11,8 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import type { AnalyticsRollup } from "@/lib/analytics/schema";
+import type { AnalyticsReferrals, AnalyticsRollup } from "@/lib/analytics/schema";
+import { REFERRAL_SOURCES } from "@/lib/onboarding/sequence";
 import { cn } from "@/lib/utils";
 import { useAnalyticsRollup } from "@/queries/analytics";
 import { ApiError } from "@/queries/apiClient";
@@ -128,6 +129,39 @@ function deriveView(rollup: AnalyticsRollup): RollupView {
     workBits,
   };
 }
+
+// One chart point per day: the per-source answer counts under their source
+// ids, plus the running total of users who answered.
+type ReferralView = {
+  config: ChartConfig;
+  series: Record<string, number | string>[];
+  respondents: number;
+};
+
+function deriveReferrals(referrals: AnalyticsReferrals): ReferralView {
+  const labels = new Map<string, string>(REFERRAL_SOURCES.map((s) => [s.id, s.label]));
+  const config: ChartConfig = {};
+  referrals.sources.forEach((id, i) => {
+    config[id] = {
+      color: `var(--chart-${Math.min(i + 1, 8)})`,
+      label: labels.get(id) ?? id,
+    };
+  });
+  let respondents = 0;
+  const series = referrals.days.map((entry) => {
+    respondents += entry.respondents;
+    const point: Record<string, number | string> = { day: entry.day, totalResponses: respondents };
+    referrals.sources.forEach((id, i) => {
+      point[id] = entry.counts[i] ?? 0;
+    });
+    return point;
+  });
+  return { config, respondents, series };
+}
+
+const totalResponsesConfig = {
+  totalResponses: { label: "Total responses", color: "var(--chart-1)" },
+} satisfies ChartConfig;
 
 const activesConfig = {
   active: { label: "Active", color: "var(--chart-1)" },
@@ -297,6 +331,10 @@ export default function SuAnalyticsPage() {
     () => (rollup.data ? deriveView(rollup.data) : null),
     [rollup.data],
   );
+  const referrals = useMemo(
+    () => (rollup.data?.referrals ? deriveReferrals(rollup.data.referrals) : null),
+    [rollup.data],
+  );
 
   if (rollup.isPending) return null;
 
@@ -443,6 +481,79 @@ export default function SuAnalyticsPage() {
           </ChartContainer>
         </ChartCard>
       </div>
+
+      {referrals && (
+        <div className="grid gap-6 xl:grid-cols-2">
+          <ChartCard
+            title="Referral sources"
+            subtitle="Onboarding answers per day, by source · one user can pick several"
+          >
+            <ChartContainer className="w-full" config={referrals.config}>
+              <BarChart accessibilityLayer data={referrals.series} margin={{ left: -16 }}>
+                <CartesianGrid vertical={false} />
+                <XAxis
+                  axisLine={false}
+                  dataKey="day"
+                  minTickGap={32}
+                  tickFormatter={formatDay}
+                  tickLine={false}
+                  tickMargin={8}
+                />
+                <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={48} />
+                <ChartTooltip
+                  content={
+                    <ChartTooltipContent labelFormatter={(label) => formatDay(String(label))} />
+                  }
+                />
+                {Object.keys(referrals.config).map((id) => (
+                  <Bar
+                    key={id}
+                    dataKey={id}
+                    fill={`var(--color-${id})`}
+                    maxBarSize={24}
+                    stackId="sources"
+                  />
+                ))}
+                <ChartLegend content={<ChartLegendContent />} />
+              </BarChart>
+            </ChartContainer>
+          </ChartCard>
+
+          <ChartCard
+            title="Referral responses"
+            subtitle={`Running total of users who answered · ${referrals.respondents.toLocaleString("en-US")} all time`}
+          >
+            <ChartContainer className="w-full" config={totalResponsesConfig}>
+              <AreaChart accessibilityLayer data={referrals.series} margin={{ left: -16 }}>
+                <CartesianGrid vertical={false} />
+                <XAxis
+                  axisLine={false}
+                  dataKey="day"
+                  minTickGap={32}
+                  tickFormatter={formatDay}
+                  tickLine={false}
+                  tickMargin={8}
+                />
+                <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={48} />
+                <ChartTooltip
+                  content={
+                    <ChartTooltipContent labelFormatter={(label) => formatDay(String(label))} />
+                  }
+                />
+                <Area
+                  dataKey="totalResponses"
+                  dot={false}
+                  fill="var(--color-totalResponses)"
+                  fillOpacity={0.1}
+                  stroke="var(--color-totalResponses)"
+                  strokeWidth={2}
+                  type="monotone"
+                />
+              </AreaChart>
+            </ChartContainer>
+          </ChartCard>
+        </div>
+      )}
 
       <ChartCard title="Total registered" subtitle="Cumulative registrations, last 60 days">
         <ChartContainer className="max-h-56 w-full" config={totalRegisteredConfig}>
