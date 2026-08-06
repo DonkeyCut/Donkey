@@ -14,7 +14,7 @@ import {
   subtitleLaneCount,
   trackPos,
 } from "@/cut/lib/subtitles";
-import { evalOverlayFrame, hasOverlayKeys, isOverlayAnimated, resolveShadow, shapeMetrics, type LottieHandle } from "@donkeycut/effects-kit";
+import { evalOverlayFrame, hasOverlayKeys, isOverlayAnimated, lineLikeShape, resolveShadow, shapeMetrics, shapePathD, type LottieHandle } from "@donkeycut/effects-kit";
 import {
   LINE_HEIGHT,
   PLATE_PAD_X,
@@ -809,7 +809,7 @@ function ShapeView({
   scale: number;
 }) {
   const m = shapeMetrics(o, { width: stageWidth, height: stageHeight, scale });
-  if (o.shape === "line" || o.shape === "arrow") {
+  if (lineLikeShape(o.shape)) {
     const h = Math.max(m.thickness, m.headHalf * 2);
     const mid = h / 2;
     return (
@@ -851,7 +851,7 @@ function ShapeView({
           stroke={o.stroke?.color}
           strokeWidth={m.strokeWidth || undefined}
         />
-      ) : (
+      ) : o.shape === "ellipse" ? (
         <ellipse
           cx={m.w / 2}
           cy={m.h / 2}
@@ -861,6 +861,15 @@ function ShapeView({
           fillOpacity={o.fillOpacity ?? 1}
           stroke={o.stroke?.color}
           strokeWidth={m.strokeWidth || undefined}
+        />
+      ) : (
+        <path
+          d={shapePathD(o.shape, m.w, m.h)}
+          fill={o.fill}
+          fillOpacity={o.fillOpacity ?? 1}
+          stroke={o.stroke?.color}
+          strokeWidth={m.strokeWidth || undefined}
+          strokeLinejoin="round"
         />
       )}
     </svg>

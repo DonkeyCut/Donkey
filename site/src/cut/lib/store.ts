@@ -4,6 +4,7 @@ import {
   groupRemap,
   KEY_EPSILON,
   keyAt,
+  lineLikeShape,
   removeKeyAt,
   upsertKey,
   type EffectId,
@@ -1819,7 +1820,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       const frame = frameOf(get().aspect);
       // A square-reading default box whatever the aspect; lines/arrows are a
       // wider box whose height is the stroke thickness.
-      const w = shape === "line" || shape === "arrow" ? 0.42 : 0.3;
+      const w = lineLikeShape(shape) ? 0.42 : 0.3;
       const h =
         shape === "line"
           ? 6 / frame.h

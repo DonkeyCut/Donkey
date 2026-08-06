@@ -25,6 +25,7 @@ import {
   hasOverlayKeys,
   KEY_EPSILON,
   keyIndexAt,
+  lineLikeShape,
   poseAt,
   type OverlayKey,
   OVERLAY_ANIM_DEFAULT_SECONDS,
@@ -2013,7 +2014,7 @@ function ShapePanel({ overlay: o }: { overlay: ShapeOverlay }) {
   const fillCk = useSliderCheckpoint();
   const radiusCk = useSliderCheckpoint();
   const strokeCk = useSliderCheckpoint();
-  const boxShape = o.shape === "rect" || o.shape === "ellipse";
+  const boxShape = !lineLikeShape(o.shape);
   return (
     <>
       <PanelTitle>{SHAPE_LABELS[o.shape]}</PanelTitle>

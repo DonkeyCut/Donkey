@@ -90,7 +90,23 @@ export interface TextOverlay extends OverlayBase {
   highlightText?: string;
 }
 
-export type ShapeKind = "rect" | "ellipse" | "line" | "arrow";
+export type ShapeKind =
+  | "rect"
+  | "ellipse"
+  | "triangle"
+  | "diamond"
+  | "star"
+  | "heart"
+  | "hexagon"
+  | "line"
+  | "arrow";
+
+/** Shapes drawn as a stroke across the element box: `h` is the stroke
+ * thickness and rotation gives them their direction. Every other kind is a
+ * filled outline with the box as its bounds. */
+export function lineLikeShape(k: ShapeKind): boolean {
+  return k === "line" || k === "arrow";
+}
 
 export interface ShapeOverlay extends OverlayBase {
   kind: "shape";

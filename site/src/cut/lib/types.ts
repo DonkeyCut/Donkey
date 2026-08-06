@@ -712,6 +712,11 @@ export const isEffectOverlay = (o: Overlay): o is EffectOverlay => o.kind === "e
 export const SHAPE_LABELS: Record<ShapeKind, string> = {
   rect: "Rectangle",
   ellipse: "Ellipse",
+  triangle: "Triangle",
+  diamond: "Diamond",
+  star: "Star",
+  heart: "Heart",
+  hexagon: "Hexagon",
   line: "Line",
   arrow: "Arrow",
 };
