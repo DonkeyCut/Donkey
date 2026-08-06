@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 
 import {
   ChartContainer,
@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/chart";
 import type { AnalyticsReferrals, AnalyticsRollup } from "@/lib/analytics/schema";
 import { REFERRAL_SOURCES } from "@/lib/onboarding/sequence";
+import { useLocalPref } from "@/cut/lib/uiState";
 import { cn } from "@/lib/utils";
 import { useAnalyticsRollup } from "@/queries/analytics";
 import { ApiError } from "@/queries/apiClient";
@@ -130,38 +131,65 @@ function deriveView(rollup: AnalyticsRollup): RollupView {
   };
 }
 
-// One chart point per day: the per-source answer counts under their source
-// ids, plus the running total of users who answered.
+// One chart point per day, twice over: `series` holds the per-source answer
+// counts of that day (the stacked bars), `cumulative` the running totals per
+// source plus the running total of users who answered (the trend lines).
 type ReferralView = {
   config: ChartConfig;
+  trendConfig: ChartConfig;
   series: Record<string, number | string>[];
+  cumulative: Record<string, number | string>[];
   respondents: number;
 };
 
 function deriveReferrals(referrals: AnalyticsReferrals): ReferralView {
   const labels = new Map<string, string>(REFERRAL_SOURCES.map((s) => [s.id, s.label]));
+  // Sources render in the survey's own order (the rollup stores its own);
+  // anything the survey no longer asks about trails the list.
+  const surveyIds = REFERRAL_SOURCES.map((s) => s.id as string);
+  const ordered = [
+    ...surveyIds.filter((id) => referrals.sources.includes(id)),
+    ...referrals.sources.filter((id) => !surveyIds.includes(id)),
+  ];
   const config: ChartConfig = {};
-  referrals.sources.forEach((id, i) => {
+  ordered.forEach((id, i) => {
     config[id] = {
       color: `var(--chart-${Math.min(i + 1, 8)})`,
       label: labels.get(id) ?? id,
     };
   });
+  // The total rides with the source lines but is an aggregate, so it wears
+  // neutral ink where every source keeps its own hue.
+  const trendConfig: ChartConfig = {
+    totalResponses: { color: "var(--muted-foreground)", label: "Total" },
+    ...config,
+  };
   let respondents = 0;
-  const series = referrals.days.map((entry) => {
+  const running = new Map<string, number>();
+  const series: Record<string, number | string>[] = [];
+  const cumulative: Record<string, number | string>[] = [];
+  for (const entry of referrals.days) {
     respondents += entry.respondents;
-    const point: Record<string, number | string> = { day: entry.day, totalResponses: respondents };
+    const daily: Record<string, number | string> = { day: entry.day };
+    const total: Record<string, number | string> = { day: entry.day, totalResponses: respondents };
     referrals.sources.forEach((id, i) => {
-      point[id] = entry.counts[i] ?? 0;
+      daily[id] = entry.counts[i] ?? 0;
+      running.set(id, (running.get(id) ?? 0) + (entry.counts[i] ?? 0));
+      total[id] = running.get(id) ?? 0;
     });
-    return point;
-  });
-  return { config, respondents, series };
+    series.push(daily);
+    cumulative.push(total);
+  }
+  return { config, cumulative, respondents, series, trendConfig };
 }
 
-const totalResponsesConfig = {
-  totalResponses: { label: "Total responses", color: "var(--chart-1)" },
-} satisfies ChartConfig;
+/** The shared tooltip minus the noise: a day's zero rows say nothing on a
+ * chart whose series are sparse, so only sources with a count show. */
+function NonZeroTooltipContent(props: React.ComponentProps<typeof ChartTooltipContent>) {
+  return (
+    <ChartTooltipContent {...props} payload={props.payload?.filter((item) => item.value !== 0)} />
+  );
+}
 
 const activesConfig = {
   active: { label: "Active", color: "var(--chart-1)" },
@@ -335,6 +363,12 @@ export default function SuAnalyticsPage() {
     () => (rollup.data?.referrals ? deriveReferrals(rollup.data.referrals) : null),
     [rollup.data],
   );
+  // Trend lines toggled off stay off across visits.
+  const [hiddenTrends, setHiddenTrends] = useLocalPref<string[]>(
+    "su-referral-hidden-trends",
+    [],
+    (v) => Array.isArray(v) && v.every((x) => typeof x === "string"),
+  );
 
   if (rollup.isPending) return null;
 
@@ -502,7 +536,7 @@ export default function SuAnalyticsPage() {
                 <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={48} />
                 <ChartTooltip
                   content={
-                    <ChartTooltipContent labelFormatter={(label) => formatDay(String(label))} />
+                    <NonZeroTooltipContent labelFormatter={(label) => formatDay(String(label))} />
                   }
                 />
                 {Object.keys(referrals.config).map((id) => (
@@ -521,10 +555,10 @@ export default function SuAnalyticsPage() {
 
           <ChartCard
             title="Referral responses"
-            subtitle={`Running total of users who answered · ${referrals.respondents.toLocaleString("en-US")} all time`}
+            subtitle={`Running totals by source · ${referrals.respondents.toLocaleString("en-US")} users answered all time`}
           >
-            <ChartContainer className="w-full" config={totalResponsesConfig}>
-              <AreaChart accessibilityLayer data={referrals.series} margin={{ left: -16 }}>
+            <ChartContainer className="w-full" config={referrals.trendConfig}>
+              <LineChart accessibilityLayer data={referrals.cumulative} margin={{ left: -16 }}>
                 <CartesianGrid vertical={false} />
                 <XAxis
                   axisLine={false}
@@ -537,20 +571,55 @@ export default function SuAnalyticsPage() {
                 <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={48} />
                 <ChartTooltip
                   content={
-                    <ChartTooltipContent labelFormatter={(label) => formatDay(String(label))} />
+                    <NonZeroTooltipContent labelFormatter={(label) => formatDay(String(label))} />
                   }
                 />
-                <Area
-                  dataKey="totalResponses"
-                  dot={false}
-                  fill="var(--color-totalResponses)"
-                  fillOpacity={0.1}
-                  stroke="var(--color-totalResponses)"
-                  strokeWidth={2}
-                  type="monotone"
-                />
-              </AreaChart>
+                {Object.keys(referrals.trendConfig)
+                  .filter((id) => !hiddenTrends.includes(id))
+                  .map((id) => (
+                    <Line
+                      key={id}
+                      dataKey={id}
+                      dot={false}
+                      stroke={`var(--color-${id})`}
+                      strokeWidth={2}
+                      type="monotone"
+                    />
+                  ))}
+              </LineChart>
             </ChartContainer>
+            {/* The legend doubles as the filter: a chip toggles its line, and
+                the choice sticks (localStorage). */}
+            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+              {Object.entries(referrals.trendConfig).map(([id, entry]) => {
+                const off = hiddenTrends.includes(id);
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    aria-pressed={!off}
+                    title={off ? "Show" : "Hide"}
+                    onClick={() =>
+                      setHiddenTrends(
+                        off ? hiddenTrends.filter((h) => h !== id) : [...hiddenTrends, id],
+                      )
+                    }
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors",
+                      off
+                        ? "border-transparent bg-muted text-muted-foreground"
+                        : "border-border hover:bg-muted/60",
+                    )}
+                  >
+                    <span
+                      className={cn("size-2 rounded-full", off && "opacity-30")}
+                      style={{ background: "color" in entry ? entry.color : undefined }}
+                    />
+                    {entry.label}
+                  </button>
+                );
+              })}
+            </div>
           </ChartCard>
         </div>
       )}
