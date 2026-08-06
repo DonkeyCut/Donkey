@@ -755,9 +755,11 @@ export async function runExport(
         );
       }
     } else {
-      // No video stream, or a hidden clip: the slot plays black.
+      // No video stream, or a hidden clip: the slot plays black. trim+setpts
+      // clear the frame-rate stamp a transitioned join's xfade demands —
+      // re-stamp it.
       filters.push(
-        `color=c=black:s=${W}x${H}:r=${fps},trim=0:${num(dur)},setpts=PTS-STARTPTS,format=${clipFmt}[v${j}]`
+        `color=c=black:s=${W}x${H}:r=${fps},trim=0:${num(dur)},setpts=PTS-STARTPTS,fps=${fps},format=${clipFmt}[v${j}]`
       );
     }
     if (!c.muted && !c.hidden && audioPresence.get(c.file)) {
@@ -878,7 +880,10 @@ export async function runExport(
       filters.push(`[${aAcc}]afade=t=out:st=${num(offset)}:d=${num(d)}[ah${j}]`);
       filters.push(`[ah${j}][a${j}]concat=n=2:v=0:a=1[${aOut}]`);
     } else {
-      filters.push(`[${vAcc}][${segLabel[j]}]concat=n=2:v=1:a=0[${vOut}]`);
+      // concat emits a microsecond timebase with no frame-rate stamp, and a
+      // later transitioned join hands this accumulator to xfade, which
+      // demands both of its inputs carry the same 1/fps stamp — re-stamp it.
+      filters.push(`[${vAcc}][${segLabel[j]}]concat=n=2:v=1:a=0,fps=${fps}[${vOut}]`);
       filters.push(`[${aAcc}][a${j}]concat=n=2:v=0:a=1[${aOut}]`);
     }
     acc = acc + durJ;
