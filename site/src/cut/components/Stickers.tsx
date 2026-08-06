@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import { Copy, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { clearAssetDrag, setAssetDragData } from "@/cut/lib/assetDrag";
+import { clearAssetDrag, setAssetDragData, setObjectDragImage } from "@/cut/lib/assetDrag";
 import { PICKED_RING, useAssetPick } from "@/cut/lib/assetPick";
 import {
   addRefOnce,
@@ -81,10 +81,9 @@ export function StickerTile({
         draggable
         onDragStart={(e) => {
           setAssetDragData(e, a.id);
-          // The tile is the ghost, so it keeps its corner radius instead of
-          // the browser's square white frame.
-          const r = e.currentTarget.getBoundingClientRect();
-          e.dataTransfer.setDragImage(e.currentTarget, e.clientX - r.left, e.clientY - r.top);
+          // The sticker picture alone is the ghost — its cut-out shape on a
+          // transparent backdrop, no tile behind it.
+          setObjectDragImage(e);
         }}
         onDragEnd={clearAssetDrag}
         onClick={pick}
@@ -104,6 +103,7 @@ export function StickerTile({
             src={a.url}
             alt={a.name}
             loading="lazy"
+            data-drag-object
             className="aspect-square w-full object-contain p-1 transition-transform group-hover:scale-[1.06]"
           />
         )}

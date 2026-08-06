@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { ArrowDown, ArrowDownToLine, ArrowLeft, ArrowLeftToLine, ArrowRight, ArrowRightToLine, ArrowUp, ArrowUpToLine, AudioLines, Blend, Check, Circle, Clapperboard, Copy, Diamond, Droplets, EllipsisVertical, Expand, Eye, EyeOff, FolderOpen, FolderPlus, FoldHorizontal, Fullscreen, Loader2, Minus, Moon, MoreHorizontal, MoveRight, Pause, Play, Scissors, SkipBack, Sparkles, Square, Sticker, Sun, Target, Trash2, Type, UnfoldHorizontal, Volume2, VolumeX, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowDownToLine, ArrowLeft, ArrowLeftToLine, ArrowRight, ArrowRightToLine, ArrowUp, ArrowUpToLine, AudioLines, Blend, Check, Circle, Clapperboard, Copy, Diamond, Droplets, EllipsisVertical, Expand, Eye, EyeOff, FolderOpen, FolderPlus, FoldHorizontal, Fullscreen, Heart, Hexagon, Loader2, Minus, Moon, MoreHorizontal, MoveRight, Pause, Play, Scissors, SkipBack, Sparkles, Square, Star, Sticker, Sun, Target, Trash2, Triangle, Type, UnfoldHorizontal, Volume2, VolumeX, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -46,7 +46,7 @@ import type { VideoTrackPlacement } from "@/cut/lib/store";
 import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
 import { EFFECT_LABELS } from "@donkeycut/effects-kit";
-import { emptySubtitles, IMAGE_CLIP_SECONDS, SHAPE_LABELS, TRANSITION_DEFAULT_SECONDS, TRANSITION_MAX, TRANSITION_STYLE_LABELS } from "@/cut/lib/types";
+import { emptySubtitles, IMAGE_CLIP_SECONDS, SHAPE_LABELS, TRANSITION_DEFAULT_SECONDS, TRANSITION_MAX, TRANSITION_STYLE_LABELS, type ShapeKind } from "@/cut/lib/types";
 import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, StickerOverlay, SubtitleCue, TimelineTransition, TransitionStyle, VideoClip } from "@/cut/lib/types";
 import { isLottieAsset } from "@/cut/lib/lottieAssets";
 import { gradeTint, gradeToCssFilter } from "@donkeycut/effects-kit";
@@ -175,6 +175,10 @@ const XBAR_MAGNET_PX = 16;
 
 const overlayFamily = (o: Overlay): OverlayFamily =>
   o.kind === "effect" ? "effect" : o.kind === "shape" || o.kind === "sticker" ? "element" : "text";
+
+/** The stretch a panel element takes when dropped — `addElement`'s default
+ * length — so the landing ghost matches what the drop makes. */
+const ELEMENT_DROP_SECONDS = 3;
 
 const FAMILY_STYLE: Record<
   OverlayFamily,
@@ -958,9 +962,10 @@ export function Timeline() {
     });
   };
 
-  // The row a shape or effect dragged out of a panel would land on, so the
-  // band shows where it is going.
-  const [elementDropRow, setElementDropRow] = useState<number | null>(null);
+  // The landing preview for a shape, sticker or effect dragged out of a
+  // panel: the row it would land on and the segment it would take there, so
+  // the drag reads on the band the way a bar drag does.
+  const [elementDrop, setElementDrop] = useState<{ row: number; t: number } | null>(null);
   // The place a dragged transition would land on, marked with the footprint it
   // would take while it is in flight.
   const [jointDrop, setJointDrop] = useState<Anchor | null>(null);
@@ -1315,6 +1320,9 @@ export function Timeline() {
     <footer
       className="relative flex min-w-0 shrink-0 flex-col overflow-hidden border-t border-border bg-card select-none"
       style={{ height: timelineH }}
+      // The floating object ghost (`setObjectDragImage`) hands over to this
+      // surface's own landing previews while a drag is over it.
+      data-segment-drop
       onDragOver={(e) => {
         // A template materializes as a whole arrangement, so it accepts the
         // drop without a single-clip landing preview.
@@ -1339,13 +1347,16 @@ export function Timeline() {
         // An element — a sticker, or a shape or effect from a panel — lands on
         // the element rows, so none of the clip previews apply to it.
         if (element || draggedSticker()) {
+          // The band paints the bar being carried; a "move" cursor keeps the
+          // copy badge off it.
+          e.dataTransfer.dropEffect = "move";
           setAssetDrop(null);
           setOverlayDrop(null);
           setAudioDrop(null);
           setDropType(null);
-          setElementDropRow(
-            element && element.kind !== "transition" ? overlayRowAt(e.clientY) ?? null : null
-          );
+          const row =
+            !element || element.kind !== "transition" ? overlayRowAt(e.clientY) ?? null : null;
+          setElementDrop(row !== null ? { row, t: dropTimeAt(e.clientX) } : null);
           setXTileDrag(element?.kind === "transition");
           setJointDrop(
             element?.kind === "transition"
@@ -1354,7 +1365,7 @@ export function Timeline() {
           );
           return;
         }
-        setElementDropRow(null);
+        setElementDrop(null);
         setJointDrop(null);
         setXTileDrag(false);
         // Preview where a video would land; audio drops free-form. Library and
@@ -1451,7 +1462,7 @@ export function Timeline() {
           setOverlayDrop(null);
           setAudioDrop(null);
           setDropType(null);
-          setElementDropRow(null);
+          setElementDrop(null);
           setJointDrop(null);
           setXTileDrag(false);
         }
@@ -1460,7 +1471,7 @@ export function Timeline() {
         // Resolve the hovered rows before the previews (and their rows) clear.
         const audioRow = audioRowAt(e.clientY);
         const elementLane = overlayLaneAt(e.clientY);
-        setElementDropRow(null);
+        setElementDrop(null);
         setJointDrop(null);
         setXTileDrag(false);
         const videoPlace = resolveDropTrack(e.clientX, e.clientY);
@@ -1740,17 +1751,71 @@ export function Timeline() {
                   )}
                 </Fragment>
               ))}
-              {elementDropRow !== null && (
-                <div
-                  className={cn(
-                    "pointer-events-none absolute inset-x-0 rounded-md border border-dashed",
-                    FAMILY_STYLE[
-                      draggingElement()?.kind === "effect" ? "effect" : "element"
-                    ].row
-                  )}
-                  style={{ top: elementDropRow * TEXT_H + 2, height: TEXT_H - 6 }}
-                />
-              )}
+              {elementDrop !== null &&
+                (() => {
+                  const el = draggingElement();
+                  const family = el?.kind === "effect" ? "effect" : "element";
+                  const sticker = el ? null : draggedSticker();
+                  const chip =
+                    el?.kind === "shape" ? (
+                      <>
+                        {(() => {
+                          const Icon = SHAPE_CHIP_ICONS[el.shape];
+                          return <Icon className="mr-1 size-2.5 shrink-0" />;
+                        })()}
+                        {SHAPE_LABELS[el.shape]}
+                      </>
+                    ) : el?.kind === "effect" ? (
+                      <>
+                        <Sparkles className="mr-1 size-2.5 shrink-0" />
+                        {EFFECT_LABELS[el.effect]}
+                      </>
+                    ) : (
+                      <>
+                        {sticker && !isLottieAsset(sticker) ? (
+                          // eslint-disable-next-line @next/next/no-img-element -- project media URL
+                          <img
+                            src={sticker.url}
+                            alt=""
+                            className="mr-1 size-4 shrink-0 object-contain"
+                          />
+                        ) : (
+                          <Sticker className="mr-1 size-2.5 shrink-0" />
+                        )}
+                        Sticker
+                      </>
+                    );
+                  return (
+                    <>
+                      <div
+                        className={cn(
+                          "pointer-events-none absolute inset-x-0 rounded-md border border-dashed",
+                          FAMILY_STYLE[family].row
+                        )}
+                        style={{ top: elementDrop.row * TEXT_H + 2, height: TEXT_H - 6 }}
+                      />
+                      {/* The bar the drop would make, carried under the
+                          pointer the way a bar drag's ghost is, so the panel
+                          drag reads as holding a track segment. */}
+                      <div
+                        className={cn(
+                          "pointer-events-none absolute z-20 flex items-center overflow-hidden rounded-md opacity-80 shadow-2xl",
+                          FAMILY_STYLE[family].bar
+                        )}
+                        style={{
+                          top: elementDrop.row * TEXT_H + 2,
+                          height: TEXT_H - 6,
+                          left: elementDrop.t * pps,
+                          width: Math.max(14, ELEMENT_DROP_SECONDS * pps - CLIP_GAP),
+                        }}
+                      >
+                        <span className="pointer-events-none flex min-w-0 items-center truncate px-2 text-[10.5px] font-medium text-white">
+                          {chip}
+                        </span>
+                      </div>
+                    </>
+                  );
+                })()}
               {/* The new row above, revealed once the drag heads past the top
                   edge — showing it any earlier would push every row down
                   under a freshly grabbed bar. */}
@@ -3831,6 +3896,19 @@ function StickerThumb({ overlay: o }: { overlay: StickerOverlay }) {
   );
 }
 
+/** The glyph a shape's timeline chip wears. */
+const SHAPE_CHIP_ICONS: Record<ShapeKind, LucideIcon> = {
+  rect: Square,
+  ellipse: Circle,
+  triangle: Triangle,
+  diamond: Diamond,
+  star: Star,
+  heart: Heart,
+  hexagon: Hexagon,
+  line: Minus,
+  arrow: MoveRight,
+};
+
 function TextBar({
   overlay: o,
   pps,
@@ -3867,18 +3945,11 @@ function TextBar({
   const ui = { pps, rowH: TEXT_H, laneCount, homeRow, topInsert: true, onDrag, onSnap };
   // Per-kind chip content: a title shows its text, a shape its name behind a
   // shape glyph, a sticker its glyph and name.
+  const ShapeIcon = SHAPE_CHIP_ICONS[o.kind === "shape" ? o.shape : "rect"];
   const chip =
     o.kind === "shape" ? (
       <>
-        {o.shape === "ellipse" ? (
-          <Circle className="mr-1 size-2.5 shrink-0" />
-        ) : o.shape === "line" ? (
-          <Minus className="mr-1 size-2.5 shrink-0" />
-        ) : o.shape === "arrow" ? (
-          <MoveRight className="mr-1 size-2.5 shrink-0" />
-        ) : (
-          <Square className="mr-1 size-2.5 shrink-0" />
-        )}
+        <ShapeIcon className="mr-1 size-2.5 shrink-0" />
         {SHAPE_LABELS[o.shape]}
       </>
     ) : o.kind === "sticker" ? (

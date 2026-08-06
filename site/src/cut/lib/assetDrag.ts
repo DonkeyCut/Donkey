@@ -19,7 +19,7 @@ let inFlightAssetId: string | null = null;
 
 export function setAssetDragData(e: React.DragEvent, assetId: string) {
   e.dataTransfer.setData(ASSET_MIME, assetId);
-  e.dataTransfer.effectAllowed = "copy";
+  e.dataTransfer.effectAllowed = "copyMove";
   inFlightAssetId = assetId;
   // Every media drag also carries the unified asset ref, so reference drop
   // zones (AI chat, the image/video creators) accept it without knowing the
@@ -111,7 +111,10 @@ export function setElementDragData(e: React.DragEvent, spec: ElementDrag) {
     ELEMENT_MIME,
     spec.kind === "shape" ? spec.shape : spec.kind === "effect" ? spec.effect : spec.style
   );
-  e.dataTransfer.effectAllowed = "copy";
+  // Drop surfaces pick the cursor: the timeline shows the drag as a bar in
+  // hand and asks for "move" so no copy badge rides it; other zones keep
+  // "copy".
+  e.dataTransfer.effectAllowed = "copyMove";
   inFlightElement = spec;
 }
 
@@ -183,6 +186,70 @@ export function setCardDragImage(e: React.DragEvent, el: HTMLElement) {
   document.body.appendChild(clone);
   e.dataTransfer.setDragImage(clone, e.clientX - rect.left, e.clientY - rect.top);
   setTimeout(() => clone.remove(), 0);
+}
+
+/** The dragged thing itself as the ghost: the tile's `data-drag-object` node —
+ * the shape silhouette, the sticker picture, the effect or transition swatch —
+ * cloned alone on a transparent backdrop, so the drag reads as carrying the
+ * object rather than a snapshot of the whole card with its border and label.
+ * Falls back to the drag source when no node is marked.
+ *
+ * The visible ghost is our own fixed-position layer under a blank native drag
+ * image. A native ghost is frozen at dragstart; the layer can keep reacting,
+ * so when the drag crosses a surface that paints its own landing preview
+ * (marked `data-segment-drop`, e.g. the timeline with its track-segment
+ * ghost) the object shrinks away and hands over, then returns if the drag
+ * leaves again. */
+export function setObjectDragImage(e: React.DragEvent) {
+  const host = e.currentTarget as HTMLElement;
+  const el = host.querySelector<HTMLElement>("[data-drag-object]") ?? host;
+  const rect = el.getBoundingClientRect();
+
+  const blank = document.createElement("canvas");
+  blank.width = blank.height = 1;
+  blank.style.cssText = "position:absolute;top:-1000px;left:-1000px;";
+  document.body.appendChild(blank);
+  e.dataTransfer.setDragImage(blank, 0, 0);
+  setTimeout(() => blank.remove(), 0);
+
+  // Hold the object where the pointer grabbed it; a grab outside the object
+  // (on the card around it) holds the nearest edge.
+  const ox = Math.min(Math.max(e.clientX - rect.left, 0), rect.width);
+  const oy = Math.min(Math.max(e.clientY - rect.top, 0), rect.height);
+
+  const root = document.createElement("div");
+  root.style.cssText =
+    "position:fixed;left:0;top:0;z-index:1000;pointer-events:none;will-change:transform;";
+  const object = el.cloneNode(true) as HTMLElement;
+  object.style.width = `${rect.width}px`;
+  object.style.height = `${rect.height}px`;
+  object.style.margin = "0";
+  object.style.opacity = "0.85";
+  object.style.transition = "opacity 150ms ease, transform 150ms ease";
+  object.style.transformOrigin = `${ox}px ${oy}px`;
+  root.appendChild(object);
+  document.body.appendChild(root);
+
+  const position = (x: number, y: number) => {
+    root.style.transform = `translate(${x - ox}px, ${y - oy}px)`;
+  };
+  position(e.clientX, e.clientY);
+
+  const onOver = (ev: DragEvent) => {
+    position(ev.clientX, ev.clientY);
+    const handedOver = !!(ev.target as Element | null)?.closest?.("[data-segment-drop]");
+    object.style.opacity = handedOver ? "0" : "0.85";
+    object.style.transform = handedOver ? "scale(0.3)" : "scale(1)";
+  };
+  const end = () => {
+    root.remove();
+    document.removeEventListener("dragover", onOver);
+    window.removeEventListener("dragend", end, true);
+    window.removeEventListener("drop", end, true);
+  };
+  document.addEventListener("dragover", onOver);
+  window.addEventListener("dragend", end, true);
+  window.addEventListener("drop", end, true);
 }
 
 /** A small chip as the drag image, so the cursor carries a compact marker
