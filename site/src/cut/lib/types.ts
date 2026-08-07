@@ -884,6 +884,10 @@ export const SIDE_PANEL_TABS: SidePanelTab[] = [
 
 export interface ProjectDoc {
   version: 1;
+  /** The project's stable API id. On the local engine the folder is named
+   * after the project and follows renames, so the id lives in the doc; the
+   * server stamps it on every write. */
+  id?: string;
   name: string;
   createdAt: number;
   updatedAt: number;

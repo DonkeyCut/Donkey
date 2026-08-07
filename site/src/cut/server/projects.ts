@@ -1,3 +1,4 @@
+import fsSync from "node:fs";
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ProjectDoc, ProjectFolder, ProjectSummary } from "@/cut/lib/types";
@@ -7,18 +8,239 @@ import { exists, uniqueName, writeJsonAtomic } from "./util";
 
 /** Projects live directly under the data root, shared by every account that
  * signs in on this Mac; each project is one folder holding project.json, its
- * raw media files, and its exports. */
+ * raw media files, and its exports. The folder is named after the project —
+ * that's what the user sees in Finder — and follows renames; the stable API
+ * id lives in project.json, and resolveDirName maps id to folder. */
 const projectsRoot = () => path.join(cutDataRoot(), "projects");
 // Project folders are grouping metadata only; it lives beside the project dirs
-// as a plain file, so the project-dir scan (which requires ID_RE) skips it.
+// as a plain file, and the project scans skip non-directories.
 const foldersIndex = () => path.join(projectsRoot(), "folders.json");
 
 const ID_RE = /^[a-z0-9][a-z0-9-]{2,40}$/;
 
+/** The Finder-safe folder name for a display name: path-hostile characters
+ * become spaces, leading dots go (a hidden project folder helps nobody), and
+ * an empty result falls back to Untitled. */
+function dirNameFrom(name: string): string {
+  const cleaned = name
+    .replace(/[/\\:*?"<>|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^\.+/, "")
+    .slice(0, 60)
+    .trim();
+  return cleaned || "Untitled";
+}
+
+// Names inside projects/ that belong to the app itself, never to a project
+// folder — a project literally named "folders.json" takes a suffix instead of
+// sitting where writeFolders renames its index in.
+const RESERVED_DIR_NAMES = new Set(["folders.json", "folders.json.bak"]);
+const isReservedDirName = (name: string) => RESERVED_DIR_NAMES.has(name.toLowerCase());
+
+/** Claim a free folder name by creating it — mkdir is the atomic check, so two
+ * concurrent creates with the same name can't share a folder. */
+async function claimDir(want: string): Promise<string> {
+  await mkdir(projectsRoot(), { recursive: true });
+  for (let n = 1; ; n++) {
+    const candidate = n === 1 ? want : `${want} ${n}`;
+    if (isReservedDirName(candidate)) continue;
+    try {
+      fsSync.mkdirSync(path.join(projectsRoot(), candidate));
+      return candidate;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    }
+  }
+}
+
+/** A folder's project doc, read for identity: project.json first, then the
+ * .bak mirror, so one truncated save never makes the project unresolvable
+ * while a good backup sits beside it. (readProject does the actual restore on
+ * open; this only has to see the doc.) */
+function readDocSyncAt(dir: string): { id?: string; name?: string } | null {
+  for (const file of ["project.json", "project.json.bak"]) {
+    try {
+      return JSON.parse(fsSync.readFileSync(path.join(dir, file), "utf8")) as {
+        id?: string;
+        name?: string;
+      };
+    } catch {
+      // Missing or unreadable; try the mirror.
+    }
+  }
+  return null;
+}
+
+/** Sync twin of util.writeJsonAtomic for the startup reconcile: unique temp,
+ * .bak written from the committed bytes, then renamed in. */
+function writeDocSync(docFile: string, doc: unknown) {
+  const json = JSON.stringify(doc, null, 2);
+  const tmp = `${docFile}.${crypto.randomUUID().slice(0, 8)}.tmp`;
+  fsSync.writeFileSync(tmp, json);
+  try {
+    fsSync.writeFileSync(`${docFile}.bak`, json);
+  } catch {
+    // Best-effort mirror, like writeJsonAtomic.
+  }
+  fsSync.renameSync(tmp, docFile);
+}
+
+// id -> folder, maintained by every create/rename/delete in this process (the
+// engine is the only writer). An entry remembers the folder's inode and is
+// trusted only while the folder at that name still has it, so a folder
+// swapped, replaced, or trashed in Finder can't satisfy a stale entry — the
+// lookup falls through to a rescan instead of touching another project's
+// folder. Unresolvable ids are remembered briefly (missCache) so a dead tab
+// autosaving to a deleted project can't hammer the full scan on every request.
+const dirIndex = new Map<string, { name: string; ino: number }>();
+const missCache = new Map<string, number>();
+const MISS_TTL_MS = 2000;
+
+function setDirIndex(id: string, name: string) {
+  try {
+    dirIndex.set(id, { name, ino: fsSync.statSync(path.join(projectsRoot(), name)).ino });
+    missCache.delete(id);
+  } catch {
+    dirIndex.delete(id);
+  }
+}
+
+function resolveDirName(id: string): string | null {
+  const root = projectsRoot();
+  const cached = dirIndex.get(id);
+  if (cached) {
+    try {
+      if (fsSync.statSync(path.join(root, cached.name)).ino === cached.ino) return cached.name;
+    } catch {
+      // Folder gone; rescan below.
+    }
+    dirIndex.delete(id);
+  }
+  const missedAt = missCache.get(id);
+  if (missedAt !== undefined && Date.now() - missedAt < MISS_TTL_MS) return null;
+  let entries: fsSync.Dirent[];
+  try {
+    entries = fsSync.readdirSync(root, { withFileTypes: true });
+  } catch {
+    missCache.set(id, Date.now());
+    return null;
+  }
+  // Sorted, first claim of an id wins, so two folders carrying the same doc id
+  // (a Finder duplicate) resolve deterministically; readProjectEntries gives
+  // the twin its own id on the next listing.
+  const seen = new Set<string>();
+  for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    if (!e.isDirectory()) continue;
+    const doc = readDocSyncAt(path.join(root, e.name));
+    if (!doc || typeof doc.id !== "string" || seen.has(doc.id)) continue;
+    seen.add(doc.id);
+    setDirIndex(doc.id, e.name);
+  }
+  const found = dirIndex.get(id)?.name ?? null;
+  if (!found) missCache.set(id, Date.now());
+  return found;
+}
+
+// jobs.ts registers the exports in flight; a folder never moves out from under
+// a running ffmpeg render (the job's recorded output path must stay live).
+// Registered by the jobs module at load; until then nothing renders, so
+// nothing blocks.
+let hasActiveJobs: (projectId: string) => boolean = () => false;
+export function setActiveJobGuard(fn: (projectId: string) => boolean) {
+  hasActiveJobs = fn;
+}
+
+/** Move the project's folder to match its display name. A conflict takes a
+ * numeric suffix; an active render defers the move to the next save. The
+ * target is claimed with mkdir first — POSIX rename replaces an empty
+ * destination directory, so moving onto a placeholder we own is atomic, and a
+ * concurrent create can never have its just-claimed folder replaced. */
+function followName(id: string, name: string) {
+  const current = resolveDirName(id);
+  if (!current || hasActiveJobs(id)) return;
+  const root = projectsRoot();
+  const want = dirNameFrom(name);
+  if (want.toLowerCase() === current.toLowerCase()) {
+    if (want === current) return;
+    // Case-only rename: same folder on a case-insensitive disk, so there is
+    // nothing to claim — rename it in place.
+    try {
+      fsSync.renameSync(path.join(root, current), path.join(root, want));
+      setDirIndex(id, want);
+    } catch {
+      dirIndex.delete(id);
+    }
+    return;
+  }
+  for (let n = 1; ; n++) {
+    const candidate = n === 1 ? want : `${want} ${n}`;
+    if (isReservedDirName(candidate)) continue;
+    // Already parked at this suffix (e.g. "Untitled 2" while "Untitled" is
+    // taken): nothing to do.
+    if (candidate.toLowerCase() === current.toLowerCase()) return;
+    try {
+      fsSync.mkdirSync(path.join(root, candidate));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") continue;
+      return;
+    }
+    try {
+      fsSync.renameSync(path.join(root, current), path.join(root, candidate));
+      setDirIndex(id, candidate);
+    } catch {
+      // The move failed; give the placeholder back and retry on a later save.
+      try {
+        fsSync.rmdirSync(path.join(root, candidate));
+      } catch {
+        // Leave it; a later claim will suffix past it.
+      }
+      dirIndex.delete(id);
+    }
+    return;
+  }
+}
+
 export function projectDir(id: string) {
   assertLocalRuntime();
   if (!ID_RE.test(id)) throw new Error("Invalid project id.");
-  return path.join(projectsRoot(), id);
+  // An unknown id falls back to a folder named by the id: a path that does not
+  // exist, so reads fail exactly like a deleted project always has.
+  return path.join(projectsRoot(), resolveDirName(id) ?? id);
+}
+
+/** Startup alignment, run by both mounts before data routes: stamp docs from
+ * before stored ids (their folder name was the id) and move every folder to
+ * match its display name. Running at every launch makes it one mechanism for
+ * the one-time move off id-named folders, for suffixed folders reclaiming a
+ * freed name, and for folders renamed in Finder while the engine was away. */
+export function reconcileProjectDirs(): void {
+  const root = projectsRoot();
+  let entries: fsSync.Dirent[];
+  try {
+    entries = fsSync.readdirSync(root, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    const doc = readDocSyncAt(path.join(root, e.name));
+    if (!doc) continue;
+    if (typeof doc.id !== "string" || !ID_RE.test(doc.id)) {
+      if (!ID_RE.test(e.name)) continue;
+      doc.id = e.name;
+      try {
+        // Atomic with a .bak mirror, like every other doc write — a plain
+        // overwrite would leave the .bak holding an id-less doc that a later
+        // corruption recovery restores.
+        writeDocSync(path.join(root, e.name, "project.json"), doc);
+      } catch {
+        continue;
+      }
+    }
+    setDirIndex(doc.id, e.name);
+    followName(doc.id, typeof doc.name === "string" ? doc.name : "");
+  }
 }
 
 export const mediaDir = (id: string) => path.join(projectDir(id), "media");
@@ -104,6 +326,10 @@ export async function readProject(id: string): Promise<ProjectDoc | null> {
   }
   try {
     const doc = JSON.parse(await readFile(`${file}.bak`, "utf8")) as ProjectDoc;
+    // The id resolved this folder, so it belongs on the restored doc — a .bak
+    // from before ids were stored must not resurrect an id-less doc that the
+    // project listing would drop.
+    doc.id = id;
     await writeJsonAtomic(file, doc);
     return doc;
   } catch (err) {
@@ -113,8 +339,10 @@ export async function readProject(id: string): Promise<ProjectDoc | null> {
 }
 
 export async function writeProject(id: string, doc: ProjectDoc) {
+  doc.id = id;
   doc.updatedAt = Date.now();
   await writeJsonAtomic(docPath(id), doc);
+  followName(id, doc.name);
 }
 
 export async function createProject(
@@ -122,15 +350,20 @@ export async function createProject(
   folderId: string | null = null
 ): Promise<ProjectSummary> {
   const id = crypto.randomUUID().slice(0, 10);
-  await mkdir(mediaDir(id), { recursive: true });
-  await mkdir(exportsDir(id), { recursive: true });
+  const displayName = name.trim() || "Untitled";
+  const dirName = await claimDir(dirNameFrom(displayName));
+  const dir = path.join(projectsRoot(), dirName);
+  await mkdir(path.join(dir, "media"), { recursive: true });
+  await mkdir(path.join(dir, "exports"), { recursive: true });
+  setDirIndex(id, dirName);
   const now = Date.now();
   // A folder that no longer exists just falls back to the root.
   const folder =
     folderId && (await readFolders()).some((f) => f.id === folderId) ? folderId : null;
   const doc: ProjectDoc = {
     version: 1,
-    name: name.trim() || "Untitled",
+    id,
+    name: displayName,
     createdAt: now,
     updatedAt: now,
     assets: [],
@@ -139,14 +372,22 @@ export async function createProject(
     overlays: [],
     ...(folder ? { folderId: folder } : {}),
   };
-  await writeJsonAtomic(docPath(id), doc);
+  await writeJsonAtomic(path.join(dir, "project.json"), doc);
   return summarize(id, doc);
 }
 
 export async function deleteProject(id: string) {
   const dir = projectDir(id);
-  if (!(await exists(docPath(id)))) throw new Error("Project not found.");
+  const doc = await readProject(id);
+  if (!doc) throw new Error("Project not found.");
+  // Final backstop before an rm -rf: the folder's own doc must carry the id
+  // being deleted, so a mis-resolved folder can never be the one removed.
+  if (doc.id !== undefined && doc.id !== id) {
+    dirIndex.delete(id);
+    throw new Error("Project not found.");
+  }
   await rm(dir, { recursive: true, force: true });
+  dirIndex.delete(id);
 }
 
 /** Total bytes under a directory (media, exports, proxy, doc). */
@@ -247,17 +488,13 @@ export async function renameProjectFolder(id: string, name: string): Promise<Pro
 export async function deleteProjectFolder(id: string) {
   await writeFolders((await readFolders()).filter((f) => f.id !== id));
   // Projects in the folder fall back to ungrouped rather than disappearing.
-  const entries = await readdir(projectsRoot(), { withFileTypes: true }).catch(() => []);
   await Promise.all(
-    entries
-      .filter((e) => e.isDirectory() && ID_RE.test(e.name))
-      .map(async (e) => {
-        const doc = await readProject(e.name);
-        if (doc && doc.folderId === id) {
-          doc.folderId = null;
-          await writeProject(e.name, doc);
-        }
-      })
+    (await readProjectEntries()).map(async ({ id: projectId, doc }) => {
+      if (doc.folderId === id) {
+        doc.folderId = null;
+        await writeProject(projectId, doc);
+      }
+    })
   );
 }
 
@@ -277,31 +514,94 @@ export async function duplicateProject(id: string): Promise<ProjectSummary> {
   const doc = await readProject(id);
   if (!doc) throw new Error("Project not found.");
   const newId = crypto.randomUUID().slice(0, 10);
-  await mkdir(mediaDir(newId), { recursive: true });
-  await mkdir(exportsDir(newId), { recursive: true });
-  await cp(mediaDir(id), mediaDir(newId), { recursive: true }).catch(() => {});
+  const name = `${doc.name} copy`;
+  const dirName = await claimDir(dirNameFrom(name));
+  const dir = path.join(projectsRoot(), dirName);
+  await mkdir(path.join(dir, "media"), { recursive: true });
+  await mkdir(path.join(dir, "exports"), { recursive: true });
+  setDirIndex(newId, dirName);
+  await cp(mediaDir(id), path.join(dir, "media"), { recursive: true }).catch(() => {});
   const now = Date.now();
-  const copy: ProjectDoc = { ...doc, name: `${doc.name} copy`, createdAt: now, updatedAt: now };
-  await writeJsonAtomic(docPath(newId), copy);
+  const copy: ProjectDoc = { ...doc, id: newId, name, createdAt: now, updatedAt: now };
+  await writeJsonAtomic(path.join(dir, "project.json"), copy);
   return summarize(newId, copy);
 }
 
-export async function listProjects(): Promise<ProjectSummary[]> {
+/** A folder's doc for listing: project.json, then the .bak mirror (the
+ * restore itself happens when readProject opens it). */
+async function readDocAt(dirName: string): Promise<ProjectDoc | null> {
+  const base = path.join(projectsRoot(), dirName);
+  for (const file of ["project.json", "project.json.bak"]) {
+    try {
+      return JSON.parse(await readFile(path.join(base, file), "utf8")) as ProjectDoc;
+    } catch {
+      // Missing or unreadable; try the mirror.
+    }
+  }
+  return null;
+}
+
+/** Every project on disk: read each folder's doc concurrently — listing
+ * latency shouldn't grow linearly with the number of projects. The scan
+ * refreshes the id index, and it repairs duplicate ids: when two folders
+ * carry the same doc id (a project duplicated in Finder), the one the index
+ * already points at keeps the id — else the most recently edited — and each
+ * twin is stamped with a fresh id of its own, making it the independent copy
+ * the duplication was after. */
+async function readProjectEntries(): Promise<{ id: string; doc: ProjectDoc }[]> {
   assertLocalRuntime();
   await mkdir(projectsRoot(), { recursive: true });
   const entries = await readdir(projectsRoot(), { withFileTypes: true });
-  const names = entries
-    .filter((e) => e.isDirectory() && ID_RE.test(e.name))
-    .map((e) => e.name);
-  // Read every project.json concurrently — listing latency shouldn't grow
-  // linearly with the number of projects.
-  const docs = await Promise.all(names.map((n) => readProject(n)));
-  const summaries = await Promise.all(
-    names.map((n, i) => (docs[i] ? summarize(n, docs[i]!) : Promise.resolve(null)))
-  );
-  return summaries
-    .filter((x): x is ProjectSummary => x !== null)
-    .sort((a, b) => b.updatedAt - a.updatedAt);
+  const dirs = entries
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort((a, b) => a.localeCompare(b));
+  const found = (
+    await Promise.all(
+      dirs.map(async (dirName) => {
+        const doc = await readDocAt(dirName);
+        if (!doc || typeof doc.id !== "string" || !ID_RE.test(doc.id)) return null;
+        return { dirName, doc };
+      })
+    )
+  ).filter((x): x is { dirName: string; doc: ProjectDoc } => x !== null);
+
+  const byId = new Map<string, { dirName: string; doc: ProjectDoc }[]>();
+  for (const entry of found) {
+    const group = byId.get(entry.doc.id!) ?? [];
+    group.push(entry);
+    byId.set(entry.doc.id!, group);
+  }
+
+  const result: { id: string; doc: ProjectDoc }[] = [];
+  for (const [id, group] of byId) {
+    const indexed = dirIndex.get(id)?.name;
+    const keeper =
+      group.find((g) => g.dirName === indexed) ??
+      group.reduce((a, b) => (b.doc.updatedAt > a.doc.updatedAt ? b : a));
+    setDirIndex(id, keeper.dirName);
+    result.push({ id, doc: keeper.doc });
+    for (const twin of group) {
+      if (twin === keeper) continue;
+      const freshId = crypto.randomUUID().slice(0, 10);
+      twin.doc.id = freshId;
+      try {
+        await writeJsonAtomic(path.join(projectsRoot(), twin.dirName, "project.json"), twin.doc);
+        setDirIndex(freshId, twin.dirName);
+        result.push({ id: freshId, doc: twin.doc });
+        console.log(`re-identified duplicate project folder "${twin.dirName}" as ${freshId}`);
+      } catch {
+        // Unwritable twin: leave it off the list; the winner keeps the id.
+      }
+    }
+  }
+  return result;
+}
+
+export async function listProjects(): Promise<ProjectSummary[]> {
+  const found = await readProjectEntries();
+  const summaries = await Promise.all(found.map(({ id, doc }) => summarize(id, doc)));
+  return summaries.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 /** Store an uploaded media file in the project folder, deduping the name. */

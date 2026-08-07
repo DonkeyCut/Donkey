@@ -76,6 +76,8 @@ export async function copyProjectAcross(
     }
     const copied: ProjectDoc = {
       ...doc,
+      // The copy is a new project; the target backend stamps its own id.
+      id: undefined,
       name,
       folderId: null,
       assets: assets.map((a) => ({ ...a, fileName: names.get(a.fileName) ?? a.fileName })),

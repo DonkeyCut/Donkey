@@ -4,6 +4,7 @@ import { Readable } from "node:stream";
 import { allowedOrigin, corsHeaders, preflightHeaders } from "../server/cors";
 import { matchCutRoute, runCutRoute } from "../server/http/routes";
 import { flattenCutUsers, migrateCutDataDir } from "../server/migrateDataDir";
+import { reconcileProjectDirs } from "../server/projects";
 import { ensureToolPath, resolveOnPath } from "../server/tool-path";
 import { enginePort } from "./config";
 
@@ -76,6 +77,7 @@ async function start() {
   exitWithParent();
   migrateCutDataDir();
   flattenCutUsers();
+  reconcileProjectDirs();
   await ensureToolPath();
 
   // The Agent SDK can't resolve its built-in CLI from inside a compiled

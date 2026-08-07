@@ -5,7 +5,7 @@ import path from "node:path";
 import { assertLocalRuntime } from "./local-only";
 import { createJobRegistry } from "./jobRegistry";
 import { runExport, type ExportSpec } from "./exportPipeline";
-import { exportsDir, mediaPath, projectDir, readProject } from "./projects";
+import { exportsDir, mediaPath, projectDir, readProject, setActiveJobGuard } from "./projects";
 
 export type { ExportSpec } from "./exportPipeline";
 
@@ -48,6 +48,14 @@ interface Pending {
 }
 const g = globalThis as unknown as { __veditorPending?: Pending[] };
 const pending: Pending[] = (g.__veditorPending ??= []);
+
+// A project folder never moves while a render holds paths inside it: the
+// rename-follows-name machinery asks here before touching the folder.
+setActiveJobGuard((projectId) =>
+  [...jobs.values()].some(
+    (j) => j.projectId === projectId && (j.status === "queued" || j.status === "running")
+  )
+);
 
 /** Promote queued exports into free running slots, oldest first. Called after
  * every enqueue and every settle, so the queue always drains to capacity. */

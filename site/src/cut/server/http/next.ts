@@ -1,5 +1,6 @@
 import { hostedApiBlock } from "../local-only";
 import { flattenCutUsers } from "../migrateDataDir";
+import { reconcileProjectDirs } from "../projects";
 import { ensureToolPath } from "../tool-path";
 import { matchCutRoute, runCutRoute } from "./routes";
 
@@ -8,6 +9,7 @@ function flattenOnce() {
   if (flattened) return;
   flattened = true;
   flattenCutUsers();
+  reconcileProjectDirs();
 }
 
 /**
