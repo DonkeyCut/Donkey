@@ -548,7 +548,9 @@ export default function SuAnalyticsPage() {
                     stackId="sources"
                   />
                 ))}
-                <ChartLegend content={<ChartLegendContent />} />
+                {/* Recharts 3 sorts legend items by name by default; null keeps
+                    the series order, which is the survey's order. */}
+                <ChartLegend content={<ChartLegendContent />} itemSorter={null} />
               </BarChart>
             </ChartContainer>
           </ChartCard>
