@@ -1,13 +1,14 @@
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ProjectDoc, ProjectFolder, ProjectSummary } from "@/cut/lib/types";
+import { cutDataRoot } from "./dataDir";
 import { assertLocalRuntime } from "./local-only";
-import { cutUserRoot } from "./userScope";
 import { exists, uniqueName, writeJsonAtomic } from "./util";
 
-/** The requesting user's projects live here; each project is one folder
- * holding project.json, its raw media files, and its exports. */
-const projectsRoot = () => path.join(cutUserRoot(), "projects");
+/** Projects live directly under the data root, shared by every account that
+ * signs in on this Mac; each project is one folder holding project.json, its
+ * raw media files, and its exports. */
+const projectsRoot = () => path.join(cutDataRoot(), "projects");
 // Project folders are grouping metadata only; it lives beside the project dirs
 // as a plain file, so the project-dir scan (which requires ID_RE) skips it.
 const foldersIndex = () => path.join(projectsRoot(), "folders.json");

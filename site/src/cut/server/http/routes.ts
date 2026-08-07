@@ -1,4 +1,3 @@
-import { isValidCutUser, runWithCutUser } from "../userScope";
 import { matchRouteTable } from "./match";
 import { aiApi } from "./ai";
 import { engineApi } from "./engine";
@@ -14,9 +13,6 @@ interface CutRoute {
   method: "GET" | "POST" | "PUT" | "DELETE";
   path: string; // ":name" segments bind params
   handler: TableHandler;
-  /** Health is the one route outside a user scope: probes and the app's
-   * supervisor hit it with no session in hand. */
-  scoped?: false;
 }
 
 /**
@@ -25,7 +21,7 @@ interface CutRoute {
  * catch-all route and the packaged engine — so the two surfaces cannot drift.
  */
 export const CUT_ROUTES: CutRoute[] = [
-  { method: "GET", path: "/api/cut/engine/health", handler: () => engineApi.health(), scoped: false },
+  { method: "GET", path: "/api/cut/engine/health", handler: () => engineApi.health() },
 
   { method: "GET", path: "/api/cut/projects", handler: () => projectsApi.list() },
   { method: "POST", path: "/api/cut/projects", handler: (req) => projectsApi.create(req) },
@@ -98,29 +94,18 @@ export const CUT_ROUTES: CutRoute[] = [
 ];
 
 export type RouteMatch =
-  | { handler: TableHandler; params: Record<string, string>; head: boolean; scoped: boolean }
+  | { handler: TableHandler; params: Record<string, string>; head: boolean }
   | { methodNotAllowed: string[] };
 
-/**
- * Run a matched route inside the requesting user's data scope. The page
- * appends the signed-in account id to every engine URL (api.ts); binding it
- * here — the one dispatch both mounts share — means every handler, and every
- * path built during it, is per-user by construction. A request without a
- * valid id never reaches a handler.
- */
+/** Dispatch a matched route. The page still appends the signed-in account id
+ * (`u`) to engine URLs because engines released before 2026-08 refuse requests
+ * without it; this dispatch ignores it — local data belongs to the Mac user,
+ * whichever Donkey account is signed in. */
 export async function runCutRoute(
   req: Request,
-  match: { handler: TableHandler; params: Record<string, string>; scoped: boolean }
+  match: { handler: TableHandler; params: Record<string, string> }
 ): Promise<Response> {
-  if (!match.scoped) return match.handler(req, match.params);
-  const user = new URL(req.url).searchParams.get("u");
-  if (!user || !isValidCutUser(user)) {
-    return new Response(
-      JSON.stringify({ error: "This page is out of date with the Donkey app — reload the tab." }),
-      { status: 400, headers: { "Content-Type": "application/json" } }
-    );
-  }
-  return runWithCutUser(user, () => match.handler(req, match.params));
+  return match.handler(req, match.params);
 }
 
 /**
@@ -136,6 +121,5 @@ export function matchCutRoute(method: string, pathname: string): RouteMatch | nu
     handler: match.route.handler,
     params: match.params,
     head: match.head,
-    scoped: match.route.scoped !== false,
   };
 }

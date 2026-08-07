@@ -14,7 +14,6 @@ import {
 import { rewriteCaptions, translateCaptions } from "../ai/captions";
 import { writeVisualCues, type VisualFrame } from "../ai/visualSubtitles";
 import { AI_SKILL_INDEX, AI_SKILLS, AI_TOOLS, attachedAssetsBlock, systemPrompt } from "../ai/catalog";
-import { currentCutUser } from "../userScope";
 
 interface ChatBody {
   messages: UIMessage[];
@@ -30,14 +29,11 @@ const proxyPath = () =>
   path.join(process.cwd(), "src", "cut", "server", "ai", "mcp-proxy.mjs");
 
 /** How to spawn the MCP proxy. The engine binary spawns itself with its
- * mcp-proxy subcommand; the dev server spawns node on the proxy source. The
- * account id rides along so the proxy's own engine calls carry the `u` scope
- * every data route requires — without it tools/list 400s and the model, left
- * with no editor tools, narrates tool calls as raw XML instead. */
-function mcpCommand(base: string, sessionKey: string, user: string): { command: string; args: string[] } {
+ * mcp-proxy subcommand; the dev server spawns node on the proxy source. */
+function mcpCommand(base: string, sessionKey: string): { command: string; args: string[] } {
   return process.env.DONKEY_CUT_ENGINE
-    ? { command: process.execPath, args: ["mcp-proxy", base, sessionKey, user] }
-    : { command: process.execPath, args: [proxyPath(), base, sessionKey, user] };
+    ? { command: process.execPath, args: ["mcp-proxy", base, sessionKey] }
+    : { command: process.execPath, args: [proxyPath(), base, sessionKey] };
 }
 
 function lastUserText(messages: UIMessage[]): string {
@@ -70,7 +66,6 @@ async function runClaude(
   body: ChatBody,
   base: string,
   sessionKey: string,
-  user: string,
   signal: AbortSignal
 ) {
   const q = query({
@@ -88,7 +83,7 @@ async function runClaude(
       mcpServers: {
         cut: {
           type: "stdio",
-          ...mcpCommand(base, sessionKey, user),
+          ...mcpCommand(base, sessionKey),
           alwaysLoad: true,
         },
       },
@@ -166,10 +161,9 @@ async function runCodex(
   body: ChatBody,
   base: string,
   sessionKey: string,
-  user: string,
   signal: AbortSignal
 ) {
-  const mcp = mcpCommand(base, sessionKey, user);
+  const mcp = mcpCommand(base, sessionKey);
   const session = body.providerSession;
   const args = ["exec"];
   if (session) args.push("resume", session);
@@ -394,7 +388,6 @@ export const aiApi = {
   async chat(req: Request) {
     const body = (await req.json()) as ChatBody;
     const base = new URL(req.url).origin;
-    const user = currentCutUser();
     const sessionKey = crypto.randomUUID();
     const userText = lastUserText(body.messages);
     const attachments = lastUserAttachments(body.messages);
@@ -410,11 +403,11 @@ export const aiApi = {
         emit({ type: "data-session", data: { sessionKey }, transient: true });
         try {
           if (body.model.startsWith("claude")) {
-            await runClaude(emit, prompt, body, base, sessionKey, user, req.signal);
+            await runClaude(emit, prompt, body, base, sessionKey, req.signal);
           } else if (body.model === "cut-test") {
             await runFake(emit, sessionKey, userText);
           } else {
-            await runCodex(emit, prompt, body, base, sessionKey, user, req.signal);
+            await runCodex(emit, prompt, body, base, sessionKey, req.signal);
           }
         } catch (err) {
           emit({ type: "error", errorText: err instanceof Error ? err.message : String(err) });

@@ -131,10 +131,10 @@ export function engineOrigin(): string {
 
 // The signed-in Donkey account, set by RequireSession before the app renders.
 // Every engine URL carries it (the `u` param) — headers can't, because media
-// loads as plain <video>/<img> src — and the engine keeps each account's
-// projects and library in that user's own folder. The engine refuses data
-// requests without it, so a scope-less URL fails visibly instead of showing
-// another account's data.
+// loads as plain <video>/<img> src. Local data is shared by every account on
+// the Mac, so current engines ignore the param; engines released before
+// 2026-08 refuse data requests without it, which is why the page keeps
+// sending it.
 let engineUser: string | null = null;
 
 export function setEngineUser(id: string) {

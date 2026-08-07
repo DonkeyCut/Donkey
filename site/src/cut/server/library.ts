@@ -1,13 +1,14 @@
 import { spawn } from "node:child_process";
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { cutDataRoot } from "./dataDir";
 import { assertLocalRuntime } from "./local-only";
 import { mediaPath as projectMediaPath, readProject } from "./projects";
-import { cutUserRoot } from "./userScope";
 import { exists, uniqueName, writeJsonAtomic } from "./util";
 
-/** The user's library: reusable media that lives outside any project. */
-const libraryRoot = () => path.join(cutUserRoot(), "library");
+/** The Mac's library: reusable media that lives outside any project, shared by
+ * every account that signs in on this Mac. */
+const libraryRoot = () => path.join(cutDataRoot(), "library");
 const libMedia = () => path.join(libraryRoot(), "media");
 const indexPath = () => path.join(libraryRoot(), "library.json");
 

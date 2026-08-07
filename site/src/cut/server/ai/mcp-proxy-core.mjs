@@ -9,12 +9,7 @@
  * Two launchers share this core: mcp-proxy.mjs (dev, spawned by file path
  * with node) and the engine binary's `mcp-proxy` subcommand.
  */
-export function runMcpProxy(BASE = "http://localhost:3000", SESSION = "", USER = "") {
-  // Every Cut data route runs inside a user scope keyed by the `u` param; the
-  // proxy inherits the chatting account's id so its own tools/list and
-  // tools/call land in that same scope instead of 400ing as out-of-scope.
-  const scoped = (path) =>
-    USER ? `${path}${path.includes("?") ? "&" : "?"}u=${encodeURIComponent(USER)}` : path;
+export function runMcpProxy(BASE = "http://localhost:3000", SESSION = "") {
   let buffer = "";
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk) => {
@@ -83,14 +78,14 @@ export function runMcpProxy(BASE = "http://localhost:3000", SESSION = "", USER =
       } else if (method === "tools/list") {
         // Idempotent: retry so a momentary hiccup can't leave the model with an
         // empty tool set (which reads to it as "editing tools aren't reachable").
-        const res = await fetchEngine(`${BASE}${scoped("/api/cut/ai/proxy?type=catalog")}`, undefined, "tools/list", true);
+        const res = await fetchEngine(`${BASE}/api/cut/ai/proxy?type=catalog`, undefined, "tools/list", true);
         const { tools } = await res.json();
         reply({ tools });
       } else if (method === "tools/call") {
         // No retry: the call may already have run on the editor by the time the
         // response is lost, and re-running a generation tool would double-charge.
         const res = await fetchEngine(
-          `${BASE}${scoped("/api/cut/ai/proxy")}`,
+          `${BASE}/api/cut/ai/proxy`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
