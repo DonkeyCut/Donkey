@@ -401,7 +401,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       setMask(undefined);
       return { id: input.id, mask: null };
     }
-    const kinds = ["rect", "circle", "linear", "mirror", "subject"];
+    const kinds = ["rect", "square", "circle", "linear", "mirror", "subject"];
     const kind =
       typeof input.kind === "string"
         ? input.kind

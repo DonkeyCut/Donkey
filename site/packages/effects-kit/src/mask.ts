@@ -17,7 +17,7 @@
 
 import { lerpKeys, shortestTurn } from "./keys";
 
-export type MaskKind = "rect" | "circle" | "linear" | "mirror" | "subject";
+export type MaskKind = "rect" | "square" | "circle" | "linear" | "mirror" | "subject";
 
 /** One keyed state of a mask's geometry, `t` seconds from the layer's start.
  * Same interpolation rules as the pose track: linear between keys, held flat
@@ -26,8 +26,8 @@ export interface MaskKey {
   t: number;
   x: number; // center offset from the layer anchor, fraction of frame width
   y: number; // center offset, fraction of frame height
-  w: number; // fraction of frame width (linear ignores; mirror ignores)
-  h: number; // fraction of frame height (mirror: band height; linear ignores)
+  w: number; // fraction of frame width (square: the side; linear/mirror ignore)
+  h: number; // fraction of frame height (mirror: band height; square/linear ignore)
   rotation: number; // degrees clockwise
   feather: number; // edge softness, px at the 1080 design short side
 }
@@ -155,12 +155,15 @@ export function paintMaskCoverage(
   ctx.translate(cx, cy);
   ctx.rotate((f.rotation * Math.PI) / 180);
   ctx.fillStyle = "#ffffff";
-  if (m.kind === "rect") {
+  if (m.kind === "rect" || m.kind === "square") {
     // Soft edges come from a gaussian of the hard shape; σ = feather / 2 puts
-    // the visible transition at about the feather width.
+    // the visible transition at about the feather width. A square's side is
+    // `w` of the frame width on both axes, so it stays square in pixels on
+    // any aspect.
+    const rh = m.kind === "square" ? w : h;
     if (feather > 0 && "filter" in ctx) ctx.filter = `blur(${feather / 2}px)`;
     ctx.beginPath();
-    ctx.roundRect(-w / 2, -h / 2, w, h, (m.radius ?? 0) * frame.scale);
+    ctx.roundRect(-w / 2, -rh / 2, w, rh, (m.radius ?? 0) * frame.scale);
     ctx.fill();
   } else if (m.kind === "circle") {
     if (feather > 0 && "filter" in ctx) ctx.filter = `blur(${feather / 2}px)`;

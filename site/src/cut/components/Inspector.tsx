@@ -2072,6 +2072,7 @@ function KeyRow({
 
 const MASK_SHAPES: { id: MaskKind; label: string }[] = [
   { id: "rect", label: "Rectangle" },
+  { id: "square", label: "Square" },
   { id: "circle", label: "Circle" },
   { id: "linear", label: "Linear" },
   { id: "mirror", label: "Mirror" },
@@ -2271,8 +2272,16 @@ function MaskSection({ target }: { target: MaskTarget }) {
     if (hasMaskKeys(m)) return target.setKey(tLocal, patch, { transient: true });
     target.setTransient({ ...m, ...patch });
   };
-  const showW = m?.kind === "rect" || m?.kind === "circle";
-  const showH = showW || m?.kind === "mirror";
+  // Which size axes the shape has: a square has one side, a mirror band one
+  // height, linear none.
+  const sizeAxes: ("w" | "h")[] =
+    m?.kind === "rect" || m?.kind === "circle"
+      ? ["w", "h"]
+      : m?.kind === "square"
+        ? ["w"]
+        : m?.kind === "mirror"
+          ? ["h"]
+          : [];
   const subject = m?.kind === "subject";
   return (
     <Section
@@ -2340,9 +2349,9 @@ function MaskSection({ target }: { target: MaskTarget }) {
               ))}
             </Row>
           )}
-          {showH && (
+          {sizeAxes.length > 0 && (
             <Row label="Size">
-              {(showW ? (["w", "h"] as const) : (["h"] as const)).map((axis) => (
+              {sizeAxes.map((axis) => (
                 <span key={axis} className="flex items-center gap-1">
                   <span className="text-[11px] text-muted-foreground/70 uppercase">{axis}</span>
                   <ScrubValue
@@ -2400,7 +2409,7 @@ function MaskSection({ target }: { target: MaskTarget }) {
             />
             <Value className="w-9 text-muted-foreground">{Math.round(geom.feather)}</Value>
           </Row>
-          {m.kind === "rect" && (
+          {(m.kind === "rect" || m.kind === "square") && (
             <Row label="Radius">
               <Slider
                 className="data-horizontal:w-24"

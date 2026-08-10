@@ -45,18 +45,18 @@ export const INSPECTOR_TOOLS = [
   {
     name: "set_mask",
     description:
-      "Mask an overlay element or a video clip — trim its picture to a shape or to the person in the shot. Kinds: rect (rounded box), circle (ellipse), linear (half-plane: at rotation 0 the top side stays), mirror (band across the item), subject (the person matte: plain keeps the picture only on the person; invert keeps it off the person — behind the speaker). Position is the mask center's offset from the item's own center (a clip's region center), in frame fractions; w/h size it in frame fractions; feather softens the edge; invert keeps what the shape leaves out. Subject masks use only feather and invert. Pass kind \"none\" to remove the mask. `keys` animates the geometry over time — each key is the full geometry at a moment, moving linearly between keys; pass an empty list to clear the keys and keep the mask still.",
+      "Mask an overlay element or a video clip — trim its picture to a shape or to the person in the shot. Kinds: rect (rounded box), square (rounded square, side = w of the frame width), circle (ellipse), linear (half-plane: at rotation 0 the top side stays), mirror (band across the item), subject (the person matte: plain keeps the picture only on the person; invert keeps it off the person — behind the speaker). Position is the mask center's offset from the item's own center (a clip's region center), in frame fractions; w/h size it in frame fractions; feather softens the edge; invert keeps what the shape leaves out. Subject masks use only feather and invert. Pass kind \"none\" to remove the mask. `keys` animates the geometry over time — each key is the full geometry at a moment, moving linearly between keys; pass an empty list to clear the keys and keep the mask still.",
     inputSchema: obj({
       id: str("Overlay element id or video clip id"),
       kind: {
         type: "string",
-        enum: ["rect", "circle", "linear", "mirror", "subject", "none"],
+        enum: ["rect", "square", "circle", "linear", "mirror", "subject", "none"],
         description: 'Mask shape, the person matte ("subject"), or "none" to remove the mask',
       },
       x: num("Center offset x from the element center, fraction of frame width (default 0)"),
       y: num("Center offset y, fraction of frame height (default 0)"),
-      w: num("Width, fraction of frame width (default 0.5; linear ignores)"),
-      h: num("Height, fraction of frame height (mirror: band height; linear ignores)"),
+      w: num("Width, fraction of frame width (default 0.5; square: the side; linear ignores)"),
+      h: num("Height, fraction of frame height (mirror: band height; square/linear ignore)"),
       rotation: num("Degrees clockwise, -180..180"),
       feather: num("Edge softness, px at the 1080 design short side (0..200)"),
       invert: bool("Keep the pixels outside the shape"),
