@@ -175,7 +175,7 @@ export async function grantCredits(input: {
   }
 
   try {
-    return await prisma.$transaction(
+    return await withWriteConflictRetry(() => prisma.$transaction(
       async (tx) => {
         const account = await ensureCreditAccountRecord(tx, input.userId);
         // An account already carrying an overdraft — one that predates the
@@ -239,7 +239,7 @@ export async function grantCredits(input: {
       {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       },
-    );
+    ));
   } catch (error) {
     if (
       input.sourceId &&
@@ -264,7 +264,7 @@ export async function grantCredits(input: {
 }
 
 export async function expireCredits(userId: string, now = new Date()) {
-  await prisma.$transaction(
+  await withWriteConflictRetry(() => prisma.$transaction(
     async (tx) => {
       const account = await ensureCreditAccountRecord(tx, userId);
       await expireCreditsForAccount(tx, account.id, userId, account.balanceMicros, now);
@@ -272,7 +272,7 @@ export async function expireCredits(userId: string, now = new Date()) {
     {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     },
-  );
+  ));
 }
 
 export async function assertCanUseInference(input: CreditPreflightInput) {
@@ -348,9 +348,10 @@ export async function requireInferenceCredits(input: CreditPreflightInput) {
 // Prisma raises P2034 when a transaction is aborted by a write conflict or
 // deadlock. A Serializable transaction rolls back entirely on conflict, so
 // nothing partially committed and the whole body is safe to re-run. Concurrent
-// charges against the same credit account (e.g. two generations at once)
-// routinely collide here; retrying transparently avoids surfacing a billing
-// race as a user-facing generation failure.
+// writers against the same credit account routinely collide here — two
+// generations at once, the parallel signup grants, simultaneous Stripe webhook
+// deliveries for one checkout — so every credit transaction retries
+// transparently instead of surfacing the race to its caller.
 async function withWriteConflictRetry<T>(run: () => Promise<T>): Promise<T> {
   const maxAttempts = 5;
   for (let attempt = 1; ; attempt += 1) {
