@@ -23,6 +23,7 @@ import {
   type AnalyticsSnapshotFile,
   utcDayOf,
 } from "@/lib/analytics/schema";
+import { isActiveProStatus } from "@/lib/billing/pro-subscription";
 import { REFERRAL_SOURCES } from "@/lib/onboarding/sequence";
 import { prisma } from "@/lib/prisma";
 
@@ -37,6 +38,10 @@ const WINDOW_DAYS = 60;
 // Backfill after an outage converges over nights instead of one heavy run.
 const MAX_EXTRACT_DAYS_PER_RUN = 5;
 const SNAPSHOT_PAGE_SIZE = 1000;
+
+// Credit grant sources that correspond to a Stripe charge; the grant amount
+// equals the dollars paid, so these rows double as the revenue record.
+const PAID_GRANT_SOURCES = ["pro_subscription", "stripe_autoreload", "stripe_topup"];
 
 export class InvalidDayError extends Error {}
 
@@ -161,59 +166,103 @@ async function extractPosthogDay(day: string): Promise<AnalyticsPosthogDayFile> 
   };
 }
 
-async function writeSnapshot(): Promise<AnalyticsSnapshotFile> {
-  const users: AnalyticsSnapshotFile["users"] = [];
-  let userCursor: string | undefined;
+// Drain a cursor-paginated query. The page function spreads the cursor args
+// into its findMany, so every table pages the same way.
+async function fetchAllPages<T extends { id: string }>(
+  fetchPage: (cursorArgs: { cursor: { id: string }; skip: 1 } | undefined) => Promise<T[]>,
+): Promise<T[]> {
+  const rows: T[] = [];
+  let cursor: string | undefined;
   for (;;) {
-    const page = await prisma.user.findMany({
-      orderBy: { id: "asc" },
-      select: {
-        createdAt: true,
-        email: true,
-        id: true,
-        name: true,
-        onboarding: { select: { referralAnsweredAt: true, referralSources: true } },
-      },
-      take: SNAPSHOT_PAGE_SIZE,
-      ...(userCursor === undefined ? {} : { cursor: { id: userCursor }, skip: 1 }),
-    });
-    for (const u of page) {
-      users.push({
-        createdAt: u.createdAt.toISOString(),
-        email: u.email,
-        id: u.id,
-        name: u.name,
-        ...(u.onboarding?.referralAnsweredAt
-          ? {
-              referralAnsweredAt: u.onboarding.referralAnsweredAt.toISOString(),
-              referralSources: u.onboarding.referralSources,
-            }
-          : {}),
-      });
-    }
-    if (page.length < SNAPSHOT_PAGE_SIZE) break;
-    userCursor = page[page.length - 1].id;
+    const page = await fetchPage(
+      cursor === undefined ? undefined : { cursor: { id: cursor }, skip: 1 },
+    );
+    rows.push(...page);
+    if (page.length < SNAPSHOT_PAGE_SIZE) return rows;
+    cursor = page[page.length - 1].id;
   }
+}
 
-  const balances: AnalyticsSnapshotFile["balances"] = [];
-  let accountCursor: string | undefined;
-  for (;;) {
-    const page = await prisma.userCreditAccount.findMany({
-      orderBy: { id: "asc" },
-      select: { balanceMicros: true, id: true, userId: true },
-      take: SNAPSHOT_PAGE_SIZE,
-      ...(accountCursor === undefined ? {} : { cursor: { id: accountCursor }, skip: 1 }),
-    });
-    for (const account of page) {
-      balances.push({ balanceMicros: account.balanceMicros.toString(), userId: account.userId });
-    }
-    if (page.length < SNAPSHOT_PAGE_SIZE) break;
-    accountCursor = page[page.length - 1].id;
-  }
+async function writeSnapshot(): Promise<AnalyticsSnapshotFile> {
+  const users = (
+    await fetchAllPages((cursorArgs) =>
+      prisma.user.findMany({
+        orderBy: { id: "asc" },
+        select: {
+          createdAt: true,
+          email: true,
+          id: true,
+          name: true,
+          onboarding: { select: { referralAnsweredAt: true, referralSources: true } },
+        },
+        take: SNAPSHOT_PAGE_SIZE,
+        ...cursorArgs,
+      }),
+    )
+  ).map((u) => ({
+    createdAt: u.createdAt.toISOString(),
+    email: u.email,
+    id: u.id,
+    name: u.name,
+    ...(u.onboarding?.referralAnsweredAt
+      ? {
+          referralAnsweredAt: u.onboarding.referralAnsweredAt.toISOString(),
+          referralSources: u.onboarding.referralSources,
+        }
+      : {}),
+  }));
+
+  const balances = (
+    await fetchAllPages((cursorArgs) =>
+      prisma.userCreditAccount.findMany({
+        orderBy: { id: "asc" },
+        select: { balanceMicros: true, id: true, userId: true },
+        take: SNAPSHOT_PAGE_SIZE,
+        ...cursorArgs,
+      }),
+    )
+  ).map((account) => ({
+    balanceMicros: account.balanceMicros.toString(),
+    userId: account.userId,
+  }));
+
+  const subscriptions = (
+    await fetchAllPages((cursorArgs) =>
+      prisma.proSubscription.findMany({
+        orderBy: { id: "asc" },
+        select: { cancelAtPeriodEnd: true, id: true, status: true, userId: true },
+        take: SNAPSHOT_PAGE_SIZE,
+        ...cursorArgs,
+      }),
+    )
+  ).map((sub) => ({
+    cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
+    status: sub.status,
+    userId: sub.userId,
+  }));
+
+  const payments = (
+    await fetchAllPages((cursorArgs) =>
+      prisma.userCreditGrant.findMany({
+        orderBy: { id: "asc" },
+        select: { createdAt: true, id: true, originalAmountMicros: true, source: true, userId: true },
+        take: SNAPSHOT_PAGE_SIZE,
+        where: { source: { in: PAID_GRANT_SOURCES } },
+        ...cursorArgs,
+      }),
+    )
+  ).map((grant) => ({
+    amountMicros: grant.originalAmountMicros.toString(),
+    day: utcDayOf(grant.createdAt),
+    source: grant.source,
+    userId: grant.userId,
+  }));
 
   const snapshot: AnalyticsSnapshotFile = {
     balances,
     generatedAt: new Date().toISOString(),
+    payments,
+    subscriptions,
     users,
     version: 1,
   };
@@ -283,6 +332,7 @@ async function consolidate(
     .sort((a, b) => (a.registeredAt < b.registeredAt ? 1 : -1));
 
   const rollup: AnalyticsRollup = {
+    billing: buildBilling(snapshot, days),
     days,
     generatedAt: new Date().toISOString(),
     missing,
@@ -293,6 +343,51 @@ async function consolidate(
   };
   await putJson(ROLLUP_KEY, rollup);
   return rollup;
+}
+
+// Current subscription state plus the paid-grant revenue record, folded into
+// the counts and per-day sums the dashboard shows. Abandoned checkouts
+// (incomplete statuses) never subscribed, so they count nowhere; past_due and
+// paused sit outside both buckets until Stripe resolves them.
+function buildBilling(
+  snapshot: AnalyticsSnapshotFile,
+  days: string[],
+): NonNullable<AnalyticsRollup["billing"]> {
+  let subscribers = 0;
+  let canceling = 0;
+  let churned = 0;
+  for (const sub of snapshot.subscriptions) {
+    if (isActiveProStatus(sub.status)) {
+      subscribers++;
+      if (sub.cancelAtPeriodEnd) canceling++;
+    } else if (sub.status === "canceled" || sub.status === "unpaid") {
+      churned++;
+    }
+  }
+
+  const dayIndex = new Map(days.map((day, i) => [day, i]));
+  const revenue = days.map(() => ({ proMicros: BigInt(0), topupMicros: BigInt(0) }));
+  let fundedMicros = BigInt(0);
+  for (const payment of snapshot.payments) {
+    const amount = BigInt(payment.amountMicros);
+    fundedMicros += amount;
+    const i = dayIndex.get(payment.day);
+    if (i === undefined) continue;
+    if (payment.source === "pro_subscription") revenue[i].proMicros += amount;
+    else revenue[i].topupMicros += amount;
+  }
+
+  return {
+    canceling,
+    churned,
+    funded: new Set(snapshot.payments.map((payment) => payment.userId)).size,
+    fundedMicros: fundedMicros.toString(),
+    revenue: revenue.map((entry) => ({
+      proMicros: entry.proMicros.toString(),
+      topupMicros: entry.topupMicros.toString(),
+    })),
+    subscribers,
+  };
 }
 
 // The snapshot covers every user, so this recomputes the whole referral

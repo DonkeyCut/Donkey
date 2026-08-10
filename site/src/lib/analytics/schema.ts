@@ -76,6 +76,25 @@ export const analyticsSnapshotFileSchema = z.object({
     }),
   ),
   balances: z.array(z.object({ userId: z.string(), balanceMicros: z.string() })),
+  // Every Donkey Pro subscription row, whatever its Stripe status.
+  subscriptions: z.array(
+    z.object({
+      userId: z.string(),
+      status: z.string(),
+      cancelAtPeriodEnd: z.boolean(),
+    }),
+  ),
+  // One entry per paid Stripe credit grant — top-ups, auto-reloads, and Pro
+  // monthly allowances. Each grant's amount equals the dollars charged, so
+  // together they are the revenue record.
+  payments: z.array(
+    z.object({
+      userId: z.string(),
+      day: analyticsDaySchema,
+      source: z.string(),
+      amountMicros: z.string(),
+    }),
+  ),
 });
 export type AnalyticsSnapshotFile = z.infer<typeof analyticsSnapshotFileSchema>;
 
@@ -108,6 +127,26 @@ export const analyticsRollupSchema = z.object({
       ),
     })
     .optional(),
+  // Subscription and revenue rollup from the snapshot's Stripe-backed rows.
+  // Counts are current state at consolidation; revenue aligns with days.
+  // Absent from rollups written before this shipped.
+  billing: z
+    .object({
+      // Pro subscriptions with an active status (active or trialing).
+      subscribers: z.number(),
+      // Active subscriptions set to cancel at period end.
+      canceling: z.number(),
+      // Subscriptions that ended after being live (canceled or unpaid);
+      // abandoned checkouts never count.
+      churned: z.number(),
+      // Users with at least one paid Stripe grant, and their all-time total.
+      funded: z.number(),
+      fundedMicros: z.string(),
+      // Per-day paid charges, aligned with days: Pro allowances vs top-ups
+      // (one-time and auto-reload). BigInt micros as decimal strings.
+      revenue: z.array(z.object({ proMicros: z.string(), topupMicros: z.string() })),
+    })
+    .optional(),
   users: z.array(
     z.object({
       id: z.string(),
@@ -124,3 +163,4 @@ export const analyticsRollupSchema = z.object({
 export type AnalyticsRollup = z.infer<typeof analyticsRollupSchema>;
 export type AnalyticsRollupUser = AnalyticsRollup["users"][number];
 export type AnalyticsReferrals = NonNullable<AnalyticsRollup["referrals"]>;
+export type AnalyticsBilling = NonNullable<AnalyticsRollup["billing"]>;
