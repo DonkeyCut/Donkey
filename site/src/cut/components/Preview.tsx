@@ -12,9 +12,10 @@ import {
   readPoster,
 } from "@/cut/lib/posterCache";
 import { setPreviewCanvas } from "@/cut/lib/previewCanvas";
-import { frameOf, isFullRect, rectOf, type Aspect, type ClipSpan, type FrameRect, type MediaAsset, type VideoClip } from "@/cut/lib/types";
+import { clipKeyed, clipPoseAt, frameOf, isFullRect, rectOf, type Aspect, type ClipSpan, type FrameRect, type MediaAsset, type VideoClip } from "@/cut/lib/types";
+import { hasMaskKeys, type MaskKey } from "@donkeycut/effects-kit";
 import { cn } from "@/lib/utils";
-import { OverlayLayer } from "./OverlayLayer";
+import { MaskGizmoCore, OverlayLayer } from "./OverlayLayer";
 import { StageEffectPaint, stageSlices, useEffectLanes, useStageEffects } from "./StageEffects";
 
 /** The clip under the playhead, when it overflows the frame in fill mode. */
@@ -219,6 +220,7 @@ export function Preview() {
             onDragEnd={clearAssetDrag}
           />
           <OverlayPipHandle stage={stage} />
+          <ClipMaskGizmo stage={stage} />
           {slices.map((slice) =>
             slice.kind === "elements" ? (
               <OverlayLayer
@@ -312,6 +314,63 @@ function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
       <span
         className="absolute -right-1.5 -bottom-1.5 size-3 cursor-nwse-resize rounded-full bg-violet-500 shadow-[0_0_0_2px_white]"
         onPointerDown={onResize}
+      />
+    </div>
+  );
+}
+
+/**
+ * The selected video clip's mask on the stage: the shared gizmo mounted at
+ * the mask's anchor — the clip rect's center, carried through the clip's
+ * pose so the outline sits where the compositor draws. Shows while the clip
+ * is live under the playhead; the anchor point is a zero-size box, so the
+ * gizmo's center-relative coordinates measure from it directly.
+ */
+function ClipMaskGizmo({ stage }: { stage: { w: number; h: number } }) {
+  const selection = useEditor((s) => s.selection);
+  const clips = useEditor((s) => s.clips);
+  const currentTime = useEditor((s) => s.currentTime);
+  const skimTime = useEditor((s) => s.skimTime);
+  const playing = useEditor((s) => s.playing);
+  if (!playing && skimTime !== null) return null;
+  if (selection?.kind !== "clip") return null;
+  const clip = clips.find((c) => c.id === selection.id);
+  if (!clip?.mask || clip.mask.kind === "subject" || clip.hidden) return null;
+  const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
+  const len = Math.max(0.1, (clip.out - clip.in) / speed);
+  if (currentTime < clip.start || currentTime >= clip.start + len) return null;
+  const tLocal = currentTime - clip.start;
+  const rect = rectOf(clip);
+  const pose = clipKeyed(clip) ? clipPoseAt(clip, tLocal) : null;
+  const ax = pose ? pose.x : rect.x + rect.w / 2;
+  const ay = pose ? pose.y : rect.y + rect.h / 2;
+  const writeGeom = (patch: Partial<Omit<MaskKey, "t">>) => {
+    const st = useEditor.getState();
+    const cur = st.clips.find((c) => c.id === clip.id)?.mask;
+    if (!cur) return;
+    if (hasMaskKeys(cur)) return st.setClipMaskKey(clip.id, tLocal, patch, { transient: true });
+    st.updateClipTransient(clip.id, { mask: { ...cur, ...patch } });
+  };
+  return (
+    <div
+      className="absolute"
+      style={{
+        left: ax * stage.w,
+        top: ay * stage.h,
+        width: 0,
+        height: 0,
+        transform: pose ? `rotate(${pose.rotation}deg) scale(${pose.scale})` : undefined,
+      }}
+    >
+      <MaskGizmoCore
+        mask={clip.mask}
+        stageWidth={stage.w}
+        stageHeight={stage.h}
+        tLocal={tLocal}
+        rotation={pose?.rotation ?? 0}
+        poseScale={pose?.scale ?? 1}
+        writeGeom={writeGeom}
+        begin={() => useEditor.getState().pushHistory()}
       />
     </div>
   );

@@ -14,7 +14,7 @@ import {
   subtitleLaneCount,
   trackPos,
 } from "@/cut/lib/subtitles";
-import { evalOverlayFrame, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, maskFrameAt, paintMaskCoverage, resolveShadow, shapeMetrics, shapePathD, type LottieHandle, type MaskKey } from "@donkeycut/effects-kit";
+import { evalOverlayFrame, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, maskFrameAt, paintMaskCoverage, resolveShadow, shapeMetrics, shapePathD, type LottieHandle, type Mask, type MaskKey } from "@donkeycut/effects-kit";
 import {
   LINE_HEIGHT,
   PLATE_PAD_X,
@@ -964,13 +964,181 @@ const MASK_GRIP =
   "absolute z-10 rounded-full border-[2.5px] border-[#ff9f0a] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.4)]";
 
 /**
- * On-canvas mask editing: a center grip that moves the mask and a corner grip
- * that resizes it (the band height, for mirror). The grips are children of
- * the element box, so they ride its transform; screen deltas are folded back
- * through the element's live rotation and scale, then through the mask's own
- * angle for the resize. With mask keys in play a drag writes the key at the
- * playhead, the same contract as dragging a keyframed element.
+ * On-canvas mask editing, shared by elements and video clips: an amber
+ * outline tracing the mask's edge, a center grip that moves it and a corner
+ * grip that resizes it (the band height, for mirror). Coordinates are local
+ * px around the layer's anchor — the mount point carries the layer's own
+ * transform — and screen deltas are folded back through that transform via
+ * `rotation`/`poseScale`, then through the mask's own angle for the resize.
+ * With mask keys in play a drag writes the key at the playhead, the same
+ * contract as dragging a keyframed element.
  */
+export function MaskGizmoCore({
+  mask: m,
+  stageWidth,
+  stageHeight,
+  tLocal,
+  rotation,
+  poseScale,
+  writeGeom,
+  begin,
+}: {
+  mask: Mask;
+  stageWidth: number;
+  stageHeight: number;
+  tLocal: number;
+  rotation: number;
+  poseScale: number;
+  writeGeom: (patch: Partial<Omit<MaskKey, "t">>) => void;
+  begin: () => void;
+}) {
+  const f = maskFrameAt(m, tLocal);
+  // Screen deltas → the box's local space (undo the element transform).
+  const toLocal = (dx: number, dy: number) => {
+    const r = (-rotation * Math.PI) / 180;
+    const s = poseScale || 1;
+    return {
+      x: (dx * Math.cos(r) - dy * Math.sin(r)) / s,
+      y: (dx * Math.sin(r) + dy * Math.cos(r)) / s,
+    };
+  };
+  const theta = (f.rotation * Math.PI) / 180;
+  const sizable =
+    m.kind === "rect" || m.kind === "square" || m.kind === "circle" || m.kind === "mirror";
+  // The outline traces the mask's hard edge in local px; a square's side is
+  // `w` of the frame width on both axes (the painter's rule), and
+  // linear/mirror edges run wider than any frame so they always cross it.
+  const cx = f.x * stageWidth;
+  const cy = f.y * stageHeight;
+  const w = f.w * stageWidth;
+  const h = m.kind === "square" ? w : f.h * stageHeight;
+  const span = stageWidth + stageHeight;
+  // The resize grip sits on the mask's corner (mirror: its lower edge),
+  // turned by the mask's own angle.
+  const gx = m.kind === "mirror" ? 0 : w / 2;
+  const gy = h / 2;
+  const rx = gx * Math.cos(theta) - gy * Math.sin(theta);
+  const ry = gx * Math.sin(theta) + gy * Math.cos(theta);
+  const clampSize = (v: number) => Math.min(2, Math.max(0.01, v));
+  const designScale = Math.min(stageWidth, stageHeight) / 1080;
+  const edge = {
+    className: "pointer-events-none",
+    fill: "none" as const,
+    stroke: "#ff9f0a",
+    strokeWidth: 1.5,
+    strokeDasharray: "6 4",
+    vectorEffect: "non-scaling-stroke" as const,
+  };
+  const beginMove = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    begin();
+    const g0 = f;
+    startDrag(e, {
+      onMove: (dx, dy) => {
+        const l = toLocal(dx, dy);
+        writeGeom({ x: g0.x + l.x / stageWidth, y: g0.y + l.y / stageHeight });
+      },
+    });
+  };
+  // The whole interior moves the mask, so a drag can start anywhere inside
+  // the outline; linear/mirror get a grabbable strip along their edge line.
+  const grabW = m.kind === "linear" || m.kind === "mirror" ? span * 2 : w;
+  const grabH = m.kind === "linear" ? 28 : m.kind === "mirror" ? Math.max(h, 28) : h;
+  return (
+    <>
+      <div
+        className="absolute cursor-move"
+        style={{
+          left: `calc(50% + ${cx}px)`,
+          top: `calc(50% + ${cy}px)`,
+          width: grabW,
+          height: grabH,
+          transform: `translate(-50%, -50%) rotate(${f.rotation}deg)`,
+          borderRadius:
+            m.kind === "circle" ? "50%" : (m.radius ?? 0) * designScale,
+        }}
+        onPointerDown={beginMove}
+      />
+      <svg
+        className="pointer-events-none absolute overflow-visible"
+        width={1}
+        height={1}
+        style={{ left: `calc(50% + ${cx}px)`, top: `calc(50% + ${cy}px)` }}
+      >
+        <g transform={`rotate(${f.rotation})`}>
+          {m.kind === "rect" || m.kind === "square" ? (
+            <rect
+              x={-w / 2}
+              y={-h / 2}
+              width={w}
+              height={h}
+              rx={(m.radius ?? 0) * designScale}
+              {...edge}
+            />
+          ) : m.kind === "circle" ? (
+            <ellipse cx={0} cy={0} rx={w / 2} ry={h / 2} {...edge} />
+          ) : m.kind === "linear" ? (
+            <line x1={-span} y1={0} x2={span} y2={0} {...edge} />
+          ) : m.kind === "mirror" ? (
+            <>
+              <line x1={-span} y1={-h / 2} x2={span} y2={-h / 2} {...edge} />
+              <line x1={-span} y1={h / 2} x2={span} y2={h / 2} {...edge} />
+            </>
+          ) : null}
+        </g>
+      </svg>
+      <span
+        title="Drag to move the mask"
+        className={cn(MASK_GRIP, "size-[13px] cursor-move")}
+        style={{
+          left: `calc(50% + ${f.x * stageWidth}px)`,
+          top: `calc(50% + ${f.y * stageHeight}px)`,
+          transform: "translate(-50%, -50%)",
+        }}
+        onPointerDown={beginMove}
+      />
+      {sizable && (
+        <span
+          title="Drag to resize the mask"
+          className={cn(MASK_GRIP, "size-[11px] cursor-nwse-resize rounded-[3px]")}
+          style={{
+            left: `calc(50% + ${f.x * stageWidth + rx}px)`,
+            top: `calc(50% + ${f.y * stageHeight + ry}px)`,
+            transform: "translate(-50%, -50%)",
+          }}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            begin();
+            const g0 = f;
+            startDrag(e, {
+              onMove: (dx, dy) => {
+                const l = toLocal(dx, dy);
+                // Into the mask's own axes for width/height growth; a square
+                // has one side and a mirror band one height.
+                const mx = l.x * Math.cos(theta) + l.y * Math.sin(theta);
+                const my = -l.x * Math.sin(theta) + l.y * Math.cos(theta);
+                writeGeom(
+                  m.kind === "square"
+                    ? { w: clampSize(g0.w + (2 * mx) / stageWidth) }
+                    : m.kind === "mirror"
+                      ? { h: clampSize(g0.h + (2 * my) / stageHeight) }
+                      : {
+                          w: clampSize(g0.w + (2 * mx) / stageWidth),
+                          h: clampSize(g0.h + (2 * my) / stageHeight),
+                        }
+                );
+              },
+            });
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+/** The element mount: grips are children of the element box, so they ride
+ * its transform; writes land on the overlay's mask (or its key at the
+ * playhead). */
 function MaskGizmo({
   overlay: o,
   stageWidth,
@@ -986,8 +1154,6 @@ function MaskGizmo({
   rotation: number;
   poseScale: number;
 }) {
-  const m = o.mask!;
-  const f = maskFrameAt(m, tLocal);
   const st = () => useEditor.getState();
   const writeGeom = (patch: Partial<Omit<MaskKey, "t">>) => {
     const cur = st().overlays.find((x) => x.id === o.id)?.mask;
@@ -995,77 +1161,17 @@ function MaskGizmo({
     if (hasMaskKeys(cur)) return st().setOverlayMaskKey(o.id, tLocal, patch, { transient: true });
     st().updateOverlayTransient(o.id, { mask: { ...cur, ...patch } });
   };
-  // Screen deltas → the box's local space (undo the element transform).
-  const toLocal = (dx: number, dy: number) => {
-    const r = (-rotation * Math.PI) / 180;
-    const s = poseScale || 1;
-    return {
-      x: (dx * Math.cos(r) - dy * Math.sin(r)) / s,
-      y: (dx * Math.sin(r) + dy * Math.cos(r)) / s,
-    };
-  };
-  const theta = (f.rotation * Math.PI) / 180;
-  const sizable = m.kind === "rect" || m.kind === "circle" || m.kind === "mirror";
-  // The resize grip sits on the mask's corner (mirror: its lower edge),
-  // turned by the mask's own angle.
-  const gx = m.kind === "mirror" ? 0 : (f.w * stageWidth) / 2;
-  const gy = (f.h * stageHeight) / 2;
-  const rx = gx * Math.cos(theta) - gy * Math.sin(theta);
-  const ry = gx * Math.sin(theta) + gy * Math.cos(theta);
-  const clampSize = (v: number) => Math.min(2, Math.max(0.01, v));
   return (
-    <>
-      <span
-        title="Drag to move the mask"
-        className={cn(MASK_GRIP, "size-[13px] cursor-move")}
-        style={{
-          left: `calc(50% + ${f.x * stageWidth}px)`,
-          top: `calc(50% + ${f.y * stageHeight}px)`,
-          transform: "translate(-50%, -50%)",
-        }}
-        onPointerDown={(e) => {
-          e.stopPropagation();
-          st().pushHistory();
-          const g0 = f;
-          startDrag(e, {
-            onMove: (dx, dy) => {
-              const l = toLocal(dx, dy);
-              writeGeom({ x: g0.x + l.x / stageWidth, y: g0.y + l.y / stageHeight });
-            },
-          });
-        }}
-      />
-      {sizable && (
-        <span
-          title="Drag to resize the mask"
-          className={cn(MASK_GRIP, "size-[11px] cursor-nwse-resize rounded-[3px]")}
-          style={{
-            left: `calc(50% + ${f.x * stageWidth + rx}px)`,
-            top: `calc(50% + ${f.y * stageHeight + ry}px)`,
-            transform: "translate(-50%, -50%)",
-          }}
-          onPointerDown={(e) => {
-            e.stopPropagation();
-            st().pushHistory();
-            const g0 = f;
-            startDrag(e, {
-              onMove: (dx, dy) => {
-                const l = toLocal(dx, dy);
-                // Into the mask's own axes for width/height growth.
-                const mx = l.x * Math.cos(theta) + l.y * Math.sin(theta);
-                const my = -l.x * Math.sin(theta) + l.y * Math.cos(theta);
-                writeGeom({
-                  ...(m.kind !== "mirror"
-                    ? { w: clampSize(g0.w + (2 * mx) / stageWidth) }
-                    : {}),
-                  h: clampSize(g0.h + (2 * my) / stageHeight),
-                });
-              },
-            });
-          }}
-        />
-      )}
-    </>
+    <MaskGizmoCore
+      mask={o.mask!}
+      stageWidth={stageWidth}
+      stageHeight={stageHeight}
+      tLocal={tLocal}
+      rotation={rotation}
+      poseScale={poseScale}
+      writeGeom={writeGeom}
+      begin={() => st().pushHistory()}
+    />
   );
 }
 
