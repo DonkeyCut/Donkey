@@ -1789,6 +1789,22 @@ function GroupRow({ overlay: o }: { overlay: Overlay }) {
 
 /** Rotation and opacity, shared by every overlay kind. Neutral values store
  * as absence so untouched elements carry nothing. */
+/** The element twin of the clip panels' Hidden row: parked on the timeline,
+ * out of the played and exported picture. It closes the Transform section
+ * (the effect panel, which has no Transform, mounts it alone), so the
+ * timeline chip always has an inspector fallback. */
+function HiddenRow({ overlay: o }: { overlay: Overlay }) {
+  const update = useEditor((s) => s.updateOverlay);
+  return (
+    <Row label="Hidden">
+      <Switch
+        checked={!!o.hidden}
+        onCheckedChange={(v) => update(o.id, { hidden: v || undefined })}
+      />
+    </Row>
+  );
+}
+
 function TransformRows({ overlay: o }: { overlay: Overlay }) {
   const rotationCk = useSliderCheckpoint();
   const opacityCk = useSliderCheckpoint();
@@ -1933,6 +1949,7 @@ function TransformRows({ overlay: o }: { overlay: Overlay }) {
           }}
         />
       </Row>
+      <HiddenRow overlay={o} />
     </Section>
   );
 }
@@ -2553,6 +2570,7 @@ function EffectPanel({ overlay: o }: { overlay: EffectOverlay }) {
             </Value>
           </Row>
         )}
+        <HiddenRow overlay={o} />
         <GroupRow overlay={o} />
       </div>
     </>
