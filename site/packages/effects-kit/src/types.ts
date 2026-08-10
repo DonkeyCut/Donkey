@@ -8,6 +8,7 @@
 import type { OverlayAnim } from "./anim";
 import type { EffectOverlay } from "./effects";
 import type { OverlayKey } from "./keys";
+import type { Mask } from "./mask";
 
 /** Fields every overlay element carries, whatever its kind. */
 export interface OverlayBase {
@@ -33,6 +34,9 @@ export interface OverlayBase {
    * Absent or empty = the element holds its resting pose; presets compose
    * over whichever of the two is in play. */
   kf?: OverlayKey[];
+  /** Coverage that trims the element's pixels to a shape or to the person in
+   * the shot (see mask.ts); absent = the whole element shows. */
+  mask?: Mask;
 }
 
 /** How a highlighted word lights up in karaoke text: accent color only,
@@ -78,10 +82,6 @@ export interface TextOverlay extends OverlayBase {
   plateRadius?: number; // plate corner radius in em
   plateColor?: string; // plate fill color
   plateOpacity?: number; // plate fill opacity 0..1
-  /** Draw this text behind the person in the shot (host-composited: video →
-   * text → segmented person back on top). Falls back to a normal front title
-   * when no person is detectable. */
-  behindSubject?: boolean;
   /** Karaoke burn-in: index of the display word (whitespace-split across all
    * lines) drawn per the accent treatment. */
   highlightWord?: number;

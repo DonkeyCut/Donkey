@@ -13,6 +13,7 @@ import {
   type OverlayAnimStyle,
 } from "./anim";
 import { evalOverlayFrame, hasOverlayKeys, poseAt, poseExtent, sortedKeys } from "./keys";
+import { applyMaskToCanvas, isMaskAnimated } from "./mask";
 import type { LottieHandle } from "./lottie";
 import { elementPlugin } from "./registry";
 import {
@@ -478,6 +479,20 @@ export async function renderElementPng(
   }
 
   await paintElement(ctx, overlay, frame, env);
+  if (overlay.mask) {
+    // The mask is painted under the element's own transform, so it rotates
+    // and travels with the element. A keyframed mask routes through the
+    // animated frame sampler; here its resting (first) geometry applies.
+    applyMaskToCanvas(
+      ctx,
+      document.createElement("canvas"),
+      overlay.mask,
+      0,
+      frame,
+      { x: overlay.x, y: overlay.y },
+      ctx.getTransform()
+    );
+  }
   return pngBlob(canvas);
 }
 
@@ -692,6 +707,7 @@ export async function renderOverlayFrames(
   canvas.width = rw;
   canvas.height = rh;
   const ctx = canvas.getContext("2d")!;
+  const maskScratch = overlay.mask ? document.createElement("canvas") : null;
 
   const drawAt = async (tLocal: number): Promise<Blob> => {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -715,7 +731,21 @@ export async function renderOverlayFrames(
       // Typing reveals characters; it must not also fade them.
       ctx.globalAlpha = poseAt(overlay, tLocal).opacity;
     }
+    const maskTransform = ctx.getTransform();
     await paintElement(ctx, el, { ...frame, t: tLocal }, env);
+    if (overlay.mask && maskScratch) {
+      // Painted under the frame's element transform, so the mask rides the
+      // pose; its own keys evaluate at this frame's time.
+      applyMaskToCanvas(
+        ctx,
+        maskScratch,
+        overlay.mask,
+        tLocal,
+        frame,
+        { x: overlay.x, y: overlay.y },
+        maskTransform
+      );
+    }
     return pngBlob(canvas);
   };
 
@@ -727,9 +757,10 @@ export async function renderOverlayFrames(
   };
 
   const step = 1 / fps;
-  // A keyframed pose changes on its own schedule, so there is no still middle
-  // and no cycle to repeat: sample the whole element frame by frame.
-  if (keyed) {
+  // A keyframed pose (or a keyframed mask) changes on its own schedule, so
+  // there is no still middle and no cycle to repeat: sample the whole element
+  // frame by frame.
+  if (keyed || isMaskAnimated(overlay.mask)) {
     const n = Math.max(1, Math.round(dur * fps));
     for (let i = 0; i < n; i++) {
       await push(i * step, i === n - 1 ? dur - (n - 1) * step : step);

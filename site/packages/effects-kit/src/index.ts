@@ -1,6 +1,7 @@
 export * from "./types";
 export * from "./anim";
 export * from "./keys";
+export * from "./mask";
 export * from "./render";
 export * from "./registry";
 export * from "./cutout";
