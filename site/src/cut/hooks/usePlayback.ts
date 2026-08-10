@@ -4,7 +4,7 @@ import { useEffect, type RefObject } from "react";
 import { clipSpeed, getClipSpans, overlayLayers, projectDuration, useEditor } from "@/cut/lib/store";
 import { isFullRect, projectFadeSeconds, rectOf } from "@/cut/lib/types";
 import type { ClipSpan, MediaAsset, VideoClip } from "@/cut/lib/types";
-import { BehindCompositor } from "@/cut/lib/behindPass";
+import { SubjectMaskCompositor } from "@/cut/lib/behindPass";
 import { FrameCompositor, MISSING_FRAME, PENDING_FRAME, type Frame } from "@/cut/lib/composite";
 import { duckGainAt, overlayPlan, prerollLead, trackZeroPlan } from "@/cut/lib/framePlan";
 import { reportMediaElementError } from "@/cut/lib/mediaLinks";
@@ -520,13 +520,18 @@ class Engine {
     return this.elFor(this.overlayEls, clip.id, asset);
   }
 
-  // Text-behind-speaker: behind-tagged titles leave the DOM overlay path and
-  // composite here — video, then the text raster, then the segmented person
-  // back on top (see behindPass.ts). Cheap no-op when nothing is tagged.
-  private behind = new BehindCompositor();
+  // The subject-mask pass: behind-tagged elements leave the DOM overlay path
+  // and composite here — video, then the element raster, then the segmented
+  // person back on top — and the pass publishes the matte the DOM's front
+  // subject-masked elements read (see behindPass.ts). Cheap no-op when
+  // nothing reads the matte. Subject-masked video clips pull their matte
+  // mid-stack through the compositor's provider, reading the canvas as it
+  // stands beneath them.
+  private behind = new SubjectMaskCompositor(true);
 
   private drawBehind(t: number) {
     const s = useEditor.getState();
+    this.comp.subjectMatteProvider = (at) => this.behind.clipMatteOf(this.canvas, at);
     this.behind.draw(this.canvas, s.overlays, s.assets, t);
   }
 

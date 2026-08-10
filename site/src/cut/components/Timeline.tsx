@@ -3137,6 +3137,18 @@ function ClipView({
           </DropdownMenuItem>
         ) : null}
       </ClipMenu>
+      {/* Keys sit on the bar where they fall, so a pose track is visible
+          without opening the inspector. */}
+      {(clip.kf ?? []).map((k) => (
+        <KeyMarker
+          key={k.t}
+          item={{ id: clip.id, start: span.start, end: span.start + span.len }}
+          kind="clip"
+          t={k.t}
+          pps={pps}
+          width={w}
+        />
+      ))}
       <span
         className={cn(trimHandle, "tl-trim-l left-0")}
         onPointerDown={(e) => startLaneTrim(e, "clip", clip.id, "l", ui)}
@@ -3846,6 +3858,17 @@ function OverlayClipView({
         className="bottom-1 right-2"
         onToggle={() => useEditor.getState().updateClip(clip.id, { hidden: !clip.hidden })}
       />
+      {/* Keys sit on the bar where they fall, same as the element bars. */}
+      {(clip.kf ?? []).map((k) => (
+        <KeyMarker
+          key={k.t}
+          item={{ id: clip.id, start: clip.start, end: clip.start + overlayLen(clip) }}
+          kind="clip"
+          t={k.t}
+          pps={pps}
+          width={w}
+        />
+      ))}
       <span
         className={cn(trimHandle, "tl-trim-l left-0")}
         onPointerDown={(e) => startLaneTrim(e, "overlayClip", clip.id, "l", ui)}
@@ -3863,27 +3886,35 @@ function OverlayClipView({
 const KEY_HIT = 14;
 
 /**
- * One keyframe on an element's bar: a diamond where the key falls, dragged
- * left and right to retime it. The grab is kept off the bar underneath, so
- * moving a key never moves the element it belongs to.
+ * One keyframe on an item's bar — an element's or a video clip's: a diamond
+ * where the key falls, dragged left and right to retime it. The grab is kept
+ * off the bar underneath, so moving a key never moves the item it belongs
+ * to. `kind` picks which store track the actions write.
  */
 function KeyMarker({
-  overlay: o,
+  item,
+  kind,
   t,
   pps,
   width,
   onMenu,
 }: {
-  overlay: Overlay;
+  item: { id: string; start: number; end: number };
+  kind: "overlay" | "clip";
   t: number;
   pps: number;
   width: number;
   /** The bar's right-click menu; a key click carries its time, so the menu
-   * offers to remove it. */
-  onMenu: (m: { x: number; y: number; id: string; key?: number }) => void;
+   * offers to remove it. Absent (clip bars), the bar's own menu handles the
+   * click and Delete removes the picked key. */
+  onMenu?: (m: { x: number; y: number; id: string; key?: number }) => void;
 }) {
   const picked = useEditor(
-    (s) => !!s.selectedKey && s.selectedKey.overlayId === o.id && s.selectedKey.t === t
+    (s) =>
+      !!s.selectedKey &&
+      s.selectedKey.kind === kind &&
+      s.selectedKey.id === item.id &&
+      s.selectedKey.t === t
   );
   // Park clear of the trim handles: a key dragged to the very end would
   // otherwise sit under one and stop being grabbable. Those last few pixels
@@ -3897,14 +3928,19 @@ function KeyMarker({
         transform: "translate(-50%, -50%)",
       }}
       title="Drag to retime, Delete to remove"
-      onContextMenu={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onMenu({ x: e.clientX, y: e.clientY, id: o.id, key: t });
-      }}
+      onContextMenu={
+        onMenu
+          ? (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onMenu({ x: e.clientX, y: e.clientY, id: item.id, key: t });
+            }
+          : undefined
+      }
       onPointerDown={(e) => {
         const s = useEditor.getState();
-        s.selectOverlayKey(o.id, t);
+        if (kind === "overlay") s.selectOverlayKey(item.id, t);
+        else s.selectClipKey(item.id, t);
         let live = t;
         // The undo step opens on the first movement, so a click that only
         // seeks does not leave one behind.
@@ -3916,13 +3952,14 @@ function KeyMarker({
               s.pushHistory();
             }
             const next = Math.max(0, t + dx / pps);
-            s.moveOverlayKey(o.id, live, next, { transient: true });
-            live = Math.max(0, Math.min(next, Math.max(0.1, o.end - o.start)));
+            if (kind === "overlay") s.moveOverlayKey(item.id, live, next, { transient: true });
+            else s.moveClipKey(item.id, live, next, { transient: true });
+            live = Math.max(0, Math.min(next, Math.max(0.1, item.end - item.start)));
           },
           // A click that never moved reads as "show me this key": the playhead
           // goes there, and the inspector's rows follow it.
           onUp: (_dx, _dy, moved) => {
-            if (!moved) s.seek(o.start + live);
+            if (!moved) s.seek(item.start + live);
           },
         });
       }}
@@ -4055,7 +4092,7 @@ function TextBar({
       {/* Keys sit on the bar where they fall, so a track is visible without
           opening the inspector. */}
       {(o.kf ?? []).map((k) => (
-        <KeyMarker key={k.t} overlay={o} t={k.t} pps={pps} width={w} onMenu={onMenu} />
+        <KeyMarker key={k.t} item={o} kind="overlay" t={k.t} pps={pps} width={w} onMenu={onMenu} />
       ))}
       <HideChip
         hidden={!!o.hidden}

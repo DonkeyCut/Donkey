@@ -1,12 +1,17 @@
 import {
+  behindSubjectMask,
   overlayKind,
+  poseAt,
   stampOverlayKinds,
   stripDefaultOverlayKinds,
   type ColorGrade,
   type EffectOverlay,
   type LookStyle,
+  type Mask,
   type OverlayBase,
+  type OverlayKey,
   type OverlayKind,
+  type OverlayPose,
   type ShapeKind,
   type ShapeOverlay,
   type StickerOverlay,
@@ -182,6 +187,56 @@ export function isFullRect(r: FrameRect): boolean {
   return r.x <= 0.001 && r.y <= 0.001 && r.w >= 0.999 && r.h >= 0.999;
 }
 
+/** A region's pixel box at an output size, even-rounded and clamped inside
+ * the frame — the one rounding that decides where a regioned clip's segment
+ * sits. The ffmpeg graph frames segments with it and the export client
+ * paints mask coverage with it, so the two land on identical pixels. Null
+ * for the full frame. */
+export function regionPx(
+  frame: { x: number; y: number; w: number; h: number } | undefined,
+  W: number,
+  H: number
+): { rx: number; ry: number; rw: number; rh: number } | null {
+  if (!frame) return null;
+  const even = (n: number) => 2 * Math.round(n / 2);
+  const rw = Math.min(W, Math.max(2, even(frame.w * W)));
+  const rh = Math.min(H, Math.max(2, even(frame.h * H)));
+  // Clamp the origin so rx+rw ≤ W and ry+rh ≤ H — independent even-rounding
+  // can otherwise push an edge-touching region a pixel past the frame, which
+  // makes the pad filter reject the input ("not within the padded area") and
+  // aborts the whole export.
+  const rx = Math.max(0, Math.min(even(frame.x * W), W - rw));
+  const ry = Math.max(0, Math.min(even(frame.y * H), H - rh));
+  if (rx <= 0 && ry <= 0 && rw >= W && rh >= H) return null;
+  return { rx, ry, rw, rh };
+}
+
+/** Whether the clip carries pose keys worth evaluating. */
+export const clipKeyed = (c: { kf?: OverlayKey[] }): boolean => !!c.kf && c.kf.length > 0;
+
+/**
+ * The clip's pose at `tLocal` seconds into its window: resting at its region
+ * center, or moving along its key track — the overlay evaluator over the
+ * clip's own anchor, so clips and elements share one interpolation.
+ */
+export function clipPoseAt(
+  clip: { frame?: FrameRect; in: number; out: number; speed?: number; kf?: OverlayKey[] },
+  tLocal: number
+): OverlayPose {
+  const rect = rectOf(clip);
+  const len = Math.max(0.1, (clip.out - clip.in) / (clip.speed && clip.speed > 0 ? clip.speed : 1));
+  return poseAt(
+    {
+      start: 0,
+      end: len,
+      x: rect.x + rect.w / 2,
+      y: rect.y + rect.h / 2,
+      kf: clip.kf,
+    },
+    tLocal
+  );
+}
+
 /** One-click layouts for arranging a video layer in the frame. `fit` is the
  * sensible default meeting for that shape: halves cover their region, a corner
  * is contained so the whole picture shows. */
@@ -266,6 +321,15 @@ export interface VideoClip {
   hidden?: boolean;
   /** Manual color adjustments; absent when every value is neutral. */
   grade?: ColorGrade;
+  /** Coverage that trims the clip's picture to a shape (see the kit's
+   * mask.ts); absent = the whole picture shows. Anchored on the clip's
+   * region center. */
+  mask?: Mask;
+  /** Keyframed pose track (see the kit's keys.ts), seconds from the clip's
+   * timeline start: x/y move the picture's center (frame fractions), scale
+   * multiplies its fitted size, rotation turns it about its center, opacity
+   * fades it. Absent = the clip sits in its region untransformed. */
+  kf?: OverlayKey[];
 }
 
 // Color grading (the dual-renderer math) lives in the effects kit; the model
@@ -708,6 +772,32 @@ export const isTextOverlay = (o: Overlay): o is TextOverlay => (o.kind ?? "text"
 export const isShapeOverlay = (o: Overlay): o is ShapeOverlay => o.kind === "shape";
 export const isStickerOverlay = (o: Overlay): o is StickerOverlay => o.kind === "sticker";
 export const isEffectOverlay = (o: Overlay): o is EffectOverlay => o.kind === "effect";
+
+/** The element rides the person matte in some direction. */
+export const subjectMasked = (o: Overlay): boolean => o.mask?.kind === "subject";
+
+/** The element sits behind the person (an inverted subject mask). */
+export const behindSubjectOverlay = (o: Overlay): boolean => behindSubjectMask(o.mask);
+
+/** The element shows only on the person (a plain subject mask). */
+export const frontSubjectOverlay = (o: Overlay): boolean =>
+  subjectMasked(o) && !behindSubjectOverlay(o);
+
+/** Tolerant-load migration: documents written when behind-speaker was a
+ * boolean load it as an inverted subject mask, so one mask model covers it
+ * everywhere in memory and on save. Returns the same array when nothing
+ * migrates (hosts compare documents by identity). */
+export function migrateBehindSubject<T extends Overlay>(overlays: T[]): T[] {
+  const legacy = (o: Overlay) =>
+    isTextOverlay(o) && !!(o as { behindSubject?: boolean }).behindSubject;
+  if (!overlays.some(legacy)) return overlays;
+  return overlays.map((o) => {
+    if (!legacy(o)) return o;
+    const next = { ...o, mask: o.mask ?? { kind: "subject" as const, invert: true } };
+    delete (next as { behindSubject?: boolean }).behindSubject;
+    return next;
+  });
+}
 
 export const SHAPE_LABELS: Record<ShapeKind, string> = {
   rect: "Rectangle",

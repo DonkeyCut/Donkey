@@ -453,7 +453,7 @@ describe("title lanes", () => {
       s().setOverlayKey(t1.id, 1);
       s().selectOverlayKey(t1.id, 1);
       s().moveOverlayKey(t1.id, 1, 2.5, { transient: true });
-      expect(s().selectedKey).toEqual({ overlayId: t1.id, t: 2.5 });
+      expect(s().selectedKey).toEqual({ kind: "overlay", id: t1.id, t: 2.5 });
       s().deleteSelection();
       expect(overlayById(t1.id).kf).toBe(undefined);
     });

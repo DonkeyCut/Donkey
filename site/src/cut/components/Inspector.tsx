@@ -22,11 +22,16 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import {
   EFFECT_LABELS,
+  hasMaskKeys,
   hasOverlayKeys,
   KEY_EPSILON,
   keyIndexAt,
   lineLikeShape,
+  maskFrameAt,
   poseAt,
+  type Mask,
+  type MaskKey,
+  type MaskKind,
   type OverlayKey,
   OVERLAY_ANIM_DEFAULT_SECONDS,
   OVERLAY_ANIM_MAX_SECONDS,
@@ -39,6 +44,7 @@ import {
   type OverlayLoopStyle,
 } from "@donkeycut/effects-kit";
 import { clipWindow, useEditor, type EditorState } from "@/cut/lib/store";
+import { clipKeyed, clipPoseAt } from "@/cut/lib/types";
 import { AnimationTiles } from "@/cut/components/AnimationTiles";
 import { GenerateSubtitlesAudio } from "@/cut/components/VoicePicker";
 import {
@@ -603,6 +609,8 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
           rect={rectOf(clip)}
           onPick={(frame, fit) => updateClip(clip.id, { frame, fit })}
         />
+        <ClipTransformSection clip={clip} />
+        <ClipMaskSection clip={clip} />
         <ClipGeneratedAudio clip={clip} />
       </div>
     </>
@@ -1507,12 +1515,7 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
             </Row>
           </>
         </Section>
-        <Section
-          title="Behind speaker"
-          info="Sit the text behind the person in the shot. Needs a clearly separated subject; with no person detected it shows as a normal title."
-          enabled={!!o.behindSubject}
-          onEnabledChange={(v) => update(o.id, { behindSubject: v || undefined })}
-        />
+        <OverlayMaskSection overlay={o} />
         <TransformRows overlay={o} />
         <GroupRow overlay={o} />
         <AnimationRows overlay={o} />
@@ -1935,7 +1938,7 @@ function TransformRows({ overlay: o }: { overlay: Overlay }) {
 }
 
 /** Seconds into the element at the playhead, clamped to its own window. */
-function localTimeOf(o: Overlay, now: number): number {
+function localTimeOf(o: { start: number; end: number }, now: number): number {
   return Math.max(0, Math.min(now - o.start, Math.max(0.1, o.end - o.start)));
 }
 
@@ -1949,13 +1952,44 @@ function localTimeOf(o: Overlay, now: number): number {
 function KeyframeControls({ overlay: o }: { overlay: Overlay }) {
   const now = useEditor((s) => s.currentTime);
   const seek = useEditor((s) => s.seek);
-  const keys = o.kf ?? [];
-  const inWindow = now >= o.start - 1e-6 && now <= o.end + 1e-6;
-  const tLocal = localTimeOf(o, now);
-  const here = keyIndexAt(keys, tLocal);
-  const prev = [...keys].reverse().find((k) => k.t < tLocal - KEY_EPSILON);
-  const next = keys.find((k) => k.t > tLocal + KEY_EPSILON);
   const st = () => useEditor.getState();
+  return (
+    <KeyRow
+      element={o}
+      now={now}
+      keys={o.kf ?? []}
+      onAdd={(tLocal) => st().setOverlayKey(o.id, tLocal)}
+      onRemove={(tLocal) => st().removeOverlayKey(o.id, tLocal)}
+      onSeek={seek}
+    />
+  );
+}
+
+/** The key track row itself — diamond, walkers, count, bin — over whichever
+ * key list it is handed. The pose track and the mask track both mount it. */
+function KeyRow({
+  element,
+  now,
+  keys,
+  onAdd,
+  onRemove,
+  onSeek,
+}: {
+  element: { start: number; end: number };
+  now: number;
+  keys: { t: number }[];
+  onAdd: (tLocal: number) => void;
+  onRemove: (tLocal: number) => void;
+  onSeek: (t: number) => void;
+}) {
+  const inWindow = now >= element.start - 1e-6 && now <= element.end + 1e-6;
+  const tLocal = Math.max(
+    0,
+    Math.min(now - element.start, Math.max(0.1, element.end - element.start))
+  );
+  const here = keyIndexAt(keys, tLocal);
+  const prev = [...keys].sort((a, b) => a.t - b.t).reverse().find((k) => k.t < tLocal - KEY_EPSILON);
+  const next = [...keys].sort((a, b) => a.t - b.t).find((k) => k.t > tLocal + KEY_EPSILON);
   return (
     <Row label="Keyframes">
       <Button
@@ -1965,7 +1999,7 @@ function KeyframeControls({ overlay: o }: { overlay: Overlay }) {
         disabled={!inWindow}
         title={here >= 0 ? "Update the key here" : "Add a key at the playhead"}
         aria-label={here >= 0 ? "Update the key here" : "Add a key at the playhead"}
-        onClick={() => st().setOverlayKey(o.id, tLocal)}
+        onClick={() => onAdd(tLocal)}
       >
         <Diamond className={cn("size-3.5", here >= 0 && "fill-current")} />
       </Button>
@@ -1976,7 +2010,7 @@ function KeyframeControls({ overlay: o }: { overlay: Overlay }) {
         disabled={!prev}
         title="Previous key"
         aria-label="Previous key"
-        onClick={() => prev && seek(o.start + prev.t)}
+        onClick={() => prev && onSeek(element.start + prev.t)}
       >
         <ChevronLeft className="size-3.5" />
       </Button>
@@ -1987,7 +2021,7 @@ function KeyframeControls({ overlay: o }: { overlay: Overlay }) {
         disabled={!next}
         title="Next key"
         aria-label="Next key"
-        onClick={() => next && seek(o.start + next.t)}
+        onClick={() => next && onSeek(element.start + next.t)}
       >
         <ChevronRight className="size-3.5" />
       </Button>
@@ -2001,11 +2035,371 @@ function KeyframeControls({ overlay: o }: { overlay: Overlay }) {
         disabled={here < 0}
         title="Remove the key here"
         aria-label="Remove the key here"
-        onClick={() => st().removeOverlayKey(o.id, tLocal)}
+        onClick={() => onRemove(tLocal)}
       >
         <Trash2 className="size-3.5" />
       </Button>
     </Row>
+  );
+}
+
+const MASK_SHAPES: { id: MaskKind; label: string }[] = [
+  { id: "rect", label: "Rectangle" },
+  { id: "circle", label: "Circle" },
+  { id: "linear", label: "Linear" },
+  { id: "mirror", label: "Mirror" },
+  { id: "subject", label: "Subject" },
+];
+
+/** How a panel's mask section reads and writes its owner's mask — the same
+ * section serves overlay elements and video clips through this. */
+interface MaskTarget {
+  /** Timeline window for the keyframe row and playhead-local time. */
+  element: { start: number; end: number };
+  mask?: Mask;
+  /** Replace the mask outright (or remove it), as one undo step. */
+  set: (mask: Mask | undefined) => void;
+  /** Live-drag mask update, no undo entry. */
+  setTransient: (mask: Mask) => void;
+  setKey: (
+    tLocal: number,
+    patch?: Partial<Omit<MaskKey, "t">>,
+    opts?: { transient?: boolean }
+  ) => void;
+  removeKey: (tLocal: number) => void;
+}
+
+/**
+ * A video clip's pose track: the keyframe row plus, once keys exist, the
+ * position/scale/rotation/opacity rows editing the key at the playhead — the
+ * element Transform contract over the clip's anchor. A clip with no keys
+ * rests in its region, so the rows appear with the first key.
+ */
+function ClipTransformSection({ clip }: { clip: VideoClip }) {
+  const clips = useEditor((s) => s.clips);
+  const assets = useEditor((s) => s.assets);
+  const now = useEditor((s) => s.currentTime);
+  const seek = useEditor((s) => s.seek);
+  const posCk = useSliderCheckpoint();
+  const scaleCk = useSliderCheckpoint();
+  const rotationCk = useSliderCheckpoint();
+  const opacityCk = useSliderCheckpoint();
+  const st = () => useEditor.getState();
+  const win = clipWindow(clips, assets, clip.id);
+  if (!win) return null;
+  const el = { start: win.start, end: win.start + win.len };
+  const tLocal = localTimeOf(el, now);
+  const keyed = clipKeyed(clip);
+  const pose = clipPoseAt(clip, tLocal);
+  const setKey = (patch: Partial<Omit<OverlayKey, "t">>) =>
+    st().setClipKey(clip.id, tLocal, patch, { transient: true });
+  return (
+    <Section title="Transform">
+      <KeyRow
+        element={el}
+        now={now}
+        keys={clip.kf ?? []}
+        onAdd={(t) => st().setClipKey(clip.id, t)}
+        onRemove={(t) => st().removeClipKey(clip.id, t)}
+        onSeek={seek}
+      />
+      {keyed && (
+        <>
+          <Row label="Position">
+            {(["x", "y"] as const).map((axis) => (
+              <span key={axis} className="flex items-center gap-1">
+                <span className="text-[11px] text-muted-foreground/70 uppercase">{axis}</span>
+                <ScrubValue
+                  label={`${axis.toUpperCase()} position`}
+                  className="w-9 text-muted-foreground"
+                  value={pose[axis] * 100}
+                  min={-50}
+                  max={150}
+                  step={0.5}
+                  keyStep={1}
+                  format={(v) => String(Math.round(v))}
+                  parse={parseNumberInput}
+                  onScrub={(v) => {
+                    posCk.begin();
+                    setKey({ [axis]: v / 100 });
+                  }}
+                  onCommit={(v) => {
+                    posCk.begin();
+                    setKey({ [axis]: v / 100 });
+                    posCk.end();
+                  }}
+                />
+              </span>
+            ))}
+          </Row>
+          <Row label="Scale">
+            <Slider
+              className="data-horizontal:w-24"
+              min={0.1}
+              max={4}
+              step={0.01}
+              value={pose.scale}
+              onValueChange={(v) => {
+                scaleCk.begin();
+                setKey({ scale: Number(v) });
+              }}
+              onValueCommitted={scaleCk.end}
+            />
+            <Value className="w-9 text-muted-foreground">{Math.round(pose.scale * 100)}%</Value>
+          </Row>
+          <Row label="Rotation">
+            <Slider
+              className="data-horizontal:w-24"
+              min={-180}
+              max={180}
+              step={1}
+              value={pose.rotation}
+              onValueChange={(v) => {
+                rotationCk.begin();
+                setKey({ rotation: Math.round(Number(v)) });
+              }}
+              onValueCommitted={rotationCk.end}
+            />
+            <Value className="w-9 text-muted-foreground">{Math.round(pose.rotation)}°</Value>
+          </Row>
+          <Row label="Opacity">
+            <Slider
+              className="data-horizontal:w-24"
+              min={0}
+              max={1}
+              step={0.01}
+              value={pose.opacity}
+              onValueChange={(v) => {
+                opacityCk.begin();
+                setKey({ opacity: Number(v) });
+              }}
+              onValueCommitted={opacityCk.end}
+            />
+            <Value className="w-9 text-muted-foreground">{Math.round(pose.opacity * 100)}</Value>
+          </Row>
+        </>
+      )}
+    </Section>
+  );
+}
+
+/** The overlay inspector's mask target, over the overlay store actions. */
+function OverlayMaskSection({ overlay: o }: { overlay: Overlay }) {
+  const st = () => useEditor.getState();
+  return (
+    <MaskSection
+      target={{
+        element: o,
+        mask: o.mask,
+        set: (mask) => st().updateOverlay(o.id, { mask }),
+        setTransient: (mask) => st().updateOverlayTransient(o.id, { mask }),
+        setKey: (t, patch, opts) => st().setOverlayMaskKey(o.id, t, patch, opts),
+        removeKey: (t) => st().removeOverlayMaskKey(o.id, t),
+      }}
+    />
+  );
+}
+
+/** The clip inspector's mask target, over the clip store actions. The clip's
+ * timeline window comes through `clipWindow` (track-0 starts derive from the
+ * span layout). */
+function ClipMaskSection({ clip }: { clip: VideoClip }) {
+  const clips = useEditor((s) => s.clips);
+  const assets = useEditor((s) => s.assets);
+  const st = () => useEditor.getState();
+  const win = clipWindow(clips, assets, clip.id);
+  if (!win) return null;
+  return (
+    <MaskSection
+      target={{
+        element: { start: win.start, end: win.start + win.len },
+        mask: clip.mask,
+        set: (mask) => st().updateClip(clip.id, { mask }),
+        setTransient: (mask) => st().updateClipTransient(clip.id, { mask }),
+        setKey: (t, patch, opts) => st().setClipMaskKey(clip.id, t, patch, opts),
+        removeKey: (t) => st().removeClipMaskKey(clip.id, t),
+      }}
+    />
+  );
+}
+
+/**
+ * The mask itself: shape picker, its own keyframe track, and the geometry
+ * rows. With mask keys in play the rows edit the key at the playhead, the
+ * same contract as Transform; otherwise they edit the mask's resting fields.
+ */
+function MaskSection({ target }: { target: MaskTarget }) {
+  const now = useEditor((s) => s.currentTime);
+  const seek = useEditor((s) => s.seek);
+  const posCk = useSliderCheckpoint();
+  const sizeCk = useSliderCheckpoint();
+  const rotationCk = useSliderCheckpoint();
+  const featherCk = useSliderCheckpoint();
+  const radiusCk = useSliderCheckpoint();
+  const m = target.mask;
+  const tLocal = localTimeOf(target.element, now);
+  const geom = m ? maskFrameAt(m, tLocal) : null;
+  const writeGeom = (patch: Partial<Omit<MaskKey, "t">>) => {
+    if (!m) return;
+    if (hasMaskKeys(m)) return target.setKey(tLocal, patch, { transient: true });
+    target.setTransient({ ...m, ...patch });
+  };
+  const showW = m?.kind === "rect" || m?.kind === "circle";
+  const showH = showW || m?.kind === "mirror";
+  const subject = m?.kind === "subject";
+  return (
+    <Section
+      title="Mask"
+      info="Trim the picture to a shape, or to the person in the shot (Subject). Feather softens the edge, and invert keeps what the shape leaves out — an inverted Subject mask sits the picture behind the speaker."
+      enabled={!!m}
+      onEnabledChange={(v) => target.set(v ? { kind: "rect" } : undefined)}
+    >
+      {m && geom && (
+        <>
+          <Row label="Shape">
+            <Select
+              value={m.kind}
+              onValueChange={(kind) => target.set({ ...m, kind: kind as MaskKind })}
+            >
+              <SelectTrigger className="h-8 w-36 text-[12px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MASK_SHAPES.map((s) => (
+                  <SelectItem key={s.id} value={s.id} className="text-[12px]">
+                    {s.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Row>
+          {!subject && (
+            <KeyRow
+              element={target.element}
+              now={now}
+              keys={m.kf ?? []}
+              onAdd={(t) => target.setKey(t)}
+              onRemove={(t) => target.removeKey(t)}
+              onSeek={seek}
+            />
+          )}
+          {!subject && (
+            <Row label="Position">
+              {(["x", "y"] as const).map((axis) => (
+                <span key={axis} className="flex items-center gap-1">
+                  <span className="text-[11px] text-muted-foreground/70 uppercase">{axis}</span>
+                  <ScrubValue
+                    label={`Mask ${axis.toUpperCase()} offset`}
+                    className="w-9 text-muted-foreground"
+                    value={geom[axis] * 100}
+                    min={-100}
+                    max={100}
+                    step={0.5}
+                    keyStep={1}
+                    format={(v) => String(Math.round(v))}
+                    parse={parseNumberInput}
+                    onScrub={(v) => {
+                      posCk.begin();
+                      writeGeom({ [axis]: v / 100 });
+                    }}
+                    onCommit={(v) => {
+                      posCk.begin();
+                      writeGeom({ [axis]: v / 100 });
+                      posCk.end();
+                    }}
+                  />
+                </span>
+              ))}
+            </Row>
+          )}
+          {showH && (
+            <Row label="Size">
+              {(showW ? (["w", "h"] as const) : (["h"] as const)).map((axis) => (
+                <span key={axis} className="flex items-center gap-1">
+                  <span className="text-[11px] text-muted-foreground/70 uppercase">{axis}</span>
+                  <ScrubValue
+                    label={`Mask ${axis === "w" ? "width" : "height"}`}
+                    className="w-9 text-muted-foreground"
+                    value={geom[axis] * 100}
+                    min={1}
+                    max={200}
+                    step={1}
+                    format={(v) => String(Math.round(v))}
+                    parse={parseNumberInput}
+                    onScrub={(v) => {
+                      sizeCk.begin();
+                      writeGeom({ [axis]: v / 100 });
+                    }}
+                    onCommit={(v) => {
+                      sizeCk.begin();
+                      writeGeom({ [axis]: v / 100 });
+                      sizeCk.end();
+                    }}
+                  />
+                </span>
+              ))}
+            </Row>
+          )}
+          {!subject && (
+            <Row label="Rotation">
+              <Slider
+                className="data-horizontal:w-24"
+                min={-180}
+                max={180}
+                step={1}
+                value={geom.rotation}
+                onValueChange={(v) => {
+                  rotationCk.begin();
+                  writeGeom({ rotation: Math.round(Number(v)) });
+                }}
+                onValueCommitted={rotationCk.end}
+              />
+              <Value className="w-9 text-muted-foreground">{Math.round(geom.rotation)}°</Value>
+            </Row>
+          )}
+          <Row label="Feather">
+            <Slider
+              className="data-horizontal:w-24"
+              min={0}
+              max={120}
+              step={1}
+              value={geom.feather}
+              onValueChange={(v) => {
+                featherCk.begin();
+                writeGeom({ feather: Math.round(Number(v)) });
+              }}
+              onValueCommitted={featherCk.end}
+            />
+            <Value className="w-9 text-muted-foreground">{Math.round(geom.feather)}</Value>
+          </Row>
+          {m.kind === "rect" && (
+            <Row label="Radius">
+              <Slider
+                className="data-horizontal:w-24"
+                min={0}
+                max={200}
+                step={1}
+                value={m.radius ?? 0}
+                onValueChange={(v) => {
+                  radiusCk.begin();
+                  const radius = Math.round(Number(v));
+                  target.setTransient({ ...m, radius: radius === 0 ? undefined : radius });
+                }}
+                onValueCommitted={radiusCk.end}
+              />
+              <Value className="w-9 text-muted-foreground">{m.radius ?? 0}</Value>
+            </Row>
+          )}
+          <Row label="Invert">
+            <Switch
+              checked={!!m.invert}
+              onCheckedChange={(v) => target.set({ ...m, invert: v || undefined })}
+              aria-label="Invert mask"
+            />
+          </Row>
+        </>
+      )}
+    </Section>
   );
 }
 
@@ -2110,6 +2504,7 @@ function ShapePanel({ overlay: o }: { overlay: ShapeOverlay }) {
             )}
           </Section>
         )}
+        <OverlayMaskSection overlay={o} />
         <TransformRows overlay={o} />
         <GroupRow overlay={o} />
         <AnimationRows overlay={o} />
@@ -2326,6 +2721,7 @@ function StickerPanel({ overlay: o }: { overlay: StickerOverlay }) {
           />
           <Value className="w-9 text-muted-foreground">{Math.round(o.w * 100)}</Value>
         </Row>
+        <OverlayMaskSection overlay={o} />
         <TransformRows overlay={o} />
         <GroupRow overlay={o} />
         <AnimationRows overlay={o} />

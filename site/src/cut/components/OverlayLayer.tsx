@@ -14,7 +14,7 @@ import {
   subtitleLaneCount,
   trackPos,
 } from "@/cut/lib/subtitles";
-import { evalOverlayFrame, hasOverlayKeys, isOverlayAnimated, lineLikeShape, resolveShadow, shapeMetrics, shapePathD, type LottieHandle } from "@donkeycut/effects-kit";
+import { evalOverlayFrame, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, maskFrameAt, paintMaskCoverage, resolveShadow, shapeMetrics, shapePathD, type LottieHandle, type MaskKey } from "@donkeycut/effects-kit";
 import {
   LINE_HEIGHT,
   PLATE_PAD_X,
@@ -24,6 +24,7 @@ import {
   SHADOW,
 } from "@/cut/lib/textRender";
 import {
+  behindSubjectOverlay,
   clampOverlayPos,
   frameOf,
   fontStack,
@@ -34,6 +35,7 @@ import {
   type ShapeOverlay,
   type StickerOverlay,
 } from "@/cut/lib/types";
+import { subjectMatteSnapshot } from "@/cut/lib/behindPass";
 import { cn } from "@/lib/utils";
 
 // Plate geometry as CSS, kept in lockstep with the export burn-in metrics.
@@ -489,18 +491,27 @@ function OverlayItem({
       : isText
         ? o.text
         : "";
-  // Behind-speaker titles draw inside the canvas compositor; the DOM keeps an
-  // invisible hit target (and the selection chrome) so editing still works.
-  const behindHidden = isText && !!o.behindSubject && !editing;
+  // Behind-the-speaker elements draw inside the canvas compositor; the DOM
+  // keeps an invisible hit target (and the selection chrome) so editing
+  // still works.
+  const behindHidden = behindSubjectOverlay(o) && !editing;
 
-  // Every kind shares position, rotation, and opacity; text carries its type
-  // styles on the same box so the edit caret inherits them.
+  const tLocal = Math.max(0, t - o.start);
+  // The mask clips the content wrapper only, never the box itself — the
+  // selection chrome and the mask's own grips must stay visible outside it.
+  const maskCss = useMaskCss(o, boxRef, stageWidth, stageHeight, scale, tLocal, editing);
+
+  // The box carries position, rotation, and opacity; the content wrapper
+  // inside it carries a title's type styles (the edit caret inherits them)
+  // and the mask.
   const style: CSSProperties = {
     // A keyframed element is placed by its pose, not by its resting x/y.
     left: `${(live?.x ?? o.x) * 100}%`,
     top: `${(live?.y ?? o.y) * 100}%`,
     transform: `translate(-50%, -50%)${animTransform}`,
     opacity: (live ? live.opacity : (o.opacity ?? 1)) * (ghost ? 0.35 : 1),
+  };
+  const contentStyle: CSSProperties = {
     ...(isText
       ? (() => {
           const shadow = resolveShadow(o.shadow);
@@ -526,12 +537,13 @@ function OverlayItem({
               : undefined,
             // A behind-speaker title paints on the canvas; the DOM box keeps
             // its footprint but no visible plate.
-            background: o.plate && !(o.behindSubject && !editing) ? plateFill(o) : undefined,
+            background: o.plate && !behindHidden ? plateFill(o) : undefined,
             padding: o.plate ? PLATE_PADDING : undefined,
             borderRadius: o.plate ? `${o.plateRadius ?? PLATE_RADIUS}em` : undefined,
           };
         })()
       : {}),
+    ...(maskCss ?? {}),
   };
 
   const commitText = () => {
@@ -741,34 +753,36 @@ function OverlayItem({
       }}
       onDoubleClick={isText ? () => setEditing(true) : undefined}
     >
-      {behindHidden ? (
-        <span className="opacity-0">{shownText}</span>
-      ) : isText ? (
-        editing ? (
-          <div
-            ref={editRef}
-            className="min-w-2 outline-none select-text"
-            contentEditable
-            suppressContentEditableWarning
-            onBlur={commitText}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                e.preventDefault();
-                commitText();
-              }
-              e.stopPropagation();
-            }}
-          >
-            {o.text}
-          </div>
-        ) : (
-          <span>{shownText}</span>
-        )
-      ) : o.kind === "shape" ? (
-        <ShapeView shape={o} stageWidth={stageWidth} stageHeight={stageHeight} scale={scale} />
-      ) : o.kind === "sticker" ? (
-        <StickerView sticker={o} stageWidth={stageWidth} t={t} />
-      ) : null}
+      <div style={contentStyle}>
+        {behindHidden ? (
+          <span className="opacity-0">{shownText}</span>
+        ) : isText ? (
+          editing ? (
+            <div
+              ref={editRef}
+              className="min-w-2 outline-none select-text"
+              contentEditable
+              suppressContentEditableWarning
+              onBlur={commitText}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  commitText();
+                }
+                e.stopPropagation();
+              }}
+            >
+              {o.text}
+            </div>
+          ) : (
+            <span>{shownText}</span>
+          )
+        ) : o.kind === "shape" ? (
+          <ShapeView shape={o} stageWidth={stageWidth} stageHeight={stageHeight} scale={scale} />
+        ) : o.kind === "sticker" ? (
+          <StickerView sticker={o} stageWidth={stageWidth} t={t} />
+        ) : null}
+      </div>
       {selected && !editing && (
         <>
           {/* The grab zone is wider than the dot, so the rotate cursor shows
@@ -789,9 +803,269 @@ function OverlayItem({
             className="overlay-resize absolute -right-2 -bottom-2 size-[13px] cursor-nwse-resize rounded-full border-[2.5px] border-[#0a84ff] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.4)]"
             onPointerDown={resizeFrom}
           />
+          {o.mask && o.mask.kind !== "subject" && (
+            <MaskGizmo
+              overlay={o}
+              stageWidth={stageWidth}
+              stageHeight={stageHeight}
+              tLocal={tLocal}
+              rotation={live?.rotation ?? o.rotation ?? 0}
+              poseScale={live?.scale ?? 1}
+            />
+          )}
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * The element's mask as CSS: the kit painter draws its coverage on a small
+ * box-sized canvas, and the data URL becomes the content's mask-image. The
+ * mask lives in the element's own space — the box's CSS transform carries it
+ * through pose, rotation and scale — so it clips exactly where the exported
+ * raster clips. Regenerated when the geometry, the box, or (keyed) the
+ * playhead moves; disabled while the text is being edited.
+ */
+/** A keyed mask's CSS repaints on the matte cadence — enough for a soft
+ * moving edge, a quarter of the per-frame PNG encodes. */
+const MASK_CSS_FPS = 15;
+/** The mask canvas's size cap; the CSS mask stretches it over the box, so a
+ * big element pays a small encode. */
+const MASK_CSS_MAX = 512;
+/** Empty coverage: hides the element while a computed matte has no person. */
+const NO_COVERAGE_MASK = "linear-gradient(transparent, transparent)";
+
+function useMaskCss(
+  o: Overlay,
+  boxRef: React.RefObject<HTMLDivElement | null>,
+  stageWidth: number,
+  stageHeight: number,
+  scale: number,
+  tLocal: number,
+  disabled: boolean
+): CSSProperties | undefined {
+  const m = o.mask;
+  // A behind (inverted subject) element renders in the canvas pass; the DOM
+  // masks shapes and front subject elements.
+  const subjectFront = !!m && m.kind === "subject" && !m.invert;
+  const active = !!m && (m.kind !== "subject" || subjectFront) && !disabled;
+  const keyed = !!m && hasMaskKeys(m);
+  // The published matte refreshes at the segmentation cadence; its stamp is
+  // the memo key, so the CSS mask follows the person as the video plays.
+  const snap = subjectFront && active ? subjectMatteSnapshot() : null;
+  // The repaint keys: a keyed mask ticks at the matte cadence, and the
+  // subject branch follows the published matte's stamp.
+  const keyTick = keyed ? Math.round(tLocal * MASK_CSS_FPS) : 0;
+  const snapTick = subjectFront ? (snap?.at ?? -1) : 0;
+  // One canvas per element, reused across repaints.
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [box, setBox] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    const el = boxRef.current;
+    if (!el) return;
+    const measure = () => setBox({ w: el.offsetWidth, h: el.offsetHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [active, boxRef]);
+  return useMemo(() => {
+    if (!active || !m || !box || box.w < 1 || box.h < 1) return undefined;
+    const canvas = (canvasRef.current ??= document.createElement("canvas"));
+    if (subjectFront) {
+      // Trim to the person: the published matte becomes the element's
+      // mask-image, positioned so it stays anchored to the frame while the
+      // element sits inside it. A computed matte with no person is empty
+      // coverage (the element hides, like every renderer); before the first
+      // matte lands the element stays whole.
+      if (!snap) return undefined;
+      if (!snap.canvas) {
+        return {
+          maskImage: NO_COVERAGE_MASK,
+          WebkitMaskImage: NO_COVERAGE_MASK,
+        };
+      }
+      if (canvas.width !== snap.canvas.width) canvas.width = snap.canvas.width;
+      if (canvas.height !== snap.canvas.height) canvas.height = snap.canvas.height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return undefined;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const featherMatte =
+        (m.feather ?? 0) * scale * (snap.canvas.width / Math.max(1, stageWidth));
+      if (featherMatte > 0 && "filter" in ctx) ctx.filter = `blur(${featherMatte / 2}px)`;
+      ctx.drawImage(snap.canvas, 0, 0);
+      ctx.filter = "none";
+      const url = canvas.toDataURL();
+      const boxLeft = o.x * stageWidth - box.w / 2;
+      const boxTop = o.y * stageHeight - box.h / 2;
+      return {
+        maskImage: `url(${url})`,
+        WebkitMaskImage: `url(${url})`,
+        maskRepeat: "no-repeat",
+        WebkitMaskRepeat: "no-repeat",
+        maskSize: `${stageWidth}px ${stageHeight}px`,
+        WebkitMaskSize: `${stageWidth}px ${stageHeight}px`,
+        maskPosition: `${-boxLeft}px ${-boxTop}px`,
+        WebkitMaskPosition: `${-boxLeft}px ${-boxTop}px`,
+      };
+    }
+    // The canvas caps below the box size and the CSS mask stretches it back:
+    // the soft coverage survives the scale and the PNG encode stays small.
+    const s = Math.min(1, MASK_CSS_MAX / Math.max(box.w, box.h));
+    const cw = Math.max(1, Math.round(box.w * s));
+    const ch = Math.max(1, Math.round(box.h * s));
+    if (canvas.width !== cw) canvas.width = cw;
+    if (canvas.height !== ch) canvas.height = ch;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return undefined;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.clearRect(0, 0, cw, ch);
+    if (m.invert) {
+      // Keep-outside: full coverage with the shape cut out of it, because a
+      // CSS mask has no invert of its own.
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, cw, ch);
+      ctx.globalCompositeOperation = "destination-out";
+    }
+    // Map frame coordinates onto the box: the element's anchor sits at the
+    // box center, which is where the painter anchors the mask.
+    ctx.scale(s, s);
+    ctx.translate(box.w / 2 - o.x * stageWidth, box.h / 2 - o.y * stageHeight);
+    paintMaskCoverage(
+      ctx,
+      { ...m, invert: undefined },
+      tLocal,
+      { width: stageWidth, height: stageHeight, scale },
+      { x: o.x, y: o.y }
+    );
+    const url = canvas.toDataURL();
+    return {
+      maskImage: `url(${url})`,
+      WebkitMaskImage: `url(${url})`,
+      maskRepeat: "no-repeat",
+      WebkitMaskRepeat: "no-repeat",
+      maskSize: "100% 100%",
+      WebkitMaskSize: "100% 100%",
+    };
+    // The keyed tick folds a 15fps-quantized tLocal in only when the mask
+    // actually animates; the matte stamp refreshes the subject branch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, m, box, o.x, o.y, stageWidth, stageHeight, scale, keyTick, snapTick]);
+}
+
+/** Handle styling shared by the mask gizmo's grips: amber, so mask handles
+ * never read as the element's own blue chrome. */
+const MASK_GRIP =
+  "absolute z-10 rounded-full border-[2.5px] border-[#ff9f0a] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.4)]";
+
+/**
+ * On-canvas mask editing: a center grip that moves the mask and a corner grip
+ * that resizes it (the band height, for mirror). The grips are children of
+ * the element box, so they ride its transform; screen deltas are folded back
+ * through the element's live rotation and scale, then through the mask's own
+ * angle for the resize. With mask keys in play a drag writes the key at the
+ * playhead, the same contract as dragging a keyframed element.
+ */
+function MaskGizmo({
+  overlay: o,
+  stageWidth,
+  stageHeight,
+  tLocal,
+  rotation,
+  poseScale,
+}: {
+  overlay: Overlay;
+  stageWidth: number;
+  stageHeight: number;
+  tLocal: number;
+  rotation: number;
+  poseScale: number;
+}) {
+  const m = o.mask!;
+  const f = maskFrameAt(m, tLocal);
+  const st = () => useEditor.getState();
+  const writeGeom = (patch: Partial<Omit<MaskKey, "t">>) => {
+    const cur = st().overlays.find((x) => x.id === o.id)?.mask;
+    if (!cur) return;
+    if (hasMaskKeys(cur)) return st().setOverlayMaskKey(o.id, tLocal, patch, { transient: true });
+    st().updateOverlayTransient(o.id, { mask: { ...cur, ...patch } });
+  };
+  // Screen deltas → the box's local space (undo the element transform).
+  const toLocal = (dx: number, dy: number) => {
+    const r = (-rotation * Math.PI) / 180;
+    const s = poseScale || 1;
+    return {
+      x: (dx * Math.cos(r) - dy * Math.sin(r)) / s,
+      y: (dx * Math.sin(r) + dy * Math.cos(r)) / s,
+    };
+  };
+  const theta = (f.rotation * Math.PI) / 180;
+  const sizable = m.kind === "rect" || m.kind === "circle" || m.kind === "mirror";
+  // The resize grip sits on the mask's corner (mirror: its lower edge),
+  // turned by the mask's own angle.
+  const gx = m.kind === "mirror" ? 0 : (f.w * stageWidth) / 2;
+  const gy = (f.h * stageHeight) / 2;
+  const rx = gx * Math.cos(theta) - gy * Math.sin(theta);
+  const ry = gx * Math.sin(theta) + gy * Math.cos(theta);
+  const clampSize = (v: number) => Math.min(2, Math.max(0.01, v));
+  return (
+    <>
+      <span
+        title="Drag to move the mask"
+        className={cn(MASK_GRIP, "size-[13px] cursor-move")}
+        style={{
+          left: `calc(50% + ${f.x * stageWidth}px)`,
+          top: `calc(50% + ${f.y * stageHeight}px)`,
+          transform: "translate(-50%, -50%)",
+        }}
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          st().pushHistory();
+          const g0 = f;
+          startDrag(e, {
+            onMove: (dx, dy) => {
+              const l = toLocal(dx, dy);
+              writeGeom({ x: g0.x + l.x / stageWidth, y: g0.y + l.y / stageHeight });
+            },
+          });
+        }}
+      />
+      {sizable && (
+        <span
+          title="Drag to resize the mask"
+          className={cn(MASK_GRIP, "size-[11px] cursor-nwse-resize rounded-[3px]")}
+          style={{
+            left: `calc(50% + ${f.x * stageWidth + rx}px)`,
+            top: `calc(50% + ${f.y * stageHeight + ry}px)`,
+            transform: "translate(-50%, -50%)",
+          }}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            st().pushHistory();
+            const g0 = f;
+            startDrag(e, {
+              onMove: (dx, dy) => {
+                const l = toLocal(dx, dy);
+                // Into the mask's own axes for width/height growth.
+                const mx = l.x * Math.cos(theta) + l.y * Math.sin(theta);
+                const my = -l.x * Math.sin(theta) + l.y * Math.cos(theta);
+                writeGeom({
+                  ...(m.kind !== "mirror"
+                    ? { w: clampSize(g0.w + (2 * mx) / stageWidth) }
+                    : {}),
+                  h: clampSize(g0.h + (2 * my) / stageHeight),
+                });
+              },
+            });
+          }}
+        />
+      )}
+    </>
   );
 }
 

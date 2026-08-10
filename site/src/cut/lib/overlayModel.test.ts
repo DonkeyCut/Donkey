@@ -7,8 +7,12 @@ import {
   type OverlayAnim,
 } from "@donkeycut/effects-kit";
 import {
+  behindSubjectOverlay,
+  frontSubjectOverlay,
+  migrateBehindSubject,
   stampOverlayKinds,
   stripDefaultOverlayKinds,
+  subjectMasked,
   type Overlay,
   type ShapeOverlay,
   type TextOverlay,
@@ -71,6 +75,33 @@ describe("overlay kind stamping", () => {
   test("stamping already-stamped elements changes nothing", () => {
     const stamped = stampOverlayKinds([legacyTitle()]);
     expect(stampOverlayKinds(stamped)).toEqual(stamped);
+  });
+});
+
+describe("behind-speaker migration", () => {
+  test("the stored boolean loads as an inverted subject mask", () => {
+    const behind = { ...legacyTitle(), behindSubject: true } as TextOverlay;
+    const [migrated] = migrateBehindSubject(stampOverlayKinds([behind]));
+    expect(migrated.mask).toEqual({ kind: "subject", invert: true });
+    expect("behindSubject" in migrated).toBe(false);
+    expect(behindSubjectOverlay(migrated)).toBe(true);
+    expect(subjectMasked(migrated)).toBe(true);
+    expect(frontSubjectOverlay(migrated)).toBe(false);
+    // The predicates read the mask alone — the migration is the one door in.
+    expect(behindSubjectOverlay(stampOverlayKinds([behind])[0])).toBe(false);
+  });
+
+  test("nothing to migrate returns the same array identity", () => {
+    const overlays = stampOverlayKinds([legacyTitle()]);
+    expect(migrateBehindSubject(overlays)).toBe(overlays);
+  });
+
+  test("a plain subject mask is front, an inverted one behind", () => {
+    const front: Overlay = { ...legacyTitle(), kind: "text", mask: { kind: "subject" } };
+    const shape: Overlay = { ...legacyTitle(), kind: "text", mask: { kind: "rect" } };
+    expect(frontSubjectOverlay(front)).toBe(true);
+    expect(behindSubjectOverlay(front)).toBe(false);
+    expect(subjectMasked(shape)).toBe(false);
   });
 });
 

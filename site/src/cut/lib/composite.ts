@@ -19,8 +19,8 @@
  * it was reached by playing there or by rendering the 135th frame.
  */
 
-import { gradeTint, gradeToCssFilter, grainTile, isNeutralGrade, lookCssFilter, lookPost } from "@donkeycut/effects-kit";
-import { isFullRect, rectOf } from "./types";
+import { applyMaskToCanvas, gradeTint, gradeToCssFilter, grainTile, isNeutralGrade, lookCssFilter, lookPost, maskComposite } from "@donkeycut/effects-kit";
+import { clipKeyed, clipPoseAt, isFullRect, rectOf } from "./types";
 import type { FrameRect, TransitionStyle, VideoClip } from "./types";
 
 /** A clip's picture at some instant, or the reasons there isn't one.
@@ -72,6 +72,22 @@ export class FrameCompositor {
   private gradeCanvas: Surface | null = null;
   private lookScratch: Surface | null = null;
   private vignetteCanvas: Surface | null = null;
+  /** The masked/keyframed-layer pass: the layer draws into `layerScratch`,
+   * its mask's coverage paints into `maskScratch`, a keyframed pose blits
+   * through `poseScratch`, and the result composites back onto the frame. */
+  private layerScratch: Surface | null = null;
+  private maskScratch: Surface | null = null;
+  private poseScratch: Surface | null = null;
+
+  /** Where a subject-masked clip's person matte comes from: the host hands a
+   * reader over the canvas as it stands (the layers beneath the clip), so
+   * the matte never includes the masked clip's own pixels. A computed frame
+   * with `alpha: null` means no person registered — empty coverage. Provider
+   * absent, or a null frame = subject masks draw the plain picture (no
+   * segmenter, or the matte pass that must not recurse). */
+  subjectMatteProvider:
+    | ((at: number) => { alpha: CanvasImageSource | null } | null)
+    | null = null;
 
   constructor(private canvas: Surface) {}
 
@@ -96,7 +112,13 @@ export class FrameCompositor {
    * whether it had to be resized — which also cleared it, since setting a
    * canvas dimension wipes its contents. */
   private scratch(
-    field: "gradeCanvas" | "lookScratch" | "vignetteCanvas",
+    field:
+      | "gradeCanvas"
+      | "lookScratch"
+      | "vignetteCanvas"
+      | "layerScratch"
+      | "maskScratch"
+      | "poseScratch",
     w: number,
     h: number
   ): { surface: Surface; resized: boolean } {
@@ -308,6 +330,112 @@ export class FrameCompositor {
     ctx.globalCompositeOperation = "source-over";
   }
 
+  /** Whether the layer routes through the mask/pose pass at all. */
+  private needsFx(clip?: VideoClip): boolean {
+    return (
+      !!clip &&
+      (clipKeyed(clip) ||
+        !!(clip.mask && (clip.mask.kind !== "subject" || this.subjectMatteProvider)))
+    );
+  }
+
+  /**
+   * Draw one masked or keyframed layer by re-entering `draw` against a
+   * transparent scratch (with the clip's mask and keys stripped so the inner
+   * call draws plainly), then compose in order: the geometry mask trims the
+   * layer in its own space (it rides the clip), the pose blits the result
+   * where the keys put it, and the person matte — anchored to the frame, so
+   * the person never travels with the clip — trims last. The mask and pose
+   * evaluate on the clip's own clock.
+   */
+  private drawFx(
+    clip: VideoClip,
+    at: number,
+    fx: LayerFx | undefined,
+    draw: (plain: VideoClip) => void
+  ) {
+    const ctx = this.ctx();
+    if (!ctx) return;
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    const tLocal = Math.max(0, at - clip.start);
+    const pose = clipKeyed(clip) ? clipPoseAt(clip, tLocal) : null;
+    if (pose && pose.opacity <= 0.001) return;
+    const mask = clip.mask;
+    const { surface: layer } = this.scratch("layerScratch", W, H);
+    const lctx = layer.getContext("2d") as Ctx | null;
+    if (!lctx) return;
+    lctx.clearRect(0, 0, W, H);
+    const prev = this.canvas;
+    this.canvas = layer;
+    try {
+      draw({ ...clip, mask: undefined, kf: undefined });
+    } finally {
+      this.canvas = prev;
+    }
+    const rect = rectOf(clip);
+    const { surface: cover } = this.scratch("maskScratch", W, H);
+    if (mask && mask.kind !== "subject") {
+      applyMaskToCanvas(
+        lctx,
+        cover,
+        mask,
+        tLocal,
+        { width: W, height: H, scale: Math.min(W, H) / 1080 },
+        { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 }
+      );
+    }
+    let out: Surface = layer;
+    let octx = lctx;
+    if (pose) {
+      const { surface: posed } = this.scratch("poseScratch", W, H);
+      const pctx = posed.getContext("2d") as Ctx | null;
+      if (!pctx) return;
+      pctx.setTransform(1, 0, 0, 1, 0, 0);
+      pctx.clearRect(0, 0, W, H);
+      pctx.save();
+      pctx.globalAlpha = Math.max(0, Math.min(1, pose.opacity));
+      pctx.translate(pose.x * W, pose.y * H);
+      pctx.rotate((pose.rotation * Math.PI) / 180);
+      pctx.scale(pose.scale, pose.scale);
+      pctx.translate(-(rect.x + rect.w / 2) * W, -(rect.y + rect.h / 2) * H);
+      pctx.drawImage(layer, 0, 0);
+      pctx.restore();
+      out = posed;
+      octx = pctx;
+    }
+    if (mask?.kind === "subject") {
+      // The person matte is the coverage: blur its edge by the feather and
+      // multiply it in (or out, inverted), after the pose so the person
+      // stays anchored to the frame. A computed frame with no person means
+      // empty coverage — a front-masked layer shows nothing (the export's
+      // black matte frames land the same way) and a behind-masked one shows
+      // whole.
+      const res = this.subjectMatteProvider?.(at) ?? null;
+      if (res && !res.alpha) {
+        if (!mask.invert) return;
+      } else if (res?.alpha) {
+        const cctx = cover.getContext("2d") as Ctx;
+        cctx.clearRect(0, 0, W, H);
+        const feather = (mask.feather ?? 0) * (Math.min(W, H) / 1080);
+        if (feather > 0 && "filter" in cctx) cctx.filter = `blur(${feather / 2}px)`;
+        cctx.imageSmoothingEnabled = true;
+        cctx.drawImage(res.alpha, 0, 0, W, H);
+        cctx.filter = "none";
+        maskComposite(octx, cover as CanvasImageSource, mask.invert);
+      }
+    }
+    // Transition motion lands on the finished result, so a push carries the
+    // mask and pose along — the export translates the segment the same way.
+    const hasFx = !!fx && (!!fx.dx || !!fx.dy);
+    if (hasFx) {
+      ctx.save();
+      ctx.translate(Math.round(fx.dx ?? 0), Math.round(fx.dy ?? 0));
+    }
+    ctx.drawImage(out, 0, 0);
+    if (hasFx) ctx.restore();
+  }
+
   /** Draw a frame into a sub-rectangle of the canvas (a split-screen half, an
    * overlay's region), fitted or filled. */
   drawIntoRect(
@@ -320,6 +448,12 @@ export class FrameCompositor {
     clip?: VideoClip
   ) {
     if (frame.kind !== "ready") return;
+    if (this.needsFx(clip)) {
+      this.drawFx(clip!, at, undefined, (plain) =>
+        this.drawIntoRect(frame, rect, fill, alpha, at, zoom, plain)
+      );
+      return;
+    }
     const ctx = this.ctx();
     if (!ctx) return;
     const W = this.canvas.width;
@@ -386,6 +520,15 @@ export class FrameCompositor {
     // instead of strobing black (matters while skimming).
     if (frame.kind === "pending") return;
     blank();
+    if (this.needsFx(clip)) {
+      // The blank above already settled who owns the black; the layer itself
+      // draws through the mask/pose pass, and any transition motion lands on
+      // the finished result.
+      this.drawFx(clip!, at, fx, (plain) =>
+        this.drawLayer(frame, plain, false, alpha, at, zoom, undefined)
+      );
+      return;
+    }
 
     const hasFx = !!fx && (!!fx.dx || !!fx.dy);
     if (hasFx) {

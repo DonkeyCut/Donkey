@@ -5,9 +5,11 @@ import {
   KEY_EPSILON,
   keyAt,
   lineLikeShape,
+  maskKeyAt,
   removeKeyAt,
   upsertKey,
   type EffectId,
+  type MaskKey,
   type OverlayKey,
 } from "@donkeycut/effects-kit";
 import { create } from "zustand";
@@ -55,7 +57,7 @@ import { alignCues } from "./cueAlign";
 import { useGenNotify } from "./genNotify";
 import { engineTranscribeSamples } from "./localStt";
 import { trackLocale } from "./subtitles";
-import { ANIM_STYLE_IDS, animStyleOfTransition, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionStyleOfAnim } from "./types";
+import { ANIM_STYLE_IDS, animStyleOfTransition, clipPoseAt, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionStyleOfAnim } from "./types";
 import { readTextStyle } from "./textStyle";
 import { loadUiState, saveUiState, type ProjectUiState } from "./uiState";
 import { captureTimelineFrames } from "./visualFrames";
@@ -165,11 +167,11 @@ export interface EditorState {
   /** Everything selected, including `selection` (the primary that drives the
    * inspector). Bulk actions — delete, copy — act on this whole set. */
   multiSelection: Selection[];
-  /** The keyframe picked on an element's timeline bar, if any. It rides
-   * alongside the element selection rather than inside it: an element is still
-   * what the inspector edits, but Delete takes the key. Any other selection
-   * clears it. */
-  selectedKey: { overlayId: string; t: number } | null;
+  /** The keyframe picked on a timeline bar — an element's or a video
+   * clip's — if any. It rides alongside the item selection: the item is
+   * still what the inspector edits, but Delete takes the key. Any other
+   * selection clears it. */
+  selectedKey: { kind: "overlay" | "clip"; id: string; t: number } | null;
   currentTime: number;
   playing: boolean;
   /** While playing a scoped effect preview, the time playback auto-pauses at;
@@ -346,6 +348,40 @@ export interface EditorState {
     opts?: { transient?: boolean }
   ) => void;
   clearOverlayKeys: (id: string) => void;
+  /** Mask keyframes, the mask's own track beside the pose track. Same rules:
+   * adding a key captures the mask's live geometry, `patch` edits it in
+   * place, and a key already sitting at `tLocal` is replaced. */
+  setOverlayMaskKey: (
+    id: string,
+    tLocal: number,
+    patch?: Partial<Omit<MaskKey, "t">>,
+    opts?: { transient?: boolean }
+  ) => void;
+  removeOverlayMaskKey: (id: string, tLocal: number) => void;
+  clearOverlayMaskKeys: (id: string) => void;
+  /** The same mask-key track on a video clip; `tLocal` is seconds from the
+   * clip's timeline start. */
+  setClipMaskKey: (
+    id: string,
+    tLocal: number,
+    patch?: Partial<Omit<MaskKey, "t">>,
+    opts?: { transient?: boolean }
+  ) => void;
+  removeClipMaskKey: (id: string, tLocal: number) => void;
+  clearClipMaskKeys: (id: string) => void;
+  /** The pose-key track on a video clip, the overlay contract over the
+   * clip's anchor: adding a key captures the clip's pose at that moment,
+   * `patch` edits it in place, and a key already at `tLocal` is replaced. */
+  setClipKey: (
+    id: string,
+    tLocal: number,
+    patch?: Partial<Omit<OverlayKey, "t">>,
+    opts?: { transient?: boolean }
+  ) => void;
+  removeClipKey: (id: string, tLocal: number) => void;
+  selectClipKey: (id: string, tLocal: number) => void;
+  moveClipKey: (id: string, fromT: number, toT: number, opts?: { transient?: boolean }) => void;
+  clearClipKeys: (id: string) => void;
   /** Patch several items in one commit — the lane coordinator's gestures part
    * and push whole lanes at a time (one bulk patcher per lane-track kind). */
   updateOverlaysTransient: (patches: { id: string; patch: OverlayPatch }[]) => void;
@@ -1211,7 +1247,11 @@ export const useEditor = create<EditorState>((baseSet, get) => {
         // saved onto a shared row move to one of their own, and a clip graded
         // back when a look was a clip property gets that grade as an element
         // over it — so a project made before either rule reads like a new one.
-        const stamped = normalizeElementLanes(stampOverlayKinds(doc.overlays ?? []));
+        // The behind-speaker boolean becomes an inverted subject mask on load,
+        // so one mask model covers it everywhere in memory and on save.
+        const stamped = normalizeElementLanes(
+          migrateBehindSubject(stampOverlayKinds(doc.overlays ?? []))
+        );
         const subtitles = doc.subtitles ?? emptySubtitles();
         // Docs saved when edge transition styles existed convert them into the
         // equivalent clip animations, and docs saved when a transition was a
@@ -2108,7 +2148,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       if (kf.length === o.kf.length) return;
       push();
       // The last key going means the element holds its own resting pose
-      // again, so the track leaves rather than lingering empty.
+      // again, so the track leaves with it.
       get().updateOverlayTransient(id, { kf: kf.length ? kf : undefined });
     },
 
@@ -2116,7 +2156,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       const o = get().overlays.find((x) => x.id === id);
       if (!o) return;
       get().select({ kind: "overlay", id });
-      set({ selectedKey: { overlayId: id, t: tLocal } });
+      set({ selectedKey: { kind: "overlay", id, t: tLocal } });
     },
 
     moveOverlayKey: (id, fromT, toT, opts) => {
@@ -2131,8 +2171,13 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       });
       // The pick follows the key it is on, so dragging never drops it.
       const picked = get().selectedKey;
-      if (picked && picked.overlayId === id && Math.abs(picked.t - fromT) <= KEY_EPSILON) {
-        set({ selectedKey: { overlayId: id, t } });
+      if (
+        picked &&
+        picked.kind === "overlay" &&
+        picked.id === id &&
+        Math.abs(picked.t - fromT) <= KEY_EPSILON
+      ) {
+        set({ selectedKey: { kind: "overlay", id, t } });
       }
     },
 
@@ -2141,6 +2186,120 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       if (!o?.kf?.length) return;
       push();
       get().updateOverlayTransient(id, { kf: undefined });
+    },
+
+    setOverlayMaskKey: (id, tLocal, patch, opts) => {
+      const o = get().overlays.find((x) => x.id === id);
+      if (!o?.mask) return;
+      const t = Math.max(0, Math.min(tLocal, Math.max(0.1, o.end - o.start)));
+      const existing = o.mask.kf?.find((k) => Math.abs(k.t - t) <= KEY_EPSILON);
+      // A brand-new key holds the geometry the mask already had at `t`, so
+      // adding one changes nothing until something edits it.
+      const next = { ...(existing ?? maskKeyAt(o.mask, t)), ...patch, t };
+      if (!opts?.transient) push();
+      get().updateOverlayTransient(id, { mask: { ...o.mask, kf: upsertKey(o.mask.kf, next) } });
+    },
+
+    removeOverlayMaskKey: (id, tLocal) => {
+      const o = get().overlays.find((x) => x.id === id);
+      if (!o?.mask?.kf?.length) return;
+      const kf = removeKeyAt(o.mask.kf, tLocal);
+      if (kf.length === o.mask.kf.length) return;
+      push();
+      // The last key going means the mask holds its own resting geometry
+      // again, so the track leaves with it.
+      get().updateOverlayTransient(id, { mask: { ...o.mask, kf: kf.length ? kf : undefined } });
+    },
+
+    clearOverlayMaskKeys: (id) => {
+      const o = get().overlays.find((x) => x.id === id);
+      if (!o?.mask?.kf?.length) return;
+      push();
+      get().updateOverlayTransient(id, { mask: { ...o.mask, kf: undefined } });
+    },
+
+    setClipMaskKey: (id, tLocal, patch, opts) => {
+      const c = get().clips.find((x) => x.id === id);
+      if (!c?.mask) return;
+      const len = Math.max(0.1, (c.out - c.in) / clipSpeed(c));
+      const t = Math.max(0, Math.min(tLocal, len));
+      const existing = c.mask.kf?.find((k) => Math.abs(k.t - t) <= KEY_EPSILON);
+      const next = { ...(existing ?? maskKeyAt(c.mask, t)), ...patch, t };
+      if (!opts?.transient) push();
+      get().updateClipTransient(id, { mask: { ...c.mask, kf: upsertKey(c.mask.kf, next) } });
+    },
+
+    removeClipMaskKey: (id, tLocal) => {
+      const c = get().clips.find((x) => x.id === id);
+      if (!c?.mask?.kf?.length) return;
+      const kf = removeKeyAt(c.mask.kf, tLocal);
+      if (kf.length === c.mask.kf.length) return;
+      push();
+      get().updateClipTransient(id, { mask: { ...c.mask, kf: kf.length ? kf : undefined } });
+    },
+
+    clearClipMaskKeys: (id) => {
+      const c = get().clips.find((x) => x.id === id);
+      if (!c?.mask?.kf?.length) return;
+      push();
+      get().updateClipTransient(id, { mask: { ...c.mask, kf: undefined } });
+    },
+
+    setClipKey: (id, tLocal, patch, opts) => {
+      const c = get().clips.find((x) => x.id === id);
+      if (!c) return;
+      const t = Math.max(0, Math.min(tLocal, clipLen(c)));
+      const existing = c.kf?.find((k) => Math.abs(k.t - t) <= KEY_EPSILON);
+      // A brand-new key holds the pose the clip already had at `t`, so
+      // adding one changes nothing until something edits it.
+      const next = { ...(existing ?? { t, ...clipPoseAt(c, t) }), ...patch, t };
+      if (!opts?.transient) push();
+      get().updateClipTransient(id, { kf: upsertKey(c.kf, next) });
+    },
+
+    removeClipKey: (id, tLocal) => {
+      const c = get().clips.find((x) => x.id === id);
+      if (!c?.kf?.length) return;
+      const kf = removeKeyAt(c.kf, tLocal);
+      if (kf.length === c.kf.length) return;
+      push();
+      // The last key going means the clip rests in its region again, so the
+      // track leaves with it.
+      get().updateClipTransient(id, { kf: kf.length ? kf : undefined });
+    },
+
+    selectClipKey: (id, tLocal) => {
+      const c = get().clips.find((x) => x.id === id);
+      if (!c) return;
+      get().select({ kind: "clip", id });
+      set({ selectedKey: { kind: "clip", id, t: tLocal } });
+    },
+
+    moveClipKey: (id, fromT, toT, opts) => {
+      const c = get().clips.find((x) => x.id === id);
+      if (!c?.kf?.length) return;
+      const key = c.kf.find((k) => Math.abs(k.t - fromT) <= KEY_EPSILON);
+      if (!key) return;
+      const t = Math.max(0, Math.min(toT, clipLen(c)));
+      if (!opts?.transient) push();
+      get().updateClipTransient(id, { kf: upsertKey(removeKeyAt(c.kf, fromT), { ...key, t }) });
+      // The pick follows the key it is on, so dragging never drops it.
+      const picked = get().selectedKey;
+      if (
+        picked &&
+        picked.kind === "clip" &&
+        picked.id === id &&
+        Math.abs(picked.t - fromT) <= KEY_EPSILON
+      ) {
+        set({ selectedKey: { kind: "clip", id, t } });
+      }
+    },
+
+    clearClipKeys: (id) => {
+      const c = get().clips.find((x) => x.id === id);
+      if (!c?.kf?.length) return;
+      push();
+      get().updateClipTransient(id, { kf: undefined });
     },
 
     updateOverlayTransient: (id, patch) =>
@@ -2487,13 +2646,17 @@ export const useEditor = create<EditorState>((baseSet, get) => {
     deleteSelection: () => {
       const st = get();
       // A picked keyframe is the smaller thing under the cursor: Delete takes
-      // the key and leaves the element it belongs to alone.
+      // the key and leaves the item it belongs to alone.
       const key = st.selectedKey;
       if (key) {
         set({ selectedKey: null });
-        const o = st.overlays.find((x) => x.id === key.overlayId);
-        if (o?.kf?.some((k) => Math.abs(k.t - key.t) <= KEY_EPSILON)) {
-          st.removeOverlayKey(key.overlayId, key.t);
+        const item =
+          key.kind === "overlay"
+            ? st.overlays.find((x) => x.id === key.id)
+            : st.clips.find((x) => x.id === key.id);
+        if (item?.kf?.some((k) => Math.abs(k.t - key.t) <= KEY_EPSILON)) {
+          if (key.kind === "overlay") st.removeOverlayKey(key.id, key.t);
+          else st.removeClipKey(key.id, key.t);
           return;
         }
       }
@@ -2830,12 +2993,13 @@ export const useEditor = create<EditorState>((baseSet, get) => {
           ...(a.duck !== undefined && a.duck < 1 ? { duck: a.duck } : {}),
           ...(a.lane ? { lane: a.lane } : {}),
         }));
-      // Templates saved before the union carry bare titles — same stamp as
-      // the doc loader, so every in-memory element has its discriminant.
-      // Groups are remapped per application, so adding the same template
-      // twice gives two independent groups instead of one welded set.
+      // Templates saved before the union carry bare titles — same stamp and
+      // behind-speaker migration as the doc loader, so every in-memory
+      // element has its discriminant and one mask model. Groups are remapped
+      // per application, so adding the same template twice gives two
+      // independent groups.
       const regroup = groupRemap(uid);
-      const newTexts: Overlay[] = stampOverlayKinds(template.texts).map((o) => ({
+      const newTexts: Overlay[] = migrateBehindSubject(stampOverlayKinds(template.texts)).map((o) => ({
         ...o,
         id: uid(),
         start: o.start + shift,
