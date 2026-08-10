@@ -70,7 +70,7 @@ import { blobToInlineAudio, refToInlineAudio, visualRefs, type InlineImage } fro
 import { characterPrompt, stockAspectDims, stockTitle } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
-import { applyOverlayPatchSettled, track0Clips, laneGapAt, getClipSpans, nextFreeStart, overlayLayers, TIMELINE_H_MAX, TIMELINE_H_MIN, totalDuration, useEditor } from "./store";
+import { applyOverlayPatchSettled, track0Clips, laneGapAt, getClipSpans, nextFreeStart, overlayLayers, totalDuration, useEditor } from "./store";
 import { buildAiContext } from "./aiContext";
 import { sampleClipFrameData } from "./previewCanvas";
 import { laneCues, subtitleLaneCount } from "./subtitles";
@@ -2184,7 +2184,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         out.pxPerSec = useEditor.getState().pxPerSec;
       }
       if (isNum(input.timelineH)) {
-        s.setTimelineH(clamp(input.timelineH, TIMELINE_H_MIN, TIMELINE_H_MAX));
+        s.setTimelineH(input.timelineH);
         out.timelineH = useEditor.getState().timelineH;
       }
       return out;
