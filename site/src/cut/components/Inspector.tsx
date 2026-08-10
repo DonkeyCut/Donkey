@@ -1966,11 +1966,14 @@ function KeyframeControls({ overlay: o }: { overlay: Overlay }) {
 }
 
 /** The key track row itself — diamond, walkers, count, bin — over whichever
- * key list it is handed. The pose track and the mask track both mount it. */
+ * key list it is handed. The pose track and the mask track both mount it;
+ * the mask track's diamond wears the timeline's amber so the two tracks
+ * read apart everywhere. */
 function KeyRow({
   element,
   now,
   keys,
+  track = "pose",
   onAdd,
   onRemove,
   onSeek,
@@ -1978,6 +1981,7 @@ function KeyRow({
   element: { start: number; end: number };
   now: number;
   keys: { t: number }[];
+  track?: "pose" | "mask";
   onAdd: (tLocal: number) => void;
   onRemove: (tLocal: number) => void;
   onSeek: (t: number) => void;
@@ -2001,7 +2005,13 @@ function KeyRow({
         aria-label={here >= 0 ? "Update the key here" : "Add a key at the playhead"}
         onClick={() => onAdd(tLocal)}
       >
-        <Diamond className={cn("size-3.5", here >= 0 && "fill-current")} />
+        <Diamond
+          className={cn(
+            "size-3.5",
+            track === "mask" && "text-[#ff9f0a]",
+            here >= 0 && "fill-current"
+          )}
+        />
       </Button>
       <Button
         size="sm"
@@ -2278,6 +2288,7 @@ function MaskSection({ target }: { target: MaskTarget }) {
               element={target.element}
               now={now}
               keys={m.kf ?? []}
+              track="mask"
               onAdd={(t) => target.setKey(t)}
               onRemove={(t) => target.removeKey(t)}
               onSeek={seek}
