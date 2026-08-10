@@ -11,7 +11,8 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import type { AnalyticsReferrals, AnalyticsRollup } from "@/lib/analytics/schema";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { AnalyticsBilling, AnalyticsReferrals, AnalyticsRollup } from "@/lib/analytics/schema";
 import { REFERRAL_SOURCES } from "@/lib/onboarding/sequence";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { cn } from "@/lib/utils";
@@ -204,6 +205,20 @@ const totalRegisteredConfig = {
   totalRegistered: { label: "Total registered", color: "var(--chart-1)" },
 } satisfies ChartConfig;
 
+const revenueConfig = {
+  pro: { label: "Pro", color: "var(--chart-1)" },
+  topups: { label: "Top-ups", color: "var(--chart-2)" },
+} satisfies ChartConfig;
+
+// Per-day dollars from the rollup's micro strings, aligned with its days.
+function deriveRevenue(days: string[], billing: AnalyticsBilling) {
+  return days.map((day, i) => ({
+    day,
+    pro: Number(BigInt(billing.revenue[i]?.proMicros ?? "0")) / 1e6,
+    topups: Number(BigInt(billing.revenue[i]?.topupMicros ?? "0")) / 1e6,
+  }));
+}
+
 function StatTile({
   label,
   value,
@@ -225,14 +240,16 @@ function StatTile({
 function ChartCard({
   title,
   subtitle,
+  className,
   children,
 }: {
   title: string;
   subtitle: string;
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border bg-card p-5">
+    <div className={cn("rounded-xl border bg-card p-5", className)}>
       <p className="font-medium">{title}</p>
       <p className="text-sm text-muted-foreground">{subtitle}</p>
       <div className="mt-4">{children}</div>
@@ -363,6 +380,10 @@ export default function SuAnalyticsPage() {
     () => (rollup.data?.referrals ? deriveReferrals(rollup.data.referrals) : null),
     [rollup.data],
   );
+  const revenue = useMemo(
+    () => (rollup.data?.billing ? deriveRevenue(rollup.data.days, rollup.data.billing) : null),
+    [rollup.data],
+  );
   // Trend lines toggled off stay off across visits.
   const [hiddenTrends, setHiddenTrends] = useLocalPref<string[]>(
     "su-referral-hidden-trends",
@@ -370,7 +391,24 @@ export default function SuAnalyticsPage() {
     (v) => Array.isArray(v) && v.every((x) => typeof x === "string"),
   );
 
-  if (rollup.isPending) return null;
+  if (rollup.isPending) {
+    return (
+      <div className="space-y-6 pb-9">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {Array.from({ length: 7 }, (_, i) => (
+            <Skeleton key={i} className="h-[104px] rounded-xl" />
+          ))}
+        </div>
+        <div className="grid gap-6 xl:grid-cols-2">
+          <Skeleton className="h-96 rounded-xl" />
+          <Skeleton className="h-96 rounded-xl" />
+          <Skeleton className="h-96 rounded-xl" />
+          <Skeleton className="h-96 rounded-xl" />
+        </div>
+        <Skeleton className="h-80 rounded-xl" />
+      </div>
+    );
+  }
 
   if (rollup.error || !view || !rollup.data) {
     const noData = rollup.error instanceof ApiError && rollup.error.status === 404;
@@ -390,6 +428,11 @@ export default function SuAnalyticsPage() {
       : null;
   const count = (n: number | null) => (n === null ? "—" : n.toLocaleString("en-US"));
   const lastDay = data.days[data.days.length - 1];
+  // Billing is absent from rollups written before it shipped; the next run
+  // fills it in.
+  const billing = data.billing;
+  const churnBase = billing ? billing.subscribers + billing.churned : 0;
+  const staleBilling = "not in this rollup yet — run analytics";
 
   return (
     <div className="space-y-6 pb-9">
@@ -436,6 +479,33 @@ export default function SuAnalyticsPage() {
           label="Outstanding balance"
           value={formatMicros(view.totalBalanceMicros)}
           sub="credits across all accounts"
+        />
+        <StatTile
+          label="Pro subscribers"
+          value={billing ? billing.subscribers.toLocaleString("en-US") : "—"}
+          sub={billing ? `${billing.canceling} canceling at period end` : staleBilling}
+        />
+        <StatTile
+          label="People funded"
+          value={billing ? billing.funded.toLocaleString("en-US") : "—"}
+          sub={
+            billing ? `${formatMicros(BigInt(billing.fundedMicros))} paid all time` : staleBilling
+          }
+        />
+        <StatTile
+          label="Churn rate"
+          value={
+            billing && churnBase > 0
+              ? `${((billing.churned / churnBase) * 100).toFixed(1)}%`
+              : "—"
+          }
+          sub={
+            !billing
+              ? staleBilling
+              : churnBase === 0
+                ? "no subscriptions yet"
+                : `${billing.churned} of ${churnBase} subscriptions ended`
+          }
         />
       </div>
 
@@ -626,40 +696,89 @@ export default function SuAnalyticsPage() {
         </div>
       )}
 
-      <ChartCard title="Total registered" subtitle="Cumulative registrations, last 60 days">
-        <ChartContainer className="max-h-56 w-full" config={totalRegisteredConfig}>
-          <AreaChart accessibilityLayer data={view.series} margin={{ left: -16 }}>
-            <CartesianGrid vertical={false} />
-            <XAxis
-              axisLine={false}
-              dataKey="day"
-              minTickGap={32}
-              tickFormatter={formatDay}
-              tickLine={false}
-              tickMargin={8}
-            />
-            <YAxis
-              allowDecimals={false}
-              axisLine={false}
-              domain={["auto", "auto"]}
-              tickLine={false}
-              width={48}
-            />
-            <ChartTooltip
-              content={<ChartTooltipContent labelFormatter={(label) => formatDay(String(label))} />}
-            />
-            <Area
-              dataKey="totalRegistered"
-              dot={false}
-              fill="var(--color-totalRegistered)"
-              fillOpacity={0.1}
-              stroke="var(--color-totalRegistered)"
-              strokeWidth={2}
-              type="monotone"
-            />
-          </AreaChart>
-        </ChartContainer>
-      </ChartCard>
+      <div className="grid gap-6 xl:grid-cols-2">
+        {revenue && (
+          <ChartCard
+            title="Revenue"
+            subtitle={`Paid Stripe charges per day · $${revenue
+              .reduce((sum, point) => sum + point.pro + point.topups, 0)
+              .toLocaleString("en-US", { maximumFractionDigits: 2 })} in the last 60 days`}
+          >
+            <ChartContainer className="max-h-56 w-full" config={revenueConfig}>
+              <BarChart accessibilityLayer data={revenue} margin={{ left: -16 }}>
+                <CartesianGrid vertical={false} />
+                <XAxis
+                  axisLine={false}
+                  dataKey="day"
+                  minTickGap={32}
+                  tickFormatter={formatDay}
+                  tickLine={false}
+                  tickMargin={8}
+                />
+                <YAxis
+                  axisLine={false}
+                  tickFormatter={(value) => `$${value}`}
+                  tickLine={false}
+                  width={48}
+                />
+                <ChartTooltip
+                  content={
+                    <NonZeroTooltipContent labelFormatter={(label) => formatDay(String(label))} />
+                  }
+                />
+                <Bar dataKey="pro" fill="var(--color-pro)" maxBarSize={24} stackId="revenue" />
+                <Bar
+                  dataKey="topups"
+                  fill="var(--color-topups)"
+                  maxBarSize={24}
+                  stackId="revenue"
+                />
+                <ChartLegend content={<ChartLegendContent />} />
+              </BarChart>
+            </ChartContainer>
+          </ChartCard>
+        )}
+        <ChartCard
+          title="Total registered"
+          subtitle="Cumulative registrations, last 60 days"
+          className={cn(!revenue && "xl:col-span-2")}
+        >
+          <ChartContainer className="max-h-56 w-full" config={totalRegisteredConfig}>
+            <AreaChart accessibilityLayer data={view.series} margin={{ left: -16 }}>
+              <CartesianGrid vertical={false} />
+              <XAxis
+                axisLine={false}
+                dataKey="day"
+                minTickGap={32}
+                tickFormatter={formatDay}
+                tickLine={false}
+                tickMargin={8}
+              />
+              <YAxis
+                allowDecimals={false}
+                axisLine={false}
+                domain={["auto", "auto"]}
+                tickLine={false}
+                width={48}
+              />
+              <ChartTooltip
+                content={
+                  <ChartTooltipContent labelFormatter={(label) => formatDay(String(label))} />
+                }
+              />
+              <Area
+                dataKey="totalRegistered"
+                dot={false}
+                fill="var(--color-totalRegistered)"
+                fillOpacity={0.1}
+                stroke="var(--color-totalRegistered)"
+                strokeWidth={2}
+                type="monotone"
+              />
+            </AreaChart>
+          </ChartContainer>
+        </ChartCard>
+      </div>
 
       <ActivityGrid missingDays={view.missingDays} rollup={data} workBits={view.workBits} />
 
