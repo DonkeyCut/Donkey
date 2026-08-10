@@ -3948,7 +3948,10 @@ function KeyMarker({
   const inset = Math.min(TRIM_W + KEY_HIT / 2, Math.max(3, (width - 8) / 2));
   return (
     <span
-      className="tl-key absolute top-1/2 z-3 grid size-3.5 cursor-ew-resize place-items-center"
+      // Above the hover chips (z-4): a key parked at the bar's end must stay
+      // grabbable — retiming lives only here, while hide/mute also live in
+      // the inspector.
+      className="tl-key absolute top-1/2 z-5 grid size-3.5 cursor-ew-resize place-items-center"
       style={{
         left: Math.min(width - inset, Math.max(inset, t * pps)),
         transform: "translate(-50%, -50%)",
