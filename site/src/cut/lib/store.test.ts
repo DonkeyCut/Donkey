@@ -453,9 +453,23 @@ describe("title lanes", () => {
       s().setOverlayKey(t1.id, 1);
       s().selectOverlayKey(t1.id, 1);
       s().moveOverlayKey(t1.id, 1, 2.5, { transient: true });
-      expect(s().selectedKey).toEqual({ kind: "overlay", id: t1.id, t: 2.5 });
+      expect(s().selectedKey).toEqual({ kind: "overlay", id: t1.id, t: 2.5, track: "pose" });
       s().deleteSelection();
       expect(overlayById(t1.id).kf).toBe(undefined);
+    });
+
+    test("a picked mask key deletes from the mask track and leaves the pose", () => {
+      const t1 = title({ start: 0, end: 4, mask: { kind: "rect" as const } });
+      useEditor.setState({ overlays: [t1] });
+      s().setOverlayKey(t1.id, 1);
+      s().setOverlayMaskKey(t1.id, 1);
+      s().setOverlayMaskKey(t1.id, 3, { w: 0.8 });
+      s().selectOverlayMaskKey(t1.id, 3);
+      s().moveOverlayMaskKey(t1.id, 3, 2, { transient: true });
+      expect(s().selectedKey).toEqual({ kind: "overlay", id: t1.id, t: 2, track: "mask" });
+      s().deleteSelection();
+      expect(overlayById(t1.id).mask!.kf!.map((k) => k.t)).toEqual([1]);
+      expect(overlayById(t1.id).kf!.length).toBe(1); // the pose track is untouched
     });
 
     test("selecting anything else drops the pick", () => {

@@ -3137,13 +3137,24 @@ function ClipView({
           </DropdownMenuItem>
         ) : null}
       </ClipMenu>
-      {/* Keys sit on the bar where they fall, so a pose track is visible
-          without opening the inspector. */}
+      {/* Keys sit on the bar where they fall — pose and mask tracks both —
+          so the animation is visible without opening the inspector. */}
       {(clip.kf ?? []).map((k) => (
         <KeyMarker
           key={k.t}
           item={{ id: clip.id, start: span.start, end: span.start + span.len }}
           kind="clip"
+          t={k.t}
+          pps={pps}
+          width={w}
+        />
+      ))}
+      {(clip.mask?.kf ?? []).map((k) => (
+        <KeyMarker
+          key={`m${k.t}`}
+          item={{ id: clip.id, start: span.start, end: span.start + span.len }}
+          kind="clip"
+          track="mask"
           t={k.t}
           pps={pps}
           width={w}
@@ -3869,6 +3880,17 @@ function OverlayClipView({
           width={w}
         />
       ))}
+      {(clip.mask?.kf ?? []).map((k) => (
+        <KeyMarker
+          key={`m${k.t}`}
+          item={{ id: clip.id, start: clip.start, end: clip.start + overlayLen(clip) }}
+          kind="clip"
+          track="mask"
+          t={k.t}
+          pps={pps}
+          width={w}
+        />
+      ))}
       <span
         className={cn(trimHandle, "tl-trim-l left-0")}
         onPointerDown={(e) => startLaneTrim(e, "overlayClip", clip.id, "l", ui)}
@@ -3886,14 +3908,16 @@ function OverlayClipView({
 const KEY_HIT = 14;
 
 /**
- * One keyframe on an item's bar — an element's or a video clip's: a diamond
- * where the key falls, dragged left and right to retime it. The grab is kept
- * off the bar underneath, so moving a key never moves the item it belongs
- * to. `kind` picks which store track the actions write.
+ * One keyframe on an item's bar — an element's or a video clip's, on its
+ * pose track (white diamond) or its mask's (amber): a diamond where the key
+ * falls, dragged left and right to retime it. The grab is kept off the bar
+ * underneath, so moving a key never moves the item it belongs to. `kind`
+ * and `track` pick which store actions the gestures write.
  */
 function KeyMarker({
   item,
   kind,
+  track = "pose",
   t,
   pps,
   width,
@@ -3901,6 +3925,7 @@ function KeyMarker({
 }: {
   item: { id: string; start: number; end: number };
   kind: "overlay" | "clip";
+  track?: "pose" | "mask";
   t: number;
   pps: number;
   width: number;
@@ -3913,6 +3938,7 @@ function KeyMarker({
     (s) =>
       !!s.selectedKey &&
       s.selectedKey.kind === kind &&
+      s.selectedKey.track === track &&
       s.selectedKey.id === item.id &&
       s.selectedKey.t === t
   );
@@ -3939,8 +3965,23 @@ function KeyMarker({
       }
       onPointerDown={(e) => {
         const s = useEditor.getState();
-        if (kind === "overlay") s.selectOverlayKey(item.id, t);
-        else s.selectClipKey(item.id, t);
+        const select =
+          kind === "overlay"
+            ? track === "mask"
+              ? s.selectOverlayMaskKey
+              : s.selectOverlayKey
+            : track === "mask"
+              ? s.selectClipMaskKey
+              : s.selectClipKey;
+        const move =
+          kind === "overlay"
+            ? track === "mask"
+              ? s.moveOverlayMaskKey
+              : s.moveOverlayKey
+            : track === "mask"
+              ? s.moveClipMaskKey
+              : s.moveClipKey;
+        select(item.id, t);
         let live = t;
         // The undo step opens on the first movement, so a click that only
         // seeks does not leave one behind.
@@ -3952,8 +3993,7 @@ function KeyMarker({
               s.pushHistory();
             }
             const next = Math.max(0, t + dx / pps);
-            if (kind === "overlay") s.moveOverlayKey(item.id, live, next, { transient: true });
-            else s.moveClipKey(item.id, live, next, { transient: true });
+            move(item.id, live, next, { transient: true });
             live = Math.max(0, Math.min(next, Math.max(0.1, item.end - item.start)));
           },
           // A click that never moved reads as "show me this key": the playhead
@@ -3966,7 +4006,8 @@ function KeyMarker({
     >
       <span
         className={cn(
-          "pointer-events-none rotate-45 bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.35)] transition-[width,height]",
+          "pointer-events-none rotate-45 shadow-[0_0_0_1px_rgba(0,0,0,0.35)] transition-[width,height]",
+          track === "mask" ? "bg-[#ff9f0a]" : "bg-white",
           picked ? "size-[9px] ring-[1.5px] ring-[#0a84ff]" : "size-[6px]"
         )}
       />
@@ -4093,6 +4134,9 @@ function TextBar({
           opening the inspector. */}
       {(o.kf ?? []).map((k) => (
         <KeyMarker key={k.t} item={o} kind="overlay" t={k.t} pps={pps} width={w} onMenu={onMenu} />
+      ))}
+      {(o.mask?.kf ?? []).map((k) => (
+        <KeyMarker key={`m${k.t}`} item={o} kind="overlay" track="mask" t={k.t} pps={pps} width={w} />
       ))}
       <HideChip
         hidden={!!o.hidden}

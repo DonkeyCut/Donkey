@@ -168,10 +168,15 @@ export interface EditorState {
    * inspector). Bulk actions — delete, copy — act on this whole set. */
   multiSelection: Selection[];
   /** The keyframe picked on a timeline bar — an element's or a video
-   * clip's — if any. It rides alongside the item selection: the item is
-   * still what the inspector edits, but Delete takes the key. Any other
-   * selection clears it. */
-  selectedKey: { kind: "overlay" | "clip"; id: string; t: number } | null;
+   * clip's, on its pose track or its mask's — if any. It rides alongside
+   * the item selection: the item is still what the inspector edits, but
+   * Delete takes the key. Any other selection clears it. */
+  selectedKey: {
+    kind: "overlay" | "clip";
+    id: string;
+    t: number;
+    track: "pose" | "mask";
+  } | null;
   currentTime: number;
   playing: boolean;
   /** While playing a scoped effect preview, the time playback auto-pauses at;
@@ -358,6 +363,13 @@ export interface EditorState {
     opts?: { transient?: boolean }
   ) => void;
   removeOverlayMaskKey: (id: string, tLocal: number) => void;
+  selectOverlayMaskKey: (id: string, tLocal: number) => void;
+  moveOverlayMaskKey: (
+    id: string,
+    fromT: number,
+    toT: number,
+    opts?: { transient?: boolean }
+  ) => void;
   clearOverlayMaskKeys: (id: string) => void;
   /** The same mask-key track on a video clip; `tLocal` is seconds from the
    * clip's timeline start. */
@@ -368,6 +380,13 @@ export interface EditorState {
     opts?: { transient?: boolean }
   ) => void;
   removeClipMaskKey: (id: string, tLocal: number) => void;
+  selectClipMaskKey: (id: string, tLocal: number) => void;
+  moveClipMaskKey: (
+    id: string,
+    fromT: number,
+    toT: number,
+    opts?: { transient?: boolean }
+  ) => void;
   clearClipMaskKeys: (id: string) => void;
   /** The pose-key track on a video clip, the overlay contract over the
    * clip's anchor: adding a key captures the clip's pose at that moment,
@@ -2156,7 +2175,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       const o = get().overlays.find((x) => x.id === id);
       if (!o) return;
       get().select({ kind: "overlay", id });
-      set({ selectedKey: { kind: "overlay", id, t: tLocal } });
+      set({ selectedKey: { kind: "overlay", id, t: tLocal, track: "pose" } });
     },
 
     moveOverlayKey: (id, fromT, toT, opts) => {
@@ -2174,10 +2193,11 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       if (
         picked &&
         picked.kind === "overlay" &&
+        picked.track === "pose" &&
         picked.id === id &&
         Math.abs(picked.t - fromT) <= KEY_EPSILON
       ) {
-        set({ selectedKey: { kind: "overlay", id, t } });
+        set({ selectedKey: { kind: "overlay", id, t, track: "pose" } });
       }
     },
 
@@ -2211,6 +2231,36 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       get().updateOverlayTransient(id, { mask: { ...o.mask, kf: kf.length ? kf : undefined } });
     },
 
+    selectOverlayMaskKey: (id, tLocal) => {
+      const o = get().overlays.find((x) => x.id === id);
+      if (!o) return;
+      get().select({ kind: "overlay", id });
+      set({ selectedKey: { kind: "overlay", id, t: tLocal, track: "mask" } });
+    },
+
+    moveOverlayMaskKey: (id, fromT, toT, opts) => {
+      const o = get().overlays.find((x) => x.id === id);
+      if (!o?.mask?.kf?.length) return;
+      const key = o.mask.kf.find((k) => Math.abs(k.t - fromT) <= KEY_EPSILON);
+      if (!key) return;
+      const t = Math.max(0, Math.min(toT, Math.max(0.1, o.end - o.start)));
+      if (!opts?.transient) push();
+      get().updateOverlayTransient(id, {
+        mask: { ...o.mask, kf: upsertKey(removeKeyAt(o.mask.kf, fromT), { ...key, t }) },
+      });
+      // The pick follows the key it is on, so dragging never drops it.
+      const picked = get().selectedKey;
+      if (
+        picked &&
+        picked.kind === "overlay" &&
+        picked.track === "mask" &&
+        picked.id === id &&
+        Math.abs(picked.t - fromT) <= KEY_EPSILON
+      ) {
+        set({ selectedKey: { kind: "overlay", id, t, track: "mask" } });
+      }
+    },
+
     clearOverlayMaskKeys: (id) => {
       const o = get().overlays.find((x) => x.id === id);
       if (!o?.mask?.kf?.length) return;
@@ -2236,6 +2286,36 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       if (kf.length === c.mask.kf.length) return;
       push();
       get().updateClipTransient(id, { mask: { ...c.mask, kf: kf.length ? kf : undefined } });
+    },
+
+    selectClipMaskKey: (id, tLocal) => {
+      const c = get().clips.find((x) => x.id === id);
+      if (!c) return;
+      get().select({ kind: "clip", id });
+      set({ selectedKey: { kind: "clip", id, t: tLocal, track: "mask" } });
+    },
+
+    moveClipMaskKey: (id, fromT, toT, opts) => {
+      const c = get().clips.find((x) => x.id === id);
+      if (!c?.mask?.kf?.length) return;
+      const key = c.mask.kf.find((k) => Math.abs(k.t - fromT) <= KEY_EPSILON);
+      if (!key) return;
+      const t = Math.max(0, Math.min(toT, clipLen(c)));
+      if (!opts?.transient) push();
+      get().updateClipTransient(id, {
+        mask: { ...c.mask, kf: upsertKey(removeKeyAt(c.mask.kf, fromT), { ...key, t }) },
+      });
+      // The pick follows the key it is on, so dragging never drops it.
+      const picked = get().selectedKey;
+      if (
+        picked &&
+        picked.kind === "clip" &&
+        picked.track === "mask" &&
+        picked.id === id &&
+        Math.abs(picked.t - fromT) <= KEY_EPSILON
+      ) {
+        set({ selectedKey: { kind: "clip", id, t, track: "mask" } });
+      }
     },
 
     clearClipMaskKeys: (id) => {
@@ -2272,7 +2352,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       const c = get().clips.find((x) => x.id === id);
       if (!c) return;
       get().select({ kind: "clip", id });
-      set({ selectedKey: { kind: "clip", id, t: tLocal } });
+      set({ selectedKey: { kind: "clip", id, t: tLocal, track: "pose" } });
     },
 
     moveClipKey: (id, fromT, toT, opts) => {
@@ -2288,10 +2368,11 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       if (
         picked &&
         picked.kind === "clip" &&
+        picked.track === "pose" &&
         picked.id === id &&
         Math.abs(picked.t - fromT) <= KEY_EPSILON
       ) {
-        set({ selectedKey: { kind: "clip", id, t } });
+        set({ selectedKey: { kind: "clip", id, t, track: "pose" } });
       }
     },
 
@@ -2654,8 +2735,12 @@ export const useEditor = create<EditorState>((baseSet, get) => {
           key.kind === "overlay"
             ? st.overlays.find((x) => x.id === key.id)
             : st.clips.find((x) => x.id === key.id);
-        if (item?.kf?.some((k) => Math.abs(k.t - key.t) <= KEY_EPSILON)) {
-          if (key.kind === "overlay") st.removeOverlayKey(key.id, key.t);
+        const keys = key.track === "mask" ? item?.mask?.kf : item?.kf;
+        if (keys?.some((k) => Math.abs(k.t - key.t) <= KEY_EPSILON)) {
+          if (key.kind === "overlay") {
+            if (key.track === "mask") st.removeOverlayMaskKey(key.id, key.t);
+            else st.removeOverlayKey(key.id, key.t);
+          } else if (key.track === "mask") st.removeClipMaskKey(key.id, key.t);
           else st.removeClipKey(key.id, key.t);
           return;
         }
