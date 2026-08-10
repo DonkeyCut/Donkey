@@ -33,9 +33,9 @@ export const auth = betterAuth({
   databaseHooks: {
     user: {
       create: {
-        // Every new account is provisioned with its signup grants (app credits
-        // + free Vision API calls), its starter project, the welcome email,
-        // and its Resend contact. provisionSignupGrants is idempotent and
+        // Every new account is provisioned with its signup credit grant, its
+        // starter project, the welcome email, and its Resend contact.
+        // provisionSignupGrants is idempotent and
         // swallows its own errors, so it never blocks user creation.
         after: async (user) => {
           await provisionSignupGrants({

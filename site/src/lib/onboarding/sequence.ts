@@ -39,8 +39,3 @@ export const ONBOARDING_VERSION = 1;
  * chat around them. A grant that can't buy one leaves every new account
  * bouncing off an empty balance on its first real try. */
 export const signupAppCredits = "3";
-
-/** Lifetime free Vision API calls the signup hook grants. Lives beside the
- * credit amount for the same reason: the welcome slides and the welcome email
- * name the number the grant uses. */
-export const signupVisionFreeCalls = 100;

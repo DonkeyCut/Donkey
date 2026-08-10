@@ -1,14 +1,10 @@
 import { seedStarterProject } from "@/cut/server/cloud/starter";
 import { creditStringToMicros } from "@/lib/credits/amounts";
 import { grantCredits } from "@/lib/credits/inference";
-import { grantVisionCalls } from "@/lib/credits/vision-grants";
 import { type EmailUser } from "@/lib/email/resend";
 import { sendWelcomeEmail } from "@/lib/email/send-welcome";
 import { syncResendContact } from "@/lib/email/sync-contact";
-import {
-  signupAppCredits,
-  signupVisionFreeCalls,
-} from "@/lib/onboarding/sequence";
+import { signupAppCredits } from "@/lib/onboarding/sequence";
 
 // Single source of truth for what a new account starts with. All steps are
 // idempotent and keyed to the user, so provisioning can run more than once
@@ -20,7 +16,6 @@ export async function provisionSignupGrants(user: EmailUser): Promise<void> {
   // and signup itself must never fail because a bonus grant hiccupped.
   const results = await Promise.allSettled([
     grantSignupAppCredits(user.id),
-    grantSignupVisionCalls(user.id),
     seedStarterProject(user.id),
     sendWelcomeEmail(user),
     syncResendContact(user),
@@ -44,19 +39,6 @@ async function grantSignupAppCredits(userId: string): Promise<void> {
     description: "Signup bonus credits",
     source: "signup",
     sourceId: `signup-app-credit:${userId}`,
-    userId,
-  });
-}
-
-async function grantSignupVisionCalls(userId: string): Promise<void> {
-  // A one-time vision_call grant — no subscription required. The Vision route
-  // and the api-keys gate both accept grant balance as access. Idempotent via
-  // (userId, unit, source, sourceId).
-  await grantVisionCalls({
-    calls: signupVisionFreeCalls,
-    description: "Signup bonus Vision API calls",
-    source: "signup",
-    sourceId: `signup-vision-calls:${userId}`,
     userId,
   });
 }
