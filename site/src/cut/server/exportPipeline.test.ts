@@ -245,3 +245,218 @@ describe("export filtergraph timebases", () => {
     expect(xfadeMismatches(g)).toEqual([]);
   });
 });
+
+describe("clip masks in the filtergraph", () => {
+  test("a masked track-0 clip trims onto a black base and keeps the join sound", async () => {
+    const g = await graphFor({
+      clips: [
+        clip("a.mp4", { mask: { file: "mask_c0.png" }, transition: 0.5, transitionStyle: "crossfade" }),
+        clip("b.mp4"),
+      ],
+    });
+    const joined = g.join(";");
+    // The multiply chain: painted coverage into the segment's alpha, then the
+    // black base restores the opaque constant-size label.
+    expect(joined).toContain("alphaextract");
+    expect(joined).toContain("blend=all_mode=multiply");
+    expect(joined).toContain("alphamerge");
+    expect(joined).toContain("format=gray");
+    expect(xfadeMismatches(g)).toEqual([]);
+  });
+
+  test("a keyframed mask on an upper track plays as a concat slideshow at the box", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { out: 6 })],
+      overlayVideos: [
+        {
+          file: "ov.mp4",
+          in: 0,
+          out: 2,
+          start: 1,
+          track: 1,
+          muted: true,
+          frame: { x: 0.5, y: 0.5, w: 0.5, h: 0.5 },
+          mask: {
+            frames: [
+              { file: "mask_ov0_f0.png", duration: 1 },
+              { file: "mask_ov0_f1.png", duration: 1 },
+            ],
+          },
+        },
+      ],
+    });
+    const joined = g.join(";");
+    expect(joined).toContain("blend=all_mode=multiply");
+    // A letterboxed masked overlay pads out to its region box so the painted
+    // mask and the segment share exact pixel geometry.
+    expect(joined).toContain("pad=540:960");
+    expect(joined).toContain("alphamerge,format=yuva420p");
+    expect(xfadeMismatches(g)).toEqual([]);
+  });
+
+  test("a masked letterboxed overlay keeps its look, graded before the pad", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { out: 6 })],
+      overlayVideos: [
+        {
+          file: "ov.mp4",
+          in: 0,
+          out: 2,
+          start: 1,
+          track: 1,
+          muted: true,
+          look: "vhs",
+          frame: { x: 0.5, y: 0.5, w: 0.5, h: 0.5 },
+          mask: { file: "mask_ov0.png" },
+        },
+      ],
+    });
+    const joined = g.join(";");
+    // The look chain runs on the opaque scaled picture; the transparent box
+    // pad joins the chain after it, so the margins stay clear.
+    expect(joined).toContain("[olki0]");
+    const lookAt = g.findIndex((c) => c.includes("[olki0]"));
+    const padAt = g.findIndex((c) => c.includes("pad=540:960") && c.includes("black@0.0"));
+    expect(lookAt).toBeGreaterThanOrEqual(0);
+    expect(padAt).toBeGreaterThanOrEqual(lookAt);
+    expect(xfadeMismatches(g)).toEqual([]);
+  });
+
+  test("a mask under head/tail alpha fades keeps both", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { out: 6 })],
+      overlayVideos: [
+        {
+          file: "ov.mp4",
+          in: 0,
+          out: 3,
+          start: 0.5,
+          track: 1,
+          muted: true,
+          headFade: 0.3,
+          tailFade: 0.3,
+          mask: { file: "mask_ov0.png" },
+        },
+      ],
+    });
+    const joined = g.join(";");
+    // Fades apply on the segment before the mask multiplies, so both survive
+    // (fade alpha=1 multiplies; alphamerge would have replaced it).
+    const fadeChain = g.find((c) => c.includes("fade=t=in") && c.includes("alpha=1"));
+    const maskChain = g.findIndex((c) => c.includes("blend=all_mode=multiply"));
+    expect(fadeChain === undefined).toBe(false);
+    expect(maskChain).toBeGreaterThan(g.indexOf(fadeChain!));
+    expect(joined).toContain("format=gray");
+    expect(xfadeMismatches(g)).toEqual([]);
+  });
+});
+
+describe("subject masks in the filtergraph", () => {
+  test("subject-tagged elements and clips take matte splits, negated when inverted", async () => {
+    const g = await graphFor({
+      clips: [
+        clip("a.mp4", { out: 6, mask: { subject: { invert: true, feather: 20 } } }),
+      ],
+      overlayVideos: [
+        {
+          file: "ov.mp4",
+          in: 0,
+          out: 2,
+          start: 1,
+          track: 1,
+          muted: true,
+          mask: { subject: {} },
+        },
+      ],
+      overlays: [
+        {
+          start: 1,
+          end: 3,
+          x: 100,
+          y: 200,
+          blank: "b.png",
+          frames: [{ file: "el_f0.png", duration: 2 }],
+          subject: { invert: true },
+        },
+      ],
+      behindMask: { file: "behind_mask.mp4", from: 0.5 },
+    });
+    const joined = g.join(";");
+    // Three consumers, one split each, every one through the same multiply
+    // chain in lane order.
+    expect(joined).toContain("split=3[bhs0][bhs1][bhs2]");
+    expect(g.filter((c) => c.includes("negate")).length).toBe(2);
+    expect(joined).toContain("gblur=sigma=");
+    expect(g.filter((c) => c.includes("blend=all_mode=multiply")).length).toBe(3);
+    expect(xfadeMismatches(g)).toEqual([]);
+  });
+});
+
+describe("clip keyframes in the filtergraph", () => {
+  const KF = [
+    { t: 0, x: 0.3, y: 0.5, scale: 1, rotation: 0, opacity: 1 },
+    { t: 2, x: 0.7, y: 0.4, scale: 1.6, rotation: 45, opacity: 1 },
+  ];
+
+  test("a keyed track-0 clip transforms over a transparent base, opaque out", async () => {
+    const g = await graphFor({
+      clips: [
+        clip("a.mp4", { out: 4, kf: KF, transition: 0.5, transitionStyle: "crossfade" }),
+        clip("b.mp4"),
+      ],
+    });
+    const joined = g.join(";");
+    expect(joined).toContain("rotate=a=");
+    expect(joined).toContain("eval=frame");
+    expect(joined).toContain("clip((t-0.000)/2.000,0,1)");
+    // The transparent base carries the positioned picture; the black base
+    // restores the opaque constant-size label the join expects.
+    expect(joined).toContain("color=c=black@0.0");
+    expect(xfadeMismatches(g)).toEqual([]);
+  });
+
+  test("a keyed overlay clip positions by expression with its start folded in", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { out: 8 })],
+      overlayVideos: [
+        {
+          file: "ov.mp4",
+          in: 0,
+          out: 3,
+          start: 1.5,
+          track: 1,
+          muted: true,
+          kf: KF,
+        },
+      ],
+    });
+    const joined = g.join(";");
+    expect(joined).toContain("(t-1.500)");
+    expect(joined).toContain("rotate=a=");
+    expect(joined).toContain("-w/2");
+    expect(xfadeMismatches(g)).toEqual([]);
+  });
+
+  test("a keyed subject-masked overlay rides the transparent base before the matte", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { out: 8 })],
+      overlayVideos: [
+        {
+          file: "ov.mp4",
+          in: 0,
+          out: 3,
+          start: 1,
+          track: 1,
+          muted: true,
+          kf: KF,
+          mask: { subject: {} },
+        },
+      ],
+      behindMask: { file: "behind_mask.mp4", from: 0.5 },
+    });
+    const joined = g.join(";");
+    expect(joined).toContain("color=c=black@0.0");
+    expect(joined).toContain("blend=all_mode=multiply");
+    expect(xfadeMismatches(g)).toEqual([]);
+  });
+});

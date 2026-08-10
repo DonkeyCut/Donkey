@@ -6,9 +6,9 @@ import { renderProjectToMp4 } from "./exportRender";
 import { putSigned } from "./media";
 import { clipSpeed, getClipSpans, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
 import { captionStyle, cueOverlay, cueWordWindows, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
-import { isOverlayAnimated, normalizeGrade } from "@donkeycut/effects-kit";
+import { isMaskAnimated, isOverlayAnimated, normalizeGrade, paintMaskLuma } from "@donkeycut/effects-kit";
 import { renderElementFrames, renderElementPng } from "./textRender";
-import { frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle } from "./types";
+import { clipPoseAt, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, rectOf, regionPx, subjectMasked } from "./types";
 import type {
   Aspect,
   AudioClip,
@@ -188,6 +188,81 @@ interface ExportPayload {
   pngs: { name: string; blob: Blob }[];
 }
 
+/** A masked video clip's coverage in the spec: one grayscale still, a
+ * sampled sequence when the mask is keyframed, or the shared person matte
+ * (`subject`) with its knobs. */
+interface SpecMask {
+  file?: string;
+  frames?: { file: string; duration: number }[];
+  subject?: { invert?: boolean; feather?: number };
+}
+
+/** How often a keyframed clip mask samples — the person-matte cadence; the
+ * server re-stamps the output fps over it. */
+const MASK_SAMPLE_FPS = 15;
+
+/** Paint a clip's mask coverage for its export segment: one luma PNG for a
+ * resting mask, a 15fps sampled sequence for a keyframed one. Keyframed
+ * opacity folds into the luma — a clip fading under its pose track exports
+ * an opacity-scaled coverage (flat white when it has no shape mask), so the
+ * graph never needs an animatable alpha filter. The pictures land in `pngs`
+ * and the returned entry references them by name. */
+async function renderClipMaskPictures(
+  clip: VideoClip,
+  box: { x: number; y: number; w: number; h: number },
+  W: number,
+  H: number,
+  dur: number,
+  tag: string,
+  pngs: ExportPayload["pngs"]
+): Promise<SpecMask | undefined> {
+  const m = clip.mask && clip.mask.kind !== "subject" ? clip.mask : undefined;
+  const opacityVaries = (clip.kf ?? []).some((k) => Math.abs(k.opacity - 1) > 1e-3);
+  if (!m && !opacityVaries) return undefined;
+  const rect = rectOf(clip);
+  const anchor = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
+  const frame = { width: W, height: H, scale: Math.min(W, H) / 1080 };
+  const canvas = document.createElement("canvas");
+  canvas.width = box.w;
+  canvas.height = box.h;
+  const blobAt = (tLocal: number) => {
+    const ctx = canvas.getContext("2d")!;
+    if (m) {
+      paintMaskLuma(canvas, m, tLocal, frame, anchor, box.x, box.y);
+    } else {
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    if (opacityVaries) {
+      const v = Math.round(
+        255 * Math.max(0, Math.min(1, clipPoseAt(clip, tLocal).opacity))
+      );
+      ctx.globalCompositeOperation = "multiply";
+      ctx.fillStyle = `rgb(${v},${v},${v})`;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.globalCompositeOperation = "source-over";
+    }
+    return new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not render the mask."))), "image/png")
+    );
+  };
+  if (!(m && isMaskAnimated(m)) && !opacityVaries) {
+    const name = `${tag}.png`;
+    pngs.push({ name, blob: await blobAt(0) });
+    return { file: name };
+  }
+  const step = 1 / MASK_SAMPLE_FPS;
+  const n = Math.max(1, Math.round(dur * MASK_SAMPLE_FPS));
+  const frames: { file: string; duration: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    const name = `${tag}_f${i}.png`;
+    pngs.push({ name, blob: await blobAt(i * step) });
+    frames.push({ file: name, duration: i === n - 1 ? Math.max(step, dur - (n - 1) * step) : step });
+  }
+  return { frames };
+}
+
 /** Build the export spec + overlay PNGs from the cut. Media already lives in
  * the project folder — the spec references it by file name; only overlay PNGs
  * travel with the request. Shared by full exports and the low-res hover proxy. */
@@ -215,6 +290,33 @@ async function buildExportPayload(
     throw new Error("Add a video to the timeline first.");
   }
 
+  // The person matte renders first, so the loops below attach subject fields
+  // only when the effect will actually composite (no person segmenter, or no
+  // person → everything renders plain, matching the preview's degrade). The
+  // spec field keeps its `behindMask` name so older engines keep rendering
+  // behind-tagged text.
+  let behindMask: { file: string; from: number } | undefined;
+  const wantsSubject =
+    doc.overlays.some((o) => subjectMasked(o) && !o.hidden) ||
+    doc.clips.some((c) => c.mask?.kind === "subject" && !c.hidden);
+  if (wantsSubject) {
+    const mask = await import("./maskVideo")
+      .then((m) => m.renderSubjectMask(doc, duration))
+      .catch(() => null);
+    if (mask) {
+      pngs.push({ name: "behind_mask.mp4", blob: mask.blob });
+      behindMask = { file: "behind_mask.mp4", from: mask.from };
+    }
+  }
+  /** The subject entry a masked item ships, or undefined without a matte. */
+  const subjectOf = (m: { invert?: boolean; feather?: number } | undefined) =>
+    behindMask && m
+      ? {
+          ...(m.invert ? { invert: true } : {}),
+          ...(m.feather ? { feather: m.feather } : {}),
+        }
+      : undefined;
+
   const clipEntries = spans.map((sp) => ({
     file: sp.asset.fileName,
     in: sp.clip.in,
@@ -240,7 +342,30 @@ async function buildExportPayload(
     // trimming a source span.
     image: sp.asset.type === "image",
     grade: normalizeGrade(sp.clip.grade),
+    mask: undefined as SpecMask | undefined,
+    kf: sp.clip.kf,
   }));
+  // Track-0 segments render at the full output frame (regioned clips pad out
+  // to it), so their masks paint full-frame. A subject mask rides the shared
+  // matte; painted pictures still travel beside it when the pose track keys
+  // opacity, since opacity ships as coverage luma.
+  for (let i = 0; i < spans.length; i++) {
+    const c = spans[i].clip;
+    const dur = Math.max(0.1, (c.out - c.in) / clipSpeed(c));
+    const pictures = await renderClipMaskPictures(
+      c,
+      { x: 0, y: 0, w: settings.width, h: settings.height },
+      settings.width,
+      settings.height,
+      dur,
+      `mask_c${i}`,
+      pngs
+    );
+    const subject = c.mask?.kind === "subject" ? subjectOf(c.mask) : undefined;
+    if (pictures || subject) {
+      clipEntries[i].mask = { ...(pictures ?? {}), ...(subject ? { subject } : {}) };
+    }
+  }
 
   // The server's video graph is a sequential fold, so gaps between the
   // free-placed clips ship as explicit spacer segments: no file, hidden and
@@ -278,6 +403,9 @@ async function buildExportPayload(
   // ramps). Animations map fade/zoom natively; the styles that need frame
   // motion degrade to a fade up here.
   const overlayTracks = [...new Set(overlayLayers(doc.clips).map((c) => c.track))];
+  // Entry → its source clip, so the mask loop below can paint per clip after
+  // the entries assemble.
+  const overlayClipOf = new Map<object, VideoClip>();
   const overlayVideos = overlayTracks.flatMap((track) => {
     const trackSpans = getClipSpans(doc.clips, doc.assets, track);
     const ramps = trackSpans.map(() => ({ headFade: 0, tailFade: 0, headZoom: 0, tailZoom: 0 }));
@@ -308,26 +436,59 @@ async function buildExportPayload(
     return trackSpans
       .map((sp, i) => ({ c: sp.clip, ramp: ramps[i] }))
       .filter(({ c }) => !c.hidden && c.start < duration)
-      .map(({ c, ramp }) => ({
-        file: assetById.get(c.assetId)!.fileName,
-        in: c.in,
-        out: c.out,
-        start: c.start,
-        track: c.track,
-        frame: c.frame,
-        // Pass `fit` through unset so the server's "default full-frame overlay
-        // covers what's below" branch fires — normalizing to "fit" defeated it.
-        fit: c.fit,
-        muted: c.muted,
-        volume: c.volume,
-        speed: c.speed,
-        image: assetById.get(c.assetId)!.type === "image",
-        grade: normalizeGrade(c.grade),
-        look: c.look,
-        lookAmount: c.lookAmount,
-        ...ramp,
-      }));
+      .map(({ c, ramp }) => {
+        const entry = {
+          file: assetById.get(c.assetId)!.fileName,
+          in: c.in,
+          out: c.out,
+          start: c.start,
+          track: c.track,
+          frame: c.frame,
+          // Pass `fit` through unset so the server's "default full-frame overlay
+          // covers what's below" branch fires — normalizing to "fit" defeated it.
+          fit: c.fit,
+          muted: c.muted,
+          volume: c.volume,
+          speed: c.speed,
+          image: assetById.get(c.assetId)!.type === "image",
+          grade: normalizeGrade(c.grade),
+          look: c.look,
+          lookAmount: c.lookAmount,
+          mask: undefined as SpecMask | undefined,
+          kf: c.kf,
+          ...ramp,
+        };
+        overlayClipOf.set(entry, c);
+        return entry;
+      });
   });
+  // Upper-track segments render at their region box (letterboxed ones pad out
+  // to it when masked), so their masks paint box-sized. Subject masks ride
+  // the shared matte, with opacity-key luma pictures beside them.
+  for (let i = 0; i < overlayVideos.length; i++) {
+    const entry = overlayVideos[i];
+    const c = overlayClipOf.get(entry);
+    if (!c) continue;
+    const region = regionPx(c.frame, settings.width, settings.height);
+    const box = region
+      ? { x: region.rx, y: region.ry, w: region.rw, h: region.rh }
+      : { x: 0, y: 0, w: settings.width, h: settings.height };
+    const ospeed = c.speed && c.speed > 0 ? c.speed : 1;
+    const olen = Math.max(0.1, (c.out - c.in) / ospeed);
+    const pictures = await renderClipMaskPictures(
+      c,
+      box,
+      settings.width,
+      settings.height,
+      olen,
+      `mask_ov${i}`,
+      pngs
+    );
+    const subject = c.mask?.kind === "subject" ? subjectOf(c.mask) : undefined;
+    if (pictures || subject) {
+      entry.mask = { ...(pictures ?? {}), ...(subject ? { subject } : {}) };
+    }
+  }
 
   const audio = doc.audioClips
     .filter((a) => !a.hidden && a.start < duration && assetById.has(a.assetId))
@@ -343,20 +504,6 @@ async function buildExportPayload(
       duck: a.duck,
     }));
 
-  // Text-behind-speaker: the mask video renders first so the loop below tags
-  // behind elements only when the effect will actually composite (no person
-  // segmenter, or no person → the text stays a normal front title).
-  let behindMask: { file: string; from: number } | undefined;
-  if (doc.overlays.some((o) => isTextOverlay(o) && !!o.behindSubject && !o.hidden)) {
-    const mask = await import("./maskVideo")
-      .then((m) => m.renderBehindMask(doc, duration))
-      .catch(() => null);
-    if (mask) {
-      pngs.push({ name: "behind_mask.mp4", blob: mask.blob });
-      behindMask = { file: "behind_mask.mp4", from: mask.from };
-    }
-  }
-
   const overlays: {
     file?: string;
     start: number;
@@ -365,7 +512,9 @@ async function buildExportPayload(
     y?: number;
     blank?: string;
     frames?: { file: string; duration: number }[];
-    behind?: boolean;
+    /** The element trims by the shared person matte (invert = behind the
+     * speaker). */
+    subject?: { invert?: boolean; feather?: number };
     /** Its row: lane 0 is the top of the stack, and the effects interleave
      * with these by lane. */
     lane?: number;
@@ -390,9 +539,14 @@ async function buildExportPayload(
     if (o.kind === "effect") continue;
     // A blank title has no pixels to burn; shapes and stickers always render.
     if (isTextOverlay(o) && !o.text.trim()) continue;
+    // A subject-masked element's stream must run its whole window so the
+    // server can multiply the matte in per frame — the frames mechanism
+    // covers that (a static element costs one frame plus the blank).
+    const subject = subjectMasked(o) && o.mask ? subjectOf(o.mask) : undefined;
+    const subjectFields = subject ? { subject } : {};
     // A Lottie sticker's pixels move on their own, so it exports as frames
     // even with no transform animation set.
-    if (isOverlayAnimated(o) || (isStickerOverlay(o) && o.lottie)) {
+    if (isOverlayAnimated(o) || (isStickerOverlay(o) && o.lottie) || subject) {
       // Animated: a region-cropped 30fps frame sequence that the server plays
       // as a concat-demuxer slideshow overlaid at the region. Presets sample
       // their heads and tails and reuse the middle; a keyframed pose changes
@@ -413,7 +567,7 @@ async function buildExportPayload(
         blank,
         frames: set.entries.map((e) => ({ file: names[e.image], duration: e.duration })),
         lane: laneOf(o),
-        ...(behindMask && isTextOverlay(o) && o.behindSubject ? { behind: true } : {}),
+        ...subjectFields,
       });
       continue;
     }
@@ -425,7 +579,7 @@ async function buildExportPayload(
       start: o.start,
       end: Math.min(o.end, duration),
       lane: laneOf(o),
-      ...(behindMask && isTextOverlay(o) && o.behindSubject ? { behind: true } : {}),
+      ...subjectFields,
     });
   }
 

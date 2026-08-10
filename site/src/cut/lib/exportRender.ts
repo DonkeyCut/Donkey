@@ -32,10 +32,10 @@ import { overlayPlan, trackZeroPlan } from "./framePlan";
 import { frameSink, openMedia, videoTrackOf } from "./mediaRead";
 import { getClipSpans, overlayLayers, projectDuration, spanSequence } from "./store";
 import { captionStyle, cueOverlay, cueWordWindows, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
-import { applyEffectToCanvas, evalOverlayFrame, grainTile, isOverlayAnimated, planAnimatedLayers, type LottieHandle, type OverlayAnim } from "@donkeycut/effects-kit";
-import { BehindCompositor, hasBehindOverlays } from "./behindPass";
+import { applyEffectToCanvas, evalOverlayFrame, grainTile, isMaskAnimated, isOverlayAnimated, maskFrameAt, planAnimatedLayers, type LottieHandle, type OverlayAnim } from "@donkeycut/effects-kit";
+import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
 import { renderElementPng } from "./textRender";
-import { frameOf, isEffectOverlay, isFullRect, isTextOverlay, laneOf, overlayAnimStyle, projectFadeSeconds, rectOf } from "./types";
+import { behindSubjectOverlay, frameOf, frontSubjectOverlay, isEffectOverlay, isFullRect, isTextOverlay, laneOf, overlayAnimStyle, projectFadeSeconds, rectOf } from "./types";
 import type { ClipSpan, EffectOverlay, MediaAsset, Overlay, StickerOverlay } from "./types";
 import type { ExportDoc, ExportSettings } from "./exportClient";
 
@@ -281,8 +281,10 @@ async function stampText(doc: ExportDoc): Promise<StampedLayer[]> {
     if (o.hidden || o.start >= duration) continue;
     // A blank title has no pixels to draw; shapes and stickers always render.
     if (isTextOverlay(o) && !o.text.trim()) continue;
-    // Behind-speaker titles composite in the behind pass, under the person.
-    if (isTextOverlay(o) && o.behindSubject) continue;
+    // Behind-the-speaker elements composite in the subject pass, under the
+    // person; front subject-masked elements stamp normally and the draw
+    // trims them to the matte.
+    if (behindSubjectOverlay(o)) continue;
     // Effect elements filter the video per frame; nothing to stamp.
     if (o.kind === "effect") continue;
     // A Lottie sticker seeks per frame; its handle rides the layer.
@@ -357,6 +359,7 @@ async function stampText(doc: ExportDoc): Promise<StampedLayer[]> {
  */
 class StampCache {
   private drawn = new Map<StampedLayer, ImageBitmap>();
+  private maskFrames = new Map<StampedLayer, { t: number; bitmap: ImageBitmap }>();
 
   constructor(
     private width: number,
@@ -374,6 +377,22 @@ class StampCache {
     return bitmap;
   }
 
+  /** The layer's picture with a keyframed mask evaluated at this moment. The
+   * mask changes the pixels themselves, so there is one live bitmap per layer,
+   * replaced as the render walks forward — the mask-side twin of the Lottie
+   * per-frame path. */
+  async bitmapForMaskAt(layer: StampedLayer, tLocal: number): Promise<ImageBitmap> {
+    const hit = this.maskFrames.get(layer);
+    if (hit && Math.abs(hit.t - tLocal) < 1e-6) return hit.bitmap;
+    const m = layer.overlay.mask!;
+    const flat = { ...layer.overlay, mask: { ...m, ...maskFrameAt(m, tLocal), kf: undefined } };
+    const png = await renderElementPng(flat, this.width, this.height, this.assets);
+    const bitmap = await createImageBitmap(png);
+    hit?.bitmap.close();
+    this.maskFrames.set(layer, { t: tLocal, bitmap });
+    return bitmap;
+  }
+
   /** Release the pictures of layers that have finished by `t`. */
   retire(t: number) {
     for (const [layer, bitmap] of this.drawn) {
@@ -382,11 +401,19 @@ class StampCache {
         this.drawn.delete(layer);
       }
     }
+    for (const [layer, hit] of this.maskFrames) {
+      if (layer.end <= t) {
+        hit.bitmap.close();
+        this.maskFrames.delete(layer);
+      }
+    }
   }
 
   dispose() {
     for (const bitmap of this.drawn.values()) bitmap.close();
     this.drawn.clear();
+    for (const hit of this.maskFrames.values()) hit.bitmap.close();
+    this.maskFrames.clear();
   }
 }
 
@@ -610,13 +637,17 @@ export async function renderProjectToMp4(
     const layers = await stampText(doc);
     // Deepest lane first, so a walk of it is a walk up the stack.
     const stacked = [...layers].sort((a, b) => b.stackLane - a.stackLane);
-    // The behind pass is created only when something is tagged; prepare()
-    // makes rasters and the segmenter resident before the first frame.
+    // The subject pass is created only when something reads the person matte;
+    // prepare() makes rasters and the segmenter resident before the first
+    // frame. Subject-masked clips pull their matte mid-stack through the
+    // compositor's provider, per frame (no throttling in an export).
     let fxScratch: OffscreenCanvas | null = null;
-    let behind: BehindCompositor | null = null;
-    if (hasBehindOverlays(doc.overlays)) {
-      behind = new BehindCompositor();
+    let behind: SubjectMaskCompositor | null = null;
+    if (hasSubjectOverlays(doc.overlays) || doc.clips.some((c) => c.mask?.kind === "subject")) {
+      behind = new SubjectMaskCompositor();
       await behind.prepare(doc.overlays, settings.width, settings.height, doc.assets);
+      const pass = behind;
+      comp.subjectMatteProvider = (at) => pass.clipMatteOf(canvas, at, { minMaskInterval: 0 });
     }
     stop();
 
@@ -678,8 +709,9 @@ export async function renderProjectToMp4(
         comp.drawIntoRect(frame, rect, cover, layer.alpha, t, layer.zoom, layer.clip);
       }
 
-      // Behind-speaker titles: video → text → segmented person, exactly the
-      // preview's pass, sampled per exported frame (no mask throttling).
+      // The subject pass: video → behind elements → segmented person, exactly
+      // the preview's pass, sampled per exported frame (no mask throttling).
+      // It also refreshes the matte the front subject-masked stamps read.
       behind?.draw(canvas, doc.overlays, doc.assets, t, { minMaskInterval: 0 });
 
       // The stack, bottom up: an effect grades what plays under it, so the
@@ -690,7 +722,7 @@ export async function renderProjectToMp4(
       for (const o of liveEffectsAt(doc.overlays, t)) {
         const upto = stacked.findIndex((l) => l.stackLane <= laneOf(o));
         const end = upto < 0 ? stacked.length : upto;
-        if (end > drawn) await drawStamps(canvas, stacked.slice(drawn, end), stamps, t);
+        if (end > drawn) await drawStamps(canvas, stacked.slice(drawn, end), stamps, t, behind);
         drawn = Math.max(drawn, end);
         if (!fxScratch) {
           fxScratch = new OffscreenCanvas(canvas.width, canvas.height);
@@ -707,7 +739,7 @@ export async function renderProjectToMp4(
           o.end - o.start
         );
       }
-      await drawStamps(canvas, stacked.slice(drawn), stamps, t);
+      await drawStamps(canvas, stacked.slice(drawn), stamps, t, behind);
       stamps.retire(t);
       comp.drawProjectFade(projectFadeGain(doc, t, duration));
 
@@ -754,7 +786,8 @@ async function drawStamps(
   canvas: HTMLCanvasElement | OffscreenCanvas,
   layers: StampedLayer[],
   stamps: StampCache,
-  t: number
+  t: number,
+  subject?: SubjectMaskCompositor | null
 ) {
   const ctx = canvas.getContext("2d") as
     | CanvasRenderingContext2D
@@ -785,9 +818,20 @@ async function drawStamps(
       ctx.restore();
       continue;
     }
-    const bitmap = await stamps.bitmapFor(layer);
+    const bitmap = isMaskAnimated(layer.overlay.mask)
+      ? await stamps.bitmapForMaskAt(layer, t - (layer.animStart ?? layer.start))
+      : await stamps.bitmapFor(layer);
+    // A front subject-masked stamp trims to the pass's current matte — its
+    // pixels change with the video, so the trim happens at draw time, never
+    // in the cached raster.
+    const subjectFront = !!subject && frontSubjectOverlay(layer.overlay);
     if (!layer.anim) {
-      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      const picture = subjectFront
+        ? subject!.mattedStamp(layer.overlay, canvas.width, canvas.height, (c) =>
+            c.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+          )
+        : bitmap;
+      ctx.drawImage(picture, 0, 0, canvas.width, canvas.height);
       continue;
     }
     // Unkeyed, the bitmap bakes the element's own rotation/opacity and only
@@ -802,13 +846,26 @@ async function drawStamps(
     const scale = Math.min(canvas.width, canvas.height) / 1080;
     const cx = layer.overlay.x * canvas.width;
     const cy = layer.overlay.y * canvas.height;
+    const posed = (c: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D) => {
+      c.translate(ev.x * canvas.width + ev.dx * scale, ev.y * canvas.height + ev.dy * scale);
+      c.rotate((ev.rotation * Math.PI) / 180);
+      c.scale(ev.scale, ev.scale);
+      c.translate(-cx, -cy);
+      c.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    };
     ctx.save();
     ctx.globalAlpha = ev.opacity;
-    ctx.translate(ev.x * canvas.width + ev.dx * scale, ev.y * canvas.height + ev.dy * scale);
-    ctx.rotate((ev.rotation * Math.PI) / 180);
-    ctx.scale(ev.scale, ev.scale);
-    ctx.translate(-cx, -cy);
-    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    if (subjectFront) {
+      // Pose the stamp inside the matte surface, so the matte stays put in
+      // frame space while the element travels beneath it.
+      ctx.drawImage(
+        subject!.mattedStamp(layer.overlay, canvas.width, canvas.height, posed),
+        0,
+        0
+      );
+    } else {
+      posed(ctx);
+    }
     ctx.restore();
   }
 }
