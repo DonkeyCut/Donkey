@@ -82,6 +82,19 @@ const DECODER_REBUILDS = 3;
 const pauseEl = (el: MediaEl) => {
   if (!isImageEl(el) && !el.paused) el.pause();
 };
+
+/** Decoder pool key. Clips whose frames are identical at every timeline
+ * instant — same source, same speed, same source-time offset — share one
+ * element: srcT(t) = in + (t − start)·speed, so equal (asset, speed,
+ * in − start·speed) means equal pictures at all times. A tiled reveal that
+ * plays one source across many tracks costs one decoder instead of one per
+ * tile, and a split of one source hands the playing element straight across
+ * the cut — no resume at all. Different trims of a source keep separate
+ * elements, so a same-source dissolve still blends two distinct frames. */
+const mappingKey = (clip: VideoClip, asset: MediaAsset) => {
+  const speed = clipSpeed(clip);
+  return `${asset.id}|${speed}|${(clip.in - clip.start * speed).toFixed(3)}`;
+};
 /** Build the decoder element for a clip's asset: an <img> for a still, a
  * hidden <video> for footage. */
 function makeMediaEl(asset: MediaAsset): MediaEl {
@@ -126,29 +139,33 @@ function teardown(el: MediaEl) {
  * matching the export's letterboxing).
  */
 class Engine {
-  // Keyed by clip id, not asset id: two trims of the same source get their own
-  // decoders, so a cross-dissolve can show both at once and the incoming clip
-  // warms during the overlap instead of fighting the outgoing one over a single
-  // element's seek head (the black flash between same-source segments).
+  // Keyed by `mappingKey`, not asset id: two trims of the same source get
+  // their own decoders, so a cross-dissolve can show both at once and the
+  // incoming clip warms during the overlap instead of fighting the outgoing
+  // one over a single element's seek head (the black flash between
+  // same-source segments) — while clips that show identical frames (a tiled
+  // reveal, a plain split) share one.
   private videoEls = new Map<string, MediaEl>();
-  // One element per overlay clip (keyed by clip id, not asset) so the same
-  // source can appear on two tracks at once.
+  // The overlay tracks' pool, keyed the same way, kept apart from track 0's
+  // so the two never trade elements mid-frame.
   private overlayEls = new Map<string, MediaEl>();
   private audioEls = new Map<string, HTMLAudioElement>();
-  // Per-clip decoder health, keyed like the element maps: the last progress
-  // reading and when it was taken, plus how many times this clip's decoder has
+  // Per-decoder health, keyed like the element maps: the last progress
+  // reading and when it was taken, plus how many times this decoder has
   // been rebuilt on the current source.
   private health = new Map<string, { mark: number; at: number; rebuilds: number }>();
-  // Decoder recency, keyed like the element maps: the tick that last asked for
-  // this clip's element. Anything below the current tick is idle and can be
+  // Decoder recency, keyed like the element maps: the tick that last asked
+  // for this element. Anything below the current tick is idle and can be
   // evicted; the current tick's entries are what the frame on screen is made
   // of.
   private used = new Map<string, number>();
+  // Captured entrance frames for live blend windows, keyed like the element
+  // maps: the bitmap the blend draws while the incoming element pre-rolls.
+  private heldEntrance = new Map<string, { src: string; canvas: HTMLCanvasElement }>();
   private frame = 0;
   // The clip array the decoder maps were last reconciled against.
   private clipsSeen: VideoClip[] | null = null;
   private raf = 0;
-  private activeClipId: string | null = null;
   private disposed = false;
   // Wall-clock stamp for advancing time where track 0 has nothing playing —
   // in a gap or past its end there is no track-0 video element to act as the
@@ -176,17 +193,19 @@ class Engine {
     this.audioEls.clear();
     this.health.clear();
     this.used.clear();
+    this.heldEntrance.clear();
   }
 
-  /** Release one clip's decoder. The element maps are disjoint by clip id, so
-   * this serves track 0 and the overlay tracks alike. */
-  private dropDecoder(clipId: string) {
-    const el = this.videoEls.get(clipId) ?? this.overlayEls.get(clipId);
+  /** Release one decoder. The element maps are disjoint by key, so this
+   * serves track 0 and the overlay tracks alike. */
+  private dropDecoder(key: string) {
+    const el = this.videoEls.get(key) ?? this.overlayEls.get(key);
     if (el) teardown(el);
-    this.videoEls.delete(clipId);
-    this.overlayEls.delete(clipId);
-    this.health.delete(clipId);
-    this.used.delete(clipId);
+    this.videoEls.delete(key);
+    this.overlayEls.delete(key);
+    this.health.delete(key);
+    this.used.delete(key);
+    this.heldEntrance.delete(key);
   }
 
   /** Hold the live decoder pool to `DECODER_BUDGET`, oldest first. Elements
@@ -203,28 +222,28 @@ class Engine {
     for (const id of idle.slice(0, total - DECODER_BUDGET)) this.dropDecoder(id);
   }
 
-  /** The cached element for a clip, rebuilt when its source no longer matches —
-   * a swap keeps the clip id but repoints the asset (a shot re-render), and the
+  /** The cached element for a key, rebuilt when its source no longer matches —
+   * a swap keeps the clip but repoints the asset (a shot re-render), and the
    * old decoder would otherwise keep playing (or erroring on) the old file. */
-  private elFor(map: Map<string, MediaEl>, clipId: string, asset: MediaAsset): MediaEl {
-    // Asking for a clip's element is what marks it in use — every path that
+  private elFor(map: Map<string, MediaEl>, key: string, asset: MediaAsset): MediaEl {
+    // Asking for an element is what marks it in use — every path that
     // draws, seeks, warms or pre-rolls a clip comes through here, so recency
     // needs no bookkeeping at the call sites.
-    this.used.set(clipId, this.frame);
-    let el = map.get(clipId);
+    this.used.set(key, this.frame);
+    let el = map.get(key);
     if (el && el.getAttribute("src") !== asset.url) {
       teardown(el);
       // A repoint is a new source, so it starts with a full rebuild budget.
-      this.health.delete(clipId);
+      this.health.delete(key);
       el = undefined;
     }
-    if (el && this.spent(clipId, el)) {
+    if (el && this.spent(key, el)) {
       teardown(el);
       el = undefined;
     }
     if (!el) {
       el = makeMediaEl(asset);
-      map.set(clipId, el);
+      map.set(key, el);
     }
     return el;
   }
@@ -236,11 +255,11 @@ class Engine {
    * `DECODER_STALL_MS` — dead either way, and worth one more decoder. Says yes
    * at most `DECODER_REBUILDS` times per source, so an unplayable file stops
    * costing fetches and falls through to the paint-through path. */
-  private spent(clipId: string, el: MediaEl): boolean {
+  private spent(key: string, el: MediaEl): boolean {
     const now = performance.now();
-    const h = this.health.get(clipId) ?? { mark: -1, at: now, rebuilds: 0 };
+    const h = this.health.get(key) ?? { mark: -1, at: now, rebuilds: 0 };
     if (elReady(el)) {
-      this.health.set(clipId, { mark: -1, at: now, rebuilds: 0 });
+      this.health.set(key, { mark: -1, at: now, rebuilds: 0 });
       return false;
     }
     // Progress reading, not a clock: readiness plus how far the buffer reaches,
@@ -250,7 +269,7 @@ class Engine {
       ? 0
       : el.readyState + (el.buffered.length ? el.buffered.end(el.buffered.length - 1) : 0);
     if (mark > h.mark) {
-      this.health.set(clipId, { ...h, mark, at: now });
+      this.health.set(key, { ...h, mark, at: now });
       return false;
     }
     const since = now - h.at;
@@ -258,19 +277,19 @@ class Engine {
     const visible = typeof document === "undefined" || document.visibilityState === "visible";
     const dead = visible && (elErrored(el) ? since > DECODER_RETRY_MS : since > DECODER_STALL_MS);
     if (!dead || h.rebuilds >= DECODER_REBUILDS) {
-      this.health.set(clipId, { ...h, mark });
+      this.health.set(key, { ...h, mark });
       return false;
     }
-    this.health.set(clipId, { mark: -1, at: now, rebuilds: h.rebuilds + 1 });
+    this.health.set(key, { mark: -1, at: now, rebuilds: h.rebuilds + 1 });
     console.debug(
-      `[cut-preview] decoder rebuild: clip ${clipId} ` +
+      `[cut-preview] decoder rebuild: ${key} ` +
         `(${elErrored(el) ? "errored" : "stalled"}, attempt ${h.rebuilds + 1}/${DECODER_REBUILDS})`
     );
     return true;
   }
 
   private videoFor(clip: VideoClip, asset: MediaAsset): MediaEl {
-    return this.elFor(this.videoEls, clip.id, asset);
+    return this.elFor(this.videoEls, mappingKey(clip, asset), asset);
   }
 
   /** Decode-ahead for track 0: build each soon-to-enter clip's element
@@ -279,12 +298,20 @@ class Engine {
    * are touched — the live master (and any dissolve partner) steers its own
    * clock through `composite`. Bounded by `WARM_HORIZON_S`/`WARM_MAX`; spans are
    * start-ordered, so we can stop once one is past the horizon. */
-  private warmAhead(spans: ClipSpan[], t: number) {
+  private warmAhead(spans: ClipSpan[], t: number, activeKey: string | null) {
     let warmed = 0;
+    // One parking seek per element: spans sharing a decoder would otherwise
+    // pull its seek head between their targets every tick. Start-ordered, so
+    // the nearest entrance wins; the active element is the live picture and
+    // is never parked out from under it.
+    const parked = new Set<string>();
     for (let i = 0; i < spans.length; i++) {
       const span = spans[i];
       if (span.start <= t) continue; // current or past — not ours to warm
       if (span.start > t + WARM_HORIZON_S) break;
+      const key = mappingKey(span.clip, span.asset);
+      if (key === activeKey || parked.has(key)) continue;
+      parked.add(key);
       const speed = clipSpeed(span.clip);
       // A clip a transition blends in shows its entrance frame for the whole
       // blend window, so it parks exactly there, as early as possible — a
@@ -319,13 +346,27 @@ class Engine {
    * frame until the tick's overlay path takes it live. */
   private warmOverlaysAhead(t: number) {
     const s = useEditor.getState();
+    // Elements live on screen at `t` — with shared decoders an upcoming clip
+    // can ride the same element a playing clip is steering, and a parking
+    // seek would yank the live picture.
+    const live = new Set<string>();
+    for (const c of overlayLayers(s.clips)) {
+      if (c.hidden || c.start > t) continue;
+      if (t >= c.start + (c.out - c.in) / clipSpeed(c)) continue;
+      const asset = s.assets.find((a) => a.id === c.assetId);
+      if (asset) live.add(mappingKey(c, asset));
+    }
     let warmed = 0;
+    const parked = new Set<string>();
     for (const c of overlayLayers(s.clips)) {
       if (c.hidden || c.start <= t || c.start > t + WARM_HORIZON_S) continue;
       const asset = s.assets.find((a) => a.id === c.assetId);
       if (!asset) continue;
+      const key = mappingKey(c, asset);
+      if (live.has(key) || parked.has(key)) continue;
+      parked.add(key);
       const el = this.overlayVideoFor(c, asset);
-      if (!isImageEl(el) && !el.seeking && Math.abs(el.currentTime - c.in) > 0.1) {
+      if (!isImageEl(el) && el.paused && !el.seeking && Math.abs(el.currentTime - c.in) > 0.1) {
         el.currentTime = c.in;
       }
       if (++warmed >= WARM_MAX) break;
@@ -385,6 +426,41 @@ class Engine {
     return el;
   }
 
+  /** The incoming side of a live blend: the entrance frame the window draws,
+   * and a decoder made hot for the cut about to land. The element holds
+   * parked on its entrance frame only until that frame has been captured
+   * once; from there the bitmap carries the blend's picture and the element
+   * itself pre-rolls muted toward the in-point (`warmNext`), so the handoff
+   * `play()` resumes a decoder that is already running. Holding the element
+   * itself for the whole window meant resuming it cold at the cut — and past
+   * a trimmed in-point, decoding forward from the prior keyframe — which
+   * froze the picture and the playhead right as the transition landed. */
+  private blendIncoming(span: ClipSpan, t: number, play: boolean): Frame {
+    const el = this.videoFor(span.clip, span.asset);
+    if (isImageEl(el)) return this.frameOf(el); // a still is its own held frame
+    const key = mappingKey(span.clip, span.asset);
+    const src = `${span.asset.url}#${span.clip.in.toFixed(3)}`;
+    let held = this.heldEntrance.get(key);
+    if (held && held.src !== src) held = undefined;
+    if (!held) {
+      const parkedOnEntrance =
+        elReady(el) && el.paused && !el.seeking && Math.abs(el.currentTime - span.clip.in) <= 0.05;
+      if (!parkedOnEntrance) {
+        // Nothing to capture yet: hold the element on the frame, as before.
+        this.holdAtEntrance(span);
+        return this.frameOf(el);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = elW(el);
+      canvas.height = elH(el);
+      canvas.getContext("2d")?.drawImage(el, 0, 0);
+      held = { src, canvas };
+      this.heldEntrance.set(key, held);
+    }
+    this.warmNext(span, t, play);
+    return { kind: "ready", image: held.canvas, width: held.canvas.width, height: held.canvas.height };
+  }
+
   /** Seek/rate/play one clip's element toward its frame at timeline time `t`,
    * without touching any other element (the caller pauses stale ones). */
   private prepare(span: ClipSpan, t: number, play: boolean, muted: boolean): MediaEl {
@@ -429,7 +505,12 @@ class Engine {
   /** The clip's raw, ungraded decoder frame for analysis (the color panel's
    * Auto), or null when no ready decoder exists for the clip. */
   sourceFor(clipId: string): CanvasImageSource | null {
-    const el = this.videoEls.get(clipId) ?? this.overlayEls.get(clipId);
+    const s = useEditor.getState();
+    const clip = s.clips.find((c) => c.id === clipId);
+    const asset = clip && s.assets.find((a) => a.id === clip.assetId);
+    if (!clip || !asset) return null;
+    const key = mappingKey(clip, asset);
+    const el = this.videoEls.get(key) ?? this.overlayEls.get(key);
     return el && elReady(el) ? el : null;
   }
 
@@ -452,30 +533,36 @@ class Engine {
     const plan = trackZeroPlan(masterSpan, spans, t);
     // A hidden clip is silent as well as black.
     const masterEl = this.prepare(masterSpan, t, play, masterSpan.clip.muted || !!masterSpan.clip.hidden);
-    this.activeClipId = masterSpan.clip.id;
-    const keep = new Set([masterSpan.clip.id]);
+    const masterKey = mappingKey(masterSpan.clip, masterSpan.asset);
+    const keep = new Set([masterKey]);
     // Prime the next clip's decoder+audio pipeline shortly before its entrance
     // (the dissolve start, or the hard cut) so the handoff `play()` resumes hot
     // — no cold-start spin-up freezing the picture and playhead at the cut.
-    // A transitioned cut holds its incoming clip on the entrance frame instead
-    // of rolling it: the blend draws that exact frame for the whole window, and
-    // a pre-roll would park the decoder on the wrong one — the seek at
-    // window-open then leaves the push/wipe geometry a black region until the
-    // frame decodes.
+    // A clip sharing the master's element (a split of the same source) needs
+    // neither: the element crosses the cut already playing.
     if (plan.upcoming && plan.upcoming !== plan.incoming) {
-      if (masterSpan.transitionOut > 0) this.holdAtEntrance(plan.upcoming);
-      else this.warmNext(plan.upcoming, t, play);
-      keep.add(plan.upcoming.clip.id);
+      const upKey = mappingKey(plan.upcoming.clip, plan.upcoming.asset);
+      if (upKey !== masterKey) {
+        if (masterSpan.transitionOut > 0) this.holdAtEntrance(plan.upcoming);
+        else this.warmNext(plan.upcoming, t, play);
+        keep.add(upKey);
+      }
     }
-    // Each clip owns its element, so a transition's two clips decode side by
-    // side — a true blend even when they are trims of the same source. The
-    // incoming clip has not started yet (the blend window sits before its
-    // footprint), so it holds parked on its entrance frame; it starts playing
-    // when the cut lands and it becomes the master.
-    let incEl: MediaEl | null = null;
+    // The incoming side of a live blend. Each trim owns its element, so the
+    // two sides decode side by side — a true blend even between trims of the
+    // same source. A split sharing the master's mapping draws the master's own
+    // frames (the pictures are identical by construction); everything else
+    // shows its captured entrance frame while its element pre-rolls for the
+    // handoff (`blendIncoming`).
+    let incFrame: Frame = MISSING_FRAME;
     if (plan.incoming) {
-      incEl = this.holdAtEntrance(plan.incoming);
-      keep.add(plan.incoming.clip.id);
+      const incKey = mappingKey(plan.incoming.clip, plan.incoming.asset);
+      if (incKey === masterKey) {
+        incFrame = this.frameOf(masterEl);
+      } else {
+        incFrame = this.blendIncoming(plan.incoming, t, play);
+        keep.add(incKey);
+      }
     }
     // A live voiceover ducks the master clip's sound under it. The clip's own
     // volume rides on top (the element clamps at 1; export honors up to 1.5).
@@ -502,7 +589,7 @@ class Engine {
           dx: plan.masterFxFrac.dx * this.canvas.width,
           dy: plan.masterFxFrac.dy * this.canvas.height,
         },
-        incFrame: this.frameOf(incEl),
+        incFrame,
         incClip: plan.incoming?.clip,
         incAlpha: plan.incAlpha,
         incZoom: plan.incZoom,
@@ -517,7 +604,7 @@ class Engine {
   }
 
   private overlayVideoFor(clip: VideoClip, asset: MediaAsset): MediaEl {
-    return this.elFor(this.overlayEls, clip.id, asset);
+    return this.elFor(this.overlayEls, mappingKey(clip, asset), asset);
   }
 
   // The subject-mask pass: behind-tagged elements leave the DOM overlay path
@@ -611,6 +698,7 @@ class Engine {
   private prepareOverlays(t: number, play: boolean) {
     return this.liveOverlays(t).map(({ clip, asset, alpha, zoom, gain }) => ({
       clip,
+      key: mappingKey(clip, asset),
       alpha,
       zoom,
       el: this.prepareOverlay(clip, asset, t, play, gain),
@@ -626,10 +714,10 @@ class Engine {
     t: number,
     play: boolean,
     active: Set<string>,
-    prepared?: { clip: VideoClip; el: MediaEl; alpha: number; zoom: number }[]
+    prepared?: { clip: VideoClip; key: string; el: MediaEl; alpha: number; zoom: number }[]
   ) {
-    for (const { clip, el, alpha, zoom } of prepared ?? this.prepareOverlays(t, play)) {
-      active.add(clip.id);
+    for (const { clip, key, el, alpha, zoom } of prepared ?? this.prepareOverlays(t, play)) {
+      active.add(key);
       if (!elReady(el)) continue;
       const rect = rectOf(clip);
       const cover = clip.fit === "fill" || (clip.fit == null && isFullRect(rect));
@@ -637,13 +725,18 @@ class Engine {
     }
   }
 
-  /** Pause overlay elements not drawn this frame; drop those whose clip is gone. */
+  /** Pause overlay elements not drawn this frame; drop those no clip needs. */
   private cleanupOverlays(active: Set<string>) {
     const s = useEditor.getState();
-    for (const [id, el] of this.overlayEls) {
-      if (active.has(id)) continue;
+    const live = new Set<string>();
+    for (const c of overlayLayers(s.clips)) {
+      const asset = s.assets.find((a) => a.id === c.assetId);
+      if (asset) live.add(mappingKey(c, asset));
+    }
+    for (const [key, el] of this.overlayEls) {
+      if (active.has(key)) continue;
       pauseEl(el);
-      if (!overlayLayers(s.clips).some((c) => c.id === id)) this.dropDecoder(id);
+      if (!live.has(key)) this.dropDecoder(key);
     }
   }
 
@@ -769,15 +862,19 @@ class Engine {
   private render() {
     const s = useEditor.getState();
     const spans = getClipSpans(s.clips, s.assets);
-    // Drop decoders for clips that no longer exist (deleted or replaced).
-    // Every edit rewrites the clip array, so its identity changing is the
-    // signal to re-check — a moving playhead leaves it alone, and the scan
-    // never runs per frame.
+    // Drop decoders no clip needs anymore (deleted or replaced). Every edit
+    // rewrites the clip array, so its identity changing is the signal to
+    // re-check — a moving playhead leaves it alone, and the scan never runs
+    // per frame.
     if (this.clipsSeen !== s.clips) {
       this.clipsSeen = s.clips;
-      const live = new Set(s.clips.map((c) => c.id));
-      for (const id of [...this.videoEls.keys(), ...this.overlayEls.keys()]) {
-        if (!live.has(id)) this.dropDecoder(id);
+      const live = new Set<string>();
+      for (const c of s.clips) {
+        const asset = s.assets.find((a) => a.id === c.assetId);
+        if (asset) live.add(mappingKey(c, asset));
+      }
+      for (const key of [...this.videoEls.keys(), ...this.overlayEls.keys()]) {
+        if (!live.has(key)) this.dropDecoder(key);
       }
     }
     // Whole-project length so time past track 0's end (a longer video track or
@@ -819,15 +916,17 @@ class Engine {
     // element the branches are about to drive — anchored at the playhead while
     // skimming, its entrance-frame parking seeks would fight the skimmed
     // clip's own scrub seeks every tick and freeze the preview on any clip
-    // ahead of the playhead.
-    this.warmAhead(spans, pt);
+    // ahead of the playhead. The span live at the anchor names the element
+    // that must not be parked out from under the picture (a shared decoder).
+    const anchorSpan = spans.find((sp) => pt >= sp.start && pt < sp.start + sp.len);
+    this.warmAhead(spans, pt, anchorSpan ? mappingKey(anchorSpan.clip, anchorSpan.asset) : null);
     this.warmOverlaysAhead(pt);
 
     if (!s.playing) {
       // Not advancing: drop the wall-clock stamp so the first playing tick
       // starts a fresh delta instead of leaping over the paused stretch.
       this.lastPlayNow = 0;
-      const span = spans.find((sp) => pt >= sp.start && pt < sp.start + sp.len);
+      const span = anchorSpan;
       // Prime every layer live at `pt` — the track-0 element and each overlay
       // track — before repainting (create them, issue any seeks). A cold
       // element or an unbuffered seek has no decodable frame yet, and painting
@@ -849,7 +948,7 @@ class Engine {
         if (!elErrored(el) && !elReady(el)) ready = false;
       }
       if (!ready) {
-        this.pauseExcept(new Set(span ? [span.clip.id] : []));
+        this.pauseExcept(new Set(span ? [mappingKey(span.clip, span.asset)] : []));
         this.syncSoundtrack(t, false);
         return;
       }
@@ -867,7 +966,7 @@ class Engine {
       return;
     }
 
-    let span = spans.find((sp) => t >= sp.start && t < sp.start + sp.len);
+    let span = anchorSpan;
 
     // A just-started or just-scrubbed clip may still be decoding. Hold the last
     // painted frame rather than clearing to black — same as the skim path. (At a
@@ -878,7 +977,7 @@ class Engine {
       // A broken source (unreachable still, decode error) never becomes ready;
       // fall through so the wall clock advances past it instead of freezing.
       if (!elReady(el) && !elErrored(el)) {
-        this.pauseExcept(new Set([span.clip.id]));
+        this.pauseExcept(new Set([mappingKey(span.clip, span.asset)]));
         this.syncSoundtrack(t, true);
         return;
       }
@@ -976,7 +1075,7 @@ class Engine {
     const fadeGain = this.projectFadeGain(t, total);
     if (fadeGain < 1) {
       if (span) {
-        const mel = this.videoEls.get(span.clip.id);
+        const mel = this.videoEls.get(mappingKey(span.clip, span.asset));
         if (mel && !isImageEl(mel)) mel.volume = Math.min(mel.volume, fadeGain);
       }
       for (const el of this.overlayEls.values()) {
@@ -1006,6 +1105,11 @@ export function usePlayback(canvasRef: RefObject<HTMLCanvasElement | null>) {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const engine = new Engine(canvas);
+    // Dev-only automation hook, like installDevHooks: lets a headless run (or
+    // a debugging session) read the live decoder pool the way diagPulse does.
+    if (process.env.NODE_ENV !== "production") {
+      (window as unknown as Record<string, unknown>).__cutDevEngine = engine;
+    }
     registerSourceSampler((clipId) => engine.sourceFor(clipId));
     return () => {
       registerSourceSampler(null);
