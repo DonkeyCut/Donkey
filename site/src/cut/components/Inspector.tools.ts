@@ -30,7 +30,6 @@ export const INSPECTOR_TOOLS = [
       line_height: num("Line height multiplier (titles; default 1.25)"),
       shadow: bool("Drop shadow (titles)"),
       plate: bool("Backdrop plate (titles)"),
-      behind_subject: bool("Sit the text behind the person in the shot (titles)"),
       w: num("Width, fraction of frame width (shapes/stickers)"),
       h: num("Height, fraction of frame height (shapes)"),
       fill: str("Fill color (shapes)"),
@@ -42,6 +41,70 @@ export const INSPECTOR_TOOLS = [
       opacity: num("Whole-element opacity 0..1 (1 clears)"),
       hidden: bool("Hide the element without deleting it"),
     }, ["id"]),
+  },
+  {
+    name: "set_mask",
+    description:
+      "Mask an overlay element or a video clip — trim its picture to a shape or to the person in the shot. Kinds: rect (rounded box), circle (ellipse), linear (half-plane: at rotation 0 the top side stays), mirror (band across the item), subject (the person matte: plain keeps the picture only on the person; invert keeps it off the person — behind the speaker). Position is the mask center's offset from the item's own center (a clip's region center), in frame fractions; w/h size it in frame fractions; feather softens the edge; invert keeps what the shape leaves out. Subject masks use only feather and invert. Pass kind \"none\" to remove the mask. `keys` animates the geometry over time — each key is the full geometry at a moment, moving linearly between keys; pass an empty list to clear the keys and keep the mask still.",
+    inputSchema: obj({
+      id: str("Overlay element id or video clip id"),
+      kind: {
+        type: "string",
+        enum: ["rect", "circle", "linear", "mirror", "subject", "none"],
+        description: 'Mask shape, the person matte ("subject"), or "none" to remove the mask',
+      },
+      x: num("Center offset x from the element center, fraction of frame width (default 0)"),
+      y: num("Center offset y, fraction of frame height (default 0)"),
+      w: num("Width, fraction of frame width (default 0.5; linear ignores)"),
+      h: num("Height, fraction of frame height (mirror: band height; linear ignores)"),
+      rotation: num("Degrees clockwise, -180..180"),
+      feather: num("Edge softness, px at the 1080 design short side (0..200)"),
+      invert: bool("Keep the pixels outside the shape"),
+      radius: num("Rect corner radius, px at 1080 short side"),
+      keys: {
+        type: "array",
+        description:
+          "Mask keyframes, seconds from the element's start; omitted fields on a key take the mask's value at that moment",
+        items: obj(
+          {
+            t: num("Seconds from the element's start"),
+            x: num("Center offset x, fraction of frame width"),
+            y: num("Center offset y, fraction of frame height"),
+            w: num("Width, fraction of frame width"),
+            h: num("Height, fraction of frame height"),
+            rotation: num("Degrees clockwise, -180..180"),
+            feather: num("Edge softness, px at 1080 short side"),
+          },
+          ["t"]
+        ),
+      },
+    }, ["id"]),
+  },
+  {
+    name: "set_clip_keyframes",
+    description:
+      "Give a video clip (any track) a keyframed pose track: each key is a whole pose at a time measured in seconds from the clip's own start — center position in frame fractions, scale multiplier on its fitted size, rotation, opacity — moving linearly between keys and holding outside them. Omitted fields on a key take the clip's pose at that moment. Pass an empty list to clear the track and return the clip to its region. Use for pans, push-ins, picture-in-picture flights, spins, and fades on video itself.",
+    inputSchema: obj(
+      {
+        clipId: str("Video clip id"),
+        keys: {
+          type: "array",
+          description: "Keys in any order; two at the same time collapse to one",
+          items: obj(
+            {
+              t: num("Seconds from the clip's start"),
+              x: num("Center x, fraction of frame width"),
+              y: num("Center y, fraction of frame height"),
+              scale: num("Size multiplier, 1 = the clip's fitted size (0.1..4)"),
+              rotation: num("Degrees clockwise, -180..180"),
+              opacity: num("0..1"),
+            },
+            ["t"]
+          ),
+        },
+      },
+      ["clipId", "keys"]
+    ),
   },
   {
     name: "update_audio",

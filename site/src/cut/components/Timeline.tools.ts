@@ -176,7 +176,6 @@ export const TIMELINE_TOOLS = [
       stroke_width: num("Text outline width in em (0..0.15; 0 removes it)"),
       shadow: bool("Drop shadow (default true)"),
       plate: bool("Translucent plate behind text (default false)"),
-      behind_subject: bool("Sit the text behind the person in the shot (needs a clearly separated speaker)"),
       rotation: num("Degrees clockwise, -180..180"),
       opacity: num("Whole-element opacity 0..1"),
     }, ["text"]),

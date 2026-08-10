@@ -5,6 +5,7 @@ import {
   EFFECT_IDS,
   normalizeGrade,
   type EffectId,
+  type Mask,
   OVERLAY_ANIM_DEFAULT_SECONDS,
   OVERLAY_ANIM_MAX_SECONDS,
   OVERLAY_ANIM_MIN_SECONDS,
@@ -85,6 +86,7 @@ import {
   ANIM_STYLE_IDS,
   frameOf,
   IMAGE_CLIP_SECONDS,
+  isEffectOverlay,
   isTextOverlay,
   LAYOUTS,
   MAX_SUBTITLE_LANES,
@@ -349,6 +351,103 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       kf = useEditor.getState().overlays.find((x) => x.id === o.id)?.kf;
     }
     return { id: o.id, keys: (kf ?? []).map((k) => ({ ...k, t: round2(k.t) })) };
+  },
+
+  set_clip_keyframes: (s, input) => {
+    const clip = requireItem(s.clips, input.clipId, "video clip");
+    const raw = input.keys;
+    if (!Array.isArray(raw)) throw new ToolError("keys must be a list.");
+    const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
+    const dur = Math.max(0.1, (clip.out - clip.in) / speed);
+    let kf = clip.kf;
+    if (raw.length === 0) {
+      s.clearClipKeys(clip.id);
+      kf = undefined;
+    } else {
+      // Each key builds on the pose already at its time, so a key that only
+      // names `x` keeps whatever the clip was doing otherwise.
+      s.pushHistory();
+      for (const k of raw as Record<string, unknown>[]) {
+        if (!isNum(k.t)) throw new ToolError("Every key needs a time `t`.");
+        s.setClipKey(
+          clip.id,
+          clamp(k.t, 0, dur),
+          {
+            ...(isNum(k.x) ? { x: clamp(k.x, -0.5, 1.5) } : {}),
+            ...(isNum(k.y) ? { y: clamp(k.y, -0.5, 1.5) } : {}),
+            ...(isNum(k.scale) ? { scale: clamp(k.scale, 0.1, 4) } : {}),
+            ...(isNum(k.rotation) ? { rotation: clamp(Math.round(k.rotation), -180, 180) } : {}),
+            ...(isNum(k.opacity) ? { opacity: clamp(k.opacity, 0, 1) } : {}),
+          },
+          { transient: true }
+        );
+      }
+      kf = useEditor.getState().clips.find((c) => c.id === clip.id)?.kf;
+    }
+    return { id: clip.id, keys: (kf ?? []).map((k) => ({ ...k, t: round2(k.t) })) };
+  },
+
+  set_mask: (s, input) => {
+    // One id space: an overlay element or a video clip on any track.
+    const o = s.overlays.find((x) => x.id === input.id);
+    const clip = o ? undefined : s.clips.find((c) => c.id === input.id);
+    if (!o && !clip)
+      throw new ToolError("No overlay element or video clip with that id.");
+    if (o && isEffectOverlay(o)) throw new ToolError("Effect elements have no pixels to mask.");
+    const current = o ? o.mask : clip!.mask;
+    const setMask = (mask: Mask | undefined) =>
+      o ? s.updateOverlay(o.id, { mask }) : s.updateClip(clip!.id, { mask });
+    if (input.kind === "none") {
+      setMask(undefined);
+      return { id: input.id, mask: null };
+    }
+    const kinds = ["rect", "circle", "linear", "mirror", "subject"];
+    const kind =
+      typeof input.kind === "string"
+        ? input.kind
+        : (current?.kind ?? "rect");
+    if (!kinds.includes(kind)) throw new ToolError(`Unknown mask kind. Use one of: ${kinds.join(", ")}, none.`);
+    const geom = (k: Record<string, unknown>) => ({
+      ...(isNum(k.x) ? { x: clamp(k.x, -1, 1) } : {}),
+      ...(isNum(k.y) ? { y: clamp(k.y, -1, 1) } : {}),
+      ...(isNum(k.w) ? { w: clamp(k.w, 0.01, 2) } : {}),
+      ...(isNum(k.h) ? { h: clamp(k.h, 0.01, 2) } : {}),
+      ...(isNum(k.rotation) ? { rotation: clamp(Math.round(k.rotation), -180, 180) } : {}),
+      ...(isNum(k.feather) ? { feather: clamp(k.feather, 0, 200) } : {}),
+    });
+    const mask: Mask = {
+      ...(current ?? {}),
+      ...geom(input),
+      kind: kind as Mask["kind"],
+      ...(typeof input.invert === "boolean" ? { invert: input.invert || undefined } : {}),
+      ...(isNum(input.radius) ? { radius: clamp(input.radius, 0, 400) || undefined } : {}),
+    };
+    setMask(mask);
+    // Keys layer on after the mask lands, so each one captures against the
+    // geometry the call just set.
+    const raw = input.keys;
+    if (Array.isArray(raw)) {
+      const st = useEditor.getState();
+      const dur = o
+        ? Math.max(0.1, o.end - o.start)
+        : Math.max(0.1, (clip!.out - clip!.in) / (clip!.speed && clip!.speed > 0 ? clip!.speed : 1));
+      if (raw.length === 0) {
+        if (o) st.clearOverlayMaskKeys(o.id);
+        else st.clearClipMaskKeys(clip!.id);
+      } else {
+        for (const k of raw as Record<string, unknown>[]) {
+          if (!isNum(k.t)) throw new ToolError("Every mask key needs a time `t`.");
+          const t = clamp(k.t, 0, dur);
+          if (o) st.setOverlayMaskKey(o.id, t, geom(k), { transient: true });
+          else st.setClipMaskKey(clip!.id, t, geom(k), { transient: true });
+        }
+      }
+    }
+    const after = useEditor.getState();
+    const next = o
+      ? after.overlays.find((x) => x.id === o.id)?.mask
+      : after.clips.find((c) => c.id === clip!.id)?.mask;
+    return { id: input.id, mask: next ?? null };
   },
 
   set_transition: (s, input) => {
@@ -2633,7 +2732,6 @@ function overlayPatch(input: Record<string, unknown>, kind: "text" | "shape" | "
       patch.lineHeight = Math.abs(input.line_height - 1.25) < 0.01 ? undefined : clamp(input.line_height, 0.7, 2.5);
     if (typeof input.shadow === "boolean") patch.shadow = input.shadow;
     if (typeof input.plate === "boolean") patch.plate = input.plate;
-    if (typeof input.behind_subject === "boolean") patch.behindSubject = input.behind_subject || undefined;
     if (isNum(input.plateRadius)) patch.plateRadius = clamp(input.plateRadius, 0, 1);
     if (typeof input.stroke_color === "string" || isNum(input.stroke_width)) {
       const width = isNum(input.stroke_width) ? clamp(input.stroke_width, 0, 0.3) : 0.04;

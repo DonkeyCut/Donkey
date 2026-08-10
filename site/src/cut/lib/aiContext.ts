@@ -195,6 +195,10 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
         ? { panX: r(sp.clip.panX ?? 0), panY: r(sp.clip.panY ?? 0) }
         : {}),
       ...(sp.clip.grade ? { colorGrade: sp.clip.grade } : {}),
+      ...(sp.clip.mask ? { mask: sp.clip.mask } : {}),
+      ...(sp.clip.kf?.length
+        ? { keyframes: sp.clip.kf.map((k) => ({ ...k, t: r(k.t), x: r(k.x), y: r(k.y) })) }
+        : {}),
       ...clipEffects(sp.clip),
     })),
     // Video layers composited over track 0 in track order (the topmost
@@ -293,6 +297,10 @@ function describeOverlayClip(c: VideoClip, assets: Map<string, { name: string }>
     fit: c.fit ?? "fit",
     ...(speed !== 1 ? { speed: r(speed) } : {}),
     ...(c.grade ? { colorGrade: c.grade } : {}),
+    ...(c.mask ? { mask: c.mask } : {}),
+    ...(c.kf?.length
+      ? { keyframes: c.kf.map((k) => ({ ...k, t: r(k.t), x: r(k.x), y: r(k.y) })) }
+      : {}),
   };
 }
 
@@ -309,6 +317,7 @@ function describeOverlay(o: Overlay) {
     ...(o.kf?.length
       ? { keyframes: o.kf.map((k) => ({ ...k, t: r(k.t), x: r(k.x), y: r(k.y) })) }
       : {}),
+    ...(o.mask ? { mask: o.mask } : {}),
     ...(o.lane ? { lane: o.lane } : {}),
     ...(o.hidden ? { hidden: true } : {}),
   };
@@ -346,7 +355,6 @@ function describeOverlay(o: Overlay) {
     color: o.color,
     shadow: o.shadow,
     plate: o.plate,
-    ...(o.behindSubject ? { behindSubject: true } : {}),
     ...(o.groupId ? { groupId: o.groupId } : {}),
     ...(o.plateRadius !== undefined && { plateRadius: r(o.plateRadius) }),
   };
