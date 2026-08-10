@@ -41,10 +41,9 @@ export function TransitionsPanel() {
     if (s.selection?.kind !== "clip") return null;
     const roles = resolveTransitions(s.clips, s.transitions);
     return (
-      s.transitions.find((t) => {
-        const r = roles.get(t.id);
-        return !!r && r.kind === "cut" && r.clipId === s.selection!.id;
-      }) ?? null
+      s.transitions.find((t) =>
+        (roles.get(t.id) ?? []).some((r) => r.kind === "cut" && r.clipId === s.selection!.id)
+      ) ?? null
     );
   });
   const { a, b } = useCutFrames();

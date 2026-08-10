@@ -891,6 +891,67 @@ describe("bars and clip edges", () => {
     expect(clipById(a.id).animIn).toEqual({ style: "fade", seconds: 0.5 });
     expect(clipById(b.id).animOut).toEqual({ style: "fade", seconds: 0.5 });
   });
+
+  test("tracks cutting at the same instant share one bar, never a stack", () => {
+    const av = asset(8);
+    const a = vclip({ track: 0, start: 0, out: 2, assetId: av.id });
+    const b = vclip({ track: 0, start: 2, in: 2, out: 4, assetId: av.id });
+    const c = vclip({ track: 1, start: 0, out: 2, assetId: av.id });
+    const d = vclip({ track: 1, start: 2, in: 2, out: 4, assetId: av.id });
+    useEditor.setState({ assets: [av], clips: [a, b, c, d] });
+    s().setClipTransition(a.id, 0.5);
+    s().setClipTransition(c.id, 0.5); // same cut instant on the other track
+    expect(s().transitions.length).toBe(1);
+    expect(clipById(a.id).transition).toBeCloseTo(0.5);
+    expect(clipById(c.id).transition).toBeCloseTo(0.5);
+    // Retiming through the same calls updates that one bar in place.
+    s().setClipTransition(a.id, 0.4);
+    s().setClipTransition(c.id, 0.4);
+    expect(s().transitions.length).toBe(1);
+    expect(s().transitions[0].seconds).toBeCloseTo(0.4);
+  });
+
+  test("simultaneous entrances on several tracks ride one bar", () => {
+    const av = asset(8);
+    const a = vclip({ track: 1, start: 1, in: 1, out: 3, assetId: av.id });
+    const b = vclip({ track: 2, start: 1, in: 1, out: 3, assetId: av.id });
+    useEditor.setState({ assets: [av], clips: [a, b] });
+    s().setClipAnim(a.id, "in", { style: "zoom", seconds: 0.3 });
+    s().setClipAnim(b.id, "in", { style: "zoom", seconds: 0.3 });
+    expect(s().transitions.length).toBe(1);
+    expect(clipById(a.id).animIn).toEqual({ style: "zoom", seconds: 0.3 });
+    expect(clipById(b.id).animIn).toEqual({ style: "zoom", seconds: 0.3 });
+  });
+
+  test("deleting a clip takes its parked leftover bars along", () => {
+    const av = asset(8);
+    const a = vclip({ track: 0, start: 0, out: 2, assetId: av.id });
+    useEditor.setState({ assets: [av], clips: [a] });
+    // A parked twin sitting exactly on the clip's tail, playing nothing.
+    s().addTransition({ start: 1.7, seconds: 0.3, style: "crosszoom" });
+    s().addTransition({ start: 1.7, seconds: 0.3, style: "crosszoom" });
+    expect(s().transitions.length).toBe(2);
+    s().select({ kind: "clip", id: a.id });
+    s().deleteSelection();
+    expect(s().clips.length).toBe(0);
+    expect(s().transitions.length).toBe(0);
+  });
+
+  test("a shared bar survives while one of its clips does", () => {
+    const av = asset(8);
+    const a = vclip({ track: 0, start: 0, out: 2, assetId: av.id });
+    const b = vclip({ track: 0, start: 2, in: 2, out: 4, assetId: av.id });
+    const c = vclip({ track: 1, start: 0, out: 2, assetId: av.id });
+    const d = vclip({ track: 1, start: 2, in: 2, out: 4, assetId: av.id });
+    useEditor.setState({ assets: [av], clips: [a, b, c, d] });
+    s().setClipTransition(a.id, 0.5);
+    expect(s().transitions.length).toBe(1);
+    // Track 1's pair goes; the bar still plays track 0's cut.
+    useEditor.setState({ multiSelection: [{ kind: "clip", id: c.id }, { kind: "clip", id: d.id }] });
+    s().deleteSelection();
+    expect(s().transitions.length).toBe(1);
+    expect(clipById(a.id).transition).toBeCloseTo(0.5);
+  });
 });
 
 describe("generated-scene placement (placeInRun)", () => {

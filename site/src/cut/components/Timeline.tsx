@@ -41,7 +41,7 @@ import { useExports } from "@/cut/lib/exportStore";
 import { isDragActive, startDrag, subscribeDragActive } from "@/cut/lib/drag";
 import { CLIP_GAP, startLaneMove, startLaneTrim, type LaneDrag } from "@/cut/lib/laneTracks";
 import { ensurePeaks, importImage, importStockMusic, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia } from "@/cut/lib/media";
-import { track0Clips, laneGapAt, sameLane, type LaneRef, clipLen, clipSpeed, footprints, getClipSpans, nextFreeStart, overlayLaneOrder, overlayLayers, projectDuration, resolveTransitions, rippleInsert, TIMELINE_H_MAX, useEditor } from "@/cut/lib/store";
+import { track0Clips, laneGapAt, sameLane, type LaneRef, clipLen, clipSpeed, footprints, getClipSpans, nextFreeStart, overlayLaneOrder, overlayLayers, projectDuration, resolveTransitions, rippleInsert, useEditor } from "@/cut/lib/store";
 import type { VideoTrackPlacement } from "@/cut/lib/store";
 import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
@@ -860,7 +860,9 @@ export function Timeline() {
     () =>
       bars
         .map((t) => {
-          const role = barRoles.get(t.id) ?? null;
+          // A bar can play several same-instant boundaries; the rank-first
+          // one names it on the row.
+          const role = barRoles.get(t.id)?.[0] ?? null;
           const base = TRANSITION_STYLE_LABELS[t.style];
           const label =
             role?.kind === "in" ? `${base} in` : role?.kind === "out" ? `${base} out` : base;
@@ -874,10 +876,13 @@ export function Timeline() {
    * entrance starts at the clip's head, everything else ends on its edge. */
   const anchorBarStart = (a: Anchor, len: number) => (a.kind === "in" ? a.at : a.at - len);
 
-  /** The bar already playing this anchor's boundary, if any. */
+  /** The bar already playing this anchor's boundary, if any — through any of
+   * its roles, so a bar serving several same-instant boundaries is the
+   * incumbent at each of them. */
   const barAt = (a: Anchor) =>
-    transitions.find((x) => x.role && x.role.kind === a.kind && x.role.clipId === a.clipId)?.t ??
-    null;
+    bars.find((t) =>
+      (barRoles.get(t.id) ?? []).some((r) => r.kind === a.kind && r.clipId === a.clipId)
+    ) ?? null;
 
   /** Land a new bar from the panel: it takes the nearest anchor when one is
    * around, replacing whatever played there, and sits free anywhere else. */
@@ -1247,8 +1252,7 @@ export function Timeline() {
     const h0 = useEditor.getState().timelineH;
     startDrag(e, {
       onMove: (_dx, dy) => {
-        const max = Math.min(TIMELINE_H_MAX, window.innerHeight - 220);
-        useEditor.getState().setTimelineH(Math.min(max, h0 - dy));
+        useEditor.getState().setTimelineH(h0 - dy);
       },
     });
   };

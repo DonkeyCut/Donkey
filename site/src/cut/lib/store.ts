@@ -108,7 +108,10 @@ const sole = (sel: NonNullable<Selection>) => ({ selection: sel, multiSelection:
 
 export const TIMELINE_H_DEFAULT = 248;
 export const TIMELINE_H_MIN = 170;
-export const TIMELINE_H_MAX = 600;
+/** Tallest the timeline may grow: the window height less room for the top bar
+ * and a usable preview. The constant covers code running without a window. */
+export const timelineHMax = () =>
+  typeof window === "undefined" ? 600 : Math.max(TIMELINE_H_MIN, window.innerHeight - 220);
 
 interface DocSnapshot {
   clips: VideoClip[];
@@ -1311,7 +1314,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
           pxPerSec: Math.max(12, Math.min(800, ui.pxPerSec ?? doc.ui?.pxPerSec ?? 60)),
           timelineH: Math.max(
             TIMELINE_H_MIN,
-            Math.min(TIMELINE_H_MAX, ui.timelineH ?? TIMELINE_H_DEFAULT)
+            Math.min(timelineHMax(), ui.timelineH ?? TIMELINE_H_DEFAULT)
           ),
           publish: {
             caption: doc.publish?.caption ?? "",
@@ -1989,20 +1992,27 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       const s = get();
       const clip = s.clips.find((c) => c.id === id);
       if (!clip) return;
-      // The bar playing this clip's tail — its cut, or its open end.
+      // The bar playing this clip's tail — its cut, or its open end. Failing
+      // that, a parked bar already ending on the tail: with several tracks
+      // cutting at the same instant, this clip's bar can lose its boundary
+      // claim to a newer neighbour, and writing a fresh bar on top of it
+      // would stack identical twins.
       const roles = resolveTransitions(s.clips, s.transitions);
-      const existing = s.transitions.find((t) => {
-        const r = roles.get(t.id);
-        return !!r && r.kind !== "in" && r.clipId === id;
-      });
+      const tail = clip.start + clipLen(clip);
+      const existing =
+        s.transitions.find((t) =>
+          (roles.get(t.id) ?? []).some((r) => r.kind !== "in" && r.clipId === id)
+        ) ??
+        s.transitions.find(
+          (t) => !roles.has(t.id) && Math.abs(t.start + t.seconds - tail) <= TOUCH_EPS
+        );
       const value = Math.max(0, Math.min(TRANSITION_MAX, seconds));
       if (value <= 0) {
         if (existing) get().removeTransition(existing.id);
         return;
       }
-      const end = clip.start + clipLen(clip);
       const bar = {
-        start: end - value,
+        start: tail - value,
         seconds: value,
         style: style ?? existing?.style ?? "crossfade",
       };
@@ -2018,20 +2028,29 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       const s = get();
       const clip = s.clips.find((c) => c.id === id);
       if (!clip) return;
-      // The bar riding this edge, whichever role it resolved to there.
+      // The bar riding this edge, whichever role it resolved to there — or a
+      // parked bar already sitting exactly on it, so a lost boundary claim
+      // (another track cutting at the same instant) never stacks a twin.
       const roles = resolveTransitions(s.clips, s.transitions);
-      const existing = s.transitions.find((t) => {
-        const r = roles.get(t.id);
-        return !!r && r.clipId === id && (which === "in" ? r.kind === "in" : r.kind !== "in");
-      });
+      const edgeAt = which === "in" ? clip.start : clip.start + clipLen(clip);
+      const existing =
+        s.transitions.find((t) =>
+          (roles.get(t.id) ?? []).some(
+            (r) => r.clipId === id && (which === "in" ? r.kind === "in" : r.kind !== "in")
+          )
+        ) ??
+        s.transitions.find(
+          (t) =>
+            !roles.has(t.id) &&
+            Math.abs((which === "in" ? t.start : t.start + t.seconds) - edgeAt) <= TOUCH_EPS
+        );
       if (!anim || !ANIM_STYLE_IDS.includes(anim.style)) {
         if (existing) get().removeTransition(existing.id);
         return;
       }
       const seconds = Math.max(0.1, Math.min(TRANSITION_MAX, anim.seconds));
-      const edge = which === "in" ? clip.start : clip.start + clipLen(clip);
       const bar = {
-        start: which === "in" ? edge : edge - seconds,
+        start: which === "in" ? edgeAt : edgeAt - seconds,
         seconds,
         style: transitionStyleOfAnim(anim.style),
       };
@@ -2805,9 +2824,24 @@ export const useEditor = create<EditorState>((baseSet, get) => {
         // rest ride the ripple to wherever their cut ended up.
         const roles = s.transitions.length
           ? resolveTransitions(s.clips, s.transitions)
-          : new Map<string, TransitionRole>();
-        const dropped = (t: TimelineTransition) =>
-          barIds.has(t.id) || clipIds.has(roles.get(t.id)?.clipId ?? "");
+          : new Map<string, TransitionRole[]>();
+        // A deleted clip's edges take their parked bars along: a bar aligned
+        // with the clip's head or tail that lost its boundary claim (a twin)
+        // is this clip's leftover, and it would otherwise sit on the row as
+        // an orphan forever. A playing bar goes when every clip it plays is
+        // going; one still serving a surviving track's boundary stays.
+        const edges: number[] = [];
+        for (const c of s.clips) {
+          if (!clipIds.has(c.id)) continue;
+          edges.push(c.start, c.start + clipLen(c));
+        }
+        const onEdge = (x: number) => edges.some((e) => Math.abs(e - x) <= TOUCH_EPS);
+        const dropped = (t: TimelineTransition) => {
+          if (barIds.has(t.id)) return true;
+          const rs = roles.get(t.id);
+          if (rs && rs.length > 0) return rs.every((r) => clipIds.has(r.clipId));
+          return onEdge(t.start) || onEdge(t.start + t.seconds);
+        };
         const kept = s.transitions.some(dropped)
           ? s.transitions.filter((t) => !dropped(t))
           : s.transitions;
@@ -3837,7 +3871,7 @@ export const useEditor = create<EditorState>((baseSet, get) => {
       if (id) saveUiState(id, { pxPerSec: Math.round(pxPerSec * 100) / 100 });
     },
     setTimelineH: (h) => {
-      const timelineH = Math.round(Math.max(TIMELINE_H_MIN, Math.min(TIMELINE_H_MAX, h)));
+      const timelineH = Math.round(Math.max(TIMELINE_H_MIN, Math.min(timelineHMax(), h)));
       set({ timelineH });
       const id = get().projectId;
       if (id) saveUiState(id, { timelineH });
@@ -4160,32 +4194,39 @@ function transitionBoundaries(clips: VideoClip[]): TransitionBoundary[] {
 }
 
 /**
- * Match each transition bar to the boundary it lines up with, by time alone:
- * a bar plays the cut or open tail its end sits on, or the open head its
- * start sits on. A bar aligned with nothing is inert — it stays on the row,
+ * Match each transition bar to the boundaries it lines up with, by time
+ * alone: a bar plays every cut or open tail its end sits on and every open
+ * head its start sits on — several tracks cutting at the same instant share
+ * the one bar, so a simultaneous multi-track handover never needs a stack of
+ * identical bars. A bar aligned with nothing is inert — it stays on the row,
  * does nothing, and starts playing the moment a boundary lines up with it.
- * One bar per boundary; when two claim the same one, the newest wins.
+ * One bar per boundary; when two claim the same one, the newest wins. A
+ * bar's list is rank-ordered, so its first role (cut before in before out)
+ * is the one that names it.
  */
 export function resolveTransitions(
   clips: VideoClip[],
   transitions: TimelineTransition[]
-): Map<string, TransitionRole> {
+): Map<string, TransitionRole[]> {
   const bounds = transitionBoundaries(clips);
   const rank = { cut: 0, in: 1, out: 2 } as const;
   const taken = new Set<TransitionBoundary>();
-  const roles = new Map<string, TransitionRole>();
+  const roles = new Map<string, TransitionRole[]>();
   for (let i = transitions.length - 1; i >= 0; i--) {
     const t = transitions[i];
-    const fit = bounds
+    const fits = bounds
       .filter(
         (b) =>
           !taken.has(b) &&
           Math.abs((b.kind === "in" ? t.start : t.start + t.seconds) - b.at) <= TOUCH_EPS
       )
-      .sort((a, b) => rank[a.kind] - rank[b.kind])[0];
-    if (!fit) continue;
-    taken.add(fit);
-    roles.set(t.id, { kind: fit.kind, clipId: fit.clipId });
+      .sort((a, b) => rank[a.kind] - rank[b.kind]);
+    if (fits.length === 0) continue;
+    for (const b of fits) taken.add(b);
+    roles.set(
+      t.id,
+      fits.map((b) => ({ kind: b.kind, clipId: b.clipId }))
+    );
   }
   return roles;
 }
@@ -4212,7 +4253,9 @@ export function reanchorTransitions(
   const byId = new Map(after.map((c) => [c.id, c]));
   let changed = false;
   const out = transitions.map((t) => {
-    const role = roles.get(t.id);
+    // The primary role decides where a multi-boundary bar travels to; the
+    // other tracks' boundaries moved with the same retime.
+    const role = roles.get(t.id)?.[0];
     const clip = role && byId.get(role.clipId);
     if (!clip) return t;
     const at = role.kind === "in" ? clip.start : clip.start + clipLen(clip);
@@ -4241,8 +4284,7 @@ export function deriveTransitionFields(
   const roles = resolveTransitions(clips, transitions);
   const byBoundary = new Map<string, TimelineTransition>();
   for (const t of transitions) {
-    const r = roles.get(t.id);
-    if (r) byBoundary.set(`${r.kind}:${r.clipId}`, t);
+    for (const r of roles.get(t.id) ?? []) byBoundary.set(`${r.kind}:${r.clipId}`, t);
   }
   let changed = false;
   const next = clips.map((c) => {
@@ -4274,9 +4316,12 @@ export function deriveTransitionFields(
   return changed ? next : clips;
 }
 
-/** Bring a stored bar list back to the shape the editor expects. */
+/** Bring a stored bar list back to the shape the editor expects. Exact twins
+ * — same footprint, same style — collapse to one: at most one bar can play a
+ * boundary, so the copies stack invisibly under it and read as a bar that
+ * refuses to delete. */
 function sanitizeTransitions(raw: TimelineTransition[] | undefined): TimelineTransition[] {
-  return (raw ?? [])
+  const bars = (raw ?? [])
     .filter((t) => t && typeof t.start === "number" && typeof t.seconds === "number")
     .map((t) => ({
       id: t.id || uid(),
@@ -4284,6 +4329,15 @@ function sanitizeTransitions(raw: TimelineTransition[] | undefined): TimelineTra
       seconds: clampBarSeconds(t.seconds),
       style: TRANSITION_STYLE_IDS.includes(t.style) ? t.style : "crossfade",
     }));
+  return bars.filter(
+    (t, i) =>
+      bars.findIndex(
+        (u) =>
+          u.style === t.style &&
+          Math.abs(u.start - t.start) < 0.001 &&
+          Math.abs(u.seconds - t.seconds) < 0.001
+      ) === i
+  );
 }
 
 /**
@@ -4297,7 +4351,7 @@ export function adoptTransitionFields(
   transitions: TimelineTransition[]
 ): TimelineTransition[] {
   const roles = resolveTransitions(clips, transitions);
-  const claimed = new Set([...roles.values()].map((r) => `${r.kind}:${r.clipId}`));
+  const claimed = new Set([...roles.values()].flat().map((r) => `${r.kind}:${r.clipId}`));
   const out = [...transitions];
   const add = (key: string, bar: Omit<TimelineTransition, "id">) => {
     claimed.add(key);
