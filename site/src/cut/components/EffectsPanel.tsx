@@ -271,12 +271,12 @@ export function useSwatchClock(running: boolean, loop = LOOP_S, resetKey = 0): n
   return t;
 }
 
-/** The picture a swatch treats: the given frame when there is one, fit whole
- * inside the square tile, and a small colored landscape as the stand-in, so
- * every treatment reads at tile size. The stand-in comes in two casts — day
- * (sun over green hills) and dusk (moon over dark ones) — so a transition
- * tile can hand over between two scenes that read as different shots. Shared
- * with the Transitions tab. */
+/** The picture a swatch treats: the given frame when there is one, scaled at
+ * its own aspect to cover the square tile, and a small colored landscape as
+ * the stand-in, so every treatment reads at tile size. The stand-in comes in
+ * two casts — day (sun over green hills) and dusk (moon over dark ones) — so
+ * a transition tile can hand over between two scenes that read as different
+ * shots. Shared with the Transitions tab. */
 export function SwatchScene({
   frame,
   variant = "day",
@@ -287,7 +287,7 @@ export function SwatchScene({
   if (frame) {
     return (
       // eslint-disable-next-line @next/next/no-img-element -- a transient data URL or filmstrip thumb; the image optimizer has no role
-      <img src={frame} alt="" draggable={false} className="absolute inset-0 size-full object-contain" />
+      <img src={frame} alt="" draggable={false} className="absolute inset-0 size-full object-cover" />
     );
   }
   if (variant === "dusk") {
