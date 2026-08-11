@@ -14,7 +14,7 @@ export const TURN_INTENT_PROMPT = `You gate and route the tools of an AI assista
 Reply with exactly one word:
 chat — pure social filler (a greeting, thanks, a sign-off, an acknowledgement) that requests nothing.
 simple — one self-contained ask: a single edit, a single generation, or a question to answer. Terse follow-ups ("yes", "do it", "the second one") that confirm one pending action are simple.
-complex — a composed job: several edits across the timeline, cutting or reorganizing many clips, assembling media into a cut, or anything needing a plan across steps.
+complex — a composed job: several edits across the timeline, cutting or reorganizing many clips, assembling media into a cut, or anything needing a plan across steps. An edit aimed at "this clip / that one / it" with no named target is also complex — resolving the referent takes the full model.
 
 If unsure between chat and the others, reply simple. If unsure between simple and complex, reply complex.`;
 
