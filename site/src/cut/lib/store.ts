@@ -579,8 +579,14 @@ const genAudioIds = new Set<string>();
 type ClipboardItem =
   | { kind: "clip"; item: VideoClip }
   | { kind: "audio"; item: AudioClip }
-  | { kind: "overlay"; item: Overlay };
+  | { kind: "overlay"; item: Overlay }
+  | { kind: "transition"; item: TimelineTransition };
 let clipboard: ClipboardItem[] = [];
+
+/** How far (seconds) a pasted transition bar reaches for a cut or clip edge
+ * around the playhead. Within it the bar lands playing that boundary, like a
+ * drop from the panel; past it the bar parks exactly at the playhead. */
+const BAR_PASTE_REACH = 1;
 
 /** Bumped whenever subtitle lanes renumber (a track removal). Async work that
  * captured a lane index checks it before landing, so a result can't write to
@@ -3936,6 +3942,9 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         } else if (sel?.kind === "overlay") {
           const o = s.overlays.find((x) => x.id === sel.id);
           if (o) items.push({ kind: "overlay", item: { ...o } });
+        } else if (sel?.kind === "transition") {
+          const t = s.transitions.find((x) => x.id === sel.id);
+          if (t) items.push({ kind: "transition", item: { ...t } });
         }
       }
       if (items.length === 0) return false;
@@ -3951,11 +3960,13 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       if (
         clipboard.some((cb) => {
           const assetId =
-            cb.kind === "overlay"
-              ? isStickerOverlay(cb.item)
-                ? cb.item.assetId
-                : undefined
-              : cb.item.assetId;
+            cb.kind === "transition"
+              ? undefined
+              : cb.kind === "overlay"
+                ? isStickerOverlay(cb.item)
+                  ? cb.item.assetId
+                  : undefined
+                : cb.item.assetId;
           return assetId !== undefined && !s.assets.some((a) => a.id === assetId);
         })
       )
@@ -3967,13 +3978,18 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         let clips = cur.clips;
         let audioClips = cur.audioClips;
         let overlays = cur.overlays;
+        let transitions = cur.transitions;
         // A copy is its own thing: pasted group members stay grouped with each
         // other and join nothing that was already on the timeline.
         const regroup = groupRemap(uid);
+        // When clips ride the same paste, their transition bars follow them by
+        // this shift, so a copied sequence keeps its blends on its own cuts.
+        let clipDelta: number | null = null;
         // Every item aims for the playhead but respects what already sits on
         // its lane: an occupied spot slides the paste right to the next gap
         // that fits. Earlier items of this same paste count too.
         for (const cb of clipboard) {
+          if (cb.kind === "transition") continue; // placed below, once clips landed
           if (cb.kind === "clip") {
             // Collision is per-track: a clip lands clear of others on its own
             // row only.
@@ -3983,6 +3999,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
               id: uid(),
               start: nextFreeStart(taken, t, clipLen(cb.item)),
             };
+            clipDelta ??= clip.start - cb.item.start;
             clips = [...clips, clip].sort((a, b) => a.start - b.start);
             newSel.push({ kind: "clip", id: clip.id });
           } else if (cb.kind === "audio") {
@@ -4009,7 +4026,51 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             newSel.push({ kind: "overlay", id: item.id });
           }
         }
-        return { clips, audioClips, overlays, selection: newSel[newSel.length - 1] ?? null, multiSelection: newSel };
+        // Transition bars land last, against the row as this paste left it.
+        // Bars copied together with clips keep their place in the copied
+        // sequence; a bar-only paste lands like a drop from the panel — onto
+        // the boundary nearest the playhead when one is in reach (replacing
+        // whatever played there), parked exactly at the playhead otherwise. A
+        // multi-bar paste keeps the bars' spacing, anchored by the earliest.
+        const barItems = clipboard
+          .flatMap((cb) => (cb.kind === "transition" ? [cb.item] : []))
+          .sort((a, b) => a.start - b.start);
+        if (barItems.length > 0) {
+          let delta = clipDelta;
+          if (delta === null) {
+            const first = barItems[0];
+            const bounds = transitionBoundaries(clips);
+            const near = bounds.reduce<TransitionBoundary | null>(
+              (found, b) => (!found || Math.abs(b.at - t) < Math.abs(found.at - t) ? b : found),
+              null
+            );
+            if (near && Math.abs(near.at - t) <= BAR_PASTE_REACH) {
+              delta =
+                (near.kind === "in" ? near.at : near.at - first.seconds) - first.start;
+              // The landed bar takes over the boundary; the bar that played
+              // it leaves with it, the way a drop replaces the incumbent.
+              const roles = resolveTransitions(clips, transitions);
+              const incumbent = transitions.find((x) =>
+                (roles.get(x.id) ?? []).some(
+                  (r) => r.kind === near.kind && r.clipId === near.clipId
+                )
+              );
+              if (incumbent) transitions = transitions.filter((x) => x.id !== incumbent.id);
+            } else {
+              delta = t - first.start;
+            }
+          }
+          for (const item of barItems) {
+            const bar: TimelineTransition = {
+              ...item,
+              id: uid(),
+              start: Math.max(0, item.start + delta),
+            };
+            transitions = [...transitions, bar];
+            newSel.push({ kind: "transition", id: bar.id });
+          }
+        }
+        return { clips, audioClips, overlays, transitions, selection: newSel[newSel.length - 1] ?? null, multiSelection: newSel };
       });
       return true;
     },

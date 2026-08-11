@@ -925,6 +925,99 @@ describe("bars and clip edges", () => {
     expect(clipById(a.id).animOut).toEqual({ style: "fade", seconds: 0.8 });
   });
 
+  test("a copied bar pastes onto the cut nearest the playhead", () => {
+    const av = asset(12);
+    const a = vclip({ track: 0, start: 0, out: 4, assetId: av.id });
+    const b = vclip({ track: 0, start: 4, out: 4, assetId: av.id });
+    const c = vclip({ track: 0, start: 8, out: 4, assetId: av.id });
+    useEditor.setState({ assets: [av], clips: [a, b, c] });
+    s().setClipTransition(a.id, 0.8, "wipeleft");
+    const bar = s().transitions[0];
+    useEditor.setState({
+      selection: { kind: "transition", id: bar.id },
+      multiSelection: [{ kind: "transition", id: bar.id }],
+    });
+    expect(s().copySelection()).toBe(true);
+    useEditor.setState({ currentTime: 7.7 }); // in reach of the b|c cut at 8
+    expect(s().paste()).toBe(true);
+    expect(s().transitions.length).toBe(2);
+    // The paste plays that cut with the copied blend, fields and all.
+    expect(clipById(b.id).transition).toBeCloseTo(0.8);
+    expect(clipById(b.id).transitionStyle).toBe("wipeleft");
+    expect(parkedTransitions(s().clips, s().transitions)).toEqual([]);
+    expect(s().selection).toEqual({ kind: "transition", id: s().transitions[1].id });
+  });
+
+  test("a bar pasted onto an occupied cut replaces the incumbent", () => {
+    const av = asset(12);
+    const a = vclip({ track: 0, start: 0, out: 4, assetId: av.id });
+    const b = vclip({ track: 0, start: 4, out: 4, assetId: av.id });
+    const c = vclip({ track: 0, start: 8, out: 4, assetId: av.id });
+    useEditor.setState({ assets: [av], clips: [a, b, c] });
+    s().setClipTransition(a.id, 0.8, "wipeleft");
+    s().setClipTransition(b.id, 0.4, "crossfade");
+    const bar = s().transitions.find((t) => t.style === "wipeleft")!;
+    useEditor.setState({
+      selection: { kind: "transition", id: bar.id },
+      multiSelection: [{ kind: "transition", id: bar.id }],
+    });
+    s().copySelection();
+    useEditor.setState({ currentTime: 8.2 });
+    s().paste();
+    // One bar on the b|c cut: the pasted wipe; the crossfade left with it.
+    expect(s().transitions.length).toBe(2);
+    expect(clipById(b.id).transition).toBeCloseTo(0.8);
+    expect(clipById(b.id).transitionStyle).toBe("wipeleft");
+    expect(parkedTransitions(s().clips, s().transitions)).toEqual([]);
+  });
+
+  test("a bar pasted far from any boundary parks at the playhead", () => {
+    const av = asset(8);
+    const a = vclip({ track: 0, start: 0, out: 4, assetId: av.id });
+    const b = vclip({ track: 0, start: 4, out: 4, assetId: av.id });
+    useEditor.setState({ assets: [av], clips: [a, b] });
+    s().setClipTransition(a.id, 0.6, "dipblack");
+    const bar = s().transitions[0];
+    useEditor.setState({
+      selection: { kind: "transition", id: bar.id },
+      multiSelection: [{ kind: "transition", id: bar.id }],
+    });
+    s().copySelection();
+    useEditor.setState({ currentTime: 6 }); // 2s from the cuts at 4 and 8
+    s().paste();
+    expect(s().transitions.length).toBe(2);
+    const pasted = s().transitions[1];
+    expect(pasted.start).toBeCloseTo(6);
+    expect(pasted.style).toBe("dipblack");
+    expect(parkedTransitions(s().clips, s().transitions)).toEqual([pasted]);
+  });
+
+  test("clips copied with their bar keep the blend on their own cut", () => {
+    const av = asset(12);
+    const a = vclip({ track: 0, start: 0, out: 3, assetId: av.id });
+    const b = vclip({ track: 0, start: 3, out: 3, assetId: av.id });
+    useEditor.setState({ assets: [av], clips: [a, b] });
+    s().setClipTransition(a.id, 0.5, "crosszoom");
+    const bar = s().transitions[0];
+    useEditor.setState({
+      selection: { kind: "transition", id: bar.id },
+      multiSelection: [
+        { kind: "clip", id: a.id },
+        { kind: "clip", id: b.id },
+        { kind: "transition", id: bar.id },
+      ],
+    });
+    expect(s().copySelection()).toBe(true);
+    useEditor.setState({ currentTime: 8 });
+    expect(s().paste()).toBe(true);
+    const pastedClips = s().clips.filter((x) => x.id !== a.id && x.id !== b.id);
+    expect(pastedClips.map((x) => x.start)).toEqual([8, 11]);
+    // The bar followed the pair, so the copied cut at 11 plays the same blend.
+    expect(pastedClips[0].transition).toBeCloseTo(0.5);
+    expect(pastedClips[0].transitionStyle).toBe("crosszoom");
+    expect(parkedTransitions(s().clips, s().transitions)).toEqual([]);
+  });
+
   test("an animation on a far edge leaves an unrelated transition alone", () => {
     const av = asset(4);
     const a = vclip({ track: 0, start: 0, out: 4, assetId: av.id });
