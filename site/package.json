@@ -38,6 +38,8 @@
     "@better-auth/kysely-adapter": "1.6.11",
     "@better-auth/utils": "0.4.0",
     "@donkeycut/effects-kit": "*",
+    "@earendil-works/pi-agent-core": "0.84.1",
+    "@earendil-works/pi-ai": "0.84.1",
     "@elevenlabs/elevenlabs-js": "^2.49.1",
     "@google/genai": "^2.6.0",
     "@mdx-js/loader": "^3.1.1",

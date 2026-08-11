@@ -87,7 +87,9 @@ import {
   useSignedIn,
 } from "@/cut/lib/generate";
 import { useCreditsRecheck, useOutOfCredits } from "@/cut/lib/hosted";
-import { streamGeminiChat } from "@/cut/lib/geminiChat";
+import { hydratePiSession, readPiSession, streamCutChat } from "@/cut/lib/pi/cutAgent";
+import { productionDeps } from "@/cut/lib/pi/prodDeps";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { AI_MODELS } from "@/cut/lib/aiModels";
 import { saveAssetToLibrary } from "@/cut/lib/library";
 import { formatDuration, useGenScene } from "@/cut/lib/genScene";
@@ -122,7 +124,11 @@ interface ChatThread {
   messages: UIMessage[];
   /** Provider-native session ids so a resumed thread keeps its context. */
   sessions: Record<string, string>;
+  /** The pi loop's LLM context (structured tool history included), when the
+   * thread has run on it. */
+  pi?: AgentMessage[];
 }
+
 
 const THREAD_LIMIT = 30;
 // How long a streaming turn's newest snapshot may park before it must land —
@@ -140,11 +146,52 @@ function readThreads(projectId: string): ChatThread[] {
 function slimForStorage(list: ChatThread[]): ChatThread[] {
   const bulky = (v: unknown) =>
     typeof v === "string" && v.startsWith("data:image/");
+  // The pi session's inline media (tool frames and sound, attachment payloads)
+  // stays out of storage the same way. Each drop leaves a note where the media
+  // was, so a replayed turn never promises an attachment that is no longer
+  // there — the model re-fetches what it still needs.
+  const slimNote =
+    "[The media here was dropped from the saved chat. Fetch what you still need with the media tools (listen_audio, watch_video, capture_frame).]";
+  const slimPi = (msgs: AgentMessage[]): AgentMessage[] =>
+    msgs.map((m) => {
+      const anyM = m as unknown as Record<string, unknown>;
+      let out = anyM;
+      const details = anyM.details as { mediaParts?: unknown[] } | undefined;
+      if (details?.mediaParts?.length)
+        out = { ...out, details: { ...details, mediaParts: [{ text: slimNote }] } };
+      const wireParts = anyM.wireParts as Record<string, unknown>[] | undefined;
+      if (wireParts?.some((p) => typeof p.dataBase64 === "string"))
+        out = {
+          ...out,
+          wireParts: [
+            ...wireParts.filter((p) => typeof p.dataBase64 !== "string"),
+            { text: slimNote },
+          ],
+        };
+      if (
+        anyM.role === "user" &&
+        Array.isArray(anyM.content) &&
+        (anyM.content as { type: string }[]).some((c) => c.type === "image")
+      )
+        out = {
+          ...out,
+          content: [
+            ...(anyM.content as { type: string }[]).filter((c) => c.type !== "image"),
+            { type: "text", text: slimNote },
+          ],
+        };
+      return out as unknown as AgentMessage;
+    });
   return list.map((t) => ({
     ...t,
+    ...(t.pi ? { pi: slimPi(t.pi) } : {}),
     messages: t.messages.map((m) => ({
       ...m,
       parts: m.parts.map((p) => {
+        if (m.role === "assistant" && p.type === "text" && p.text.includes("<")) {
+          const clean = sanitizeAssistantText(p.text);
+          if (clean !== p.text) return { ...p, text: clean };
+        }
         const out = (p as { output?: unknown }).output;
         if (!out || typeof out !== "object") return p;
         const o = out as Record<string, unknown>;
@@ -660,6 +707,11 @@ function ChatSession({
   const providerSessions = useRef<Record<string, string>>({
     ...(initialThread?.sessions ?? {}),
   });
+  // Seed the pi session registry from the stored thread before any turn runs.
+  useEffect(() => {
+    if (initialThread?.pi) hydratePiSession(threadId, initialThread.pi);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialThread is the mount-time snapshot
+  }, [threadId]);
   const modelRef = useRef(model);
   modelRef.current = model;
 
@@ -694,10 +746,12 @@ function ChatSession({
       sendMessages: async (options) => {
         if (provider(modelRef.current) === "gemini") {
           clientToolsRef.current = true;
-          return streamGeminiChat({
+          return streamCutChat({
+            threadId,
             model: modelRef.current,
             messages: options.messages,
             abortSignal: options.abortSignal,
+            deps: productionDeps(),
           });
         }
         clientToolsRef.current = false;
@@ -705,7 +759,7 @@ function ChatSession({
       },
       reconnectToStream: (options) => engine.reconnectToStream(options),
     };
-  }, []);
+  }, [threadId]);
 
   const { messages, sendMessage, stop, status, error, clearError } = useChat({
     id: threadId,
@@ -839,6 +893,7 @@ function ChatSession({
       updatedAt: Date.now(),
       messages,
       sessions: { ...providerSessions.current },
+      pi: readPiSession(threadId),
     };
     if (saveTimer.current === null) {
       saveTimer.current = window.setTimeout(() => {
@@ -1365,6 +1420,24 @@ const chatMarkdownComponents: Components = {
   ),
 };
 
+// The model's replayed context wraps bookkeeping in tag blocks (<tools_ran>,
+// <editor_state>, …), and a reply sometimes mimics one verbatim. The blocks are
+// input-side scaffolding, so any that reach assistant text get stripped wherever
+// that text leaves the transcript: render, copy, and storage. Three passes:
+// closed blocks anywhere; then a still-open tag swallows through end-of-string
+// only when it starts a line — a mimicked block always does, and this covers a
+// block arriving across stream deltas without eating a mid-sentence mention
+// like `<editor_state>`; then stray closers.
+const TAG_NAMES = "tools_ran|turn_ledger|editor_state|attached_assets";
+const CLOSED_BLOCK = new RegExp(`<(${TAG_NAMES})>[^]*?</\\1>`, "g");
+const OPEN_TAIL = new RegExp(`(?:^|\\n)[ \\t]*<(?:${TAG_NAMES})>[^]*$`);
+const STRAY_CLOSE = new RegExp(`</(?:${TAG_NAMES})>`, "g");
+
+export function sanitizeAssistantText(text: string): string {
+  if (!text.includes("<")) return text;
+  return text.replace(CLOSED_BLOCK, "").replace(OPEN_TAIL, "").replace(STRAY_CLOSE, "").trim();
+}
+
 // Some models verbalize their chain-of-thought inline in the reply, tagging
 // each block with a `NN_thought` marker (e.g. `96_thought The user wants…`).
 // It lands in a plain text part; splitting on the marker lets the reasoning
@@ -1573,9 +1646,9 @@ const MessageView = memo(function MessageView({
       </div>
     );
   }
-  const text = message.parts
-    .map((p) => (p.type === "text" ? p.text : ""))
-    .join("");
+  const text = sanitizeAssistantText(
+    message.parts.map((p) => (p.type === "text" ? p.text : "")).join(""),
+  );
   // Media the turn produced, gathered from every finished tool call. It renders
   // as one left-to-right row after the chips — the way the mock presents a set
   // of generated stills — instead of one card stacked under each tool.
@@ -1659,7 +1732,7 @@ const MessageView = memo(function MessageView({
         if (part.type === "text") {
           return (
             <Fragment key={block.index}>
-              {splitThoughtSegments(part.text).map((seg, j) =>
+              {splitThoughtSegments(sanitizeAssistantText(part.text)).map((seg, j) =>
                 seg.kind === "thought" ? (
                   <ThoughtBlock key={j} text={seg.text} />
                 ) : (
