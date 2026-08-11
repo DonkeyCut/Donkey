@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { groupRemap } from "@donkeycut/effects-kit";
-import { adoptTransitionFields, clipLen, deriveTransitionFields, docOverlays, getClipSpans, liftClipLooks, moveOverlayGroup, overlayLaneOrder, normalizeElementLanes, placeInRun, projectDuration, separateOverlaps, serializeDoc, useEditor } from "./store";
+import { adoptTransitionFields, clipLen, deriveTransitionFields, docOverlays, getClipSpans, liftClipLooks, moveOverlayGroup, overlayLaneOrder, normalizeElementLanes, parkedTransitions, placeInRun, projectDuration, reanchorTransitions, separateOverlaps, serializeDoc, useEditor } from "./store";
 import { emptySubtitles } from "./types";
 import type { AudioClip, MediaAsset, SubtitleCue, TextOverlay, VideoClip } from "./types";
 
@@ -197,12 +197,14 @@ describe("committed video updates (AI chat / inspector)", () => {
   });
 
   test("retracking onto an occupied track slides clear", () => {
-    const c1 = vclip({ track: 1, start: 0, out: 2 });
-    const c2 = vclip({ track: 2, start: 0.5, out: 2 });
+    // Grounded on write: the stack always sits on track 0, so the pair is
+    // written as the rows they would ground to.
+    const c1 = vclip({ track: 0, start: 0, out: 2 });
+    const c2 = vclip({ track: 1, start: 0.5, out: 2 });
     useEditor.setState({ clips: [c1, c2] });
-    s().updateClip(c2.id, { track: 1 });
+    s().updateClip(c2.id, { track: 0 });
     expect(clipById(c2.id).start).toBeCloseTo(2);
-    expectLaneSound(videoLane(1));
+    expectLaneSound(videoLane(0));
   });
 
   test("extending a clip pushes the same-track run right", () => {
@@ -877,6 +879,50 @@ describe("bars and clip edges", () => {
     s().updateClipTransient(b.id, { start: 40 });
     expect(s().transitions.length).toBe(1);
     expect(clipById(a.id).transition).toBeUndefined();
+  });
+
+  test("a trim carries the bar and the clip fields the export renders from", () => {
+    // The preview and the export read clip.transition, not the bar. A resize
+    // moves the clip's edge and the run behind it, so both have to land
+    // together: a bar left behind, or a field left stale, is a blend playing
+    // at a joint that no longer has one.
+    const av = asset(8);
+    const a = vclip({ track: 0, start: 0, out: 4, assetId: av.id });
+    const b = vclip({ track: 0, start: 4, out: 4, assetId: av.id });
+    useEditor.setState({ assets: [av], clips: [a, b] });
+    s().setClipTransition(a.id, 0.8, "wipeleft");
+    s().setClipTrim(a.id, 0, 3);
+    // The pair stays in contact, so the cut moved to 3s with the bar on it.
+    expect(clipById(b.id).start).toBeCloseTo(3);
+    expect(s().transitions[0].start).toBeCloseTo(2.2);
+    expect(parkedTransitions(s().clips, s().transitions)).toEqual([]);
+    // And the render fields still describe that blend.
+    expect(clipById(a.id).transition).toBeCloseTo(0.8);
+    expect(clipById(a.id).transitionStyle).toBe("wipeleft");
+  });
+
+  test("a bar lining up with nothing reads as parked, and reanchorBars brings it back", () => {
+    const av = asset(8);
+    const a = vclip({ track: 0, start: 0, out: 4, assetId: av.id });
+    const b = vclip({ track: 0, start: 6, out: 4, assetId: av.id });
+    useEditor.setState({ assets: [av], clips: [a, b] });
+    // A blend on a's open tail, the bar ending on 4s.
+    s().setClipAnim(a.id, "out", { style: "fade", seconds: 0.8 });
+    expect(parkedTransitions(s().clips, s().transitions)).toEqual([]);
+    // The clip slides — the move an assistant makes with place_clip — and the
+    // bar stays where it was, now lining up with nothing.
+    const before = s().clips;
+    s().updateClip(a.id, { start: 1 });
+    const parked = parkedTransitions(s().clips, s().transitions);
+    expect(parked.length).toBe(1);
+    expect(parked[0].style).toBe("crossfade");
+    expect(clipById(a.id).animOut).toBeUndefined();
+    // Carrying the bars through that move lands it back on the edge it
+    // played, and the render fields follow.
+    s().reanchorBars(before);
+    expect(s().transitions[0].start).toBeCloseTo(4.2);
+    expect(parkedTransitions(s().clips, s().transitions)).toEqual([]);
+    expect(clipById(a.id).animOut).toEqual({ style: "fade", seconds: 0.8 });
   });
 
   test("an animation on a far edge leaves an unrelated transition alone", () => {

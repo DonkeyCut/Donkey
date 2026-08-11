@@ -3,7 +3,7 @@
 import { hasOverlayAnim } from "@donkeycut/effects-kit";
 import { chatOwner } from "./chatAssets";
 import { useGenerate } from "./generate";
-import { getClipSpans, overlayLayers, totalDuration, useEditor } from "./store";
+import { getClipSpans, overlayLayers, resolveTransitions, totalDuration, useEditor } from "./store";
 import { laneCues, subtitleLaneCount } from "./subtitles";
 import { watchSweepActive } from "./watch/sweep";
 import { frameOf, rectOf, regionLabel, type ClipSpan, type Overlay, type VideoClip } from "./types";
@@ -243,6 +243,29 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
         ...clipEffects(sp.clip),
       }));
     }),
+    // Every transition bar in the doc. A bar is its own object on the
+    // transitions row: it plays whatever cut or clip edge its window lines up
+    // with, and one lining up with nothing sits parked, playing nothing. The
+    // clip-level transitionToNext above only shows bars that landed on a cut,
+    // so this is where a parked leftover — the debris a move or a retime
+    // leaves — is visible and addressable by id.
+    transitions: (() => {
+      const roles = resolveTransitions(s.clips, s.transitions);
+      return [...s.transitions]
+        .sort((a, b) => a.start - b.start)
+        .map((t) => {
+          const plays = roles.get(t.id) ?? [];
+          return {
+            id: t.id,
+            start: r(t.start),
+            seconds: r(t.seconds),
+            style: t.style,
+            ...(plays.length > 0
+              ? { plays: plays.map((p) => ({ at: p.kind, clipId: p.clipId })) }
+              : { parked: true }),
+          };
+        });
+    })(),
     soundtrack: s.audioClips.map((a) => ({ id: a.id, ...describeAudio(a, assetById) })),
     // Every overlay element on the title lanes: titles, shapes, stickers —
     // each entry carries its `kind`.

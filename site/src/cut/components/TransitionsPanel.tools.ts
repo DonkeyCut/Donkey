@@ -26,6 +26,14 @@ export const TRANSITIONS_TOOLS = [
     }, ["clipId", "seconds"]),
   },
   {
+    name: "remove_transition",
+    description:
+      "Delete a transition bar by its own id — the handle for a parked bar, one lining up with no cut or clip edge and playing nothing. editor_state's `transitions` lists every bar and marks the parked ones, and each timeline mutation reports the bars its edit left parked. Use this to clear leftovers after moving or retiming clips; a bar that still plays a cut is better changed with set_transition (0 clears it).",
+    inputSchema: obj({
+      transitionId: str("Transition bar id, from editor_state `transitions`"),
+    }, ["transitionId"]),
+  },
+  {
     name: "set_animation",
     description:
       "Animate one clip's own entrance (which:'in') or exit (which:'out'): fade, zoom, pop, or a slide named by its motion direction. style 'none' clears. Track-0 clips take every style; upper-track clips only fade and zoom. Each edge holds one effect, last pick wins: animating an edge a transition owns replaces that transition, and setting a transition clears the animations adjacent to its joint. At an abutting cut the animation plays over the neighbor's held frame; at the timeline's ends and across gaps it plays against black.",

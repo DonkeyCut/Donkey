@@ -315,6 +315,11 @@ export interface EditorState {
   /** The same, with no undo checkpoint — for mid-gesture updates. */
   updateTransitionTransient: (id: string, patch: Partial<Omit<TimelineTransition, "id">>) => void;
   removeTransition: (id: string) => void;
+  /** Carry the bars through a retime the caller just wrote: given the clip row
+   * as it stood before, every bar keeps playing the boundary it played, at
+   * wherever that boundary moved to. No undo checkpoint — the caller's own
+   * push covers the whole edit. For the retiming paths outside this store. */
+  reanchorBars: (before: VideoClip[]) => void;
   /** Set (or clear with null) a clip's preset filter look; amount 0..1. */
   updateAudio: (id: string, patch: Partial<AudioClip>) => void;
   /** Hide or show every clip on one video track, in one undo step. Showing a
@@ -984,46 +989,63 @@ const DOC_KEYS = [
 ] as const;
 let hydrating = false;
 
-export const useEditor = create<EditorState>((baseSet, get) => {
-  // Every write that touches clips grounds the stack, so the spine invariant
-  // holds by construction — across deletes, drops, undo, and doc loads.
+/**
+ * The invariants every write to the store passes through, wherever it comes
+ * from: a read-only project takes no doc changes, the track stack stays
+ * grounded, the per-clip transition/anim fields stay caches of the bars, and
+ * the playhead stays inside the timeline.
+ *
+ * The clip fields are what the preview and the export actually render from,
+ * so a write that moved clips or bars without re-deriving them would ship a
+ * blend at a joint that no longer has one. This runs inside `setState`
+ * itself, so no caller — action, module helper, or anything outside this
+ * file — can write past it.
+ */
+function normalizeWrite(prev: EditorState, incoming: Partial<EditorState>): Partial<EditorState> {
+  let next = incoming;
+  if (prev.readOnly && !hydrating) {
+    next = { ...next };
+    for (const k of DOC_KEYS) delete (next as Record<string, unknown>)[k];
+  }
+  if (next.clips) next = { ...next, clips: groundTracks(next.clips) };
+  if (next.clips || next.transitions) {
+    const clips = next.clips ?? prev.clips;
+    const derived = deriveTransitionFields(clips, next.transitions ?? prev.transitions);
+    if (derived !== clips) next = { ...next, clips: derived };
+  }
+  // The playhead cannot outlive the timeline. Deleting the last of a long
+  // row shortens the project under a playhead standing past the new end,
+  // which leaves the readout ahead of the total and — since the playhead is
+  // placed with a transform, and transforms count toward scrollable
+  // overflow — stretches the scroll area into empty space. Clamping here
+  // covers every edit that shortens anything, present and future.
+  if (next.clips || next.audioClips || next.overlays) {
+    const total = projectDuration({
+      clips: next.clips ?? prev.clips,
+      audioClips: next.audioClips ?? prev.audioClips,
+      overlays: next.overlays ?? prev.overlays,
+    });
+    if ((next.currentTime ?? prev.currentTime) > total) next = { ...next, currentTime: total };
+  }
+  return next;
+}
+
+export const useEditor = create<EditorState>((baseSet, get, api) => {
+  // Normalizing is bolted onto setState itself, not onto a local helper the
+  // actions happen to use: the store's own module-level helpers write through
+  // `useEditor.setState`, and one of those skipping the derive is how a clip
+  // kept rendering a transition its bar had already left.
   const set = (
     partial:
       | Partial<EditorState>
       | ((s: EditorState) => Partial<EditorState>),
     replace?: boolean
   ) =>
-    baseSet((prev) => {
-      let next = typeof partial === "function" ? partial(prev) : partial;
-      if (prev.readOnly && !hydrating) {
-        next = { ...next };
-        for (const k of DOC_KEYS) delete (next as Record<string, unknown>)[k];
-      }
-      if (next.clips) next = { ...next, clips: groundTracks(next.clips) };
-      // The per-clip transition/anim fields are caches of the transition bars:
-      // any write that moves a clip or a bar re-derives them here, so the two
-      // can never disagree.
-      if (next.clips || next.transitions) {
-        const clips = next.clips ?? prev.clips;
-        const derived = deriveTransitionFields(clips, next.transitions ?? prev.transitions);
-        if (derived !== clips) next = { ...next, clips: derived };
-      }
-      // The playhead cannot outlive the timeline. Deleting the last of a long
-      // row shortens the project under a playhead standing past the new end,
-      // which leaves the readout ahead of the total and — since the playhead is
-      // placed with a transform, and transforms count toward scrollable
-      // overflow — stretches the scroll area into empty space. Clamping here
-      // covers every edit that shortens anything, present and future.
-      if (next.clips || next.audioClips || next.overlays) {
-        const total = projectDuration({
-          clips: next.clips ?? prev.clips,
-          audioClips: next.audioClips ?? prev.audioClips,
-          overlays: next.overlays ?? prev.overlays,
-        });
-        if ((next.currentTime ?? prev.currentTime) > total) next = { ...next, currentTime: total };
-      }
-      return next;
-    }, replace as false | undefined);
+    baseSet(
+      (prev) => normalizeWrite(prev, typeof partial === "function" ? partial(prev) : partial),
+      replace as false | undefined
+    );
+  api.setState = set as typeof api.setState;
 
   const snapshot = (): DocSnapshot => {
     const { clips, transitions, audioClips, overlays, subtitles } = get();
@@ -2066,6 +2088,13 @@ export const useEditor = create<EditorState>((baseSet, get) => {
           ? s2.transitions.map((t) => (t.id === existing.id ? { ...t, ...bar } : t))
           : [...s2.transitions, { id: uid(), ...bar }],
       }));
+    },
+
+    reanchorBars: (before) => {
+      const s = get();
+      if (s.transitions.length === 0) return;
+      const next = reanchorTransitions(before, s.clips, s.transitions);
+      if (next !== s.transitions) set({ transitions: next });
     },
 
     addTransition: (bar) => {
@@ -4237,6 +4266,21 @@ export function resolveTransitions(
     );
   }
   return roles;
+}
+
+/**
+ * The bars lining up with nothing: on the row, playing no cut and no clip
+ * edge. A user who drags a clip away sees the bar it left and can drag it
+ * back; an assistant edit has no such eye, so the tool layer reports these
+ * after every timeline mutation and the model clears or reattaches them.
+ */
+export function parkedTransitions(
+  clips: VideoClip[],
+  transitions: TimelineTransition[]
+): TimelineTransition[] {
+  if (transitions.length === 0) return [];
+  const roles = resolveTransitions(clips, transitions);
+  return transitions.filter((t) => !(roles.get(t.id) ?? []).length);
 }
 
 /**

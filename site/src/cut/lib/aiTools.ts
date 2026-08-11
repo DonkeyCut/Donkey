@@ -71,7 +71,7 @@ import { blobToInlineAudio, refToInlineAudio, visualRefs, type InlineImage } fro
 import { characterPrompt, stockAspectDims, stockTitle } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
-import { applyOverlayPatchSettled, track0Clips, laneGapAt, getClipSpans, nextFreeStart, overlayLayers, totalDuration, useEditor } from "./store";
+import { applyOverlayPatchSettled, track0Clips, laneGapAt, getClipSpans, nextFreeStart, overlayLayers, parkedTransitions, totalDuration, useEditor } from "./store";
 import { buildAiContext } from "./aiContext";
 import { sampleClipFrameData } from "./previewCanvas";
 import { laneCues, subtitleLaneCount } from "./subtitles";
@@ -122,7 +122,12 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
  * ids, starts, and lengths for track 0 and the soundtrack, read fresh after
  * the store settled. The model keeps editing from these — new ids after a
  * split, closed-up starts after a delete — with no get_state poll between
- * steps. */
+ * steps.
+ *
+ * `parkedTransitions` rides along: a bar the edit left lining up with
+ * nothing. The model sees its own debris the moment it makes it, in the same
+ * payload it already reads, so a stranded blend gets cleared or reattached
+ * inside the turn instead of sitting on the row. */
 function tracksAfter() {
   const cur = useEditor.getState();
   const row = track0Clips(cur.clips).map((c) => ({
@@ -135,11 +140,24 @@ function tracksAfter() {
     start: round2(a.start),
     len: round2(a.out - a.in),
   }));
+  const parked = parkedTransitions(cur.clips, cur.transitions);
   return {
     track0: row.slice(0, 60),
     ...(row.length > 60 ? { track0Truncated: true } : {}),
     soundtrack: lanes.slice(0, 60),
     ...(lanes.length > 60 ? { soundtrackTruncated: true } : {}),
+    ...(parked.length > 0
+      ? {
+          parkedTransitions: parked.map((t) => ({
+            id: t.id,
+            start: round2(t.start),
+            seconds: round2(t.seconds),
+            style: t.style,
+          })),
+          parkedTransitionsNote:
+            "These transition bars line up with no cut or clip edge and play nothing. Clear each one with remove_transition, or reattach it with set_transition/set_animation on the edge it belongs to. If it isn't clear which the user wanted, say what's there and ask.",
+        }
+      : {}),
   };
 }
 
@@ -472,6 +490,14 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     return { id: next.id, transition: next.transition ?? 0, style: next.transitionStyle ?? "crossfade" };
   },
 
+  remove_transition: (s, input) => {
+    const id = String(input.transitionId ?? "");
+    if (!s.transitions.some((t) => t.id === id))
+      throw new ToolError(`No transition bar with id ${id}.`);
+    s.removeTransition(id);
+    return { removed: id, ...tracksAfter() };
+  },
+
   set_animation: (s, input) => {
     const clip = requireItem(s.clips, input.clipId, "video clip");
     const which = input.which === "in" || input.which === "out" ? input.which : null;
@@ -777,8 +803,13 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           end: c.start + (c.out - c.in) / (c.speed && c.speed > 0 ? c.speed : 1),
         }));
       const at = nextFreeStart(taken, Math.max(0, input.start), len);
+      // Closing a gap is this tool's main job, so the clip's blends travel
+      // with it: a bar playing its head or its cut lands on the edge's new
+      // time instead of staying behind on the row.
+      const before = s.clips;
       s.updateClip(clip.id, { start: at });
       useEditor.getState().sortClips();
+      useEditor.getState().reanchorBars(before);
       return {
         id: clip.id,
         start: round2(at),
@@ -977,6 +1008,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // change — butted joints stay butted, deliberate beats keep their width,
       // and a tightened clip closes up instead of opening a gap.
       if (plans.size > 0) {
+        const before = s.clips;
         s.pushHistory();
         const patches: { id: string; patch: Partial<VideoClip> }[] = [];
         for (const row of rows.values()) {
@@ -995,6 +1027,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         }
         useEditor.getState().updateClipsTransient(patches);
         useEditor.getState().sortClips();
+        // Every edge here moved because the audio said so, and the run behind
+        // each one shifted with it — a retime, so the bars ride along.
+        useEditor.getState().reanchorBars(before);
       }
 
       return {
