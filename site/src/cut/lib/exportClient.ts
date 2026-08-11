@@ -215,15 +215,31 @@ async function renderClipMaskPictures(
 ): Promise<SpecMask | undefined> {
   const m = clip.mask && clip.mask.kind !== "subject" ? clip.mask : undefined;
   const opacityVaries = (clip.kf ?? []).some((k) => Math.abs(k.opacity - 1) > 1e-3);
-  if (!m && !opacityVaries) return undefined;
+  const radius = clip.boxStyle?.radius ?? 0;
+  if (!m && !opacityVaries && radius <= 0) return undefined;
   const rect = rectOf(clip);
   const anchor = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
   const frame = { width: W, height: H, scale: Math.min(W, H) / 1080 };
+  // Rounded corners trim coverage at the clip's box: outside the rounded box
+  // everything drops, and inside it the mask keeps deciding.
+  const rp = regionPx(clip.frame, W, H);
+  const rb = rp
+    ? { x: rp.rx - box.x, y: rp.ry - box.y, w: rp.rw, h: rp.rh }
+    : { x: -box.x, y: -box.y, w: W, h: H };
   const canvas = document.createElement("canvas");
   canvas.width = box.w;
   canvas.height = box.h;
   const blobAt = (tLocal: number) => {
     const ctx = canvas.getContext("2d")!;
+    if (radius > 0) {
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(rb.x, rb.y, rb.w, rb.h, radius * frame.scale);
+      ctx.clip();
+    }
     if (m) {
       paintMaskLuma(canvas, m, tLocal, frame, anchor, box.x, box.y);
     } else {
@@ -231,6 +247,7 @@ async function renderClipMaskPictures(
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
+    if (radius > 0) ctx.restore();
     if (opacityVaries) {
       const v = Math.round(
         255 * Math.max(0, Math.min(1, clipPoseAt(clip, tLocal).opacity))
@@ -258,6 +275,37 @@ async function renderClipMaskPictures(
     frames.push({ file: name, duration: i === n - 1 ? Math.max(step, dur - (n - 1) * step) : step });
   }
   return { frames };
+}
+
+/** Paint the clip's border ring — a stroked rounded rect along its box edge,
+ * transparent everywhere else — sized to the segment the graph frames (the
+ * full frame for track 0, the region box for overlays). The engine overlays
+ * it onto the segment before fades, masks and pose, so the ring rides the
+ * clip like the preview's stroke does. Null without a border. */
+function renderClipBorderPng(
+  clip: VideoClip,
+  seg: { w: number; h: number },
+  ring: { x: number; y: number; w: number; h: number },
+  W: number,
+  H: number
+): Promise<Blob> | null {
+  const bs = clip.boxStyle;
+  if (!bs?.borderWidth) return null;
+  const scale = Math.min(W, H) / 1080;
+  const bw = bs.borderWidth * scale;
+  const rad = Math.max(0, (bs.radius ?? 0) * scale);
+  const canvas = document.createElement("canvas");
+  canvas.width = seg.w;
+  canvas.height = seg.h;
+  const ctx = canvas.getContext("2d")!;
+  ctx.strokeStyle = bs.borderColor ?? "#ffffff";
+  ctx.lineWidth = bw;
+  ctx.beginPath();
+  ctx.roundRect(ring.x + bw / 2, ring.y + bw / 2, ring.w - bw, ring.h - bw, Math.max(0, rad - bw / 2));
+  ctx.stroke();
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not render the border."))), "image/png")
+  );
 }
 
 /** Build the export spec + overlay PNGs from the cut. Media already lives in
@@ -341,6 +389,7 @@ async function buildExportPayload(
     grade: normalizeGrade(sp.clip.grade),
     mask: undefined as SpecMask | undefined,
     kf: sp.clip.kf,
+    border: undefined as string | undefined,
   }));
   // Track-0 segments render at the full output frame (regioned clips pad out
   // to it), so their masks paint full-frame. A subject mask rides the shared
@@ -361,6 +410,22 @@ async function buildExportPayload(
     const subject = c.mask?.kind === "subject" ? subjectOf(c.mask) : undefined;
     if (pictures || subject) {
       clipEntries[i].mask = { ...(pictures ?? {}), ...(subject ? { subject } : {}) };
+    }
+    const rp = regionPx(c.frame, settings.width, settings.height);
+    const ring = rp
+      ? { x: rp.rx, y: rp.ry, w: rp.rw, h: rp.rh }
+      : { x: 0, y: 0, w: settings.width, h: settings.height };
+    const borderBlob = renderClipBorderPng(
+      c,
+      { w: settings.width, h: settings.height },
+      ring,
+      settings.width,
+      settings.height
+    );
+    if (borderBlob) {
+      const name = `border_c${i}.png`;
+      pngs.push({ name, blob: await borderBlob });
+      clipEntries[i].border = name;
     }
   }
 
@@ -444,6 +509,8 @@ async function buildExportPayload(
           // Pass `fit` through unset so the server's "default full-frame overlay
           // covers what's below" branch fires — normalizing to "fit" defeated it.
           fit: c.fit,
+          panX: c.panX ?? 0,
+          panY: c.panY ?? 0,
           muted: c.muted,
           volume: c.volume,
           speed: c.speed,
@@ -453,6 +520,7 @@ async function buildExportPayload(
           lookAmount: c.lookAmount,
           mask: undefined as SpecMask | undefined,
           kf: c.kf,
+          border: undefined as string | undefined,
           ...ramp,
         };
         overlayClipOf.set(entry, c);
@@ -484,6 +552,18 @@ async function buildExportPayload(
     const subject = c.mask?.kind === "subject" ? subjectOf(c.mask) : undefined;
     if (pictures || subject) {
       entry.mask = { ...(pictures ?? {}), ...(subject ? { subject } : {}) };
+    }
+    const borderBlob = renderClipBorderPng(
+      c,
+      { w: box.w, h: box.h },
+      { x: 0, y: 0, w: box.w, h: box.h },
+      settings.width,
+      settings.height
+    );
+    if (borderBlob) {
+      const name = `border_ov${i}.png`;
+      pngs.push({ name, blob: await borderBlob });
+      entry.border = name;
     }
   }
 

@@ -160,6 +160,29 @@ export function Preview() {
     return true;
   };
 
+  // The topmost regioned clip under a stage point at the playhead — clicking
+  // its picture selects it, in the preview and the timeline alike. Full-frame
+  // clips stay out: a click on the backdrop keeps playing and pausing.
+  const clipAtPoint = (e: React.MouseEvent): string | null => {
+    const rct = e.currentTarget.getBoundingClientRect();
+    const px = (e.clientX - rct.left) / rct.width;
+    const py = (e.clientY - rct.top) / rct.height;
+    const s = useEditor.getState();
+    const t = s.currentTime;
+    let best: { id: string; track: number } | null = null;
+    for (const c of s.clips) {
+      if (c.hidden) continue;
+      const r = rectOf(c);
+      if (isFullRect(r)) continue;
+      const speed = c.speed && c.speed > 0 ? c.speed : 1;
+      const len = Math.max(0.1, (c.out - c.in) / speed);
+      if (t < c.start || t >= c.start + len) continue;
+      if (px < r.x || px > r.x + r.w || py < r.y || py > r.y + r.h) continue;
+      if (!best || c.track > best.track) best = { id: c.id, track: c.track };
+    }
+    return best?.id ?? null;
+  };
+
   return (
     <section className="preview-pane flex min-h-0 min-w-0 flex-col bg-muted/40 select-none">
       <div
@@ -184,6 +207,9 @@ export function Preview() {
               e.target === e.currentTarget ||
               (e.target as HTMLElement).tagName === "CANVAS"
             ) {
+              // A press over a regioned clip belongs to the click handler
+              // below (select it); a pan gesture here would swallow the click.
+              if (clipAtPoint(e)) return;
               panDrag(e);
             }
           }}
@@ -194,6 +220,11 @@ export function Preview() {
               e.target === e.currentTarget ||
               (e.target as HTMLElement).tagName === "CANVAS"
             ) {
+              const hit = clipAtPoint(e);
+              if (hit) {
+                useEditor.getState().select({ kind: "clip", id: hit });
+                return;
+              }
               togglePlayback();
             }
           }}
@@ -252,12 +283,49 @@ export function Preview() {
  * overlay clip, and only while that clip is live under the playhead so it lines
  * up with the compositor. A full-frame layer needs no handle.
  */
+/** How close (screen px) a box edge pulls onto a snap line while dragging. */
+const SNAP_PX = 8;
+
+/** Snap a moving box along one axis: its leading edge, center, and trailing
+ * edge each pull to the frame's edges and centerline. Returns the snapped
+ * position and the frame line it landed on, for the guide. */
+function snapAxis(v: number, size: number, tol: number): { v: number; guide: number | null } {
+  let best = { v, guide: null as number | null, d: tol };
+  for (const offset of [0, size / 2, size]) {
+    for (const target of [0, 0.5, 1]) {
+      const d = Math.abs(v - (target - offset));
+      if (d < best.d) best = { v: target - offset, guide: target, d };
+    }
+  }
+  return best;
+}
+
+/** The frame line nearest a resized trailing edge, within tolerance. */
+function snapEdge(v: number, tol: number): number | null {
+  let best: number | null = null;
+  let bd = tol;
+  for (const target of [0.5, 1]) {
+    const d = Math.abs(v - target);
+    if (d < bd) {
+      bd = d;
+      best = target;
+    }
+  }
+  return best;
+}
+
 function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
   const selection = useEditor((s) => s.selection);
   const clips = useEditor((s) => s.clips);
+  const assets = useEditor((s) => s.assets);
+  const aspect = useEditor((s) => s.aspect);
   const currentTime = useEditor((s) => s.currentTime);
   const skimTime = useEditor((s) => s.skimTime);
   const playing = useEditor((s) => s.playing);
+  const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({
+    x: null,
+    y: null,
+  });
   // While hover-scrubbing the preview shows the skimmer's frame, where the
   // selected clip may not even be on screen — selection stays, the handle hides.
   if (!playing && skimTime !== null) return null;
@@ -267,6 +335,10 @@ function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
   // every track.
   let rect: FrameRect | null = null;
   let apply: ((frame: FrameRect) => void) | null = null;
+  // A fill clip whose content overflows the box can pan its crop window: how
+  // far the scaled picture overhangs the box (frame px), and the pan to start
+  // the gesture from.
+  let pan: { id: string; ox: number; oy: number; panX0: number; panY0: number } | null = null;
   if (selection?.kind === "clip") {
     const clip = clips.find((c) => c.id === selection.id);
     if (clip && !clip.hidden) {
@@ -275,6 +347,18 @@ function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
       if (currentTime >= clip.start && currentTime < clip.start + len) {
         rect = rectOf(clip);
         apply = (frame) => useEditor.getState().updateClipTransient(clip.id, { frame });
+        const asset = assets.find((a) => a.id === clip.assetId);
+        if (clip.fit === "fill" && asset?.width && asset?.height) {
+          const fr = frameOf(aspect);
+          const bw = rect.w * fr.w;
+          const bh = rect.h * fr.h;
+          const sc = Math.max(bw / asset.width, bh / asset.height);
+          const ox = asset.width * sc - bw;
+          const oy = asset.height * sc - bh;
+          if (ox > 1 || oy > 1) {
+            pan = { id: clip.id, ox, oy, panX0: clip.panX ?? 0, panY0: clip.panY ?? 0 };
+          }
+        }
       }
     }
   }
@@ -288,12 +372,17 @@ function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
     e.stopPropagation();
     useEditor.getState().pushHistory();
     startDrag(e, {
-      onMove: (dx, dy) =>
+      onMove: (dx, dy) => {
+        const sx = snapAxis(r.x + dx / stage.w, r.w, SNAP_PX / stage.w);
+        const sy = snapAxis(r.y + dy / stage.h, r.h, SNAP_PX / stage.h);
+        setGuides({ x: sx.guide, y: sy.guide });
         patch({
           ...r,
-          x: Math.max(0.05 - r.w, Math.min(0.95, r.x + dx / stage.w)),
-          y: Math.max(0.05 - r.h, Math.min(0.95, r.y + dy / stage.h)),
-        }),
+          x: Math.max(0.05 - r.w, Math.min(0.95, sx.v)),
+          y: Math.max(0.05 - r.h, Math.min(0.95, sy.v)),
+        });
+      },
+      onUp: () => setGuides({ x: null, y: null }),
     });
   };
 
@@ -301,12 +390,40 @@ function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
     e.stopPropagation();
     useEditor.getState().pushHistory();
     startDrag(e, {
-      onMove: (dx, dy) =>
-        patch({
-          ...r,
-          w: Math.max(0.1, Math.min(REGION_MAX_SCALE, r.w + dx / stage.w)),
-          h: Math.max(0.1, Math.min(REGION_MAX_SCALE, r.h + dy / stage.h)),
-        }),
+      onMove: (dx, dy) => {
+        let w = Math.max(0.1, Math.min(REGION_MAX_SCALE, r.w + dx / stage.w));
+        let h = Math.max(0.1, Math.min(REGION_MAX_SCALE, r.h + dy / stage.h));
+        const gx = snapEdge(r.x + w, SNAP_PX / stage.w);
+        const gy = snapEdge(r.y + h, SNAP_PX / stage.h);
+        if (gx !== null && gx - r.x >= 0.1) w = gx - r.x;
+        if (gy !== null && gy - r.y >= 0.1) h = gy - r.y;
+        setGuides({ x: gx !== null && gx - r.x >= 0.1 ? gx : null, y: gy !== null && gy - r.y >= 0.1 ? gy : null });
+        patch({ ...r, w, h });
+      },
+      onUp: () => setGuides({ x: null, y: null }),
+    });
+  };
+
+  const panContent = pan;
+  const onPanContent = (e: React.PointerEvent) => {
+    if (!panContent) return;
+    e.stopPropagation();
+    useEditor.getState().pushHistory();
+    const toFrame = frameOf(aspect).w / stage.w; // screen px → frame px
+    startDrag(e, {
+      onMove: (dx, dy) => {
+        // Content follows the pointer; pan is the crop-window position.
+        useEditor.getState().updateClipTransient(panContent.id, {
+          panX:
+            panContent.ox > 1
+              ? Math.max(-1, Math.min(1, panContent.panX0 - (dx * toFrame) / (panContent.ox / 2)))
+              : 0,
+          panY:
+            panContent.oy > 1
+              ? Math.max(-1, Math.min(1, panContent.panY0 - (dy * toFrame) / (panContent.oy / 2)))
+              : 0,
+        });
+      },
     });
   };
 
@@ -325,6 +442,14 @@ function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
         style={box}
         onPointerDown={onMove}
       >
+        {/* Overflowing fill content pans from the interior; the ring at the
+            border moves the box, the corner resizes it. */}
+        {panContent && (
+          <div
+            className="absolute inset-2 cursor-grab active:cursor-grabbing"
+            onPointerDown={onPanContent}
+          />
+        )}
         <span
           className="absolute -right-1.5 -bottom-1.5 z-20 size-3 cursor-nwse-resize rounded-full bg-[#0a84ff] shadow-[0_0_0_2px_white]"
           onPointerDown={onResize}
@@ -335,6 +460,12 @@ function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
           className="absolute rounded-[3px] shadow-[inset_0_0_0_2px_#0a84ff]"
           style={box}
         />
+        {guides.x !== null && (
+          <div className="absolute inset-y-0 w-px bg-[#0a84ff]" style={{ left: guides.x * stage.w }} />
+        )}
+        {guides.y !== null && (
+          <div className="absolute inset-x-0 h-px bg-[#0a84ff]" style={{ top: guides.y * stage.h }} />
+        )}
       </div>
     </>
   );

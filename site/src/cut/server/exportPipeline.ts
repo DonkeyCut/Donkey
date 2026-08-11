@@ -35,7 +35,7 @@ export interface ExportSpec {
     volume?: number;
     /** "fit" letterboxes (default); "fill" covers the region and crops. */
     fit?: "fit" | "fill";
-    panX?: number; // crop-window pan -1..1 (fill mode, full frame)
+    panX?: number; // crop-window pan -1..1 (fill mode)
     panY?: number;
     /** Region of the frame this clip fills; absent = full frame. */
     frame?: { x: number; y: number; w: number; h: number };
@@ -78,6 +78,10 @@ export interface ExportSpec {
      * turns it. Opacity keys ride the painted mask's luma, so the graph
      * never needs an animatable alpha filter. */
     kf?: { t: number; x: number; y: number; scale: number; rotation: number; opacity: number }[];
+    /** Client-painted border ring (a stroked rounded rect along the clip's
+     * box, transparent elsewhere), full-frame sized; overlaid onto the
+     * segment before fades, masks and pose so it rides the clip. */
+    border?: string;
   }[];
   /** Video tracks composited over the track-0 `clips`, lowest track first. */
   overlayVideos?: {
@@ -89,6 +93,8 @@ export interface ExportSpec {
     /** Region of the frame this overlay fills; absent = full frame. */
     frame?: { x: number; y: number; w: number; h: number };
     fit?: "fit" | "fill";
+    panX?: number; // crop-window pan -1..1 (fill mode)
+    panY?: number;
     muted: boolean;
     /** Gain on the clip's own audio, 0..1.5; absent = 1 (unchanged). */
     volume?: number;
@@ -121,6 +127,10 @@ export interface ExportSpec {
     };
     /** Keyframed pose track, seconds from this overlay's start. */
     kf?: { t: number; x: number; y: number; scale: number; rotation: number; opacity: number }[];
+    /** Client-painted border ring, box-sized (a letterboxed segment pads out
+     * to its box when bordered); overlaid onto the segment so it rides the
+     * clip through fades, masks and pose. */
+    border?: string;
   }[];
   audio: {
     file: string;
@@ -512,6 +522,26 @@ export async function runExport(
     const olen = Math.max(0.1, (oc.out - oc.in) / ospeed);
     const idx = await maskInput(oc.mask, olen, `mask_ovl_${k}`);
     if (idx !== undefined) overlayMaskInput.set(oc, idx);
+  }
+  // Border rings loop as stills for their segment's length, like mask files.
+  const borderStill = (file: string, dur: number): number => {
+    const idx = nInputs++;
+    inputs.push("-loop", "1", "-t", num(dur), "-framerate", String(fps), "-i", path.join(job.tmpDir, path.basename(file)));
+    return idx;
+  };
+  const clipBorderInput = new Map<number, number>();
+  for (let j = 0; j < spec.clips.length; j++) {
+    const c = spec.clips[j];
+    if (!c.border) continue;
+    const dur = c.file ? Math.max(0.1, (c.out - c.in) / clipRate(c)) : Math.max(0, c.out - c.in);
+    clipBorderInput.set(j, borderStill(c.border, dur));
+  }
+  const overlayBorderInput = new Map<(typeof overlayVideos)[number], number>();
+  for (const oc of overlayVideos) {
+    if (!oc.border) continue;
+    const ospeed = oc.speed && oc.speed > 0 ? oc.speed : 1;
+    const olen = Math.max(0.1, (oc.out - oc.in) / ospeed);
+    overlayBorderInput.set(oc, borderStill(oc.border, olen));
   }
 
   // One concat-demuxer input per subtitle track: within a track cues never
@@ -910,7 +940,9 @@ export async function runExport(
         const win = bw > W || bh > H ? `,crop=${W}:${H}:${-bx}:${-by}` : "";
         frame =
           c.fit === "fill"
-            ? `scale=${rw}:${rh}:force_original_aspect_ratio=increase,crop=${rw}:${rh},` +
+            ? `scale=${rw}:${rh}:force_original_aspect_ratio=increase,` +
+              `crop=${rw}:${rh}:(iw-ow)*${num(0.5 + Math.max(-1, Math.min(1, c.panX ?? 0)) / 2)}` +
+              `:(ih-oh)*${num(0.5 + Math.max(-1, Math.min(1, c.panY ?? 0)) / 2)},` +
               `pad=${bw}:${bh}:${rx - bx}:${ry - by}:color=${padColor}${win}`
             : `scale=${rw}:${rh}:force_original_aspect_ratio=decrease:force_divisible_by=2,` +
               `pad=${bw}:${bh}:${rx - bx}+(${rw}-iw)/2:${ry - by}+(${rh}-ih)/2:color=${padColor}${win}`;
@@ -938,6 +970,14 @@ export async function runExport(
           filters.push(...lines);
           core = `[lko${j}]null`;
         }
+      }
+      // The border ring lands after the look (true stroke color) and before
+      // the fades, so it fades and masks with the clip like the preview.
+      const brIdx = clipBorderInput.get(j);
+      if (brIdx !== undefined) {
+        filters.push(`${core}[cbi${j}]`);
+        filters.push(`[cbi${j}][${brIdx}:v]overlay=0:0:eof_action=pass,format=${clipFmt}[cbo${j}]`);
+        core = `[cbo${j}]null`;
       }
       const fades =
         (hf > 0.01 ? `,fade=t=in:st=0:d=${num(hf)}` : "") +
@@ -1183,15 +1223,20 @@ export async function runExport(
     const boxH = region ? region.rh : H;
     let framing: string;
     let pos: string;
+    // A fill overlay's crop window follows the clip's pan, matching the
+    // preview compositor.
+    const panCrop =
+      `:(iw-ow)*${num(0.5 + Math.max(-1, Math.min(1, oc.panX ?? 0)) / 2)}` +
+      `:(ih-oh)*${num(0.5 + Math.max(-1, Math.min(1, oc.panY ?? 0)) / 2)}`;
     if (!region) {
       framing = cover
-        ? `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}`
+        ? `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}${panCrop}`
         : `scale=${W}:${H}:force_original_aspect_ratio=decrease:force_divisible_by=2`;
       pos = cover ? "0:0" : `x=(${W}-w)/2:y=(${H}-h)/2`;
     } else {
       const { rx, ry, rw, rh } = region;
       framing = cover
-        ? `scale=${rw}:${rh}:force_original_aspect_ratio=increase,crop=${rw}:${rh}`
+        ? `scale=${rw}:${rh}:force_original_aspect_ratio=increase,crop=${rw}:${rh}${panCrop}`
         : `scale=${rw}:${rh}:force_original_aspect_ratio=decrease:force_divisible_by=2`;
       pos = cover ? `${rx}:${ry}` : `x=${rx}+(${rw}-w)/2:y=${ry}+(${rh}-h)/2`;
     }
@@ -1201,7 +1246,10 @@ export async function runExport(
     // overlay at the box origin. The pad joins the chain after the look
     // bakes in, so the look grades the opaque scaled picture and never
     // flattens the transparent margins.
-    const boxed = (ramped || maskIdx !== undefined || !!subjMask || keyed) && !cover;
+    // A bordered letterboxed segment also pads to its box: the ring strokes
+    // the box edge, so the segment must span the box to carry it.
+    const boxed =
+      (ramped || maskIdx !== undefined || !!subjMask || keyed || !!oc.border) && !cover;
     const boxPad = boxed
       ? `,format=yuva420p,pad=${boxW}:${boxH}:(ow-iw)/2:(oh-ih)/2:color=black@0.0`
       : "";
@@ -1232,6 +1280,14 @@ export async function runExport(
       }
     }
     if (boxPad) core += boxPad;
+    // The border ring lands after the look and box pad, before the edge
+    // ramps, so it fades and masks with the clip like the preview.
+    const obIdx = overlayBorderInput.get(oc);
+    if (obIdx !== undefined) {
+      filters.push(`${core}[obi${k}]`);
+      filters.push(`[obi${k}][${obIdx}:v]overlay=0:0:eof_action=pass,format=${fmt}[obo${k}]`);
+      core = `[obo${k}]null`;
+    }
     const pre = `ovp${k}`;
     pushEdgeFx(
       core,

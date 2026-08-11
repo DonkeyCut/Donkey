@@ -467,20 +467,40 @@ export class FrameCompositor {
     const sc = (fill ? Math.max(rw / vw, rh / vh) : Math.min(rw / vw, rh / vh)) * zoom;
     const dw = vw * sc;
     const dh = vh * sc;
-    const dx = rx + (rw - dw) / 2;
-    const dy = ry + (rh - dh) / 2;
+    let dx = rx + (rw - dw) / 2;
+    let dy = ry + (rh - dh) / 2;
+    if (fill) {
+      // Pan the crop window across the overflow (matches the export crop).
+      const kx = 0.5 + Math.max(-1, Math.min(1, clip?.panX ?? 0)) / 2;
+      const ky = 0.5 + Math.max(-1, Math.min(1, clip?.panY ?? 0)) / 2;
+      dx = rx - (dw - rw) * kx;
+      dy = ry - (dh - rh) * ky;
+    }
     const src = this.gradedSource(frame, clip);
+    const bs = clip?.boxStyle;
+    // Box style lengths are design px at the 1080 short side, like masks.
+    const ds = Math.min(W, H) / 1080;
+    const rad = Math.max(0, (bs?.radius ?? 0) * ds);
     const prevAlpha = ctx.globalAlpha;
     ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-    if (fill || zoom > 1) {
+    if (fill || zoom > 1 || rad > 0) {
       ctx.save();
       ctx.beginPath();
-      ctx.rect(rx, ry, rw, rh);
+      ctx.roundRect(rx, ry, rw, rh, rad);
       ctx.clip();
       ctx.drawImage(src, dx, dy, dw, dh);
       ctx.restore();
     } else {
       ctx.drawImage(src, dx, dy, dw, dh);
+    }
+    if (bs?.borderWidth) {
+      // Stroke inside the box edge, so the border never widens the region.
+      const bw = bs.borderWidth * ds;
+      ctx.strokeStyle = bs.borderColor ?? "#ffffff";
+      ctx.lineWidth = bw;
+      ctx.beginPath();
+      ctx.roundRect(rx + bw / 2, ry + bw / 2, rw - bw, rh - bw, Math.max(0, rad - bw / 2));
+      ctx.stroke();
     }
     ctx.globalAlpha = prevAlpha;
     this.applyLookPost(clip, rx, ry, rw, rh, alpha, at);
@@ -540,9 +560,11 @@ export class FrameCompositor {
       ctx.translate(Math.round(fx.dx ?? 0), Math.round(fx.dy ?? 0));
     }
     // A regioned track-0 clip (split-screen half) draws into its rect over the
-    // black frame; the full-frame path below keeps the pan-crop behavior.
+    // black frame; the full-frame path below keeps the pan-crop behavior. A
+    // styled box (rounded corners, border) also routes through the rect path,
+    // which knows how to draw the style at full frame too.
     const rect = rectOf(clip ?? {});
-    if (!isFullRect(rect)) {
+    if (!isFullRect(rect) || clip?.boxStyle) {
       this.drawIntoRect(frame, rect, clip?.fit === "fill", alpha, at, zoom, clip);
       if (hasFx) ctx.restore();
       return;

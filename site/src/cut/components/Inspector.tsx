@@ -83,6 +83,7 @@ import {
   SPEED_MIN,
   clampOverlayPos,
   type AudioClip,
+  type BoxStyle,
   type ColorGrade,
   type FrameRect,
   type LayoutId,
@@ -610,6 +611,7 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
           onPick={(frame, fit) => updateClip(clip.id, { frame, fit })}
         />
         <ClipTransformSection clip={clip} />
+        <ClipBorderSection clip={clip} />
         <ClipMaskSection clip={clip} />
         <ClipGeneratedAudio clip={clip} />
       </div>
@@ -2231,6 +2233,85 @@ function OverlayMaskSection({ overlay: o }: { overlay: Overlay }) {
 /** The clip inspector's mask target, over the clip store actions. The clip's
  * timeline window comes through `clipWindow` (track-0 starts derive from the
  * span layout). */
+/** Rounded corners and a border stroke on the clip's box. The section's
+ * switch turns the style on with visible defaults; off returns the clip to a
+ * plain box. */
+function ClipBorderSection({ clip }: { clip: VideoClip }) {
+  const widthCk = useSliderCheckpoint();
+  const radiusCk = useSliderCheckpoint();
+  const bs = clip.boxStyle;
+  const st = () => useEditor.getState();
+  const write = (patch: Partial<BoxStyle>) =>
+    st().updateClipTransient(clip.id, { boxStyle: { ...st().clips.find((c) => c.id === clip.id)?.boxStyle, ...patch } });
+  return (
+    <Section
+      title="Border"
+      info="Round the clip's corners and stroke a border along its box edge. Sizes are design pixels, matched between preview and export."
+      enabled={!!bs}
+      onEnabledChange={(v) =>
+        st().updateClip(clip.id, {
+          boxStyle: v ? { radius: 16, borderWidth: 6, borderColor: "#FFFFFF" } : undefined,
+        })
+      }
+    >
+      {bs && (
+        <>
+          <Row label="Width">
+            <ScrubValue
+              label="Border width"
+              className="w-9 text-muted-foreground"
+              value={bs.borderWidth ?? 0}
+              min={0}
+              max={60}
+              step={1}
+              format={(v) => String(Math.round(v))}
+              parse={parseNumberInput}
+              onScrub={(v) => {
+                widthCk.begin();
+                write({ borderWidth: v });
+              }}
+              onCommit={(v) => {
+                widthCk.begin();
+                write({ borderWidth: v });
+                widthCk.end();
+              }}
+            />
+          </Row>
+          <Row label="Radius">
+            <ScrubValue
+              label="Corner radius"
+              className="w-9 text-muted-foreground"
+              value={bs.radius ?? 0}
+              min={0}
+              max={200}
+              step={1}
+              format={(v) => String(Math.round(v))}
+              parse={parseNumberInput}
+              onScrub={(v) => {
+                radiusCk.begin();
+                write({ radius: v });
+              }}
+              onCommit={(v) => {
+                radiusCk.begin();
+                write({ radius: v });
+                radiusCk.end();
+              }}
+            />
+          </Row>
+          <Row label="Color" grow>
+            <ColorSwatches
+              value={bs.borderColor ?? "#FFFFFF"}
+              onBegin={() => st().pushHistory()}
+              onLive={(c) => write({ borderColor: c })}
+              onCommit={(c) => st().updateClip(clip.id, { boxStyle: { ...bs, borderColor: c } })}
+            />
+          </Row>
+        </>
+      )}
+    </Section>
+  );
+}
+
 function ClipMaskSection({ clip }: { clip: VideoClip }) {
   const clips = useEditor((s) => s.clips);
   const assets = useEditor((s) => s.assets);

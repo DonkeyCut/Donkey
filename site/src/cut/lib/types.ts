@@ -214,6 +214,18 @@ export interface FrameRect {
 
 export const FULL_FRAME: FrameRect = { x: 0, y: 0, w: 1, h: 1 };
 
+/** Decorative styling on a clip's box, off until the user turns it on:
+ * rounded corners trim the picture, and a stroke draws along the box edge.
+ * Lengths are design px at the 1080 short side, like mask feather/radius. */
+export interface BoxStyle {
+  /** Corner radius, design px. */
+  radius?: number;
+  /** Border stroke width, design px; 0/absent draws no stroke. */
+  borderWidth?: number;
+  /** Border stroke color (hex). */
+  borderColor?: string;
+}
+
 /** How far a region box may oversize the frame on each axis. Oversizing is
  * the zoom-into-an-area move; the ceiling keeps export scale targets and
  * mask canvases within what ffmpeg and browser canvases handle. */
@@ -378,6 +390,8 @@ export interface VideoClip {
    * multiplies its fitted size, rotation turns it about its center, opacity
    * fades it. Absent = the clip sits in its region untransformed. */
   kf?: OverlayKey[];
+  /** Rounded corners and a border stroke on the clip's box; absent = plain. */
+  boxStyle?: BoxStyle;
 }
 
 // Color grading (the dual-renderer math) lives in the effects kit; the model
