@@ -2,14 +2,18 @@
 // timestamps out. The client renders the timeline's audible mix, chunks it
 // short enough to bound the model's timing drift, and stitches the results
 // (lib/cloudTranscribe.ts); this route only turns one chunk of speech into
-// cues with Gemini, metered against the user's inference credits like every
-// /api/inference route.
+// cues with Gemini. Each account's allowance of chunks is included (Pro per
+// billing period, free per month — see withinFreeAllowance); chunks past
+// that meter against the user's inference credits like every /api/inference
+// route.
 import {
   creditErrorResponse,
   recordFailedInferenceUsage,
   recordInferenceUsage,
   requireInferenceCredits,
 } from "@/lib/credits/inference";
+import { getActiveProSubscription } from "@/lib/billing/pro-subscription";
+import { prisma } from "@/lib/prisma";
 import {
   defaultGeminiClientFactory,
   geminiApiError,
@@ -32,6 +36,55 @@ const PROVIDER = "gemini";
 // provider-pricing.ts. No dedicated STT role exists, so speech-to-text rides
 // the chat model.
 const MODEL = geminiModelRoles.chat;
+
+// Each account's first chunks in its allowance window are on the house, so
+// transcripts fill in for every project — the background sweep included —
+// before any charge appears. A chunk is at most 20 seconds of speech-bearing
+// audio (silent chunks never reach this route), at about $0.004 provider
+// cost each. Pro includes 2 hours per billing period, aligned to the
+// subscription's own cycle; a free account gets 30 minutes per UTC calendar
+// month. Past the allowance, chunks bill the credit balance as usual; a
+// `freeOnly` caller is turned away instead.
+//
+// The background sweep (`freeOnly`) may take at most half the allowance: it
+// transcribes what nobody asked for, so the user's own caption runs always
+// find at least the other half included. Sweep chunks record under their own
+// request kind, which is how the halves are told apart.
+const PRO_FREE_CHUNKS = 360; // 2 hours at 20s per chunk
+const FREE_CHUNKS = 90; // 30 minutes
+const USER_KIND = "transcribe";
+const SWEEP_KIND = "transcribe_sweep";
+export const freeTranscriptionExhausted = "free_transcription_exhausted";
+
+/** Whether this chunk fits the caller's remaining allowance. Used chunks are
+ * counted from the route's own "included" usage events since the window
+ * opened, so the ledger is the tracker and no separate counter can drift
+ * from it. Concurrent chunks can each pass the check before any of them
+ * records, so the allowance can overshoot by the posts-in-flight few —
+ * bounded and cheap, like the credit preflight's own concurrency window. */
+async function withinFreeAllowance(userId: string, sweep: boolean): Promise<boolean> {
+  const pro = await getActiveProSubscription(userId);
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const windowStart = pro?.currentPeriodStart ?? monthStart;
+  const used = await prisma.inferenceUsageEvent.groupBy({
+    by: ["requestKind"],
+    _count: { _all: true },
+    where: {
+      userId,
+      route: ROUTE,
+      billingStatus: "included",
+      status: "succeeded",
+      createdAt: { gte: windowStart },
+    },
+  });
+  const total = used.reduce((n, u) => n + u._count._all, 0);
+  const cap = pro ? PRO_FREE_CHUNKS : FREE_CHUNKS;
+  if (total >= cap) return false;
+  if (!sweep) return true;
+  const sweepUsed = used.find((u) => u.requestKind === SWEEP_KIND)?._count._all ?? 0;
+  return sweepUsed < Math.floor(cap / 2);
+}
 
 interface WireCue {
   start: number;
@@ -92,12 +145,14 @@ export const transcribeCloud = {
   async transcribe(userId: string, req: Request): Promise<Response> {
     let audio: File | null = null;
     let locale = "";
+    let freeOnly = false;
     try {
       const form = await req.formData();
       const a = form.get("audio");
       audio = a instanceof File ? a : null;
       const l = form.get("locale");
       locale = typeof l === "string" ? l.trim() : "";
+      freeOnly = form.get("freeOnly") === "1";
     } catch {
       return err("Send multipart form data with an audio file.", 400);
     }
@@ -109,14 +164,27 @@ export const transcribeCloud = {
       return err("Transcription is not configured on this deployment.", 500);
     }
 
-    const credits = await requireInferenceCredits({
-      enforceModelPrice: true,
-      model: MODEL,
-      provider: PROVIDER,
-      route: ROUTE,
-      userId,
-    });
-    if (!credits.ok) return credits.response;
+    // Inside the allowance the chunk is on the house — no balance check, so a
+    // zero-balance account still gets its transcripts. Past it, a background
+    // (`freeOnly`) caller stops here with nothing run and nothing spent; a
+    // user-initiated call clears the usual credit preflight and bills.
+    const included = await withinFreeAllowance(userId, freeOnly);
+    if (!included) {
+      if (freeOnly) {
+        return Response.json(
+          { error: freeTranscriptionExhausted, message: "The free transcription allowance is used up." },
+          { status: 402 },
+        );
+      }
+      const credits = await requireInferenceCredits({
+        enforceModelPrice: true,
+        model: MODEL,
+        provider: PROVIDER,
+        route: ROUTE,
+        userId,
+      });
+      if (!credits.ok) return credits.response;
+    }
 
     // Seconds of 16 kHz s16 mono after the 44-byte RIFF header — the clamp
     // ceiling for cue times the model may overshoot.
@@ -142,11 +210,12 @@ export const transcribeCloud = {
       });
     } catch (error) {
       await recordFailedInferenceUsage({
+        billingMode: included ? "included" : "credits",
         clientId: null,
         errorCode: "provider_error",
         model: MODEL,
         provider: PROVIDER,
-        requestKind: "transcribe",
+        requestKind: freeOnly ? SWEEP_KIND : USER_KIND,
         route: ROUTE,
         userId,
       });
@@ -161,10 +230,11 @@ export const transcribeCloud = {
     const usage = (raw as { usageMetadata?: unknown }).usageMetadata;
     try {
       await recordInferenceUsage({
+        billingMode: included ? "included" : "credits",
         clientId: null,
         model: MODEL,
         provider: PROVIDER,
-        requestKind: "transcribe",
+        requestKind: freeOnly ? SWEEP_KIND : USER_KIND,
         route: ROUTE,
         status: "succeeded",
         usage: toJsonValue(usage ?? null),

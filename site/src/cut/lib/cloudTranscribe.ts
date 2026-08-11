@@ -5,7 +5,8 @@
 // an OfflineAudioContext applies the same trims, speeds, volumes, and
 // crossfades the engine's ffmpeg graph does (see server/transcribe.ts), so the
 // result is the cut's audible mix in timeline time — whether it then goes to
-// this Mac (localStt.ts) or to the metered hosted route. The hosted path
+// this Mac (localStt.ts) or to the hosted route, which includes each
+// account's first chunks and meters the rest. The hosted path
 // chunks it as 16 kHz mono WAV, POSTs each chunk, stitches the cues back into
 // timeline time, and interpolates per-word timings. Mic dictation reuses the
 // same chunk/post/stitch core on a MediaRecorder capture.
@@ -105,20 +106,44 @@ interface WireCue {
   text: string;
 }
 
+// The route's error code for an account whose included chunks are used up.
+// A `freeOnly` caller reads it off the thrown error and stops transcribing.
+const FREE_EXHAUSTED_CODE = "free_transcription_exhausted";
+
+export class HostedTranscribeError extends Error {
+  public constructor(
+    message: string,
+    public readonly code?: string
+  ) {
+    super(message);
+    this.name = "HostedTranscribeError";
+  }
+}
+
+export const isFreeTranscriptionExhausted = (e: unknown): boolean =>
+  e instanceof HostedTranscribeError && e.code === FREE_EXHAUSTED_CODE;
+
 async function postChunk(
   samples: Float32Array,
   offset: number,
-  locale: string | undefined
+  locale: string | undefined,
+  freeOnly: boolean
 ): Promise<WireCue[]> {
   const form = new FormData();
   form.append("audio", new File([encodeWav(samples)], "chunk.wav", { type: "audio/wav" }));
   form.append("offset", String(round(offset)));
   if (locale) form.append("locale", locale);
+  if (freeOnly) form.append("freeOnly", "1");
   const res = await apiFetch("/api/cut/transcribe", { method: "POST", body: form });
   const body = (await res.json().catch(() => null)) as
     | { cues?: WireCue[]; error?: string; message?: string }
     | null;
-  if (!res.ok) throw new Error(body?.message ?? body?.error ?? "Transcription failed.");
+  if (!res.ok) {
+    throw new HostedTranscribeError(
+      body?.message ?? body?.error ?? "Transcription failed.",
+      body?.error
+    );
+  }
   return (body?.cues ?? []).filter(
     (c) =>
       typeof c?.start === "number" &&
@@ -156,7 +181,8 @@ function interpolateWords(
 export async function transcribeSamples(
   samples: Float32Array,
   locale: string | undefined,
-  isStale?: () => boolean
+  isStale?: () => boolean,
+  opts?: { freeOnly?: boolean }
 ): Promise<SubtitleCue[] | null> {
   const duration = samples.length / RATE;
   const step = (CHUNK_SECONDS - OVERLAP_SECONDS) * RATE;
@@ -178,7 +204,7 @@ export async function transcribeSamples(
       const i = next++;
       if (i >= chunks.length || failed !== undefined || isStale?.()) return;
       try {
-        results[i] = await postChunk(chunks[i].slice, chunks[i].offset, locale);
+        results[i] = await postChunk(chunks[i].slice, chunks[i].offset, locale, opts?.freeOnly ?? false);
       } catch (error) {
         failed = error;
         return;
