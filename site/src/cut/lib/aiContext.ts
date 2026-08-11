@@ -5,6 +5,7 @@ import { chatOwner } from "./chatAssets";
 import { useGenerate } from "./generate";
 import { getClipSpans, overlayLayers, totalDuration, useEditor } from "./store";
 import { laneCues, subtitleLaneCount } from "./subtitles";
+import { watchSweepActive } from "./watch/sweep";
 import { frameOf, rectOf, regionLabel, type ClipSpan, type Overlay, type VideoClip } from "./types";
 
 const r = (n: number) => Math.round(n * 100) / 100;
@@ -135,6 +136,32 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
       type: a.type,
       duration: r(a.duration),
       ...(a.origin ? { origin: a.origin } : {}),
+      // Source spans whose frame map exists (persisted with the project):
+      // distinct-moment times and cut candidates recorded by an earlier watch
+      // or by the background sweep. The map aims a watch — it is not seen
+      // footage; only sheets returned in this chat are. `watching` marks the
+      // sweep still filling the rest; the spans grow as segments land.
+      ...(a.watch && a.watch.ranges.length > 0
+        ? { mapped: a.watch.ranges.map((rg) => ({ from: r(rg.from), to: r(rg.to) })) }
+        : {}),
+      ...(watchSweepActive(a.id) ? { watching: true } : {}),
+      // The source's own transcript (built quietly by the sweep; no subtitle
+      // track involved). The snapshot carries the verdict; get_state carries
+      // the segments — read those for the words instead of inlining audio.
+      ...(a.speech
+        ? {
+            speech: a.speech.noSpeech ? "none" : "transcribed",
+            ...(opts?.fullCues && a.speech.segments.length > 0
+              ? {
+                  transcript: a.speech.segments.map((sg) => ({
+                    start: r(sg.start),
+                    end: r(sg.end),
+                    text: sg.text,
+                  })),
+                }
+              : {}),
+          }
+        : {}),
     })),
     mediaTruncated: visibleAssets.length > cueCap,
     // AI video renders for this project, live from the job store — what

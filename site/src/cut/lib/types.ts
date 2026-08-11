@@ -118,6 +118,39 @@ export function nearestAspect<T extends string>(aspect: Aspect, supported: reado
 }
 
 /** Asset fields persisted in project.json. */
+/** Why watch_video kept a frame: "first" opens the range, "global" is a
+ * whole-frame change (a hard cut), "action" is hard local motion (a small
+ * subject), "settled" is new settled detail (text, ink, UI). */
+export type WatchKeepReason = "first" | "global" | "action" | "settled";
+
+/** What the assistant has seen of a source: watch_video's kept frames and
+ * detected cuts, merged across the watched spans. Times are source seconds.
+ * Media files are immutable per fileName, so this never goes stale; it lives
+ * on the asset, so it saves with the project and dies with the asset. */
+export interface AssetWatch {
+  /** Watched source spans, merged and ascending. */
+  ranges: { from: number; to: number }[];
+  /** Kept distinct frames, ascending, each with why it was kept. */
+  frames: { t: number; via: WatchKeepReason }[];
+  /** Hard-cut moments among the kept frames. */
+  sceneChanges: number[];
+}
+
+/** A source's own transcript — working data for the assistant, kept apart
+ * from subtitle tracks (those are user-visible and only written on request).
+ * Times are source seconds. Same lifecycle as AssetWatch: saves with the
+ * project, dies with the asset, never stale (media files are immutable). */
+export interface AssetSpeech {
+  /** Transcribed source spans, merged and ascending. */
+  ranges: { from: number; to: number }[];
+  /** Timed speech segments, ascending. */
+  segments: { start: number; end: number; text: string }[];
+  /** Set once the whole source is covered and no speech was heard — a
+   * result, so silent sources are never re-transcribed. */
+  noSpeech?: true;
+  locale?: string;
+}
+
 export interface StoredAsset {
   id: string;
   fileName: string; // file inside the project's media/ folder
@@ -126,6 +159,10 @@ export interface StoredAsset {
   duration: number; // seconds
   width?: number;
   height?: number;
+  /** Watch metadata for video sources — what the assistant has seen. */
+  watch?: AssetWatch;
+  /** The source's own transcript — what the assistant has heard. */
+  speech?: AssetSpeech;
   /** How this asset entered the project. Absent = the user imported it (drag,
    * drop, or upload), so it belongs in the Media panel. Any value marks media
    * Cut created or fetched — it lives where it was made (the timeline, a

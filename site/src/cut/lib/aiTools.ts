@@ -59,9 +59,10 @@ import {
   importImage,
   importStockVideo,
   importUrlMedia,
-  makeContactSheetsClientSide,
-  makeStillSheetClientSide,
+  composeSheets,
+  makeStillFrame,
   renderAudioSpanWav,
+  sampleWatchFrames,
 } from "./media";
 import { isLottieAsset } from "./lottieAssets";
 import { BREATH, REACH, refineEdge, type SilenceSpan } from "./cutRefine";
@@ -74,6 +75,9 @@ import { applyOverlayPatchSettled, track0Clips, laneGapAt, getClipSpans, nextFre
 import { buildAiContext } from "./aiContext";
 import { sampleClipFrameData } from "./previewCanvas";
 import { laneCues, subtitleLaneCount } from "./subtitles";
+import { fuseTimeline, renderFusedTimeline } from "./watch/fuse";
+import { mergeWatch } from "./watch/merge";
+import { queueWatchSweep, withSweepPaused } from "./watch/sweep";
 import { synthesizeMusic } from "./audioGen";
 import { composeMusicPrompt } from "./composeGen";
 import { stockAssetInDoc } from "./genvideo/docWriter";
@@ -510,78 +514,93 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   },
 
   watch_video: async (s, input) => {
-      const { projectId, asset, clip, speed, from, to } = resolveWatchRange(s, input);
+      const { asset, clip, speed, from, to } = resolveWatchRange(s, input);
       if (asset.type === "audio")
         throw new ToolError(`"${asset.name}" is audio — listen_audio hears it, detect_silence finds its dead air.`);
-      interface WatchBody {
-        sheets: { image: string; frames: { t: number; scene?: number }[] }[];
-        layout: { grid: number; margin: number; padding: number };
-        sceneChanges: number[];
-        coveredTo: number;
-        truncated: boolean;
-        error?: string;
-      }
-      // A still is one sheet with no time axis.
+      // One path for both backends: the browser decodes the source (the same
+      // URL the preview plays) and the shared selector keeps distinct frames.
       if (asset.type === "image") {
-        let body: WatchBody;
-        if (getBackend().kind === "cloud") {
-          body = await makeStillSheetClientSide(asset.url).catch((e) => {
-            throw new ToolError(e instanceof Error ? e.message : "Could not read the image.");
-          });
-        } else {
-          const res = await apiFetch(`/api/cut/projects/${projectId}/watch`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ file: asset.fileName, still: true }),
-          });
-          body = await apiJson<WatchBody>(res);
-          if (!res.ok) throw new ToolError(body.error ?? "Could not read the image.");
-        }
+        const body = await makeStillFrame(asset.url).catch((e) => {
+          throw new ToolError(e instanceof Error ? e.message : "Could not read the image.");
+        });
         return {
-          images: body.sheets.map((sh) => sh.image),
+          images: [body.frames[0].image],
           source: { assetId: asset.id, name: asset.name },
           note: "A still image — one frame, no time axis.",
         };
       }
-      let body: WatchBody;
-      if (getBackend().kind === "cloud") {
-        // Same defaults, clamps, and caps as the engine's watch handler.
-        body = await makeContactSheetsClientSide(asset.url, {
+      // The sweep yields its decoders to this call for its whole duration.
+      // The budget keeps the call inside the tool bridge's 120s deadline: a
+      // slow decode salvages what it covered (truncated + coveredTo) rather
+      // than timing out with nothing.
+      const body = await withSweepPaused(() =>
+        sampleWatchFrames(asset.url, {
           from,
           ...(to !== undefined ? { to } : {}),
           ...(isNum(input.interval_seconds) ? { interval: input.interval_seconds } : {}),
-        }).catch((e) => {
-          throw new ToolError(e instanceof Error ? e.message : "Could not watch the video.");
-        });
-      } else {
-        const res = await apiFetch(`/api/cut/projects/${projectId}/watch`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            file: asset.fileName,
-            from,
-            ...(to !== undefined ? { to } : {}),
-            ...(isNum(input.interval_seconds) ? { interval: input.interval_seconds } : {}),
-          }),
-        });
-        body = await apiJson<WatchBody>(res);
-        if (!res.ok) throw new ToolError(body.error ?? "Could not watch the video.");
+          budgetMs: 90_000,
+        })
+      ).catch((e) => {
+        throw new ToolError(e instanceof Error ? e.message : "Could not watch the video.");
+      });
+      // The metadata persists on the asset (it saves with the project and
+      // dies with the asset), so what has been seen survives this thread.
+      // Merge against the asset's CURRENT record — a sweep segment may have
+      // landed while this call was decoding, and a merge computed from the
+      // pre-decode snapshot would overwrite it.
+      const st = useEditor.getState();
+      const liveAsset = st.assets.find((x) => x.id === asset.id);
+      if (liveAsset) {
+        // A pass that covered nothing records nothing.
+        if (body.coveredTo > from) {
+          st.updateAsset(asset.id, {
+            watch: mergeWatch(liveAsset.watch, {
+              from,
+              to: body.coveredTo,
+              frames: body.frames.map((f) => ({ t: f.t, via: f.via })),
+              sceneChanges: body.sceneChanges,
+            }),
+          });
+        }
+        // A first look queues the quiet background sweep of the rest of the
+        // source — metadata only, merged in as segments land.
+        queueWatchSweep(asset.id);
       }
-      // The engine's ffmpeg has no text renderer; the cells get their source-
-      // time stamps here on a canvas. A sheet that fails to stamp rides plain —
-      // sheetFrames stays the authority either way.
-      let stamped = true;
-      const images = await Promise.all(
-        body.sheets.map((sh) =>
-          stampSheet(sh.image, sh.frames.map((f) => f.t), body.layout).catch(() => {
-            stamped = false;
-            return sh.image;
-          })
-        )
-      );
+      // Tile the kept frames 3×3 and stamp each cell's source time.
+      const sheets = await composeSheets(body.frames).catch(() => null);
+      const keptTimes = body.frames.map((f) => f.t);
+      // Kept frames woven into the speech on one clock, so the model reads
+      // precomputed frame↔speech alignment. Project captions win (cue times
+      // are timeline seconds, mapped to source through the clip); with none,
+      // the asset's own transcript serves — it is already source time, so it
+      // fuses for asset-only watches too.
+      let speech: { start: number; end: number; text: string }[] = [];
+      if (clip) {
+        speech = laneCues(s.subtitles, s.subtitleLane)
+          .map((c) => ({
+            start: clip.in + (c.start - clip.start) * speed,
+            end: clip.in + (c.end - clip.start) * speed,
+            text: c.text,
+          }))
+          .filter((c) => c.end > from && c.start < body.coveredTo);
+      }
+      if (speech.length === 0) speech = (liveAsset ?? asset).speech?.segments ?? [];
+      let timelineText: string | undefined;
+      if (speech.length > 0) {
+        timelineText = renderFusedTimeline(
+          fuseTimeline(keptTimes, speech, { from, to: body.coveredTo })
+        ).slice(0, 4000);
+      }
+      // Each cell's time plus why the selector kept it — "global" a hard cut,
+      // "action" local motion, "settled" new settled detail (text, ink, UI).
+      const cellInfo = body.frames.map((f) => ({ t: round2(f.t), via: f.via }));
+      const perSheet = sheets ? sheets.map((sh) => sh.frames.length) : [cellInfo.length];
+      let cellAt = 0;
       return {
-        images,
-        sheetFrames: body.sheets.map((sh) => sh.frames.map((f) => round2(f.t))),
+        images: sheets ? sheets.map((sh) => sh.image) : body.frames.map((f) => f.image),
+        sheetFrames: perSheet.map((n) => cellInfo.slice(cellAt, (cellAt += n))),
+        distinctFrames: body.frames.length,
+        candidates: body.candidates,
         sceneChanges: body.sceneChanges.map(round2),
         coveredTo: round2(body.coveredTo),
         truncated: body.truncated,
@@ -598,12 +617,15 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
               },
             }
           : {}),
+        ...(timelineText ? { timeline: timelineText } : {}),
         note:
-          "Cells read left→right then top→bottom; each stamp is SOURCE seconds." +
+          "Cells read left→right then top→bottom; each stamp is SOURCE seconds. " +
+          "Cells are distinct moments (near-duplicates removed), so gaps between stamps mean nothing changed there. " +
+          "sheetFrames says why each cell was kept: global = hard cut, action = local motion, settled = new settled detail (text/UI)." +
           (body.truncated
             ? ` Coverage stopped at ${round2(body.coveredTo)}s — call again with from=${round2(body.coveredTo)} to continue.`
             : "") +
-          (stamped ? "" : " (Stamps unavailable — sheetFrames lists each cell's time.)"),
+          (sheets ? "" : " (Sheets unavailable — each image is one frame; sheetFrames lists the times.)"),
       };
   },
 
@@ -658,6 +680,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const inline = wholeAudio
         ? await refToInlineAudio(refFromAsset(asset))
         : await listenToSource(projectId, asset, from, to);
+      // Listening shows interest in the source's sound — queue the background
+      // sweep so its transcript (and, for video, its visual map) fills in.
+      queueWatchSweep(asset.id);
       if (!inline)
         throw new ToolError(
           "That stretch is too long to listen to inline (≈12MB cap) — pass a narrower from/to."
@@ -2347,45 +2372,6 @@ async function synthesizeVoiceover(
     duck: duck < 1 ? duck : null,
     addedToTimeline: true,
   };
-}
-
-/** Draw each cell's source-time stamp onto a contact sheet. The bundled
- * ffmpeg ships without a text renderer (LGPL build, no freetype), so the
- * stamps land here, where a canvas always can. */
-async function stampSheet(
-  image: string,
-  times: number[],
-  layout: { grid: number; margin: number; padding: number }
-): Promise<string> {
-  const img = new Image();
-  await new Promise<void>((resolve, reject) => {
-    img.onload = () => resolve();
-    img.onerror = () => reject(new Error("Bad sheet image."));
-    img.src = image;
-  });
-  const canvas = document.createElement("canvas");
-  canvas.width = img.naturalWidth;
-  canvas.height = img.naturalHeight;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("No 2d context.");
-  ctx.drawImage(img, 0, 0);
-  const { grid, margin, padding } = layout;
-  const cellW = (canvas.width - 2 * margin - (grid - 1) * padding) / grid;
-  const cellH = (canvas.height - 2 * margin - (grid - 1) * padding) / grid;
-  const size = Math.max(13, Math.round(cellH / 12));
-  ctx.font = `bold ${size}px ui-monospace, monospace`;
-  ctx.textBaseline = "bottom";
-  times.forEach((t, i) => {
-    const x = margin + (i % grid) * (cellW + padding);
-    const y = margin + Math.floor(i / grid) * (cellH + padding);
-    const label = `${round2(t)}s`;
-    const w = ctx.measureText(label).width;
-    ctx.fillStyle = "rgba(0,0,0,0.6)";
-    ctx.fillRect(x + 4, y + cellH - size - 10, w + 10, size + 8);
-    ctx.fillStyle = "#fff";
-    ctx.fillText(label, x + 9, y + cellH - 6);
-  });
-  return canvas.toDataURL("image/jpeg", 0.8);
 }
 
 /** Resolve a watch/listen target: a timeline clip (its source plus trim and

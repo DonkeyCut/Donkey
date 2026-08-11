@@ -55,7 +55,7 @@ import {
 import { renderMix, transcribeSamples, type CloudTranscribeSpec } from "./cloudTranscribe";
 import { alignCues } from "./cueAlign";
 import { useGenNotify } from "./genNotify";
-import { engineTranscribeSamples } from "./localStt";
+import { engineTranscribeSamples, withEngineStt } from "./localStt";
 import { trackLocale } from "./subtitles";
 import { ANIM_STYLE_IDS, animStyleOfTransition, clipPoseAt, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionStyleOfAnim } from "./types";
 import { readTextStyle } from "./textStyle";
@@ -910,7 +910,8 @@ export async function runTranscription(projectId: string, spec: object): Promise
   // A cloud project's media isn't on this Mac, so the engine can't render the
   // mix — the browser does, and then hands it to whoever can transcribe it:
   // this Mac when the app is running (on-device, free, real word timings), the
-  // metered hosted route otherwise. A local project skips all of it; the
+  // hosted route otherwise (included up to the account's allowance, metered
+  // past it). A local project skips all of it; the
   // engine already holds the media and runs the whole job.
   if (getBackend().kind === "cloud") {
     const s = spec as CloudTranscribeSpec;
@@ -935,24 +936,29 @@ export async function runTranscription(projectId: string, spec: object): Promise
     const cues = await transcribeSamples(samples, s.locale, stale);
     return cues && alignCues(cues, samples, mix.sampleRate, { snap: 0.6 });
   }
-  const res = await apiFetch(`/api/cut/projects/${projectId}/transcribe`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(spec),
-  });
-  const body = await apiJson<{ id?: string }>(res);
-  if (!res.ok || !body.id) throw new Error(body.error ?? "Transcription failed to start.");
-  for (;;) {
-    await new Promise((r) => setTimeout(r, 600));
-    if (useEditor.getState().projectId !== projectId) return null;
-    const st = await apiFetch(`/api/cut/projects/${projectId}/transcribe?job=${body.id}`);
-    if (!st.ok) throw new Error("The transcription job was lost — try again.");
-    const status = (await st.json()) as { status: string; error?: string; cues?: SubtitleCue[] };
-    if (status.status === "error") throw new Error(status.error ?? "Transcription failed.");
-    if (status.status === "done") {
-      return useEditor.getState().projectId === projectId ? (status.cues ?? []) : null;
+  // The engine runs one transcription at a time; the client-side turn queue
+  // keeps this job from colliding with a background sweep chunk (or vice
+  // versa) and failing on the busy slot.
+  return withEngineStt(async () => {
+    const res = await apiFetch(`/api/cut/projects/${projectId}/transcribe`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(spec),
+    });
+    const body = await apiJson<{ id?: string }>(res);
+    if (!res.ok || !body.id) throw new Error(body.error ?? "Transcription failed to start.");
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 600));
+      if (useEditor.getState().projectId !== projectId) return null;
+      const st = await apiFetch(`/api/cut/projects/${projectId}/transcribe?job=${body.id}`);
+      if (!st.ok) throw new Error("The transcription job was lost — try again.");
+      const status = (await st.json()) as { status: string; error?: string; cues?: SubtitleCue[] };
+      if (status.status === "error") throw new Error(status.error ?? "Transcription failed.");
+      if (status.status === "done") {
+        return useEditor.getState().projectId === projectId ? (status.cues ?? []) : null;
+      }
     }
-  }
+  });
 }
 
 // Doc-mutating state: in a read-only shared view the set wrapper drops these
@@ -4071,7 +4077,7 @@ export const docOverlays = (() => {
 export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
   return assets
     .filter((a) => !a.upload)
-    .map(({ id, fileName, name, type, duration, width, height, origin, chatId, language }) => ({
+    .map(({ id, fileName, name, type, duration, width, height, origin, chatId, language, watch, speech }) => ({
       id,
       fileName,
       name,
@@ -4082,6 +4088,8 @@ export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
       ...(origin !== undefined ? { origin } : {}),
       ...(chatId !== undefined ? { chatId } : {}),
       ...(language !== undefined ? { language } : {}),
+      ...(watch !== undefined ? { watch } : {}),
+      ...(speech !== undefined ? { speech } : {}),
     }));
 }
 

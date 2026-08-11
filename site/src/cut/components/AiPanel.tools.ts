@@ -19,13 +19,13 @@ export const AI_PANEL_TOOLS = [
   {
     name: "watch_video",
     description:
-      "Watch a video source with your own eyes: samples its frames at scene changes plus a steady floor into timestamped contact-sheet images, and returns the detected scene-change times (natural cut candidates). Pass clip_id to watch a timeline clip's source (the result includes that clip's source↔timeline time math) or asset_id for any project video or image. The stamp burned into each cell is SOURCE seconds — what trim_clip's in/out use — not timeline seconds. Coverage is capped per call: survey the whole range first, then call again with a narrow from/to and a small interval_seconds where the cut needs care; the result says where coverage stopped. Read the watching-and-cutting skill before editing footage by content.",
+      "Watch a video source with your own eyes: samples candidate frames on a dense steady floor, keeps only the ones that actually differ, and tiles them into timestamped contact-sheet images — so every cell is a distinct moment and a gap between stamps means nothing changed there. Also returns sceneChanges, hard-cut times refined to about a third of a second of the true boundary (the time is where the new shot first appears) — though a shot shorter than the sampling step can fall between candidates, so where short cuts matter, re-watch narrow with a small interval_seconds. When the clip has captions or the source's own transcript exists, a fused timeline places each kept frame inside the speech it belongs to. Pass clip_id to watch a timeline clip's source (the result includes that clip's source↔timeline time math) or asset_id for any project video or image. The stamp burned into each cell is SOURCE seconds — what trim_clip's in/out use — not timeline seconds. Coverage ends where the result says it does: when truncated is true (span bound, frame cap, or time budget), continue from coveredTo — everything before it was seen, nothing after it was. Watching builds the source's frame map (moment times + cut candidates), persisted on the asset; media entries list those spans as `mapped`, and your first watch starts a quiet background sweep that maps the rest (`watching: true` while it runs). The map aims your watches — a mapped span is NOT footage you have seen; only sheets returned in this conversation are, so watch any span you need to actually look at. Read the watching-and-cutting skill before editing footage by content.",
     inputSchema: obj({
       clip_id: str("Video clip id, track 0 or overlay (defaults from/to to its trimmed in/out)"),
       asset_id: str("Project asset id (video or image) — watch the source itself"),
       from: num("Source start s (default: the clip's in, else 0)"),
       to: num("Source end s (default: the clip's out, else the source's end; spans at most 600s per call)"),
-      interval_seconds: num("Target seconds between sampled frames, 0.5–30 (default spreads ~32 frames across the range)"),
+      interval_seconds: num("Seconds between candidate frames, 0.5–30 (default 1; near-duplicates are dropped, so a dense default costs nothing)"),
     }),
   },
   {
@@ -44,7 +44,7 @@ export const AI_PANEL_TOOLS = [
   {
     name: "listen_audio",
     description:
-      "Listen with your own ears to a project asset's sound — an audio asset, or the audio track of a video (its speech, music, burned-in narration) — so you can answer what it says or how it sounds. The sound rides back inline (≈12MB cap). Pass clip_id for a timeline clip's source (scopes to its trim) or asset_id for the whole source; add from/to (source seconds) to hear one stretch of a long file. Audio the user attached to their message already plays in it. To WRITE a caption track, use subtitles_generate.",
+      "Listen with your own ears to a project asset's sound — an audio asset, or the audio track of a video (its speech, music, burned-in narration) — so you can answer what it says or how it sounds. For the WORDS alone, check the source's transcript first: media entries marked speech: 'transcribed' carry timed segments (get_state includes them) at no audio cost; listen when you need the sound itself — tone, music, delivery, timing by ear. The sound rides back inline (≈12MB cap). Pass clip_id for a timeline clip's source (scopes to its trim) or asset_id for the whole source; add from/to (source seconds) to hear one stretch of a long file. Audio the user attached to their message already plays in it. To WRITE a caption track, use subtitles_generate.",
     inputSchema: obj({
       clip_id: str("Clip id — video or soundtrack (defaults from/to to its trimmed in/out)"),
       asset_id: str("Project asset id (audio or video) — listen to the whole source"),

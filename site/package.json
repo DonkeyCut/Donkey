@@ -20,6 +20,7 @@
     "engine:dev": "bun run src/cut/engine/main.ts",
     "engine:build": "bash scripts/build-cut-engine.sh",
     "worker:build": "bun build --target=node --minify --external=pg-native src/cut/worker/main.ts --outfile dist/cut-worker/main.js",
+    "bench:watch": "bun run scripts/bench-watch.ts",
     "eval:cut-chat": "bun run scripts/eval-cut-chat.ts",
     "email:dev": "email dev --dir src/emails --port 3001",
     "test": "bun test src packages/effects-kit/src",

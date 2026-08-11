@@ -12,10 +12,33 @@ import type { SubtitleCue } from "./types";
 
 const POLL_MS = 700;
 
+/** The engine transcribes one job at a time, so every caller in this client
+ * takes its turn here instead of racing for the slot and failing with
+ * "already running" — a user's caption run simply waits out the background
+ * sweep's current chunk, and the sweep waits out the user. */
+let sttTurn: Promise<void> = Promise.resolve();
+export function withEngineStt<T>(work: () => Promise<T>): Promise<T> {
+  const run = sttTurn.then(work, work);
+  sttTurn = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
+}
+
 /** Transcribe a rendered mix on this Mac. Returns null when `isStale` trips
  * (the caller moved on); throws when the engine can't do it, which is the
  * caller's cue to fall back to the hosted route. */
-export async function engineTranscribeSamples(
+export function engineTranscribeSamples(
+  samples: Float32Array,
+  duration: number,
+  locale: string | undefined,
+  isStale?: () => boolean
+): Promise<SubtitleCue[] | null> {
+  return withEngineStt(() => engineTranscribe(samples, duration, locale, isStale));
+}
+
+async function engineTranscribe(
   samples: Float32Array,
   duration: number,
   locale: string | undefined,
