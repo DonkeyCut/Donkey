@@ -898,14 +898,22 @@ export async function runExport(
       let frame: string;
       if (region) {
         // A regioned track-0 clip (split-screen half) scales into its rect,
-        // then pads out to the full frame with black around it.
+        // then pads out to the full frame with black around it. The rect may
+        // reach past the frame (an oversized focus box), and pad rejects
+        // placement outside its area — so pad to the box holding both, then
+        // crop the frame window back out.
         const { rx, ry, rw, rh } = region;
+        const bx = Math.min(0, rx);
+        const by = Math.min(0, ry);
+        const bw = Math.max(W, rx + rw) - bx;
+        const bh = Math.max(H, ry + rh) - by;
+        const win = bw > W || bh > H ? `,crop=${W}:${H}:${-bx}:${-by}` : "";
         frame =
           c.fit === "fill"
             ? `scale=${rw}:${rh}:force_original_aspect_ratio=increase,crop=${rw}:${rh},` +
-              `pad=${W}:${H}:${rx}:${ry}:color=${padColor}`
+              `pad=${bw}:${bh}:${rx - bx}:${ry - by}:color=${padColor}${win}`
             : `scale=${rw}:${rh}:force_original_aspect_ratio=decrease:force_divisible_by=2,` +
-              `pad=${W}:${H}:${rx}+(${rw}-iw)/2:${ry}+(${rh}-ih)/2:color=${padColor}`;
+              `pad=${bw}:${bh}:${rx - bx}+(${rw}-iw)/2:${ry - by}+(${rh}-ih)/2:color=${padColor}${win}`;
       } else {
         frame =
           c.fit === "fill"
@@ -1278,10 +1286,18 @@ export async function runExport(
           `[osb${k}][${seg}]overlay=x=${kpos.x}:y=${kpos.y}:eof_action=pass[osp${k}]`
         );
       } else {
+        // The box may reach past the frame; pad to the box holding both and
+        // crop the frame window back out (pad rejects placement outside its
+        // area).
         const padX = region ? region.rx : 0;
         const padY = region ? region.ry : 0;
+        const bx = Math.min(0, padX);
+        const by = Math.min(0, padY);
+        const bw = Math.max(W, padX + boxW) - bx;
+        const bh = Math.max(H, padY + boxH) - by;
+        const win = bw > W || bh > H ? `,crop=${W}:${H}:${-bx}:${-by}` : "";
         filters.push(
-          `[${seg}]format=rgba,pad=${W}:${H}:${padX}:${padY}:color=black@0.0[osp${k}]`
+          `[${seg}]format=rgba,pad=${bw}:${bh}:${padX - bx}:${padY - by}:color=black@0.0${win}[osp${k}]`
         );
       }
       filters.push(`[osp${k}]format=rgba,split[os0${k}][os1${k}]`);

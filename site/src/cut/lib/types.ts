@@ -214,37 +214,48 @@ export interface FrameRect {
 
 export const FULL_FRAME: FrameRect = { x: 0, y: 0, w: 1, h: 1 };
 
+/** How far a region box may oversize the frame on each axis. Oversizing is
+ * the zoom-into-an-area move; the ceiling keeps export scale targets and
+ * mask canvases within what ffmpeg and browser canvases handle. */
+export const REGION_MAX_SCALE = 3;
+
 /** A clip's effective region: its own `frame`, or the full frame if unset. */
 export function rectOf(clip: { frame?: FrameRect }): FrameRect {
   return clip.frame ?? FULL_FRAME;
 }
 
-/** Whether a region covers the whole frame (so it needs no special layout). */
+/** Whether a region matches the whole frame (so it needs no special layout).
+ * An oversized or shifted region counts as regioned — it crops to the frame. */
 export function isFullRect(r: FrameRect): boolean {
-  return r.x <= 0.001 && r.y <= 0.001 && r.w >= 0.999 && r.h >= 0.999;
+  return (
+    Math.abs(r.x) <= 0.001 &&
+    Math.abs(r.y) <= 0.001 &&
+    Math.abs(r.w - 1) <= 0.001 &&
+    Math.abs(r.h - 1) <= 0.001
+  );
 }
 
-/** A region's pixel box at an output size, even-rounded and clamped inside
- * the frame — the one rounding that decides where a regioned clip's segment
- * sits. The ffmpeg graph frames segments with it and the export client
- * paints mask coverage with it, so the two land on identical pixels. Null
- * for the full frame. */
+/** A region's pixel box at an output size, even-rounded — the one rounding
+ * that decides where a regioned clip's segment sits. The ffmpeg graph frames
+ * segments with it and the export client paints mask coverage with it, so
+ * the two land on identical pixels. The box may reach past the frame edges
+ * (up to REGION_MAX_SCALE per axis — the same ceiling the resize handle
+ * enforces, applied again here so a stored oversize can never blow up the
+ * export); the graph crops the frame window back out. Null for the full
+ * frame, judged with isFullRect's tolerance so a nudged-by-a-hair rect lays
+ * out exactly like the full frame it visually is. */
 export function regionPx(
   frame: { x: number; y: number; w: number; h: number } | undefined,
   W: number,
   H: number
 ): { rx: number; ry: number; rw: number; rh: number } | null {
-  if (!frame) return null;
+  if (!frame || isFullRect(frame)) return null;
   const even = (n: number) => 2 * Math.round(n / 2);
-  const rw = Math.min(W, Math.max(2, even(frame.w * W)));
-  const rh = Math.min(H, Math.max(2, even(frame.h * H)));
-  // Clamp the origin so rx+rw ≤ W and ry+rh ≤ H — independent even-rounding
-  // can otherwise push an edge-touching region a pixel past the frame, which
-  // makes the pad filter reject the input ("not within the padded area") and
-  // aborts the whole export.
-  const rx = Math.max(0, Math.min(even(frame.x * W), W - rw));
-  const ry = Math.max(0, Math.min(even(frame.y * H), H - rh));
-  if (rx <= 0 && ry <= 0 && rw >= W && rh >= H) return null;
+  const rw = Math.min(even(REGION_MAX_SCALE * W), Math.max(2, even(frame.w * W)));
+  const rh = Math.min(even(REGION_MAX_SCALE * H), Math.max(2, even(frame.h * H)));
+  const rx = even(frame.x * W);
+  const ry = even(frame.y * H);
+  if (rx === 0 && ry === 0 && rw === W && rh === H) return null;
   return { rx, ry, rw, rh };
 }
 

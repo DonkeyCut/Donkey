@@ -12,7 +12,7 @@ import {
   readPoster,
 } from "@/cut/lib/posterCache";
 import { setPreviewCanvas } from "@/cut/lib/previewCanvas";
-import { clipKeyed, clipPoseAt, frameOf, isFullRect, rectOf, type Aspect, type ClipSpan, type FrameRect, type MediaAsset, type VideoClip } from "@/cut/lib/types";
+import { clipKeyed, clipPoseAt, frameOf, isFullRect, rectOf, REGION_MAX_SCALE, type Aspect, type ClipSpan, type FrameRect, type MediaAsset, type VideoClip } from "@/cut/lib/types";
 import { hasMaskKeys, type MaskKey } from "@donkeycut/effects-kit";
 import { cn } from "@/lib/utils";
 import { MaskGizmoCore, OverlayLayer } from "./OverlayLayer";
@@ -171,12 +171,14 @@ export function Preview() {
           if (e.target === e.currentTarget) useEditor.getState().select(null);
         }}
       >
+        {/* The selection handle mounts beside the stage, outside its clipping,
+            so a box dragged past the frame edge stays visible and grabbable. */}
+        <div className="relative" style={{ width: stage.w, height: stage.h }}>
         <div
           className={cn(
-            "stage relative overflow-hidden rounded-xl bg-black shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_36px_rgba(0,0,0,0.18)]",
+            "stage absolute inset-0 overflow-hidden rounded-xl bg-black shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_36px_rgba(0,0,0,0.18)]",
             pannable && "cursor-grab active:cursor-grabbing"
           )}
-          style={{ width: stage.w, height: stage.h }}
           onPointerDown={(e) => {
             if (
               e.target === e.currentTarget ||
@@ -219,7 +221,6 @@ export function Preview() {
             }}
             onDragEnd={clearAssetDrag}
           />
-          <OverlayPipHandle stage={stage} />
           <ClipMaskGizmo stage={stage} />
           {slices.map((slice) =>
             slice.kind === "elements" ? (
@@ -236,6 +237,8 @@ export function Preview() {
               <StageEffectPaint key={slice.key} states={slice.states} />
             )
           )}
+        </div>
+        <OverlayPipHandle stage={stage} />
         </div>
       </div>
     </section>
@@ -279,6 +282,8 @@ function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
   const r = rect;
   const patch = apply;
 
+  // The box may leave the frame — oversize it to focus on an area, or park it
+  // partly off screen — as long as a sliver stays inside to grab.
   const onMove = (e: React.PointerEvent) => {
     e.stopPropagation();
     useEditor.getState().pushHistory();
@@ -286,8 +291,8 @@ function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
       onMove: (dx, dy) =>
         patch({
           ...r,
-          x: Math.max(0, Math.min(1 - r.w, r.x + dx / stage.w)),
-          y: Math.max(0, Math.min(1 - r.h, r.y + dy / stage.h)),
+          x: Math.max(0.05 - r.w, Math.min(0.95, r.x + dx / stage.w)),
+          y: Math.max(0.05 - r.h, Math.min(0.95, r.y + dy / stage.h)),
         }),
     });
   };
@@ -299,23 +304,39 @@ function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
       onMove: (dx, dy) =>
         patch({
           ...r,
-          w: Math.max(0.1, Math.min(1 - r.x, r.w + dx / stage.w)),
-          h: Math.max(0.1, Math.min(1 - r.y, r.h + dy / stage.h)),
+          w: Math.max(0.1, Math.min(REGION_MAX_SCALE, r.w + dx / stage.w)),
+          h: Math.max(0.1, Math.min(REGION_MAX_SCALE, r.h + dy / stage.h)),
         }),
     });
   };
 
+  const box = {
+    left: r.x * stage.w,
+    top: r.y * stage.h,
+    width: r.w * stage.w,
+    height: r.h * stage.h,
+  };
+  // The dashed box draws the full extent; the frame-clipped solid ring paints
+  // over it, so dashes show only where the box leaves the frame.
   return (
-    <div
-      className="absolute cursor-move rounded-[3px] shadow-[inset_0_0_0_2px_#a855f7]"
-      style={{ left: r.x * stage.w, top: r.y * stage.h, width: r.w * stage.w, height: r.h * stage.h }}
-      onPointerDown={onMove}
-    >
-      <span
-        className="absolute -right-1.5 -bottom-1.5 size-3 cursor-nwse-resize rounded-full bg-violet-500 shadow-[0_0_0_2px_white]"
-        onPointerDown={onResize}
-      />
-    </div>
+    <>
+      <div
+        className="absolute cursor-move rounded-[3px] border-2 border-dashed border-[#0a84ff]"
+        style={box}
+        onPointerDown={onMove}
+      >
+        <span
+          className="absolute -right-1.5 -bottom-1.5 z-20 size-3 cursor-nwse-resize rounded-full bg-[#0a84ff] shadow-[0_0_0_2px_white]"
+          onPointerDown={onResize}
+        />
+      </div>
+      <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden rounded-xl">
+        <div
+          className="absolute rounded-[3px] shadow-[inset_0_0_0_2px_#0a84ff]"
+          style={box}
+        />
+      </div>
+    </>
   );
 }
 
