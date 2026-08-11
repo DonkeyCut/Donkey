@@ -2113,7 +2113,7 @@ export function Timeline() {
               // and it rides above the row's clips (z-20), so a drag reads as a
               // placed segment sliding to its landing spot, not a hole to fill.
               <div
-                className="tl-asset-drop-slot pointer-events-none absolute top-0.5 z-20 overflow-hidden rounded-lg bg-neutral-200 opacity-90 shadow-2xl ring-[1.5px] ring-[#0a84ff]/70 transition-[left] duration-100 ease-out"
+                className="tl-asset-drop-slot pointer-events-none absolute top-0.5 z-20 overflow-hidden rounded-lg bg-black opacity-90 shadow-2xl ring-[1.5px] ring-[#0a84ff]/70 transition-[left] duration-100 ease-out"
                 style={{
                   left: assetDrop.t * pps,
                   width: Math.max(10, assetDrop.len * pps - CLIP_GAP),
@@ -3065,7 +3065,7 @@ function ClipView({
   return (
     <div
       className={cn(
-        "tl-clip group absolute top-0.5 cursor-grab overflow-hidden rounded-lg bg-neutral-200 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
+        "tl-clip group absolute top-0.5 cursor-grab overflow-hidden rounded-lg bg-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
         selected && SELECTED_SHADOW,
         clip.hidden && "opacity-40 grayscale",
         drag
@@ -3833,7 +3833,7 @@ function OverlayClipView({
   return (
     <div
       className={cn(
-        "tl-overlay-clip group absolute top-0.5 cursor-grab overflow-hidden rounded-lg bg-neutral-200 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
+        "tl-overlay-clip group absolute top-0.5 cursor-grab overflow-hidden rounded-lg bg-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
         selected && SELECTED_SHADOW,
         clip.hidden && "opacity-40 grayscale",
         drag

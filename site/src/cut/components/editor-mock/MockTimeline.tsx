@@ -68,7 +68,7 @@ export function MockTimeline({ project }: { project: MockProject }) {
               role="img"
               aria-label={c.label}
               className={cn(
-                "absolute top-0.5 overflow-hidden rounded-lg bg-neutral-200 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
+                "absolute top-0.5 overflow-hidden rounded-lg bg-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
                 c.selected && "z-10 ring-2 ring-[#0a84ff]"
               )}
               style={{
