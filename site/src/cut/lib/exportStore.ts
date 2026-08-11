@@ -125,6 +125,9 @@ export const useExports = create<ExportsState>((set, get) => ({
         },
       ],
     }));
+    // The loop may have been idling minutes deep; this export needs the fast
+    // cadence from its first frame.
+    wake();
     let claimedId: string | null = null;
     const release = () => {
       if (claimedId) set((s) => ({ rendering: s.rendering.filter((id) => id !== claimedId) }));
@@ -304,51 +307,108 @@ export function useWatchExportLands(projectId: string) {
 }
 
 // The dock is mounted app-wide, so polling runs the whole time the Cut app is
-// open. It quickens while work is in flight and idles between exports. The
-// cloud feed drops out while the browser is offline and backs off while the
+// open. Three cadences: fast while this tab has work in flight, a widening idle
+// interval otherwise, and parked while the tab is hidden with nothing running.
+//
+// The idle poll exists to find jobs this tab never started — another tab, an
+// engine job that outlived a reload, the cloud render worker — so it can't stop
+// on an empty feed. It widens instead, and anything that means the user is back
+// (the tab shown, the window focused, the network returning) or that work just
+// started snaps it to the floor and polls immediately.
+const ACTIVE_MS = 700;
+const IDLE_MIN_MS = 3000;
+const IDLE_MAX_MS = 30_000;
+
+// The cloud feed drops out while the browser is offline and backs off while the
 // server is unreachable; coming back online resets both and polls right away.
 let cloudFailures = 0;
 let cloudRetryAt = 0;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let ticking = false;
 let mounts = 0;
+let idleMs = IDLE_MIN_MS;
+
+const hidden = () => typeof document !== "undefined" && document.hidden;
+
+/** Work this tab is showing progress for: its own rows plus any unfinished job
+ * in either feed. */
+const inFlight = () => {
+  const s = useExports.getState();
+  return (
+    s.local.length > 0 || s.jobs.some((j) => j.status === "queued" || j.status === "running")
+  );
+};
+
+const schedule = (ms: number) => {
+  if (pollTimer !== null) clearTimeout(pollTimer);
+  pollTimer = setTimeout(tick, ms);
+};
 
 const tick = async () => {
-  if (ticking) return;
+  pollTimer = null;
+  if (mounts === 0 || ticking) return;
   ticking = true;
-  await useExports.getState().refresh();
-  ticking = false;
-  if (mounts === 0) {
-    pollTimer = null;
+  try {
+    await useExports.getState().refresh();
+  } finally {
+    ticking = false;
+  }
+  if (mounts === 0) return;
+  if (inFlight()) {
+    idleMs = IDLE_MIN_MS;
+    schedule(ACTIVE_MS);
     return;
   }
-  const s = useExports.getState();
-  const active =
-    s.local.length > 0 ||
-    s.jobs.some((j) => j.status === "queued" || j.status === "running");
-  pollTimer = setTimeout(tick, active ? 700 : 3000);
+  // Idle and out of sight: park. A visibility, focus, or online event restarts
+  // the loop at the floor, and a tab still tracking an export never gets here.
+  if (hidden()) return;
+  schedule(idleMs);
+  idleMs = Math.min(idleMs * 2, IDLE_MAX_MS);
+};
+
+/** Snap back to the fast cadence and poll now. */
+const wake = () => {
+  idleMs = IDLE_MIN_MS;
+  // A tick already in flight schedules the next one off the reset interval.
+  if (mounts === 0 || ticking) return;
+  schedule(0);
 };
 
 const handleOnline = () => {
   cloudFailures = 0;
   cloudRetryAt = 0;
-  // A tick in flight fails fast offline; the one it schedules polls fresh.
-  if (ticking || pollTimer === null) return;
-  clearTimeout(pollTimer);
-  pollTimer = setTimeout(tick, 0);
+  wake();
+};
+
+const handleVisibility = () => {
+  if (hidden()) {
+    // Park immediately rather than waiting out the pending interval; work in
+    // flight keeps polling so its landing still registers.
+    if (!inFlight() && pollTimer !== null) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+    return;
+  }
+  wake();
 };
 
 export function beginExportPolling() {
   mounts++;
-  if (pollTimer !== null) return;
+  if (mounts > 1) return;
   window.addEventListener("online", handleOnline);
-  pollTimer = setTimeout(tick, 0);
+  window.addEventListener("focus", handleVisibility);
+  document.addEventListener("visibilitychange", handleVisibility);
+  idleMs = IDLE_MIN_MS;
+  schedule(0);
 }
 
 export function endExportPolling() {
   mounts = Math.max(0, mounts - 1);
   if (mounts === 0) {
     window.removeEventListener("online", handleOnline);
+    window.removeEventListener("focus", handleVisibility);
+    document.removeEventListener("visibilitychange", handleVisibility);
     if (pollTimer !== null) {
       clearTimeout(pollTimer);
       pollTimer = null;
