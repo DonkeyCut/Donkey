@@ -146,10 +146,12 @@ export const upsertRef = (list: AssetRef[], ref: AssetRef): AssetRef[] =>
 
 /** A ref's fetchable URL, re-read from the live catalogs. Cloud asset URLs are
  * short-lived signed R2 URLs, so a ref persisted in a saved chat thread
- * outlives its `url`; project and clip refs resolve through the current asset
- * instead. Library/stock/file URLs are stable routes or data: URLs, and a ref
- * whose asset is gone keeps the persisted URL (its fetch fails either way). */
-function liveRefUrl(scope: AssetRefScope, id: string, url: string): string {
+ * outlives its `url`; a ref attached mid-import holds its file's local object
+ * URL, which dies once the upload lands and the bytes are released. Project
+ * and clip refs resolve through the current asset for both. Library/stock/file
+ * URLs are stable routes or data: URLs, and a ref whose asset is gone keeps
+ * the persisted URL (its fetch fails either way). */
+export function liveRefUrl(scope: AssetRefScope, id: string, url: string): string {
   const s = useEditor.getState();
   if (scope === "project") return s.assets.find((a) => a.id === id)?.url ?? url;
   if (scope === "clip") {
@@ -579,10 +581,17 @@ export function collectRefs(
   const parsed = parseMentions(text, candidates);
   // Re-resolve each ref's short handle from the live candidates — chips from
   // drags predate handle assignment, and the model reads handles to talk
-  // about attachments ("v2").
+  // about attachments ("v2") — and its URL from the live asset: a chip
+  // attached mid-import points at the file's local object URL until the
+  // upload lands and the asset swaps to its stored one. The URL reads through
+  // liveRefUrl because chat-owned attachments never become candidates.
   const refs = parsed.refs.reduce(addRefOnce, chips).map((r) => {
     const live = candidates.find((c) => sameRef(c, r));
-    return live?.handle ? { ...r, handle: live.handle } : r;
+    return {
+      ...r,
+      url: liveRefUrl(r.scope, r.id, r.url),
+      ...(live?.handle ? { handle: live.handle } : {}),
+    };
   });
   return { refs, text: parsed.text };
 }

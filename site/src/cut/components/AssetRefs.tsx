@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, 
 import { Check, Copy, FileText, X } from "lucide-react";
 import {
   highlightMentions,
+  liveRefUrl,
   mentionToken,
   refToken,
   sameRef,
@@ -336,12 +337,16 @@ export function RefChips({
     <div className={cn("flex flex-wrap gap-2", className)}>
       {refs.map((r) => {
         // Handles are session-derived; show the live one, not a stored copy.
+        // The URL follows the live asset too: a chip attached mid-import
+        // starts on the file's local object URL and swaps to storage when the
+        // upload lands. liveRefUrl, because chat-owned attachments never
+        // become candidates.
         const handle =
           candidates.find((c) => c.scope === r.scope && c.id === r.id)?.handle ?? r.handle;
         return (
           <RefChip
             key={`${r.scope}:${r.id}`}
-            item={{ ...r, handle }}
+            item={{ ...r, handle, url: liveRefUrl(r.scope, r.id, r.url) }}
             onRemove={onRemove}
             onUpdate={onUpdate}
             peekSide={peekSide}

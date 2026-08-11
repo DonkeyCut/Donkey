@@ -2,7 +2,15 @@
 
 import { refFromAsset, refFromTextFile, type AssetRef } from "./assetRef";
 import { tagChatAsset } from "./chatAssets";
-import { enrichAsset, importFileToProject, isMediaFile, isTextFile, renderAudioSpanWav } from "./media";
+import { startUpload } from "./importQueue";
+import {
+  enrichAsset,
+  importFileToProject,
+  isMediaFile,
+  isTextFile,
+  prepareImport,
+  renderAudioSpanWav,
+} from "./media";
 import { frameSink, openMedia, videoTrackOf } from "./mediaRead";
 import { useEditor } from "./store";
 import { formatTime } from "./time";
@@ -291,7 +299,14 @@ export const visualRefs = (refs: AssetRef[]): AssetRef[] =>
  * skipped. `chatId` marks the imports chat-owned from creation: they live on
  * the chat (its card, thread deletion), never in the Media panel — a drop on
  * the chat composer is an attachment, not a filing. Panel drops omit it and
- * file into Media as user imports. */
+ * file into Media as user imports.
+ *
+ * A cloud drop shows its chip the moment the local bytes are probed: the ref
+ * plays from the file's own object URL while the upload queue sends the bytes
+ * behind the composer, and the asset swaps to its stored URL when they land
+ * (chips and the send paths read the live URL from the asset). The engine
+ * takes a file's bytes in one quick local call, so its imports go straight
+ * through. */
 export async function refsFromDroppedFiles(
   projectId: string,
   files: File[],
@@ -304,11 +319,14 @@ export async function refsFromDroppedFiles(
         refs.push(await refFromTextFile(file));
         continue;
       }
-      const asset = await importFileToProject(projectId, file);
+      const pending = await prepareImport(projectId, file);
+      const asset = pending?.asset ?? (await importFileToProject(projectId, file));
       if (!asset) continue;
       useEditor.getState().addAsset(asset);
       if (opts?.chatId) tagChatAsset(asset.id, opts.chatId);
-      void enrichAsset(asset);
+      // A pending import still holds its bytes — enrich from those.
+      void enrichAsset(asset, pending?.localUrl);
+      if (pending) startUpload(projectId, pending);
       refs.push(refFromAsset(asset));
     } catch (err) {
       console.error(`Attach failed for ${file.name}:`, err);
