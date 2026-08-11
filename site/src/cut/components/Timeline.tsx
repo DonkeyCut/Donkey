@@ -74,6 +74,11 @@ const TRANSITION_ICONS: Record<TransitionStyle, LucideIcon> = {
 
 const VIDEO_H = 64;
 const OVERLAY_H = VIDEO_H; // every video track shares the same row height
+/** Extra row height under a video row whose clips carry mask keys: room for
+ * the key rail below the bars. The diamonds read as part of the clip, so the
+ * row's separator line sits clear under them — a picked key's ring included —
+ * and the next row keeps its usual distance below the line. */
+const KEYRAIL_EXTRA = 20;
 const AUDIO_H = 44;
 
 /** Where a dragged video clip can land. Re-exported name for the store's
@@ -470,6 +475,11 @@ export function Timeline() {
   );
 
   const spans = useMemo(() => getClipSpans(clips, assets), [clips, assets]);
+  // A row whose clips carry mask keys grows by the rail band, so the diamonds
+  // sit fully below the clips with the usual row gap kept under them.
+  const railFor = (list: { clip: VideoClip }[]) =>
+    list.some((sp) => sp.clip.mask?.kf?.length) ? KEYRAIL_EXTRA : 0;
+  const rail0 = railFor(spans);
   // Per-upper-track spans: each track carries its own transitions, so its row
   // needs the same overlap-aware geometry (insets, badges) as track 0's.
   const overlayTrackSpans = useMemo(() => {
@@ -2031,18 +2041,20 @@ export function Timeline() {
           {videoDragActive &&
             samePlacement(overlayDrop?.target ?? null, { kind: "insert", level: topInsertLevel }) &&
             newTrackRow(topInsertLevel)}
-          {aboveTracks.map((track) => (
+          {aboveTracks.map((track) => {
+            const railH = railFor(overlayTrackSpans.get(track) ?? []);
+            return (
             <div
               key={`ov-${track}`}
               className="relative mt-1.5"
-              style={{ height: OVERLAY_H }}
+              style={{ height: OVERLAY_H + railH }}
               data-tl-vrow={track}
               data-drop={placementAttr({ kind: "track", track })}
               onPointerDown={deselectIfSelf}
               onContextMenu={openGapMenu({ kind: "video", index: track })}
               {...overlayDropHandlers({ kind: "track", track })}
             >
-              {laneRail(OVERLAY_H - 2)}
+              {laneRail(OVERLAY_H - 2 + railH)}
               {gapHighlight({ kind: "video", index: track }, OVERLAY_H - 4)}
               {draggedOverlayTrack === track && laneDrag && (
                 <LaneSlot
@@ -2077,7 +2089,8 @@ export function Timeline() {
               ))}
               {trackSlot({ kind: "track", track }, OVERLAY_H - 4)}
             </div>
-          ))}
+            );
+          })}
 
           {/* An empty track 0 disappears like any other empty track. It
               renders while it has clips, while the whole project is empty
@@ -2090,13 +2103,13 @@ export function Timeline() {
             samePlacement(overlayDrop?.target ?? null, TRACK_ZERO)) && (
           <div
             className="relative mt-1.5"
-            style={{ height: VIDEO_H }}
+            style={{ height: VIDEO_H + rail0 }}
             data-tl-vrow={0}
             data-drop={placementAttr(TRACK_ZERO)}
             onPointerDown={deselectIfSelf}
             onContextMenu={openGapMenu({ kind: "video", index: 0 })}
           >
-            {spans.length > 0 && laneRail(VIDEO_H - 2)}
+            {spans.length > 0 && laneRail(VIDEO_H - 2 + rail0)}
             {gapHighlight({ kind: "video", index: 0 }, VIDEO_H - 4)}
             {trackSlot(TRACK_ZERO, VIDEO_H - 4)}
             {laneDrag?.kind === "clip" && !laneDrag.away && (
@@ -3063,6 +3076,7 @@ function ClipView({
   };
 
   return (
+    <>
     <div
       className={cn(
         "tl-clip group absolute top-0.5 cursor-grab overflow-hidden rounded-lg bg-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
@@ -3153,17 +3167,6 @@ function ClipView({
           width={w}
         />
       ))}
-      {(clip.mask?.kf ?? []).map((k) => (
-        <KeyMarker
-          key={`m${k.t}`}
-          item={{ id: clip.id, start: span.start, end: span.start + span.len }}
-          kind="clip"
-          track="mask"
-          t={k.t}
-          pps={pps}
-          width={w}
-        />
-      ))}
       <span
         className={cn(trimHandle, "tl-trim-l left-0")}
         onPointerDown={(e) => startLaneTrim(e, "clip", clip.id, "l", ui)}
@@ -3172,6 +3175,57 @@ function ClipView({
         className={cn(trimHandle, "tl-trim-r right-0")}
         onPointerDown={(e) => startLaneTrim(e, "clip", clip.id, "r", ui)}
       />
+    </div>
+    <ClipMaskKeyStrip clip={clip} start={span.start} len={span.len} pps={pps} w={w} hidden={!!drag} />
+    </>
+  );
+}
+
+/** The clip's mask keys, on a thin rail under its box: a hairline spanning
+ * the clip's width with a diamond on it per key. The bar itself clips its
+ * children (rounded corners), so the rail is a sibling that follows the
+ * clip's own left edge. It hides while the clip rides a drag ghost and comes
+ * back where the clip lands. */
+function ClipMaskKeyStrip({
+  clip,
+  start,
+  len,
+  pps,
+  w,
+  hidden,
+}: {
+  clip: VideoClip;
+  start: number;
+  len: number;
+  pps: number;
+  w: number;
+  hidden: boolean;
+}) {
+  if (hidden || !clip.mask?.kf?.length) return null;
+  return (
+    <div
+      className="pointer-events-none absolute z-5"
+      style={{
+        left: start * pps,
+        // A hair below the bar's bottom edge, deep enough that the diamonds —
+        // the picked one's ring included — never touch the clip's box.
+        top: VIDEO_H - 1,
+        width: Math.max(10, w - CLIP_GAP),
+        height: 16,
+      }}
+    >
+      <div className="absolute inset-x-0 top-1/2 h-[2px] -translate-y-1/2 rounded-full bg-[#ff9f0a]/45" />
+      {clip.mask.kf.map((k) => (
+        <KeyMarker
+          key={`m${k.t}`}
+          item={{ id: clip.id, start, end: start + len }}
+          kind="clip"
+          track="mask"
+          t={k.t}
+          pps={pps}
+          width={w}
+        />
+      ))}
     </div>
   );
 }
@@ -3831,6 +3885,7 @@ function OverlayClipView({
   };
 
   return (
+    <>
     <div
       className={cn(
         "tl-overlay-clip group absolute top-0.5 cursor-grab overflow-hidden rounded-lg bg-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
@@ -3895,17 +3950,6 @@ function OverlayClipView({
           width={w}
         />
       ))}
-      {(clip.mask?.kf ?? []).map((k) => (
-        <KeyMarker
-          key={`m${k.t}`}
-          item={{ id: clip.id, start: clip.start, end: clip.start + overlayLen(clip) }}
-          kind="clip"
-          track="mask"
-          t={k.t}
-          pps={pps}
-          width={w}
-        />
-      ))}
       <span
         className={cn(trimHandle, "tl-trim-l left-0")}
         onPointerDown={(e) => startLaneTrim(e, "overlayClip", clip.id, "l", ui)}
@@ -3915,6 +3959,15 @@ function OverlayClipView({
         onPointerDown={(e) => startLaneTrim(e, "overlayClip", clip.id, "r", ui)}
       />
     </div>
+    <ClipMaskKeyStrip
+      clip={clip}
+      start={clip.start}
+      len={overlayLen(clip)}
+      pps={pps}
+      w={w}
+      hidden={!!drag}
+    />
+    </>
   );
 }
 
@@ -3966,7 +4019,7 @@ function KeyMarker({
       // Above the hover chips (z-4): a key parked at the bar's end must stay
       // grabbable — retiming lives only here, while hide/mute also live in
       // the inspector.
-      className="tl-key absolute top-1/2 z-5 grid size-3.5 cursor-ew-resize place-items-center"
+      className="tl-key pointer-events-auto absolute top-1/2 z-5 grid size-3.5 cursor-ew-resize place-items-center"
       style={{
         left: Math.min(width - inset, Math.max(inset, t * pps)),
         transform: "translate(-50%, -50%)",
