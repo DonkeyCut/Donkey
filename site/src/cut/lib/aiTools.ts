@@ -71,7 +71,7 @@ import { blobToInlineAudio, refToInlineAudio, visualRefs, type InlineImage } fro
 import { characterPrompt, stockAspectDims, stockTitle } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
-import { applyOverlayPatchSettled, track0Clips, laneGapAt, getClipSpans, nextFreeStart, overlayLayers, parkedTransitions, totalDuration, useEditor } from "./store";
+import { applyOverlayPatchSettled, track0Clips, laneGapAt, getClipSpans, nextFreeStart, overlayLayers, parkedTransitions, resolveTransitions, totalDuration, useEditor } from "./store";
 import { buildAiContext } from "./aiContext";
 import { sampleClipFrameData } from "./previewCanvas";
 import { laneCues, subtitleLaneCount } from "./subtitles";
@@ -486,8 +486,19 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (!style) throw new ToolError(`Unknown style. Use one of: ${TRANSITION_STYLE_IDS.join(", ")}.`);
     }
     s.setClipTransition(clip.id, input.seconds, style);
-    const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
-    return { id: next.id, transition: next.transition ?? 0, style: next.transitionStyle ?? "crossfade" };
+    const after = useEditor.getState();
+    const next = after.clips.find((c) => c.id === clip.id)!;
+    // The bar's own id rides the result so remove_transition can round-trip it.
+    const roles = resolveTransitions(after.clips, after.transitions);
+    const bar = after.transitions.find((t) =>
+      (roles.get(t.id) ?? []).some((r) => r.kind !== "in" && r.clipId === clip.id)
+    );
+    return {
+      id: next.id,
+      transitionId: bar?.id ?? null,
+      transition: next.transition ?? 0,
+      style: next.transitionStyle ?? "crossfade",
+    };
   },
 
   remove_transition: (s, input) => {
@@ -713,8 +724,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         throw new ToolError(
           "That stretch is too long to listen to inline (≈12MB cap) — pass a narrower from/to."
         );
-      // The `audio` data URL leaves the JSON in geminiChat and rides to the
-      // model as an input_audio part, the way attachments do.
+      // The `audio` data URL leaves the JSON in the chat transport and rides
+      // to the model as an input_audio part, the way attachments do.
       return {
         name: asset.name,
         duration: round2(asset.duration),
