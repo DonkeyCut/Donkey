@@ -9,11 +9,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  AI_SKILL_INDEX,
-  attachedAssetsBlock,
-  toolsRanBlock,
-} from "../../../src/cut/server/ai/catalog";
+import { AI_SKILL_INDEX } from "../../../src/cut/server/ai/catalog";
 
 export type Item = Record<string, unknown>;
 
@@ -276,6 +272,28 @@ export const STYLED_STATE = {
   soundtrack: [],
 };
 
+/** STYLED_STATE's timeline with its transition bars listed the way
+ * buildAiContext reports them: two playing their cuts, two parked — the
+ * debris-scope cases. */
+export const PARKED_STATE = {
+  ...STYLED_STATE,
+  transitions: [
+    { id: "tr-1", start: 2.7, seconds: 1, style: "crosszoom", plays: [{ at: 3.7, clipId: "c1" }] },
+    { id: "tr-2", start: 6.4, seconds: 1, style: "crosszoom", plays: [{ at: 7.4, clipId: "c2" }] },
+    { id: "tr-8", start: 0.9, seconds: 0.5, style: "blur", parked: true },
+    { id: "tr-9", start: 10.6, seconds: 0.5, style: "crossfade", parked: true },
+  ],
+};
+
+/** EDITOR_STATE with a title stranded past the video's end — the ledger's
+ * non-transition debris class. */
+export const STRANDED_TITLE_STATE = {
+  ...EDITOR_STATE,
+  titles: [
+    { id: "ov-7", kind: "title", text: "THE END", start: 14.0, end: 17.0, x: 0.5, y: 0.5 },
+  ],
+};
+
 /** A finished scene run's timeline: three generated takes, each clip carrying
  * its plan shot number (sceneShot), the narration as the spine. */
 const sceneClip = (n: number, start: number, len: number) => ({
@@ -331,8 +349,20 @@ export function makeSceneSim(check: (args: Record<string, unknown>) => void) {
   };
 }
 
-/** A composer turn as geminiChat's inputFromMessages builds it (keep the
- * envelope text in sync with geminiChat.ts). */
+/** A composer message as the production loop receives it. The eval-only
+ * fields carry what production resolves live: the editor snapshot this turn
+ * rides with, and the wire media its attachments resolve to. */
+export interface EvalMessage {
+  id: string;
+  role: "user" | "assistant";
+  parts: { type: string; text?: string; state?: string }[];
+  metadata?: { attachments?: unknown[] };
+  __state?: unknown;
+  __wireParts?: Item[];
+}
+
+let turnSeq = 0;
+
 export function userTurn(
   text: string,
   opts?: {
@@ -340,29 +370,45 @@ export function userTurn(
     attachRefs?: unknown[];
     state?: unknown;
   }
-): Item {
-  let full = text;
-  const extra: Item[] = [];
+): EvalMessage {
   const refs = [...(opts?.attachAudio ? [VOICE_REF] : []), ...(opts?.attachRefs ?? [])];
-  full += attachedAssetsBlock(refs);
+  const wire: Item[] = [];
   if (opts?.attachAudio) {
-    extra.push({ text: `Attached audio "${VOICE_REF.name}":` });
-    extra.push({ type: "input_audio", ...opts.attachAudio });
+    wire.push({ text: `Attached audio "${VOICE_REF.name}":` });
+    wire.push({ type: "input_audio", ...opts.attachAudio });
   }
-  full += `\n\n<editor_state>\n${JSON.stringify(opts?.state ?? EDITOR_STATE)}\n</editor_state>`;
-  return { role: "user", content: [{ text: full }, ...extra] };
+  return {
+    id: `m${++turnSeq}`,
+    role: "user",
+    parts: [{ type: "text", text }],
+    ...(refs.length > 0 ? { metadata: { attachments: refs } } : {}),
+    ...(opts?.state !== undefined ? { __state: opts.state } : {}),
+    ...(wire.length > 0 ? { __wireParts: wire } : {}),
+  };
 }
 
-/** Earlier turns in a multi-message case: plain text, no envelope — production
- * attaches the editor snapshot to the newest user message alone. */
-export const plainUserTurn = (text: string): Item => ({ role: "user", content: [{ text }] });
-export const assistantTurn = (text: string): Item => ({ role: "assistant", content: [{ text }] });
-
-/** An earlier assistant turn that ran tools, carrying the same <tools_ran>
- * ledger production replays it with (catalog's toolsRanBlock). */
-export const assistantToolTurn = (text: string, tools: string[]): Item => ({
+/** Earlier turns in a multi-message case: plain text — production attaches
+ * the editor snapshot to the newest user message alone. */
+export const plainUserTurn = (text: string): EvalMessage => ({
+  id: `m${++turnSeq}`,
+  role: "user",
+  parts: [{ type: "text", text }],
+});
+export const assistantTurn = (text: string): EvalMessage => ({
+  id: `m${++turnSeq}`,
   role: "assistant",
-  content: [{ text: `${text}${toolsRanBlock(tools)}` }],
+  parts: [{ type: "text", text }],
+});
+
+/** An earlier assistant turn that ran tools; the loop's legacy converter
+ * folds these settled tool parts into the replayed context. */
+export const assistantToolTurn = (text: string, tools: string[]): EvalMessage => ({
+  id: `m${++turnSeq}`,
+  role: "assistant",
+  parts: [
+    { type: "text", text },
+    ...tools.map((t) => ({ type: `tool-${t}`, state: "output-available" })),
+  ],
 });
 
 /** A tiny track-0 simulator for composed cut flows: splits, trims, deletes,

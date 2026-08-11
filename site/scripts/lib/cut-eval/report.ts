@@ -22,6 +22,8 @@ export interface RunReport {
   /** The model the rounds ran on — differs per turn under a router config. */
   roundModel?: string;
   notes: string[];
+  /** The voice/taste judge's complaint. Report-only: never part of pass. */
+  judgeNote?: string | null;
   trace: TraceEntry[];
   timings: RunTimings | null;
   /** Set when the run threw (dev server down, non-retryable upstream error). */
@@ -98,6 +100,7 @@ export function toRunReport(result: CaseResult | null, error?: string): RunRepor
     intent: result.intent,
     roundModel: result.roundModel,
     notes: result.notes,
+    judgeNote: result.judgeNote,
     trace: result.trace,
     timings: result.timings,
   };

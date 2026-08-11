@@ -12,12 +12,13 @@
  * Run with the site dev server up:
  *   bun run scripts/eval-cut-chat.ts
  *     [--base http://localhost:3000]
- *     [--only <case>] [--bucket chat|single-tool|multi-tool]
+ *     [--only <case>[,<case>…]] [--bucket chat|single-tool|multi-tool]
  *     [--runs N]                      default 1; use 3+ for latency stats
  *     [--model <registryKey|rawId>]   pin BOTH chat roles to one model (unrouted)
  *     [--simple-model <id>] [--complex-model <id>]  override one routed role
  *     [--gate-model <registryKey|rawId>]
  *     [--matrix]                      run every CANDIDATES row, compare
+ *     [--no-judge]                    skip the voice/taste judge call
  *     [--enforce-budgets]             exit 1 when a case breaches its budget
  *     [--out <path>]                  report path; a full run defaults to
  *                                     <repo>/evals/cut-chat.latest-report.json,
@@ -80,6 +81,7 @@ const ONLY = argValue("--only");
 const BUCKET = argValue("--bucket") as Bucket | undefined;
 const RUNS = Number(argValue("--runs") ?? 1);
 const MATRIX = args.includes("--matrix");
+const NO_JUDGE = args.includes("--no-judge");
 const ENFORCE_BUDGETS = args.includes("--enforce-budgets");
 const OUT_ARG = argValue("--out");
 const DEFAULT_OUT = join(
@@ -140,6 +142,7 @@ async function runConfig(
       if (r.trace.length > 0)
         console.log(`       tools: ${r.trace.map((t) => t.name).join(" → ")}`);
     }
+    for (const r of runs.filter((r) => r.judgeNote)) console.log(`       judge: ${r.judgeNote}`);
   }
   return {
     label,
@@ -152,8 +155,9 @@ async function runConfig(
 
 async function main() {
   const audio = makeFixtureAudio();
+  const only = ONLY?.split(",").map((s) => s.trim());
   const selected = cases(audio).filter(
-    (c) => (!ONLY || c.name === ONLY) && (!BUCKET || c.bucket === BUCKET)
+    (c) => (!only || only.includes(c.name)) && (!BUCKET || c.bucket === BUCKET)
   );
   if (selected.length === 0)
     throw new Error(ONLY ? `No case named "${ONLY}".` : `No cases in bucket "${BUCKET}".`);
@@ -162,10 +166,17 @@ async function main() {
   // --simple-model / --complex-model override a role each. The default is
   // production's routed pair.
   const both = argValue("--model");
+  const judgeModel = NO_JUDGE ? null : geminiModelRoles.fastDecision;
   const configs = MATRIX
     ? CANDIDATES.map((cand) => ({
         label: cand.label,
-        cfg: { base: BASE, simpleModel: cand.simple, complexModel: cand.complex, gateModel: cand.gate },
+        cfg: {
+          base: BASE,
+          simpleModel: cand.simple,
+          complexModel: cand.complex,
+          gateModel: cand.gate,
+          judgeModel,
+        },
       }))
     : [
         {
@@ -179,6 +190,7 @@ async function main() {
               argValue("--complex-model") ?? both ?? geminiModelRoles.chat
             ),
             gateModel: resolveModel(argValue("--gate-model") ?? geminiModelRoles.fastDecision),
+            judgeModel,
           },
         },
       ];

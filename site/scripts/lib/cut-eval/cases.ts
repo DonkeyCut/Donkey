@@ -21,10 +21,12 @@ import {
   PHOTO_REFS,
   SCENE_DONE_STATE,
   STYLED_STATE,
+  PARKED_STATE,
+  STRANDED_TITLE_STATE,
   TWEET_ASSET,
   TWEET_STATE,
   TWO_CLIP_STATE,
-  type Item,
+  type EvalMessage,
   assistantToolTurn,
   assistantTurn,
   plainUserTurn,
@@ -37,7 +39,7 @@ export interface EvalCase {
   name: string;
   /** Latency bucket the case aggregates under. */
   bucket: Bucket;
-  input: () => Item[];
+  input: () => EvalMessage[];
   /** The final reply must match. */
   reply: RegExp;
   /** Tools that MUST appear across the turn (each stubbed to succeed). */
@@ -51,6 +53,16 @@ export interface EvalCase {
    * declarations (tool calls become impossible), "work" covers both routing
    * verdicts (simple and complex). */
   gate?: "chat" | "work";
+  /** The turn is expected to end on a question (a genuinely ambiguous ask), so
+   * the trailing-question shape check stands down. */
+  expectsQuestion?: boolean;
+  /** Round-budget overrides, for exercising auto-continue with a tiny budget. */
+  limits?: { roundBudget?: number; maxExtensions?: number };
+  /** Auto-continue extensions the turn must land in. */
+  extensions?: { min?: number; max?: number };
+  /** Debris lines the turn ledger reports (the live editor computes these from
+   * the store; the eval injects them). */
+  debris?: string[];
   /** Editor snapshot served to get_state for this case (default EDITOR_STATE). */
   state?: unknown;
   /** Per-run tool interceptor (fresh per run); a non-undefined return serves
@@ -615,6 +627,138 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
           return undefined;
         };
       },
+    },
+    {
+      // The QA-loop regression from the field: a retime parks a transition
+      // bar; the mutation result and the turn ledger both report it, and the
+      // turn owns the debris — reattached or removed — before replying.
+      name: "parked-debris-cleanup-after-retime",
+      bucket: "multi-tool",
+      input: () => [userTurn("speed up the san francisco clip 2x", { state: PARKED_STATE })],
+      reply: /speed|2x|faster/i,
+      requiredTools: ["set_speed"],
+      anyTools: ["remove_transition", "set_transition"],
+      state: PARKED_STATE,
+      simulate: () => (name, args) => {
+        if (name === "set_speed") {
+          return {
+            id: args.clipId ?? "c2",
+            speed: 2,
+            parkedTransitions: [{ id: "tr-2", start: 6.4, seconds: 1, style: "crosszoom" }],
+            parkedTransitionsNote:
+              "This edit left 1 transition bar lining up with nothing — reattach it with set_transition or clear it with remove_transition.",
+          };
+        }
+        if (name === "remove_transition") return { removed: args.transitionId };
+        if (name === "set_transition")
+          return { id: args.clipId, transitionId: "tr-2", transition: args.seconds, style: "crosszoom" };
+        return undefined;
+      },
+    },
+    {
+      // Scope: "the grey ones" are the parked bars alone. The attached pair
+      // keeps playing; clearing one of them is the over-rotation regression.
+      name: "remove-grey-ones-scope",
+      bucket: "multi-tool",
+      input: () => [userTurn("remove the grey transitions on the timeline", { state: PARKED_STATE })],
+      reply: /remov|clear/i,
+      requiredTools: ["remove_transition"],
+      state: PARKED_STATE,
+      simulate: () => {
+        const wrong: string[] = [];
+        const sim = (name: string, args: Record<string, unknown>) => {
+          if (name === "remove_transition") {
+            const id = String(args.transitionId ?? "");
+            if (id === "tr-1" || id === "tr-2") wrong.push(id);
+            return { removed: id };
+          }
+          return undefined;
+        };
+        sim.verify = () =>
+          wrong.length > 0 ? [`removed attached transitions: ${wrong.join(", ")}`] : [];
+        return sim;
+      },
+    },
+    {
+      // A failed call produced nothing; the reply owns the failure in plain
+      // words. Claiming the crossfade landed is the grounding regression.
+      name: "errored-call-not-claimed-done",
+      bucket: "single-tool",
+      input: () => [userTurn("add a small crossfade on the last clip", { state: TWO_CLIP_STATE })],
+      reply: /last clip|nothing after|no clip after|can('|no)t|couldn't|didn('|o)t/i,
+      requiredTools: ["set_transition"],
+      state: TWO_CLIP_STATE,
+      stubs: {
+        set_transition: {
+          __error: "That is its track's last clip — nothing after it to transition into.",
+        },
+      },
+    },
+    {
+      // Auto-continue: with a one-round budget the loop extends itself and the
+      // job still lands — the user never types "keep going".
+      name: "auto-continue-no-handoff",
+      bucket: "multi-tool",
+      input: () => [
+        plainUserTurn("could you clean up my captions? lots of filler words"),
+        assistantTurn("I can tidy the five cues on track 0, dropping the ums and uhs — say the word."),
+        userTurn("yes do it", { state: FILLER_STATE }),
+      ],
+      reply: /cue|caption|filler|clean|tidi|done|\bum\b|\buh\b|remove|swept/i,
+      anyTools: ["update_cue", "delete_cue", "merge_cue"],
+      state: FILLER_STATE,
+      simulate: () => makeTimelineSim(FILLER_STATE),
+      limits: { roundBudget: 1, maxExtensions: 3 },
+      extensions: { min: 1 },
+    },
+    {
+      // Over-suppression guard: a genuinely ambiguous ask still gets the
+      // clarifying question.
+      name: "question-when-ambiguous",
+      bucket: "chat",
+      input: () => [userTurn("make that clip a bit shorter", { state: STYLED_STATE })],
+      reply: /which|clarify|\?/i,
+      state: STYLED_STATE,
+      expectsQuestion: true,
+      maxToolCalls: 2,
+    },
+    {
+      // The ledger's non-transition debris class: a title stranded past the
+      // video's end surfaces in the reply (or gets fixed), even though the ask
+      // was about something else.
+      name: "orphaned-overlay-debris",
+      bucket: "multi-tool",
+      input: () => [userTurn("trim the beach clip to end at 10 seconds", { state: STRANDED_TITLE_STATE })],
+      reply: /title|overlay|past the end|THE END|stranded/i,
+      requiredTools: ["trim_clip"],
+      // The stranded title is the user's own work — asking before moving or
+      // deleting it is the correct close.
+      expectsQuestion: true,
+      state: STRANDED_TITLE_STATE,
+      debris: ['overlay ov-7 ("THE END") starts at 14s, past the video\'s end at 12.5s'],
+      simulate: () => (name, args) => {
+        if (name === "trim_clip") return { id: args.clipId ?? "c1", in: 0, out: 10 };
+        if (name === "update_overlay" || name === "delete_item")
+          return { ok: true, id: args.id ?? "ov-7" };
+        return undefined;
+      },
+    },
+    {
+      // A thread from before the pi loop replays its tool history as prose;
+      // nothing tag-shaped may leak into the fresh reply.
+      name: "legacy-thread-no-leak",
+      bucket: "chat",
+      input: () => [
+        plainUserTurn("add nice transitions between my clips"),
+        assistantToolTurn("Added a crosszoom between each pair of city clips.", [
+          "set_transition",
+          "set_transition",
+        ]),
+        userTurn("what transition style did you use?", { state: STYLED_STATE }),
+      ],
+      reply: /crosszoom|cross.?zoom/i,
+      state: STYLED_STATE,
+      maxToolCalls: 2,
     },
   ];
 }
