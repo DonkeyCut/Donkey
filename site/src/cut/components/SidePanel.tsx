@@ -68,7 +68,7 @@ import {
 import { activeResidency, availableResidencies, type Residency } from "@/cut/lib/residency";
 import { isStylePresetTemplate } from "@/cut/lib/stylePresets";
 import { retryUpload } from "@/cut/lib/importQueue";
-import { isMediaFile, revealMedia } from "@/cut/lib/media";
+import { downloadMedia, isMediaFile, revealMedia } from "@/cut/lib/media";
 import { mediaUrl, TRANSITION_MAX } from "@/cut/lib/types";
 import { Slider } from "@/components/ui/slider";
 import { genPulseOverlay, isGenTab, useGenNotify, useGenPulse, useWatchGenTab } from "@/cut/lib/genNotify";
@@ -1095,6 +1095,12 @@ function AssetCard({ asset, projectId }: { asset: MediaAsset; projectId: string 
           <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
             <DropdownMenuItem onClick={saveToLibrary} disabled={!!asset.upload}>
               <FolderPlus /> Save to library
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => downloadMedia(projectId, asset)}
+              disabled={!!asset.upload}
+            >
+              <Download /> Download
             </DropdownMenuItem>
             {caps.revealInFinder && (
               <DropdownMenuItem

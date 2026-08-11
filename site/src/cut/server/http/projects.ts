@@ -22,7 +22,7 @@ import {
   sweepOrphanMedia,
   writeProject,
 } from "../projects";
-import { serveFileRange } from "../serveFile";
+import { serveFileRange, wantsDownload } from "../serveFile";
 import { importUrlToProject } from "../urlImport";
 import { createTranscribeJob, getTranscribeJob, type TranscribeSpec } from "../transcribe";
 import { exists } from "../util";
@@ -239,12 +239,14 @@ export const projectsApi = {
   /** Raw media file with Range support so <video>/<audio> can seek. */
   async serveMedia(req: Request, { id, file }: { id: string; file: string }) {
     let p: string;
+    let name: string;
     try {
-      p = mediaPath(id, decodeURIComponent(file));
+      name = decodeURIComponent(file);
+      p = mediaPath(id, name);
     } catch {
       return new Response("Bad request.", { status: 400 });
     }
-    return serveFileRange(p, req);
+    return serveFileRange(p, req, wantsDownload(req) ? { downloadName: name } : {});
   },
 
   /** Rendered exports for a project, newest first. */
@@ -259,12 +261,17 @@ export const projectsApi = {
   /** A rendered export with Range support so the preview player can seek. */
   async serveExport(req: Request, { id, file }: { id: string; file: string }) {
     let p: string;
+    let name: string;
     try {
-      p = exportPath(id, decodeURIComponent(file));
+      name = decodeURIComponent(file);
+      p = exportPath(id, name);
     } catch {
       return new Response("Bad request.", { status: 400 });
     }
-    return serveFileRange(p, req, { contentType: "video/mp4" });
+    return serveFileRange(p, req, {
+      contentType: "video/mp4",
+      ...(wantsDownload(req) ? { downloadName: name } : {}),
+    });
   },
 
   /** Reveal a rendered export in Finder (Cut runs on the user's own Mac). */

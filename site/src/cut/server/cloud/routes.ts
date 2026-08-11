@@ -17,6 +17,7 @@ import { projectsCloud } from "./projects";
 import { shareCloud } from "./share";
 import { transcribeCloud } from "./transcribe";
 import { usageApi } from "./usage";
+import { wantsDownload } from "./util";
 
 type CloudHandler = (
   req: Request,
@@ -42,9 +43,9 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "POST", path: "/api/cut-cloud/projects/:id/duplicate", handler: (_r, u, p) => copyJobs.requestDuplicate(u, p.id) },
   { method: "GET", path: "/api/cut-cloud/copy-jobs/:jobId", handler: (_r, u, p) => copyJobs.ownerStatus(u, p.jobId) },
   { method: "GET", path: "/api/cut-cloud/projects/:id/exports", handler: (_r, u, p) => projectsCloud.listExports(u, p.id) },
-  { method: "GET", path: "/api/cut-cloud/projects/:id/exports/:file", handler: (r, u, p) => projectsCloud.serveExport(u, p.id, p.file, new URL(r.url).searchParams.has("download")) },
+  { method: "GET", path: "/api/cut-cloud/projects/:id/exports/:file", handler: (r, u, p) => projectsCloud.serveExport(u, p.id, p.file, wantsDownload(r)) },
   { method: "DELETE", path: "/api/cut-cloud/projects/:id/exports/:file", handler: (_r, u, p) => projectsCloud.removeExport(u, p.id, p.file) },
-  { method: "GET", path: "/api/cut-cloud/projects/:id/media/:file", handler: (_r, u, p) => projectsCloud.serveMedia(u, p.id, p.file) },
+  { method: "GET", path: "/api/cut-cloud/projects/:id/media/:file", handler: (r, u, p) => projectsCloud.serveMedia(u, p.id, p.file, wantsDownload(r)) },
   { method: "DELETE", path: "/api/cut-cloud/projects/:id/media/:file", handler: (_r, u, p) => projectsCloud.removeMedia(u, p.id, p.file) },
   { method: "GET", path: "/api/cut-cloud/projects/:id/preview", handler: (_r, u, p) => projectsCloud.servePreview(u, p.id) },
   { method: "GET", path: "/api/cut-cloud/projects/:id/share", handler: (_r, u, p) => shareCloud.get(u, p.id) },
@@ -73,7 +74,7 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "POST", path: "/api/cut-cloud/library/folders", handler: (r, u) => libraryCloud.createFolder(u, r) },
   { method: "PUT", path: "/api/cut-cloud/library/folders/:id", handler: (r, u, p) => libraryCloud.renameFolder(u, p.id, r) },
   { method: "DELETE", path: "/api/cut-cloud/library/folders/:id", handler: (_r, u, p) => libraryCloud.deleteFolder(u, p.id) },
-  { method: "GET", path: "/api/cut-cloud/library/media/:file", handler: (_r, u, p) => libraryCloud.serveMedia(u, p.file) },
+  { method: "GET", path: "/api/cut-cloud/library/media/:file", handler: (r, u, p) => libraryCloud.serveMedia(u, p.file, wantsDownload(r)) },
   { method: "DELETE", path: "/api/cut-cloud/library/:id", handler: (_r, u, p) => libraryCloud.remove(u, p.id) },
 
   { method: "GET", path: "/api/cut-cloud/export-jobs", handler: (_r, u) => jobsCloud.exportFeed(u) },

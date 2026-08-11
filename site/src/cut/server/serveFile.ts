@@ -28,6 +28,14 @@ export function contentTypeFor(p: string) {
   return TYPES[path.extname(p).toLowerCase()] ?? "application/octet-stream";
 }
 
+/** `?download=1` on a media URL asks for the bytes as an attachment. The same
+ * flag reads the same way on both backends: the engine sets the disposition
+ * header itself, the cloud signs the name into the object URL it redirects to.
+ * The name is always the stored file's own, never anything off the query. */
+export function wantsDownload(req: Request): boolean {
+  return new URL(req.url).searchParams.has("download");
+}
+
 interface Opts {
   /** Override the MIME type (defaults to the extension's type). */
   contentType?: string;

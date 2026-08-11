@@ -25,6 +25,10 @@ export const caught = (e: unknown, fallback: string, status = 500) => {
 export const redirect = (url: string, headers: Record<string, string> = {}) =>
   new Response(null, { status: 302, headers: { Location: url, ...headers } });
 
+/** `?download=1` on a media URL asks for the bytes as an attachment — the
+ * engine's flag, read the same way here. */
+export const wantsDownload = (req: Request) => new URL(req.url).searchParams.has("download");
+
 /** Sanitize an upload name the way the engine's saveMedia does. */
 export function safeFileName(original: string): string {
   const base = path

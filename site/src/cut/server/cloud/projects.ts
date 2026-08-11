@@ -331,7 +331,7 @@ export const projectsCloud = {
 
   // --- Media / export / preview bytes: 302 to a signed R2 GET. ---
 
-  async serveMedia(userId: string, id: string, file: string) {
+  async serveMedia(userId: string, id: string, file: string, download = false) {
     try {
       const fileName = decodeFileParam(file);
       const row = await prisma.cutMediaObject.findFirst({
@@ -342,6 +342,7 @@ export const projectsCloud = {
       return redirect(
         mediaObjectUrl(projectMediaKey(userId, id, fileName), {
           version: String(row.updatedAt.getTime()),
+          ...(download ? { downloadName: fileName } : {}),
         })
       );
     } catch (e) {

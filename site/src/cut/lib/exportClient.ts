@@ -2,6 +2,7 @@
 
 import { apiFetch, apiJson, getBackend, type CutBackend } from "./backend";
 import { quotaErrorMessage } from "./backend/cloud";
+import { downloadFromUrl } from "./download";
 import { renderProjectToMp4 } from "./exportRender";
 import { putSigned } from "./media";
 import { clipSpeed, getClipSpans, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
@@ -139,14 +140,10 @@ export async function revealExport(
  * when the backend has no Finder (the cloud route 302s to a signed R2 URL with
  * attachment disposition). */
 export function downloadProjectExport(projectId: string, file: string) {
-  const a = document.createElement("a");
-  a.href = getBackend().url(
-    `/api/cut/projects/${projectId}/exports/${encodeURIComponent(file)}?download=1`
+  downloadFromUrl(
+    getBackend().url(`/api/cut/projects/${projectId}/exports/${encodeURIComponent(file)}`),
+    file
   );
-  a.download = file;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
 }
 
 /** Delete a rendered export from the project folder. Throws on failure so the

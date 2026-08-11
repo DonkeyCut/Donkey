@@ -5,6 +5,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Cloud,
+  Download,
+  Ellipsis,
   Film,
   FolderOpen,
   FolderPlus,
@@ -18,6 +20,13 @@ import {
   Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { LiveElapsed } from "@/cut/components/Elapsed";
 import {
   AlertDialog,
@@ -46,6 +55,7 @@ import {
   deleteFromLibrary,
   deleteLibraryFolder,
   deleteTemplate,
+  downloadLibraryAsset,
   importUrlToLibrary,
   libraryMediaUrl,
   moveLibraryItem,
@@ -665,25 +675,31 @@ export function LibraryCard({
             durationClassName={!!onUse && "transition-opacity group-hover:opacity-0"}
           />
         )}
-        {a.type === "video" && (
-          <span className="absolute right-1.5 bottom-1.5 rounded-md bg-black/65 px-1.5 py-0.5 font-mono text-[10px] text-white tabular-nums">
-            {formatTime(a.duration)}
-          </span>
-        )}
-        {sizeBytes != null && (
+        {a.type !== "audio" && (a.type === "video" || sizeBytes != null) && (
+          // Length and size share one pill in the corner: on a card this narrow
+          // two of them collide. The length reads at rest, the size takes over
+          // on hover, where the + button is what the pointer is there for.
           <span
             className={cn(
-              "absolute font-mono tabular-nums opacity-0 transition-opacity group-hover:opacity-100",
-              a.type === "audio"
-                ? // Clear of the play circle, matching the face's duration pill.
-                  "bottom-3 left-12 rounded-md bg-[#2b4e42] px-1.5 py-0.5 text-[10px] text-[#d6eddf]"
-                : cn(
-                    "rounded-md bg-black/65 px-1.5 py-0.5 text-[10px] text-white",
-                    // The + button takes the corner on hover; sit beside it.
-                    onUse ? "bottom-2 left-9" : "bottom-1.5 left-1.5"
-                  )
+              "absolute right-1.5 bottom-1.5 rounded-md bg-black/65 px-1.5 py-0.5 font-mono text-[10px] text-white tabular-nums",
+              a.type !== "video" && "opacity-0 transition-opacity group-hover:opacity-100"
             )}
           >
+            {a.type === "video" && (
+              <span className={cn(sizeBytes != null && "group-hover:hidden")}>
+                {formatTime(a.duration)}
+              </span>
+            )}
+            {sizeBytes != null && (
+              <span className={cn(a.type === "video" && "hidden group-hover:inline")}>
+                {formatBytes(sizeBytes)}
+              </span>
+            )}
+          </span>
+        )}
+        {a.type === "audio" && sizeBytes != null && (
+          // Clear of the play circle, matching the face's duration pill.
+          <span className="absolute bottom-3 left-12 rounded-md bg-[#2b4e42] px-1.5 py-0.5 font-mono text-[10px] text-[#d6eddf] tabular-nums opacity-0 transition-opacity group-hover:opacity-100">
             {formatBytes(sizeBytes)}
           </span>
         )}
@@ -711,27 +727,34 @@ export function LibraryCard({
             className={cn(
               "absolute top-2 right-2 transition-opacity",
               offline ? "text-muted-foreground" : "text-white/85",
-              // The delete button takes this corner on hover.
-              onDelete && "group-hover:opacity-0"
+              // The actions menu takes this corner on hover.
+              "group-hover:opacity-0"
             )}
           />
         )}
-        <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100">
-          {onDelete && (
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              aria-label="Remove from library"
-              className="bg-black/40 text-white hover:bg-black/60 hover:text-white"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete();
-              }}
-            >
-              <Trash2 />
-            </Button>
-          )}
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            aria-label="More actions"
+            title="More actions"
+            className="absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full bg-black/40 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/60 data-[state=open]:opacity-100"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Ellipsis className="size-3.5" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-44" onClick={(e) => e.stopPropagation()}>
+            <DropdownMenuItem onClick={() => downloadLibraryAsset(a)} disabled={offline}>
+              <Download /> Download
+            </DropdownMenuItem>
+            {onDelete && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onClick={onDelete}>
+                  <Trash2 /> Remove from library
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <CopyNameLabel
           name={a.name}
           dark={a.type === "audio"}

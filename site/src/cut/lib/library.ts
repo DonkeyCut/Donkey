@@ -2,6 +2,7 @@
 
 import { apiJson, getBackend } from "./backend";
 import { readSnapshot, writeSnapshot } from "./cache";
+import { downloadFromUrl } from "./download";
 import {
   enrichAsset,
   importRemote,
@@ -63,6 +64,12 @@ export interface LibraryData {
 
 export const libraryMediaUrl = (fileName: string, residency: Residency) =>
   backendFor(residency).url(`/api/cut/library/media/${encodeURIComponent(fileName)}`);
+
+/** Save a library file to the user's Downloads folder, off the shelf it sits
+ * on. */
+export function downloadLibraryAsset(a: Pick<LibraryAsset, "fileName" | "residency">) {
+  downloadFromUrl(libraryMediaUrl(a.fileName, a.residency), a.fileName);
+}
 
 async function fetchLibraryFrom(r: Residency): Promise<LibraryData> {
   const res = await backendFor(r).fetch("/api/cut/library");

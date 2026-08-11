@@ -4,6 +4,7 @@ import { scanSilence, type PcmChunk } from "./audioScan";
 import { apiFetch, apiJson, getBackend, type CutBackend } from "./backend";
 import { quotaErrorMessage } from "./backend/cloud";
 import { encodeWav } from "./cloudTranscribe";
+import { downloadFromUrl } from "./download";
 import { startUpload } from "./importQueue";
 import {
   audioChunks,
@@ -86,6 +87,20 @@ export async function createProjectFromFile(
     body: JSON.stringify(doc),
   });
   return project.id;
+}
+
+/** Save a project media file to the user's Downloads folder — the everywhere
+ * counterpart to revealing it in Finder.
+ *
+ * What lands is the source file itself: import stores the bytes it was handed
+ * and every derivative (proxy, ladder, filmstrip, export) is a separate file,
+ * so the media route is already the original. An asset whose bytes are still
+ * uploading has no server copy to serve, so it has nothing to download yet.
+ * `backend` pins the shelf the asset lives on when the ambient one may have
+ * moved on. */
+export function downloadMedia(projectId: string, asset: MediaAsset, backend?: CutBackend) {
+  if (asset.upload) return;
+  downloadFromUrl(mediaUrl(projectId, asset.fileName, backend), asset.fileName);
 }
 
 /** Reveal a project media file in Finder (local engine only). */

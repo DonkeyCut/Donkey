@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { Clapperboard, Ellipsis, FolderPlus, Trash2 } from "lucide-react";
+import { Clapperboard, Download, Ellipsis, FolderPlus, Trash2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { saveAssetToLibrary } from "@/cut/lib/library";
+import { downloadMedia } from "@/cut/lib/media";
 import { useEditor } from "@/cut/lib/store";
 import type { MediaAsset } from "@/cut/lib/types";
 
@@ -92,6 +93,12 @@ export function GeneratedAssetMenu({
           }
         >
           <FolderPlus /> Add to Library
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => downloadMedia(projectId, asset)}
+          disabled={!!asset.upload}
+        >
+          <Download /> Download
         </DropdownMenuItem>
         {(after != null || onDelete) && <DropdownMenuSeparator />}
         {after}

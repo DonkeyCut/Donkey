@@ -18,7 +18,7 @@ import {
   useTemplate,
   type TemplateInput,
 } from "../library";
-import { serveFileRange } from "../serveFile";
+import { serveFileRange, wantsDownload } from "../serveFile";
 import { importFromUrl } from "../urlImport";
 
 const err = (message: string, status: number) => Response.json({ error: message }, { status });
@@ -189,11 +189,13 @@ export const libraryApi = {
   /** Raw library media file with Range support. */
   async serveMedia(req: Request, { file }: { file: string }) {
     let p: string;
+    let name: string;
     try {
-      p = libMediaPath(decodeURIComponent(file));
+      name = decodeURIComponent(file);
+      p = libMediaPath(name);
     } catch {
       return new Response("Bad request.", { status: 400 });
     }
-    return serveFileRange(p, req);
+    return serveFileRange(p, req, wantsDownload(req) ? { downloadName: name } : {});
   },
 };
