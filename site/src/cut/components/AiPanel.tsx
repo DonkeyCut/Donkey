@@ -32,6 +32,7 @@ import { LiveElapsed } from "./Elapsed";
 import { SceneCard } from "./SceneCard";
 import { useElapsed } from "@/cut/hooks/useElapsed";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -100,6 +101,7 @@ import { useEditor } from "@/cut/lib/store";
 import { cn } from "@/lib/utils";
 import { cardIconButton } from "@/cut/components/iconButton";
 import { MentionTextarea, RefChips, RefThumb, RefTokenChip } from "./AssetRefs";
+import { ComposerQueue, type QueuedMessage } from "./ComposerQueue";
 import { DictationBody } from "./MicDictation";
 import { RECORD_RUNNING_TTL_MS, ToolOutputAssets } from "./ChatAssets";
 import { HostedErrorText } from "./hostedError";
@@ -246,6 +248,8 @@ function writeThreads(projectId: string, list: ChatThread[]) {
     if (!keptIds.has(t.id)) {
       useGenScene.getState().killThread(t.id);
       deleteCloudThread(projectId, t.id);
+      if (typeof window !== "undefined")
+        localStorage.removeItem(queueKey(projectId, t.id));
     }
   }
   writeRawThreads(projectId, slimForStorage(kept));
@@ -253,6 +257,35 @@ function writeThreads(projectId: string, list: ChatThread[]) {
 
 const MODEL_KEY = "cut-ai-model";
 const FAVS_KEY = "cut-ai-favs";
+
+// Waiting composer-queue rows, saved per thread so a reload or a project
+// switch brings them back. Running and done rows stay out — their turns die
+// with the page.
+const queueKey = (projectId: string, threadId: string) =>
+  `cut-ai-queue-${projectId}-${threadId}`;
+function readStoredQueue(
+  projectId: string,
+  threadId: string,
+): QueuedMessage[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(queueKey(projectId, threadId));
+    if (!raw) return [];
+    return (JSON.parse(raw) as QueuedMessage[])
+      .filter(
+        (m) =>
+          m?.status === "queued" &&
+          typeof m.id === "string" &&
+          typeof m.text === "string",
+      )
+      .map((m) => ({
+        ...m,
+        attachments: Array.isArray(m.attachments) ? m.attachments : [],
+      }));
+  } catch {
+    return [];
+  }
+}
 // A fresh user starts on Gemini — it runs on their signed-in Donkey account, so
 // it works without a local CLI. Claude/Codex show up automatically once the
 // engine probes them installed. The choice persists, so this is first-run only.
@@ -377,6 +410,7 @@ export function AiPanel({
     // into Media/Library stays.
     deleteChatAssets(id);
     deleteCloudThread(projectId, id);
+    localStorage.removeItem(queueKey(projectId, id));
     // Its work dies with it too: a scene run the thread owned aborts and its
     // plan clears — nothing keeps running behind a conversation the user killed.
     useGenScene.getState().killThread(id);
@@ -954,30 +988,27 @@ function ChatSession({
   }, [messages, busy]);
 
   const [sendError, setSendError] = useState<string | null>(null);
-  const send = (text: string) => {
-    // Inline @mentions attach their assets alongside the dropped chips. The
-    // message keeps the raw tokens — they render as interactive chips and the
-    // model reads the handle↔asset mapping from <attached_assets>.
-    const body = text.trim();
-    const { refs: all } = collectRefs(body, attachments, candidates);
-    if ((!body && all.length === 0) || busy) return;
-    // An unavailable provider surfaces as an error in the thread at send time
-    // rather than a standing footer note: say why nothing sent, then stop.
-    if (!currentAvailable) {
-      setSendError(unavailableMessage());
-      return;
-    }
-    clearError();
-    setSendError(null);
-    pinnedRef.current = true;
-    void sendMessage({
-      text: body,
-      ...(all.length > 0 && { metadata: { attachments: all } }),
-    });
-    setInput("");
-    setAttachments([]);
-  };
-
+  // Messages submitted while a turn runs wait here and dispatch one at a time
+  // as turns settle. Waiting rows persist per thread, so a reload or a trip
+  // to another project brings them back — paused, so nothing fires on its
+  // own until the user resumes.
+  const [initialQueue] = useState(() => readStoredQueue(projectId, threadId));
+  const [queue, setQueue] = useState<QueuedMessage[]>(initialQueue);
+  const [queuePaused, setQueuePaused] = useState(initialQueue.length > 0);
+  const [queueEditing, setQueueEditing] = useState<string | null>(null);
+  const drainedRef = useRef(false);
+  // Height of the floating stack above the composer (warning tabs + queue
+  // tray); the messages pad their bottom by it so the newest message can
+  // scroll out from behind the stack.
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const [overlayH, setOverlayH] = useState(0);
+  useEffect(() => {
+    const el = overlayRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setOverlayH(el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [readOnly]);
   const currentAvailable = info
     ? info.providers[provider(model)]?.available !== false
     : true;
@@ -987,6 +1018,125 @@ function ChatSession({
     const note = info?.providers[p]?.note?.trim();
     return note ? `${PROVIDER_LABEL[p]}: ${note}` : `${PROVIDER_LABEL[p]} isn't available.`;
   };
+  const send = (text: string) => {
+    // Inline @mentions attach their assets alongside the dropped chips. The
+    // message keeps the raw tokens — they render as interactive chips and the
+    // model reads the handle↔asset mapping from <attached_assets>.
+    const body = text.trim();
+    const { refs: all } = collectRefs(body, attachments, candidates);
+    if (!body && all.length === 0) return;
+    // An unavailable provider surfaces as an error in the thread at send time
+    // rather than a standing footer note: say why nothing sent, then stop.
+    if (!currentAvailable) {
+      setSendError(unavailableMessage());
+      return;
+    }
+    if (busy) {
+      // A paused queue stays paused: parked rows fire only from the tray's
+      // resume button, never as a side effect of submitting something new.
+      setQueue((q) => [
+        ...q,
+        { id: crypto.randomUUID(), text: body, attachments: all, status: "queued" },
+      ]);
+      setInput("");
+      setAttachments([]);
+      pinnedRef.current = true;
+      return;
+    }
+    clearError();
+    setSendError(null);
+    // A direct send starts a new turn; a row still marked running belongs to
+    // the settled one — sweep it, or cross it out under a frozen view.
+    setQueue((q) =>
+      q.flatMap((m) =>
+        m.status !== "running"
+          ? [m]
+          : queueEditing === null
+            ? []
+            : [{ ...m, status: "done" as const }],
+      ),
+    );
+    pinnedRef.current = true;
+    void sendMessage({
+      text: body,
+      ...(all.length > 0 && { metadata: { attachments: all } }),
+    });
+    setInput("");
+    setAttachments([]);
+  };
+
+  // Drain the queue as turns settle. drainedRef keeps it to one dispatch per
+  // ready period — the effect re-runs when the queue changes before useChat
+  // surfaces the new turn's status. A dispatched row stays in the queue as
+  // running until the next dispatch settles it: it leaves the tray, or stays
+  // crossed out in place while an open row edit has the view frozen. The edit
+  // skips only its own row — the rest keep draining. An unavailable provider
+  // holds the drain the same way it stops a direct send; the tray reads as
+  // paused until the user switches models or the provider comes back.
+  // Defined after the settle-flush effect above, so the finished transcript
+  // saves before the next turn starts mutating messages.
+  useEffect(() => {
+    if (status !== "ready") {
+      drainedRef.current = false;
+      return;
+    }
+    if (drainedRef.current || queuePaused || !currentAvailable) return;
+    const next = queue.find(
+      (m) => m.status === "queued" && m.id !== queueEditing,
+    );
+    if (!next) return;
+    drainedRef.current = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the drain reacts to the chat stream settling; drainedRef caps it at one guarded dispatch per ready period
+    setQueue((q) =>
+      q.flatMap((m) => {
+        if (m.id === next.id) return [{ ...m, status: "running" as const }];
+        if (m.status !== "running") return [m];
+        return queueEditing === null
+          ? []
+          : [{ ...m, status: "done" as const }];
+      }),
+    );
+    setSendError(null);
+    pinnedRef.current = true;
+    // A restored row's attachments may point at assets deleted since it was
+    // parked (or at file blobs that died with the last page); dropping the
+    // dead refs keeps the message from claiming media it can't deliver.
+    const live = next.attachments.filter(
+      (a) =>
+        !a.url?.startsWith("blob:") &&
+        (a.scope !== "project" ||
+          useEditor.getState().assets.some((x) => x.id === a.id)),
+    );
+    void sendMessage({
+      text: next.text,
+      ...(live.length > 0 && { metadata: { attachments: live } }),
+    });
+  }, [status, queue, queuePaused, queueEditing, currentAvailable, sendMessage]);
+
+  // Mirror the waiting rows to storage as they change; an empty queue clears
+  // its slot.
+  useEffect(() => {
+    if (readOnly) return;
+    const waiting = queue.filter((m) => m.status === "queued");
+    if (waiting.length === 0)
+      localStorage.removeItem(queueKey(projectId, threadId));
+    else
+      localStorage.setItem(
+        queueKey(projectId, threadId),
+        JSON.stringify(waiting),
+      );
+  }, [queue, projectId, threadId, readOnly]);
+
+  // An errored turn holds the queue for review — the drain only fires on
+  // 'ready', and the tray reads the error as paused. Resuming clears the
+  // error, which settles status back to ready and releases the drain. An
+  // unavailable provider holds it the same way.
+  const queueHeld = queuePaused || status === "error" || !currentAvailable;
+  // The tray shows only while a row is waiting; settled running rows linger
+  // in the array until the next dispatch sweeps them, and alone they are
+  // nothing to show.
+  const trayVisible = queue.some((m) => m.status === "queued");
+
   // The saved model's provider may be uninstalled — its group is hidden from
   // the picker, so fall back to the first installed provider rather than sit on
   // a selection the user can no longer see or change.
@@ -1006,18 +1156,19 @@ function ChatSession({
       {...targetProps}
       className="relative flex min-h-0 flex-1 flex-col"
     >
-      <div
-        ref={scrollRef}
-        onScroll={onMessagesScroll}
-        className={cn(
-          "ai-messages min-h-0 flex-1 overflow-y-auto px-3.5 py-3",
-          // The credits tab floats over the bottom of this area; the extra
-          // padding lets the last message scroll out from behind it.
-          outOfCredits && "pb-9",
-        )}
+      <ScrollArea
+        className="min-h-0 flex-1"
+        // Scene cards and the pinning logic reach the scrolling element by
+        // class and ref, so both ride the viewport.
+        viewportClassName="ai-messages"
+        viewportRef={scrollRef}
+        onViewportScroll={onMessagesScroll}
+        contentClassName="px-3.5 py-3"
       >
-        {/* Single wrapper so the ResizeObserver sees all content growth. */}
-        <div>
+        {/* Single wrapper so the ResizeObserver sees all content growth. The
+            bottom padding matches the floating stack over the composer, so
+            the newest message can scroll out from behind it. */}
+        <div style={{ paddingBottom: overlayH }}>
           {messages.length === 0 && !hasSceneRun && (
             <div className="flex flex-col gap-3 pt-6">
               <p className="text-[12.5px] leading-relaxed text-muted-foreground">
@@ -1065,42 +1216,102 @@ function ChatSession({
             </div>
           )}
         </div>
-      </div>
+      </ScrollArea>
 
       {!readOnly && (
       <div className="shrink-0 px-2.5 pb-2.5">
         <div className="relative">
-          {outOfCredits && (
-            // Folder tab behind the box: its bottom few pixels slide under the
-            // box, which paints over it, so the tab meets the border even where
-            // the box's corner radius curves away. Extra bottom padding keeps
-            // the text above the overlap. It floats over the messages, which
-            // scroll behind it.
-            <a
-              className="ai-credits-tab absolute inset-x-1.5 bottom-full -mb-1 flex items-center gap-1.5 rounded-t-lg border border-b-0 border-amber-500/30 bg-amber-50 px-3 pt-1.5 pb-2.5 text-[11px] text-amber-800"
-              href={creditsUrl()}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <TriangleAlert className="size-3 shrink-0" />
-              <span>
-                No credits left —{" "}
-                <span className="font-medium underline">reload credits</span>
-              </span>
-            </a>
-          )}
-          {!outOfCredits && notice && (
-            // The credits tab's folder shape, borrowed for transient
-            // refusals; the credits warning outranks it when both apply.
-            <div className="ai-notice-tab absolute inset-x-1.5 bottom-full -mb-1 flex items-center gap-1.5 rounded-t-lg border border-b-0 border-amber-500/30 bg-amber-50 px-3 pt-1.5 pb-2.5 text-[11px] text-amber-800">
-              <TriangleAlert className="size-3 shrink-0" />
-              <span>{notice}</span>
-            </div>
-          )}
+          {/* The stack above the composer — warning tabs first, then the
+              queue tray — floats over the messages, which scroll behind it;
+              the messages pad their bottom by its measured height so the
+              newest message still lands in view. Its bottom few pixels slide
+              under the composer box, which paints over them, so the bottom
+              piece meets the border even where the box's corner radius
+              curves away. */}
+          <div
+            ref={overlayRef}
+            className="pointer-events-none absolute inset-x-0 bottom-full z-10 -mb-1 flex flex-col"
+          >
+            {outOfCredits && (
+              <a
+                className={cn(
+                  "ai-credits-tab pointer-events-auto mx-1.5 flex items-center gap-1.5 rounded-t-lg border border-b-0 border-amber-500/30 bg-amber-50 px-3 pt-1.5 pb-2.5 text-[11px] text-amber-800",
+                  // With the tray below, the tab tucks under it the same way
+                  // the stack tucks under the composer.
+                  trayVisible && "-mb-1",
+                )}
+                href={creditsUrl()}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <TriangleAlert className="size-3 shrink-0" />
+                <span>
+                  No credits left —{" "}
+                  <span className="font-medium underline">reload credits</span>
+                </span>
+              </a>
+            )}
+            {!outOfCredits && notice && (
+              // The credits tab's folder shape, borrowed for transient
+              // refusals; the credits warning outranks it when both apply.
+              <div
+                className={cn(
+                  "ai-notice-tab pointer-events-auto mx-1.5 flex items-center gap-1.5 rounded-t-lg border border-b-0 border-amber-500/30 bg-amber-50 px-3 pt-1.5 pb-2.5 text-[11px] text-amber-800",
+                  trayVisible && "-mb-1",
+                )}
+              >
+                <TriangleAlert className="size-3 shrink-0" />
+                <span>{notice}</span>
+              </div>
+            )}
+            {trayVisible && (
+              <div className="pointer-events-auto">
+            <ComposerQueue
+              items={queue}
+              paused={queueHeld}
+              busy={busy}
+              editingId={queueEditing}
+              onEditingChange={(id) => {
+                setQueueEditing(id);
+                // Closing the freeze sweeps out the crossed-out rows it kept
+                // around for display.
+                if (id === null)
+                  setQueue((q) => q.filter((m) => m.status === "queued"));
+              }}
+              onCommitEdit={(id, text) =>
+                setQueue((q) =>
+                  q.map((m) =>
+                    m.id === id ? { ...m, text: text.trim() || m.text } : m,
+                  ),
+                )
+              }
+              onRemove={(id) => setQueue((q) => q.filter((m) => m.id !== id))}
+              onReorder={(from, to) =>
+                setQueue((q) => {
+                  const next = [...q];
+                  const [grabbed] = next.splice(from, 1);
+                  next.splice(to, 0, grabbed);
+                  return next;
+                })
+              }
+              onTogglePaused={() => {
+                if (status === "error") {
+                  clearError();
+                  setQueuePaused(false);
+                } else {
+                  setQueuePaused((p) => !p);
+                }
+              }}
+            />
+              </div>
+            )}
+          </div>
           <div
             ref={composerBoxRef}
             className={cn(
-              "relative rounded-xl border bg-background transition-colors",
+              // z above the floating stack so the box paints over its tucked
+              // bottom edge.
+              "relative z-10 rounded-xl border bg-background transition-colors",
               dropActive
                 ? "border-[#0a84ff] ring-2 ring-[#0a84ff]/30"
                 : fileDropHint
@@ -1175,7 +1386,15 @@ function ChatSession({
                       size="sm"
                       className="ai-stop"
                       title="Stop"
-                      onClick={() => void stop()}
+                      onClick={() => {
+                        // stop() settles to 'ready', which the drain reads as
+                        // a clean finish — park the queue here so it stays put
+                        // for review. An empty queue has nothing to park, and
+                        // pausing it anyway would leave a stale flag.
+                        if (queue.some((m) => m.status === "queued"))
+                          setQueuePaused(true);
+                        void stop();
+                      }}
                     >
                       <Square className="size-3" />
                     </Button>
