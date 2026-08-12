@@ -865,7 +865,7 @@ function ProjectAudio({
             playing={playingUrl === a.url}
             pulse={pulsing.includes(a.id)}
             onTogglePlay={onTogglePlay}
-            onAdd={() => useEditor.getState().addAudioFromAsset(a.id)}
+            onAdd={() => useEditor.getState().addAssetAtPlayhead(a.id)}
             menu={
               <GeneratedAssetMenu
                 asset={a}
@@ -927,7 +927,7 @@ function ProjectMusic({
             playing={playingUrl === a.url}
             pulse={pulsing.includes(a.id)}
             onTogglePlay={onTogglePlay}
-            onAdd={() => useEditor.getState().addAudioFromAsset(a.id)}
+            onAdd={() => useEditor.getState().addAssetAtPlayhead(a.id)}
             menu={
               <GeneratedAssetMenu
                 asset={a}

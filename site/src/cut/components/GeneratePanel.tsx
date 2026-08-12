@@ -387,7 +387,7 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
         <button
           title="Add to timeline"
           className="grid size-5 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:brightness-110"
-          onClick={() => useEditor.getState().addClipFromAsset(asset.id)}
+          onClick={() => useEditor.getState().addAssetAtPlayhead(asset.id)}
         >
           <Plus className="size-3" />
         </button>

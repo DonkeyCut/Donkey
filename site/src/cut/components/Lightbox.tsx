@@ -49,11 +49,7 @@ export function Lightbox() {
     setAdding(true);
     try {
       if (item.assetId) {
-        if (item.kind === "audio") {
-          useEditor.getState().addAudioFromAsset(item.assetId);
-        } else {
-          useEditor.getState().addClipFromAsset(item.assetId);
-        }
+        useEditor.getState().addAssetAtPlayhead(item.assetId);
       } else if (item.libraryId) {
         // Library media copies in through the library route, like using it
         // from the Library panel.
@@ -66,7 +62,7 @@ export function Lightbox() {
           item.kind === "video"
             ? await importStockVideo(projectId, { url: item.src, name: item.name })
             : await importImage(projectId, { url: item.src, name: item.name });
-        useEditor.getState().addClipFromAsset(asset.id);
+        useEditor.getState().addAssetAtPlayhead(asset.id);
       }
       setAddedSrc(item.src);
     } catch {

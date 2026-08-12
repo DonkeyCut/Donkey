@@ -295,6 +295,66 @@ describe("committed video updates (AI chat / inspector)", () => {
   });
 });
 
+describe("the panel + add", () => {
+  test("a video lands under the playhead when its track has room there", () => {
+    const a = asset(2);
+    useEditor.setState({ assets: [a], clips: [vclip({ start: 0, out: 2 })] });
+    setPlayhead(5);
+    s().addAssetAtPlayhead(a.id);
+    const added = s().clips.find((c) => c.assetId === a.id)!;
+    expect(added.start).toBeCloseTo(5);
+    expect(added.track).toBe(0);
+  });
+
+  test("an occupied playhead climbs to the first open track, opening one when the stack is full", () => {
+    const a = asset(2);
+    useEditor.setState({
+      assets: [a],
+      clips: [vclip({ start: 0, out: 8 }), vclip({ track: 1, start: 4, out: 4 })],
+    });
+    setPlayhead(5);
+    s().addAssetAtPlayhead(a.id);
+    const added = s().clips.find((c) => c.assetId === a.id)!;
+    expect(added.start).toBeCloseTo(5);
+    expect(added.track).toBe(2);
+    expectLaneSound(videoLane(0));
+    expectLaneSound(videoLane(1));
+  });
+
+  test("a gap too small for the clip counts as occupied", () => {
+    const a = asset(4);
+    useEditor.setState({
+      assets: [a],
+      clips: [vclip({ start: 0, out: 2 }), vclip({ start: 4, out: 2 })],
+    });
+    setPlayhead(2); // 2s gap, 4s clip
+    s().addAssetAtPlayhead(a.id);
+    const added = s().clips.find((c) => c.assetId === a.id)!;
+    expect(added.start).toBeCloseTo(2);
+    expect(added.track).toBe(1);
+    expectLaneSound(videoLane(0));
+  });
+
+  test("a live skimmer wins over the playhead", () => {
+    const a = asset(2);
+    useEditor.setState({ assets: [a], clips: [] });
+    setPlayhead(1);
+    setSkim(6);
+    s().addAssetAtPlayhead(a.id);
+    expect(s().clips.find((c) => c.assetId === a.id)!.start).toBeCloseTo(6);
+  });
+
+  test("audio under a full lane opens the next lane at the same moment", () => {
+    const a = asset(3, "audio");
+    useEditor.setState({ assets: [a], audioClips: [aclip({ start: 0, out: 10 })] });
+    setPlayhead(2);
+    s().addAssetAtPlayhead(a.id);
+    const added = s().audioClips.find((c) => c.assetId === a.id)!;
+    expect(added.start).toBeCloseTo(2);
+    expect(added.lane).toBe(1);
+  });
+});
+
 describe("audio lanes", () => {
   test("adding at an occupied time slides right", () => {
     const a = asset(2, "audio");

@@ -213,11 +213,7 @@ function ChatCardMenu({ asset, triggerClassName }: { asset: MediaAsset; triggerC
       before={
         <>
           <DropdownMenuItem
-            onClick={() => {
-              const s = useEditor.getState();
-              if (asset.type === "audio") s.addAudioFromAsset(asset.id);
-              else s.addClipFromAsset(asset.id);
-            }}
+            onClick={() => useEditor.getState().addAssetAtPlayhead(asset.id)}
           >
             <Plus /> Add to timeline
           </DropdownMenuItem>
@@ -325,7 +321,7 @@ function AudioCard({ item, asset }: ChatCardProps) {
         peaks={asset?.peaks}
         playing={playing}
         onTogglePlay={(url) => usePreviewAudio.getState().toggle(url)}
-        onAdd={() => asset && useEditor.getState().addAudioFromAsset(asset.id)}
+        onAdd={() => asset && useEditor.getState().addAssetAtPlayhead(asset.id)}
         menu={asset && <ChatCardMenu asset={asset} triggerClassName={scrimIconButton} />}
         onDragStart={(e) => {
           if (asset) setAssetDragData(e, asset.id);

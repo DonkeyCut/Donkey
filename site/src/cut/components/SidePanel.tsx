@@ -961,11 +961,7 @@ function AssetCard({ asset, projectId }: { asset: MediaAsset; projectId: string 
   const [hovered, setHovered] = useState(false);
   const sizeBytes = useMediaFileSize(asset.url, hovered && !asset.upload);
 
-  const add = () => {
-    const s = useEditor.getState();
-    if (asset.type === "video" || asset.type === "image") s.addClipFromAsset(asset.id);
-    else s.addAudioFromAsset(asset.id);
-  };
+  const add = () => useEditor.getState().addAssetAtPlayhead(asset.id);
 
   const saveToLibrary = async (e: React.MouseEvent) => {
     e.stopPropagation();

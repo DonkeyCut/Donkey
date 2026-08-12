@@ -251,6 +251,11 @@ export interface EditorState {
    * to that gain while it plays; `opts.lane` picks the audio track it lands
    * on (default: the first one). */
   addAudioFromAsset: (assetId: string, start?: number, opts?: { duck?: number; lane?: number }) => void;
+  /** The panel “+” add: the asset lands at the preview time (the skimmer while
+   * one is live, the playhead otherwise), on the lowest video track or audio
+   * lane with room for its whole length there. When every existing row is
+   * occupied at that moment it opens a new row above. */
+  addAssetAtPlayhead: (assetId: string) => void;
   /** Set (or clear) the persisted brief-to-video run. Replaces the object by
    * reference so autosave detects the change. */
   setGenvideo: (project: VideoProject | undefined) => void;
@@ -1880,6 +1885,52 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       }));
     },
 
+    addAssetAtPlayhead: (assetId) => {
+      const asset = get().assets.find((a) => a.id === assetId);
+      if (!asset) return;
+      push();
+      const t = Math.max(0, previewAt());
+      // A row fits when `nextFreeStart` keeps the clip at the preview time
+      // itself; the scan climbs until one does. A brand-new row always fits,
+      // so the clip lands under the indicator no matter how full the stack is.
+      const fits = (spans: { start: number; end: number }[], len: number) =>
+        nextFreeStart(spans, t, len) < t + 1e-3;
+      if (asset.type === "audio") {
+        const len = Math.max(MIN_LEN, asset.duration);
+        const all = get().audioClips;
+        const top = all.reduce((m, c) => Math.max(m, c.lane ?? 0), 0);
+        let lane = 0;
+        while (lane <= top && !fits(footprints(all.filter((c) => (c.lane ?? 0) === lane)), len))
+          lane++;
+        const clip: AudioClip = {
+          id: uid(),
+          assetId,
+          start: t,
+          in: 0,
+          out: asset.duration,
+          volume: 1,
+          ...(lane > 0 ? { lane } : {}),
+        };
+        set((s) => ({
+          audioClips: [...s.audioClips, clip],
+          ...sole({ kind: "audio", id: clip.id }),
+        }));
+        return;
+      }
+      const out = asset.type === "image" ? IMAGE_CLIP_SECONDS : asset.duration;
+      const len = Math.max(MIN_LEN, out);
+      const all = get().clips;
+      const top = all.reduce((m, c) => Math.max(m, c.track), 0);
+      let track = 0;
+      while (track <= top && !fits(footprints(all.filter((c) => c.track === track)), len))
+        track++;
+      const clip: VideoClip = { id: uid(), assetId, track, start: t, in: 0, out, muted: false };
+      set((s) => ({
+        clips: [...s.clips, clip].sort((a, b) => a.start - b.start),
+        ...sole({ kind: "clip", id: clip.id }),
+      }));
+    },
+
     addOverlay: () => {
       // Seed the visual style from the last-used title so repeated titles in a
       // project share one look; fall back to the built-in defaults.
@@ -2541,46 +2592,59 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const out = asset.type === "image" ? IMAGE_CLIP_SECONDS : asset.duration;
       push();
       if (place.kind === "track" && place.track === 0) {
-        const taken = footprints(track0Clips(get().clips));
-        const v: VideoClip = {
-          id: uid(),
-          assetId,
-          track: 0,
-          start: nextFreeStart(taken, Math.max(0, start), Math.max(MIN_LEN, out)),
-          in: 0,
-          out,
-          muted: false,
-        };
-        set((s) => ({
-          clips: [...s.clips, v].sort((a, b) => a.start - b.start),
-          ...sole({ kind: "clip", id: v.id }),
-        }));
+        // Insert at the pointer, rippling later clips right — the same landing
+        // a drag along the row gives.
+        const { start: at, shifts } = rippleInsert(
+          track0Clips(get().clips),
+          Math.max(0, start),
+          Math.max(MIN_LEN, out)
+        );
+        const move = new Map(shifts.map((sh) => [sh.id, sh.start]));
+        const v: VideoClip = { id: uid(), assetId, track: 0, start: at, in: 0, out, muted: false };
+        set((s) => {
+          const clips = [
+            ...s.clips.map((c) => (move.has(c.id) ? { ...c, start: move.get(c.id)! } : c)),
+            v,
+          ].sort((a, b) => a.start - b.start);
+          return {
+            clips,
+            transitions: reanchorTransitions(s.clips, clips, s.transitions),
+            ...sole({ kind: "clip", id: v.id }),
+          };
+        });
         return;
       }
       // Full-frame by default: covers track 0 ("topmost plays"); the inspector
       // regions it (split half / corner PiP).
       const track = place.kind === "insert" ? place.level : place.track;
-      // An existing track has residents: slide to its next free slot, like the
-      // track-0 add. An inserted track is brand-new, so the start holds as-is.
-      const at =
+      // An existing track has residents: insert at the pointer and ripple that
+      // track's later clips right. An inserted track is brand-new, so the
+      // start holds as-is.
+      const landing =
         place.kind === "track"
-          ? nextFreeStart(
-              footprints(get().clips.filter((c) => c.track === track)),
+          ? rippleInsert(
+              get().clips.filter((c) => c.track === track),
               Math.max(0, start),
               Math.max(MIN_LEN, out)
             )
-          : Math.max(0, start);
+          : { start: Math.max(0, start), shifts: [] as { id: string; start: number }[] };
+      const move = new Map(landing.shifts.map((sh) => [sh.id, sh.start]));
       const ov: VideoClip = {
         id: uid(),
         assetId,
         track,
-        start: at,
+        start: landing.start,
         in: 0,
         out,
         muted: false,
       };
       set((s) => ({
-        clips: [...shiftTracksUp(s.clips, place), ov],
+        clips: [
+          ...shiftTracksUp(s.clips, place).map((c) =>
+            move.has(c.id) ? { ...c, start: move.get(c.id)! } : c
+          ),
+          ov,
+        ],
         ...sole({ kind: "clip", id: ov.id }),
       }));
     },
@@ -2594,29 +2658,46 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
 
       if (place.kind === "track" && place.track === 0) {
         if (onTrack0) return; // a same-track move commits through the lane coordinator
-        // Drop a layer clip down onto track 0: slide to its next free slot.
-        const taken = footprints(track0Clips(get().clips));
-        const at = nextFreeStart(taken, Math.max(0, start), clipLen(src));
-        set((st) => ({
-          clips: st.clips.map((c) =>
-            c.id === id ? { ...c, track: 0, start: at } : c
-          ).sort((a, b) => a.start - b.start),
-          ...sole({ kind: "clip", id }),
-        }));
+        // Drop a layer clip down onto track 0: insert at the pointer, rippling
+        // later clips right — the same landing a drag along the row gives.
+        const { start: at, shifts } = rippleInsert(
+          track0Clips(get().clips),
+          Math.max(0, start),
+          clipLen(src)
+        );
+        const move = new Map(shifts.map((sh) => [sh.id, sh.start]));
+        set((st) => {
+          const clips = st.clips
+            .map((c) =>
+              c.id === id
+                ? { ...c, track: 0, start: at }
+                : move.has(c.id)
+                  ? { ...c, start: move.get(c.id)! }
+                  : c
+            )
+            .sort((a, b) => a.start - b.start);
+          return {
+            clips,
+            transitions: reanchorTransitions(st.clips, clips, st.transitions),
+            ...sole({ kind: "clip", id }),
+          };
+        });
         return;
       }
 
       const track = place.kind === "insert" ? place.level : place.track;
-      // An existing track has residents: slide to its next free slot, like the
-      // track-0 drop. An inserted track is brand-new, so the start holds as-is.
-      const at =
+      // An existing track has residents: insert at the pointer and ripple that
+      // track's later clips right. An inserted track is brand-new, so the
+      // start holds as-is.
+      const landing =
         place.kind === "track"
-          ? nextFreeStart(
-              footprints(get().clips.filter((c) => c.track === track && c.id !== id)),
+          ? rippleInsert(
+              get().clips.filter((c) => c.track === track && c.id !== id),
               Math.max(0, start),
               clipLen(src)
             )
-          : Math.max(0, start);
+          : { start: Math.max(0, start), shifts: [] as { id: string; start: number }[] };
+      const move = new Map(landing.shifts.map((sh) => [sh.id, sh.start]));
       set((st) => {
         // Inserting a new track opens the slot by renumbering the others; the
         // moved clip itself is excluded from the shift, then placed at `track`.
@@ -2624,7 +2705,13 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           place.kind === "insert" ? openInsertSlot(st.clips, place.level, id) : st.clips;
         return {
           clips: shifted
-            .map((c) => (c.id === id ? { ...c, track, start: at } : c))
+            .map((c) =>
+              c.id === id
+                ? { ...c, track, start: landing.start }
+                : move.has(c.id)
+                  ? { ...c, start: move.get(c.id)! }
+                  : c
+            )
             .sort((a, b) => a.start - b.start),
           ...sole({ kind: "clip", id }),
         };

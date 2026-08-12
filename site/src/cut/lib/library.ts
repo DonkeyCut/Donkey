@@ -284,15 +284,14 @@ export async function importLibraryAsset(
   );
 }
 
-/** Copy a library asset into the open project and append it to the timeline. */
+/** Copy a library asset into the open project and add it to the timeline at
+ * the playhead. */
 export async function addLibraryAssetToProject(
   projectId: string,
   lib: LibraryAsset
 ): Promise<MediaAsset> {
   const asset = await importLibraryAsset(projectId, lib);
-  const s = useEditor.getState();
-  if (asset.type === "video" || asset.type === "image") s.addClipFromAsset(asset.id);
-  else s.addAudioFromAsset(asset.id);
+  useEditor.getState().addAssetAtPlayhead(asset.id);
   return asset;
 }
 

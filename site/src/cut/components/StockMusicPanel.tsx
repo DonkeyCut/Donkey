@@ -85,7 +85,7 @@ export function SampleLibrary({ projectId }: { projectId: string }) {
                       name: sampleName(s.id),
                       duration: s.duration,
                     })
-                      .then((a) => useEditor.getState().addAudioFromAsset(a.id))
+                      .then((a) => useEditor.getState().addAssetAtPlayhead(a.id))
                       .catch(() => {})
                   }
                 />
