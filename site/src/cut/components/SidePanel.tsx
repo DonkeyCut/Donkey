@@ -1012,6 +1012,7 @@ function AssetCard({ asset, projectId }: { asset: MediaAsset; projectId: string 
     >
       <div
         ref={tileRef}
+        data-drag-object
         className={cn(
           "relative aspect-square overflow-hidden rounded-lg border border-border bg-muted transition-colors group-hover:border-input",
           flash && "ring-2 ring-[#0a84ff] ring-offset-1"
@@ -1043,7 +1044,10 @@ function AssetCard({ asset, projectId }: { asset: MediaAsset; projectId: string 
           />
         )}
         {asset.type === "video" && (
-          <span className="absolute right-1 bottom-1 rounded-[5px] bg-black/65 px-1 py-px font-mono text-[9.5px] text-white tabular-nums">
+          <span
+            data-drag-omit
+            className="absolute right-1 bottom-1 rounded-[5px] bg-black/65 px-1 py-px font-mono text-[9.5px] text-white tabular-nums"
+          >
             {formatTime(asset.duration)}
           </span>
         )}

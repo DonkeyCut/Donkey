@@ -634,6 +634,7 @@ export function LibraryCard({
     >
       <div
         ref={tileRef}
+        data-drag-object
         className={cn(
           "relative aspect-square cursor-grab overflow-hidden rounded-xl border bg-muted transition-shadow group-hover:shadow-[0_4px_20px_rgba(0,0,0,0.1)] active:cursor-grabbing",
           selected || flash ? "border-[#0a84ff] ring-2 ring-[#0a84ff]" : "border-border"
@@ -680,6 +681,7 @@ export function LibraryCard({
           // two of them collide. The length reads at rest, the size takes over
           // on hover, where the + button is what the pointer is there for.
           <span
+            data-drag-omit
             className={cn(
               "absolute right-1.5 bottom-1.5 rounded-md bg-black/65 px-1.5 py-0.5 font-mono text-[10px] text-white tabular-nums",
               a.type !== "video" && "opacity-0 transition-opacity group-hover:opacity-100"

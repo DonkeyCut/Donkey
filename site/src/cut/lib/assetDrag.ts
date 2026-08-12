@@ -132,15 +132,26 @@ export function clearElementDrag() {
   inFlightElement = null;
 }
 
-/** Use the card itself as the drag ghost: a clone at rendered size, so the
- * ghost matches the card exactly — rounded corners, fills, labels. Live
- * `<video>`/`<canvas>` content is baked into the clone (clones of those paint
- * blank), and hover-revealed controls drop out since the clone is not hovered.
- * The clone lives off-screen just long enough for the browser to snapshot it. */
-export function setCardDragImage(e: React.DragEvent, el: HTMLElement) {
+/** Longest side of a card drag ghost, px. */
+const CARD_GHOST_MAX = 72;
+
+/** Use the card itself as the drag ghost: a scaled-down clone, so the
+ * ghost matches the card exactly — rounded corners, fills, labels. A card can
+ * narrow the ghost to just its picture: the ghost clones the node marked
+ * `data-drag-object` when one exists, and drops anything marked
+ * `data-drag-omit` (badges riding on the picture). Live `<video>`/`<canvas>`
+ * content is baked into the clone (clones of those paint blank), and
+ * hover-revealed controls drop out since the clone is not hovered. The clone
+ * lives off-screen just long enough for the browser to snapshot it. */
+export function setCardDragImage(e: React.DragEvent, host: HTMLElement) {
+  const el = host.querySelector<HTMLElement>("[data-drag-object]") ?? host;
   const rect = el.getBoundingClientRect();
   const clone = el.cloneNode(true) as HTMLElement;
-  const srcMedia = el.querySelectorAll<HTMLElement>("video, canvas");
+  clone.querySelectorAll("[data-drag-omit]").forEach((n) => n.remove());
+  // Skip media inside omitted nodes so both lists pair up by index.
+  const srcMedia = Array.from(el.querySelectorAll<HTMLElement>("video, canvas")).filter(
+    (n) => !n.closest("[data-drag-omit]")
+  );
   clone.querySelectorAll<HTMLElement>("video, canvas").forEach((node, i) => {
     const src = srcMedia[i];
     if (!src) return;
@@ -176,16 +187,27 @@ export function setCardDragImage(e: React.DragEvent, el: HTMLElement) {
     }
     node.replaceWith(c);
   });
-  clone.style.position = "absolute";
-  clone.style.top = "-1000px";
-  clone.style.left = "-1000px";
   clone.style.width = `${rect.width}px`;
   clone.style.height = `${rect.height}px`;
   clone.style.margin = "0";
-  clone.style.pointerEvents = "none";
-  document.body.appendChild(clone);
-  e.dataTransfer.setDragImage(clone, e.clientX - rect.left, e.clientY - rect.top);
-  setTimeout(() => clone.remove(), 0);
+  // Compact ghost: the card at full size blankets the rows it is dragged
+  // across, so it shrinks to a thumbnail, scaled around the grab point.
+  const scale = Math.min(1, CARD_GHOST_MAX / Math.max(rect.width, rect.height));
+  clone.style.transform = `scale(${scale})`;
+  clone.style.transformOrigin = "top left";
+  const wrap = document.createElement("div");
+  wrap.style.cssText =
+    "position:absolute;top:-1000px;left:-1000px;pointer-events:none;" +
+    `width:${rect.width * scale}px;height:${rect.height * scale}px;`;
+  wrap.appendChild(clone);
+  document.body.appendChild(wrap);
+  // A grab outside the snapshot (on the card's label) holds the nearest edge.
+  e.dataTransfer.setDragImage(
+    wrap,
+    Math.min(Math.max(e.clientX - rect.left, 0), rect.width) * scale,
+    Math.min(Math.max(e.clientY - rect.top, 0), rect.height) * scale
+  );
+  setTimeout(() => wrap.remove(), 0);
 }
 
 /** The dragged thing itself as the ghost: the tile's `data-drag-object` node —
