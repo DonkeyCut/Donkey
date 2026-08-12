@@ -2654,10 +2654,21 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       if (!src) return;
       // No checkpoint here: the lane coordinator's drag gesture already pushed
       // one at pointer-down, so the whole move is a single undo step.
-      const onTrack0 = src.track === 0;
+      if (place.kind === "track" && place.track === src.track) {
+        return; // a same-track move commits through the lane coordinator
+      }
+
+      // The clip leaves its track, so the hole it leaves closes behind it:
+      // the source row's later clips slide left by its length. Matching by id
+      // keeps the closure correct through an insert's track renumbering.
+      const srcLen = clipLen(src);
+      const closing: [string, number][] = get()
+        .clips.filter(
+          (c) => c.track === src.track && c.id !== id && c.start > src.start + 1e-9
+        )
+        .map((c) => [c.id, Math.max(0, c.start - srcLen)]);
 
       if (place.kind === "track" && place.track === 0) {
-        if (onTrack0) return; // a same-track move commits through the lane coordinator
         // Drop a layer clip down onto track 0: insert at the pointer, rippling
         // later clips right — the same landing a drag along the row gives.
         const { start: at, shifts } = rippleInsert(
@@ -2665,7 +2676,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           Math.max(0, start),
           clipLen(src)
         );
-        const move = new Map(shifts.map((sh) => [sh.id, sh.start]));
+        const move = new Map([...shifts.map((sh) => [sh.id, sh.start] as const), ...closing]);
         set((st) => {
           const clips = st.clips
             .map((c) =>
@@ -2697,22 +2708,29 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
               clipLen(src)
             )
           : { start: Math.max(0, start), shifts: [] as { id: string; start: number }[] };
-      const move = new Map(landing.shifts.map((sh) => [sh.id, sh.start]));
+      const move = new Map([
+        ...landing.shifts.map((sh) => [sh.id, sh.start] as const),
+        ...closing,
+      ]);
       set((st) => {
         // Inserting a new track opens the slot by renumbering the others; the
         // moved clip itself is excluded from the shift, then placed at `track`.
         const shifted =
           place.kind === "insert" ? openInsertSlot(st.clips, place.level, id) : st.clips;
+        const clips = shifted
+          .map((c) =>
+            c.id === id
+              ? { ...c, track, start: landing.start }
+              : move.has(c.id)
+                ? { ...c, start: move.get(c.id)! }
+                : c
+          )
+          .sort((a, b) => a.start - b.start);
         return {
-          clips: shifted
-            .map((c) =>
-              c.id === id
-                ? { ...c, track, start: landing.start }
-                : move.has(c.id)
-                  ? { ...c, start: move.get(c.id)! }
-                  : c
-            )
-            .sort((a, b) => a.start - b.start),
+          clips,
+          // A clip lifted off track 0 shifts the spine, and its cuts carry
+          // the transitions with them.
+          transitions: reanchorTransitions(st.clips, clips, st.transitions),
           ...sole({ kind: "clip", id }),
         };
       });

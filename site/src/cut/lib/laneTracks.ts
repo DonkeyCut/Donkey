@@ -98,6 +98,11 @@ interface LaneAdapter<T> {
   lanePatch?(raw: T, lane: number): Patch<T>;
   /** The media behind the item, so dragging it can feed reference drop zones. */
   assetOf?(s: S, raw: T): MediaAsset | undefined;
+  /** A lifted item's slot closes behind it: while one drags, same-lane items
+   * past its old spot rest slid left by its length, so the run heals the
+   * moment the item leaves. Video tracks set this; free-form lanes (audio,
+   * titles, cues) hold every resting spot. */
+  closesGap?: boolean;
   /** After a committed move (e.g. keep cues sorted). */
   onMoved?(): void;
   /** After a committed move, shift companions that ride along — a grouped
@@ -137,6 +142,7 @@ const clipAdapter: LaneAdapter<VideoClip> = {
   }),
   leftFloor: (c) => Math.max(0, c.start - c.in / speedOf(c)),
   maxLen: videoMaxLen,
+  closesGap: true,
   assetOf: (s, c) => s.assets.find((x) => x.id === c.assetId),
   onMoved: () => useEditor.getState().sortClips(),
 };
@@ -205,6 +211,7 @@ const overlayClipAdapter: LaneAdapter<VideoClip> = {
   }),
   leftFloor: (c) => Math.max(0, c.start - c.in / speedOf(c)),
   maxLen: videoMaxLen,
+  closesGap: true,
   assetOf: (s, c) => s.assets.find((x) => x.id === c.assetId),
 };
 
@@ -413,6 +420,14 @@ export function startLaneMove<V = unknown>(
     .raws(s)
     .filter((r) => ad.view(r).id !== id)
     .map((r) => ({ raw: r, view: ad.view(r) }));
+  // Where a neighbor rests while the drag is live. On a gap-closing lane the
+  // lifted clip's slot heals under it: same-lane neighbors past its old spot
+  // rest slid left by its length, and the parting below lays the lane out
+  // from these closed spots.
+  const restAt = (x: (typeof rest)[number]) =>
+    ad.closesGap && x.view.lane === self.lane && x.view.start > start0 + 1e-9
+      ? x.view.start - len
+      : x.view.start;
   const usedLanes = laneOrder(kind, s, [...rest.map((x) => x.view.lane), self.lane]);
   const targets = snapTargets(s, kind, id);
   const tol = SNAP_PX / ui.pps;
@@ -478,7 +493,8 @@ export function startLaneMove<V = unknown>(
         const target = ui.vertical.resolve(ev);
         if (!ui.vertical.isHome(target)) {
           awayTarget = target;
-          restRestore();
+          // The hole the clip left stays closed while it hovers other tracks.
+          applyMoves(restAt);
           ui.onSnap(null);
           ui.vertical.preview(target, ds, len);
           ui.onDrag({
@@ -543,6 +559,9 @@ export function startLaneMove<V = unknown>(
       // neighbor before it by that neighbor's declared transition, and only
       // pushes the run after it once the overlap into its first item exceeds the
       // item's own declared transition.
+      // Order comes from the original midpoints, so a lifted clip keeps its
+      // spot until the pointer truly crosses a neighbor's middle; the runs
+      // themselves sit at their resting spots (closed on gap-closing lanes).
       const others = rest
         .filter((x) => x.view.lane === lane)
         .sort((a, b) => a.view.start - b.view.start);
@@ -552,19 +571,19 @@ export function startLaneMove<V = unknown>(
       const clampFloor = prev
         ? Math.max(
             0,
-            ...before.slice(0, -1).map((b) => b.view.start + b.view.len),
-            prev.view.start + prev.view.len
+            ...before.slice(0, -1).map((b) => restAt(b) + b.view.len),
+            restAt(prev) + prev.view.len
           )
         : 0;
       const clamped = Math.max(start, clampFloor);
       if (clamped !== start) guide = null;
       slotStart = clamped;
       const delta = after.length
-        ? Math.max(0, clamped + len - after[0].view.start)
+        ? Math.max(0, clamped + len - restAt(after[0]))
         : 0;
       const pushed = new Set(after.map((x) => x.view.id));
       ui.onSnap(guide);
-      applyMoves((x) => (pushed.has(x.view.id) ? x.view.start + delta : x.view.start));
+      applyMoves((x) => (pushed.has(x.view.id) ? restAt(x) + delta : restAt(x)));
       ui.onDrag({ kind, id, targetRow, ghostX: ds * ui.pps, ghostY, slotStart: clamped, len });
     },
     onUp: (_dx, _dy, moved) => {
@@ -578,6 +597,9 @@ export function startLaneMove<V = unknown>(
         return;
       }
       if (ui.vertical && awayTarget !== null && !ui.vertical.isHome(awayTarget)) {
+        // The cross-track commit closes the source gap itself, from resting
+        // starts — undo the live closure first or the run slides twice.
+        restRestore();
         ui.vertical.commit(id, awayTarget, ds);
         return;
       }

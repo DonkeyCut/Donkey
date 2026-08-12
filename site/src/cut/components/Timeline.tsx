@@ -41,7 +41,7 @@ import { useExports } from "@/cut/lib/exportStore";
 import { isDragActive, startDrag, subscribeDragActive } from "@/cut/lib/drag";
 import { CLIP_GAP, startLaneMove, startLaneTrim, type LaneDrag } from "@/cut/lib/laneTracks";
 import { downloadMedia, ensurePeaks, importImage, importStockMusic, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia } from "@/cut/lib/media";
-import { track0Clips, laneGapAt, sameLane, type LaneRef, clipLen, clipSpeed, footprints, getClipSpans, nextFreeStart, overlayLaneOrder, overlayLayers, projectDuration, resolveTransitions, rippleInsert, useEditor } from "@/cut/lib/store";
+import { track0Clips, laneGapAt, sameLane, type LaneRef, clipLen, clipSpeed, getClipSpans, overlayLaneOrder, overlayLayers, projectDuration, resolveTransitions, rippleInsert, useEditor } from "@/cut/lib/store";
 import type { VideoTrackPlacement } from "@/cut/lib/store";
 import { playheadAt, setSkim, skimAt, subscribePlayhead, usePlayhead, useSkim } from "@/cut/lib/playhead";
 import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
@@ -508,21 +508,43 @@ export function Timeline() {
   // clip would land, how long it runs, and what the source looks like, so the
   // preview reads as the segment itself sliding along the row rather than an
   // empty slot.
-  const [assetDrop, setAssetDrop] = useState<{ t: number; len: number; ghost?: DropGhost } | null>(
-    null
-  );
+  const [assetDrop, setAssetDrop] = useState<{
+    t: number;
+    len: number;
+    ghost?: DropGhost;
+    shifts?: { id: string; start: number }[];
+  } | null>(null);
   // Kind of external media being dragged over the timeline (audio vs video).
   const [dropType, setDropType] = useState<"video" | "audio" | null>(null);
   // A video clip is being dragged (internal or external): reveals the
   // would-be new tracks past the stack's edges.
   const [videoDragging, setVideoDragging] = useState(false);
-  // The pending drop preview: which track/gap, at what time, for how long.
-  const [overlayDrop, setOverlayDrop] = useState<
-    { target: TrackTarget; t: number; len: number } | null
-  >(null);
+  // The pending drop preview: which track/gap, at what time, for how long —
+  // and which resident clips slide right to open the room, so the row can
+  // paint them parting ahead of the drop.
+  const [overlayDrop, setOverlayDrop] = useState<{
+    target: TrackTarget;
+    t: number;
+    len: number;
+    shifts?: { id: string; start: number }[];
+    /** External media paints its landing as the segment itself — filmstrip at
+     * true length; without one the slot is the plain highlight (internal drags
+     * already carry their own clip). */
+    ghost?: DropGhost;
+  } | null>(null);
   // Stage-x pixel a snapped title edge sits at, for the guide line (null = off).
   const [snapX, setSnapX] = useState<number | null>(null);
   const videoDragActive = videoDragging || dropType === "video";
+
+  // Residents sliding ahead of an in-flight drop: clip id → the start it
+  // previews at. Painted as an animated left offset, so the row opens room
+  // while the drop hovers and flows back the moment the drag aims elsewhere.
+  const dropPartAt = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const sh of assetDrop?.shifts ?? []) m.set(sh.id, sh.start);
+    for (const sh of overlayDrop?.shifts ?? []) m.set(sh.id, sh.start);
+    return m;
+  }, [assetDrop, overlayDrop]);
 
   // Which drop the cursor is over: an existing track (0 included), or a
   // would-be new track — past the stack's edges, or at a seam between rows.
@@ -579,18 +601,21 @@ export function Timeline() {
   // target track's slot or a between-track insertion line. An existing track
   // takes the drop as an insert at the pointer — its later clips ripple right —
   // so the slot previews the ripple landing the drop will actually take.
-  const previewCross = useCallback((target: TrackTarget | null, start = 0, len = 0) => {
-    if (target === null) return setOverlayDrop(null);
-    const t =
-      target.kind === "track"
-        ? rippleInsert(
-            useEditor.getState().clips.filter((c) => c.track === target.track),
-            Math.max(0, start),
-            len
-          ).start
-        : start;
-    setOverlayDrop({ target, t, len });
-  }, []);
+  const previewCross = useCallback(
+    (target: TrackTarget | null, start = 0, len = 0, ghost?: DropGhost) => {
+      if (target === null) return setOverlayDrop(null);
+      const landing =
+        target.kind === "track"
+          ? rippleInsert(
+              useEditor.getState().clips.filter((c) => c.track === target.track),
+              Math.max(0, start),
+              len
+            )
+          : { start, shifts: [] };
+      setOverlayDrop({ target, t: landing.start, len, shifts: landing.shifts, ghost });
+    },
+    []
+  );
 
   // Releasing a track-0 clip on any other track lifts it out onto that track
   // (or a new one); on its own track the lane coordinator commits the move.
@@ -1216,22 +1241,59 @@ export function Timeline() {
   };
 
   // The video being dragged — project media, a library clip, or an image ref
-  // (which lands as a still).
-  const draggedVideo = (e: React.DragEvent): { duration: number } | null => {
+  // (which lands as a still) — with the ghost its landing segment paints.
+  const draggedVideo = (e: React.DragEvent): { duration: number; ghost: DropGhost } | null => {
     if (hasLibraryDrag(e)) {
       const lib = draggingLibrary();
       if (!lib || !isClipMedia(lib.type)) return null;
-      return { duration: lib.type === "image" ? STILL_SECONDS : lib.duration };
+      return {
+        duration: lib.type === "image" ? STILL_SECONDS : lib.duration,
+        ghost: {
+          url: libraryMediaUrl(lib.fileName, lib.residency),
+          kind: lib.type,
+          aspect: lib.width && lib.height ? lib.width / lib.height : undefined,
+        },
+      };
     }
     const id = draggingAssetId();
     if (id) {
       const asset = useEditor.getState().assets.find((a) => a.id === id);
       if (!asset || stickerOf(asset) || !isClipMedia(asset.type)) return null;
-      return { duration: asset.type === "image" ? STILL_SECONDS : asset.duration };
+      return {
+        duration: asset.type === "image" ? STILL_SECONDS : asset.duration,
+        ghost:
+          asset.type === "image"
+            ? { url: asset.url, kind: "image" }
+            : {
+                url: asset.url,
+                kind: "video",
+                aspect:
+                  asset.width && asset.height ? asset.width / asset.height : undefined,
+                thumbs: asset.thumbs,
+                thumbStep: asset.thumbStep,
+                poster: asset.thumbs?.[0],
+              },
+      };
     }
     const stockVideo = draggingStockVideo(e);
-    if (stockVideo) return { duration: stockVideo.duration ?? 0 };
-    return draggingStill(e) ? { duration: STILL_SECONDS } : null;
+    if (stockVideo) {
+      return {
+        duration: stockVideo.duration ?? 0,
+        ghost: {
+          url: stockVideo.url,
+          kind: "video",
+          aspect:
+            stockVideo.width && stockVideo.height
+              ? stockVideo.width / stockVideo.height
+              : undefined,
+          poster: stockVideo.thumb,
+        },
+      };
+    }
+    const still = draggingStill(e);
+    return still
+      ? { duration: STILL_SECONDS, ghost: { url: still.url, kind: "image" } }
+      : null;
   };
 
   // Drop targets for the upper tracks and between-track seams: dragging a
@@ -1251,7 +1313,8 @@ export function Timeline() {
       previewCross(
         resolveDropTrack(e.clientX, e.clientY),
         Math.max(0, timeAt(e.clientX)),
-        vid.duration
+        vid.duration,
+        vid.ghost
       );
     },
     onDragLeave: (e: React.DragEvent) => {
@@ -1316,18 +1379,40 @@ export function Timeline() {
     });
   };
 
-  // The landing-slot preview on a video row while the drag targets it — the
-  // same chrome as the lane slots.
+  // The dragged media as a floating segment: its filmstrip fills it at true
+  // length and it rides above the row's clips (z-20), so the drag reads as a
+  // placed segment sliding to its landing spot.
+  const dropSegment = (t: number, len: number, h: number, ghost?: DropGhost) => (
+    <div
+      className="tl-asset-drop-slot pointer-events-none absolute top-0.5 z-20 overflow-hidden rounded-lg bg-black opacity-90 shadow-2xl ring-[1.5px] ring-[#0a84ff]/70 transition-[left] duration-100 ease-out"
+      style={{ left: t * pps, width: Math.max(10, len * pps - CLIP_GAP), height: h }}
+    >
+      {ghost && (
+        <DropGhostFilm ghost={ghost} w={Math.max(10, len * pps - CLIP_GAP)} h={h} pps={pps} />
+      )}
+      <span className="absolute top-1 left-1 rounded-[5px] bg-black/65 px-1.5 py-px font-mono text-[10px] tabular-nums text-white">
+        {len.toFixed(1)}s
+      </span>
+    </div>
+  );
+
+  // The landing preview on a video row while the drag targets it. External
+  // media paints the segment itself; an internal drag paints the plain slot —
+  // the same chrome as the lane slots — since the dragged clip is its own ghost.
   const trackSlot = (place: TrackTarget, h: number) =>
     samePlacement(overlayDrop?.target ?? null, place) ? (
-      <div
-        className="pointer-events-none absolute top-0.5 rounded-lg bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4)] transition-[left] duration-150 ease-out"
-        style={{
-          left: overlayDrop!.t * pps,
-          width: Math.max(10, overlayDrop!.len * pps - CLIP_GAP),
-          height: h,
-        }}
-      />
+      overlayDrop!.ghost ? (
+        dropSegment(overlayDrop!.t, overlayDrop!.len, h, overlayDrop!.ghost)
+      ) : (
+        <div
+          className="pointer-events-none absolute top-0.5 rounded-lg bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4)] transition-[left] duration-150 ease-out"
+          style={{
+            left: overlayDrop!.t * pps,
+            width: Math.max(10, overlayDrop!.len * pps - CLIP_GAP),
+            height: h,
+          }}
+        />
+      )
     ) : null;
 
   // Only empty space gets the menu: a right-click on an item sits on a
@@ -1467,57 +1552,27 @@ export function Timeline() {
         // stock drags carry their own shape since they aren't in the project yet.
         let type: "video" | "audio" | "image" | undefined;
         let duration = 0;
-        // What the ghost paints: the source's frames, from wherever it lives.
-        let ghost: DropGhost | undefined;
         if (isLib) {
           const lib = draggingLibrary();
           type = lib?.type;
           duration = lib?.duration ?? 0;
-          if (lib && isClipMedia(lib.type)) {
-            ghost = {
-              url: libraryMediaUrl(lib.fileName, lib.residency),
-              kind: lib.type,
-              aspect: lib.width && lib.height ? lib.width / lib.height : undefined,
-            };
-          }
         } else if (stockMusic) {
           type = "audio";
           duration = stockMusic.duration ?? 0;
         } else if (stockVideo) {
           type = "video";
           duration = stockVideo.duration ?? 0;
-          ghost = {
-            url: stockVideo.url,
-            kind: "video",
-            aspect:
-              stockVideo.width && stockVideo.height
-                ? stockVideo.width / stockVideo.height
-                : undefined,
-            poster: stockVideo.thumb,
-          };
         } else if (still) {
           type = "video";
           duration = STILL_SECONDS;
-          ghost = { url: still.url, kind: "image" };
         } else {
           const id = draggingAssetId();
           const asset = id ? useEditor.getState().assets.find((a) => a.id === id) : null;
           type = asset && asset.type !== "font" ? asset.type : undefined;
           duration = asset?.type === "image" ? STILL_SECONDS : asset?.duration ?? 0;
-          if (asset && !stickerOf(asset) && isClipMedia(asset.type)) {
-            ghost =
-              asset.type === "image"
-                ? { url: asset.url, kind: "image" }
-                : {
-                    url: asset.url,
-                    kind: "video",
-                    aspect: asset.width && asset.height ? asset.width / asset.height : undefined,
-                    thumbs: asset.thumbs,
-                    thumbStep: asset.thumbStep,
-                    poster: asset.thumbs?.[0],
-                  };
-          }
         }
+        // What the ghost paints: the source's frames, from wherever it lives.
+        const ghost = draggedVideo(e)?.ghost;
         // A still rides the video tracks: reveal their guides and new-track rows.
         setDropType(isClipMedia(type) ? "video" : type ?? null);
         if (type === "audio") {
@@ -1540,7 +1595,7 @@ export function Timeline() {
         const place = resolveDropTrack(e.clientX, e.clientY);
         if (place.kind === "insert") {
           setAssetDrop(null);
-          setOverlayDrop({ target: place, t: dropTimeAt(e.clientX), len: duration });
+          setOverlayDrop({ target: place, t: dropTimeAt(e.clientX), len: duration, ghost });
           return;
         }
         setOverlayDrop(null);
@@ -1548,8 +1603,12 @@ export function Timeline() {
         // rippling later clips right, so the ghost sits where the segment will
         // actually land — a box under the pointer that lands minutes away lies.
         const cur = useEditor.getState();
-        const { start } = rippleInsert(track0Clips(cur.clips), dropTimeAt(e.clientX), duration);
-        setAssetDrop({ t: start, len: duration, ghost });
+        const { start, shifts } = rippleInsert(
+          track0Clips(cur.clips),
+          dropTimeAt(e.clientX),
+          duration
+        );
+        setAssetDrop({ t: start, len: duration, ghost, shifts });
       }}
       onDragLeave={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
@@ -2137,7 +2196,11 @@ export function Timeline() {
                       ? laneDrag
                       : null
                   }
-                  parting={laneDrag?.kind === "overlayClip" && laneDrag.id !== span.clip.id}
+                  parting={
+                    (laneDrag?.kind === "overlayClip" && laneDrag.id !== span.clip.id) ||
+                    videoDragActive
+                  }
+                  partAt={dropPartAt.get(span.clip.id)}
                   onDrag={setLaneDrag}
                   onSnap={setSnapX}
                   resolveTarget={resolveDropTrack}
@@ -2185,31 +2248,8 @@ export function Timeline() {
                 className="rounded-lg bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4),inset_0_2px_10px_rgba(10,60,140,0.08)]"
               />
             )}
-            {assetDrop && (
-              // The dragged clip as a floating segment: its filmstrip fills it
-              // and it rides above the row's clips (z-20), so a drag reads as a
-              // placed segment sliding to its landing spot, not a hole to fill.
-              <div
-                className="tl-asset-drop-slot pointer-events-none absolute top-0.5 z-20 overflow-hidden rounded-lg bg-black opacity-90 shadow-2xl ring-[1.5px] ring-[#0a84ff]/70 transition-[left] duration-100 ease-out"
-                style={{
-                  left: assetDrop.t * pps,
-                  width: Math.max(10, assetDrop.len * pps - CLIP_GAP),
-                  height: VIDEO_H - 4,
-                }}
-              >
-                {assetDrop.ghost && (
-                  <DropGhostFilm
-                    ghost={assetDrop.ghost}
-                    w={Math.max(10, assetDrop.len * pps - CLIP_GAP)}
-                    h={VIDEO_H - 4}
-                    pps={pps}
-                  />
-                )}
-                <span className="absolute top-1 left-1 rounded-[5px] bg-black/65 px-1.5 py-px font-mono text-[10px] tabular-nums text-white">
-                  {assetDrop.len.toFixed(1)}s
-                </span>
-              </div>
-            )}
+            {assetDrop &&
+              dropSegment(assetDrop.t, assetDrop.len, VIDEO_H - 4, assetDrop.ghost)}
             {spans.map((span, i) => (
               <ClipView
                 key={span.clip.id}
@@ -2218,7 +2258,10 @@ export function Timeline() {
                 pps={pps}
                 selected={selKeys.has(`clip:${span.clip.id}`)}
                 drag={laneDrag?.kind === "clip" && laneDrag.id === span.clip.id ? laneDrag : null}
-                parting={laneDrag?.kind === "clip" && laneDrag.id !== span.clip.id}
+                parting={
+                  (laneDrag?.kind === "clip" && laneDrag.id !== span.clip.id) || videoDragActive
+                }
+                partAt={dropPartAt.get(span.clip.id)}
                 onDrag={setLaneDrag}
                 onSnap={setSnapX}
                 resolveTarget={resolveDropTrack}
@@ -3105,6 +3148,7 @@ function ClipView({
   selected,
   drag,
   parting,
+  partAt,
   onDrag,
   onSnap,
   resolveTarget,
@@ -3123,6 +3167,8 @@ function ClipView({
   drag: LaneDrag | null;
   /** Another track-0 clip is dragging: animate this one's parting shifts. */
   parting: boolean;
+  /** The start this clip previews at while a hovering drop parts its row. */
+  partAt?: number;
   onDrag: (d: LaneDrag | null) => void;
   onSnap: (x: number | null) => void;
   /** Which drop the given screen point is over (a track / an insert gap). */
@@ -3192,7 +3238,7 @@ function ClipView({
           : parting && "transition-[left] duration-150 ease-out"
       )}
       style={{
-        left: drag ? drag.ghostX : span.start * pps,
+        left: drag ? drag.ghostX : (partAt ?? span.start) * pps,
         top: drag ? 2 + drag.ghostY : undefined,
         width: Math.max(10, w - CLIP_GAP),
         height: VIDEO_H - 4,
@@ -3918,6 +3964,7 @@ function OverlayClipView({
   selected,
   drag,
   parting,
+  partAt,
   onDrag,
   onSnap,
   resolveTarget,
@@ -3934,6 +3981,8 @@ function OverlayClipView({
   drag: LaneDrag | null;
   /** Another upper-layer clip is dragging: animate this one's parting shifts. */
   parting: boolean;
+  /** The start this clip previews at while a hovering drop parts its row. */
+  partAt?: number;
   onDrag: (d: LaneDrag | null) => void;
   onSnap: (x: number | null) => void;
   resolveTarget: (clientX: number, clientY: number) => TrackTarget;
@@ -4001,7 +4050,7 @@ function OverlayClipView({
           : parting && "transition-[left] duration-150 ease-out"
       )}
       style={{
-        left: drag ? drag.ghostX : clip.start * pps,
+        left: drag ? drag.ghostX : (partAt ?? clip.start) * pps,
         top: drag ? 2 + drag.ghostY : undefined,
         width: Math.max(10, w - CLIP_GAP),
         height: OVERLAY_H - 4,
