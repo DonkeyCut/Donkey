@@ -2,14 +2,37 @@ import { Slider as SliderPrimitive } from "@base-ui/react/slider"
 
 import { cn } from "@/lib/utils"
 
+/** Fraction of the range around a snap point that lands exactly on it. */
+const SNAP_REACH = 0.025
+
 function Slider({
   className,
   defaultValue,
   value,
   min = 0,
   max = 100,
+  snap,
+  onValueChange,
   ...props
-}: SliderPrimitive.Root.Props) {
+}: SliderPrimitive.Root.Props & {
+  /**
+   * Detent values: a pointer drag that comes within reach lands exactly on
+   * one, which is how a nudged setting finds its way back to 100% or 0°.
+   * Keyboard steps stay exact, so arrow keys can walk out of a detent.
+   */
+  snap?: number[]
+}) {
+  const handleValueChange: typeof onValueChange =
+    snap && onValueChange
+      ? (v, details) => {
+          if (typeof v === "number" && details.reason !== "keyboard") {
+            const reach = (max - min) * SNAP_REACH
+            const n = v
+            v = snap.find((s) => Math.abs(n - s) <= reach) ?? n
+          }
+          onValueChange(v, details)
+        }
+      : onValueChange
   // One thumb per actual value. A scalar renders exactly one thumb — a phantom
   // second thumb has no backing value, so Base UI ignores any rail click that
   // lands closest to it (the click resolves to a thumb index out of range).
@@ -31,6 +54,7 @@ function Slider({
       value={value}
       min={min}
       max={max}
+      onValueChange={handleValueChange}
       thumbAlignment="edge"
       {...props}
     >

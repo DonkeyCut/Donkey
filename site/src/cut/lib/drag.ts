@@ -86,10 +86,27 @@ export function startDrag(e: React.PointerEvent, opts: DragOpts) {
     latest = ev;
     if (!frame) frame = requestAnimationFrame(flush);
   };
+  // The gesture owns this pointer through release: the browser may still
+  // synthesize a click on the common ancestor of the press and the release
+  // (canceling pointerdown leaves click alone in some engines), and that stray
+  // click lands on whatever sits under the pointer — the stage would take a
+  // handle drag's release as play/pause. Armed at release, disarmed by the
+  // click it eats or by the next press.
+  const swallowClick = (ce: MouseEvent) => {
+    ce.stopPropagation();
+    ce.preventDefault();
+    disarm();
+  };
+  const disarm = () => {
+    window.removeEventListener("click", swallowClick, true);
+    window.removeEventListener("pointerdown", disarm, true);
+  };
   const up = (ev: PointerEvent) => {
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
     window.removeEventListener("pointercancel", up);
+    window.addEventListener("click", swallowClick, true);
+    window.addEventListener("pointerdown", disarm, true);
     // Land the last position before the gesture ends, so a fast release
     // finishes where the pointer was rather than one frame behind it.
     if (frame) cancelAnimationFrame(frame);

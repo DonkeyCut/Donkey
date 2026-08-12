@@ -61,6 +61,10 @@ const ROTATE_BOX = Math.ceil(Math.hypot(ROTATE_GLYPH_W, ROTATE_GLYPH_H));
 /** The glyph's own arrows run top-to-bottom, so a quarter turn puts them
  * left-to-right — the way an unrotated element's top handle drags. */
 const ROTATE_BASE_DEG = -90;
+/** Degrees around a quarter turn where a rotate drag locks on. Wide enough to
+ * feel as a detent at drag speed — a rotate drag covers several degrees per
+ * pointer event, so a narrow window slips by between frames. */
+const ROTATE_SNAP_DEG = 6;
 
 const rotateCursorCache = new Map<number, string>();
 
@@ -212,6 +216,23 @@ export function OverlayLayer({
 
   const clearGuides = useCallback(() => setGuides({ v: [], h: [] }), []);
 
+  // A rotate drag that locks onto a quarter turn paints a guide through the
+  // element's center: the horizontal line at 0°/±180°, the vertical one at
+  // ±90°, matching the axis the element's baseline runs along.
+  const rotationGuide = useCallback(
+    (p: { clientX: number; clientY: number; quarter: number } | null) => {
+      const root = rootRef.current;
+      if (!p || !root) {
+        setGuides({ v: [], h: [] });
+        return;
+      }
+      const r = root.getBoundingClientRect();
+      if (Math.abs(p.quarter) === 90) setGuides({ v: [p.clientX - r.left], h: [] });
+      else setGuides({ v: [], h: [p.clientY - r.top] });
+    },
+    []
+  );
+
   // The selected title and whether the playhead sits inside it. Selecting a
   // title off the playhead (e.g. focusing its text in the panel) edits it in
   // isolation: it shows alone so it never stacks over whatever title is live.
@@ -262,6 +283,7 @@ export function OverlayLayer({
             registerBox={registerBox}
             snap={snap}
             onSnapEnd={clearGuides}
+            rotationGuide={rotationGuide}
           />
         );
       })}
@@ -438,6 +460,7 @@ function OverlayItem({
   registerBox,
   snap,
   onSnapEnd,
+  rotationGuide,
 }: {
   overlay: Overlay;
   selected: boolean;
@@ -448,6 +471,9 @@ function OverlayItem({
   registerBox: (id: string, el: HTMLElement | null) => void;
   snap: (id: string, x: number, y: number, ev: PointerEvent) => { x: number; y: number };
   onSnapEnd: () => void;
+  /** Paint (or clear) the guide line while a rotate drag sits on a quarter
+   * turn; the point is the rotating element's center in client coords. */
+  rotationGuide: (p: { clientX: number; clientY: number; quarter: number } | null) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const editRef = useRef<HTMLDivElement>(null);
@@ -661,10 +687,10 @@ function OverlayItem({
     });
   };
 
-  // The lollipop above the box rotates around the center; plain angles within
-  // 3° of a quarter turn snap to it, and 0 stores as absence. A group orbits
-  // its shared center: positions revolve and each member's rotation shifts by
-  // the same delta.
+  // The lollipop above the box rotates around the center; angles within reach
+  // of a quarter turn snap to it, and 0 stores as absence. A group orbits
+  // its shared center: positions revolve, each member's rotation shifts by
+  // the same delta, and the grabbed element's angle snaps the same way.
   const rotateFrom = (e: React.PointerEvent) => {
     const s = useEditor.getState();
     s.pushHistory();
@@ -677,6 +703,9 @@ function OverlayItem({
     const angleAt = (ev: { clientX: number; clientY: number }) =>
       (Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180) / Math.PI + 90;
     const start0 = angleAt(e);
+    // The grabbed member's start position, for placing the guide while the
+    // group orbit carries its center away from the box rect measured above.
+    const grabbed = members.find((m) => m.id === o.id) ?? o;
     const norm = (deg: number) => ((((deg + 180) % 360) + 360) % 360) - 180;
     // The cursor turns with the element for the whole drag, so its heads keep
     // pointing the way the next bit of travel will take it.
@@ -686,15 +715,30 @@ function OverlayItem({
       onMove: (_dx, _dy, ev) => {
         if (members.length === 1) {
           let deg = norm(angleAt(ev));
+          let locked: number | null = null;
           for (const q of [-180, -90, 0, 90, 180]) {
-            if (Math.abs(deg - q) < 3) deg = q;
+            if (Math.abs(deg - q) < ROTATE_SNAP_DEG) {
+              deg = q;
+              locked = q;
+              break;
+            }
           }
           const rotation = Math.round(deg);
           liveRotation = rotation;
+          rotationGuide(locked === null ? null : { clientX: cx, clientY: cy, quarter: locked });
           writeTransform([{ id: o.id, patch: { rotation: rotation === 0 ? undefined : rotation } }]);
           return;
         }
-        const delta = norm(angleAt(ev) - start0);
+        let delta = norm(angleAt(ev) - start0);
+        const lead = norm((o.rotation ?? 0) + delta);
+        let locked: number | null = null;
+        for (const q of [-180, -90, 0, 90, 180]) {
+          if (Math.abs(lead - q) < ROTATE_SNAP_DEG) {
+            delta = norm(delta + q - lead);
+            locked = q;
+            break;
+          }
+        }
         liveRotation = norm((o.rotation ?? 0) + delta);
         const rad = (delta * Math.PI) / 180;
         // Positions are frame fractions with unequal axes; orbit in a square
@@ -716,7 +760,21 @@ function OverlayItem({
             };
           })
         );
+        const ox0 = (grabbed.x - gx) * ax;
+        const oy0 = (grabbed.y - gy) * ay;
+        rotationGuide(
+          locked === null
+            ? null
+            : {
+                clientX:
+                  cx + (gx + (ox0 * Math.cos(rad) - oy0 * Math.sin(rad)) / ax - grabbed.x) * stageWidth,
+                clientY:
+                  cy + (gy + (ox0 * Math.sin(rad) + oy0 * Math.cos(rad)) / ay - grabbed.y) * stageHeight,
+                quarter: locked,
+              }
+        );
       },
+      onUp: () => rotationGuide(null),
     });
   };
 
@@ -967,8 +1025,10 @@ const MASK_GRIP =
 
 /**
  * On-canvas mask editing, shared by elements and video clips: an amber
- * outline tracing the mask's edge, a center grip that moves it and a corner
- * grip that resizes it (the band height, for mirror). Coordinates are local
+ * outline tracing the mask's edge — its interior moves the mask, a lollipop
+ * above rotates it and a corner grip resizes it (the band height, for
+ * mirror), with the same detents and red guide lines as the element's own
+ * handles. Coordinates are local
  * px around the layer's anchor — the mount point carries the layer's own
  * transform — and screen deltas are folded back through that transform via
  * `rotation`/`poseScale`, then through the mask's own angle for the resize.
@@ -995,6 +1055,11 @@ export function MaskGizmoCore({
   begin: () => void;
 }) {
   const f = maskFrameAt(m, tLocal);
+  // Guide lines while a drag sits on a detent: `rot` is the locked quarter
+  // turn, `x`/`y` mark the mask centered on an axis. Local space, so on an
+  // element they ride its transform the way the mask itself does.
+  const [guide, setGuide] = useState<{ rot?: number; x?: boolean; y?: boolean } | null>(null);
+  const interiorRef = useRef<HTMLDivElement>(null);
   // Screen deltas → the box's local space (undo the element transform).
   const toLocal = (dx: number, dy: number) => {
     const r = (-rotation * Math.PI) / 180;
@@ -1022,6 +1087,9 @@ export function MaskGizmoCore({
   const rx = gx * Math.cos(theta) - gy * Math.sin(theta);
   const ry = gx * Math.sin(theta) + gy * Math.cos(theta);
   const clampSize = (v: number) => Math.min(2, Math.max(0.01, v));
+  // Detents matching the inspector's: size locks onto exactly full frame,
+  // the center onto dead center, within a couple percent of the frame.
+  const snapTo = (v: number, target: number) => (Math.abs(v - target) < 0.02 ? target : v);
   const designScale = Math.min(stageWidth, stageHeight) / 1080;
   const edge = {
     className: "pointer-events-none",
@@ -1038,8 +1106,48 @@ export function MaskGizmoCore({
     startDrag(e, {
       onMove: (dx, dy) => {
         const l = toLocal(dx, dy);
-        writeGeom({ x: g0.x + l.x / stageWidth, y: g0.y + l.y / stageHeight });
+        const x = snapTo(g0.x + l.x / stageWidth, 0);
+        const y = snapTo(g0.y + l.y / stageHeight, 0);
+        setGuide(x === 0 || y === 0 ? { x: x === 0, y: y === 0 } : null);
+        writeGeom({ x, y });
       },
+      onUp: () => setGuide(null),
+    });
+  };
+  // The lollipop turns the mask about its center; quarter turns detent the
+  // same way the element's own handle does. Angles are mask-local — the
+  // mount's transform carries the element's rotation, and a screen-angle
+  // delta equals a local delta under rotate + uniform scale.
+  const rotateMask = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    begin();
+    const box = interiorRef.current?.getBoundingClientRect();
+    const mcx = box ? box.left + box.width / 2 : e.clientX;
+    const mcy = box ? box.top + box.height / 2 : e.clientY;
+    const angleAt = (ev: { clientX: number; clientY: number }) =>
+      (Math.atan2(ev.clientY - mcy, ev.clientX - mcx) * 180) / Math.PI;
+    const a0 = angleAt(e);
+    const g0 = f;
+    const norm = (deg: number) => ((((deg + 180) % 360) + 360) % 360) - 180;
+    let liveRot = rotation + g0.rotation;
+    startDrag(e, {
+      cursor: () => rotateCursor(liveRot),
+      onMove: (_dx, _dy, ev) => {
+        let deg = norm(g0.rotation + (angleAt(ev) - a0));
+        let locked: number | null = null;
+        for (const q of [-180, -90, 0, 90, 180]) {
+          if (Math.abs(deg - q) < ROTATE_SNAP_DEG) {
+            deg = q;
+            locked = q;
+            break;
+          }
+        }
+        const rot = Math.round(deg);
+        liveRot = rotation + rot;
+        setGuide(locked === null ? null : { rot: locked });
+        writeGeom({ rotation: rot });
+      },
+      onUp: () => setGuide(null),
     });
   };
   // The whole interior moves the mask, so a drag can start anywhere inside
@@ -1121,12 +1229,12 @@ export function MaskGizmoCore({
                 const my = -l.x * Math.sin(theta) + l.y * Math.cos(theta);
                 writeGeom(
                   m.kind === "square"
-                    ? { w: clampSize(g0.w + (2 * mx) / stageWidth) }
+                    ? { w: clampSize(snapTo(g0.w + (2 * mx) / stageWidth, 1)) }
                     : m.kind === "mirror"
-                      ? { h: clampSize(g0.h + (2 * my) / stageHeight) }
+                      ? { h: clampSize(snapTo(g0.h + (2 * my) / stageHeight, 1)) }
                       : {
-                          w: clampSize(g0.w + (2 * mx) / stageWidth),
-                          h: clampSize(g0.h + (2 * my) / stageHeight),
+                          w: clampSize(snapTo(g0.w + (2 * mx) / stageWidth, 1)),
+                          h: clampSize(snapTo(g0.h + (2 * my) / stageHeight, 1)),
                         }
                 );
               },

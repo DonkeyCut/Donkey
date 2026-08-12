@@ -258,6 +258,7 @@ function OptionsTab() {
             min={24}
             max={120}
             step={1}
+            snap={[captionStyle(subtitles.style).size]}
             value={subtitles.size ?? captionStyle(subtitles.style).size}
             onValueChange={(v) => useEditor.getState().setSubtitlesView({ size: Number(v) })}
           />

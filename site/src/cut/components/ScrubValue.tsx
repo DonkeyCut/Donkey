@@ -20,6 +20,7 @@ export function ScrubValue({
   max,
   step,
   keyStep,
+  snap,
   format,
   parse,
   onScrub,
@@ -32,6 +33,9 @@ export function ScrubValue({
   max: number;
   step: number;
   keyStep?: number;
+  /** Detent values: a drag passing within a few steps lands exactly on one.
+   * Arrow keys and typed entries stay exact. */
+  snap?: number[];
   format: (v: number) => string;
   parse: (raw: string) => number | null;
   onScrub?: (v: number) => void;
@@ -43,6 +47,10 @@ export function ScrubValue({
   const [draft, setDraft] = useState("");
   const [preview, setPreview] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  // The readout's rendered width, held while the editor is open so swapping
+  // the button for an input never reflows the row around it.
+  const [editWidth, setEditWidth] = useState(0);
   const skipBlur = useRef(false);
   // Arrow keys inside the editor apply live through onScrub; these carry the
   // pre-edit value so Escape (or garbage text) can put it back.
@@ -62,6 +70,7 @@ export function ScrubValue({
   const openEditor = () => {
     skipBlur.current = false;
     liveArrowed.current = false;
+    setEditWidth(buttonRef.current?.offsetWidth ?? 0);
     editStart.current = value;
     setDraft(format(value));
     setEditing(true);
@@ -88,10 +97,12 @@ export function ScrubValue({
         autoFocus
         value={draft}
         aria-label={label}
-        // Mono font, so ch tracks the content width as the user types.
-        style={{ width: `${Math.max(draft.length, 3) + 1}ch` }}
+        // At least as wide as the readout it replaced (so the row holds
+        // still); mono font, so ch grows it with what the user types. The
+        // underline is a shadow — a border would add a pixel of height.
+        style={{ width: `${Math.max(draft.length, 3) + 1}ch`, minWidth: editWidth }}
         className={cn(
-          "border-b border-primary/60 bg-transparent text-right font-mono text-[11.5px] tabular-nums text-foreground outline-none",
+          "bg-transparent text-right font-mono text-[11.5px] tabular-nums text-foreground shadow-[0_1px_0_0] shadow-primary/60 outline-none",
           className
         )}
         onChange={(e) => setDraft(e.target.value)}
@@ -132,6 +143,7 @@ export function ScrubValue({
 
   return (
     <button
+      ref={buttonRef}
       type="button"
       aria-label={label}
       title="Drag to adjust · click to type"
@@ -151,7 +163,10 @@ export function ScrubValue({
         if (!d.moved && Math.abs(dx) < 3) return;
         d.moved = true;
         // 2px per step; Shift coarsens to ×10.
-        d.last = clamp(d.startValue + (dx / 2) * step * (e.shiftKey ? 10 : 1));
+        let next = clamp(d.startValue + (dx / 2) * step * (e.shiftKey ? 10 : 1));
+        const near = snap?.find((s) => Math.abs(next - s) <= 3 * step);
+        if (near !== undefined) next = clamp(near);
+        d.last = next;
         if (onScrub) onScrub(d.last);
         else setPreview(d.last);
       }}
@@ -228,8 +243,8 @@ export function parsePercentInput(raw: string): number | null {
   return m ? Number(m[1]) / 100 : null;
 }
 
-/** Plain number, for unitless fields like text size. */
+/** Plain or signed number, degree sign allowed: "64", "-12", "12°". */
 export function parseNumberInput(raw: string): number | null {
-  const m = raw.trim().match(/^\d*\.?\d+$/);
+  const m = raw.trim().replace(/°$/, "").match(/^-?\d*\.?\d+$/);
   return m ? Number(m[0]) : null;
 }
