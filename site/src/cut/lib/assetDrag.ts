@@ -143,19 +143,19 @@ const CARD_GHOST_MAX = 72;
  * content is baked into the clone (clones of those paint blank), and
  * hover-revealed controls drop out since the clone is not hovered. The clone
  * lives off-screen just long enough for the browser to snapshot it. */
-export function setCardDragImage(e: React.DragEvent, host: HTMLElement) {
-  const el = host.querySelector<HTMLElement>("[data-drag-object]") ?? host;
-  const rect = el.getBoundingClientRect();
-  const clone = el.cloneNode(true) as HTMLElement;
+/** Ready a clone for ghost duty: drop `data-drag-omit` nodes (badges riding on
+ * the picture) and bake live `<video>`/`<canvas>` frames into canvases, since
+ * clones of those paint blank. */
+function bakeGhostClone(src: HTMLElement, clone: HTMLElement) {
   clone.querySelectorAll("[data-drag-omit]").forEach((n) => n.remove());
   // Skip media inside omitted nodes so both lists pair up by index.
-  const srcMedia = Array.from(el.querySelectorAll<HTMLElement>("video, canvas")).filter(
+  const srcMedia = Array.from(src.querySelectorAll<HTMLElement>("video, canvas")).filter(
     (n) => !n.closest("[data-drag-omit]")
   );
   clone.querySelectorAll<HTMLElement>("video, canvas").forEach((node, i) => {
-    const src = srcMedia[i];
-    if (!src) return;
-    const r = src.getBoundingClientRect();
+    const from = srcMedia[i];
+    if (!from) return;
+    const r = from.getBoundingClientRect();
     const c = document.createElement("canvas");
     c.width = Math.max(1, Math.round(r.width * devicePixelRatio));
     c.height = Math.max(1, Math.round(r.height * devicePixelRatio));
@@ -166,20 +166,20 @@ export function setCardDragImage(e: React.DragEvent, host: HTMLElement) {
     const ctx = c.getContext("2d");
     if (ctx) {
       try {
-        if (src instanceof HTMLVideoElement) {
+        if (from instanceof HTMLVideoElement) {
           // Match object-cover: scale to fill and center-crop.
-          const vw = src.videoWidth || r.width;
-          const vh = src.videoHeight || r.height;
+          const vw = from.videoWidth || r.width;
+          const vh = from.videoHeight || r.height;
           const scale = Math.max(c.width / vw, c.height / vh);
           ctx.drawImage(
-            src,
+            from,
             (c.width - vw * scale) / 2,
             (c.height - vh * scale) / 2,
             vw * scale,
             vh * scale
           );
         } else {
-          ctx.drawImage(src as HTMLCanvasElement, 0, 0, c.width, c.height);
+          ctx.drawImage(from as HTMLCanvasElement, 0, 0, c.width, c.height);
         }
       } catch {
         // A frame that cannot be painted just leaves that slot blank.
@@ -187,6 +187,13 @@ export function setCardDragImage(e: React.DragEvent, host: HTMLElement) {
     }
     node.replaceWith(c);
   });
+}
+
+export function setCardDragImage(e: React.DragEvent, host: HTMLElement) {
+  const el = host.querySelector<HTMLElement>("[data-drag-object]") ?? host;
+  const rect = el.getBoundingClientRect();
+  const clone = el.cloneNode(true) as HTMLElement;
+  bakeGhostClone(el, clone);
   clone.style.width = `${rect.width}px`;
   clone.style.height = `${rect.height}px`;
   clone.style.margin = "0";
@@ -222,10 +229,15 @@ export function setCardDragImage(e: React.DragEvent, host: HTMLElement) {
  * (marked `data-segment-drop`, e.g. the timeline with its track-segment
  * ghost) the object shrinks away and hands over, then returns if the drag
  * leaves again. */
+/** Longest side of an object drag ghost, px: a small sticker rides at its own
+ * size, a panel-width media tile shrinks to a carryable ghost. */
+const OBJECT_GHOST_MAX = 120;
+
 export function setObjectDragImage(e: React.DragEvent) {
   const host = e.currentTarget as HTMLElement;
   const el = host.querySelector<HTMLElement>("[data-drag-object]") ?? host;
   const rect = el.getBoundingClientRect();
+  const fit = Math.min(1, OBJECT_GHOST_MAX / Math.max(rect.width, rect.height));
 
   const blank = document.createElement("canvas");
   blank.width = blank.height = 1;
@@ -243,12 +255,14 @@ export function setObjectDragImage(e: React.DragEvent) {
   root.style.cssText =
     "position:fixed;left:0;top:0;z-index:1000;pointer-events:none;will-change:transform;";
   const object = el.cloneNode(true) as HTMLElement;
+  bakeGhostClone(el, object);
   object.style.width = `${rect.width}px`;
   object.style.height = `${rect.height}px`;
   object.style.margin = "0";
   object.style.opacity = "0.85";
   object.style.transition = "opacity 150ms ease, transform 150ms ease";
   object.style.transformOrigin = `${ox}px ${oy}px`;
+  object.style.transform = `scale(${fit})`;
   root.appendChild(object);
   document.body.appendChild(root);
 
@@ -261,7 +275,7 @@ export function setObjectDragImage(e: React.DragEvent) {
     position(ev.clientX, ev.clientY);
     const handedOver = !!(ev.target as Element | null)?.closest?.("[data-segment-drop]");
     object.style.opacity = handedOver ? "0" : "0.85";
-    object.style.transform = handedOver ? "scale(0.3)" : "scale(1)";
+    object.style.transform = `scale(${handedOver ? fit * 0.3 : fit})`;
   };
   const end = () => {
     root.remove();

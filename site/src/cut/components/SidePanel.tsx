@@ -33,7 +33,7 @@ import {
   hasLibraryDrag,
   hasTemplateDrag,
   setAssetDragData,
-  setCardDragImage,
+  setObjectDragImage,
 } from "@/cut/lib/assetDrag";
 import { draggingRef, useAssetDrop, type AssetRef } from "@/cut/lib/assetRef";
 import { RefDropZone } from "./RefDropZone";
@@ -995,7 +995,7 @@ function AssetCard({ asset, projectId }: { asset: MediaAsset; projectId: string 
       draggable
       onDragStart={(e) => {
         setAssetDragData(e, asset.id);
-        setCardDragImage(e, e.currentTarget);
+        setObjectDragImage(e);
       }}
       onDragEnd={clearAssetDrag}
       onMouseEnter={() => {
@@ -1273,11 +1273,12 @@ function LibraryPanel({ projectId }: { projectId: string }) {
   );
 
   // Let a clip be dragged onto a folder tile to file it (alongside the timeline
-  // drag payload the card already sets). The ghost is the card itself.
+  // drag payload the card already sets). The ghost is the card's picture, and
+  // it hands over to the timeline's segment preview.
   const onCardDragExtra = (e: React.DragEvent, a: LibraryAsset) => {
     e.dataTransfer.setData(LIBRARY_MOVE_MIME, JSON.stringify([a.id]));
     e.dataTransfer.effectAllowed = "copyMove";
-    setCardDragImage(e, e.currentTarget as HTMLElement);
+    setObjectDragImage(e);
   };
 
   const all = assets ?? [];

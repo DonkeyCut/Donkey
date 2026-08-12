@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronLeft, ChevronRight, Maximize2, Search } from "lucide-react";
 import { clearRefDrag, refFromStock, setRefDragData } from "@/cut/lib/assetRef";
+import { setObjectDragImage } from "@/cut/lib/assetDrag";
 import { useLightbox } from "@/cut/lib/lightbox";
 import { useRevealEffect, useRevealFlash } from "@/cut/lib/refReveal";
 import { useImageGen } from "@/cut/lib/imageGen";
@@ -163,7 +164,10 @@ function StockTile({ item }: { item: StockImage }) {
       <button
         className="block w-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
         draggable
-        onDragStart={(e) => setRefDragData(e, refFromStock(item))}
+        onDragStart={(e) => {
+          setRefDragData(e, refFromStock(item));
+          setObjectDragImage(e);
+        }}
         onDragEnd={clearRefDrag}
         onClick={() => useImageGen.getState().openWith(item.prompt)}
       >

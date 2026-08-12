@@ -46,7 +46,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
-import { clearAssetDrag, setCardDragImage, setLibraryDragData } from "@/cut/lib/assetDrag";
+import { clearAssetDrag, setLibraryDragData, setObjectDragImage } from "@/cut/lib/assetDrag";
 import { useInView } from "@/cut/hooks/useInView";
 import { isMediaFile } from "@/cut/lib/media";
 import { patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
@@ -284,7 +284,7 @@ export function LibraryView() {
       e.dataTransfer.setDragImage(ghost, 18, 16);
       setTimeout(() => ghost.remove(), 0);
     } else {
-      setCardDragImage(e, e.currentTarget as HTMLElement);
+      setObjectDragImage(e);
     }
   };
 
