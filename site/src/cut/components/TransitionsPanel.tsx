@@ -7,6 +7,7 @@ import { clearElementDrag, setElementDragData, setObjectDragImage } from "@/cut/
 import { peekEdgeFrame, requestEdgeFrame } from "@/cut/lib/media";
 import { PICKED_RING, pickGridNav, useAssetPick } from "@/cut/lib/assetPick";
 import { getClipSpans, resolveTransitions, useEditor } from "@/cut/lib/store";
+import { usePreviewTimeEvery } from "@/cut/lib/playhead";
 import {
   TRANSITION_STYLE_GROUPS,
   TRANSITION_STYLE_LABELS,
@@ -121,7 +122,7 @@ function useCutFrames(): { a: string | null; b: string | null } {
   const clips = useEditor((s) => s.clips);
   const assets = useEditor((s) => s.assets);
   // Re-pick the cut as the playhead crosses half-second marks.
-  const tick = useEditor((s) => Math.round(s.currentTime * 2));
+  const tick = usePreviewTimeEvery(2);
   const cut = useMemo(() => {
     const spans = getClipSpans(clips, assets);
     let best: {

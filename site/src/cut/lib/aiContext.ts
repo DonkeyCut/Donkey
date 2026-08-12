@@ -4,6 +4,7 @@ import { hasOverlayAnim } from "@donkeycut/effects-kit";
 import { chatOwner } from "./chatAssets";
 import { useGenerate } from "./generate";
 import { getClipSpans, overlayLayers, resolveTransitions, totalDuration, useEditor } from "./store";
+import { playheadAt, skimAt } from "./playhead";
 import { laneCues, subtitleLaneCount } from "./subtitles";
 import { watchSweepActive } from "./watch/sweep";
 import { frameOf, rectOf, regionLabel, type ClipSpan, type Overlay, type VideoClip } from "./types";
@@ -122,8 +123,8 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
       ...(s.fadeIn > 0 ? { fadeIn: r(s.fadeIn) } : {}),
       ...(s.fadeOut > 0 ? { fadeOut: r(s.fadeOut) } : {}),
     },
-    playhead: r(s.currentTime),
-    skimmer: s.skimTime === null ? null : r(s.skimTime),
+    playhead: r(playheadAt()),
+    skimmer: skimAt() === null ? null : r(skimAt()!),
     playing: s.playing,
     selection,
     // Every project asset visible to this chat, timeline-placed or not (media

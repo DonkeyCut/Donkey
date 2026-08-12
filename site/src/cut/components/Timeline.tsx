@@ -43,6 +43,7 @@ import { CLIP_GAP, startLaneMove, startLaneTrim, type LaneDrag } from "@/cut/lib
 import { downloadMedia, ensurePeaks, importImage, importStockMusic, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia } from "@/cut/lib/media";
 import { track0Clips, laneGapAt, sameLane, type LaneRef, clipLen, clipSpeed, footprints, getClipSpans, nextFreeStart, overlayLaneOrder, overlayLayers, projectDuration, resolveTransitions, rippleInsert, useEditor } from "@/cut/lib/store";
 import type { VideoTrackPlacement } from "@/cut/lib/store";
+import { playheadAt, setSkim, skimAt, subscribePlayhead, usePlayhead, useSkim } from "@/cut/lib/playhead";
 import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
 import { EFFECT_LABELS } from "@donkeycut/effects-kit";
@@ -662,14 +663,14 @@ export function Timeline() {
       menuPointer.current = { x: e.clientX, y: e.clientY };
     };
     window.addEventListener("pointermove", track);
-    useEditor.getState().setSkimTime(frameMenu.t);
+    setSkim(frameMenu.t);
     return () => {
       window.removeEventListener("pointermove", track);
       const p = menuPointer.current;
       const r = scrollEl?.getBoundingClientRect();
       const inside =
         !!p && !!r && p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom;
-      useEditor.getState().setSkimTime(inside ? Math.max(0, timeAt(p.x)) : null);
+      setSkim(inside ? Math.max(0, timeAt(p.x)) : null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- timeAt reads live refs
   }, [frameMenu]);
@@ -1003,19 +1004,30 @@ export function Timeline() {
   const dropTimeAt = (clientX: number) => (total <= 0 ? 0 : Math.max(0, timeAt(clientX)));
 
   // Scrub with auto-scroll when the pointer nears the viewport edges.
+  //
+  // Both boxes are measured once, at the press. Reading a rect forces the
+  // browser to lay the page out, and a drag that measured per event paid for
+  // two layouts before it could work out what time the pointer was over.
   const scrub = (e: React.PointerEvent) => {
     const s = useEditor.getState();
     if (s.playing) s.setPlaying(false);
-    s.seek(timeAt(e.clientX));
     const el = scrollRef.current;
+    const innerLeft = innerRef.current?.getBoundingClientRect().left ?? 0;
+    const view = el?.getBoundingClientRect() ?? null;
+    // The inner box travels with the scroller, so an auto-scroll shifts what
+    // a given screen x means; tracking the shift keeps the measurement true
+    // without re-reading the layout.
+    const scroll0 = el?.scrollLeft ?? 0;
+    const at = (clientX: number) =>
+      Math.max(0, (clientX - innerLeft + ((el?.scrollLeft ?? 0) - scroll0)) / pps);
+    useEditor.getState().seek(at(e.clientX));
     startDrag(e, {
       onMove: (_dx, _dy, ev) => {
-        if (el) {
-          const r = el.getBoundingClientRect();
-          if (ev.clientX > r.right - 36) el.scrollLeft += 14;
-          else if (ev.clientX < r.left + 36) el.scrollLeft -= 14;
+        if (el && view) {
+          if (ev.clientX > view.right - 36) el.scrollLeft += 14;
+          else if (ev.clientX < view.left + 36) el.scrollLeft -= 14;
         }
-        useEditor.getState().seek(timeAt(ev.clientX));
+        useEditor.getState().seek(at(ev.clientX));
       },
     });
   };
@@ -1046,7 +1058,7 @@ export function Timeline() {
     const clamped = Math.max(floor, Math.min(ZOOM_MAX, next));
     if (Math.abs(clamped - cur.pxPerSec) < 0.01) return;
     if (el) {
-      const t = anchorT ?? cur.currentTime;
+      const t = anchorT ?? playheadAt();
       const px = anchorPx ?? PAD_SIDE + t * cur.pxPerSec - el.scrollLeft;
       pendingAnchor.current = { t, px };
     }
@@ -1062,8 +1074,7 @@ export function Timeline() {
 
   // The editing tools, as the toolbar button and its menu row both invoke them.
   const split = useCallback(() => {
-    const s = useEditor.getState();
-    s.splitAtPlayhead(s.skimTime ?? undefined);
+    useEditor.getState().splitAtPlayhead(skimAt() ?? undefined);
   }, []);
   const addText = useCallback(() => useEditor.getState().addOverlay(), []);
   const deleteSelection = useCallback(() => useEditor.getState().deleteSelection(), []);
@@ -2626,22 +2637,40 @@ function HoverLine({
    * it, and the line darkens — the marker is the skimmer, held. */
   hold: boolean;
 }) {
-  const skimTime = useEditor((s) => s.skimTime);
-  useEffect(() => () => useEditor.getState().setSkimTime(null), []);
+  const skimTime = useSkim();
+  useEffect(() => () => setSkim(null), []);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || hold) return;
+    // The inner box only moves when the timeline scrolls or zooms, so its left
+    // edge is read once per gesture instead of once per pointer event — the
+    // read forces a layout, and a scrub issues hundreds of them.
+    let left = 0;
+    let measured = false;
+    const remeasure = () => {
+      measured = false;
+    };
     const move = (e: PointerEvent) => {
       const inner = innerRef.current;
-      const s = useEditor.getState();
-      if (!inner || e.buttons) return s.setSkimTime(null);
-      const t = (e.clientX - inner.getBoundingClientRect().left) / s.pxPerSec;
-      s.setSkimTime(Math.max(0, t));
+      // The skimmer is a paused affordance: while the cut is playing the
+      // picture belongs to the playhead, wherever the pointer happens to rest.
+      if (!inner || e.buttons || useEditor.getState().playing) return setSkim(null);
+      if (!measured) {
+        left = inner.getBoundingClientRect().left;
+        measured = true;
+      }
+      const t = (e.clientX - left) / useEditor.getState().pxPerSec;
+      setSkim(Math.max(0, t));
     };
-    const leave = () => useEditor.getState().setSkimTime(null);
+    const leave = () => {
+      remeasure();
+      setSkim(null);
+    };
+    el.addEventListener("scroll", remeasure, { passive: true });
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerleave", leave);
     return () => {
+      el.removeEventListener("scroll", remeasure);
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerleave", leave);
     };
@@ -2837,15 +2866,19 @@ function SaveSelectionButton({ labels = true }: { labels?: boolean }) {
   );
 }
 
+/** The running time, on its own so the transport's buttons stay off the clock. */
+function Timecode() {
+  return <span className="tc-now">{formatTimecode(usePlayhead())}</span>;
+}
+
 /** Playback transport, centered in the timeline toolbar. */
 function Transport({ total }: { total: number }) {
   const playing = useEditor((s) => s.playing);
-  const currentTime = useEditor((s) => s.currentTime);
   const hasClips = total > 0;
 
   const toggle = () => {
     const s = useEditor.getState();
-    if (!s.playing && s.currentTime >= total - 0.01) s.seek(0);
+    if (!s.playing && playheadAt() >= total - 0.01) s.seek(0);
     s.setPlaying(!s.playing);
   };
 
@@ -2876,7 +2909,7 @@ function Transport({ total }: { total: number }) {
         )}
       </button>
       <div className="flex min-w-30 items-baseline gap-1.5 font-mono text-xs tabular-nums">
-        <span className="tc-now">{formatTimecode(currentTime)}</span>
+        <Timecode />
         <span className="text-muted-foreground">/</span>
         <span className="text-muted-foreground">{formatTimecode(total)}</span>
       </div>
@@ -2924,14 +2957,13 @@ function Playhead({
   scrollRef: React.RefObject<HTMLDivElement | null>;
   onScrub: (e: React.PointerEvent) => void;
 }) {
-  const t = useEditor((s) => s.currentTime);
   const playing = useEditor((s) => s.playing);
-  const x = t * pps;
+  const ref = useRef<HTMLDivElement>(null);
 
   // Follow the playhead while playing, but yield to the user: any manual
   // scroll pauses following, which resumes after 5s of scroll idle. The
-  // follow effect's own writes are told apart from user scrolls by matching
-  // the scroll-event echo against the value it just wrote.
+  // follow's own writes are told apart from user scrolls by matching the
+  // scroll-event echo against the value it just wrote.
   const manualUntil = useRef(0);
   const followWrote = useRef<number | null>(null);
   useEffect(() => {
@@ -2949,24 +2981,36 @@ function Playhead({
     return () => el.removeEventListener("scroll", onScroll);
   }, [scrollRef]);
 
+  // The marker is one transform. Rendering a component sixty times a second to
+  // write one style property costs a reconcile per frame and moves the same
+  // pixel, so the subscription writes it directly and the scroll-follow rides
+  // along in the same callback.
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el || !playing) return;
-    if (performance.now() < manualUntil.current) return;
-    const sx = x + PAD_SIDE; // playhead position in scroll coordinates
-    if (sx < el.scrollLeft + 24 || sx > el.scrollLeft + el.clientWidth - 80) {
-      el.scrollLeft = Math.max(0, sx - 80);
-      followWrote.current = el.scrollLeft; // read back: the browser clamps
-    }
-  }, [x, playing, scrollRef]);
+    const move = () => {
+      const el = ref.current;
+      if (!el) return;
+      const x = playheadAt() * pps;
+      el.style.transform = `translateX(${x}px)`;
+      const scroller = scrollRef.current;
+      if (!scroller || !playing) return;
+      if (performance.now() < manualUntil.current) return;
+      const sx = x + PAD_SIDE; // playhead position in scroll coordinates
+      if (sx < scroller.scrollLeft + 24 || sx > scroller.scrollLeft + scroller.clientWidth - 80) {
+        scroller.scrollLeft = Math.max(0, sx - 80);
+        followWrote.current = scroller.scrollLeft; // read back: the browser clamps
+      }
+    };
+    move();
+    return subscribePlayhead(move);
+  }, [pps, playing, scrollRef]);
 
   return (
     <div
+      ref={ref}
       // Over the gutter as well as the clips: at 0 the playhead stands on the
       // gutter's own edge. The clips pass under the gutter; the time it is
       // showing does not. The grab cap lives in the pinned ruler.
       className="pointer-events-none absolute top-0 bottom-0 left-0 z-50 w-[1.5px] bg-[#0a84ff] shadow-[0_0_8px_rgba(10,132,255,0.6)]"
-      style={{ transform: `translateX(${x}px)` }}
     />
   );
 }
@@ -2980,11 +3024,18 @@ function PlayheadCap({
   pps: number;
   onScrub: (e: React.PointerEvent) => void;
 }) {
-  const t = useEditor((s) => s.currentTime);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const move = () => {
+      if (ref.current) ref.current.style.transform = `translateX(${playheadAt() * pps}px)`;
+    };
+    move();
+    return subscribePlayhead(move);
+  }, [pps]);
   return (
     <div
+      ref={ref}
       className="tl-playhead-cap absolute top-0 left-[-7px] h-5 w-4 cursor-ew-resize"
-      style={{ transform: `translateX(${t * pps}px)` }}
       onPointerDown={onScrub}
     >
       <div className="mx-auto h-3 w-2.5 rounded-t-[3px] bg-[#0a84ff] [clip-path:polygon(0_0,100%_0,100%_58%,50%_100%,0_58%)]" />

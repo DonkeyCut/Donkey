@@ -16,6 +16,7 @@ import { clearElementDrag, setElementDragData, setObjectDragImage } from "@/cut/
 import { SubTabs } from "@/cut/components/SubTabs";
 import { getPreviewCanvas } from "@/cut/lib/previewCanvas";
 import { useEditor } from "@/cut/lib/store";
+import { usePreviewTimeEvery } from "@/cut/lib/playhead";
 import { isEffectOverlay, type EffectOverlay } from "@/cut/lib/types";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { cn } from "@/lib/utils";
@@ -134,7 +135,7 @@ function usePlayheadFrame(): string | null {
   const [frame, setFrame] = useState<string | null>(() =>
     lastFrame && lastFrame.project === projectId ? lastFrame.url : null
   );
-  const tick = useEditor((s) => Math.round(s.currentTime * 5));
+  const tick = usePreviewTimeEvery(5);
   const epoch = useEditor((s) => s.loadEpoch);
   const hasClips = useEditor((s) => s.clips.length > 0);
   useEffect(() => {

@@ -63,17 +63,38 @@ export function startDrag(e: React.PointerEvent, opts: DragOpts) {
     document.head.append(pin);
   }
 
+  // Pointer events arrive faster than the screen can show the result — a
+  // high-rate mouse fires several times between two frames, and a trackpad
+  // delivers a burst at once. Handling each one runs the whole response (a
+  // seek, a clip move, a re-layout) for a position that is overwritten before
+  // anything is painted. Coalescing to one call per frame does the work once,
+  // for where the pointer actually ended up.
+  let latest: PointerEvent | null = null;
+  let frame = 0;
+  const flush = () => {
+    frame = 0;
+    const ev = latest;
+    if (!ev) return;
+    latest = null;
+    opts.onMove(ev.clientX - startX, ev.clientY - startY, ev);
+    holdCursor();
+  };
   const move = (ev: PointerEvent) => {
     const dx = ev.clientX - startX;
     const dy = ev.clientY - startY;
     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
-    opts.onMove(dx, dy, ev);
-    holdCursor();
+    latest = ev;
+    if (!frame) frame = requestAnimationFrame(flush);
   };
   const up = (ev: PointerEvent) => {
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
     window.removeEventListener("pointercancel", up);
+    // Land the last position before the gesture ends, so a fast release
+    // finishes where the pointer was rather than one frame behind it.
+    if (frame) cancelAnimationFrame(frame);
+    frame = 0;
+    flush();
     pin?.remove();
     activeDrags--;
     dragListeners.forEach((fn) => fn());

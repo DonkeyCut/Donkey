@@ -72,6 +72,7 @@ import { characterPrompt, stockAspectDims, stockTitle } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
 import { applyOverlayPatchSettled, track0Clips, laneGapAt, getClipSpans, nextFreeStart, overlayLayers, parkedTransitions, resolveTransitions, totalDuration, useEditor } from "./store";
+import { playheadAt } from "./playhead";
 import { buildAiContext } from "./aiContext";
 import { sampleClipFrameData } from "./previewCanvas";
 import { laneCues, subtitleLaneCount } from "./subtitles";
@@ -739,7 +740,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   seek: (s, input) => {
       if (!isNum(input.t)) throw new ToolError("t (seconds) is required.");
       s.seek(input.t);
-      return { playhead: useEditor.getState().currentTime };
+      return { playhead: playheadAt() };
   },
 
   set_playing: (s, input) => {
@@ -840,7 +841,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const asset = requireItem(s.assets, input.asset_id, "project asset");
       if (asset.type !== "video" && asset.type !== "image")
         throw new ToolError("Only video or image assets can sit on a video track.");
-      const start = isNum(input.start) ? Math.max(0, input.start) : s.currentTime;
+      const start = isNum(input.start) ? Math.max(0, input.start) : playheadAt();
       // Tracks stack bottom-up from track 0; overlays live on 1+. A stale
       // negative (the old behind-track model) clamps to the first layer.
       const track = isNum(input.track) ? Math.max(1, Math.round(input.track)) : 1;
@@ -1255,7 +1256,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const spans = getClipSpans(s.clips, s.assets);
       if (spans.length === 0) throw new ToolError("The timeline is empty.");
       const total = totalDuration(s.clips);
-      const t = clamp(isNum(input.t) ? input.t : s.currentTime, 0, Math.max(0, total - 0.001));
+      const t = clamp(isNum(input.t) ? input.t : playheadAt(), 0, Math.max(0, total - 0.001));
       const span = spans.find((sp) => t >= sp.start && t < sp.start + sp.len) ?? spans[spans.length - 1];
       const srcTime = span.clip.in + (t - span.start);
       let body: MediaAsset;
@@ -2075,7 +2076,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   voiceover_generate: (s, input) => {
       if (typeof input.script !== "string" || !input.script.trim())
         throw new ToolError("script is required.");
-      const start = isNum(input.start) ? Math.max(0, input.start) : s.currentTime;
+      const start = isNum(input.start) ? Math.max(0, input.start) : playheadAt();
       // Label with the spoken line (capped) so its preview fills across the row.
       const lead = input.script.replace(/\s+/g, " ").trim().slice(0, 200);
       const place = wantsTimeline(input, "start");
@@ -2149,7 +2150,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           note: "The music previews in this chat — the user can play it and drag it onto the soundtrack; pass add_to_timeline or start when they ask for it in the cut.",
         };
       }
-      const start = isNum(input.start) ? Math.max(0, input.start) : cur.currentTime;
+      const start = isNum(input.start) ? Math.max(0, input.start) : playheadAt();
       cur.addAudioFromAsset(asset.id, start);
       // Sits under speech at a soft bed volume by default; the model can raise it.
       const volume = isNum(input.volume) ? clamp(input.volume, 0, 1.5) : 0.4;

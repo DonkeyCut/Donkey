@@ -26,6 +26,7 @@ import {
 import { useElapsed } from "@/cut/hooks/useElapsed";
 import { useCutCaps } from "@/cut/lib/backend/hooks";
 import { TIMELINE_H_MIN, useEditor } from "@/cut/lib/store";
+import { usePreviewSelector } from "@/cut/lib/playhead";
 import { PLATE_PAD_X, PLATE_PAD_Y, PLATE_RADIUS, plateFill } from "@/cut/lib/textRender";
 import {
   FONTS,
@@ -561,10 +562,7 @@ function caretOffset(el: HTMLElement): number {
 }
 
 const CueSpan = memo(function CueSpan({ cue, gap }: { cue: SubtitleCue; gap: number }) {
-  const active = useEditor((s) => {
-    const t = !s.playing && s.skimTime !== null ? s.skimTime : s.currentTime;
-    return t >= cue.start && t < cue.end;
-  });
+  const active = usePreviewSelector((t) => t >= cue.start && t < cue.end);
   const ref = useRef<HTMLSpanElement>(null);
   const [focused, setFocused] = useState(false);
 

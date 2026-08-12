@@ -31,6 +31,7 @@ import type React from "react";
 import { refFromAsset, startPointerRefDrag } from "./assetRef";
 import { startDrag } from "./drag";
 import { track0Clips, clipLen, getClipSpans, moveOverlayGroup, overlayLaneOrder, overlayLayers, projectDuration, useEditor } from "./store";
+import { playheadAt } from "./playhead";
 import type {
   AudioClip,
   MediaAsset,
@@ -253,7 +254,7 @@ function snapTargets(s: S, kind: LaneKind, selfId: string): number[] {
     pts.add(sp.start + sp.len);
   }
   pts.add(projectDuration(s));
-  pts.add(s.currentTime);
+  pts.add(playheadAt());
   for (const k of Object.keys(ADAPTERS) as LaneKind[]) {
     for (const raw of ADAPTERS[k].raws(s)) {
       const v = ADAPTERS[k].view(raw);

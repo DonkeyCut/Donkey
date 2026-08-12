@@ -50,6 +50,7 @@ import { genPulseOverlay, useGenNotify } from "@/cut/lib/genNotify";
 import { enrichAsset } from "@/cut/lib/media";
 import { usePreviewAudio } from "@/cut/lib/previewAudio";
 import { useEditor } from "@/cut/lib/store";
+import { playheadAt } from "@/cut/lib/playhead";
 import { formatTime } from "@/cut/lib/time";
 import { NoCreditsError, synthesizeSpeech } from "@/cut/lib/tts";
 import { useLocalPref } from "@/cut/lib/uiState";
@@ -385,7 +386,7 @@ function VoiceGenerator({ projectId }: { projectId: string }) {
     const settle = useGenNotify.getState().begin("audio");
     setError(null);
     try {
-      const playhead = useEditor.getState().currentTime;
+      const playhead = playheadAt();
       // Label with the spoken line, not just its first words, so the preview
       // fills across the row (each surface truncates to its own width). Collapse
       // whitespace and cap it so project.json stays lean.

@@ -16,6 +16,7 @@ import { useInView } from "@/cut/hooks/useInView";
 import { revealRef } from "@/cut/lib/refReveal";
 import { formatTime } from "@/cut/lib/time";
 import { clipLen, getClipSpans, useEditor } from "@/cut/lib/store";
+import { playheadAt } from "@/cut/lib/playhead";
 import { AudioPillSurface } from "@/cut/components/AudioPanel";
 import { ScrubValue, parseTimeInput } from "@/cut/components/ScrubValue";
 import { Slider } from "@/components/ui/slider";
@@ -507,7 +508,7 @@ function RefChip({
 function playheadMoment(ref: AssetRef): number | null {
   if (ref.scope !== "clip" && ref.scope !== "project") return null;
   const s = useEditor.getState();
-  const now = s.currentTime;
+  const now = playheadAt();
   const sp = getClipSpans(s.clips, s.assets).find(
     (x) =>
       now >= x.start &&

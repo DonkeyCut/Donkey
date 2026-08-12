@@ -19,6 +19,7 @@ import {
   type Residency,
 } from "./residency";
 import { useEditor } from "./store";
+import { playheadAt } from "./playhead";
 import type { LibraryTemplate, MediaAsset, TemplateMedia, TemplateSaveInput } from "./types";
 import { IMAGE_CLIP_SECONDS, mediaUrl } from "./types";
 
@@ -428,7 +429,7 @@ export async function addTemplateToProject(
     void enrichAsset(asset);
     return asset.id;
   });
-  s.insertTemplate(template, assetIds, at ?? useEditor.getState().currentTime);
+  s.insertTemplate(template, assetIds, at ?? playheadAt());
 }
 
 /** Copy a library template into the project as a project template: its media
@@ -476,7 +477,7 @@ export function addProjectTemplateToTimeline(
     void enrichAsset(asset);
     return asset.id;
   });
-  useEditor.getState().insertTemplate(template, assetIds, at ?? useEditor.getState().currentTime);
+  useEditor.getState().insertTemplate(template, assetIds, at ?? playheadAt());
 }
 
 /** Copy a project asset into the shared library for reuse. It lands on the

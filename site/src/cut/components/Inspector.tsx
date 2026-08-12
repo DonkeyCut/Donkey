@@ -44,6 +44,7 @@ import {
   type OverlayLoopStyle,
 } from "@donkeycut/effects-kit";
 import { clipWindow, useEditor, type EditorState } from "@/cut/lib/store";
+import { usePreviewTime } from "@/cut/lib/playhead";
 import { clipKeyed, clipPoseAt } from "@/cut/lib/types";
 import { AnimationTiles } from "@/cut/components/AnimationTiles";
 import { GenerateSubtitlesAudio } from "@/cut/components/VoicePicker";
@@ -1812,7 +1813,7 @@ function TransformRows({ overlay: o }: { overlay: Overlay }) {
   const opacityCk = useSliderCheckpoint();
   const scaleCk = useSliderCheckpoint();
   const posCk = useSliderCheckpoint();
-  const now = useEditor((s) => s.currentTime);
+  const now = usePreviewTime();
   // With keys in play these rows edit the pose at the playhead rather than the
   // element's resting fields — which is what makes them a track.
   const keyed = hasOverlayKeys(o);
@@ -1969,7 +1970,7 @@ function localTimeOf(o: { start: number; end: number }, now: number): number {
  * element or pulling those same rows.
  */
 function KeyframeControls({ overlay: o }: { overlay: Overlay }) {
-  const now = useEditor((s) => s.currentTime);
+  const now = usePreviewTime();
   const seek = useEditor((s) => s.seek);
   const st = () => useEditor.getState();
   return (
@@ -2108,7 +2109,7 @@ interface MaskTarget {
 function ClipTransformSection({ clip }: { clip: VideoClip }) {
   const clips = useEditor((s) => s.clips);
   const assets = useEditor((s) => s.assets);
-  const now = useEditor((s) => s.currentTime);
+  const now = usePreviewTime();
   const seek = useEditor((s) => s.seek);
   const posCk = useSliderCheckpoint();
   const scaleCk = useSliderCheckpoint();
@@ -2338,7 +2339,7 @@ function ClipMaskSection({ clip }: { clip: VideoClip }) {
  * same contract as Transform; otherwise they edit the mask's resting fields.
  */
 function MaskSection({ target }: { target: MaskTarget }) {
-  const now = useEditor((s) => s.currentTime);
+  const now = usePreviewTime();
   const seek = useEditor((s) => s.seek);
   const posCk = useSliderCheckpoint();
   const sizeCk = useSliderCheckpoint();

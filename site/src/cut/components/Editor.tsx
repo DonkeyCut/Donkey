@@ -46,6 +46,7 @@ import {
   storedAssets,
   useEditor,
 } from "@/cut/lib/store";
+import { playheadAt, skimAt } from "@/cut/lib/playhead";
 import type { MediaAsset } from "@/cut/lib/types";
 import { AiPanel } from "./AiPanel";
 import { ExportDialog } from "./ExportDialog";
@@ -274,7 +275,7 @@ export function Editor({
             const version = res.headers.get("x-cut-doc-version");
             const showing = loadedDocVersion(projectId);
             if (version && showing && version !== showing) {
-              const at = useEditor.getState().currentTime;
+              const at = playheadAt();
               await useEditor.getState().loadProject(projectId, { inPlace: true });
               for (const asset of useEditor.getState().assets) void enrichAsset(asset);
               useEditor.getState().seek(at);
@@ -763,7 +764,7 @@ export function Editor({
 
       if (e.code === "Space" && !controlFocused) {
         e.preventDefault();
-        if (!s.playing && s.currentTime >= projectDuration(s) - 0.01) s.seek(0);
+        if (!s.playing && playheadAt() >= projectDuration(s) - 0.01) s.seek(0);
         s.setPlaying(!s.playing);
       } else if (e.key === "Backspace" || e.key === "Delete") {
         e.preventDefault();
@@ -782,9 +783,9 @@ export function Editor({
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
         e.preventDefault();
         // Cut at the skimmer when the mouse is over the timeline.
-        s.splitAtPlayhead(s.skimTime ?? undefined);
+        s.splitAtPlayhead(skimAt() ?? undefined);
       } else if (e.key.toLowerCase() === "s" && !e.metaKey && !e.ctrlKey) {
-        s.splitAtPlayhead(s.skimTime ?? undefined);
+        s.splitAtPlayhead(skimAt() ?? undefined);
       } else if (e.key.toLowerCase() === "t" && !e.metaKey && !e.ctrlKey) {
         s.addOverlay();
       } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !controlFocused) {
@@ -793,7 +794,7 @@ export function Editor({
         // never pauses); paused, they step a frame — 1s with Shift — for
         // precise editing.
         const step = s.playing ? 1 : e.shiftKey ? 1 : 1 / 30;
-        s.seek(s.currentTime + (e.key === "ArrowLeft" ? -step : step));
+        s.seek(playheadAt() + (e.key === "ArrowLeft" ? -step : step));
       } else if (e.key === "Escape") {
         s.select(null);
       }

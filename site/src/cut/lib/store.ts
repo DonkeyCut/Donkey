@@ -55,6 +55,7 @@ import {
 import { renderMix, transcribeSamples, type CloudTranscribeSpec } from "./cloudTranscribe";
 import { alignCues } from "./cueAlign";
 import { useGenNotify } from "./genNotify";
+import { clampPlayhead, playheadAt, setPlayhead, setSkim } from "./playhead";
 import { engineTranscribeSamples, withEngineStt } from "./localStt";
 import { trackLocale } from "./subtitles";
 import { ANIM_STYLE_IDS, animStyleOfTransition, clipPoseAt, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionStyleOfAnim } from "./types";
@@ -180,7 +181,6 @@ export interface EditorState {
     t: number;
     track: "pose" | "mask";
   } | null;
-  currentTime: number;
   playing: boolean;
   /** While playing a scoped effect preview, the time playback auto-pauses at;
    * null otherwise. Manual seek/play/pause clears it. */
@@ -188,8 +188,6 @@ export interface EditorState {
   pxPerSec: number;
   /** Timeline panel height in px (drag the panel's top border to change). */
   timelineH: number;
-  /** Timeline time under the mouse (the skimmer); null when off the timeline. */
-  skimTime: number | null;
   /** TikTok publishing metadata (caption, hashtags, sound title). */
   publish: { caption: string; tags: string; soundTitle: string; handle: string };
   /** Free-form maker notes: published date, source links, reminders. */
@@ -436,7 +434,6 @@ export interface EditorState {
   detachAudio: () => void;
   /** Split at the given time, or the playhead when omitted. */
   splitAtPlayhead: (at?: number) => void;
-  setSkimTime: (t: number | null) => void;
   setPublish: (patch: Partial<{ caption: string; tags: string; soundTitle: string; handle: string }>) => void;
   setNotes: (patch: Partial<{ text: string; publishedAt: string; links: string[] }>) => void;
   /** Kick off (and poll) an on-device transcription of the current cut. */
@@ -1026,12 +1023,13 @@ function normalizeWrite(prev: EditorState, incoming: Partial<EditorState>): Part
   // overflow — stretches the scroll area into empty space. Clamping here
   // covers every edit that shortens anything, present and future.
   if (next.clips || next.audioClips || next.overlays) {
-    const total = projectDuration({
-      clips: next.clips ?? prev.clips,
-      audioClips: next.audioClips ?? prev.audioClips,
-      overlays: next.overlays ?? prev.overlays,
-    });
-    if ((next.currentTime ?? prev.currentTime) > total) next = { ...next, currentTime: total };
+    clampPlayhead(
+      projectDuration({
+        clips: next.clips ?? prev.clips,
+        audioClips: next.audioClips ?? prev.audioClips,
+        overlays: next.overlays ?? prev.overlays,
+      })
+    );
   }
   return next;
 }
@@ -1153,7 +1151,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     const rest = place.shiftDown
       ? get().overlays.map((o) => ({ ...o, lane: (o.lane ?? 0) + 1 }))
       : get().overlays;
-    const t = aim.at ?? get().currentTime;
+    const t = aim.at ?? playheadAt();
     const total = totalDuration(get().clips);
     const taken = rest
       .filter((o) => (o.lane ?? 0) === place.lane)
@@ -1193,12 +1191,10 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     selection: null,
     multiSelection: [],
     selectedKey: null,
-    currentTime: 0,
     playing: false,
     previewStopAt: null,
     pxPerSec: 60,
     timelineH: TIMELINE_H_DEFAULT,
-    skimTime: null,
     publish: { caption: "", tags: "", soundTitle: "", handle: "" },
     notes: { text: "", publishedAt: "", links: [] },
     subtitles: emptySubtitles(),
@@ -1246,7 +1242,6 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         fadeOut: 0,
         selection: null,
         multiSelection: [],
-        currentTime: 0,
         playing: false,
         previewStopAt: null,
         subtitles: emptySubtitles(),
@@ -1862,7 +1857,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       push();
       // Within its lane the clip slides to the next free slot at or after the
       // target so it never lands on top of an existing sound.
-      const want = Math.max(0, start ?? get().currentTime);
+      const want = Math.max(0, start ?? playheadAt());
       const len = Math.max(MIN_LEN, asset.duration);
       const lane = opts?.lane ?? 0;
       const taken = footprints(get().audioClips.filter((a) => (a.lane ?? 0) === lane));
@@ -1969,7 +1964,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       // people mean: dropped anywhere over one, it opens covering that clip.
       // Off the end of the cut it falls back to the standard length.
       const s0 = get();
-      const t = aim?.at ?? s0.currentTime;
+      const t = aim?.at ?? playheadAt();
       const span = getClipSpans(s0.clips, s0.assets).find(
         (sp) => t >= sp.start - 1e-6 && t < sp.start + sp.len
       );
@@ -2662,8 +2657,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     },
 
     splitAtPlayhead: (at) => {
-      const { clips, audioClips, assets, currentTime, selection } = get();
-      const t = at ?? currentTime;
+      const { clips, audioClips, assets, selection } = get();
+      const t = at ?? playheadAt();
 
       // With a soundtrack clip selected, ⌘B slices it instead.
       if (selection?.kind === "audio") {
@@ -3231,21 +3226,25 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
 
     seek: (t) => {
       const total = projectDuration(get());
+      setPlayhead(Math.max(0, Math.min(total, t)));
       // A manual seek cancels any scoped effect preview.
-      set({ currentTime: Math.max(0, Math.min(total, t)), previewStopAt: null });
+      if (get().previewStopAt !== null) set({ previewStopAt: null });
     },
 
-    // A manual play/pause cancels any scoped effect preview.
-    setPlaying: (p) => set({ playing: p, previewStopAt: null }),
+    // A manual play/pause cancels any scoped effect preview. Starting playback
+    // also drops the skimmer: the picture belongs to the playhead again, and a
+    // pointer left standing over the timeline would otherwise keep claiming it.
+    setPlaying: (p) => {
+      if (p) setSkim(null);
+      set({ playing: p, previewStopAt: null });
+    },
 
     previewRange: (start, end) => {
       const total = projectDuration(get());
       const from = Math.max(0, Math.min(total, start));
       const to = Math.max(from + 0.05, Math.min(total, end));
-      set({ currentTime: from, playing: true, previewStopAt: to });
-    },
-    setSkimTime: (t) => {
-      if (get().skimTime !== t) set({ skimTime: t });
+      setPlayhead(from);
+      set({ playing: true, previewStopAt: to });
     },
     setPublish: (patch) => set((s) => ({ publish: { ...s.publish, ...patch } })),
     setNotes: (patch) => set((s) => ({ notes: { ...s.notes, ...patch } })),
@@ -3972,7 +3971,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       )
         return false;
       push();
-      const t = Math.max(0, s.currentTime);
+      const t = Math.max(0, playheadAt());
       const newSel: Selection[] = [];
       set((cur) => {
         let clips = cur.clips;
@@ -4595,11 +4594,37 @@ export function separateOverlaps<
   };
 }
 
-export function getClipSpans(
-  clips: VideoClip[],
-  assets: MediaAsset[],
-  track = 0
-): ClipSpan[] {
+/**
+ * Spans for one track, cached until the document moves.
+ *
+ * Every frame of playback and every pixel of a scrub asks for these, and some
+ * of the askers are React selectors that run on every store write. Rebuilding
+ * the list each time meant an asset `Map`, a filter/map/sort and a `ClipSpan`
+ * per clip — several times a frame, discarded. Clips and assets are replaced
+ * wholesale on an edit, so identity is a sound cache key: same arrays, same
+ * answer.
+ *
+ * Callers treat the result as read-only. Nothing sorts or pushes into it, and
+ * anything that wants to would be handing the next caller a different timeline.
+ */
+let spansClips: VideoClip[] | null = null;
+let spansAssets: MediaAsset[] | null = null;
+const spansByTrack = new Map<number, ClipSpan[]>();
+
+export function getClipSpans(clips: VideoClip[], assets: MediaAsset[], track = 0): ClipSpan[] {
+  if (clips !== spansClips || assets !== spansAssets) {
+    spansClips = clips;
+    spansAssets = assets;
+    spansByTrack.clear();
+  }
+  const hit = spansByTrack.get(track);
+  if (hit) return hit;
+  const built = buildClipSpans(clips, assets, track);
+  spansByTrack.set(track, built);
+  return built;
+}
+
+function buildClipSpans(clips: VideoClip[], assets: MediaAsset[], track: number): ClipSpan[] {
   // One track's clips in sequence, each with its live dissolve overlap into
   // the next. Track 0 is the spine that drives playback; upper tracks carry
   // their own transitions between their own clips.
@@ -4966,11 +4991,24 @@ export function elementPlacement(
  * runs past it on another video track, the soundtrack, or an element row.
  * Drives the timeline extent, the seek clamp, and export length so content
  * past track 0's end is reachable. */
+let durClips: VideoClip[] | null = null;
+let durAudio: AudioClip[] | null = null;
+let durOverlays: Overlay[] | null = null;
+let durValue = 0;
+
 export function projectDuration(s: {
   clips: VideoClip[];
   audioClips: AudioClip[];
   overlays: Overlay[];
 }): number {
+  // Cached on the same identity rule as the spans above: every seek clamps
+  // against this, so a drag used to walk all three lists per pointer move.
+  if (s.clips === durClips && s.audioClips === durAudio && s.overlays === durOverlays) {
+    return durValue;
+  }
+  durClips = s.clips;
+  durAudio = s.audioClips;
+  durOverlays = s.overlays;
   let end = 0;
   // Anything on any row extends the timeline: a layer or soundtrack running
   // past track 0's end is still reachable, and so is a title or sticker left
@@ -4978,7 +5016,8 @@ export function projectDuration(s: {
   for (const c of s.clips) end = Math.max(end, c.start + clipLen(c));
   for (const a of s.audioClips) end = Math.max(end, a.start + clipLen(a));
   for (const o of s.overlays) end = Math.max(end, o.end);
-  return Math.max(0, end);
+  durValue = Math.max(0, end);
+  return durValue;
 }
 
 /** Spread a cue's words across [start, end], each word's slice proportional to

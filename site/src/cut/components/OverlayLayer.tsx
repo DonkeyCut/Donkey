@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { startDrag } from "@/cut/lib/drag";
+import { useSkim, usePreviewTime } from "@/cut/lib/playhead";
 import { useEditor } from "@/cut/lib/store";
 import {
   captionStyle,
@@ -36,6 +37,8 @@ import {
   type StickerOverlay,
 } from "@/cut/lib/types";
 import { subjectMatteSnapshot } from "@/cut/lib/behindPass";
+import { stageEffectFilter, stageEffectTransform } from "@/cut/lib/effectStack";
+import { useLiveEffects } from "./StageEffects";
 import { cn } from "@/lib/utils";
 
 // Plate geometry as CSS, kept in lockstep with the export burn-in metrics.
@@ -98,20 +101,16 @@ const subtitleBoxId = (lane: number) => `subtitle-caption-${lane}`;
 
 export function OverlayLayer({
   stageWidth,
-  transform,
-  filter,
+  gradeAbove = null,
   from = 0,
   to = Infinity,
   captions = true,
 }: {
   stageWidth: number;
-  /** How a live effect moves the frame (shake, tearing) — the elements travel
-   * with the picture they sit on. */
-  transform?: string;
-  /** The grade of every effect above these elements. An effect filters what
-   * plays under it, so the ones below it wear its look and the ones above it
-   * do not (see StageEffects). */
-  filter?: string;
+  /** Effects on a lane shallower than this one grade and move these elements.
+   * An effect filters what plays under it, so the ones below it wear its look
+   * and the ones above it do not (see StageEffects). Null grades nothing. */
+  gradeAbove?: number | null;
   /** The lanes this slice of the stack draws: [from, to). */
   from?: number;
   to?: number;
@@ -123,13 +122,19 @@ export function OverlayLayer({
     () => allOverlays.filter((o) => laneOf(o) >= from && laneOf(o) < to),
     [allOverlays, from, to]
   );
-  const currentTime = useEditor((s) => s.currentTime);
-  const skimTime = useEditor((s) => s.skimTime);
-  const playing = useEditor((s) => s.playing);
   const selection = useEditor((s) => s.selection);
   const aspect = useEditor((s) => s.aspect);
   // Titles preview under the skimmer too (paused only), matching the canvas.
-  const t = !playing && skimTime !== null ? skimTime : currentTime;
+  const t = usePreviewTime();
+  const skimTime = useSkim();
+  const live = useLiveEffects();
+  // The grade and frame motion of every effect above this slice.
+  const graded = useMemo(
+    () => (gradeAbove === null ? [] : live.filter((e) => e.lane < gradeAbove).map((e) => e.state)),
+    [live, gradeAbove]
+  );
+  const filter = stageEffectFilter(graded);
+  const transform = stageEffectTransform(graded);
 
   const rootRef = useRef<HTMLDivElement>(null);
   // Live box elements per on-screen item (titles and the subtitle caption), so
@@ -211,7 +216,7 @@ export function OverlayLayer({
   // title off the playhead (e.g. focusing its text in the panel) edits it in
   // isolation: it shows alone so it never stacks over whatever title is live.
   // Not while scrubbing — the skimmer must still show the exact frame's titles.
-  const scrubbing = !playing && skimTime !== null;
+  const scrubbing = skimTime !== null;
   const sel =
     selection?.kind === "overlay" ? overlays.find((o) => o.id === selection.id) : undefined;
   const isolate = !!sel && !scrubbing && !(t >= sel.start && t <= sel.end);
@@ -319,11 +324,8 @@ function SubtitleCaption({
   onSnapEnd: () => void;
 }) {
   const subtitles = useEditor((s) => s.subtitles);
-  const currentTime = useEditor((s) => s.currentTime);
-  const skimTime = useEditor((s) => s.skimTime);
-  const playing = useEditor((s) => s.playing);
   const frame = frameOf(useEditor((s) => s.aspect));
-  const t = !playing && skimTime !== null ? skimTime : currentTime;
+  const t = usePreviewTime();
 
   const cues = laneCues(subtitles, lane);
   const cue = cueAt(cues, t);

@@ -10,6 +10,8 @@
 import { useGenerate } from "./generate";
 import { useGenScene } from "./genScene";
 import { enrichAsset, importFileToProject } from "./media";
+import { awaitingFrame, startTrace, stopTrace } from "./perfTrace";
+import { playheadAt } from "./playhead";
 import { useEditor } from "./store";
 
 export function installDevHooks(): void {
@@ -20,5 +22,13 @@ export function installDevHooks(): void {
     useGenScene,
     importFileToProject,
     enrichAsset,
+    playheadAt,
+  };
+  // The perf eval arms and reads the frame trace through here. Off until
+  // `start()` is called, so an ordinary dev session records nothing.
+  (window as unknown as Record<string, unknown>).__cutPerf = {
+    start: startTrace,
+    stop: stopTrace,
+    awaiting: awaitingFrame,
   };
 }

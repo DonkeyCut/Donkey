@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { groupRemap } from "@donkeycut/effects-kit";
 import { adoptTransitionFields, clipLen, deriveTransitionFields, docOverlays, getClipSpans, liftClipLooks, moveOverlayGroup, overlayLaneOrder, normalizeElementLanes, parkedTransitions, placeInRun, projectDuration, reanchorTransitions, separateOverlaps, serializeDoc, useEditor } from "./store";
+import { playheadAt, setPlayhead } from "./playhead";
 import { emptySubtitles } from "./types";
 import type { AudioClip, MediaAsset, SubtitleCue, TextOverlay, VideoClip } from "./types";
 
@@ -604,11 +605,11 @@ describe("delete ripple and gaps", () => {
     const far = vclip({ track: 0, start: 30, out: 4 });
     useEditor.setState({ clips: [keep, far] });
     s().seek(32);
-    expect(s().currentTime).toBeCloseTo(32);
+    expect(playheadAt()).toBeCloseTo(32);
     s().select({ kind: "clip", id: far.id });
     s().deleteSelection();
-    expect(s().currentTime).toBeCloseTo(projectDuration(s()));
-    expect(s().currentTime).toBeLessThanOrEqual(4);
+    expect(playheadAt()).toBeCloseTo(projectDuration(s()));
+    expect(playheadAt()).toBeLessThanOrEqual(4);
   });
 
   test("an overlay left standing keeps the playhead reachable", () => {
@@ -616,7 +617,7 @@ describe("delete ripple and gaps", () => {
     const late = title({ start: 6, end: 9 });
     useEditor.setState({ clips: [clip], overlays: [late], audioClips: [] });
     s().seek(8);
-    expect(s().currentTime).toBeCloseTo(8);
+    expect(playheadAt()).toBeCloseTo(8);
   });
 
   test("removeLaneGap closes the gap on its own track only", () => {
@@ -737,7 +738,8 @@ describe("upper-track transitions", () => {
     const c = vclip({ track: 1, start: 8, out: 4, assetId: av.id });
     useEditor.setState({ assets: [av], clips: [spine, a, c] });
     s().setClipTransition(a.id, 1);
-    useEditor.setState({ selection: { kind: "clip", id: a.id }, currentTime: 4 });
+    useEditor.setState({ selection: { kind: "clip", id: a.id } });
+    setPlayhead(4);
     s().splitAtPlayhead();
     const halves = s().clips.filter((x) => x.track === 1 && x.id !== c.id);
     expect(halves.length).toBe(2);
@@ -938,7 +940,7 @@ describe("bars and clip edges", () => {
       multiSelection: [{ kind: "transition", id: bar.id }],
     });
     expect(s().copySelection()).toBe(true);
-    useEditor.setState({ currentTime: 7.7 }); // in reach of the b|c cut at 8
+    setPlayhead(7.7); // in reach of the b|c cut at 8
     expect(s().paste()).toBe(true);
     expect(s().transitions.length).toBe(2);
     // The paste plays that cut with the copied blend, fields and all.
@@ -962,7 +964,7 @@ describe("bars and clip edges", () => {
       multiSelection: [{ kind: "transition", id: bar.id }],
     });
     s().copySelection();
-    useEditor.setState({ currentTime: 8.2 });
+    setPlayhead(8.2);
     s().paste();
     // One bar on the b|c cut: the pasted wipe; the crossfade left with it.
     expect(s().transitions.length).toBe(2);
@@ -983,7 +985,7 @@ describe("bars and clip edges", () => {
       multiSelection: [{ kind: "transition", id: bar.id }],
     });
     s().copySelection();
-    useEditor.setState({ currentTime: 6 }); // 2s from the cuts at 4 and 8
+    setPlayhead(6); // 2s from the cuts at 4 and 8
     s().paste();
     expect(s().transitions.length).toBe(2);
     const pasted = s().transitions[1];
@@ -1008,7 +1010,7 @@ describe("bars and clip edges", () => {
       ],
     });
     expect(s().copySelection()).toBe(true);
-    useEditor.setState({ currentTime: 8 });
+    setPlayhead(8);
     expect(s().paste()).toBe(true);
     const pastedClips = s().clips.filter((x) => x.id !== a.id && x.id !== b.id);
     expect(pastedClips.map((x) => x.start)).toEqual([8, 11]);
