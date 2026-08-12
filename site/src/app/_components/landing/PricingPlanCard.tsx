@@ -99,6 +99,7 @@ export function PricingPlanCard({ plan }: Props) {
                   border: "2px solid #0F0E0D",
                   borderRadius: 999,
                   display: "inline-flex",
+                  flexShrink: 0,
                   height: 24,
                   justifyContent: "center",
                   width: 24,
