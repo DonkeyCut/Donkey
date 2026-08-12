@@ -1258,7 +1258,12 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const total = totalDuration(s.clips);
       const t = clamp(isNum(input.t) ? input.t : playheadAt(), 0, Math.max(0, total - 0.001));
       const span = spans.find((sp) => t >= sp.start && t < sp.start + sp.len) ?? spans[spans.length - 1];
-      const srcTime = span.clip.in + (t - span.start);
+      // Timeline seconds run at the clip's speed in source time, so a sped-up
+      // clip freezes the frame the preview actually shows.
+      const srcTime =
+        span.clip.in +
+        (t - span.start) *
+          (span.clip.speed && span.clip.speed > 0 ? span.clip.speed : 1);
       let body: MediaAsset;
       if (getBackend().kind === "cloud") {
         // No engine to bake a still video — grab the frame in the browser and
