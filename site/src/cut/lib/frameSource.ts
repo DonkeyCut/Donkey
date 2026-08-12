@@ -301,6 +301,10 @@ export class ClipFrameSource {
       // A real jump: drop the walk and fetch the one frame. Newest ask wins, so
       // a fast drag decodes where it stopped rather than everywhere it crossed.
       this.stopStream();
+      // The jump also starts a new walk story. A finished flag left over from
+      // the old walk would pin playback to the seeked frame on resume: the
+      // ring covers it, so no walk would restart until the frame aged out.
+      this.streamDone = false;
       this.wanted = t;
       void this.pumpSeek();
     }

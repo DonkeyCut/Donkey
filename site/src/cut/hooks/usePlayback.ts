@@ -167,10 +167,14 @@ class Engine {
     this.used.add(src);
     const st = sourceTimeOf(span.clip, t);
     src.want(st, playing);
-    if (src.failed) return MISSING_FRAME;
+    // A failed source that already decoded frames keeps showing the nearest
+    // one it holds — a transient blip (a network drop, a signed URL mid
+    // re-mint) reads as a held frame, and only a source with nothing at all
+    // to show goes missing.
     const frame = src.frameAt(st);
-    if (!frame) return PENDING_FRAME;
-    return { kind: "ready", image: frame.image, width: frame.width, height: frame.height };
+    if (frame)
+      return { kind: "ready", image: frame.image, width: frame.width, height: frame.height };
+    return src.failed ? MISSING_FRAME : PENDING_FRAME;
   }
 
   /** Open and start the decoders for clips about to arrive — on track 0 and
@@ -436,24 +440,24 @@ class Engine {
     // Ask for the master's picture before clearing. A clip nothing has decoded
     // yet answers `pending`, and clearing on the strength of that would black
     // the frame out for as long as the file takes to open — the strobe this
-    // whole design exists to remove. Leave what is on screen, stay dirty, and
-    // paint when there is something to paint.
+    // whole design exists to remove. Leave what is on screen and stay dirty;
+    // the clock, the audio, and the stop checks below still run, so a slow
+    // open can't freeze the playhead or carry playback past a stop mark.
     const masterFrame = master ? this.frameFor(master, t, playing) : MISSING_FRAME;
-    if (masterFrame.kind === "pending") {
-      this.warm(t, playing);
-      this.dirty = true;
-      return;
-    }
-
-    this.comp.clear();
-    if (master) this.drawTrackZero(master, spans, t, playing, masterFrame);
-    this.drawOverlays(t, playing);
-    // The subject-mask pass reads the canvas as it stands beneath it, then
-    // publishes the matte the DOM's front subject-masked elements read.
-    this.comp.subjectMatteProvider = (at) => this.behind.clipMatteOf(this.canvas, at);
-    this.behind.draw(this.canvas, s.overlays, s.assets, t);
+    const pendingMaster = masterFrame.kind === "pending";
     const fadeGain = this.projectFadeGain(t, total);
-    this.comp.drawProjectFade(fadeGain);
+    if (pendingMaster) {
+      this.dirty = true;
+    } else {
+      this.comp.clear();
+      if (master) this.drawTrackZero(master, spans, t, playing, masterFrame);
+      this.drawOverlays(t, playing);
+      // The subject-mask pass reads the canvas as it stands beneath it, then
+      // publishes the matte the DOM's front subject-masked elements read.
+      this.comp.subjectMatteProvider = (at) => this.behind.clipMatteOf(this.canvas, at);
+      this.behind.draw(this.canvas, s.overlays, s.assets, t);
+      this.comp.drawProjectFade(fadeGain);
+    }
 
     // Decoders for what is about to arrive, and the ones nothing needs closed.
     this.warm(t, playing);

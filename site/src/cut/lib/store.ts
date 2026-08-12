@@ -3244,6 +3244,11 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const from = Math.max(0, Math.min(total, start));
       const to = Math.max(from + 0.05, Math.min(total, end));
       setPlayhead(from);
+      // Starting playback drops the skimmer, same as setPlaying: while the
+      // cut plays, the playhead owns the picture everywhere — a skim left
+      // standing would freeze the DOM surfaces on one frame while the canvas
+      // runs.
+      setSkim(null);
       set({ playing: true, previewStopAt: to });
     },
     setPublish: (patch) => set((s) => ({ publish: { ...s.publish, ...patch } })),

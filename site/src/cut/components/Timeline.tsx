@@ -670,7 +670,12 @@ export function Timeline() {
       const r = scrollEl?.getBoundingClientRect();
       const inside =
         !!p && !!r && p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom;
-      setSkim(inside ? Math.max(0, timeAt(p.x)) : null);
+      // Resuming playback while the menu was up (Space) hands the picture
+      // back to the playhead; re-arming the skimmer then would freeze every
+      // DOM surface on the held frame while the canvas plays on.
+      setSkim(
+        inside && !useEditor.getState().playing ? Math.max(0, timeAt(p.x)) : null,
+      );
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- timeAt reads live refs
   }, [frameMenu]);
