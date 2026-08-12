@@ -55,7 +55,7 @@ import {
 import { renderMix, transcribeSamples, type CloudTranscribeSpec } from "./cloudTranscribe";
 import { alignCues } from "./cueAlign";
 import { useGenNotify } from "./genNotify";
-import { clampPlayhead, playheadAt, setPlayhead, setSkim } from "./playhead";
+import { clampPlayhead, playheadAt, previewAt, setPlayhead, setSkim } from "./playhead";
 import { engineTranscribeSamples, withEngineStt } from "./localStt";
 import { trackLocale } from "./subtitles";
 import { ANIM_STYLE_IDS, animStyleOfTransition, clipPoseAt, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionStyleOfAnim } from "./types";
@@ -538,8 +538,9 @@ export interface EditorState {
   endHistoryBatch: () => void;
   /** Copy the selected clip/audio/overlay/title(s) to the timeline clipboard. */
   copySelection: () => boolean;
-  /** Paste the clipboard at the playhead — sliding past anything already on
-   * the target lane — and select the pasted item(s). */
+  /** Paste the clipboard at the preview time (the skimmer while one is live,
+   * the playhead otherwise) — sliding past anything already on the target
+   * lane — and select the pasted item(s). */
   paste: () => boolean;
 }
 
@@ -3976,7 +3977,9 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       )
         return false;
       push();
-      const t = Math.max(0, playheadAt());
+      // The paste lands under the skimmer while one is live, at the playhead
+      // otherwise — the same moment the preview is showing.
+      const t = Math.max(0, previewAt());
       const newSel: Selection[] = [];
       set((cur) => {
         let clips = cur.clips;
@@ -3989,7 +3992,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         // When clips ride the same paste, their transition bars follow them by
         // this shift, so a copied sequence keeps its blends on its own cuts.
         let clipDelta: number | null = null;
-        // Every item aims for the playhead but respects what already sits on
+        // Every item aims for the paste point but respects what already sits on
         // its lane: an occupied spot slides the paste right to the next gap
         // that fits. Earlier items of this same paste count too.
         for (const cb of clipboard) {
@@ -4033,8 +4036,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         // Transition bars land last, against the row as this paste left it.
         // Bars copied together with clips keep their place in the copied
         // sequence; a bar-only paste lands like a drop from the panel — onto
-        // the boundary nearest the playhead when one is in reach (replacing
-        // whatever played there), parked exactly at the playhead otherwise. A
+        // the boundary nearest the paste point when one is in reach (replacing
+        // whatever played there), parked exactly at the paste point otherwise. A
         // multi-bar paste keeps the bars' spacing, anchored by the earliest.
         const barItems = clipboard
           .flatMap((cb) => (cb.kind === "transition" ? [cb.item] : []))

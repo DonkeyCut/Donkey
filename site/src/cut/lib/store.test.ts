@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { groupRemap } from "@donkeycut/effects-kit";
 import { adoptTransitionFields, clipLen, deriveTransitionFields, docOverlays, getClipSpans, liftClipLooks, moveOverlayGroup, overlayLaneOrder, normalizeElementLanes, parkedTransitions, placeInRun, projectDuration, reanchorTransitions, separateOverlaps, serializeDoc, useEditor } from "./store";
-import { playheadAt, setPlayhead } from "./playhead";
+import { playheadAt, setPlayhead, setSkim } from "./playhead";
 import { emptySubtitles } from "./types";
 import type { AudioClip, MediaAsset, SubtitleCue, TextOverlay, VideoClip } from "./types";
 
@@ -87,6 +87,7 @@ const videoLane = (track: number) =>
     .map((c) => ({ start: c.start, end: c.start + clipLen(c) }));
 
 beforeEach(() => {
+  setSkim(null);
   useEditor.setState({
     clips: [],
     transitions: [],
@@ -1018,6 +1019,32 @@ describe("bars and clip edges", () => {
     expect(pastedClips[0].transition).toBeCloseTo(0.5);
     expect(pastedClips[0].transitionStyle).toBe("crosszoom");
     expect(parkedTransitions(s().clips, s().transitions)).toEqual([]);
+  });
+
+  test("paste lands under the skimmer when one is live, sliding clear of the lane", () => {
+    const av = asset(8);
+    const a = vclip({ track: 0, start: 0, out: 3, assetId: av.id });
+    useEditor.setState({
+      assets: [av],
+      clips: [a],
+      selection: { kind: "clip", id: a.id },
+      multiSelection: [{ kind: "clip", id: a.id }],
+    });
+    expect(s().copySelection()).toBe(true);
+    setPlayhead(10);
+    setSkim(5);
+    expect(s().paste()).toBe(true);
+    // The skimmer wins over the playhead.
+    expect(s().clips.map((c) => c.start)).toEqual([0, 5]);
+    // A skim into occupied ground slides to the lane's next gap that fits.
+    setSkim(1);
+    expect(s().paste()).toBe(true);
+    expect(s().clips.map((c) => c.start)).toEqual([0, 5, 8]);
+    expectLaneSound(videoLane(0));
+    // With the pointer off the timeline, the playhead takes over.
+    setSkim(null);
+    expect(s().paste()).toBe(true);
+    expect(s().clips.map((c) => c.start)).toEqual([0, 5, 8, 11]);
   });
 
   test("an animation on a far edge leaves an unrelated transition alone", () => {
