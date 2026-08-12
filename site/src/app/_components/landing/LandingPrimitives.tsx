@@ -154,6 +154,7 @@ export function PillButton({
     minHeight: size === "lg" ? 56 : 40,
     opacity: disabled ? 0.65 : 1,
     textDecoration: "none",
+    whiteSpace: "nowrap",
     transition: "transform 0.15s ease, opacity 0.15s ease",
     ...sizes[size],
     ...variants[variant],
