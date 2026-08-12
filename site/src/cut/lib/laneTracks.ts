@@ -107,6 +107,13 @@ interface LaneAdapter<T> {
 
 const speedOf = (c: { speed?: number }) => (c.speed && c.speed > 0 ? c.speed : 1);
 
+function videoMaxLen(s: S, c: VideoClip): number {
+  const a = s.assets.find((x) => x.id === c.assetId);
+  // A still has no source length, so its clip can stretch to any duration.
+  if (a?.type === "image") return Infinity;
+  return ((a?.duration ?? c.out) - c.in) / speedOf(c);
+}
+
 const clipAdapter: LaneAdapter<VideoClip> = {
   minLen: 0.15,
   // Verticality is the video placement system (upper tracks and insert
@@ -129,12 +136,7 @@ const clipAdapter: LaneAdapter<VideoClip> = {
     patch: { start, in: c.in + (reveal - c.start) * speedOf(c) },
   }),
   leftFloor: (c) => Math.max(0, c.start - c.in / speedOf(c)),
-  maxLen: (s, c) => {
-    const a = s.assets.find((x) => x.id === c.assetId);
-    // A still has no source length, so its clip can stretch to any duration.
-    if (a?.type === "image") return Infinity;
-    return ((a?.duration ?? c.out) - c.in) / speedOf(c);
-  },
+  maxLen: videoMaxLen,
   assetOf: (s, c) => s.assets.find((x) => x.id === c.assetId),
   onMoved: () => useEditor.getState().sortClips(),
 };
@@ -202,8 +204,7 @@ const overlayClipAdapter: LaneAdapter<VideoClip> = {
     patch: { start, in: c.in + (reveal - c.start) * speedOf(c) },
   }),
   leftFloor: (c) => Math.max(0, c.start - c.in / speedOf(c)),
-  maxLen: (s, c) =>
-    ((s.assets.find((x) => x.id === c.assetId)?.duration ?? c.out) - c.in) / speedOf(c),
+  maxLen: videoMaxLen,
   assetOf: (s, c) => s.assets.find((x) => x.id === c.assetId),
 };
 
