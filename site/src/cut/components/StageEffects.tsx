@@ -1,17 +1,22 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
-  effectPreviewState,
   grainTileUrl,
   LEAK_TINT,
   leakGradient,
   streakGradient,
-  type EffectPreviewState,
 } from "@donkeycut/effects-kit";
+import { previewAt, subscribePlayhead, usePreviewTime } from "@/cut/lib/playhead";
 import { useEditor } from "@/cut/lib/store";
 import { isEffectOverlay, laneOf } from "@/cut/lib/types";
-import type { LiveEffect } from "@/cut/lib/effectStack";
+import {
+  hasEffects,
+  liveEffectsAt,
+  stageEffectFilter,
+  stageEffectTransform,
+  type LiveEffect,
+} from "@/cut/lib/effectStack";
 import "./grain.css";
 
 /**
@@ -26,27 +31,59 @@ import "./grain.css";
  * Both exports walk the same stack, so what plays here is what renders.
  */
 
-export { stageEffectTransform, stageSlices, type LiveEffect, type StageSlice } from "@/cut/lib/effectStack";
+export { stageEffectTransform, stageSliceStructure, type LiveEffect, type StageSlice } from "@/cut/lib/effectStack";
 
-/** Every effect live at `t`, deepest lane last. Skimming previews them too,
- * the same as the elements beside them. */
-export function useStageEffects(): LiveEffect[] {
+/**
+ * Every effect live right now, deepest lane last. Skimming previews them too,
+ * the same as the elements beside them.
+ *
+ * This subscribes at frame rate, so only the leaves of the stage call it — the
+ * paints of one lane, the elements of one band. The component that lays the
+ * stage out stays off the clock.
+ */
+export function useLiveEffects(): LiveEffect[] {
   const overlays = useEditor((s) => s.overlays);
-  const currentTime = useEditor((s) => s.currentTime);
-  const skimTime = useEditor((s) => s.skimTime);
-  const playing = useEditor((s) => s.playing);
-  const t = !playing && skimTime !== null ? skimTime : currentTime;
-  return useMemo(
-    () =>
-      overlays
-        .filter(isEffectOverlay)
-        .filter((o) => !o.hidden && t >= o.start && t <= o.end)
-        .map((o) => ({
-          lane: laneOf(o),
-          state: effectPreviewState(o.effect, o.amount, t - o.start, o.focus, o.ramp, o.end - o.start),
-        }))
-        .sort((a, b) => a.lane - b.lane),
-    [overlays, t]
+  const t = usePreviewTime();
+  return useMemo(() => liveEffectsAt(overlays, t), [overlays, t]);
+}
+
+/**
+ * Wear the whole stack's grade and frame motion over the picture.
+ *
+ * The picture is a canvas the engine paints imperatively, and its grade is two
+ * style properties on the box around it. Writing them from a subscription keeps
+ * a project with no effects at zero React work per frame, and one with effects
+ * at two string comparisons.
+ */
+export function StagePictureFx({ children }: { children: React.ReactNode }) {
+  const overlays = useEditor((s) => s.overlays);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const write = (filter: string, transform: string) => {
+      const style = ref.current?.style;
+      if (!style) return;
+      if (style.filter !== filter) style.filter = filter;
+      if (style.transform !== transform) style.transform = transform;
+    };
+    if (!hasEffects(overlays)) {
+      write("", "");
+      return;
+    }
+    const apply = () => {
+      const states = liveEffectsAt(overlays, previewAt()).map((e) => e.state);
+      write(stageEffectFilter(states) ?? "", stageEffectTransform(states) ?? "");
+    };
+    apply();
+    const stop = subscribePlayhead(apply);
+    return () => {
+      stop();
+      write("", "");
+    };
+  }, [overlays]);
+  return (
+    <div ref={ref} className="absolute inset-0">
+      {children}
+    </div>
   );
 }
 
@@ -63,7 +100,12 @@ export function useEffectLanes(): number[] {
 
 /** The frame-wide paints of the effects on one lane, over everything under
  * them and under everything above. */
-export function StageEffectPaint({ states }: { states: EffectPreviewState[] }) {
+export function StageEffectPaint({ lane }: { lane: number }) {
+  const live = useLiveEffects();
+  const states = useMemo(
+    () => live.filter((e) => e.lane === lane).map((e) => e.state),
+    [live, lane]
+  );
   if (states.length === 0) return null;
   const grainUrl = grainTileUrl();
   const grain = Math.max(0, ...states.map((s) => s.grain ?? 0));

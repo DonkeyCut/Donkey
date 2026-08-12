@@ -1,9 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { usePlayback } from "@/cut/hooks/usePlayback";
 import { clearAssetDrag, setAssetDragData } from "@/cut/lib/assetDrag";
 import { startDrag } from "@/cut/lib/drag";
+import {
+  playheadAt,
+  previewAt,
+  subscribePlayhead,
+  usePreviewSelector,
+  useSkim,
+} from "@/cut/lib/playhead";
 import { getClipSpans, projectDuration, useEditor } from "@/cut/lib/store";
 import {
   capturePoster,
@@ -16,19 +23,20 @@ import { clipKeyed, clipPoseAt, frameOf, isFullRect, rectOf, REGION_MAX_SCALE, t
 import { hasMaskKeys, type MaskKey } from "@donkeycut/effects-kit";
 import { cn } from "@/lib/utils";
 import { MaskGizmoCore, OverlayLayer } from "./OverlayLayer";
-import { StageEffectPaint, stageSlices, useEffectLanes, useStageEffects } from "./StageEffects";
+import {
+  StageEffectPaint,
+  StagePictureFx,
+  stageSliceStructure,
+  useEffectLanes,
+} from "./StageEffects";
 
 /** The clip under the playhead, when it overflows the frame in fill mode. */
-function pannableSpan(s: {
-  clips: VideoClip[];
-  assets: MediaAsset[];
-  currentTime: number;
-  aspect: Aspect;
-}): ClipSpan | null {
+function pannableSpan(
+  s: { clips: VideoClip[]; assets: MediaAsset[]; aspect: Aspect },
+  t: number
+): ClipSpan | null {
   const spans = getClipSpans(s.clips, s.assets);
-  const span =
-    spans.find((sp) => s.currentTime >= sp.start && sp.start + sp.len > s.currentTime) ??
-    spans[spans.length - 1];
+  const span = spans.find((sp) => t >= sp.start && sp.start + sp.len > t) ?? spans[spans.length - 1];
   // Pan only makes sense for a full-frame fill clip; a regioned clip is moved
   // with its own preview handle instead.
   if (!span || span.clip.fit !== "fill" || !isFullRect(rectOf(span.clip))) return null;
@@ -39,6 +47,34 @@ function pannableSpan(s: {
   const ox = width * scale - frame.w;
   const oy = height * scale - frame.h;
   return ox > 1 || oy > 1 ? span : null;
+}
+
+/**
+ * Show the grab cursor while the clip under the playhead can be panned.
+ *
+ * Which clip that is changes sixty times a second, and the answer is one class
+ * on one element. Rendering the whole preview to find out would put every
+ * frame of playback through React; the class goes on from a subscription
+ * instead, and only when the answer actually changes.
+ */
+function usePannableCursor(target: RefObject<HTMLElement | null>) {
+  const clips = useEditor((s) => s.clips);
+  const assets = useEditor((s) => s.assets);
+  const aspect = useEditor((s) => s.aspect);
+  useEffect(() => {
+    const el = target.current;
+    if (!el) return;
+    let on: boolean | null = null;
+    const apply = () => {
+      const next = pannableSpan({ clips, assets, aspect }, previewAt()) !== null;
+      if (next === on) return;
+      on = next;
+      el.classList.toggle("cursor-grab", next);
+      el.classList.toggle("active:cursor-grabbing", next);
+    };
+    apply();
+    return subscribePlayhead(apply);
+  }, [target, clips, assets, aspect]);
 }
 
 /** Paint the picture this project's preview last showed, then hand the canvas
@@ -73,18 +109,20 @@ function useCachedFirstFrame(canvasRef: RefObject<HTMLCanvasElement | null>) {
 export function Preview() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const [stage, setStage] = useState({ w: 270, h: 480 });
-  const pannable = useEditor((s) => pannableSpan(s) !== null);
   const aspect = useEditor((s) => s.aspect);
   const frame = frameOf(aspect);
 
   usePlayback(canvasRef);
-  // An effect grades what plays under it, so the stage is built in slices:
-  // the picture, then the elements of each lane band with the look of the
-  // effects above them, and each effect's paints sitting where the effect does.
-  const stageFx = useStageEffects();
+  // An effect grades what plays under it, so the stage is built in slices: the
+  // picture, then the elements of each lane band with the look of the effects
+  // above them, and each effect's paints sitting where the effect does. Only
+  // which lanes hold effects decides the shape, so this component never renders
+  // for the clock; each slice reads the clock for itself.
   const effectLanes = useEffectLanes();
-  const { picture, slices } = stageSlices(stageFx, effectLanes);
+  const slices = useMemo(() => stageSliceStructure(effectLanes), [effectLanes]);
+  usePannableCursor(stageRef);
 
   useEffect(() => {
     setPreviewCanvas(canvasRef.current);
@@ -92,6 +130,17 @@ export function Preview() {
   }, []);
 
   useCachedFirstFrame(canvasRef);
+
+  // The canvas backing store matches the pixels the screen will actually show,
+  // capped at the project's own frame. Painting a 4K backing store into a box
+  // a few hundred pixels wide put every grade, look and mask pass through
+  // millions of pixels nobody could see; the export renders at full size on its
+  // own surface, so nothing about the file changes.
+  const surface = useMemo(() => {
+    const dpr = typeof window === "undefined" ? 1 : Math.min(2, window.devicePixelRatio || 1);
+    const w = Math.max(2, Math.min(frame.w, Math.round(stage.w * dpr)));
+    return { w, h: Math.max(2, Math.round((w * frame.h) / frame.w)) };
+  }, [stage.w, frame.w, frame.h]);
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -115,14 +164,14 @@ export function Preview() {
     const s = useEditor.getState();
     const total = projectDuration(s);
     if (!total) return;
-    if (!s.playing && s.currentTime >= total - 0.01) s.seek(0);
+    if (!s.playing && playheadAt() >= total - 0.01) s.seek(0);
     s.setPlaying(!s.playing);
   };
 
   // Drag a fill-mode clip inside the frame to choose the visible crop.
   const panDrag = (e: React.PointerEvent) => {
     const s = useEditor.getState();
-    const span = pannableSpan(s);
+    const span = pannableSpan(s, previewAt());
     if (!span) return false;
     const fr = frameOf(s.aspect);
     const { width = 1, height = 1 } = span.asset;
@@ -168,7 +217,7 @@ export function Preview() {
     const px = (e.clientX - rct.left) / rct.width;
     const py = (e.clientY - rct.top) / rct.height;
     const s = useEditor.getState();
-    const t = s.currentTime;
+    const t = previewAt();
     let best: { id: string; track: number } | null = null;
     for (const c of s.clips) {
       if (c.hidden) continue;
@@ -198,9 +247,9 @@ export function Preview() {
             so a box dragged past the frame edge stays visible and grabbable. */}
         <div className="relative" style={{ width: stage.w, height: stage.h }}>
         <div
+          ref={stageRef}
           className={cn(
-            "stage absolute inset-0 overflow-hidden rounded-xl bg-black shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_36px_rgba(0,0,0,0.18)]",
-            pannable && "cursor-grab active:cursor-grabbing"
+            "stage absolute inset-0 overflow-hidden rounded-xl bg-black shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_36px_rgba(0,0,0,0.18)]"
           )}
           onPointerDown={(e) => {
             if (
@@ -229,12 +278,12 @@ export function Preview() {
             }
           }}
         >
+          <StagePictureFx>
           <canvas
             ref={canvasRef}
-            width={frame.w}
-            height={frame.h}
+            width={surface.w}
+            height={surface.h}
             className="block size-full"
-            style={{ transform: picture.transform, filter: picture.filter }}
             // Drag the viewport to reference what's on screen: the clip under
             // the playhead travels as a media drag (timeline placement, chat
             // attachment, generation reference). Pan on a fill clip wins —
@@ -243,7 +292,7 @@ export function Preview() {
             onDragStart={(e) => {
               const s = useEditor.getState();
               const spans = getClipSpans(s.clips, s.assets);
-              const t = s.currentTime;
+              const t = previewAt();
               const span =
                 spans.find((sp) => t >= sp.start && sp.start + sp.len > t) ??
                 spans[spans.length - 1];
@@ -252,20 +301,20 @@ export function Preview() {
             }}
             onDragEnd={clearAssetDrag}
           />
+          </StagePictureFx>
           <ClipMaskGizmo stage={stage} />
           {slices.map((slice) =>
             slice.kind === "elements" ? (
               <OverlayLayer
                 key={slice.key}
                 stageWidth={stage.w}
-                transform={slice.transform}
-                filter={slice.filter}
+                gradeAbove={slice.gradeAbove}
                 from={slice.from}
                 to={slice.to}
                 captions={slice.captions}
               />
             ) : (
-              <StageEffectPaint key={slice.key} states={slice.states} />
+              <StageEffectPaint key={slice.key} lane={slice.lane} />
             )
           )}
         </div>
@@ -319,16 +368,24 @@ function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
   const clips = useEditor((s) => s.clips);
   const assets = useEditor((s) => s.assets);
   const aspect = useEditor((s) => s.aspect);
-  const currentTime = useEditor((s) => s.currentTime);
-  const skimTime = useEditor((s) => s.skimTime);
-  const playing = useEditor((s) => s.playing);
+  const skimTime = useSkim();
+  // The handle only cares whether its clip is on screen, so it subscribes to
+  // that answer instead of to the clock: one render when the clip comes and
+  // goes, rather than one per frame while it stays.
+  const selectedClip = selection?.kind === "clip" ? clips.find((c) => c.id === selection.id) : null;
+  const live = usePreviewSelector((t) => {
+    if (!selectedClip) return false;
+    const speed = selectedClip.speed && selectedClip.speed > 0 ? selectedClip.speed : 1;
+    const len = Math.max(0.1, (selectedClip.out - selectedClip.in) / speed);
+    return t >= selectedClip.start && t < selectedClip.start + len;
+  });
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({
     x: null,
     y: null,
   });
   // While hover-scrubbing the preview shows the skimmer's frame, where the
   // selected clip may not even be on screen — selection stays, the handle hides.
-  if (!playing && skimTime !== null) return null;
+  if (skimTime !== null) return null;
 
   // Resolve the selected, live, regioned clip (any track) plus how to patch its
   // rect. A clip's own footprint equals its span length, so one path serves
@@ -339,12 +396,10 @@ function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
   // far the scaled picture overhangs the box (frame px), and the pan to start
   // the gesture from.
   let pan: { id: string; ox: number; oy: number; panX0: number; panY0: number } | null = null;
-  if (selection?.kind === "clip") {
-    const clip = clips.find((c) => c.id === selection.id);
+  {
+    const clip = selectedClip;
     if (clip && !clip.hidden) {
-      const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
-      const len = Math.max(0.1, (clip.out - clip.in) / speed);
-      if (currentTime >= clip.start && currentTime < clip.start + len) {
+      if (live) {
         rect = rectOf(clip);
         apply = (frame) => useEditor.getState().updateClipTransient(clip.id, { frame });
         const asset = assets.find((a) => a.id === clip.assetId);
@@ -481,17 +536,19 @@ function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
 function ClipMaskGizmo({ stage }: { stage: { w: number; h: number } }) {
   const selection = useEditor((s) => s.selection);
   const clips = useEditor((s) => s.clips);
-  const currentTime = useEditor((s) => s.currentTime);
-  const skimTime = useEditor((s) => s.skimTime);
-  const playing = useEditor((s) => s.playing);
-  if (!playing && skimTime !== null) return null;
-  if (selection?.kind !== "clip") return null;
-  const clip = clips.find((c) => c.id === selection.id);
-  if (!clip?.mask || clip.mask.kind === "subject" || clip.hidden) return null;
+  const skimTime = useSkim();
+  // A keyframed mask travels with the clock, so this one does follow every
+  // frame — but only while a masked clip is the selection.
+  const masked =
+    selection?.kind === "clip" ? clips.find((c) => c.id === selection.id) ?? null : null;
+  const armed = !!masked?.mask && masked.mask.kind !== "subject" && !masked.hidden;
+  const tLocal = usePreviewSelector((t) => (armed && masked ? t - masked.start : -1));
+  if (skimTime !== null) return null;
+  const clip = masked;
+  if (!armed || !clip?.mask) return null;
   const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
   const len = Math.max(0.1, (clip.out - clip.in) / speed);
-  if (currentTime < clip.start || currentTime >= clip.start + len) return null;
-  const tLocal = currentTime - clip.start;
+  if (tLocal < 0 || tLocal >= len) return null;
   const rect = rectOf(clip);
   const pose = clipKeyed(clip) ? clipPoseAt(clip, tLocal) : null;
   const ax = pose ? pose.x : rect.x + rect.w / 2;

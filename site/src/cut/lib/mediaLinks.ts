@@ -18,11 +18,11 @@
 //   hands back the same string, so the reload is what clears an element that
 //   failed for any other reason.
 //
-// A re-mint swaps the store's asset URLs in place. Components and the preview
-// engine both key their elements off asset.url, so the swap heals them on
-// render. The store marks the batch at load; a global capture-phase error
-// listener watches DOM elements, and the preview engine reports its detached
-// decoders through reportMediaElementError.
+// A re-mint swaps the store's asset URLs in place. Media elements key off
+// asset.url and the preview's decoder pool compares each source against it, so
+// the swap heals both on the next render. The store marks the batch at load; a
+// global capture-phase error listener watches DOM elements, and the preview's
+// frame sources report their failed reads through reportMediaUrlError.
 import { fetchSignedMediaUrls } from "./backend/cloud";
 import { mediaUrl } from "./types";
 
@@ -141,6 +141,18 @@ function retryElement(el: HTMLImageElement | HTMLMediaElement, src: string, atte
       el.load();
     }
   }, ELEMENT_RETRY_BASE_MS * attempt);
+}
+
+/** A decoder failed to read a media URL. There is no element to reload — the
+ * frame source retries on its own — but an expiring URL may genuinely have
+ * expired, and only a re-mint heals that. The store swap repoints the decoder
+ * pool, which opens a fresh source under the new URL. */
+export function reportMediaUrlError(src: string) {
+  if (!src || src.startsWith("blob:") || src.startsWith("data:")) return;
+  if (!isExpiringUrl(src)) return;
+  if (Date.now() - lastForcedAt < FORCED_GAP_MS) return;
+  lastForcedAt = Date.now();
+  void refreshSignedUrls(true);
 }
 
 /** A media element failed to load. An expiring URL may genuinely have expired,
