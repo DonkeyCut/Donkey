@@ -151,8 +151,8 @@ export function Editor({
           });
       void bind.then((placement) => {
         if (!alive) return;
-        setNeedsApp(!placement.reachable);
         if (placement.reachable) {
+          setNeedsApp(false);
           // loadProject clears `loaded` synchronously before its first await,
           // so marking the mount opened here can never show the editor
           // against leftover state.
@@ -175,6 +175,17 @@ export function Editor({
           waiting = undefined;
           open();
         });
+        // The gate's probe may have reached the engine while the placement
+        // above was resolving — its announcement fired before this
+        // subscription existed. Subscribing first and then reading the
+        // current answer closes that gap in both orders.
+        if (hasLocalCompute()) {
+          waiting();
+          waiting = undefined;
+          open();
+          return;
+        }
+        setNeedsApp(true);
       });
     };
     open();
