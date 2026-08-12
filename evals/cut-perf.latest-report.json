@@ -1,0 +1,142 @@
+{
+  "schema": "cut-perf-eval/v1",
+  "gate": {
+    "scrubP50Ms": 10,
+    "scrubP95Ms": 16.7,
+    "jumpP50Ms": 20,
+    "jumpP95Ms": 32,
+    "boundaryDrops": 0,
+    "longTaskMs": 16
+  },
+  "fixture": {
+    "clips": 6,
+    "clipSeconds": 3
+  },
+  "results": [
+    {
+      "name": "drag-within-a-clip",
+      "bucket": "scrub",
+      "pass": true,
+      "notes": [],
+      "scrub": {
+        "p50": 7.3,
+        "p95": 15.9,
+        "mean": 7.92,
+        "max": 18.8,
+        "n": 41
+      },
+      "longTasks": {
+        "p50": 0,
+        "p95": 0,
+        "mean": 0,
+        "max": 0,
+        "n": 0
+      },
+      "liveSamples": 34
+    },
+    {
+      "name": "drag-across-a-cut",
+      "bucket": "scrub",
+      "pass": true,
+      "notes": [],
+      "scrub": {
+        "p50": 7.1,
+        "p95": 16.1,
+        "mean": 8.45,
+        "max": 20.6,
+        "n": 41
+      },
+      "longTasks": {
+        "p50": 0,
+        "p95": 0,
+        "mean": 0,
+        "max": 0,
+        "n": 0
+      },
+      "liveSamples": 28
+    },
+    {
+      "name": "drag-across-a-transition",
+      "bucket": "scrub",
+      "pass": true,
+      "notes": [],
+      "scrub": {
+        "p50": 7.3,
+        "p95": 15.7,
+        "mean": 8.09,
+        "max": 22.9,
+        "n": 41
+      },
+      "longTasks": {
+        "p50": 0,
+        "p95": 0,
+        "mean": 0,
+        "max": 0,
+        "n": 0
+      },
+      "liveSamples": 28
+    },
+    {
+      "name": "jump-across-the-cut",
+      "bucket": "scrub",
+      "pass": true,
+      "notes": [],
+      "scrub": {
+        "p50": 15.7,
+        "p95": 23.9,
+        "mean": 15.29,
+        "max": 23.9,
+        "n": 41
+      },
+      "longTasks": {
+        "p50": 0,
+        "p95": 0,
+        "mean": 0,
+        "max": 0,
+        "n": 0
+      },
+      "liveSamples": 60
+    },
+    {
+      "name": "play-hard-cuts",
+      "bucket": "playback",
+      "pass": true,
+      "notes": [],
+      "drops": 0,
+      "presented": 2077,
+      "boundaryDrops": 0,
+      "longTasks": {
+        "p50": 0,
+        "p95": 0,
+        "mean": 0,
+        "max": 0,
+        "n": 0
+      },
+      "liveSamples": 60
+    },
+    {
+      "name": "play-with-transitions",
+      "bucket": "boundary",
+      "pass": true,
+      "notes": [],
+      "drops": 0,
+      "presented": 2086,
+      "boundaryDrops": 0,
+      "longTasks": {
+        "p50": 0,
+        "p95": 0,
+        "mean": 0,
+        "max": 0,
+        "n": 0
+      },
+      "liveSamples": 60
+    },
+    {
+      "name": "idle-costs-nothing",
+      "bucket": "playback",
+      "pass": true,
+      "notes": [],
+      "idleTicks": 0
+    }
+  ]
+}

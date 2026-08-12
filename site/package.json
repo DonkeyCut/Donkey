@@ -25,7 +25,8 @@
     "email:dev": "email dev --dir src/emails --port 3001",
     "test": "bun test src packages/effects-kit/src",
     "test:genvideo": "bun run scripts/genvideo-selftest.ts",
-    "eval:genvideo": "bun run scripts/genvideo-eval.ts"
+    "eval:genvideo": "bun run scripts/genvideo-eval.ts",
+    "eval:cut-perf": "bun run scripts/eval-cut-perf.ts"
   },
   "dependencies": {
     "@ai-sdk/react": "^4.0.15",
@@ -94,6 +95,7 @@
     "dotenv-cli": "^11.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
+    "playwright": "^1.62.1",
     "prisma": "^7.8.0",
     "tailwindcss": "^4",
     "typescript": "^5"
