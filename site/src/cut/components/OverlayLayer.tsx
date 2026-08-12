@@ -845,22 +845,21 @@ function OverlayItem({
       </div>
       {selected && !editing && (
         <>
-          {/* The grab zone is wider than the dot, so the rotate cursor shows
-              as the pointer approaches rather than only dead on it. It clears
-              the element's own top edge, so moving is never caught by it. */}
-          <span
+          {/* The lollipop clears the element's own top edge, so moving is
+              never caught by it. */}
+          <RotateGrip
             title="Drag to rotate"
-            className="overlay-rotate absolute -top-8 left-1/2 grid size-7 -translate-x-1/2 place-items-center"
+            color="#0a84ff"
+            className="overlay-rotate absolute -top-8 left-1/2 -translate-x-1/2"
             // The handle rides the element's rotation, so the cursor turns
             // with it and its heads keep pointing along the drag.
             style={{ cursor: rotateCursor(live?.rotation ?? o.rotation ?? 0) }}
             onPointerDown={rotateFrom}
-          >
-            <span className="size-[13px] rounded-full border-[2.5px] border-[#0a84ff] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.4)]" />
-          </span>
-          <span
+          />
+          <Grip
             title="Drag to resize"
-            className="overlay-resize absolute -right-2 -bottom-2 size-[13px] cursor-nwse-resize rounded-full border-[2.5px] border-[#0a84ff] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.4)]"
+            color="#0a84ff"
+            className="overlay-resize absolute -right-2 -bottom-2 cursor-nwse-resize"
             onPointerDown={resizeFrom}
           />
           {o.mask && o.mask.kind !== "subject" && (
@@ -1018,10 +1017,40 @@ function useMaskCss(
   }, [active, m, box, o.x, o.y, stageWidth, stageHeight, scale, keyTick, snapTick]);
 }
 
-/** Handle styling shared by the mask gizmo's grips: amber, so mask handles
- * never read as the element's own blue chrome. */
-const MASK_GRIP =
-  "absolute z-10 rounded-full border-[2.5px] border-[#ff9f0a] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.4)]";
+/** On-canvas handle dot shared by every gizmo: a white dot with a colored
+ * ring. The mask's amber is the default; a caller recolors it for its own
+ * chrome (elements and clip regions pass selection blue). */
+export function Grip({
+  color = "#ff9f0a",
+  className,
+  style,
+  ...rest
+}: React.ComponentProps<"span"> & { color?: string }) {
+  return (
+    <span
+      {...rest}
+      className={cn(
+        "size-[13px] rounded-full border-[2.5px] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.4)]",
+        className
+      )}
+      style={{ borderColor: color, ...style }}
+    />
+  );
+}
+
+/** Rotate lollipop: the dot centered in a 28px grab zone, so the rotate
+ * cursor shows as the pointer approaches rather than only dead on it. */
+export function RotateGrip({
+  color,
+  className,
+  ...rest
+}: React.ComponentProps<"span"> & { color?: string }) {
+  return (
+    <span {...rest} className={cn("grid size-7 place-items-center", className)}>
+      <Grip color={color} />
+    </span>
+  );
+}
 
 /**
  * On-canvas mask editing, shared by elements and video clips: an amber
@@ -1056,9 +1085,16 @@ export function MaskGizmoCore({
 }) {
   const f = maskFrameAt(m, tLocal);
   // Guide lines while a drag sits on a detent: `rot` is the locked quarter
-  // turn, `x`/`y` mark the mask centered on an axis. Local space, so on an
-  // element they ride its transform the way the mask itself does.
-  const [guide, setGuide] = useState<{ rot?: number; x?: boolean; y?: boolean } | null>(null);
+  // turn, `x`/`y` mark the mask centered on an axis, `w`/`h` a size locked at
+  // exactly full frame. Local space, so on an element they ride its transform
+  // the way the mask itself does.
+  const [guide, setGuide] = useState<{
+    rot?: number;
+    x?: boolean;
+    y?: boolean;
+    w?: boolean;
+    h?: boolean;
+  } | null>(null);
   const interiorRef = useRef<HTMLDivElement>(null);
   // Screen deltas → the box's local space (undo the element transform).
   const toLocal = (dx: number, dy: number) => {
@@ -1086,6 +1122,12 @@ export function MaskGizmoCore({
   const gy = h / 2;
   const rx = gx * Math.cos(theta) - gy * Math.sin(theta);
   const ry = gx * Math.sin(theta) + gy * Math.cos(theta);
+  // The rotate lollipop clears the top edge (linear: the line itself), turned
+  // with the mask so it stays over its top. The gap matches the element's own
+  // lollipop: its 28px grab zone sits at -top-8, putting the dot 18px out.
+  const lift = (m.kind === "linear" ? 0 : h / 2) + 18;
+  const hx = cx + lift * Math.sin(theta);
+  const hy = cy - lift * Math.cos(theta);
   const clampSize = (v: number) => Math.min(2, Math.max(0.01, v));
   // Detents matching the inspector's: size locks onto exactly full frame,
   // the center onto dead center, within a couple percent of the frame.
@@ -1157,6 +1199,7 @@ export function MaskGizmoCore({
   return (
     <>
       <div
+        ref={interiorRef}
         className="absolute cursor-move"
         style={{
           left: `calc(50% + ${cx}px)`,
@@ -1197,20 +1240,56 @@ export function MaskGizmoCore({
           ) : null}
         </g>
       </svg>
-      <span
-        title="Drag to move the mask"
-        className={cn(MASK_GRIP, "size-[13px] cursor-move")}
+      {guide && (
+        <svg
+          className="pointer-events-none absolute z-10 overflow-visible"
+          width={1}
+          height={1}
+          style={{ left: "50%", top: "50%" }}
+        >
+          {guide.rot !== undefined && (
+            <g transform={`translate(${cx} ${cy}) rotate(${guide.rot})`}>
+              <line x1={-span} y1={0} x2={span} y2={0} stroke="#ff2d55" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+            </g>
+          )}
+          {(guide.w || guide.h) && (
+            <g transform={`translate(${cx} ${cy}) rotate(${f.rotation})`}>
+              {guide.w && (
+                <>
+                  <line x1={-stageWidth / 2} y1={-span} x2={-stageWidth / 2} y2={span} stroke="#ff2d55" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                  <line x1={stageWidth / 2} y1={-span} x2={stageWidth / 2} y2={span} stroke="#ff2d55" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                </>
+              )}
+              {guide.h && (
+                <>
+                  <line x1={-span} y1={-stageHeight / 2} x2={span} y2={-stageHeight / 2} stroke="#ff2d55" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                  <line x1={-span} y1={stageHeight / 2} x2={span} y2={stageHeight / 2} stroke="#ff2d55" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                </>
+              )}
+            </g>
+          )}
+          {guide.x && (
+            <line x1={0} y1={-span} x2={0} y2={span} stroke="#ff2d55" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+          )}
+          {guide.y && (
+            <line x1={-span} y1={0} x2={span} y2={0} stroke="#ff2d55" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+          )}
+        </svg>
+      )}
+      <RotateGrip
+        title="Drag to rotate the mask"
+        className="absolute z-10 -translate-x-1/2 -translate-y-1/2"
         style={{
-          left: `calc(50% + ${f.x * stageWidth}px)`,
-          top: `calc(50% + ${f.y * stageHeight}px)`,
-          transform: "translate(-50%, -50%)",
+          left: `calc(50% + ${hx}px)`,
+          top: `calc(50% + ${hy}px)`,
+          cursor: rotateCursor(rotation + f.rotation),
         }}
-        onPointerDown={beginMove}
+        onPointerDown={rotateMask}
       />
       {sizable && (
-        <span
+        <Grip
           title="Drag to resize the mask"
-          className={cn(MASK_GRIP, "size-[11px] cursor-nwse-resize rounded-[3px]")}
+          className="absolute z-10 cursor-nwse-resize"
           style={{
             left: `calc(50% + ${f.x * stageWidth + rx}px)`,
             top: `calc(50% + ${f.y * stageHeight + ry}px)`,
@@ -1227,17 +1306,21 @@ export function MaskGizmoCore({
                 // has one side and a mirror band one height.
                 const mx = l.x * Math.cos(theta) + l.y * Math.sin(theta);
                 const my = -l.x * Math.sin(theta) + l.y * Math.cos(theta);
+                const nw = clampSize(snapTo(g0.w + (2 * mx) / stageWidth, 1));
+                const nh = clampSize(snapTo(g0.h + (2 * my) / stageHeight, 1));
+                const gw = m.kind !== "mirror" && nw === 1;
+                const gh = m.kind !== "square" && m.kind !== "mirror" && nh === 1;
+                const gm = m.kind === "mirror" && nh === 1;
+                setGuide(gw || gh || gm ? { w: gw, h: gh || gm } : null);
                 writeGeom(
                   m.kind === "square"
-                    ? { w: clampSize(snapTo(g0.w + (2 * mx) / stageWidth, 1)) }
+                    ? { w: nw }
                     : m.kind === "mirror"
-                      ? { h: clampSize(snapTo(g0.h + (2 * my) / stageHeight, 1)) }
-                      : {
-                          w: clampSize(snapTo(g0.w + (2 * mx) / stageWidth, 1)),
-                          h: clampSize(snapTo(g0.h + (2 * my) / stageHeight, 1)),
-                        }
+                      ? { h: nh }
+                      : { w: nw, h: nh }
                 );
               },
+              onUp: () => setGuide(null),
             });
           }}
         />

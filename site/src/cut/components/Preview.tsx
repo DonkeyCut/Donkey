@@ -22,7 +22,7 @@ import { setPreviewCanvas } from "@/cut/lib/previewCanvas";
 import { clipKeyed, clipPoseAt, frameOf, isFullRect, rectOf, REGION_MAX_SCALE, type Aspect, type ClipSpan, type FrameRect, type MediaAsset, type VideoClip } from "@/cut/lib/types";
 import { hasMaskKeys, type MaskKey } from "@donkeycut/effects-kit";
 import { cn } from "@/lib/utils";
-import { MaskGizmoCore, OverlayLayer } from "./OverlayLayer";
+import { Grip, MaskGizmoCore, OverlayLayer } from "./OverlayLayer";
 import {
   StageEffectPaint,
   StagePictureFx,
@@ -505,8 +505,9 @@ function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
             onPointerDown={onPanContent}
           />
         )}
-        <span
-          className="absolute -right-1.5 -bottom-1.5 z-20 size-3 cursor-nwse-resize rounded-full bg-[#0a84ff] shadow-[0_0_0_2px_white]"
+        <Grip
+          color="#0a84ff"
+          className="absolute -right-2 -bottom-2 z-20 cursor-nwse-resize"
           onPointerDown={onResize}
         />
       </div>
