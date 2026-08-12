@@ -105,10 +105,52 @@ function settleDanglingToolCalls(messages: AgentMessage[]): AgentMessage[] {
   return changed ? out : messages;
 }
 
+/** The legacy loop's media invariant, kept on the pi session: attachment
+ * payloads and tool media ride only the turn that produced them, and older
+ * turns keep their metadata text alone. Runs before every model call and at
+ * save, so a thread with heavy attachments pays for them once per turn — the
+ * wire and the stored session both shed the previous turns' bytes. */
+function pruneStaleMedia(messages: AgentMessage[]): AgentMessage[] {
+  let lastAsk = -1;
+  messages.forEach((m, i) => {
+    if ((m as Message).role === "user" && !isBudgetSteer(m)) lastAsk = i;
+  });
+  return messages.map((m, i) => {
+    if (i >= lastAsk) return m;
+    const msg = m as Message;
+    if (msg.role === "user") {
+      const u = msg as UserMessage & WireCarrier;
+      const hasWire = (u.wireParts?.length ?? 0) > 0;
+      const hasImages =
+        Array.isArray(u.content) && u.content.some((c) => c.type === "image");
+      if (!hasWire && !hasImages) return m;
+      const content = Array.isArray(u.content)
+        ? u.content.filter((c) => c.type !== "image")
+        : u.content;
+      return {
+        ...u,
+        wireParts: undefined,
+        content:
+          Array.isArray(content) && content.length === 0
+            ? [{ type: "text" as const, text: "(media from an earlier turn)" }]
+            : content,
+      } as AgentMessage;
+    }
+    if (msg.role === "toolResult") {
+      const details = msg.details as DonkeyToolDetails | undefined;
+      if (!details?.mediaParts?.length) return m;
+      return { ...msg, details: { ...details, mediaParts: undefined } };
+    }
+    return m;
+  });
+}
+
 /** A session fit to store and replay: no ephemeral steer messages, no stale
- * editor snapshots, and every toolCall paired with a result. */
+ * editor snapshots or media, and every toolCall paired with a result. */
 function sanitizeSession(messages: AgentMessage[]): AgentMessage[] {
-  return settleDanglingToolCalls(pruneStaleSnapshots(messages.filter((m) => !isBudgetSteer(m))));
+  return settleDanglingToolCalls(
+    pruneStaleMedia(pruneStaleSnapshots(messages.filter((m) => !isBudgetSteer(m)))),
+  );
 }
 
 export function hydratePiSession(threadId: string, messages: AgentMessage[] | undefined): void {
@@ -353,7 +395,7 @@ export function streamCutChat({
             noCreditsMessage: deps.noCreditsMessage,
           }),
           transformContext: async (msgs) => {
-            const out = enforceContextBudget(pruneStaleSnapshots(msgs));
+            const out = enforceContextBudget(pruneStaleMedia(pruneStaleSnapshots(msgs)));
             // The turn ledger rides every call as an ephemeral tail message —
             // the reply-writing call always sees the current record, and the
             // stored session never carries it.
@@ -457,6 +499,30 @@ export function streamCutChat({
         }
 
         sessions.set(threadId, sanitizeSession(agent.state.messages));
+        // The step-limit handoff guarantee: a turn that ends at the ceiling
+        // with the model still requesting tools closes with readable text —
+        // the terminated batch alone would leave the reply on blocked tool
+        // chips with no sign-off.
+        if (rounds > roundCeiling && !abortSignal?.aborted) {
+          const last = [...agent.state.messages]
+            .reverse()
+            .find((m) => (m as Message).role === "assistant") as Message | undefined;
+          const spoke =
+            !!last &&
+            Array.isArray(last.content) &&
+            last.content.some((c) => c.type === "text" && c.text.trim());
+          if (!spoke) {
+            const id = crypto.randomUUID();
+            emit({ type: "text-start", id });
+            emit({
+              type: "text-delta",
+              id,
+              delta:
+                'Paused at this turn\'s step limit with work still open. Say "keep going" to continue.',
+            });
+            emit({ type: "text-end", id });
+          }
+        }
         const errorMessage = agent.state.errorMessage;
         if (errorMessage && !abortSignal?.aborted) {
           emit({ type: "error", errorText: errorMessage });
