@@ -207,6 +207,10 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
   } finally {
     dropPiSession(threadId);
   }
+  // Wall clock for the whole turn, captured at stream close. The gate runs
+  // concurrently with the first model round, so summing the stage timings
+  // would overstate what a user actually waits.
+  const wallMs = performance.now() - turnStart;
   reply = reply.trim();
   if (streamError) throw new Error(streamError);
 
@@ -261,7 +265,7 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
     ttftMs,
     modelMs,
     toolMs,
-    totalMs: gateMs + modelMs + toolMs,
+    totalMs: wallMs,
     judgeMs,
     retryMs: 0,
     retries: 0,
