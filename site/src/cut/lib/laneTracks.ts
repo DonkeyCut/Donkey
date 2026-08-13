@@ -428,6 +428,12 @@ export function startLaneMove<V = unknown>(
     ad.closesGap && x.view.lane === self.lane && x.view.start > start0 + 1e-9
       ? x.view.start - len
       : x.view.start;
+  // The one spot on the healed home lane that overlaps nothing: past the end
+  // of the resting run. The lifted clip parks there while it hovers other
+  // tracks, so the closed gap never puts two clips on the same span.
+  const parked = rest
+    .filter((x) => x.view.lane === self.lane)
+    .reduce((m, x) => Math.max(m, restAt(x) + x.view.len), 0);
   const usedLanes = laneOrder(kind, s, [...rest.map((x) => x.view.lane), self.lane]);
   const targets = snapTargets(s, kind, id);
   const tol = SNAP_PX / ui.pps;
@@ -454,8 +460,18 @@ export function startLaneMove<V = unknown>(
   // Patch only items whose position actually changes this frame (plus
   // restores of previously shifted ones): dragging one cue must not rebuild
   // hundreds of unmoved neighbors on every mousemove.
+  //
+  // On a gap-closing lane the lifted item rides along too (`selfStart`): the
+  // store mirrors the previewed layout every frame — the landing slot while
+  // home, the parked spot while hovering other tracks — so the doc stays
+  // overlap-free at every instant a mid-drag autosave could catch it. The
+  // ghost is what the user sees, so the transient self-moves never show.
+  let selfAt = start0;
   const shifted = new Map<string, number>();
-  const applyMoves = (startFor: (x: (typeof rest)[number]) => number) => {
+  const applyMoves = (
+    startFor: (x: (typeof rest)[number]) => number,
+    selfStart?: number
+  ) => {
     const patches: Patch<LaneRaw>[] = [];
     for (const x of rest) {
       const want = startFor(x);
@@ -466,9 +482,13 @@ export function startLaneMove<V = unknown>(
         else shifted.delete(x.view.id);
       }
     }
+    if (ad.closesGap && selfStart !== undefined && Math.abs(selfStart - selfAt) > 1e-9) {
+      patches.push(ad.movePatch(raw0, selfStart));
+      selfAt = selfStart;
+    }
     if (patches.length) ad.apply(patches);
   };
-  const restRestore = () => applyMoves((x) => x.view.start);
+  const restRestore = () => applyMoves((x) => x.view.start, start0);
 
   startDrag(e, {
     onMove: (dx, dy, ev) => {
@@ -494,7 +514,7 @@ export function startLaneMove<V = unknown>(
         if (!ui.vertical.isHome(target)) {
           awayTarget = target;
           // The hole the clip left stays closed while it hovers other tracks.
-          applyMoves(restAt);
+          applyMoves(restAt, parked);
           ui.onSnap(null);
           ui.vertical.preview(target, ds, len);
           ui.onDrag({
@@ -583,7 +603,7 @@ export function startLaneMove<V = unknown>(
         : 0;
       const pushed = new Set(after.map((x) => x.view.id));
       ui.onSnap(guide);
-      applyMoves((x) => (pushed.has(x.view.id) ? restAt(x) + delta : restAt(x)));
+      applyMoves((x) => (pushed.has(x.view.id) ? restAt(x) + delta : restAt(x)), clamped);
       ui.onDrag({ kind, id, targetRow, ghostX: ds * ui.pps, ghostY, slotStart: clamped, len });
     },
     onUp: (_dx, _dy, moved) => {
