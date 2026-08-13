@@ -75,7 +75,9 @@ const TRANSITION_ICONS: Record<TransitionStyle, LucideIcon> = {
 
 const VIDEO_H = 64;
 /** Band at a video row's top and bottom edge where a drag aims at the seam —
- * the would-be new track between rows — rather than the row itself. */
+ * the would-be new track between rows. A drag's own home row keeps no bands,
+ * so a horizontal slide along the row stays a slide however close to the edge
+ * it runs; the seams engage once the pointer crosses out of the row. */
 const SEAM_PX = 10;
 const OVERLAY_H = VIDEO_H; // every video track shares the same row height
 /** Extra row height under a video row whose clips carry mask keys: room for
@@ -553,7 +555,8 @@ export function Timeline() {
   // the new-track row there reveals only while the drag is close and folds
   // away when it leaves. Every drag flavor resolves through here — clips
   // grabbed off the timeline and all external media alike.
-  const resolveDropTrack = useCallback((clientX: number, clientY: number): TrackTarget => {
+  const resolveDropTrack = useCallback(
+    (clientX: number, clientY: number, homeTrack?: number): TrackTarget => {
     // An empty video timeline has no base yet: the first clip always lands on
     // track 0, whatever height the pointer is at. Otherwise a drop above the
     // thin empty row resolves to an overlay track, leaving track 0 empty — and
@@ -579,6 +582,10 @@ export function Timeline() {
     const parsed = zone ? parsePlacement(zone.dataset.drop!) : null;
     if (parsed?.kind === "insert") return parsed;
     if (parsed && zone) {
+      // The drag's own row keeps no seam bands: a horizontal slide near the
+      // row's edge stays on the row, and the adjacent seams stay reachable
+      // through the neighboring row's band or the gap between rows.
+      if (parsed.track === homeTrack) return parsed;
       const r = zone.getBoundingClientRect();
       if (clientY <= r.top + SEAM_PX) return seamUnder(rows[rows.indexOf(zone) - 1]);
       if (clientY >= r.bottom - SEAM_PX) return { kind: "insert", level: parsed.track };
@@ -3171,8 +3178,9 @@ function ClipView({
   partAt?: number;
   onDrag: (d: LaneDrag | null) => void;
   onSnap: (x: number | null) => void;
-  /** Which drop the given screen point is over (a track / an insert gap). */
-  resolveTarget: (clientX: number, clientY: number) => TrackTarget;
+  /** Which drop the given screen point is over (a track / an insert gap);
+   * `homeTrack` marks the drag's own row, which keeps no seam bands. */
+  resolveTarget: (clientX: number, clientY: number, homeTrack?: number) => TrackTarget;
   /** Preview a cross-track drop (null clears it). */
   onCrossMove: (target: TrackTarget | null, start?: number, len?: number) => void;
   /** Commit a cross-track drop of this clip at `start`. */
@@ -3217,7 +3225,7 @@ function ClipView({
     onDrag,
     onSnap,
     vertical: {
-      resolve: (ev: PointerEvent) => resolveTarget(ev.clientX, ev.clientY),
+      resolve: (ev: PointerEvent) => resolveTarget(ev.clientX, ev.clientY, clip.track),
       isHome: (t: TrackTarget) => samePlacement(t, TRACK_ZERO),
       preview: (t: TrackTarget | null, start: number, len: number) =>
         t ? onCrossMove(t, start, len) : onCrossMove(null),
@@ -3985,7 +3993,9 @@ function OverlayClipView({
   partAt?: number;
   onDrag: (d: LaneDrag | null) => void;
   onSnap: (x: number | null) => void;
-  resolveTarget: (clientX: number, clientY: number) => TrackTarget;
+  /** Which drop the given screen point is over (a track / an insert gap);
+   * `homeTrack` marks the drag's own row, which keeps no seam bands. */
+  resolveTarget: (clientX: number, clientY: number, homeTrack?: number) => TrackTarget;
   onCrossMove: (target: TrackTarget | null, start?: number, len?: number) => void;
   onCrossDrop: (id: string, target: TrackTarget, start: number) => void;
   onDragActive: (active: boolean) => void;
@@ -4029,7 +4039,7 @@ function OverlayClipView({
     onDrag,
     onSnap,
     vertical: {
-      resolve: (ev: PointerEvent) => resolveTarget(ev.clientX, ev.clientY),
+      resolve: (ev: PointerEvent) => resolveTarget(ev.clientX, ev.clientY, clip.track),
       isHome: (t: TrackTarget) => samePlacement(t, { kind: "track", track: clip.track }),
       preview: (t: TrackTarget | null, start: number, len: number) =>
         t ? onCrossMove(t, start, len) : onCrossMove(null),
