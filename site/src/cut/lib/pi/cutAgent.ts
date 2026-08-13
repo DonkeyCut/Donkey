@@ -2,7 +2,7 @@ import type { UIMessage, UIMessageChunk } from "ai";
 import { Agent, type AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Message, UserMessage } from "@earendil-works/pi-ai";
 import { AI_TOOLS, attachedAssetsBlock, systemPrompt } from "@/cut/server/ai/catalog";
-import { parseTurnIntent, TURN_INTENT_PROMPT, turnIntentInput, type TurnIntent } from "../turnIntent";
+import { parseTurnIntent, turnIntentInput, turnIntentPrompt, type TurnIntent } from "../turnIntent";
 import { enforceContextBudget } from "./contextBudget";
 import { donkeyModel } from "./donkeyModel";
 import { ledgerText, recordCall, type LedgerRecord } from "./mutationLedger";
@@ -12,7 +12,8 @@ import { subscribeUiChunks } from "./uiChunks";
 
 // The chat turn runner on the pi agent harness. Each turn: the intent gate
 // classifies the newest message (chat verdicts withhold every tool, simple
-// verdicts downgrade the model), the Agent loops model calls and tool
+// verdicts downgrade the model and narrow the tool catalog to the areas the
+// verdict names), the Agent loops model calls and tool
 // executions against the live editor store, and the events stream out as the
 // UIMessageChunks AiPanel already consumes. The thread's LLM context is pi's
 // own message list, kept per thread in the session registry — past tool calls
@@ -44,7 +45,8 @@ export interface CutAgentDeps {
   /** Round-budget overrides (the eval exercises auto-continue with a tiny
    * budget; production runs the defaults). */
   limits?: { roundBudget?: number; maxExtensions?: number };
-  /** Eval instrumentation. */
+  /** Timing instrumentation: the eval asserts on it, production logs it at
+   * debug level. */
   hooks?: {
     onGate?: (intent: TurnIntent, ms: number, skipped: boolean) => void;
     /** One LLM round settled: wall time, and time to its first visible delta. */
@@ -281,6 +283,8 @@ function sessionFor(threadId: string, history: UIMessage[]): AgentMessage[] {
   return [...stored, ...legacySession(history.slice(firstMissing))];
 }
 
+const GATE_PROMPT = turnIntentPrompt();
+
 /** The turn's gate and router (ported from the legacy loop): judge the newest
  * message; "chat" withholds every tool, "simple" downgrades the model. A
  * message with attachments is complex by construction. Fails open. */
@@ -304,7 +308,7 @@ async function classifyTurnIntent(
       {
         donkeyProvider: "gemini",
         model: deps.models.gate,
-        instructions: TURN_INTENT_PROMPT,
+        instructions: GATE_PROMPT,
         input: turnIntentInput(turns),
       },
       abortSignal
@@ -362,170 +366,257 @@ export function streamCutChat({
       emit({ type: "start" });
       try {
         const gateStart = performance.now();
-        const intentPromise = classifyTurnIntent(messages, deps, abortSignal);
         const lastUser = messages.findLast((m) => m.role === "user");
         const promptPromise = buildPrompt(lastUser, deps);
-        const { intent, skipped } = await intentPromise;
-        deps.hooks?.onGate?.(intent, performance.now() - gateStart, skipped);
-        const roundModel = intent === "simple" ? deps.models.simple : model;
+        const verdictPromise = classifyTurnIntent(messages, deps, abortSignal);
+        void verdictPromise.then(({ intent, skipped }) =>
+          deps.hooks?.onGate?.(intent, performance.now() - gateStart, skipped)
+        );
 
-        const session = sessionFor(threadId, messages.filter((m) => m !== lastUser));
-
-        // The scene-plan money gate, enforced structurally: a plan created
-        // this turn cannot be approved this turn, whatever the model decides.
-        let scenePlannedThisTurn = false;
         const roundBudget = deps.limits?.roundBudget ?? ROUND_BUDGET;
         const maxExtensions = deps.limits?.maxExtensions ?? MAX_EXTENSIONS;
         const roundCeiling = roundBudget * (maxExtensions + 1);
-        let rounds = 0;
-        let extensions = 0;
-        // Everything this turn ran, harvested off the tool results in code.
-        const records: LedgerRecord[] = [];
 
-        const agent = new Agent({
-          initialState: {
-            systemPrompt: systemPrompt(),
-            model: donkeyModel(roundModel),
-            messages: session,
-            tools: intent === "chat" ? [] : toAgentTools(AI_TOOLS, deps.execTool),
-          },
-          streamFn: makeDonkeyStream({
-            post: deps.post,
-            onAuthFail: deps.onAuthFail,
-            noCreditsMessage: deps.noCreditsMessage,
-          }),
-          transformContext: async (msgs) => {
-            const out = enforceContextBudget(pruneStaleMedia(pruneStaleSnapshots(msgs)));
-            // The turn ledger rides every call as an ephemeral tail message —
-            // the reply-writing call always sees the current record, and the
-            // stored session never carries it.
-            const ledger = ledgerText(records, deps.debris?.() ?? []);
-            if (!ledger) return out;
-            return [...out, { role: "user", content: ledger, timestamp: 0 }];
-          },
-          toolExecution: "sequential",
-          beforeToolCall: async ({ toolCall }) => {
-            if (rounds >= roundCeiling)
-              return {
-                block: true,
-                // The first blocked round leaves the model one round to write
-                // its reply; a model that requests tools again instead has its
-                // batch terminated, ending the turn.
-                terminate: rounds > roundCeiling,
-                reason:
-                  "Step ceiling reached — no more tool calls this turn. Reply now: what is done and what remains.",
-              };
-            if (toolCall.name === "approve_scene" && scenePlannedThisTurn)
-              return {
-                block: true,
-                reason:
-                  "This plan landed this turn — the user hasn't answered yet. Ask them to confirm (they can also click Approve on the plan card), and call approve_scene only after they say yes in a later message.",
-              };
-            return undefined;
-          },
-          afterToolCall: async ({ toolCall, result, isError }) => {
-            if (toolCall.name === "generate_scene" && !isError) scenePlannedThisTurn = true;
-            const details = result.details as DonkeyToolDetails | undefined;
-            const errorText = isError
-              ? (result.content.find((c) => c.type === "text") as { text?: string } | undefined)
-                  ?.text || "failed"
-              : undefined;
-            recordCall(records, toolCall.name, details?.response, errorText);
-            return undefined;
-          },
-        });
+        /** One full agent lifecycle: build, subscribe, prompt, run to idle.
+         * The caller decides what the run streams to (live or a buffer) and
+         * finalizes only the run it keeps. */
+        const runAgentTurn = async ({
+          roundModel,
+          withTools,
+          send,
+          executionGate,
+          onAgent,
+        }: {
+          roundModel: string;
+          withTools: boolean;
+          send: (chunk: Record<string, unknown>) => void;
+          /** Awaited before any tool executes; false ends the batch unrun. */
+          executionGate?: () => Promise<boolean>;
+          onAgent?: (agent: Agent) => void;
+        }) => {
+          // The scene-plan money gate, enforced structurally: a plan created
+          // this turn cannot be approved this turn, whatever the model decides.
+          let scenePlannedThisTurn = false;
+          let rounds = 0;
+          let extensions = 0;
+          // Everything this turn ran, harvested off the tool results in code.
+          const records: LedgerRecord[] = [];
 
-        const unsubscribeUi = subscribeUiChunks(agent, emit);
-        // Round timing for the eval: one assistant message = one LLM round.
-        const onRound = deps.hooks?.onRound;
-        let roundStart = 0;
-        let roundFirstDelta: number | null = null;
-        const unsubscribeTiming = !onRound
-          ? () => {}
-          : agent.subscribe((event) => {
-              if (
-                event.type === "message_start" &&
-                (event.message as Message).role === "assistant"
-              ) {
-                roundStart = performance.now();
-                roundFirstDelta = null;
-              } else if (
-                event.type === "message_update" &&
-                event.assistantMessageEvent.type === "text_delta" &&
-                roundFirstDelta === null &&
-                event.assistantMessageEvent.delta.trim()
-              ) {
-                roundFirstDelta = performance.now() - roundStart;
-              } else if (
-                event.type === "message_end" &&
-                (event.message as Message).role === "assistant" &&
-                roundStart > 0
-              ) {
-                onRound(performance.now() - roundStart, roundFirstDelta);
-                roundStart = 0;
-              }
-            });
-        const unsubscribeTurns = agent.subscribe((event) => {
-          if (event.type !== "turn_end") return;
-          const msg = event.message as Message;
-          if (msg.role !== "assistant" || !msg.content.some((c) => c.type === "toolCall")) return;
-          rounds++;
-          if (rounds % roundBudget === 0 && rounds < roundCeiling && extensions < maxExtensions) {
-            extensions++;
-            deps.hooks?.onExtension?.(extensions);
-            agent.steer({
-              role: "user",
-              content: `[budget] Round budget auto-extended (${extensions} of ${maxExtensions}). Keep working; finish the job or report the concrete blocker.`,
-              timestamp: Date.now(),
-            });
+          const agent = new Agent({
+            initialState: {
+              systemPrompt: systemPrompt(),
+              model: donkeyModel(roundModel),
+              messages: sessionFor(threadId, messages.filter((m) => m !== lastUser)),
+              tools: withTools ? toAgentTools(AI_TOOLS, deps.execTool) : [],
+            },
+            streamFn: makeDonkeyStream({
+              post: deps.post,
+              onAuthFail: deps.onAuthFail,
+              noCreditsMessage: deps.noCreditsMessage,
+            }),
+            transformContext: async (msgs) => {
+              const out = enforceContextBudget(pruneStaleMedia(pruneStaleSnapshots(msgs)));
+              // The turn ledger rides every call as an ephemeral tail message —
+              // the reply-writing call always sees the current record, and the
+              // stored session never carries it.
+              const ledger = ledgerText(records, deps.debris?.() ?? []);
+              if (!ledger) return out;
+              return [...out, { role: "user", content: ledger, timestamp: 0 }];
+            },
+            toolExecution: "sequential",
+            beforeToolCall: async ({ toolCall }) => {
+              if (executionGate && !(await executionGate()))
+                return {
+                  block: true,
+                  terminate: true,
+                  reason: "Rerouted — this turn is restarting on the full model.",
+                };
+              if (rounds >= roundCeiling)
+                return {
+                  block: true,
+                  // The first blocked round leaves the model one round to write
+                  // its reply; a model that requests tools again instead has its
+                  // batch terminated, ending the turn.
+                  terminate: rounds > roundCeiling,
+                  reason:
+                    "Step ceiling reached — no more tool calls this turn. Reply now: what is done and what remains.",
+                };
+              if (toolCall.name === "approve_scene" && scenePlannedThisTurn)
+                return {
+                  block: true,
+                  reason:
+                    "This plan landed this turn — the user hasn't answered yet. Ask them to confirm (they can also click Approve on the plan card), and call approve_scene only after they say yes in a later message.",
+                };
+              return undefined;
+            },
+            afterToolCall: async ({ toolCall, result, isError }) => {
+              if (toolCall.name === "generate_scene" && !isError) scenePlannedThisTurn = true;
+              const details = result.details as DonkeyToolDetails | undefined;
+              const errorText = isError
+                ? (result.content.find((c) => c.type === "text") as { text?: string } | undefined)
+                    ?.text || "failed"
+                : undefined;
+              recordCall(records, toolCall.name, details?.response, errorText);
+              return undefined;
+            },
+          });
+          onAgent?.(agent);
+
+          const unsubscribeUi = subscribeUiChunks(agent, send);
+          // Round timing for the eval: one assistant message = one LLM round.
+          const onRound = deps.hooks?.onRound;
+          let roundStart = 0;
+          let roundFirstDelta: number | null = null;
+          const unsubscribeTiming = !onRound
+            ? () => {}
+            : agent.subscribe((event) => {
+                if (
+                  event.type === "message_start" &&
+                  (event.message as Message).role === "assistant"
+                ) {
+                  roundStart = performance.now();
+                  roundFirstDelta = null;
+                } else if (
+                  event.type === "message_update" &&
+                  event.assistantMessageEvent.type === "text_delta" &&
+                  roundFirstDelta === null &&
+                  event.assistantMessageEvent.delta.trim()
+                ) {
+                  roundFirstDelta = performance.now() - roundStart;
+                } else if (
+                  event.type === "message_end" &&
+                  (event.message as Message).role === "assistant" &&
+                  roundStart > 0
+                ) {
+                  onRound(performance.now() - roundStart, roundFirstDelta);
+                  roundStart = 0;
+                }
+              });
+          const unsubscribeTurns = agent.subscribe((event) => {
+            if (event.type !== "turn_end") return;
+            const msg = event.message as Message;
+            if (msg.role !== "assistant" || !msg.content.some((c) => c.type === "toolCall")) return;
+            rounds++;
+            if (rounds % roundBudget === 0 && rounds < roundCeiling && extensions < maxExtensions) {
+              extensions++;
+              deps.hooks?.onExtension?.(extensions);
+              agent.steer({
+                role: "user",
+                content: `[budget] Round budget auto-extended (${extensions} of ${maxExtensions}). Keep working; finish the job or report the concrete blocker.`,
+                timestamp: Date.now(),
+              });
+            }
+          });
+          const onAbort = () => agent.abort();
+          abortSignal?.addEventListener("abort", onAbort);
+
+          try {
+            const prompt = { ...(await promptPromise) };
+            // A signal that aborted during the gate/prompt awaits fired before
+            // the listener existed; nothing has run, so the turn just ends.
+            if (!abortSignal?.aborted) {
+              await agent.prompt(prompt);
+              await agent.waitForIdle();
+            }
+          } finally {
+            abortSignal?.removeEventListener("abort", onAbort);
+            unsubscribeUi();
+            unsubscribeTiming();
+            unsubscribeTurns();
           }
-        });
-        const onAbort = () => agent.abort();
-        abortSignal?.addEventListener("abort", onAbort);
+          return { agent, rounds, send };
+        };
 
-        try {
-          const prompt = await promptPromise;
-          // A signal that aborted during the gate/prompt awaits fired before
-          // the listener existed; nothing has run, so the turn just ends.
-          if (!abortSignal?.aborted) {
-            await agent.prompt(prompt);
-            await agent.waitForIdle();
+        /** Save and sign off the one run this turn keeps. */
+        const finalize = (run: {
+          agent: Agent;
+          rounds: number;
+          send: (chunk: Record<string, unknown>) => void;
+        }) => {
+          sessions.set(threadId, sanitizeSession(run.agent.state.messages));
+          // The step-limit handoff guarantee: a turn that ends at the ceiling
+          // with the model still requesting tools closes with readable text —
+          // the terminated batch alone would leave the reply on blocked tool
+          // chips with no sign-off.
+          if (run.rounds > roundCeiling && !abortSignal?.aborted) {
+            const last = [...run.agent.state.messages]
+              .reverse()
+              .find((m) => (m as Message).role === "assistant") as Message | undefined;
+            const spoke =
+              !!last &&
+              Array.isArray(last.content) &&
+              last.content.some((c) => c.type === "text" && c.text.trim());
+            if (!spoke) {
+              const id = crypto.randomUUID();
+              run.send({ type: "text-start", id });
+              run.send({
+                type: "text-delta",
+                id,
+                delta:
+                  'Paused at this turn\'s step limit with work still open. Say "keep going" to continue.',
+              });
+              run.send({ type: "text-end", id });
+            }
           }
-        } finally {
-          abortSignal?.removeEventListener("abort", onAbort);
-          unsubscribeUi();
-          unsubscribeTiming();
-          unsubscribeTurns();
+          const errorMessage = run.agent.state.errorMessage;
+          if (errorMessage && !abortSignal?.aborted) {
+            run.send({ type: "error", errorText: errorMessage });
+          }
+        };
+
+        // Speculative first round: the turn goes out immediately on the light
+        // model with the full catalog while the gate classifies in parallel.
+        // Tool execution waits on the verdict and UI chunks buffer until it
+        // lands, so a chat or complex verdict aborts the run with nothing
+        // shown and nothing executed, and the turn restarts routed — while a
+        // simple verdict (the common case) keeps the run and pays no gate
+        // wall time at all. A message with attachments resolves complex
+        // instantly, so it runs routed from the start.
+        const attached = (lastUser?.metadata as { attachments?: unknown[] } | undefined)
+          ?.attachments;
+        let kept = false;
+        if (!(Array.isArray(attached) && attached.length > 0) && !abortSignal?.aborted) {
+          const buffer: Record<string, unknown>[] = [];
+          let mode: "buffering" | "live" | "discarded" = "buffering";
+          const send = (chunk: Record<string, unknown>) => {
+            if (mode === "live") emit(chunk);
+            else if (mode === "buffering") buffer.push(chunk);
+          };
+          let speculating: Agent | null = null;
+          const watcher = verdictPromise.then(({ intent }) => {
+            if (intent === "simple") {
+              mode = "live";
+              for (const c of buffer.splice(0)) emit(c);
+              return true;
+            }
+            mode = "discarded";
+            buffer.length = 0;
+            speculating?.abort();
+            return false;
+          });
+          const run = await runAgentTurn({
+            roundModel: deps.models.simple,
+            withTools: true,
+            send,
+            executionGate: async () => (await verdictPromise).intent === "simple",
+            onAgent: (a) => {
+              speculating = a;
+            },
+          });
+          if (await watcher) {
+            finalize(run);
+            kept = true;
+          }
         }
-
-        sessions.set(threadId, sanitizeSession(agent.state.messages));
-        // The step-limit handoff guarantee: a turn that ends at the ceiling
-        // with the model still requesting tools closes with readable text —
-        // the terminated batch alone would leave the reply on blocked tool
-        // chips with no sign-off.
-        if (rounds > roundCeiling && !abortSignal?.aborted) {
-          const last = [...agent.state.messages]
-            .reverse()
-            .find((m) => (m as Message).role === "assistant") as Message | undefined;
-          const spoke =
-            !!last &&
-            Array.isArray(last.content) &&
-            last.content.some((c) => c.type === "text" && c.text.trim());
-          if (!spoke) {
-            const id = crypto.randomUUID();
-            emit({ type: "text-start", id });
-            emit({
-              type: "text-delta",
-              id,
-              delta:
-                'Paused at this turn\'s step limit with work still open. Say "keep going" to continue.',
-            });
-            emit({ type: "text-end", id });
-          }
-        }
-        const errorMessage = agent.state.errorMessage;
-        if (errorMessage && !abortSignal?.aborted) {
-          emit({ type: "error", errorText: errorMessage });
+        if (!kept && !abortSignal?.aborted) {
+          const { intent } = await verdictPromise;
+          finalize(
+            await runAgentTurn({
+              roundModel: intent === "simple" ? deps.models.simple : model,
+              withTools: intent !== "chat",
+              send: emit,
+            })
+          );
         }
       } catch (err) {
         if (!abortSignal?.aborted) {

@@ -67,5 +67,13 @@ export function productionDeps(): CutAgentDeps {
     debris: currentDebris,
     onAuthFail: () => useGenerate.getState().probe(),
     noCreditsMessage: NO_CREDITS_MESSAGE,
+    hooks: {
+      onGate: (intent, ms, skipped) =>
+        console.debug(`[chat] gate ${intent} ${Math.round(ms)}ms${skipped ? " skipped" : ""}`),
+      onRound: (ms, firstDeltaMs) =>
+        console.debug(
+          `[chat] round ${Math.round(ms)}ms${firstDeltaMs === null ? "" : `, first delta ${Math.round(firstDeltaMs)}ms`}`
+        ),
+    },
   };
 }
