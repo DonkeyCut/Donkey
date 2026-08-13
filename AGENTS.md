@@ -26,6 +26,8 @@ Before changing `site/` UI, routes, API handlers, or data access patterns:
 - Ask before creating any new plan document.
 - When writing or editing any engineering doc under `docs/`, follow `docs/guides/eng-doc-style.md`.
 - Write straight up — in prompts, docs, commits, code comments, summaries, and UI copy. State what a thing is, once, and stop. Never frame it against what it is not: no "X, not Y", no "X rather than Y", no "instead of Z", no "…, which is exactly what not to do". Cut filler.
+- Keep replies short and action-oriented. For implementation questions, give the recommendation first, then one to three short bullets on why; when the answer is obvious, just say what to do. Skip long explanations, caveats, and "one last thing" sections; flag a real blocker or risk with "One issue:" and explain it briefly.
+- Make the decision and do it. Implement the obvious next step; never end with "if you want, I can…" or ask the user to say the word. Save questions for genuine scope forks and destructive actions.
 - Update guides in `docs/guides/` only for major features or durable supported-behavior changes. Do not update guide docs for small styling tweaks, layout adjustments, copy changes, or implementation-only refactors.
 - Keep guides explanatory. They should teach what the system is, how it works, and which boundaries matter; do not turn guides into feature inventories, implementation logs, duplicated code, or long file lists.
 - Optimize guides for readability: use plain language, short sections, and only the detail a maintainer needs to understand the supported boundary. Prefer trimming outdated or repetitive detail over adding more paragraphs.
