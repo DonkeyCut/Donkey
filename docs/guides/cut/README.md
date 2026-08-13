@@ -108,6 +108,8 @@ The AI assistant knows the editor through three surfaces: the catalog — tool d
 
 **Teach the assistant in the same change.** When an editor feature lands, changes, or goes away, update those surfaces with it — usually by adding, updating, or deleting the matching tools and skills, and by extending the context snapshot when the feature adds user-visible state. A feature the catalog omits is invisible to the assistant, and a stale tool or skill is worse: the assistant confidently acts on behavior that no longer exists.
 
+**Everything the user can point at is referenceable.** Every entity the editor lets a user select or create — a clip, a keyframe, a mask, a sticker, a title, an effect, a generated asset, a library item — carries a stable id and joins the editor's one reference model. The ref is how an entity leaves its home surface: drag it onto a drop zone, copy it with ⌘C and paste it into the chat composer, or type its @handle in a prompt, and chat resolves it back to the live entity — "tighten @c2" reaches the real clip and the tools that edit it. When a feature adds a new kind of entity, wire its ref in the same change: a scope and handle among the mention candidates, copy and drag affordances where the entity renders, and tools that accept its id. An entity without a ref is invisible to chat.
+
 ## Where it lives
 
 The editor, its handlers, and the engine entry sit under the site app's Cut folder; host routing, the hosted API shut-off, and the CORS grant live in the site's proxy file (`src/proxy.ts`, the Next 16 successor to middleware). The app-side supervisor lives with the Donkey runtime code, and the packaging scripts stage the engine binary into the app bundle.
