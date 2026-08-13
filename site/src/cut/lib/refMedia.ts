@@ -407,7 +407,12 @@ export async function refsToParts(
       continue;
     }
     if (ref.kind === "text") {
-      parts.push({ text: `Attached file "${ref.name}":\n${await readRefText(ref)}` });
+      parts.push({
+        text:
+          ref.scope === "entity"
+            ? `Referenced timeline entity "${ref.name}":\n${await readRefText(ref)}`
+            : `Attached file "${ref.name}":\n${await readRefText(ref)}`,
+      });
       continue;
     }
     if (ref.kind === "video" && ref.t !== undefined) {
