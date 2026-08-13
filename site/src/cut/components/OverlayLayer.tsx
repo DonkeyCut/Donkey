@@ -66,6 +66,15 @@ const ROTATE_BASE_DEG = -90;
  * pointer event, so a narrow window slips by between frames. */
 const ROTATE_SNAP_DEG = 6;
 
+/** Land an angle on the quarter turn within reach: the angle to use and the
+ * detent it locked to (null when free). */
+function snapQuarter(deg: number): { deg: number; locked: number | null } {
+  for (const q of [-180, -90, 0, 90, 180]) {
+    if (Math.abs(deg - q) < ROTATE_SNAP_DEG) return { deg: q, locked: q };
+  }
+  return { deg, locked: null };
+}
+
 const rotateCursorCache = new Map<number, string>();
 
 function rotateCursor(rotationDeg: number): string {
@@ -714,15 +723,7 @@ function OverlayItem({
       cursor: () => rotateCursor(liveRotation),
       onMove: (_dx, _dy, ev) => {
         if (members.length === 1) {
-          let deg = norm(angleAt(ev));
-          let locked: number | null = null;
-          for (const q of [-180, -90, 0, 90, 180]) {
-            if (Math.abs(deg - q) < ROTATE_SNAP_DEG) {
-              deg = q;
-              locked = q;
-              break;
-            }
-          }
+          const { deg, locked } = snapQuarter(norm(angleAt(ev)));
           const rotation = Math.round(deg);
           liveRotation = rotation;
           rotationGuide(locked === null ? null : { clientX: cx, clientY: cy, quarter: locked });
@@ -731,14 +732,8 @@ function OverlayItem({
         }
         let delta = norm(angleAt(ev) - start0);
         const lead = norm((o.rotation ?? 0) + delta);
-        let locked: number | null = null;
-        for (const q of [-180, -90, 0, 90, 180]) {
-          if (Math.abs(lead - q) < ROTATE_SNAP_DEG) {
-            delta = norm(delta + q - lead);
-            locked = q;
-            break;
-          }
-        }
+        const { locked } = snapQuarter(lead);
+        if (locked !== null) delta = norm(delta + locked - lead);
         liveRotation = norm((o.rotation ?? 0) + delta);
         const rad = (delta * Math.PI) / 180;
         // Positions are frame fractions with unequal axes; orbit in a square
@@ -1039,7 +1034,7 @@ export function Grip({
 }
 
 /** Rotate lollipop: the dot centered in a 28px grab zone, so the rotate
- * cursor shows as the pointer approaches rather than only dead on it. */
+ * cursor shows as the pointer approaches the dot. */
 export function RotateGrip({
   color,
   className,
@@ -1175,15 +1170,7 @@ export function MaskGizmoCore({
     startDrag(e, {
       cursor: () => rotateCursor(liveRot),
       onMove: (_dx, _dy, ev) => {
-        let deg = norm(g0.rotation + (angleAt(ev) - a0));
-        let locked: number | null = null;
-        for (const q of [-180, -90, 0, 90, 180]) {
-          if (Math.abs(deg - q) < ROTATE_SNAP_DEG) {
-            deg = q;
-            locked = q;
-            break;
-          }
-        }
+        const { deg, locked } = snapQuarter(norm(g0.rotation + (angleAt(ev) - a0)));
         const rot = Math.round(deg);
         liveRot = rotation + rot;
         setGuide(locked === null ? null : { rot: locked });
