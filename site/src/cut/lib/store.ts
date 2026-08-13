@@ -555,6 +555,8 @@ export interface EditorState {
   /** ⌘/⇧-click: add the item to the selection (or remove it if already in),
    * making it the new primary. */
   toggleSelect: (sel: NonNullable<Selection>) => void;
+  /** Marquee sweep: replace the whole selection at once, last item primary. */
+  setMultiSelection: (sels: NonNullable<Selection>[]) => void;
   seek: (t: number) => void;
   setPlaying: (p: boolean) => void;
   /** Play just the [start, end] stretch in the preview: seek to `start`,
@@ -3253,6 +3255,13 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         // Primary is the just-added item, or the last survivor when removing.
         const primary = has ? next[next.length - 1] ?? null : sel;
         return { multiSelection: next, selection: primary };
+      }),
+
+    setMultiSelection: (sels) =>
+      set({
+        multiSelection: sels,
+        selection: sels[sels.length - 1] ?? null,
+        selectedKey: null,
       }),
 
     seek: (t) => {

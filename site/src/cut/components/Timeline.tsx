@@ -1,7 +1,8 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { ArrowDown, ArrowDownToLine, ArrowLeft, ArrowLeftToLine, ArrowRight, ArrowRightToLine, ArrowUp, ArrowUpToLine, AudioLines, Blend, Check, Circle, Clapperboard, Copy, Diamond, Download, Droplets, EllipsisVertical, Expand, Eye, EyeOff, FolderOpen, FolderPlus, FoldHorizontal, Fullscreen, Heart, Hexagon, Loader2, Minus, Moon, MoreHorizontal, MoveRight, Pause, Play, Scissors, SkipBack, Sparkles, Square, Star, Sticker, Sun, Target, Trash2, Triangle, Type, UnfoldHorizontal, Volume2, VolumeX, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowDownToLine, ArrowLeft, ArrowLeftToLine, ArrowRight, ArrowRightToLine, ArrowUp, ArrowUpToLine, AudioLines, Blend, Check, Circle, Clapperboard, Copy, Diamond, Download, Droplets, EllipsisVertical, Expand, Eye, EyeOff, FolderOpen, FolderPlus, FoldHorizontal, Fullscreen, Loader2, Moon, MoreHorizontal, Pause, Play, Scissors, SkipBack, Sparkles, Sticker, Sun, Target, Trash2, Type, UnfoldHorizontal, Volume2, VolumeX, type LucideIcon } from "lucide-react";
+import { SHAPE_CHIP_ICONS } from "@/cut/components/entityIcons";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -48,7 +49,7 @@ import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
 import { EFFECT_LABELS } from "@donkeycut/effects-kit";
 import { emptySubtitles, IMAGE_CLIP_SECONDS, SHAPE_LABELS, TRANSITION_DEFAULT_SECONDS, TRANSITION_MAX, TRANSITION_STYLE_LABELS, type ShapeKind } from "@/cut/lib/types";
-import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, StickerOverlay, SubtitleCue, TimelineTransition, TransitionStyle, VideoClip } from "@/cut/lib/types";
+import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, Selection, StickerOverlay, SubtitleCue, TimelineTransition, TransitionStyle, VideoClip } from "@/cut/lib/types";
 import { isLottieAsset } from "@/cut/lib/lottieAssets";
 import { gradeTint, gradeToCssFilter } from "@donkeycut/effects-kit";
 import { cn } from "@/lib/utils";
@@ -345,6 +346,26 @@ export function Timeline() {
     const rect = innerRef.current!.getBoundingClientRect();
     return (clientX - rect.left) / pps;
   };
+  // Selection made elsewhere (a chat pill click) lands offscreen: scroll the
+  // selected item's bar into view. In-view selections stay put.
+  useEffect(
+    () =>
+      useEditor.subscribe((s, prev) => {
+        if (!s.selection || s.selection === prev.selection) return;
+        const scroller = scrollRef.current;
+        const el = scroller?.querySelector(
+          `[data-tl-sel="${s.selection.kind}:${s.selection.id}"]`
+        );
+        if (!scroller || !el) return;
+        const r = el.getBoundingClientRect();
+        const v = scroller.getBoundingClientRect();
+        if (r.right < v.left) scroller.scrollLeft += r.left - v.left - 48;
+        else if (r.left > v.right) scroller.scrollLeft += r.right - v.right + 48;
+        if (r.top < v.top) scroller.scrollTop += r.top - v.top - 12;
+        else if (r.bottom > v.bottom) scroller.scrollTop += r.bottom - v.bottom + 12;
+      }),
+    []
+  );
   // The rail copies behind the scroller follow vertical scroll so they stay
   // glued under the live rails; overscroll can't move them, so the surface
   // runs unbroken through the bounce. (Horizontal position is moot — every
@@ -986,6 +1007,8 @@ export function Timeline() {
     e.stopPropagation();
     const s = useEditor.getState();
     if (s.readOnly) return;
+    // ⌘/⇧-click folds the bar into the multi-selection, like any lane bar.
+    const additive = e.metaKey || e.shiftKey;
     let landing: { start: number; anchor: Anchor | null } | null = null;
     startDrag(e, {
       onMove: (dx) => {
@@ -1007,7 +1030,10 @@ export function Timeline() {
         setJointDrop(null);
         setTransitionDrag(null);
         const st = useEditor.getState();
-        if (!moved || !landing) return st.select({ kind: "transition", id: x.t.id });
+        if (!moved || !landing) {
+          if (additive) return st.toggleSelect({ kind: "transition", id: x.t.id });
+          return st.select({ kind: "transition", id: x.t.id });
+        }
         st.beginHistoryBatch();
         const incumbent = landing.anchor ? barAt(landing.anchor) : null;
         if (incumbent && incumbent.id !== x.t.id) st.removeTransition(incumbent.id);
@@ -1095,12 +1121,63 @@ export function Timeline() {
     });
   };
 
-  // Clicking empty track space deselects AND moves the playhead.
+  // A press on empty track space: a click deselects and moves the playhead;
+  // a drag sweeps a rubber-band that selects every bar it touches — the same
+  // blue band the projects home uses. ⇧/⌘ keeps the prior selection under it.
+  const [marquee, setMarquee] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  } | null>(null);
   const deselectIfSelf = (e: React.PointerEvent) => {
-    if (e.target === e.currentTarget) {
-      useEditor.getState().select(null);
-      scrub(e);
-    }
+    if (e.target !== e.currentTarget) return;
+    const st = useEditor.getState();
+    if (st.playing) st.setPlaying(false);
+    st.seek(Math.max(0, timeAt(e.clientX)));
+    const additive = e.shiftKey || e.metaKey;
+    const base = additive
+      ? st.multiSelection.filter((m): m is NonNullable<Selection> => !!m)
+      : [];
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let sweeping = false;
+    startDrag(e, {
+      onMove: (dx, dy, ev) => {
+        if (!sweeping && Math.hypot(dx, dy) < 4) return;
+        sweeping = true;
+        const r = {
+          left: Math.min(startX, ev.clientX),
+          top: Math.min(startY, ev.clientY),
+          width: Math.abs(ev.clientX - startX),
+          height: Math.abs(ev.clientY - startY),
+        };
+        setMarquee(r);
+        const hit = [...base];
+        const seen = new Set(hit.map((m) => `${m.kind}:${m.id}`));
+        scrollRef.current?.querySelectorAll<HTMLElement>("[data-tl-sel]").forEach((el) => {
+          const b = el.getBoundingClientRect();
+          const overlaps =
+            b.left < r.left + r.width &&
+            b.right > r.left &&
+            b.top < r.top + r.height &&
+            b.bottom > r.top;
+          if (!overlaps) return;
+          const tag = el.dataset.tlSel!;
+          const cut = tag.indexOf(":");
+          const kind = tag.slice(0, cut) as NonNullable<Selection>["kind"];
+          const id = tag.slice(cut + 1);
+          if (seen.has(tag)) return;
+          seen.add(tag);
+          hit.push({ kind, id });
+        });
+        useEditor.getState().setMultiSelection(hit);
+      },
+      onUp: (_dx, _dy, moved) => {
+        setMarquee(null);
+        if (!moved && !additive) useEditor.getState().select(null);
+      },
+    });
   };
 
   // Zoom that keeps a chosen time pinned under a chosen viewport x.
@@ -1853,6 +1930,12 @@ export function Timeline() {
         </div>
       </div>
       <RulerBand />
+      {marquee && (
+        <div
+          className="pointer-events-none fixed z-50 rounded-[3px] border-2 border-[#0a84ff]"
+          style={marquee}
+        />
+      )}
       <div
         ref={scrollRef}
         data-tl-scroll
@@ -2138,6 +2221,7 @@ export function Timeline() {
                       width: Math.max(14, x.t.seconds * pps - CLIP_GAP),
                       height: TEXT_H - 6,
                     }}
+                    data-tl-sel={`transition:${x.t.id}`}
                     onPointerDown={(e) => moveTransition(e, x)}
                   >
                     <Icon className="size-2.5 shrink-0" />
@@ -3252,6 +3336,7 @@ function ClipView({
         // Inline so it beats SELECTED_SHADOW's z-10 class on the same element.
         zIndex: drag ? 20 : undefined,
       }}
+      data-tl-sel={`clip:${clip.id}`}
       onPointerDown={(e) => startLaneMove(e, "clip", clip.id, ui)}
       onContextMenu={(e) => {
         if (asset.type !== "video") return;
@@ -3905,6 +3990,7 @@ function AudioView({
         // Inline so it beats SELECTED_SHADOW's z-10 class on the same element.
         zIndex: drag ? 20 : undefined,
       }}
+      data-tl-sel={`audio:${clip.id}`}
       onPointerDown={(e) => startLaneMove(e, "audio", clip.id, ui)}
     >
       <canvas ref={canvasRef} className="pointer-events-none absolute inset-x-0 inset-y-1 w-full" />
@@ -4066,6 +4152,7 @@ function OverlayClipView({
         // Inline so it beats SELECTED_SHADOW's z-10 class on the same element.
         zIndex: drag ? 20 : undefined,
       }}
+      data-tl-sel={`clip:${clip.id}`}
       onPointerDown={(e) => startLaneMove(e, "overlayClip", clip.id, ui)}
       onContextMenu={(e) => {
         if (asset.type !== "video") return;
@@ -4266,19 +4353,6 @@ function StickerThumb({ overlay: o }: { overlay: StickerOverlay }) {
   );
 }
 
-/** The glyph a shape's timeline chip wears. */
-const SHAPE_CHIP_ICONS: Record<ShapeKind, LucideIcon> = {
-  rect: Square,
-  ellipse: Circle,
-  triangle: Triangle,
-  diamond: Diamond,
-  star: Star,
-  heart: Heart,
-  hexagon: Hexagon,
-  line: Minus,
-  arrow: MoveRight,
-};
-
 function TextBar({
   overlay: o,
   pps,
@@ -4355,6 +4429,7 @@ function TextBar({
         // Inline so it beats SELECTED_SHADOW's z-10 class on the same element.
         zIndex: drag ? 20 : undefined,
       }}
+      data-tl-sel={`overlay:${o.id}`}
       onPointerDown={(e) => startLaneMove(e, "overlay", o.id, ui)}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -4441,6 +4516,7 @@ function SubBar({
         zIndex: drag ? 20 : undefined,
       }}
       title={cue.text}
+      data-tl-sel={`cue:${cue.id}`}
       onPointerDown={(e) => startLaneMove(e, "cue", cue.id, ui)}
     >
       <span className="pointer-events-none truncate px-1.5 text-[9.5px] font-medium text-amber-950/90">

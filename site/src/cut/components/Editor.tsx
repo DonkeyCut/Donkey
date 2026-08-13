@@ -20,7 +20,7 @@ import {
   renderPreviewProxy,
   type ExportDoc,
 } from "@/cut/lib/exportClient";
-import { fileZoneAt, hasRefDrag } from "@/cut/lib/assetRef";
+import { fileZoneAt, hasRefDrag, selectionRefTokens } from "@/cut/lib/assetRef";
 import { startUpload } from "@/cut/lib/importQueue";
 import { enrichAsset, importFileToProject, prepareImport } from "@/cut/lib/media";
 // Side-effect import: registers the brief-to-video resume subscription, so a
@@ -105,13 +105,21 @@ export function Editor({
   // show; otherwise (nothing selected, a subtitle cue, a transition bar — the
   // Transitions tab is its panel) it is an empty white panel, so collapse it
   // and let the preview take the space.
-  const hasInspector = useEditor(
-    (s) =>
-      !s.readOnly &&
-      s.selection != null &&
-      s.selection.kind !== "cue" &&
-      s.selection.kind !== "transition"
-  );
+  const hasInspector = useEditor((s) => {
+    if (s.readOnly || s.selection == null) return false;
+    if (s.selection.kind === "cue" || s.selection.kind === "transition") return false;
+    if (s.multiSelection.length <= 1) return true;
+    // A multi-selection (marquee, ⌘-click) has no single item to edit, so the
+    // panel stays closed. The exception is a grouped element: selecting it
+    // selects its whole group, and the panel edits the clicked member.
+    const first = s.multiSelection[0];
+    if (first?.kind !== "overlay") return false;
+    const gid = s.overlays.find((o) => o.id === first.id)?.groupId;
+    if (!gid) return false;
+    return s.multiSelection.every(
+      (m) => m?.kind === "overlay" && s.overlays.find((o) => o.id === m.id)?.groupId === gid
+    );
+  });
   const [importing, setImporting] = useState(0);
   // Files being probed and named, plus the ones already placed whose bytes are
   // still going out — both are work the save indicator reports.
@@ -785,9 +793,32 @@ export function Editor({
         if (e.shiftKey) s.redo();
         else s.undo();
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c") {
-        if (s.copySelection()) e.preventDefault();
+        // Selected page text keeps native ⌘C. Otherwise, alongside the
+        // internal copy (for ⌘V back onto the timeline), the selection's
+        // mention tokens go to the system clipboard, so a copied clip,
+        // element, transition, cue, or keyframe pastes into the chat
+        // composer as a reference.
+        if (!window.getSelection()?.toString()) {
+          const token = selectionRefTokens(s);
+          if (token) void navigator.clipboard.writeText(token).catch(() => {});
+          if (s.copySelection() || token) e.preventDefault();
+        }
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "v") {
         if (s.paste()) e.preventDefault();
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "g") {
+        // ⌘G groups the multi-selected elements, ⇧⌘G dissolves the primary's
+        // group — the panel's Group button is out of reach while a
+        // multi-selection keeps the inspector closed.
+        e.preventDefault();
+        if (e.shiftKey) {
+          const gid =
+            s.selection?.kind === "overlay"
+              ? s.overlays.find((o) => o.id === s.selection!.id)?.groupId
+              : undefined;
+          if (gid) s.ungroupOverlays(gid);
+        } else {
+          s.groupSelectedOverlays();
+        }
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
         e.preventDefault();
         s.setAiOpen(!s.aiOpen);
