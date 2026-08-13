@@ -70,7 +70,8 @@ import { isStylePresetTemplate } from "@/cut/lib/stylePresets";
 import { retryUpload } from "@/cut/lib/importQueue";
 import { downloadMedia, isMediaFile, revealMedia } from "@/cut/lib/media";
 import { mediaUrl, TRANSITION_MAX } from "@/cut/lib/types";
-import { Slider } from "@/components/ui/slider";
+import { parseSecondsInput } from "@/cut/components/ScrubValue";
+import { ValueSlider } from "@/cut/components/ValueSlider";
 import { genPulseOverlay, isGenTab, useGenNotify, useGenPulse, useWatchGenTab } from "@/cut/lib/genNotify";
 import { useGenerate, type GenerateJob } from "@/cut/lib/generate";
 import { CAPTION_LIMIT, normalizeTags } from "@/cut/lib/publish";
@@ -1490,22 +1491,24 @@ function ProjectFadeRow({ label, value, onChange }: {
   onChange: (v: number) => void;
 }) {
   return (
-    <label className="flex items-center justify-between gap-3 text-[12px] text-muted-foreground">
+    <div className="flex items-center justify-between gap-3 text-[12px] text-muted-foreground">
       {label}
       <span className="flex items-center gap-2">
-        <Slider
-          className={`project-${label.toLowerCase().replace(" ", "-")} data-horizontal:w-28`}
+        <ValueSlider
+          label={label}
+          sliderClassName={`project-${label.toLowerCase().replace(" ", "-")} data-horizontal:w-28`}
+          valueClassName="w-9"
+          value={value}
           min={0}
           max={TRANSITION_MAX}
           step={0.1}
-          value={value}
-          onValueChange={(v) => onChange(Number(v))}
+          format={(v) => (v < 0.05 ? "Off" : `${v.toFixed(1)}s`)}
+          parse={(raw) => (raw.trim().toLowerCase() === "off" ? 0 : parseSecondsInput(raw))}
+          onDraft={onChange}
+          onCommit={onChange}
         />
-        <span className="w-9 text-right font-mono text-[11.5px]">
-          {value < 0.05 ? "Off" : `${value.toFixed(1)}s`}
-        </span>
       </span>
-    </label>
+    </div>
   );
 }
 

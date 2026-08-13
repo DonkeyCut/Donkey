@@ -10,9 +10,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { parseNumberInput, ScrubValue } from "@/cut/components/ScrubValue";
+import { parseNumberInput } from "@/cut/components/ScrubValue";
+import { ValueSlider } from "@/cut/components/ValueSlider";
 import { GenerateSubtitlesAudio } from "@/cut/components/VoicePicker";
 import {
   CAPTION_STYLES,
@@ -253,25 +253,18 @@ function OptionsTab() {
       <div className="flex min-h-8 items-center justify-between text-xs font-medium">
         Size
         <div className="sub-size flex items-center gap-2">
-          <Slider
-            className="data-horizontal:w-24"
+          <ValueSlider
+            label="Caption size"
+            sliderClassName="data-horizontal:w-24"
+            valueClassName="w-7 text-muted-foreground"
+            value={subtitles.size ?? captionStyle(subtitles.style).size}
             min={24}
             max={120}
             step={1}
             snap={[captionStyle(subtitles.style).size]}
-            value={subtitles.size ?? captionStyle(subtitles.style).size}
-            onValueChange={(v) => useEditor.getState().setSubtitlesView({ size: Number(v) })}
-          />
-          <ScrubValue
-            label="Caption size"
-            className="w-7 text-muted-foreground"
-            value={subtitles.size ?? captionStyle(subtitles.style).size}
-            min={24}
-            max={120}
-            step={1}
             format={(v) => String(Math.round(v))}
             parse={parseNumberInput}
-            onScrub={(v) => useEditor.getState().setSubtitlesView({ size: v })}
+            onDraft={(v) => useEditor.getState().setSubtitlesView({ size: v })}
             onCommit={(v) => useEditor.getState().setSubtitlesView({ size: v })}
           />
         </div>
