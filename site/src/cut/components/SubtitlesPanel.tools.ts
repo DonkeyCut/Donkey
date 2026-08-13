@@ -39,7 +39,7 @@ export const SUBTITLES_TOOLS = [
   {
     name: "subtitles_add_track",
     description:
-      "Add a subtitle track (up to 3, one language each — e.g. English on track 0, Korean on track 1; each shows as its own caption line, draggable to its own spot). The new track becomes active and starts empty: fill it with subtitles_translate_track, or subtitles_generate in its language.",
+      "Add a subtitle track for an additional language (up to 3, one language each — e.g. English on track 0, Korean on track 1; each shows as its own caption line, draggable to its own spot). The new track becomes active and starts empty: fill it with subtitles_translate_track, or subtitles_generate in its language. Plain \"add captions\" is subtitles_generate by itself — it writes the default track.",
     inputSchema: obj({ language: str("The track's language as BCP-47, e.g. ko-KR (optional)") }),
   },
   {
