@@ -1235,10 +1235,9 @@ export function Timeline() {
       return;
     }
     if (isClipMedia(type)) {
-      if (place.kind === "insert") s.addVideoFromAsset(assetId, place, t);
-      // Drop at the pointer, rippling later clips right — so a drop into a
-      // leading gap or between clips lands there instead of sliding to the end.
-      else s.dropClipFromAsset(assetId, t);
+      // A track drop lands at the pointer, rippling later clips right, so a
+      // drop into a leading gap or between clips lands there.
+      s.addVideoFromAsset(assetId, place, t);
     } else {
       const used = [...new Set(s.audioClips.map((a) => a.lane ?? 0))].sort((a, b) => a - b);
       const lane =
