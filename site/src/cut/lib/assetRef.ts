@@ -6,8 +6,25 @@ import { fetchLibrary, libraryMediaUrl, type LibraryAsset } from "./library";
 import { stockAspectDims, stockTitle, type StockImage, type StockMusic, type StockVideo } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
+import { EFFECT_LABELS } from "@donkeycut/effects-kit";
 import { clipLen, getClipSpans, useEditor } from "./store";
-import type { AudioClip, MediaAsset } from "./types";
+import {
+  isEffectOverlay,
+  isShapeOverlay,
+  isStickerOverlay,
+  isTextOverlay,
+  SHAPE_LABELS,
+  type ShapeKind,
+} from "./types";
+import type {
+  AudioClip,
+  MediaAsset,
+  Overlay,
+  Selection,
+  SubtitleCue,
+  TimelineTransition,
+  VideoClip,
+} from "./types";
 
 // One reference model for every piece of media in the app. A ref names an
 // asset wherever it lives — the open project, the shared library, the bundled
@@ -29,8 +46,14 @@ import type { AudioClip, MediaAsset } from "./types";
  * composer) — it lives only in the composer's state, never in a catalog.
  * "clip" names a clip on the timeline — a video-track clip or a soundtrack
  * clip (id = the clip id, url = its source media), so chat can talk about
- * segments of the cut, not just assets. */
-export type AssetRefScope = "project" | "library" | "stock" | "file" | "clip";
+ * segments of the cut, not just assets.
+ * "entity" names a timeline object with no media of its own — a title, shape,
+ * sticker or effect element, a transition bar, a subtitle cue, or one keyframe
+ * on an element's or clip's pose/mask track. Its `id` is an internal composite
+ * (`overlay:<id>`, `key:clip:<id>:pose:<index>`, …) and its `url` is a
+ * data: text payload describing the entity — the parent's id included — so a
+ * mention lands in chat as grounded text the tools can act on. */
+export type AssetRefScope = "project" | "library" | "stock" | "file" | "clip" | "entity";
 export type AssetRefKind = "video" | "audio" | "image" | "text";
 
 export interface AssetRef {
@@ -60,6 +83,15 @@ export interface AssetRef {
    * media order by `useRefCandidates`. Derived per session, not persisted —
    * display surfaces re-resolve it live so a stale copy never shows. */
   handle?: string;
+  /** Which timeline entity an `"entity"` ref names — picks the pill's icon. */
+  entityKind?: "title" | "shape" | "sticker" | "effect" | "transition" | "cue" | "keyframe";
+  /** The shape element's kind, for the pill's per-shape icon. */
+  shapeKind?: ShapeKind;
+  /** Which track a keyframe ref rides — mask keys color their pill amber to
+   * match the timeline's diamonds. */
+  keyTrack?: "pose" | "mask";
+  /** Tiny image the pill shows instead of an icon — the sticker's own art. */
+  preview?: string;
 }
 
 export const refFromAsset = (a: MediaAsset): AssetRef => ({
@@ -160,6 +192,10 @@ export function liveRefUrl(scope: AssetRefScope, id: string, url: string): strin
       s.audioClips.find((c) => c.id === id)?.assetId;
     return s.assets.find((a) => a.id === assetId)?.url ?? url;
   }
+  // An entity payload describes live state (times, pose values), so re-derive
+  // it; an entity that no longer resolves keeps the description it was
+  // copied with.
+  if (scope === "entity") return entityRefs(s).find((r) => r.id === id)?.url ?? url;
   return url;
 }
 
@@ -439,10 +475,231 @@ export function audioClipRefs(audioClips: AudioClip[], assets: MediaAsset[]): As
     });
 }
 
+/** What `entityRefs` reads; the editor store state satisfies it. */
+export interface EntitySources {
+  clips: VideoClip[];
+  assets: MediaAsset[];
+  overlays: Overlay[];
+  transitions: TimelineTransition[];
+  subtitles: { cues: SubtitleCue[] };
+}
+
+const sec = (t: number) => `${t.toFixed(2)}s`;
+
+const entityRef = (
+  id: string,
+  name: string,
+  payload: string,
+  extra?: Partial<AssetRef>
+): AssetRef => ({
+  scope: "entity",
+  id,
+  name,
+  kind: "text",
+  url: `data:text/plain;charset=utf-8,${encodeURIComponent(payload)}`,
+  ...extra,
+});
+
+/** One element's keyframes as refs. `parent` is the display name mentions use
+ * ("c3", "Snap Test"); names stay short — "kf c3", numbered only when the
+ * track holds more than one key ("kf2 c3"). The payload carries the parent's
+ * real id, so chat edits land through the parent's keyframe track. */
+function keyRefs(
+  ownerKind: "clip" | "overlay",
+  ownerId: string,
+  parent: string,
+  start: number,
+  keys: { t: number; x?: number; y?: number; scale?: number; rotation?: number; opacity?: number }[] | undefined,
+  track: "pose" | "mask"
+): AssetRef[] {
+  if (!keys || keys.length === 0) return [];
+  const sorted = [...keys].sort((a, b) => a.t - b.t);
+  const label = track === "pose" ? "kf" : "mask kf";
+  return sorted.map((k, i) => {
+    const pose =
+      track === "pose"
+        ? ` Pose: x ${(k.x ?? 0).toFixed(3)}, y ${(k.y ?? 0).toFixed(3)}, scale ${(k.scale ?? 1).toFixed(2)}, rotation ${(k.rotation ?? 0).toFixed(1)}°, opacity ${(k.opacity ?? 1).toFixed(2)}.`
+        : "";
+    return entityRef(
+      `key:${ownerKind}:${ownerId}:${track}:${i}`,
+      sorted.length === 1 ? `${label} ${parent}` : `${label}${i + 1} ${parent}`,
+      `keyframe ${i + 1} of ${sorted.length} on the ${track} track of ${parent} (${ownerKind} id ${ownerId}). ` +
+        `At ${sec(k.t)} into the ${ownerKind} (timeline ${sec(start + k.t)}).${pose} ` +
+        `Edit it by rewriting the parent ${ownerKind}'s ${track} keyframe track.`,
+      { entityKind: "keyframe", keyTrack: track }
+    );
+  });
+}
+
+/** A readable name for an element, the same one its timeline chip shows: a
+ * title's own text, a shape's or effect's label, a sticker's asset name. The
+ * kind word when nothing better exists. Cleaned to survive a mention token
+ * (no quotes or newlines) and kept short. */
+function overlayBaseName(o: Overlay, fallback: string): string {
+  // A sticker's identity is its art — the pill shows the thumbnail — and its
+  // asset name is often a generation prompt, which would collide with the
+  // media asset carrying the same name. It names by kind.
+  const raw = isTextOverlay(o)
+    ? o.text
+    : isShapeOverlay(o)
+      ? SHAPE_LABELS[o.shape]
+      : isEffectOverlay(o)
+        ? EFFECT_LABELS[o.effect]
+        : "Sticker";
+  const clean = (raw ?? "")
+    .replace(/[\n"]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 40)
+    .trim();
+  return clean || fallback;
+}
+
+/** The timeline's media-less objects as refs: title/shape/sticker/effect
+ * elements, transition bars, subtitle cues, and every keyframe on a track-0
+ * clip's or element's pose and mask tracks. Elements name by their content
+ * ("Snap Test", "Rectangle"), numbered in timeline order only when two share
+ * a name ("Rectangle 1", "Rectangle 2"); transitions, cues, and keyframes
+ * stay ordinal. Names re-derive from the current timeline, so a pasted
+ * mention resolves to whatever holds that name now; the internal ids ride in
+ * the ref, never in the prompt text. */
+export function entityRefs(src: EntitySources): AssetRef[] {
+  const out: AssetRef[] = [];
+
+  const overlayLabel: Record<string, string> = {
+    text: "title",
+    shape: "shape",
+    sticker: "sticker",
+    effect: "effect",
+  };
+  const overlays = [...src.overlays].sort(
+    (a, b) => a.start - b.start || (a.lane ?? 0) - (b.lane ?? 0)
+  );
+  const bases = overlays.map((o) =>
+    overlayBaseName(o, overlayLabel[(o as { kind?: string }).kind ?? "text"] ?? "element")
+  );
+  const dupes = new Map<string, number>();
+  for (const b of bases) dupes.set(b.toLowerCase(), (dupes.get(b.toLowerCase()) ?? 0) + 1);
+  const taken = new Set<string>();
+  const nth = new Map<string, number>();
+  const bump = (k: string) => {
+    const n = (nth.get(k) ?? 0) + 1;
+    nth.set(k, n);
+    return n;
+  };
+  overlays.forEach((o, i) => {
+    const label = overlayLabel[(o as { kind?: string }).kind ?? "text"] ?? "element";
+    const base = bases[i];
+    const key = base.toLowerCase();
+    let name = (dupes.get(key) ?? 0) > 1 ? `${base} ${bump(key)}` : base;
+    while (taken.has(name.toLowerCase())) name = `${base} ${bump(key)}`;
+    taken.add(name.toLowerCase());
+    const text = (o as { text?: string }).text;
+    const stickerAsset =
+      isStickerOverlay(o) && !o.lottie ? src.assets.find((a) => a.id === o.assetId) : undefined;
+    out.push(
+      entityRef(
+        `overlay:${o.id}`,
+        name,
+        `${name} — a ${label} element on the timeline. id ${o.id}, ` +
+          `${sec(o.start)}–${sec(o.end)}, lane ${o.lane ?? 0}.` +
+          (text ? ` Text: "${text}"` : ""),
+        {
+          entityKind: label as AssetRef["entityKind"],
+          shapeKind: isShapeOverlay(o) ? o.shape : undefined,
+          preview: stickerAsset?.url,
+        }
+      )
+    );
+    out.push(...keyRefs("overlay", o.id, name, o.start, o.kf, "pose"));
+    out.push(...keyRefs("overlay", o.id, name, o.start, o.mask?.kf, "mask"));
+  });
+
+  getClipSpans(src.clips, src.assets).forEach((sp, i) => {
+    // The clip's session handle ("c3") — clipRefs numbers the same spans.
+    const parent = `c${i + 1}`;
+    out.push(...keyRefs("clip", sp.clip.id, parent, sp.start, sp.clip.kf, "pose"));
+    out.push(...keyRefs("clip", sp.clip.id, parent, sp.start, sp.clip.mask?.kf, "mask"));
+  });
+
+  [...src.transitions].sort((a, b) => a.start - b.start).forEach((t, i) => {
+    const name = `transition ${i + 1}`;
+    out.push(
+      entityRef(
+        `transition:${t.id}`,
+        name,
+        `${name} — a transition bar on the timeline. id ${t.id}, style ${t.style}, ` +
+          `window ${sec(t.start)}–${sec(t.start + t.seconds)}.`,
+        { entityKind: "transition" }
+      )
+    );
+  });
+
+  [...src.subtitles.cues].sort((a, b) => a.start - b.start).forEach((c, i) => {
+    const name = `cue ${i + 1}`;
+    out.push(
+      entityRef(
+        `cue:${c.id}`,
+        name,
+        `${name} — a subtitle cue. id ${c.id}, ${sec(c.start)}–${sec(c.end)}. Text: "${c.text}"`,
+        { entityKind: "cue" }
+      )
+    );
+  });
+
+  return out;
+}
+
+/** The prompt tokens for the current timeline selection, ready for the
+ * system clipboard — a picked keyframe first, then every selected clip,
+ * sound, element, transition, or cue that resolves to a ref. ⌘C writes this
+ * so the selection can be pasted straight into the chat composer, where the
+ * tokens light up as mentions. Null when nothing selected resolves. */
+export function selectionRefTokens(s: EntitySources & {
+  audioClips: AudioClip[];
+  selection: Selection;
+  multiSelection: Selection[];
+  selectedKey: { kind: "overlay" | "clip"; id: string; t: number; track: "pose" | "mask" } | null;
+}): string | null {
+  const entities = entityRefs(s);
+
+  if (s.selectedKey) {
+    const k = s.selectedKey;
+    const owner =
+      k.kind === "clip"
+        ? s.clips.find((c) => c.id === k.id)
+        : s.overlays.find((o) => o.id === k.id);
+    const keys = k.track === "pose" ? owner?.kf : owner?.mask?.kf;
+    const idx = keys
+      ? [...keys].sort((a, b) => a.t - b.t).findIndex((key) => Math.abs(key.t - k.t) < 1e-6)
+      : -1;
+    const ref =
+      idx >= 0 ? entities.find((r) => r.id === `key:${k.kind}:${k.id}:${k.track}:${idx}`) : undefined;
+    if (ref) return refToken(ref);
+  }
+
+  const cRefs = clipRefs(s.clips, s.assets);
+  const aRefs = audioClipRefs(s.audioClips, s.assets);
+  const sels = s.multiSelection.length ? s.multiSelection : s.selection ? [s.selection] : [];
+  const tokens: string[] = [];
+  for (const sel of sels) {
+    if (!sel) continue;
+    const ref =
+      sel.kind === "clip"
+        ? cRefs.find((r) => r.id === sel.id)
+        : sel.kind === "audio"
+          ? aRefs.find((r) => r.id === sel.id)
+          : entities.find((r) => r.id === `${sel.kind}:${sel.id}`);
+    if (ref) tokens.push(refToken(ref));
+  }
+  return tokens.length ? tokens.join(" ") : null;
+}
+
 /** Everything referenceable right now, in resolution order: the timeline's
  * clips first — video-track clips, then soundtrack clips (what's in front of
- * the user — a bare `@` leads with the cut), then the open project's media,
- * the shared library, and the stock catalog.
+ * the user — a bare `@` leads with the cut), then the timeline's media-less
+ * entities (elements, transitions, cues, keyframes — pasted in via ⌘C), then
+ * the open project's media, the shared library, and the stock catalog.
  * Names are unique within the list (first scope wins) so a mention resolves
  * to one asset. Library items mention by name; stock ids are already short
  * (`@nature-dunes`). */
@@ -450,6 +707,9 @@ export function useRefCandidates(): AssetRef[] {
   const assets = useEditor((s) => s.assets);
   const clips = useEditor((s) => s.clips);
   const audioClips = useEditor((s) => s.audioClips);
+  const overlays = useEditor((s) => s.overlays);
+  const transitions = useEditor((s) => s.transitions);
+  const subtitles = useEditor((s) => s.subtitles);
   const [lib, setLib] = useState<LibraryAsset[]>(libraryCache ?? []);
 
   useEffect(() => {
@@ -470,6 +730,7 @@ export function useRefCandidates(): AssetRef[] {
     for (const ref of [
       ...clipRefs(clips, assets),
       ...audioClipRefs(audioClips, assets),
+      ...entityRefs({ clips, assets, overlays, transitions, subtitles }),
       ...project,
       ...lib.map(refFromLibrary),
       ...STOCK_IMAGES.map(refFromStock),
@@ -481,24 +742,36 @@ export function useRefCandidates(): AssetRef[] {
       out.push(ref);
     }
     return out;
-  }, [assets, clips, audioClips, lib]);
+  }, [assets, clips, audioClips, overlays, transitions, subtitles, lib]);
 }
 
 /** The prompt token for an asset name: `@name`, quoted when it has spaces. */
 export const mentionToken = (name: string) =>
   /[\s"]/.test(name) ? `@"${name.replace(/"/g, "")}"` : `@${name}`;
 
+/** Inside an entity token, spaces ride as no-break spaces: the composer
+ * paints a single-line pill cover over the token's glyphs, so line wrap must
+ * move the whole token. `resolveRefByName` reads both space forms as one, and
+ * `parseMentions` restores plain spaces on the way out. */
+const NBSP = " ";
+
 /** The preferred prompt token for a ref: its short handle (`@v2`) when it has
- * one, the (quoted) name otherwise. */
+ * one, the (quoted) name otherwise. Entity tokens always quote: the composer
+ * paints an icon + name cover over the token's glyphs, and the quotes buy the
+ * width the icon needs. */
 export const refToken = (ref: AssetRef) =>
-  ref.handle ? `@${ref.handle}` : mentionToken(ref.name);
+  ref.handle
+    ? `@${ref.handle}`
+    : ref.scope === "entity"
+      ? `@"${ref.name.replace(/"/g, "").replace(/ /g, NBSP)}"`
+      : mentionToken(ref.name);
 
 const MENTION_RE = /@(?:"([^"\n]+)"|([^\s"@]+))/g;
 
 /** Resolve one mention body against the candidates: short handle first
  * (`v2`), then exact name (case-insensitive on both). */
 export function resolveRefByName(name: string, candidates: AssetRef[]): AssetRef | null {
-  const q = name.toLowerCase();
+  const q = name.replace(/ /g, " ").toLowerCase();
   return (
     candidates.find((c) => c.handle?.toLowerCase() === q) ??
     candidates.find((c) => c.name.toLowerCase() === q) ??
@@ -567,7 +840,8 @@ export function parseMentions(
     if (!refs.some((r) => sameRef(r, ref))) refs.push(ref);
     return ref.name;
   });
-  return { refs, text: out };
+  // Composer-side no-break spaces stay behind: prompt text reads plain.
+  return { refs, text: out.replace(/ /g, " ") };
 }
 
 /** Resolve a prompt's `@name` mentions and merge them into the already-attached

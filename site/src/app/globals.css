@@ -171,3 +171,16 @@ html.app-surface {
     @apply bg-background font-sans;
   }
 }
+
+/* The mention pill's stand-in caret: the real one blinks in the textarea
+   underneath the pill cover's left edge. */
+@keyframes mention-caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}

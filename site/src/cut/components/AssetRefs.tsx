@@ -18,8 +18,9 @@ import { formatTime } from "@/cut/lib/time";
 import { clipLen, getClipSpans, useEditor } from "@/cut/lib/store";
 import { playheadAt } from "@/cut/lib/playhead";
 import { AudioPillSurface } from "@/cut/components/AudioPanel";
-import { ScrubValue, parseTimeInput } from "@/cut/components/ScrubValue";
-import { Slider } from "@/components/ui/slider";
+import { entityGlyph } from "@/cut/components/entityIcons";
+import { parseTimeInput } from "@/cut/components/ScrubValue";
+import { ValueSlider } from "@/cut/components/ValueSlider";
 import { cn } from "@/lib/utils";
 
 // Shared UI for asset references: the preview thumbnail, attachment chips,
@@ -87,7 +88,17 @@ export function RefThumb({ item, className }: { item: AssetRef; className?: stri
         ) : null
       ) : item.kind === "text" ? (
         <div className="grid size-full place-items-center bg-gradient-to-br from-slate-100 to-slate-50 text-slate-500">
-          <FileText className="size-4.5" />
+          {item.preview ? (
+            // eslint-disable-next-line @next/next/no-img-element -- refs point at engine/static files, not Next-optimizable images
+            <img
+              src={item.preview}
+              alt={item.name}
+              loading="lazy"
+              className="size-full object-contain p-1"
+            />
+          ) : (
+            (entityGlyph(item, "size-4.5") ?? <FileText className="size-4.5" />)
+          )}
         </div>
       ) : (
         <AudioPillSurface peaks={peaks} className="size-full rounded-none" />
@@ -281,6 +292,26 @@ export function RefTokenChip({
   peekSide?: "top" | "bottom";
 }) {
   const [peek, setPeek] = useState(false);
+  // Entity refs have no media to peek at and no card to jump to — the pill
+  // itself, icon plus name, is the whole story.
+  if (item.scope === "entity") {
+    return (
+      <span
+        className={cn(
+          "ref-token inline-flex items-center gap-1 rounded-md px-1 align-middle font-mono text-[11px]",
+          onDark ? "bg-white/15 text-[#8ec7ff]" : "bg-[#0a84ff]/10 text-[#0a84ff]"
+        )}
+      >
+        {item.preview ? (
+          // eslint-disable-next-line @next/next/no-img-element -- refs point at engine/static files, not Next-optimizable images
+          <img src={item.preview} alt="" className="size-3 shrink-0 object-contain" />
+        ) : (
+          entityGlyph(item, cn("size-2.5 shrink-0", item.keyTrack === "mask" && "text-[#ff9f0a]"))
+        )}
+        {item.name}
+      </span>
+    );
+  }
   return (
     <span
       className="relative inline-block"
@@ -441,11 +472,13 @@ function RefChip({
           the wide chip stays within the composer. Composer chips (onUpdate)
           are inert surfaces — hover carries the moment card; click-to-reveal
           belongs to the read-only rows on past messages. */}
-      {onUpdate ? (
-        <RefThumb
-          item={item}
-          className={item.kind === "audio" ? "h-12 w-44 max-w-full" : thumbClassName}
-        />
+      {onUpdate || item.scope === "entity" ? (
+        <div title={item.scope === "entity" ? item.name : undefined}>
+          <RefThumb
+            item={item}
+            className={item.kind === "audio" ? "h-12 w-44 max-w-full" : thumbClassName}
+          />
+        </div>
       ) : (
         <button
           type="button"
@@ -487,7 +520,8 @@ function RefChip({
           <RefMomentPicker item={item} side={peekSide} offsetX={cardDx} onChange={onUpdate} />
         </div>
       ) : (
-        hover && <RefPeek item={item} side={peekSide} />
+        // Entity refs have nothing more to show than the chip itself.
+        hover && item.scope !== "entity" && <RefPeek item={item} side={peekSide} />
       )}
       <button
         aria-label={`Remove ${item.name}`}
@@ -525,6 +559,36 @@ function playheadMoment(ref: AssetRef): number | null {
   return a ? a.in + (now - a.start) : null;
 }
 
+/** The timeline selection the last pill click made, so dismissing the pick in
+ * chat can take it back without touching a selection made elsewhere. */
+let lastReveal: { kind: string; id: string } | null = null;
+
+/** Select the entity a pill points at, so the timeline highlights and reveals
+ * it. The ref id carries the timeline identity (`overlay:<id>`, `cue:<id>`,
+ * `key:clip:<id>:pose:<n>`, …). */
+function revealEntity(ref: AssetRef) {
+  const [kind, a, b, c, d] = ref.id.split(":");
+  const st = useEditor.getState();
+  if (kind === "overlay" || kind === "cue" || kind === "transition") {
+    st.select({ kind, id: a });
+    lastReveal = { kind, id: a };
+    return;
+  }
+  if (kind !== "key") return;
+  const ownerKind = a === "clip" ? "clip" : "overlay";
+  const owner =
+    ownerKind === "clip"
+      ? st.clips.find((x) => x.id === b)
+      : st.overlays.find((x) => x.id === b);
+  const track = c === "mask" ? "mask" : "pose";
+  const keys = track === "pose" ? owner?.kf : owner?.mask?.kf;
+  const key = keys ? [...keys].sort((x, y) => x.t - y.t)[Number(d)] : undefined;
+  st.select({ kind: ownerKind, id: b });
+  lastReveal = { kind: ownerKind, id: b };
+  if (key)
+    useEditor.setState({ selectedKey: { kind: ownerKind, id: b, t: key.t, track } });
+}
+
 /** The scrubbable range behind a ref's pin: a clip ref covers its trimmed
  * [in, out] of the source (its pin is source seconds), anything else the whole
  * media. `dur` supplies a probed duration when the ref doesn't know its own. */
@@ -560,17 +624,10 @@ function MomentControls({
     onChange({ ...item, t: Math.min(Math.max(lo, next), hi > lo ? hi : next) });
   return (
     <div className={cn("flex items-center gap-2", className)}>
-      <div className="min-w-0 flex-1">
-        <Slider
-          min={lo}
-          max={Math.max(hi, lo + 0.1)}
-          step={0.1}
-          value={t}
-          aria-label="Pinned moment"
-          onValueChange={(v) => apply(Number(v))}
-        />
-      </div>
-      <ScrubValue
+      <ValueSlider
+        label="Pinned moment"
+        sliderClassName="min-w-0 flex-1"
+        valueClassName="shrink-0 text-muted-foreground"
         value={t}
         min={lo}
         max={Math.max(hi, lo + 0.1)}
@@ -578,10 +635,8 @@ function MomentControls({
         keyStep={1}
         format={formatTime}
         parse={parseTimeInput}
-        onScrub={apply}
+        onDraft={apply}
         onCommit={apply}
-        label="Pinned moment timestamp"
-        className="shrink-0 text-muted-foreground"
       />
     </div>
   );
@@ -796,6 +851,145 @@ function mentionAtCaret(value: string, caret: number): { start: number; query: s
   return { start: at, query };
 }
 
+/** One resolved mention in the composer mirror. Entity pills paint over the
+ * raw token with the entity's icon (or the sticker's own art) and name — the
+ * token glyphs underneath keep their exact layout, so the textarea's caret
+ * math never drifts. The overlay steps aside while the caret sits inside the
+ * token (the user is editing it) and when the token wraps across lines (an
+ * inline overlay can only cover one line box). */
+function MentionPill({
+  item,
+  text,
+  editing,
+  selected,
+  caretAtStart,
+  bleedL,
+  bleedR,
+  pinnable,
+  onPin,
+  onSelectToken,
+}: {
+  item: AssetRef;
+  text: string;
+  editing: boolean;
+  /** The selection covers this token — the pill is picked whole. */
+  selected: boolean;
+  /** A collapsed caret sits right before the token — the cover would hide
+   * the real one, so the pill paints its own on top. */
+  caretAtStart: boolean;
+  bleedL: boolean;
+  bleedR: boolean;
+  pinnable: boolean;
+  onPin: (ref: AssetRef, el: HTMLElement) => void;
+  /** Select the whole token in the textarea. */
+  onSelectToken: () => void;
+}) {
+  const spanRef = useRef<HTMLSpanElement>(null);
+  const coverRef = useRef<HTMLSpanElement>(null);
+  const [wrapped, setWrapped] = useState(false);
+  // A cover that needs more room than the raw token has would truncate the
+  // name; once it measures too wide for this token text it stays raw.
+  const [clippedFor, setClippedFor] = useState<string | null>(null);
+  // Measured every render: wrapping depends on everything before the token.
+  useLayoutEffect(() => {
+    setWrapped((spanRef.current?.getClientRects().length ?? 1) > 1);
+    const cover = coverRef.current;
+    if (cover && cover.scrollWidth > cover.clientWidth + 1) setClippedFor(text);
+  });
+  const glyph = entityGlyph(
+    item,
+    cn(
+      "relative size-[0.9em] shrink-0",
+      // Mask keyframes carry the timeline's amber; everything else the pill blue.
+      item.keyTrack === "mask" ? "text-[#ff9f0a]" : "text-[#0a84ff]"
+    )
+  );
+  const rich =
+    item.scope === "entity" &&
+    !editing &&
+    !wrapped &&
+    clippedFor !== text &&
+    !!(glyph || item.preview);
+  // Entity pills act as one object: a click selects the whole token, so the
+  // caret never lands inside and typing replaces it in one stroke.
+  const atomic = item.scope === "entity" && !pinnable;
+  return (
+    <span
+      ref={spanRef}
+      className={cn(
+        // Padding cancelled by negative margin: the background gains side
+        // padding to match the font's own vertical inset while every glyph
+        // stays exactly where the textarea draws it.
+        "rounded-[4px] bg-[#0a84ff]/12",
+        rich && "relative",
+        // The cover spans the padding box, so a bleed under it would paint
+        // over the character typed right after the token. The cover draws its
+        // own pill, sized to the token alone; padding and margin cancel each
+        // other, so dropping both leaves the text metrics untouched.
+        bleedL && !rich && "pl-[0.15em] -ml-[0.15em]",
+        bleedR && !rich && "pr-[0.15em] -mr-[0.15em]",
+        pinnable && "pointer-events-auto cursor-pointer hover:bg-[#0a84ff]/25",
+        atomic && "pointer-events-auto cursor-default"
+      )}
+      title={pinnable ? `${item.name} — click to pin the moment` : undefined}
+      // mousedown, not click: preventDefault keeps focus in the textarea.
+      onMouseDown={
+        pinnable
+          ? (e) => {
+              e.preventDefault();
+              onPin(item, e.currentTarget);
+            }
+          : atomic
+            ? (e) => {
+                e.preventDefault();
+                onSelectToken();
+                revealEntity(item);
+              }
+            : undefined
+      }
+    >
+      {text}
+      {rich && (
+        // Opaque cover over the raw token: the composer's background, the
+        // pill tint on top, then icon + name. It stretches a little past the
+        // inline box vertically so the art keeps a visible margin.
+        <span
+          ref={coverRef}
+          className={cn(
+            "pointer-events-none absolute inset-x-0 -inset-y-[0.1em] flex items-center overflow-hidden rounded-[4px] bg-background whitespace-nowrap",
+            // Sticker art bleeds to the pill's own edges; icons sit inset.
+            item.preview ? "gap-[0.25em]" : "gap-[0.3em] pl-[0.25em]"
+          )}
+        >
+          <span className="absolute inset-0 rounded-[4px] bg-[#0a84ff]/12" />
+          {item.preview ? (
+            // eslint-disable-next-line @next/next/no-img-element -- refs point at engine/static files, not Next-optimizable images
+            <img
+              src={item.preview}
+              alt=""
+              className="relative h-full w-[1.05em] shrink-0 rounded-l-[4px] object-cover"
+            />
+          ) : (
+            glyph
+          )}
+          <span className="relative text-foreground">{item.name}</span>
+          {/* Picked whole: the same pill with a blue ring, painted last so it
+              rides over the full-bleed art. */}
+          {selected && (
+            <span className="absolute inset-0 rounded-[4px] ring-[1.5px] ring-[#0a84ff] ring-inset" />
+          )}
+        </span>
+      )}
+      {rich && caretAtStart && (
+        // The mirror's stand-in for the real caret, which blinks in the
+        // textarea underneath the cover's left edge. Mounting on caret
+        // arrival restarts the animation, matching the browser's own reset.
+        <span className="pointer-events-none absolute -inset-y-[0.1em] -left-px w-[1.5px] animate-[mention-caret_1.1s_steps(1)_infinite] bg-foreground" />
+      )}
+    </span>
+  );
+}
+
 /**
  * Textarea with `@` autocomplete over the given candidates — matches short
  * handles (`@v2`) and names, and inserts the handle token when there is one.
@@ -853,6 +1047,10 @@ export function MentionTextarea({
   const rootRef = useRef<HTMLDivElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
   const [caret, setCaret] = useState(0);
+  // Selection end and focus, so a pill knows when the user is editing inside
+  // its token and should see the raw text.
+  const [selEnd, setSelEnd] = useState(0);
+  const [focused, setFocused] = useState(false);
   const [dismissed, setDismissed] = useState<number | null>(null);
   /** The open pill picker: the ref it edits and where it anchors, in the
    * container's coordinates (the pill's top and bottom edges). */
@@ -891,9 +1089,52 @@ export function MentionTextarea({
     for (const k of [...autoPinned.current]) if (!present.has(k)) autoPinned.current.delete(k);
   }, [value, candidates, attachedRefs, onUpsertRef]);
 
+  // Mirror segments with their character offsets, so a pill can tell when
+  // the caret sits inside its token.
+  const mirrorSegs = useMemo(
+    () =>
+      highlightMentions(value, candidates).reduce<
+        { text: string; ref: AssetRef | null; start: number }[]
+      >((acc, seg) => {
+        const prev = acc[acc.length - 1];
+        acc.push({ ...seg, start: prev ? prev.start + prev.text.length : 0 });
+        return acc;
+      }, []),
+    [value, candidates]
+  );
+
+  // A pill cover is one box, so its token must move between lines whole —
+  // wrapped mid-token it falls back to raw text. Resolved entity tokens ride
+  // no-break spaces (pasted or typed ones get rewritten here); the swap keeps
+  // the length, so every caret offset survives and the write settles.
+  useEffect(() => {
+    let next = value;
+    for (const m of mirrorSegs) {
+      if (m.ref?.scope !== "entity" || !m.text.includes(" ")) continue;
+      next =
+        next.slice(0, m.start) +
+        m.text.replace(/ /g, " ") +
+        next.slice(m.start + m.text.length);
+    }
+    if (next === value) return;
+    const el = taRef.current;
+    const s = el?.selectionStart ?? null;
+    const e = el?.selectionEnd ?? null;
+    onChange(next);
+    if (el && s !== null)
+      requestAnimationFrame(() => el.setSelectionRange(s, e ?? s));
+  }, [mirrorSegs, value, onChange]);
+
   const mention = useMemo(() => mentionAtCaret(value, caret), [value, caret]);
   const matches = useMemo(() => {
     if (!mention || dismissed === mention.start) return [];
+    // A caret strictly inside an intact, resolved token is a click on the
+    // pill — the mention is complete, and offering lookalike suggestions for
+    // its half-read query would misdirect it.
+    const inResolved = mirrorSegs.some(
+      (seg) => seg.ref && caret > seg.start && caret < seg.start + seg.text.length
+    );
+    if (inResolved) return [];
     const q = mention.query.toLowerCase();
     // Best match first, not list order: a typed handle prefix ("c" → c1, c2)
     // beats a name prefix, which beats a substring hit anywhere in the name —
@@ -905,13 +1146,17 @@ export function MentionTextarea({
       const name = c.name.toLowerCase();
       return name.startsWith(q) ? 1 : name.includes(q) ? 2 : 3;
     };
+    // Entity refs (keyframes, transitions, cues, elements) reach a prompt by
+    // ⌘C copy-paste; the popover offers media and clips, so a long subtitle
+    // track never floods the list.
     return candidates
+      .filter((c) => c.scope !== "entity")
       .map((c) => ({ c, r: rank(c) }))
       .filter((x) => x.r < 3)
       .sort((a, b) => a.r - b.r)
       .slice(0, 8)
       .map((x) => x.c);
-  }, [mention, dismissed, candidates]);
+  }, [mention, dismissed, candidates, mirrorSegs, caret]);
   const open = matches.length > 0;
   // Each keystroke re-ranks the list, so a highlight chosen under a previous
   // query derives back to the best (first) match instead of holding a stale
@@ -922,8 +1167,63 @@ export function MentionTextarea({
 
   const syncCaret = () => {
     const el = taRef.current;
-    if (el) setCaret(el.selectionStart ?? 0);
+    if (!el) return;
+    let start = el.selectionStart ?? 0;
+    let end = el.selectionEnd ?? start;
+    // Entity tokens are atomic: the caret never rests inside one. A collapsed
+    // caret arriving inside (arrow keys) picks the whole token; a range
+    // endpoint inside grows to the token edge. The write below echoes another
+    // select event, which re-enters here and settles as a no-op.
+    const inside = (pos: number) =>
+      mirrorSegs.find(
+        (m) => m.ref?.scope === "entity" && pos > m.start && pos < m.start + m.text.length
+      );
+    if (start === end) {
+      const seg = inside(start);
+      if (seg) {
+        start = seg.start;
+        end = seg.start + seg.text.length;
+      }
+    } else {
+      start = inside(start)?.start ?? start;
+      const seg = inside(end);
+      if (seg) end = seg.start + seg.text.length;
+    }
+    if (start !== el.selectionStart || end !== el.selectionEnd) el.setSelectionRange(start, end);
+    setCaret(start);
+    setSelEnd(end);
   };
+
+  /** Select a whole token: clicking an entity pill picks it as one object. */
+  const selectToken = (start: number, len: number) => {
+    const el = taRef.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(start, start + len);
+    setCaret(start);
+    setSelEnd(start + len);
+  };
+
+  /** Some entity pill is picked whole right now. */
+  const anyPicked =
+    focused &&
+    selEnd > caret &&
+    mirrorSegs.some(
+      (m) => m.ref?.scope === "entity" && caret === m.start && selEnd === m.start + m.text.length
+    );
+
+  // Dismissing a pick inside the composer (arrowing away, typing over it,
+  // clicking elsewhere in the text) takes back the timeline selection that
+  // pick made. A blur keeps it — leaving for the timeline or another panel
+  // is working with the selection, and clearing it there would fight the
+  // click that took focus.
+  useEffect(() => {
+    if (anyPicked || !focused || !lastReveal) return;
+    const st = useEditor.getState();
+    const cur = st.selection;
+    if (cur && cur.kind === lastReveal.kind && cur.id === lastReveal.id) st.select(null);
+    lastReveal = null;
+  }, [anyPicked, focused]);
 
   /** Open the moment picker anchored on a mention pill. The pill spans live
    * in the mirror overlay, so the anchor is measured into the container's
@@ -1005,7 +1305,10 @@ export function MentionTextarea({
           taRef.current = el;
           if (inputRef) inputRef.current = el;
         }}
-        className={cn(className, "relative block bg-transparent")}
+        // While a pill is picked whole, the pill's ring is the selection
+        // highlight — the browser's own selection paint would spill out
+        // around the cover as a bare blue rectangle.
+        className={cn(className, "relative block bg-transparent", anyPicked && "selection:bg-transparent")}
         rows={rows}
         placeholder={placeholder}
         value={value}
@@ -1013,7 +1316,10 @@ export function MentionTextarea({
           setDismissed(null);
           onChange(e.target.value);
           setCaret(e.target.selectionStart ?? 0);
+          setSelEnd(e.target.selectionEnd ?? e.target.selectionStart ?? 0);
         }}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         onScroll={(e) => {
           const bd = backdropRef.current;
           if (bd) {
@@ -1023,14 +1329,40 @@ export function MentionTextarea({
         }}
         onSelect={syncCaret}
         onPaste={(e) => {
-          if (!onPasteFiles) return;
-          const files = Array.from(e.clipboardData.items)
-            .filter((item) => item.kind === "file")
-            .map((item) => item.getAsFile())
-            .filter((f): f is File => f !== null);
-          if (files.length === 0) return;
+          if (onPasteFiles) {
+            const files = Array.from(e.clipboardData.items)
+              .filter((item) => item.kind === "file")
+              .map((item) => item.getAsFile())
+              .filter((f): f is File => f !== null);
+            if (files.length > 0) {
+              e.preventDefault();
+              onPasteFiles(files);
+              return;
+            }
+          }
+          // A token pasted flush against a neighbor never resolves — the
+          // quote swallows the boundary. Restore the missing space on
+          // whichever side needs one.
+          const text = e.clipboardData.getData("text/plain");
+          if (!text) return;
+          const el = e.currentTarget;
+          const s = el.selectionStart ?? 0;
+          const sEnd = el.selectionEnd ?? s;
+          const needL = text.startsWith("@") && /\S/.test(value[s - 1] ?? "");
+          const needR = /\S$/.test(text) && (value[sEnd] ?? "") === "@";
+          if (!needL && !needR) return;
           e.preventDefault();
-          onPasteFiles(files);
+          setDismissed(null);
+          const insert = (needL ? " " : "") + text + (needR ? " " : "");
+          onChange(value.slice(0, s) + insert + value.slice(sEnd));
+          const nc = s + (needL ? 1 : 0) + text.length;
+          requestAnimationFrame(() => {
+            const ta = taRef.current;
+            if (!ta) return;
+            ta.setSelectionRange(nc, nc);
+            setCaret(nc);
+            setSelEnd(nc);
+          });
         }}
         onKeyDown={(e) => {
           e.stopPropagation();
@@ -1051,6 +1383,30 @@ export function MentionTextarea({
             e.preventDefault();
             onRemoveLastRef();
             return;
+          }
+          // Deleting into an entity token picks it whole first; the next
+          // press removes it in one stroke, so a half-eaten token never
+          // degenerates into raw text.
+          if (
+            (e.key === "Backspace" || e.key === "Delete") &&
+            !e.metaKey &&
+            !e.altKey &&
+            !e.ctrlKey
+          ) {
+            const el = e.currentTarget;
+            const pos = el.selectionStart ?? 0;
+            if (pos === (el.selectionEnd ?? pos)) {
+              const seg = mirrorSegs.find(
+                (m) =>
+                  m.ref?.scope === "entity" &&
+                  pos === (e.key === "Backspace" ? m.start + m.text.length : m.start)
+              );
+              if (seg) {
+                e.preventDefault();
+                selectToken(seg.start, seg.text.length);
+                return;
+              }
+            }
           }
           if (open) {
             if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -1098,40 +1454,41 @@ export function MentionTextarea({
           "pointer-events-none absolute inset-0 overflow-hidden border-transparent bg-transparent whitespace-pre-wrap break-words text-transparent"
         )}
       >
-        {highlightMentions(value, candidates).map((seg, i, segs) => {
-          const pinnable =
-            !!onUpsertRef && (seg.ref?.kind === "video" || seg.ref?.kind === "audio");
+        {mirrorSegs.map((seg, i) => {
+          if (!seg.ref) return <span key={i}>{seg.text}</span>;
           // A side facing another pill across a single space keeps its bleed
           // off — two bleeds would swallow the only gap between the pills.
           const facing = (gap: number, other: number) =>
-            !!segs[gap] && !segs[gap].ref && /^\s$/.test(segs[gap].text) && !!segs[other]?.ref;
-          return seg.ref ? (
-            <span
+            !!mirrorSegs[gap] &&
+            !mirrorSegs[gap].ref &&
+            /^\s$/.test(mirrorSegs[gap].text) &&
+            !!mirrorSegs[other]?.ref;
+          const end = seg.start + seg.text.length;
+          // Raw text shows only while a range endpoint rests strictly inside
+          // the token; entity endpoints normalize to the token edges, so an
+          // entity pill stays covered through any selection sweep (⌘A too).
+          const editing =
+            focused &&
+            ((caret > seg.start && caret < end) || (selEnd > seg.start && selEnd < end));
+          // The selection covers the whole token — a pill click or a sweep
+          // across it — and the pill wears its ring.
+          const covered = focused && selEnd > caret && caret <= seg.start && selEnd >= end;
+          return (
+            <MentionPill
               key={i}
-              className={cn(
-                // Padding cancelled by negative margin: the background gains
-                // side padding to match the font's own vertical inset while
-                // every glyph stays exactly where the textarea draws it.
-                "rounded-[4px] bg-[#0a84ff]/12",
-                !facing(i - 1, i - 2) && "pl-[0.15em] -ml-[0.15em]",
-                !facing(i + 1, i + 2) && "pr-[0.15em] -mr-[0.15em]",
-                pinnable && "pointer-events-auto cursor-pointer hover:bg-[#0a84ff]/25"
-              )}
-              title={pinnable ? `${seg.ref.name} — click to pin the moment` : undefined}
-              // mousedown, not click: preventDefault keeps focus in the textarea.
-              onMouseDown={
-                pinnable
-                  ? (e) => {
-                      e.preventDefault();
-                      openPin(seg.ref!, e.currentTarget);
-                    }
-                  : undefined
+              item={seg.ref}
+              text={seg.text}
+              editing={editing}
+              selected={covered}
+              caretAtStart={focused && caret === seg.start && selEnd === seg.start}
+              bleedL={!facing(i - 1, i - 2)}
+              bleedR={!facing(i + 1, i + 2)}
+              pinnable={
+                !!onUpsertRef && (seg.ref.kind === "video" || seg.ref.kind === "audio")
               }
-            >
-              {seg.text}
-            </span>
-          ) : (
-            <span key={i}>{seg.text}</span>
+              onPin={openPin}
+              onSelectToken={() => selectToken(seg.start, seg.text.length)}
+            />
           );
         })}
       </div>
