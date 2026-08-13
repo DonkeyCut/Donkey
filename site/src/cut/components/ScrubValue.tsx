@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { snapNear } from "@/lib/snap";
 
 /**
  * Hot-text numeric value: reads as the plain mono readout it replaces, drag
@@ -33,7 +34,7 @@ export function ScrubValue({
   max: number;
   step: number;
   keyStep?: number;
-  /** Detent values: a drag passing within a few steps lands exactly on one.
+  /** Detent values: a drag passing within reach lands exactly on one.
    * Arrow keys and typed entries stay exact. */
   snap?: number[];
   format: (v: number) => string;
@@ -164,8 +165,7 @@ export function ScrubValue({
         d.moved = true;
         // 2px per step; Shift coarsens to ×10.
         let next = clamp(d.startValue + (dx / 2) * step * (e.shiftKey ? 10 : 1));
-        const near = snap?.find((s) => Math.abs(next - s) <= 3 * step);
-        if (near !== undefined) next = clamp(near);
+        if (snap) next = clamp(snapNear(next, snap, min, max));
         d.last = next;
         if (onScrub) onScrub(d.last);
         else setPreview(d.last);

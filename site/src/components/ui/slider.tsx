@@ -1,9 +1,7 @@
 import { Slider as SliderPrimitive } from "@base-ui/react/slider"
 
 import { cn } from "@/lib/utils"
-
-/** Fraction of the range around a snap point that lands exactly on it. */
-const SNAP_REACH = 0.025
+import { snapNear } from "@/lib/snap"
 
 function Slider({
   className,
@@ -18,17 +16,16 @@ function Slider({
   /**
    * Detent values: a pointer drag that comes within reach lands exactly on
    * one, which is how a nudged setting finds its way back to 100% or 0°.
-   * Keyboard steps stay exact, so arrow keys can walk out of a detent.
+   * Keyboard steps, rail clicks, and typed values stay exact, so every
+   * deliberate placement can walk out of a detent.
    */
   snap?: number[]
 }) {
   const handleValueChange: typeof onValueChange =
     snap && onValueChange
       ? (v, details) => {
-          if (typeof v === "number" && details.reason !== "keyboard") {
-            const reach = (max - min) * SNAP_REACH
-            const n = v
-            v = snap.find((s) => Math.abs(n - s) <= reach) ?? n
+          if (typeof v === "number" && details.reason === "drag") {
+            v = snapNear(v, snap, min, max)
           }
           onValueChange(v, details)
         }
