@@ -247,15 +247,32 @@ const openAITextCreditRates: {
   { model: "o4-mini", input: "1.1", cachedInput: "0.275", output: "4.4" },
 ];
 
+// gemini-3.7-flash launch pricing runs through 2026-12-31; standard pricing
+// starts 2027-01-01 UTC. Audio input bills at the text rate. The record entry
+// is a getter, so every lookup reads the clock and the switch happens on
+// schedule without a deploy.
+const geminiFlashStandardPricingStartMs = Date.UTC(2027, 0, 1);
+const geminiFlashLaunchPricing = textAudioTokenPricing({
+  input: "0.75",
+  cachedInput: "0.075",
+  output: "3.75",
+  inputAudio: "0.75",
+});
+const geminiFlashStandardPricing = textAudioTokenPricing({
+  input: "1.5",
+  cachedInput: "0.15",
+  output: "7.5",
+  inputAudio: "1.5",
+});
+
 // Every Gemini model we run must appear here: the Record is keyed by the GeminiModel union,
 // so adding a model to gemini-models.ts without a price fails the type-check (and the build).
 const geminiModelPricing: Record<GeminiModel, ProviderCreditPricing> = {
-  [geminiModels.flash]: textTokenPricing({
-    model: "gemini-3.5-flash",
-    input: "1.5",
-    cachedInput: "0.15",
-    output: "9",
-  }),
+  get [geminiModels.flash]() {
+    return Date.now() >= geminiFlashStandardPricingStartMs
+      ? geminiFlashStandardPricing
+      : geminiFlashLaunchPricing;
+  },
   [geminiModels.flashLite]: textAudioTokenPricing({
     input: "0.25",
     cachedInput: "0.025",

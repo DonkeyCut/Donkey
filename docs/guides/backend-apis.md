@@ -109,7 +109,7 @@ Model choice is code (see Handler Rules on `process.env`):
 | Call | Model |
 |---|---|
 | Gate-judged simple chat turns, fast structured decisions | `gemini-3.1-flash-lite` |
-| General chat, non-decision structured calls | `gemini-3.5-flash` |
+| General chat, non-decision structured calls | `gemini-3.7-flash` |
 
 Structured requests normalize their JSON schema for Gemini and retry without a
 provider-enforced schema when Vertex rejects the schema parameters.

@@ -8,7 +8,7 @@
 // Canonical, dated-or-versioned model IDs. Add a new constant when adopting a
 // new model; do not inline raw version strings at call sites.
 export const geminiModels = {
-  flash: "gemini-3.5-flash",
+  flash: "gemini-3.7-flash",
   flashLite: "gemini-3.1-flash-lite",
   // Generative image editing/generation ("nano banana"). Bump here when adopting a
   // newer image model.

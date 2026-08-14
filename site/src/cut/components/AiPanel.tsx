@@ -328,11 +328,15 @@ export function AiPanel({
   const engineUp = useLocalCompute();
   const readOnly = useEditor((s) => s.readOnly);
   const signedIn = useSignedIn();
-  const [model, setModel] = useState<string>(() =>
-    typeof window === "undefined"
-      ? DEFAULT_MODEL
-      : (localStorage.getItem(MODEL_KEY) ?? DEFAULT_MODEL),
-  );
+  // A saved id whose model left the catalog (a retired model after a bump)
+  // falls back to the default; passed through, the hosted route rejects it.
+  const [model, setModel] = useState<string>(() => {
+    if (typeof window === "undefined") return DEFAULT_MODEL;
+    const saved = localStorage.getItem(MODEL_KEY);
+    return saved && AI_MODELS.some((m) => m.id === saved)
+      ? saved
+      : DEFAULT_MODEL;
+  });
   // One chat is active at a time; every past chat lives in the Threads panel.
   // The id persists so closing and reopening the panel resumes the same chat.
   const [activeChat, setActiveChat] = useState<string>(() =>
