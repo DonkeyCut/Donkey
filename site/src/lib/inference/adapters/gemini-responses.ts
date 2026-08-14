@@ -1,6 +1,5 @@
 import {
   ApiError,
-  Environment,
   GoogleGenAI,
   ThinkingLevel,
 } from "@google/genai";
@@ -47,45 +46,11 @@ import {
   type TextStreamResult,
 } from "@/lib/inference/providers";
 
-const providerID = "gemini-computer-use";
+const providerID = "gemini-responses";
 const geminiProviderID = "gemini";
-const defaultDecisionResponsesModel = geminiModelRoles.fastDecision;
 const defaultVertexResponsesModel = geminiModelRoles.chat;
-const defaultComputerUseModel = geminiModelRoles.computerUse;
 
-export const geminiBrowserInteractionToolType = "donkey_gemini_browser_interaction";
-export const geminiMacDesktopInteractionToolType = "donkey_gemini_mac_desktop_interaction";
-export const debugUIInspectionToolType = "donkey_debug_ui_inspection";
-
-// Note: `generic_harness_planning` is deliberately NOT fast-decision. Planning is the most
-// reasoning-heavy step (routing, plan steps, applying loaded skill guidance, and the act-vs-confirm
-// call), and the flash-lite model follows that nuanced guidance poorly — it tends to ask for
-// clarification on requests a skill can resolve directly. Route planning to the stronger model.
-const fastDecisionSchemaNames = new Set([
-  "task_intent_v1",
-  "task_followup_resolution_v1",
-]);
-
-const fastDecisionPromptVersions = new Set([
-  "task-followup-resolution-v1",
-]);
-
-const browserOnlyFunctionExclusions = [
-  "drag_and_drop",
-];
-
-// On the macOS desktop the agent never drives a web browser chrome, so the
-// browser-navigation predefined functions are excluded — leaving the GUI actions
-// (click, type, scroll, drag_and_drop, key_combination, …) the desktop needs.
-const desktopExcludedFunctions = [
-  "open_web_browser",
-  "navigate",
-  "go_back",
-  "go_forward",
-  "search",
-];
-
-export function createGeminiComputerUseProvider(
+export function createGeminiResponsesProvider(
   environment: AdapterEnvironment = process.env,
   clientFactory: GeminiClientFactory = (options) => new GoogleGenAI(options),
 ): InferenceProvider {
@@ -98,12 +63,11 @@ export function createGeminiComputerUseProvider(
       return [];
     }
 
-    // gemini-3.5-flash serves both general Responses and computer use, so list it once with the
-    // computer-use capability — listing it twice would let dedupeModels drop the computer-use entry.
-    // The fast-decision model (flash-lite) is the only other entry.
+    // The full flash model serves general Responses; the fast-decision model
+    // (flash-lite) is the only other entry.
     return [
-      staticModel(defaultDecisionResponsesModel, false),
-      staticModel(defaultComputerUseModel, true),
+      staticModel(geminiModelRoles.fastDecision),
+      staticModel(defaultVertexResponsesModel),
     ];
   }
 
@@ -113,31 +77,22 @@ export function createGeminiComputerUseProvider(
     // Caller-defined function tools are honored only when the caller explicitly
     // asked for Gemini; the default Responses route keeps sending them elsewhere.
     const allowFunctionTools = request.donkeyProvider === geminiProviderID;
-    const registeredTools = registeredToolTypes(request.body.tools);
     if (hasExplicitUnsupportedTools(request.body.tools, allowFunctionTools)) {
       throw new InferenceProviderError("Gemini Responses received unsupported tool declarations.", {
         statusCode: 400,
         code: "gemini_tool_unsupported",
         details: {
-          supportedTools: [
-            geminiBrowserInteractionToolType,
-            geminiMacDesktopInteractionToolType,
-            debugUIInspectionToolType,
-          ],
+          supportedTools: allowFunctionTools ? ["function"] : [],
         },
       });
     }
 
-    const model = requestedModel(
-      request.body,
-      defaultResponseModel(request.body, registeredTools),
-    );
+    const model = requestedModel(request.body, defaultVertexResponsesModel);
     const requestParameters = geminiGenerateContentParameters(
       request.body,
-      registeredTools,
       model,
     );
-    return { registeredTools, model, requestParameters };
+    return { model, requestParameters };
   }
 
   async function createResponse(
@@ -145,14 +100,14 @@ export function createGeminiComputerUseProvider(
   ): Promise<ResponseCreateResult> {
     ensureConfigured(configured);
 
-    const { registeredTools, model, requestParameters } = responseRequestSetup(request);
+    const { model, requestParameters } = responseRequestSetup(request);
     const client = clientFactory(clientConfig.options);
 
     // Cache the planner's large, byte-identical system instruction once and reference it on later steps, so
     // its ~11K tokens bill at the cached rate instead of full price on every step. Best-effort: a no-op for
-    // tool/computer-use calls and short instructions, and a clean fallback to the inline instruction on any
+    // short instructions, and a clean fallback to the inline instruction on any
     // caching error — so the request is never made invalid by this.
-    await applyContextCacheToRequest(requestParameters, registeredTools, client);
+    await applyContextCacheToRequest(requestParameters, client);
 
     let rawResponse: unknown;
     let retriedWithoutSchema = false;
@@ -174,7 +129,7 @@ export function createGeminiComputerUseProvider(
     }
 
     const rawBody = toJsonValue(rawResponse);
-    const body = normalizedGeminiResponse(toJsonValue(rawBody), registeredTools);
+    const body = normalizedGeminiResponse(toJsonValue(rawBody));
     return {
       provider: geminiProviderID,
       model,
@@ -184,7 +139,6 @@ export function createGeminiComputerUseProvider(
         provider: geminiProviderID,
         api: "google-genai-sdk",
         service: clientConfig.service,
-        registeredTools,
         structuredSchemaRetry: String(retriedWithoutSchema),
       },
     };
@@ -200,9 +154,9 @@ export function createGeminiComputerUseProvider(
   ): Promise<ResponseStreamResult> {
     ensureConfigured(configured);
 
-    const { registeredTools, model, requestParameters } = responseRequestSetup(request);
+    const { model, requestParameters } = responseRequestSetup(request);
     const client = clientFactory(clientConfig.options);
-    await applyContextCacheToRequest(requestParameters, registeredTools, client);
+    await applyContextCacheToRequest(requestParameters, client);
 
     let iterator: AsyncGenerator<GenerateContentResponse>;
     try {
@@ -214,12 +168,11 @@ export function createGeminiComputerUseProvider(
     return {
       provider: geminiProviderID,
       model,
-      events: responseStreamEvents(iterator, registeredTools),
+      events: responseStreamEvents(iterator),
       metadata: {
         provider: geminiProviderID,
         api: "google-genai-sdk",
         service: clientConfig.service,
-        registeredTools,
       },
     };
   }
@@ -249,7 +202,7 @@ export function createGeminiComputerUseProvider(
     }
 
     const rawBody = toJsonValue(rawResponse);
-    const normalized = normalizedGeminiResponse(rawBody, []);
+    const normalized = normalizedGeminiResponse(rawBody);
     const outputText = stringValue(normalized.output_text) ?? "";
     return {
       provider: geminiProviderID,
@@ -353,7 +306,6 @@ export function createGeminiComputerUseProvider(
 // signatures. Non-thought text also goes out live as delta events.
 async function* responseStreamEvents(
   iterator: AsyncGenerator<GenerateContentResponse>,
-  registeredTools: string[],
 ): AsyncGenerator<ResponseStreamEvent> {
   const parts: JsonObject[] = [];
   let responseId: string | undefined;
@@ -395,7 +347,6 @@ async function* responseStreamEvents(
       ...(usageMetadata !== undefined ? { usageMetadata } : {}),
       candidates: [{ content: { parts } }],
     },
-    registeredTools,
   );
   yield { type: "completed", body, usage: body.usage };
 }
@@ -409,10 +360,9 @@ function streamChunkText(chunk: GenerateContentResponse): string {
 
 function geminiGenerateContentParameters(
   body: JsonObject,
-  registeredTools: string[],
   model: string,
 ): GenerateContentParameters {
-  const tools = geminiTools(registeredTools, body.tools);
+  const tools = geminiTools(body.tools);
   const generationConfig = generationConfigFromBody(body);
   const systemInstruction = systemInstructionFromBody(body);
   const config: GenerateContentConfig = {
@@ -432,32 +382,8 @@ function geminiGenerateContentParameters(
   };
 }
 
-function geminiTools(registeredTools: string[], rawTools: JsonValue | undefined): Tool[] {
+function geminiTools(rawTools: JsonValue | undefined): Tool[] {
   const tools: Tool[] = [];
-
-  if (registeredTools.includes(geminiBrowserInteractionToolType)) {
-    tools.push({
-      computerUse: {
-        environment: Environment.ENVIRONMENT_BROWSER,
-        excludedPredefinedFunctions: excludedPredefinedFunctions(
-          rawTools,
-          browserOnlyFunctionExclusions,
-        ),
-      },
-    });
-  }
-
-  if (registeredTools.includes(geminiMacDesktopInteractionToolType)) {
-    tools.push({
-      computerUse: {
-        environment: Environment.ENVIRONMENT_DESKTOP,
-        excludedPredefinedFunctions: excludedPredefinedFunctions(
-          rawTools,
-          desktopExcludedFunctions,
-        ),
-      },
-    });
-  }
 
   const declarations = functionDeclarationsFromTools(rawTools);
   if (declarations.length > 0) {
@@ -762,7 +688,7 @@ function generationConfigFromBody(body: JsonObject): Partial<GenerateContentConf
   }
   // Bound reasoning so thinking tokens (which count against maxOutputTokens) can't starve the
   // structured output. Callers driving tight per-turn loops pass a small budget; 0 disables thinking.
-  // Gemini 3.x models (e.g. gemini-3.5-flash) take thinking_level (minimal|low|medium|high), NOT the
+  // Gemini 3.x models (e.g. gemini-3.7-flash) take thinking_level (minimal|low|medium|high), NOT the
   // integer thinking_budget — passing the budget to them is silently ignored. Prefer the level when the
   // caller sets it; the two are mutually exclusive. Older 2.x models still use thinking_budget. In both
   // cases request the thought summary so callers can persist the reasoning (the normalized response
@@ -926,44 +852,6 @@ function responseFormatFromBody(body: JsonObject): { json: boolean; schema?: Jso
   return null;
 }
 
-function defaultResponseModel(body: JsonObject, registeredTools: string[]) {
-  if (
-    registeredTools.includes(geminiBrowserInteractionToolType) ||
-    registeredTools.includes(geminiMacDesktopInteractionToolType)
-  ) {
-    return defaultComputerUseModel;
-  }
-
-  if (registeredTools.includes(debugUIInspectionToolType)) {
-    return defaultDecisionResponsesModel;
-  }
-
-  if (isFastDecisionRequest(body)) {
-    return defaultDecisionResponsesModel;
-  }
-
-  return defaultVertexResponsesModel;
-}
-
-function isFastDecisionRequest(body: JsonObject) {
-  const metadata = isJsonObject(body.metadata) ? body.metadata : {};
-  const promptVersion =
-    stringValue(metadata.prompt_version) ??
-    stringValue(metadata.promptVersion);
-  if (promptVersion && fastDecisionPromptVersions.has(promptVersion)) {
-    return true;
-  }
-
-  const format =
-    isJsonObject(body.text) && isJsonObject(body.text.format)
-      ? body.text.format
-      : isJsonObject(body.response_format)
-        ? body.response_format
-        : null;
-  const schemaName = format ? stringValue(format.name) : undefined;
-  return Boolean(schemaName && fastDecisionSchemaNames.has(schemaName));
-}
-
 function systemInstructionFromBody(body: JsonObject): string | undefined {
   const instruction = [
     stringValue(body.instructions),
@@ -976,10 +864,7 @@ function systemInstructionFromBody(body: JsonObject): string | undefined {
   return instruction;
 }
 
-function normalizedGeminiResponse(
-  raw: JsonValue,
-  registeredTools: string[],
-): JsonObject {
+function normalizedGeminiResponse(raw: JsonValue): JsonObject {
   const partObjects = geminiCandidateParts(geminiCandidates(raw)[0]);
   // Thought summaries (parts flagged `thought: true` when includeThoughts is on) must NOT land in
   // output_text — that field carries the structured JSON the caller parses. Keep them separate so the
@@ -1015,10 +900,6 @@ function normalizedGeminiResponse(
         ...call,
       })),
     ],
-    computer_use: {
-      registered_tools: registeredTools,
-      calls,
-    },
     provider_output: raw,
     usage: isJsonObject(raw) ? raw.usageMetadata ?? null : null,
   };
@@ -1049,49 +930,6 @@ function functionCallFromPart(part: JsonObject): JsonObject | null {
     call.thoughtSignature = thoughtSignature;
   }
   return call;
-}
-
-function registeredToolTypes(tools: JsonValue | undefined): string[] {
-  if (!Array.isArray(tools)) {
-    return [];
-  }
-
-  const registered = new Set<string>();
-  for (const tool of tools) {
-    if (!isJsonObject(tool)) {
-      continue;
-    }
-    if (tool.type === geminiBrowserInteractionToolType) {
-      registered.add(geminiBrowserInteractionToolType);
-    } else if (tool.type === geminiMacDesktopInteractionToolType) {
-      registered.add(geminiMacDesktopInteractionToolType);
-    } else if (tool.type === debugUIInspectionToolType) {
-      registered.add(debugUIInspectionToolType);
-    }
-  }
-  return [...registered];
-}
-
-function excludedPredefinedFunctions(rawTools: JsonValue | undefined, defaults: string[]) {
-  const excluded = new Set(defaults);
-  if (Array.isArray(rawTools)) {
-    for (const tool of rawTools) {
-      if (!isJsonObject(tool)) {
-        continue;
-      }
-      const values = Array.isArray(tool.excludedPredefinedFunctions)
-        ? tool.excludedPredefinedFunctions
-        : Array.isArray(tool.excluded_predefined_functions)
-          ? tool.excluded_predefined_functions
-          : [];
-      for (const value of values) {
-        if (typeof value === "string" && value.trim()) {
-          excluded.add(value.trim());
-        }
-      }
-    }
-  }
-  return [...excluded];
 }
 
 function geminiRole(value: string | undefined) {
@@ -1147,16 +985,11 @@ function hasExplicitUnsupportedTools(
     if (!isJsonObject(tool)) {
       return true;
     }
-    if (allowFunctionTools && tool.type === "function") {
-      return false;
-    }
-    return tool.type !== geminiBrowserInteractionToolType &&
-      tool.type !== geminiMacDesktopInteractionToolType &&
-      tool.type !== debugUIInspectionToolType;
+    return !(allowFunctionTools && tool.type === "function");
   });
 }
 
-function staticModel(model: string, computerUse: boolean): InferenceModel {
+function staticModel(model: string): InferenceModel {
   return {
     id: model,
     name: model,
@@ -1168,16 +1001,7 @@ function staticModel(model: string, computerUse: boolean): InferenceModel {
     metadata: {
       provider: geminiProviderID,
       api: "generateContent",
-      ...(computerUse
-        ? {
-            computerUse,
-            registeredTools: [
-              geminiBrowserInteractionToolType,
-              geminiMacDesktopInteractionToolType,
-              debugUIInspectionToolType,
-            ],
-          }
-        : { structuredOutputs: true }),
+      structuredOutputs: true,
     },
   };
 }

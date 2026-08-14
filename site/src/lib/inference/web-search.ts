@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 
+import { geminiClientConfig } from "@/lib/inference/adapters/gemini-client";
 import { geminiModelRoles } from "@/lib/inference/gemini-models";
-import { geminiClientConfig } from "@/lib/inference/screenshot-parsing/gemini-flash";
 
 export type WebSearchSource = {
   title: string;
@@ -17,12 +17,12 @@ export type WebSearchResult = {
 
 /**
  * Web search via Gemini's built-in Google Search grounding on Vertex AI. This uses the backend's
- * service-account credential (the same one behind live-token and screenshot parsing) — no API key
- * and no separate Programmable Search Engine. The model searches the web for the query and returns a
+ * service-account credential (the same one behind live-token) — no API key and no separate
+ * Programmable Search Engine. The model searches the web for the query and returns a
  * grounded summary plus the source pages it used, which the caller turns into ranked results.
  */
 export async function searchWeb(query: string): Promise<WebSearchResult | null> {
-  const config = geminiClientConfig();
+  const config = geminiClientConfig(process.env);
   if (!config.configured) {
     return null;
   }

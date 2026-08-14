@@ -97,18 +97,13 @@ async function resolveCachedSystemInstruction(args: {
 
 /**
  * Swap a large, repeated inline system instruction for a cached reference, in place on `requestParameters`.
- * Applies only to the text/decision path (no Gemini tools registered) where the same instruction recurs
- * every step; tool/computer-use calls and short instructions are left untouched. A no-op on any failure, so
- * the request always stays valid.
+ * Applies where the same instruction recurs every step; short instructions are left untouched.
+ * A no-op on any failure, so the request always stays valid.
  */
 export async function applyContextCacheToRequest(
   requestParameters: GenerateContentParameters,
-  registeredTools: string[],
   client: GeminiClient,
 ): Promise<void> {
-  if (registeredTools.length > 0) {
-    return;
-  }
   const config = requestParameters.config;
   const systemInstruction = config?.systemInstruction;
   if (!config || typeof systemInstruction !== "string" || systemInstruction.length < MIN_CACHEABLE_CHARS) {

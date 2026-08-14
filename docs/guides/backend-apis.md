@@ -97,32 +97,7 @@ route reads an object only under the caller's own prefix. And storage is how a
 large request succeeds, never why a small one fails: a client that can't reach
 storage sends the bytes inline, as it always could.
 
-### Computer use
-
-Computer use is a built-in tool of Gemini's main flash model, so one model
-drives both a browser and a guarded macOS desktop. The Mac app sends a request
-tool; the adapter maps it to an environment and returns the model's native
-action calls for the app to execute.
-
-| Request tool | Environment | Used for |
-|---|---|---|
-| `donkey_gemini_browser_interaction` | browser | web interaction |
-| `donkey_gemini_mac_desktop_interaction` | desktop | guarded macOS desktop interaction |
-| `donkey_debug_ui_inspection` | — | developer-only, read-only UI inspection |
-
-The first two return action calls the app executes. UI inspection is read-only:
-the adapter routes it through a vision-capable model but must never forward or
-run a UI action call.
-
-### Screenshot parsing
-
-Screenshot parsing is its own route, `POST /api/inference/screenshots/parse/`.
-It takes a scoped app, window, or system-navigation screenshot — never a
-whole-desktop capture — and returns read-only UI evidence in the Mac app's local
-UI-understanding shape. The default provider is Gemini Flash, configured with
-hosted Google credentials or `GEMINI_API_KEY`.
-
-### Gemini and OpenAI adapters
+### Gemini adapter
 
 The Gemini adapter uses the official `@google/genai` SDK. It runs on Vertex AI's
 global endpoint only when `GOOGLE_APPLICATION_CREDENTIALS_JSON` carries a
@@ -133,17 +108,11 @@ Model choice is code (see Handler Rules on `process.env`):
 
 | Call | Model |
 |---|---|
-| Fast structured decisions: task-intent, follow-ups | `gemini-3.1-flash-lite` |
-| General chat, non-decision structured calls, computer use | `gemini-3.5-flash` |
+| Gate-judged simple chat turns, fast structured decisions | `gemini-3.1-flash-lite` |
+| General chat, non-decision structured calls | `gemini-3.5-flash` |
 
-Structured-decision requests normalize their JSON schema for Gemini and retry
-without a provider-enforced schema when Vertex rejects the schema parameters.
-Whether the returned JSON is actually executable is decided by Mac-side runtime
-validation, not the backend.
-
-The OpenAI Responses adapter exists only for developer read-only UI inspection
-and uses `OPENAI_API_KEY`. Keep that key in the hosted deploy; the Mac app never
-carries it.
+Structured requests normalize their JSON schema for Gemini and retry without a
+provider-enforced schema when Vertex rejects the schema parameters.
 
 ## Hosted Model Credits
 

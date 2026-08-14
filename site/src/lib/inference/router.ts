@@ -1,9 +1,8 @@
-import { createGeminiComputerUseProvider } from "@/lib/inference/adapters/gemini-computer-use";
+import { createGeminiResponsesProvider } from "@/lib/inference/adapters/gemini-responses";
 import { createGeminiImageAssetProvider } from "@/lib/inference/adapters/gemini-image";
 import { createGeminiMusicAssetProvider } from "@/lib/inference/adapters/gemini-music";
 import { createGeminiSpeechAssetProvider } from "@/lib/inference/adapters/gemini-speech";
 import { createGeminiOmniVideoAssetProvider } from "@/lib/inference/adapters/gemini-omni-video";
-import { createHostedResponsesProvider } from "@/lib/inference/adapters/hosted-responses";
 import {
   InferenceProviderError,
   type AssetGenerationRequest,
@@ -216,7 +215,7 @@ export class ProviderRegistry {
 export function createProviderRegistry() {
   return new ProviderRegistry([
     // Asset selection is by capability + generateAsset, not list order: the image asset
-    // provider serves kind="image" (gemini-computer-use lists "image" as an input modality
+    // provider serves kind="image" (gemini-responses lists "image" as an input modality
     // but has no generateAsset, so it is never chosen for asset generation).
     createGeminiImageAssetProvider(),
     // Omni (Gemini Omni Flash) serves kind="video"; its distinct provider id
@@ -231,8 +230,7 @@ export function createProviderRegistry() {
     // adapter picks the clip or the longer pro model from the requested length so
     // a bed can still span a longer video (see gemini-music.ts).
     createGeminiMusicAssetProvider(),
-    createGeminiComputerUseProvider(),
-    createHostedResponsesProvider(),
+    createGeminiResponsesProvider(),
   ]);
 }
 

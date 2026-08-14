@@ -16,7 +16,6 @@ import {
   type GeminiOmniModel,
   type GeminiTtsModel,
 } from "@/lib/inference/gemini-models";
-import { openaiModels, type OpenAIRunModel } from "@/lib/inference/openai-models";
 import { browserUsePerStepUsd } from "@/lib/browser/pricing";
 
 export type ProviderCreditPricing = {
@@ -73,19 +72,6 @@ export function providerCreditPricing(
   return undefined;
 }
 
-// Every OpenAI model the gateway selects must appear here: the Record is keyed by the
-// OpenAIRunModel union, so adding a run model without a price fails the type-check (and the
-// build). Matched exactly (not by prefix) so it never shadows a more specific table entry.
-const openaiRunModelPricing: Record<OpenAIRunModel, ProviderCreditPricing> = {
-  [openaiModels.debugInspection]: textTokenPricing({
-    model: "gpt-5.4",
-    input: "2.5",
-    cachedInput: "0.25",
-    output: "15",
-    longContext: { input: "5", cachedInput: "0.5", output: "22.5" },
-  }),
-};
-
 function browserUseCreditPricing(): ProviderCreditPricing {
   // Browser Use Cloud bills ~$0.01/task init + a per-step LLM fee, and the API
   // exposes stepCount (not a USD cost), so we price per step. The per-step rate
@@ -100,11 +86,6 @@ function openAICreditPricing(model: string): ProviderCreditPricing | undefined {
   const audioPricing = openAIAudioCreditPricing(model);
   if (audioPricing) {
     return audioPricing;
-  }
-
-  const runModelPricing = openaiRunModelPricing[model as OpenAIRunModel];
-  if (runModelPricing) {
-    return runModelPricing;
   }
 
   const matched = openAITextCreditRates.find((rate) => modelMatches(model, rate.model));

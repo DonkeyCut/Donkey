@@ -67,11 +67,6 @@ export const geminiModelRoles = {
   chatSimple: geminiModels.flashLite,
   // Fast structured task-intent and follow-up decisions.
   fastDecision: geminiModels.flashLite,
-  // Computer Use tool calls (browser and macOS desktop environments). Computer
-  // use is a built-in tool of the main flash model, so both share one model.
-  computerUse: geminiModels.flash,
-  // Screenshot parsing into read-only UI evidence.
-  screenshotParse: geminiModels.flash,
   // Generative image editing and generation.
   imageGeneration: geminiModels.proImage,
   // Production review: the director judging rendered takes and minted frames
