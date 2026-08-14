@@ -140,7 +140,7 @@ export const BODY_PARAMS: ApiField[] = [
     name: "model",
     type: "string",
     description:
-      "Model used for prompt-based targeting. Supported options include `gemini-3.5-flash` and `gemini-3.1-flash-lite`. Defaults to `gemini-3.1-flash-lite`.",
+      "Model used for prompt-based targeting. Supported options include `gemini-3.7-flash` and `gemini-3.1-flash-lite`. Defaults to `gemini-3.1-flash-lite`.",
   },
   {
     name: "returnElements",

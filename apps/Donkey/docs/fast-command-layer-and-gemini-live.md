@@ -142,7 +142,7 @@ optional depending on the auth path.
 
 ### Two models: realtime command vs vision
 
-The realtime Live session (`gemini-live-2.5-flash`) is the **command brain** — fast, tool-calling, screen-last. When a task genuinely needs the screen, the **vision** path uses a stronger turn-based model (`gemini-3.5-flash`) via `GeminiVertexVisionPlanner`: it calls Vertex `generateContent` with the window screenshot and returns the single next click/type/key (coordinates in Gemini's 0–1000 space, mapped to the window). `gemini-3.5-flash` isn't a Live/bidi model, so vision is per-turn `generateContent`, not the socket — slower per turn (~7s) but markedly better grounding than the realtime model. Both run on Vertex with backend-minted tokens.
+The realtime Live session (`gemini-live-2.5-flash`) is the **command brain** — fast, tool-calling, screen-last. When a task genuinely needs the screen, the **vision** path uses a stronger turn-based model (`gemini-3.7-flash`) via `GeminiVertexVisionPlanner`: it calls Vertex `generateContent` with the window screenshot and returns the single next click/type/key (coordinates in Gemini's 0–1000 space, mapped to the window). `gemini-3.7-flash` isn't a Live/bidi model, so vision is per-turn `generateContent`, not the socket — slower per turn (~7s) but markedly better grounding than the realtime model. Both run on Vertex with backend-minted tokens.
 
 ## How the overlay is wired
 

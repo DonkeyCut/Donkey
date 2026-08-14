@@ -269,11 +269,13 @@ const openAITextCreditRates: {
 // Every Gemini model we run must appear here: the Record is keyed by the GeminiModel union,
 // so adding a model to gemini-models.ts without a price fails the type-check (and the build).
 const geminiModelPricing: Record<GeminiModel, ProviderCreditPricing> = {
+  // gemini-3.7-flash list price. Google bills half these rates through 2026-12-31;
+  // we charge the standard rate that takes over 2027-01-01.
   [geminiModels.flash]: textTokenPricing({
-    model: "gemini-3.5-flash",
+    model: "gemini-3.7-flash",
     input: "1.5",
     cachedInput: "0.15",
-    output: "9",
+    output: "7.5",
   }),
   [geminiModels.flashLite]: textAudioTokenPricing({
     input: "0.25",

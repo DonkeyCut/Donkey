@@ -98,7 +98,7 @@ export function createGeminiComputerUseProvider(
       return [];
     }
 
-    // gemini-3.5-flash serves both general Responses and computer use, so list it once with the
+    // gemini-3.7-flash serves both general Responses and computer use, so list it once with the
     // computer-use capability — listing it twice would let dedupeModels drop the computer-use entry.
     // The fast-decision model (flash-lite) is the only other entry.
     return [
@@ -727,12 +727,12 @@ function dataURLToInlineData(value: string): JsonObject | null {
 
 // Maps a caller's `thinking_level` string to the SDK enum. Accepts the documented lowercase values
 // (and tolerates casing); returns undefined for anything unrecognized so the caller can fall back to
-// the legacy thinking_budget path.
+// the legacy thinking_budget path. gemini-3.7-flash rejects MINIMAL with a validation error, so
+// "minimal" clamps to LOW.
 function thinkingLevelFromBody(body: JsonObject): ThinkingLevel | undefined {
   const raw = stringValue(body.thinking_level) ?? stringValue(body.thinkingLevel);
   switch (raw?.trim().toLowerCase()) {
     case "minimal":
-      return ThinkingLevel.MINIMAL;
     case "low":
       return ThinkingLevel.LOW;
     case "medium":
@@ -762,7 +762,7 @@ function generationConfigFromBody(body: JsonObject): Partial<GenerateContentConf
   }
   // Bound reasoning so thinking tokens (which count against maxOutputTokens) can't starve the
   // structured output. Callers driving tight per-turn loops pass a small budget; 0 disables thinking.
-  // Gemini 3.x models (e.g. gemini-3.5-flash) take thinking_level (minimal|low|medium|high), NOT the
+  // Gemini 3.x models (e.g. gemini-3.7-flash) take thinking_level (low|medium|high), NOT the
   // integer thinking_budget — passing the budget to them is silently ignored. Prefer the level when the
   // caller sets it; the two are mutually exclusive. Older 2.x models still use thinking_budget. In both
   // cases request the thought summary so callers can persist the reasoning (the normalized response
