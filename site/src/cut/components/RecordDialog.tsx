@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Mic, Square, Video, X } from "lucide-react";
+import { Mic, Square, UserRound, Video, X } from "lucide-react";
 import {
   BufferTarget,
   getFirstEncodableAudioCodec,
@@ -19,9 +19,10 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
+import { useEditor } from "@/cut/lib/store";
 import { formatTimecode } from "@/cut/lib/time";
+import { aspectOrientation, frameOf } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 
 export type RecordMode = "camera" | "audio";
@@ -33,6 +34,12 @@ export type RecordMode = "camera" | "audio";
 // guessing at MIME strings and hoping the recording isn't empty.
 const VIDEO_CODECS = ["avc", "vp9", "av1", "vp8"] as const;
 const AUDIO_CODECS = ["aac", "opus"] as const;
+
+function clock(t: number) {
+  const m = Math.floor(t / 60);
+  const s = Math.floor(t % 60);
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
 
 function stamp() {
   const d = new Date();
@@ -88,27 +95,45 @@ export function RecordDialog({
   // the live stream landed on.
   const [cameraId, setCameraId] = useState<string | null>(() => loadDeviceId("videoinput"));
   const [micId, setMicId] = useState<string | null>(() => loadDeviceId("audioinput"));
+  // Takes are shot at the project's aspect so a recording drops onto the
+  // timeline without letterboxing.
+  const aspect = useEditor((s) => s.aspect);
+  const frame = frameOf(aspect);
+  const orientation = aspectOrientation(aspect);
   const videoRef = useRef<HTMLVideoElement>(null);
   const outputRef = useRef<Output<Mp4OutputFormat, BufferTarget> | null>(null);
   // Setting up the encoders is a round trip, so the button can be hit again
   // before `recording` flips. This claims the take at the click.
   const startingRef = useRef(false);
   const streamRef = useRef<MediaStream | null>(null);
+  // The camera the live stream was acquired with; a mic change that leaves it
+  // untouched swaps only the audio track. undefined = nothing acquired yet.
+  const appliedCameraRef = useRef<string | null | undefined>(undefined);
+  // Remounts the level meter when the audio track is swapped in place — the
+  // stream object stays the same, so nothing else would re-read it.
+  const [meterKey, setMeterKey] = useState(0);
 
   useEffect(() => {
     let canceled = false;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    setStream(null);
     const audio: MediaTrackConstraints | boolean = micId
       ? { deviceId: { exact: micId } }
       : true;
+    // With the camera unchanged, ask for the mic alone and splice its track
+    // into the live stream: the <video> keeps its srcObject, so the preview
+    // never blinks on a mic change.
+    const micOnly =
+      mode === "camera" &&
+      appliedCameraRef.current !== undefined &&
+      appliedCameraRef.current === cameraId &&
+      (streamRef.current?.getVideoTracks().length ?? 0) > 0;
+    const target = frameOf(aspect);
     const constraints: MediaStreamConstraints =
-      mode === "camera"
+      mode === "camera" && !micOnly
         ? {
             video: {
-              width: { ideal: 1920 },
-              height: { ideal: 1080 },
+              width: { ideal: target.w },
+              height: { ideal: target.h },
+              aspectRatio: { ideal: target.w / target.h },
               ...(cameraId ? { deviceId: { exact: cameraId } } : {}),
             },
             audio,
@@ -117,12 +142,28 @@ export function RecordDialog({
     navigator.mediaDevices
       .getUserMedia(constraints)
       .then(async (s) => {
-        if (canceled) {
+        // A device switch swaps streams only once the new one is live, so the
+        // preview holds the last picture through the change. A take already
+        // claimed on the old stream keeps it; the pick applies next open.
+        if (canceled || outputRef.current || startingRef.current) {
           s.getTracks().forEach((t) => t.stop());
           return;
         }
-        streamRef.current = s;
-        setStream(s);
+        const live = streamRef.current;
+        if (micOnly && live) {
+          live.getAudioTracks().forEach((t) => {
+            live.removeTrack(t);
+            t.stop();
+          });
+          const track = s.getAudioTracks()[0];
+          if (track) live.addTrack(track);
+          setMeterKey((k) => k + 1);
+        } else {
+          live?.getTracks().forEach((t) => t.stop());
+          streamRef.current = s;
+          setStream(s);
+        }
+        appliedCameraRef.current = cameraId;
         // Device labels are only populated once permission is granted.
         const list = await navigator.mediaDevices.enumerateDevices();
         if (!canceled) setDevices(list);
@@ -147,13 +188,19 @@ export function RecordDialog({
       });
     return () => {
       canceled = true;
-      // A take abandoned mid-record is thrown away rather than finalized —
-      // nothing is waiting for the file.
+    };
+  }, [mode, cameraId, micId, aspect]);
+
+  // Teardown only when the dialog goes away. A take abandoned mid-record is
+  // thrown away rather than finalized — nothing is waiting for the file.
+  useEffect(
+    () => () => {
       if (outputRef.current?.state === "started") void outputRef.current.cancel();
       outputRef.current = null;
       streamRef.current?.getTracks().forEach((t) => t.stop());
-    };
-  }, [mode, cameraId, micId]);
+    },
+    []
+  );
 
   useEffect(() => {
     const refresh = () =>
@@ -266,14 +313,14 @@ export function RecordDialog({
       <DialogContent
         showCloseButton={false}
         className={cn(
-          "gap-0 overflow-hidden p-0 transition-[max-width] duration-200",
-          // Compact while waiting for permission; grow to a full preview once
-          // the camera is live. Audio mode keeps a steady width.
-          mode === "audio"
-            ? "sm:max-w-md"
-            : stream
-              ? "sm:max-w-lg"
-              : "sm:max-w-xs"
+          "gap-0 overflow-hidden p-0",
+          // Popup width follows the frame's orientation so a portrait take
+          // stays on screen; landscape sits at the top third.
+          mode === "audio" || orientation === "landscape"
+            ? "top-1/3 sm:max-w-2xl"
+            : orientation === "square"
+              ? "top-[38%] sm:max-w-lg"
+              : "top-[42%] sm:max-w-sm"
         )}
       >
         {/* Kept for accessibility; the dialog reads as its own preview. */}
@@ -286,7 +333,7 @@ export function RecordDialog({
           onClick={onClose}
           aria-label="Close"
           title="Close"
-          className="absolute top-2 right-2 z-20 grid size-8 place-items-center rounded-full bg-black/45 text-white backdrop-blur-sm transition-colors hover:bg-black/65"
+          className="absolute top-3 right-3 z-20 grid size-9 place-items-center rounded-full bg-black/45 text-white backdrop-blur-sm transition-colors hover:bg-black/65"
         >
           <X className="size-4" />
         </button>
@@ -296,97 +343,136 @@ export function RecordDialog({
         ) : (
           <>
             {mode === "camera" ? (
-              <div className="relative w-full min-w-0 overflow-hidden bg-black">
+              // One full-bleed frame; the controls sit on it, and the frame
+              // holds its size while permission is pending so the dialog
+              // never shifts when the camera comes live.
+              <div
+                className="relative w-full min-w-0 overflow-hidden bg-neutral-800"
+                style={{ aspectRatio: `${frame.w} / ${frame.h}` }}
+              >
                 {/* Mirrored preview; the recording itself is not mirrored. */}
                 <video
                   ref={videoRef}
                   muted
                   playsInline
-                  className="aspect-video w-full -scale-x-100 object-cover"
+                  className={cn(
+                    "absolute inset-0 size-full -scale-x-100 object-cover",
+                    !stream && "invisible"
+                  )}
                 />
-                {stream && (
-                  <LiveWaveform
-                    stream={stream}
-                    className={cn(
-                      "absolute inset-x-0 bottom-3 h-8 w-full text-white/80",
-                      recording && "text-red-400"
-                    )}
-                  />
+                {!stream && (
+                  <div className="absolute inset-0 grid place-items-center">
+                    <div className="flex flex-col items-center gap-3 text-white/60">
+                      <UserRound className="size-12" strokeWidth={1.25} />
+                      <span className="text-xs">{notice ?? "Waiting for permission…"}</span>
+                    </div>
+                  </div>
                 )}
                 {recording && <RecTimer elapsed={elapsed} />}
-              </div>
-            ) : (
-              <div className="px-6 pt-10">
-                <div className="relative grid h-36 place-items-center rounded-xl bg-muted px-4 pb-12">
-                  {stream ? (
-                    <LiveWaveform
-                      stream={stream}
-                      className={cn("h-16 w-full text-foreground/70", recording && "text-red-500")}
-                    />
-                  ) : (
-                    <span className="grid size-16 place-items-center rounded-full bg-card text-foreground shadow-sm">
-                      <Mic className="size-7" />
+                {stream && notice && !recording && (
+                  <p className="absolute inset-x-0 bottom-24 z-10 text-center">
+                    <span className="rounded-md bg-black/60 px-2 py-1 text-xs text-white">
+                      {notice}
                     </span>
-                  )}
-                  {recording && <RecTimer elapsed={elapsed} />}
-                  <div className="absolute inset-x-0 bottom-2 flex justify-center px-2">
+                  </p>
+                )}
+                <div className="absolute inset-x-0 bottom-4 z-10 flex items-center justify-center">
+                  <div className="absolute left-4 flex gap-2">
                     <DevicePill
-                      icon={<Mic className="size-3.5 shrink-0" />}
+                      icon={<Video className="size-4 shrink-0" />}
+                      options={cameras}
+                      value={activeCameraId}
+                      onChange={pickCamera}
+                      disabled={recording}
+                    />
+                    <DevicePill
+                      icon={<Mic className="size-4 shrink-0" />}
                       options={mics}
                       value={activeMicId}
                       onChange={pickMic}
                       disabled={recording}
                     />
                   </div>
+                  <RecordButton
+                    recording={recording}
+                    disabled={!stream}
+                    onStart={() => void startRecording()}
+                    onStop={() => void stopRecording()}
+                  />
+                  {stream && (
+                    // Spans from the record button's edge to the frame edge,
+                    // mirroring the pills' 16px margin on the left.
+                    <div
+                      className="absolute right-4 h-10"
+                      style={{ left: "calc(50% + 2.25rem)" }}
+                    >
+                      <LiveWaveform
+                        key={meterKey}
+                        stream={stream}
+                        className={cn(
+                          "size-full text-white/80",
+                          recording && "text-red-400"
+                        )}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              // The waveform band is the whole dialog; the mic pill, record
+              // button, level meter, and clock share one row on it.
+              <div className="relative h-36 w-full min-w-0 overflow-hidden bg-neutral-800">
+                {stream && notice && !recording && (
+                  <p className="absolute inset-x-0 top-3 z-10 text-center">
+                    <span className="rounded-md bg-black/60 px-2 py-1 text-xs text-white">
+                      {notice}
+                    </span>
+                  </p>
+                )}
+                {/* Mic pick lives beside the close button, off the control row. */}
+                <div className="absolute top-3.5 right-14 z-20">
+                  {mics.length > 0 ? (
+                    <DevicePill
+                      icon={<Mic className="size-4 shrink-0" />}
+                      options={mics}
+                      value={activeMicId}
+                      onChange={pickMic}
+                      disabled={recording}
+                    />
+                  ) : (
+                    // Holds the pill's spot until devices enumerate, so
+                    // nothing shifts.
+                    <span className="grid h-8 w-14 place-items-center rounded-lg border border-input bg-background/95 text-muted-foreground backdrop-blur-sm">
+                      <Mic className="size-4" />
+                    </span>
+                  )}
+                </div>
+                <div className="absolute inset-x-0 bottom-6 flex items-center gap-4 px-4">
+                  <RecordButton
+                    recording={recording}
+                    disabled={!stream}
+                    onStart={() => void startRecording()}
+                    onStop={() => void stopRecording()}
+                  />
+                  {stream ? (
+                    <LiveWaveform
+                      stream={stream}
+                      className={cn(
+                        "h-12 min-w-0 flex-1 text-white/80",
+                        recording && "text-red-400"
+                      )}
+                    />
+                  ) : (
+                    <span className="min-w-0 flex-1 text-center text-xs text-white/60">
+                      {notice ?? "Waiting for permission…"}
+                    </span>
+                  )}
+                  <span className="font-mono text-sm text-white/70 tabular-nums">
+                    {clock(elapsed)}
+                  </span>
                 </div>
               </div>
             )}
-
-            <div className="min-w-0 space-y-2 px-6 pt-3 pb-6">
-              {mode === "camera" && (
-                <div className="flex justify-center gap-2">
-                  <DevicePill
-                    icon={<Video className="size-3.5 shrink-0" />}
-                    options={cameras}
-                    value={activeCameraId}
-                    onChange={pickCamera}
-                    disabled={recording}
-                  />
-                  <DevicePill
-                    icon={<Mic className="size-3.5 shrink-0" />}
-                    options={mics}
-                    value={activeMicId}
-                    onChange={pickMic}
-                    disabled={recording}
-                  />
-                </div>
-              )}
-              <div className="flex justify-center">
-                {!recording ? (
-                  <button
-                    className="grid size-12 place-items-center rounded-full border-[3px] border-foreground/20 transition-transform hover:scale-105 disabled:opacity-40"
-                    title="Start recording"
-                    disabled={!stream}
-                    onClick={() => void startRecording()}
-                  >
-                    <span className="size-8 rounded-full bg-red-500" />
-                  </button>
-                ) : (
-                  <button
-                    className="grid size-12 place-items-center rounded-full border-[3px] border-red-500/40 transition-transform hover:scale-105"
-                    title="Stop and use recording"
-                    onClick={() => void stopRecording()}
-                  >
-                    <Square className="size-5 fill-red-500 stroke-none" />
-                  </button>
-                )}
-              </div>
-              {!recording && (notice || !stream) && (
-                <p className="text-center text-xs text-muted-foreground">
-                  {notice ?? "Waiting for permission…"}
-                </p>
-              )}
-            </div>
           </>
         )}
       </DialogContent>
@@ -394,7 +480,39 @@ export function RecordDialog({
   );
 }
 
-/** Meet-style rounded device picker: icon + truncated device name + chevron. */
+function RecordButton({
+  recording,
+  disabled,
+  onStart,
+  onStop,
+}: {
+  recording: boolean;
+  disabled: boolean;
+  onStart: () => void;
+  onStop: () => void;
+}) {
+  return !recording ? (
+    <button
+      className="grid size-14 place-items-center rounded-full bg-white shadow-md transition-transform hover:scale-105 disabled:opacity-60"
+      title="Start recording"
+      disabled={disabled}
+      onClick={onStart}
+    >
+      <span className="size-9 rounded-full bg-red-500" />
+    </button>
+  ) : (
+    <button
+      className="grid size-14 place-items-center rounded-full bg-white shadow-md transition-transform hover:scale-105"
+      title="Stop and use recording"
+      onClick={onStop}
+    >
+      <Square className="size-6 fill-red-500 stroke-none" />
+    </button>
+  );
+}
+
+/** Device picker styled like the app's settings selects: an icon + chevron
+ * trigger, with the device names in the menu. */
 function DevicePill({
   icon,
   options,
@@ -410,23 +528,21 @@ function DevicePill({
 }) {
   if (options.length === 0) return null;
   const items = Object.fromEntries(options.map((o) => [o.id, o.label]));
+  const current = items[value] ? value : options[0].id;
   return (
-    <Select
-      value={items[value] ? value : options[0].id}
-      items={items}
-      onValueChange={(id) => onChange(id as string)}
-    >
+    <Select value={current} items={items} onValueChange={(id) => onChange(id as string)}>
       <SelectTrigger
-        size="sm"
         disabled={disabled}
-        className="max-w-[46%] min-w-0 rounded-full border-white/25 bg-black/55 text-xs text-white backdrop-blur-sm hover:bg-black/70 dark:bg-black/55 dark:hover:bg-black/70 [&_svg]:text-white/80"
+        className="bg-background/95 backdrop-blur-sm hover:bg-background dark:bg-background/95 dark:hover:bg-background"
       >
         {icon}
-        <SelectValue className="truncate" />
+        {/* Just the label's first word — "Default", "MacBook" — the menu
+            carries the full names. */}
+        <span className="text-[12px]">{items[current].split(/[\s-]+/)[0]}</span>
       </SelectTrigger>
       <SelectContent alignItemWithTrigger={false} className="w-auto max-w-72">
         {options.map((o) => (
-          <SelectItem key={o.id} value={o.id} className="text-xs">
+          <SelectItem key={o.id} value={o.id} className="text-[12px]">
             {o.label}
           </SelectItem>
         ))}
