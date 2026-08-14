@@ -81,7 +81,7 @@ inline, the call belongs in a hook.
   `src/queries/apiClient.ts`. Define each query's key as a constant alongside
   its hook in the same module (export it if another module needs to invalidate
   it). Mount `QueryProvider` once at the root layout.
-- Per-user account views (`/app/settings`, including API keys and usage) are
+- Per-user account views (`/app/settings`, including usage) are
   client-rendered and read their data through these hooks. The route handlers
   still enforce auth server-side, so a client guard is for UX, not security.
 - Use database clients only from server-side code, and never run migrations or

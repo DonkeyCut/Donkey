@@ -25,10 +25,7 @@ export function Footer() {
   const linkGroups: FooterColumn[] = [
     {
       title: "Product",
-      links: [
-        { href: "/donkeyvision", label: "Donkey Vision API" },
-        { href: GITHUB_REPO_URL, label: "GitHub" },
-      ],
+      links: [{ href: GITHUB_REPO_URL, label: "GitHub" }],
     },
     {
       title: "Legal",

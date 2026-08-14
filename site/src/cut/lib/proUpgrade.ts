@@ -13,7 +13,7 @@ export function useUpgradeToPro() {
     track("pro_checkout_started");
     void (async () => {
       try {
-        const { url } = await checkout.mutateAsync("pro");
+        const { url } = await checkout.mutateAsync();
         window.location.assign(url);
       } catch {
         // Checkout can't start (an unconfigured plan 404s); the billing page

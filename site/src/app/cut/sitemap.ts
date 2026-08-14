@@ -17,11 +17,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.8,
     },
     {
-      url: `${DONKEYCUT_CANONICAL}/donkeyvision`,
-      changeFrequency: "monthly",
-      priority: 0.6,
-    },
-    {
       url: `${DONKEYCUT_CANONICAL}/privacy`,
       changeFrequency: "yearly",
       priority: 0.5,

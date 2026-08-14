@@ -1,5 +1,0 @@
-# Local venv for overlay rendering (Pillow).
-.venv/
-
-# Python bytecode cache.
-__pycache__/

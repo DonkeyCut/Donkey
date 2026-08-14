@@ -11,8 +11,8 @@ import {
 // site app: the marketing landing at /cut and the app under /cut/app. Every
 // host gets the same mapping — "/" → landing, "/app/…" → editor app (generic
 // "/…" → "/cut/…" rewrite) — with donkeycut.com as the one production host.
-// The auth pages (/sign-in, /sign-up), "/install", "/donkeyvision", and the
-// legal pages are real root-level routes and pass through the rewrite.
+// The auth pages (/sign-in, /sign-up), "/install", and the legal pages are
+// real root-level routes and pass through the rewrite.
 // www. 308s to the apex; retired domains redirect to donkeycut.com at the
 // edge (Cloudflare) and never reach this app.
 //
@@ -53,17 +53,15 @@ function cutApi(req: NextRequest): NextResponse {
 }
 
 // Root-level routes the generic "/…" → "/cut/…" rewrite must not capture:
-// auth pages, the Mac download, Donkey Vision (marketing, settings, and API
-// docs), and the legal pages. "/app/settings" is not among them: Cut ships its
-// own billing and usage pages under /cut/app/settings, which the generic
-// rewrite serves at /app/settings.
+// auth pages, the Mac download, and the legal pages. "/app/settings" is not
+// among them: Cut ships its own billing and usage pages under
+// /cut/app/settings, which the generic rewrite serves at /app/settings.
 const PASSTHROUGH = [
   "/install",
   "/privacy",
   "/terms",
   "/sign-in",
   "/sign-up",
-  "/donkeyvision",
   // Email-footer unsubscribe page.
   "/unsubscribe",
 ];

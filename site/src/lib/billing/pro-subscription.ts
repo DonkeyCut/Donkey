@@ -9,7 +9,7 @@ import { creditMicrosPerCent, zeroCreditMicros } from "@/lib/credits/amounts";
 import { grantCredits } from "@/lib/credits/inference";
 import { prisma } from "@/lib/prisma";
 
-// Donkey Pro: the Mac app subscription, separate from the Vision API product.
+// Donkey Pro: the Mac app subscription.
 export const proPlanKey = "pro";
 
 // Stripe subscription statuses that include the Pro allowance.

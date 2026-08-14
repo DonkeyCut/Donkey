@@ -189,7 +189,7 @@ function GraceBanner({ enabled }: { enabled: boolean }) {
         onClick={async () => {
           track("pro_checkout_started");
           try {
-            const { url } = await checkout.mutateAsync("pro");
+            const { url } = await checkout.mutateAsync();
             window.location.assign(url);
           } catch {
             window.location.assign(`${base}/settings`);

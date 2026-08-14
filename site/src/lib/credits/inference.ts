@@ -4,7 +4,6 @@ import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
   creditMicrosToString,
-  creditStringToMicros,
   zeroCreditMicros,
 } from "@/lib/credits/amounts";
 import {
@@ -14,12 +13,10 @@ import {
 import { isJsonObject, toJsonValue } from "@/lib/inference/json";
 import type { JsonObject, JsonValue } from "@/lib/inference/providers";
 
-// UserCreditGrant.unit values. Dollar grants ("credit") feed the account
-// balance and pay for hosted inference; vision-call grants ("vision_call") are
-// an off-balance integer count consumed only by the Vision API quota path.
+// UserCreditGrant.unit value. Dollar grants ("credit") feed the account
+// balance and pay for hosted inference. Balance queries filter on this unit
+// because historical rows carry retired units.
 export const creditGrantUnit = "credit";
-export const visionCallGrantUnit = "vision_call";
-export type CreditGrantUnit = typeof creditGrantUnit | typeof visionCallGrantUnit;
 
 export const inferenceUsageRoutes = {
   assets: "/api/inference/assets/",
@@ -28,7 +25,6 @@ export const inferenceUsageRoutes = {
   chatCompletions: "/api/inference/chat/completions/",
   responses: "/api/inference/responses/",
   screenshotParse: "/api/inference/screenshots/parse/",
-  vision: "/api/vision/",
 } as const;
 
 type CreditsDatabase = PrismaClient | Prisma.TransactionClient;
@@ -64,7 +60,7 @@ type InferenceUsageInput = {
   userId: string;
   clientId: string | null;
   // The app conversation this call belongs to, for grouping usage history. Null
-  // for background work and non-app (Vision API) callers.
+  // for background work.
   conversationId?: string | null;
   route: string;
   requestKind: string;
@@ -74,9 +70,9 @@ type InferenceUsageInput = {
   usage?: JsonValue;
   errorCode?: string;
   metadata?: JsonObject;
-  // "included" records the event for usage/quota tracking without charging the
-  // money-credit balance (the call is covered by a subscription, e.g. the
-  // Vision API product). Defaults to "credits".
+  // "included" records the event for usage tracking without charging the
+  // money-credit balance (the call is covered by a subscription). Defaults
+  // to "credits".
   billingMode?: "credits" | "included";
 };
 
@@ -143,7 +139,6 @@ export async function grantCredits(input: {
   amountMicros: bigint;
   source: string;
   sourceId?: string;
-  unit?: CreditGrantUnit;
   expiresAt?: Date;
   periodStart?: Date;
   periodEnd?: Date;
@@ -154,18 +149,12 @@ export async function grantCredits(input: {
     throw new Error("Credit grants must be positive.");
   }
 
-  const unit = input.unit ?? creditGrantUnit;
-  // Only dollar grants move the account balance and write a balance-tracking
-  // ledger entry. Vision-call grants are an off-balance count, so they create
-  // just the grant row.
-  const affectsBalance = unit === creditGrantUnit;
-
   if (input.sourceId) {
     const existing = await prisma.userCreditGrant.findFirst({
       where: {
         source: input.source,
         sourceId: input.sourceId,
-        unit,
+        unit: creditGrantUnit,
         userId: input.userId,
       },
     });
@@ -181,24 +170,20 @@ export async function grantCredits(input: {
         // An account already carrying an overdraft — one that predates the
         // write-off at charge time — starts from zero here, so the grant lands
         // whole. Funding $25 credits $25.
-        if (affectsBalance) {
-          await forgiveOverdraft(tx, account.id, input.userId, account.balanceMicros, null);
-        }
-        const updatedAccount = affectsBalance
-          ? await tx.userCreditAccount.update({
-              data: {
-                balanceMicros: {
-                  increment: input.amountMicros,
-                },
-                lifetimeGrantedMicros: {
-                  increment: input.amountMicros,
-                },
-              },
-              where: {
-                id: account.id,
-              },
-            })
-          : account;
+        await forgiveOverdraft(tx, account.id, input.userId, account.balanceMicros, null);
+        const updatedAccount = await tx.userCreditAccount.update({
+          data: {
+            balanceMicros: {
+              increment: input.amountMicros,
+            },
+            lifetimeGrantedMicros: {
+              increment: input.amountMicros,
+            },
+          },
+          where: {
+            id: account.id,
+          },
+        });
 
         const grant = await tx.userCreditGrant.create({
           data: {
@@ -212,27 +197,25 @@ export async function grantCredits(input: {
             remainingAmountMicros: input.amountMicros,
             source: input.source,
             sourceId: input.sourceId,
-            unit,
+            unit: creditGrantUnit,
             userId: input.userId,
           },
         });
 
-        if (affectsBalance) {
-          await tx.userCreditLedgerEntry.create({
-            data: {
-              accountId: account.id,
-              amountMicros: input.amountMicros,
-              balanceAfterMicros: updatedAccount.balanceMicros,
-              description: input.description,
-              grantId: grant.id,
-              metadata: prismaJson(input.metadata),
-              source: input.source,
-              sourceId: input.sourceId,
-              type: "grant",
-              userId: input.userId,
-            },
-          });
-        }
+        await tx.userCreditLedgerEntry.create({
+          data: {
+            accountId: account.id,
+            amountMicros: input.amountMicros,
+            balanceAfterMicros: updatedAccount.balanceMicros,
+            description: input.description,
+            grantId: grant.id,
+            metadata: prismaJson(input.metadata),
+            source: input.source,
+            sourceId: input.sourceId,
+            type: "grant",
+            userId: input.userId,
+          },
+        });
 
         return grant;
       },
@@ -250,7 +233,7 @@ export async function grantCredits(input: {
         where: {
           source: input.source,
           sourceId: input.sourceId,
-          unit,
+          unit: creditGrantUnit,
           userId: input.userId,
         },
       });
@@ -555,8 +538,7 @@ export async function getCreditBalance(userId: string) {
           gt: zeroCreditMicros,
         },
         status: "active",
-        // The dollar balance view lists dollar grants only; vision-call grants
-        // are surfaced through the Vision API quota path.
+        // Dollar grants only; historical rows can carry retired units.
         unit: creditGrantUnit,
         userId,
         OR: [
@@ -749,8 +731,8 @@ async function expireCreditsForAccount(
         gt: zeroCreditMicros,
       },
       status: "active",
-      // Dollar grants only — vision-call grants are off-balance and expire via
-      // their own path, so they must never decrement balanceMicros here.
+      // Dollar grants only — a historical row with a retired unit must never
+      // decrement balanceMicros here.
       unit: creditGrantUnit,
     },
   });
@@ -858,8 +840,8 @@ async function debitGrants(
         gt: zeroCreditMicros,
       },
       status: "active",
-      // Dollar inference only spends dollar grants — vision-call grants are a
-      // separate denomination and must never be debited here.
+      // Dollar inference only spends dollar grants — a historical row with a
+      // retired unit must never be debited here.
       unit: creditGrantUnit,
     },
   });
@@ -1083,7 +1065,7 @@ async function resolveCreditRate(
   const globalRate = rates.find((rate) => {
     return rate.route === null && rate.provider === null && rate.model === null;
   });
-  const providerDefaultRate = defaultCreditRate(route, provider, model);
+  const providerDefaultRate = defaultCreditRate(provider, model);
 
   if (exactRate || providerModelRate || providerDefaultRate.providerPricing) {
     return rateSnapshot(
@@ -1094,11 +1076,6 @@ async function resolveCreditRate(
 
   if (globalRate) {
     return rateSnapshot(globalRate, providerDefaultRate);
-  }
-
-  // Flat-priced routes (vision) don't need per-model pricing.
-  if (routeHasFlatPrice(route)) {
-    return providerDefaultRate;
   }
 
   // Every billable model must have a price — a code-level rate in provider-pricing.ts or a DB
@@ -1135,35 +1112,21 @@ function rateSnapshot(
   };
 }
 
-// Flat per-call price for an app vision parse. Vision reports no token usage, so
-// each successful app (credits-billed) call is charged this flat amount. A DB
-// InferenceCreditRate row still overrides it.
-export const visionCallDefaultMicros = creditStringToMicros("0.004");
-
-// Routes priced per call regardless of model (no per-model pricing required): a vision parse is
-// a flat per-call charge. Every other route bills against a model price.
-function routeHasFlatPrice(route: string): boolean {
-  return route === inferenceUsageRoutes.vision;
-}
-
 function defaultCreditRate(
-  route: string,
   provider: string,
   model: string,
 ): CreditRateSnapshot {
-  const flatRequestMicros =
-    route === inferenceUsageRoutes.vision ? visionCallDefaultMicros : zeroCreditMicros;
   const providerPricing = providerCreditPricing(provider, model);
 
   return {
     id: null,
     version: null,
-    baseCostMicros: providerPricing ? zeroCreditMicros : flatRequestMicros,
+    baseCostMicros: zeroCreditMicros,
     inputTokenCostMicros: zeroCreditMicros,
     outputTokenCostMicros: zeroCreditMicros,
     totalTokenCostMicros: zeroCreditMicros,
     characterCostMicros: zeroCreditMicros,
-    fallbackCostMicros: flatRequestMicros,
+    fallbackCostMicros: zeroCreditMicros,
     providerPricing,
   };
 }

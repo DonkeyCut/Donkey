@@ -1,6 +1,0 @@
-# Worker-only deps layered on top of OmniParser's own requirements.txt
-# (installed from the cloned repo inside the Docker build). These are also
-# pip-installed in the Dockerfile; this file documents the worker surface and
-# supports local handler testing.
-runpod
-huggingface_hub

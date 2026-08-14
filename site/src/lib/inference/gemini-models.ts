@@ -72,8 +72,6 @@ export const geminiModelRoles = {
   computerUse: geminiModels.flash,
   // Screenshot parsing into read-only UI evidence.
   screenshotParse: geminiModels.flash,
-  // Vision grounding: a cheap structured pick over already-parsed elements.
-  visionGrounding: geminiModels.flashLite,
   // Generative image editing and generation.
   imageGeneration: geminiModels.proImage,
   // Production review: the director judging rendered takes and minted frames

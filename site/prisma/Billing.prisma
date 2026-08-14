@@ -1,34 +1,7 @@
-// Third-party Vision API product: paid access tier gated by a Stripe
-// subscription that grants a monthly quota of API calls, plus API keys issued
-// to developers. This is separate from the Mac app's credit-funded inference;
-// VisionApiSubscription does not touch UserCreditAccount balances.
-
-model VisionApiSubscription {
-  id                   String    @id @default(cuid())
-  userId               String    @unique
-  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  stripeCustomerId     String
-  stripeSubscriptionId String?   @unique
-  status               String    @default("incomplete")
-  planKey              String    @default("vision")
-  monthlyCallQuota     Int       @default(0)
-  // Atomic per-period call counter. Incremented under a conditional UPDATE so
-  // concurrent requests can't exceed the quota; reset to 0 by the webhook when
-  // the Stripe billing period rolls over. This is the authoritative API-call
-  // count (never mixes in the Mac app's credit-billed vision calls).
-  periodCallCount      Int       @default(0)
-  currentPeriodStart   DateTime?
-  currentPeriodEnd     DateTime?
-  cancelAtPeriodEnd    Boolean   @default(false)
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
-}
-
-// Donkey Pro: the Mac app subscription. Kept entirely separate from the Vision
-// API product above. While active it includes a monthly inference allowance
-// equal to the plan price, granted into the user's credit balance as an
-// expiring grant (source "pro_subscription") so it is drawn down before
-// never-expiring purchased credits and does not roll over.
+// Donkey Pro: the Mac app subscription. While active it includes a monthly
+// inference allowance equal to the plan price, granted into the user's credit
+// balance as an expiring grant (source "pro_subscription") so it is drawn down
+// before never-expiring purchased credits and does not roll over.
 // monthlyAllowanceMicros mirrors the included amount (the price), for display.
 model ProSubscription {
   id                     String    @id @default(cuid())
@@ -46,38 +19,4 @@ model ProSubscription {
   updatedAt              DateTime  @updatedAt
 
   @@map("pro_subscription")
-}
-
-// Mirrors the Better Auth @better-auth/api-key plugin schema (generated via the
-// Better Auth CLI). The plugin owns reads/writes through auth.api.* and links a
-// key to its owner via referenceId (= User.id). We keep verification
-// authoritative and run our own monthly quota, so the rate-limit/refill columns
-// stay unused. The only addition over the generated shape is the User relation
-// on referenceId, which gives cascade-delete without changing any plugin field.
-model Apikey {
-  id                  String    @id
-  configId            String    @default("default")
-  name                String?
-  start               String?
-  referenceId         String
-  user                User      @relation(fields: [referenceId], references: [id], onDelete: Cascade)
-  prefix              String?
-  key                 String
-  refillInterval      Int?
-  refillAmount        Int?
-  lastRefillAt        DateTime?
-  enabled             Boolean?  @default(true)
-  rateLimitEnabled    Boolean?  @default(true)
-  rateLimitTimeWindow Int?      @default(86400000)
-  rateLimitMax        Int?      @default(10)
-  requestCount        Int?      @default(0)
-  remaining           Int?
-  lastRequest         DateTime?
-  expiresAt           DateTime?
-  createdAt           DateTime
-  updatedAt           DateTime
-  permissions         String?
-  metadata            String?
-
-  @@index([key])
 }

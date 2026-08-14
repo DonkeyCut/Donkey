@@ -1,8 +1,0 @@
-{
-  "input": {
-    "image": "REPLACE_WITH_BASE64_SCREENSHOT",
-    "box_threshold": 0.05,
-    "iou_threshold": 0.1,
-    "imgsz": 640
-  }
-}

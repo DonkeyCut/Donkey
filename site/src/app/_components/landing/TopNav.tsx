@@ -12,8 +12,7 @@ const NAV_ICON_SIZE = 59;
 
 type Props = {
   homeHref?: string;
-  // Wordmark next to the logo. Donkey Vision is its own B2B product, so that
-  // page overrides the default "Donkey" with "Donkey Vision".
+  // Wordmark next to the logo.
   wordmark?: string;
   // Sign-in/up pages show a single toggle to the other mode. Auth otherwise
   // lives on donkeycut.com, so the marketing nav carries no auth entry points.

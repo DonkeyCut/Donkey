@@ -11,23 +11,17 @@ import {
   subscriptionIsPro,
   syncProSubscription,
 } from "@/lib/billing/pro-subscription";
-import {
-  getStripe,
-  stripeId,
-  syncVisionSubscription,
-} from "@/lib/billing/stripe";
+import { getStripe, stripeId } from "@/lib/billing/stripe";
 import { notFoundResponse } from "@/lib/donkey-api-auth";
 
 export const dynamic = "force-dynamic";
 
-// Two subscription products share these webhook events; route each Stripe
-// subscription to the right sync by its price (Pro vs Vision, the default).
+// Pro is the only subscription product; ignore any other Stripe subscription
+// that reaches these webhook events.
 async function syncSubscription(subscription: Stripe.Subscription) {
   if (subscriptionIsPro(subscription)) {
     await syncProSubscription(subscription);
-    return;
   }
-  await syncVisionSubscription(subscription);
 }
 
 // Public, signature-verified Stripe webhook. This is an intentional exception to

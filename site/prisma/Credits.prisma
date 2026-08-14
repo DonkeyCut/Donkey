@@ -23,9 +23,8 @@ model UserCreditGrant {
   source                String
   sourceId              String?
   // What the amounts below are denominated in. "credit" = USD micros that feed
-  // UserCreditAccount.balanceMicros. "vision_call" = a raw integer count of
-  // Vision API calls that lives off-balance (never touches balanceMicros and is
-  // consumed by the Vision API quota path, not by dollar inference).
+  // UserCreditAccount.balanceMicros. Historical rows carry retired units, so
+  // balance paths filter on this column.
   unit                  String    @default("credit")
   originalAmountMicros  BigInt
   remainingAmountMicros BigInt

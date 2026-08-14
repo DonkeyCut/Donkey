@@ -11,8 +11,7 @@ const DISCORD_URL = "https://discord.gg/Xv6qGax7sT";
 
 // Cut's own footer, in the shared landing Footer's grouped-column design. The
 // shared Footer links routes that don't exist on donkeycut.com (/sign-in,
-// /use-cases, /donkeyvision), so this one carries only links that resolve on
-// both hosts.
+// /use-cases), so this one carries only links that resolve on both hosts.
 export function CutFooter() {
   const linkGroups: FooterColumn[] = [
     {

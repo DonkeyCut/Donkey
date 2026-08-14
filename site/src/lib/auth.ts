@@ -1,14 +1,9 @@
-import { apiKey } from "@better-auth/api-key";
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 
 import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
 import { provisionSignupGrants } from "@/lib/onboarding/signup-grants";
 import { prisma } from "@/lib/prisma";
-
-// Prefix for issued Vision API keys. The full secret is shown to the developer
-// once at creation; only a hash is stored (handled by the apiKey plugin).
-export const visionApiKeyPrefix = "dk_live_";
 
 // donkeycut.com is the single production host: the sign-in pages, the auth
 // API, the Google OAuth callback, and the session all live on that one origin
@@ -59,15 +54,4 @@ export const auth = betterAuth({
       prompt: "select_account",
     },
   },
-  plugins: [
-    apiKey({
-      // We enforce our own monthly call quota and per-key rate limit on the
-      // vision route, so the plugin's built-in rate limiting stays off.
-      defaultPrefix: visionApiKeyPrefix,
-      enableMetadata: true,
-      rateLimit: {
-        enabled: false,
-      },
-    }),
-  ],
 });

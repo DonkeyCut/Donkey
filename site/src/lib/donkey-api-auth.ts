@@ -6,13 +6,12 @@ import { prisma } from "@/lib/prisma";
 export type DonkeyAuthContext = {
   platform: "api";
   app: "donkey";
-  method: "session-cookie" | "dev-bypass" | "api-key";
+  method: "session-cookie" | "dev-bypass";
   clientId: string | null;
   // The app's active conversation for this request, from x-donkey-conversation-id.
-  // Null for background work (vision warming) and non-app callers (Vision API keys).
+  // Null for background work.
   conversationId: string | null;
   userId: string;
-  apiKeyId: string | null;
 };
 
 // The known roles a route can require beyond being signed in. Add new roles
@@ -20,10 +19,6 @@ export type DonkeyAuthContext = {
 export type DonkeyRole = "SUPER_USER";
 
 export type DonkeyAuthOptions = {
-  // Routes are session-only by default. Set true to also accept a Vision API
-  // key as a bearer token. This is the typed allowlist for "which routes
-  // support API keys" — no path string matching.
-  allowApiKey?: boolean;
   // When set, the authenticated user must hold this role or the request is
   // rejected with 403 before the handler runs.
   role?: DonkeyRole;
@@ -33,9 +28,9 @@ export type DonkeyAuthenticatedRequest = NextRequest & {
   donkey: DonkeyAuthContext;
 };
 
-// The real signed-in user's id, or null for api-key / dev-bypass callers. Use
-// this in session-only product routes (billing, API-key management) instead of
-// re-calling auth.api.getSession — withDonkeyAuth already authenticated.
+// The real signed-in user's id, or null for dev-bypass callers. Use this in
+// session-only product routes (billing) instead of re-calling
+// auth.api.getSession — withDonkeyAuth already authenticated.
 export function donkeySessionUserId(
   request: DonkeyAuthenticatedRequest,
 ): string | null {
@@ -91,11 +86,6 @@ export async function getDonkeyAuthContext(
     return devBypass;
   }
 
-  const apiKeyContext = await apiKeyAuthContext(headers);
-  if (apiKeyContext) {
-    return apiKeyContext;
-  }
-
   const session = await auth.api.getSession({
     headers,
   });
@@ -112,47 +102,6 @@ export async function getDonkeyAuthContext(
     clientId: clientId ? clientId : null,
     conversationId: conversationIdFromHeaders(headers),
     userId: session.user.id,
-    apiKeyId: null,
-  };
-}
-
-// Vision API keys are sent as a bearer token; that is the only accepted format.
-function apiKeyFromHeaders(headers: Headers): string | null {
-  const authorization = headers.get("authorization")?.trim();
-  if (!authorization?.toLowerCase().startsWith("bearer ")) {
-    return null;
-  }
-
-  const token = authorization.slice("bearer ".length).trim();
-  return token ? token : null;
-}
-
-async function apiKeyAuthContext(
-  headers: Headers,
-): Promise<DonkeyAuthContext | null> {
-  const key = apiKeyFromHeaders(headers);
-  if (!key) {
-    return null;
-  }
-
-  const verified = await auth.api.verifyApiKey({ body: { key } });
-  if (!verified.valid || !verified.key) {
-    return null;
-  }
-
-  const clientId = headers.get(clientIdHeader)?.trim();
-
-  return {
-    platform: "api",
-    app: "donkey",
-    method: "api-key",
-    // The Vision API does not require x-donkey-client-id; default it to the key
-    // id so downstream usage records and rate-limit buckets stay per-key.
-    clientId: clientId ? clientId : verified.key.id,
-    // Vision API keys have no app conversation; honor the header if sent, else null.
-    conversationId: conversationIdFromHeaders(headers),
-    userId: verified.key.referenceId,
-    apiKeyId: verified.key.id,
   };
 }
 
@@ -179,7 +128,6 @@ function devAuthBypassContext(headers: Headers): DonkeyAuthContext | null {
     clientId: clientId ? clientId : null,
     conversationId: conversationIdFromHeaders(headers),
     userId: devAuthBypassUserID,
-    apiKeyId: null,
   };
 }
 
@@ -195,18 +143,6 @@ export function withDonkeyAuth<
         {
           error: "Unauthorized",
           message: "Authentication required",
-        },
-        {
-          status: 401,
-        },
-      );
-    }
-
-    if (authContext.method === "api-key" && !options.allowApiKey) {
-      return NextResponse.json(
-        {
-          error: "api_key_not_permitted_for_route",
-          message: "API keys are not accepted on this route.",
         },
         {
           status: 401,

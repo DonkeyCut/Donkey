@@ -1,8 +1,7 @@
 # Backend API Guide
 
 Backend APIs are the Next.js route handlers under the site project. They serve
-two callers: the site's own client views, signed in with a session cookie; and
-third-party Vision API developers, who authenticate with an API key.
+the site's own client views, signed in with a session cookie.
 
 **The one rule:** every route handler is wrapped in `withDonkeyAuth`. A public
 endpoint is a deliberate exception with a product reason — today only Better
@@ -12,15 +11,10 @@ a handler without the wrapper and the endpoint is open to anyone.
 
 ## Authentication
 
-`withDonkeyAuth` takes a session cookie by default. A route accepts a
-third-party API key only when it opts in with `allowApiKey: true`. That typed
-allowlist is the only way a key reaches a handler. If a handler instead branches
-on whether the request path starts with `/api/vision`, the allowlist has already
-been bypassed.
-
-Inside the handler, `request.donkey` carries who the caller is. Its `method`
-field says how they authenticated — by session cookie, API key, or dev bypass —
-and the handler branches on that, never on the path.
+`withDonkeyAuth` takes a session cookie. Inside the handler, `request.donkey`
+carries who the caller is. Its `method` field says how they authenticated — by
+session cookie or dev bypass — and the handler branches on that, never on the
+path.
 
 A route that requires more than being signed in declares the role in the same
 wrapper: `withSuperUser(handler)` rejects everyone else with a plain 403 before
@@ -182,37 +176,6 @@ and per-user limits in backend-owned data, not the Mac app.
 usage metadata and normalized billable units. They must not keep prompts,
 request bodies, screenshots, generated assets, provider output, output
 references, or any other user content.
-
-## Third-Party Vision API
-
-`POST /api/vision` is also a standalone product for outside developers, sold
-separately from the Mac app. One handler serves both audiences, branching on how
-the caller authenticated:
-
-| Caller | `request.donkey.method` | Gate |
-|---|---|---|
-| Mac app | `session-cookie` | hosted credit balance |
-| Third-party developer | `api-key` | active subscription + monthly call quota |
-
-A third-party developer's calls never touch the money-credit balance.
-
-- Developers sign in with Google and subscribe through Stripe. The plan is a
-  flat monthly subscription that grants a quota of API calls; the included count
-  comes from the Stripe price metadata.
-- Keys come from Better Auth's API-key plugin, managed from account settings.
-  Only a hash is stored, the secret is shown once, and creating a key requires
-  an active subscription.
-- The route opts in with `allowApiKey: true`, enforces a per-key burst limit,
-  and counts succeeded vision calls in the current period against the quota. A
-  covered call is recorded as `billingMode: "included"` — it shows up in usage
-  at zero money cost.
-- Stripe is the source of truth for subscription state. Its webhook,
-  `POST /api/billing/webhook`, is signature-verified and therefore the public
-  exception named in the one rule; it syncs the subscription lifecycle and the
-  quota. Checkout, portal, subscription, and usage all live under
-  `/api/billing/`.
-- The account views are client-rendered, and every data read goes through the
-  audited TanStack Query hooks.
 
 ## Pattern
 

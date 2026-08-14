@@ -2,14 +2,8 @@
 
 import { Fragment, useRef, useState, type KeyboardEvent } from "react";
 
-import { useUsage, type VisionUsage } from "@/queries/billing";
+import { useUsage, type UsageHistory } from "@/queries/billing";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Pagination,
@@ -29,12 +23,12 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
-type RecentCall = VisionUsage["recent"][number];
+type RecentCall = UsageHistory["recent"][number];
 
 // Stable identity for a call so expansion state survives a background refetch
 // (which can reorder/prepend rows) instead of being pinned to an array index.
 function callKey(call: RecentCall): string {
-  return `${call.createdAt}-${call.product}-${call.requestKind}-${call.costCredits}`;
+  return `${call.createdAt}-${call.requestKind}-${call.costCredits}`;
 }
 
 // Cents by default, but show a third decimal when a value carries sub-cent
@@ -148,13 +142,6 @@ function formatDuration(millis: number): string {
   return millis >= 1000 ? `${(millis / 1000).toFixed(1)}s` : `${millis}ms`;
 }
 
-const tabs = [
-  { key: "app", label: "App" },
-  { key: "vision", label: "Vision API" },
-] as const;
-
-type TabKey = (typeof tabs)[number]["key"];
-
 // Page the table client-side, capped so the control never grows past 5 pages.
 const ROWS_PER_PAGE = 25;
 const MAX_PAGES = 5;
@@ -164,10 +151,6 @@ function CallDetail({ call }: { call: RecentCall }) {
   const imageBilled = usage.generationCount > 0;
   const tokenBilled =
     usage.inputTokens > 0 || usage.outputTokens > 0 || usage.totalTokens > 0;
-  // Vision parses report no token/image usage — they're a flat per-call charge,
-  // so there's no breakdown to show, just the pricing model.
-  const flatRate =
-    !imageBilled && !tokenBilled && call.requestKind === "vision_parse";
 
   const stats: { label: string; value: string }[] = [];
   if (imageBilled) {
@@ -204,9 +187,7 @@ function CallDetail({ call }: { call: RecentCall }) {
     ? "Image generation is priced per image, not by tokens."
     : tokenBilled
       ? "Cost is driven by tokens, and input dominates here. Cached input is an unchanged prompt prefix the provider reuses at a fraction of the rate; a low cached share on a repeated call means the cache isn't being hit."
-      : flatRate
-        ? "Flat rate — vision parses are billed per call."
-        : "No billable usage was recorded for this call.";
+      : "No billable usage was recorded for this call.";
 
   return (
     <div className="space-y-3 px-2 py-1 text-sm">
@@ -228,18 +209,10 @@ function CallDetail({ call }: { call: RecentCall }) {
   );
 }
 
-// showVision=false (Cut's usage page) drops the Vision API tab and shows only
-// app calls. plain=true drops the card chrome entirely — the table renders
-// directly on the page and stretches to the space its parent gives it.
-export function UsageHistoryCard({
-  showVision = true,
-  plain = false,
-}: {
-  showVision?: boolean;
-  plain?: boolean;
-}) {
+// The table renders directly on the page and stretches to the space its
+// parent gives it; the surrounding pane owns scrolling.
+export function UsageHistoryCard() {
   const usage = useUsage();
-  const [tab, setTab] = useState<TabKey>("app");
   const [page, setPage] = useState(1);
   // Keyed by call identity (not row index) so a refetch can't leave the open
   // detail pinned to whatever row now sits at that index.
@@ -248,41 +221,22 @@ export function UsageHistoryCard({
   const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
 
   if (usage.isLoading) {
-    if (plain) {
-      return <Skeleton className="h-64 w-full" />;
-    }
-    return (
-      <Card>
-        <CardHeader>
-          <Skeleton className="h-6 w-40" />
-        </CardHeader>
-        <CardContent>
-          <Skeleton className="h-64 w-full" />
-        </CardContent>
-      </Card>
-    );
+    return <Skeleton className="h-64 w-full" />;
   }
 
-  const recent = usage.data?.recent ?? [];
-  const tabRows = recent.filter((call) => call.product === tab);
+  const rows = usage.data?.recent ?? [];
   // Annotate in the server's chronological order so conversations group in place
   // and individual (no-conversation) calls stay interleaved between them.
-  const annotations = annotateRows(tabRows);
+  const annotations = annotateRows(rows);
 
   const totalPages = Math.min(
     MAX_PAGES,
-    Math.max(1, Math.ceil(tabRows.length / ROWS_PER_PAGE)),
+    Math.max(1, Math.ceil(rows.length / ROWS_PER_PAGE)),
   );
-  // Clamp in case rows shrank (refetch / tab change) below the current page.
+  // Clamp in case rows shrank on a refetch below the current page.
   const currentPage = Math.min(page, totalPages);
   const pageStart = (currentPage - 1) * ROWS_PER_PAGE;
-  const pageRows = tabRows.slice(pageStart, pageStart + ROWS_PER_PAGE);
-
-  const selectTab = (next: TabKey) => {
-    setTab(next);
-    setPage(1);
-    setExpanded(null);
-  };
+  const pageRows = rows.slice(pageStart, pageStart + ROWS_PER_PAGE);
 
   const goToPage = (next: number) => {
     setPage(next);
@@ -314,53 +268,17 @@ export function UsageHistoryCard({
     }
   };
 
-  // In a height-constrained flex column (Cut's usage page) the wrapper fills
-  // the remaining space, the table body scrolls on its own with the column
-  // header row pinned, and the pagination stays visible below. In normal flow
-  // (the apex settings) these classes are inert and the card grows as before.
-  const body = (
-    <>
-        {showVision ? (
-        <div className="inline-flex rounded-md border p-0.5">
-          {tabs.map((item) => (
-            <button
-              key={item.key}
-              onClick={() => selectTab(item.key)}
-              type="button"
-              className={cn(
-                "rounded px-3 py-1 text-sm font-medium transition-colors",
-                tab === item.key
-                  ? "bg-muted text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-        ) : null}
-
+  return (
+    <div className="space-y-4">
         {/* The table's own container must stay overflow-visible so the sticky
-            header row pins against the real scroll ancestor: this wrapper in
-            card mode, the surrounding pane in plain mode. */}
-        <div
-          className={cn(
-            "[&_[data-slot=table-container]]:overflow-visible",
-            !plain && "min-h-0 flex-1 overflow-y-auto",
-          )}
-        >
-        {tabRows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No {tab === "app" ? "app" : "Vision API"} calls yet.
-          </p>
+            header row pins against the real scroll ancestor, the surrounding
+            pane. */}
+        <div className="[&_[data-slot=table-container]]:overflow-visible">
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No calls yet.</p>
         ) : (
           <Table>
-            <TableHeader
-              className={cn(
-                "sticky top-0 z-10",
-                plain ? "bg-background" : "bg-card",
-              )}
-            >
+            <TableHeader className="sticky top-0 z-10 bg-background">
               <TableRow>
                 <TableHead>Date</TableHead>
                 <TableHead>Kind</TableHead>
@@ -461,7 +379,7 @@ export function UsageHistoryCard({
         </div>
 
         {totalPages > 1 ? (
-        <div className={cn(plain && "sticky bottom-0 z-10 bg-background py-3")}>
+        <div className="sticky bottom-0 z-10 bg-background py-3">
           <Pagination>
             <PaginationContent>
               <PaginationItem>
@@ -500,20 +418,6 @@ export function UsageHistoryCard({
           </Pagination>
         </div>
         ) : null}
-    </>
-  );
-
-  if (plain) {
-    return <div className="space-y-4">{body}</div>;
-  }
-  return (
-    <Card className="min-h-0 flex-1">
-      <CardHeader>
-        <CardTitle>Usage history</CardTitle>
-      </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
-        {body}
-      </CardContent>
-    </Card>
+    </div>
   );
 }
