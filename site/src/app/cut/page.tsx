@@ -4,16 +4,16 @@ import { CutLanding } from "@/app/cut/_components/landing/CutLanding";
 import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
 
 export const metadata: Metadata = {
-  title: "Donkey Cut — Free, Open Source Video Editor",
+  title: "Donkey Cut — Free, Open Source Video Editor, CapCut Alternative",
   description:
     "A free, open source CapCut alternative. Edit with Chat, generate video, images, voiceovers and music, and keep your projects local.",
   alternates: {
     canonical: `${DONKEYCUT_CANONICAL}/`,
   },
   openGraph: {
-    title: "Donkey Cut — Free, Open Source Video Editor",
+    title: "Donkey Cut — Free, Open Source Video Editor, CapCut Alternative",
     description:
-      "Edit with Chat, generate video, images, voiceovers and music, and keep your projects local. A free, open source CapCut alternative.",
+      "A free, open source CapCut alternative. Edit with Chat, generate video, images, voiceovers and music, and keep your projects local.",
     url: `${DONKEYCUT_CANONICAL}/`,
     siteName: "Donkey Cut",
     type: "website",
@@ -21,9 +21,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Donkey Cut — Free, Open Source Video Editor",
+    title: "Donkey Cut — Free, Open Source Video Editor, CapCut Alternative",
     description:
-      "Edit with Chat, generate content in your timeline, and keep your projects local. Free, open source, and a CapCut alternative.",
+      "A free, open source CapCut alternative. Edit with Chat, generate video, images, voiceovers and music, and keep your projects local.",
     images: ["/cut/landing/og.png"],
   },
 };
