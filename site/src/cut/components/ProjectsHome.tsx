@@ -4,11 +4,9 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  Check,
   Cloud,
   Copy,
   Film,
-  Folder,
   FolderPlus,
   Laptop,
   LayoutGrid,
@@ -655,9 +653,7 @@ export function ProjectsHome() {
             </span>
             {live(r) && (
               <ProjectMenu
-                project={p}
                 className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
-                folders={data[r].folders}
                 onRename={() => {
                   setName(p.name);
                   setRenaming({ project: p, residency: r });
@@ -671,7 +667,6 @@ export function ProjectsHome() {
                       }
                     : undefined
                 }
-                onMove={(folderId) => void moveProjects(r, [p.id], folderId)}
                 onDelete={() => setDeleting({ project: p, residency: r })}
               />
             )}
@@ -734,8 +729,6 @@ export function ProjectsHome() {
           </span>
           {live(r) ? (
             <ProjectMenu
-              project={p}
-              folders={data[r].folders}
               onRename={() => {
                 setName(p.name);
                 setRenaming({ project: p, residency: r });
@@ -749,7 +742,6 @@ export function ProjectsHome() {
                     }
                   : undefined
               }
-              onMove={(folderId) => void moveProjects(r, [p.id], folderId)}
               onDelete={() => setDeleting({ project: p, residency: r })}
             />
           ) : (
@@ -1138,23 +1130,17 @@ function useCardPoster(
 }
 
 function ProjectMenu({
-  project: p,
   className,
-  folders,
   onRename,
   onDuplicate,
   moveTo,
-  onMove,
   onDelete,
 }: {
-  project: ProjectSummary;
   className?: string;
-  folders: ProjectFolder[];
   onRename: () => void;
   onDuplicate: () => void;
   /** Move to the other residency, when both are live. */
   moveTo?: { target: Residency; run: () => void };
-  onMove: (folderId: string | null) => void;
   onDelete: () => void;
 }) {
   return (
@@ -1184,19 +1170,6 @@ function ProjectMenu({
             {moveTo.target === "cloud" ? <Cloud /> : <Laptop />}{" "}
             {moveTo.target === "cloud" ? "Move to Cloud" : "Move to this Mac"}
           </DropdownMenuItem>
-        )}
-        {folders.length > 0 && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => onMove(null)}>
-              {(p.folderId ?? null) === null && <Check />} No folder
-            </DropdownMenuItem>
-            {folders.map((f) => (
-              <DropdownMenuItem key={f.id} onClick={() => onMove(f.id)}>
-                {p.folderId === f.id ? <Check /> : <Folder />} {f.name}
-              </DropdownMenuItem>
-            ))}
-          </>
         )}
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" onClick={onDelete}>
