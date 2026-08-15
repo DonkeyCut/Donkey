@@ -4,6 +4,8 @@ import { prisma, type ClaimedJob } from "./db";
 import { overlayKeysOf, runExportJob } from "./exportJob";
 import { runHlsJob } from "./hlsJob";
 import { runImportUrlJob } from "./importUrlJob";
+import { runTurnJob } from "./turnJob";
+import { installSkiaRaster } from "../lib/headless/skiaRaster";
 import { deleteObjects } from "./r2";
 
 // The cloud render worker: a headless loop that claims CutRenderJob rows the
@@ -52,10 +54,10 @@ let stopping = false;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** The kinds someone is watching happen: an export or a URL import has a
- * progress bar on screen, while a hover proxy and a share card are background
- * polish nobody is waiting on. */
-const WATCHED_KINDS = ["export", "import_url"];
+/** The kinds someone is watching happen: an export, a URL import, or a chat
+ * turn has a progress surface on screen, while a hover proxy and a share card
+ * are background polish nobody is waiting on. */
+const WATCHED_KINDS = ["export", "import_url", "agent_turn"];
 
 /** Atomically claim the next queued job: the updateMany's state guard makes
  * exactly one worker win each row, so replicas never double-run a job.
@@ -159,6 +161,12 @@ async function runJob(job: ClaimedJob): Promise<void> {
         where: { id: job.id, state: "running" },
         data: { state: "done", progress: 1, result: result as unknown as Prisma.InputJsonValue },
       });
+    } else if (job.kind === "agent_turn") {
+      const result = await runTurnJob(job, handle, () => entry.canceled);
+      await prisma.cutRenderJob.updateMany({
+        where: { id: job.id, state: "running" },
+        data: { state: "done", progress: 1, result: result as unknown as Prisma.InputJsonValue },
+      });
     } else {
       throw new Error(`Unknown job kind: ${job.kind}`);
     }
@@ -176,6 +184,12 @@ async function runJob(job: ClaimedJob): Promise<void> {
         .catch(() => {});
     }
     console.error(`[cut-worker] ${job.kind} ${job.id} ${entry.canceled ? "canceled" : "failed"}: ${message}`);
+    // A canceled turn retires this process once its cleanup settles: the
+    // abort tears the agent loop down, and a fresh process guarantees the
+    // next claim starts with clean per-user transport bindings even if some
+    // in-flight tool call outlived the abort. The wake on the next queued
+    // job restarts the container in seconds.
+    if (job.kind === "agent_turn" && entry.canceled) stopping = true;
   } finally {
     clearInterval(watcher);
     // The overlay PNGs are single-use render inputs: delete them once the job
@@ -221,7 +235,11 @@ async function stop(): Promise<void> {
 async function main(): Promise<void> {
   process.on("SIGTERM", () => void stop());
   process.on("SIGINT", () => void stop());
-  console.log(`[cut-worker] polling for jobs (max ${MAX_RUNNING} concurrent)`);
+  // The server canvas backs any turn that rasterizes overlays (an export
+  // kicked off headless). A worker without the module still runs every
+  // ffmpeg-only job.
+  const skia = await installSkiaRaster();
+  console.log(`[cut-worker] polling for jobs (max ${MAX_RUNNING} concurrent), raster: ${skia ? "skia" : "unavailable"}`);
   const inFlight = new Set<Promise<void>>();
   let idleSince: number | null = null;
   let failingSince: number | null = null;

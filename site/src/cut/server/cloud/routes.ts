@@ -14,6 +14,7 @@ import { jobsCloud } from "./jobs";
 import { libraryCloud } from "./library";
 import { mediaCloud } from "./media";
 import { projectsCloud } from "./projects";
+import { turnsCloud } from "./turns";
 import { shareCloud } from "./share";
 import { transcribeCloud } from "./transcribe";
 import { usageApi } from "./usage";
@@ -89,6 +90,8 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "DELETE", path: "/api/cut-cloud/export/:jobId", handler: (_r, u, p) => jobsCloud.exportCancel(u, p.jobId) },
   { method: "GET", path: "/api/cut-cloud/export/:jobId/file", handler: (_r, u, p) => jobsCloud.exportFile(u, p.jobId) },
   { method: "GET", path: "/api/cut-cloud/jobs/:jobId", handler: (_r, u, p) => jobsCloud.status(u, p.jobId) },
+  { method: "POST", path: "/api/cut-cloud/projects/:id/turns", handler: (r, u, p) => turnsCloud.queue(u, p.id, r) },
+  { method: "POST", path: "/api/cut-cloud/turns/:jobId/cancel", handler: (_r, u, p) => turnsCloud.cancel(u, p.jobId) },
 
   { method: "POST", path: "/api/cut-cloud/transcribe", handler: (r, u) => transcribeCloud.transcribe(u, r) },
   { method: "POST", path: "/api/cut-cloud/ai/captions", handler: (r, u) => captionsCloud.captions(u, r) },

@@ -24,6 +24,12 @@ export const CUT_MEDIA_ORIGIN = `https://${CUT_MEDIA_HOST}`;
 export const CUT_WORKER_HOST = "worker.donkeycut.com";
 export const CUT_WORKER_WAKE_URL = `https://${CUT_WORKER_HOST}/wake`;
 
+// Where the worker's runner calls the hosted API back: production containers
+// (NODE_ENV=production in the image) talk to the canonical host, a dev worker
+// run by hand talks to the local dev server.
+export const CUT_HOSTED_ORIGIN =
+  process.env.NODE_ENV === "production" ? DONKEYCUT_CANONICAL : "http://localhost:3000";
+
 function hostname(host: string | null | undefined): string {
   return host ? host.split(":")[0] : "";
 }
