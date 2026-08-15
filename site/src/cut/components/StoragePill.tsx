@@ -3,10 +3,8 @@
 // The top bar's subscription surface for cloud projects, one slot with two
 // mutually exclusive faces: free accounts see their storage usage (click →
 // upgrade dialog); a Pro set to cancel sees the days it has left (click →
-// Stripe portal, where Resume lives). A browser project's face is the
-// device's own storage estimate — there is no quota to sell past, so it only
-// informs.
-import { useEffect, useState, type ReactNode } from "react";
+// Stripe portal, where Resume lives).
+import { type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import {
   Tooltip,
@@ -38,41 +36,8 @@ export function usageLabel(bytes: number, quotaBytes: number): string {
 
 export function StoragePill() {
   const mode = useCutMode();
-  if (mode === "browser") return <BrowserStoragePill />;
   if (mode !== "cloud") return null;
   return <CloudStoragePill />;
-}
-
-function BrowserStoragePill() {
-  const [est, setEst] = useState<{ usage: number; quota: number } | null>(null);
-  useEffect(() => {
-    let alive = true;
-    const read = () =>
-      void navigator.storage
-        ?.estimate?.()
-        .then((e) => {
-          if (alive && typeof e.usage === "number" && typeof e.quota === "number") {
-            setEst({ usage: e.usage, quota: e.quota });
-          }
-        })
-        .catch(() => {});
-    read();
-    const timer = setInterval(read, 30_000);
-    return () => {
-      alive = false;
-      clearInterval(timer);
-    };
-  }, []);
-  if (!est) return null;
-  return (
-    <PillTooltip
-      message={`This is a local project. ${formatBytes(est.usage)} of the ${formatBytes(est.quota)} the browser allows is in use.`}
-    >
-      <TooltipTrigger className={cn(PILL, "cursor-default text-muted-foreground")}>
-        {usageLabel(est.usage, est.quota)}
-      </TooltipTrigger>
-    </PillTooltip>
-  );
 }
 
 function CloudStoragePill() {
