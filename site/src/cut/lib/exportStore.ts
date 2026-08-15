@@ -109,9 +109,10 @@ export const useExports = create<ExportsState>((set, get) => ({
     const backend = getBackend();
     // A cloud project renders in the tab: no upload of the cut to a container,
     // no queue behind other accounts, and the file matches the preview because
-    // the same compositor drew both. Past what a tab can hold — a long cut, a
-    // very large frame — it goes to the worker, which has a whole machine. A
-    // browser-resident project renders in the tab too; the tab is its machine.
+    // the same compositor drew both. A browser that can't carry the render —
+    // no encoder at these dimensions, no scratch storage — sends it to the
+    // worker, which has a whole machine. A browser-resident project renders in
+    // the tab too; the tab is its machine.
     const inBrowser =
       (backend.kind === "cloud" || backend.kind === "browser") &&
       (await canRenderInBrowser(doc, settings));
@@ -140,17 +141,19 @@ export const useExports = create<ExportsState>((set, get) => ({
     };
     const fail = (err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
+      // A browser-resident project has exactly one other renderer, so a failed
+      // render says where to take it.
+      const hint = " Move the project to Cloud to export.";
+      const full = backend.kind === "browser" && !msg.includes(hint) ? msg + hint : msg;
       set((s) => ({
         local: s.local.map((r) =>
-          r.id === localId ? { ...r, status: "error" as const, error: msg, abort: undefined } : r
+          r.id === localId ? { ...r, status: "error" as const, error: full, abort: undefined } : r
         ),
       }));
     };
     try {
       if (backend.kind === "browser" && !inBrowser) {
-        throw new Error(
-          "This project is too big to export from this tab. Move it to Cloud to export."
-        );
+        throw new Error("This browser can't render this export.");
       }
       if (inBrowser) {
         await runBrowserExport(projectId, doc, settings, {

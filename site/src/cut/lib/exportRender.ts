@@ -871,26 +871,20 @@ async function drawStamps(
 }
 
 /**
- * Whether this render should happen in the tab.
- *
- * Three things have to hold. The cut has to be one a tab can carry — past ten
- * minutes or 4K it belongs on the worker, which has a whole machine rather than
- * a share of one. The browser has to offer scratch storage, because the render
- * writes its file to origin-private disk rather than the heap. And the browser
- * has to actually be able to encode it: whether WebCodecs offers a video
- * encoder for these dimensions is a fact about the browser, not about the
- * project, and asking after the render has already been routed here leaves
- * nowhere to go. Answering all three first means a browser that cannot carry
- * the render quietly renders on the worker, the way every cloud export did
- * before this path existed.
+ * Whether this browser can render the export at all. Two facts decide it,
+ * both about the browser: it has to offer scratch storage, because the render
+ * writes its file to origin-private disk, and WebCodecs has to offer a video
+ * encoder at these dimensions. A cut of any length renders in the tab — the
+ * pipeline streams to disk, so duration costs time, and the answer here has
+ * to be known up front because a cloud project whose browser can't carry the
+ * render quietly renders on the worker instead.
  */
 export async function canRenderInBrowser(
   doc: ExportDoc,
   settings: ExportSettings
 ): Promise<boolean> {
   const duration = projectDuration(doc);
-  const pixels = settings.width * settings.height;
-  if (!(duration > 0) || duration > 10 * 60 || pixels > 3840 * 2160) return false;
+  if (!(duration > 0)) return false;
   if (
     typeof navigator.storage?.getDirectory !== "function" ||
     typeof FileSystemFileHandle === "undefined" ||

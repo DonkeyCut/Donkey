@@ -59,7 +59,7 @@ export function ExportDialog() {
   const selected = presets.find((p) => p.id === presetId) ?? presets[0];
 
   // A browser-resident project has exactly one renderer: this tab. Ask up
-  // front whether the tab can hold this cut at the chosen size, so a refusal
+  // front whether the browser can encode at the chosen size, so a refusal
   // is a message here instead of an error card after the dialog closed.
   const cutMode = useCutMode();
   const [fits, setFits] = useState(true);
@@ -151,7 +151,7 @@ export function ExportDialog() {
           <p className="text-center text-[11px] text-muted-foreground">
             {fits
               ? "Renders in the background. You can keep editing, open another project, or export more — each shows in the corner."
-              : "This project is too big to export from this tab. Move it to Cloud (top bar) to export."}
+              : "This browser can't export at this size. Move the project to Cloud (top bar) to export."}
           </p>
         </DialogFooter>
       </DialogContent>
