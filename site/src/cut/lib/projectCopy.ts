@@ -8,6 +8,7 @@ import type { CutBackend } from "./backend/types";
 import { fetchCloudThreads, putCloudThread } from "./chatCloud";
 import { mergeThreads, readProjectThreads, writeProjectThreads } from "./chatThreads";
 import { uploadProjectMediaTo } from "./media";
+import { localMediaFile } from "./mediaSync";
 import type { ProjectDoc } from "./types";
 
 /** Move a project's conversations onto the copy.
@@ -64,14 +65,23 @@ export async function copyProjectAcross(
     const unique = new Set(assets.map((a) => a.fileName)).size;
     for (const a of assets) {
       if (names.has(a.fileName)) continue;
-      const bytes = await src.fetch(
-        `/api/cut/projects/${projectId}/media/${encodeURIComponent(a.fileName)}`
-      );
-      if (!bytes.ok) throw new Error(`Could not read “${a.name}”.`);
-      names.set(
-        a.fileName,
-        await uploadProjectMediaTo(dst, summary.id, await bytes.blob(), a.fileName)
-      );
+      // A cloud project's media may exist only in this browser's store so far
+      // (an import the lazy upload hasn't drained — a full account's, say).
+      // The local copy is the same write-once bytes, and for the undrained
+      // file it is the only copy, so it is read first; the network serves the
+      // rest.
+      const local = src.kind === "cloud" ? await localMediaFile(projectId, a.fileName) : null;
+      let blob: Blob;
+      if (local) {
+        blob = local;
+      } else {
+        const bytes = await src.fetch(
+          `/api/cut/projects/${projectId}/media/${encodeURIComponent(a.fileName)}`
+        );
+        if (!bytes.ok) throw new Error(`Could not read “${a.name}”.`);
+        blob = await bytes.blob();
+      }
+      names.set(a.fileName, await uploadProjectMediaTo(dst, summary.id, blob, a.fileName));
       opts.onProgress?.(names.size, unique);
     }
     const copied: ProjectDoc = {

@@ -44,7 +44,9 @@ import type { VideoProject } from "./genvideo/types";
 import { fillSlot } from "./genvideo/fillSlot";
 import { apiFetch, apiJson, getBackend, hasLocalCompute } from "./backend";
 import { fetchSignedMediaUrls, pinDocBase } from "./backend/cloud";
+import { cancelRevoke, resolveRegisteredBlob, revokeRegistered } from "./backend/browser/registry";
 import { markSignedBatch } from "./mediaLinks";
+import { cacheCloudMedia, dropLocalMedia, localMediaUrl } from "./mediaSync";
 import {
   dropCachedDoc,
   readCachedDoc,
@@ -965,13 +967,13 @@ export function rippleInsert(
  * null when the user switches projects mid-run. Throws user-facing errors.
  * Shared with the brief-to-video transcribe adapter. */
 export async function runTranscription(projectId: string, spec: object): Promise<SubtitleCue[] | null> {
-  // A cloud project's media isn't on this Mac, so the engine can't render the
-  // mix — the browser does, and then hands it to whoever can transcribe it:
-  // this Mac when the app is running (on-device, free, real word timings), the
-  // hosted route otherwise (included up to the account's allowance, metered
-  // past it). A local project skips all of it; the
-  // engine already holds the media and runs the whole job.
-  if (getBackend().kind === "cloud") {
+  // A cloud or browser project's media isn't on the engine's disk, so the
+  // engine can't render the mix — the browser does, and then hands it to
+  // whoever can transcribe it: this Mac when the app is running (on-device,
+  // free, real word timings), the hosted route otherwise (included up to the
+  // account's allowance, metered past it). A local project skips all of it;
+  // the engine already holds the media and runs the whole job.
+  if (getBackend().kind !== "local") {
     const s = spec as CloudTranscribeSpec;
     if (s.clips.length === 0 && s.audio.length === 0) {
       throw new Error("Add audio or video to the timeline first.");
@@ -1220,6 +1222,15 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
   /** Reset to an empty, loading project and drain any background doc writes
    * still queued for it, so no open ever reads a half-written document. */
   const resetForOpen = async (id: string) => {
+    // Blob URLs minted for the project being left go with it; the next open
+    // of that project re-registers what its store holds. A re-open of the
+    // same project keeps them — its state still points at them.
+    const prev = get().projectId;
+    if (prev && prev !== id) revokeRegistered(`/api/cut/projects/${prev}/`);
+    // Coming back to a project whose revoke is still waiting on an in-flight
+    // render's hold: the subtree is live again, so the revoke no longer
+    // applies — hydration is about to reuse those registrations.
+    cancelRevoke(`/api/cut/projects/${id}/`);
     history.length = 0;
     future.length = 0;
     pending = null;
@@ -1355,9 +1366,12 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           const stale = stored.assets ?? [];
           // Signed R2 links are cached alongside the doc, so a snapshot open
           // hands its clips the very URLs the live load is about to hand
-          // them: identical strings, so nothing reloads when it lands.
+          // them: identical strings, so nothing reloads when it lands. Local
+          // and browser projects serve their own bytes; their URLs are minted
+          // per session and never cached.
+          const kind = getBackend().kind;
           const links =
-            getBackend().kind === "local"
+            kind === "local" || kind === "browser"
               ? null
               : await readCachedMediaLinks(id, stale.map((a) => a.fileName));
           if (openable()) {
@@ -1409,13 +1423,47 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         // load; the /media route's 302 stays the fallback for anything the
         // mint misses. mediaLinks re-mints the batch as it nears expiry.
         if (getBackend().kind !== "local") {
-          const signed = await fetchSignedMediaUrls(id, assets.map((a) => a.fileName));
-          for (const a of assets) a.url = signed.urls.get(a.fileName) ?? a.url;
+          // A cloud project plays what this browser already holds — imports
+          // that haven't drained plus files cached from earlier reads — so
+          // only the rest asks for signed links.
+          const held = new Map<string, string>();
+          if (getBackend().kind === "cloud") {
+            await Promise.all(
+              assets.map(async (a) => {
+                const url = await localMediaUrl(id, a.fileName);
+                if (url) held.set(a.fileName, url);
+              })
+            );
+          }
+          const missing = assets.filter((a) => !held.has(a.fileName));
+          const signed = await fetchSignedMediaUrls(id, missing.map((a) => a.fileName));
+          for (const a of assets) {
+            a.url = held.get(a.fileName) ?? signed.urls.get(a.fileName) ?? a.url;
+          }
           markSignedBatch(id, signed.expiresAt);
-          writeCachedMediaLinks(id, signed.urls, signed.expiresAt);
+          // A browser project's "mint" hands back session blob URLs, dead on
+          // the next load — only time-limited signed links are worth caching.
+          if (getBackend().kind !== "browser") {
+            writeCachedMediaLinks(id, signed.urls, signed.expiresAt);
+          }
+          if (getBackend().kind === "cloud") {
+            // First playback over a signed link streams the file into the
+            // browser store behind the editor; the next open plays from disk.
+            for (const a of missing) {
+              const url = signed.urls.get(a.fileName);
+              if (url) cacheCloudMedia(id, a.fileName, url);
+            }
+          }
         } else {
           markSignedBatch(id, null);
         }
+        // Ledger pins survive the reload; once the document is in hand, its
+        // unsynced imports re-enter the upload queue. Lazy import: media.ts
+        // reaches back into the store.
+        const resumeUploads = () =>
+          void import("./media")
+            .then((m) => m.resumePendingUploads(id))
+            .catch(() => {});
         // A dirty snapshot resumes only onto the version its edits were made
         // on top of. The server having moved past that base is a conflict,
         // and the server wins it the way it wins any conflict — even over
@@ -1442,10 +1490,12 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           (paintedDirty || history.length > 0 || get().saveState !== "saved")
         ) {
           get().applyMediaUrls(new Map(assets.map((a) => [a.fileName, a.url])));
+          resumeUploads();
           return;
         }
         writeCachedDoc(id, doc);
         hydrate(doc, assets, ui);
+        resumeUploads();
       } catch (err) {
         // Couldn't reach the server. A snapshot already on screen is the
         // better answer than an error page: the project is open and editable,
@@ -1802,8 +1852,10 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         set((s) => ({
           assets: s.assets.map((a) => {
             // An import still uploading plays from local bytes; a signed URL
-            // for an object that hasn't landed would only 404.
-            if (a.upload) return a;
+            // for an object that hasn't landed would only 404. An asset the
+            // browser store serves keeps its blob URL — link rotation is for
+            // links that expire.
+            if (a.upload || resolveRegisteredBlob(a.url)) return a;
             const url = urls.get(a.fileName);
             return url && url !== a.url ? { ...a, url } : a;
           }),
@@ -1836,6 +1888,9 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           `/api/cut/projects/${s.projectId}/media/${encodeURIComponent(gone.fileName)}`,
           { method: "DELETE" }
         ).catch(() => {});
+        // A cloud project's browser-store copy — pin, bytes, and blob URL —
+        // dies with the cloud object.
+        if (getBackend().kind === "cloud") void dropLocalMedia(s.projectId, gone.fileName);
       };
       // An unreferenced asset is no doc edit: history snapshots don't cover
       // the asset list, so removing one must not open a checkpoint or churn
@@ -4190,26 +4245,31 @@ useEditor.subscribe((s, prev) => {
     useGenNotify.getState().landed("subtitles", `subs-${Date.now()}`);
 });
 
-/** Ids of the assets still uploading, as a comparable key ("" when none). An
- * import is on screen before its bytes are stored, and nothing about it may
- * reach the document until they are. */
+/** An upload whose bytes exist only in this tab. One backed by the browser
+ * store survives a reload, so it may reach the document like a landed file. */
+const tabOnlyUpload = (a: MediaAsset) => a.upload !== undefined && !a.upload.stored;
+
+/** Ids of the assets still uploading from tab-scoped bytes, as a comparable
+ * key ("" when none). An import is on screen before its bytes are stored, and
+ * nothing about it may reach the document until they are. */
 function pendingKey(assets: MediaAsset[]): string {
   let key = "";
-  for (const a of assets) if (a.upload) key += `${a.id},`;
+  for (const a of assets) if (tabOnlyUpload(a)) key += `${a.id},`;
   return key;
 }
 
-/** Clips are held back from the document while their asset is still uploading:
- * one pointing at bytes this tab never finished sending would reopen broken.
- * Memoized, so autosave's change detector can compare the projection by
- * reference and an upload in flight doesn't read as a stream of edits. */
+/** Clips are held back from the document while their asset is still uploading
+ * from tab-scoped bytes: one pointing at bytes this tab never finished sending
+ * would reopen broken. Memoized, so autosave's change detector can compare the
+ * projection by reference and an upload in flight doesn't read as a stream of
+ * edits. */
 function docClipFilter<T extends { assetId: string }>() {
   let memo: { clips: T[]; key: string; out: T[] } | null = null;
   return (clips: T[], assets: MediaAsset[]): T[] => {
     const key = pendingKey(assets);
     if (memo && memo.clips === clips && memo.key === key) return memo.out;
     const out = key
-      ? clips.filter((c) => !assets.some((a) => a.id === c.assetId && a.upload))
+      ? clips.filter((c) => !assets.some((a) => a.id === c.assetId && tabOnlyUpload(a)))
       : clips;
     memo = { clips, key, out };
     return out;
@@ -4235,11 +4295,12 @@ export const docOverlays = (() => {
 
 /** The asset fields persisted in project.json — the projection autosave
  * writes, and the one its change detector compares (runtime fields like
- * thumbs/peaks must not mark the doc dirty). Assets whose bytes are still
- * uploading are left out entirely; they join the document when they land. */
+ * thumbs/peaks must not mark the doc dirty). Assets whose bytes live only in
+ * this tab are left out entirely; they join the document when they land — or
+ * straight away when the browser store holds their bytes. */
 export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
   return assets
-    .filter((a) => !a.upload)
+    .filter((a) => !tabOnlyUpload(a))
     .map(({ id, fileName, name, type, duration, width, height, origin, chatId, language, watch, speech }) => ({
       id,
       fileName,

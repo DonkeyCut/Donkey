@@ -56,16 +56,49 @@ export const mediaCloud = {
    * and claimed by a pending CutMediaObject row before the URL goes out. */
   async presign(userId: string, projectId: string, req: Request) {
     try {
-      const body = (await req.json()) as { fileName?: string; mime?: string; bytes?: number };
+      const body = (await req.json()) as {
+        fileName?: string;
+        mime?: string;
+        bytes?: number;
+        resume?: boolean;
+        avoid?: string[];
+      };
       if (!body.fileName || typeof body.bytes !== "number" || body.bytes <= 0) {
         return err("fileName and bytes are required.", 400);
       }
       if (!(await getProject(userId, projectId))) return err("Project not found.", 404);
+      // A resumed upload already holds its name: the browser kept the bytes
+      // across a reload and asks for a fresh URL for the same claim. Re-mint
+      // against the claimed key so the name never shifts; a claim that
+      // completed in the meantime reports done and uploads nothing. The size
+      // has to match the claim — a same-named row of a different size is a
+      // different file (the browser's local stash colliding with an object it
+      // never saw), and answering "done" for it would silently swallow the
+      // upload; that ask falls through to a fresh claim under a deduped name.
+      if (body.resume) {
+        const row = await prisma.cutMediaObject.findFirst({
+          where: { userId, projectId, fileName: safeFileName(body.fileName), kind: "media" },
+          orderBy: { createdAt: "desc" },
+        });
+        if (row && Number(row.bytes) === Math.round(body.bytes)) {
+          if (row.uploadState === "complete") {
+            return Response.json({ fileName: row.fileName, key: row.r2Key, done: true });
+          }
+          const url = await presignPut(row.r2Key, body.mime ?? "application/octet-stream");
+          return Response.json({ fileName: row.fileName, key: row.r2Key, url });
+        }
+      }
       const over = await quotaCheck(userId, body.bytes);
       if (over) return over;
+      // `avoid` carries names the browser holds locally with no cloud row
+      // (413-era stashes): claiming one would collide with the only copy of
+      // another file on the client's disk.
+      const avoid = Array.isArray(body.avoid)
+        ? body.avoid.filter((n): n is string => typeof n === "string").map(safeFileName)
+        : [];
       const fileName = dedupeName(
         safeFileName(body.fileName),
-        await takenMediaNames(userId, projectId)
+        new Set([...(await takenMediaNames(userId, projectId)), ...avoid])
       );
       const key = projectMediaKey(userId, projectId, fileName);
       const url = await presignPut(key, body.mime ?? "application/octet-stream");
