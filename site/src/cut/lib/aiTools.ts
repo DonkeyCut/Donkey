@@ -1265,7 +1265,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         (t - span.start) *
           (span.clip.speed && span.clip.speed > 0 ? span.clip.speed : 1);
       let body: MediaAsset;
-      if (getBackend().kind === "cloud") {
+      if (getBackend().kind !== "local") {
         // No engine to bake a still video — grab the frame in the browser and
         // store it as a project image; image clips carry their own length,
         // sized below to the requested duration, mirroring the engine's
@@ -2525,7 +2525,7 @@ async function fetchSilences(
   // Same defaults and clamps as the engine's silence handler.
   const thresholdDb = clamp(opts.thresholdDb ?? -30, -90, 0);
   const minSilence = clamp(opts.minSilence ?? 0.35, 0.05, 10);
-  if (getBackend().kind === "cloud") {
+  if (getBackend().kind !== "local") {
     return detectSilenceClientSide(asset.url, {
       from: opts.from,
       ...(opts.to !== undefined ? { to: opts.to } : {}),
@@ -2563,7 +2563,7 @@ async function listenToSource(
   from: number,
   to: number | undefined,
 ): Promise<InlineImage | null> {
-  if (getBackend().kind === "cloud") {
+  if (getBackend().kind !== "local") {
     const wav = await renderAudioSpanWav(asset.url, from, to).catch((e) => {
       throw new ToolError(e instanceof Error ? e.message : "Could not read the audio.");
     });

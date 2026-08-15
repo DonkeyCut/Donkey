@@ -68,7 +68,12 @@ import {
 import { useNewProjectTarget } from "@/cut/lib/newProject";
 import { useListedResidencies, useLocalCompute } from "@/cut/lib/backend/hooks";
 import { setNeedsApp } from "@/cut/lib/needsApp";
-import { availableResidencies, RESIDENCY_LABEL, type Residency } from "@/cut/lib/residency";
+import {
+  availableResidencies,
+  libraryResidencies,
+  RESIDENCY_LABEL,
+  type Residency,
+} from "@/cut/lib/residency";
 import { TemplateCard } from "./TemplateCard";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
 import { useRevealFlash } from "@/cut/lib/refReveal";
@@ -98,7 +103,7 @@ export function ShelfBadge({
   const Icon = residency === "cloud" ? Cloud : Laptop;
   return (
     <span
-      title={offline ? "On this Mac — open the Donkey app to use it" : RESIDENCY_LABEL[residency]}
+      title={offline ? "Local — open the Donkey app to use it" : RESIDENCY_LABEL[residency]}
       className={className}
     >
       <Icon className="size-3" />
@@ -592,7 +597,7 @@ export function LibraryCard({
   const videoRef = useRef<HTMLVideoElement>(null);
   const { flash, attachReveal } = useRevealFlash("library", a.id);
   // With one shelf listed, every card is on it — the badge would say nothing.
-  const bothShelves = availableResidencies().length > 1 || offline;
+  const bothShelves = libraryResidencies(availableResidencies()).length > 1 || offline;
   // Each card is a real media element, so the source waits until the tile has
   // been scrolled near: a large library would otherwise pull every file's
   // metadata across the network the moment the page opened.

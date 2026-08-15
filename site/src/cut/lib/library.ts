@@ -14,6 +14,7 @@ import {
   activeResidency,
   availableResidencies,
   backendFor,
+  libraryResidencies,
   libraryShelfKey,
   listedResidencies,
   type Residency,
@@ -106,8 +107,8 @@ async function rememberedLibraryFrom(r: Residency): Promise<LibraryData | null> 
  * item it can't copy into the project has no business in a picker.
  */
 export async function fetchLibrary(opts?: { remembered?: boolean }): Promise<LibraryData> {
-  const live = availableResidencies();
-  const rs = opts?.remembered ? listedResidencies() : live;
+  const live = libraryResidencies(availableResidencies());
+  const rs = libraryResidencies(opts?.remembered ? listedResidencies() : live);
   const parts = await Promise.all(
     rs.map((r) =>
       live.includes(r) ? fetchLibraryFrom(r).catch(() => null) : rememberedLibraryFrom(r)

@@ -13,6 +13,7 @@
 import { useSyncExternalStore } from "react";
 
 import { authClient } from "@/lib/auth-client";
+import { supportsBrowserStore } from "./backend/browser/opfs";
 import { useLocalCompute } from "./backend/hooks";
 import type { Residency } from "./residency";
 
@@ -25,7 +26,7 @@ function current(): Residency {
   if (choice) return choice;
   try {
     const raw = localStorage.getItem(KEY);
-    choice = raw === "cloud" || raw === "local" ? raw : "local";
+    choice = raw === "cloud" || raw === "local" || raw === "browser" ? raw : "local";
   } catch {
     choice = "local";
   }
@@ -65,7 +66,18 @@ export function useNewProjectTarget(): NewProjectTarget {
   // already has, and redraws when it lands.
   const engineUp = useLocalCompute();
   const stored = useSyncExternalStore(subscribe, current, () => "local" as const);
-  const choices: Residency[] = !session ? ["local"] : engineUp ? ["local", "cloud"] : ["cloud"];
+  // "Local" is one place to the user, so one local entry ever lists: the Mac
+  // engine when it is up, else the browser's own store. First entry is the
+  // fallback default, so a signed-in user with no engine lands in the browser
+  // store: instant imports, no upload, no quota.
+  const store = supportsBrowserStore();
+  const choices: Residency[] = !session
+    ? ["local"]
+    : engineUp
+      ? ["local", "cloud"]
+      : store
+        ? ["browser", "cloud"]
+        : ["cloud"];
   return {
     target: choices.includes(stored) ? stored : choices[0],
     choices,

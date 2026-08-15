@@ -1,5 +1,5 @@
-// Cloud mirror of a project's chat threads. Local projects keep chat purely in
-// localStorage; a cloud project's threads also sync to the hosted
+// Cloud mirror of a project's chat threads. Local and browser projects keep
+// chat purely in localStorage; a cloud project's threads also sync to the hosted
 // /projects/:id/chats routes so the history follows the account across
 // devices. Threads stay opaque here — the module reads only id and updatedAt
 // to merge, and ships the same slimmed payload the panel writes to storage.
@@ -24,7 +24,7 @@ export async function fetchCloudThreads(
 ): Promise<StoredThread[]> {
   // The shared backend rewrites this path onto the viewer surface, which
   // serves the owner's threads when the share includes chat.
-  if (backend.kind === "local") return [];
+  if (backend.kind === "local" || backend.kind === "browser") return [];
   // Throws on a failed read rather than reading as "no threads": the seed memo
   // and a project copy both have to tell an empty history from a lost one.
   const res = await backend.fetch(`/api/cut/projects/${projectId}/chats`);
@@ -60,7 +60,7 @@ export async function putCloudThread(
 export function ensureCloudThreads(projectId: string): Promise<void> {
   // Shared viewers sync too, read-only: syncThreads pushes nothing back, and
   // the saves and deletes below are cloud-only.
-  if (cutMode() === "local") return Promise.resolve();
+  if (cutMode() === "local" || cutMode() === "browser") return Promise.resolve();
   let p = seeded.get(projectId);
   if (!p) {
     p = syncThreads(projectId).catch(() => {

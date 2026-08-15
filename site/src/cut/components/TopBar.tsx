@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cloudBackend } from "@/cut/lib/backend/cloud";
 import { cloudUsageQueryKey, useCutMode } from "@/cut/lib/backend/hooks";
+import { browserBackend } from "@/cut/lib/backend/browser";
 import { localBackend } from "@/cut/lib/backend/local";
 import { clearProjectThreads } from "@/cut/lib/chatThreads";
 import { retryUpload } from "@/cut/lib/importQueue";
@@ -236,11 +237,11 @@ export function TopBar({
     endEditing();
   };
 
-  // "Move to Cloud": copies this local project — doc and every media file — to
-  // the cloud, deletes the local original, and reopens the editor on the cloud
-  // copy.
+  // "Move to Cloud": copies this local or browser project — doc and every
+  // media file — to the cloud, deletes the original, and reopens the editor on
+  // the cloud copy.
   const cutMode = useCutMode();
-  const canMoveToCloud = cutMode === "local";
+  const canMoveToCloud = cutMode === "local" || cutMode === "browser";
   // Cloud imports are real uploads worth reporting; local imports are instant
   // disk copies, so they report nothing.
   const cloudUploading = uploading > 0 && cutMode === "cloud";
@@ -278,10 +279,11 @@ export function TopBar({
       for (let i = 0; i < 40 && useEditor.getState().saveState !== "saved"; i++) {
         await new Promise((r) => setTimeout(r, 250));
       }
-      const newId = await copyProjectAcross(localBackend, cloudBackend, projectId, {
+      const src = cutMode === "browser" ? browserBackend : localBackend;
+      const newId = await copyProjectAcross(src, cloudBackend, projectId, {
         onProgress: (done, total) => setMoveProgress(`Moving media ${done}/${total}…`),
       });
-      await localBackend
+      await src
         .fetch(`/api/cut/projects/${projectId}`, { method: "DELETE" })
         .catch(() => {});
       // The chat history moved with the project; the old project's copy goes
@@ -307,13 +309,15 @@ export function TopBar({
   // bar tightens. Chat keeps its label in both — it is the primary control.
   const actionButtons = (compact: boolean) => (
     <>
-      {cutMode === "cloud" && (
+      {(cutMode === "cloud" || cutMode === "browser") && (
+        // Shares are served from the cloud, so for a browser project the
+        // Share button leads to the move that makes sharing possible.
         <Button
           variant="ghost"
           size={compact ? "icon-sm" : "sm"}
           aria-label="Share"
-          title="Share"
-          onClick={() => setShareOpen(true)}
+          title={cutMode === "browser" ? "Move to Cloud to share" : "Share"}
+          onClick={() => (cutMode === "browser" ? setMoveOpen(true) : setShareOpen(true))}
         >
           <Share2 data-icon={compact ? undefined : "inline-start"} />
           {!compact && "Share"}
@@ -689,7 +693,8 @@ export function TopBar({
             </DialogHeader>
             <p className="text-sm text-muted-foreground">
               Copies this project and its media to the cloud, then removes it
-              from this Mac. Exports rendered here stay behind.
+              from {cutMode === "browser" ? "this browser" : "this Mac"}.
+              Exports rendered here stay behind.
             </p>
             {moveError && <p className="text-sm text-red-600">{moveError}</p>}
             <DialogFooter className="mt-2">

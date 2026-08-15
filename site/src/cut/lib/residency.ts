@@ -14,6 +14,8 @@
 // still pull one out of the cloud.
 import { engineOrigin, servedFromEngine } from "./api";
 import { cutMode } from "./backend";
+import { browserBackend } from "./backend/browser";
+import { supportsBrowserStore } from "./backend/browser/opfs";
 import { cloudBackend } from "./backend/cloud";
 import { localBackend } from "./backend/local";
 import type { CutBackend, CutMode } from "./backend/types";
@@ -22,31 +24,44 @@ import type { ProjectSummary } from "./types";
 
 /** Where a piece of the user's own data lives. ("shared" is a view of someone
  * else's cloud project, never a residency of yours, so it never lists here.) */
-export type Residency = "local" | "cloud";
+export type Residency = "local" | "cloud" | "browser";
 
 export const backendFor = (r: Residency): CutBackend =>
-  r === "cloud" ? cloudBackend : localBackend;
+  r === "cloud" ? cloudBackend : r === "browser" ? browserBackend : localBackend;
 
+// A project lives in one of two places the user thinks in: Local (this
+// device — the Mac engine or the browser's own storage, whichever this
+// session has) or Cloud. The two local kinds present identically; which one
+// backs "Local" is the app's business, so only one is ever offered at a time.
 export const RESIDENCY_LABEL: Record<Residency, string> = {
-  local: "On this Mac",
+  local: "Local",
   cloud: "Cloud",
+  browser: "Local",
 };
 
 /**
  * The residencies this browser can talk to right now.
  *
  * The cloud is always one of them — a signed-in account always has a hosted
- * shelf. The engine counts only once it has actually answered — the
- * ConnectGate resolved its origin, or the page is served by it. Probing here
- * could raise the browser's local-network prompt, and calling the engine
+ * shelf. The browser store counts when this browser can hold one (OPFS with
+ * committed writes). The engine counts only once it has actually answered —
+ * the ConnectGate resolved its origin, or the page is served by it. Probing
+ * here could raise the browser's local-network prompt, and calling the engine
  * before the gate opens would hang on its latch.
  */
 export function availableResidencies(): Residency[] {
   const out: Residency[] = [];
   if (servedFromEngine() || engineOrigin() !== "") out.push("local");
+  if (supportsBrowserStore()) out.push("browser");
   out.push("cloud");
   return out;
 }
+
+/** The shelves the library spans. Library items keep a Mac and a cloud home;
+ * browser-resident storage holds projects only, so library reads and writes
+ * pass over it. */
+export const libraryResidencies = (rs: Residency[]): Residency[] =>
+  rs.filter((r) => r !== "browser");
 
 /** Set the first time an engine answers in this browser (by the ConnectGate).
  * It separates a browser that never had the Donkey app from one whose app
@@ -98,10 +113,12 @@ async function lastLocalProjects(): Promise<Set<string>> {
   return new Set((hit?.value.projects ?? []).map((p) => p.id));
 }
 
-/** The residency the app is bound to: where a new library upload lands, and
- * where the open project lives. A shared view reads the local shelf. */
+/** The library residency the app is bound to: where a new library upload
+ * lands. Browser mode uploads to the cloud shelf — the library passes over
+ * browser storage. A shared view reads the local shelf. */
 export function activeResidency(): Residency {
-  return cutMode() === "cloud" ? "cloud" : "local";
+  const mode = cutMode();
+  return mode === "cloud" || mode === "browser" ? "cloud" : "local";
 }
 
 const owners = new Map<string, Promise<CutBackend>>();
@@ -118,8 +135,8 @@ export function projectBackend(projectId: string): Promise<CutBackend> {
   let p = owners.get(projectId);
   if (!p) {
     p = resolveProjectMode(projectId).then((mode) => {
-      if (mode !== "local") owners.delete(projectId);
-      return backendFor(mode === "local" ? "local" : "cloud");
+      if (mode !== "local" && mode !== "browser") owners.delete(projectId);
+      return backendFor(mode === "local" || mode === "browser" ? mode : "cloud");
     });
     owners.set(projectId, p);
   }
@@ -138,8 +155,27 @@ export type ProjectPlacement = { mode: CutMode; reachable: boolean };
  * nothing and stays out of this set. */
 const knownCloud = new Set<string>();
 
+/** Ids the browser store answered for. Same definitiveness as an engine hit:
+ * the store is this page's own storage, and a project never changes residency
+ * in place. */
+const knownBrowser = new Set<string>();
+
+/** Whether the browser store holds this id — the cheapest and most definitive
+ * ask, so it goes first. The store import stays lazy so pages that never see
+ * a browser project don't load it. */
+async function browserHasProject(projectId: string): Promise<boolean> {
+  if (!supportsBrowserStore()) return false;
+  const { readDoc } = await import("./backend/browser/opfs");
+  return (await readDoc(projectId)) !== null;
+}
+
 export async function resolveProjectPlacement(projectId: string): Promise<ProjectPlacement> {
+  if (knownBrowser.has(projectId)) return { mode: "browser", reachable: true };
   if (knownCloud.has(projectId)) return { mode: "cloud", reachable: true };
+  if (await browserHasProject(projectId)) {
+    knownBrowser.add(projectId);
+    return { mode: "browser", reachable: true };
+  }
   if (!servedFromEngine() && !engineOrigin()) {
     // No engine to ask. A project this browser last saw on this Mac is still
     // that project — saying "cloud" would send the editor to fetch a document

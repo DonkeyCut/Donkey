@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { apiFetch, apiUrl } from "@/cut/lib/backend";
-import { useCutCaps } from "@/cut/lib/backend/hooks";
+import { useCutCaps, useCutMode } from "@/cut/lib/backend/hooks";
 import {
   clearAssetDrag,
   draggingLibrary,
@@ -65,7 +65,12 @@ import {
   type LibraryFolder,
   type LibraryTemplateItem,
 } from "@/cut/lib/library";
-import { activeResidency, availableResidencies, type Residency } from "@/cut/lib/residency";
+import {
+  activeResidency,
+  availableResidencies,
+  libraryResidencies,
+  type Residency,
+} from "@/cut/lib/residency";
 import { isStylePresetTemplate } from "@/cut/lib/stylePresets";
 import { retryUpload } from "@/cut/lib/importQueue";
 import { downloadMedia, isMediaFile, revealMedia } from "@/cut/lib/media";
@@ -623,6 +628,10 @@ function ProjectFilesPanel({
   importing: boolean;
 }) {
   const caps = useCutCaps();
+  // The library passes over browser storage (`libraryResidencies`), and its
+  // server-side copy can't reach bytes that live in this browser's store, so
+  // a browser-resident project's templates stay on the project shelf.
+  const cutMode = useCutMode();
   // Only user-imported media lives here; anything Cut created (recordings, AI
   // generations, voiceovers, freeze frames, stock adds) is tagged with an
   // `origin` and stays where it was made.
@@ -754,9 +763,11 @@ function ProjectFilesPanel({
                   if (r.scope === "project") useEditor.getState().addAssetToTemplate(t.id, r.id);
                 }}
                 extraMenu={
-                  <DropdownMenuItem onClick={() => void saveTemplate(projectId, t)}>
-                    <FolderPlus /> Add to Library
-                  </DropdownMenuItem>
+                  cutMode === "browser" ? undefined : (
+                    <DropdownMenuItem onClick={() => void saveTemplate(projectId, t)}>
+                      <FolderPlus /> Add to Library
+                    </DropdownMenuItem>
+                  )
                 }
               />
             ))}
@@ -1283,7 +1294,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
   };
 
   const all = assets ?? [];
-  const bothShelves = availableResidencies().length > 1;
+  const bothShelves = libraryResidencies(availableResidencies()).length > 1;
   const shown = all.filter((a) => (a.folderId ?? null) === openFolder);
   const shownTemplates = templates.filter((t) => (t.folderId ?? null) === openFolder);
   const openFolderName = folders.find((f) => f.id === openFolder)?.name;

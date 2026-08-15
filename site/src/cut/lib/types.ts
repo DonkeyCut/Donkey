@@ -177,14 +177,20 @@ export interface StoredAsset {
 }
 
 /** An import whose bytes are still on their way to storage. While this is set
- * the asset plays from a local object URL, and it is held out of the saved
- * document along with the clips that use it — a reload cannot resume bytes
- * this tab was holding, so a doc pointing at them would open broken. */
+ * the asset plays from a local object URL. Whether it may join the saved
+ * document depends on where the bytes live: an upload holding only tab-scoped
+ * bytes is held out along with the clips that use it — a reload cannot resume
+ * them, so a doc pointing at them would open broken. One whose bytes sit in
+ * the browser store survives a reload and saves like any other asset; the
+ * store's ledger re-marks it pending on the next open. */
 export interface AssetUpload {
   /** Share of the bytes sent, 0..1. */
   progress: number;
   /** Set when the upload failed; the asset is retryable until it is removed. */
   error?: string;
+  /** The bytes are held durably in the browser store, so the asset is safe to
+   * save and the upload safe to resume after a reload. */
+  stored?: boolean;
 }
 
 /** Runtime asset: stored fields plus derived/browser-only data. */

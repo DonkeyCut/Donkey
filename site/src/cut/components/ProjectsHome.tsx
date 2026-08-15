@@ -77,6 +77,7 @@ import { clearProjectThreads } from "@/cut/lib/chatThreads";
 import { useGenerate } from "@/cut/lib/generate";
 import { useGenScene } from "@/cut/lib/genScene";
 import { createProjectFromFile, isMediaFile } from "@/cut/lib/media";
+import { dropLocalProjectCopy, localMediaUrl } from "@/cut/lib/mediaSync";
 import { copyProjectAcross } from "@/cut/lib/projectCopy";
 import { homeHref, projectHref, useCutBase } from "@/cut/lib/nav";
 import { daysUntil, formatTime } from "@/cut/lib/time";
@@ -130,6 +131,7 @@ function formatDate(ts: number) {
 const RESIDENCY_HINT: Record<Residency, string> = {
   local: "This is a local project",
   cloud: "This is a cloud project",
+  browser: "This is a local project",
 };
 const OFFLINE_HINT = "This is a local project — open the Donkey app to edit it";
 
@@ -204,8 +206,9 @@ export function ProjectsHome() {
   const router = useRouter();
   const base = useCutBase();
   const mode = useCutMode();
-  // The home never runs in shared mode; anything non-cloud lists as local.
-  const homeMode: Residency = mode === "cloud" ? "cloud" : "local";
+  // The home never runs in shared mode; anything else lists as local.
+  const homeMode: Residency =
+    mode === "cloud" ? "cloud" : mode === "browser" ? "browser" : "local";
   // What this home shows and what a new project can be made on are two
   // questions now. The Mac's shelf lists whenever this browser has used it,
   // reachable or not; creating on it needs the Donkey app answering.
@@ -216,7 +219,20 @@ export function ProjectsHome() {
   // Whether a shelf takes writes right now. The cloud always does; the Mac's
   // does while its engine answers.
   const engineUp = useLocalCompute();
-  const live = useCallback((r: Residency) => r === "cloud" || engineUp, [engineUp]);
+  const live = useCallback((r: Residency) => r !== "local" || engineUp, [engineUp]);
+  // A project moves between the two places the user thinks in: Local and
+  // Cloud. The two local kinds are the same place, so a local-kind project
+  // only offers the Cloud, and a cloud project offers one local kind — the
+  // Mac engine when it is up, this browser's storage otherwise.
+  const moveDests = useCallback(
+    (from: Residency): Residency[] => {
+      if (from !== "cloud") return residencies.includes("cloud") ? ["cloud"] : [];
+      const local = residencies.filter((d) => d !== "cloud" && live(d));
+      if (local.includes("local")) return ["local"];
+      return local;
+    },
+    [residencies, live]
+  );
 
   const client = useQueryClient();
   // Hooks can't run in a loop, so both sections are always wired and the
@@ -229,6 +245,10 @@ export function ProjectsHome() {
     list: residencies.includes("cloud"),
     live: true,
   });
+  const browserSection = useProjectsSection("browser", {
+    list: residencies.includes("browser"),
+    live: residencies.includes("browser"),
+  });
   const asSection = (q: typeof localSection): SectionData => ({
     projects: q.data?.projects ?? null,
     folders: q.data?.folders ?? [],
@@ -239,6 +259,7 @@ export function ProjectsHome() {
   const data: Record<Residency, SectionData> = {
     local: asSection(localSection),
     cloud: asSection(cloudSection),
+    browser: asSection(browserSection),
   };
 
   // Optimistic edits to a section's cached listing; the next revalidation
@@ -477,11 +498,10 @@ export function ProjectsHome() {
     }
   };
 
-  // Move a project to the other residency: copy it across (projectCopy.ts does
+  // Move a project to another residency: copy it across (projectCopy.ts does
   // the doc + media transfer and cleans up a half-made copy itself), then drop
   // the original. The copy landing first is what makes deleting it safe.
-  const moveAcross = async (source: Residency, p: ProjectSummary) => {
-    const dest: Residency = source === "cloud" ? "local" : "cloud";
+  const moveAcross = async (source: Residency, dest: Residency, p: ProjectSummary) => {
     if (!live(source) || !live(dest)) return;
     setDupError(null);
     setBusy(true);
@@ -491,8 +511,9 @@ export function ProjectsHome() {
         .fetch(`/api/cut/projects/${p.id}`, { method: "DELETE" })
         .catch(() => {});
       // The chat history moved with the project; the old project's copy goes
-      // with the project itself.
+      // with the project itself, as does a cloud project's browser-store copy.
       clearProjectThreads(p.id);
+      if (source === "cloud") void dropLocalProjectCopy(p.id);
       await Promise.all([refresh(source), refresh(dest)]);
     } catch (e) {
       setDupError(e instanceof Error && e.message ? e.message : "Could not move the project.");
@@ -518,6 +539,7 @@ export function ProjectsHome() {
       useGenerate.getState().cancelForOwner({ projectId: id });
       clearProjectThreads(id);
       dropCachedDoc(id, residency);
+      if (residency === "cloud") void dropLocalProjectCopy(id);
       patch(residency, (s) => ({ ...s, projects: s.projects.filter((p) => p.id !== id) }));
       setDeleting(null);
     } finally {
@@ -659,14 +681,8 @@ export function ProjectsHome() {
                   setRenaming({ project: p, residency: r });
                 }}
                 onDuplicate={() => void duplicate(r, p)}
-                moveTo={
-                  dual && engineUp
-                    ? {
-                        target: r === "cloud" ? "local" : "cloud",
-                        run: () => void moveAcross(r, p),
-                      }
-                    : undefined
-                }
+                moveTo={moveDests(r)
+                  .map((d) => ({ target: d, run: () => void moveAcross(r, d, p) }))}
                 onDelete={() => setDeleting({ project: p, residency: r })}
               />
             )}
@@ -734,14 +750,8 @@ export function ProjectsHome() {
                 setRenaming({ project: p, residency: r });
               }}
               onDuplicate={() => void duplicate(r, p)}
-              moveTo={
-                dual && engineUp
-                  ? {
-                      target: r === "cloud" ? "local" : "cloud",
-                      run: () => void moveAcross(r, p),
-                    }
-                  : undefined
-              }
+              moveTo={moveDests(r)
+                .map((d) => ({ target: d, run: () => void moveAcross(r, d, p) }))}
               onDelete={() => setDeleting({ project: p, residency: r })}
             />
           ) : (
@@ -1019,8 +1029,25 @@ function CardPreview({
   // out of IndexedDB a moment after that.
   const [decoded, setDecoded] = useState(false);
   const backend = backendFor(residency);
+  // A browser-resident card's media lives in the OPFS store, and blob URLs
+  // are session-scoped: a fresh tab holds none until this mints one. Until it
+  // resolves the card shows its cached poster, like an offline shelf.
+  const [storeUrl, setStoreUrl] = useState<string | null>(null);
+  const previewFile = p.previewFile;
+  useEffect(() => {
+    if (residency !== "browser" || !previewFile) return;
+    let alive = true;
+    void localMediaUrl(p.id, previewFile).then((u) => {
+      if (alive && u) setStoreUrl(u);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [residency, p.id, previewFile]);
   const fileUrl = (file: string) =>
-    backend.url(`/api/cut/projects/${p.id}/media/${encodeURIComponent(file)}`);
+    residency === "browser"
+      ? (storeUrl ?? "")
+      : backend.url(`/api/cut/projects/${p.id}/media/${encodeURIComponent(file)}`);
 
   if (offline) {
     return poster ? (
@@ -1039,6 +1066,20 @@ function CardPreview({
   if (!p.previewFile && !p.hasPreview) {
     return (
       <Film className="size-7 text-muted-foreground/50 transition-transform group-hover:scale-110" />
+    );
+  }
+
+  if (residency === "browser" && !storeUrl) {
+    return poster ? (
+      // eslint-disable-next-line @next/next/no-img-element -- a cached data URL, not a Next asset
+      <img
+        src={poster}
+        alt=""
+        draggable={false}
+        className="absolute inset-0 size-full object-cover"
+      />
+    ) : (
+      <Film className="size-7 text-muted-foreground/50" />
     );
   }
 
@@ -1129,6 +1170,12 @@ function useCardPoster(
   return poster;
 }
 
+const MOVE_DEST: Record<Residency, { Icon: typeof Cloud; label: string }> = {
+  local: { Icon: Laptop, label: "Move to Local" },
+  cloud: { Icon: Cloud, label: "Move to Cloud" },
+  browser: { Icon: Laptop, label: "Move to Local" },
+};
+
 function ProjectMenu({
   className,
   onRename,
@@ -1139,8 +1186,8 @@ function ProjectMenu({
   className?: string;
   onRename: () => void;
   onDuplicate: () => void;
-  /** Move to the other residency, when both are live. */
-  moveTo?: { target: Residency; run: () => void };
+  /** The other live residencies this project can move to. */
+  moveTo?: { target: Residency; run: () => void }[];
   onDelete: () => void;
 }) {
   return (
@@ -1165,12 +1212,14 @@ function ProjectMenu({
         <DropdownMenuItem onClick={onDuplicate}>
           <Copy /> Duplicate
         </DropdownMenuItem>
-        {moveTo && (
-          <DropdownMenuItem onClick={moveTo.run}>
-            {moveTo.target === "cloud" ? <Cloud /> : <Laptop />}{" "}
-            {moveTo.target === "cloud" ? "Move to Cloud" : "Move to this Mac"}
-          </DropdownMenuItem>
-        )}
+        {moveTo?.map(({ target, run }) => {
+          const { Icon, label } = MOVE_DEST[target];
+          return (
+            <DropdownMenuItem key={target} onClick={run}>
+              <Icon /> {label}
+            </DropdownMenuItem>
+          );
+        })}
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" onClick={onDelete}>
           <Trash2 /> Delete

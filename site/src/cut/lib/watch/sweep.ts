@@ -56,7 +56,7 @@ const decodersBusy = () => syncWatches > 0 || useEditor.getState().playing;
 /** A free transcriber exists: the local engine, a Mac's engine behind a cloud
  * project, or the hosted route's monthly included allowance while it lasts. */
 const sttFree = () =>
-  getBackend().kind !== "cloud" || hasLocalCompute() || hostedFreeExhaustedMonth !== utcMonth();
+  getBackend().kind === "local" || hasLocalCompute() || hostedFreeExhaustedMonth !== utcMonth();
 
 /** Run a foreground watch with the sweep paused for its duration, so the
  * call the assistant is waiting on gets the decoders to itself. */
@@ -91,7 +91,7 @@ async function transcribeFree(
   projectId: string,
   spec: CloudTranscribeSpec
 ): Promise<{ start: number; end: number; text: string }[] | null> {
-  if (getBackend().kind !== "cloud") return runTranscription(projectId, spec);
+  if (getBackend().kind === "local") return runTranscription(projectId, spec);
   const stale = () => useEditor.getState().projectId !== projectId;
   const mix = await renderMix(projectId, spec);
   if (stale()) return null;

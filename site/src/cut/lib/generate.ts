@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { create } from "zustand";
 import { getBackend, type CutBackend, type CutMode } from "./backend";
+import { browserBackend } from "./backend/browser";
 import { cloudBackend } from "./backend/cloud";
 import { localBackend } from "./backend/local";
 import { normalizeRef, type AssetRef } from "./assetRef";
@@ -201,7 +202,13 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** The backend a job's results land on: its pinned residency; jobs persisted
  * before residency existed fall back to the active backend. */
 const jobBackend = (job: { residency?: CutMode }): CutBackend =>
-  job.residency === "cloud" ? cloudBackend : job.residency === "local" ? localBackend : getBackend();
+  job.residency === "cloud"
+    ? cloudBackend
+    : job.residency === "local"
+      ? localBackend
+      : job.residency === "browser"
+        ? browserBackend
+        : getBackend();
 
 /** Display name for the asset: the prompt, tidied and capped. */
 const promptName = (prompt: string) => {
