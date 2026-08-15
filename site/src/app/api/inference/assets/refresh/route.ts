@@ -84,4 +84,4 @@ export const POST = withDonkeyAuth(async (request) => {
 
     throw error;
   }
-});
+}, { allowRunner: true });

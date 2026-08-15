@@ -9,7 +9,13 @@ import { cutCloudCatchAll } from "@/cut/server/cloud/routes";
 // engine's /api/cut/* paths to this prefix.
 export const runtime = "nodejs";
 
-const handle = withDonkeyAuth((request) => cutCloudCatchAll(request));
+// The Cut API surface takes machine callers: a `dk_live_` bearer key acts as
+// its user across the same routes the page uses, and the Cut runner calls
+// back here with its grant while executing a queued turn.
+const handle = withDonkeyAuth((request) => cutCloudCatchAll(request), {
+  allowApiKey: true,
+  allowRunner: true,
+});
 
 // The daily GC cron has no session; Vercel authenticates its invocations with
 // the CRON_SECRET bearer token. Everything else goes through auth (a superuser
