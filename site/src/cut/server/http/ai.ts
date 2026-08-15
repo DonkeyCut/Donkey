@@ -397,7 +397,10 @@ export const aiApi = {
       execute: async ({ writer }) => {
         const emit: UIChunkWriter["write"] = (chunk) =>
           writer.write(chunk as Parameters<typeof writer.write>[0]);
-        registerSession(sessionKey, { write: emit });
+        // The editor snapshot names the project; the bridge keeps it so a
+        // turn whose tab closes finishes through the engine's own executor.
+        const projectId = (body.context as { project?: { id?: string } } | undefined)?.project?.id;
+        registerSession(sessionKey, { write: emit }, typeof projectId === "string" ? projectId : undefined);
         emit({ type: "start" });
         // The browser posts tool outputs back to /api/cut/ai/tool-result with this key.
         emit({ type: "data-session", data: { sessionKey }, transient: true });

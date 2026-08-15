@@ -25,8 +25,15 @@ interface Session {
 const g = globalThis as unknown as { __veditorAiSessions?: Map<string, Session> };
 const sessions = (g.__veditorAiSessions ??= new Map<string, Session>());
 
-export function registerSession(key: string, writer: UIChunkWriter) {
+// The project each chat session edits, kept past the stream's close: a tab
+// that goes away mid-turn leaves the running provider's tool calls a route
+// to the engine's own executor (headlessTools) for that project.
+const g2 = globalThis as unknown as { __veditorAiProjects?: Map<string, string> };
+const sessionProjects = (g2.__veditorAiProjects ??= new Map<string, string>());
+
+export function registerSession(key: string, writer: UIChunkWriter, projectId?: string) {
   sessions.set(key, { writer, waiters: new Map() });
+  if (projectId) sessionProjects.set(key, projectId);
 }
 
 export function unregisterSession(key: string) {
@@ -38,6 +45,11 @@ export function unregisterSession(key: string) {
     }
   }
   sessions.delete(key);
+  // The chat route unregisters after the provider run settles, so no more
+  // tool calls can arrive under this key. Dropping the project mapping here
+  // keeps the map bounded and keeps a reloaded tab's fresh session from ever
+  // racing a leftover headless executor.
+  sessionProjects.delete(key);
 }
 
 const TOOL_TIMEOUT_MS = 120_000; // subtitles generation can take a while
@@ -53,9 +65,14 @@ export function callBrowserTool(
 ): Promise<{ output?: unknown; errorText?: string }> {
   const session = sessions.get(sessionKey);
   if (!session) {
-    // The proxy called with a key no open chat stream is registered under — a
-    // stale/mismatched session. Log which keys ARE live so a recurrence pins
-    // the drift instead of only surfacing to the model as "unreachable".
+    // The tab is gone (closed mid-turn) or the key is stale. A session whose
+    // project is known finishes headless: the engine hydrates the doc and
+    // runs the tool itself, so the turn completes and lands on disk.
+    const projectId = sessionProjects.get(sessionKey);
+    if (projectId) {
+      console.log(`[cut-ai] ${toolName}: no editor tab for ${sessionKey}; running headless on ${projectId}`);
+      return import("./headlessTools").then((m) => m.callHeadlessTool(projectId, toolName, input));
+    }
     console.warn(
       `[cut-ai] ${toolName}: no live editor session for ${sessionKey}; live: ${[...sessions.keys()].join(", ") || "none"}`
     );
