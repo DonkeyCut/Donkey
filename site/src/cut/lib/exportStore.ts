@@ -172,13 +172,17 @@ export const useExports = create<ExportsState>((set, get) => ({
         await createExportJob(projectId, doc, settings);
       }
       // Pull the finished (or queued) job into the feed *before* retiring the
-      // placeholder. Dropping the local row first left a round-trip with
-      // neither row on screen, which read as the export card flashing away and
-      // back. A failed poll must not mark a started export as a start error, so
-      // it never reaches the catch below.
-      release();
+      // placeholder — dropping the local row first left a round-trip with
+      // neither row on screen — and while the job row is still hidden, since
+      // showing it early stacked two identical cards for the same round-trip.
+      // One set() then swaps the placeholder for the job row. A failed poll
+      // must not mark a started export as a start error, so it never reaches
+      // the catch below.
       await get().refresh().catch(() => {});
-      set((s) => ({ local: s.local.filter((r) => r.id !== localId) }));
+      set((s) => ({
+        rendering: s.rendering.filter((id) => id !== claimedId),
+        local: s.local.filter((r) => r.id !== localId),
+      }));
     } catch (err) {
       release();
       // A render the user stopped leaves no row at all — the dock already
