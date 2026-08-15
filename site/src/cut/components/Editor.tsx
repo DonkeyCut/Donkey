@@ -733,7 +733,11 @@ export function Editor({
       }
       const at = timelineDropTime(e);
       if (at != null) {
-        void importFiles(e.dataTransfer.files, { at });
+        // The first drop on an empty timeline starts the cut at 0: a lone
+        // clip floating at the pointer time reads as broken.
+        const s = useEditor.getState();
+        const empty = s.clips.length === 0 && s.audioClips.length === 0;
+        void importFiles(e.dataTransfer.files, { at: empty ? 0 : at });
         return;
       }
       void importFiles(e.dataTransfer.files, { mediaOnly: !overCanvas(e) });
