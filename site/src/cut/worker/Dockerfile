@@ -30,6 +30,10 @@ RUN ffmpeg -hide_banner -encoders 2>&1 | grep -q '\blibx264\b' \
   || { echo "ffmpeg has no libx264: the share HLS ladder cannot encode." >&2; exit 1; }
 
 WORKDIR /app
+# The server canvas for headless overlay rasterization. Kept out of the
+# bundle (worker:build marks it external) so its native binary installs for
+# this platform here.
+RUN npm install --no-package-lock --omit=dev skia-canvas@^3.0.8
 COPY dist/cut-worker/main.js ./main.js
 
 ENV NODE_ENV=production

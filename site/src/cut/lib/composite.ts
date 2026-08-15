@@ -20,6 +20,7 @@
  */
 
 import { applyMaskToCanvas, gradeTint, gradeToCssFilter, grainTile, isNeutralGrade, lookCssFilter, lookPost, maskComposite } from "@donkeycut/effects-kit";
+import { createRasterCanvas } from "./raster";
 import { clipKeyed, clipPoseAt, isFullRect, rectOf } from "./types";
 import type { FrameRect, TransitionStyle, VideoClip } from "./types";
 
@@ -124,10 +125,7 @@ export class FrameCompositor {
   ): { surface: Surface; resized: boolean } {
     let surface = this[field];
     if (!surface) {
-      surface =
-        typeof document === "undefined"
-          ? new OffscreenCanvas(Math.max(1, w), Math.max(1, h))
-          : document.createElement("canvas");
+      surface = createRasterCanvas(w, h);
       this[field] = surface;
     }
     // Match both dimensions — a transition alternates two differently-sized

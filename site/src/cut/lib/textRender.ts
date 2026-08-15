@@ -7,6 +7,7 @@ import {
   type RenderEnv,
   type StickerImage,
 } from "@donkeycut/effects-kit";
+import { createRasterCanvas, decodeRasterImage, rasterCanvasToPng } from "./raster";
 import { fontStack, type MediaAsset, type Overlay } from "./types";
 
 // The shared text metrics and painters live in the effects kit; these
@@ -30,26 +31,7 @@ const stickerCache = new Map<string, Promise<StickerImage | null>>();
 function decodeSticker(url: string): Promise<StickerImage | null> {
   return fetch(url)
     .then((res) => (res.ok ? res.blob() : Promise.reject(new Error("fetch failed"))))
-    .then(
-      (blob) =>
-        new Promise<StickerImage | null>((resolve) => {
-          const objectUrl = URL.createObjectURL(blob);
-          const img = new Image();
-          img.onload = () => {
-            URL.revokeObjectURL(objectUrl);
-            resolve({
-              source: img,
-              // An SVG with no intrinsic size reports 0×0; treat it as square.
-              width: img.naturalWidth || 512,
-              height: img.naturalHeight || 512,
-            });
-          };
-          img.onerror = () => {
-            URL.revokeObjectURL(objectUrl);
-            resolve(null);
-          };
-          img.src = objectUrl;
-        })
+    .then((blob) => decodeRasterImage(blob)
     )
     .catch(() => null);
 }
@@ -60,6 +42,8 @@ function decodeSticker(url: string): Promise<StickerImage | null> {
 export function cutRenderEnv(assets: MediaAsset[]): RenderEnv {
   return {
     fontStack,
+    createCanvas: (w, h) => createRasterCanvas(w, h) as HTMLCanvasElement,
+    canvasToPngBlob: (canvas) => rasterCanvasToPng(canvas),
     resolveLottie: (assetId) =>
       import("./lottieAssets").then((m) => m.sharedLottieHandle(assetId, assets)),
     resolveAsset: (assetId) => {

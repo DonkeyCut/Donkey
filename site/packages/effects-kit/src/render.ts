@@ -87,6 +87,12 @@ export interface StickerImage {
 export interface RenderEnv {
   /** CSS font-family stack for a host font id. */
   fontStack(font: string): string;
+  /** Canvas surface for rasterization. The host injects a server canvas here
+   * to render headless; unset, the DOM canvas is used. */
+  createCanvas?(w: number, h: number): HTMLCanvasElement;
+  /** PNG encode for a canvas made by `createCanvas`. Required alongside it —
+   * a server canvas encodes through its own API. */
+  canvasToPngBlob?(canvas: HTMLCanvasElement): Promise<Blob>;
   /** Decoded image for a sticker asset id; null when the asset is gone. */
   resolveAsset?(assetId: string): Promise<StickerImage | null>;
   /** Seekable player for a Lottie sticker asset id; null when the asset is
@@ -440,13 +446,22 @@ export async function paintElement(
   }
 }
 
-function pngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+function pngBlob(canvas: HTMLCanvasElement, env: RenderEnv): Promise<Blob> {
+  if (env.canvasToPngBlob) return env.canvasToPngBlob(canvas);
   return new Promise((resolve, reject) =>
     canvas.toBlob(
       (b) => (b ? resolve(b) : reject(new Error("Could not render the overlay."))),
       "image/png"
     )
   );
+}
+
+function newCanvas(env: RenderEnv, w: number, h: number): HTMLCanvasElement {
+  if (env.createCanvas) return env.createCanvas(Math.max(1, w), Math.max(1, h));
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, w);
+  c.height = Math.max(1, h);
+  return c;
 }
 
 /**
@@ -463,9 +478,7 @@ export async function renderElementPng(
   // Element sizes are design pixels with a 1080 short side, so scaling by the
   // short side keeps them the same visual size in any aspect and resolution.
   const scale = Math.min(width, height) / 1080;
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
+  const canvas = newCanvas(env, width, height);
   const ctx = canvas.getContext("2d")!;
   const frame: PaintFrame = { width, height, scale };
 
@@ -485,7 +498,7 @@ export async function renderElementPng(
     // animated frame sampler; here its resting (first) geometry applies.
     applyMaskToCanvas(
       ctx,
-      document.createElement("canvas"),
+      newCanvas(env, 1, 1),
       overlay.mask,
       0,
       frame,
@@ -493,7 +506,7 @@ export async function renderElementPng(
       ctx.getTransform()
     );
   }
-  return pngBlob(canvas);
+  return pngBlob(canvas, env);
 }
 
 /** An element's resting box in output pixels (center + size), rotation left
@@ -535,7 +548,7 @@ export async function measureElementBounds(
   const fpx = o.size * frame.scale;
   const cssFont = textCssFont(o, fpx, env);
   await ensureFontLoaded(cssFont, o.text);
-  const scratch = document.createElement("canvas");
+  const scratch = newCanvas(env, 1, 1);
   const ctx = scratch.getContext("2d")!;
   ctx.font = cssFont;
   if ("letterSpacing" in ctx) ctx.letterSpacing = `${(o.letterSpacing ?? 0) * fpx}px`;
@@ -703,17 +716,15 @@ export async function renderOverlayFrames(
   const rw = Math.max(2, x1 - x0);
   const rh = Math.max(2, y1 - y0);
 
-  const canvas = document.createElement("canvas");
-  canvas.width = rw;
-  canvas.height = rh;
+  const canvas = newCanvas(env, rw, rh);
   const ctx = canvas.getContext("2d")!;
-  const maskScratch = overlay.mask ? document.createElement("canvas") : null;
+  const maskScratch = overlay.mask ? newCanvas(env, 1, 1) : null;
 
   const drawAt = async (tLocal: number): Promise<Blob> => {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, rw, rh);
     const ev = evalOverlayFrame(overlay, tLocal);
-    if (ev.opacity <= 0.001) return pngBlob(canvas); // fully transparent frame
+    if (ev.opacity <= 0.001) return pngBlob(canvas, env); // fully transparent frame
     ctx.globalAlpha = ev.opacity;
     ctx.translate(-x0, -y0);
     // The pose places the element; the preset's travel rides on top of it.
@@ -746,7 +757,7 @@ export async function renderOverlayFrames(
         maskTransform
       );
     }
-    return pngBlob(canvas);
+    return pngBlob(canvas, env);
   };
 
   const images: Blob[] = [];
@@ -767,7 +778,7 @@ export async function renderOverlayFrames(
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, rw, rh);
-    return { x: x0, y: y0, w: rw, h: rh, images, blank: await pngBlob(canvas), entries };
+    return { x: x0, y: y0, w: rw, h: rh, images, blank: await pngBlob(canvas, env), entries };
   }
   // Head ramp, frame by frame; the last frame absorbs the rounding so the
   // segment lengths sum exactly.
@@ -808,6 +819,6 @@ export async function renderOverlayFrames(
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, rw, rh);
-  const blank = await pngBlob(canvas);
+  const blank = await pngBlob(canvas, env);
   return { x: x0, y: y0, w: rw, h: rh, images, blank, entries };
 }

@@ -5,6 +5,7 @@ import { quotaErrorMessage } from "./backend/cloud";
 import { downloadFromUrl } from "./download";
 import { renderProjectToMp4 } from "./exportRender";
 import { putSigned } from "./media";
+import { createRasterCanvas, rasterCanvasToPng } from "./raster";
 import { clipSpeed, getClipSpans, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
 import { captionStyle, cueOverlay, cueWordWindows, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
 import { isMaskAnimated, isOverlayAnimated, normalizeGrade, paintMaskLuma } from "@donkeycut/effects-kit";
@@ -226,9 +227,7 @@ async function renderClipMaskPictures(
   const rb = rp
     ? { x: rp.rx - box.x, y: rp.ry - box.y, w: rp.rw, h: rp.rh }
     : { x: -box.x, y: -box.y, w: W, h: H };
-  const canvas = document.createElement("canvas");
-  canvas.width = box.w;
-  canvas.height = box.h;
+  const canvas = createRasterCanvas(box.w, box.h);
   const blobAt = (tLocal: number) => {
     const ctx = canvas.getContext("2d")!;
     if (radius > 0) {
@@ -257,9 +256,7 @@ async function renderClipMaskPictures(
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.globalCompositeOperation = "source-over";
     }
-    return new Promise<Blob>((resolve, reject) =>
-      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not render the mask."))), "image/png")
-    );
+    return rasterCanvasToPng(canvas);
   };
   if (!(m && isMaskAnimated(m)) && !opacityVaries) {
     const name = `${tag}.png`;
@@ -294,18 +291,14 @@ function renderClipBorderPng(
   const scale = Math.min(W, H) / 1080;
   const bw = bs.borderWidth * scale;
   const rad = Math.max(0, (bs.radius ?? 0) * scale);
-  const canvas = document.createElement("canvas");
-  canvas.width = seg.w;
-  canvas.height = seg.h;
-  const ctx = canvas.getContext("2d")!;
+  const canvas = createRasterCanvas(seg.w, seg.h);
+  const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
   ctx.strokeStyle = bs.borderColor ?? "#ffffff";
   ctx.lineWidth = bw;
   ctx.beginPath();
   ctx.roundRect(ring.x + bw / 2, ring.y + bw / 2, ring.w - bw, ring.h - bw, Math.max(0, rad - bw / 2));
   ctx.stroke();
-  return new Promise((resolve, reject) =>
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not render the border."))), "image/png")
-  );
+  return rasterCanvasToPng(canvas);
 }
 
 /** Build the export spec + overlay PNGs from the cut. Media already lives in
@@ -709,13 +702,8 @@ async function buildExportPayload(
       }
     }
     if (captions.length > 0) {
-      const blank = document.createElement("canvas");
-      blank.width = settings.width;
-      blank.height = settings.height;
-      const png = await new Promise<Blob>((resolve, reject) =>
-        blank.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not render captions."))), "image/png")
-      );
-      pngs.push({ name: "sub_blank.png", blob: png });
+      const blank = createRasterCanvas(settings.width, settings.height);
+      pngs.push({ name: "sub_blank.png", blob: await rasterCanvasToPng(blank) });
     }
   }
 
