@@ -1157,6 +1157,9 @@ export interface ProjectSummary {
   previewStart?: number;
   /** Whether a rendered proxy of the edit exists to play on hover. */
   hasPreview?: boolean;
+  /** Output frame ratio, so the home card takes the project's shape.
+   * Absent in older projects (which are all 9:16). */
+  aspect?: Aspect;
   /** Folder this project is filed under (null = ungrouped). */
   folderId?: string | null;
   /** Total bytes on disk (media + exports + proxy), for cleanup decisions. */

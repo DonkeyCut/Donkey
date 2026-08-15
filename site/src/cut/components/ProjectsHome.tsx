@@ -81,7 +81,7 @@ import { dropLocalProjectCopy, localMediaUrl } from "@/cut/lib/mediaSync";
 import { copyProjectAcross } from "@/cut/lib/projectCopy";
 import { homeHref, projectHref, useCutBase } from "@/cut/lib/nav";
 import { daysUntil, formatTime } from "@/cut/lib/time";
-import type { ProjectFolder, ProjectSummary } from "@/cut/lib/types";
+import { parseRatio, type ProjectFolder, type ProjectSummary } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 import { buildDragGhost, FolderCrumb, FolderShelf, formatBytes, Marquee } from "./desktopFolders";
 
@@ -636,7 +636,10 @@ export function ProjectsHome() {
       selected={selected}
       setSelected={setSelected}
     >
-      {shown.map(({ p, r }) => (
+      {shown.map(({ p, r }) => {
+        // The tile takes the project's output shape; docs without an aspect are 9:16.
+        const frame = parseRatio(p.aspect) ?? { w: 9, h: 16 };
+        return (
         <div
           key={p.id}
           data-sel-id={p.id}
@@ -652,12 +655,12 @@ export function ProjectsHome() {
             router.push(projectHref(base, p.id, "projects", openFolder));
           }}
         >
-          {/* Vertical 9:16 tile — the project is mobile video, show it that way. */}
           <div
             className={cn(
-              "relative grid aspect-[9/16] place-items-center overflow-hidden rounded-2xl border bg-muted transition-shadow group-hover:shadow-[0_6px_28px_rgba(0,0,0,0.12)]",
+              "relative grid place-items-center overflow-hidden rounded-2xl border bg-muted transition-shadow group-hover:shadow-[0_6px_28px_rgba(0,0,0,0.12)]",
               selected.has(p.id) ? "border-[#0a84ff] ring-2 ring-[#0a84ff]" : "border-border"
             )}
+            style={{ aspectRatio: `${frame.w} / ${frame.h}` }}
           >
             <CardPreview project={p} residency={r} offline={!live(r)} />
             <span className="absolute top-2 left-2 max-w-[70%] truncate rounded-lg bg-black/55 px-2 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
@@ -691,7 +694,8 @@ export function ProjectsHome() {
             {formatBytes(p.sizeBytes ?? 0)} · edited {formatDate(p.updatedAt)}
           </div>
         </div>
-      ))}
+        );
+      })}
     </Marquee>
   );
 

@@ -67,6 +67,7 @@ function summarize(row: ProjectRow, sizeBytes: number): ProjectSummary {
     previewIsImage: previewAsset?.type === "image",
     previewStart,
     hasPreview: row.previewKey != null,
+    aspect: normalizeAspect(doc.aspect) ?? undefined,
     folderId: row.folderId ?? null,
     sizeBytes,
   };

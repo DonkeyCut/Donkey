@@ -436,6 +436,7 @@ async function summarize(id: string, doc: ProjectDoc): Promise<ProjectSummary> {
     previewIsImage: previewAsset?.type === "image",
     previewStart,
     hasPreview,
+    aspect: doc.aspect,
     folderId: doc.folderId ?? null,
     sizeBytes,
   };

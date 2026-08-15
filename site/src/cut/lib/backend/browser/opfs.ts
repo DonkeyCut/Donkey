@@ -217,6 +217,7 @@ export async function summarize(id: string, doc: ProjectDoc): Promise<ProjectSum
     previewIsImage: previewAsset?.type === "image",
     previewStart: firstClipAsset && firstClip ? firstClip.in : 0,
     hasPreview: false,
+    aspect: doc.aspect,
     folderId: doc.folderId ?? null,
     sizeBytes: await dirBytes(await projectDir(id)),
   };
