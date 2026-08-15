@@ -73,7 +73,7 @@ export function Footer() {
             </a>
           </p>
           <p className="mt-6 text-[13px] text-[#666]">
-            2026 Donkey, Inc. Made for Macs.
+            2026 Donkey, Inc.
           </p>
         </div>
         <div className="flex flex-1 flex-col gap-10 sm:flex-row sm:flex-wrap sm:gap-x-16 sm:gap-y-12 md:gap-x-20">
