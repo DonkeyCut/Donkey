@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -16,6 +16,8 @@ import {
   originalSettings,
   presetSettings,
 } from "@/cut/lib/exportClient";
+import { useCutMode } from "@/cut/lib/backend/hooks";
+import { canRenderInBrowser } from "@/cut/lib/exportRender";
 import { useExports } from "@/cut/lib/exportStore";
 import { projectDuration, useEditor } from "@/cut/lib/store";
 import { cn } from "@/lib/utils";
@@ -54,6 +56,39 @@ export function ExportDialog() {
     [aspect, clips, assets]
   );
   const [presetId, setPresetId] = useState("original");
+  const selected = presets.find((p) => p.id === presetId) ?? presets[0];
+
+  // A browser-resident project has exactly one renderer: this tab. Ask up
+  // front whether the tab can hold this cut at the chosen size, so a refusal
+  // is a message here instead of an error card after the dialog closed.
+  const cutMode = useCutMode();
+  const [fits, setFits] = useState(true);
+  useEffect(() => {
+    if (cutMode !== "browser") {
+      setFits(true);
+      return;
+    }
+    let alive = true;
+    const s = useEditor.getState();
+    void canRenderInBrowser(
+      {
+        aspect: s.aspect,
+        assets: s.assets,
+        clips: s.clips,
+        audioClips: s.audioClips,
+        overlays: s.overlays,
+        subtitles: s.subtitles,
+        fadeIn: s.fadeIn,
+        fadeOut: s.fadeOut,
+      },
+      selected.settings
+    ).then((ok) => {
+      if (alive) setFits(ok);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [cutMode, selected.settings]);
 
   const run = () => {
     const s = useEditor.getState();
@@ -110,12 +145,13 @@ export function ExportDialog() {
         </div>
 
         <DialogFooter className="flex-col gap-2 sm:flex-col">
-          <Button className="w-full" onClick={run}>
+          <Button className="w-full" disabled={!fits} onClick={run}>
             Export video
           </Button>
           <p className="text-center text-[11px] text-muted-foreground">
-            Renders in the background. You can keep editing, open another project,
-            or export more — each shows in the corner.
+            {fits
+              ? "Renders in the background. You can keep editing, open another project, or export more — each shows in the corner."
+              : "This project is too big to export from this tab. Move it to Cloud (top bar) to export."}
           </p>
         </DialogFooter>
       </DialogContent>

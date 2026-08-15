@@ -1,6 +1,13 @@
 "use client";
 
 import { apiFetch, apiJson, getBackend, type CutBackend } from "./backend";
+import {
+  removeBrowserExportJob,
+  reserveBrowserExportJob,
+  updateBrowserExportJob,
+} from "./backend/browser/exportJobs";
+import { exportsDir, readFileAt, saveExport } from "./backend/browser/opfs";
+import { holdRegistered, registerBlobFile, releaseRegistered } from "./backend/browser/registry";
 import { quotaErrorMessage } from "./backend/cloud";
 import { downloadFromUrl } from "./download";
 import { renderProjectToMp4 } from "./exportRender";
@@ -870,12 +877,15 @@ export async function runBrowserExport(
   opts: {
     onProgress?: (ratio: number) => void;
     signal?: AbortSignal;
+    /** Dock-row label for a browser-resident render's tab-local job. */
+    projectName?: string;
     /** The reserved job's id, as soon as it exists — the dock hides that row
      * while this tab is the thing rendering it. */
     onClaimed?: (jobId: string) => void;
   } = {}
 ): Promise<string> {
   const backend = getBackend(); // pinned: the render outlives navigation
+  if (backend.kind === "browser") return runStoreExport(projectId, doc, settings, opts);
   if (backend.kind !== "cloud") throw new Error("This project renders on its own machine.");
 
   // The name and the destination are claimed before a frame is drawn, so a
@@ -897,6 +907,9 @@ export async function runBrowserExport(
   const jobId = claimed.jobId;
   opts.onClaimed?.(jobId);
 
+  // The render keeps reading the project's store-served blob URLs after the
+  // user opens another project; the hold keeps them alive until it finishes.
+  holdRegistered(`/api/cut/projects/${projectId}/`);
   try {
     const rendered = await renderProjectToMp4(doc, settings, {
       // Read the asset's URL at the moment it is needed rather than off the
@@ -936,6 +949,58 @@ export async function runBrowserExport(
       .fetch(`/api/cut/export/client/${jobId}/release`, { method: "POST" })
       .catch(() => {});
     throw err;
+  } finally {
+    releaseRegistered(`/api/cut/projects/${projectId}/`);
+  }
+}
+
+/** A browser-resident project's export: the same in-tab render, with the
+ * finished file written into the project's exports shelf in the browser store.
+ * The job is a row in the tab-local feed, so the dock tracks, cancels, and
+ * downloads it the way it does every other residency's. */
+async function runStoreExport(
+  projectId: string,
+  doc: ExportDoc,
+  settings: ExportSettings,
+  opts: Parameters<typeof runBrowserExport>[3] = {}
+): Promise<string> {
+  const job = reserveBrowserExportJob(projectId, opts.projectName);
+  opts.onClaimed?.(job.id);
+  holdRegistered(`/api/cut/projects/${projectId}/`);
+  try {
+    const rendered = await renderProjectToMp4(doc, settings, {
+      resolve: (asset) =>
+        useEditor.getState().assets.find((a) => a.id === asset.id)?.url ?? asset.url,
+      signal: opts.signal,
+      onProgress: ({ ratio }) => {
+        opts.onProgress?.(ratio);
+        updateBrowserExportJob(job.id, { progress: ratio });
+      },
+    });
+    let outName: string;
+    try {
+      outName = await saveExport(projectId, rendered.file, exportOutName());
+    } finally {
+      void rendered.discard();
+    }
+    // Serve the finished file from the store copy: the scratch file behind the
+    // render is already gone, and these two paths are what the dock's download
+    // button and the exports shelf resolve through backend.url().
+    const saved = await readFileAt(await exportsDir(projectId), outName);
+    if (saved) {
+      registerBlobFile(`/api/cut/export/${job.id}/file`, saved);
+      registerBlobFile(
+        `/api/cut/projects/${projectId}/exports/${encodeURIComponent(outName)}`,
+        saved
+      );
+    }
+    updateBrowserExportJob(job.id, { status: "done", progress: 1, outName });
+    return job.id;
+  } catch (err) {
+    removeBrowserExportJob(job.id);
+    throw err;
+  } finally {
+    releaseRegistered(`/api/cut/projects/${projectId}/`);
   }
 }
 

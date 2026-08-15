@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { create } from "zustand";
 import { engineOrigin, servedFromEngine } from "./api";
 import { getBackend, type CutBackend, type CutMode } from "./backend";
+import { browserBackend } from "./backend/browser";
 import { cloudBackend } from "./backend/cloud";
 import { localBackend } from "./backend/local";
 import {
@@ -46,7 +47,9 @@ export interface ExportJob {
 /** The backend a dock row lives on; per-row actions hit this, never the
  * globally bound mode. */
 export function exportBackend(residency: CutMode): CutBackend {
-  return residency === "cloud" ? cloudBackend : localBackend;
+  if (residency === "cloud") return cloudBackend;
+  if (residency === "browser") return browserBackend;
+  return localBackend;
 }
 
 /** A client-only dock row for work no server job covers: the window before the
@@ -107,8 +110,11 @@ export const useExports = create<ExportsState>((set, get) => ({
     // A cloud project renders in the tab: no upload of the cut to a container,
     // no queue behind other accounts, and the file matches the preview because
     // the same compositor drew both. Past what a tab can hold — a long cut, a
-    // very large frame — it goes to the worker, which has a whole machine.
-    const inBrowser = backend.kind === "cloud" && (await canRenderInBrowser(doc, settings));
+    // very large frame — it goes to the worker, which has a whole machine. A
+    // browser-resident project renders in the tab too; the tab is its machine.
+    const inBrowser =
+      (backend.kind === "cloud" || backend.kind === "browser") &&
+      (await canRenderInBrowser(doc, settings));
     const abort = inBrowser ? new AbortController() : undefined;
     set((s) => ({
       local: [
@@ -141,9 +147,15 @@ export const useExports = create<ExportsState>((set, get) => ({
       }));
     };
     try {
+      if (backend.kind === "browser" && !inBrowser) {
+        throw new Error(
+          "This project is too big to export from this tab. Move it to Cloud to export."
+        );
+      }
       if (inBrowser) {
         await runBrowserExport(projectId, doc, settings, {
           signal: abort!.signal,
+          projectName,
           // The reservation is a real job row, so the feed would show it beside
           // the local row that carries the progress. Hide it until this tab is
           // done with it.
@@ -254,9 +266,11 @@ export const useExports = create<ExportsState>((set, get) => ({
     const pollCloud =
       (typeof navigator === "undefined" || navigator.onLine) &&
       Date.now() >= cloudRetryAt;
-    const [localRows, cloudRows] = await Promise.all([
+    // The browser feed is this tab's own memory, so it always answers.
+    const [localRows, cloudRows, browserRows] = await Promise.all([
       pollLocal ? fetchFeed(localBackend) : Promise.resolve(null),
       pollCloud ? fetchFeed(cloudBackend) : Promise.resolve(null),
+      fetchFeed(browserBackend),
     ]);
     if (pollCloud) {
       if (cloudRows === null) {
@@ -272,7 +286,11 @@ export const useExports = create<ExportsState>((set, get) => ({
       // replaces that backend's slice.
       const slice = (kind: CutMode, fresh: ExportJob[] | null) =>
         fresh ?? s.jobs.filter((j) => j.residency === kind);
-      const jobs = [...slice("local", localRows), ...slice("cloud", cloudRows)];
+      const jobs = [
+        ...slice("local", localRows),
+        ...slice("cloud", cloudRows),
+        ...slice("browser", browserRows),
+      ];
       return {
         jobs,
         dismissed: s.dismissed.filter((id) => jobs.some((j) => j.id === id)),
