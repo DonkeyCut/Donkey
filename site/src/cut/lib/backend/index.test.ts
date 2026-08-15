@@ -34,6 +34,16 @@ describe("cut mode", () => {
     expect(cutMode()).toBe("cloud");
   });
 
+  test("browser is a mode of its own, ambient and pinned", () => {
+    setCutMode("browser");
+    expect(cutMode()).toBe("browser");
+    expect(getBackend().kind).toBe("browser");
+    bindCutMode("browser");
+    setCutMode("local"); // the gate finds an engine after the editor bound
+    expect(cutMode()).toBe("browser");
+    expect(getBackend().kind).toBe("browser");
+  });
+
   test("subscribers hear effective changes only", () => {
     let calls = 0;
     const stop = subscribeCutMode(() => calls++);
