@@ -8,9 +8,9 @@ import { useCutBase } from "@/cut/lib/nav";
 import { cn } from "@/lib/utils";
 
 const NAV: { suffix: string; label: string; icon: typeof UserRound }[] = [
+  { suffix: "/analytics", label: "Analytics", icon: ChartColumn },
   { suffix: "", label: "Users", icon: UserRound },
   { suffix: "/credits", label: "Credits", icon: CreditCard },
-  { suffix: "/analytics", label: "Analytics", icon: ChartColumn },
 ];
 
 const itemClass =
