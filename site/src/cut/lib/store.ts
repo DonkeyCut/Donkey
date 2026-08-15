@@ -260,6 +260,14 @@ export interface EditorState {
    * the stored copy has moved on, so the head-start snapshot is skipped and
    * only the live document is applied. */
   loadProject: (id: string, opts?: { inPlace?: boolean }) => Promise<void>;
+  /** Apply one project document to the store: the legacy migrations and the
+   * state swap, shared by every hydration path — the snapshot paint, the live
+   * load, a conflict reload, and a headless open. */
+  applyDocState: (doc: Partial<ProjectDoc>, assets: MediaAsset[], ui: ProjectUiState) => void;
+  /** Open a project from an already-fetched document. The headless runner's
+   * open: resets the store, drains pending doc writes, and hydrates straight
+   * from the given document. */
+  openProjectDoc: (id: string, doc: Partial<ProjectDoc>, assets: MediaAsset[]) => Promise<void>;
   setProjectName: (name: string) => void;
   setSaveState: (s: SaveState) => void;
   /** Enter read-only shared mode; call before loadProject. */
@@ -1209,6 +1217,57 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     }));
   };
 
+  /** Reset to an empty, loading project and drain any background doc writes
+   * still queued for it, so no open ever reads a half-written document. */
+  const resetForOpen = async (id: string) => {
+    history.length = 0;
+    future.length = 0;
+    pending = null;
+    // A fresh project owns no live run — any prior run's render-owned ids are
+    // stale, and the loaded clips are ordinary, fully-undoable content.
+    genClipIds.clear();
+    genAudioIds.clear();
+    hydrating = true;
+    set({
+      projectId: id,
+      loaded: false,
+      loadError: null,
+      saveState: "saved",
+      resumePush: false,
+      assets: [],
+      clips: [],
+      transitions: [],
+      audioClips: [],
+      overlays: [],
+      templates: [],
+      aspect: "9:16",
+      aspectTouched: false,
+      fadeIn: 0,
+      fadeOut: 0,
+      selection: null,
+      multiSelection: [],
+      playing: false,
+      previewStopAt: null,
+      subtitles: emptySubtitles(),
+      subtitleLane: 0,
+      subtitleStatus: "idle",
+      subtitleError: null,
+      exportOpen: false,
+      genvideo: undefined,
+      renders: [],
+      firstOpen: undefined,
+    });
+    hydrating = false;
+    // A background scene run may still be writing this project's doc — drain
+    // its queued writes so the open never reads a half-written doc. Ordering
+    // matters: projectId is set (loaded false) BEFORE this await, so a write
+    // arriving during the drain waits for the load (projectWriteMode) instead
+    // of queueing a doc write the drain would miss — nothing can land between
+    // the drain and the fetch that follows. Lazy import: docWriter reads store
+    // helpers, so a static import would be a cycle.
+    await import("./genvideo/docWriter").then((m) => m.docWriterIdle(id)).catch(() => {});
+  };
+
   return {
     projectId: null,
     projectName: "",
@@ -1258,156 +1317,13 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       // clicking back in — is not a re-read, and gets the snapshot's head
       // start like any other open.
       const inPlace = opts?.inPlace === true;
-      history.length = 0;
-      future.length = 0;
-      pending = null;
-      // A fresh project owns no live run — any prior run's render-owned ids are
-      // stale, and the loaded clips are ordinary, fully-undoable content.
-      genClipIds.clear();
-      genAudioIds.clear();
-      hydrating = true;
-      set({
-        projectId: id,
-        loaded: false,
-        loadError: null,
-        saveState: "saved",
-        resumePush: false,
-        assets: [],
-        clips: [],
-        transitions: [],
-        audioClips: [],
-        overlays: [],
-        templates: [],
-        aspect: "9:16",
-        aspectTouched: false,
-        fadeIn: 0,
-        fadeOut: 0,
-        selection: null,
-        multiSelection: [],
-        playing: false,
-        previewStopAt: null,
-        subtitles: emptySubtitles(),
-        subtitleLane: 0,
-        subtitleStatus: "idle",
-        subtitleError: null,
-        exportOpen: false,
-        genvideo: undefined,
-        renders: [],
-        firstOpen: undefined,
-      });
-      hydrating = false;
-      // A background scene run may still be writing this project's doc — drain
-      // its queued writes so the load never reads a half-written doc. Ordering
-      // matters: projectId is set (loaded false) BEFORE this await, so a write
-      // arriving during the drain waits for the load (projectWriteMode) instead
-      // of queueing a doc write the drain would miss — nothing can land between
-      // the drain and the fetch below. Lazy import: docWriter reads store
-      // helpers, so a static import would be a cycle.
-      await import("./genvideo/docWriter").then((m) => m.docWriterIdle(id)).catch(() => {});
+      await resetForOpen(id);
 
       // One shape of hydration, used by both the snapshot painted below and
       // the live document that replaces it, so the legacy migrations happen
       // once per document rather than once per code path.
-      const hydrate = (doc: Partial<ProjectDoc>, assets: MediaAsset[], ui: ProjectUiState) => {
-        const docClips = doc.clips ?? [];
-        // Older docs stored video track 0 packed (array order implied the
-        // position); bake explicit starts in once so every clip is free-placed.
-        const legacy = (docClips as LegacyClip[]).some((c) => typeof c.start !== "number");
-        const folded = (legacy ? packStarts(docClips as LegacyClip[]) : docClips).map((c) => ({
-          ...c,
-          track: c.track ?? 0,
-        }));
-        // Older docs kept tracks other than 0 in a separate `overlayClips` array;
-        // fold them into the one clip list (each already carries its `track`).
-        // Entries whose id already sits in `clips` are the same clip persisted
-        // twice by a version-skewed save (an older engine keeps overlayClips
-        // after a merged client writes the folded list) — keep the folded copy.
-        // Entries with track 0 were unreachable dead data under the split shape
-        // (never rendered, never played); promoting them would insert them into
-        // track 0's sequence, so they stay dropped.
-        const seen = new Set(folded.map((c) => c.id));
-        const legacyLayers = (doc.overlayClips ?? []).filter(
-          (c) => c.track !== 0 && !seen.has(c.id)
-        );
-        // Tracks number 0..N bottom-up. Docs saved when tracks could go
-        // negative (backdrop rows below the spine) lift wholesale so the
-        // lowest row becomes track 0 — the bottom row is the spine now.
-        const joined = [...folded, ...legacyLayers];
-        const lift = Math.max(0, ...joined.map((c) => -c.track));
-        const lifted = lift ? joined.map((c) => ({ ...c, track: c.track + lift })) : joined;
-        // Stamp `kind: "text"` on pre-union titles so every in-memory element
-        // carries its discriminant; the serializer strips it back. Effects
-        // saved onto a shared row move to one of their own, and a clip graded
-        // back when a look was a clip property gets that grade as an element
-        // over it — so a project made before either rule reads like a new one.
-        // The behind-speaker boolean becomes an inverted subject mask on load,
-        // so one mask model covers it everywhere in memory and on save.
-        const stamped = normalizeElementLanes(
-          migrateBehindSubject(stampOverlayKinds(doc.overlays ?? []))
-        );
-        const subtitles = doc.subtitles ?? emptySubtitles();
-        // Docs saved when edge transition styles existed convert them into the
-        // equivalent clip animations, and docs saved when a transition was a
-        // physical overlap pull their intruding clips apart — clips never
-        // overlap, whatever wrote the file. Pulling them apart lengthens the
-        // cut, so the whole document goes through it together.
-        const merged = separateOverlaps({
-          clips: migrateLegacyTransitions(lifted),
-          audioClips: doc.audioClips ?? [],
-          overlays: stamped,
-          cues: subtitles.cues,
-        });
-        const withLooks =
-          liftClipLooks(merged.clips, merged.overlays, getClipSpans(merged.clips, assets)) ?? {
-            clips: merged.clips,
-            overlays: merged.overlays,
-          };
-        hydrating = true;
-        set({
-          projectName: doc.name ?? "",
-          assets,
-          clips: withLooks.clips,
-          // Bars from the doc, plus one adopted for each transition/animation
-          // a pre-bar doc stored as a clip field.
-          transitions: adoptTransitionFields(
-            withLooks.clips,
-            sanitizeTransitions(doc.transitions)
-          ),
-          audioClips: merged.audioClips,
-          overlays: withLooks.overlays,
-          templates: doc.templates ?? [],
-          aspect: normalizeAspect(doc.aspect) ?? "9:16",
-          aspectTouched: doc.aspect !== undefined,
-          fadeIn: doc.fadeIn ?? 0,
-          fadeOut: doc.fadeOut ?? 0,
-          // View state lives in IndexedDB; doc.ui covers projects saved
-          // before the move.
-          pxPerSec: Math.max(12, Math.min(800, ui.pxPerSec ?? doc.ui?.pxPerSec ?? 60)),
-          timelineH: Math.max(
-            TIMELINE_H_MIN,
-            Math.min(timelineHMax(), ui.timelineH ?? TIMELINE_H_DEFAULT)
-          ),
-          publish: {
-            caption: doc.publish?.caption ?? "",
-            tags: doc.publish?.tags ?? "",
-            soundTitle: doc.publish?.soundTitle ?? "",
-            handle: doc.publish?.handle ?? "",
-          },
-          notes: {
-            text: doc.notes?.text ?? "",
-            publishedAt: doc.notes?.publishedAt ?? "",
-            links: doc.notes?.links ?? [],
-          },
-          subtitles: { ...subtitles, cues: merged.cues },
-          subtitleStatus: merged.cues.length > 0 ? "ready" : "idle",
-          genvideo: doc.genvideo ?? undefined,
-          renders: Array.isArray(doc.renders) ? doc.renders : [],
-          firstOpen: doc.firstOpen,
-          loaded: true,
-          loadEpoch: get().loadEpoch + 1,
-        });
-        hydrating = false;
-      };
+      const hydrate = (doc: Partial<ProjectDoc>, assets: MediaAsset[], ui: ProjectUiState) =>
+        get().applyDocState(doc, assets, ui);
 
       // The live document goes out first, so everything below is a head start
       // on it and never a substitute for it.
@@ -1541,6 +1457,117 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       } finally {
         hydrating = false;
       }
+    },
+
+    applyDocState: (doc, assets, ui) => {
+      const docClips = doc.clips ?? [];
+      // Older docs stored video track 0 packed (array order implied the
+      // position); bake explicit starts in once so every clip is free-placed.
+      const legacy = (docClips as LegacyClip[]).some((c) => typeof c.start !== "number");
+      const folded = (legacy ? packStarts(docClips as LegacyClip[]) : docClips).map((c) => ({
+        ...c,
+        track: c.track ?? 0,
+      }));
+      // Older docs kept tracks other than 0 in a separate `overlayClips` array;
+      // fold them into the one clip list (each already carries its `track`).
+      // Entries whose id already sits in `clips` are the same clip persisted
+      // twice by a version-skewed save (an older engine keeps overlayClips
+      // after a merged client writes the folded list) — keep the folded copy.
+      // Entries with track 0 were unreachable dead data under the split shape
+      // (never rendered, never played); promoting them would insert them into
+      // track 0's sequence, so they stay dropped.
+      const seen = new Set(folded.map((c) => c.id));
+      const legacyLayers = (doc.overlayClips ?? []).filter(
+        (c) => c.track !== 0 && !seen.has(c.id)
+      );
+      // Tracks number 0..N bottom-up. Docs saved when tracks could go
+      // negative (backdrop rows below the spine) lift wholesale so the
+      // lowest row becomes track 0 — the bottom row is the spine now.
+      const joined = [...folded, ...legacyLayers];
+      const lift = Math.max(0, ...joined.map((c) => -c.track));
+      const lifted = lift ? joined.map((c) => ({ ...c, track: c.track + lift })) : joined;
+      // Stamp `kind: "text"` on pre-union titles so every in-memory element
+      // carries its discriminant; the serializer strips it back. Effects
+      // saved onto a shared row move to one of their own, and a clip graded
+      // back when a look was a clip property gets that grade as an element
+      // over it — so a project made before either rule reads like a new one.
+      // The behind-speaker boolean becomes an inverted subject mask on load,
+      // so one mask model covers it everywhere in memory and on save.
+      const stamped = normalizeElementLanes(
+        migrateBehindSubject(stampOverlayKinds(doc.overlays ?? []))
+      );
+      const subtitles = doc.subtitles ?? emptySubtitles();
+      // Docs saved when edge transition styles existed convert them into the
+      // equivalent clip animations, and docs saved when a transition was a
+      // physical overlap pull their intruding clips apart — clips never
+      // overlap, whatever wrote the file. Pulling them apart lengthens the
+      // cut, so the whole document goes through it together.
+      const merged = separateOverlaps({
+        clips: migrateLegacyTransitions(lifted),
+        audioClips: doc.audioClips ?? [],
+        overlays: stamped,
+        cues: subtitles.cues,
+      });
+      const withLooks =
+        liftClipLooks(merged.clips, merged.overlays, getClipSpans(merged.clips, assets)) ?? {
+          clips: merged.clips,
+          overlays: merged.overlays,
+        };
+      hydrating = true;
+      try {
+        set({
+          projectName: doc.name ?? "",
+          assets,
+          clips: withLooks.clips,
+          // Bars from the doc, plus one adopted for each transition/animation
+          // a pre-bar doc stored as a clip field.
+          transitions: adoptTransitionFields(
+            withLooks.clips,
+            sanitizeTransitions(doc.transitions)
+          ),
+          audioClips: merged.audioClips,
+          overlays: withLooks.overlays,
+          templates: doc.templates ?? [],
+          aspect: normalizeAspect(doc.aspect) ?? "9:16",
+          aspectTouched: doc.aspect !== undefined,
+          fadeIn: doc.fadeIn ?? 0,
+          fadeOut: doc.fadeOut ?? 0,
+          // View state lives in IndexedDB; doc.ui covers projects saved
+          // before the move.
+          pxPerSec: Math.max(12, Math.min(800, ui.pxPerSec ?? doc.ui?.pxPerSec ?? 60)),
+          timelineH: Math.max(
+            TIMELINE_H_MIN,
+            Math.min(timelineHMax(), ui.timelineH ?? TIMELINE_H_DEFAULT)
+          ),
+          publish: {
+            caption: doc.publish?.caption ?? "",
+            tags: doc.publish?.tags ?? "",
+            soundTitle: doc.publish?.soundTitle ?? "",
+            handle: doc.publish?.handle ?? "",
+          },
+          notes: {
+            text: doc.notes?.text ?? "",
+            publishedAt: doc.notes?.publishedAt ?? "",
+            links: doc.notes?.links ?? [],
+          },
+          subtitles: { ...subtitles, cues: merged.cues },
+          subtitleStatus: merged.cues.length > 0 ? "ready" : "idle",
+          genvideo: doc.genvideo ?? undefined,
+          renders: Array.isArray(doc.renders) ? doc.renders : [],
+          firstOpen: doc.firstOpen,
+          loaded: true,
+          loadEpoch: get().loadEpoch + 1,
+        });
+      } finally {
+        // Reset on every path: a doc bad enough to throw inside set() must
+        // never leave the store treating ordinary writes as hydration.
+        hydrating = false;
+      }
+    },
+
+    openProjectDoc: async (id, doc, assets) => {
+      await resetForOpen(id);
+      get().applyDocState(doc, assets, {});
     },
 
     setProjectName: (name) => set({ projectName: name }),

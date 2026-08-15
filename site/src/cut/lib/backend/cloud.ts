@@ -8,6 +8,22 @@ import type { CutBackend } from "./types";
 
 const cloudPath = (path: string) => path.replace(/^\/api\/cut\//, "/api/cut-cloud/");
 
+// A headless session's transport: an absolute origin and auth headers folded
+// into every cloud call. The page binds nothing — its calls are same-origin
+// and the session cookie rides on its own.
+let session: { base: string; headers: Record<string, string> } | null = null;
+export function bindCloudSession(base: string, headers: Record<string, string>) {
+  session = { base: base.replace(/\/$/, ""), headers };
+}
+
+function cloudRequest(path: string, init?: RequestInit): Promise<Response> {
+  if (!session) return fetch(path, init);
+  return fetch(session.base + path, {
+    ...init,
+    headers: { ...session.headers, ...(init?.headers as Record<string, string> | undefined) },
+  });
+}
+
 // Cloud project docs are versioned for lost-write detection: GET hands the
 // current version out in a header, PUT sends it back as ?v= and gets the
 // incremented one in its body. The map lives in the transport so call sites
@@ -58,11 +74,11 @@ const PROJECT_DOC = /^\/api\/cut\/projects\/(?!folders$)([^/?]+)$/;
 async function cloudFetch(path: string, init?: RequestInit): Promise<Response> {
   const doc = PROJECT_DOC.exec(path);
   const method = (init?.method ?? "GET").toUpperCase();
-  if (!doc || (method !== "GET" && method !== "PUT")) return fetch(cloudPath(path), init);
+  if (!doc || (method !== "GET" && method !== "PUT")) return cloudRequest(cloudPath(path), init);
   const projectId = decodeURIComponent(doc[1]);
 
   if (method === "GET") {
-    const req = fetch(cloudPath(path), init);
+    const req = cloudRequest(cloudPath(path), init);
     const tracked = req.then(
       (res) => {
         if (res.ok) noteVersion(projectId, res.headers.get("x-cut-doc-version"));
@@ -88,7 +104,7 @@ async function putDoc(projectId: string, path: string, init?: RequestInit): Prom
   // A pinned base outranks the map; with neither, an unversioned PUT is the
   // first save and succeeds unconditionally.
   const v = basePins.get(projectId) ?? docVersions.get(projectId);
-  const res = await fetch(cloudPath(path) + (v ? `?v=${encodeURIComponent(v)}` : ""), init);
+  const res = await cloudRequest(cloudPath(path) + (v ? `?v=${encodeURIComponent(v)}` : ""), init);
   if (res.ok || res.status === 409) basePins.delete(projectId);
   if (res.status === 409) {
     const body = (await res
@@ -96,11 +112,12 @@ async function putDoc(projectId: string, path: string, init?: RequestInit): Prom
       .json()
       .catch(() => null)) as { doc?: unknown; version?: number | string } | null;
     noteVersion(projectId, body?.version);
-    window.dispatchEvent(
-      new CustomEvent("cut-cloud-doc-conflict", {
-        detail: { projectId, doc: body?.doc, version: body?.version },
-      })
-    );
+    if (typeof window !== "undefined")
+      window.dispatchEvent(
+        new CustomEvent("cut-cloud-doc-conflict", {
+          detail: { projectId, doc: body?.doc, version: body?.version },
+        })
+      );
   } else if (res.ok) {
     const body = (await res
       .clone()

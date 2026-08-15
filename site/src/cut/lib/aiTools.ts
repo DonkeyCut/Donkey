@@ -2354,6 +2354,35 @@ class ToolError extends Error {}
  * Execute an assistant tool call against the live editor store.
  * Returns a small JSON-safe result; throws ToolError with a readable message.
  */
+/** Tools whose whole effect is the editor UI in an open tab — panel focus,
+ * scroll, playback, the preview snapshot. A headless session answers them
+ * with a typed no-op so the model keeps its footing. */
+export const UI_TOOLS: ReadonlySet<string> = new Set([
+  "capture_frame",
+  "set_side_panel",
+  "set_view",
+  "open_export",
+  "set_playing",
+]);
+
+/** Tools that decode or rasterize media with browser APIs today — frame
+ * grabs, audio scans, image decodes, the transcription mixdown. A headless
+ * session refuses them with a typed error until the runner grows ffmpeg
+ * equivalents. Membership is about page decoding; tools that only call
+ * servers run headless through the bound transports and stay out. */
+export const BROWSER_MEDIA_TOOLS: ReadonlySet<string> = new Set([
+  "watch_video",
+  "listen_audio",
+  "detect_silence",
+  "refine_speech_cuts",
+  "freeze_frame",
+  "create_sticker",
+  "subtitles_generate",
+  "captions_generate",
+  "subtitles_from_visuals",
+  "stock_add",
+]);
+
 export async function runAiTool(
   name: string,
   input: Record<string, unknown>

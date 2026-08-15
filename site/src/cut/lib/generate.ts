@@ -16,7 +16,7 @@ import {
   upsertRenderInDoc,
 } from "./genvideo/docWriter";
 import { CUT_APP_BASE } from "./nav";
-import { hostedPost } from "./hosted";
+import { hostedFetch, hostedPost } from "./hosted";
 import { enrichAsset, importFileToProject, uploadProjectImage } from "./media";
 import { refsToInlineImages, videoSafeInline, visualRefs, type InlineImage } from "./refMedia";
 import { useGenNotify } from "./genNotify";
@@ -711,7 +711,7 @@ export const useGenerate = create<GenerateState>((set, get) => {
     },
 
     probeNow: () => {
-      probing ??= fetch("/api/auth/get-session", { cache: "no-store" })
+      probing ??= hostedFetch("/api/auth/get-session", { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : null))
         .then((s) => {
           const signedIn = Boolean((s as { user?: unknown } | null)?.user);

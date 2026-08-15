@@ -1,22 +1,23 @@
-"use client";
-
 import { geminiModelRoles } from "@/lib/inference/gemini-models";
 import { AI_SKILL_INDEX, AI_SKILLS } from "@/cut/server/ai/catalog";
 import { buildAiContext } from "../aiContext";
-import { runAiTool } from "../aiTools";
+import { BROWSER_MEDIA_TOOLS, runAiTool, UI_TOOLS } from "../aiTools";
 import { normalizeRef } from "../assetRef";
-import { NO_CREDITS_MESSAGE, useGenerate } from "../generate";
+import { NO_CREDITS_MESSAGE } from "../generate";
 import { hostedPost } from "../hosted";
+import { bindHeadlessSession, type HeadlessSession } from "../headless/bind";
 import { refsToParts } from "../refMedia";
 import type { CutAgentDeps } from "./cutAgent";
 import { currentDebris } from "./debris";
 
-// The live editor's wiring for the pi chat loop. This module carries the
-// browser-only graph (the editor store, hosted auth, media resolution), so
-// cutAgent itself stays importable anywhere — the eval runs the same loop in
-// Bun with its own deps.
+// The headless wiring for the pi chat loop. The runner opens a project into
+// the store (openProjectDoc), runs the turn with these deps, and pushes the
+// doc back up. Every transport rides the session's origin and auth headers.
 
-export function productionDeps(): CutAgentDeps {
+export type { HeadlessSession };
+
+export function headlessDeps(session: HeadlessSession): CutAgentDeps {
+  bindHeadlessSession(session);
   return {
     post: (payload, signal) => hostedPost("/api/inference/responses", payload, signal),
     execTool: async (name, args) => {
@@ -26,6 +27,15 @@ export function productionDeps(): CutAgentDeps {
         if (!doc) throw new Error(`No such skill. Available: ${AI_SKILL_INDEX.join(", ")}`);
         return doc;
       }
+      if (UI_TOOLS.has(name))
+        return {
+          noEditor: true,
+          note: "No editor page is attached to this session, so this tool had no effect. The project itself is unchanged — keep working from the editor state.",
+        };
+      if (BROWSER_MEDIA_TOOLS.has(name))
+        throw new Error(
+          "This tool reads media through the editor page and is unavailable in this session. Work from the editor state and the transcript instead."
+        );
       return runAiTool(name, args);
     },
     models: {
@@ -39,15 +49,6 @@ export function productionDeps(): CutAgentDeps {
       return (await refsToParts(refs)).parts;
     },
     debris: currentDebris,
-    onAuthFail: () => useGenerate.getState().probe(),
     noCreditsMessage: NO_CREDITS_MESSAGE,
-    hooks: {
-      onGate: (intent, ms, skipped) =>
-        console.debug(`[chat] gate ${intent} ${Math.round(ms)}ms${skipped ? " skipped" : ""}`),
-      onRound: (ms, firstDeltaMs) =>
-        console.debug(
-          `[chat] round ${Math.round(ms)}ms${firstDeltaMs === null ? "" : `, first delta ${Math.round(firstDeltaMs)}ms`}`
-        ),
-    },
   };
 }

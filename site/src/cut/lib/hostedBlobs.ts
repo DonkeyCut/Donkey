@@ -20,6 +20,7 @@
 // out as it would have: storage is how a large request succeeds, never the
 // reason a small one fails.
 import { bytesFromBase64 } from "./bytes";
+import { hostedFetch } from "./hosted";
 
 /** Keys a hosted payload carries base64 media under, and the media type to
  * assume when the part does not name one. */
@@ -100,7 +101,7 @@ async function claimKeys(blobs: Claimable[], clientId: string): Promise<Claim[]>
   const claimed = await Promise.all(
     batches.map(async (batch) => {
       const unavailable = batch.map(() => ({ skipped: "unavailable" }));
-      const res = await fetch("/api/inference/uploads", {
+      const res = await hostedFetch("/api/inference/uploads", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-donkey-client-id": clientId },
         body: JSON.stringify({ blobs: batch }),

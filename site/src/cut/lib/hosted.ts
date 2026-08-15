@@ -51,7 +51,7 @@ let rechecking: Promise<void> | null = null;
  * tab up after the user already paid. Any failure leaves the flag as is. */
 export function recheckCredits(): Promise<void> {
   if (!useOutOfCredits.getState().out) return Promise.resolve();
-  rechecking ??= fetch("/api/credits/balance", { cache: "no-store" })
+  rechecking ??= hostedFetch("/api/credits/balance", { cache: "no-store" })
     .then(async (res) => {
       if (!res.ok) return;
       const body = (await res.json()) as { balanceMicros?: string };
@@ -95,6 +95,23 @@ export function useCreditsRecheck(): void {
 const OFFLOAD_ABOVE_BYTES = 1024 * 1024;
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
+/** A headless session's transport: an absolute origin and auth headers folded
+ * into every hosted call. In the page this stays unbound; same-origin calls
+ * carry the session cookie on their own. */
+let session: { base: string; headers: Record<string, string> } | null = null;
+export function bindHostedSession(base: string, headers: Record<string, string>) {
+  session = { base: base.replace(/\/$/, ""), headers };
+}
+
+/** Fetch a hosted route through the bound session when one exists. Every
+ * hosted-route call in lib code goes through here so a headless process
+ * reaches the right server with its auth. */
+export const hostedFetch = (path: string, init?: RequestInit): Promise<Response> =>
+  fetch((session?.base ?? "") + path, {
+    ...init,
+    headers: { ...session?.headers, ...(init?.headers as Record<string, string> | undefined) },
+  });
+
 /** POST one of Donkey's hosted inference routes with the user's session. */
 export const hostedPost = async (path: string, body: unknown, signal?: AbortSignal) => {
   let payload = JSON.stringify(body);
@@ -104,7 +121,7 @@ export const hostedPost = async (path: string, body: unknown, signal?: AbortSign
   if (new Blob([payload]).size > MAX_BODY_BYTES) {
     throw new Error("That request carries too much attached media to send. Use fewer references.");
   }
-  const res = await fetch(path, {
+  const res = await hostedFetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-donkey-client-id": CLIENT_ID },
     body: payload,

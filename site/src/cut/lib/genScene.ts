@@ -99,6 +99,10 @@ useEditor.subscribe((s, prev) => {
   // mounts. loadProject flips `loaded` false→true in the same set() that
   // fills genvideo, so the edge fires once per open.
   if (!s.loaded || prev.loaded || !s.projectId) return;
+  // A headless process (the turn runner, an eval) opens projects to run one
+  // job; resuming a persisted plan there would spend credits on a render the
+  // page is already resuming for its user.
+  if (typeof window === "undefined") return;
   // A shared view shows the owner's persisted run as data only — never
   // adopt or resume it (resuming would render on the viewer's account).
   if (s.readOnly) return;
