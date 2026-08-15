@@ -236,7 +236,7 @@ async function renderClipMaskPictures(
     : { x: -box.x, y: -box.y, w: W, h: H };
   const canvas = createRasterCanvas(box.w, box.h);
   const blobAt = (tLocal: number) => {
-    const ctx = canvas.getContext("2d")!;
+    const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
     if (radius > 0) {
       ctx.globalCompositeOperation = "source-over";
       ctx.fillStyle = "#000000";
