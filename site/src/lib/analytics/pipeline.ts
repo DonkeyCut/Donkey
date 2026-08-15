@@ -320,15 +320,26 @@ async function consolidate(
   }
 
   const balanceByUser = new Map(snapshot.balances.map((b) => [b.userId, b.balanceMicros]));
+  const fundedByUser = new Map<string, bigint>();
+  for (const payment of snapshot.payments) {
+    fundedByUser.set(
+      payment.userId,
+      (fundedByUser.get(payment.userId) ?? BigInt(0)) + BigInt(payment.amountMicros),
+    );
+  }
   const users = snapshot.users
-    .map((u) => ({
-      activity: masks.get(u.id) ?? days.map(() => 0),
-      balanceMicros: balanceByUser.get(u.id) ?? "0",
-      email: u.email,
-      id: u.id,
-      name: u.name,
-      registeredAt: u.createdAt,
-    }))
+    .map((u) => {
+      const funded = fundedByUser.get(u.id);
+      return {
+        activity: masks.get(u.id) ?? days.map(() => 0),
+        balanceMicros: balanceByUser.get(u.id) ?? "0",
+        email: u.email,
+        ...(funded !== undefined ? { fundedMicros: funded.toString() } : {}),
+        id: u.id,
+        name: u.name,
+        registeredAt: u.createdAt,
+      };
+    })
     .sort((a, b) => (a.registeredAt < b.registeredAt ? 1 : -1));
 
   const rollup: AnalyticsRollup = {

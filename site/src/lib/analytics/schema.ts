@@ -155,6 +155,9 @@ export const analyticsRollupSchema = z.object({
       registeredAt: z.string(),
       // BigInt micros as a decimal string; "0" for users without an account row.
       balanceMicros: z.string(),
+      // All-time paid Stripe grants, BigInt micros as a decimal string. Absent
+      // for users who never paid and in rollups written before this shipped.
+      fundedMicros: z.string().optional(),
       // One mask per entry of days; a dot is mask !== 0.
       activity: z.array(z.number()),
     }),

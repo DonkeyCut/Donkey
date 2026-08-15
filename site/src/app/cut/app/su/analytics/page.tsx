@@ -302,6 +302,14 @@ function ActivityGrid({
     const sources = rollup.sources.filter((_, i) => (mask & (1 << i)) !== 0);
     return `${email} — ${formatDay(day)}: ${sources.join(", ")}`;
   };
+  // Newest day sits in the leftmost column so the current dots are in view
+  // before any horizontal scroll; each column keeps its index into the
+  // activity masks.
+  const columns = rollup.days.map((day, i) => ({ day, i })).reverse();
+  // Paying users first; the stable sort keeps recency within each group.
+  const users = [...rollup.users].sort(
+    (a, b) => Number(b.fundedMicros !== undefined) - Number(a.fundedMicros !== undefined),
+  );
   return (
     <div className="rounded-xl border bg-card p-5">
       <p className="font-medium">User activity</p>
@@ -314,18 +322,18 @@ function ActivityGrid({
           <thead>
             <tr>
               <th className="sticky left-0 z-10 bg-card" />
-              {rollup.days.map((day, i) => (
+              {columns.map(({ day }, col) => (
                 <th
                   key={day}
                   className="pb-2 text-left text-[10px] font-normal whitespace-nowrap text-muted-foreground"
                 >
-                  {i === 0 || day.endsWith("-01") ? formatDay(day) : ""}
+                  {col === 0 || day.endsWith("-01") ? formatDay(day) : ""}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {rollup.users.map((user) => (
+            {users.map((user) => (
               <tr key={user.id}>
                 <td className="sticky left-0 z-10 bg-card py-1 pr-4 whitespace-nowrap">
                   <span className="block max-w-56 truncate text-sm" title={user.name}>
@@ -334,9 +342,15 @@ function ActivityGrid({
                   <span className="block text-xs text-muted-foreground">
                     Joined {formatDay(user.registeredAt.slice(0, 10))} ·{" "}
                     {formatMicros(BigInt(user.balanceMicros))}
+                    {user.fundedMicros !== undefined && (
+                      <span className="text-emerald-700 dark:text-emerald-500">
+                        {" "}
+                        · paid {formatMicros(BigInt(user.fundedMicros))}
+                      </span>
+                    )}
                   </span>
                 </td>
-                {rollup.days.map((day, i) => (
+                {columns.map(({ day, i }) => (
                   <td key={day} className="p-0.5">
                     <ActivityDot
                       label={dotLabel(user.email, day, user.activity[i] ?? 0)}
@@ -618,11 +632,21 @@ export default function SuAnalyticsPage() {
                     stackId="sources"
                   />
                 ))}
-                {/* Recharts 3 sorts legend items by name by default; null keeps
-                    the series order, which is the survey's order. */}
-                <ChartLegend content={<ChartLegendContent />} itemSorter={null} />
               </BarChart>
             </ChartContainer>
+            {/* The legend renders as its own row below the plot, in the
+                survey's order, so it wraps freely at narrow widths. */}
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+              {Object.entries(referrals.config).map(([id, entry]) => (
+                <span key={id} className="flex items-center gap-1.5 whitespace-nowrap">
+                  <span
+                    className="size-2 shrink-0 rounded-full"
+                    style={{ background: "color" in entry ? entry.color : undefined }}
+                  />
+                  {entry.label}
+                </span>
+              ))}
+            </div>
           </ChartCard>
 
           <ChartCard
