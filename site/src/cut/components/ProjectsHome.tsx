@@ -81,7 +81,13 @@ import { dropLocalProjectCopy, localMediaUrl } from "@/cut/lib/mediaSync";
 import { copyProjectAcross } from "@/cut/lib/projectCopy";
 import { homeHref, projectHref, useCutBase } from "@/cut/lib/nav";
 import { daysUntil, formatTime } from "@/cut/lib/time";
-import { parseRatio, type ProjectFolder, type ProjectSummary } from "@/cut/lib/types";
+import {
+  aspectOrientation,
+  normalizeAspect,
+  parseRatio,
+  type ProjectFolder,
+  type ProjectSummary,
+} from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 import { buildDragGhost, FolderCrumb, FolderShelf, formatBytes, Marquee } from "./desktopFolders";
 
@@ -630,20 +636,39 @@ export function ProjectsHome() {
     />
   );
 
+  // Same-shape tiles sit together: the list clusters by orientation, groups
+  // ordered by their most recently edited project, recency kept within each
+  // group. A run of uniform tiles reads as a clean row.
+  const clusterByShape = (shown: { p: ProjectSummary; r: Residency }[]) => {
+    const groups = new Map<string, typeof shown>();
+    for (const it of shown) {
+      const key = aspectOrientation(normalizeAspect(it.p.aspect) ?? "9:16");
+      const group = groups.get(key) ?? [];
+      if (group.length === 0) groups.set(key, group);
+      group.push(it);
+    }
+    return [...groups.values()].flat();
+  };
+
+  // Every tile takes the same area — a wide project spreads, a tall one
+  // stands, and each carries equal weight on the page.
+  const TILE_AREA = 180 * 320;
+
   const renderGallery = (shown: { p: ProjectSummary; r: Residency }[]) => (
     <Marquee
-      className="grid min-h-[42vh] grid-cols-[repeat(auto-fill,minmax(190px,1fr))] content-start gap-5"
+      className="flex min-h-[42vh] flex-wrap content-start items-start gap-5"
       selected={selected}
       setSelected={setSelected}
     >
-      {shown.map(({ p, r }) => {
-        // The tile takes the project's output shape; docs without an aspect are 9:16.
+      {clusterByShape(shown).map(({ p, r }) => {
+        // Docs without an aspect are 9:16.
         const frame = parseRatio(p.aspect) ?? { w: 9, h: 16 };
+        const tileW = Math.round(Math.sqrt((TILE_AREA * frame.w) / frame.h));
         return (
         <div
           key={p.id}
           data-sel-id={p.id}
-          className="group cursor-pointer"
+          className="group max-w-full cursor-pointer"
           draggable={live(r)}
           onDragStart={(e) => onProjectDragStart(e, p)}
           onClick={(e) => {
@@ -660,7 +685,7 @@ export function ProjectsHome() {
               "relative grid place-items-center overflow-hidden rounded-2xl border bg-muted transition-shadow group-hover:shadow-[0_6px_28px_rgba(0,0,0,0.12)]",
               selected.has(p.id) ? "border-[#0a84ff] ring-2 ring-[#0a84ff]" : "border-border"
             )}
-            style={{ aspectRatio: `${frame.w} / ${frame.h}` }}
+            style={{ width: tileW, aspectRatio: `${frame.w} / ${frame.h}` }}
           >
             <CardPreview project={p} residency={r} offline={!live(r)} />
             <span className="absolute top-2 left-2 max-w-[70%] truncate rounded-lg bg-black/55 px-2 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
