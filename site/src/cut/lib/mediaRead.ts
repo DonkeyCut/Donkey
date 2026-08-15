@@ -83,12 +83,21 @@ export async function withMedia<T>(src: string | Blob, fn: (input: Input) => Pro
   }
 }
 
+// A headless runtime (the turn runner) has no page, and there the
+// decodability gate is not a gate: nothing plays in that process, rendering
+// goes through ffmpeg, and the probe only reads container metadata — which
+// parses fine. Tracks pass headless; every browser keeps the strict check,
+// including one without WebCodecs, where canDecode answers false and the
+// undecodable-import guard still refuses footage the page can't play.
+const headless = () => typeof document === "undefined";
+
 /** The primary video track, or null when the file has no readable one — either
  * no video at all, or video in a codec this browser can't decode. Callers that
  * need to tell those apart ask `hasUndecodableVideo`. */
 export async function videoTrackOf(input: Input): Promise<InputVideoTrack | null> {
   const track = await input.getPrimaryVideoTrack();
-  return track && (await track.canDecode()) ? track : null;
+  if (!track) return null;
+  return headless() || (await track.canDecode()) ? track : null;
 }
 
 /** True when the file carries video this browser cannot decode.
@@ -98,6 +107,7 @@ export async function videoTrackOf(input: Input): Promise<InputVideoTrack | null
  * readable video track, and calling *that* audio drops the user's footage onto
  * the timeline as a waveform with no explanation. */
 export async function hasUndecodableVideo(input: Input): Promise<boolean> {
+  if (headless()) return false;
   const track = await input.getPrimaryVideoTrack();
   return !!track && !(await track.canDecode());
 }
@@ -105,7 +115,8 @@ export async function hasUndecodableVideo(input: Input): Promise<boolean> {
 /** The primary audio track, or null — same decodability rule as video. */
 export async function audioTrackOf(input: Input): Promise<InputAudioTrack | null> {
   const track = await input.getPrimaryAudioTrack();
-  return track && (await track.canDecode()) ? track : null;
+  if (!track) return null;
+  return headless() || (await track.canDecode()) ? track : null;
 }
 
 /** Read what a file is: how long, whether it carries picture or sound, and at
@@ -252,6 +263,9 @@ export async function decodeAudioSpan(
  * of float samples to draw a strip a few hundred pixels wide.
  */
 export async function audioPeaks(src: string | Blob, buckets: number): Promise<number[]> {
+  // Peaks are a real decode; a headless runtime skips them and the waveform
+  // enriches the next time a browser holds the asset.
+  if (typeof AudioDecoder === "undefined") return [];
   const input = openMedia(src);
   try {
     const track = await audioTrackOf(input);

@@ -19,6 +19,7 @@ import {
   UnreadableMediaError,
   videoTrackOf,
 } from "./mediaRead";
+import { decodeRasterImage } from "./raster";
 import { useEditor } from "./store";
 import type { AssetType, AudioClip, MediaAsset, ProjectSummary, StoredAsset, VideoClip, WatchKeepReason } from "./types";
 import { IMAGE_CLIP_SECONDS, mediaUrl } from "./types";
@@ -163,15 +164,26 @@ export async function presignedUpload(
   return signed.key;
 }
 
-/** PUT a blob to a presigned R2 URL. XHR rather than fetch: it is the only way
- * to watch the bytes leave, which is what an upload running behind the editor
- * has to report. */
+/** PUT a blob to a presigned R2 URL. XHR because it is the only way to watch
+ * the bytes leave, which is what an upload running behind the editor has to
+ * report. A headless runtime has no XHR and nobody watching; fetch covers it. */
 export function putSigned(
   url: string,
   file: Blob,
   mime?: string,
   opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }
 ): Promise<void> {
+  if (typeof XMLHttpRequest === "undefined") {
+    return fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": mime ?? (file.type || "application/octet-stream") },
+      body: file,
+      signal: opts?.signal,
+    }).then((res) => {
+      if (!res.ok) throw new Error("Upload failed.");
+      opts?.onProgress?.(1);
+    });
+  }
   return new Promise((resolve, reject) => {
     if (opts?.signal?.aborted) return reject(new DOMException("Upload cancelled.", "AbortError"));
     const xhr = new XMLHttpRequest();
@@ -318,6 +330,13 @@ async function probeMedia(type: AssetType, src: string | Blob): Promise<ProbedMe
     // Images have no intrinsic duration; the timeline clip carries its length.
     // Stills are the one kind read through the browser's image decoder rather
     // than the container reader, which does not do them.
+    if (typeof Image === "undefined") {
+      // Headless runtime: decode through the raster seam (skia in the worker).
+      const blob = typeof src === "string" ? await (await fetch(src)).blob() : src;
+      const img = await decodeRasterImage(blob);
+      if (!img) throw new UnreadableMediaError();
+      return { type, duration: 0, width: img.width, height: img.height };
+    }
     const url = typeof src === "string" ? src : URL.createObjectURL(src);
     try {
       const dims = await loadImageMeta(url);
@@ -431,7 +450,9 @@ export async function importFileToProject(
 
   const fileName = await uploadProjectMediaTo(backend, projectId, file, file.name);
   const url = mediaUrl(projectId, fileName, backend);
-  const meta = await probeMedia(type, url);
+  // Probe the bytes in hand: the same file the upload just wrote, with no
+  // second network read — which also lets a headless process import media.
+  const meta = await probeMedia(type, file);
   return {
     id: uid(),
     fileName,
