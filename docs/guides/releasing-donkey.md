@@ -32,7 +32,7 @@ Use nightly builds to smoke-test the latest default-branch app package. Use
 ## What Triggers a Release
 
 The commit says so. A subject ending in ` [rebuild]` means the change ships
-inside the Mac app — the Swift app, the Cut engine sources compiled into the
+inside the Mac app — the Swift app, the Donkey Cut engine sources compiled into the
 bundled binary, the packaging scripts — and a push carrying one cuts a release.
 Anything else lands on the site alone and no build runs.
 
@@ -104,7 +104,7 @@ microphone are governed by TCC and the Info.plist usage strings.
 
 ## Bundled Tools
 
-The Cut engine runs CLI tools — `ffmpeg` and `ffprobe` behind every export, probe,
+The Donkey Cut engine runs CLI tools — `ffmpeg` and `ffprobe` behind every export, probe,
 and frame extract, and `yt-dlp` behind URL import — by bare name off PATH. Those tools ship **inside** the app, at
 `Donkey.app/Contents/Resources/donkey-tools`. Being part of the app is what makes
 them dependable: they are present the moment the app is, so an export or a download

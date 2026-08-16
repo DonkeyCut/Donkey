@@ -29,7 +29,7 @@ DONKEY_APP_BUILD="2" \
 ```
 
 The app has no account and makes no authenticated calls; the menu bar's "Go to
-App" opens the Cut app at `https://donkeycut.com/app`.
+App" opens Donkey Cut at `https://donkeycut.com/app`.
 
 Launch the packaged app with `open dist/Donkey.app`; test the installer flow
 with `open dist/Donkey.dmg`.
@@ -110,7 +110,7 @@ The dev script starts the local site when `DONKEY_WEB_BASE_URL` points at
 localhost, builds Donkey, wraps the debug executable in
 `apps/Donkey/.build/debug/Donkey Dev.app`, and launches it. The debug wrapper
 defaults to the `Donkey Dev` display name and the `com.donkeyuse.Donkey.dev`
-bundle identifier, and runs the Cut engine on its own port, so it never collides
+bundle identifier, and runs the Donkey Cut engine on its own port, so it never collides
 with a packaged `Donkey.app` over macOS privacy settings.
 
 | Variable | Effect |

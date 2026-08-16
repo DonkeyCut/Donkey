@@ -3,7 +3,7 @@
 This folder is the product and engineering source of truth for capabilities that are already supported.
 
 Donkey is a video editor. Donkey Cut runs in the browser; the Mac app is a menu bar
-app that lets that page use the Mac's hardware — the local Cut engine for encoding,
+app that lets that page use the Mac's hardware — the local Donkey Cut engine for encoding,
 storage, and speech-to-text, plus screen recording.
 
 ## Guides
@@ -12,10 +12,10 @@ Supported product and engineering guides live in `docs/guides/`. This list is th
 
 **The product**
 
-- [Cut](guides/cut/README.md) — the video editor: what runs in the browser, what runs on the Mac, and the local resources behind it.
-- [Cut's AI Assistant](guides/cut/ai-assistant.md) — how a chat turn runs: the providers, the tool bridge into the editor, what the model knows, and the context budgets.
+- [Donkey Cut](guides/cut/README.md) — the video editor: what runs in the browser, what runs on the Mac, and the local resources behind it.
+- [Donkey Cut's AI Assistant](guides/cut/ai-assistant.md) — how a chat turn runs: the providers, the tool bridge into the editor, what the model knows, and the context budgets.
 - [Brief to Video](guides/cut/brief-to-video.md) — the director pipeline's strategy: story planning, the identity ladder that keeps a cast consistent, and where audio goes next.
-- [Local Compute for Cloud Projects](guides/cut/local-compute.md) — why a cloud project uses the Mac when there is one, and the rule that keeps its data in the cloud regardless.
+- [Local Compute](guides/cut/local-compute.md) — why a project the engine doesn't store still uses the Mac when there is one, and the rule that keeps its data where it lives regardless.
 
 **Site and backend**
 

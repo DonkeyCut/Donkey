@@ -1,6 +1,6 @@
 # Brief to Video
 
-The brief-to-video pipeline is Cut's director: one request ("make me a video
+The brief-to-video pipeline is Donkey Cut's director: one request ("make me a video
 about…") becomes a finished cut — script, narration, reference images, shots —
 assembled on the timeline, with subtitles and any other post step one
 assistant tool call away. The target: one prompt becomes a coherent short
@@ -98,7 +98,7 @@ that planned the story.
 
 ## Where it lives
 
-The orchestrator, plan types, and coverage invariant live in the site's Cut
+The orchestrator, plan types, and coverage invariant live in the site's `cut/`
 genvideo area; its planning and media roles are the hosted-model adapters
 beside it, and the chat tool that drives it is generate_scene. The assistant's
 steering for scene runs — references and look, aspect, the from-audio flow —
