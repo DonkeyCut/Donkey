@@ -76,6 +76,7 @@ import {
 } from "@/cut/lib/residency";
 import { TemplateCard } from "./TemplateCard";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
+import { shapeBand } from "@/cut/lib/types";
 import { useRevealFlash } from "@/cut/lib/refReveal";
 import { formatTime } from "@/cut/lib/time";
 import { cn } from "@/lib/utils";
@@ -295,6 +296,20 @@ export function LibraryView() {
 
   const bothShelves = listed.length > 1;
   const shown = all.filter((a) => (a.folderId ?? null) === openFolder);
+  // Similar-shape tiles get their own band of wrapped rows, so a wide tile
+  // never shares a row with a tall one; audio and unmeasured assets band as
+  // squares. Order within and across bands follows the listing.
+  const shapeOf = (a: LibraryAsset) =>
+    a.type === "audio" || !a.width || !a.height ? 0 : shapeBand(a.width, a.height);
+  const shownBands = new Map<number, LibraryAsset[]>();
+  for (const a of shown) {
+    const band = shownBands.get(shapeOf(a)) ?? [];
+    if (band.length === 0) shownBands.set(shapeOf(a), band);
+    band.push(a);
+  }
+  // Every tile takes the same area — a wide clip spreads, a tall one stands,
+  // and each carries equal weight on the page.
+  const TILE_AREA = 180 * 180;
   const shownTemplates = templates.filter((t) => (t.folderId ?? null) === openFolder);
   const openFolderName = folders.find((f) => f.id === openFolder)?.name;
   const hasContent =
@@ -472,26 +487,31 @@ export function LibraryView() {
         </button>
       ) : shown.length === 0 && uploading === 0 ? null : (
         <Marquee
-          className="grid min-h-[40vh] grid-cols-[repeat(auto-fill,minmax(160px,1fr))] content-start gap-4"
+          className="flex min-h-[40vh] flex-col content-start gap-8"
           selected={selected}
           setSelected={setSelected}
         >
-          {shown.map((a) => (
-            <LibraryCard
-              key={a.id}
-              asset={a}
-              selected={selected.has(a.id)}
-              offline={!live(a.residency)}
-              // Clicking an item this browser can only remember is the moment
-              // something is actually blocked, so that is when the gate's
-              // banner — and the way out of it — comes up.
-              onClick={live(a.residency) ? undefined : () => setNeedsApp(true)}
-              onDelete={live(a.residency) ? () => setDeleting(a) : undefined}
-              onDragStartExtra={(e) => onCardDragExtra(e, a)}
-            />
+          {[...shownBands.entries()].map(([shape, band]) => (
+            <div key={shape} className="flex flex-wrap items-start gap-4">
+              {band.map((a) => (
+                <LibraryCard
+                  key={a.id}
+                  asset={a}
+                  area={TILE_AREA}
+                  selected={selected.has(a.id)}
+                  offline={!live(a.residency)}
+                  // Clicking an item this browser can only remember is the
+                  // moment something is actually blocked, so that is when the
+                  // gate's banner — and the way out of it — comes up.
+                  onClick={live(a.residency) ? undefined : () => setNeedsApp(true)}
+                  onDelete={live(a.residency) ? () => setDeleting(a) : undefined}
+                  onDragStartExtra={(e) => onCardDragExtra(e, a)}
+                />
+              ))}
+            </div>
           ))}
           {uploading > 0 && (
-            <div className="flex aspect-square flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-input text-xs text-muted-foreground">
+            <div className="flex size-[180px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-input text-xs text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
               <span>
                 Uploading… <LiveElapsed />
@@ -579,6 +599,7 @@ export function LibraryCard({
   asset: a,
   selected,
   offline = false,
+  area,
   onClick,
   onDelete,
   onUse,
@@ -589,6 +610,11 @@ export function LibraryCard({
   /** The shelf this item is on isn't answering: it lists from memory, so the
    * card shows what it knows and reaches for no media it can't load. */
   offline?: boolean;
+  /** Tile area in square pixels. When set, the tile takes the media's own
+   * aspect at this shared area — a wide clip spreads, a tall one stands, and
+   * every card carries the same weight. Unset, the tile fills its grid cell
+   * as a square. Audio and unmeasured assets sit square either way. */
+  area?: number;
   onClick?: () => void;
   onDelete?: () => void;
   onUse?: () => void;
@@ -612,6 +638,16 @@ export function LibraryCard({
     offline ? "" : libraryMediaUrl(a.fileName, a.residency),
     hovered
   );
+  const frame =
+    area && a.type !== "audio" && a.width && a.height
+      ? { w: a.width, h: a.height }
+      : { w: 1, h: 1 };
+  const tileStyle = area
+    ? {
+        width: Math.round(Math.sqrt((area * frame.w) / frame.h)),
+        aspectRatio: `${frame.w} / ${frame.h}`,
+      }
+    : undefined;
 
   return (
     <div
@@ -641,9 +677,11 @@ export function LibraryCard({
         ref={tileRef}
         data-drag-object
         className={cn(
-          "relative aspect-square cursor-grab overflow-hidden rounded-xl border bg-muted transition-shadow group-hover:shadow-[0_4px_20px_rgba(0,0,0,0.1)] active:cursor-grabbing",
+          "relative max-w-full cursor-grab overflow-hidden rounded-xl border bg-muted transition-shadow group-hover:shadow-[0_4px_20px_rgba(0,0,0,0.1)] active:cursor-grabbing",
+          !area && "aspect-square",
           selected || flash ? "border-[#0a84ff] ring-2 ring-[#0a84ff]" : "border-border"
         )}
+        style={tileStyle}
       >
         {offline ? (
           // Nothing to load from a shelf that isn't answering, so the card

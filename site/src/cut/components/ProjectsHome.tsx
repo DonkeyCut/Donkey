@@ -82,9 +82,8 @@ import { copyProjectAcross } from "@/cut/lib/projectCopy";
 import { homeHref, projectHref, useCutBase } from "@/cut/lib/nav";
 import { daysUntil, formatTime } from "@/cut/lib/time";
 import {
-  aspectOrientation,
-  normalizeAspect,
   parseRatio,
+  shapeBand,
   type ProjectFolder,
   type ProjectSummary,
 } from "@/cut/lib/types";
@@ -636,35 +635,30 @@ export function ProjectsHome() {
     />
   );
 
-  // Same-shape tiles sit together: the list clusters by orientation, groups
-  // ordered by their most recently edited project, recency kept within each
-  // group. A run of uniform tiles reads as a clean row.
-  const clusterByShape = (shown: { p: ProjectSummary; r: Residency }[]) => {
-    const groups = new Map<string, typeof shown>();
+  // Similar-shape tiles get their own band of wrapped rows, so a wide tile
+  // never shares a row with a tall one. Bands are ordered by their most
+  // recently edited project, recency kept within each band.
+  const bandsByShape = (shown: { p: ProjectSummary; r: Residency }[]) => {
+    const bands = new Map<number, typeof shown>();
     for (const it of shown) {
-      const key = aspectOrientation(normalizeAspect(it.p.aspect) ?? "9:16");
-      const group = groups.get(key) ?? [];
-      if (group.length === 0) groups.set(key, group);
-      group.push(it);
+      const frame = parseRatio(it.p.aspect) ?? { w: 9, h: 16 };
+      const key = shapeBand(frame.w, frame.h);
+      const band = bands.get(key) ?? [];
+      if (band.length === 0) bands.set(key, band);
+      band.push(it);
     }
-    return [...groups.values()].flat();
+    return [...bands.entries()];
   };
 
   // Every tile takes the same area — a wide project spreads, a tall one
   // stands, and each carries equal weight on the page.
   const TILE_AREA = 180 * 320;
 
-  const renderGallery = (shown: { p: ProjectSummary; r: Residency }[]) => (
-    <Marquee
-      className="flex min-h-[42vh] flex-wrap content-start items-start gap-5"
-      selected={selected}
-      setSelected={setSelected}
-    >
-      {clusterByShape(shown).map(({ p, r }) => {
-        // Docs without an aspect are 9:16.
-        const frame = parseRatio(p.aspect) ?? { w: 9, h: 16 };
-        const tileW = Math.round(Math.sqrt((TILE_AREA * frame.w) / frame.h));
-        return (
+  const renderTile = ({ p, r }: { p: ProjectSummary; r: Residency }) => {
+    // Docs without an aspect are 9:16.
+    const frame = parseRatio(p.aspect) ?? { w: 9, h: 16 };
+    const tileW = Math.round(Math.sqrt((TILE_AREA * frame.w) / frame.h));
+    return (
         <div
           key={p.id}
           data-sel-id={p.id}
@@ -719,8 +713,20 @@ export function ProjectsHome() {
             {formatBytes(p.sizeBytes ?? 0)} · edited {formatDate(p.updatedAt)}
           </div>
         </div>
-        );
-      })}
+    );
+  };
+
+  const renderGallery = (shown: { p: ProjectSummary; r: Residency }[]) => (
+    <Marquee
+      className="flex min-h-[42vh] flex-col content-start gap-8"
+      selected={selected}
+      setSelected={setSelected}
+    >
+      {bandsByShape(shown).map(([shape, band]) => (
+        <div key={shape} className="flex flex-wrap items-start gap-5">
+          {band.map(renderTile)}
+        </div>
+      ))}
     </Marquee>
   );
 

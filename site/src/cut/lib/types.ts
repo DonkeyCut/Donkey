@@ -98,6 +98,13 @@ export function aspectOrientation(aspect: Aspect): "landscape" | "portrait" | "s
   return r.w === r.h ? "square" : r.w > r.h ? "landscape" : "portrait";
 }
 
+/** Which shape band a w×h frame tiles with. The log of the ratio, in coarse
+ * steps: 16:9 bands with 3:2, while 4:3, 1:1, 3:4, and 9:16 each band apart —
+ * any ratio lands somewhere, with no landscape/portrait dichotomy. */
+export function shapeBand(w: number, h: number): number {
+  return Math.round(Math.log2(w / h) * 3);
+}
+
 /** Project the project aspect onto a model/provider's supported ratio list:
  * the entry whose shape is closest (log-ratio distance), first entry on ties. */
 export function nearestAspect<T extends string>(aspect: Aspect, supported: readonly T[]): T {
