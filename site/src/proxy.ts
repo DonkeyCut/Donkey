@@ -1,11 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { allowedOrigin, corsHeaders, preflightHeaders } from "@/cut/server/cors";
-import {
-  DONKEYCUT_CANONICAL,
-  isDonkeycutHost,
-  isLocalHost,
-} from "@/cut/lib/hosts";
+import { DONKEYCUT_CANONICAL, isDonkeycutHost } from "@/cut/lib/hosts";
 
 // Cut (the video editor, publicly "Donkey Cut") lives under /cut in this single
 // site app: the marketing landing at /cut and the app under /cut/app. Every
@@ -98,10 +94,6 @@ export function proxy(req: NextRequest) {
 
   if (underPath(pathname, "/api")) return NextResponse.next();
   if (passesThrough(pathname)) return NextResponse.next();
-  // The notch prototype is a dev-only page.
-  if (isLocalHost(host) && underPath(pathname, "/prototype")) {
-    return NextResponse.next();
-  }
 
   const url = req.nextUrl.clone();
   url.pathname =
