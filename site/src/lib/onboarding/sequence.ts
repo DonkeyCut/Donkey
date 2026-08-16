@@ -12,6 +12,7 @@ export const REFERRAL_SOURCES = [
   { id: "tiktok", label: "TikTok" },
   { id: "instagram", label: "Instagram" },
   { id: "youtube", label: "YouTube" },
+  { id: "reddit", label: "Reddit" },
   { id: "search", label: "Search" },
   { id: "friend", label: "A friend" },
   { id: "other", label: "Other" },

@@ -17,6 +17,7 @@ const MARKS: Record<ReferralSource, ReactNode> = {
   tiktok: <BrandMark src="/cut/onboarding/tiktok.svg" />,
   instagram: <BrandMark src="/cut/onboarding/instagram.svg" />,
   youtube: <BrandMark src="/cut/onboarding/youtube.svg" />,
+  reddit: <BrandMark src="/cut/onboarding/reddit.svg" />,
   search: <Search className="size-[18px]" />,
   friend: <Users className="size-[18px]" />,
   other: <PenLine className="size-[18px]" />,
