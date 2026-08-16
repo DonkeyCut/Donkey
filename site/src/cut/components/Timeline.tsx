@@ -3277,6 +3277,7 @@ function ClipView({
   ) => void;
 }) {
   const { clip, asset } = span;
+  const loading = useEditor((s) => s.loadingMedia.has(asset.fileName));
   const speed = clipSpeed(clip);
   // Every box is its clip's whole footprint. Clips never overlap — a
   // transition is a render-time blend at the cut, drawn as the bar above the
@@ -3358,12 +3359,13 @@ function ClipView({
         <span className="tl-dur-chip pointer-events-none absolute top-1 left-1 z-2 rounded-[5px] bg-black/65 px-1.5 py-px font-mono text-[10px] tabular-nums text-white">
           {(Math.round(span.len * 10) / 10).toFixed(1)}s
         </span>
-      ) : (
+      ) : loading ? null : (
         <span className="tl-mention-chip pointer-events-none absolute top-1 left-1 z-2 rounded-[5px] bg-black/65 px-1.5 py-px font-mono text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100">
           {mention}
         </span>
       )}
-      {asset.type === "video" && (
+      {loading && <LoadingChip />}
+      {asset.type === "video" && !loading && (
         <MuteChip
           muted={clip.muted}
           className="bottom-1 left-1"
@@ -3378,26 +3380,30 @@ function ClipView({
           {+(clip.speed ?? 1).toFixed(2)}×
         </span>
       )}
-      <HideChip
-        hidden={!!clip.hidden}
-        className="bottom-1 right-2"
-        onToggle={() => useEditor.getState().updateClip(clip.id, { hidden: !clip.hidden })}
-      />
-      <ClipMenu asset={asset} clip={clip}>
-        {asset.type === "video" ? (
-          <DropdownMenuItem
-            disabled={clip.muted}
-            onClick={() => {
-              const s = useEditor.getState();
-              s.select({ kind: "clip", id: clip.id });
-              s.detachAudio();
-              void ensurePeaks(asset);
-            }}
-          >
-            <AudioLines /> Detach audio
-          </DropdownMenuItem>
-        ) : null}
-      </ClipMenu>
+      {!loading && (
+        <HideChip
+          hidden={!!clip.hidden}
+          className="bottom-1 right-2"
+          onToggle={() => useEditor.getState().updateClip(clip.id, { hidden: !clip.hidden })}
+        />
+      )}
+      {!loading && (
+        <ClipMenu asset={asset} clip={clip}>
+          {asset.type === "video" ? (
+            <DropdownMenuItem
+              disabled={clip.muted}
+              onClick={() => {
+                const s = useEditor.getState();
+                s.select({ kind: "clip", id: clip.id });
+                s.detachAudio();
+                void ensurePeaks(asset);
+              }}
+            >
+              <AudioLines /> Detach audio
+            </DropdownMenuItem>
+          ) : null}
+        </ClipMenu>
+      )}
       {/* Keys sit on the bar where they fall — pose and mask tracks both —
           so the animation is visible without opening the inspector. */}
       {(clip.kf ?? []).map((k) => (
@@ -3876,6 +3882,17 @@ function HideChip({
   );
 }
 
+/** Corner chip for a timeline item whose media is still streaming into the
+ * browser store. It sits where the hover controls live — the controls stay
+ * off until the bytes land and the item scrubs, plays, and edits instantly. */
+function LoadingChip() {
+  return (
+    <span className="tl-loading-chip pointer-events-none absolute bottom-1 left-1 z-4 grid size-[18px] place-items-center rounded-[5px] bg-black/55 text-white">
+      <Loader2 className="size-3 animate-spin" />
+    </span>
+  );
+}
+
 /** Hover chip that toggles a clip's own audio. Stays visible while the clip is
  * muted so unmuting is one click. */
 function MuteChip({
@@ -3940,6 +3957,7 @@ function AudioView({
   onSnap: (x: number | null) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const loading = useEditor((s) => (asset ? s.loadingMedia.has(asset.fileName) : false));
   const len = clipLen(clip);
   const w = Math.max(10, len * pps);
 
@@ -4015,17 +4033,20 @@ function AudioView({
       >
         {asset.name}
       </span>
-      {mention && !drag && (
+      {mention && !drag && !loading && (
         <span className="tl-mention-chip pointer-events-none absolute top-1 left-1 z-2 rounded-[5px] bg-black/65 px-1.5 py-px font-mono text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100">
           {mention}
         </span>
       )}
-      <ClipMenu asset={asset} clip={clip} />
-      <MuteChip
-        muted={!!clip.hidden}
-        className="bottom-1 left-1"
-        onToggle={() => useEditor.getState().updateAudio(clip.id, { hidden: !clip.hidden })}
-      />
+      {loading && <LoadingChip />}
+      {!loading && <ClipMenu asset={asset} clip={clip} />}
+      {!loading && (
+        <MuteChip
+          muted={!!clip.hidden}
+          className="bottom-1 left-1"
+          onToggle={() => useEditor.getState().updateAudio(clip.id, { hidden: !clip.hidden })}
+        />
+      )}
       <span
         className={cn(trimHandle, "tl-trim-l left-0")}
         onPointerDown={(e) => startLaneTrim(e, "audio", clip.id, "l", ui)}
@@ -4092,6 +4113,7 @@ function OverlayClipView({
 }) {
   // Its whole footprint, like a track-0 box: clips never overlap, and a
   // transition is the bar above the tracks, never a bite out of a box.
+  const loading = useEditor((s) => (asset ? s.loadingMedia.has(asset.fileName) : false));
   const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
   const w = Math.max(10, overlayLen(clip) * pps);
   const filmIn = clip.in;
@@ -4168,7 +4190,8 @@ function OverlayClipView({
       {selected && (
         <div className="pointer-events-none absolute inset-0 z-[1] bg-[#0a84ff]/25" />
       )}
-      {asset.type === "video" && (
+      {loading && <LoadingChip />}
+      {asset.type === "video" && !loading && (
         <MuteChip
           muted={clip.muted}
           className="bottom-1 left-1"
@@ -4183,12 +4206,14 @@ function OverlayClipView({
           {+(clip.speed ?? 1).toFixed(2)}×
         </span>
       )}
-      <ClipMenu asset={asset} clip={clip} />
-      <HideChip
-        hidden={!!clip.hidden}
-        className="bottom-1 right-2"
-        onToggle={() => useEditor.getState().updateClip(clip.id, { hidden: !clip.hidden })}
-      />
+      {!loading && <ClipMenu asset={asset} clip={clip} />}
+      {!loading && (
+        <HideChip
+          hidden={!!clip.hidden}
+          className="bottom-1 right-2"
+          onToggle={() => useEditor.getState().updateClip(clip.id, { hidden: !clip.hidden })}
+        />
+      )}
       {/* Keys sit on the bar where they fall, same as the element bars. */}
       {(clip.kf ?? []).map((k) => (
         <KeyMarker
