@@ -1,42 +1,63 @@
 <p align="center">
-  <img src="site/public/donkey-app-icon.png" alt="Donkey" width="128" height="128" />
+  <img src="site/public/donkey-app-icon.png" alt="Donkey Cut" width="128" height="128" />
 </p>
 
-<h1 align="center">Donkey</h1>
+<h1 align="center">Donkey Cut</h1>
 
-<p align="center"><i>The video editor iMovie should have been — free, open source, and local-first, with AI generation when you want it.</i></p>
+<p align="center"><i>A free, open source CapCut alternative. Edit with chat. Generate video, images, voiceovers, and music.</i></p>
 
 <p align="center">
-  <a href="https://github.com/DonkeyUseCorp/Donkey/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/DonkeyUseCorp/Donkey?label=release&color=EC7868" /></a>
+  <a href="https://github.com/DonkeyCut/Donkey/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/DonkeyCut/Donkey?label=release&color=EC7868" /></a>
   <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" /></a>
   <img alt="Platform: macOS" src="https://img.shields.io/badge/Platform-macOS-black.svg" />
 </p>
 
-Donkey is **Donkey Cut** — a free browser video editor at [donkeycut.com](https://donkeycut.com), powered by a local engine that ships inside the companion Mac app.
+Donkey Cut is a free video editor that runs in your browser.
+
+You can save projects in the cloud and open them anywhere. You can also keep projects on your computer so your video files stay local.
 
 ---
 
 ## Donkey Cut
 
-Open [donkeycut.com](https://donkeycut.com) and you're in a full editor: multi-track timeline, captions, music and effects tracks, and an AI assistant that edits alongside you. The page is only the client — every real operation runs on a local engine the Donkey Mac app ships and supervises, so your footage stays on your Mac. No uploads, no cloud storage fees.
+Donkey Cut is a simple video editor with a multi-track timeline, captions, music, effects, and an AI assistant that can help you edit.
 
 <p align="center">
-  <img src=".github/cut-editor-railway.gif" alt="The Donkey Cut editor with The Railway Mystery open: generated shots in the side panel, clips and score on the timeline, and the AI chat that assembled them" width="960" />
+  <img src=".github/cut-editor-railway.gif" alt="The Donkey Cut editor with The Railway Mystery open: generated shots in the side panel, clips and score on the timeline" width="960" />
   <br />
-  <sub><i>The editor with "The Railway Mystery" open — generated shots in the side panel, clips and score on the timeline, and the AI chat that assembled them.</i></sub>
+  <sub><i>The editor with "The Railway Mystery" open. Generated shots in the side panel, with clips and music on the timeline.</i></sub>
 </p>
 
-### Free and local
+### Your computer or the cloud
 
-Editing needs no account. Projects and media live on your own disk, transcription and subtitles run on-device, and exports render through the bundled ffmpeg. The assistant uses the Claude or Codex app already signed in on your Mac — if you have a subscription, you're done. No setup, no API keys.
+You choose where each project lives.
 
-The one hosted piece is AI generation: images, video, voiceovers, and music are rendered through your Donkey account and credits, then land back in your project like any other file.
+**Cloud projects** work anywhere. You do not need to install anything. Upload your media from the browser and export your video right in the tab. You can also share a project with a read-only link.
+
+**Local projects** keep your files on your computer. Nothing needs to be uploaded.
+
+Both types of projects appear together on the same home screen.
+
+The AI assistant works with both. You can generate images, video, voiceovers, and music. Generated files are added to your project just like any other media.
+
+### For Mac users
+
+Install the [Donkey Cut companion app](https://github.com/DonkeyCut/Donkey/releases/latest) to connect the editor to your Mac.
+
+* Projects are saved in `~/Movies`, so you can see and manage them directly in Finder.
+* Captions and transcription run locally on your Mac.
+* Connect the AI assistant to your existing Codex or Claude Code login.
+* Record your screen directly onto the timeline.
+
+When the app is running, cloud projects can also use your Mac for transcription.
 
 ### Generate what you can't shoot
 
-Describe a shot in chat and iterate until it's right. These are the two example projects from the [donkeycut.com](https://donkeycut.com) landing page, prompts included.
+Describe a shot in chat and keep iterating until you get what you want.
 
-**The Railway Mystery** — a 1920s comic-style chase, three generated shots cut together with a brass-and-strings score:
+These are the two example projects from the [landing page](https://donkeycut.com). The prompts are included below.
+
+**The Railway Mystery** is a 1920s comic-style chase. It uses three generated shots with a brass-and-strings score.
 
 > Franco-Belgian comic style, early-1900s animation with film grain: a steam train races a cliffside railway through a mountain canyon; a cloaked figure rides the carriage roof; a boy on a bicycle gives chase
 
@@ -44,7 +65,7 @@ Describe a shot in chat and iterate until it's right. These are the two example 
 | --- | --- | --- |
 | ![Steam train threading a mountain canyon](site/public/cut/landing/chase-1.jpg) | ![Cloaked figure on the carriage roof](site/public/cut/landing/chase-2.jpg) | ![Boy on a bicycle chasing the train](site/public/cut/landing/chase-3.jpg) |
 
-**City poster series** — matched hand-painted travel posters, animated into 4-second clips and cut with captions and a waltz:
+**City poster series** uses matching hand-painted travel posters. The posters are animated into 4-second clips and edited together with captions and a waltz.
 
 > Hand-painted travel poster, PARIS — woman in a trench coat crossing the street, Eiffel Tower behind, café awnings, 'Live the romance' in red script
 
@@ -55,28 +76,33 @@ Describe a shot in chat and iterate until it's right. These are the two example 
 <p align="center">
   <img src=".github/cut-editor-travel-posters.gif" alt="The Donkey Cut editor with the City poster series open: both posters generated in the side panel, animated clips with captions and a waltz on the timeline" width="960" />
   <br />
-  <sub><i>The poster series in the editor — both posters animated into clips, cut with captions and a waltz.</i></sub>
+  <sub><i>The poster series in the editor. Both posters are animated into clips with captions and a waltz.</i></sub>
 </p>
 
 ### How it works
 
-The hosted page and the local engine split the work: the page comes from wherever is convenient, the work always happens on your Mac.
+The editor looks and works the same everywhere. Each project decides where its files are stored and where processing happens.
 
 ```text
-browser (donkeycut.com or localhost)
-        │  API calls
-        ▼
-Cut engine on 127.0.0.1 — shipped and supervised by the Donkey Mac app
-        │
-        ▼
-local disk · bundled ffmpeg · on-device speech · your claude/codex logins
+browser (the editor)
+  ├─ local project ───▶ the browser's own storage, on your computer
+  │
+  ├─ cloud project ───▶ hosted APIs · Postgres · R2 storage
+  │
+  └─ with the Mac app ▶ Cut engine on 127.0.0.1
+                        local disk (~/Movies) · bundled ffmpeg
+                        · on-device speech · your claude/codex logins
 ```
 
-On a hosted deploy every Cut API answers 404 before any handler runs — the server side of Cut exists only on your machine. The full architecture lives in [`docs/guides/cut/README.md`](docs/guides/cut/README.md).
+The local engine only runs on your Mac. On a hosted deployment, these routes return 404 before any handler runs.
+
+For the full architecture, see [`docs/guides/cut/README.md`](docs/guides/cut/README.md).
 
 ### Pricing
 
-The editor is free. Pay only for AI-generated media: the Pro plan ($20/month) adds monthly credits for image, video, voiceover, and music generation.
+The editor is free.
+
+We only charge for cloud storage and AI content generation.
 
 ---
 
@@ -84,9 +110,9 @@ The editor is free. Pay only for AI-generated media: the Pro plan ($20/month) ad
 
 | Path | What's there |
 | --- | --- |
-| [`apps/Donkey`](apps/Donkey) | The macOS companion app; it ships and supervises the Cut engine. |
-| [`site`](site) | The Next.js site, the Cut editor and engine, and hosted API routes. |
-| [`docs`](docs/README.md) | Supported product behavior and engineering guides. |
+| [`apps/Donkey`](apps/Donkey) | The macOS companion app. It runs the Cut engine and handles screen recording. |
+| [`site`](site) | The Next.js site, Cut editor, engine, cloud backend, and hosted API routes. |
+| [`docs`](docs/README.md) | Product documentation and engineering guides. |
 
 ## Build and run
 
@@ -99,7 +125,7 @@ npm run db:generate
 npm run dev
 ```
 
-The editor is at `http://localhost:3000/cut`.
+Then open `http://localhost:3000/cut`.
 
 Run the macOS app in development:
 
@@ -115,15 +141,17 @@ Build the packaged app and installer disk image:
 open dist/Donkey.app
 ```
 
-The site uses Supabase Postgres through Prisma. Keep local credentials in `.env` and never commit them.
+The site uses Supabase Postgres through Prisma. Keep local credentials in `.env`. Never commit them.
 
 ## Documentation
 
-[`docs/README.md`](docs/README.md) is the source of truth for supported behavior. Good starting points:
+[`docs/README.md`](docs/README.md) is the source of truth for supported behavior.
 
-- [Cut](docs/guides/cut/README.md) — the editor, its local engine, and the boundary between them.
-- [Install Donkey Locally](docs/guides/install-donkey.md) — building the app bundle.
+Good places to start:
+
+* [Cut](docs/guides/cut/README.md) for the editor, local engine, and cloud projects.
+* [Install Donkey Locally](docs/guides/install-donkey.md) for building the app bundle.
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+Apache 2.0. See [LICENSE](LICENSE).
