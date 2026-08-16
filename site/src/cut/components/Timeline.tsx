@@ -3768,6 +3768,13 @@ function Filmstrip({
   grade?: ColorGrade;
 }) {
   const tint = gradeTint(grade);
+  // No thumbs yet — the media is still streaming into the browser store. A
+  // pulsing skeleton fills the box until the strip can draw real frames.
+  if (!frames.length) {
+    return (
+      <div className="tl-filmstrip-skeleton pointer-events-none absolute inset-0 animate-pulse bg-muted" />
+    );
+  }
   return (
     <div
       className="tl-filmstrip pointer-events-none absolute inset-0 isolate"
