@@ -130,14 +130,17 @@ type StoreIndex = {
   version: 1;
   folders: ProjectFolder[];
   pendingUploads: PendingUpload[];
+  /** When each project was last opened here — the recency order eviction
+   * walks when the store needs room. */
+  opens: Record<string, number>;
 };
 
-const EMPTY_INDEX: StoreIndex = { version: 1, folders: [], pendingUploads: [] };
+const EMPTY_INDEX: StoreIndex = { version: 1, folders: [], pendingUploads: [], opens: {} };
 
 export async function readIndex(): Promise<StoreIndex> {
   const idx = await readJsonAt<StoreIndex>(await dirAt(userParts(), false), "index.json");
   return idx && Array.isArray(idx.folders)
-    ? { ...EMPTY_INDEX, ...idx, pendingUploads: idx.pendingUploads ?? [] }
+    ? { ...EMPTY_INDEX, ...idx, pendingUploads: idx.pendingUploads ?? [], opens: idx.opens ?? {} }
     : EMPTY_INDEX;
 }
 

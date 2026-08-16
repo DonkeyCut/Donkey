@@ -46,7 +46,7 @@ import { apiFetch, apiJson, getBackend, hasLocalCompute } from "./backend";
 import { fetchSignedMediaUrls, pinDocBase } from "./backend/cloud";
 import { cancelRevoke, resolveRegisteredBlob, revokeRegistered } from "./backend/browser/registry";
 import { markSignedBatch } from "./mediaLinks";
-import { cacheCloudMedia, dropLocalMedia, localMediaUrl } from "./mediaSync";
+import { dropLocalMedia, localMediaUrl, prefetchCloudMedia } from "./mediaSync";
 import {
   dropCachedDoc,
   readCachedDoc,
@@ -188,6 +188,11 @@ export interface EditorState {
   sharedFeatures: ShareFeatures | null;
 
   assets: MediaAsset[];
+  /** Media files still streaming into the browser store, by fileName.
+   * Timeline items on these show a loading chip and hold their hover
+   * controls until the local bytes land — or the prefetch gives up and
+   * signed URLs carry the file. */
+  loadingMedia: Set<string>;
   /** Every video clip, on any track. Tracks number 0..N bottom-up: track 0
    * carries the transition sequence, higher tracks composite in front. A
    * clip's `track` field is the only thing that places it. */
@@ -1246,6 +1251,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       saveState: "saved",
       resumePush: false,
       assets: [],
+      loadingMedia: new Set<string>(),
       clips: [],
       transitions: [],
       audioClips: [],
@@ -1291,6 +1297,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     sharedFeatures: null,
 
     assets: [],
+    loadingMedia: new Set<string>(),
     clips: [],
     transitions: [],
     audioClips: [],
@@ -1447,12 +1454,39 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             writeCachedMediaLinks(id, signed.urls, signed.expiresAt);
           }
           if (getBackend().kind === "cloud") {
-            // First playback over a signed link streams the file into the
-            // browser store behind the editor; the next open plays from disk.
-            for (const a of missing) {
-              const url = signed.urls.get(a.fileName);
-              if (url) cacheCloudMedia(id, a.fileName, url);
+            // Pull every missing file into the browser store behind the
+            // editor, nearest timeline use first, and swap each asset onto
+            // its local bytes as it lands — scrubbing goes local front to
+            // back, and the next open plays entirely from disk.
+            const firstUse = new Map<string, number>();
+            for (const c of [...doc.clips, ...doc.audioClips]) {
+              const asset = doc.assets.find((x) => x.id === c.assetId);
+              if (!asset) continue;
+              firstUse.set(
+                asset.fileName,
+                Math.min(firstUse.get(asset.fileName) ?? Infinity, c.start)
+              );
             }
+            const queue = missing
+              .flatMap((a) => {
+                const url = signed.urls.get(a.fileName);
+                return url ? [{ fileName: a.fileName, url }] : [];
+              })
+              .sort(
+                (x, y) =>
+                  (firstUse.get(x.fileName) ?? Infinity) - (firstUse.get(y.fileName) ?? Infinity)
+              );
+            set({ loadingMedia: new Set(queue.map((f) => f.fileName)) });
+            prefetchCloudMedia(id, queue, (fileName, url) => {
+              const st = get();
+              if (st.projectId !== id) return;
+              if (url) st.applyMediaUrls(new Map([[fileName, url]]));
+              set((s) => {
+                const next = new Set(s.loadingMedia);
+                next.delete(fileName);
+                return { loadingMedia: next };
+              });
+            });
           }
         } else {
           markSignedBatch(id, null);

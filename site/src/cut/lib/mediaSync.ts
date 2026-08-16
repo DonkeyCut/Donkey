@@ -8,9 +8,17 @@
 // open re-marks the asset and resumes the upload. Once the cloud confirms the
 // object, the entry clears and the local file becomes a read cache.
 //
-// The cache side runs the other way: media that hydrated over a signed URL is
-// streamed into the store in the background, so the next open of the same
-// project on this machine plays from disk.
+// The cache side runs the other way: opening a cloud project prefetches every
+// asset this browser is missing — one file at a time, nearest timeline use
+// first, so the downloads never race each other for bandwidth — and each file
+// that lands swaps the playing asset onto its local bytes. Scrubbing goes
+// local as the queue drains, and the next open plays entirely from disk.
+//
+// Cached copies are also what eviction spends: when the origin's storage
+// quota runs short, the least recently opened cloud projects' caches are
+// dropped to make room. Pinned files (a `pendingUploads` entry means this
+// browser holds the only copy) and browser-resident projects (their store IS
+// the project) are never touched — losing a cache only costs a re-download.
 //
 // Every function is a no-op wherever the browser can't hold a store, so call
 // sites stay unconditional.
@@ -18,7 +26,9 @@ import {
   askPersist,
   deleteMedia,
   deleteProject,
+  listProjectIds,
   mediaDir,
+  projectDir,
   readFileAt,
   readIndex,
   saveMedia,
@@ -43,6 +53,7 @@ export async function stashCloudMedia(
 ): Promise<string | null> {
   if (!supportsBrowserStore()) return null;
   try {
+    await makeRoom(projectId, file.size);
     const dir = await mediaDir(projectId, true);
     if (!dir) return null;
     await writeFileAt(dir, fileName, file);
@@ -69,6 +80,7 @@ export async function stashUnclaimedMedia(
 ): Promise<{ fileName: string; url: string } | null> {
   if (!supportsBrowserStore()) return null;
   try {
+    await makeRoom(projectId, file.size);
     const fileName = await saveMedia(projectId, file, file.name);
     await updateIndex((idx) => {
       idx.pendingUploads = [
@@ -164,41 +176,176 @@ export async function dropLocalMedia(projectId: string, fileName: string): Promi
 /** A project delete's local half: its whole subtree, URLs, and pins. */
 export async function dropLocalProjectCopy(projectId: string): Promise<void> {
   if (!supportsBrowserStore()) return;
+  if (prefetch?.projectId === projectId) prefetch.ctrl.abort();
   revokeRegistered(`/api/cut/projects/${projectId}/`);
   await deleteProject(projectId).catch(() => {});
   try {
     await updateIndex((idx) => {
       idx.pendingUploads = idx.pendingUploads.filter((p) => p.projectId !== projectId);
+      delete idx.opens[projectId];
     });
   } catch {
     // Orphaned pins for a gone project are swept on the next open attempt.
   }
 }
 
-const caching = new Set<string>();
+// --- prefetch ---
 
-/** Cache-on-read: stream a signed URL's bytes into the store in the
- * background, so the next open of this project plays the file from disk.
- * Fire-and-forget; a failed or refused write costs nothing but the cache. */
-export function cacheCloudMedia(projectId: string, fileName: string, url: string): void {
-  if (!supportsBrowserStore()) return;
-  const path = mediaPath(projectId, fileName);
-  if (registeredUrl(path) || caching.has(path)) return;
-  caching.add(path);
+type PrefetchRun = { projectId: string; ctrl: AbortController };
+let prefetch: PrefetchRun | null = null;
+
+/** Prefetch a cloud project's missing media into the store, one file at a
+ * time in the order given. Every file reports back through `onDone` exactly
+ * once — its blob URL when the bytes landed, null when the run gave up on it
+ * — so the caller can swap playing assets onto local bytes mid-session and
+ * retire per-file loading state either way. Starting a prefetch cancels any
+ * earlier one — the queue follows the open project — and records the open for
+ * eviction recency. Fire-and-forget; a failed or refused write costs nothing
+ * but the cache. */
+export function prefetchCloudMedia(
+  projectId: string,
+  files: { fileName: string; url: string }[],
+  onDone?: (fileName: string, blobUrl: string | null) => void
+): void {
+  if (!supportsBrowserStore()) {
+    for (const f of files) onDone?.(f.fileName, null);
+    return;
+  }
+  prefetch?.ctrl.abort();
+  const run: PrefetchRun = { projectId, ctrl: new AbortController() };
+  prefetch = run;
   void (async () => {
-    try {
-      if (await localMediaFile(projectId, fileName)) return;
-      const res = await fetch(url);
-      if (!res.ok) return;
-      const blob = await res.blob();
-      const dir = await mediaDir(projectId, true);
-      if (!dir) return;
-      await writeFileAt(dir, fileName, blob);
-    } catch {
-      // Out of space or offline mid-stream: the abort discards the partial
-      // write, and signed URLs keep the project playing.
-    } finally {
-      caching.delete(path);
+    await updateIndex((idx) => {
+      idx.opens = { ...idx.opens, [projectId]: Date.now() };
+    }).catch(() => {});
+    for (let i = 0; i < files.length; i++) {
+      if (run.ctrl.signal.aborted) return;
+      const f = files[i];
+      const r = await cacheOne(projectId, f.fileName, f.url, run.ctrl.signal).catch(
+        // Offline mid-stream: the abort discarded the partial write.
+        () => ({ go: true, url: null as string | null })
+      );
+      if (run.ctrl.signal.aborted) return;
+      onDone?.(f.fileName, r.url);
+      if (!r.go) {
+        // Out of room even after eviction — signed URLs carry the rest.
+        for (const rest of files.slice(i + 1)) onDone?.(rest.fileName, null);
+        return;
+      }
     }
   })();
+}
+
+/** Stream one file into the store. `go: false` means storage is out of room
+ * even after eviction, which ends the whole run. */
+async function cacheOne(
+  projectId: string,
+  fileName: string,
+  url: string,
+  signal: AbortSignal
+): Promise<{ go: boolean; url: string | null }> {
+  const path = mediaPath(projectId, fileName);
+  const prior = registeredUrl(path);
+  if (prior) return { go: true, url: prior };
+  const existing = await localMediaFile(projectId, fileName);
+  if (existing) return { go: true, url: registerBlobFile(path, existing) };
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, { signal });
+    if (!res.ok || !res.body) return { go: true, url: null };
+    await makeRoom(projectId, Number(res.headers.get("content-length")) || 0);
+    const dir = await mediaDir(projectId, true);
+    if (!dir) return { go: true, url: null };
+    const w = await (await dir.getFileHandle(fileName, { create: true })).createWritable();
+    try {
+      await res.body.pipeTo(w, { signal });
+      break;
+    } catch (err) {
+      // pipeTo aborts the writable, which discards the partial write.
+      if (signal.aborted) return { go: false, url: null };
+      const quota = err instanceof DOMException && err.name === "QuotaExceededError";
+      if (!quota) return { go: true, url: null }; // a blip skips this file, the queue goes on
+      if (attempt > 0) return { go: false, url: null };
+      // The room estimate undershot; evict against what the stream really
+      // needed and give the file one more pass.
+      await makeRoom(projectId, res.headers.get("content-length") ? 0 : 1 << 30);
+    }
+  }
+  const file = await readFileAt(await mediaDir(projectId), fileName);
+  return { go: true, url: file ? registerBlobFile(path, file) : null };
+}
+
+// --- eviction ---
+
+/** Free space to keep under the origin's storage quota beyond what a write
+ * needs, so caching never runs the store to the brim. */
+const QUOTA_MARGIN = 512 * 1024 * 1024;
+
+/** Make room for `bytes` of new media, evicting least-recently-opened cloud
+ * projects' cached copies until the write fits under quota. Pinned files and
+ * browser-resident projects are exempt; `keepId` (the project being written)
+ * is never a candidate. */
+async function makeRoom(keepId: string, bytes: number): Promise<void> {
+  let est: StorageEstimate | undefined;
+  try {
+    est = await navigator.storage.estimate?.();
+  } catch {
+    return;
+  }
+  if (!est?.quota) return;
+  const margin = Math.min(QUOTA_MARGIN, est.quota * 0.1);
+  let deficit = (est.usage ?? 0) + bytes + margin - est.quota;
+  if (deficit <= 0) return;
+  const idx = await readIndex();
+  const pinned = new Set(idx.pendingUploads.map((p) => `${p.projectId}/${p.fileName}`));
+  const candidates: { id: string; openedAt: number }[] = [];
+  for (const id of await listProjectIds()) {
+    if (id === keepId) continue;
+    // A directory holding a doc is a browser-resident project — the store is
+    // its only home. Cached cloud copies hold media alone.
+    if (await readFileAt(await projectDir(id), "project.json")) continue;
+    candidates.push({ id, openedAt: idx.opens[id] ?? 0 });
+  }
+  candidates.sort((a, b) => a.openedAt - b.openedAt);
+  for (const c of candidates) {
+    if (deficit <= 0) return;
+    deficit -= await evictCachedCopy(c.id, pinned);
+  }
+}
+
+/** Drop a cloud project's cached media, keeping pinned files. A copy left
+ * empty loses its directory and its recency entry too. */
+async function evictCachedCopy(id: string, pinned: Set<string>): Promise<number> {
+  const dir = await mediaDir(id);
+  if (!dir) return 0;
+  const names: string[] = [];
+  try {
+    for await (const [name, handle] of dir) {
+      if (handle.kind === "file") names.push(name);
+    }
+  } catch {
+    return 0;
+  }
+  let freed = 0;
+  let kept = 0;
+  for (const name of names) {
+    if (pinned.has(`${id}/${name}`)) {
+      kept++;
+      continue;
+    }
+    const size = (await readFileAt(dir, name))?.size ?? 0;
+    revokeRegistered(mediaPath(id, name));
+    try {
+      await dir.removeEntry(name);
+      freed += size;
+    } catch {
+      // Still held open somewhere; count nothing and move on.
+    }
+  }
+  if (!kept) {
+    await deleteProject(id).catch(() => {});
+    await updateIndex((idx) => {
+      delete idx.opens[id];
+    }).catch(() => {});
+  }
+  return freed;
 }
