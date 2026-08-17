@@ -75,11 +75,12 @@ const TRANSITION_ICONS: Record<TransitionStyle, LucideIcon> = {
 };
 
 const VIDEO_H = 64;
-/** Band at a video row's top and bottom edge where a drag aims at the seam —
- * the would-be new track between rows. A drag's own home row keeps no bands,
- * so a horizontal slide along the row stays a slide however close to the edge
- * it runs; the seams engage once the pointer crosses out of the row. */
-const SEAM_PX = 10;
+/** How far past the top or bottom of the video stack a drag has to carry a
+ * clip to open a new track. Every drop inside the stack lands on a row, which
+ * opens room for it, so this reach is the one gesture that adds a track — and
+ * it is long enough that drifting off a row while sliding along it never
+ * does. */
+const NEW_TRACK_PX = 24;
 const OVERLAY_H = VIDEO_H; // every video track shares the same row height
 /** Extra row height under a video row whose clips carry mask keys: room for
  * the key rail below the bars. The diamonds read as part of the clip, so the
@@ -92,16 +93,6 @@ const AUDIO_H = 44;
  * placement union (existing track, 0 included / newly-inserted track). */
 type TrackTarget = VideoTrackPlacement;
 
-/** Encode/decode a placement in a row's `data-drop` attribute. */
-function placementAttr(place: TrackTarget): string {
-  return place.kind === "track" ? `track:${place.track}` : `insert:${place.level}`;
-}
-function parsePlacement(raw: string): TrackTarget | null {
-  const [k, n] = raw.split(":");
-  if (k === "track") return { kind: "track", track: Number(n) };
-  if (k === "insert") return { kind: "insert", level: Number(n) };
-  return null;
-}
 /** Two placements point at the same drop. */
 function samePlacement(a: TrackTarget | null, b: TrackTarget | null): boolean {
   if (!a || !b || a.kind !== b.kind) return false;
@@ -558,6 +549,9 @@ export function Timeline() {
   // Stage-x pixel a snapped title edge sits at, for the guide line (null = off).
   const [snapX, setSnapX] = useState<number | null>(null);
   const videoDragActive = videoDragging || dropType === "video";
+  // The drop the pointer resolved to last, so a new track that has opened
+  // under the pointer keeps its hold until the drag returns to a row.
+  const lastDrop = useRef<TrackTarget | null>(null);
 
   // Residents sliding ahead of an in-flight drop: clip id → the start it
   // previews at. Painted as an animated left offset, so the row opens room
@@ -569,69 +563,70 @@ export function Timeline() {
     return m;
   }, [assetDrop, overlayDrop]);
 
-  // Which drop the cursor is over: an existing track (0 included), or a
-  // would-be new track — past the stack's edges, or at a seam between rows.
-  // Hit-test live via elementFromPoint — rows (new-track rows included) carry
-  // a `data-drop` placement; a pointer near a row's edge aims at the seam, so
-  // the new-track row there reveals only while the drag is close and folds
-  // away when it leaves. Every drag flavor resolves through here — clips
-  // grabbed off the timeline and all external media alike.
+  // Which drop the cursor is over. Inside the video stack the answer is always
+  // a row: the row under the pointer takes the clip and opens room for it, so
+  // aiming anywhere over a track lands on that track. A new track comes from
+  // one gesture — carrying the clip past the top or the bottom of the stack —
+  // and that new row then mounts under the pointer, so it holds itself while
+  // the pointer stays out there and lets go the moment it returns to a row.
+  // `draggedId` is the clip being carried, when one is; every drag flavor
+  // resolves through here, clips grabbed off the timeline and external media
+  // alike.
   const resolveDropTrack = useCallback(
-    (clientX: number, clientY: number, homeTrack?: number): TrackTarget => {
+    (clientX: number, clientY: number, draggedId?: string): TrackTarget => {
     // An empty video timeline has no base yet: the first clip always lands on
     // track 0, whatever height the pointer is at. Otherwise a drop above the
     // thin empty row resolves to an overlay track, leaving track 0 empty — and
     // an empty track 0 plays black (the compositor's master lives there).
     const st = useEditor.getState();
-    if (st.clips.length === 0) return TRACK_ZERO;
+    const answer = (t: TrackTarget) => ((lastDrop.current = t), t);
+    if (st.clips.length === 0) return answer(TRACK_ZERO);
     const rows = Array.from(
-      innerRef.current?.querySelectorAll<HTMLElement>("[data-drop]") ?? []
-    );
-    // The seam under a row opens a new track directly below it: below a track
-    // row that is z-level `track` (level 0 under track 0 — the spine
-    // transplants onto the drop); under an already-open new-track row it is
-    // that row's own placement.
-    const topInsertLevelNow = () =>
-      Math.max(0, ...overlayLayers(useEditor.getState().clips).map((c) => c.track)) + 1;
-    const seamUnder = (row: HTMLElement | undefined): TrackTarget => {
-      const p = row ? parsePlacement(row.dataset.drop!) : null;
-      if (!p) return { kind: "insert", level: topInsertLevelNow() };
-      return p.kind === "track" ? { kind: "insert", level: p.track } : p;
-    };
-    const el = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
-    const zone = el?.closest<HTMLElement>("[data-drop]");
-    const parsed = zone ? parsePlacement(zone.dataset.drop!) : null;
-    if (parsed?.kind === "insert") return parsed;
-    if (parsed && zone) {
-      // The drag's own row keeps no seam bands: a horizontal slide near the
-      // row's edge stays on the row, and the adjacent seams stay reachable
-      // through the neighboring row's band or the gap between rows.
-      if (parsed.track === homeTrack) return parsed;
-      const r = zone.getBoundingClientRect();
-      if (clientY <= r.top + SEAM_PX) return seamUnder(rows[rows.indexOf(zone) - 1]);
-      if (clientY >= r.bottom - SEAM_PX) return { kind: "insert", level: parsed.track };
-      return parsed;
-    }
-    // No row under the pointer: past the stack's ends, or in a gap between
-    // rows — the seam of the row above it.
-    if (rows.length) {
-      if (clientY < rows[0].getBoundingClientRect().top)
-        return { kind: "insert", level: topInsertLevelNow() };
-      if (clientY > rows[rows.length - 1].getBoundingClientRect().bottom)
-        return { kind: "insert", level: 0 };
-      const below = rows.findIndex((r) => r.getBoundingClientRect().top > clientY);
-      if (below > 0) return seamUnder(rows[below - 1]);
-    }
-    return TRACK_ZERO;
+      innerRef.current?.querySelectorAll<HTMLElement>("[data-tl-vrow]") ?? []
+    )
+      .map((el) => ({ track: Number(el.dataset.tlVrow), r: el.getBoundingClientRect() }))
+      .sort((a, b) => a.r.top - b.r.top);
+    if (!rows.length) return answer(TRACK_ZERO);
+    const top = rows[0];
+    const bottom = rows[rows.length - 1];
+    const held = lastDrop.current?.kind === "insert" ? lastDrop.current.level : null;
+    const topLevel = Math.max(0, ...overlayLayers(st.clips).map((c) => c.track)) + 1;
+    // A clip alone on the outermost row has no new track to open on that side:
+    // the row it left collapses behind it, so it would land alone on a fresh
+    // row with the same picture on it. The reach that way aims at rows only;
+    // the other way still reorders the stack, so it stays live.
+    const dragged = draggedId ? st.clips.find((c) => c.id === draggedId) : undefined;
+    const soleTrack =
+      dragged && st.clips.every((c) => c.track !== dragged.track || c.id === dragged.id)
+        ? dragged.track
+        : null;
+    // Past the stack: a new top layer above it, a new track 0 below it (the
+    // spine transplants onto the drop). Reaching there takes NEW_TRACK_PX of
+    // travel; holding it takes none, since by then the new track's own row
+    // fills the space the pointer is in.
+    if (soleTrack !== top.track && clientY < top.r.top - (held === topLevel ? 0 : NEW_TRACK_PX))
+      return answer({ kind: "insert", level: topLevel });
+    if (soleTrack !== bottom.track && clientY > bottom.r.bottom + (held === 0 ? 0 : NEW_TRACK_PX))
+      return answer({ kind: "insert", level: 0 });
+    // Inside the stack: the row the pointer is over, or the one under it when
+    // the pointer sits in the gap between two rows. The row makes space for
+    // the drop — nothing new opens between two tracks.
+    const row = rows.find((r) => clientY <= r.r.bottom) ?? bottom;
+    return answer({ kind: "track", track: row.track });
   }, []);
 
   // Drive the drop preview while a clip is dragged across tracks: highlight the
-  // target track's slot or a between-track insertion line. An existing track
+  // target row's landing slot, or the new track's row past the stack. A row
   // takes the drop as an insert at the pointer — its later clips ripple right —
   // so the slot previews the ripple landing the drop will actually take.
   const previewCross = useCallback(
     (target: TrackTarget | null, start = 0, len = 0, ghost?: DropGhost) => {
-      if (target === null) return setOverlayDrop(null);
+      // The drag let go of the placement system (it is home, or it ended): the
+      // next resolve starts from the geometry alone.
+      if (target === null) {
+        lastDrop.current = null;
+        return setOverlayDrop(null);
+      }
       const landing =
         target.kind === "track"
           ? rippleInsert(
@@ -644,6 +639,13 @@ export function Timeline() {
     },
     []
   );
+
+  // A drag that left the timeline or landed lets go of the placement hold too,
+  // so the next one starts from the geometry alone.
+  const endCrossDrag = useCallback(() => {
+    lastDrop.current = null;
+    setOverlayDrop(null);
+  }, []);
 
   // Releasing a track-0 clip on any other track lifts it out onto that track
   // (or a new one); on its own track the lane coordinator commits the move.
@@ -1401,7 +1403,7 @@ export function Timeline() {
       );
     },
     onDragLeave: (e: React.DragEvent) => {
-      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOverlayDrop(null);
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) endCrossDrag();
     },
     onDrop: (e: React.DragEvent) => {
       // A sticker crossing a video row is still headed for the element rows;
@@ -1411,7 +1413,7 @@ export function Timeline() {
       e.stopPropagation();
       const place = resolveDropTrack(e.clientX, e.clientY);
       const t = Math.max(0, timeAt(e.clientX));
-      setOverlayDrop(null);
+      endCrossDrag();
       setDropType(null);
       const lib = draggingLibrary();
       const libId = draggedLibraryId(e);
@@ -1533,26 +1535,17 @@ export function Timeline() {
       />
     ) : null;
 
-  // A rail mounts only while the in-flight video drag targets its seam:
-  // `resolveDropTrack` turns a pointer near a row edge into that seam's
-  // insert placement, and the mounted rail's own drop zone then holds the
-  // target while the pointer stays inside it. One gate for every rail and
-  // every drag flavor — internal segments and external media alike.
-  const railOpen = (place: TrackTarget) =>
-    videoDragActive && samePlacement(overlayDrop?.target ?? null, place);
-
   // The would-be new video track, one row past the stack's edge — the same
-  // grown-row experience as the audio and title lanes. Dropping here opens a
-  // brand-new track at z-level `level`.
+  // grown-row experience as the audio and title lanes. It mounts only while
+  // the drag is out there, and it grows away from the stack (the top one
+  // carries the rows below it down with the pointer's own ghost), so the row
+  // the drag came from stays where it was. Dropping here opens a brand-new
+  // track at z-level `level`.
   const newTrackRow = (level: number) => {
     const place: TrackTarget = { kind: "insert", level };
+    if (!videoDragActive || !samePlacement(overlayDrop?.target ?? null, place)) return null;
     return (
-      <div
-        className="relative mt-1.5"
-        style={{ height: OVERLAY_H }}
-        data-drop={placementAttr(place)}
-        {...overlayDropHandlers}
-      >
+      <div className="relative mt-1.5" style={{ height: OVERLAY_H }}>
         {laneRail(OVERLAY_H - 2)}
         {trackSlot(place, OVERLAY_H - 4)}
       </div>
@@ -1696,7 +1689,7 @@ export function Timeline() {
       onDragLeave={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
           setAssetDrop(null);
-          setOverlayDrop(null);
+          endCrossDrag();
           setAudioDrop(null);
           setDropType(null);
           setElementDrop(null);
@@ -1713,7 +1706,7 @@ export function Timeline() {
         setXTileDrag(false);
         const videoPlace = resolveDropTrack(e.clientX, e.clientY);
         setAssetDrop(null);
-        setOverlayDrop(null);
+        endCrossDrag();
         setAudioDrop(null);
         setDropType(null);
         const t = dropTimeAt(e.clientX);
@@ -2243,22 +2236,17 @@ export function Timeline() {
             </div>
           )}
 
-          {/* New-track rails reveal on approach: a drag near a row edge (or
-              past the stack) resolves to that seam's insert level, the rail
-              mounts as a full row there, and it folds away the moment the
-              drag aims elsewhere. The dragged clip's ghost anchors to its row
-              live, so the mount-time shift never pulls it off the pointer. */}
-          {railOpen({ kind: "insert", level: topInsertLevel }) &&
-            newTrackRow(topInsertLevel)}
+          {/* A drag carried above the stack opens a new top layer: the row
+              grows in here and folds away when the drag comes back down. */}
+          {newTrackRow(topInsertLevel)}
           {aboveTracks.map((track) => {
             const railH = railFor(overlayTrackSpans.get(track) ?? []);
             return (
-            <Fragment key={`ov-${track}`}>
             <div
+              key={`ov-${track}`}
               className="relative mt-1.5"
               style={{ height: OVERLAY_H + railH }}
               data-tl-vrow={track}
-              data-drop={placementAttr({ kind: "track", track })}
               onPointerDown={deselectIfSelf}
               onContextMenu={openGapMenu({ kind: "video", index: track })}
               {...overlayDropHandlers}
@@ -2302,18 +2290,15 @@ export function Timeline() {
               ))}
               {trackSlot({ kind: "track", track }, OVERLAY_H - 4)}
             </div>
-            {/* The would-be new track under this row: a drop opens it between
-                this track and the one below. */}
-            {railOpen({ kind: "insert", level: track }) && newTrackRow(track)}
-            </Fragment>
             );
           })}
 
           {/* An empty track 0 disappears like any other empty track. It
               renders while it has clips, while the whole project is empty
               (the first drop target), for the length of an external media
-              drag, or once an internal drag targets it — the seam where it
-              sat resolves to TRACK_ZERO, so heading there reveals the row. */}
+              drag, or once a drag targets it. An empty one that no row shows
+              is reached by carrying the clip under the stack: the new-track
+              row below opens track 0 again. */}
           {(spans.length > 0 ||
             total <= 0 ||
             dropType === "video" ||
@@ -2322,7 +2307,6 @@ export function Timeline() {
             className="relative mt-1.5"
             style={{ height: VIDEO_H + rail0 }}
             data-tl-vrow={0}
-            data-drop={placementAttr(TRACK_ZERO)}
             onPointerDown={deselectIfSelf}
             onContextMenu={openGapMenu({ kind: "video", index: 0 })}
           >
@@ -2364,12 +2348,11 @@ export function Timeline() {
           </div>
           )}
 
-          {/* The bottom-side new track grows the stack downward, like the
-              audio and title lanes' extra row — nothing above it moves.
-              Dropping here opens a new track 0: the whole stack renumbers up
-              and the spine (ripple, transitions) transplants onto the drop. */}
-          {railOpen({ kind: "insert", level: bottomInsertLevel }) &&
-            newTrackRow(bottomInsertLevel)}
+          {/* A drag carried under the stack grows it downward — nothing above
+              moves. Dropping here opens a new track 0: the whole stack
+              renumbers up and the spine (ripple, transitions) transplants onto
+              the drop. */}
+          {newTrackRow(bottomInsertLevel)}
 
           {(audioClips.length > 0 || audioDrop !== null) && (
             <div
@@ -3261,9 +3244,10 @@ function ClipView({
   partAt?: number;
   onDrag: (d: LaneDrag | null) => void;
   onSnap: (x: number | null) => void;
-  /** Which drop the given screen point is over (a track / an insert gap);
-   * `homeTrack` marks the drag's own row, which keeps no seam bands. */
-  resolveTarget: (clientX: number, clientY: number, homeTrack?: number) => TrackTarget;
+  /** Which drop the given screen point is over: a video row, or a new track
+   * past the stack's edge. The carried clip's id decides whether a new track
+   * is on offer at all. */
+  resolveTarget: (clientX: number, clientY: number, draggedId?: string) => TrackTarget;
   /** Preview a cross-track drop (null clears it). */
   onCrossMove: (target: TrackTarget | null, start?: number, len?: number) => void;
   /** Commit a cross-track drop of this clip at `start`. */
@@ -3298,8 +3282,8 @@ function ClipView({
   );
 
   // The move gesture is the shared lane behavior (parting, snapping); its
-  // verticality is the video placement system — upper tracks and insert
-  // gaps — resolved by DOM hit-testing.
+  // verticality is the video placement system — upper tracks and the new
+  // tracks past the stack — resolved from the rows' geometry.
   const ui = {
     pps,
     rowH: VIDEO_H,
@@ -3309,7 +3293,7 @@ function ClipView({
     onDrag,
     onSnap,
     vertical: {
-      resolve: (ev: PointerEvent) => resolveTarget(ev.clientX, ev.clientY, clip.track),
+      resolve: (ev: PointerEvent) => resolveTarget(ev.clientX, ev.clientY, clip.id),
       isHome: (t: TrackTarget) => samePlacement(t, TRACK_ZERO),
       preview: (t: TrackTarget | null, start: number, len: number) =>
         t ? onCrossMove(t, start, len) : onCrossMove(null),
@@ -4106,9 +4090,10 @@ function OverlayClipView({
   partAt?: number;
   onDrag: (d: LaneDrag | null) => void;
   onSnap: (x: number | null) => void;
-  /** Which drop the given screen point is over (a track / an insert gap);
-   * `homeTrack` marks the drag's own row, which keeps no seam bands. */
-  resolveTarget: (clientX: number, clientY: number, homeTrack?: number) => TrackTarget;
+  /** Which drop the given screen point is over: a video row, or a new track
+   * past the stack's edge. The carried clip's id decides whether a new track
+   * is on offer at all. */
+  resolveTarget: (clientX: number, clientY: number, draggedId?: string) => TrackTarget;
   onCrossMove: (target: TrackTarget | null, start?: number, len?: number) => void;
   onCrossDrop: (id: string, target: TrackTarget, start: number) => void;
   onDragActive: (active: boolean) => void;
@@ -4142,8 +4127,8 @@ function OverlayClipView({
   if (!asset) return null;
 
   // The move gesture is the shared lane behavior (parting, snapping); its
-  // verticality is the video placement system — other tracks (0 included)
-  // and insert gaps — resolved by DOM hit-testing.
+  // verticality is the video placement system — other tracks (0 included) and
+  // the new tracks past the stack — resolved from the rows' geometry.
   const ui = {
     pps,
     rowH: OVERLAY_H,
@@ -4153,7 +4138,7 @@ function OverlayClipView({
     onDrag,
     onSnap,
     vertical: {
-      resolve: (ev: PointerEvent) => resolveTarget(ev.clientX, ev.clientY, clip.track),
+      resolve: (ev: PointerEvent) => resolveTarget(ev.clientX, ev.clientY, clip.id),
       isHome: (t: TrackTarget) => samePlacement(t, { kind: "track", track: clip.track }),
       preview: (t: TrackTarget | null, start: number, len: number) =>
         t ? onCrossMove(t, start, len) : onCrossMove(null),
