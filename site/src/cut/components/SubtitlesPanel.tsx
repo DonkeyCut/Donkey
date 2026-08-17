@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { ColorField } from "@/cut/components/ColorField";
 import { parseNumberInput } from "@/cut/components/ScrubValue";
 import { ValueSlider } from "@/cut/components/ValueSlider";
 import { GenerateSubtitlesAudio } from "@/cut/components/VoicePicker";
@@ -189,9 +190,6 @@ export function SubtitlesPanel() {
   );
 }
 
-/** Accent colors offered for the spoken word. */
-const ACCENTS = ["#FFE94A", "#FFFFFF", "#FF375F", "#0A84FF", "#30D158"];
-
 const ACCENT_MODES: { id: WordAccentMode; label: string }[] = [
   { id: "color", label: "Color" },
   { id: "underline", label: "Underline" },
@@ -303,37 +301,14 @@ function OptionsTab() {
           </div>
           <div className="flex min-h-8 items-center justify-between text-xs font-medium">
             Word color
-            <div className="sub-accent-color flex items-center gap-1.5">
-              {ACCENTS.map((c) => (
-                <button
-                  key={c}
-                  title={c}
-                  aria-label={`Word color ${c}`}
-                  className={cn(
-                    "size-5 rounded-full border border-black/15 transition-transform hover:scale-110",
-                    look.color.toUpperCase() === c.toUpperCase() &&
-                      "ring-2 ring-primary ring-offset-2 ring-offset-card"
-                  )}
-                  style={{ background: c }}
-                  onClick={() => useEditor.getState().setSubtitlesView({ accentColor: c })}
-                />
-              ))}
-              <label
-                title="Custom color"
-                className="relative size-5 cursor-pointer rounded-full border border-black/15 bg-[conic-gradient(from_0deg,#f43f5e,#f59e0b,#84cc16,#06b6d4,#6366f1,#d946ef,#f43f5e)] transition-transform hover:scale-110"
-              >
-                <span className="absolute inset-1 rounded-full bg-card" />
-                <span className="absolute inset-[5px] rounded-full" style={{ background: look.color }} />
-                <input
-                  type="color"
-                  aria-label="Pick a custom word color"
-                  className="absolute inset-0 size-full cursor-pointer opacity-0"
-                  value={/^#[0-9a-fA-F]{6}$/.test(look.color) ? look.color : "#ffffff"}
-                  onChange={(e) =>
-                    useEditor.getState().setSubtitlesView({ accentColor: e.target.value })
-                  }
-                />
-              </label>
+            <div className="sub-accent-color flex items-center">
+              <ColorField
+                value={look.color}
+                label="Word color"
+                onBegin={() => useEditor.getState().pushHistory()}
+                onLive={(c) => useEditor.getState().setSubtitlesView({ accentColor: c })}
+                onCommit={(c) => useEditor.getState().setSubtitlesView({ accentColor: c })}
+              />
             </div>
           </div>
         </>

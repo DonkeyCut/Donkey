@@ -22,7 +22,8 @@ import { setPreviewCanvas } from "@/cut/lib/previewCanvas";
 import { clipKeyed, clipPoseAt, frameOf, isFullRect, rectOf, REGION_MAX_SCALE, type Aspect, type ClipSpan, type FrameRect, type MediaAsset, type VideoClip } from "@/cut/lib/types";
 import { hasMaskKeys, type MaskKey } from "@donkeycut/effects-kit";
 import { cn } from "@/lib/utils";
-import { Grip, MaskGizmoCore, OverlayLayer } from "./OverlayLayer";
+import { MaskGizmoCore, OverlayLayer } from "./OverlayLayer";
+import { HANDLE_AXIS, TransformHandles, type ResizeHandle } from "./TransformHandles";
 import {
   StageEffectPaint,
   StagePictureFx,
@@ -441,19 +442,43 @@ function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
     });
   };
 
-  const onResize = (e: React.PointerEvent) => {
+  // A grip drags its own edges and leaves the opposite ones where they are:
+  // the box keeps its far corner planted while the grabbed side travels, and
+  // a moving edge snaps to the frame the same way a move does.
+  const onResize = (handle: ResizeHandle, e: React.PointerEvent) => {
     e.stopPropagation();
     useEditor.getState().pushHistory();
+    const a = HANDLE_AXIS[handle];
     startDrag(e, {
       onMove: (dx, dy) => {
-        let w = Math.max(0.1, Math.min(REGION_MAX_SCALE, r.w + dx / stage.w));
-        let h = Math.max(0.1, Math.min(REGION_MAX_SCALE, r.h + dy / stage.h));
-        const gx = snapEdge(r.x + w, SNAP_PX / stage.w);
-        const gy = snapEdge(r.y + h, SNAP_PX / stage.h);
-        if (gx !== null && gx - r.x >= 0.1) w = gx - r.x;
-        if (gy !== null && gy - r.y >= 0.1) h = gy - r.y;
-        setGuides({ x: gx !== null && gx - r.x >= 0.1 ? gx : null, y: gy !== null && gy - r.y >= 0.1 ? gy : null });
-        patch({ ...r, w, h });
+        // One axis at a time: where the grabbed edge lands, snapped to the
+        // frame, then the span it leaves against the planted edge.
+        const pull = (
+          dir: -1 | 0 | 1,
+          pos: number,
+          size: number,
+          d: number,
+          stageSize: number
+        ) => {
+          if (!dir) return { pos, size, guide: null as number | null };
+          const far = dir > 0 ? pos : pos + size;
+          const edge = (dir > 0 ? pos + size : pos) + d / stageSize;
+          const snapped = snapEdge(edge, SNAP_PX / stageSize);
+          const at = snapped ?? edge;
+          // Signed: a grip dragged past the planted edge stops at the floor and
+          // the box keeps its side.
+          const span = dir > 0 ? at - far : far - at;
+          const next = Math.max(0.1, Math.min(REGION_MAX_SCALE, span));
+          return {
+            pos: dir > 0 ? far : far - next,
+            size: next,
+            guide: snapped !== null && next === span ? snapped : null,
+          };
+        };
+        const hx = pull(a.x, r.x, r.w, dx, stage.w);
+        const hy = pull(a.y, r.y, r.h, dy, stage.h);
+        setGuides({ x: hx.guide, y: hy.guide });
+        patch({ ...r, x: hx.pos, w: hx.size, y: hy.pos, h: hy.size });
       },
       onUp: () => setGuides({ x: null, y: null }),
     });
@@ -505,11 +530,7 @@ function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
             onPointerDown={onPanContent}
           />
         )}
-        <Grip
-          color="#0a84ff"
-          className="absolute -right-2 -bottom-2 z-20 cursor-nwse-resize"
-          onPointerDown={onResize}
-        />
+        <TransformHandles color="#0a84ff" className="z-20" onResize={onResize} />
       </div>
       <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden rounded-xl">
         <div
