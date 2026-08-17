@@ -11,8 +11,8 @@ export const PREVIEW_TOOLS = [
   {
     name: "capture_frame",
     description:
-      "Capture the composited video frame the preview shows at the playhead as an image. Titles and captions are drawn over the canvas in the UI, so they don't appear here — this checks the footage, not the text.",
-    inputSchema: obj({}),
+      "Render one frame of the cut as an image — the whole picture an export would write at that moment: footage, transitions, effects, elements and captions. Defaults to the playhead.",
+    inputSchema: obj({ t: num("Timeline time in seconds (default: the playhead)") }),
   },
   {
     name: "seek",

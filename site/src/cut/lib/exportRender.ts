@@ -32,8 +32,9 @@ import { overlayPlan, trackZeroPlan } from "./framePlan";
 import { frameSink, openMedia, videoTrackOf } from "./mediaRead";
 import { getClipSpans, overlayLayers, projectDuration, spanSequence } from "./store";
 import { captionStyle, cueOverlay, cueWordWindows, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
-import { applyEffectToCanvas, evalOverlayFrame, grainTile, isMaskAnimated, isOverlayAnimated, maskFrameAt, planAnimatedLayers, type LottieHandle, type OverlayAnim } from "@donkeycut/effects-kit";
+import { applyEffectToCanvas, evalOverlayFrame, grainTile, isMaskAnimated, isOverlayAnimated, maskFrameAt, planAnimatedLayers, type LottieHandle, type OverlayAnim, type PaintPhase } from "@donkeycut/effects-kit";
 import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
+import { createRasterCanvas, type RasterSurface } from "./raster";
 import { renderElementPng } from "./textRender";
 import { behindSubjectOverlay, frameOf, frontSubjectOverlay, isEffectOverlay, isFullRect, isTextOverlay, laneOf, overlayAnimStyle, projectFadeSeconds, rectOf } from "./types";
 import type { ClipSpan, EffectOverlay, MediaAsset, Overlay, StickerOverlay } from "./types";
@@ -258,6 +259,9 @@ interface StampedLayer {
   source?: Overlay;
   /** Lottie sticker: seek this per frame instead of caching one bitmap. */
   lottie?: LottieHandle;
+  /** Pixel-level animation baked into this window's picture (a wipe's
+   * uncovered share, a per-glyph ramp's position). */
+  phase?: PaintPhase;
 }
 
 /**
@@ -370,23 +374,31 @@ class StampCache {
   async bitmapFor(layer: StampedLayer): Promise<ImageBitmap> {
     let bitmap = this.drawn.get(layer);
     if (!bitmap) {
-      const png = await renderElementPng(layer.overlay, this.width, this.height, this.assets);
+      const png = await renderElementPng(
+        layer.overlay,
+        this.width,
+        this.height,
+        this.assets,
+        layer.phase
+      );
       bitmap = await createImageBitmap(png);
       this.drawn.set(layer, bitmap);
     }
     return bitmap;
   }
 
-  /** The layer's picture with a keyframed mask evaluated at this moment. The
-   * mask changes the pixels themselves, so there is one live bitmap per layer,
-   * replaced as the render walks forward — the mask-side twin of the Lottie
-   * per-frame path. */
-  async bitmapForMaskAt(layer: StampedLayer, tLocal: number): Promise<ImageBitmap> {
+  /** The layer's picture drawn for this one moment, for the animations that
+   * change the pixels as time moves — a keyframed mask, a per-glyph loop.
+   * There is one live bitmap per layer, replaced as the render walks forward:
+   * the cached-stamp twin of the Lottie per-frame path. */
+  async bitmapAt(layer: StampedLayer, tLocal: number, phase?: PaintPhase): Promise<ImageBitmap> {
     const hit = this.maskFrames.get(layer);
     if (hit && Math.abs(hit.t - tLocal) < 1e-6) return hit.bitmap;
-    const m = layer.overlay.mask!;
-    const flat = { ...layer.overlay, mask: { ...m, ...maskFrameAt(m, tLocal), kf: undefined } };
-    const png = await renderElementPng(flat, this.width, this.height, this.assets);
+    const m = layer.overlay.mask;
+    const el = isMaskAnimated(m)
+      ? { ...layer.overlay, mask: { ...m!, ...maskFrameAt(m!, tLocal), kf: undefined } }
+      : layer.overlay;
+    const png = await renderElementPng(el, this.width, this.height, this.assets, phase);
     const bitmap = await createImageBitmap(png);
     hit?.bitmap.close();
     this.maskFrames.set(layer, { t: tLocal, bitmap });
@@ -573,14 +585,8 @@ export async function renderProjectToMp4(
   });
   stop();
 
-  const canvas =
-    typeof OffscreenCanvas !== "undefined"
-      ? new OffscreenCanvas(settings.width, settings.height)
-      : Object.assign(document.createElement("canvas"), {
-          width: settings.width,
-          height: settings.height,
-        });
-  const comp = new FrameCompositor(canvas);
+  const canvas = createRasterCanvas(settings.width, settings.height);
+  const painter = new FramePainter(doc, canvas, resolve);
 
   const frameDur = 1 / settings.fps;
   const frames = Math.max(1, Math.round(duration * settings.fps));
@@ -601,14 +607,6 @@ export async function renderProjectToMp4(
     format: new Mp4OutputFormat({ fastStart: "reserve" }),
     target: new StreamTarget(writable, { chunked: true }),
   });
-
-  const stamps = new StampCache(settings.width, settings.height, doc.assets);
-  const readers = new Map<string, ClipReader>();
-  const readerFor = (asset: MediaAsset) => {
-    let r = readers.get(asset.id);
-    if (!r) readers.set(asset.id, (r = new ClipReader(asset, () => resolve(asset))));
-    return r;
-  };
 
   try {
     const video = new CanvasSource(canvas, { codec, bitrate: bitrateFor(settings) });
@@ -634,114 +632,13 @@ export async function renderProjectToMp4(
     // frames rather than being interleaved with them.
     if (audio && mix) await audio.add(mix);
 
-    const layers = await stampText(doc);
-    // Deepest lane first, so a walk of it is a walk up the stack.
-    const stacked = [...layers].sort((a, b) => b.stackLane - a.stackLane);
-    // The subject pass is created only when something reads the person matte;
-    // prepare() makes rasters and the segmenter resident before the first
-    // frame. Subject-masked clips pull their matte mid-stack through the
-    // compositor's provider, per frame (no throttling in an export).
-    let fxScratch: OffscreenCanvas | null = null;
-    let behind: SubjectMaskCompositor | null = null;
-    if (hasSubjectOverlays(doc.overlays) || doc.clips.some((c) => c.mask?.kind === "subject")) {
-      behind = new SubjectMaskCompositor();
-      await behind.prepare(doc.overlays, settings.width, settings.height, doc.assets);
-      const pass = behind;
-      comp.subjectMatteProvider = (at) => pass.clipMatteOf(canvas, at, { minMaskInterval: 0 });
-    }
+    await painter.prepare();
     stop();
-
-    const spans = getClipSpans(doc.clips, doc.assets, 0);
-    const overlayTracks = [...new Set(overlayLayers(doc.clips).map((c) => c.track))];
-    // Span geometry is a property of the document, which does not change while
-    // rendering — so it is computed once rather than per overlay per frame.
-    const byTrack = new Map(overlayTracks.map((track) => [track, getClipSpans(doc.clips, doc.assets, track)]));
-    const spansOf = (track: number) => byTrack.get(track) ?? [];
-    const spanOfClip = new Map<string, ClipSpan>();
-    for (const list of byTrack.values()) for (const sp of list) spanOfClip.set(sp.clip.id, sp);
 
     for (let i = 0; i < frames; i++) {
       stop();
       const t = i * frameDur;
-      comp.clear();
-
-      const master = spans.find((sp) => t >= sp.start && t < sp.start + sp.len);
-      if (master) {
-        const plan = trackZeroPlan(master, spans, t);
-        if (plan.backdrop) {
-          const frame = await readerFor(plan.backdrop.span.asset).frameAt(plan.backdrop.at);
-          comp.drawLayer(frame, plan.backdrop.span.clip, false, 1, t);
-        }
-        const masterFrame = master.clip.hidden
-          ? MISSING_FRAME
-          : await readerFor(master.asset).frameAt(sourceTimeAt(master, t));
-        const incFrame = plan.incoming
-          ? await readerFor(plan.incoming.asset).frameAt(sourceTimeAt(plan.incoming, t))
-          : MISSING_FRAME;
-        comp.drawCrossJoin(
-          plan.style,
-          plan.p,
-          {
-            masterFrame,
-            masterClip: master.clip,
-            masterAlpha: plan.masterAlpha,
-            masterZoom: plan.masterZoom,
-            masterFx: {
-              dx: plan.masterFxFrac.dx * settings.width,
-              dy: plan.masterFxFrac.dy * settings.height,
-            },
-            incFrame,
-            incClip: plan.incoming?.clip,
-            incAlpha: plan.incAlpha,
-            incZoom: plan.incZoom,
-          },
-          t
-        );
-        if (plan.veil > 0) comp.fillBlackVeil(plan.veil, rectOf(master.clip));
-      }
-
-      for (const layer of overlayPlan(overlayTracks, spansOf, t)) {
-        const span = spanOfClip.get(layer.clip.id);
-        if (!span) continue;
-        const frame = await readerFor(layer.asset).frameAt(sourceTimeAt(span, t));
-        const rect = rectOf(layer.clip);
-        const cover = layer.clip.fit === "fill" || (layer.clip.fit == null && isFullRect(rect));
-        comp.drawIntoRect(frame, rect, cover, layer.alpha, t, layer.zoom, layer.clip);
-      }
-
-      // The subject pass: video → behind elements → segmented person, exactly
-      // the preview's pass, sampled per exported frame (no mask throttling).
-      // It also refreshes the matte the front subject-masked stamps read.
-      behind?.draw(canvas, doc.overlays, doc.assets, t, { minMaskInterval: 0 });
-
-      // The stack, bottom up: an effect grades what plays under it, so the
-      // elements below it burn in first, the effect runs over that much of the
-      // frame, and the elements above it land on the graded picture. Same
-      // order as the live preview and the ffmpeg graph.
-      let drawn = 0;
-      for (const o of liveEffectsAt(doc.overlays, t)) {
-        const upto = stacked.findIndex((l) => l.stackLane <= laneOf(o));
-        const end = upto < 0 ? stacked.length : upto;
-        if (end > drawn) await drawStamps(canvas, stacked.slice(drawn, end), stamps, t, behind);
-        drawn = Math.max(drawn, end);
-        if (!fxScratch) {
-          fxScratch = new OffscreenCanvas(canvas.width, canvas.height);
-        }
-        applyEffectToCanvas(
-          canvas,
-          fxScratch,
-          o.effect,
-          o.amount,
-          t - o.start,
-          grainTile,
-          o.focus,
-          o.ramp,
-          o.end - o.start
-        );
-      }
-      await drawStamps(canvas, stacked.slice(drawn), stamps, t, behind);
-      stamps.retire(t);
-      comp.drawProjectFade(projectFadeGain(doc, t, duration));
+      await painter.drawAt(t);
 
       await video.add(t, frameDur);
       if (i % 15 === 0) {
@@ -762,9 +659,7 @@ export async function renderProjectToMp4(
     await discard();
     throw err;
   } finally {
-    stamps.dispose();
-    for (const r of readers.values()) r.dispose();
-    readers.clear();
+    painter.dispose();
   }
 }
 
@@ -818,14 +713,26 @@ async function drawStamps(
       ctx.restore();
       continue;
     }
-    const bitmap = isMaskAnimated(layer.overlay.mask)
-      ? await stamps.bitmapForMaskAt(layer, t - (layer.animStart ?? layer.start))
-      : await stamps.bitmapFor(layer);
+    // Unkeyed, the bitmap bakes the element's own rotation/opacity and only
+    // the preset's delta composes on top. Keyed, the bitmap is neutral and the
+    // pose supplies position, scale, rotation and opacity outright — either
+    // way this samples the evaluator the ffmpeg path rasterized into frames.
+    const tLocal = t - (layer.animStart ?? layer.start);
+    const ev = layer.anim
+      ? evalOverlayFrame({ ...(layer.source ?? layer.overlay), anim: layer.anim }, tLocal)
+      : null;
+    // A per-glyph loop moves the characters inside the picture, so its window
+    // is drawn afresh each frame with the loop folded into the layer's phase.
+    const livePhase = ev?.glyphLoop ? { ...layer.phase, glyphLoop: ev.glyphLoop } : undefined;
+    const bitmap =
+      livePhase || isMaskAnimated(layer.overlay.mask)
+        ? await stamps.bitmapAt(layer, tLocal, livePhase ?? layer.phase)
+        : await stamps.bitmapFor(layer);
     // A front subject-masked stamp trims to the pass's current matte — its
     // pixels change with the video, so the trim happens at draw time, never
     // in the cached raster.
     const subjectFront = !!subject && frontSubjectOverlay(layer.overlay);
-    if (!layer.anim) {
+    if (!ev) {
       const picture = subjectFront
         ? subject!.mattedStamp(layer.overlay, canvas.width, canvas.height, (c) =>
             c.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
@@ -834,14 +741,6 @@ async function drawStamps(
       ctx.drawImage(picture, 0, 0, canvas.width, canvas.height);
       continue;
     }
-    // Unkeyed, the bitmap bakes the element's own rotation/opacity and only
-    // the preset's delta composes on top. Keyed, the bitmap is neutral and the
-    // pose supplies position, scale, rotation and opacity outright — either
-    // way this samples the evaluator the ffmpeg path rasterized into frames.
-    const ev = evalOverlayFrame(
-      { ...(layer.source ?? layer.overlay), anim: layer.anim },
-      t - (layer.animStart ?? layer.start)
-    );
     if (ev.opacity <= 0.001) continue;
     const scale = Math.min(canvas.width, canvas.height) / 1080;
     const cx = layer.overlay.x * canvas.width;
@@ -868,6 +767,193 @@ async function drawStamps(
     }
     ctx.restore();
   }
+}
+
+/**
+ * The cut's picture, drawn at whatever moment is asked for.
+ *
+ * Everything a frame needs that outlives the frame lives here: the
+ * compositor, the open decoders, the stamped text layers, the subject pass.
+ * A render walks it forward frame by frame; a single capture opens it, draws
+ * once, and lets it go. Both get the same picture, because it is the same
+ * code drawing it.
+ */
+export class FramePainter {
+  private comp: FrameCompositor;
+  private stamps: StampCache;
+  private readers = new Map<string, ClipReader>();
+  private behind: SubjectMaskCompositor | null = null;
+  private fxScratch: RasterSurface | null = null;
+  /** Text layers, deepest lane first — so a walk of them is a walk up the stack. */
+  private stacked: StampedLayer[] = [];
+  private spans: ClipSpan[] = [];
+  private overlayTracks: number[] = [];
+  private byTrack = new Map<number, ClipSpan[]>();
+  private spanOfClip = new Map<string, ClipSpan>();
+  private duration: number;
+
+  constructor(
+    private doc: ExportDoc,
+    private canvas: RasterSurface,
+    private resolve: (asset: MediaAsset) => string
+  ) {
+    this.comp = new FrameCompositor(canvas);
+    this.stamps = new StampCache(canvas.width, canvas.height, doc.assets);
+    this.duration = projectDuration(doc);
+  }
+
+  /** Make the text layers, the span geometry and the subject pass resident.
+   * Runs once, before the first frame. */
+  async prepare(): Promise<void> {
+    this.stacked = [...(await stampText(this.doc))].sort((a, b) => b.stackLane - a.stackLane);
+    // The subject pass is created only when something reads the person matte;
+    // prepare() makes rasters and the segmenter resident before the first
+    // frame. Subject-masked clips pull their matte mid-stack through the
+    // compositor's provider, per frame (no throttling in an export).
+    if (
+      hasSubjectOverlays(this.doc.overlays) ||
+      this.doc.clips.some((c) => c.mask?.kind === "subject")
+    ) {
+      const behind = new SubjectMaskCompositor();
+      await behind.prepare(
+        this.doc.overlays,
+        this.canvas.width,
+        this.canvas.height,
+        this.doc.assets
+      );
+      this.behind = behind;
+      this.comp.subjectMatteProvider = (at) =>
+        behind.clipMatteOf(this.canvas, at, { minMaskInterval: 0 });
+    }
+    // Span geometry is a property of the document, which does not change while
+    // rendering — so it is computed once rather than per overlay per frame.
+    this.spans = getClipSpans(this.doc.clips, this.doc.assets, 0);
+    this.overlayTracks = [...new Set(overlayLayers(this.doc.clips).map((c) => c.track))];
+    this.byTrack = new Map(
+      this.overlayTracks.map((track) => [track, getClipSpans(this.doc.clips, this.doc.assets, track)])
+    );
+    for (const list of this.byTrack.values())
+      for (const sp of list) this.spanOfClip.set(sp.clip.id, sp);
+  }
+
+  private readerFor(asset: MediaAsset): ClipReader {
+    let r = this.readers.get(asset.id);
+    if (!r) this.readers.set(asset.id, (r = new ClipReader(asset, () => this.resolve(asset))));
+    return r;
+  }
+
+  /** Draw the whole cut at timeline time `t` onto the canvas. */
+  async drawAt(t: number): Promise<void> {
+    const { canvas, comp, doc, stamps } = this;
+    const W = canvas.width;
+    const H = canvas.height;
+    comp.clear();
+
+    const master = this.spans.find((sp) => t >= sp.start && t < sp.start + sp.len);
+    if (master) {
+      const plan = trackZeroPlan(master, this.spans, t);
+      if (plan.backdrop) {
+        const frame = await this.readerFor(plan.backdrop.span.asset).frameAt(plan.backdrop.at);
+        comp.drawLayer(frame, plan.backdrop.span.clip, false, 1, t);
+      }
+      const masterFrame = master.clip.hidden
+        ? MISSING_FRAME
+        : await this.readerFor(master.asset).frameAt(sourceTimeAt(master, t));
+      const incFrame = plan.incoming
+        ? await this.readerFor(plan.incoming.asset).frameAt(sourceTimeAt(plan.incoming, t))
+        : MISSING_FRAME;
+      comp.drawCrossJoin(
+        plan.style,
+        plan.p,
+        {
+          masterFrame,
+          masterClip: master.clip,
+          masterAlpha: plan.masterAlpha,
+          masterZoom: plan.masterZoom,
+          masterFx: {
+            dx: plan.masterFxFrac.dx * W,
+            dy: plan.masterFxFrac.dy * H,
+          },
+          incFrame,
+          incClip: plan.incoming?.clip,
+          incAlpha: plan.incAlpha,
+          incZoom: plan.incZoom,
+        },
+        t
+      );
+      if (plan.veil > 0) comp.fillBlackVeil(plan.veil, rectOf(master.clip));
+    }
+
+    const spansOf = (track: number) => this.byTrack.get(track) ?? [];
+    for (const layer of overlayPlan(this.overlayTracks, spansOf, t)) {
+      const span = this.spanOfClip.get(layer.clip.id);
+      if (!span) continue;
+      const frame = await this.readerFor(layer.asset).frameAt(sourceTimeAt(span, t));
+      const rect = rectOf(layer.clip);
+      const cover = layer.clip.fit === "fill" || (layer.clip.fit == null && isFullRect(rect));
+      comp.drawIntoRect(frame, rect, cover, layer.alpha, t, layer.zoom, layer.clip);
+    }
+
+    // The subject pass: video → behind elements → segmented person, exactly
+    // the preview's pass, sampled per drawn frame (no mask throttling).
+    // It also refreshes the matte the front subject-masked stamps read.
+    this.behind?.draw(canvas, doc.overlays, doc.assets, t, { minMaskInterval: 0 });
+
+    // The stack, bottom up: an effect grades what plays under it, so the
+    // elements below it burn in first, the effect runs over that much of the
+    // frame, and the elements above it land on the graded picture. Same
+    // order as the live preview and the ffmpeg graph.
+    let drawn = 0;
+    for (const o of liveEffectsAt(doc.overlays, t)) {
+      const upto = this.stacked.findIndex((l) => l.stackLane <= laneOf(o));
+      const end = upto < 0 ? this.stacked.length : upto;
+      if (end > drawn) await drawStamps(canvas, this.stacked.slice(drawn, end), stamps, t, this.behind);
+      drawn = Math.max(drawn, end);
+      this.fxScratch ??= createRasterCanvas(W, H);
+      applyEffectToCanvas(
+        canvas,
+        this.fxScratch,
+        o.effect,
+        o.amount,
+        t - o.start,
+        grainTile,
+        o.focus,
+        o.ramp,
+        o.end - o.start
+      );
+    }
+    await drawStamps(canvas, this.stacked.slice(drawn), stamps, t, this.behind);
+    stamps.retire(t);
+    comp.drawProjectFade(projectFadeGain(doc, t, this.duration));
+  }
+
+  dispose(): void {
+    this.stamps.dispose();
+    for (const r of this.readers.values()) r.dispose();
+    this.readers.clear();
+  }
+}
+
+/**
+ * One composited frame of the cut, drawn the way a render of it would draw —
+ * clips, transitions, effects, elements, captions, the project fade. The
+ * canvas comes off the raster seam, so this answers on a page and in a job.
+ */
+export async function renderProjectFrame(
+  doc: ExportDoc,
+  at: number,
+  size: { width: number; height: number },
+  resolve: (asset: MediaAsset) => string
+): Promise<RasterSurface> {
+  const canvas = createRasterCanvas(size.width, size.height);
+  const painter = new FramePainter(doc, canvas, resolve);
+  try {
+    await painter.prepare();
+    await painter.drawAt(at);
+  } finally {
+    painter.dispose();
+  }
+  return canvas;
 }
 
 /**

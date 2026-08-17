@@ -73,6 +73,8 @@ import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
 import { applyOverlayPatchSettled, track0Clips, laneGapAt, getClipSpans, nextFreeStart, overlayLayers, parkedTransitions, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt } from "./playhead";
+import { renderProjectFrame } from "./exportRender";
+import { rasterCanvasToDataUrl } from "./raster";
 import { buildAiContext } from "./aiContext";
 import { sampleClipFrameData } from "./previewCanvas";
 import { laneCues, subtitleLaneCount } from "./subtitles";
@@ -200,6 +202,10 @@ const ANIM_STYLE_SYNONYMS: Record<string, AnimStyle> = {
 };
 
 const GRADE_KEYS = ["brightness", "contrast", "saturation", "exposure", "temperature", "hue"] as const;
+
+/** Long side of a captured frame: enough for the model to read a title, small
+ * enough to ride a turn. */
+const CAPTURE_LONG_SIDE = 640;
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -537,18 +543,33 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return buildAiContext({ fullCues: true });
   },
 
-  capture_frame: () => {
-      const canvas = document.querySelector<HTMLCanvasElement>(".stage canvas");
-      if (!canvas) throw new ToolError("No preview canvas on screen.");
-      const scaled = document.createElement("canvas");
-      // Downscale at the frame's own aspect (long side 640).
-      const k = 640 / Math.max(canvas.width, canvas.height);
-      scaled.width = Math.round(canvas.width * k);
-      scaled.height = Math.round(canvas.height * k);
-      const ctx = scaled.getContext("2d")!;
-      ctx.drawImage(canvas, 0, 0, scaled.width, scaled.height);
-      // Overlays/captions are DOM, not canvas — note that for the model.
-      return { image: scaled.toDataURL("image/jpeg", 0.75), note: "Video frame only; titles and captions overlay this in the UI." };
+  capture_frame: async (s, input) => {
+      // Composited through the render path, so the frame carries what the
+      // finished file would carry — clips, transitions, effects, elements,
+      // captions, the project fade — rather than the preview's video layer
+      // with its DOM elements floating above it.
+      const total = totalDuration(s.clips);
+      const at = clamp(isNum(input.t) ? input.t : playheadAt(), 0, Math.max(0, total - 0.001));
+      const frame = frameOf(s.aspect);
+      const k = CAPTURE_LONG_SIDE / Math.max(frame.w, frame.h);
+      const canvas = await renderProjectFrame(
+        {
+          aspect: s.aspect,
+          assets: s.assets,
+          clips: s.clips,
+          audioClips: s.audioClips,
+          overlays: s.overlays,
+          subtitles: s.subtitles,
+          fadeIn: s.fadeIn,
+          fadeOut: s.fadeOut,
+        },
+        at,
+        { width: Math.round(frame.w * k), height: Math.round(frame.h * k) },
+        (asset) => asset.url
+      ).catch((e) => {
+        throw new ToolError(e instanceof Error ? e.message : "Could not draw the frame.");
+      });
+      return { image: await rasterCanvasToDataUrl(canvas, "image/jpeg", 0.75), at };
   },
 
   watch_video: async (s, input) => {
@@ -2355,32 +2376,14 @@ class ToolError extends Error {}
  * Returns a small JSON-safe result; throws ToolError with a readable message.
  */
 /** Tools whose whole effect is the editor UI in an open tab — panel focus,
- * scroll, playback, the preview snapshot. A headless session answers them
- * with a typed no-op so the model keeps its footing. */
+ * scroll, playback. A session with no page answers them with a typed no-op so
+ * the model keeps its footing. Everything else runs anywhere the media
+ * primitives do. */
 export const UI_TOOLS: ReadonlySet<string> = new Set([
-  "capture_frame",
   "set_side_panel",
   "set_view",
   "open_export",
   "set_playing",
-]);
-
-/** Tools that decode or rasterize media with browser APIs today — frame
- * grabs, audio scans, image decodes, the transcription mixdown. A headless
- * session refuses them with a typed error until the runner grows ffmpeg
- * equivalents. Membership is about page decoding; tools that only call
- * servers run headless through the bound transports and stay out. */
-export const BROWSER_MEDIA_TOOLS: ReadonlySet<string> = new Set([
-  "watch_video",
-  "listen_audio",
-  "detect_silence",
-  "refine_speech_cuts",
-  "freeze_frame",
-  "create_sticker",
-  "subtitles_generate",
-  "captions_generate",
-  "subtitles_from_visuals",
-  "stock_add",
 ]);
 
 export async function runAiTool(
