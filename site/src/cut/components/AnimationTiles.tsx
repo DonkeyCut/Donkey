@@ -1,9 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Ban, Image as ImageIcon } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { X } from "lucide-react";
 import {
   evalOverlayAnim,
+  glyphStateAt,
+  hasGlyphMotion,
+  isGlyphAnimStyle,
+  isGlyphLoopStyle,
   OVERLAY_ANIM_STYLE_IDS,
   OVERLAY_ANIM_STYLE_LABELS,
   OVERLAY_LOOP_STYLE_IDS,
@@ -14,152 +18,416 @@ import {
 import { Tile } from "@/cut/components/PanelTile";
 
 /**
- * The animation picker: a grid of tiles that play their animation on a
- * stand-in shape, so the motion is chosen by watching rather than by reading a
- * name. Only the tile under the pointer moves — a dozen shapes all cycling at
- * once is noise, and it makes the one you are actually looking at harder to
- * read.
+ * The animation picker: a grid of tiles, each playing its style on the style's
+ * own name, in the element's own text — the grid reads as what every motion
+ * does without asking the reader to hunt for it. A card outside the picker
+ * holds its name still until the pointer reaches it.
  *
- * Every tile samples `evalOverlayAnim` — the same function the preview, the
- * in-tab export and the frame sampler use. A tile therefore cannot promise
- * motion the export will not deliver, and a new style animates here the moment
- * the evaluator learns it.
+ * Playback samples `evalOverlayAnim` — the same function the preview, the
+ * in-tab export and the frame sampler use — so a tile can't promise motion the
+ * export won't play. A new style draws itself here the moment the evaluator
+ * learns it.
  */
 
-/** Demo timing: a ramp, then a beat of rest, then round again. */
-const DEMO_RAMP = 0.6;
-const DEMO_HOLD = 0.55;
-const DEMO_CYCLE = DEMO_RAMP + DEMO_HOLD;
+/** Rest beat between demo ramps. An exit clears the stage for its whole ramp,
+ * and a per-glyph ramp leaves a couple of letters scattered for most of it, so
+ * the demo rests for a multiple of the ramp it just played: the tile shows the
+ * name it is offering roughly three quarters of the time. */
+const DEMO_HOLD = 1.4;
+const HOLD_RATIO = 2.6;
+
+const demoCycle = (ramp: number) => ramp + Math.max(DEMO_HOLD, ramp * HOLD_RATIO);
+
+/** How far apart in its cycle each tile starts from the one before it. The
+ * golden ratio spreads any run of tiles evenly around the cycle, so the few
+ * that are mid-motion at a given moment are scattered through the grid. */
+const PHASE_STEP = 0.618;
+/** The cycle a loop tile steps against; loops hold the name the whole way
+ * round, so this only has to look unsynchronised. */
+const LOOP_SPREAD = 1.2;
 
 /** Design px that map to the tile's preview stage. The evaluator works in px at
  * a 1080 short side; a slide travels 120 of them, which has to read inside a
  * stage a few dozen pixels wide. Low enough that a slide clearly leaves. */
 const DEMO_REFERENCE_PX = 190;
 
-/** What a typewriter tile types. */
-const DEMO_WORD = "Text";
+/** A loop's travel is a fraction of a slide's — a float bobs 12 design px — so
+ * it maps against a shorter reference and stays visible at tile size. */
+const LOOP_REFERENCE_PX = 64;
+
+const referencePx = (slot: Slot) => (slot === "loop" ? LOOP_REFERENCE_PX : DEMO_REFERENCE_PX);
 
 type Slot = "in" | "out" | "loop";
 
-function demoStateAt(slot: Slot, style: string, t: number) {
+const labelOf = (slot: Slot, style: string) =>
+  slot === "loop"
+    ? (OVERLAY_LOOP_STYLE_LABELS[style as OverlayLoopStyle] ?? style)
+    : (OVERLAY_ANIM_STYLE_LABELS[style as OverlayAnimStyle] ?? style);
+
+function demoStateAt(
+  slot: Slot,
+  style: string,
+  t: number,
+  isText: boolean,
+  ramp: number,
+  speed: number
+) {
   if (slot === "loop") {
-    return evalOverlayAnim({ loop: { style: style as OverlayLoopStyle, speed: 1 } }, t, 60);
+    return evalOverlayAnim({ loop: { style: style as OverlayLoopStyle, speed } }, t, 60, isText);
   }
-  const local = t % DEMO_CYCLE;
+  const cycle = demoCycle(ramp);
+  const local = t % cycle;
   const anim =
     slot === "in"
-      ? { in: { style: style as OverlayAnimStyle, seconds: DEMO_RAMP } }
-      : { out: { style: style as OverlayAnimStyle, seconds: DEMO_RAMP } };
+      ? { in: { style: style as OverlayAnimStyle, seconds: ramp } }
+      : { out: { style: style as OverlayAnimStyle, seconds: ramp } };
   // The exit sits at the tail of the window, so an Out tile rests first and
   // then leaves — the shape of the thing it is previewing.
-  return evalOverlayAnim(anim, local, DEMO_CYCLE);
+  return evalOverlayAnim(anim, local, cycle, isText);
+}
+
+// The stage is the card's own width with no frame of its own: the card is
+// already one, and a second inside it would both box the motion in and steal
+// the room the motion needs. Clipping is what sells a slide leaving.
+const STAGE = "grid h-12 w-full place-items-center overflow-hidden";
+const WORD = "text-[13px] font-semibold whitespace-nowrap";
+
+/** Whether the demo has to lay the name out letter by letter: the per-glyph
+ * ramps and the per-glyph loops both move each character on its own delay. */
+const splitsGlyphs = (slot: Slot, style: string) =>
+  slot === "loop"
+    ? isGlyphLoopStyle(style as OverlayLoopStyle)
+    : isGlyphAnimStyle(style as OverlayAnimStyle);
+
+/** The name standing still: what a card wears until the pointer reaches it,
+ * and what every tile falls back to when the reader asks for less motion. */
+function FrozenName({
+  slot,
+  style,
+  textStyle,
+}: {
+  slot: Slot;
+  style: string;
+  textStyle?: CSSProperties;
+}) {
+  return (
+    <span
+      className={`${WORD} ${textStyle ? "" : "text-foreground"}`}
+      style={{ lineHeight: 1, ...textStyle }}
+    >
+      {labelOf(slot, style)}
+    </span>
+  );
+}
+
+/** The style's name playing its own animation. The frames write styles straight
+ * to the element: animating through React state would re-render the inspector
+ * every frame for pixels React has no say over. */
+function LiveName({
+  slot,
+  style,
+  isText,
+  seconds,
+  speed,
+  index = 0,
+  textStyle,
+}: {
+  slot: Slot;
+  style: string;
+  isText: boolean;
+  seconds: number;
+  speed: number;
+  /** Place in the grid. It sets where in its own cycle this demo starts, so a
+   * grid of them spreads out instead of running in unison. */
+  index?: number;
+  /** The element's own look — font, color, stroke, shadow — so the demo
+   * plays on the text it will actually move. */
+  textStyle?: CSSProperties;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const label = labelOf(slot, style);
+  // Golden-ratio steps around the cycle: neighbouring tiles land far apart in
+  // it, and no run of them ever bunches up mid-motion together.
+  const phase = index * (slot === "loop" ? LOOP_SPREAD : demoCycle(seconds)) * PHASE_STEP;
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const letters = () => Array.from(el.children) as HTMLElement[];
+    const rest = () => {
+      el.style.transform = "";
+      el.style.opacity = "";
+      el.style.clipPath = "";
+      for (const kid of letters()) {
+        kid.style.transform = "";
+        kid.style.opacity = "";
+      }
+      if (el.dataset.word) el.textContent = el.dataset.word;
+    };
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return rest;
+    let start = 0;
+    let raf = 0;
+    // Whether the last frame left per-letter styles on the children. A ramp
+    // that ends off-stage leaves them at zero opacity, so the rest beat has to
+    // hand the letters back before the word can read again.
+    let glyphed = false;
+    const tick = (now: number) => {
+      if (!start) start = now;
+      const st = demoStateAt(slot, style, (now - start) / 1000 + phase, isText, seconds, speed);
+      const px = (v: number) => (v * el.clientWidth) / referencePx(slot);
+      if (hasGlyphMotion(st)) {
+        // The letters carry the motion; the word itself stays put.
+        const kids = letters();
+        kids.forEach((kid, i) => {
+          const g = glyphStateAt(st, i, kids.length);
+          kid.style.transform = `translate(${px(g.dx)}px, ${px(g.dy)}px) rotate(${g.rotate}deg) scale(${g.sx}, ${g.sy})`;
+          kid.style.opacity = String(g.alpha);
+        });
+        glyphed = true;
+      } else {
+        if (glyphed) {
+          for (const kid of letters()) {
+            kid.style.transform = "";
+            kid.style.opacity = "";
+          }
+          glyphed = false;
+        }
+        el.style.transform = `translate(${px(st.dx)}px, ${px(st.dy)}px) rotate(${st.rotate}deg) scale(${st.scale})`;
+        el.style.opacity = String(st.alpha);
+      }
+      el.style.clipPath =
+        st.reveal !== undefined ? `inset(0 ${(1 - st.reveal) * 100}% 0 0)` : "";
+      if (st.textProgress !== undefined) {
+        const word = el.dataset.word ?? "";
+        el.textContent = word.slice(0, Math.ceil(st.textProgress * word.length));
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    // Back to rest on the way out, so a card never freezes mid-animation.
+    return () => {
+      cancelAnimationFrame(raf);
+      rest();
+    };
+  }, [slot, style, isText, seconds, speed, phase]);
+
+  return (
+    <span
+      ref={ref}
+      data-word={style === "typewriter" ? label : undefined}
+      className={`${WORD} ${textStyle ? "" : "text-foreground"}`}
+      style={{ willChange: "transform", lineHeight: 1, ...textStyle }}
+    >
+      {isText && splitsGlyphs(slot, style)
+        ? [...label].map((ch, i) => (
+            <span key={i} className="inline-block">
+              {ch}
+            </span>
+          ))
+        : label}
+    </span>
+  );
+}
+
+/** The name in its tile: the motion itself while the tile is playing, the
+ * plain name when it is not. */
+function AnimName({
+  playing,
+  ...rest
+}: {
+  slot: Slot;
+  style: string;
+  isText: boolean;
+  seconds: number;
+  speed: number;
+  playing: boolean;
+  index?: number;
+  textStyle?: CSSProperties;
+}) {
+  return playing ? (
+    <LiveName {...rest} />
+  ) : (
+    <FrozenName slot={rest.slot} style={rest.style} textStyle={rest.textStyle} />
+  );
+}
+
+/** Whether the element is on screen. A tile off the scroll's edge keeps its
+ * name still and books no frames until it comes into view. */
+function useOnScreen(ref: React.RefObject<HTMLElement | null>) {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(([e]) => setShown(e.isIntersecting), {
+      rootMargin: "64px",
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [ref]);
+  return shown;
+}
+
+function AnimTile({
+  slot,
+  style,
+  isText,
+  seconds,
+  speed,
+  index,
+  selected,
+  onPick,
+  textStyle,
+}: {
+  slot: Slot;
+  style: string;
+  isText: boolean;
+  seconds: number;
+  speed: number;
+  /** Place in the grid, which sets this tile's beat in the cascade. */
+  index: number;
+  selected: boolean;
+  onPick: () => void;
+  textStyle?: CSSProperties;
+}) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const onScreen = useOnScreen(ref);
+  return (
+    <Tile
+      ref={ref}
+      selected={selected}
+      onClick={onPick}
+      title={labelOf(slot, style)}
+      className="p-1"
+    >
+      <span className={STAGE}>
+        <AnimName
+          slot={slot}
+          style={style}
+          isText={isText}
+          seconds={seconds}
+          speed={speed}
+          index={index}
+          playing={onScreen}
+          textStyle={textStyle}
+        />
+      </span>
+    </Tile>
+  );
+}
+
+/**
+ * One picked style as a card outside the picker: the slot it fills in a
+ * corner, the name playing what that slot does, and an × that clears the slot
+ * on the spot. The card itself opens the picker.
+ */
+export function AnimationCard({
+  slot,
+  style,
+  isText,
+  seconds,
+  speed,
+  index = 0,
+  onOpen,
+  onClear,
+  textStyle,
+}: {
+  slot: Slot;
+  style: string;
+  isText: boolean;
+  seconds: number;
+  speed: number;
+  /** Place in the row, which sets where in its cycle this card starts. */
+  index?: number;
+  onOpen: () => void;
+  onClear: () => void;
+  textStyle?: CSSProperties;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const onScreen = useOnScreen(ref);
+  const label = labelOf(slot, style);
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        title={`${label} — change`}
+        className="flex w-full flex-col rounded-lg border border-border p-1 outline-none transition-colors hover:bg-muted/60"
+        onClick={onOpen}
+      >
+        <span className={STAGE}>
+          <AnimName
+            slot={slot}
+            style={style}
+            isText={isText}
+            seconds={seconds}
+            speed={speed}
+            index={index}
+            playing={onScreen}
+            textStyle={textStyle}
+          />
+        </span>
+      </button>
+      <span className="pointer-events-none absolute top-0.5 left-1.5 text-[9px] font-medium text-muted-foreground/70 capitalize">
+        {slot}
+      </span>
+      <button
+        type="button"
+        aria-label={`No ${slot} animation`}
+        title={`No ${slot} animation`}
+        className="absolute top-0.5 right-0.5 grid size-4 place-items-center rounded-full text-muted-foreground/70 transition-colors hover:text-foreground"
+        onClick={onClear}
+      >
+        <X className="size-3" />
+      </button>
+    </div>
+  );
 }
 
 export function AnimationTiles({
   slot,
   value,
   isText,
+  seconds,
+  speed,
   onPick,
+  textStyle,
 }: {
   slot: Slot;
   /** The style in use, or undefined for none. */
   value?: string;
   /** Typewriter is offered on titles only. */
   isText: boolean;
+  /** The In/Out length the panel has set — the hover demo's ramp. */
+  seconds: number;
+  /** The loop speed the panel has set — the hover demo's cycle rate. */
+  speed: number;
   onPick: (style: string | null) => void;
+  /** The element's own look, applied to every tile's demo text. */
+  textStyle?: CSSProperties;
 }) {
   const ids: string[] =
     slot === "loop"
       ? OVERLAY_LOOP_STYLE_IDS
       : OVERLAY_ANIM_STYLE_IDS.filter((s) => s !== "typewriter" || isText);
-  const labels: Record<string, string> =
-    slot === "loop" ? OVERLAY_LOOP_STYLE_LABELS : OVERLAY_ANIM_STYLE_LABELS;
-
-  // One clock for the whole grid, writing transforms straight to the elements:
-  // a dozen tiles animating through React state would re-render the inspector
-  // every frame for pixels React has no say over.
-  const shapes = useRef(new Map<string, HTMLElement>());
-  const register = (id: string) => (el: HTMLElement | null) => {
-    if (el) shapes.current.set(id, el);
-    else shapes.current.delete(id);
-  };
-
-  const [hovered, setHovered] = useState<string | null>(null);
-
-  useEffect(() => {
-    const el = hovered ? shapes.current.get(hovered) : null;
-    if (!el) return;
-    const rest = () => {
-      el.style.transform = "";
-      el.style.opacity = "";
-      if (el.dataset.word) el.textContent = el.dataset.word;
-    };
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return rest;
-    let start = 0;
-    let raf = 0;
-    const tick = (now: number) => {
-      if (!start) start = now;
-      const st = demoStateAt(slot, hovered!, (now - start) / 1000);
-      const px = (v: number) => (v * el.clientWidth) / DEMO_REFERENCE_PX;
-      el.style.transform = `translate(${px(st.dx)}px, ${px(st.dy)}px) rotate(${st.rotate}deg) scale(${st.scale})`;
-      el.style.opacity = String(st.alpha);
-      if (st.textProgress !== undefined) {
-        el.textContent = DEMO_WORD.slice(0, Math.ceil(st.textProgress * DEMO_WORD.length));
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    // Back to rest on the way out, so a tile never freezes mid-animation.
-    return () => {
-      cancelAnimationFrame(raf);
-      rest();
-    };
-  }, [hovered, slot]);
-
-  // The stage is the tile's own width with no frame of its own: the tile is
-  // already a card, and a second one inside it would both box the motion in and
-  // steal the room the motion needs. Clipping is what sells a slide leaving.
-  const stage = "grid h-11 w-full place-items-center overflow-hidden";
-  const tile = "gap-1 px-1 pt-1.5 pb-1";
 
   return (
-    <div className="grid grid-cols-3 gap-1.5">
-      <Tile selected={!value} onClick={() => onPick(null)} label="None" className={tile}>
-        <span className={stage}>
-          <Ban className="size-7 text-muted-foreground/60" />
+    <div className="grid grid-cols-2 gap-[9px]">
+      <Tile selected={!value} onClick={() => onPick(null)} title="None" className="p-1">
+        <span className={STAGE}>
+          <span className={`${WORD} text-muted-foreground/70`}>None</span>
         </span>
       </Tile>
-      {ids.map((id) => (
-        <Tile
+      {ids.map((id, i) => (
+        <AnimTile
           key={id}
+          slot={slot}
+          style={id}
+          isText={isText}
+          seconds={seconds}
+          speed={speed}
+          index={i}
           selected={value === id}
-          onClick={() => onPick(id)}
-          label={labels[id]}
-          className={tile}
-          onHover={(on) => setHovered(on ? id : (h) => (h === id ? null : h))}
-        >
-          <span className={stage}>
-            {id === "typewriter" ? (
-              <span
-                ref={register(id)}
-                data-word={DEMO_WORD}
-                className="text-[13px] font-semibold text-foreground"
-                style={{ willChange: "transform" }}
-              >
-                {DEMO_WORD}
-              </span>
-            ) : (
-              // Its own wrapper, so the animated transform never fights the
-              // icon's sizing.
-              <span ref={register(id)} className="block" style={{ willChange: "transform" }}>
-                {/* Carries the tile's own muted color and the light stroke the
-                    transition tiles use, so a grid of stand-ins doesn't read
-                    heavier than the picture it stands in for. */}
-                <ImageIcon className="size-7" strokeWidth={1.5} />
-              </span>
-            )}
-          </span>
-        </Tile>
+          onPick={() => onPick(id)}
+          textStyle={textStyle}
+        />
       ))}
     </div>
   );

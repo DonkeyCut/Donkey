@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlignCenter, AlignLeft, AlignRight, Bold, ChevronLeft, ChevronRight, Diamond, Info, Italic, RotateCcw, SlidersHorizontal, Smile, Trash2, Wand2 } from "lucide-react";
+import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, Info, Italic, RotateCcw, SlidersHorizontal, Smile, Trash2, Type, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmojiPicker } from "@/cut/components/EmojiPicker";
 import {
@@ -45,7 +45,10 @@ import {
 import { clipWindow, useEditor, type EditorState } from "@/cut/lib/store";
 import { usePreviewTime } from "@/cut/lib/playhead";
 import { clipKeyed, clipPoseAt } from "@/cut/lib/types";
-import { AnimationTiles } from "@/cut/components/AnimationTiles";
+import { AnimationCard, AnimationTiles } from "@/cut/components/AnimationTiles";
+import { ColorField } from "@/cut/components/ColorField";
+import { NumberField } from "@/cut/components/NumberField";
+import { playAnimPreview, stopAnimPreview } from "@/cut/lib/animPreview";
 import { GenerateSubtitlesAudio } from "@/cut/components/VoicePicker";
 import {
   parseNumberInput,
@@ -95,15 +98,10 @@ import {
   type TextOverlay,
   type VideoClip,
 } from "@/cut/lib/types";
-import { autoGradeFromImageData, isNeutralGrade, normalizeGrade } from "@donkeycut/effects-kit";
+import { autoGradeFromImageData, isNeutralGrade, normalizeGrade, resolveShadow } from "@donkeycut/effects-kit";
 import { getPreviewCanvas, sampleClipFrameData } from "@/cut/lib/previewCanvas";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
-
-const SWATCHES = ["#FFFFFF", "#111114", "#FFD60A", "#FF375F", "#0A84FF", "#30D158"];
-
-/** Last three custom colors picked with the eyedropper, newest first. */
-const RECENT_COLORS_KEY = "cut-recent-colors";
 
 /**
  * One undo checkpoint per slider drag: capture the pre-drag state on the first
@@ -122,79 +120,6 @@ function useSliderCheckpoint() {
       active.current = false;
     },
   };
-}
-
-function readRecentColors(): string[] {
-  try {
-    const v = JSON.parse(localStorage.getItem(RECENT_COLORS_KEY) ?? "[]") as unknown;
-    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(0, 3) : [];
-  } catch {
-    return [];
-  }
-}
-
-/** Preset swatches, recent custom colors, and an eyedropper. `onBegin` marks
- * an undo checkpoint, `onLive` streams the drag, `onCommit` sets a final pick. */
-function ColorSwatches({
-  value,
-  onBegin,
-  onLive,
-  onCommit,
-}: {
-  value: string;
-  onBegin: () => void;
-  onLive: (c: string) => void;
-  onCommit: (c: string) => void;
-}) {
-  const [recents, setRecents] = useState<string[]>(() =>
-    typeof window === "undefined" ? [] : readRecentColors()
-  );
-
-  const recordRecent = (c: string) => {
-    if (SWATCHES.some((s) => s.toUpperCase() === c.toUpperCase())) return;
-    const next = [c, ...recents.filter((r) => r.toUpperCase() !== c.toUpperCase())].slice(0, 3);
-    setRecents(next);
-    try {
-      localStorage.setItem(RECENT_COLORS_KEY, JSON.stringify(next));
-    } catch {
-      // Storage full/blocked — recents just won't persist.
-    }
-  };
-
-  return (
-    <div className="flex max-w-44 flex-wrap items-center justify-end gap-1.5">
-      {[...SWATCHES, ...recents].map((c) => (
-        <button
-          key={c}
-          title={c}
-          aria-label={`Color ${c}`}
-          className={cn(
-            "size-5 rounded-full border border-black/15 transition-transform hover:scale-110",
-            value.toUpperCase() === c.toUpperCase() &&
-              "ring-2 ring-primary ring-offset-2 ring-offset-card"
-          )}
-          style={{ background: c }}
-          onClick={() => onCommit(c)}
-        />
-      ))}
-      <label
-        title="Custom color"
-        className="color-picker-well relative size-5 cursor-pointer rounded-full border border-black/15 bg-[conic-gradient(from_0deg,#f43f5e,#f59e0b,#84cc16,#06b6d4,#6366f1,#d946ef,#f43f5e)] transition-transform hover:scale-110"
-      >
-        <span className="absolute inset-1 rounded-full bg-card" />
-        <span className="absolute inset-[5px] rounded-full" style={{ background: value }} />
-        <input
-          type="color"
-          aria-label="Pick a custom color"
-          className="absolute inset-0 size-full cursor-pointer opacity-0"
-          value={/^#[0-9a-fA-F]{6}$/.test(value) ? value : "#ffffff"}
-          onFocus={onBegin}
-          onChange={(e) => onLive(e.target.value)}
-          onBlur={() => recordRecent(value)}
-        />
-      </label>
-    </div>
-  );
 }
 
 export function Inspector() {
@@ -276,6 +201,54 @@ function Row({
       </span>
       <div className={cn("flex min-w-0 items-center gap-2", grow && "grow")}>{children}</div>
     </div>
+  );
+}
+
+/** A control that carries its own caption, for the two-up rows where the
+ * settings sit side by side instead of behind a label on the left. */
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <span className="truncate text-[11px] text-muted-foreground">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+/** Icon toggles that belong together, sat in one trough. */
+function SegGroup({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex shrink-0 items-center gap-0.5 rounded-md bg-secondary/60 p-0.5">
+      {children}
+    </div>
+  );
+}
+
+function SegToggle({
+  label,
+  active,
+  onClick,
+  children,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      aria-pressed={active}
+      className={cn(
+        "grid size-6 place-items-center rounded-[5px] text-muted-foreground transition-colors [&_svg]:size-3.5",
+        active ? "bg-foreground text-background" : "hover:bg-foreground/10 hover:text-foreground"
+      )}
+      onClick={onClick}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -1023,8 +996,15 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
   );
 }
 
+/** The sizes and spacings a title usually wants, offered under each field's
+ * chevron; any value in range can still be typed or dragged. */
+const TEXT_SIZES = [32, 48, 64, 80, 96, 120, 160, 200, 240];
+const LINE_HEIGHTS = [0.9, 1, 1.15, 1.25, 1.5, 1.75, 2];
+const LETTER_SPACINGS = [-2, 0, 2, 5, 10, 20];
+
 function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
   const update = useEditor((s) => s.updateOverlay);
+  const [animView, setAnimView] = useState<"closed" | "open" | "returned">("closed");
   const sizeCk = useSliderCheckpoint();
   const radiusCk = useSliderCheckpoint();
   const opacityCk = useSliderCheckpoint();
@@ -1075,6 +1055,8 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
     requestAnimationFrame(() => ta?.setSelectionRange(start + emoji.length, start + emoji.length));
   };
 
+  if (animView === "open")
+    return <AnimationPanel overlay={o} onBack={() => setAnimView("returned")} />;
   return (
     <>
       <PanelTitle>Text</PanelTitle>
@@ -1106,77 +1088,66 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
           />
         </div>
         <StylePresetsRow overlay={o} />
-        <Row label="Font">
-          <Select
-            value={o.font}
-            items={Object.fromEntries(fonts.map((f) => [f.id, f.label]))}
-            onValueChange={(v) => update(o.id, { font: v as TextOverlay["font"] })}
-          >
-            <SelectTrigger size="sm" className="w-28">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {fonts.map((f) => (
-                <SelectItem key={f.id} value={f.id}>
-                  <span style={{ fontFamily: f.stack }}>{f.label}</span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            variant="outline"
-            size="icon-sm"
-            aria-label="Bold"
-            aria-pressed={o.weight === 700}
-            className={cn(o.weight === 700 && "border-primary bg-primary/15 text-primary")}
-            onClick={() => update(o.id, { weight: o.weight === 700 ? 400 : 700 })}
-          >
-            <Bold />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon-sm"
-            aria-label="Italic"
-            aria-pressed={!!o.italic}
-            className={cn(o.italic && "border-primary bg-primary/15 text-primary")}
-            onClick={() => update(o.id, { italic: o.italic ? undefined : true })}
-          >
-            <Italic />
-          </Button>
-        </Row>
-        <Row label="Align">
-          {(
-            [
-              ["left", AlignLeft],
-              ["center", AlignCenter],
-              ["right", AlignRight],
-            ] as const
-          ).map(([a, Icon]) => {
-            const active = (o.align ?? "center") === a;
-            return (
-              <Button
+        <Select
+          value={o.font}
+          items={Object.fromEntries(fonts.map((f) => [f.id, f.label]))}
+          onValueChange={(v) => update(o.id, { font: v as TextOverlay["font"] })}
+        >
+          <SelectTrigger size="sm" className="w-full" style={{ fontFamily: fontStack(o.font) }}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {fonts.map((f) => (
+              <SelectItem key={f.id} value={f.id}>
+                <span style={{ fontFamily: f.stack }}>{f.label}</span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <div className="mt-1 flex items-center gap-2">
+          <SegGroup>
+            <SegToggle
+              label="Bold"
+              active={o.weight === 700}
+              onClick={() => update(o.id, { weight: o.weight === 700 ? 400 : 700 })}
+            >
+              <Bold />
+            </SegToggle>
+            <SegToggle
+              label="Italic"
+              active={!!o.italic}
+              onClick={() => update(o.id, { italic: o.italic ? undefined : true })}
+            >
+              <Italic />
+            </SegToggle>
+          </SegGroup>
+          <SegGroup>
+            {(
+              [
+                ["left", AlignLeft],
+                ["center", AlignCenter],
+                ["right", AlignRight],
+              ] as const
+            ).map(([a, Icon]) => (
+              <SegToggle
                 key={a}
-                variant="outline"
-                size="icon-sm"
-                aria-label={`Align ${a}`}
-                aria-pressed={active}
-                className={cn(active && "border-primary bg-primary/15 text-primary")}
+                label={`Align ${a}`}
+                active={(o.align ?? "center") === a}
                 onClick={() => update(o.id, { align: a === "center" ? undefined : a })}
               >
                 <Icon />
-              </Button>
-            );
-          })}
-        </Row>
-        <Row label="Size">
-          <ValueSlider
+              </SegToggle>
+            ))}
+          </SegGroup>
+          <NumberField
             label="Text size"
-            sliderClassName="data-horizontal:w-24"
-            valueClassName="w-9 text-muted-foreground"
+            className="ml-auto w-[74px]"
+            icon={<Type />}
             value={o.size}
             min={24}
             max={240}
             step={1}
+            presets={TEXT_SIZES}
             format={(v) => String(Math.round(v))}
             parse={parseNumberInput}
             onDraft={(v) => {
@@ -1189,67 +1160,70 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
               sizeCk.end();
             }}
           />
-        </Row>
+        </div>
+        <div className="mt-1 grid grid-cols-2 gap-2">
+          <Field label="Line height">
+            <NumberField
+              label="Line height"
+              icon={<AlignVerticalSpaceAround />}
+              value={o.lineHeight ?? 1.25}
+              min={0.8}
+              max={2}
+              step={0.05}
+              snap={[1.25]}
+              presets={LINE_HEIGHTS}
+              format={(v) => v.toFixed(2)}
+              parse={parseNumberInput}
+              onDraft={(v) => {
+                lineHeightCk.begin();
+                useEditor.getState().updateOverlayTransient(o.id, {
+                  lineHeight: Math.abs(v - 1.25) < 0.025 ? undefined : v,
+                });
+              }}
+              onCommit={(v) => {
+                lineHeightCk.begin();
+                useEditor.getState().updateOverlayTransient(o.id, {
+                  lineHeight: Math.abs(v - 1.25) < 0.025 ? undefined : v,
+                });
+                lineHeightCk.end();
+              }}
+            />
+          </Field>
+          <Field label="Letter spacing">
+            <NumberField
+              label="Letter spacing"
+              icon={<AlignHorizontalSpaceAround />}
+              value={(o.letterSpacing ?? 0) * 100}
+              min={-5}
+              max={30}
+              step={1}
+              snap={[0]}
+              presets={LETTER_SPACINGS}
+              format={(v) => `${Math.round(v)}%`}
+              parse={(raw) => parseNumberInput(raw.replace(/%$/, ""))}
+              onDraft={(v) => {
+                spacingCk.begin();
+                useEditor.getState().updateOverlayTransient(o.id, {
+                  letterSpacing: Math.abs(v) < 0.25 ? undefined : v / 100,
+                });
+              }}
+              onCommit={(v) => {
+                spacingCk.begin();
+                useEditor.getState().updateOverlayTransient(o.id, {
+                  letterSpacing: Math.abs(v) < 0.25 ? undefined : v / 100,
+                });
+                spacingCk.end();
+              }}
+            />
+          </Field>
+        </div>
         <Row label="Color">
-          <ColorSwatches
+          <ColorField
             value={o.color}
+            label="Text color"
             onBegin={() => useEditor.getState().pushHistory()}
             onLive={(c) => useEditor.getState().updateOverlayTransient(o.id, { color: c })}
             onCommit={(c) => update(o.id, { color: c })}
-          />
-        </Row>
-        <Row label="Spacing">
-          <ValueSlider
-            label="Letter spacing"
-            sliderClassName="data-horizontal:w-24"
-            valueClassName="w-9 text-muted-foreground"
-            value={(o.letterSpacing ?? 0) * 100}
-            min={-5}
-            max={30}
-            step={0.5}
-            snap={[0]}
-            format={(v) => String(Math.round(v))}
-            parse={parseNumberInput}
-            onDraft={(v) => {
-              spacingCk.begin();
-              useEditor.getState().updateOverlayTransient(o.id, {
-                letterSpacing: Math.abs(v) < 0.25 ? undefined : v / 100,
-              });
-            }}
-            onCommit={(v) => {
-              spacingCk.begin();
-              useEditor.getState().updateOverlayTransient(o.id, {
-                letterSpacing: Math.abs(v) < 0.25 ? undefined : v / 100,
-              });
-              spacingCk.end();
-            }}
-          />
-        </Row>
-        <Row label="Line height">
-          <ValueSlider
-            label="Line height"
-            sliderClassName="data-horizontal:w-24"
-            valueClassName="w-9 text-muted-foreground"
-            value={o.lineHeight ?? 1.25}
-            min={0.8}
-            max={2}
-            step={0.05}
-            snap={[1.25]}
-            format={(v) => v.toFixed(2)}
-            parse={parseNumberInput}
-            onDraft={(v) => {
-              lineHeightCk.begin();
-              useEditor.getState().updateOverlayTransient(o.id, {
-                lineHeight: Math.abs(v - 1.25) < 0.025 ? undefined : v,
-              });
-            }}
-            onCommit={(v) => {
-              lineHeightCk.begin();
-              useEditor.getState().updateOverlayTransient(o.id, {
-                lineHeight: Math.abs(v - 1.25) < 0.025 ? undefined : v,
-              });
-              lineHeightCk.end();
-            }}
           />
         </Row>
         <Section
@@ -1262,8 +1236,9 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
           {o.stroke && (
             <>
               <Row label="Color">
-                <ColorSwatches
+                <ColorField
                   value={o.stroke.color}
+                  label="Outline color"
                   onBegin={() => useEditor.getState().pushHistory()}
                   onLive={(c) =>
                     useEditor.getState().updateOverlayTransient(o.id, {
@@ -1310,8 +1285,9 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
         >
           <>
             <Row label="Color">
-              <ColorSwatches
+              <ColorField
                 value={(typeof o.shadow === "object" ? o.shadow.color : undefined) ?? "#000000"}
+                label="Shadow color"
                 onBegin={() => useEditor.getState().pushHistory()}
                 onLive={(c) =>
                   useEditor.getState().updateOverlayTransient(o.id, {
@@ -1323,6 +1299,23 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
                     shadow: { ...(typeof o.shadow === "object" ? o.shadow : {}), color: c },
                   })
                 }
+                opacity={{
+                  label: "Shadow opacity",
+                  value: (typeof o.shadow === "object" ? o.shadow.opacity : undefined) ?? 0.65,
+                  onDraft: (v) => {
+                    shadowCk.begin();
+                    useEditor.getState().updateOverlayTransient(o.id, {
+                      shadow: { ...(typeof o.shadow === "object" ? o.shadow : {}), opacity: v },
+                    });
+                  },
+                  onCommit: (v) => {
+                    shadowCk.begin();
+                    useEditor.getState().updateOverlayTransient(o.id, {
+                      shadow: { ...(typeof o.shadow === "object" ? o.shadow : {}), opacity: v },
+                    });
+                    shadowCk.end();
+                  },
+                }}
               />
             </Row>
             <Row label="Blur">
@@ -1352,33 +1345,6 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
                 }}
               />
             </Row>
-            <Row label="Opacity">
-              <ValueSlider
-                label="Shadow opacity"
-                sliderClassName="data-horizontal:w-24"
-                valueClassName="w-9 text-muted-foreground"
-                value={(typeof o.shadow === "object" ? o.shadow.opacity : undefined) ?? 0.65}
-                min={0}
-                max={1}
-                step={0.01}
-                snap={[0.65]}
-                format={(v) => String(Math.round(v * 100))}
-                parse={parsePercentInput}
-                onDraft={(v) => {
-                  shadowCk.begin();
-                  useEditor.getState().updateOverlayTransient(o.id, {
-                    shadow: { ...(typeof o.shadow === "object" ? o.shadow : {}), opacity: v },
-                  });
-                }}
-                onCommit={(v) => {
-                  shadowCk.begin();
-                  useEditor.getState().updateOverlayTransient(o.id, {
-                    shadow: { ...(typeof o.shadow === "object" ? o.shadow : {}), opacity: v },
-                  });
-                  shadowCk.end();
-                }}
-              />
-            </Row>
           </>
         </Section>
         <Section
@@ -1388,33 +1354,24 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
         >
           <>
             <Row label="Color">
-              <ColorSwatches
+              <ColorField
                 value={o.plateColor ?? PLATE_COLOR}
+                label="Backdrop color"
                 onBegin={() => useEditor.getState().pushHistory()}
                 onLive={(c) => useEditor.getState().updateOverlayTransient(o.id, { plateColor: c })}
                 onCommit={(c) => update(o.id, { plateColor: c })}
-              />
-            </Row>
-            <Row label="Opacity">
-              <ValueSlider
-                label="Backdrop opacity"
-                sliderClassName="data-horizontal:w-24"
-                valueClassName="w-9 text-muted-foreground"
-                value={o.plateOpacity ?? PLATE_OPACITY}
-                min={0}
-                max={1}
-                step={0.01}
-                snap={[PLATE_OPACITY]}
-                format={(v) => String(Math.round(v * 100))}
-                parse={parsePercentInput}
-                onDraft={(v) => {
-                  opacityCk.begin();
-                  useEditor.getState().updateOverlayTransient(o.id, { plateOpacity: v });
-                }}
-                onCommit={(v) => {
-                  opacityCk.begin();
-                  useEditor.getState().updateOverlayTransient(o.id, { plateOpacity: v });
-                  opacityCk.end();
+                opacity={{
+                  label: "Backdrop opacity",
+                  value: o.plateOpacity ?? PLATE_OPACITY,
+                  onDraft: (v) => {
+                    opacityCk.begin();
+                    useEditor.getState().updateOverlayTransient(o.id, { plateOpacity: v });
+                  },
+                  onCommit: (v) => {
+                    opacityCk.begin();
+                    useEditor.getState().updateOverlayTransient(o.id, { plateOpacity: v });
+                    opacityCk.end();
+                  },
                 }}
               />
             </Row>
@@ -1446,7 +1403,11 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
         <OverlayMaskSection overlay={o} />
         <TransformRows overlay={o} />
         <GroupRow overlay={o} />
-        <AnimationRows overlay={o} />
+        <AnimationSection
+          overlay={o}
+          onOpen={() => setAnimView("open")}
+          reveal={animView === "returned"}
+        />
       </div>
     </>
   );
@@ -1567,132 +1528,261 @@ function StylePresetsRow({ overlay: o }: { overlay: TextOverlay }) {
   );
 }
 
-/** Preset In / Out / Loop animation, shared by every overlay kind. Neutral
- * (all slots off) stores as absence. */
-function AnimationRows({ overlay: o }: { overlay: Overlay }) {
-  const lengthCk = useSliderCheckpoint();
-  const speedCk = useSliderCheckpoint();
+/** Write an animation patch to the element — and its whole group, since a
+ * grouped element's animation stamps the group. Neutral (all slots off)
+ * stores as absence. */
+function writeOverlayAnim(o: Overlay, anim: OverlayAnim, patch: Partial<OverlayAnim>) {
+  const next = { ...anim, ...patch };
+  if (!next.in) delete next.in;
+  if (!next.out) delete next.out;
+  if (!next.loop) delete next.loop;
+  const value = next.in || next.out || next.loop ? next : undefined;
+  const st = useEditor.getState();
+  const peers = o.groupId ? st.overlays.filter((x) => x.groupId === o.groupId) : [];
+  const ids = peers.length > 1 ? peers.map((p) => p.id) : [o.id];
+  st.updateOverlaysTransient(ids.map((id) => ({ id, patch: { anim: value } })));
+}
+
+/** The set slot's Length (In/Out) or Speed (Loop) slider. */
+function AnimSlotSlider({
+  overlay: o,
+  slot,
+  label,
+}: {
+  overlay: Overlay;
+  slot: "in" | "out" | "loop";
+  label: string;
+}) {
+  const ck = useSliderCheckpoint();
   const anim = o.anim ?? {};
   const dur = Math.max(0.2, o.end - o.start);
-  const writeAnim = (patch: Partial<OverlayAnim>) => {
-    const next = { ...anim, ...patch };
-    if (!next.in) delete next.in;
-    if (!next.out) delete next.out;
-    if (!next.loop) delete next.loop;
-    const value = next.in || next.out || next.loop ? next : undefined;
-    // A grouped element's animation stamps the whole group.
-    const st = useEditor.getState();
-    const peers = o.groupId ? st.overlays.filter((x) => x.groupId === o.groupId) : [];
-    const ids = peers.length > 1 ? peers.map((p) => p.id) : [o.id];
-    st.updateOverlaysTransient(ids.map((id) => ({ id, patch: { anim: value } })));
-  };
-  /** A discrete change — its own undo step. */
-  const setAnim = (patch: Partial<OverlayAnim>) => {
-    useEditor.getState().pushHistory();
-    writeAnim(patch);
-  };
   /** A drag — one undo step for the whole gesture, not one per frame. */
-  const dragAnim = (ck: ReturnType<typeof useSliderCheckpoint>, patch: Partial<OverlayAnim>) => {
+  const drag = (patch: Partial<OverlayAnim>) => {
     ck.begin();
-    writeAnim(patch);
+    writeOverlayAnim(o, anim, patch);
   };
-  // In / Out / Loop pick from the same grid, one slot at a time — the tiles
-  // are big enough to read the motion, which three stacked grids would not be.
+  if (slot === "loop") {
+    if (!anim.loop) return null;
+    return (
+      <Row label={label}>
+        <ValueSlider
+          label={label}
+          sliderClassName="data-horizontal:w-24"
+          valueClassName="w-9 text-muted-foreground"
+          value={anim.loop.speed}
+          min={0.25}
+          max={4}
+          step={0.25}
+          format={(v) => `${v.toFixed(2)}×`}
+          parse={parseSpeedInput}
+          onDraft={(v) => drag({ loop: { ...anim.loop!, speed: v } })}
+          onCommit={(v) => {
+            drag({ loop: { ...anim.loop!, speed: v } });
+            ck.end();
+          }}
+        />
+      </Row>
+    );
+  }
+  const active = anim[slot];
+  if (!active) return null;
+  return (
+    <Row label={label}>
+      <ValueSlider
+        label={label}
+        sliderClassName="data-horizontal:w-24"
+        valueClassName="w-9 text-muted-foreground"
+        value={active.seconds}
+        min={OVERLAY_ANIM_MIN_SECONDS}
+        max={Math.min(OVERLAY_ANIM_MAX_SECONDS, dur)}
+        step={0.05}
+        snap={[OVERLAY_ANIM_DEFAULT_SECONDS]}
+        format={(v) => `${v.toFixed(2)}s`}
+        parse={parseSecondsInput}
+        onDraft={(v) =>
+          drag({ [slot]: { style: active.style as OverlayAnimStyle, seconds: v } })
+        }
+        onCommit={(v) => {
+          drag({ [slot]: { style: active.style as OverlayAnimStyle, seconds: v } });
+          ck.end();
+        }}
+      />
+    </Row>
+  );
+}
+
+/** A title's own look at tile scale, for the picker's demo text: family,
+ * weight, color, stroke and shadow ride along (the stroke's em units scale
+ * with the demo font); layout knobs stay out. */
+function demoTextStyle(o: Overlay): React.CSSProperties | undefined {
+  if (!isTextOverlay(o)) return undefined;
+  const shadow = resolveShadow(o.shadow);
+  const k = 13 / o.size;
+  return {
+    fontFamily: fontStack(o.font),
+    fontWeight: o.weight,
+    fontStyle: o.italic ? "italic" : undefined,
+    color: o.color,
+    WebkitTextStroke: o.stroke ? `${o.stroke.width * 2}em ${o.stroke.color}` : undefined,
+    paintOrder: o.stroke ? ("stroke fill" as const) : undefined,
+    textShadow: shadow
+      ? `0 ${shadow.offsetY * k}px ${shadow.blur * k}px ${shadow.color}`
+      : undefined,
+  };
+}
+
+/** The Animation entry every overlay panel carries: the current picks at a
+ * glance on a drill-in to the picker, with each set slot's length or speed
+ * right under it. */
+function AnimationSection({
+  overlay: o,
+  onOpen,
+  reveal,
+}: {
+  overlay: Overlay;
+  onOpen: () => void;
+  /** Mounted by the picker's back button: bring the section into view, since
+   * the pushed view scrolled away from it. */
+  reveal?: boolean;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (reveal) ref.current?.scrollIntoView({ block: "nearest" });
+  }, [reveal]);
+  const anim = o.anim ?? {};
+  const slots = (["in", "out", "loop"] as const).filter((s) => anim[s]);
+  const clear = (slot: "in" | "out" | "loop") => {
+    stopAnimPreview();
+    useEditor.getState().pushHistory();
+    writeOverlayAnim(o, anim, { [slot]: undefined });
+  };
+  return (
+    <div ref={ref}>
+    <Section
+      title="Animation"
+      aside={
+        <button
+          type="button"
+          className="anim-open flex h-8 items-center gap-1 rounded-md border border-input px-2.5 text-[11.5px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+          onClick={onOpen}
+        >
+          {slots.length ? "Change" : "None"}
+          <ChevronRight className="size-3.5 shrink-0" />
+        </button>
+      }
+    >
+      {slots.length > 0 && (
+        <div className="mt-2 mb-1 grid grid-cols-3 gap-1.5">
+          {slots.map((slot, i) => (
+            <AnimationCard
+              key={slot}
+              slot={slot}
+              index={i}
+              style={slot === "loop" ? anim.loop!.style : anim[slot]!.style}
+              isText={isTextOverlay(o)}
+              seconds={slot === "loop" ? OVERLAY_ANIM_DEFAULT_SECONDS : anim[slot]!.seconds}
+              speed={anim.loop?.speed ?? 1}
+              onOpen={onOpen}
+              onClear={() => clear(slot)}
+              textStyle={demoTextStyle(o)}
+            />
+          ))}
+        </div>
+      )}
+      <AnimSlotSlider overlay={o} slot="in" label="In duration" />
+      <AnimSlotSlider overlay={o} slot="out" label="Out duration" />
+      <AnimSlotSlider overlay={o} slot="loop" label="Loop speed" />
+    </Section>
+    </div>
+  );
+}
+
+/** The animation subview an overlay panel pushes into: In / Out / Loop tabs
+ * over the tile grid, the active slot's length or speed under it. The three
+ * slots pick from the same grid, one at a time — the tiles are big enough to
+ * read the motion, which three stacked grids would not be. */
+function AnimationPanel({ overlay: o, onBack }: { overlay: Overlay; onBack: () => void }) {
+  const anim = o.anim ?? {};
   const [slot, setSlot] = useState<"in" | "out" | "loop">("in");
   const active = anim[slot];
   const seconds =
     slot === "loop" ? undefined : (anim[slot] as OverlayAnim["in"])?.seconds;
   const pick = (style: string | null) => {
-    if (!style) return setAnim({ [slot]: undefined });
-    if (slot === "loop") {
-      setAnim({ loop: { style: style as OverlayLoopStyle, speed: anim.loop?.speed ?? 1 } });
+    if (!style) {
+      stopAnimPreview();
+      useEditor.getState().pushHistory();
+      writeOverlayAnim(o, anim, { [slot]: undefined });
       return;
     }
-    setAnim({
-      [slot]: {
-        style: style as OverlayAnimStyle,
-        seconds: seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS,
-      },
-    });
+    const patch: Partial<OverlayAnim> =
+      slot === "loop"
+        ? { loop: { style: style as OverlayLoopStyle, speed: anim.loop?.speed ?? 1 } }
+        : {
+            [slot]: {
+              style: style as OverlayAnimStyle,
+              seconds: seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS,
+            },
+          };
+    useEditor.getState().pushHistory();
+    writeOverlayAnim(o, anim, patch);
+    // The pick plays itself on the stage, for exactly its own length.
+    playAnimPreview({ ...o, anim: { ...anim, ...patch } }, slot);
   };
+  // A rehearsal belongs to the panel that started it: leaving takes it away.
+  useEffect(() => stopAnimPreview, []);
 
   return (
-    <Section title="Animation">
-      <div className="mt-0.5 mb-2 flex shrink-0 rounded-lg bg-muted p-0.5 text-[11.5px] font-medium">
-        {(["in", "out", "loop"] as const).map((id) => (
+    <>
+      {/* The title and the slot tabs ride the top of the scroll: the grid is
+          longer than the panel, and which slot a tile lands in is the one
+          thing a reader cannot afford to lose track of. */}
+      <div className="sticky top-0 z-10 bg-card pb-2">
+        <div className="flex h-10 shrink-0 items-center gap-1 px-2.5 text-sm font-semibold tracking-tight">
           <button
-            key={id}
             type="button"
-            className={cn(
-              "flex-1 rounded-md px-1.5 py-1 capitalize transition-colors",
-              slot === id
-                ? "bg-neutral-900 text-white"
-                : "text-muted-foreground hover:text-foreground",
-              // A dot marks a slot that is already set, so switching tabs is
-              // not the only way to see what an element is doing.
-              anim[id] && slot !== id && "text-foreground"
-            )}
-            onClick={() => setSlot(id)}
+            aria-label="Back"
+            className="anim-back grid size-6 place-items-center rounded text-muted-foreground transition-colors hover:text-foreground"
+            onClick={onBack}
           >
-            {id}
-            {anim[id] ? " ●" : ""}
+            <ChevronLeft className="size-4" />
           </button>
-        ))}
+          Animation
+        </div>
+        <div className="mx-3.5 flex shrink-0 rounded-lg bg-muted p-0.5 text-[11.5px] font-medium">
+          {(["in", "out", "loop"] as const).map((id) => (
+            <button
+              key={id}
+              type="button"
+              className={cn(
+                "flex-1 rounded-md px-1.5 py-1 capitalize transition-colors",
+                slot === id
+                  ? "bg-neutral-900 text-white"
+                  : "text-muted-foreground hover:text-foreground",
+                // A slot that is already set reads darker, so switching tabs is
+                // not the only way to see what an element is doing.
+                anim[id] && slot !== id && "text-foreground"
+              )}
+              onClick={() => setSlot(id)}
+            >
+              {id}
+            </button>
+          ))}
+        </div>
       </div>
-      <AnimationTiles
-        slot={slot}
-        value={active?.style}
-        isText={isTextOverlay(o)}
-        onPick={pick}
-      />
-      {slot !== "loop" && active && (
-        <Row label="Length">
-          <ValueSlider
-            label="Animation length"
-            sliderClassName="data-horizontal:w-24"
-            valueClassName="w-9 text-muted-foreground"
-            value={seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS}
-            min={OVERLAY_ANIM_MIN_SECONDS}
-            max={Math.min(OVERLAY_ANIM_MAX_SECONDS, dur)}
-            step={0.05}
-            snap={[OVERLAY_ANIM_DEFAULT_SECONDS]}
-            format={(v) => `${v.toFixed(2)}s`}
-            parse={parseSecondsInput}
-            onDraft={(v) =>
-              dragAnim(lengthCk, {
-                [slot]: { style: active.style as OverlayAnimStyle, seconds: v },
-              })
-            }
-            onCommit={(v) => {
-              dragAnim(lengthCk, {
-                [slot]: { style: active.style as OverlayAnimStyle, seconds: v },
-              });
-              lengthCk.end();
-            }}
-          />
-        </Row>
-      )}
-      {slot === "loop" && anim.loop && (
-        <Row label="Speed">
-          <ValueSlider
-            label="Loop speed"
-            sliderClassName="data-horizontal:w-24"
-            valueClassName="w-9 text-muted-foreground"
-            value={anim.loop.speed}
-            min={0.25}
-            max={4}
-            step={0.25}
-            format={(v) => `${v.toFixed(2)}×`}
-            parse={parseSpeedInput}
-            onDraft={(v) => dragAnim(speedCk, { loop: { ...anim.loop!, speed: v } })}
-            onCommit={(v) => {
-              dragAnim(speedCk, { loop: { ...anim.loop!, speed: v } });
-              speedCk.end();
-            }}
-          />
-        </Row>
-      )}
-    </Section>
+      {/* pt-1 clears the selected tile's ring, which draws outside its box and
+          would otherwise sit under the sticky header. */}
+      <div className="flex flex-col gap-1 px-3.5 pt-1 pb-4">
+        <AnimationTiles
+          slot={slot}
+          value={active?.style}
+          isText={isTextOverlay(o)}
+          seconds={seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS}
+          speed={anim.loop?.speed ?? 1}
+          onPick={pick}
+          textStyle={demoTextStyle(o)}
+        />
+      </div>
+    </>
   );
 }
 
@@ -2249,9 +2339,10 @@ function ClipBorderSection({ clip }: { clip: VideoClip }) {
               }}
             />
           </Row>
-          <Row label="Color" grow>
-            <ColorSwatches
+          <Row label="Color">
+            <ColorField
               value={bs.borderColor ?? "#FFFFFF"}
+              label="Border color"
               onBegin={() => st().pushHistory()}
               onLive={(c) => write({ borderColor: c })}
               onCommit={(c) => st().updateClip(clip.id, { boxStyle: { ...bs, borderColor: c } })}
@@ -2502,47 +2593,44 @@ function ShapePanel({ overlay: o }: { overlay: ShapeOverlay }) {
   const fillCk = useSliderCheckpoint();
   const radiusCk = useSliderCheckpoint();
   const strokeCk = useSliderCheckpoint();
+  const [animView, setAnimView] = useState<"closed" | "open" | "returned">("closed");
   const boxShape = !lineLikeShape(o.shape);
+  if (animView === "open")
+    return <AnimationPanel overlay={o} onBack={() => setAnimView("returned")} />;
   return (
     <>
       <PanelTitle>{SHAPE_LABELS[o.shape]}</PanelTitle>
       <div className="flex flex-col gap-1 px-3.5 pb-4">
         <Row label={boxShape ? "Fill" : "Color"}>
-          <ColorSwatches
+          <ColorField
             value={o.fill}
+            label={boxShape ? "Fill color" : "Shape color"}
             onBegin={() => useEditor.getState().pushHistory()}
             onLive={(c) => useEditor.getState().updateOverlayTransient(o.id, { fill: c })}
             onCommit={(c) => update(o.id, { fill: c })}
+            opacity={
+              boxShape
+                ? {
+                    label: "Fill opacity",
+                    value: o.fillOpacity ?? 1,
+                    onDraft: (v) => {
+                      fillCk.begin();
+                      useEditor.getState().updateOverlayTransient(o.id, {
+                        fillOpacity: v >= 0.995 ? undefined : v,
+                      });
+                    },
+                    onCommit: (v) => {
+                      fillCk.begin();
+                      useEditor.getState().updateOverlayTransient(o.id, {
+                        fillOpacity: v >= 0.995 ? undefined : v,
+                      });
+                      fillCk.end();
+                    },
+                  }
+                : undefined
+            }
           />
         </Row>
-        {boxShape && (
-          <Row label="Fill opacity">
-            <ValueSlider
-              label="Fill opacity"
-              sliderClassName="data-horizontal:w-24"
-              valueClassName="w-9 text-muted-foreground"
-              value={o.fillOpacity ?? 1}
-              min={0}
-              max={1}
-              step={0.01}
-              format={(v) => String(Math.round(v * 100))}
-              parse={parsePercentInput}
-              onDraft={(v) => {
-                fillCk.begin();
-                useEditor.getState().updateOverlayTransient(o.id, {
-                  fillOpacity: v >= 0.995 ? undefined : v,
-                });
-              }}
-              onCommit={(v) => {
-                fillCk.begin();
-                useEditor.getState().updateOverlayTransient(o.id, {
-                  fillOpacity: v >= 0.995 ? undefined : v,
-                });
-                fillCk.end();
-              }}
-            />
-          </Row>
-        )}
         {o.shape === "rect" && (
           <Row label="Corner radius">
             <ValueSlider
@@ -2584,8 +2672,9 @@ function ShapePanel({ overlay: o }: { overlay: ShapeOverlay }) {
             {o.stroke && (
               <>
                 <Row label="Color">
-                  <ColorSwatches
+                  <ColorField
                     value={o.stroke.color}
+                    label="Outline color"
                     onBegin={() => useEditor.getState().pushHistory()}
                     onLive={(c) =>
                       useEditor.getState().updateOverlayTransient(o.id, {
@@ -2629,7 +2718,11 @@ function ShapePanel({ overlay: o }: { overlay: ShapeOverlay }) {
         <OverlayMaskSection overlay={o} />
         <TransformRows overlay={o} />
         <GroupRow overlay={o} />
-        <AnimationRows overlay={o} />
+        <AnimationSection
+          overlay={o}
+          onOpen={() => setAnimView("open")}
+          reveal={animView === "returned"}
+        />
       </div>
     </>
   );
@@ -2816,6 +2909,9 @@ function StickerPanel({ overlay: o }: { overlay: StickerOverlay }) {
   const asset = useEditor((s) =>
     o.assetId ? s.assets.find((a) => a.id === o.assetId) : undefined
   );
+  const [animView, setAnimView] = useState<"closed" | "open" | "returned">("closed");
+  if (animView === "open")
+    return <AnimationPanel overlay={o} onBack={() => setAnimView("returned")} />;
   return (
     <>
       <PanelTitle>Sticker</PanelTitle>
@@ -2850,7 +2946,11 @@ function StickerPanel({ overlay: o }: { overlay: StickerOverlay }) {
         <OverlayMaskSection overlay={o} />
         <TransformRows overlay={o} />
         <GroupRow overlay={o} />
-        <AnimationRows overlay={o} />
+        <AnimationSection
+          overlay={o}
+          onOpen={() => setAnimView("open")}
+          reveal={animView === "returned"}
+        />
       </div>
     </>
   );

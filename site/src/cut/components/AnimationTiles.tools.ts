@@ -12,6 +12,8 @@ import {
   OVERLAY_ANIM_DEFAULT_SECONDS,
   OVERLAY_ANIM_MAX_SECONDS,
   OVERLAY_ANIM_MIN_SECONDS,
+  GLYPH_ANIM_STYLE_IDS,
+  GLYPH_LOOP_STYLE_IDS,
   OVERLAY_ANIM_STYLE_IDS,
   OVERLAY_LOOP_STYLE_IDS,
 } from "@donkeycut/effects-kit";
@@ -23,7 +25,7 @@ export const OVERLAY_ANIMATION_TOOLS = [
   {
     name: "set_overlay_animation",
     description:
-      `Animate an overlay element (title, shape, or sticker): preset In/Out ramps plus a Loop that runs its whole duration. Omitted slots keep their setting; pass "none" to clear one. In/Out styles: ${OVERLAY_ANIM_STYLE_IDS.join(", ")} — slide names are the motion direction, typewriter animates titles only. Loop styles: ${OVERLAY_LOOP_STYLE_IDS.join(", ")}.`,
+      `Animate an overlay element (title, shape, or sticker): preset In/Out ramps plus a Loop that runs its whole duration. Omitted slots keep their setting; pass "none" to clear one. In/Out styles: ${OVERLAY_ANIM_STYLE_IDS.join(", ")} — slide names are the motion direction; typewriter animates titles only; ${GLYPH_ANIM_STYLE_IDS.join(", ")} move a title's letters one at a time, and move any other kind as one piece. Loop styles: ${OVERLAY_LOOP_STYLE_IDS.join(", ")} — ${GLYPH_LOOP_STYLE_IDS.join(", ")} carry a title's letters on their own delays, and carry any other kind as one piece.`,
     inputSchema: obj({
       id: str("Overlay element id"),
       in_style: {

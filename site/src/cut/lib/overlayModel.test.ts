@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   evalOverlayAnim,
+  glyphStateAt,
   hasOverlayAnim,
   loopPeriod,
+  OVERLAY_LOOP_STYLE_IDS,
   shapeMetrics,
   type OverlayAnim,
 } from "@donkeycut/effects-kit";
@@ -246,6 +248,32 @@ describe("evalOverlayAnim", () => {
     const b = evalOverlayAnim(anim, 1.1 + p, dur);
     expect(a.scale).toBeCloseTo(b.scale, 5);
     expect(loopPeriod({ in: { style: "fade", seconds: 1 } }) === null).toBe(true);
+  });
+
+  // The frame sampler renders one cycle of pictures and repeats them by
+  // reference, so a loop that drifts by even a hair would jump at the seam.
+  test("every loop repeats exactly on its period", () => {
+    for (const style of OVERLAY_LOOP_STYLE_IDS) {
+      const anim: OverlayAnim = { loop: { style, speed: 1 } };
+      const p = loopPeriod(anim)!;
+      for (const t of [0, 0.37 * p, 0.5 * p, 0.83 * p]) {
+        const a = evalOverlayAnim(anim, t, dur);
+        const b = evalOverlayAnim(anim, t + p, dur);
+        expect(b.dx).toBeCloseTo(a.dx, 5);
+        expect(b.dy).toBeCloseTo(a.dy, 5);
+        expect(b.scale).toBeCloseTo(a.scale, 5);
+        expect(b.alpha).toBeCloseTo(a.alpha, 5);
+        // Spin turns forever, so its angle only matches modulo a full turn.
+        expect((b.rotate - a.rotate) % 360).toBeCloseTo(0, 5);
+        for (let i = 0; i < 4; i++) {
+          const ga = glyphStateAt(a, i, 4);
+          const gb = glyphStateAt(b, i, 4);
+          expect(gb.dx).toBeCloseTo(ga.dx, 5);
+          expect(gb.dy).toBeCloseTo(ga.dy, 5);
+          expect(gb.sy).toBeCloseTo(ga.sy, 5);
+        }
+      }
+    }
   });
 
   test("loop composes with the in ramp", () => {

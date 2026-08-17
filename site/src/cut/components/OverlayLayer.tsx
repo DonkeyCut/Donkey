@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { releaseAnimRest, useAnimPreview } from "@/cut/lib/animPreview";
 import { startDrag } from "@/cut/lib/drag";
 import { useSkim, usePreviewTime } from "@/cut/lib/playhead";
 import { useEditor } from "@/cut/lib/store";
@@ -15,7 +16,7 @@ import {
   subtitleLaneCount,
   trackPos,
 } from "@/cut/lib/subtitles";
-import { evalOverlayFrame, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, maskFrameAt, paintMaskCoverage, resolveShadow, shapeMetrics, shapePathD, type LottieHandle, type Mask, type MaskKey } from "@donkeycut/effects-kit";
+import { evalOverlayFrame, glyphStateAt, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, maskFrameAt, paintMaskCoverage, resolveShadow, shapeMetrics, shapePathD, type LottieHandle, type Mask, type MaskKey, type OverlayFrameState } from "@donkeycut/effects-kit";
 import {
   LINE_HEIGHT,
   PLATE_PAD_X,
@@ -37,6 +38,13 @@ import {
   type StickerOverlay,
 } from "@/cut/lib/types";
 import { subjectMatteSnapshot } from "@/cut/lib/behindPass";
+import {
+  BOX_HANDLES,
+  CORNER_HANDLES,
+  HANDLE_AXIS,
+  TransformHandles,
+  type ResizeHandle,
+} from "./TransformHandles";
 import { stageEffectFilter, stageEffectTransform } from "@/cut/lib/effectStack";
 import { useLiveEffects } from "./StageEffects";
 import { cn } from "@/lib/utils";
@@ -485,6 +493,8 @@ function OverlayItem({
   rotationGuide: (p: { clientX: number; clientY: number; quarter: number } | null) => void;
 }) {
   const [editing, setEditing] = useState(false);
+  /** The angle the readout shows while a rotate drag runs; null when idle. */
+  const [spin, setSpin] = useState<number | null>(null);
   const editRef = useRef<HTMLDivElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const frame = frameOf(useEditor((s) => s.aspect));
@@ -511,8 +521,29 @@ function OverlayItem({
 
   // The element's animation state at this exact moment — the same evaluator
   // the export samples, applied here as a live CSS transform. Ghosts (shown
-  // out of range for editing) render at rest.
-  const live = !ghost && isOverlayAnimated(o) ? evalOverlayFrame(o, Math.max(0, t - o.start)) : null;
+  // out of range for editing) render at rest. A rehearsal from the inspector
+  // outranks the clock: the element plays its animation where it stands, and
+  // after the run it holds its resting pose until the clock moves.
+  const rehearsal = useAnimPreview(o.id);
+  const restedAt = useRef<number | null>(null);
+  useEffect(() => {
+    if (rehearsal !== "rest") {
+      restedAt.current = null;
+      return;
+    }
+    if (restedAt.current === null) restedAt.current = t;
+    else if (t !== restedAt.current) releaseAnimRest(o.id);
+  }, [rehearsal, t, o.id]);
+  // A rehearsal draws the slot it is testing on its own — the run carries that
+  // one animation, so an In or a loop never rides along with it.
+  const running = rehearsal !== null && rehearsal !== "rest" ? rehearsal : null;
+  const live =
+    isOverlayAnimated(o) && rehearsal !== "rest" && (running !== null || !ghost)
+      ? evalOverlayFrame(
+          running ? { ...o, anim: running.anim } : o,
+          running ? running.tLocal : Math.max(0, t - o.start)
+        )
+      : null;
   const animTransform = live
     ? ` translate(${live.dx * scale}px, ${live.dy * scale}px)` +
       (live.rotation ? ` rotate(${live.rotation}deg)` : "") +
@@ -520,6 +551,10 @@ function OverlayItem({
     : o.rotation
       ? ` rotate(${o.rotation}deg)`
       : "";
+  // Per-glyph ramps and loops draw character by character; a wipe uncovers the
+  // box from its left edge. Neither runs while the box is being edited.
+  const glyphs = isText && !editing && live && hasGlyphMotion(live) ? live : null;
+  const reveal = !editing ? live?.reveal : undefined;
   // Typewriter: the visible slice of the text (display only, never while
   // the box is being edited).
   const shownText =
@@ -581,6 +616,9 @@ function OverlayItem({
         })()
       : {}),
     ...(maskCss ?? {}),
+    ...(reveal !== undefined
+      ? { clipPath: `inset(0 ${(1 - Math.min(1, Math.max(0, reveal))) * 100}% 0 0)` }
+      : {}),
   };
 
   const commitText = () => {
@@ -651,44 +689,80 @@ function OverlayItem({
     if (direct.length) s.updateOverlaysTransient(direct);
   };
 
-  // The corner handle resizes what the kind actually stores: a title's font
-  // size, a shape's box (both axes by the drag ratio), a sticker's width.
-  // A group scales as one: every member's size and its offset from the group
-  // center ride the same factor.
-  const resizeFrom = (e: React.PointerEvent) => {
+  // A grip resizes what the kind actually stores: a title's font size, a
+  // shape's box, a sticker's width. The grip's opposite corner or side stays
+  // planted: a corner takes both axes by how far it travels from the far
+  // corner, a side grip takes width alone measured from the far side, and the
+  // center walks out so the planted edge holds still on screen. A group
+  // scales as one about the same planted point.
+  const resizeFrom = (handle: ResizeHandle, e: React.PointerEvent) => {
     const s = useEditor.getState();
     s.pushHistory();
-    const box = boxRef.current!.getBoundingClientRect();
+    const el = boxRef.current!;
+    const box = el.getBoundingClientRect();
     const cx = box.left + box.width / 2;
     const cy = box.top + box.height / 2;
-    const d0 = Math.max(8, Math.hypot(e.clientX - cx, e.clientY - cy));
+    const axis = HANDLE_AXIS[handle];
+    const rad = (-(live?.rotation ?? o.rotation ?? 0) * Math.PI) / 180;
+    // The box's own size on screen: the bounding rect is the turned box's
+    // envelope, so take the layout size under the pose's scale.
+    const ow = el.offsetWidth * (live?.scale ?? 1);
+    const oh = el.offsetHeight * (live?.scale ?? 1);
+    // The planted point, in the element's own space relative to its center.
+    const ax = (-axis.x * ow) / 2;
+    const ay = (-axis.y * oh) / 2;
+    // The grip's reach from the planted point, in the element's own space: a
+    // corner measures the full diagonal, a side grip only its own axis.
+    const reach = (px: number, py: number) => {
+      const dx = px - cx;
+      const dy = py - cy;
+      const lx = dx * Math.cos(rad) - dy * Math.sin(rad);
+      const ly = dx * Math.sin(rad) + dy * Math.cos(rad);
+      if (axis.y === 0) return Math.abs(lx - ax);
+      if (axis.x === 0) return Math.abs(ly - ay);
+      return Math.hypot(lx - ax, ly - ay);
+    };
+    const d0 = Math.max(8, reach(e.clientX, e.clientY));
     const members = groupSnapshot();
-    const gx = members.reduce((sum, m) => sum + m.x, 0) / members.length;
-    const gy = members.reduce((sum, m) => sum + m.y, 0) / members.length;
+    const self = members.find((m) => m.id === o.id) ?? members[0];
     const scaled = (m: Overlay, k: number): Partial<Overlay> => {
       if (isTextOverlay(m)) {
         return { size: Math.round(Math.min(320, Math.max(16, m.size * k))) };
       }
       if (m.kind === "shape") {
-        return {
-          w: Math.min(2, Math.max(0.01, m.w * k)),
-          h: Math.min(2, Math.max(0.002, m.h * k)),
-        };
+        const w = { w: Math.min(2, Math.max(0.01, m.w * k)) };
+        // A side grip leaves the shape's height where it is.
+        if (axis.y === 0) return w;
+        return { ...w, h: Math.min(2, Math.max(0.002, m.h * k)) };
       }
       if (m.kind === "sticker") return { w: Math.min(1.5, Math.max(0.02, m.w * k)) };
       return {};
     };
+    // How much the grabbed element actually grew once its size clamps, so
+    // the planted point holds through the clamp too.
+    const grew = (patch: Partial<Overlay>): number => {
+      const p = patch as { size?: number; w?: number };
+      if (isTextOverlay(self)) return (p.size ?? self.size) / self.size;
+      if (self.kind === "shape" || self.kind === "sticker") return (p.w ?? self.w) / self.w;
+      return 1;
+    };
     startDrag(e, {
       onMove: (_dx, _dy, ev) => {
-        const k = Math.hypot(ev.clientX - cx, ev.clientY - cy) / d0;
+        const k = reach(ev.clientX, ev.clientY) / d0;
+        const keff = grew(scaled(self, k));
+        // The center's walk that keeps the planted point on its screen spot,
+        // rotated back to the screen and into frame fractions.
+        const sx = axis.x ? ((keff - 1) * axis.x * ow) / 2 : 0;
+        const sy = axis.y ? ((keff - 1) * axis.y * oh) / 2 : 0;
+        const mx = (sx * Math.cos(rad) + sy * Math.sin(rad)) / stageWidth;
+        const my = (-sx * Math.sin(rad) + sy * Math.cos(rad)) / stageHeight;
         writeTransform(
           members.map((m) => ({
             id: m.id,
             patch: {
               ...scaled(m, k),
-              ...(members.length > 1
-                ? { x: clampPos(gx + (m.x - gx) * k), y: clampPos(gy + (m.y - gy) * k) }
-                : {}),
+              x: clampPos(self.x + keff * (m.x - self.x) + mx),
+              y: clampPos(self.y + keff * (m.y - self.y) + my),
             },
           }))
         );
@@ -719,6 +793,7 @@ function OverlayItem({
     // The cursor turns with the element for the whole drag, so its heads keep
     // pointing the way the next bit of travel will take it.
     let liveRotation = o.rotation ?? 0;
+    setSpin(liveRotation);
     startDrag(e, {
       cursor: () => rotateCursor(liveRotation),
       onMove: (_dx, _dy, ev) => {
@@ -726,6 +801,7 @@ function OverlayItem({
           const { deg, locked } = snapQuarter(norm(angleAt(ev)));
           const rotation = Math.round(deg);
           liveRotation = rotation;
+          setSpin(rotation);
           rotationGuide(locked === null ? null : { clientX: cx, clientY: cy, quarter: locked });
           writeTransform([{ id: o.id, patch: { rotation: rotation === 0 ? undefined : rotation } }]);
           return;
@@ -735,6 +811,7 @@ function OverlayItem({
         const { locked } = snapQuarter(lead);
         if (locked !== null) delta = norm(delta + locked - lead);
         liveRotation = norm((o.rotation ?? 0) + delta);
+        setSpin(Math.round(liveRotation));
         const rad = (delta * Math.PI) / 180;
         // Positions are frame fractions with unequal axes; orbit in a square
         // space keyed to width so the group turns rigidly on screen.
@@ -769,7 +846,10 @@ function OverlayItem({
               }
         );
       },
-      onUp: () => rotationGuide(null),
+      onUp: () => {
+        rotationGuide(null);
+        setSpin(null);
+      },
     });
   };
 
@@ -829,6 +909,8 @@ function OverlayItem({
             >
               {o.text}
             </div>
+          ) : glyphs ? (
+            <GlyphText text={shownText} phase={glyphs} scale={scale} />
           ) : (
             <span>{shownText}</span>
           )
@@ -840,22 +922,19 @@ function OverlayItem({
       </div>
       {selected && !editing && (
         <>
-          {/* The lollipop clears the element's own top edge, so moving is
-              never caught by it. */}
-          <RotateGrip
-            title="Drag to rotate"
+          {/* The rotate button clears the element's own top edge, so moving is
+              never caught by it. Its cursor rides the element's rotation, so
+              the glyph's heads keep pointing along the drag. */}
+          <TransformHandles
             color="#0a84ff"
-            className="overlay-rotate absolute -top-8 left-1/2 -translate-x-1/2"
-            // The handle rides the element's rotation, so the cursor turns
-            // with it and its heads keep pointing along the drag.
-            style={{ cursor: rotateCursor(live?.rotation ?? o.rotation ?? 0) }}
-            onPointerDown={rotateFrom}
-          />
-          <Grip
-            title="Drag to resize"
-            color="#0a84ff"
-            className="overlay-resize absolute -right-2 -bottom-2 cursor-nwse-resize"
-            onPointerDown={resizeFrom}
+            // The selection line draws 3px outside the box (plus half its
+            // stroke); the grips sit centered on it.
+            className="-inset-[3.75px]"
+            rotation={live?.rotation ?? o.rotation ?? 0}
+            angle={spin}
+            rotateCursor={rotateCursor(live?.rotation ?? o.rotation ?? 0)}
+            onResize={resizeFrom}
+            onRotate={rotateFrom}
           />
           {o.mask && o.mask.kind !== "subject" && (
             <MaskGizmo
@@ -889,6 +968,56 @@ const MASK_CSS_FPS = 15;
 const MASK_CSS_MAX = 512;
 /** Empty coverage: hides the element while a computed matte has no person. */
 const NO_COVERAGE_MASK = "linear-gradient(transparent, transparent)";
+
+/**
+ * Text laid out character by character, each one placed by the shared glyph
+ * evaluator. A ramp and a loop both land here, folded together by
+ * `glyphStateAt`. The canvas painter walks the same characters in the same
+ * order — line breaks take a turn too — so the preview and the export agree.
+ */
+function GlyphText({
+  text,
+  phase,
+  scale,
+}: {
+  text: string;
+  phase: OverlayFrameState;
+  scale: number;
+}) {
+  const total = Math.max(1, [...text].length);
+  let gi = 0;
+  return (
+    <>
+      {text.split("\n").map((line, li) => {
+        const chars = [...line].map((ch) => {
+          const i = gi++;
+          const g = glyphStateAt(phase, i, total);
+          return (
+            <span
+              key={i}
+              style={{
+                display: "inline-block",
+                whiteSpace: "pre",
+                opacity: Math.min(1, Math.max(0, g.alpha)),
+                transform:
+                  `translate(${g.dx * scale}px, ${g.dy * scale}px)` +
+                  ` rotate(${g.rotate}deg) scale(${g.sx}, ${g.sy})`,
+              }}
+            >
+              {ch}
+            </span>
+          );
+        });
+        gi++;
+        return (
+          <span key={li} style={{ display: "block", minHeight: "1em" }}>
+            {chars}
+          </span>
+        );
+      })}
+    </>
+  );
+}
 
 function useMaskCss(
   o: Overlay,
@@ -1012,41 +1141,6 @@ function useMaskCss(
   }, [active, m, box, o.x, o.y, stageWidth, stageHeight, scale, keyTick, snapTick]);
 }
 
-/** On-canvas handle dot shared by every gizmo: a white dot with a colored
- * ring. The mask's amber is the default; a caller recolors it for its own
- * chrome (elements and clip regions pass selection blue). */
-export function Grip({
-  color = "#ff9f0a",
-  className,
-  style,
-  ...rest
-}: React.ComponentProps<"span"> & { color?: string }) {
-  return (
-    <span
-      {...rest}
-      className={cn(
-        "size-[13px] rounded-full border-[2.5px] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.4)]",
-        className
-      )}
-      style={{ borderColor: color, ...style }}
-    />
-  );
-}
-
-/** Rotate lollipop: the dot centered in a 28px grab zone, so the rotate
- * cursor shows as the pointer approaches the dot. */
-export function RotateGrip({
-  color,
-  className,
-  ...rest
-}: React.ComponentProps<"span"> & { color?: string }) {
-  return (
-    <span {...rest} className={cn("grid size-7 place-items-center", className)}>
-      <Grip color={color} />
-    </span>
-  );
-}
-
 /**
  * On-canvas mask editing, shared by elements and video clips: an amber
  * outline tracing the mask's edge — its interior moves the mask, a lollipop
@@ -1090,6 +1184,8 @@ export function MaskGizmoCore({
     w?: boolean;
     h?: boolean;
   } | null>(null);
+  /** The angle the readout shows while a rotate drag runs; null when idle. */
+  const [spin, setSpin] = useState<number | null>(null);
   const interiorRef = useRef<HTMLDivElement>(null);
   // Screen deltas → the box's local space (undo the element transform).
   const toLocal = (dx: number, dy: number) => {
@@ -1111,18 +1207,16 @@ export function MaskGizmoCore({
   const w = f.w * stageWidth;
   const h = m.kind === "square" ? w : f.h * stageHeight;
   const span = stageWidth + stageHeight;
-  // The resize grip sits on the mask's corner (mirror: its lower edge),
-  // turned by the mask's own angle.
-  const gx = m.kind === "mirror" ? 0 : w / 2;
-  const gy = h / 2;
-  const rx = gx * Math.cos(theta) - gy * Math.sin(theta);
-  const ry = gx * Math.sin(theta) + gy * Math.cos(theta);
-  // The rotate lollipop clears the top edge (linear: the line itself), turned
-  // with the mask so it stays over its top. The gap matches the element's own
-  // lollipop: its 28px grab zone sits at -top-8, putting the dot 18px out.
-  const lift = (m.kind === "linear" ? 0 : h / 2) + 18;
-  const hx = cx + lift * Math.sin(theta);
-  const hy = cy - lift * Math.cos(theta);
+  // Which grips the kind can honor: a square's axes move together, a mirror
+  // band only opens and closes, and a linear edge has no size at all.
+  const maskHandles: ResizeHandle[] =
+    m.kind === "square"
+      ? CORNER_HANDLES
+      : m.kind === "mirror"
+        ? ["n", "s"]
+        : sizable
+          ? BOX_HANDLES
+          : [];
   const clampSize = (v: number) => Math.min(2, Math.max(0.01, v));
   // Detents matching the inspector's: size locks onto exactly full frame,
   // the center onto dead center, within a couple percent of the frame.
@@ -1167,14 +1261,66 @@ export function MaskGizmoCore({
     const g0 = f;
     const norm = (deg: number) => ((((deg + 180) % 360) + 360) % 360) - 180;
     let liveRot = rotation + g0.rotation;
+    setSpin(Math.round(g0.rotation));
     startDrag(e, {
       cursor: () => rotateCursor(liveRot),
       onMove: (_dx, _dy, ev) => {
         const { deg, locked } = snapQuarter(norm(g0.rotation + (angleAt(ev) - a0)));
         const rot = Math.round(deg);
         liveRot = rotation + rot;
+        setSpin(rot);
         setGuide(locked === null ? null : { rot: locked });
         writeGeom({ rotation: rot });
+      },
+      onUp: () => {
+        setGuide(null);
+        setSpin(null);
+      },
+    });
+  };
+  // A grip pulls its own edge and leaves the opposite one planted: the size
+  // takes the pull and the center walks half of it, so the far edge holds
+  // still. A mirror band is the exception — it opens about its line, which is
+  // the thing it draws.
+  const sizeMask = (handle: ResizeHandle, e: React.PointerEvent) => {
+    e.stopPropagation();
+    begin();
+    const a = HANDLE_AXIS[handle];
+    const g0 = f;
+    startDrag(e, {
+      onMove: (dx, dy) => {
+        const l = toLocal(dx, dy);
+        const mx = l.x * Math.cos(theta) + l.y * Math.sin(theta);
+        const my = -l.x * Math.sin(theta) + l.y * Math.cos(theta);
+        const grow = m.kind === "mirror" ? 2 : 1;
+        const nw = clampSize(snapTo(g0.w + (grow * mx * a.x) / stageWidth, 1));
+        const nh = clampSize(snapTo(g0.h + (grow * my * a.y) / stageHeight, 1));
+        const gw = a.x !== 0 && nw === 1;
+        const gh = a.y !== 0 && nh === 1;
+        setGuide(gw || gh ? { w: gw, h: gh } : null);
+        // The center's walk, in the mask's own axes in px: half of what each
+        // edge actually grew after the clamp. A square's vertical side is `w`
+        // of the frame width too, so its corner shifts both axes by the same
+        // px. Turned by the mask's angle back into the element's space.
+        const dw = (nw - g0.w) * stageWidth;
+        const dh = m.kind === "square" ? dw : (nh - g0.h) * stageHeight;
+        const hx = m.kind === "mirror" ? 0 : (a.x * dw) / 2;
+        const hy = m.kind === "mirror" ? 0 : (a.y * dh) / 2;
+        const ex = hx * Math.cos(theta) - hy * Math.sin(theta);
+        const ey = hx * Math.sin(theta) + hy * Math.cos(theta);
+        const shift =
+          hx || hy ? { x: g0.x + ex / stageWidth, y: g0.y + ey / stageHeight } : {};
+        writeGeom(
+          m.kind === "square"
+            ? { w: nw, ...shift }
+            : m.kind === "mirror"
+              ? { h: nh }
+              : a.y === 0
+                ? { w: nw, ...shift }
+                : a.x === 0
+                  ? { h: nh, ...shift }
+                  : { w: nw, h: nh, ...shift }
+        );
       },
       onUp: () => setGuide(null),
     });
@@ -1263,55 +1409,25 @@ export function MaskGizmoCore({
           )}
         </svg>
       )}
-      <RotateGrip
-        title="Drag to rotate the mask"
-        className="absolute z-10 -translate-x-1/2 -translate-y-1/2"
-        style={{
-          left: `calc(50% + ${hx}px)`,
-          top: `calc(50% + ${hy}px)`,
-          cursor: rotateCursor(rotation + f.rotation),
+      <TransformHandles
+        className="z-10"
+        color="#ff9f0a"
+        handles={maskHandles}
+        rotation={rotation + f.rotation}
+        angle={spin}
+        rotateCursor={rotateCursor(rotation + f.rotation)}
+        rotateTitle="Drag to rotate the mask"
+        resizeTitle="Drag to resize the mask"
+        frame={{
+          left: `calc(50% + ${cx}px)`,
+          top: `calc(50% + ${cy}px)`,
+          width: Math.max(1, w),
+          height: Math.max(1, h),
+          transform: `translate(-50%, -50%) rotate(${f.rotation}deg)`,
         }}
-        onPointerDown={rotateMask}
+        onRotate={rotateMask}
+        onResize={sizeMask}
       />
-      {sizable && (
-        <Grip
-          title="Drag to resize the mask"
-          className="absolute z-10 cursor-nwse-resize"
-          style={{
-            left: `calc(50% + ${f.x * stageWidth + rx}px)`,
-            top: `calc(50% + ${f.y * stageHeight + ry}px)`,
-            transform: "translate(-50%, -50%)",
-          }}
-          onPointerDown={(e) => {
-            e.stopPropagation();
-            begin();
-            const g0 = f;
-            startDrag(e, {
-              onMove: (dx, dy) => {
-                const l = toLocal(dx, dy);
-                // Into the mask's own axes for width/height growth; a square
-                // has one side and a mirror band one height.
-                const mx = l.x * Math.cos(theta) + l.y * Math.sin(theta);
-                const my = -l.x * Math.sin(theta) + l.y * Math.cos(theta);
-                const nw = clampSize(snapTo(g0.w + (2 * mx) / stageWidth, 1));
-                const nh = clampSize(snapTo(g0.h + (2 * my) / stageHeight, 1));
-                const gw = m.kind !== "mirror" && nw === 1;
-                const gh = m.kind !== "square" && m.kind !== "mirror" && nh === 1;
-                const gm = m.kind === "mirror" && nh === 1;
-                setGuide(gw || gh || gm ? { w: gw, h: gh || gm } : null);
-                writeGeom(
-                  m.kind === "square"
-                    ? { w: nw }
-                    : m.kind === "mirror"
-                      ? { h: nh }
-                      : { w: nw, h: nh }
-                );
-              },
-              onUp: () => setGuide(null),
-            });
-          }}
-        />
-      )}
     </>
   );
 }

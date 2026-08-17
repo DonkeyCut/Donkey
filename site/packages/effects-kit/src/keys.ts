@@ -15,7 +15,13 @@
  * the frame sampler that feeds ffmpeg.
  */
 
-import { evalOverlayAnim, hasOverlayAnim, type OverlayAnim } from "./anim";
+import {
+  evalOverlayAnim,
+  hasOverlayAnim,
+  type GlyphLoopPhase,
+  type GlyphPhase,
+  type OverlayAnim,
+} from "./anim";
 
 /** A pose captured at `t` seconds into the element. Values are absolute, in
  * the same units as the element's own fields — `scale` multiplies the
@@ -46,6 +52,9 @@ interface Posable {
   end: number;
   x: number;
   y: number;
+  /** Absent means text — the union's own default. Only the per-glyph styles
+   * read it, to decide whether there are glyphs to move. */
+  kind?: string;
   rotation?: number;
   opacity?: number;
   anim?: OverlayAnim;
@@ -176,12 +185,19 @@ export interface OverlayFrameState extends OverlayPose {
   dy: number;
   /** 0..1 share of the text shown (typewriter); absent when not typing. */
   textProgress?: number;
+  /** 0..1 share of the box uncovered from its left edge (wipe). */
+  reveal?: number;
+  /** Where a per-glyph ramp stands; the element's own transform stays neutral
+   * and each character carries the motion. */
+  glyphs?: GlyphPhase;
+  /** Where a per-glyph loop stands, on the same terms. */
+  glyphLoop?: GlyphLoopPhase;
 }
 
 export function evalOverlayFrame(o: Posable, tLocal: number): OverlayFrameState {
   const dur = Math.max(0.1, o.end - o.start);
   const pose = poseAt(o, tLocal);
-  const ev = evalOverlayAnim(o.anim, tLocal, dur);
+  const ev = evalOverlayAnim(o.anim, tLocal, dur, (o.kind ?? "text") === "text");
   return {
     x: pose.x,
     y: pose.y,
@@ -191,6 +207,9 @@ export function evalOverlayFrame(o: Posable, tLocal: number): OverlayFrameState 
     rotation: pose.rotation + ev.rotate,
     opacity: pose.opacity * ev.alpha,
     ...(ev.textProgress !== undefined ? { textProgress: ev.textProgress } : {}),
+    ...(ev.reveal !== undefined ? { reveal: ev.reveal } : {}),
+    ...(ev.glyphs ? { glyphs: ev.glyphs } : {}),
+    ...(ev.glyphLoop ? { glyphLoop: ev.glyphLoop } : {}),
   };
 }
 

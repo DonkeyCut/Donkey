@@ -6,9 +6,16 @@
  */
 
 import {
-  FLOAT_TRAVEL,
+  bakesPixels,
+  glyphStateAt,
+  GLYPH_TRAVEL_MAX,
+  hasGlyphMotion,
+  isGlyphAnimStyle,
+  loopExtent,
   loopPeriod,
   SLIDE_TRAVEL,
+  type GlyphLoopPhase,
+  type GlyphPhase,
   type OverlayAnim,
   type OverlayAnimStyle,
 } from "./anim";
@@ -16,6 +23,7 @@ import { evalOverlayFrame, hasOverlayKeys, poseAt, poseExtent, sortedKeys } from
 import { applyMaskToCanvas, isMaskAnimated } from "./mask";
 import type { LottieHandle } from "./lottie";
 import { elementPlugin } from "./registry";
+import { kitCanvas } from "./surface";
 import {
   lineLikeShape,
   type Overlay,
@@ -108,6 +116,18 @@ export interface PaintFrame {
   height: number;
   scale: number;
   t?: number;
+  /** Pixel-level animation baked into this picture; absent = the element at
+   * rest. */
+  phase?: PaintPhase;
+}
+
+/** What a pixel-changing animation contributes to one picture: how much of the
+ * element is uncovered, and where its characters sit. The transform styles
+ * never come through here — they ride the drawn picture instead. */
+export interface PaintPhase {
+  reveal?: number;
+  glyphs?: GlyphPhase;
+  glyphLoop?: GlyphLoopPhase;
 }
 
 /**
@@ -379,6 +399,42 @@ async function paintText(
         ? cx - maxW / 2 + widthsOf[i] / 2
         : cx + maxW / 2 - widthsOf[i] / 2;
 
+  const phase = frame.phase;
+  if (phase && hasGlyphMotion(phase)) {
+    // A per-glyph ramp or loop draws character by character, each at its own
+    // place in the motion. The index counts through the whole element, line
+    // breaks included, which is exactly what the DOM preview counts.
+    const total = Math.max(1, [...overlay.text].length);
+    const alpha0 = ctx.globalAlpha;
+    let gi = 0;
+    lines.forEach((line, i) => {
+      const y = cy - totalH / 2 + lineH * (i + 0.5);
+      // Characters drawn one by one lose the kerning between them, so the run
+      // is centered on what it actually measures — the DOM's inline boxes
+      // land in the same place.
+      const chars = [...line];
+      const widths = chars.map((ch) => ctx.measureText(ch).width);
+      let x = lineX(i) - widths.reduce((a, b) => a + b, 0) / 2;
+      chars.forEach((ch, ci) => {
+        const w = widths[ci];
+        const g = glyphStateAt(phase, gi, total);
+        gi++;
+        if (ch !== " " && g.alpha > 0.001) {
+          ctx.save();
+          ctx.globalAlpha = alpha0 * Math.min(1, Math.max(0, g.alpha));
+          ctx.translate(x + w / 2 + g.dx * scale, y + g.dy * scale);
+          if (g.rotate) ctx.rotate((g.rotate * Math.PI) / 180);
+          ctx.scale(g.sx, g.sy);
+          drawText(ch, 0, 0);
+          ctx.restore();
+        }
+        x += w;
+      });
+      gi++; // the line break takes a turn too
+    });
+    return;
+  }
+
   // Karaoke: draw word by word so the spoken word gets the accent color and an
   // underline; the word index counts across all lines.
   let k = 0;
@@ -434,6 +490,20 @@ export async function paintElement(
 ): Promise<void> {
   const kind = overlay.kind ?? "text";
   if (kind === "effect") return; // effects filter the video; nothing to paint
+  const reveal = frame.phase?.reveal;
+  if (reveal !== undefined && reveal < 1) {
+    // A wipe uncovers the element from its left edge: clip to the uncovered
+    // share of its box and paint the whole thing behind it.
+    if (reveal <= 0) return;
+    const b = await measureElementBounds(overlay, frame, env);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(b.cx - b.w / 2, b.cy - b.h / 2, b.w * reveal, b.h);
+    ctx.clip();
+    await paintElement(ctx, overlay, { ...frame, phase: { ...frame.phase, reveal: undefined } }, env);
+    ctx.restore();
+    return;
+  }
   const plugin = elementPlugin(kind);
   if (plugin) {
     await plugin.paint(ctx, overlay, frame, env);
@@ -458,10 +528,7 @@ function pngBlob(canvas: HTMLCanvasElement, env: RenderEnv): Promise<Blob> {
 
 function newCanvas(env: RenderEnv, w: number, h: number): HTMLCanvasElement {
   if (env.createCanvas) return env.createCanvas(Math.max(1, w), Math.max(1, h));
-  const c = document.createElement("canvas");
-  c.width = Math.max(1, w);
-  c.height = Math.max(1, h);
-  return c;
+  return kitCanvas(w, h);
 }
 
 /**
@@ -473,14 +540,15 @@ export async function renderElementPng(
   overlay: Overlay,
   width: number,
   height: number,
-  env: RenderEnv
+  env: RenderEnv,
+  phase?: PaintPhase
 ): Promise<Blob> {
   // Element sizes are design pixels with a 1080 short side, so scaling by the
   // short side keeps them the same visual size in any aspect and resolution.
   const scale = Math.min(width, height) / 1080;
   const canvas = newCanvas(env, width, height);
   const ctx = canvas.getContext("2d")!;
-  const frame: PaintFrame = { width, height, scale };
+  const frame: PaintFrame = { width, height, scale, phase };
 
   ctx.globalAlpha = overlay.opacity ?? 1;
   if (overlay.rotation) {
@@ -576,33 +644,46 @@ export interface AnimatedLayer {
   overlay: Overlay;
   start: number; // timeline seconds
   end: number;
+  /** The pixel-level animation this window's picture is drawn at (a wipe's
+   * uncovered share, a per-glyph ramp's position); absent = at rest. */
+  phase?: PaintPhase;
   /** The slots still in play for this window (a typed-out one has spent its
    * ramp, so that slot is gone). */
   anim: OverlayAnim;
 }
 
-/** Typewriter slices per second: one per output frame, matching the rate the
- * frame sequences sample at. */
+/** Baked slices per second: one per output frame, matching the rate the frame
+ * sequences sample at. */
 const TYPE_SLICE_FPS = 30;
 
 /**
  * Split an animated element into the windows a canvas renderer draws.
  *
  * Continuous transforms — slides, fades, loops, a keyframed pose — stay one
- * window whose picture is drawn under a per-frame transform. A typewriter
- * changes the pixels themselves, so its ramp becomes one window per revealed
- * slice. This is the canvas-side twin of `renderOverlayFrames`: same split,
- * one baked into pictures, the other handed to a compositor.
+ * window whose picture is drawn under a per-frame transform. A style that
+ * changes the pixels themselves (typing, a wipe, per-glyph motion) can't ride
+ * one cached picture, so its ramp becomes one window per slice. This is the
+ * canvas-side twin of `renderOverlayFrames`: same split, one baked into
+ * pictures, the other handed to a compositor.
  */
 export function planAnimatedLayers(o: Overlay, end: number): AnimatedLayer[] {
   const anim: OverlayAnim = o.anim ?? {};
   const dur = Math.max(0.1, o.end - o.start);
-  const isTw = (slot: "in" | "out") =>
-    anim[slot]?.style === "typewriter" && (o.kind ?? "text") === "text";
+  const isText = (o.kind ?? "text") === "text";
+  const baked = (slot: "in" | "out") => {
+    const style = anim[slot]?.style;
+    return !!style && bakesPixels(style, isText);
+  };
   const inS = anim.in ? Math.min(anim.in.seconds, dur) : 0;
   const outS = anim.out ? Math.min(anim.out.seconds, Math.max(0, dur - inS)) : 0;
   const out: AnimatedLayer[] = [];
-  const push = (overlay: Overlay, from: number, to: number, animPart: OverlayAnim) => {
+  const push = (
+    overlay: Overlay,
+    from: number,
+    to: number,
+    animPart: OverlayAnim,
+    phase?: PaintPhase
+  ) => {
     const start = Math.max(o.start, from);
     const stop = Math.min(end, to);
     if (stop - start < 1e-3) return;
@@ -611,29 +692,40 @@ export function planAnimatedLayers(o: Overlay, end: number): AnimatedLayer[] {
       start,
       end: stop,
       anim: animPart,
+      phase,
     });
   };
-  const typeSlices = (from: number, secs: number, reverse: boolean) => {
-    const text = (o as TextOverlay).text;
-    const n = Math.max(1, Math.min(text.length, Math.ceil(secs * TYPE_SLICE_FPS)));
-    for (let i = 1; i <= n; i++) {
-      const chars = Math.ceil((text.length * (reverse ? n - i + 1 : i)) / n);
-      push(
-        { ...o, text: text.slice(0, chars) } as Overlay,
-        from + ((i - 1) / n) * secs,
-        from + (i / n) * secs,
-        { ...anim, [reverse ? "out" : "in"]: undefined }
-      );
+  /** One window per slice, each drawn at the ramp's position mid-window. The
+   * slot leaves the window's anim: its motion is in the picture already. */
+  const slices = (from: number, secs: number, slot: "in" | "out") => {
+    const style = anim[slot]!.style;
+    const text = isText ? (o as TextOverlay).text : "";
+    const cap = style === "typewriter" ? Math.max(1, text.length) : Infinity;
+    const n = Math.max(1, Math.min(cap, Math.ceil(secs * TYPE_SLICE_FPS)));
+    const rest: OverlayAnim = { ...anim, [slot]: undefined };
+    for (let i = 0; i < n; i++) {
+      const mid = (i + 0.5) / n;
+      const p = slot === "out" ? 1 - mid : mid;
+      const at = from + (i / n) * secs;
+      const to = from + ((i + 1) / n) * secs;
+      if (style === "typewriter") {
+        const chars = Math.max(1, Math.ceil(p * text.length));
+        push({ ...o, text: text.slice(0, chars) } as Overlay, at, to, rest);
+      } else if (isGlyphAnimStyle(style)) {
+        push(o, at, to, rest, { glyphs: { style, p, exiting: slot === "out" } });
+      } else {
+        push(o, at, to, rest, { reveal: p });
+      }
     }
   };
 
   if (inS > 1e-3) {
-    if (isTw("in")) typeSlices(o.start, inS, false);
+    if (baked("in")) slices(o.start, inS, "in");
     else push(o, o.start, o.start + inS, anim);
   }
   push(o, o.start + inS, o.start + dur - outS, anim);
   if (outS > 1e-3) {
-    if (isTw("out")) typeSlices(o.start + dur - outS, outS, true);
+    if (baked("out")) slices(o.start + dur - outS, outS, "out");
     else push(o, o.start + dur - outS, o.start + dur, anim);
   }
   return out;
@@ -690,8 +782,14 @@ export async function renderOverlayFrames(
     (s): s is OverlayAnimStyle => !!s
   );
   const slides = styles.some((s) => s.startsWith("slide"));
+  // Glyphs stray from the resting box on their own; pad by the farthest any
+  // of them travels.
+  const glyphs = styles.some(isGlyphAnimStyle);
+  const loop = loopExtent(anim?.loop?.style);
   const travel =
-    (slides ? SLIDE_TRAVEL : 0) * scale + (anim?.loop?.style === "float" ? FLOAT_TRAVEL * scale : 0);
+    (slides ? SLIDE_TRAVEL : 0) * scale +
+    (glyphs ? GLYPH_TRAVEL_MAX : 0) * scale +
+    loop.travel * scale;
   // A keyframed element carries its own travel and its own zoom: the region
   // spans every pose the track visits, at the largest scale it reaches.
   const keyed = hasOverlayKeys(overlay);
@@ -699,8 +797,7 @@ export async function renderOverlayFrames(
   const maxScale = 1.15 * extent.scale;
   const rotates =
     !!overlay.rotation ||
-    anim?.loop?.style === "spin" ||
-    anim?.loop?.style === "wiggle" ||
+    loop.rotates ||
     (keyed && sortedKeys(overlay.kf!).some((k) => !!k.rotation));
   let halfW = (base.w * maxScale) / 2 + travel + 4;
   let halfH = (base.h * maxScale) / 2 + travel + 4;
@@ -742,8 +839,16 @@ export async function renderOverlayFrames(
       // Typing reveals characters; it must not also fade them.
       ctx.globalAlpha = poseAt(overlay, tLocal).opacity;
     }
+    const phase: PaintPhase | undefined =
+      ev.glyphs || ev.glyphLoop || ev.reveal !== undefined
+        ? {
+            ...(ev.glyphs ? { glyphs: ev.glyphs } : {}),
+            ...(ev.glyphLoop ? { glyphLoop: ev.glyphLoop } : {}),
+            ...(ev.reveal !== undefined ? { reveal: ev.reveal } : {}),
+          }
+        : undefined;
     const maskTransform = ctx.getTransform();
-    await paintElement(ctx, el, { ...frame, t: tLocal }, env);
+    await paintElement(ctx, el, { ...frame, t: tLocal, phase }, env);
     if (overlay.mask && maskScratch) {
       // Painted under the frame's element transform, so the mask rides the
       // pose; its own keys evaluate at this frame's time.

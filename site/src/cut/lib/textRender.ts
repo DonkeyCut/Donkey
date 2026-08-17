@@ -4,6 +4,7 @@ import {
   renderElementPng as kitRenderElementPng,
   renderOverlayFrames as kitRenderOverlayFrames,
   type OverlayFrameSet,
+  type PaintPhase,
   type RenderEnv,
   type StickerImage,
 } from "@donkeycut/effects-kit";
@@ -72,9 +73,10 @@ export function renderElementPng(
   overlay: Overlay,
   width: number,
   height: number,
-  assets: MediaAsset[] = []
+  assets: MediaAsset[] = [],
+  phase?: PaintPhase
 ): Promise<Blob> {
-  return kitRenderElementPng(overlay, width, height, cutRenderEnv(assets));
+  return kitRenderElementPng(overlay, width, height, cutRenderEnv(assets), phase);
 }
 
 /** Rasterize an animated element into its region-cropped frame set (the

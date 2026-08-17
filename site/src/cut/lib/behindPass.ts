@@ -9,8 +9,9 @@
  * behind effect degrades to the plain picture.
  */
 
-import { evalOverlayFrame, maskComposite } from "@donkeycut/effects-kit";
+import { evalOverlayFrame, glyphStateAt, hasGlyphMotion, maskComposite } from "@donkeycut/effects-kit";
 import { personSegmenter, segmentSubjectAlpha } from "./cutout";
+import { createRasterCanvas } from "./raster";
 import { renderElementPng } from "./textRender";
 import {
   behindSubjectOverlay,
@@ -68,6 +69,10 @@ let published: { canvas: HTMLCanvasElement | null; at: number } | null = null;
 export function subjectMatteSnapshot(): { canvas: HTMLCanvasElement | null; at: number } | null {
   return published;
 }
+
+/** Scratch off the raster seam. The pass types its surfaces as page canvases;
+ * headless they are server canvases with the same 2D interface. */
+const scratchCanvas = () => createRasterCanvas(1, 1) as HTMLCanvasElement;
 
 export class SubjectMaskCompositor {
   /** `publishes` marks the live preview's instance, the one whose matte the
@@ -147,7 +152,7 @@ export class SubjectMaskCompositor {
     this.ensureSegmenter();
     if (!this.segmenter) return null;
     if (slot.at > -1e8 && Math.abs(t - slot.at) < minInterval) return { alpha: slot.alpha };
-    if (!this.small) this.small = document.createElement("canvas");
+    if (!this.small) this.small = scratchCanvas();
     const W = source.width;
     const H = source.height;
     const sw = SEG_WIDTH;
@@ -233,8 +238,8 @@ export class SubjectMaskCompositor {
     draw: (ctx: CanvasRenderingContext2D) => void
   ): CanvasImageSource {
     if (!this.stampSurface || !this.stampScratch) {
-      this.stampSurface = document.createElement("canvas");
-      this.stampScratch = document.createElement("canvas");
+      this.stampSurface = scratchCanvas();
+      this.stampScratch = scratchCanvas();
     }
     if (this.stampSurface.width !== w) this.stampSurface.width = w;
     if (this.stampSurface.height !== h) this.stampSurface.height = h;
@@ -279,7 +284,7 @@ export class SubjectMaskCompositor {
 
     // The person source: the video pixels before any text lands on them.
     if (!this.person || this.person.width !== W || this.person.height !== H) {
-      this.person = document.createElement("canvas");
+      this.person = scratchCanvas();
       this.person.width = W;
       this.person.height = H;
     }
@@ -302,14 +307,21 @@ export class SubjectMaskCompositor {
       const bmp = this.rasterFor(o, W, H, assets);
       if (!bmp) continue;
       const ev = evalOverlayFrame(o, Math.max(0, t - o.start));
-      if (ev.opacity <= 0.001) continue;
+      // One cached picture per element here, so a per-glyph ramp or loop runs
+      // its motion over the whole box as a single letter would.
+      const g = hasGlyphMotion(ev) ? glyphStateAt(ev, 0, 1) : null;
+      const alphaOf = ev.opacity * (g?.alpha ?? 1);
+      if (alphaOf <= 0.001) continue;
       const cx = o.x * W;
       const cy = o.y * H;
       ctx.save();
-      ctx.globalAlpha = ev.opacity;
-      ctx.translate(ev.x * W + ev.dx * scale, ev.y * H + ev.dy * scale);
-      ctx.rotate((ev.rotation * Math.PI) / 180);
-      ctx.scale(ev.scale, ev.scale);
+      ctx.globalAlpha = alphaOf;
+      ctx.translate(
+        ev.x * W + (ev.dx + (g?.dx ?? 0)) * scale,
+        ev.y * H + (ev.dy + (g?.dy ?? 0)) * scale
+      );
+      ctx.rotate(((ev.rotation + (g?.rotate ?? 0)) * Math.PI) / 180);
+      ctx.scale(ev.scale * (g?.sx ?? 1), ev.scale * (g?.sy ?? 1));
       ctx.translate(-cx, -cy);
       ctx.drawImage(bmp, 0, 0, W, H);
       ctx.restore();
