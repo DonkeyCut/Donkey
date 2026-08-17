@@ -16,8 +16,27 @@ import {
   type MediaAsset,
 } from "./types";
 
-/** Asset ids whose FontFace is loaded (or loading) in this page. */
+/** Asset ids whose face is loaded (or loading) in this process. */
 const loaded = new Map<string, Promise<void>>();
+
+/**
+ * How a font's bytes become a family the painters can draw.
+ *
+ * The page adds a FontFace to the document. A process with no document
+ * installs its own — the server canvas's font library — so a title set in a
+ * project's uploaded font renders the same in a job as in the tab.
+ */
+export type FontInstaller = (family: string, bytes: ArrayBuffer) => Promise<void>;
+
+let installFace: FontInstaller = async (family, bytes) => {
+  const face = new FontFace(family, bytes);
+  await face.load();
+  document.fonts.add(face);
+};
+
+export function setFontInstaller(install: FontInstaller): void {
+  installFace = install;
+}
 
 /** A display label from the uploaded file's name, extension dropped. */
 const fontLabel = (name: string) => name.replace(/\.(ttf|otf|woff2?|TTF|OTF)$/, "") || "Custom font";
@@ -31,9 +50,7 @@ export function registerFontAsset(asset: MediaAsset): Promise<void> {
   hit = (async () => {
     const res = await fetch(asset.url);
     if (!res.ok) throw new Error("font fetch failed");
-    const face = new FontFace(family, await res.arrayBuffer());
-    await face.load();
-    document.fonts.add(face);
+    await installFace(family, await res.arrayBuffer());
     registerFonts([
       { id: uploadedFontId(asset.id), label: fontLabel(asset.name), stack: `"${family}"` },
     ]);
@@ -46,14 +63,15 @@ export function registerFontAsset(asset: MediaAsset): Promise<void> {
 }
 
 /** Reconcile the registry with the project's font assets: register new ones,
- * unregister deleted ones. The editor calls this whenever assets change. */
-export function syncFontAssets(assets: MediaAsset[]): void {
+ * unregister deleted ones. The editor calls this whenever assets change; a
+ * headless run awaits it before drawing anything. */
+export function syncFontAssets(assets: MediaAsset[]): Promise<void> {
   const fonts = assets.filter((a) => a.type === "font");
-  for (const a of fonts) void registerFontAsset(a);
   const live = new Set(fonts.map((a) => a.id));
   const stale = [...loaded.keys()].filter((id) => !live.has(id));
   if (stale.length) {
     for (const id of stale) loaded.delete(id);
     unregisterFonts(stale.map(uploadedFontId));
   }
+  return Promise.all(fonts.map(registerFontAsset)).then(() => {});
 }

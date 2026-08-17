@@ -58,3 +58,4 @@ next-env.d.ts
 
 # MediaPipe wasm runtime, staged from node_modules by postinstall
 /public/mediapipe/wasm/
+/public/cut-fonts/

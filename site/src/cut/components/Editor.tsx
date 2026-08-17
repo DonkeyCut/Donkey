@@ -129,7 +129,7 @@ export function Editor({
   // Uploaded fonts become live FontFaces the moment their assets exist (and
   // drop out when deleted), so titles set in them never measure a fallback.
   const assetsForFonts = useEditor((s) => s.assets);
-  useEffect(() => syncFontAssets(assetsForFonts), [assetsForFonts]);
+  useEffect(() => void syncFontAssets(assetsForFonts), [assetsForFonts]);
   const [conflictReloaded, setConflictReloaded] = useState(false);
   const [shareGone, setShareGone] = useState(false);
   // This project lives on this Mac and the Donkey app isn't answering. Nothing
