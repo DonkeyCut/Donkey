@@ -149,11 +149,55 @@ export async function probeMediaFile(src: string | Blob): Promise<MediaProbe> {
   });
 }
 
+/** What every frame reader in Cut asks of a video track: one frame at a
+ * time, a span in order, or a set of moments in one pass. mediabunny's
+ * CanvasSink is this in a browser; a headless process installs its own,
+ * because CanvasSink draws through `VideoFrame`, which Node has no. */
+export interface FrameCanvasSink {
+  getCanvas(timestamp: number): Promise<WrappedCanvas | null>;
+  canvases(start?: number, end?: number): AsyncGenerator<WrappedCanvas, void, unknown>;
+  canvasesAtTimestamps(
+    timestamps: Iterable<number> | AsyncIterable<number>
+  ): AsyncGenerator<WrappedCanvas | null, void, unknown>;
+}
+
+export type FrameSinkFactory = (
+  track: InputVideoTrack,
+  size?: FrameSize,
+  poolSize?: number
+) => FrameCanvasSink;
+
+const canvasSinkFactory: FrameSinkFactory = (track, size, poolSize) =>
+  new CanvasSink(track, { ...size, ...(poolSize ? { poolSize } : {}) });
+
+let sinkFactory: FrameSinkFactory = canvasSinkFactory;
+
+/** Install a replacement frame reader, e.g. the skia-backed one a headless
+ * process uses. Affects every later `frameSink` call. */
+export function setFrameSinkFactory(f: FrameSinkFactory): void {
+  sinkFactory = f;
+}
+
 /** A sink that draws this track's frames at `size`. Rotation from the file's
  * metadata is applied by default, so a phone clip comes back upright and no
- * consumer has to know it was ever sideways. */
-export function frameSink(track: InputVideoTrack, size?: FrameSize, poolSize?: number): CanvasSink {
-  return new CanvasSink(track, { ...size, ...(poolSize ? { poolSize } : {}) });
+ * consumer has to know it was ever sideways. A requested size is capped at the
+ * track's own: a sampler asking 480 wide of a 360-wide file pays for the extra
+ * pixels and learns nothing from them. */
+export function frameSink(
+  track: InputVideoTrack,
+  size?: FrameSize,
+  poolSize?: number
+): FrameCanvasSink {
+  return sinkFactory(track, capToTrack(track, size), poolSize);
+}
+
+function capToTrack(track: InputVideoTrack, size?: FrameSize): FrameSize | undefined {
+  if (!size) return size;
+  return {
+    ...size,
+    ...(size.width !== undefined ? { width: Math.min(size.width, track.displayWidth) } : {}),
+    ...(size.height !== undefined ? { height: Math.min(size.height, track.displayHeight) } : {}),
+  };
 }
 
 /**

@@ -23,8 +23,8 @@
  * capacity and the pool size move together, and that is the whole memory story.
  */
 
-import type { CanvasSink, Input, WrappedCanvas } from "mediabunny";
-import { frameSink, openMedia, videoTrackOf } from "./mediaRead";
+import type { Input, WrappedCanvas } from "mediabunny";
+import { frameSink, openMedia, videoTrackOf, type FrameCanvasSink } from "./mediaRead";
 import type { MediaAsset } from "./types";
 
 /**
@@ -183,7 +183,7 @@ export class FrameRing<T extends Timed> {
  */
 export class ClipFrameSource {
   private input: Input | null = null;
-  private sink: CanvasSink | null = null;
+  private sink: FrameCanvasSink | null = null;
   private ring = new FrameRing<WrappedCanvas>(RING);
   /** A still's single frame; stills never stream. */
   private still: SourceFrame | null = null;

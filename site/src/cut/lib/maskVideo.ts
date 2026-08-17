@@ -24,6 +24,7 @@ import { FrameCompositor, MISSING_FRAME } from "./composite";
 import { overlayPlan, trackZeroPlan } from "./framePlan";
 import { ClipReader, VIDEO_CODECS } from "./exportRender";
 import type { ExportDoc } from "./exportClient";
+import { createRasterCanvas } from "./raster";
 import { getClipSpans } from "./store";
 import { frameOf, isEffectOverlay, isFullRect, isTextOverlay, rectOf, subjectMasked, type ClipSpan, type MediaAsset } from "./types";
 
@@ -85,14 +86,10 @@ export async function renderSubjectMask(
   if (!codec) return null;
 
   // A small compositor: the video layers only, at mask resolution.
-  const compose = document.createElement("canvas");
-  compose.width = W;
-  compose.height = H;
+  const compose = createRasterCanvas(W, H);
   const comp = new FrameCompositor(compose);
-  const mask = document.createElement("canvas");
-  mask.width = W;
-  mask.height = H;
-  const mctx = mask.getContext("2d")!;
+  const mask = createRasterCanvas(W, H);
+  const mctx = mask.getContext("2d") as CanvasRenderingContext2D;
 
   const spans = getClipSpans(doc.clips, doc.assets);
   const overlayTracks = [...new Set(doc.clips.filter((c) => c.track !== 0).map((c) => c.track))];
@@ -142,7 +139,7 @@ export async function renderSubjectMask(
       mctx.globalCompositeOperation = "source-over";
       mctx.fillStyle = "#000000";
       mctx.fillRect(0, 0, W, H);
-      const alpha = segmentSubjectAlpha(segmenter, compose);
+      const alpha = segmentSubjectAlpha(segmenter, compose as HTMLCanvasElement);
       if (alpha) mctx.drawImage(alpha, 0, 0, W, H);
       await video.add(i / MASK_FPS, 1 / MASK_FPS);
     }

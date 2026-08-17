@@ -5,6 +5,8 @@
  * shapes pixels, so any host with a canvas can reuse it.
  */
 
+import { kitCanvas } from "./surface";
+
 /** Die-cut outline radius as a share of the sticker's long side. */
 export const OUTLINE_SHARE = 0.03;
 
@@ -281,9 +283,7 @@ export function keepLargestSubject(
 
 /** A blank canvas and its 2D context, set up for pixel reads. */
 export function canvasOf(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
-  const c = document.createElement("canvas");
-  c.width = w;
-  c.height = h;
+  const c = kitCanvas(w, h);
   return [c, c.getContext("2d", { willReadFrequently: true })!];
 }
 

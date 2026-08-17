@@ -30,11 +30,23 @@ RUN ffmpeg -hide_banner -encoders 2>&1 | grep -q '\blibx264\b' \
   || { echo "ffmpeg has no libx264: the share HLS ladder cannot encode." >&2; exit 1; }
 
 WORKDIR /app
-# The server canvas for headless overlay rasterization. Kept out of the
-# bundle (worker:build marks it external) so its native binary installs for
-# this platform here.
-RUN npm install --no-package-lock --omit=dev skia-canvas@^3.0.8
+# The browser primitives a job draws and decodes with: the server canvas, the
+# Node decoders behind mediabunny, and Web Audio. All native, so they are kept
+# out of the bundle (worker:build marks them external) and installed for this
+# platform here. mediabunny itself comes along because its server package
+# registers into it — one registry instance, one copy.
+RUN npm install --no-package-lock --omit=dev \
+      skia-canvas@^3.0.8 \
+      mediabunny@^1.51.0 \
+      @mediabunny/server@^1.54.0 \
+      node-web-audio-api@^2.2.0
 COPY dist/cut-worker/main.js ./main.js
+# The faces the editor shows, staged as files the canvas loads at startup so a
+# title renders in its own font. Fetched here so the image carries them
+# whatever state the build context is in; a family that will not come down
+# leaves the rest staged and falls back at draw time.
+COPY scripts/fetch-cut-fonts.mjs ./scripts/fetch-cut-fonts.mjs
+RUN node scripts/fetch-cut-fonts.mjs
 
 ENV NODE_ENV=production
 ENTRYPOINT ["node", "main.js"]

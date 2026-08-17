@@ -11,6 +11,11 @@ on:
     branches: [main]
     paths:
       - site/src/cut/worker/**
+      # The worker bundles the editor's own library for headless runs, so a
+      # change to the drawing, decoding or effects code ships in this image.
+      - site/src/cut/lib/**
+      - site/packages/effects-kit/**
+      - site/scripts/fetch-cut-fonts.mjs
       - site/src/cut/server/exportPipeline.ts
       - site/src/cut/server/hlsLadder.ts
       - site/src/cut/server/urlDownload.ts

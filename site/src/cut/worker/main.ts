@@ -5,7 +5,7 @@ import { overlayKeysOf, runExportJob } from "./exportJob";
 import { runHlsJob } from "./hlsJob";
 import { runImportUrlJob } from "./importUrlJob";
 import { runTurnJob } from "./turnJob";
-import { installSkiaRaster } from "../lib/headless/skiaRaster";
+import { describeRuntime, installHeadlessRuntime } from "../lib/headless/runtime";
 import { deleteObjects } from "./r2";
 
 // The cloud render worker: a headless loop that claims CutRenderJob rows the
@@ -235,11 +235,13 @@ async function stop(): Promise<void> {
 async function main(): Promise<void> {
   process.on("SIGTERM", () => void stop());
   process.on("SIGINT", () => void stop());
-  // The server canvas backs any turn that rasterizes overlays (an export
-  // kicked off headless). A worker without the module still runs every
-  // ffmpeg-only job.
-  const skia = await installSkiaRaster();
-  console.log(`[cut-worker] polling for jobs (max ${MAX_RUNNING} concurrent), raster: ${skia ? "skia" : "unavailable"}`);
+  // Canvas, decoders, Web Audio, and fonts, standing in for the page a turn
+  // would otherwise run in. A worker missing a native module loses that
+  // capability and still runs every ffmpeg-only job.
+  const runtime = await installHeadlessRuntime();
+  console.log(
+    `[cut-worker] polling for jobs (max ${MAX_RUNNING} concurrent), ${describeRuntime(runtime)}`
+  );
   const inFlight = new Set<Promise<void>>();
   let idleSince: number | null = null;
   let failingSince: number | null = null;

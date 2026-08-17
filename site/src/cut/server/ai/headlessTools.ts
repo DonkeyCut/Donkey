@@ -1,4 +1,4 @@
-import { BROWSER_MEDIA_TOOLS, runAiTool, UI_TOOLS } from "../../lib/aiTools";
+import { runAiTool, UI_TOOLS } from "../../lib/aiTools";
 import { serializeDoc, useEditor } from "../../lib/store";
 import type { MediaAsset, ProjectDoc } from "../../lib/types";
 import { readProject, writeProject } from "../projects";
@@ -10,6 +10,24 @@ import { readProject, writeProject } from "../projects";
 // Scope: doc edits. Tools that need the page (preview reads, media decodes)
 // or the page's hosted sign-in (generation, library sync) answer with a
 // typed refusal so the model reports honestly and moves on.
+
+/** Tools that decode or rasterize media. The engine runs on Bun with the
+ * bundled tools and no canvas, decoders or Web Audio, so these answer with a
+ * typed refusal here; the cloud runner installs those primitives and runs the
+ * same tools for real. */
+const PAGE_MEDIA_TOOLS: ReadonlySet<string> = new Set([
+  "watch_video",
+  "listen_audio",
+  "detect_silence",
+  "refine_speech_cuts",
+  "freeze_frame",
+  "capture_frame",
+  "create_sticker",
+  "subtitles_generate",
+  "captions_generate",
+  "subtitles_from_visuals",
+  "stock_add",
+]);
 
 const PAGE_SESSION_TOOLS: ReadonlySet<string> = new Set([
   "generate_image",
@@ -87,7 +105,7 @@ export async function callHeadlessTool(
         note: "No editor page is attached to this session, so this tool had no effect. The project itself is unchanged — keep working from the editor state.",
       },
     };
-  if (BROWSER_MEDIA_TOOLS.has(toolName))
+  if (PAGE_MEDIA_TOOLS.has(toolName))
     return {
       errorText:
         "This tool reads media through the editor page and is unavailable while no tab is attached. Work from the editor state instead.",

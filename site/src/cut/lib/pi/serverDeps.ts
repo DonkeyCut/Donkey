@@ -1,7 +1,7 @@
 import { geminiModelRoles } from "@/lib/inference/gemini-models";
 import { AI_SKILL_INDEX, AI_SKILLS } from "@/cut/server/ai/catalog";
 import { buildAiContext } from "../aiContext";
-import { BROWSER_MEDIA_TOOLS, runAiTool, UI_TOOLS } from "../aiTools";
+import { runAiTool, UI_TOOLS } from "../aiTools";
 import { normalizeRef } from "../assetRef";
 import { NO_CREDITS_MESSAGE } from "../generate";
 import { hostedPost } from "../hosted";
@@ -32,10 +32,6 @@ export function headlessDeps(session: HeadlessSession): CutAgentDeps {
           noEditor: true,
           note: "No editor page is attached to this session, so this tool had no effect. The project itself is unchanged — keep working from the editor state.",
         };
-      if (BROWSER_MEDIA_TOOLS.has(name))
-        throw new Error(
-          "This tool reads media through the editor page and is unavailable in this session. Work from the editor state and the transcript instead."
-        );
       return runAiTool(name, args);
     },
     models: {

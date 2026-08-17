@@ -1,4 +1,5 @@
 import type { HeadlessSession } from "./bind";
+import { syncFontAssets } from "../fontAssets";
 import { serializeDoc, useEditor } from "../store";
 import type { MediaAsset, ProjectDoc } from "../types";
 
@@ -50,6 +51,9 @@ export async function openCloudProject(
     url: signed.get(a.fileName) ?? `${projectPath(s, projectId)}/media/${encodeURIComponent(a.fileName)}`,
   }));
   await useEditor.getState().openProjectDoc(projectId, doc, assets);
+  // The page does this from the editor; a run has to do it before it draws,
+  // or a title set in the project's own font comes out in the fallback face.
+  await syncFontAssets(assets);
   return { projectId, version };
 }
 

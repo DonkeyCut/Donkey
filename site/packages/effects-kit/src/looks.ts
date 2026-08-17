@@ -1,5 +1,7 @@
 /** Preset filter looks: a named color/effect treatment baked over a clip's
  * picture in both preview and export. */
+import { kitCanvas } from "./surface";
+
 export type LookStyle =
   | "vintage"
   | "vhs"
@@ -151,14 +153,11 @@ const GRAIN_SIZE = 1.6;
 let grainTiles: HTMLCanvasElement[] | null = null;
 
 export function grainTile(tick: number): HTMLCanvasElement | null {
-  if (typeof document === "undefined") return null;
   if (!grainTiles) {
     grainTiles = [];
     const side = Math.round(GRAIN_TILE / GRAIN_SIZE);
     for (let n = 0; n < GRAIN_COUNT; n++) {
-      const small = document.createElement("canvas");
-      small.width = side;
-      small.height = side;
+      const small = kitCanvas(side, side);
       const sctx = small.getContext("2d");
       if (!sctx) return null;
       const img = sctx.createImageData(side, side);
@@ -176,9 +175,7 @@ export function grainTile(tick: number): HTMLCanvasElement | null {
         img.data[i + 3] = 255;
       }
       sctx.putImageData(img, 0, 0);
-      const c = document.createElement("canvas");
-      c.width = GRAIN_TILE;
-      c.height = GRAIN_TILE;
+      const c = kitCanvas(GRAIN_TILE, GRAIN_TILE);
       const ctx = c.getContext("2d");
       if (!ctx) return null;
       ctx.imageSmoothingEnabled = true;
@@ -196,6 +193,7 @@ let grainUrl: string | null = null;
  * with CSS — the preview stage and the effect tiles. Overlay-blend it and set
  * the layer's opacity to the effect's grain amount. */
 export function grainTileUrl(): string | null {
+  if (typeof document === "undefined") return null; // a CSS surface, page only
   if (grainUrl) return grainUrl;
   const tile = grainTile(0);
   if (!tile) return null;

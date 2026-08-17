@@ -21,6 +21,7 @@ import {
   withOutline,
 } from "@donkeycut/effects-kit";
 import { hostedPost } from "./hosted";
+import { decodeRasterImage, rasterCanvasToDataUrl, rasterCanvasToPng } from "./raster";
 import { geminiModelRoles } from "@/lib/inference/gemini-models";
 
 const WASM_BASE = "/mediapipe/wasm";
@@ -102,26 +103,6 @@ export function personSegmenter(): Promise<Segmenter | null> {
   return segmenterOnce;
 }
 
-async function decode(blob: Blob): Promise<HTMLImageElement | null> {
-  return new Promise((resolve) => {
-    const url = URL.createObjectURL(blob);
-    const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve(img);
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve(null);
-    };
-    img.src = url;
-  });
-}
-
-function pngOf(canvas: HTMLCanvasElement): Promise<Blob | null> {
-  return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-}
-
 /**
  * Segment one frame and return the subject as an alpha canvas at the mask's
  * own (small) resolution — white where the person is, transparent elsewhere.
@@ -168,12 +149,12 @@ export function segmentSubjectAlpha(
 /** Person matting, fully on-device. Null when no person registers (callers
  * fall through to the hosted path). */
 export async function personCutout(blob: Blob): Promise<HTMLCanvasElement | null> {
-  const [img, segmenter] = await Promise.all([decode(blob), personSegmenter()]);
+  const [img, segmenter] = await Promise.all([decodeRasterImage(blob), personSegmenter()]);
   if (!img || !segmenter) return null;
-  const w = img.naturalWidth;
-  const h = img.naturalHeight;
+  const w = img.width;
+  const h = img.height;
   const [canvas, ctx] = canvasOf(w, h);
-  ctx.drawImage(img, 0, 0);
+  ctx.drawImage(img.source, 0, 0);
   const result = segmenter.segment(canvas);
   try {
     const mask = result.confidenceMasks?.[0];
@@ -197,17 +178,17 @@ export async function personCutout(blob: Blob): Promise<HTMLCanvasElement | null
 /** Hosted matting for general subjects: the vision model returns segmentation
  * masks; the largest subject's mask becomes the alpha. */
 export async function hostedCutout(blob: Blob): Promise<HTMLCanvasElement | null> {
-  const img = await decode(blob);
+  const img = await decodeRasterImage(blob);
   if (!img) return null;
-  const w = img.naturalWidth;
-  const h = img.naturalHeight;
+  const w = img.width;
+  const h = img.height;
   const [canvas, ctx] = canvasOf(w, h);
-  ctx.drawImage(img, 0, 0);
+  ctx.drawImage(img.source, 0, 0);
   // Fit the upload to the inline budget; masks come back box-relative, so a
   // downscaled request still masks the full-size picture.
   const [small, sctx] = canvasOf(Math.min(1024, w), Math.round((Math.min(1024, w) * h) / w));
-  sctx.drawImage(img, 0, 0, small.width, small.height);
-  const dataUrl = small.toDataURL("image/jpeg", 0.85);
+  sctx.drawImage(img.source, 0, 0, small.width, small.height);
+  const dataUrl = await rasterCanvasToDataUrl(small, "image/jpeg", 0.85);
   const res = await hostedPost("/api/inference/responses", {
     donkeyProvider: "gemini",
     model: geminiModelRoles.chat,
@@ -242,11 +223,11 @@ export async function hostedCutout(blob: Blob): Promise<HTMLCanvasElement | null
       return area(b.box_2d!) - area(a.box_2d!);
     })[0];
   if (!best) return null;
-  const maskImg = await decode(await (await fetch(best.mask!)).blob().catch(() => new Blob()));
+  const maskImg = await decodeRasterImage(await (await fetch(best.mask!)).blob().catch(() => new Blob()));
   if (!maskImg) return null;
   const [y0, x0, y1, x1] = best.box_2d!.map((v) => v / 1000);
   const [, mctx] = canvasOf(w, h);
-  mctx.drawImage(maskImg, x0 * w, y0 * h, Math.max(1, (x1 - x0) * w), Math.max(1, (y1 - y0) * h));
+  mctx.drawImage(maskImg.source, x0 * w, y0 * h, Math.max(1, (x1 - x0) * w), Math.max(1, (y1 - y0) * h));
   const maskData = mctx.getImageData(0, 0, w, h).data;
   const ok = applyAlpha(ctx, w, h, (i) => {
     const v = maskData[i * 4] / 255; // grayscale probability
@@ -258,10 +239,10 @@ export async function hostedCutout(blob: Blob): Promise<HTMLCanvasElement | null
 /** Knock out a flat studio backdrop — the shape a generated sticker arrives
  * in. Null when the picture has no such backdrop. */
 export async function flatBackdropCutout(blob: Blob): Promise<HTMLCanvasElement | null> {
-  const img = await decode(blob);
+  const img = await decodeRasterImage(blob);
   if (!img) return null;
-  const [canvas, ctx] = canvasOf(img.naturalWidth, img.naturalHeight);
-  ctx.drawImage(img, 0, 0);
+  const [canvas, ctx] = canvasOf(img.width, img.height);
+  ctx.drawImage(img.source, 0, 0);
   return removeFlatBackdrop(canvas) ? canvas : null;
 }
 
@@ -294,5 +275,5 @@ export async function makeStickerCutout(
   // before the crop, which would otherwise frame the strays too.
   keepLargestSubject(cut);
   const cropped = cropToContent(cut);
-  return pngOf(opts.outline === false ? cropped : withOutline(cropped));
+  return rasterCanvasToPng(opts.outline === false ? cropped : withOutline(cropped));
 }

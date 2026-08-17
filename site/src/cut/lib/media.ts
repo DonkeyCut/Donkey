@@ -29,7 +29,14 @@ import {
   stashCloudMedia,
   stashUnclaimedMedia,
 } from "./mediaSync";
-import { decodeRasterImage } from "./raster";
+import {
+  createRasterCanvas,
+  decodeRasterImage,
+  decodeRasterImageUrl,
+  rasterCanvasToBlob,
+  rasterCanvasToDataUrl,
+  type RasterSurface,
+} from "./raster";
 import { useEditor } from "./store";
 import type { AssetType, AudioClip, MediaAsset, ProjectSummary, StoredAsset, VideoClip, WatchKeepReason } from "./types";
 import { IMAGE_CLIP_SECONDS, mediaUrl } from "./types";
@@ -611,38 +618,10 @@ export async function importFileToProject(
   };
 }
 
-// The frame reader hands back whichever canvas kind its context has — an
-// element in the DOM, an OffscreenCanvas in a worker — and these two are the
-// only places that difference shows.
-
-function canvasBlob(canvas: HTMLCanvasElement | OffscreenCanvas, type: string): Promise<Blob | null> {
-  if (canvas instanceof OffscreenCanvas) return canvas.convertToBlob({ type });
-  return new Promise((resolve) => canvas.toBlob(resolve, type));
-}
-
-async function canvasDataUrl(
-  canvas: HTMLCanvasElement | OffscreenCanvas,
-  type: string,
-  quality: number
-): Promise<string> {
-  if (!(canvas instanceof OffscreenCanvas)) return canvas.toDataURL(type, quality);
-  const blob = await canvas.convertToBlob({ type, quality });
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
-}
-
 /** Natural pixel size of an image URL, for framing on the timeline. */
-function loadImageMeta(url: string): Promise<{ width: number; height: number }> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
-    img.onerror = () => resolve({ width: 0, height: 0 });
-    img.src = url;
-  });
+async function loadImageMeta(url: string): Promise<{ width: number; height: number }> {
+  const img = await decodeRasterImageUrl(url);
+  return img ? { width: img.width, height: img.height } : { width: 0, height: 0 };
 }
 
 /** What `importRemote` needs to register a fetchable source as an asset the
@@ -939,8 +918,7 @@ export async function captureFreezeFrame(
 ): Promise<MediaAsset> {
   const frame = await frameAt(sourceUrl, srcTime);
   if (!frame) throw new Error("Could not render the freeze frame.");
-  const blob = await canvasBlob(frame.canvas, "image/png");
-  if (!blob) throw new Error("Could not render the freeze frame.");
+  const blob = await rasterCanvasToBlob(frame.canvas, "image/png");
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   const fileName = `freeze-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}-${uid().slice(0, 4)}.png`;
@@ -1042,25 +1020,18 @@ const cellDims = (w: number, h: number): [number, number] =>
 
 /** Watch a still image: one downscaled frame, no time axis. */
 export async function makeStillFrame(sourceUrl: string): Promise<WatchFrames> {
-  const img = new Image();
-  img.crossOrigin = "anonymous";
-  await new Promise<void>((resolve, reject) => {
-    img.onload = () => resolve();
-    img.onerror = () => reject(new Error("Could not read the image."));
-    img.src = sourceUrl;
-  });
-  if (img.naturalWidth === 0 || img.naturalHeight === 0)
-    throw new Error("Could not read the image.");
-  const [w, h] = cellDims(img.naturalWidth, img.naturalHeight);
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d");
+  const img = await decodeRasterImageUrl(sourceUrl);
+  if (!img || img.width === 0 || img.height === 0) throw new Error("Could not read the image.");
+  const [w, h] = cellDims(img.width, img.height);
+  const canvas = createRasterCanvas(w, h);
+  const ctx = canvas.getContext("2d") as CanvasRenderingContext2D | null;
   if (!ctx) throw new Error("Could not read the image.");
   ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(img, 0, 0, w, h);
+  ctx.drawImage(img.source, 0, 0, w, h);
   return {
-    frames: [{ t: 0, image: canvas.toDataURL("image/jpeg", SHEET_QUALITY), via: "first" }],
+    frames: [
+      { t: 0, image: await rasterCanvasToDataUrl(canvas, "image/jpeg", SHEET_QUALITY), via: "first" },
+    ],
     candidates: 1,
     sceneChanges: [],
     coveredTo: 0,
@@ -1120,7 +1091,7 @@ export async function sampleWatchFrames(
     // Cell canvases are held only until the selector rules on them (decisions
     // run one frame behind), so memory stays near the kept set, never the
     // candidate sweep.
-    const held = new Map<number, HTMLCanvasElement>();
+    const held = new Map<number, RasterSurface>();
     const candTimes: number[] = [];
     const candG16: Float32Array[] = []; // per-candidate coarse grid, for cut refinement
     let keptCount = 0;
@@ -1131,10 +1102,10 @@ export async function sampleWatchFrames(
         else keptCount++;
       },
     });
-    const sig = document.createElement("canvas");
-    sig.width = SIGNATURE_SIZE;
-    sig.height = SIGNATURE_SIZE;
-    const sigCtx = sig.getContext("2d", { willReadFrequently: true });
+    const sig = createRasterCanvas(SIGNATURE_SIZE, SIGNATURE_SIZE);
+    const sigCtx = sig.getContext("2d", {
+      willReadFrequently: true,
+    }) as CanvasRenderingContext2D | null;
     if (!sigCtx) throw new Error("Could not sample the video.");
     const deadline = Date.now() + (opts.budgetMs ?? Infinity);
     const outOfTime = () => Date.now() > deadline;
@@ -1144,7 +1115,7 @@ export async function sampleWatchFrames(
         .next();
       if (one.done || !one.value) return null;
       sigCtx.imageSmoothingQuality = "high";
-      sigCtx.drawImage(one.value.canvas, 0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE);
+      sigCtx.drawImage(one.value.canvas as CanvasImageSource, 0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE);
       const data = sigCtx.getImageData(0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE).data;
       return frameSig({ width: SIGNATURE_SIZE, height: SIGNATURE_SIZE, channels: 4, data }).g16;
     };
@@ -1169,17 +1140,15 @@ export async function sampleWatchFrames(
       const next = await cells.next();
       if (next.done || !next.value) continue; // a moment the decoder had no frame for
       if (!opts.metadataOnly) {
-        const copy = document.createElement("canvas");
-        copy.width = cw;
-        copy.height = ch;
-        const cctx = copy.getContext("2d");
+        const copy = createRasterCanvas(cw, ch);
+        const cctx = copy.getContext("2d") as CanvasRenderingContext2D | null;
         if (!cctx) throw new Error("Could not sample the video.");
-        cctx.drawImage(next.value.canvas, 0, 0);
+        cctx.drawImage(next.value.canvas as CanvasImageSource, 0, 0);
         held.set(candTimes.length, copy);
       }
       candTimes.push(times[i]);
       sigCtx.imageSmoothingQuality = "high";
-      sigCtx.drawImage(next.value.canvas, 0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE);
+      sigCtx.drawImage(next.value.canvas as CanvasImageSource, 0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE);
       const rgb = {
         width: SIGNATURE_SIZE,
         height: SIGNATURE_SIZE,
@@ -1202,7 +1171,7 @@ export async function sampleWatchFrames(
       const verdict = selection.decisions[idx].verdict;
       frames.push({
         t: candTimes[idx],
-        image: canvas ? await canvasDataUrl(canvas, "image/jpeg", SHEET_QUALITY) : "",
+        image: canvas ? await rasterCanvasToDataUrl(canvas, "image/jpeg", SHEET_QUALITY) : "",
         via: verdict === "keep-global" ? "global"
           : verdict === "keep-action" ? "action"
           : verdict === "keep-settled" ? "settled"
@@ -1267,18 +1236,14 @@ export async function composeSheets(
 ): Promise<{ image: string; frames: { t: number }[] }[]> {
   if (cells.length === 0) return [];
   const images = await Promise.all(
-    cells.map(
-      (c) =>
-        new Promise<HTMLImageElement>((resolve, reject) => {
-          const img = new Image();
-          img.onload = () => resolve(img);
-          img.onerror = () => reject(new Error("Bad frame image."));
-          img.src = c.image;
-        })
-    )
+    cells.map(async (c) => {
+      const img = await decodeRasterImageUrl(c.image);
+      if (!img) throw new Error("Bad frame image.");
+      return img;
+    })
   );
-  const cw = images[0].naturalWidth;
-  const ch = images[0].naturalHeight;
+  const cw = images[0].width;
+  const ch = images[0].height;
   const perSheet = SHEET_GRID * SHEET_GRID;
   const sheetW = 2 * SHEET_GAP + SHEET_GRID * cw + (SHEET_GRID - 1) * SHEET_GAP;
   const sheetH = 2 * SHEET_GAP + SHEET_GRID * ch + (SHEET_GRID - 1) * SHEET_GAP;
@@ -1286,10 +1251,8 @@ export async function composeSheets(
   const sheets: { image: string; frames: { t: number }[] }[] = [];
   for (let s = 0; s < cells.length; s += perSheet) {
     const batch = cells.slice(s, s + perSheet);
-    const canvas = document.createElement("canvas");
-    canvas.width = sheetW;
-    canvas.height = sheetH;
-    const ctx = canvas.getContext("2d");
+    const canvas = createRasterCanvas(sheetW, sheetH);
+    const ctx = canvas.getContext("2d") as CanvasRenderingContext2D | null;
     if (!ctx) throw new Error("No 2d context.");
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, sheetW, sheetH);
@@ -1299,7 +1262,7 @@ export async function composeSheets(
     batch.forEach((c, j) => {
       const x = SHEET_GAP + (j % SHEET_GRID) * (cw + SHEET_GAP);
       const y = SHEET_GAP + Math.floor(j / SHEET_GRID) * (ch + SHEET_GAP);
-      ctx.drawImage(images[s + j], x, y, cw, ch);
+      ctx.drawImage(images[s + j].source, x, y, cw, ch);
       const label = `${round2(c.t)}s`;
       const w = ctx.measureText(label).width;
       ctx.fillStyle = "rgba(0,0,0,0.6)";
@@ -1308,7 +1271,7 @@ export async function composeSheets(
       ctx.fillText(label, x + 9, y + ch - 6);
     });
     sheets.push({
-      image: await canvasDataUrl(canvas, "image/jpeg", SHEET_QUALITY),
+      image: await rasterCanvasToDataUrl(canvas, "image/jpeg", SHEET_QUALITY),
       frames: batch.map((c) => ({ t: c.t })),
     });
   }
@@ -1453,7 +1416,7 @@ async function makeThumbs(url: string, duration: number) {
   // keeps every index meaning what it says.
   const captured: (string | null)[] = [];
   for await (const frame of framesAt(url, times, { height: THUMB_H })) {
-    captured.push(frame ? await canvasDataUrl(frame.canvas, "image/jpeg", 0.92) : null);
+    captured.push(frame ? await rasterCanvasToDataUrl(frame.canvas, "image/jpeg", 0.92) : null);
   }
   // Fill gaps from the nearest frame either side, so a strip is either fully
   // populated or empty.
@@ -1588,7 +1551,7 @@ async function pumpEdgeFrames() {
           const { sinkFor } = await edgeReader(req.url);
           const frame = await sinkFor(req.height).getCanvas(Math.max(0, req.time));
           if (!frame) throw new Error("No frame at that time.");
-          src = await canvasDataUrl(frame.canvas, "image/jpeg", 0.92);
+          src = await rasterCanvasToDataUrl(frame.canvas, "image/jpeg", 0.92);
           edgeCache.set(req.key, src);
           while (edgeCache.size > EDGE_CACHE_CAP) {
             edgeCache.delete(edgeCache.keys().next().value!);

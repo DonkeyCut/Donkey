@@ -1,11 +1,14 @@
 "use client";
 
+import { framesAt } from "./mediaRead";
+import { rasterCanvasToDataUrl } from "./raster";
 import type { ClipSpan } from "./types";
 
 // Sample the cut's picture for the visual-subtitles pipeline: a handful of
 // small jpeg frames spread along video track 0, each stamped with its
-// timeline time. Captured in the browser from the same media elements the
-// preview uses, so nothing re-renders server-side.
+// timeline time. Frames come off the same container reader the rest of Cut
+// uses, so one pass over a file decodes every moment wanted from it and the
+// sampler runs wherever the reader does.
 
 export interface CapturedFrame {
   at: number;
@@ -20,68 +23,40 @@ const MAX_FRAMES = 20;
 /** Aim for one frame every ~2.5s of timeline. */
 const SECONDS_PER_FRAME = 2.5;
 
-function loadVideo(url: string): Promise<HTMLVideoElement> {
-  return new Promise((resolve, reject) => {
-    const v = document.createElement("video");
-    v.preload = "metadata";
-    v.muted = true;
-    // Media may come from the engine on another origin; anonymous CORS keeps
-    // the canvas grab from tainting.
-    v.crossOrigin = "anonymous";
-    v.src = url;
-    v.onloadedmetadata = () => resolve(v);
-    v.onerror = () => reject(new Error("Could not read a video file for frame capture."));
-  });
-}
-
-function seekTo(v: HTMLVideoElement, t: number): Promise<void> {
-  return new Promise((resolve) => {
-    const done = () => {
-      v.removeEventListener("seeked", done);
-      clearTimeout(timer);
-      resolve();
-    };
-    const timer = setTimeout(done, 2000);
-    v.addEventListener("seeked", done);
-    v.currentTime = t;
-  });
+/** Read the given source times out of one file and stamp each result with the
+ * timeline time it answers for. Times must ascend, which is what keeps this
+ * to a single decode pass. An unreadable source yields nothing. */
+async function readFrames(
+  url: string,
+  moments: { at: number; srcTime: number }[]
+): Promise<CapturedFrame[]> {
+  const out: CapturedFrame[] = [];
+  try {
+    let i = 0;
+    for await (const frame of framesAt(
+      url,
+      moments.map((m) => m.srcTime),
+      { width: FRAME_W }
+    )) {
+      const moment = moments[i++];
+      if (!frame) continue;
+      out.push({ at: moment.at, image: await rasterCanvasToDataUrl(frame.canvas, "image/jpeg", JPEG_Q) });
+    }
+  } catch {
+    // One unreadable source yields the frames it managed, never an error:
+    // the pipeline reads what it can see and writes captions for that.
+  }
+  return out;
 }
 
 /** Capture small stamped frames from one video file at the given times —
- * the dailies-review sampler. Times land in file seconds; unreadable sources
- * or tainted canvases yield fewer frames rather than an error. */
-export async function captureVideoFrames(url: string, times: number[]): Promise<CapturedFrame[]> {
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return [];
-  ctx.imageSmoothingQuality = "high";
-  let v: HTMLVideoElement;
-  try {
-    v = await loadVideo(url);
-  } catch {
-    return [];
-  }
-  const frames: CapturedFrame[] = [];
-  try {
-    for (const at of times) {
-      await seekTo(v, Math.max(0, Math.min(at, Math.max(0, v.duration - 0.05))));
-      if (v.readyState < 2 || !v.videoWidth) continue;
-      const w = Math.min(FRAME_W, v.videoWidth);
-      const h = Math.round((w / v.videoWidth) * v.videoHeight);
-      canvas.width = w;
-      canvas.height = h;
-      ctx.drawImage(v, 0, 0, w, h);
-      try {
-        frames.push({ at, image: canvas.toDataURL("image/jpeg", JPEG_Q) });
-      } catch {
-        // A tainted canvas (unexpected CORS setup) — skip the frame.
-      }
-    }
-  } finally {
-    v.removeAttribute("src");
-    v.load();
-  }
-  return frames;
+ * the dailies-review sampler. Times land in file seconds. */
+export function captureVideoFrames(url: string, times: number[]): Promise<CapturedFrame[]> {
+  const moments = [...times]
+    .map((t) => Math.max(0, t))
+    .sort((a, b) => a - b)
+    .map((t) => ({ at: t, srcTime: t }));
+  return readFrames(url, moments);
 }
 
 /** Capture timeline frames from video track 0's visible clips. */
@@ -94,48 +69,24 @@ export async function captureTimelineFrames(spans: ClipSpan[]): Promise<Captured
     Math.max(MIN_FRAMES, Math.round(total / SECONDS_PER_FRAME))
   );
 
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return [];
-  ctx.imageSmoothingQuality = "high";
-
-  // One shared element per source file; spans of the same asset reuse it.
-  const videos = new Map<string, HTMLVideoElement>();
-  const frames: CapturedFrame[] = [];
-  try {
-    for (let i = 0; i < count; i++) {
-      const at = ((i + 0.5) * total) / count;
-      const span = visible.find((sp) => at >= sp.start && at < sp.start + sp.len);
-      if (!span) continue;
-      let v = videos.get(span.asset.id);
-      if (!v) {
-        try {
-          v = await loadVideo(span.asset.url);
-        } catch {
-          continue; // one unreadable source shouldn't sink the whole capture
-        }
-        videos.set(span.asset.id, v);
-      }
-      const speed = span.clip.speed && span.clip.speed > 0 ? span.clip.speed : 1;
-      const srcTime = span.clip.in + (at - span.start) * speed;
-      await seekTo(v, Math.max(0, Math.min(srcTime, Math.max(0, v.duration - 0.05))));
-      if (v.readyState < 2 || !v.videoWidth) continue;
-      const w = Math.min(FRAME_W, v.videoWidth);
-      const h = Math.round((w / v.videoWidth) * v.videoHeight);
-      canvas.width = w;
-      canvas.height = h;
-      ctx.drawImage(v, 0, 0, w, h);
-      try {
-        frames.push({ at, image: canvas.toDataURL("image/jpeg", JPEG_Q) });
-      } catch {
-        // A tainted canvas (unexpected CORS setup) — skip the frame.
-      }
-    }
-  } finally {
-    for (const v of videos.values()) {
-      v.removeAttribute("src");
-      v.load();
-    }
+  // Group the wanted moments by source file, so each file is opened once and
+  // swept in order however the clips using it are laid out.
+  const bySource = new Map<string, { url: string; moments: { at: number; srcTime: number }[] }>();
+  for (let i = 0; i < count; i++) {
+    const at = ((i + 0.5) * total) / count;
+    const span = visible.find((sp) => at >= sp.start && at < sp.start + sp.len);
+    if (!span) continue;
+    const speed = span.clip.speed && span.clip.speed > 0 ? span.clip.speed : 1;
+    const srcTime = Math.max(0, span.clip.in + (at - span.start) * speed);
+    const group = bySource.get(span.asset.url) ?? { url: span.asset.url, moments: [] };
+    group.moments.push({ at, srcTime });
+    bySource.set(span.asset.url, group);
   }
-  return frames;
+
+  const frames: CapturedFrame[] = [];
+  for (const group of bySource.values()) {
+    group.moments.sort((a, b) => a.srcTime - b.srcTime);
+    frames.push(...(await readFrames(group.url, group.moments)));
+  }
+  return frames.sort((a, b) => a.at - b.at);
 }

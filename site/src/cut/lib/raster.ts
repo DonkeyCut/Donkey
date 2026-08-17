@@ -15,7 +15,9 @@ export interface RasterFactory {
   createCanvas(w: number, h: number): RasterSurface;
   /** Decode one image blob; null when the bytes are undecodable. */
   decodeImage(blob: Blob): Promise<RasterImage | null>;
-  canvasToPngBlob(canvas: RasterSurface): Promise<Blob>;
+  /** Encode a canvas. `type` is a MIME type ("image/png", "image/jpeg");
+   * `quality` applies to the lossy ones. */
+  canvasToBlob(canvas: RasterSurface, type: string, quality?: number): Promise<Blob>;
 }
 
 const domFactory: RasterFactory = {
@@ -41,13 +43,14 @@ const domFactory: RasterFactory = {
       };
       img.src = objectUrl;
     }),
-  canvasToPngBlob: (canvas) => {
+  canvasToBlob: (canvas, type, quality) => {
     if (typeof OffscreenCanvas !== "undefined" && canvas instanceof OffscreenCanvas)
-      return canvas.convertToBlob({ type: "image/png" });
+      return canvas.convertToBlob({ type, ...(quality !== undefined ? { quality } : {}) });
     return new Promise((resolve, reject) =>
       (canvas as HTMLCanvasElement).toBlob(
         (b) => (b ? resolve(b) : reject(new Error("Could not render the image."))),
-        "image/png"
+        type,
+        quality
       )
     );
   },
@@ -63,4 +66,56 @@ export function setRasterFactory(f: RasterFactory): void {
 
 export const createRasterCanvas = (w: number, h: number): RasterSurface => factory.createCanvas(w, h);
 export const decodeRasterImage = (blob: Blob): Promise<RasterImage | null> => factory.decodeImage(blob);
-export const rasterCanvasToPng = (canvas: RasterSurface): Promise<Blob> => factory.canvasToPngBlob(canvas);
+export const rasterCanvasToPng = (canvas: RasterSurface): Promise<Blob> =>
+  factory.canvasToBlob(canvas, "image/png");
+export const rasterCanvasToBlob = (
+  canvas: RasterSurface,
+  type: string,
+  quality?: number
+): Promise<Blob> => factory.canvasToBlob(canvas, type, quality);
+
+/** Decode an image that lives at a URL. Goes through `fetch` so the same call
+ * works on a page and in a process with no `Image` constructor; anonymous CORS
+ * is what the DOM decoders use, so a cross-origin read shares their cache
+ * entry and never taints what it draws into. */
+export async function decodeRasterImageUrl(url: string): Promise<RasterImage | null> {
+  try {
+    const res = await fetch(url, { mode: "cors" });
+    if (res.ok) return await factory.decodeImage(await res.blob());
+  } catch {
+    // A host that sends no CORS header refuses the fetch; the page can still
+    // see the picture through an element load.
+  }
+  return elementImage(url);
+}
+
+/** An `<img>` read of a URL the fetch above could not have — a host that
+ * serves pictures with no CORS header still answers one. Enough to measure a
+ * picture with; drawing it taints the canvas, so an encode of it fails the way
+ * the refused fetch would have. */
+function elementImage(url: string): Promise<RasterImage | null> {
+  if (typeof document === "undefined") return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () =>
+      resolve({ source: img, width: img.naturalWidth || 512, height: img.naturalHeight || 512 });
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
+/** A canvas as a data: URL. Encoding rides the same seam as the blob path, so
+ * the string a headless render produces is byte-for-byte the page's. */
+export async function rasterCanvasToDataUrl(
+  canvas: RasterSurface,
+  type: string,
+  quality?: number
+): Promise<string> {
+  const blob = await factory.canvasToBlob(canvas, type, quality);
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  // Chunked so a multi-megabyte sheet doesn't blow the argument limit.
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return `data:${type};base64,${btoa(binary)}`;
+}

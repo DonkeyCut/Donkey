@@ -12,6 +12,7 @@ import {
   renderAudioSpanWav,
 } from "./media";
 import { frameSink, openMedia, videoTrackOf } from "./mediaRead";
+import { createRasterCanvas, rasterCanvasToDataUrl } from "./raster";
 import { useEditor } from "./store";
 import { formatTime } from "./time";
 
@@ -76,13 +77,13 @@ function splitDataUrl(dataUrl: string): InlineImage {
   return { data, mimeType };
 }
 
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result));
-    r.onerror = () => reject(new Error("Could not read the file."));
-    r.readAsDataURL(blob);
-  });
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  // Chunked so a large picture doesn't blow the argument limit.
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return `data:${blob.type || "application/octet-stream"};base64,${btoa(binary)}`;
 }
 
 /** Re-encode a picture down into the inline budget: scaled to the edge cap,
@@ -96,10 +97,11 @@ async function encodeWithin(blob: Blob): Promise<InlineImage | null> {
     let out: InlineImage | null = null;
     for (const quality of [JPEG_Q, 0.7, 0.55]) {
       const scale = Math.min(1, edge / Math.max(bitmap.width, bitmap.height));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-      const ctx = canvas.getContext("2d");
+      const canvas = createRasterCanvas(
+        Math.max(1, Math.round(bitmap.width * scale)),
+        Math.max(1, Math.round(bitmap.height * scale))
+      );
+      const ctx = canvas.getContext("2d") as CanvasRenderingContext2D | null;
       if (!ctx) return null;
       ctx.imageSmoothingQuality = "high";
       // JPEG carries no alpha, so a cut-out sheet composites onto white here
@@ -107,7 +109,7 @@ async function encodeWithin(blob: Blob): Promise<InlineImage | null> {
       ctx.fillStyle = "#fff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-      out = splitDataUrl(canvas.toDataURL("image/jpeg", quality));
+      out = splitDataUrl(await rasterCanvasToDataUrl(canvas, "image/jpeg", quality));
       if (out.data.length * 0.75 <= MAX_INLINE_BYTES) return out;
       edge = Math.round(edge * 0.75);
     }
