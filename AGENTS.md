@@ -20,6 +20,17 @@ Before changing `site/` UI, routes, API handlers, or data access patterns:
 - Keep Prisma table/model definitions out of `site/prisma/schema.prisma`. Put tables in logically grouped sibling `.prisma` files under `site/prisma/`; reserve `schema.prisma` for shared Prisma configuration such as generator and datasource blocks.
 - Treat `/prototype`, "the prototype route", or route-shaped prototype requests as work on the Next.js route under `site/`, not as a repository-root `prototype/` directory.
 
+## Cut Surfaces
+
+Every Cut change has to hold on all four surfaces, and the plan for it says how:
+
+- **Both residencies.** A browser project (OPFS in the page) and a cloud project (Postgres doc + R2 media) get the same behavior. Work through the backend seam in `site/src/cut/lib/backend/`.
+- **Headed and headless.** Whatever the tab can do, the Bun engine and the worker runner can do: chat tools, rendering, media reads. Headless installs browser primitives — canvas, decoders, Web Audio, fonts — behind narrow seams (`lib/raster.ts`, the frame sink in `lib/mediaRead.ts`, the font installer in `lib/fontAssets.ts`, the kit's `surface.ts`) so one implementation serves both; reach for those seams before writing a second path.
+- Allocate canvases and decode images through the raster seam. Direct `document`, `window`, `FileReader`, `createImageBitmap`, or `FontFace` use in `site/src/cut/lib/` or `packages/effects-kit/` breaks a job.
+- When a surface genuinely cannot carry a feature, give it a fallback and say so in the summary and the guide.
+- **The AI chat drives it too.** A functional change ships with its chat surface: a tool the assistant can call, and descriptions/system-prompt lines that teach the new capability. Derive tool schemas and prompt text from the same exported constants the UI uses (style id lists, model registries) so the catalog updates itself; check the tool files beside the component (`*.tools.ts`) and `site/src/cut/server/ai/catalog.ts`.
+- The chat surface is kept true, both directions. Removing or reshaping a feature means deleting its tool and its prompt/skill mentions in the same change — grep the catalog, the `*.tools.ts` files, the skills library, and `lib/aiTools.ts` for the old names, ids, and parameters. A tool that describes behavior the code no longer has, offers an option that no longer exists, or is missing a setting the UI gained is a bug: the model calls what the catalog teaches.
+
 ## Working Rules
 
 - Do not touch repository-root `prototype/` unless the user explicitly asks for that filesystem path. By default, assume requested product changes are for the Mac app or the site/landing page.
