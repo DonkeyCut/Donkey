@@ -75,12 +75,15 @@ final class WindowPickerOverlayController {
         panels.first?.makeKey()
     }
 
-    /// The frontmost pickable window containing the cursor. ScreenCaptureKit returns windows
-    /// front-to-back, so the first hit is the topmost.
+    /// The window the cursor is actually over: the first hit walking the list front-to-back, so a
+    /// window buried under another one is never offered where the one on top covers it.
     private func window(atGlobalCGPoint point: CGPoint) -> PickWindowInfo? {
         windows.first { $0.cgFrame.contains(point) }
     }
 
+    /// Pickable windows, front-to-back. ScreenCaptureKit says which windows can be captured and
+    /// where they are; the window server's on-screen list says which one is in front of which, and
+    /// that order is what makes the hit test pick the window the cursor is looking at.
     private static func pickableWindows() async -> [PickWindowInfo] {
         // Only visible windows: ask ScreenCaptureKit for on-screen, non-desktop windows, then keep
         // normal app windows (layer 0) that aren't our own and are large enough to aim at.
@@ -92,15 +95,27 @@ final class WindowPickerOverlayController {
             return []
         }
         let ownPID = ProcessInfo.processInfo.processIdentifier
-        return content.windows.compactMap { window in
+        var capturable: [CGWindowID: CGRect] = [:]
+        for window in content.windows {
             guard window.isOnScreen,
                   window.windowLayer == 0,
                   window.frame.width >= 40,
                   window.frame.height >= 40,
                   window.owningApplication?.processID != ownPID else {
+                continue
+            }
+            capturable[window.windowID] = window.frame
+        }
+        let ordered = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] ?? []
+        return ordered.compactMap { entry in
+            guard let id = entry[kCGWindowNumber as String] as? CGWindowID,
+                  let frame = capturable[id] else {
                 return nil
             }
-            return PickWindowInfo(windowID: window.windowID, cgFrame: window.frame)
+            return PickWindowInfo(windowID: id, cgFrame: frame)
         }
     }
 }

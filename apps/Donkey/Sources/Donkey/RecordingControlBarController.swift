@@ -71,7 +71,9 @@ final class RecordingControlBarController {
 
     private func frame(for size: CGSize, on screen: NSScreen) -> CGRect {
         let x = screen.frame.midX - size.width / 2
-        let y = screen.visibleFrame.minY + 24
+        // The panel drops by the hint lane it carries above the bar, so the bar itself sits the
+        // same 24pt off the bottom of the screen whether or not a hint is showing.
+        let y = screen.visibleFrame.minY + 24 - RecordingControlBarView.hintLaneHeight
         return CGRect(x: x, y: y, width: size.width, height: size.height)
     }
 }

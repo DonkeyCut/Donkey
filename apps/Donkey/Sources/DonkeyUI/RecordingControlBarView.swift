@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The three things a screen recording can capture, as the control bar presents them.
@@ -84,9 +85,14 @@ public final class RecordingControlBarModel: ObservableObject {
 public struct RecordingControlBarView: View {
     /// Fixed panel size — the controller owns framing (`hostingView.sizingOptions = []`), so the bar
     /// paints to a known rect rather than pushing its content size back to the window.
-    public static let contentSize = CGSize(width: 500, height: 72)
+    public static let contentSize = CGSize(width: 500, height: 96)
+
+    /// The lane above the bar that holds the hovered control's name, plus the stack spacing under
+    /// it. The controller drops the panel by this much so the bar itself stays put.
+    public static let hintLaneHeight: CGFloat = 24
 
     @ObservedObject private var model: RecordingControlBarModel
+    @State private var hint: String?
 
     public init(model: RecordingControlBarModel) {
         self.model = model
@@ -94,6 +100,7 @@ public struct RecordingControlBarView: View {
 
     public var body: some View {
         VStack(spacing: 6) {
+            hintLabel
             bar
             if let statusMessage = model.statusMessage {
                 Text(statusMessage)
@@ -103,6 +110,21 @@ public struct RecordingControlBarView: View {
             }
         }
         .frame(width: Self.contentSize.width, height: Self.contentSize.height, alignment: .top)
+    }
+
+    /// The hovered control's name, above the bar. The bar floats over whatever is being recorded
+    /// while Donkey sits inactive in the menu bar, and AppKit holds its own tooltips back for an
+    /// inactive app — so the bar carries its own.
+    private var hintLabel: some View {
+        Text(hint ?? " ")
+            .font(.system(size: 11, weight: .medium))
+            .lineLimit(1)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(.ultraThinMaterial))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
+            .opacity(hint == nil ? 0 : 1)
+            .frame(height: 18)
     }
 
     private var bar: some View {
@@ -132,7 +154,6 @@ public struct RecordingControlBarView: View {
         .overlay(
             Capsule().strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
     }
 
     private var recordingStatus: some View {
@@ -160,7 +181,7 @@ public struct RecordingControlBarView: View {
                 .foregroundStyle(isActive ? Color.white : Color.primary)
         }
         .buttonStyle(.plain)
-        .help(mode.tooltip)
+        .hoverHint(mode.tooltip, into: $hint)
     }
 
     /// The audio input selector: a sound icon, the current input's name, and a chevron opening the
@@ -196,7 +217,7 @@ public struct RecordingControlBarView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Audio Input")
+        .hoverHint("Audio Input", into: $hint)
     }
 
     private var recordButton: some View {
@@ -219,7 +240,7 @@ public struct RecordingControlBarView: View {
         .buttonStyle(.plain)
         .disabled(model.isBusy || (!model.isRecording && !model.canRecord))
         .opacity(model.isBusy || (!model.isRecording && !model.canRecord) ? 0.5 : 1)
-        .help(model.isRecording ? "Stop Recording" : "Start Recording")
+        .hoverHint(model.isRecording ? "Stop Recording" : "Start Recording", into: $hint)
     }
 
     private func iconButton(symbol: String, help: String, action: @escaping () -> Void) -> some View {
@@ -230,6 +251,58 @@ public struct RecordingControlBarView: View {
                 .foregroundStyle(Color.primary)
         }
         .buttonStyle(.plain)
-        .help(help)
+        .hoverHint(help, into: $hint)
+    }
+}
+
+private extension View {
+    /// Name this control in the bar's hint lane while the pointer is on it.
+    func hoverHint(_ text: String, into hint: Binding<String?>) -> some View {
+        overlay(
+            HoverTracker { inside in
+                if inside {
+                    hint.wrappedValue = text
+                } else if hint.wrappedValue == text {
+                    hint.wrappedValue = nil
+                }
+            }
+        )
+    }
+}
+
+/// Pointer enter/exit that fires with Donkey inactive. SwiftUI's `onHover` and AppKit's tooltips
+/// both wait on the active app; the tracking area asks for `.activeAlways` instead. The view hands
+/// every click straight through, so it reports on top of a button without taking its taps.
+private struct HoverTracker: NSViewRepresentable {
+    let onChange: (Bool) -> Void
+
+    func makeNSView(context: Context) -> TrackingView {
+        let view = TrackingView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateNSView(_ view: TrackingView, context: Context) {
+        view.onChange = onChange
+    }
+
+    final class TrackingView: NSView {
+        var onChange: ((Bool) -> Void)?
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            for area in trackingAreas { removeTrackingArea(area) }
+            addTrackingArea(NSTrackingArea(
+                rect: bounds,
+                options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            ))
+        }
+
+        override func mouseEntered(with event: NSEvent) { onChange?(true) }
+        override func mouseExited(with event: NSEvent) { onChange?(false) }
     }
 }

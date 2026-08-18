@@ -17,6 +17,8 @@ public struct ScreenRecordingConfiguration: Sendable {
     public var capturesMicrophone: Bool
     /// The microphone device to capture, when `capturesMicrophone` is set. `nil` uses the system default.
     public var microphoneDeviceID: String?
+    /// Whether the pointer is burned into the video. Off: the recording carries the cursor as a
+    /// `CursorTrack` sidecar instead, so an editor can draw it, follow it, or leave it out.
     public var showsCursor: Bool
     public var frameRate: Int
     /// Window IDs to keep out of the capture — our own control bar, so it never appears in the file.
@@ -28,7 +30,7 @@ public struct ScreenRecordingConfiguration: Sendable {
         capturesSystemAudio: Bool = true,
         capturesMicrophone: Bool = false,
         microphoneDeviceID: String? = nil,
-        showsCursor: Bool = true,
+        showsCursor: Bool = false,
         frameRate: Int = 30,
         excludedWindowIDs: [CGWindowID] = [],
         outputURL: URL

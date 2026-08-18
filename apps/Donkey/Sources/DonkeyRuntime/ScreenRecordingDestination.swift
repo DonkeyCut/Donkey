@@ -30,6 +30,12 @@ public enum ScreenRecordingDestination {
         return candidate
     }
 
+    /// Where a recording's cursor track goes: the movie's name with a `.cursor.json` tail, so the
+    /// pair travels together and an importer can find one from the other.
+    public static func cursorTrackURL(for movieURL: URL) -> URL {
+        movieURL.deletingPathExtension().appendingPathExtension("cursor.json")
+    }
+
     /// The concrete output URL for a recording starting now, on the real Desktop.
     public static func makeOutputURL(now: Date = Date()) -> URL {
         let fileManager = FileManager.default

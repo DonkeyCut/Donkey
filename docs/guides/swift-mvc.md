@@ -39,7 +39,9 @@ Screen recording follows this split: `ScreenRecorder` and its destination types
 hold the capture state; `RecordingControlBarView` renders it; the controllers own
 AppKit-only work such as the control bar panel, the region and window pickers, and
 screen positioning; `DonkeyAppDelegate` bootstraps the feature and the menu bar
-without owning product behavior.
+without owning product behavior. The pointer is captured as data: the stream draws
+no cursor, and `CursorTrackRecorder` samples where it went into a `.cursor.json`
+beside the movie for an editor to draw or follow.
 
 ## Review Checklist
 
