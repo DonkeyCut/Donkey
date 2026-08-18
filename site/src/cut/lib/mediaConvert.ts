@@ -43,6 +43,7 @@ import {
 import { apiFetch as engineFetch } from "./api";
 import { getBackend, hasLocalCompute, type CutBackend } from "./backend";
 import { resolveRegisteredBlob } from "./backend/browser/registry";
+import { pollCloudJob } from "./cloudJob";
 import { enrichAsset, uploadProjectMediaTo } from "./media";
 import {
   audioTrackOf,
@@ -241,44 +242,18 @@ async function convertOnBackend(
   if (backend.kind === "cloud") {
     const started = (await res.json().catch(() => ({}))) as { jobId?: string; error?: string };
     if (!res.ok || !started.jobId) throw new Error(started.error ?? "Could not convert that file.");
-    body = await pollConvertJob(started.jobId, backend);
+    body = await pollCloudJob(
+      started.jobId,
+      backend,
+      "Could not convert that file.",
+      "The conversion took too long."
+    );
   } else {
     body = (await res.json().catch(() => ({}))) as ServerConvert;
     if (!res.ok) throw new Error(body.error ?? "Could not convert that file.");
   }
   if (!body.fileName) throw new Error(body.error ?? "Could not convert that file.");
   return fromServer(body);
-}
-
-/** Poll a cloud convert job to completion — the import-url cadence: 2s, a
- * ten-minute ceiling, and a run of failed polls before giving up on it. */
-async function pollConvertJob(jobId: string, backend: CutBackend): Promise<ServerConvert> {
-  const deadline = Date.now() + 10 * 60 * 1000;
-  const MAX_STRIKES = 6;
-  let strikes = 0;
-  for (;;) {
-    if (Date.now() > deadline) throw new Error("The conversion took too long.");
-    await new Promise((r) => setTimeout(r, 2000));
-    let res: Response | null = null;
-    try {
-      res = await backend.fetch(`/api/cut/jobs/${jobId}`);
-    } catch {
-      // Network blip — a strike, counted below.
-    }
-    if (res?.status === 404) throw new Error("Could not convert that file.");
-    if (!res?.ok) {
-      if (++strikes >= MAX_STRIKES) throw new Error("Could not convert that file.");
-      continue;
-    }
-    strikes = 0;
-    const job = (await res.json().catch(() => ({}))) as {
-      state?: string;
-      result?: ServerConvert;
-      error?: string;
-    };
-    if (job.state === "error") throw new Error(job.error ?? "Could not convert that file.");
-    if (job.state === "done") return job.result ?? {};
-  }
 }
 
 /** No machine stores this project, so the work happens beside the bytes: in

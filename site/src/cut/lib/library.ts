@@ -2,6 +2,7 @@
 
 import { apiJson, getBackend } from "./backend";
 import { readSnapshot, writeSnapshot } from "./cache";
+import { pollCloudJob } from "./cloudJob";
 import { downloadFromUrl } from "./download";
 import {
   enrichAsset,
@@ -129,11 +130,27 @@ export async function importUrlToLibrary(
   url: string,
   residency: Residency = activeResidency()
 ): Promise<LibraryAsset[]> {
-  const res = await backendFor(residency).fetch("/api/cut/library/import-url", {
+  const backend = backendFor(residency);
+  const res = await backend.fetch("/api/cut/library/import-url", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url }),
   });
+  // The engine downloads inside the request; the cloud answers {jobId} and a
+  // worker does the fetch, so that side waits on the job.
+  if (backend.kind === "cloud") {
+    const started = await apiJson<{ jobId?: string }>(res);
+    if (!res.ok || !started.jobId) throw new Error(started.error ?? "Could not import that URL.");
+    const done = await pollCloudJob<{ assets?: LibraryAsset[] }>(
+      started.jobId,
+      backend,
+      "Could not import that URL."
+    );
+    // The library holds media, so a source that turned out to be only words
+    // fails here — the same line the engine's library import draws.
+    if (!done.assets?.length) throw new Error("That link has no media to import.");
+    return done.assets.map((a) => ({ ...a, residency }));
+  }
   const body = await apiJson<LibraryAsset[]>(res);
   if (!res.ok) throw new Error(body.error ?? "Could not import that URL.");
   return (Array.isArray(body) ? body : []).map((a) => ({ ...a, residency }));

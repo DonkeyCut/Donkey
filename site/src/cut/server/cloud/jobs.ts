@@ -453,6 +453,29 @@ export const jobsCloud = {
     }
   },
 
+  /** Queue a URL import into the shared library. No project owns it: the
+   * worker lands the files under the account's library prefix and registers
+   * the assets, and the client polls this job for them. */
+  async importUrlToLibrary(userId: string, req: Request) {
+    try {
+      const { url } = (await req.json()) as { url?: string };
+      if (!url) return err("No URL provided.", 400);
+      const capped = await renderJobCheck(userId);
+      if (capped) return capped;
+      const row = await prisma.cutRenderJob.create({
+        data: {
+          userId,
+          kind: "import_url",
+          spec: { url, target: "library" } as unknown as Prisma.InputJsonValue,
+        },
+      });
+      wakeRenderWorker();
+      return Response.json({ jobId: row.id });
+    } catch (e) {
+      return caught(e, "Could not import that URL.");
+    }
+  },
+
   /** Queue a media conversion: the worker rewrites one of the project's media
    * files as MP4 and registers it beside the original. */
   async convert(userId: string, projectId: string, req: Request) {

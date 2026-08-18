@@ -127,6 +127,7 @@ export const projectsApi = {
         aspect: normalizeAspect(body.aspect) ?? existing.aspect,
         fadeIn: typeof body.fadeIn === "number" ? body.fadeIn : existing.fadeIn,
         fadeOut: typeof body.fadeOut === "number" ? body.fadeOut : existing.fadeOut,
+        background: typeof body.background === "string" ? body.background : existing.background,
         subtitles:
           body.subtitles && typeof body.subtitles === "object"
             ? body.subtitles

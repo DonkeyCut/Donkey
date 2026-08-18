@@ -314,10 +314,10 @@ async function exportJobStatus(jobId: string): Promise<Response> {
 async function exportJobFile(jobId: string, download: boolean): Promise<Response> {
   const job = getBrowserExportJob(jobId);
   if (!job || job.status !== "done" || !job.outName) {
-    return new Response("Export not ready.", { status: 404 });
+    return err("Export not ready.", 404);
   }
   const file = await store.readFileAt(await store.exportsDir(job.projectId), job.outName);
-  if (!file) return new Response("Export not ready.", { status: 404 });
+  if (!file) return err("Export not ready.", 404);
   return serveFile(file, job.outName, download);
 }
 

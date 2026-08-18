@@ -13,26 +13,28 @@ export interface ClaimedJob {
 }
 
 /**
- * Record a finished R2 object and keep the user's storage total in step. The
- * upsert makes re-registering the same key (a preview re-render, a retried
- * job) charge only the size delta instead of double-counting.
+ * Record a finished R2 object and keep the user's storage total in step, and
+ * hand back the row's id. The upsert makes re-registering the same key (a
+ * preview re-render, a retried job) charge only the size delta instead of
+ * double-counting.
  */
 export async function registerObject(opts: {
   userId: string;
-  projectId: string;
+  /** Null for objects no project owns — the account's shared library. */
+  projectId: string | null;
   r2Key: string;
   fileName: string;
   mime: string;
   bytes: number;
   kind: string;
-}): Promise<void> {
+}): Promise<string> {
   const prior = await prisma.cutMediaObject.findUnique({
     where: { r2Key: opts.r2Key },
     select: { bytes: true, uploadState: true },
   });
   const priorBytes = prior?.uploadState === "complete" ? prior.bytes : BigInt(0);
   const delta = BigInt(opts.bytes) - priorBytes;
-  await prisma.$transaction([
+  const [row] = await prisma.$transaction([
     prisma.cutMediaObject.upsert({
       where: { r2Key: opts.r2Key },
       create: {
@@ -53,6 +55,7 @@ export async function registerObject(opts: {
       update: { bytes: { increment: delta } },
     }),
   ]);
+  return row.id;
 }
 
 /**

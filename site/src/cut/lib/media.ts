@@ -2,6 +2,8 @@
 
 import { scanSilence, type PcmChunk } from "./audioScan";
 import { apiFetch, apiJson, getBackend, type CutBackend } from "./backend";
+import { cloudBackend } from "./backend/cloud";
+import { pollCloudJob } from "./cloudJob";
 import { quotaErrorMessage } from "./backend/cloud";
 import { encodeWav } from "./cloudTranscribe";
 import { downloadFromUrl } from "./download";
@@ -830,6 +832,12 @@ export async function importUrlMedia(
   // Pinned at start: the download can outlast navigation into a project of
   // the other residency, and every poll must hit the backend the job started on.
   const backend = getBackend();
+  // A browser project has no server of its own to run the fetch, so its import
+  // rides the cloud worker and the bytes come back down.
+  if (backend.kind === "browser") {
+    const staged = await importUrlThroughCloud(projectId, backend, url);
+    return adoptImportedFiles(projectId, backend, staged);
+  }
   const res = await backend.fetch(`/api/cut/projects/${projectId}/import-url`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -840,7 +848,7 @@ export async function importUrlMedia(
     // The cloud route is async: it answers {jobId} and a worker does the fetch.
     const started = await apiJson<{ jobId?: string }>(res);
     if (!res.ok || !started.jobId) throw new Error(started.error ?? "Could not import that URL.");
-    body = await pollImportUrlJob(started.jobId, backend);
+    body = await pollCloudJob(started.jobId, backend, "Could not import that URL.");
   } else {
     body = await apiJson<{ files?: { fileName: string; title: string }[]; text?: string }>(res);
   }
@@ -849,8 +857,18 @@ export async function importUrlMedia(
   if (!res.ok || (!body.files?.length && !body.text)) {
     throw new Error(body.error ?? "Could not import that URL.");
   }
+  return adoptImportedFiles(projectId, backend, body);
+}
+
+/** Register the files an import landed in the project, in order, and hand back
+ * what the caller places. */
+async function adoptImportedFiles(
+  projectId: string,
+  backend: CutBackend,
+  imported: { files?: { fileName: string; title: string }[]; text?: string }
+): Promise<{ assets: MediaAsset[]; text?: string }> {
   const assets: MediaAsset[] = [];
-  for (const f of body.files ?? []) {
+  for (const f of imported.files ?? []) {
     const asset = await assetFromProjectFile(
       projectId,
       f.fileName,
@@ -861,43 +879,63 @@ export async function importUrlMedia(
     void enrichAsset(asset);
     assets.push(asset);
   }
-  return { assets, text: body.text };
+  return { assets, text: imported.text };
 }
 
-/** Poll a cloud import-url job to completion (2s cadence, ~10 min cap) and
- * return the engine-shaped {files, text} result. Fails only when the job
- * itself says so — state "error", or the job gone (404) — or after several
- * consecutive failed polls; a single dropped request keeps polling. */
-async function pollImportUrlJob(
-  jobId: string,
-  backend: CutBackend
-): Promise<{ files?: { fileName: string; title: string }[]; text?: string }> {
-  const deadline = Date.now() + 10 * 60 * 1000;
-  const MAX_STRIKES = 6;
-  let strikes = 0;
-  for (;;) {
-    if (Date.now() > deadline) throw new Error("Could not import that URL.");
-    await new Promise((r) => setTimeout(r, 2000));
-    let res: Response | null = null;
-    try {
-      res = await backend.fetch(`/api/cut/jobs/${jobId}`);
-    } catch {
-      // Network blip — a strike, counted below.
+/**
+ * A browser project's URL import. Nothing in the page can fetch a TikTok or a
+ * YouTube video, so the cloud worker does it — into the account's library,
+ * where the page can read it — and the bytes come down into this browser's own
+ * storage. The staged library copy is dropped once the project holds it, so
+ * the import leaves nothing behind on the cloud shelf.
+ */
+async function importUrlThroughCloud(
+  projectId: string,
+  backend: CutBackend,
+  url: string
+): Promise<{ files: { fileName: string; title: string }[]; text?: string }> {
+  const res = await cloudBackend.fetch("/api/cut/library/import-url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  const started = await apiJson<{ jobId?: string }>(res);
+  if (!res.ok || !started.jobId) throw new Error(started.error ?? "Could not import that URL.");
+  const done = await pollCloudJob<{
+    assets?: { id: string; fileName: string; name: string }[];
+    text?: string;
+  }>(started.jobId, cloudBackend, "Could not import that URL.");
+  // Words with no media are a successful import; nothing at all is a failure.
+  if (!done.assets?.length && !done.text) throw new Error("Could not import that URL.");
+  const files: { fileName: string; title: string }[] = [];
+  // Every staged copy is dropped from the cloud shelf, however this ends: a
+  // download or a local write that throws part way through would otherwise
+  // leave the user holding — and paying quota for — library media they never
+  // asked for and cannot see from a browser project.
+  const dropStaged = async () => {
+    for (const staged of done.assets ?? []) {
+      await cloudBackend
+        .fetch(`/api/cut/library/${staged.id}`, { method: "DELETE" })
+        .catch(() => {});
     }
-    // The create call returned this job's id, so a 404 means it's gone.
-    if (res?.status === 404) throw new Error("Could not import that URL.");
-    if (!res?.ok) {
-      if (++strikes >= MAX_STRIKES) throw new Error("Could not import that URL.");
-      continue;
+  };
+  try {
+    for (const staged of done.assets ?? []) {
+      const path = `/api/cut/library/media/${encodeURIComponent(staged.fileName)}`;
+      const bytes = await cloudBackend.fetch(path);
+      if (!bytes.ok) throw new Error("Could not import that URL.");
+      const fileName = await uploadProjectMediaTo(
+        backend,
+        projectId,
+        await bytes.blob(),
+        staged.fileName
+      );
+      files.push({ fileName, title: staged.name });
     }
-    strikes = 0;
-    const job = await apiJson<{
-      state?: string;
-      result?: { files?: { fileName: string; title: string }[]; text?: string };
-    }>(res);
-    if (job.state === "error") throw new Error(job.error ?? "Could not import that URL.");
-    if (job.state === "done") return job.result ?? {};
+  } finally {
+    void dropStaged();
   }
+  return { files, ...(done.text ? { text: done.text } : {}) };
 }
 
 /** Build a runtime asset for a media file the engine already wrote into the

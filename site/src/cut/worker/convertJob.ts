@@ -4,8 +4,8 @@ import path from "node:path";
 import type { RenderHandle } from "../server/exportPipeline";
 import { convertToMp4, mp4NameFor } from "../server/convert";
 import { probeDuration } from "../server/frames";
+import { dedupeName } from "../server/cloud/util";
 import { prisma, registerObject, unregisterObjects, type ClaimedJob } from "./db";
-import { dedupeName } from "./importUrlJob";
 import { deleteObjects, downloadToFile, mediaKey, uploadFile } from "./r2";
 
 /** What a convert job records in CutRenderJob.result — the same shape the

@@ -73,6 +73,7 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "POST", path: "/api/cut-cloud/library/templates/:id/add", handler: (r, u, p) => libraryCloud.addToTemplate(u, p.id, r) },
   { method: "PUT", path: "/api/cut-cloud/library/templates/:id", handler: (r, u, p) => libraryCloud.renameTemplate(u, p.id, r) },
   { method: "DELETE", path: "/api/cut-cloud/library/templates/:id", handler: (_r, u, p) => libraryCloud.removeTemplate(u, p.id) },
+  { method: "POST", path: "/api/cut-cloud/library/import-url", handler: (r, u) => jobsCloud.importUrlToLibrary(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/folders", handler: (r, u) => libraryCloud.createFolder(u, r) },
   { method: "PUT", path: "/api/cut-cloud/library/folders/:id", handler: (r, u, p) => libraryCloud.renameFolder(u, p.id, r) },
   { method: "DELETE", path: "/api/cut-cloud/library/folders/:id", handler: (_r, u, p) => libraryCloud.deleteFolder(u, p.id) },

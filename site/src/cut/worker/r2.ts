@@ -19,6 +19,7 @@ export {
   projectExportKey as exportKey,
   projectHlsPrefix as hlsPrefix,
   projectHlsRoot as hlsRoot,
+  libraryKey,
   projectMediaKey as mediaKey,
   projectPreviewKey as previewKey,
 } from "../server/cloud/r2";

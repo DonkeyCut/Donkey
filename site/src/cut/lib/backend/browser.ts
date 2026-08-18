@@ -18,7 +18,7 @@ async function browserFetch(path: string, init?: RequestInit): Promise<Response>
 export const browserBackend: CutBackend = {
   kind: "browser",
   caps: {
-    importUrl: false, // needs a machine that can run the fetch
+    importUrl: true, // the cloud worker fetches; the page adopts the bytes
     liveMic: true, // hosted LLM STT (lib/cloudTranscribe.ts)
     transcribe: true, // hosted LLM STT (lib/cloudTranscribe.ts)
     captionAi: true, // hosted Gemini twin (server/cloud/captions.ts)
