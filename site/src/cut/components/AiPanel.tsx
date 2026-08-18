@@ -1442,7 +1442,7 @@ function MessageAssetCard({ asset }: { asset: AssetRef }) {
   return (
     <div
       className={cn(
-        "ai-msg-asset group relative",
+        "ai-msg-asset group/chip relative",
         // Audio gets the wide timeline-pill treatment; the row still wraps
         // inside the message's max width.
         asset.kind === "audio" ? "w-44 max-w-full" : "w-16",
@@ -1472,7 +1472,7 @@ function MessageAssetCard({ asset }: { asset: AssetRef }) {
           item={asset}
           className={cn(
             asset.kind === "audio" ? "h-12 w-full" : "size-16",
-            "transition-colors group-hover:border-input",
+            "transition-colors group-hover/chip:border-input",
           )}
         />
         <span className="w-full truncate text-[10px] text-muted-foreground">
@@ -1484,7 +1484,7 @@ function MessageAssetCard({ asset }: { asset: AssetRef }) {
           render={
             <button
               aria-label="Asset options"
-              className="absolute top-1 right-1 grid size-5 place-items-center rounded-md bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/75"
+              className="absolute top-1 right-1 grid size-5 place-items-center rounded-md bg-black/55 text-white opacity-0 transition-opacity group-hover/chip:opacity-100 hover:bg-black/75"
             />
           }
         >

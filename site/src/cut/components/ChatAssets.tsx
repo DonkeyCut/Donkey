@@ -261,7 +261,7 @@ function MediaCard({ item, asset }: ChatCardProps) {
   return (
     <div
       ref={tileRef}
-      className="ai-chat-asset group relative shrink-0 cursor-grab overflow-hidden rounded-xl border border-border bg-muted transition-colors hover:border-input"
+      className="ai-chat-asset group/card relative shrink-0 cursor-grab overflow-hidden rounded-xl border border-border bg-muted transition-colors hover:border-input"
       style={{ width, aspectRatio: ratio }}
       title={`${ref.name} — double-click to expand · drag to the timeline`}
       {...dragProps(item, asset)}
@@ -288,10 +288,10 @@ function MediaCard({ item, asset }: ChatCardProps) {
           {formatTime(ref.duration)}
         </span>
       )}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2 pt-4 pb-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2 pt-4 pb-1.5 opacity-0 transition-opacity group-hover/card:opacity-100">
         <span className="block truncate text-[10.5px] font-medium text-white">{ref.name}</span>
       </div>
-      <div className="absolute top-1 right-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 has-data-popup-open:opacity-100">
+      <div className="absolute top-1 right-1 flex gap-1 opacity-0 transition-opacity group-hover/card:opacity-100 has-data-popup-open:opacity-100">
         <button title="Expand" className={scrimButton} onClick={() => expandRef(item, asset)}>
           <Maximize2 className="size-3" />
         </button>
@@ -342,7 +342,7 @@ function DocCard({ item, asset }: ChatCardProps) {
   const clipped = text !== null && text.length > DOC_PREVIEW_CHARS;
   return (
     <div
-      className="ai-chat-asset group relative w-full max-w-[280px] cursor-default overflow-hidden rounded-xl border border-border bg-background transition-colors hover:border-input"
+      className="ai-chat-asset group/card relative w-full max-w-[280px] cursor-default overflow-hidden rounded-xl border border-border bg-background transition-colors hover:border-input"
       title={`${item.name} — double-click to expand`}
       {...dragProps(item, asset)}
       onDoubleClick={() => expandRef(item, asset)}
@@ -352,7 +352,7 @@ function DocCard({ item, asset }: ChatCardProps) {
         <span className="min-w-0 flex-1 truncate text-[11px] font-medium">{item.name}</span>
         <button
           title="Expand"
-          className={cn(scrimButton, "opacity-0 transition-opacity group-hover:opacity-100")}
+          className={cn(scrimButton, "opacity-0 transition-opacity group-hover/card:opacity-100")}
           onClick={() => expandRef(item, asset)}
         >
           <Maximize2 className="size-3" />

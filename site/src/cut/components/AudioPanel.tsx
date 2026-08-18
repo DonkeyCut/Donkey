@@ -766,7 +766,7 @@ export function AudioRow({
   return (
     <AudioPillSurface
       peaks={peaks}
-      className="audio-row group h-10 shrink-0 cursor-grab"
+      className="audio-row group/row h-10 shrink-0 cursor-grab"
       draggable={!!onDragStart}
       onDragStart={
         onDragStart &&
@@ -808,10 +808,10 @@ export function AudioRow({
       </button>
       {/* Steps aside when the hover controls take the right edge — the pill is
           too short to stack both without them colliding. */}
-      <span className="pointer-events-none absolute right-1.5 bottom-1 rounded-[5px] bg-black/40 px-1 py-px font-mono text-[9px] text-white tabular-nums transition-opacity group-hover:opacity-0 has-data-popup-open:opacity-0">
+      <span className="pointer-events-none absolute right-1.5 bottom-1 rounded-[5px] bg-black/40 px-1 py-px font-mono text-[9px] text-white tabular-nums transition-opacity group-hover/row:opacity-0 has-data-popup-open:opacity-0">
         {formatTime(duration)}
       </span>
-      <div className="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center gap-1.5 opacity-0 transition-opacity group-hover:opacity-100 has-data-popup-open:opacity-100">
+      <div className="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center gap-1.5 opacity-0 transition-opacity group-hover/row:opacity-100 has-data-popup-open:opacity-100">
         {menu}
         <button
           type="button"

@@ -319,7 +319,7 @@ function ShotTile({
         onClick={view}
         title={`Shot ${n} — ${describe(shot)}`}
         className={cn(
-          "group relative w-full overflow-hidden rounded-md bg-muted transition-opacity",
+          "group/tile relative w-full overflow-hidden rounded-md bg-muted transition-opacity",
           ref ? "cursor-zoom-in hover:opacity-95" : "cursor-default"
         )}
         // The tile fills its column at the run's aspect; a tall 9:16 shot is
@@ -378,7 +378,7 @@ function ShotTile({
             }}
             className={cn(
               scrimIconButton,
-              "absolute top-1 right-1 opacity-0 transition-opacity group-hover:opacity-100"
+              "absolute top-1 right-1 opacity-0 transition-opacity group-hover/tile:opacity-100"
             )}
           >
             <RotateCw className="size-3" />
@@ -473,7 +473,7 @@ function FeedEntry({
     return (
       <div className="flex flex-col items-start gap-1">
         <div
-          className="group relative cursor-zoom-out overflow-hidden rounded-xl border border-border bg-muted"
+          className="group/tile relative cursor-zoom-out overflow-hidden rounded-xl border border-border bg-muted"
           style={{ width, aspectRatio: ratio }}
           title={`${item.name} — click to minimize`}
           onClick={() => setExpanded(false)}
@@ -502,7 +502,7 @@ function FeedEntry({
             title="Expand"
             className={cn(
               scrimIconButton,
-              "absolute top-1 right-1 opacity-0 transition-opacity group-hover:opacity-100"
+              "absolute top-1 right-1 opacity-0 transition-opacity group-hover/tile:opacity-100"
             )}
             onClick={(e) => {
               e.stopPropagation();
