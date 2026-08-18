@@ -536,6 +536,9 @@ export interface EditorState {
    * right past occupied stretches on the cue's own lane so cues never overlap,
    * and detach the word timings (they described the old window). One undo step. */
   setCueTiming: (id: string, start: number, end: number) => void;
+  /** Replace one subtitle track's captions wholesale, in timeline seconds —
+   * what a lyric sync writes once it knows when every line lands. */
+  setLaneCues: (lane: number, cues: { start: number; end: number; text: string; words?: { t0: number; t1: number; w: string }[] }[]) => void;
   /** Re-time listed cues to a generated voiceover: set each cue's [start, end]
    * and spread its words across the new span (the AI voice paces differently
    * from the original recording, so the word highlighter would otherwise drift). */
@@ -4039,6 +4042,29 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           cues: s.subtitles.cues.map((c) => (c.id === id ? { ...c, ...patch } : c)),
         },
       })),
+
+    setLaneCues: (lane, cues) => {
+      push();
+      const made: SubtitleCue[] = cues
+        .filter((c) => c.text.trim().length > 0 && c.end > c.start)
+        .map((c) => ({
+          id: uid(),
+          start: Math.max(0, c.start),
+          end: c.end,
+          text: c.text.trim(),
+          ...(c.words && c.words.length > 0 ? { words: c.words } : {}),
+          ...(lane > 0 ? { lane } : {}),
+        }));
+      set((s) => ({
+        subtitles: {
+          ...s.subtitles,
+          cues: [...s.subtitles.cues.filter((c) => (c.lane ?? 0) !== lane), ...made].sort(
+            (a, b) => a.start - b.start
+          ),
+        },
+        subtitleStatus: made.length > 0 ? "ready" : s.subtitleStatus,
+      }));
+    },
 
     setCueTiming: (id, start, end) => {
       const cue = get().subtitles.cues.find((c) => c.id === id);

@@ -182,6 +182,32 @@ export const TIMELINE_TOOLS = [
     }, ["text"]),
   },
   {
+    name: "add_text_sequence",
+    description:
+      "Place a run of text on the timeline in one call — a lyric video, a kinetic-typography passage, a quote sequence — styled by a named look. `look` carries the whole design: the frame color, the card colors it cycles line to line, the type, and how each line arrives (ids and what each is for are in the text-videos skill). Lines come from `lines` ({text, start, end} in timeline seconds, plus an optional color/size override per line), or from the caption track with from_captions when a sync already timed them. Cards land on `lane` and the words one row above, so they stack instead of sliding apart. It sets the project background to the look's frame color unless background is false — words over the user's own footage want a look with no cards, and the footage keeps playing underneath.",
+    inputSchema: obj({
+      look: str("Look id from the text-videos skill (default lyric-card)"),
+      lines: {
+        type: "array",
+        description: "The run, in order. Omit times on a line and it follows the one before it.",
+        items: obj(
+          {
+            text: str("The line (\\n for a break inside it)"),
+            start: num("Timeline start s"),
+            end: num("Timeline end s"),
+            color: str("Override the look's text color for this line — for an accent word or a section change"),
+            size: num("Override the look's size for this line"),
+          },
+          ["text"]
+        ),
+      },
+      from_captions: num("Build the run from this caption track's cues (0-based) instead of `lines`"),
+      lane: num("Row for the color cards; the words go one row above (default 0)"),
+      cards: bool("Paint the look's color cards behind each line (default: whatever the look does)"),
+      background: bool("Set the project background to the look's frame color (default true)"),
+    }),
+  },
+  {
     name: "freeze_frame",
     description:
       "Extract the video frame at a time (default: the playhead — what the user is looking at) as a still clip and insert it into the timeline. Default insert position is index 0, making it the first thing viewers see (a cover/hook frame).",

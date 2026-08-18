@@ -37,6 +37,39 @@ export const SUBTITLES_TOOLS = [
     }),
   },
   {
+    name: "sync_lyrics",
+    description:
+      "Time a text the user already has — song lyrics, a script, a poem — to the audio in the cut, and put it on a caption track. Transcribes the cut first when the track is empty, then aligns the user's words to the recognized ones and keeps the user's text exactly as written: the recognizer supplies the clock, never the wording, which is what makes it work on singing it half-mishears. Words it missed take interpolated times from the words around them. Pass `look` to dress the track in a text-videos look at the same time (karaoke word highlight included). For lyrics as full-frame cards rather than captions, follow this with add_text_sequence from_captions.",
+    inputSchema: obj(
+      {
+        text: str("The lyrics or script, one line per screen (newline separated)"),
+        track: num("Subtitle track to write, 0-based (default: the active track)"),
+        look: str("Text-videos look id to dress the captions in"),
+        from: num("Ignore audio before this timeline second"),
+        to: num("Ignore audio after this timeline second"),
+        background: bool("With `look`, also set the project background to its frame color (default true)"),
+      },
+      ["text"]
+    ),
+  },
+  {
+    name: "set_caption_look",
+    description:
+      "Style the caption track: a text-videos look id in `look` sets everything at once (preset, size, font, karaoke highlight, accent color, frame background), or set the pieces yourself. Karaoke — word_highlight — lights each word as it is spoken or sung, in the preview and the export burn-in; it needs word timings, which transcription and sync_lyrics leave on the cues.",
+    inputSchema: obj({
+      look: str("Text-videos look id — sets the whole caption look"),
+      style: str("Caption preset: clean, hook, punchy, minimal, editorial, typewriter, block, highlight, bubble, neon"),
+      size: num("Caption size in px at a 1080-wide frame"),
+      font: str("Font id"),
+      word_highlight: bool("Light each word as it lands (karaoke)"),
+      accent_color: str("Highlight color"),
+      accent_mode: { type: "string", enum: ["color", "underline", "box"], description: "How the word lights up" },
+      x: num("Caption center x 0..1"),
+      y: num("Caption center y 0..1"),
+      background: bool("With `look`, also set the project background (default true)"),
+    }),
+  },
+  {
     name: "subtitles_add_track",
     description:
       "Add a subtitle track for an additional language (up to 3, one language each — e.g. English on track 0, Korean on track 1; each shows as its own caption line, draggable to its own spot). The new track becomes active and starts empty: fill it with subtitles_translate_track, or subtitles_generate in its language. Plain \"add captions\" is subtitles_generate by itself — it writes the default track.",

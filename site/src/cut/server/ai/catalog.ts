@@ -10,6 +10,7 @@
  */
 
 import { AI_PANEL_TOOLS } from "@/cut/components/AiPanel.tools";
+import { textLookCatalog } from "@/cut/lib/textLooks";
 import { OVERLAY_ANIMATION_TOOLS } from "@/cut/components/AnimationTiles.tools";
 import { AUDIO_TOOLS } from "@/cut/components/AudioPanel.tools";
 import { EDITOR_TOOLS } from "@/cut/components/Editor.tools";
@@ -156,7 +157,31 @@ Good TikTok titles: short punchy lines, high contrast (white/yellow + shadow or 
 Tasteful graphics: shapes read best as accents (a highlight box behind a stat, an arrow pointing at the subject, a color bar under a title) — semi-transparent fills (fill_opacity 0.2–0.5) sit better over footage than solid blocks. One or two stickers a scene; size 0.15–0.3 of the frame width.
 In the UI: the timeline toolbar adds Text; the Elements side-panel tab browses stickers and shapes and creates sticker images, and the Effects tab holds the effects — a click in any panel picks a tile, and dragging one onto the timeline is what places it; dragging in the preview places an element, its corner handle resizes, the top handle rotates; the Inspector edits every field.`,
 
+  "text-videos": `# Text-driven videos: lyrics, kinetic type, quote cards
+A video whose picture is words. Three pieces: the frame behind them (set_background, or the user's footage), the words themselves, and the clock that says when each line lands.
+
+**Two ways to carry the words.** A caption track is one styled row of text that follows a voice — it holds word timings, so karaoke (each word lighting as it is sung) is only possible here, and one call restyles every line. Elements are separate titles and cards on the timeline — per-line color, per-glyph motion, a color card behind each line — which is what kinetic typography and lyric cards are made of. Captions for a song you want to sing along to; elements when each line is its own picture. Both burn into the export.
+
+**The looks.** Every look sets the frame color, the card colors it cycles, the type, the motion, and the caption equivalent, so a whole video comes from one id:
+${textLookCatalog()}
+
+**A lyric video, from an audio track and the words.** The user has the song and the lyrics.
+1. The song is in the cut (a soundtrack clip). \`get_state\` confirms it and gives the duration.
+2. sync_lyrics with the lyrics text, one line per screen. It transcribes the cut, aligns the user's words to what it recognized, and writes the user's text — verbatim — onto a caption track with per-word times. Singing defeats recognizers; that is why the wording comes from the user and only the clock comes from the transcript.
+3. Dress it: set_caption_look with a look id (karaoke-glow for words lighting up, neon-club, serif-mood…), or add_text_sequence from_captions to turn the same timed lines into full-frame cards.
+4. Check it: seek + capture_frame at two or three lines, and listen_audio across one of them. A line that sits early or late retimes with update_cue — the recognizer's gaps are where drift comes from.
+With no lyrics text, transcribe with subtitles_generate and work from the cues it wrote.
+
+**Words over the user's footage.** Same flow, with the over-footage look (or any look with \`cards: false\`) and \`background: false\` — the clips keep playing and the words ride above them. Aim them off the caption band when captions are also on.
+
+**Words on plain color.** A cut with nothing on track 0 is a complete video: set the background, place the run, export. Cards are how the color changes line to line — the sequence paints one per line on its own row and puts the words on the row above, so they stack instead of sliding apart.
+
+**Timing.** One line per screen beats two. A line needs about 0.4s minimum to read; 1.5–2.5s is the normal beat for a spoken line, and a sung line takes whatever the vocal takes. Lines never overlap on a row — the sequence tool lays them end to end from the times you give it.
+
+**Making it yours.** Every look is a starting point: after add_text_sequence, update_overlay retimes or recolors any line, set_overlay_animation swaps a line's motion, and set_overlay_keyframes moves it on a path. A per-line \`color\` on the sequence call marks the word that matters without touching the rest.`,
+
   "audio-and-subtitles": `# Audio, voiceover & subtitles
+Lyrics and scripts the user already has: sync_lyrics times their exact words against the audio (transcribing first when needed) and writes them to a caption track with per-word timings; set_caption_look then dresses the track — preset, size, font, karaoke word highlight, accent color — from a text-videos look id or field by field. The text-videos skill has the whole flow, including turning the same timed lines into full-frame cards.
 Soundtrack clips: volume 0..1.5, fadeIn/fadeOut seconds (max half the clip), start = timeline position, in/out = trim inside the source; clips can spread across several soundtrack lanes (the \`lane\` field), new sounds slide to free space in their lane. Fades render with ffmpeg afade on export.
 Ducking: a soundtrack clip's \`duck\` (0..1, via update_audio) lowers ALL other audio — video-clip sound and other music — to that gain while the clip plays; 1 clears it. Voiceovers set this so narration sits over quieter music. It applies in both the preview and the export.
 Voiceover (Donkey's hosted speech model — signed in, spends credits, like image/video generation):

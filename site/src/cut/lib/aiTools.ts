@@ -78,9 +78,11 @@ import { renderProjectFrame } from "./exportRender";
 import { rasterCanvasToDataUrl } from "./raster";
 import { buildAiContext } from "./aiContext";
 import { sampleClipFrameData } from "./previewCanvas";
-import { laneCues, subtitleLaneCount } from "./subtitles";
+import { CAPTION_STYLES, laneCues, subtitleLaneCount } from "./subtitles";
 import { fuseTimeline, renderFusedTimeline } from "./watch/fuse";
 import { mergeWatch, mergeWatchNotes, uncoveredSeconds, unnotedSpans } from "./watch/merge";
+import { syncLines, type TimedWord } from "./lyricSync";
+import { requireTextLook } from "./textLooks";
 import { queueWatchSweep, withSweepPaused } from "./watch/sweep";
 import { synthesizeMusic } from "./audioGen";
 import { composeMusicPrompt } from "./composeGen";
@@ -1294,6 +1296,179 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "text"));
       const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
       return { id: o.id, ...(isTextOverlay(o) ? { text: o.text } : {}), start: o.start, end: o.end };
+  },
+
+  add_text_sequence: (s, input) => {
+      const look = requireTextLook(input.look);
+      const lane = isNum(input.lane) ? Math.max(0, Math.round(input.lane)) : 0;
+      const wantCards =
+        typeof input.cards === "boolean" ? input.cards : look.frame.cards.length > 0;
+      const cards = wantCards && look.frame.cards.length > 0 ? look.frame.cards : [];
+      const lines = textSequenceLines(s, input);
+      if (lines.length === 0)
+        throw new ToolError(
+          "Pass lines: [{text, start, end}], or from_captions: true to build the sequence from the caption track."
+        );
+      if (input.background !== false) s.setBackground(look.frame.background);
+      const textLane = lane + (cards.length > 0 ? 1 : 0);
+      const made: { id: string; start: number; end: number; text: string }[] = [];
+      lines.forEach((line, i) => {
+        const card = cards.length > 0 ? cards[i % cards.length] : null;
+        if (card) {
+          useEditor.getState().seek(line.start);
+          useEditor.getState().addShape("rect", { lane });
+          const sel = useEditor.getState().selection;
+          if (sel?.kind === "overlay")
+            applyOverlayPatchSettled(sel.id, {
+              start: line.start,
+              end: line.end,
+              x: 0.5,
+              y: 0.5,
+              w: 1,
+              h: 1,
+              fill: card,
+            });
+        }
+        useEditor.getState().seek(line.start);
+        useEditor.getState().addOverlay({ lane: textLane });
+        const sel = useEditor.getState().selection;
+        if (sel?.kind !== "overlay") return;
+        const onCard =
+          card && look.text.onCards ? look.text.onCards[i % look.text.onCards.length] : undefined;
+        const fit = fitTextToFrame(line.text, look, frameOf(s.aspect), line.size ?? look.text.size);
+        applyOverlayPatchSettled(sel.id, {
+          start: line.start,
+          end: line.end,
+          text: fit.text,
+          x: look.text.x,
+          y: look.text.y,
+          size: fit.size,
+          font: look.text.font,
+          weight: look.text.weight,
+          color: line.color ?? onCard ?? look.text.color,
+          italic: look.text.italic,
+          letterSpacing: look.text.letterSpacing,
+          lineHeight: look.text.lineHeight,
+          stroke: look.text.stroke,
+          plate: look.text.plate ?? false,
+          plateColor: look.text.plateColor,
+          plateOpacity: look.text.plateOpacity,
+          shadow: look.text.shadow ?? false,
+          align: "center",
+        });
+        if (look.motion.in || look.motion.out || look.motion.loop)
+          useEditor.getState().updateOverlay(sel.id, {
+            anim: {
+              ...(look.motion.in ? { in: look.motion.in } : {}),
+              ...(look.motion.out ? { out: look.motion.out } : {}),
+              ...(look.motion.loop
+                ? { loop: { style: look.motion.loop.style, speed: look.motion.loop.speed ?? 1 } }
+                : {}),
+            },
+          });
+        const o = useEditor.getState().overlays.find((x) => x.id === sel.id);
+        if (o) made.push({ id: o.id, start: round2(o.start), end: round2(o.end), text: line.text });
+      });
+      return {
+        look: look.id,
+        count: made.length,
+        lanes: cards.length > 0 ? { cards: lane, text: textLane } : { text: textLane },
+        background: useEditor.getState().background,
+        items: made.slice(0, 40),
+        ...(made.length > 40 ? { itemsTruncated: true } : {}),
+        note:
+          cards.length > 0
+            ? `Cards on row ${lane}, words on row ${textLane}, colors cycling ${look.frame.cards.join(" → ")}.`
+            : `Words on row ${textLane} over the ${look.frame.background} frame.`,
+      };
+  },
+
+  set_caption_look: (s, input) => {
+      const patch: Parameters<typeof s.setSubtitlesView>[0] = {};
+      if (typeof input.look === "string") {
+        const look = requireTextLook(input.look);
+        patch.style = look.captions.style;
+        patch.wordHighlight = look.captions.wordHighlight;
+        if (look.captions.size !== undefined) patch.size = look.captions.size;
+        if (look.captions.font) patch.font = look.captions.font;
+        if (look.captions.accentColor) patch.accentColor = look.captions.accentColor;
+        if (look.captions.accentMode) patch.accentMode = look.captions.accentMode;
+        if (input.background !== false) s.setBackground(look.frame.background);
+      }
+      if (typeof input.style === "string") {
+        if (!(input.style in CAPTION_STYLES))
+          throw new ToolError(`Unknown caption style. Use one of: ${Object.keys(CAPTION_STYLES).join(", ")}.`);
+        patch.style = input.style as CaptionStyleId;
+      }
+      if (isNum(input.size)) patch.size = clamp(Math.round(input.size), 16, 200);
+      if (typeof input.font === "string" && allFonts().some((f) => f.id === input.font))
+        patch.font = input.font;
+      if (typeof input.word_highlight === "boolean") patch.wordHighlight = input.word_highlight;
+      if (typeof input.accent_color === "string") patch.accentColor = input.accent_color;
+      if (input.accent_mode === "color" || input.accent_mode === "underline" || input.accent_mode === "box")
+        patch.accentMode = input.accent_mode;
+      if (isNum(input.y)) patch.y = clamp(input.y, 0.02, 0.98);
+      if (isNum(input.x)) patch.x = clamp(input.x, 0.02, 0.98);
+      if (Object.keys(patch).length === 0) throw new ToolError("Nothing to change.");
+      s.setSubtitlesView(patch);
+      const cur = useEditor.getState().subtitles;
+      return {
+        style: cur.style ?? "clean",
+        size: cur.size,
+        font: cur.font,
+        wordHighlight: cur.wordHighlight === true,
+        accentColor: cur.accentColor,
+        accentMode: cur.accentMode,
+      };
+  },
+
+  sync_lyrics: async (s, input) => {
+      const text = typeof input.text === "string" ? input.text : "";
+      const lines = text
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+      if (lines.length === 0) throw new ToolError("Pass text — the lyrics or script, one line per screen.");
+      const lane = targetSubtitleTrack(input);
+      // The recording's own clock. Existing captions serve; without them the
+      // cut is transcribed first, which is what puts times on the words.
+      let cues = laneCues(useEditor.getState().subtitles, lane);
+      if (cues.length === 0) {
+        await useEditor.getState().generateSubtitles();
+        const cur = useEditor.getState();
+        if (cur.subtitleStatus === "error")
+          throw new ToolError(cur.subtitleError ?? "Could not transcribe the audio.");
+        cues = laneCues(cur.subtitles, lane);
+      }
+      const st = useEditor.getState();
+      const span = {
+        from: isNum(input.from) ? Math.max(0, input.from) : 0,
+        to: isNum(input.to) ? input.to : Math.max(projectDuration(st), cues[cues.length - 1]?.end ?? 0),
+      };
+      const timed = syncLines(lines, cueWords(cues), span);
+      st.setLaneCues(lane, timed);
+      if (typeof input.look === "string") {
+        const look = requireTextLook(input.look);
+        st.setSubtitlesView({
+          style: look.captions.style,
+          wordHighlight: look.captions.wordHighlight,
+          ...(look.captions.size !== undefined ? { size: look.captions.size } : {}),
+          ...(look.captions.font ? { font: look.captions.font } : {}),
+          ...(look.captions.accentColor ? { accentColor: look.captions.accentColor } : {}),
+          ...(look.captions.accentMode ? { accentMode: look.captions.accentMode } : {}),
+        });
+        if (input.background !== false) st.setBackground(look.frame.background);
+      }
+      const heardWords = cueWords(cues).length;
+      return {
+        track: lane,
+        count: timed.length,
+        lines: timed.slice(0, 40).map((l) => ({ start: l.start, end: l.end, text: l.text })),
+        ...(timed.length > 40 ? { linesTruncated: true } : {}),
+        note:
+          `Your text is on the track verbatim, timed against ${heardWords} recognized words. ` +
+          "Words the recognizer missed took interpolated times, so spot-check a line or two with seek + capture_frame and retime with update_cue.",
+      };
   },
 
   update_overlay: (s, input) => {
@@ -2629,6 +2804,107 @@ async function synthesizeVoiceover(
 
 /** Resolve a watch/listen target: a timeline clip (its source plus trim and
  * placement) or a bare project asset. */
+/** The words a caption track carries, on the timeline clock: the
+ * transcriber's own word times where it left them, and an even split of each
+ * cue's span where it did not. */
+function cueWords(cues: { start: number; end: number; text: string; words?: TimedWord[] }[]): TimedWord[] {
+  const out: TimedWord[] = [];
+  for (const c of cues) {
+    if (c.words && c.words.length > 0) {
+      out.push(...c.words);
+      continue;
+    }
+    const parts = c.text.split(/\s+/).filter((w) => w.length > 0);
+    const step = parts.length > 0 ? (c.end - c.start) / parts.length : 0;
+    parts.forEach((w, i) => out.push({ w, t0: c.start + step * i, t1: c.start + step * (i + 1) }));
+  }
+  return out;
+}
+
+/** A line broken and sized to the frame it is going into. The look's size is
+ * a ceiling written for a wide frame; a vertical cut, or a long line, gets
+ * breaks at word boundaries first and a smaller size only when breaking is
+ * not enough. Type the user hand-sized (a per-line `size`) is left alone
+ * apart from the breaks. */
+function fitTextToFrame(
+  text: string,
+  look: { text: { size: number; widthRatio?: number; lineHeight?: number } },
+  frame: { w: number; h: number },
+  size: number
+): { text: string; size: number } {
+  if (text.includes("\n")) return { text, size }; // the caller broke it themselves
+  const ratio = look.text.widthRatio ?? 0.55;
+  const usable = frame.w * 0.86;
+  const words = text.split(/\s+/).filter((w) => w.length > 0);
+  if (words.length === 0) return { text, size };
+  const maxLines = 3;
+  // The widest a line may run, in characters, at this size.
+  const budget = Math.max(6, Math.floor(usable / (size * ratio)));
+  const lines: string[] = [];
+  let cur = "";
+  for (const w of words) {
+    const next = cur ? `${cur} ${w}` : w;
+    if (next.length <= budget || cur === "") cur = next;
+    else {
+      lines.push(cur);
+      cur = w;
+    }
+  }
+  if (cur) lines.push(cur);
+  const longest = lines.reduce((n, l) => Math.max(n, l.length), 0);
+  // Still over the frame (one long word, or more rows than the look wants):
+  // shrink until it sits inside.
+  let fitted = size;
+  if (longest > budget) fitted = Math.min(fitted, Math.floor(usable / (longest * ratio)));
+  if (lines.length > maxLines) fitted = Math.min(fitted, Math.floor(size * (maxLines / lines.length)));
+  const rows = lines.length;
+  const lineH = look.text.lineHeight ?? 1.25;
+  const tall = rows * fitted * lineH;
+  if (tall > frame.h * 0.8) fitted = Math.floor((frame.h * 0.8) / (rows * lineH));
+  return { text: lines.join("\n"), size: Math.max(16, Math.min(size, fitted)) };
+}
+
+/** The lines a text sequence should place: the ones passed in, or the caption
+ * track read as a running order. */
+function textSequenceLines(
+  s: ReturnType<typeof useEditor.getState>,
+  input: Record<string, unknown>
+): { text: string; start: number; end: number; color?: string; size?: number }[] {
+  if (input.from_captions === true || isNum(input.from_captions)) {
+    const lane = isNum(input.from_captions) ? Math.max(0, Math.round(input.from_captions)) : 0;
+    return laneCues(s.subtitles, lane).map((c) => ({
+      text: c.text,
+      start: round2(c.start),
+      end: round2(c.end),
+    }));
+  }
+  const raw = Array.isArray(input.lines) ? input.lines : [];
+  const lines = raw
+    .filter((l): l is Record<string, unknown> => typeof l === "object" && l !== null)
+    .map((l) => ({
+      text: typeof l.text === "string" ? l.text.trim() : "",
+      start: isNum(l.start) ? Math.max(0, l.start) : NaN,
+      end: isNum(l.end) ? l.end : NaN,
+      ...(typeof l.color === "string" ? { color: l.color } : {}),
+      ...(isNum(l.size) ? { size: clamp(Math.round(l.size), 16, 320) } : {}),
+    }))
+    .filter((l) => l.text.length > 0);
+  // A line with no times follows the one before it; the first starts at the
+  // playhead. Every line gets a real span, so nothing lands on top of
+  // anything.
+  let cursor = playheadAt();
+  return lines.map((l, i) => {
+    const start = Number.isNaN(l.start) ? cursor : l.start;
+    const nextStart = lines[i + 1]?.start ?? NaN;
+    const fallbackEnd = Number.isNaN(nextStart) ? start + 2 : nextStart;
+    // Every line lands at least 0.2s long, whichever way its end was
+    // decided — a following line that starts earlier cannot invert it.
+    const end = Math.max(Number.isNaN(l.end) ? fallbackEnd : l.end, start + 0.2);
+    cursor = end;
+    return { ...l, start: round2(start), end: round2(end) };
+  });
+}
+
 /** Spans watched this session that nobody has written down yet, by asset id.
  * Contact sheets fall out of the conversation as it grows, so the record has
  * to be written while the frames are still on screen; a second look at the
