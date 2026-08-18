@@ -24,7 +24,7 @@ Before changing `site/` UI, routes, API handlers, or data access patterns:
 
 Every Cut change has to hold on all four surfaces, and the plan for it says how:
 
-- **Both residencies.** A browser project (OPFS in the page) and a cloud project (Postgres doc + R2 media) get the same behavior. Work through the backend seam in `site/src/cut/lib/backend/`.
+- **Three residencies.** A project lives in the **browser** (OPFS in the page), on this **Mac** (the Bun engine inside the app, with the bundled command-line tools), or in the **cloud** (Postgres doc + R2 media, the work done by the container worker). People run all three — a Mac with or without the app, any browser, a cloud project — so a change holds in each of them. Work through the backend seam in `site/src/cut/lib/backend/`. Where one residency lacks the machinery for a job, hand the job to one that has it: the browser shelf imports links through the cloud worker, and the engine falls back to the same worker when its own tools come back empty-handed.
 - **Headed and headless.** Whatever the tab can do, the Bun engine and the worker runner can do: chat tools, rendering, media reads. Headless installs browser primitives — canvas, decoders, Web Audio, fonts — behind narrow seams (`lib/raster.ts`, the frame sink in `lib/mediaRead.ts`, the font installer in `lib/fontAssets.ts`, the kit's `surface.ts`) so one implementation serves both; reach for those seams before writing a second path.
 - Allocate canvases and decode images through the raster seam. Direct `document`, `window`, `FileReader`, `createImageBitmap`, or `FontFace` use in `site/src/cut/lib/` or `packages/effects-kit/` breaks a job.
 - When a surface genuinely cannot carry a feature, give it a fallback and say so in the summary and the guide.
