@@ -6,8 +6,6 @@ import { unauthorizedResponse } from "@/lib/donkey-api-auth";
 import { setMarketingUnsubscribed } from "@/lib/email/unsubscribe";
 import { prisma } from "@/lib/prisma";
 
-export const dynamic = "force-dynamic";
-
 // The one event this app consumes: an unsubscribe (or resubscribe) made on
 // Resend's side — a broadcast footer link or a dashboard edit — flows back
 // into the account's own preference row. Everything else acknowledges as a

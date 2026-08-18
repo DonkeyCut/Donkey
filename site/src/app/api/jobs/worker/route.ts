@@ -7,7 +7,7 @@ import { executeJob } from "@/lib/jobs/queue";
 // Deliberately not wrapped in withDonkeyAuth — the caller is a machine, not a
 // session — and gated by the shared secret instead, like the copy worker's
 // callback beside it.
-export const runtime = "nodejs";
+
 // A user delete can move a lot of R2 objects; give the function room to finish.
 export const maxDuration = 300;
 

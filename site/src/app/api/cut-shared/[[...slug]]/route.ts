@@ -6,7 +6,6 @@ import { cutSharedCatchAll } from "@/cut/server/cloud/sharedRoutes";
 // docs/guides/backend-apis.md). Access control happens per request inside the
 // route table's share resolver, and content is filtered to the share's
 // settings before it leaves the server.
-export const runtime = "nodejs";
 
 const handle = (request: Request) => cutSharedCatchAll(request);
 

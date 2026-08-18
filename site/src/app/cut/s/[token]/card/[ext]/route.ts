@@ -18,8 +18,6 @@ import {
 // so the answer depends on the viewer's session and must stay out of shared
 // caches.
 
-export const runtime = "nodejs";
-
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ token: string; ext: string }> }

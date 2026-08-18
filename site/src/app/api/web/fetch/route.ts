@@ -8,8 +8,6 @@ import {
 } from "@/lib/inference/responses";
 import { fetchWebContent } from "@/lib/inference/web-fetch";
 
-export const dynamic = "force-dynamic";
-
 const webFetchRequestSchema = z.object({
   url: z.string().trim().url().max(2000),
 });

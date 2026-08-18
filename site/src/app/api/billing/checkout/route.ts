@@ -9,8 +9,6 @@ import {
   withDonkeyAuth,
 } from "@/lib/donkey-api-auth";
 
-export const dynamic = "force-dynamic";
-
 // Start a Stripe Checkout session for a Pro subscription. This route keeps its
 // getSession call because it needs the user's email/name.
 export const POST = withDonkeyAuth(async (request) => {

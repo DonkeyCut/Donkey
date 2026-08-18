@@ -13,8 +13,6 @@ import {
 import { inferenceUploadRequestSchema } from "@/lib/inference/schemas";
 import { withDonkeyAuth } from "@/lib/donkey-api-auth";
 
-export const dynamic = "force-dynamic";
-
 // Media a hosted inference call carries rides object storage rather than the
 // request body (see lib/inference/blobs.ts). This mints the upload URLs: one
 // content-addressed key per picture or sound, and a direct PUT the browser sends

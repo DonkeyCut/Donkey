@@ -14,8 +14,6 @@ import { prisma } from "@/lib/prisma";
 // keys. The full secret is returned once, at creation; the row holds its
 // hash (`key`) and a display head (`start`).
 
-export const runtime = "nodejs";
-
 const MAX_KEYS = 20;
 
 export const GET = withDonkeyAuth(async (request) => {

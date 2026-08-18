@@ -3,7 +3,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { isVercelCron, notFoundResponse } from "@/lib/donkey-api-auth";
 import { enqueueJob } from "@/lib/jobs/queue";
 
-export const dynamic = "force-dynamic";
 // Without a queue configured (local dev) the job runs inline before the
 // response; give it room.
 export const maxDuration = 300;

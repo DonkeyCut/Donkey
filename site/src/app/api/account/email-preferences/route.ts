@@ -10,8 +10,6 @@ import {
   setMarketingUnsubscribed,
 } from "@/lib/email/unsubscribe";
 
-export const dynamic = "force-dynamic";
-
 export const GET = withDonkeyAuth(
   async (request: DonkeyAuthenticatedRequest) => {
     return NextResponse.json({

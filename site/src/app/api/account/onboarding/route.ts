@@ -13,8 +13,6 @@ import {
 } from "@/lib/onboarding/sequence";
 import { prisma } from "@/lib/prisma";
 
-export const dynamic = "force-dynamic";
-
 type OnboardingState = {
   version: number;
   completedAt: string | null;

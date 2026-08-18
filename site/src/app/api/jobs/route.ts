@@ -7,7 +7,6 @@ import { enqueueJob, healJob } from "@/lib/jobs/queue";
 import { jobKinds } from "@/lib/jobs/registry";
 import { prisma } from "@/lib/prisma";
 
-export const dynamic = "force-dynamic";
 // Without a queue configured (local dev) the job runs inline before the
 // response; give it room.
 export const maxDuration = 300;

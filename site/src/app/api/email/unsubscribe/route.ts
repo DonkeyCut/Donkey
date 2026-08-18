@@ -7,8 +7,6 @@ import {
   verifyUnsubscribeToken,
 } from "@/lib/email/unsubscribe";
 
-export const dynamic = "force-dynamic";
-
 const querySchema = z.object({ token: z.string().min(1).max(512) });
 
 // Public exception to withDonkeyAuth (docs/guides/backend-apis.md): RFC 8058

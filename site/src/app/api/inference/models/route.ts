@@ -5,8 +5,6 @@ import { requireInferenceClientId } from "@/lib/inference/responses";
 import { parseRequestedModalities } from "@/lib/inference/schemas";
 import { withDonkeyAuth } from "@/lib/donkey-api-auth";
 
-export const dynamic = "force-dynamic";
-
 export const GET = withDonkeyAuth(async (request) => {
   const client = requireInferenceClientId(request.donkey.clientId);
   if (!client.ok) {

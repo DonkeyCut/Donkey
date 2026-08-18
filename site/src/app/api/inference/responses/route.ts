@@ -24,8 +24,6 @@ import {
   withDonkeyAuth,
 } from "@/lib/donkey-api-auth";
 
-export const dynamic = "force-dynamic";
-
 export const POST = withDonkeyAuth(async (request) => {
   const client = requireInferenceClientId(request.donkey.clientId);
   if (!client.ok) {

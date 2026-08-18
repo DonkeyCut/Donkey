@@ -14,8 +14,6 @@ import {
 import { getStripe, stripeId } from "@/lib/billing/stripe";
 import { notFoundResponse } from "@/lib/donkey-api-auth";
 
-export const dynamic = "force-dynamic";
-
 // Pro is the only subscription product; ignore any other Stripe subscription
 // that reaches these webhook events.
 async function syncSubscription(subscription: Stripe.Subscription) {

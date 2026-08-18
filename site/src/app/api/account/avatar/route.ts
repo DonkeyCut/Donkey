@@ -8,8 +8,6 @@ import {
 import { accountProfile } from "@/lib/account-profile";
 import { prisma } from "@/lib/prisma";
 
-export const dynamic = "force-dynamic";
-
 // The client crops to a square and re-encodes before uploading, so anything
 // arriving here is already small. The cap is a backstop against a caller that
 // skips that path, not a size the UI ever approaches.

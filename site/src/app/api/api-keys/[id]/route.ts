@@ -7,8 +7,6 @@ import {
 } from "@/lib/donkey-api-auth";
 import { prisma } from "@/lib/prisma";
 
-export const runtime = "nodejs";
-
 /** Revoke a key. The row stays for the audit trail; `enabled: false` stops
  * matching live traffic immediately. */
 export const DELETE = withDonkeyAuth(async (request, ctx: { params: Promise<{ id: string }> }) => {

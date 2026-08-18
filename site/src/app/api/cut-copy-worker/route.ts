@@ -6,7 +6,6 @@ import { executeCopyJob } from "@/cut/server/cloud/copyQueue";
 // Deliberately not wrapped in withDonkeyAuth — the caller is a machine, not a
 // session — and gated by the shared secret instead, like the render worker's
 // wake in the other direction.
-export const runtime = "nodejs";
 // A big project copies many R2 objects; give the function room to finish.
 export const maxDuration = 300;
 

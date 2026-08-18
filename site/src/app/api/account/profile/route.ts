@@ -10,8 +10,6 @@ import {
 import { validationErrorResponse } from "@/lib/inference/responses";
 import { prisma } from "@/lib/prisma";
 
-export const dynamic = "force-dynamic";
-
 // The visible name is the product's own field. `name` keeps whatever Google
 // gave us at sign-in — billing and the provider record depend on it — so a
 // user renaming themselves writes `displayName`, and clearing it falls back to

@@ -2,8 +2,6 @@ import { notFoundResponse, withSuperUser } from "@/lib/donkey-api-auth";
 import { jobStatusResponse } from "@/lib/jobs/queue";
 import { prisma } from "@/lib/prisma";
 
-export const dynamic = "force-dynamic";
-
 type RouteContext = { params: Promise<{ jobId: string }> };
 
 // Poll one background job for its outcome.

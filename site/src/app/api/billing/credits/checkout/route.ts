@@ -11,8 +11,6 @@ import {
 } from "@/lib/credits/top-up";
 import { unauthorizedResponse, withDonkeyAuth } from "@/lib/donkey-api-auth";
 
-export const dynamic = "force-dynamic";
-
 const checkoutRequestSchema = z
   .object({
     amountDollars: z.coerce

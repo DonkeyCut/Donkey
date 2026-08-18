@@ -6,8 +6,6 @@ import { creditGrantUnit } from "@/lib/credits/inference";
 import { withDonkeyAuth } from "@/lib/donkey-api-auth";
 import { prisma } from "@/lib/prisma";
 
-export const dynamic = "force-dynamic";
-
 // Pro subscription status for the settings UI, plus how much of this period's
 // included allowance is left — the remaining balance on the active
 // "pro_subscription" grant(s).

@@ -9,8 +9,6 @@ import {
 } from "@/lib/donkey-api-auth";
 import { prisma } from "@/lib/prisma";
 
-export const dynamic = "force-dynamic";
-
 // Open the Stripe billing portal for the signed-in customer.
 export const POST = withDonkeyAuth(async (request) => {
   const userId = donkeySessionUserId(request);

@@ -10,7 +10,6 @@ import { isHostedRuntime } from "@/cut/server/local-only";
 // on hosted builds next.config aliases "@/cut/server/http/next" to a 404 stub,
 // keeping the engine (and the ~220MB SDK CLI binary it would otherwise sweep in)
 // out of the deployed function so it fits Vercel's size limit.
-export const runtime = "nodejs";
 
 async function handle(req: Request): Promise<Response> {
   if (isHostedRuntime()) return new Response(null, { status: 404 });

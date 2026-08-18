@@ -7,8 +7,6 @@ import { maxCreditGrantDollars } from "@/lib/credits/top-up";
 import { notFoundResponse, withSuperUser } from "@/lib/donkey-api-auth";
 import { prisma } from "@/lib/prisma";
 
-export const dynamic = "force-dynamic";
-
 // The target is identified by userId (grant to self) or by email (grant to
 // another user). At least one is required. A single grant is capped to guard
 // against typos.

@@ -9,8 +9,6 @@ import {
 import { withDonkeyAuth } from "@/lib/donkey-api-auth";
 import { prisma } from "@/lib/prisma";
 
-export const dynamic = "force-dynamic";
-
 // Defaults shown before the user has saved any config.
 const defaultThresholdDollars = 10;
 const defaultAmountDollars = 25;

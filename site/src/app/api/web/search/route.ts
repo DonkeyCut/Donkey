@@ -8,8 +8,6 @@ import {
 } from "@/lib/inference/responses";
 import { searchWeb } from "@/lib/inference/web-search";
 
-export const dynamic = "force-dynamic";
-
 const webSearchRequestSchema = z.object({
   query: z.string().trim().min(1).max(500),
 });

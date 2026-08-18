@@ -7,7 +7,6 @@ import { cutCloudCatchAll } from "@/cut/server/cloud/routes";
 // session cookie (withDonkeyAuth) and dispatches through the cloud route table
 // (src/cut/server/cloud/routes.ts). The client's cloud driver rewrites the
 // engine's /api/cut/* paths to this prefix.
-export const runtime = "nodejs";
 
 // The Cut API surface takes machine callers: a `dk_live_` bearer key acts as
 // its user across the same routes the page uses, and the Cut runner calls

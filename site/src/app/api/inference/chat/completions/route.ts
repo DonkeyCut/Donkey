@@ -24,8 +24,6 @@ import {
 } from "@/lib/donkey-api-auth";
 import { InferenceProviderError } from "@/lib/inference/providers";
 
-export const dynamic = "force-dynamic";
-
 export const POST = withDonkeyAuth(async (request) => {
   const client = requireInferenceClientId(request.donkey.clientId);
   if (!client.ok) {

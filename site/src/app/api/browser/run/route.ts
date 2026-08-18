@@ -20,7 +20,6 @@ import {
   validationErrorResponse,
 } from "@/lib/inference/responses";
 
-export const dynamic = "force-dynamic";
 // The run executes server-side to completion (the SDK polls Browser Use here, not
 // the app), so the function must be allowed to run long. maxCostUsd bounds the
 // task so it finishes well within this.

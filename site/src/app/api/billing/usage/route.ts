@@ -11,8 +11,6 @@ import {
 } from "@/lib/donkey-api-auth";
 import { prisma } from "@/lib/prisma";
 
-export const dynamic = "force-dynamic";
-
 // Up to 5 pages of 25 in the usage tab.
 const recentLimit = 125;
 
