@@ -27,6 +27,25 @@ export function nextUncoveredSpan(
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+/** How much of [0, duration] no watch has covered, in seconds. Coverage is
+ * the union of watched spans, so a look aimed at the middle of a source
+ * leaves the head uncovered and says so — what `coveredTo` alone cannot. */
+export function uncoveredSeconds(
+  watch: { ranges: { from: number; to: number }[] } | undefined,
+  duration: number
+): number {
+  let covered = 0;
+  let cursor = 0;
+  for (const rg of watch?.ranges ?? []) {
+    const from = Math.max(rg.from, cursor);
+    if (rg.to > from) {
+      covered += rg.to - from;
+      cursor = rg.to;
+    }
+  }
+  return Math.max(0, round2(duration - covered));
+}
+
 /** Fold a new watch result into an asset's stored watch metadata. The new
  * span is authoritative for what it covered: stored frames and cuts inside
  * [from, to] are replaced by the new ones, spans union, and everything stays
@@ -102,5 +121,61 @@ export function mergeWatch(
     if (last && rg.from <= last.to + EPS) last.to = Math.max(last.to, rg.to);
     else ranges.push({ from: rg.from, to: rg.to });
   }
-  return { ranges, frames, sceneChanges };
+  // Notes survive a re-watch: they are what someone read off the source, not
+  // a product of this pass.
+  return { ranges, frames, sceneChanges, ...(prev?.notes?.length ? { notes: prev.notes } : {}) };
+}
+
+/** Fold written observations into an asset's watch record. A new note owns
+ * its span: stored notes that fall inside it drop, so re-reading a stretch
+ * closely supersedes the coarse pass that first described it. Everything
+ * else stays, sorted by time. */
+export function mergeWatchNotes(
+  prev: AssetWatch | undefined,
+  add: { from: number; to: number; text: string }[]
+): AssetWatch {
+  const incoming = add
+    .map((n) => ({
+      from: round2(Math.max(0, Math.min(n.from, n.to))),
+      to: round2(Math.max(n.from, n.to)),
+      text: n.text.trim(),
+    }))
+    .filter((n) => n.text.length > 0);
+  // The incoming spans, unioned: a stored note goes when the new reading
+  // covers the ground it described, whether by one note or several.
+  const union: { from: number; to: number }[] = [];
+  for (const n of [...incoming].sort((a, b) => a.from - b.from)) {
+    const last = union[union.length - 1];
+    if (last && n.from <= last.to + EPS) last.to = Math.max(last.to, n.to);
+    else union.push({ from: n.from, to: n.to });
+  }
+  const covered = (n: { from: number; to: number }) =>
+    union.some((x) => n.from >= x.from - EPS && n.to <= x.to + EPS);
+  const notes = (prev?.notes ?? [])
+    .filter((n) => !covered(n))
+    .concat(incoming)
+    .sort((a, b) => a.from - b.from || a.to - b.to);
+  return {
+    ranges: prev?.ranges ?? [],
+    frames: prev?.frames ?? [],
+    sceneChanges: prev?.sceneChanges ?? [],
+    ...(notes.length ? { notes } : {}),
+  };
+}
+
+/** The stretches of [0, duration] no note describes yet, ascending — what is
+ * left to look at and write down. Slivers under MIN_GAP_S are ignored, the
+ * same way coverage gaps are. */
+export function unnotedSpans(
+  watch: AssetWatch | undefined,
+  duration: number
+): { from: number; to: number }[] {
+  const gaps: { from: number; to: number }[] = [];
+  let cursor = 0;
+  for (const n of [...(watch?.notes ?? [])].sort((a, b) => a.from - b.from)) {
+    if (n.from - cursor >= MIN_GAP_S) gaps.push({ from: round2(cursor), to: round2(n.from) });
+    cursor = Math.max(cursor, n.to);
+  }
+  if (duration - cursor >= MIN_GAP_S) gaps.push({ from: round2(cursor), to: round2(duration) });
+  return gaps;
 }

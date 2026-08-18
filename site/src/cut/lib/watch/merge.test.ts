@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { mergeSpeech, mergeWatch, nextUncoveredSpan } from "./merge";
+import { mergeSpeech, mergeWatch, mergeWatchNotes, nextUncoveredSpan, uncoveredSeconds, unnotedSpans } from "./merge";
 import type { AssetWatch } from "../types";
 
 const frame = (t: number, via: AssetWatch["frames"][number]["via"] = "global") => ({ t, via });
@@ -104,5 +104,69 @@ describe("nextUncoveredSpan", () => {
     const w = mergeWatch(undefined, { from: 0, to: 599, frames: [], sceneChanges: [] });
     expect(nextUncoveredSpan(w, 600, 600)).toBe(null);
     expect(nextUncoveredSpan(mergeWatch(undefined, { from: 0, to: 600, frames: [], sceneChanges: [] }), 600, 600)).toBe(null);
+  });
+});
+
+describe("watch notes", () => {
+  const note = (from: number, to: number, text: string) => ({ from, to, text });
+
+  test("notes land sorted and empty ones are dropped", () => {
+    const w = mergeWatchNotes(undefined, [
+      note(30, 60, "the diagram builds"),
+      note(0, 30, "opening cards"),
+      note(60, 70, "   "),
+    ]);
+    expect(w.notes).toEqual([note(0, 30, "opening cards"), note(30, 60, "the diagram builds")]);
+  });
+
+  test("a closer note replaces the coarse one it covers", () => {
+    const coarse = mergeWatchNotes(undefined, [note(0, 60, "titles over b-roll")]);
+    const close = mergeWatchNotes(coarse, [
+      note(0, 30, 'card: "Yo, I got a Mil in $ idea"'),
+      note(30, 60, 'card: "Right?"'),
+    ]);
+    expect(close.notes).toEqual([
+      note(0, 30, 'card: "Yo, I got a Mil in $ idea"'),
+      note(30, 60, 'card: "Right?"'),
+    ]);
+  });
+
+  test("notes outlive a re-watch of the same span", () => {
+    const noted = mergeWatchNotes(
+      mergeWatch(undefined, { from: 0, to: 10, frames: [], sceneChanges: [] }),
+      [note(0, 10, "the hook")]
+    );
+    const again = mergeWatch(noted, { from: 0, to: 10, frames: [], sceneChanges: [] });
+    expect(again.notes).toEqual([note(0, 10, "the hook")]);
+  });
+
+  test("what is still undescribed reads off the notes", () => {
+    const w = mergeWatchNotes(undefined, [note(0, 30, "opening"), note(60, 90, "the pitch")]);
+    expect(unnotedSpans(w, 120)).toEqual([
+      { from: 30, to: 60 },
+      { from: 90, to: 120 },
+    ]);
+    expect(unnotedSpans(mergeWatchNotes(w, [note(30, 120, "the rest")]), 120)).toEqual([]);
+  });
+});
+
+describe("uncoveredSeconds", () => {
+  test("a watch aimed at the middle counts the head it skipped", () => {
+    const w = mergeWatch(undefined, { from: 120, to: 600, frames: [], sceneChanges: [] });
+    expect(uncoveredSeconds(w, 600)).toBe(120);
+  });
+
+  test("overlapping spans count once", () => {
+    const w = mergeWatch(mergeWatch(undefined, { from: 0, to: 60, frames: [], sceneChanges: [] }), {
+      from: 30,
+      to: 90,
+      frames: [],
+      sceneChanges: [],
+    });
+    expect(uncoveredSeconds(w, 100)).toBe(10);
+  });
+
+  test("nothing watched is the whole source", () => {
+    expect(uncoveredSeconds(undefined, 64.1)).toBe(64.1);
   });
 });

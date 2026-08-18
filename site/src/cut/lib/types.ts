@@ -141,6 +141,11 @@ export interface AssetWatch {
   frames: { t: number; via: WatchKeepReason }[];
   /** Hard-cut moments among the kept frames. */
   sceneChanges: number[];
+  /** What the assistant read off the source, in its own words, against the
+   * span it read it from. Contact sheets leave the conversation as it grows;
+   * these stay, so a source longer than one look can be decided from the
+   * record instead of watched again. */
+  notes?: { from: number; to: number; text: string }[];
 }
 
 /** A source's own transcript — working data for the assistant, kept apart

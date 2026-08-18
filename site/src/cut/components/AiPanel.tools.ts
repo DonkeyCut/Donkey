@@ -19,7 +19,7 @@ export const AI_PANEL_TOOLS = [
   {
     name: "watch_video",
     description:
-      "Watch a video source with your own eyes: samples candidate frames on a dense steady floor, keeps only the ones that actually differ, and tiles them into timestamped contact-sheet images — so every cell is a distinct moment and a gap between stamps means nothing changed there. Also returns sceneChanges, hard-cut times refined to about a third of a second of the true boundary (the time is where the new shot first appears) — though a shot shorter than the sampling step can fall between candidates, so where short cuts matter, re-watch narrow with a small interval_seconds. When the clip has captions or the source's own transcript exists, a fused timeline places each kept frame inside the speech it belongs to. Pass clip_id to watch a timeline clip's source (the result includes that clip's source↔timeline time math) or asset_id for any project video or image. The stamp burned into each cell is SOURCE seconds — what trim_clip's in/out use — not timeline seconds. Coverage ends where the result says it does: when truncated is true (span bound, frame cap, or time budget), continue from coveredTo — everything before it was seen, nothing after it was. Watching builds the source's frame map (moment times + cut candidates), persisted on the asset; media entries list those spans as `mapped`, and your first watch starts a quiet background sweep that maps the rest (`watching: true` while it runs). The map aims your watches — a mapped span is NOT footage you have seen; only sheets returned in this conversation are, so watch any span you need to actually look at. Read the watching-and-cutting skill before editing footage by content.",
+      "Watch a video source with your own eyes: samples candidate frames on a dense steady floor, keeps only the ones that actually differ, and tiles them into timestamped contact-sheet images — so every cell is a distinct moment and a gap between stamps means nothing changed there. Also returns sceneChanges, hard-cut times refined to about a third of a second of the true boundary (the time is where the new shot first appears) — though a shot shorter than the sampling step can fall between candidates, so where short cuts matter, re-watch narrow with a small interval_seconds. When the clip has captions or the source's own transcript exists, a fused timeline places each kept frame inside the speech it belongs to. Pass clip_id to watch a timeline clip's source (the result includes that clip's source↔timeline time math) or asset_id for any project video or image. The stamp burned into each cell is SOURCE seconds — what trim_clip's in/out use — not timeline seconds. Coverage ends where the result says it does: `coveredTo` is how far you have looked and `unwatchedSeconds` is how much of the source you have NOT — everything before coveredTo was seen, nothing after it was. Continue from coveredTo until unwatchedSeconds is 0 before you describe, summarize, or reproduce the source as a whole; a `to` you chose yourself ends a call with truncated false and the rest of the video still unseen. Watching builds the source's frame map (moment times + cut candidates), persisted on the asset; media entries list those spans as `mapped`, and your first watch starts a quiet background sweep that maps the rest (`watching: true` while it runs). The map aims your watches — a mapped span is NOT footage you have seen; only sheets returned in this conversation are, so watch any span you need to actually look at. Every pass ends with note_source: the sheets are conversation-local and drop out as the chat grows, so write what this stretch showed against its source seconds and it stays on the asset for every later turn. The result carries `recorded` (what is already written about the stretch you just watched) and `unnoted` (the spans of this source nothing describes yet); watching a source that still owes a note is refused. Read the watching-and-cutting skill before editing footage by content.",
     inputSchema: obj({
       clip_id: str("Video clip id, track 0 or overlay (defaults from/to to its trimmed in/out)"),
       asset_id: str("Project asset id (video or image) — watch the source itself"),
@@ -27,6 +27,30 @@ export const AI_PANEL_TOOLS = [
       to: num("Source end s (default: the clip's out, else the source's end; spans at most 600s per call)"),
       interval_seconds: num("Seconds between candidate frames, 0.5–30 (default 1; near-duplicates are dropped, so a dense default costs nothing)"),
     }),
+  },
+  {
+    name: "note_source",
+    description:
+      "Write down what you just saw in a source, against the source seconds it covers. Contact sheets live in this conversation only and the oldest media drops out as the chat grows, so a source longer than one look is only usable if each look is recorded while it is on screen: the notes save onto the asset, ride the editor state into every later turn and every later chat, and come back in get_state and in watch_video's `recorded`. Write what a later decision needs — on-screen text word for word, what happens, how it is shot, where the cuts land — one entry per stretch you looked at. A note owns its span: re-reading 0-30s closely and noting it again replaces the coarse note that covered it. Watching a source that still has an unrecorded look behind it is refused, so note as you go.",
+    inputSchema: obj(
+      {
+        clip_id: str("Video clip id — records against that clip's source"),
+        asset_id: str("Project asset id"),
+        notes: {
+          type: "array",
+          description: "One entry per stretch you looked at, in source seconds",
+          items: obj(
+            {
+              from: num("Source start s"),
+              to: num("Source end s"),
+              text: str("What that stretch showed — quote on-screen text exactly"),
+            },
+            ["from", "to", "text"]
+          ),
+        },
+      },
+      ["notes"]
+    ),
   },
   {
     name: "detect_silence",

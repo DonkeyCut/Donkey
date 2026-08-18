@@ -33,6 +33,32 @@ function clipEffects(clip: VideoClip) {
   };
 }
 
+/** How much written record the per-message snapshot carries before it hands
+ * the rest to get_state. */
+const NOTE_SNAPSHOT_BUDGET = 3000;
+
+/** An asset's watch notes shaped for the context: whole when they fit (and
+ * whenever the caller asked for everything), otherwise each note shortened to
+ * an even share of the budget so every span still says what it holds, with
+ * `observedText` naming where the rest is. */
+function noteFields(
+  notes: { from: number; to: number; text: string }[] | undefined,
+  full: boolean
+): Record<string, unknown> {
+  if (!notes || notes.length === 0) return {};
+  const size = notes.reduce((sum, n) => sum + n.text.length, 0);
+  if (full || size <= NOTE_SNAPSHOT_BUDGET)
+    return { observed: notes.map((n) => ({ from: r(n.from), to: r(n.to), text: n.text })) };
+  const share = Math.max(120, Math.floor(NOTE_SNAPSHOT_BUDGET / notes.length));
+  let trimmed = false;
+  const observed = notes.map((n) => {
+    if (n.text.length <= share) return { from: r(n.from), to: r(n.to), text: n.text };
+    trimmed = true;
+    return { from: r(n.from), to: r(n.to), text: `${n.text.slice(0, share).trimEnd()}…` };
+  });
+  return { observed, ...(trimmed ? { observedText: "shortened here, whole in get_state" } : {}) };
+}
+
 /**
  * Compact JSON snapshot of everything the assistant should know: the cut,
  * the selection, what's on screen, and every user-facing setting. Sent with
@@ -61,6 +87,13 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
   const ownedByOtherChat = (a: { origin?: string; chatId?: string; id: string }) =>
     a.origin === "chat" && !!a.chatId && a.chatId !== chatId && !placed.has(a.id);
   const visibleAssets = s.assets.filter((a) => !ownedByOtherChat(a));
+  // The cap trims the tail of a huge media list, and a source someone has
+  // watched and written up stays regardless of where it sits: the record is
+  // what later decisions are made from.
+  const shownAssets =
+    visibleAssets.length <= cueCap
+      ? visibleAssets
+      : visibleAssets.filter((a, i) => i < cueCap || (a.watch?.notes?.length ?? 0) > 0);
   const spans = getClipSpans(s.clips, s.assets);
   const duration = totalDuration(s.clips);
   const assetById = new Map(s.assets.map((a) => [a.id, a]));
@@ -122,6 +155,7 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
       frame: `${frameOf(s.aspect).w}x${frameOf(s.aspect).h}`,
       ...(s.fadeIn > 0 ? { fadeIn: r(s.fadeIn) } : {}),
       ...(s.fadeOut > 0 ? { fadeOut: r(s.fadeOut) } : {}),
+      background: s.background,
     },
     playhead: r(playheadAt()),
     skimmer: skimAt() === null ? null : r(skimAt()!),
@@ -131,7 +165,7 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
     // another chat still owns is filtered out above). `origin` marks Cut-made
     // media (generated/voiceover/recording/stock/freeze); no origin = a user
     // import shown in the Media panel.
-    media: visibleAssets.slice(0, cueCap).map((a) => ({
+    media: shownAssets.map((a) => ({
       id: a.id,
       name: a.name,
       type: a.type,
@@ -146,6 +180,13 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
         ? { mapped: a.watch.ranges.map((rg) => ({ from: r(rg.from), to: r(rg.to) })) }
         : {}),
       ...(watchSweepActive(a.id) ? { watching: true } : {}),
+      // The written record of this source — what someone looked at these
+      // frames and wrote down (note_source). Unlike `mapped`, this IS seen
+      // footage, and it survives the contact sheets that showed it, so a
+      // source too long to hold in one conversation is decided from here.
+      // The snapshot rides every model call, so it carries the notes while
+      // they are small and hands the rest to get_state.
+      ...noteFields(a.watch?.notes, opts?.fullCues === true),
       // The source's own transcript (built quietly by the sweep; no subtitle
       // track involved). The snapshot carries the verdict; get_state carries
       // the segments — read those for the words instead of inlining audio.
@@ -164,7 +205,7 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
           }
         : {}),
     })),
-    mediaTruncated: visibleAssets.length > cueCap,
+    mediaTruncated: shownAssets.length < visibleAssets.length,
     // AI video renders for this project, live from the job store — what
     // "rendering" claims must be grounded in. A done render names the asset
     // it landed as (already in `media`); a failed one carries its error.

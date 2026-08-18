@@ -80,7 +80,7 @@ import { buildAiContext } from "./aiContext";
 import { sampleClipFrameData } from "./previewCanvas";
 import { laneCues, subtitleLaneCount } from "./subtitles";
 import { fuseTimeline, renderFusedTimeline } from "./watch/fuse";
-import { mergeWatch } from "./watch/merge";
+import { mergeWatch, mergeWatchNotes, uncoveredSeconds, unnotedSpans } from "./watch/merge";
 import { queueWatchSweep, withSweepPaused } from "./watch/sweep";
 import { synthesizeMusic } from "./audioGen";
 import { composeMusicPrompt } from "./composeGen";
@@ -111,6 +111,8 @@ import {
   SPEED_FLOOR,
   TRANSITION_STYLE_IDS,
   type AnimStyle,
+  type AssetWatch,
+  type CaptionStyleId,
   type AudioClip,
   type ColorGrade,
   type FontId,
@@ -584,6 +586,15 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
 
   watch_video: async (s, input) => {
       const { asset, clip, speed, from, to } = resolveWatchRange(s, input);
+      // The reading of the last look comes before the next one. Without it a
+      // long source is watched into a conversation that keeps dropping the
+      // sheets, and the tail arrives with the head already gone.
+      const owed = unwritten.get(asset.id);
+      if (owed && !spanIsNoted(asset.watch, owed))
+        throw new ToolError(
+          `You watched ${round2(owed.from)}-${round2(owed.to)}s of "${asset.name}" and have not written down what it showed. ` +
+            "Those sheets leave this conversation as it grows, so record them while you can still see them: call note_source with what that stretch showed — the on-screen text word for word, what happens, how it is shot, the timings — then watch on."
+        );
       if (asset.type === "audio")
         throw new ToolError(`"${asset.name}" is audio — listen_audio hears it, detect_silence finds its dead air.`);
       // One path for both backends: the browser decodes the source (the same
@@ -631,10 +642,19 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             }),
           });
         }
+        // A source with more to see owes a reading of what just went past:
+        // the next watch of it asks for this span's notes first.
+        if (body.coveredTo > from && asset.duration - body.coveredTo > 0.5)
+          unwritten.set(asset.id, { from: round2(from), to: round2(body.coveredTo) });
+        else unwritten.delete(asset.id);
         // A first look queues the quiet background sweep of the rest of the
         // source — metadata only, merged in as segments land.
         queueWatchSweep(asset.id);
       }
+      const unwatched = uncoveredSeconds(
+        useEditor.getState().assets.find((x) => x.id === asset.id)?.watch,
+        asset.duration
+      );
       // Tile the kept frames 3×3 and stamp each cell's source time.
       const sheets = await composeSheets(body.frames).catch(() => null);
       const keptTimes = body.frames.map((f) => f.t);
@@ -673,6 +693,21 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         sceneChanges: body.sceneChanges.map(round2),
         coveredTo: round2(body.coveredTo),
         truncated: body.truncated,
+        // What NOBODY has looked at, anywhere in the source — the union of
+        // every watched span subtracted from its length, so a watch aimed at
+        // the middle counts the head it skipped as well as the tail it never
+        // reached. `truncated` only says whether the sampler stopped early,
+        // and a caller who passed a short `to` gets truncated: false; this is
+        // the honest number, stated in the payload and in the note.
+        unwatchedSeconds: unwatched,
+        // The written record of this source, which outlives the sheets: what
+        // was already noted about the stretch on screen now, and the spans of
+        // the source nothing has been written about yet.
+        recorded: notesIn((liveAsset ?? asset).watch, from, body.coveredTo),
+        unnoted: unnotedSpans((liveAsset ?? asset).watch, asset.duration).map((g) => ({
+          from: round2(g.from),
+          to: round2(g.to),
+        })),
         source: { assetId: asset.id, name: asset.name, duration: round2(asset.duration) },
         ...(clip
           ? {
@@ -691,10 +726,50 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           "Cells read left→right then top→bottom; each stamp is SOURCE seconds. " +
           "Cells are distinct moments (near-duplicates removed), so gaps between stamps mean nothing changed there. " +
           "sheetFrames says why each cell was kept: global = hard cut, action = local motion, settled = new settled detail (text/UI)." +
-          (body.truncated
-            ? ` Coverage stopped at ${round2(body.coveredTo)}s — call again with from=${round2(body.coveredTo)} to continue.`
+          (unwatched > 0.5
+            ? ` You have seen ${round2(from)}-${round2(body.coveredTo)}s of a ${round2(asset.duration)}s source; ` +
+              `${unwatched}s of it has NOT been looked at (this call's range plus anything else already watched)` +
+              (body.truncated ? " (this call hit its budget)" : " (your own `to` ended this call)") +
+              `. Call again with from=${round2(body.coveredTo)} to continue — and do continue before describing, summarizing, or reproducing the source as a whole.`
             : "") +
+          " These sheets are in this conversation only, and it drops the oldest media as it grows. Write what they showed into note_source now — text word for word, what happens, the timings — and the reading stays on the source for every later turn and every later chat." +
           (sheets ? "" : " (Sheets unavailable — each image is one frame; sheetFrames lists the times.)"),
+      };
+  },
+
+  note_source: (s, input) => {
+      const { asset } = resolveWatchTarget(s, input);
+      const raw = Array.isArray(input.notes) ? input.notes : [];
+      const notes = raw
+        .filter((n): n is Record<string, unknown> => typeof n === "object" && n !== null)
+        .map((n) => ({
+          from: isNum(n.from) ? clamp(n.from, 0, asset.duration) : 0,
+          to: isNum(n.to) ? clamp(n.to, 0, asset.duration) : asset.duration,
+          text: typeof n.text === "string" ? n.text.trim() : "",
+        }))
+        .filter((n) => n.text.length > 0);
+      if (notes.length === 0)
+        throw new ToolError("Pass notes: [{from, to, text}] — source seconds and what that stretch showed.");
+      s.updateAsset(asset.id, { watch: mergeWatchNotes(asset.watch, notes) });
+      const cur = useEditor.getState().assets.find((a) => a.id === asset.id);
+      const owed = unwritten.get(asset.id);
+      if (owed && spanIsNoted(cur?.watch, owed)) unwritten.delete(asset.id);
+      const unnoted = unnotedSpans(cur?.watch, asset.duration);
+      return {
+        source: { assetId: asset.id, name: asset.name, duration: round2(asset.duration) },
+        notes: (cur?.watch?.notes ?? []).map((n) => ({
+          from: round2(n.from),
+          to: round2(n.to),
+          text: n.text,
+        })),
+        unnoted: unnoted.map((g) => ({ from: round2(g.from), to: round2(g.to) })),
+        note:
+          "Written onto the source: it saves with the project, rides the editor state from here on, and outlives this conversation's images." +
+          (unnoted.length > 0
+            ? ` Still undescribed: ${unnoted
+                .map((g) => `${round2(g.from)}-${round2(g.to)}s`)
+                .join(", ")}.`
+            : " The whole source is described."),
       };
   },
 
@@ -2554,6 +2629,35 @@ async function synthesizeVoiceover(
 
 /** Resolve a watch/listen target: a timeline clip (its source plus trim and
  * placement) or a bare project asset. */
+/** Spans watched this session that nobody has written down yet, by asset id.
+ * Contact sheets fall out of the conversation as it grows, so the record has
+ * to be written while the frames are still on screen; a second look at the
+ * same source asks for the first look's reading before it spends a call. */
+const unwritten = new Map<string, { from: number; to: number }>();
+
+/** A span counts as written down once notes describe all but a sliver of it. */
+function spanIsNoted(watch: AssetWatch | undefined, span: { from: number; to: number }): boolean {
+  let cursor = span.from;
+  for (const n of [...(watch?.notes ?? [])].sort((a, b) => a.from - b.from)) {
+    if (n.to <= cursor) continue;
+    if (n.from > cursor + 2) break;
+    cursor = Math.max(cursor, n.to);
+  }
+  return cursor >= span.to - 2;
+}
+
+/** What has been written about a stretch of a source: the notes overlapping
+ * it, oldest span first. */
+function notesIn(
+  watch: AssetWatch | undefined,
+  from: number,
+  to: number
+): { from: number; to: number; text: string }[] {
+  return (watch?.notes ?? [])
+    .filter((n) => n.to > from && n.from < to)
+    .map((n) => ({ from: round2(n.from), to: round2(n.to), text: n.text }));
+}
+
 function resolveWatchTarget(
   s: ReturnType<typeof useEditor.getState>,
   input: Record<string, unknown>

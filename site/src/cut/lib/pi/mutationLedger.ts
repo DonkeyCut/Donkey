@@ -12,6 +12,7 @@ const READ_ONLY = new Set([
   "read_skill",
   "capture_frame",
   "watch_video",
+  "note_source",
   "detect_silence",
   "listen_audio",
   "library_list",
