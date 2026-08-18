@@ -5,8 +5,8 @@ import type { ComponentType } from "react";
 
 import { RunAnalyticsButton } from "@/app/cut/app/su/analytics/RunAnalyticsButton";
 
-// Ordered so the more specific path wins the suffix match; Users is the
-// section root, so it's also the fallback title.
+// Every surface owns a path, so the match is exact; the rail's order is the
+// order here, and its first entry is what the section root opens.
 const SECTIONS: {
   suffix: string;
   title: string;
@@ -14,27 +14,27 @@ const SECTIONS: {
   Action?: ComponentType;
 }[] = [
   {
-    suffix: "/su/credits",
-    title: "Credits",
-    description: "Grant credits to a user.",
-  },
-  {
     suffix: "/su/analytics",
     title: "Analytics",
     description: "Product analytics.",
     Action: RunAnalyticsButton,
   },
   {
-    suffix: "/su",
+    suffix: "/su/users",
     title: "Users",
     description: "Account actions.",
+  },
+  {
+    suffix: "/su/credits",
+    title: "Credits",
+    description: "Grant credits to a user.",
   },
 ];
 
 export function SuHeader() {
   const pathname = usePathname();
   const section =
-    SECTIONS.find((s) => pathname.endsWith(s.suffix)) ?? SECTIONS.at(-1)!;
+    SECTIONS.find((s) => pathname.endsWith(s.suffix)) ?? SECTIONS[0];
   return (
     <div className="sticky top-0 z-20 mx-auto flex w-full max-w-6xl shrink-0 items-start justify-between gap-4 bg-background px-10 pt-9 pb-5">
       <div>

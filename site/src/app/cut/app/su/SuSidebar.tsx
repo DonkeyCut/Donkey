@@ -2,16 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowLeft, ChartColumn, CreditCard, UserRound } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 
+import { SU_NAV } from "@/app/cut/app/su/nav";
 import { useCutBase } from "@/cut/lib/nav";
 import { cn } from "@/lib/utils";
-
-const NAV: { suffix: string; label: string; icon: typeof UserRound }[] = [
-  { suffix: "/analytics", label: "Analytics", icon: ChartColumn },
-  { suffix: "", label: "Users", icon: UserRound },
-  { suffix: "/credits", label: "Credits", icon: CreditCard },
-];
 
 const itemClass =
   "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground";
@@ -38,7 +33,7 @@ export function SuSidebar() {
       </div>
 
       <nav className="flex flex-col gap-0.5">
-        {NAV.map(({ suffix, label, icon: Icon }) => {
+        {SU_NAV.map(({ suffix, label, icon: Icon }) => {
           const href = `${base}/su${suffix}`;
           const active = pathname === href;
           return (
