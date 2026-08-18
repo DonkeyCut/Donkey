@@ -1,11 +1,12 @@
 import { geminiModelRoles } from "@/lib/inference/gemini-models";
 import { AI_SKILL_INDEX, AI_SKILLS } from "@/cut/server/ai/catalog";
 import { buildAiContext } from "../aiContext";
-import { runAiTool, UI_TOOLS } from "../aiTools";
+import { MEDIA_RUNTIME_TOOLS, runAiTool, UI_TOOLS } from "../aiTools";
 import { normalizeRef } from "../assetRef";
 import { NO_CREDITS_MESSAGE } from "../generate";
 import { hostedPost } from "../hosted";
 import { bindHeadlessSession, type HeadlessSession } from "../headless/bind";
+import { headlessRuntime } from "../headless/runtime";
 import { refsToParts } from "../refMedia";
 import type { CutAgentDeps } from "./cutAgent";
 import { currentDebris } from "./debris";
@@ -32,6 +33,15 @@ export function headlessDeps(session: HeadlessSession): CutAgentDeps {
           noEditor: true,
           note: "No editor page is attached to this session, so this tool had no effect. The project itself is unchanged — keep working from the editor state.",
         };
+      // The worker installs canvas and decoders at startup and these run as
+      // written. A process that came up without them says so plainly.
+      if (MEDIA_RUNTIME_TOOLS.has(name)) {
+        const rt = headlessRuntime();
+        if (!rt?.raster || !rt.media)
+          throw new Error(
+            "This session has no media runtime, so it cannot decode or draw media. Work from the editor state and the transcript instead."
+          );
+      }
       return runAiTool(name, args);
     },
     models: {

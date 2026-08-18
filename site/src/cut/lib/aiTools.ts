@@ -2386,6 +2386,25 @@ export const UI_TOOLS: ReadonlySet<string> = new Set([
   "set_playing",
 ]);
 
+/** Tools that decode or rasterize media — frame grabs, audio scans, image
+ * decodes, the transcription mixdown. A page has those primitives and a
+ * headless process installs them; a process that installed neither refuses
+ * these with a typed error rather than a stray "document is not defined". */
+export const MEDIA_RUNTIME_TOOLS: ReadonlySet<string> = new Set([
+  "convert_media",
+  "watch_video",
+  "listen_audio",
+  "detect_silence",
+  "refine_speech_cuts",
+  "capture_frame",
+  "freeze_frame",
+  "create_sticker",
+  "subtitles_generate",
+  "captions_generate",
+  "subtitles_from_visuals",
+  "stock_add",
+]);
+
 export async function runAiTool(
   name: string,
   input: Record<string, unknown>

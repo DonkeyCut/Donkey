@@ -21,16 +21,24 @@ export interface HeadlessRuntime {
 }
 
 let installed: Promise<HeadlessRuntime> | null = null;
+let current: HeadlessRuntime | null = null;
 
 export function installHeadlessRuntime(): Promise<HeadlessRuntime> {
   installed ??= (async () => {
     // Raster first: the frame sink draws into canvases the seam hands out.
     const raster = await installSkiaRaster();
     const [media, fonts] = await Promise.all([installNodeMedia(), installHeadlessFonts()]);
-    return { raster, media, fonts };
+    const rt = { raster, media, fonts };
+    current = rt;
+    return rt;
   })();
   return installed;
 }
+
+/** What this process actually got, or null before the install finishes. Code
+ * that has to answer synchronously — a tool dispatch — reads it to tell a
+ * capability it has from one it has to refuse. */
+export const headlessRuntime = (): HeadlessRuntime | null => current;
 
 /** One line for a startup log. */
 export const describeRuntime = (r: HeadlessRuntime): string =>
