@@ -72,7 +72,7 @@ import { blobToInlineAudio, refToInlineAudio, visualRefs, type InlineImage } fro
 import { characterPrompt, stockAspectDims, stockTitle } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
-import { applyOverlayPatchSettled, track0Clips, laneGapAt, getClipSpans, nextFreeStart, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
+import { applyOverlayPatchSettled, track0Clips, laneGapAt, getClipSpans, nextFreeStart, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt } from "./playhead";
 import { renderProjectFrame } from "./exportRender";
 import { rasterCanvasToDataUrl } from "./raster";
@@ -1196,6 +1196,32 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       s.updateClip(clip.id, { hidden: input.hidden ? true : undefined });
       return { id: clip.id, hidden: Boolean(input.hidden) };
   },
+
+  reorder_track: (s, input) => {
+      if (!isNum(input.from) || !isNum(input.to) || input.from < 0 || input.to < 0)
+        throw new ToolError("from and to must be 0 or higher.");
+      const from = Math.round(input.from);
+      const to = Math.round(input.to);
+      const kind = String(input.kind);
+      const rows =
+        kind === "video"
+          ? [...new Set(s.clips.map((c) => c.track))].sort((a, b) => a - b)
+          : kind === "soundtrack"
+            ? [...new Set(s.audioClips.map((a) => a.lane ?? 0))].sort((a, b) => a - b)
+            : kind === "text"
+              ? overlayLaneOrder(s.overlays)
+              : null;
+      if (!rows) throw new ToolError("kind must be video, soundtrack, or text.");
+      if (rows.length < 2) throw new ToolError(`There is only one ${kind} row, so nothing to reorder.`);
+      const i = rows.indexOf(from);
+      if (i < 0) throw new ToolError(`No ${kind} row ${from} — rows ${rows.join(", ")} exist.`);
+      const j = Math.min(rows.length - 1, rows.indexOf(to) >= 0 ? rows.indexOf(to) : to);
+      if (i === j) return { kind, from: i, to: j, rows: rows.length, moved: false };
+      if (kind === "video") s.moveVideoTrack(i, j);
+      else if (kind === "soundtrack") s.moveAudioLane(i, j);
+      else s.moveOverlayLane(i, j);
+      return { kind, from: i, to: j, rows: rows.length, moved: true };
+    },
 
   set_track_hidden: (s, input) => {
       if (!isNum(input.track) || input.track < 0)

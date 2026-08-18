@@ -103,6 +103,17 @@ function openInsertSlot(clips: VideoClip[], level: number, exclude?: string): Vi
 const shiftTracksUp = (clips: VideoClip[], place: VideoTrackPlacement): VideoClip[] =>
   place.kind === "insert" ? openInsertSlot(clips, place.level) : clips;
 
+/** The renumbering a row move produces: the row at index `from` lifts out of
+ * `used` and drops at `to`, and the result maps every old row key to its new
+ * index. Null when the move is a no-op or points off the end, so callers can
+ * skip the undo step entirely. */
+function rowRenumber(used: number[], from: number, to: number): Map<number, number> | null {
+  if (from === to || from < 0 || to < 0 || from >= used.length || to >= used.length) return null;
+  const next = [...used];
+  next.splice(to, 0, next.splice(from, 1)[0]);
+  return new Map(next.map((row, i) => [row, i]));
+}
+
 /** A single-item selection: the primary that drives the Inspector plus the
  * one-element multiSelection that bulk actions (delete, copy) and the timeline
  * highlight read. Every mutation that selects its own result funnels through
@@ -391,6 +402,15 @@ export interface EditorState {
   setAudioLaneHidden: (lane: number, hidden: boolean) => void;
   /** Hide or show every title on one title lane, in one undo step. */
   setTextLaneHidden: (lane: number, hidden: boolean) => void;
+  /** Reorder the occupied video tracks: the track sitting at z-index `from`
+   * (0 = the bottom track) lands at `to` and the rest close up around it.
+   * Tracks renumber to 0..n-1, so whatever lands at 0 becomes the spine. */
+  moveVideoTrack: (from: number, to: number) => void;
+  /** Reorder the element rows: the row at display index `from` (0 = the top
+   * row) lands at `to`. Lanes renumber to 0..n-1 in the new order. */
+  moveOverlayLane: (from: number, to: number) => void;
+  /** Reorder the soundtrack lanes the same way, top row first. */
+  moveAudioLane: (from: number, to: number) => void;
   updateOverlay: (id: string, patch: OverlayPatch) => void;
   /** Live-drag updates that should not create undo entries. */
   updateOverlayTransient: (id: string, patch: OverlayPatch) => void;
@@ -2372,6 +2392,49 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       if (!ids.length) return;
       push();
       get().updateOverlaysTransient(ids.map((id) => ({ id, patch: { hidden } })));
+    },
+
+    moveVideoTrack: (from, to) => {
+      const s = get();
+      const map = rowRenumber([...new Set(s.clips.map((c) => c.track))].sort((a, b) => a - b), from, to);
+      if (!map) return;
+      push();
+      s.updateClipsTransient(
+        s.clips
+          .filter((c) => map.get(c.track) !== c.track)
+          .map((c) => ({ id: c.id, patch: { track: map.get(c.track)! } }))
+      );
+    },
+
+    moveOverlayLane: (from, to) => {
+      const s = get();
+      const map = rowRenumber(overlayLaneOrder(s.overlays), from, to);
+      if (!map) return;
+      push();
+      s.updateOverlaysTransient(
+        s.overlays
+          .filter((o) => map.get(o.lane ?? 0) !== (o.lane ?? 0))
+          .map((o) => ({ id: o.id, patch: { lane: map.get(o.lane ?? 0)! } }))
+      );
+    },
+
+    moveAudioLane: (from, to) => {
+      const s = get();
+      const map = rowRenumber(
+        [...new Set(s.audioClips.map((a) => a.lane ?? 0))].sort((a, b) => a - b),
+        from,
+        to
+      );
+      if (!map) return;
+      push();
+      s.updateAudiosTransient(
+        s.audioClips
+          .filter((a) => map.get(a.lane ?? 0) !== (a.lane ?? 0))
+          .map((a) => {
+            const lane = map.get(a.lane ?? 0)!;
+            return { id: a.id, patch: { lane: lane > 0 ? lane : undefined } };
+          })
+      );
     },
     updateOverlay: (id, patch) => {
       push();

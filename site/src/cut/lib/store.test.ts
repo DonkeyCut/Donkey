@@ -411,6 +411,61 @@ describe("audio lanes", () => {
   });
 });
 
+describe("row reordering", () => {
+  test("a video track carried down the stack renumbers the ones it passes", () => {
+    const bottom = vclip({ track: 0 });
+    const mid = vclip({ track: 1 });
+    const top = vclip({ track: 2 });
+    useEditor.setState({ clips: [bottom, mid, top] });
+    s().moveVideoTrack(2, 0); // the frontmost layer becomes the spine
+    expect(clipById(top.id).track).toBe(0);
+    expect(clipById(bottom.id).track).toBe(1);
+    expect(clipById(mid.id).track).toBe(2);
+  });
+
+  test("reordering closes track number holes", () => {
+    const a = vclip({ track: 0 });
+    const b = vclip({ track: 3 });
+    useEditor.setState({ clips: [a, b] });
+    s().moveVideoTrack(0, 1);
+    expect(clipById(b.id).track).toBe(0);
+    expect(clipById(a.id).track).toBe(1);
+  });
+
+  test("an element row lands where it was carried, times untouched", () => {
+    const t0 = title({ start: 1, end: 2, lane: 0 });
+    const t1 = title({ start: 0, end: 3, lane: 1 });
+    const t2 = title({ start: 4, end: 5, lane: 2 });
+    useEditor.setState({ overlays: [t0, t1, t2] });
+    s().moveOverlayLane(0, 2); // the top row goes to the bottom
+    const by = (id: string) => s().overlays.find((o) => o.id === id)!;
+    expect(by(t1.id).lane).toBe(0);
+    expect(by(t2.id).lane).toBe(1);
+    expect(by(t0.id).lane).toBe(2);
+    expect(by(t0.id).start).toBeCloseTo(1);
+  });
+
+  test("a soundtrack lane move takes every segment on the row", () => {
+    const a1 = aclip({ start: 0, out: 2 });
+    const a2 = aclip({ start: 4, out: 2 });
+    const b1 = aclip({ start: 0, out: 2, lane: 1 });
+    useEditor.setState({ audioClips: [a1, a2, b1] });
+    s().moveAudioLane(1, 0);
+    expect(audioById(b1.id).lane ?? 0).toBe(0);
+    expect(audioById(a1.id).lane).toBe(1);
+    expect(audioById(a2.id).lane).toBe(1);
+  });
+
+  test("a move to the row it already sits on changes nothing", () => {
+    const t0 = title({ lane: 0 });
+    const t1 = title({ lane: 1 });
+    useEditor.setState({ overlays: [t0, t1] });
+    const before = s().overlays;
+    s().moveOverlayLane(1, 1);
+    expect(s().overlays).toBe(before);
+  });
+});
+
 describe("title lanes", () => {
   const overlayById = (id: string) => s().overlays.find((o) => o.id === id)!;
 

@@ -95,6 +95,16 @@ export const TIMELINE_TOOLS = [
     inputSchema: obj({ track: num("Video track index, 0-based"), muted: bool("true to mute") }, ["track", "muted"]),
   },
   {
+    name: "reorder_track",
+    description:
+      "Move a whole timeline row to another place in its own band — the gutter drag. Rows only ever reorder among their own kind: video tracks restack (row 0 is the bottom track, the spine that carries ripple and transitions; higher rows composite in front), element rows and soundtrack lanes renumber from there. Everything on the row travels with it and keeps its times.",
+    inputSchema: obj({
+      kind: { type: "string", enum: ["video", "soundtrack", "text"], description: "Which band the row belongs to" },
+      from: num("The row's current index, 0-based"),
+      to: num("The index it should end up at, 0-based"),
+    }, ["kind", "from", "to"]),
+  },
+  {
     name: "delete_item",
     description:
       "Delete a video clip (any track), soundtrack clip, or overlay element (title/shape/sticker) by id. While track 0 is the only video track, deleting a track-0 clip ripples: its footprint closes and everything after it — clips, titles, captions, soundtrack — slides left in sync; items wholly inside that span are removed with it, straddlers are trimmed. With overlay video tracks present the delete leaves its gap in place (remove_gap closes it). Deletes on other tracks remove just that item.",

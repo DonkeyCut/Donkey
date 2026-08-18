@@ -88,6 +88,48 @@ const OVERLAY_H = VIDEO_H; // every video track shares the same row height
  * and the next row keeps its usual distance below the line. */
 const KEYRAIL_EXTRA = 20;
 const AUDIO_H = 44;
+/** The `mt-1.5` every row carries, so a row drag knows what one row's worth of
+ * travel is. */
+const ROW_GAP = 6;
+
+/** The three bands whose rows reorder: the video stack, the element rows, and
+ * the soundtrack lanes. Subtitle rows are language tracks, managed in the
+ * panel, so they stay put. */
+type RowBand = "video" | "overlay" | "audio";
+
+/** A row being dragged to a new place in its own band. Rows are display
+ * indices, 0 = the band's top row. The boxes are the band's rows measured in
+ * screen space at the grab: the rows move while the drag runs, so hit-testing
+ * against where they started is what keeps the target from flickering. */
+interface RowDrag {
+  band: RowBand;
+  from: number;
+  to: number;
+  /** Pointer travel, clamped so the carried row stays inside its band. */
+  dy: number;
+  rows: { top: number; h: number }[];
+  /** The viewport the landing outline draws across. */
+  left: number;
+  width: number;
+}
+
+/** Where row `r` shows while `d` is in flight: the carried row is at the
+ * target, and the rows it passed close up behind it. */
+function shownRow(d: RowDrag, r: number): number {
+  if (r === d.from) return d.to;
+  if (d.from < d.to) return r > d.from && r <= d.to ? r - 1 : r;
+  return r >= d.to && r < d.from ? r + 1 : r;
+}
+
+/** The box the carried row will land in, in screen space. */
+function landingBox(d: RowDrag): { top: number; h: number } {
+  const held = d.rows[d.from];
+  const seat = d.rows[d.to];
+  return {
+    top: d.to > d.from ? seat.top + seat.h - held.h : seat.top,
+    h: held.h,
+  };
+}
 
 /** Where a dragged video clip can land. Re-exported name for the store's
  * placement union (existing track, 0 included / newly-inserted track). */
@@ -451,7 +493,7 @@ export function Timeline() {
   // the rows live in the scrolled content, but the toggles are pinned in the
   // gutter, so they need the rows' content-space tops.
   const [gutterYs, setGutterYs] = useState<{
-    video: { track: number; y: number }[];
+    video: { track: number; y: number; h: number }[];
     audioTop: number | null;
     textTop: number | null;
     subTop: number | null;
@@ -467,6 +509,7 @@ export function Timeline() {
     const video = Array.from(el.querySelectorAll<HTMLElement>("[data-tl-vrow]"), (r) => ({
       track: Number(r.dataset.tlVrow),
       y: Math.round(r.getBoundingClientRect().top - box.top + el.scrollTop),
+      h: Math.round(r.getBoundingClientRect().height),
     }));
     const audioTop = contentY("[data-tl-arows]");
     const textTop = contentY("[data-tl-trows]");
@@ -476,7 +519,9 @@ export function Timeline() {
       prev.textTop === textTop &&
       prev.subTop === subTop &&
       prev.video.length === video.length &&
-      prev.video.every((v, i) => v.track === video[i].track && v.y === video[i].y)
+      prev.video.every(
+        (v, i) => v.track === video[i].track && v.y === video[i].y && v.h === video[i].h
+      )
         ? prev
         : { video, audioTop, textTop, subTop }
     );
@@ -845,6 +890,91 @@ export function Timeline() {
   // Reveals the resting toggles while the pointer is over the track area;
   // a toggle whose track has anything off stays visible on its own.
   const [trackHover, setTrackHover] = useState(false);
+
+  // A whole row on its way to a new place in its band. The gutter is the
+  // handle: a press there grabs the row it sits on, and the drag stays inside
+  // that band — a row is only ever above or below its own kind, so there is
+  // nowhere else for it to go.
+  const [rowDrag, setRowDrag] = useState<RowDrag | null>(null);
+  // The band's rows in screen space, top row first. The video stack measures
+  // its own row elements (their heights vary with the mask key rail); the
+  // stacked bands are uniform, so their rows come off the band's top edge.
+  const rowBoxes = useCallback(
+    (band: RowBand): { top: number; h: number }[] => {
+      if (band === "video")
+        return Array.from(
+          innerRef.current?.querySelectorAll<HTMLElement>("[data-tl-vrow]") ?? [],
+          (el) => {
+            const r = el.getBoundingClientRect();
+            return { top: r.top, h: r.height };
+          }
+        );
+      const el = band === "overlay" ? overlayRef.current : audioRef.current;
+      if (!el) return [];
+      const h = band === "overlay" ? TEXT_H : AUDIO_H;
+      const n = band === "overlay" ? overlayLanes.count : audioLanes.count;
+      const top = el.getBoundingClientRect().top;
+      return Array.from({ length: n }, (_, r) => ({ top: top + r * h, h }));
+    },
+    [overlayLanes.count, audioLanes.count]
+  );
+  // Grab a row by its gutter cell and carry it to a new place in the band.
+  const gripRow = (band: RowBand, row: number) => (e: React.PointerEvent) => {
+    const rows = rowBoxes(band);
+    if (e.button !== 0 || rows.length < 2 || row >= rows.length) return;
+    const held = rows[row];
+    const first = rows[0];
+    const last = rows[rows.length - 1];
+    // The carried row travels between the band's own edges and no further.
+    const floor = first.top - held.top;
+    const ceil = last.top + last.h - (held.top + held.h);
+    let to = row;
+    setRowDrag({ band, from: row, to, dy: 0, rows, left: 0, width: 0 });
+    const view = scrollRef.current?.getBoundingClientRect();
+    const left = view?.left ?? 0;
+    const width = view?.width ?? 0;
+    startDrag(e, {
+      cursor: () => "grabbing",
+      onMove: (_dx, dy) => {
+        const travel = Math.max(floor, Math.min(ceil, dy));
+        const mid = held.top + held.h / 2 + travel;
+        to = rows.length - 1;
+        for (let i = 0; i < rows.length; i++)
+          if (mid < rows[i].top + rows[i].h) {
+            to = i;
+            break;
+          }
+        setRowDrag({ band, from: row, to, dy: travel, rows, left, width });
+      },
+      onUp: () => {
+        setRowDrag(null);
+        if (to === row) return;
+        const s = useEditor.getState();
+        // The video stack draws top-down but numbers bottom-up, so its rows
+        // reach the store flipped.
+        if (band === "video") s.moveVideoTrack(rows.length - 1 - row, rows.length - 1 - to);
+        else if (band === "overlay") s.moveOverlayLane(row, to);
+        else s.moveAudioLane(row, to);
+      },
+    });
+  };
+  /** A stacked band's row top while a row drag runs: the carried row rides the
+   * pointer, the rest sit at the place they are closing up into. */
+  const stackedRowTop = (band: "overlay" | "audio", row: number, h: number) =>
+    rowDrag?.band !== band
+      ? row * h
+      : row === rowDrag.from
+        ? row * h + rowDrag.dy
+        : shownRow(rowDrag, row) * h;
+  /** The same for the video stack, where rows are laid out in flow and shift
+   * by a transform instead. */
+  const videoRowShift = (row: number) => {
+    if (rowDrag?.band !== "video") return 0;
+    const step = rowDrag.rows[rowDrag.from].h + ROW_GAP;
+    if (row === rowDrag.from) return rowDrag.dy;
+    if (rowDrag.from < rowDrag.to) return row > rowDrag.from && row <= rowDrag.to ? -step : 0;
+    return row >= rowDrag.to && row < rowDrag.from ? step : 0;
+  };
 
   // Chat mention token per audio clip ("@s1"), keyed by clip id — the same
   // handles the chat resolves against, so the token shown on hover is exactly
@@ -1929,6 +2059,19 @@ export function Timeline() {
           style={marquee}
         />
       )}
+      {/* Where the carried row will sit once it lands. The rows have already
+          closed up around the slot; the outline says it is the one. */}
+      {rowDrag && rowDrag.to !== rowDrag.from && (
+        <div
+          className="pointer-events-none fixed z-50 rounded-md border border-dashed border-[#0a84ff]/70 bg-[#0a84ff]/5"
+          style={{
+            top: landingBox(rowDrag).top,
+            height: landingBox(rowDrag).h,
+            left: rowDrag.left,
+            width: rowDrag.width,
+          }}
+        />
+      )}
       <div
         ref={scrollRef}
         data-tl-scroll
@@ -2007,7 +2150,7 @@ export function Timeline() {
                   {gapHighlight(
                     { kind: "overlay", index: lane },
                     TEXT_H - 6,
-                    r * TEXT_H + topRowShift
+                    stackedRowTop("overlay", r, TEXT_H) + topRowShift
                   )}
                 </Fragment>
               ))}
@@ -2131,8 +2274,15 @@ export function Timeline() {
                     key={o.id}
                     overlay={o}
                     pps={pps}
-                    top={homeRow * TEXT_H + topRowShift}
+                    top={stackedRowTop("overlay", homeRow, TEXT_H) + topRowShift}
                     homeRow={homeRow}
+                    rowMove={
+                      rowDrag?.band === "overlay"
+                        ? homeRow === rowDrag.from
+                          ? "lift"
+                          : "part"
+                        : null
+                    }
                     laneCount={overlayLanes.count}
                     selected={selKeys.has(`overlay:${o.id}`)}
                     drag={drag}
@@ -2239,13 +2389,21 @@ export function Timeline() {
           {/* A drag carried above the stack opens a new top layer: the row
               grows in here and folds away when the drag comes back down. */}
           {newTrackRow(topInsertLevel)}
-          {aboveTracks.map((track) => {
+          {aboveTracks.map((track, row) => {
             const railH = railFor(overlayTrackSpans.get(track) ?? []);
+            const lifted = rowDrag?.band === "video" && rowDrag.from === row;
             return (
             <div
               key={`ov-${track}`}
-              className="relative mt-1.5"
-              style={{ height: OVERLAY_H + railH }}
+              className={cn(
+                "relative mt-1.5",
+                rowDrag?.band === "video" && !lifted && "transition-transform duration-150 ease-out",
+                lifted && "pointer-events-none z-20 opacity-90 drop-shadow-2xl"
+              )}
+              style={{
+                height: OVERLAY_H + railH,
+                transform: videoRowShift(row) ? `translateY(${videoRowShift(row)}px)` : undefined,
+              }}
               data-tl-vrow={track}
               onPointerDown={deselectIfSelf}
               onContextMenu={openGapMenu({ kind: "video", index: track })}
@@ -2303,8 +2461,19 @@ export function Timeline() {
             dropType === "video" ||
             samePlacement(overlayDrop?.target ?? null, TRACK_ZERO)) && (
           <div
-            className="relative mt-1.5"
-            style={{ height: VIDEO_H + rail0 }}
+            className={cn(
+              "relative mt-1.5",
+              rowDrag?.band === "video" &&
+                (rowDrag.from === aboveTracks.length
+                  ? "pointer-events-none z-20 opacity-90 drop-shadow-2xl"
+                  : "transition-transform duration-150 ease-out")
+            )}
+            style={{
+              height: VIDEO_H + rail0,
+              transform: videoRowShift(aboveTracks.length)
+                ? `translateY(${videoRowShift(aboveTracks.length)}px)`
+                : undefined,
+            }}
             data-tl-vrow={0}
             onPointerDown={deselectIfSelf}
             onContextMenu={openGapMenu({ kind: "video", index: 0 })}
@@ -2376,7 +2545,11 @@ export function Timeline() {
               )}
               {audioLanes.used.map((lane, r) => (
                 <Fragment key={`agap-${lane}`}>
-                  {gapHighlight({ kind: "audio", index: lane }, AUDIO_H - 4, r * AUDIO_H)}
+                  {gapHighlight(
+                    { kind: "audio", index: lane },
+                    AUDIO_H - 4,
+                    stackedRowTop("audio", r, AUDIO_H)
+                  )}
                 </Fragment>
               ))}
               {laneDrag?.kind === "audio" &&
@@ -2422,8 +2595,15 @@ export function Timeline() {
                     asset={assets.find((x) => x.id === a.assetId)}
                     mention={audioMentions.get(a.id)}
                     pps={pps}
-                    top={homeRow * AUDIO_H}
+                    top={stackedRowTop("audio", homeRow, AUDIO_H)}
                     homeRow={homeRow}
+                    rowMove={
+                      rowDrag?.band === "audio"
+                        ? homeRow === rowDrag.from
+                          ? "lift"
+                          : "part"
+                        : null
+                    }
                     laneCount={audioLanes.count}
                     selected={selKeys.has(`audio:${a.id}`)}
                     drag={drag}
@@ -2543,7 +2723,42 @@ export function Timeline() {
         style={{ width: PAD_SIDE, top: RULER_H }}
       >
         <div ref={gutterCtlRef} className="absolute inset-x-0 bottom-0" style={{ top: -RULER_H }}>
-          {gutterYs.video.map(({ track, y }) => {
+          {/* Each row's gutter cell is the handle for the row itself: press and
+              carry it to another place in its own band. Drawn before the
+              toggles so an eye or a speaker still takes its own press. */}
+          {gutterYs.video.map(({ track, y, h }, row) => (
+            <RowGrip
+              key={`vgrip-${track}`}
+              top={y}
+              height={h}
+              barH={VIDEO_H - 4}
+              enabled={gutterYs.video.length > 1}
+              onGrab={gripRow("video", row)}
+            />
+          ))}
+          {gutterYs.textTop !== null &&
+            overlayLanes.used.map((lane, r) => (
+              <RowGrip
+                key={`tgrip-${lane}`}
+                top={gutterYs.textTop! + stackedRowTop("overlay", r, TEXT_H)}
+                height={TEXT_H}
+                barH={TEXT_H - 6}
+                enabled={overlayLanes.count > 1}
+                onGrab={gripRow("overlay", r)}
+              />
+            ))}
+          {gutterYs.audioTop !== null &&
+            audioLanes.used.map((lane, r) => (
+              <RowGrip
+                key={`agrip-${lane}`}
+                top={gutterYs.audioTop! + stackedRowTop("audio", r, AUDIO_H)}
+                height={AUDIO_H}
+                barH={AUDIO_H - 4}
+                enabled={audioLanes.count > 1}
+                onGrab={gripRow("audio", r)}
+              />
+            ))}
+          {gutterYs.video.map(({ track, y }, row) => {
             const t = trackState.get(track);
             if (!t) return null;
             const rows: React.ReactNode[] = [
@@ -2554,6 +2769,7 @@ export function Timeline() {
                 partial={t.hidden > 0}
                 reveal={trackHover}
                 top={y + (t.sound > 0 ? VIDEO_H / 2 - 22 : VIDEO_H / 2 - 8)}
+                onGrab={gripRow("video", row)}
                 onToggle={() =>
                   useEditor.getState().setTrackHidden(track, t.hidden !== t.total)
                 }
@@ -2568,6 +2784,7 @@ export function Timeline() {
                   partial={t.muted > 0}
                   reveal={trackHover}
                   top={y + VIDEO_H / 2 + 6}
+                  onGrab={gripRow("video", row)}
                   onToggle={() =>
                     useEditor.getState().setTrackMuted(track, t.muted !== t.sound)
                   }
@@ -2586,7 +2803,8 @@ export function Timeline() {
                   off={t.hidden === t.total}
                   partial={t.hidden > 0}
                   reveal={trackHover}
-                  top={gutterYs.audioTop! + r * AUDIO_H + AUDIO_H / 2 - 8}
+                  top={gutterYs.audioTop! + stackedRowTop("audio", r, AUDIO_H) + AUDIO_H / 2 - 8}
+                  onGrab={gripRow("audio", r)}
                   onToggle={() =>
                     useEditor.getState().setAudioLaneHidden(lane, t.hidden !== t.total)
                   }
@@ -2604,7 +2822,8 @@ export function Timeline() {
                   off={t.hidden === t.total}
                   partial={t.hidden > 0}
                   reveal={trackHover}
-                  top={gutterYs.textTop! + r * TEXT_H + TEXT_H / 2 - 8}
+                  top={gutterYs.textTop! + stackedRowTop("overlay", r, TEXT_H) + TEXT_H / 2 - 8}
+                  onGrab={gripRow("overlay", r)}
                   onToggle={() =>
                     useEditor.getState().setTextLaneHidden(lane, t.hidden !== t.total)
                   }
@@ -3801,6 +4020,41 @@ function Filmstrip({
  * full-strength "whole track". A click always turns the whole track off, and
  * the next click turns every segment back on — individually disabled segments
  * included. */
+/** One row's gutter cell, and the handle for the whole row: pressing it picks
+ * the row up and carries it to another place in its own band. A band with a
+ * single row has no reorder in it, so the cell stays out of the way and the
+ * gutter scrubs there as it always did. */
+function RowGrip({
+  top,
+  height,
+  barH,
+  enabled,
+  onGrab,
+}: {
+  top: number;
+  height: number;
+  /** The band's bar height, so the hover surface lines up with the bars on
+   * the row instead of the row box they sit inside. */
+  barH: number;
+  enabled: boolean;
+  onGrab: (e: React.PointerEvent) => void;
+}) {
+  if (!enabled) return null;
+  return (
+    <div
+      title="Drag to reorder the row"
+      className="group pointer-events-auto absolute inset-x-0 cursor-grab"
+      style={{ top, height }}
+      onPointerDown={onGrab}
+    >
+      <span
+        className="pointer-events-none absolute inset-x-0 bg-foreground/10 opacity-0 transition-opacity group-hover:opacity-100"
+        style={{ top: 2, height: barH }}
+      />
+    </div>
+  );
+}
+
 function GutterToggle({
   kind,
   off,
@@ -3808,6 +4062,7 @@ function GutterToggle({
   reveal,
   top,
   onToggle,
+  onGrab,
 }: {
   kind: "hide" | "mute";
   off: boolean;
@@ -3815,6 +4070,9 @@ function GutterToggle({
   reveal: boolean;
   top: number;
   onToggle: () => void;
+  /** Grab the row this toggle rides. A press that travels is a row drag; one
+   * that does not is a click on the toggle and nothing more. */
+  onGrab?: (e: React.PointerEvent) => void;
 }) {
   const active = off || partial;
   const title =
@@ -3843,7 +4101,27 @@ function GutterToggle({
             : "pointer-events-none opacity-0"
       )}
       style={{ top }}
-      onPointerDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        if (!onGrab || e.button !== 0) return;
+        const x = e.clientX;
+        const y = e.clientY;
+        const drop = () => {
+          window.removeEventListener("pointermove", travel);
+          window.removeEventListener("pointerup", drop);
+          window.removeEventListener("pointercancel", drop);
+        };
+        // Once the press has travelled it belongs to the row, so the gesture
+        // hands over from the press's own point and the click never lands.
+        const travel = (ev: PointerEvent) => {
+          if (Math.abs(ev.clientX - x) <= 3 && Math.abs(ev.clientY - y) <= 3) return;
+          drop();
+          onGrab(e);
+        };
+        window.addEventListener("pointermove", travel);
+        window.addEventListener("pointerup", drop);
+        window.addEventListener("pointercancel", drop);
+      }}
       onClick={onToggle}
     >
       <Icon className="size-3" />
@@ -3937,6 +4215,7 @@ function AudioView({
   selected,
   drag,
   parting,
+  rowMove,
   onDrag,
   onSnap,
 }: {
@@ -3955,6 +4234,9 @@ function AudioView({
   drag: LaneDrag | null;
   /** Another sound is dragging: animate this bar's shifts as it parts. */
   parting: boolean;
+  /** A row drag is running in this band: "lift" is the row being carried,
+   * "part" a row sliding into the place it closes up into. */
+  rowMove: "lift" | "part" | null;
   /** Publish (or clear) the in-flight drag so the slot and rows track it. */
   onDrag: (d: LaneDrag | null) => void;
   /** Paint (or clear) the snap guide at this stage-x pixel. */
@@ -4002,7 +4284,10 @@ function AudioView({
         clip.hidden && "opacity-40 grayscale",
         drag
           ? "tl-audio-ghost pointer-events-none cursor-grabbing opacity-80 shadow-2xl"
-          : parting && "transition-[left] duration-150 ease-out"
+          : parting && "transition-[left] duration-150 ease-out",
+        rowMove === "lift"
+          ? "pointer-events-none opacity-80 shadow-2xl"
+          : rowMove === "part" && "transition-[top] duration-150 ease-out"
       )}
       style={{
         left: drag ? drag.ghostX : clip.start * pps,
@@ -4010,7 +4295,7 @@ function AudioView({
         width: Math.max(10, w - CLIP_GAP),
         height: AUDIO_H - 4,
         // Inline so it beats SELECTED_SHADOW's z-10 class on the same element.
-        zIndex: drag ? 20 : undefined,
+        zIndex: drag || rowMove === "lift" ? 20 : undefined,
       }}
       data-tl-sel={`audio:${clip.id}`}
       onPointerDown={(e) => startLaneMove(e, "audio", clip.id, ui)}
@@ -4204,6 +4489,7 @@ function TextBar({
   selected,
   drag,
   parting,
+  rowMove,
   onDrag,
   onSnap,
   onMenu,
@@ -4214,6 +4500,9 @@ function TextBar({
   homeRow: number;
   laneCount: number;
   selected: boolean;
+  /** A row drag is running in this band: "lift" is the row being carried,
+   * "part" a row sliding into the place it closes up into. */
+  rowMove: "lift" | "part" | null;
   /** This bar's live drag when it is the one being carried (ghost mode). */
   drag: LaneDrag | null;
   /** Another title is dragging: animate this bar's shifts as it parts. */
@@ -4261,7 +4550,10 @@ function TextBar({
         selected && SELECTED_SHADOW,
         drag
           ? "tl-text-ghost pointer-events-none cursor-grabbing opacity-80 shadow-2xl"
-          : parting && "transition-[left] duration-150 ease-out"
+          : parting && "transition-[left] duration-150 ease-out",
+        rowMove === "lift"
+          ? "pointer-events-none opacity-80 shadow-2xl"
+          : rowMove === "part" && "transition-[top] duration-150 ease-out"
       )}
       style={{
         left: drag ? drag.ghostX : o.start * pps,
@@ -4269,7 +4561,7 @@ function TextBar({
         width: Math.max(8, w - CLIP_GAP),
         height: TEXT_H - 6,
         // Inline so it beats SELECTED_SHADOW's z-10 class on the same element.
-        zIndex: drag ? 20 : undefined,
+        zIndex: drag || rowMove === "lift" ? 20 : undefined,
       }}
       data-tl-sel={`overlay:${o.id}`}
       onPointerDown={(e) => startLaneMove(e, "overlay", o.id, ui)}

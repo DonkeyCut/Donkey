@@ -148,8 +148,15 @@ export function OverlayLayer({
   captions?: boolean;
 }) {
   const allOverlays = useEditor((s) => s.overlays);
+  // Lane 0 is the top row, so the deepest lane paints first and lane 0 lands
+  // over it. These boxes stack by DOM order alone; the document's array order
+  // is the order elements were made, which is not the stack the rows show and
+  // not the one the export draws.
   const overlays = useMemo(
-    () => allOverlays.filter((o) => laneOf(o) >= from && laneOf(o) < to),
+    () =>
+      allOverlays
+        .filter((o) => laneOf(o) >= from && laneOf(o) < to)
+        .sort((a, b) => laneOf(b) - laneOf(a)),
     [allOverlays, from, to]
   );
   const selection = useEditor((s) => s.selection);
@@ -274,15 +281,6 @@ export function OverlayLayer({
       className="pointer-events-none absolute inset-0"
       style={{ transform, filter }}
     >
-      {captions && (
-        <SubtitleCaptions
-          stageWidth={stageWidth}
-          stageHeight={stageHeight}
-          registerBox={registerBox}
-          snap={snap}
-          onSnapEnd={clearGuides}
-        />
-      )}
       {overlays.map((o) => {
         if (o.hidden) return null;
         // An effect has no place in the frame — it grades what plays under it
@@ -313,6 +311,15 @@ export function OverlayLayer({
           />
         );
       })}
+      {captions && (
+        <SubtitleCaptions
+          stageWidth={stageWidth}
+          stageHeight={stageHeight}
+          registerBox={registerBox}
+          snap={snap}
+          onSnapEnd={clearGuides}
+        />
+      )}
       {guides.v.map((x, i) => (
         <div
           key={`v${i}`}
