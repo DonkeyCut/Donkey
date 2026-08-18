@@ -18,6 +18,9 @@ export type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
 /** The default set: four corners and the two side grips. */
 export const BOX_HANDLES: ResizeHandle[] = ["nw", "ne", "se", "sw", "w", "e"];
+/** Corners and all four sides, for a box whose width and height each pull on
+ * their own. */
+export const FRAME_HANDLES: ResizeHandle[] = ["nw", "ne", "se", "sw", "w", "e", "n", "s"];
 /** Corners alone, for a box whose axes are locked together. */
 export const CORNER_HANDLES: ResizeHandle[] = ["nw", "ne", "se", "sw"];
 

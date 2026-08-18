@@ -41,6 +41,7 @@ import { subjectMatteSnapshot } from "@/cut/lib/behindPass";
 import {
   BOX_HANDLES,
   CORNER_HANDLES,
+  FRAME_HANDLES,
   HANDLE_AXIS,
   TransformHandles,
   type ResizeHandle,
@@ -747,9 +748,12 @@ function OverlayItem({
       }
       if (m.kind === "shape") {
         const w = { w: Math.min(2, Math.max(0.01, m.w * k)) };
-        // A side grip leaves the shape's height where it is.
+        const h = { h: Math.min(2, Math.max(0.002, m.h * k)) };
+        // A side grip pulls its own axis alone: left/right take the width,
+        // top/bottom the height.
         if (axis.y === 0) return w;
-        return { ...w, h: Math.min(2, Math.max(0.002, m.h * k)) };
+        if (axis.x === 0) return h;
+        return { ...w, ...h };
       }
       if (m.kind === "sticker") return { w: Math.min(1.5, Math.max(0.02, m.w * k)) };
       return {};
@@ -757,8 +761,11 @@ function OverlayItem({
     // How much the grabbed element actually grew once its size clamps, so
     // the planted point holds through the clamp too.
     const grew = (patch: Partial<Overlay>): number => {
-      const p = patch as { size?: number; w?: number };
+      const p = patch as { size?: number; w?: number; h?: number };
       if (isTextOverlay(self)) return (p.size ?? self.size) / self.size;
+      // A top/bottom grip on a shape moves its height, so that is the side
+      // the planted point reads.
+      if (self.kind === "shape" && axis.x === 0) return (p.h ?? self.h) / self.h;
       if (self.kind === "shape" || self.kind === "sticker") return (p.w ?? self.w) / self.w;
       return 1;
     };
@@ -947,6 +954,9 @@ function OverlayItem({
             rotation={live?.rotation ?? o.rotation ?? 0}
             angle={spin}
             rotateCursor={rotateCursor(live?.rotation ?? o.rotation ?? 0)}
+            handles={
+              o.kind === "shape" && !lineLikeShape(o.shape) ? FRAME_HANDLES : BOX_HANDLES
+            }
             onResize={resizeFrom}
             onRotate={rotateFrom}
           />
@@ -1229,7 +1239,7 @@ export function MaskGizmoCore({
       : m.kind === "mirror"
         ? ["n", "s"]
         : sizable
-          ? BOX_HANDLES
+          ? FRAME_HANDLES
           : [];
   const clampSize = (v: number) => Math.min(2, Math.max(0.01, v));
   // Detents matching the inspector's: size locks onto exactly full frame,
