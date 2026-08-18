@@ -495,7 +495,7 @@ export async function paintElement(
     // A wipe uncovers the element from its left edge: clip to the uncovered
     // share of its box and paint the whole thing behind it.
     if (reveal <= 0) return;
-    const b = await measureElementBounds(overlay, frame, env);
+    const b = await measureElementBounds(overlay, frame, env, { pad: false });
     ctx.save();
     ctx.beginPath();
     ctx.rect(b.cx - b.w / 2, b.cy - b.h / 2, b.w * reveal, b.h);
@@ -579,11 +579,14 @@ export async function renderElementPng(
 
 /** An element's resting box in output pixels (center + size), rotation left
  * to the caller. Conservative on purpose: it feeds the animated-region crop,
- * where a few spare pixels beat a clipped shadow. */
+ * where a few spare pixels beat a clipped shadow. `pad: false` drops that
+ * slack and returns the box the DOM lays out, which is what a wipe clips to.
+ */
 export async function measureElementBounds(
   overlay: Overlay,
   frame: PaintFrame,
-  env: RenderEnv
+  env: RenderEnv,
+  opts?: { pad?: boolean }
 ): Promise<{ cx: number; cy: number; w: number; h: number }> {
   const cx = overlay.x * frame.width;
   const cy = overlay.y * frame.height;
@@ -629,6 +632,7 @@ export async function measureElementBounds(
     w += PLATE_PAD_X * fpx * 2;
     h += PLATE_PAD_Y * fpx * 2;
   }
+  if (opts?.pad === false) return { cx, cy, w, h };
   const strokePad = (o.stroke?.width ?? 0) * fpx * 2;
   const shadow = resolveShadow(o.shadow);
   const shadowPad = shadow ? (shadow.blur + Math.abs(shadow.offsetY)) * frame.scale : 0;

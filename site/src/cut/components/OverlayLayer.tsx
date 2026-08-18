@@ -1422,7 +1422,8 @@ export function MaskGizmoCore({
           left: `calc(50% + ${cx}px)`,
           top: `calc(50% + ${cy}px)`,
           width: Math.max(1, w),
-          height: Math.max(1, h),
+          // A linear mask is a line: its frame has no height to lift over.
+          height: m.kind === "linear" ? 1 : Math.max(1, h),
           transform: `translate(-50%, -50%) rotate(${f.rotation}deg)`,
         }}
         onRotate={rotateMask}
