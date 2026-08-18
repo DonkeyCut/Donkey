@@ -264,7 +264,7 @@ function FontBody({ item }: { item: LightboxItem }) {
     <div
       className={cn(
         "overflow-hidden rounded-2xl bg-white text-black shadow-2xl",
-        item.poster ? "" : "px-10 py-12"
+        item.poster ? "" : "px-10 py-12",
       )}
     >
       <FontSpecimen

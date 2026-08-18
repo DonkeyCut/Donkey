@@ -18,7 +18,15 @@ import { mediaObjectUrl } from "./mediaCdn";
 import { getProject, takenMediaNames } from "./projects";
 import { copy, del, head, libraryKey, presignPut, projectMediaKey } from "./r2";
 import { addUsage, quotaCheck } from "./usage";
-import { caught, decodeFileParam, dedupeName, err, redirect, safeFileName, typeOf } from "./util";
+import {
+  caught,
+  decodeFileParam,
+  dedupeName,
+  err,
+  redirect,
+  safeFileName,
+  typeOf,
+} from "./util";
 
 /** Descriptive fields the engine derives with ffprobe; the cloud stores them on
  * the row, supplied by the client (which probed in the browser) or copied from
@@ -64,7 +72,7 @@ async function takenLibraryNames(userId: string): Promise<Set<string>> {
 
 function assetView(
   row: { id: string; folderId: string | null; meta: unknown; createdAt: Date },
-  obj: { fileName: string }
+  obj: { fileName: string },
 ): LibraryAsset {
   const meta = (row.meta ?? {}) as AssetMeta;
   return {
@@ -81,7 +89,12 @@ function assetView(
   };
 }
 
-function templateView(row: { id: string; name: string; doc: unknown; createdAt: Date }): LibraryTemplate {
+function templateView(row: {
+  id: string;
+  name: string;
+  doc: unknown;
+  createdAt: Date;
+}): LibraryTemplate {
   const doc = row.doc as unknown as TemplateDoc;
   return {
     id: row.id,
@@ -105,9 +118,19 @@ async function findTemplate(userId: string, id: string) {
 
 /** A project media object row, complete, by fileName — the copy source for
  * save/saveTemplate/addToTemplate. */
-async function projectMediaObject(userId: string, projectId: string, fileName: string) {
+async function projectMediaObject(
+  userId: string,
+  projectId: string,
+  fileName: string,
+) {
   return prisma.cutMediaObject.findFirst({
-    where: { userId, projectId, kind: "media", fileName, uploadState: "complete" },
+    where: {
+      userId,
+      projectId,
+      kind: "media",
+      fileName,
+      uploadState: "complete",
+    },
   });
 }
 
@@ -122,7 +145,7 @@ async function libraryMediaObject(userId: string, fileName: string) {
 async function copyIntoLibrary(
   userId: string,
   src: MediaObjectRow,
-  taken: Set<string>
+  taken: Set<string>,
 ): Promise<string> {
   const dest = dedupeName(safeFileName(src.fileName), taken);
   taken.add(dest);
@@ -150,9 +173,11 @@ async function copyIntoLibrary(
  * route and the storage-reclamation sweep (gc.ts). */
 export async function deleteLibraryAssetCascade(
   userId: string,
-  id: string
+  id: string,
 ): Promise<number | null> {
-  const asset = await prisma.cutLibraryAsset.findFirst({ where: { id, userId } });
+  const asset = await prisma.cutLibraryAsset.findFirst({
+    where: { id, userId },
+  });
   if (!asset) return null;
   const obj = await prisma.cutMediaObject.findFirst({
     where: { id: asset.mediaObjectId, userId },
@@ -171,7 +196,8 @@ export async function deleteLibraryAssetCascade(
     .reduce((n, o) => n + Number(o.bytes), 0);
   await prisma.$transaction(async (tx) => {
     await tx.cutLibraryAsset.delete({ where: { id } });
-    for (const o of objects) await tx.cutMediaObject.delete({ where: { id: o.id } });
+    for (const o of objects)
+      await tx.cutMediaObject.delete({ where: { id: o.id } });
     if (freed > 0) await addUsage(tx, userId, -freed);
   });
   if (objects.length > 0) await del(objects.map((o) => o.r2Key));
@@ -184,7 +210,7 @@ async function copyIntoProject(
   userId: string,
   projectId: string,
   libFileName: string,
-  taken: Set<string>
+  taken: Set<string>,
 ): Promise<string> {
   const src = await libraryMediaObject(userId, libFileName);
   if (!src) throw new Error("Library asset not found.");
@@ -216,7 +242,8 @@ async function deleteLibraryObject(userId: string, fileName: string) {
   if (!row) return;
   await prisma.$transaction(async (tx) => {
     await tx.cutMediaObject.delete({ where: { id: row.id } });
-    if (row.uploadState === "complete") await addUsage(tx, userId, -Number(row.bytes));
+    if (row.uploadState === "complete")
+      await addUsage(tx, userId, -Number(row.bytes));
   });
   await del([row.r2Key]);
 }
@@ -224,9 +251,18 @@ async function deleteLibraryObject(userId: string, fileName: string) {
 export const libraryCloud = {
   async list(userId: string) {
     const [assetRows, folderRows, templateRows] = await Promise.all([
-      prisma.cutLibraryAsset.findMany({ where: { userId }, orderBy: { createdAt: "desc" } }),
-      prisma.cutFolder.findMany({ where: { userId, scope: "library" }, orderBy: { createdAt: "asc" } }),
-      prisma.cutTemplate.findMany({ where: { userId }, orderBy: { createdAt: "desc" } }),
+      prisma.cutLibraryAsset.findMany({
+        where: { userId },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.cutFolder.findMany({
+        where: { userId, scope: "library" },
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.cutTemplate.findMany({
+        where: { userId },
+        orderBy: { createdAt: "desc" },
+      }),
     ]);
     const objs = await prisma.cutMediaObject.findMany({
       where: { id: { in: assetRows.map((r) => r.mediaObjectId) } },
@@ -251,16 +287,26 @@ export const libraryCloud = {
   /** Mint a presigned PUT for a direct-to-library upload. */
   async presign(userId: string, req: Request) {
     try {
-      const body = (await req.json()) as { fileName?: string; mime?: string; bytes?: number };
+      const body = (await req.json()) as {
+        fileName?: string;
+        mime?: string;
+        bytes?: number;
+      };
       if (!body.fileName || typeof body.bytes !== "number" || body.bytes <= 0) {
         return err("fileName and bytes are required.", 400);
       }
       if (!typeOf(body.fileName)) return err("Unsupported file type.", 400);
       const over = await quotaCheck(userId, body.bytes);
       if (over) return over;
-      const fileName = dedupeName(safeFileName(body.fileName), await takenLibraryNames(userId));
+      const fileName = dedupeName(
+        safeFileName(body.fileName),
+        await takenLibraryNames(userId),
+      );
       const key = libraryKey(userId, fileName);
-      const url = await presignPut(key, body.mime ?? "application/octet-stream");
+      const url = await presignPut(
+        key,
+        body.mime ?? "application/octet-stream",
+      );
       await prisma.cutMediaObject.create({
         data: {
           userId,
@@ -287,18 +333,28 @@ export const libraryCloud = {
         meta?: AssetMeta;
       };
       if (!key) return err("key is required.", 400);
-      const obj = await prisma.cutMediaObject.findFirst({ where: { userId, r2Key: key } });
+      const obj = await prisma.cutMediaObject.findFirst({
+        where: { userId, r2Key: key },
+      });
       if (!obj) return err("Unknown upload.", 404);
       const info = obj.uploadState === "complete" ? null : await head(key);
-      if (obj.uploadState !== "complete" && !info) return err("The upload never arrived.", 400);
+      if (obj.uploadState !== "complete" && !info)
+        return err("The upload never arrived.", 400);
       // A cover that came up alongside the file: its own object, finished the
       // same way, named on the asset so the delete cascade takes it too.
       const posterObj = posterKey
-        ? await prisma.cutMediaObject.findFirst({ where: { userId, r2Key: posterKey } })
+        ? await prisma.cutMediaObject.findFirst({
+            where: { userId, r2Key: posterKey },
+          })
         : null;
       const posterInfo =
-        posterObj && posterObj.uploadState !== "complete" ? await head(posterKey!) : null;
-      const posterFile = posterInfo || posterObj?.uploadState === "complete" ? posterObj!.fileName : undefined;
+        posterObj && posterObj.uploadState !== "complete"
+          ? await head(posterKey!)
+          : null;
+      const posterFile =
+        posterInfo || posterObj?.uploadState === "complete"
+          ? posterObj!.fileName
+          : undefined;
       const row = await prisma.$transaction(async (tx) => {
         if (posterObj && posterInfo) {
           await tx.cutMediaObject.update({
@@ -330,9 +386,11 @@ export const libraryCloud = {
               name: meta?.name ?? obj.fileName,
               type: meta?.type ?? typeOf(obj.fileName) ?? "video",
               duration: meta?.duration ?? 0,
-              ...(meta?.width ? { width: meta.width, height: meta.height } : {}),
+              ...(meta?.width
+                ? { width: meta.width, height: meta.height }
+                : {}),
               ...(meta?.source ? { source: meta.source } : {}),
-              ...(posterFile ?? meta?.posterFile
+              ...((posterFile ?? meta?.posterFile)
                 ? { posterFile: posterFile ?? meta?.posterFile }
                 : {}),
             } as unknown as Prisma.InputJsonValue,
@@ -348,17 +406,25 @@ export const libraryCloud = {
   /** Copy a library asset into a project's media space. */
   async use(userId: string, req: Request) {
     try {
-      const { assetId, projectId } = (await req.json()) as { assetId: string; projectId: string };
-      const asset = await prisma.cutLibraryAsset.findFirst({ where: { id: assetId, userId } });
+      const { assetId, projectId } = (await req.json()) as {
+        assetId: string;
+        projectId: string;
+      };
+      const asset = await prisma.cutLibraryAsset.findFirst({
+        where: { id: assetId, userId },
+      });
       if (!asset) throw new Error("Library asset not found.");
-      const obj = await prisma.cutMediaObject.findUnique({ where: { id: asset.mediaObjectId } });
+      const obj = await prisma.cutMediaObject.findUnique({
+        where: { id: asset.mediaObjectId },
+      });
       if (!obj) throw new Error("Library asset not found.");
-      if (!(await getProject(userId, projectId))) throw new Error("Project not found.");
+      if (!(await getProject(userId, projectId)))
+        throw new Error("Project not found.");
       const fileName = await copyIntoProject(
         userId,
         projectId,
         obj.fileName,
-        await takenMediaNames(userId, projectId)
+        await takenMediaNames(userId, projectId),
       );
       return Response.json({ fileName });
     } catch (e) {
@@ -377,10 +443,14 @@ export const libraryCloud = {
       const src = await projectMediaObject(userId, projectId, fileName);
       if (!src) throw new Error("Media file not found in project.");
       const project = await getProject(userId, projectId);
-      const docAsset = (project?.doc as { assets?: StoredAsset[] } | undefined)?.assets?.find(
-        (a) => a.fileName === fileName
+      const docAsset = (
+        project?.doc as { assets?: StoredAsset[] } | undefined
+      )?.assets?.find((a) => a.fileName === fileName);
+      const dest = await copyIntoLibrary(
+        userId,
+        src,
+        await takenLibraryNames(userId),
       );
-      const dest = await copyIntoLibrary(userId, src, await takenLibraryNames(userId));
       const obj = await libraryMediaObject(userId, dest);
       if (!obj) throw new Error("Could not save to library.");
       const row = await prisma.cutLibraryAsset.create({
@@ -391,7 +461,9 @@ export const libraryCloud = {
             name: name || fileName,
             type: docAsset?.type ?? typeOf(dest) ?? "video",
             duration: docAsset?.duration ?? 0,
-            ...(docAsset?.width ? { width: docAsset.width, height: docAsset.height } : {}),
+            ...(docAsset?.width
+              ? { width: docAsset.width, height: docAsset.height }
+              : {}),
           } as unknown as Prisma.InputJsonValue,
         },
       });
@@ -404,16 +476,24 @@ export const libraryCloud = {
   /** Move an item — asset or template — into a folder (or `null` to ungroup). */
   async move(userId: string, req: Request) {
     try {
-      const { id, folderId } = (await req.json()) as { id: string; folderId: string | null };
+      const { id, folderId } = (await req.json()) as {
+        id: string;
+        folderId: string | null;
+      };
       if (folderId) {
         const folder = await prisma.cutFolder.findFirst({
           where: { id: folderId, userId, scope: "library" },
         });
         if (!folder) throw new Error("Folder not found.");
       }
-      const asset = await prisma.cutLibraryAsset.findFirst({ where: { id, userId } });
+      const asset = await prisma.cutLibraryAsset.findFirst({
+        where: { id, userId },
+      });
       if (asset) {
-        await prisma.cutLibraryAsset.update({ where: { id }, data: { folderId: folderId ?? null } });
+        await prisma.cutLibraryAsset.update({
+          where: { id },
+          data: { folderId: folderId ?? null },
+        });
         return Response.json({ ok: true });
       }
       const template = await findTemplate(userId, id);
@@ -445,8 +525,8 @@ export const libraryCloud = {
       return redirect(
         mediaObjectUrl(
           libraryKey(userId, fileName),
-          download ? { downloadName: fileName } : undefined
-        )
+          download ? { downloadName: fileName } : undefined,
+        ),
       );
     } catch (e) {
       return caught(e, "Bad request.", 400);
@@ -463,7 +543,11 @@ export const libraryCloud = {
       const row = await prisma.cutFolder.create({
         data: { userId, name: trimmed.slice(0, 80), scope: "library" },
       });
-      return Response.json({ id: row.id, name: row.name, createdAt: row.createdAt.getTime() });
+      return Response.json({
+        id: row.id,
+        name: row.name,
+        createdAt: row.createdAt.getTime(),
+      });
     } catch (e) {
       return caught(e, "Could not create folder.");
     }
@@ -474,7 +558,9 @@ export const libraryCloud = {
       const { name } = (await req.json()) as { name?: string };
       const trimmed = (name ?? "").trim();
       if (!trimmed) throw new Error("Folder name required.");
-      const row = await prisma.cutFolder.findFirst({ where: { id, userId, scope: "library" } });
+      const row = await prisma.cutFolder.findFirst({
+        where: { id, userId, scope: "library" },
+      });
       if (!row) throw new Error("Folder not found.");
       const updated = await prisma.cutFolder.update({
         where: { id },
@@ -493,7 +579,9 @@ export const libraryCloud = {
   async deleteFolder(userId: string, id: string) {
     try {
       await prisma.$transaction(async (tx) => {
-        await tx.cutFolder.deleteMany({ where: { id, userId, scope: "library" } });
+        await tx.cutFolder.deleteMany({
+          where: { id, userId, scope: "library" },
+        });
         // Items in the folder fall back to ungrouped rather than vanishing.
         await tx.cutLibraryAsset.updateMany({
           where: { userId, folderId: id },
@@ -522,8 +610,11 @@ export const libraryCloud = {
    * copied into the library privately, then the edit is stored. */
   async saveTemplate(userId: string, req: Request) {
     try {
-      const { projectId, ...input } = (await req.json()) as { projectId: string } & TemplateInput;
-      if (!(await getProject(userId, projectId))) throw new Error("Project not found.");
+      const { projectId, ...input } = (await req.json()) as {
+        projectId: string;
+      } & TemplateInput;
+      if (!(await getProject(userId, projectId)))
+        throw new Error("Project not found.");
       if (!input.media?.length && !input.texts?.length && !input.cues?.length) {
         throw new Error("Nothing to save.");
       }
@@ -533,7 +624,14 @@ export const libraryCloud = {
         const src = await projectMediaObject(userId, projectId, m.fileName);
         if (!src) throw new Error("Media file not found in project.");
         const dest = await copyIntoLibrary(userId, src, taken);
-        media.push({ fileName: dest, name: m.name, type: m.type, duration: m.duration, width: m.width, height: m.height });
+        media.push({
+          fileName: dest,
+          name: m.name,
+          type: m.type,
+          duration: m.duration,
+          width: m.width,
+          height: m.height,
+        });
       }
       const doc: TemplateDoc = {
         folderId: null,
@@ -545,11 +643,74 @@ export const libraryCloud = {
         cues: input.cues ?? [],
       };
       const row = await prisma.cutTemplate.create({
-        data: { userId, name: (input.name || "Template").trim().slice(0, 80), doc: asJson(doc) },
+        data: {
+          userId,
+          name: (input.name || "Template").trim().slice(0, 80),
+          doc: asJson(doc),
+        },
       });
       return Response.json(templateView(row));
     } catch (e) {
       return caught(e, "Could not save the template.");
+    }
+  },
+
+  /** Take in a template carried off another shelf: its media are presigned
+   * objects already in R2, named here in the doc's own order. */
+  async importTemplate(userId: string, req: Request) {
+    try {
+      const { keys, ...input } = (await req.json()) as TemplateInput & {
+        keys?: string[];
+        folderId?: string | null;
+      };
+      if (!input.media?.length && !input.texts?.length && !input.cues?.length) {
+        throw new Error("Nothing to add.");
+      }
+      const media: TemplateMedia[] = [];
+      for (const [i, m] of (input.media ?? []).entries()) {
+        const key = keys?.[i];
+        const obj = key
+          ? await prisma.cutMediaObject.findFirst({
+              where: { userId, r2Key: key },
+            })
+          : null;
+        if (!obj) throw new Error("Template media missing.");
+        if (obj.uploadState !== "complete") {
+          const info = await head(key!);
+          if (!info) throw new Error("The upload never arrived.");
+          await prisma.$transaction(async (tx) => {
+            await tx.cutMediaObject.update({
+              where: { id: obj.id },
+              data: {
+                uploadState: "complete",
+                bytes: BigInt(info.bytes),
+                ...(info.mime ? { mime: info.mime } : {}),
+              },
+            });
+            await addUsage(tx, userId, info.bytes);
+          });
+        }
+        media.push({ ...m, fileName: obj.fileName });
+      }
+      const doc: TemplateDoc = {
+        folderId: input.folderId ?? null,
+        duration: input.duration,
+        media,
+        layers: input.layers ?? [],
+        audio: input.audio ?? [],
+        texts: input.texts ?? [],
+        cues: input.cues ?? [],
+      };
+      const row = await prisma.cutTemplate.create({
+        data: {
+          userId,
+          name: (input.name || "Template").trim().slice(0, 80),
+          doc: asJson(doc),
+        },
+      });
+      return Response.json(templateView(row));
+    } catch (e) {
+      return caught(e, "Could not add the template.");
     }
   },
 
@@ -558,14 +719,20 @@ export const libraryCloud = {
   async useTemplate(userId: string, id: string, req: Request) {
     try {
       const { projectId } = (await req.json()) as { projectId: string };
-      if (!(await getProject(userId, projectId))) throw new Error("Project not found.");
+      if (!(await getProject(userId, projectId)))
+        throw new Error("Project not found.");
       const row = await findTemplate(userId, id);
       if (!row) throw new Error("Template not found.");
       const template = templateView(row);
       const taken = await takenMediaNames(userId, projectId);
       const media: TemplateMedia[] = [];
       for (const m of template.media) {
-        const dest = await copyIntoProject(userId, projectId, m.fileName, taken);
+        const dest = await copyIntoProject(
+          userId,
+          projectId,
+          m.fileName,
+          taken,
+        );
         media.push({ ...m, fileName: dest });
       }
       return Response.json({ template, media });
@@ -586,24 +753,41 @@ export const libraryCloud = {
       };
       const row = await findTemplate(userId, id);
       if (!row) throw new Error("Template not found.");
-      const src = await projectMediaObject(userId, projectId, input.media.fileName);
+      const src = await projectMediaObject(
+        userId,
+        projectId,
+        input.media.fileName,
+      );
       if (!src) throw new Error("Media file not found in project.");
-      const dest = await copyIntoLibrary(userId, src, await takenLibraryNames(userId));
-      const doc = (row.doc as unknown as TemplateDoc);
+      const dest = await copyIntoLibrary(
+        userId,
+        src,
+        await takenLibraryNames(userId),
+      );
+      const doc = row.doc as unknown as TemplateDoc;
       const mi = (doc.media ?? []).length;
       const next: TemplateDoc = {
         ...doc,
         media: [...(doc.media ?? []), { ...input.media, fileName: dest }],
         audio: input.audio
-          ? [...(doc.audio ?? []), { ...input.audio, media: mi, start: doc.duration }]
-          : doc.audio ?? [],
+          ? [
+              ...(doc.audio ?? []),
+              { ...input.audio, media: mi, start: doc.duration },
+            ]
+          : (doc.audio ?? []),
         layers:
           !input.audio && input.layer
-            ? [...(doc.layers ?? []), { ...input.layer, media: mi, start: doc.duration }]
-            : doc.layers ?? [],
+            ? [
+                ...(doc.layers ?? []),
+                { ...input.layer, media: mi, start: doc.duration },
+              ]
+            : (doc.layers ?? []),
         duration: doc.duration + input.extend,
       };
-      const updated = await prisma.cutTemplate.update({ where: { id }, data: { doc: asJson(next) } });
+      const updated = await prisma.cutTemplate.update({
+        where: { id },
+        data: { doc: asJson(next) },
+      });
       return Response.json(templateView(updated));
     } catch (e) {
       return caught(e, "Could not add to the template.");
@@ -634,7 +818,8 @@ export const libraryCloud = {
         await prisma.cutTemplate.delete({ where: { id } });
         // The media copies are private to this template, so removing them is safe.
         const doc = row.doc as unknown as TemplateDoc;
-        for (const m of doc.media ?? []) await deleteLibraryObject(userId, m.fileName);
+        for (const m of doc.media ?? [])
+          await deleteLibraryObject(userId, m.fileName);
       }
       return Response.json({ ok: true });
     } catch (e) {
@@ -652,5 +837,7 @@ export const fontsFolderId = (userId: string) => `fonts-${userId}`;
 export async function seedFontsFolder(userId: string): Promise<void> {
   const id = fontsFolderId(userId);
   if (await prisma.cutFolder.findUnique({ where: { id } })) return;
-  await prisma.cutFolder.create({ data: { id, userId, name: "Fonts", scope: "library" } });
+  await prisma.cutFolder.create({
+    data: { id, userId, name: "Fonts", scope: "library" },
+  });
 }

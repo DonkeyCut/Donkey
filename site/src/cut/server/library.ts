@@ -121,7 +121,9 @@ async function readIndex(): Promise<LibraryIndex> {
     console.error(`Corrupt library index ${indexPath()}:`, err);
   }
   try {
-    const idx = JSON.parse(await readFile(`${indexPath()}.bak`, "utf8")) as LibraryIndex;
+    const idx = JSON.parse(
+      await readFile(`${indexPath()}.bak`, "utf8"),
+    ) as LibraryIndex;
     await writeIndex(idx);
     return idx;
   } catch (err) {
@@ -141,7 +143,9 @@ async function writeIndex(idx: LibraryIndex) {
 // one asset, and write the whole file back — clobbering each other's changes.
 // Each mutation reads the freshly-written state, applies its change, and writes.
 let indexLock: Promise<unknown> = Promise.resolve();
-async function mutateIndex<T>(fn: (idx: LibraryIndex) => T | Promise<T>): Promise<T> {
+async function mutateIndex<T>(
+  fn: (idx: LibraryIndex) => T | Promise<T>,
+): Promise<T> {
   const run = indexLock.then(async () => {
     const idx = await readIndex();
     const result = await fn(idx);
@@ -150,7 +154,7 @@ async function mutateIndex<T>(fn: (idx: LibraryIndex) => T | Promise<T>): Promis
   });
   indexLock = run.then(
     () => undefined,
-    () => undefined
+    () => undefined,
   );
   return run;
 }
@@ -185,15 +189,24 @@ function ffprobe(args: string[]): Promise<string> {
 
 async function probe(filePath: string) {
   const duration = parseFloat(
-    await ffprobe(["-show_entries", "format=duration", "-of", "csv=p=0", filePath])
+    await ffprobe([
+      "-show_entries",
+      "format=duration",
+      "-of",
+      "csv=p=0",
+      filePath,
+    ]),
   );
   let width: number | undefined;
   let height: number | undefined;
   if (VIDEO_RE.test(filePath) || IMAGE_RE.test(filePath)) {
     const dims = await ffprobe([
-      "-select_streams", "v:0",
-      "-show_entries", "stream=width,height",
-      "-of", "csv=p=0",
+      "-select_streams",
+      "v:0",
+      "-show_entries",
+      "stream=width,height",
+      "-of",
+      "csv=p=0",
       filePath,
     ]).catch(() => "");
     const [w, h] = dims.split(",").map(Number);
@@ -207,7 +220,10 @@ async function probe(filePath: string) {
 }
 
 async function freeName(original: string) {
-  const base = path.basename(original).replace(/[^\w.\-() ]+/g, "_").slice(-80);
+  const base = path
+    .basename(original)
+    .replace(/[^\w.\-() ]+/g, "_")
+    .slice(-80);
   return uniqueName(base, libMediaPath);
 }
 
@@ -223,7 +239,7 @@ export async function register(
   fileName: string,
   name: string,
   source?: LibrarySource,
-  posterFile?: string
+  posterFile?: string,
 ): Promise<LibraryAsset> {
   const type = typeOf(fileName);
   if (!type) throw new Error("Unsupported file type.");
@@ -252,19 +268,25 @@ export async function addUpload(
   file: File,
   name?: string,
   source?: LibrarySource,
-  poster?: File
+  poster?: File,
 ): Promise<LibraryAsset> {
   if (!typeOf(file.name)) throw new Error("Unsupported file type.");
   await mkdir(libMedia(), { recursive: true });
   const fileName = await freeName(file.name);
-  await writeFile(libMediaPath(fileName), Buffer.from(await file.arrayBuffer()));
+  await writeFile(
+    libMediaPath(fileName),
+    Buffer.from(await file.arrayBuffer()),
+  );
   // An import that came down from elsewhere brings the source's cover with it;
   // it is stored like any other library file, named after the media it belongs
   // to, and taken down with it.
   let posterFile: string | undefined;
   if (poster) {
     posterFile = `${fileName}.poster${path.extname(poster.name) || ".jpg"}`;
-    await writeFile(libMediaPath(posterFile), Buffer.from(await poster.arrayBuffer()));
+    await writeFile(
+      libMediaPath(posterFile),
+      Buffer.from(await poster.arrayBuffer()),
+    );
   }
   return register(fileName, name?.trim() || file.name, source, posterFile);
 }
@@ -273,7 +295,7 @@ export async function addUpload(
 export async function addFromProject(
   projectId: string,
   fileName: string,
-  name: string
+  name: string,
 ): Promise<LibraryAsset> {
   const src = projectMediaPath(projectId, fileName);
   if (!(await exists(src))) throw new Error("Media file not found in project.");
@@ -289,7 +311,7 @@ export async function addDownloaded(
   srcPath: string,
   name: string,
   source?: LibrarySource,
-  posterPath?: string
+  posterPath?: string,
 ): Promise<LibraryAsset> {
   if (!typeOf(srcPath)) throw new Error("Unsupported file type.");
   await mkdir(libMedia(), { recursive: true });
@@ -307,7 +329,10 @@ export async function addDownloaded(
 
 /** Copy a library asset into a project's media folder. Returns the file name
  * inside the project. */
-export async function useInProject(assetId: string, projectId: string): Promise<string> {
+export async function useInProject(
+  assetId: string,
+  projectId: string,
+): Promise<string> {
   const idx = await readIndex();
   const asset = idx.assets.find((a) => a.id === assetId);
   if (!asset) throw new Error("Library asset not found.");
@@ -355,7 +380,10 @@ export async function createFolder(name: string): Promise<LibraryFolder> {
   return folder;
 }
 
-export async function renameFolder(id: string, name: string): Promise<LibraryFolder> {
+export async function renameFolder(
+  id: string,
+  name: string,
+): Promise<LibraryFolder> {
   const trimmed = name.trim();
   if (!trimmed) throw new Error("Folder name required.");
   return mutateIndex((idx) => {
@@ -371,7 +399,8 @@ export async function deleteFolder(id: string) {
     idx.folders = (idx.folders ?? []).filter((f) => f.id !== id);
     // Items in the folder fall back to ungrouped rather than vanishing.
     for (const a of idx.assets) if (a.folderId === id) a.folderId = null;
-    for (const t of idx.templates ?? []) if (t.folderId === id) t.folderId = null;
+    for (const t of idx.templates ?? [])
+      if (t.folderId === id) t.folderId = null;
   });
 }
 
@@ -379,7 +408,8 @@ export async function deleteFolder(id: string) {
 export async function moveItem(id: string, folderId: string | null) {
   await mutateIndex((idx) => {
     const item =
-      idx.assets.find((a) => a.id === id) ?? (idx.templates ?? []).find((t) => t.id === id);
+      idx.assets.find((a) => a.id === id) ??
+      (idx.templates ?? []).find((t) => t.id === id);
     if (!item) throw new Error("Library item not found.");
     if (folderId && !(idx.folders ?? []).some((f) => f.id === folderId)) {
       throw new Error("Folder not found.");
@@ -395,7 +425,14 @@ export async function moveItem(id: string, folderId: string | null) {
 export interface TemplateInput {
   name: string;
   duration: number;
-  media: { fileName: string; name: string; type: "video" | "audio" | "image"; duration: number; width?: number; height?: number }[];
+  media: {
+    fileName: string;
+    name: string;
+    type: "video" | "audio" | "image";
+    duration: number;
+    width?: number;
+    height?: number;
+  }[];
   layers: TemplateLayer[];
   audio: TemplateAudio[];
   texts: unknown[];
@@ -409,7 +446,51 @@ export async function listTemplates(): Promise<LibraryTemplate[]> {
 
 /** Save a selection as a template: copy each source into the library privately
  * and store the edit that references it. */
-export async function saveTemplate(projectId: string, input: TemplateInput): Promise<LibraryTemplate> {
+/**
+ * Land a template that came off another shelf.
+ *
+ * A template's media live privately in the library, so carrying one here means
+ * taking its files as they arrive and keeping the doc's own order: `layers` and
+ * `audio` point at `media` by index, and only the file names change.
+ */
+export async function importTemplate(
+  input: TemplateInput & { folderId?: string | null },
+  files: File[],
+): Promise<LibraryTemplate> {
+  if (!input.media?.length && !input.texts?.length && !input.cues?.length) {
+    throw new Error("Nothing to add.");
+  }
+  await mkdir(libMedia(), { recursive: true });
+  const media: TemplateMedia[] = [];
+  for (const [i, m] of (input.media ?? []).entries()) {
+    const file = files[i];
+    if (!file) throw new Error("Template media missing.");
+    const dest = await freeName(m.fileName || file.name);
+    await writeFile(libMediaPath(dest), Buffer.from(await file.arrayBuffer()));
+    media.push({ ...m, fileName: dest });
+  }
+  const template: LibraryTemplate = {
+    id: crypto.randomUUID().slice(0, 8),
+    name: (input.name || "Template").trim().slice(0, 80),
+    addedAt: Date.now(),
+    duration: input.duration,
+    media,
+    layers: input.layers ?? [],
+    audio: input.audio ?? [],
+    texts: input.texts ?? [],
+    cues: input.cues ?? [],
+    folderId: input.folderId ?? null,
+  };
+  await mutateIndex((idx) => {
+    idx.templates = [...(idx.templates ?? []), template];
+  });
+  return template;
+}
+
+export async function saveTemplate(
+  projectId: string,
+  input: TemplateInput,
+): Promise<LibraryTemplate> {
   if (!(await readProject(projectId))) throw new Error("Project not found.");
   if (!input.media?.length && !input.texts?.length && !input.cues?.length) {
     throw new Error("Nothing to save.");
@@ -418,10 +499,18 @@ export async function saveTemplate(projectId: string, input: TemplateInput): Pro
   const media: TemplateMedia[] = [];
   for (const m of input.media) {
     const src = projectMediaPath(projectId, m.fileName);
-    if (!(await exists(src))) throw new Error("Media file not found in project.");
+    if (!(await exists(src)))
+      throw new Error("Media file not found in project.");
     const dest = await freeName(m.fileName);
     await copyFile(src, libMediaPath(dest));
-    media.push({ fileName: dest, name: m.name, type: m.type, duration: m.duration, width: m.width, height: m.height });
+    media.push({
+      fileName: dest,
+      name: m.name,
+      type: m.type,
+      duration: m.duration,
+      width: m.width,
+      height: m.height,
+    });
   }
   const template: LibraryTemplate = {
     id: crypto.randomUUID().slice(0, 8),
@@ -449,7 +538,9 @@ export async function useTemplate(templateId: string, projectId: string) {
   if (!template) throw new Error("Template not found.");
   const media: TemplateMedia[] = [];
   for (const m of template.media) {
-    const dest = await uniqueName(m.fileName, (n) => projectMediaPath(projectId, n));
+    const dest = await uniqueName(m.fileName, (n) =>
+      projectMediaPath(projectId, n),
+    );
     await copyFile(libMediaPath(m.fileName), projectMediaPath(projectId, dest));
     media.push({ ...m, fileName: dest });
   }
@@ -468,7 +559,7 @@ export async function addMediaToTemplate(
     layer?: Omit<TemplateLayer, "media" | "start">;
     audio?: Omit<TemplateAudio, "media" | "start">;
     extend: number;
-  }
+  },
 ): Promise<LibraryTemplate> {
   const src = projectMediaPath(projectId, input.media.fileName);
   if (!(await exists(src))) throw new Error("Media file not found in project.");
@@ -481,8 +572,16 @@ export async function addMediaToTemplate(
       if (!t) throw new Error("Template not found.");
       const mi = t.media.length;
       t.media = [...t.media, { ...input.media, fileName: dest }];
-      if (input.audio) t.audio = [...t.audio, { ...input.audio, media: mi, start: t.duration }];
-      else if (input.layer) t.layers = [...t.layers, { ...input.layer, media: mi, start: t.duration }];
+      if (input.audio)
+        t.audio = [
+          ...t.audio,
+          { ...input.audio, media: mi, start: t.duration },
+        ];
+      else if (input.layer)
+        t.layers = [
+          ...t.layers,
+          { ...input.layer, media: mi, start: t.duration },
+        ];
       t.duration += input.extend;
       return t;
     });
@@ -492,7 +591,10 @@ export async function addMediaToTemplate(
   }
 }
 
-export async function renameTemplate(id: string, name: string): Promise<LibraryTemplate> {
+export async function renameTemplate(
+  id: string,
+  name: string,
+): Promise<LibraryTemplate> {
   const trimmed = name.trim();
   if (!trimmed) throw new Error("Template name required.");
   return mutateIndex((idx) => {
@@ -510,5 +612,6 @@ export async function deleteTemplate(id: string) {
     return t;
   });
   // The media copies are private to this template, so removing them is safe.
-  for (const m of template?.media ?? []) await rm(libMediaPath(m.fileName), { force: true });
+  for (const m of template?.media ?? [])
+    await rm(libMediaPath(m.fileName), { force: true });
 }

@@ -60,6 +60,7 @@ export const CUT_ROUTES: CutRoute[] = [
   { method: "POST", path: "/api/cut/library/import-url", handler: (req) => libraryApi.importUrl(req) },
   { method: "POST", path: "/api/cut/library/move", handler: (req) => libraryApi.move(req) },
   { method: "POST", path: "/api/cut/library/templates", handler: (req) => libraryApi.saveTemplate(req) },
+  { method: "POST", path: "/api/cut/library/templates/import", handler: (req) => libraryApi.importTemplate(req) },
   { method: "POST", path: "/api/cut/library/templates/:id/use", handler: (req, p) => libraryApi.useTemplate(req, { id: p.id }) },
   { method: "POST", path: "/api/cut/library/templates/:id/add", handler: (req, p) => libraryApi.addToTemplate(req, { id: p.id }) },
   { method: "PUT", path: "/api/cut/library/templates/:id", handler: (req, p) => libraryApi.renameTemplate(req, { id: p.id }) },

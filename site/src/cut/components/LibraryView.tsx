@@ -76,12 +76,14 @@ import {
   libraryMediaUrl,
   libraryPosterUrl,
   carryAssetTo,
+  carryTemplateTo,
   moveLibraryItem,
   renameLibraryFolder,
   renameTemplate,
   uploadToLibrary,
   type ImportStage,
   type LibraryAsset,
+  type LibraryTemplateItem,
   type LibraryData,
 } from "@/cut/lib/library";
 import { normalizeLink } from "@/cut/lib/link";
@@ -579,6 +581,24 @@ export function LibraryView() {
                 !!a && a.residency !== target && live(a.residency),
             )
         : [];
+    const carriedTemplates =
+      target && live(target)
+        ? ids
+            .map((id) => templates.find((t) => t.id === id))
+            .filter(
+              (t): t is LibraryTemplateItem =>
+                !!t && t.residency !== target && live(t.residency),
+            )
+        : [];
+    if (carriedTemplates.length > 0) {
+      setSelected(new Set());
+      await Promise.all(
+        carriedTemplates.map((t) =>
+          carryTemplateTo(t, target!, folderId).catch(() => {}),
+        ),
+      );
+      void reload();
+    }
     if (carried.length > 0) {
       setSelected(new Set());
       await Promise.all(

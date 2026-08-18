@@ -5,6 +5,7 @@ import {
   createFolder,
   deleteFolder,
   deleteTemplate,
+  importTemplate,
   libMediaPath,
   listFolders,
   listLibrary,
@@ -22,7 +23,8 @@ import {
 import { serveFileRange, wantsDownload } from "../serveFile";
 import { importFromUrl } from "../urlImport";
 
-const err = (message: string, status: number) => Response.json({ error: message }, { status });
+const err = (message: string, status: number) =>
+  Response.json({ error: message }, { status });
 const caught = (e: unknown, fallback: string) =>
   err(e instanceof Error ? e.message : fallback, 500);
 
@@ -40,10 +42,31 @@ export const libraryApi = {
   /** Save a timeline selection as a by-reference template. */
   async saveTemplate(req: Request) {
     try {
-      const { projectId, ...input } = (await req.json()) as { projectId: string } & TemplateInput;
+      const { projectId, ...input } = (await req.json()) as {
+        projectId: string;
+      } & TemplateInput;
       return Response.json(await saveTemplate(projectId, input));
     } catch (e) {
       return caught(e, "Could not save the template.");
+    }
+  },
+
+  /** Take in a template carried off another shelf: its doc as `doc`, its media
+   * as `file` parts in the doc's order. */
+  async importTemplate(req: Request) {
+    try {
+      const form = await req.formData();
+      const doc = JSON.parse(
+        String(form.get("doc") ?? "{}"),
+      ) as TemplateInput & {
+        folderId?: string | null;
+      };
+      const files = form
+        .getAll("file")
+        .filter((f): f is File => f instanceof File);
+      return Response.json(await importTemplate(doc, files));
+    } catch (e) {
+      return caught(e, "Could not add the template.");
     }
   },
 
@@ -60,9 +83,9 @@ export const libraryApi = {
   /** Append a project media file to a template as one more part. */
   async addToTemplate(req: Request, { id }: { id: string }) {
     try {
-      const { projectId, ...input } = (await req.json()) as { projectId: string } & Parameters<
-        typeof addMediaToTemplate
-      >[2];
+      const { projectId, ...input } = (await req.json()) as {
+        projectId: string;
+      } & Parameters<typeof addMediaToTemplate>[2];
       return Response.json(await addMediaToTemplate(id, projectId, input));
     } catch (e) {
       return caught(e, "Could not add to the template.");
@@ -162,8 +185,8 @@ export const libraryApi = {
           file,
           typeof name === "string" ? name : undefined,
           source,
-          poster instanceof File ? poster : undefined
-        )
+          poster instanceof File ? poster : undefined,
+        ),
       );
     } catch (e) {
       return caught(e, "Upload failed.");
@@ -201,7 +224,9 @@ export const libraryApi = {
         fileName: string;
         name?: string;
       };
-      return Response.json(await addFromProject(projectId, fileName, name ?? fileName));
+      return Response.json(
+        await addFromProject(projectId, fileName, name ?? fileName),
+      );
     } catch (e) {
       return caught(e, "Could not save to library.");
     }
@@ -217,6 +242,10 @@ export const libraryApi = {
     } catch {
       return new Response("Bad request.", { status: 400 });
     }
-    return serveFileRange(p, req, wantsDownload(req) ? { downloadName: name } : {});
+    return serveFileRange(
+      p,
+      req,
+      wantsDownload(req) ? { downloadName: name } : {},
+    );
   },
 };

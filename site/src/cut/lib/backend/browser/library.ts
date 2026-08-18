@@ -31,7 +31,12 @@ const projectMediaApiPath = (id: string, fileName: string) =>
   `/api/cut/projects/${id}/media/${encodeURIComponent(fileName)}`;
 
 /** Where a URL-imported asset came from, kept as notes on the asset. */
-type LibrarySource = { url: string; title?: string; uploader?: string; uploadDate?: string };
+type LibrarySource = {
+  url: string;
+  title?: string;
+  uploader?: string;
+  uploadDate?: string;
+};
 
 type StoredAsset = {
   id: string;
@@ -58,10 +63,18 @@ type LibraryIndex = {
   templates: LibraryTemplate[];
 };
 
-const EMPTY: LibraryIndex = { version: 1, assets: [], folders: [], templates: [] };
+const EMPTY: LibraryIndex = {
+  version: 1,
+  assets: [],
+  folders: [],
+  templates: [],
+};
 
 async function readIndex(): Promise<LibraryIndex> {
-  const idx = await store.readJson<LibraryIndex>(await store.libraryDir(), INDEX_FILE);
+  const idx = await store.readJson<LibraryIndex>(
+    await store.libraryDir(),
+    INDEX_FILE,
+  );
   if (!idx) return EMPTY;
   return {
     version: 1,
@@ -111,7 +124,8 @@ function parseField<T>(value: FormDataEntryValue | null): T | null {
 async function register(fileName: string, file?: File | null): Promise<void> {
   const path = libraryMediaApiPath(fileName);
   if (registeredUrl(path)) return;
-  const bytes = file ?? (await store.readFileAt(await store.libraryMediaDir(), fileName));
+  const bytes =
+    file ?? (await store.readFileAt(await store.libraryMediaDir(), fileName));
   if (bytes) registerBlobFile(path, bytes);
 }
 
@@ -137,9 +151,14 @@ async function list(): Promise<Response> {
 async function addAsset(
   fileName: string,
   name: string,
-  meta: { type?: AssetType; duration?: number; width?: number; height?: number } | null,
+  meta: {
+    type?: AssetType;
+    duration?: number;
+    width?: number;
+    height?: number;
+  } | null,
   source?: LibrarySource | null,
-  posterFile?: string
+  posterFile?: string,
 ): Promise<StoredAsset> {
   const type = meta?.type ?? typeOf(fileName);
   if (!type) throw new Error("Unsupported file type.");
@@ -149,7 +168,9 @@ async function addAsset(
     name,
     type,
     duration: meta?.duration ?? 0,
-    ...(meta?.width && meta?.height ? { width: meta.width, height: meta.height } : {}),
+    ...(meta?.width && meta?.height
+      ? { width: meta.width, height: meta.height }
+      : {}),
     addedAt: Date.now(),
     folderId: null,
     ...(source ? { source } : {}),
@@ -172,7 +193,10 @@ async function upload(req: Request): Promise<Response> {
     const file = form.get("file");
     if (!(file instanceof File)) return err("No file in upload.", 400);
     const nameField = form.get("name");
-    const name = typeof nameField === "string" && nameField.trim() ? nameField.trim() : file.name;
+    const name =
+      typeof nameField === "string" && nameField.trim()
+        ? nameField.trim()
+        : file.name;
     const meta = parseField<{
       type?: AssetType;
       duration?: number;
@@ -180,7 +204,8 @@ async function upload(req: Request): Promise<Response> {
       height?: number;
     }>(form.get("meta"));
     const source = parseField<LibrarySource>(form.get("source"));
-    if (!(meta?.type ?? typeOf(file.name))) return err("Unsupported file type.", 400);
+    if (!(meta?.type ?? typeOf(file.name)))
+      return err("Unsupported file type.", 400);
     const fileName = await store.saveLibraryMedia(file, file.name);
     await register(fileName, file);
     // An import carries the source's cover alongside the media; it is stored
@@ -189,7 +214,10 @@ async function upload(req: Request): Promise<Response> {
     let posterFile: string | undefined;
     if (posterField instanceof File) {
       const ext = posterField.name.match(/\.[a-z0-9]+$/i)?.[0] ?? ".jpg";
-      posterFile = await store.saveLibraryMedia(posterField, `${fileName}.poster${ext}`);
+      posterFile = await store.saveLibraryMedia(
+        posterField,
+        `${fileName}.poster${ext}`,
+      );
       await register(posterFile, posterField);
     }
     return json(await addAsset(fileName, name, meta, source, posterFile));
@@ -198,7 +226,10 @@ async function upload(req: Request): Promise<Response> {
   }
 }
 
-async function serveMedia(fileName: string, download: boolean): Promise<Response> {
+async function serveMedia(
+  fileName: string,
+  download: boolean,
+): Promise<Response> {
   const file = await store.readFileAt(await store.libraryMediaDir(), fileName);
   if (!file) return err("Media file not found.", 404);
   await register(fileName, file);
@@ -227,9 +258,14 @@ async function removeAsset(id: string): Promise<Response> {
 
 async function move(req: Request): Promise<Response> {
   try {
-    const { id, folderId } = (await req.json()) as { id: string; folderId: string | null };
+    const { id, folderId } = (await req.json()) as {
+      id: string;
+      folderId: string | null;
+    };
     await mutateIndex((idx) => {
-      const item = idx.assets.find((a) => a.id === id) ?? idx.templates.find((t) => t.id === id);
+      const item =
+        idx.assets.find((a) => a.id === id) ??
+        idx.templates.find((t) => t.id === id);
       if (!item) throw new Error("Library item not found.");
       if (folderId && !idx.folders.some((f) => f.id === folderId)) {
         throw new Error("Folder not found.");
@@ -272,7 +308,7 @@ async function renameFolder(req: Request, id: string): Promise<Response> {
         if (!folder) throw new Error("Folder not found.");
         folder.name = trimmed.slice(0, 80);
         return folder;
-      })
+      }),
     );
   } catch (e) {
     return caught(e, "Could not rename folder.");
@@ -294,7 +330,10 @@ async function deleteFolder(id: string): Promise<Response> {
 }
 
 /** Copy a library file into a project's media folder. */
-async function copyIntoProject(projectId: string, fileName: string): Promise<string> {
+async function copyIntoProject(
+  projectId: string,
+  fileName: string,
+): Promise<string> {
   const file = await store.readFileAt(await store.libraryMediaDir(), fileName);
   if (!file) throw new Error("Library file not found.");
   const stored = await store.saveMedia(projectId, file, fileName);
@@ -303,8 +342,14 @@ async function copyIntoProject(projectId: string, fileName: string): Promise<str
 }
 
 /** Copy a project's media file onto the shelf. */
-async function copyFromProject(projectId: string, fileName: string): Promise<string> {
-  const file = await store.readFileAt(await store.mediaDir(projectId), fileName);
+async function copyFromProject(
+  projectId: string,
+  fileName: string,
+): Promise<string> {
+  const file = await store.readFileAt(
+    await store.mediaDir(projectId),
+    fileName,
+  );
   if (!file) throw new Error("Media file not found in project.");
   const stored = await store.saveLibraryMedia(file, fileName);
   await register(stored, file);
@@ -313,10 +358,14 @@ async function copyFromProject(projectId: string, fileName: string): Promise<str
 
 async function addToProject(req: Request): Promise<Response> {
   try {
-    const { assetId, projectId } = (await req.json()) as { assetId: string; projectId: string };
+    const { assetId, projectId } = (await req.json()) as {
+      assetId: string;
+      projectId: string;
+    };
     const asset = (await readIndex()).assets.find((a) => a.id === assetId);
     if (!asset) return err("Library asset not found.", 404);
-    if (!(await store.readDoc(projectId))) return err("Project not found.", 404);
+    if (!(await store.readDoc(projectId)))
+      return err("Project not found.", 404);
     return json({ fileName: await copyIntoProject(projectId, asset.fileName) });
   } catch (e) {
     return caught(e, "Could not add from library.");
@@ -345,7 +394,7 @@ async function saveFromProject(req: Request): Promise<Response> {
         duration: known?.duration,
         width: known?.width,
         height: known?.height,
-      })
+      }),
     );
   } catch (e) {
     return caught(e, "Could not save to library.");
@@ -366,14 +415,20 @@ type TemplateInput = {
 
 async function saveTemplate(req: Request): Promise<Response> {
   try {
-    const { projectId, ...input } = (await req.json()) as { projectId: string } & TemplateInput;
-    if (!(await store.readDoc(projectId))) return err("Project not found.", 404);
+    const { projectId, ...input } = (await req.json()) as {
+      projectId: string;
+    } & TemplateInput;
+    if (!(await store.readDoc(projectId)))
+      return err("Project not found.", 404);
     if (!input.media?.length && !input.texts?.length && !input.cues?.length) {
       return err("Nothing to save.", 500);
     }
     const media: TemplateMedia[] = [];
     for (const m of input.media ?? []) {
-      media.push({ ...m, fileName: await copyFromProject(projectId, m.fileName) });
+      media.push({
+        ...m,
+        fileName: await copyFromProject(projectId, m.fileName),
+      });
     }
     const template: LibraryTemplate = {
       id: crypto.randomUUID().slice(0, 8),
@@ -395,15 +450,67 @@ async function saveTemplate(req: Request): Promise<Response> {
   }
 }
 
-async function materializeTemplate(req: Request, id: string): Promise<Response> {
+/** Take in a template carried off another shelf: its doc, and its media as
+ * files in the doc's order — `layers` and `audio` point at `media` by index, so
+ * only the file names change. */
+async function importTemplate(req: Request): Promise<Response> {
+  try {
+    const form = await req.formData();
+    const input = parseField<TemplateInput & { folderId?: string | null }>(
+      form.get("doc"),
+    );
+    if (!input) return err("No template in the request.", 400);
+    const files = form
+      .getAll("file")
+      .filter((f): f is File => f instanceof File);
+    const media: TemplateMedia[] = [];
+    for (const [i, m] of (input.media ?? []).entries()) {
+      const file = files[i];
+      if (!file) return err("Template media missing.", 400);
+      const fileName = await store.saveLibraryMedia(
+        file,
+        m.fileName || file.name,
+      );
+      await register(fileName, file);
+      media.push({ ...m, fileName });
+    }
+    const template: LibraryTemplate = {
+      id: crypto.randomUUID().slice(0, 8),
+      name: (input.name || "Template").trim().slice(0, 80),
+      addedAt: Date.now(),
+      duration: input.duration,
+      media,
+      layers: input.layers ?? [],
+      audio: input.audio ?? [],
+      texts: input.texts ?? [],
+      cues: input.cues ?? [],
+      folderId: input.folderId ?? null,
+    };
+    await mutateIndex((idx) => {
+      idx.templates.push(template);
+    });
+    return json(template);
+  } catch (e) {
+    return caught(e, "Could not add the template.");
+  }
+}
+
+async function materializeTemplate(
+  req: Request,
+  id: string,
+): Promise<Response> {
   try {
     const { projectId } = (await req.json()) as { projectId: string };
-    if (!(await store.readDoc(projectId))) return err("Project not found.", 404);
+    if (!(await store.readDoc(projectId)))
+      return err("Project not found.", 404);
     const template = (await readIndex()).templates.find((t) => t.id === id);
     if (!template) return err("Template not found.", 404);
     const media: TemplateMedia[] = [];
     for (const m of template.media) {
-      media.push({ ...m, fileName: await copyIntoProject(projectId, m.fileName) });
+      media.push({
+        ...m,
+        fileName: await copyIntoProject(projectId, m.fileName),
+      });
     }
     return json({ template, media });
   } catch (e) {
@@ -428,11 +535,16 @@ async function addToTemplate(req: Request, id: string): Promise<Response> {
           if (!t) throw new Error("Template not found.");
           const mi = t.media.length;
           t.media = [...t.media, { ...media, fileName: stored }];
-          if (audio) t.audio = [...t.audio, { ...audio, media: mi, start: t.duration }];
-          else if (layer) t.layers = [...t.layers, { ...layer, media: mi, start: t.duration }];
+          if (audio)
+            t.audio = [...t.audio, { ...audio, media: mi, start: t.duration }];
+          else if (layer)
+            t.layers = [
+              ...t.layers,
+              { ...layer, media: mi, start: t.duration },
+            ];
           t.duration += extend;
           return t;
-        })
+        }),
       );
     } catch (e) {
       await store.deleteLibraryMedia(stored);
@@ -454,7 +566,7 @@ async function renameTemplate(req: Request, id: string): Promise<Response> {
         if (!template) throw new Error("Template not found.");
         template.name = trimmed.slice(0, 80);
         return template;
-      })
+      }),
     );
   } catch (e) {
     return caught(e, "Could not rename the template.");
@@ -488,7 +600,7 @@ export async function dispatchLibraryRoute(
   rest: string[],
   method: string,
   req: () => Request,
-  download: boolean
+  download: boolean,
 ): Promise<Response | null> {
   // /library
   if (rest.length === 0) {
@@ -505,15 +617,20 @@ export async function dispatchLibraryRoute(
 
   if (rest[0] === "folders") {
     if (rest.length === 1 && method === "POST") return createFolder(req());
-    if (rest.length === 2 && method === "PUT") return renameFolder(req(), rest[1]);
+    if (rest.length === 2 && method === "PUT")
+      return renameFolder(req(), rest[1]);
     if (rest.length === 2 && method === "DELETE") return deleteFolder(rest[1]);
     return err("Not found.", 404);
   }
 
   if (rest[0] === "templates") {
     if (rest.length === 1 && method === "POST") return saveTemplate(req());
-    if (rest.length === 2 && method === "PUT") return renameTemplate(req(), rest[1]);
-    if (rest.length === 2 && method === "DELETE") return deleteTemplate(rest[1]);
+    if (rest.length === 2 && rest[1] === "import" && method === "POST")
+      return importTemplate(req());
+    if (rest.length === 2 && method === "PUT")
+      return renameTemplate(req(), rest[1]);
+    if (rest.length === 2 && method === "DELETE")
+      return deleteTemplate(rest[1]);
     if (rest.length === 3 && method === "POST") {
       if (rest[2] === "use") return materializeTemplate(req(), rest[1]);
       if (rest[2] === "add") return addToTemplate(req(), rest[1]);

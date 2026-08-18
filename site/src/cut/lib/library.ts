@@ -28,7 +28,12 @@ import {
 } from "./residency";
 import { useEditor } from "./store";
 import { playheadAt } from "./playhead";
-import type { LibraryTemplate, MediaAsset, TemplateMedia, TemplateSaveInput } from "./types";
+import type {
+  LibraryTemplate,
+  MediaAsset,
+  TemplateMedia,
+  TemplateSaveInput,
+} from "./types";
 import { IMAGE_CLIP_SECONDS, mediaUrl } from "./types";
 
 export interface LibrarySource {
@@ -76,15 +81,20 @@ export interface LibraryData {
 }
 
 export const libraryMediaUrl = (fileName: string, residency: Residency) =>
-  backendFor(residency).url(`/api/cut/library/media/${encodeURIComponent(fileName)}`);
+  backendFor(residency).url(
+    `/api/cut/library/media/${encodeURIComponent(fileName)}`,
+  );
 
 /** The asset's cover image, when the import brought one back. */
-export const libraryPosterUrl = (a: Pick<LibraryAsset, "posterFile" | "residency">) =>
-  a.posterFile ? libraryMediaUrl(a.posterFile, a.residency) : undefined;
+export const libraryPosterUrl = (
+  a: Pick<LibraryAsset, "posterFile" | "residency">,
+) => (a.posterFile ? libraryMediaUrl(a.posterFile, a.residency) : undefined);
 
 /** Save a library file to the user's Downloads folder, off the shelf it sits
  * on. */
-export function downloadLibraryAsset(a: Pick<LibraryAsset, "fileName" | "residency">) {
+export function downloadLibraryAsset(
+  a: Pick<LibraryAsset, "fileName" | "residency">,
+) {
   downloadFromUrl(libraryMediaUrl(a.fileName, a.residency), a.fileName);
 }
 
@@ -105,7 +115,9 @@ async function fetchLibraryFrom(r: Residency): Promise<LibraryData> {
 
 /** One shelf as this browser last saw it, for a residency it can't ask right
  * now. Those files are still on that Mac; only the way to reach them is gone. */
-async function rememberedLibraryFrom(r: Residency): Promise<LibraryData | null> {
+async function rememberedLibraryFrom(
+  r: Residency,
+): Promise<LibraryData | null> {
   const hit = await readSnapshot<LibraryData>(libraryShelfKey(r));
   return hit?.value ?? null;
 }
@@ -121,13 +133,17 @@ async function rememberedLibraryFrom(r: Residency): Promise<LibraryData | null> 
  * is entitled to see them; the editor's library picker doesn't, because an
  * item it can't copy into the project has no business in a picker.
  */
-export async function fetchLibrary(opts?: { remembered?: boolean }): Promise<LibraryData> {
+export async function fetchLibrary(opts?: {
+  remembered?: boolean;
+}): Promise<LibraryData> {
   const live = availableResidencies();
   const rs = opts?.remembered ? listedResidencies() : live;
   const parts = await Promise.all(
     rs.map((r) =>
-      live.includes(r) ? fetchLibraryFrom(r).catch(() => null) : rememberedLibraryFrom(r)
-    )
+      live.includes(r)
+        ? fetchLibraryFrom(r).catch(() => null)
+        : rememberedLibraryFrom(r),
+    ),
   );
   const got = parts.filter((p): p is LibraryData => p !== null);
   if (got.length === 0) throw new Error("Could not load the library.");
@@ -135,7 +151,9 @@ export async function fetchLibrary(opts?: { remembered?: boolean }): Promise<Lib
     [...items].sort((a, b) => b.addedAt - a.addedAt);
   return {
     assets: byNewest(got.flatMap((p) => p.assets)),
-    folders: got.flatMap((p) => p.folders).sort((a, b) => a.createdAt - b.createdAt),
+    folders: got
+      .flatMap((p) => p.folders)
+      .sort((a, b) => a.createdAt - b.createdAt),
     templates: byNewest(got.flatMap((p) => p.templates)),
   };
 }
@@ -149,7 +167,9 @@ export type ImportStage = "queued" | "downloading" | "saving";
  * the short-form feeds are vertical, everything else is filmed wide. The tile
  * takes the real shape the moment the media lands. */
 export function estimatedShape(url: string): { width: number; height: number } {
-  return SHORT_FORM_URL.test(url) ? { width: 9, height: 16 } : { width: 16, height: 9 };
+  return SHORT_FORM_URL.test(url)
+    ? { width: 9, height: 16 }
+    : { width: 16, height: 9 };
 }
 
 const SHORT_FORM_URL =
@@ -158,10 +178,11 @@ const SHORT_FORM_URL =
 export async function importUrlToLibrary(
   url: string,
   residency: Residency = activeResidency(),
-  onStage?: (stage: ImportStage) => void
+  onStage?: (stage: ImportStage) => void,
 ): Promise<LibraryAsset[]> {
   url = normalizeLink(url);
-  if (residency === "browser") return importUrlThroughCloud(url, "browser", onStage);
+  if (residency === "browser")
+    return importUrlThroughCloud(url, "browser", onStage);
   onStage?.("downloading");
   const backend = backendFor(residency);
   const res = await backend.fetch("/api/cut/library/import-url", {
@@ -173,20 +194,26 @@ export async function importUrlToLibrary(
   // worker does the fetch, so that side waits on the job.
   if (backend.kind === "cloud") {
     const started = await apiJson<{ jobId?: string }>(res);
-    if (!res.ok || !started.jobId) throw new Error(started.error ?? "Could not import that URL.");
+    if (!res.ok || !started.jobId)
+      throw new Error(started.error ?? "Could not import that URL.");
     const done = await pollCloudJob<{ assets?: LibraryAsset[] }>(
       started.jobId,
       backend,
       "Could not import that URL.",
-      { onState: (state) => onStage?.(state === "queued" ? "queued" : "downloading") }
+      {
+        onState: (state) =>
+          onStage?.(state === "queued" ? "queued" : "downloading"),
+      },
     );
     // The library holds media, so a source that turned out to be only words
     // fails here — the same line the engine's library import draws.
-    if (!done.assets?.length) throw new Error("That link has no media to import.");
+    if (!done.assets?.length)
+      throw new Error("That link has no media to import.");
     return done.assets.map((a) => ({ ...a, residency }));
   }
   const body = await apiJson<LibraryAsset[]>(res);
-  if (res.ok) return (Array.isArray(body) ? body : []).map((a) => ({ ...a, residency }));
+  if (res.ok)
+    return (Array.isArray(body) ? body : []).map((a) => ({ ...a, residency }));
   // The engine fetches with the tools it ships, and a site can refuse the
   // build it happens to carry — TikTok reads the requests it impersonates with
   // and answers with nothing usable. The cloud worker fetches with a different
@@ -215,7 +242,7 @@ export async function importUrlToLibrary(
 async function importUrlThroughCloud(
   url: string,
   target: Residency,
-  onStage?: (stage: ImportStage) => void
+  onStage?: (stage: ImportStage) => void,
 ): Promise<LibraryAsset[]> {
   onStage?.("downloading");
   const res = await cloudBackend.fetch("/api/cut/library/import-url", {
@@ -224,22 +251,27 @@ async function importUrlThroughCloud(
     body: JSON.stringify({ url }),
   });
   const started = await apiJson<{ jobId?: string }>(res);
-  if (!res.ok || !started.jobId) throw new Error(started.error ?? "Could not import that URL.");
+  if (!res.ok || !started.jobId)
+    throw new Error(started.error ?? "Could not import that URL.");
   const done = await pollCloudJob<{ assets?: LibraryAsset[] }>(
     started.jobId,
     cloudBackend,
     "Could not import that URL.",
-    { onState: (state) => onStage?.(state === "queued" ? "queued" : "downloading") }
+    {
+      onState: (state) =>
+        onStage?.(state === "queued" ? "queued" : "downloading"),
+    },
   );
   // The library holds media, so a source that turned out to be only words
   // fails here — the same line the engine's library import draws.
-  if (!done.assets?.length) throw new Error("That link has no media to import.");
+  if (!done.assets?.length)
+    throw new Error("That link has no media to import.");
   const landed: LibraryAsset[] = [];
   onStage?.("saving");
   try {
     for (const staged of done.assets) {
       const bytes = await cloudBackend.fetch(
-        `/api/cut/library/media/${encodeURIComponent(staged.fileName)}`
+        `/api/cut/library/media/${encodeURIComponent(staged.fileName)}`,
       );
       if (!bytes.ok) throw new Error("Could not import that URL.");
       const form = new FormData();
@@ -247,9 +279,10 @@ async function importUrlThroughCloud(
       form.append("name", staged.name);
       if (staged.posterFile) {
         const poster = await cloudBackend.fetch(
-          `/api/cut/library/media/${encodeURIComponent(staged.posterFile)}`
+          `/api/cut/library/media/${encodeURIComponent(staged.posterFile)}`,
         );
-        if (poster.ok) form.append("poster", await poster.blob(), staged.posterFile);
+        if (poster.ok)
+          form.append("poster", await poster.blob(), staged.posterFile);
       }
       form.append(
         "meta",
@@ -258,7 +291,7 @@ async function importUrlThroughCloud(
           duration: staged.duration,
           width: staged.width,
           height: staged.height,
-        })
+        }),
       );
       if (staged.source) form.append("source", JSON.stringify(staged.source));
       const saved = await backendFor(target).fetch("/api/cut/library", {
@@ -266,13 +299,15 @@ async function importUrlThroughCloud(
         body: form,
       });
       const body = await apiJson<LibraryAsset>(saved);
-      if (!saved.ok) throw new Error(body.error ?? "Could not import that URL.");
+      if (!saved.ok)
+        throw new Error(body.error ?? "Could not import that URL.");
       landed.push({ ...body, residency: target });
     }
   } catch (e) {
     // A part-written import is worse than none: the user reads an error and is
     // left holding half a link.
-    for (const a of landed) await deleteFromLibrary(target, a.id).catch(() => {});
+    for (const a of landed)
+      await deleteFromLibrary(target, a.id).catch(() => {});
     throw e;
   } finally {
     for (const staged of done.assets) {
@@ -286,7 +321,7 @@ async function importUrlThroughCloud(
 
 export async function createLibraryFolder(
   name: string,
-  residency: Residency = activeResidency()
+  residency: Residency = activeResidency(),
 ): Promise<LibraryFolder> {
   const res = await backendFor(residency).fetch("/api/cut/library/folders", {
     method: "POST",
@@ -301,20 +336,29 @@ export async function createLibraryFolder(
 export async function renameLibraryFolder(
   residency: Residency,
   id: string,
-  name: string
+  name: string,
 ): Promise<void> {
-  const res = await backendFor(residency).fetch(`/api/cut/library/folders/${id}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
+  const res = await backendFor(residency).fetch(
+    `/api/cut/library/folders/${id}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    },
+  );
   if (!res.ok) throw new Error("Could not rename folder.");
 }
 
-export async function deleteLibraryFolder(residency: Residency, id: string): Promise<void> {
-  const res = await backendFor(residency).fetch(`/api/cut/library/folders/${id}`, {
-    method: "DELETE",
-  });
+export async function deleteLibraryFolder(
+  residency: Residency,
+  id: string,
+): Promise<void> {
+  const res = await backendFor(residency).fetch(
+    `/api/cut/library/folders/${id}`,
+    {
+      method: "DELETE",
+    },
+  );
   if (!res.ok) throw new Error("Could not delete folder.");
 }
 
@@ -324,7 +368,7 @@ export async function deleteLibraryFolder(residency: Residency, id: string): Pro
 export async function moveLibraryItem(
   residency: Residency,
   id: string,
-  folderId: string | null
+  folderId: string | null,
 ): Promise<void> {
   const res = await backendFor(residency).fetch("/api/cut/library/move", {
     method: "POST",
@@ -345,24 +389,30 @@ export async function moveLibraryItem(
 export async function carryAssetTo(
   asset: LibraryAsset,
   to: Residency,
-  folderId: string | null
+  folderId: string | null,
 ): Promise<LibraryAsset> {
   const res = await backendFor(asset.residency).fetch(
-    `/api/cut/library/media/${encodeURIComponent(asset.fileName)}`
+    `/api/cut/library/media/${encodeURIComponent(asset.fileName)}`,
   );
   if (!res.ok) throw new Error("Could not read that file off its shelf.");
   const from = libraryPosterUrl(asset);
   const cover = from
     ? await backendFor(asset.residency)
-        .fetch(`/api/cut/library/media/${encodeURIComponent(asset.posterFile!)}`)
+        .fetch(
+          `/api/cut/library/media/${encodeURIComponent(asset.posterFile!)}`,
+        )
         .then((r) => (r.ok ? r.blob() : null))
         .catch(() => null)
     : null;
-  const landed = await uploadToLibrary(new File([await res.blob()], asset.fileName), to, {
-    name: asset.name,
-    ...(asset.source ? { source: asset.source } : {}),
-    ...(cover ? { poster: cover } : {}),
-  });
+  const landed = await uploadToLibrary(
+    new File([await res.blob()], asset.fileName),
+    to,
+    {
+      name: asset.name,
+      ...(asset.source ? { source: asset.source } : {}),
+      ...(cover ? { poster: cover } : {}),
+    },
+  );
   if (folderId) await moveLibraryItem(to, landed.id, folderId).catch(() => {});
   await deleteFromLibrary(asset.residency, asset.id).catch(() => {});
   return { ...landed, folderId };
@@ -375,9 +425,13 @@ export async function carryAssetTo(
  * family name the font calls itself — the shelf's label and the font menu's —
  * and a specimen drawn in the face it just installed, which becomes the file's
  * cover, so a card never has to have the font installed to show it. */
-async function checkFont(file: File): Promise<{ label: string; poster: Blob | null }> {
+async function checkFont(
+  file: File,
+): Promise<{ label: string; poster: Blob | null }> {
   if (file.size > MAX_FONT_BYTES) {
-    throw new Error(`Fonts are limited to ${Math.round(MAX_FONT_BYTES / 1024 ** 2)}MB.`);
+    throw new Error(
+      `Fonts are limited to ${Math.round(MAX_FONT_BYTES / 1024 ** 2)}MB.`,
+    );
   }
   const bytes = await file.arrayBuffer();
   const family = `lf-check-${file.size}`;
@@ -398,7 +452,7 @@ export async function uploadToLibrary(
   /** What the shelf should call it and where it came from, when the file is
    * arriving from somewhere that already knows — a carry from another shelf,
    * say. Left out, the file names itself and keeps whatever cover it makes. */
-  keep: { name?: string; source?: LibrarySource; poster?: Blob } = {}
+  keep: { name?: string; source?: LibrarySource; poster?: Blob } = {},
 ): Promise<LibraryAsset> {
   const backend = backendFor(residency);
   // A font has no streams to measure; it is checked by installing it instead,
@@ -413,19 +467,32 @@ export async function uploadToLibrary(
     // cloud can't cheaply probe an R2 object the way the engine probes disk.
     // A file this browser can't decode would land as a zero-length asset it
     // also couldn't preview, so reject it before any bytes go up.
-    const meta = fontLabel ? fontMeta : await probeFileMeta(file).catch(() => null);
-    if (!meta || (meta.type !== "image" && meta.type !== "font" && !(meta.duration > 0))) {
+    const meta = fontLabel
+      ? fontMeta
+      : await probeFileMeta(file).catch(() => null);
+    if (
+      !meta ||
+      (meta.type !== "image" && meta.type !== "font" && !(meta.duration > 0))
+    ) {
       throw new Error(
-        "This file can't be read in this browser, so it can't go in the cloud library. Import it in the Mac app instead."
+        "This file can't be read in this browser, so it can't go in the cloud library. Import it in the Mac app instead.",
       );
     }
-    const key = await presignedUpload("/api/cut/library/presign", file, file.name, backend);
+    const key = await presignedUpload(
+      "/api/cut/library/presign",
+      file,
+      file.name,
+      backend,
+    );
     // The cover rides up as an object of its own; `complete` marks it and
     // records it against the asset.
     const posterKey = poster
-      ? await presignedUpload("/api/cut/library/presign", poster, posterName, backend).catch(
-          () => null
-        )
+      ? await presignedUpload(
+          "/api/cut/library/presign",
+          poster,
+          posterName,
+          backend,
+        ).catch(() => null)
       : null;
     const res = await backend.fetch("/api/cut/library/complete", {
       method: "POST",
@@ -454,20 +521,32 @@ export async function uploadToLibrary(
     // The shelf is this page's storage, with no ffprobe behind it: the file is
     // measured here, and one this browser can't read is refused rather than
     // shelved as an asset nothing can play.
-    const meta = fontLabel ? fontMeta : await probeFileMeta(file).catch(() => null);
-    if (!meta || (meta.type !== "image" && meta.type !== "font" && !(meta.duration > 0))) {
-      throw new Error("This file can't be read in this browser, so it can't go in the library.");
+    const meta = fontLabel
+      ? fontMeta
+      : await probeFileMeta(file).catch(() => null);
+    if (
+      !meta ||
+      (meta.type !== "image" && meta.type !== "font" && !(meta.duration > 0))
+    ) {
+      throw new Error(
+        "This file can't be read in this browser, so it can't go in the library.",
+      );
     }
     form.append("meta", JSON.stringify(meta));
   }
-  const res = await backend.fetch("/api/cut/library", { method: "POST", body: form });
+  const res = await backend.fetch("/api/cut/library", {
+    method: "POST",
+    body: form,
+  });
   const body = await apiJson<LibraryAsset>(res);
   if (!res.ok) throw new Error(body.error ?? "Upload failed.");
   return { ...body, residency };
 }
 
 export async function deleteFromLibrary(residency: Residency, id: string) {
-  const res = await backendFor(residency).fetch(`/api/cut/library/${id}`, { method: "DELETE" });
+  const res = await backendFor(residency).fetch(`/api/cut/library/${id}`, {
+    method: "DELETE",
+  });
   if (!res.ok) throw new Error("Could not delete.");
 }
 
@@ -482,7 +561,7 @@ async function copyLibraryFileToProject(
   residency: Residency,
   fileName: string,
   assetId?: string,
-  opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }
+  opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal },
 ): Promise<string> {
   const target = getBackend();
   if (assetId && residency === target.kind) {
@@ -493,15 +572,22 @@ async function copyLibraryFileToProject(
       signal: opts?.signal,
     });
     const body = await apiJson<{ fileName?: string }>(res);
-    if (!res.ok || !body.fileName) throw new Error(body.error ?? "Could not add from library.");
+    if (!res.ok || !body.fileName)
+      throw new Error(body.error ?? "Could not add from library.");
     return body.fileName;
   }
   const bytes = await backendFor(residency).fetch(
     `/api/cut/library/media/${encodeURIComponent(fileName)}`,
-    { signal: opts?.signal }
+    { signal: opts?.signal },
   );
   if (!bytes.ok) throw new Error("Could not read that library file.");
-  return uploadProjectMediaTo(target, projectId, await bytes.blob(), fileName, opts);
+  return uploadProjectMediaTo(
+    target,
+    projectId,
+    await bytes.blob(),
+    fileName,
+    opts,
+  );
 }
 
 /** Register a library asset in the open project's media, without placing it on
@@ -511,9 +597,10 @@ async function copyLibraryFileToProject(
  * across residencies). */
 export async function importLibraryAsset(
   projectId: string,
-  lib: LibraryAsset
+  lib: LibraryAsset,
 ): Promise<MediaAsset> {
-  if (lib.type === "font") throw new Error("Fonts are used from the font menu, not the timeline.");
+  if (lib.type === "font")
+    throw new Error("Fonts are used from the font menu, not the timeline.");
   return importRemote(
     projectId,
     {
@@ -525,7 +612,14 @@ export async function importLibraryAsset(
       width: lib.width,
       height: lib.height,
     },
-    (opts) => copyLibraryFileToProject(projectId, lib.residency, lib.fileName, lib.id, opts)
+    (opts) =>
+      copyLibraryFileToProject(
+        projectId,
+        lib.residency,
+        lib.fileName,
+        lib.id,
+        opts,
+      ),
   );
 }
 
@@ -533,7 +627,7 @@ export async function importLibraryAsset(
  * the playhead. */
 export async function addLibraryAssetToProject(
   projectId: string,
-  lib: LibraryAsset
+  lib: LibraryAsset,
 ): Promise<MediaAsset> {
   const asset = await importLibraryAsset(projectId, lib);
   useEditor.getState().addAssetAtPlayhead(asset.id);
@@ -544,7 +638,7 @@ export async function addLibraryAssetToProject(
  * the project's own shelf: the server copies the media straight across. */
 export async function saveTemplate(
   projectId: string,
-  input: TemplateSaveInput
+  input: TemplateSaveInput,
 ): Promise<LibraryTemplateItem> {
   const residency = activeResidency();
   const res = await backendFor(residency).fetch("/api/cut/library/templates", {
@@ -557,6 +651,68 @@ export async function saveTemplate(
   return { ...body, residency };
 }
 
+/**
+ * Carry a template to another shelf, filed where it lands.
+ *
+ * A template's media live privately in the library, so the carry takes them
+ * with it: the files come down here and go up on the target shelf — presigned
+ * objects in the cloud, a multipart post anywhere else — and the doc arrives in
+ * the same order, since `layers` and `audio` point at `media` by index. The
+ * template left behind comes off.
+ */
+export async function carryTemplateTo(
+  t: LibraryTemplateItem,
+  to: Residency,
+  folderId: string | null,
+): Promise<void> {
+  const source = backendFor(t.residency);
+  const files: File[] = [];
+  for (const m of t.media) {
+    const res = await source.fetch(
+      `/api/cut/library/media/${encodeURIComponent(m.fileName)}`,
+    );
+    if (!res.ok)
+      throw new Error("Could not read that template's media off its shelf.");
+    files.push(new File([await res.blob()], m.fileName));
+  }
+  const input = {
+    name: t.name,
+    folderId,
+    duration: t.duration,
+    media: t.media,
+    layers: t.layers,
+    audio: t.audio,
+    texts: t.texts,
+    cues: t.cues,
+  };
+  const backend = backendFor(to);
+  let res: Response;
+  if (to === "cloud") {
+    const keys: string[] = [];
+    for (const f of files) {
+      keys.push(
+        await presignedUpload("/api/cut/library/presign", f, f.name, backend),
+      );
+    }
+    res = await backend.fetch("/api/cut/library/templates/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...input, keys }),
+    });
+  } else {
+    const form = new FormData();
+    form.append("doc", JSON.stringify(input));
+    for (const f of files) form.append("file", f, f.name);
+    res = await backend.fetch("/api/cut/library/templates/import", {
+      method: "POST",
+      body: form,
+    });
+  }
+  const body = await apiJson<LibraryTemplate>(res);
+  if (!res.ok) throw new Error(body.error ?? "Could not add the template.");
+  await deleteTemplate(t.residency, t.id);
+}
+
 /** Append a project asset to a library template as one more part at its end:
  * the server copies the file into the library and returns the updated
  * template. Same-shelf only — the copy happens server-side, where neither
@@ -564,13 +720,13 @@ export async function saveTemplate(
 export async function addAssetToLibraryTemplate(
   projectId: string,
   template: LibraryTemplateItem,
-  asset: MediaAsset
+  asset: MediaAsset,
 ): Promise<LibraryTemplateItem> {
   if (template.residency !== getBackend().kind) {
     throw new Error(
       template.residency === "cloud"
         ? "That template is in the cloud; this project isn't."
-        : "That template is on this Mac; this project isn't."
+        : "That template is on this Mac; this project isn't.",
     );
   }
   const len = asset.type === "image" ? IMAGE_CLIP_SECONDS : asset.duration;
@@ -578,23 +734,26 @@ export async function addAssetToLibraryTemplate(
     asset.type === "audio"
       ? { audio: { in: 0, out: len, volume: 1 } }
       : { layer: { in: 0, out: len, muted: false, track: 1, asClip: true } };
-  const res = await getBackend().fetch(`/api/cut/library/templates/${template.id}/add`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      projectId,
-      media: {
-        fileName: asset.fileName,
-        name: asset.name,
-        type: asset.type,
-        duration: asset.duration,
-        width: asset.width,
-        height: asset.height,
-      },
-      extend: len,
-      ...part,
-    }),
-  });
+  const res = await getBackend().fetch(
+    `/api/cut/library/templates/${template.id}/add`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId,
+        media: {
+          fileName: asset.fileName,
+          name: asset.name,
+          type: asset.type,
+          duration: asset.duration,
+          width: asset.width,
+          height: asset.height,
+        },
+        extend: len,
+        ...part,
+      }),
+    },
+  );
   const body = await apiJson<LibraryTemplate>(res);
   if (!res.ok) throw new Error(body.error ?? "Could not add to the template.");
   return { ...body, residency: template.residency };
@@ -603,20 +762,29 @@ export async function addAssetToLibraryTemplate(
 export async function renameTemplate(
   residency: Residency,
   id: string,
-  name: string
+  name: string,
 ): Promise<void> {
-  const res = await backendFor(residency).fetch(`/api/cut/library/templates/${id}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
+  const res = await backendFor(residency).fetch(
+    `/api/cut/library/templates/${id}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    },
+  );
   if (!res.ok) throw new Error("Could not rename the template.");
 }
 
-export async function deleteTemplate(residency: Residency, id: string): Promise<void> {
-  const res = await backendFor(residency).fetch(`/api/cut/library/templates/${id}`, {
-    method: "DELETE",
-  });
+export async function deleteTemplate(
+  residency: Residency,
+  id: string,
+): Promise<void> {
+  const res = await backendFor(residency).fetch(
+    `/api/cut/library/templates/${id}`,
+    {
+      method: "DELETE",
+    },
+  );
   if (!res.ok) throw new Error("Could not delete the template.");
 }
 
@@ -625,21 +793,29 @@ export async function deleteTemplate(residency: Residency, id: string): Promise<
  * whole copy server-side; off it each file rides through the browser. */
 async function copyTemplateMediaToProject(
   projectId: string,
-  template: LibraryTemplateItem
+  template: LibraryTemplateItem,
 ): Promise<TemplateMedia[]> {
   if (template.residency === getBackend().kind) {
-    const res = await getBackend().fetch(`/api/cut/library/templates/${template.id}/use`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectId }),
-    });
+    const res = await getBackend().fetch(
+      `/api/cut/library/templates/${template.id}/use`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId }),
+      },
+    );
     const body = await apiJson<{ media?: TemplateMedia[] }>(res);
-    if (!res.ok || !body.media) throw new Error(body.error ?? "Could not add the template.");
+    if (!res.ok || !body.media)
+      throw new Error(body.error ?? "Could not add the template.");
     return body.media;
   }
   const out: TemplateMedia[] = [];
   for (const m of template.media) {
-    const fileName = await copyLibraryFileToProject(projectId, template.residency, m.fileName);
+    const fileName = await copyLibraryFileToProject(
+      projectId,
+      template.residency,
+      m.fileName,
+    );
     out.push({ ...m, fileName });
   }
   return out;
@@ -650,7 +826,7 @@ async function copyTemplateMediaToProject(
 export async function addTemplateToProject(
   projectId: string,
   template: LibraryTemplateItem,
-  at?: number
+  at?: number,
 ): Promise<void> {
   const media = await copyTemplateMediaToProject(projectId, template);
 
@@ -681,7 +857,7 @@ export async function addTemplateToProject(
  * Nothing is placed on the timeline. */
 export async function importTemplateToProject(
   projectId: string,
-  template: LibraryTemplateItem
+  template: LibraryTemplateItem,
 ): Promise<void> {
   const media = await copyTemplateMediaToProject(projectId, template);
   useEditor.getState().addTemplate({
@@ -701,7 +877,7 @@ export async function importTemplateToProject(
 export function addProjectTemplateToTimeline(
   projectId: string,
   template: LibraryTemplate,
-  at?: number
+  at?: number,
 ) {
   const s = useEditor.getState();
   const assetIds = template.media.map((m) => {
@@ -728,13 +904,17 @@ export function addProjectTemplateToTimeline(
  * project's own shelf, where the server can copy the bytes itself. */
 export async function saveAssetToLibrary(
   projectId: string,
-  asset: MediaAsset
+  asset: MediaAsset,
 ): Promise<LibraryAsset> {
   const residency = activeResidency();
   const res = await backendFor(residency).fetch("/api/cut/library/save", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ projectId, fileName: asset.fileName, name: asset.name }),
+    body: JSON.stringify({
+      projectId,
+      fileName: asset.fileName,
+      name: asset.name,
+    }),
   });
   const body = await apiJson<LibraryAsset>(res);
   if (!res.ok) throw new Error(body.error ?? "Could not save to library.");

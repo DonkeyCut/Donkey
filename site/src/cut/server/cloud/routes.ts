@@ -69,6 +69,7 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "POST", path: "/api/cut-cloud/library/save", handler: (r, u) => libraryCloud.save(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/move", handler: (r, u) => libraryCloud.move(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/templates", handler: (r, u) => libraryCloud.saveTemplate(u, r) },
+  { method: "POST", path: "/api/cut-cloud/library/templates/import", handler: (r, u) => libraryCloud.importTemplate(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/templates/:id/use", handler: (r, u, p) => libraryCloud.useTemplate(u, p.id, r) },
   { method: "POST", path: "/api/cut-cloud/library/templates/:id/add", handler: (r, u, p) => libraryCloud.addToTemplate(u, p.id, r) },
   { method: "PUT", path: "/api/cut-cloud/library/templates/:id", handler: (r, u, p) => libraryCloud.renameTemplate(u, p.id, r) },
