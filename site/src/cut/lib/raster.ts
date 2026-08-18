@@ -97,8 +97,8 @@ function elementImage(url: string): Promise<RasterImage | null> {
   if (typeof document === "undefined") return Promise.resolve(null);
   return new Promise((resolve) => {
     const img = new Image();
-    img.onload = () =>
-      resolve({ source: img, width: img.naturalWidth || 512, height: img.naturalHeight || 512 });
+    // The intrinsic size as reported: 0 is how a caller learns it is unknown.
+    img.onload = () => resolve({ source: img, width: img.naturalWidth, height: img.naturalHeight });
     img.onerror = () => resolve(null);
     img.src = url;
   });

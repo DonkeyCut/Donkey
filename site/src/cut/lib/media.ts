@@ -1028,10 +1028,13 @@ export async function makeStillFrame(sourceUrl: string): Promise<WatchFrames> {
   if (!ctx) throw new Error("Could not read the image.");
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(img.source, 0, 0, w, h);
+  // A picture read through an element (a host that sends no CORS header)
+  // taints the canvas, and the encode is where that surfaces.
+  const image = await rasterCanvasToDataUrl(canvas, "image/jpeg", SHEET_QUALITY).catch(() => {
+    throw new Error("Could not read the image.");
+  });
   return {
-    frames: [
-      { t: 0, image: await rasterCanvasToDataUrl(canvas, "image/jpeg", SHEET_QUALITY), via: "first" },
-    ],
+    frames: [{ t: 0, image, via: "first" }],
     candidates: 1,
     sceneChanges: [],
     coveredTo: 0,
@@ -1143,7 +1146,7 @@ export async function sampleWatchFrames(
         const copy = createRasterCanvas(cw, ch);
         const cctx = copy.getContext("2d") as CanvasRenderingContext2D | null;
         if (!cctx) throw new Error("Could not sample the video.");
-        cctx.drawImage(next.value.canvas as CanvasImageSource, 0, 0);
+        cctx.drawImage(next.value.canvas as CanvasImageSource, 0, 0, cw, ch);
         held.set(candTimes.length, copy);
       }
       candTimes.push(times[i]);

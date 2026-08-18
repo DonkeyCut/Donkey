@@ -193,10 +193,21 @@ export function frameSink(
 
 function capToTrack(track: InputVideoTrack, size?: FrameSize): FrameSize | undefined {
   if (!size) return size;
+  // A backing that resolves its metadata asynchronously — HLS, a segmented
+  // input — refuses the synchronous read. The sink is sync, so those sources
+  // decode at the size asked for.
+  let tw: number;
+  let th: number;
+  try {
+    tw = track.displayWidth;
+    th = track.displayHeight;
+  } catch {
+    return size;
+  }
   return {
     ...size,
-    ...(size.width !== undefined ? { width: Math.min(size.width, track.displayWidth) } : {}),
-    ...(size.height !== undefined ? { height: Math.min(size.height, track.displayHeight) } : {}),
+    ...(size.width !== undefined ? { width: Math.min(size.width, tw) } : {}),
+    ...(size.height !== undefined ? { height: Math.min(size.height, th) } : {}),
   };
 }
 
