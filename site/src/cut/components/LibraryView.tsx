@@ -88,6 +88,7 @@ import {
 } from "@/cut/lib/library";
 import { normalizeLink } from "@/cut/lib/link";
 import { useLightbox } from "@/cut/lib/lightbox";
+import { reportActivity } from "@/cut/lib/tabActivity";
 import { useNewProjectTarget } from "@/cut/lib/newProject";
 import { useListedResidencies, useLocalCompute } from "@/cut/lib/backend/hooks";
 import { setNeedsApp } from "@/cut/lib/needsApp";
@@ -97,6 +98,7 @@ import {
   type Residency,
 } from "@/cut/lib/residency";
 import { Lightbox } from "./Lightbox";
+import { TabStatus } from "./TabStatus";
 import { TemplateCard } from "./TemplateCard";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
 import {
@@ -418,6 +420,10 @@ export function LibraryView() {
   // Track one arrival from its first moment to its last: the tile goes up
   // before any bytes move, follows the work, and comes down when the asset
   // itself takes its place. A failure leaves the tile up with the reason.
+  // Files land here long after the drop, so the tab carries the arrival.
+  useEffect(() => {
+    reportActivity("import", pending.some((p) => !p.error));
+  }, [pending]);
   const addPending = (p: Pending) => setPending((q) => [...q, p]);
   const setStage = (id: string, stage: PendingStage) =>
     setPending((q) => q.map((p) => (p.id === id ? { ...p, stage } : p)));
@@ -1006,6 +1012,7 @@ export function LibraryView() {
         </AlertDialog>
 
         <Lightbox />
+      <TabStatus />
       </div>
     </div>
   );

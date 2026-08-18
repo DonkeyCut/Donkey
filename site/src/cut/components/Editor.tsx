@@ -31,6 +31,8 @@ import "@/cut/lib/genScene";
 import "@/cut/lib/googleFonts";
 import { syncFontAssets } from "@/cut/lib/fontAssets";
 import { syncLinkedLibrary } from "@/cut/lib/linkedLibrary";
+import { reportActivity } from "@/cut/lib/tabActivity";
+import { TabStatus } from "./TabStatus";
 import { installDevHooks } from "@/cut/lib/devHooks";
 import { ensureCloudThreads } from "@/cut/lib/chatCloud";
 import { readProjectThreads, writeActiveChat } from "@/cut/lib/chatThreads";
@@ -138,6 +140,11 @@ export function Editor({
   const sending = useEditor((s) =>
     s.assets.reduce((n, a) => (a.upload && !a.upload.error ? n + 1 : n), 0)
   );
+  // Bytes moving into the project are work the tab should show.
+  useEffect(() => {
+    reportActivity("import", importing + sending > 0);
+  }, [importing, sending]);
+
   // Uploaded fonts become live FontFaces the moment their assets exist (and
   // drop out when deleted), so titles set in them never measure a fallback.
   const assetsForFonts = useEditor((s) => s.assets);
@@ -935,6 +942,8 @@ export function Editor({
     // the panels give up width, the top bar collapses to a menu, and the
     // timeline scrolls inside itself as it always has.
     <div className="flex h-full min-w-0 overflow-hidden">
+      {/* The tab wears whatever is still running here. */}
+      <TabStatus />
       <div className="grid min-w-0 flex-1 grid-rows-[46px_minmax(0,1fr)_auto]">
         {viewer ? (
           <ViewerTopBar />

@@ -98,6 +98,7 @@ import { lightboxItemFromRef, useLightbox } from "@/cut/lib/lightbox";
 import { refsFromDroppedFiles } from "@/cut/lib/refMedia";
 import { revealRef } from "@/cut/lib/refReveal";
 import { useEditor } from "@/cut/lib/store";
+import { reportActivity } from "@/cut/lib/tabActivity";
 import { cn } from "@/lib/utils";
 import { cardIconButton } from "@/cut/components/iconButton";
 import { MentionTextarea, RefChips, RefThumb, RefTokenChip } from "./AssetRefs";
@@ -869,6 +870,11 @@ function ChatSession({
   );
 
   const busy = status === "submitted" || status === "streaming";
+  // The tab's own icon carries the turn, for the user reading another tab.
+  useEffect(() => {
+    reportActivity("chat", busy);
+    return () => reportActivity("chat", false);
+  }, [busy]);
 
   // While this thread is open its tools tag created assets with it, so
   // deleting the thread later can clean them up.
