@@ -47,6 +47,20 @@ Two facts decide whether a tab can carry a render, both probed per export: origi
 
 The worker also takes the renders the editor fires on its own — hover proxies, share cards, streaming ladders. Moving export to the Mac would be a third path and there is no longer much to win from it.
 
+## Converting footage
+
+A camera writes what it likes. A phone's `.mov` is HEVC, a screen recorder's is ProRes, and a camera file often carries raw PCM sound — formats some browsers have no decoder for. Cut reads media through the browser's own decoders, so a file this browser cannot decode is a file it cannot preview, cut, or render, and the fix is to rewrite it as MP4 with H.264 picture and AAC sound.
+
+Where it runs is decided by where the bytes already are, since moving a video file costs more than converting one. A Mac project converts on the engine's bundled ffmpeg, on the file in the project folder. A cloud project queues a render-worker job, which runs the identical code against the object in R2 — the tab sends nothing and watches the job row. A browser project converts in the tab, where mediabunny drives WebCodecs. A file whose streams already fit the container takes the cheap path everywhere: its packets are copied into a new wrapper in seconds, with no decoding and nothing lost. That case is most of what people mean by "turn these .mov files into mp4".
+
+The one case with no machine of its own is a browser project holding footage this browser cannot decode, and that is where the Mac comes back in. With the app running, the page posts the bytes to the engine and takes an MP4 back — the same trade transcription makes, and for the same reason: the work is free, fast, and already installed. The engine keeps nothing; it converts what it is handed. With no app, the conversion fails and says what would fix it — a browser that decodes the format, the Mac app, or moving the project to the cloud.
+
+A process with no page converts for itself. The engine holds the project folder, so it converts there directly and never calls its own HTTP surface; the cloud runner carries decoders of its own and runs the same in-process path a tab runs. That is what keeps conversion available to a chat turn whose tab has gone away.
+
+Conversion happens on two occasions. An import whose bytes this browser cannot decode converts on the way in: the file reaches the project, converts there, and the asset that lands points at the result. And the assistant converts on request, in place — the asset keeps its id and its name, so clips already cut from it keep playing, and the file underneath changes.
+
+In place is what makes the plain version of this work. Someone with a folder of `.mov` files drops them on the chat and asks for mp4: the drop makes each one an attachment on the thread, the conversion rewrites those same attachments, and the converted files come back as cards in the same conversation, ready to download or drag onto the timeline. Nothing is filed anywhere the user has to go find, and an attachment that was already an H.264 MP4 comes back untouched.
+
 ## Rules
 
 1. **Local is an optimization, never a requirement.** Every job routed to the Mac has a hosted path behind it. An engine that never answered, or one that fails the job, means the work goes hosted — the user hears about a failure only when both paths fail.
@@ -61,6 +75,7 @@ The worker also takes the renders the editor fires on its own — hover proxies,
 | Transcription, dictation | the Mac when it is there, hosted otherwise | the app ships the speech tool |
 | Export | the Mac for its own projects, the browser for cloud and browser ones, the worker when a cloud project's tab can't encode | see Export above |
 | Thumbnails, waveforms, media probing | the browser, always | it decodes the media itself |
+| Converting media to MP4 | the machine holding the bytes: the Mac, the worker, or the tab — and the Mac for a browser project the tab can't decode | see Converting footage above |
 | Image, video, and voice generation | hosted, always | no local counterpart |
 | The assistant's Gemini models | hosted, always | credits and the user's session |
 | The assistant's Claude and Codex providers | the Mac, always | the user's own CLI logins |
