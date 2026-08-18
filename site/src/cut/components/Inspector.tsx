@@ -136,7 +136,7 @@ export function Inspector() {
 
   return (
     <ScrollArea
-      render={<aside />}
+      render={<aside data-field-panel="" />}
       className="flex min-h-0 flex-col border-l border-border bg-card"
     >
       {clip ? (

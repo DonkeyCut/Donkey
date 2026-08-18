@@ -3,66 +3,89 @@
 /**
  * The font menu, shared by the title inspector and the caption panel.
  *
- * It lists the base system set, the bundled families, and the account's own
- * fonts off the Library shelf, and it is where a font file gets onto that shelf
- * in the first place: "Upload font" is a row in the menu, and each of the
- * user's own fonts carries the button that takes it off again.
+ * One list: the base system set, the bundled families, and the account's own
+ * fonts off the Library shelf, every row set in its own face. It is also where
+ * a font file gets onto that shelf in the first place, through the "Upload
+ * font" row at the bottom. Taking one off again is the Library's job, where the
+ * font is an item like any other.
  */
 
-import { Laptop, Loader2, Trash2, Upload } from "lucide-react";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { Loader2, Upload } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
 import { isFontFile } from "@/cut/lib/media";
 import {
-  deleteLinkedItem,
-  libraryFontId,
-  listLibraryFonts,
   expandLinkedFiles,
+  libraryFontId,
   linkedAccept,
+  listLibraryFonts,
   onLinkedChanged,
   uploadLibraryFont,
-  type LinkedItem,
 } from "@/cut/lib/linkedLibrary";
-import { useEditor } from "@/cut/lib/store";
 import { allFonts, fontStack, onFontsChanged } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
+
+/** Room left either side of the menu inside its panel. */
+const PANEL_INSET = 24;
 
 /** Picking this row opens the file dialog; it never becomes the value. */
 const UPLOAD = "__upload";
 
 const ACCEPT = linkedAccept();
 
-const NONE: LinkedItem[] = [];
+/** The row's text size, and the cap height it is drawn to. */
+const ROW_PX = 14;
+const CAP_PX = 10;
 
-function useShelfFonts(): LinkedItem[] {
-  return useSyncExternalStore(onLinkedChanged, listLibraryFonts, () => NONE);
+const capScale = new Map<string, number>();
+let pen: CanvasRenderingContext2D | null = null;
+
+/**
+ * How much to scale a face so its capitals stand as tall as everybody else's.
+ *
+ * A point size is the em box, and faces spend it differently — a script sets
+ * its capitals at half the em where a grotesque sets them at three quarters —
+ * so one size down the menu reads as a jumble of sizes. Each face is measured
+ * once, against the height its own capitals draw at.
+ */
+function rowSize(stack: string | undefined): number {
+  if (!stack) return ROW_PX;
+  const held = capScale.get(stack);
+  if (held !== undefined) return ROW_PX * held;
+  if (typeof document === "undefined") return ROW_PX;
+  // An unloaded face measures as the fallback, which would cache the wrong
+  // number; the menu re-renders when fonts land and asks again.
+  if (!document.fonts.check(`${ROW_PX}px ${stack}`)) return ROW_PX;
+  pen ??= document.createElement("canvas").getContext("2d");
+  if (!pen) return ROW_PX;
+  pen.font = `100px ${stack}`;
+  const cap = pen.measureText("H").actualBoundingBoxAscent;
+  const scale =
+    cap > 0 ? Math.min(2, Math.max(0.8, ((CAP_PX / cap) * 100) / ROW_PX)) : 1;
+  capScale.set(stack, scale);
+  return ROW_PX * scale;
 }
 
-/** How many titles and cues are set in this font, so a delete says what it
- * costs before it happens. */
-function countUses(fontId: string): number {
-  const s = useEditor.getState();
-  const titles = s.overlays.filter((o) => "font" in o && o.font === fontId).length;
-  const cues = s.subtitles.font === fontId ? 1 : 0;
-  return titles + cues;
-}
+/** One font's row, set in itself at the size the menu reads at. */
+const row = (f: { id: string; label: string; stack?: string }) => (
+  <SelectItem key={f.id} value={f.id}>
+    <span
+      className="leading-6"
+      style={{ fontFamily: f.stack, fontSize: rowSize(f.stack) }}
+    >
+      {f.label}
+    </span>
+  </SelectItem>
+);
 
 export function FontPicker({
   value,
@@ -76,39 +99,44 @@ export function FontPicker({
   // The menu re-reads the registry when the bundled families finish registering
   // or a shelf font lands (the bump re-renders, and the render re-reads).
   const [, bump] = useState(0);
-  useEffect(() => onFontsChanged(() => bump((n) => n + 1)), []);
+  const again = () => bump((n) => n + 1);
+  useEffect(() => onFontsChanged(again), []);
+  useEffect(() => onLinkedChanged(again), []);
   const fonts = allFonts();
-  const shelf = useShelfFonts();
-  const shelfIds = new Set(shelf.map((f) => libraryFontId(f.key)));
-  const built = fonts.filter((f) => !shelfIds.has(f.id));
-  // A font whose bytes wouldn't install still lists, so it can still be taken
-  // off the shelf; it just has no specimen to set its own name in.
-  const mine = shelf.map((f) => {
-    const id = libraryFontId(f.key);
-    const def = fonts.find((d) => d.id === id);
-    return {
-      font: f,
-      id,
-      label: def?.label ?? f.label,
-      stack: def?.stack,
-      // Only the cloud shelf is readable from a render job.
-      deviceOnly: !f.copies.some((c) => c.residency === "cloud"),
-    };
-  });
+  // The user's own fonts get their own heading; everything else is the set the
+  // editor ships with.
+  const shelf = new Set(listLibraryFonts().map((f) => libraryFontId(f.key)));
+  const built = fonts.filter((f) => !shelf.has(f.id));
+  const mine = fonts.filter((f) => shelf.has(f.id));
 
   const inputRef = useRef<HTMLInputElement>(null);
+  // The menu takes the width of the panel it drops out of: a font name sets in
+  // its own face, and a face that runs wide needs the room the field alone
+  // doesn't have. It hangs from the field's right edge back across the panel.
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [menuWidth, setMenuWidth] = useState<number>();
+  const measure = () => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const panel = el.closest("[data-field-panel]");
+    setMenuWidth(
+      Math.max(el.offsetWidth, (panel?.clientWidth ?? 0) - PANEL_INSET),
+    );
+  };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState<{ font: LinkedItem; uses: number } | null>(null);
 
   const upload = async (files: FileList | null) => {
     setBusy(true);
     setError(null);
     // A font download is a zip more often than it is a font, so the archive is
     // opened before anything is judged for being one.
-    const file = (await expandLinkedFiles(Array.from(files ?? []))).find(isFontFile);
+    const file = (await expandLinkedFiles(Array.from(files ?? []))).find(
+      isFontFile,
+    );
     if (!file) {
-      if (files?.length) setError("That file has no font in it. Try a .ttf, .otf or .woff.");
+      if (files?.length)
+        setError("That file has no font in it. Try a .ttf, .otf or .woff.");
       setBusy(false);
       return;
     }
@@ -121,18 +149,14 @@ export function FontPicker({
     }
   };
 
-  const remove = async () => {
-    const target = confirming?.font;
-    setConfirming(null);
-    if (!target) return;
-    await deleteLinkedItem(target).catch(() => {});
-  };
-
   return (
     <>
       <Select
         value={value}
         items={Object.fromEntries(fonts.map((f) => [f.id, f.label]))}
+        onOpenChange={(open) => {
+          if (open) measure();
+        }}
         onValueChange={(v) => {
           if (v === UPLOAD) {
             inputRef.current?.click();
@@ -141,52 +165,46 @@ export function FontPicker({
           onChange(v as string);
         }}
       >
-        <SelectTrigger size="sm" className={cn("w-full", className)} style={{ fontFamily: fontStack(value) }}>
+        <SelectTrigger
+          ref={triggerRef}
+          size="sm"
+          className={cn("w-full", className)}
+          style={{
+            fontFamily: fontStack(value),
+            fontSize: rowSize(fontStack(value)),
+          }}
+        >
           <SelectValue />
         </SelectTrigger>
-        <SelectContent>
-          {built.map((f) => (
-            <SelectItem key={f.id} value={f.id}>
-              <span style={{ fontFamily: f.stack }}>{f.label}</span>
-            </SelectItem>
-          ))}
-          {mine.length > 0 && <SelectSeparator />}
-          {mine.map(({ font, id, label, stack, deviceOnly }) => (
-            <SelectItem key={id} value={id}>
-              <span className="flex-1 truncate" style={stack ? { fontFamily: stack } : undefined}>
-                {label}
-              </span>
-              {deviceOnly && (
-                <span
-                  className="text-muted-foreground"
-                  title="On this device only — a cloud render falls back to SF Pro"
-                >
-                  <Laptop className="size-3" aria-label="On this device only" />
-                </span>
-              )}
-              <button
-                type="button"
-                aria-label={`Delete ${label}`}
-                title="Delete this font"
-                className="ml-1 rounded p-0.5 text-muted-foreground opacity-60 hover:text-destructive hover:opacity-100"
-                onPointerDown={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                }}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setConfirming({ font, uses: countUses(id) });
-                }}
-              >
-                <Trash2 className="size-3.5" />
-              </button>
-            </SelectItem>
-          ))}
+        {/* The menu is the field's own width: a face's name sets in a face
+            that runs wide, and the panel it drops out of is narrow. */}
+        <SelectContent
+          align="end"
+          alignItemWithTrigger={false}
+          style={
+            menuWidth ? { width: menuWidth, maxWidth: menuWidth } : undefined
+          }
+        >
+          {built.map(row)}
+          {mine.length > 0 && (
+            <>
+              <SelectSeparator />
+              <SelectGroup>
+                <SelectLabel>Custom fonts</SelectLabel>
+                {mine.map(row)}
+              </SelectGroup>
+            </>
+          )}
           <SelectSeparator />
           <SelectItem value={UPLOAD}>
-            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
-            <span className="text-muted-foreground">{busy ? "Adding font…" : "Upload font…"}</span>
+            <span className="flex items-center gap-2 text-muted-foreground">
+              {busy ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Upload className="size-3.5" />
+              )}
+              {busy ? "Adding font…" : "Upload font…"}
+            </span>
           </SelectItem>
         </SelectContent>
       </Select>
@@ -201,31 +219,6 @@ export function FontPicker({
           e.target.value = "";
         }}
       />
-      <AlertDialog open={!!confirming} onOpenChange={(o) => !o && setConfirming(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this font?</AlertDialogTitle>
-            <AlertDialogDescription>
-              It leaves your library and every project that offers it.
-              {confirming && confirming.uses > 0
-                ? ` ${confirming.uses} ${confirming.uses === 1 ? "title or caption" : "titles and captions"} set in it fall back to SF Pro.`
-                : ""}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive/10 text-destructive hover:bg-destructive/20"
-              onClick={(e) => {
-                e.preventDefault();
-                void remove();
-              }}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </>
   );
 }

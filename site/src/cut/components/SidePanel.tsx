@@ -410,7 +410,10 @@ export function SidePanel({
           )}
         </>
       ) : (
-        <div className="relative flex w-[264px] min-h-0 shrink-0 flex-col">
+        <div
+          data-field-panel=""
+          className="relative flex w-[264px] min-h-0 shrink-0 flex-col"
+        >
           <ClosePanelButton onClose={() => setTab(null)} />
           {tab === "media" && (
             <MediaPanel projectId={projectId} onImport={onImport} importing={importing} />

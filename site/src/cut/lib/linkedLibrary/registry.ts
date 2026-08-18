@@ -25,7 +25,6 @@
 
 import { readSnapshot, writeSnapshot } from "../cache";
 import {
-  deleteFromLibrary,
   fetchLibrary,
   moveLibraryItem,
   uploadToLibrary,
@@ -134,8 +133,17 @@ const byAsset = new Map<string, LinkedItem>();
 const used = new Map<string, Promise<void>>();
 const listeners = new Set<() => void>();
 
-export const listLinked = (prefix: string): LinkedItem[] =>
-  items.filter((i) => i.prefix === prefix);
+/** One array per kind, held until the listing changes: a subscriber reads this
+ * on every render and a fresh array each time would never settle. */
+const perKind = new Map<string, LinkedItem[]>();
+
+export const listLinked = (prefix: string): LinkedItem[] => {
+  const held = perKind.get(prefix);
+  if (held) return held;
+  const made = items.filter((i) => i.prefix === prefix);
+  perKind.set(prefix, made);
+  return made;
+};
 
 /** The link id a Library card should render itself as. */
 export const linkIdForAsset = (assetId: string): string | null => {
@@ -150,6 +158,7 @@ export function onLinkedChanged(cb: () => void): () => void {
 
 function publish(next: LinkedItem[]): void {
   items = next;
+  perKind.clear();
   byAsset.clear();
   for (const i of next) for (const c of i.copies) byAsset.set(c.assetId, i);
   for (const cb of listeners) cb();
@@ -357,18 +366,6 @@ export async function uploadLinkedItem(
   const key = await contentKey(await file.arrayBuffer());
   await syncLinkedLibrary();
   return linkId(prefix, key);
-}
-
-/** Take a linked item off the shelf, every copy of it. Whatever points at it
- * falls back on its own, so nothing in a document has to be rewritten. */
-export async function deleteLinkedItem(item: LinkedItem): Promise<void> {
-  const copies = [...item.copies];
-  for (const c of copies) forgetLinkedCopy(c.assetId);
-  await Promise.all(
-    copies.map((c) =>
-      deleteFromLibrary(c.residency, c.assetId).catch(() => {}),
-    ),
-  );
 }
 
 /** Every linked id a document is set in, across kinds. */
