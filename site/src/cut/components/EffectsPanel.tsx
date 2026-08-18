@@ -15,7 +15,7 @@ import { PICKED_RING, pickGridNav, useAssetPick } from "@/cut/lib/assetPick";
 import { clearElementDrag, setElementDragData, setObjectDragImage } from "@/cut/lib/assetDrag";
 import { SubTabs } from "@/cut/components/SubTabs";
 import { getPreviewCanvas } from "@/cut/lib/previewCanvas";
-import { useEditor } from "@/cut/lib/store";
+import { projectDuration, useEditor } from "@/cut/lib/store";
 import { usePreviewTimeEvery } from "@/cut/lib/playhead";
 import { isEffectOverlay, type EffectOverlay } from "@/cut/lib/types";
 import { useLocalPref } from "@/cut/lib/uiState";
@@ -137,9 +137,11 @@ function usePlayheadFrame(): string | null {
   );
   const tick = usePreviewTimeEvery(5);
   const epoch = useEditor((s) => s.loadEpoch);
-  const hasClips = useEditor((s) => s.clips.length > 0);
+  // The tile shows the live frame, which a cut of titles and shapes over the
+  // background has as much as one made of footage.
+  const hasPicture = useEditor((s) => projectDuration(s) > 0);
   useEffect(() => {
-    if (!hasClips || !projectId) return;
+    if (!hasPicture || !projectId) return;
     const t = setTimeout(() => {
       const shot = snapshotPreview();
       if (shot) {
@@ -148,8 +150,8 @@ function usePlayheadFrame(): string | null {
       }
     }, 160);
     return () => clearTimeout(t);
-  }, [tick, epoch, hasClips, projectId]);
-  return hasClips ? frame : null;
+  }, [tick, epoch, hasPicture, projectId]);
+  return hasPicture ? frame : null;
 }
 
 /** One effect: the preview fills the tile with its name under it, a click

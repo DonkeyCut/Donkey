@@ -178,6 +178,7 @@ export const TIMELINE_TOOLS = [
       plate: bool("Translucent plate behind text (default false)"),
       rotation: num("Degrees clockwise, -180..180"),
       opacity: num("Whole-element opacity 0..1"),
+      lane: num("Element row (0 = the bottom row). Elements on one row never overlap — a title over a shape needs a higher row than the shape."),
     }, ["text"]),
   },
   {

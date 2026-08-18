@@ -76,6 +76,7 @@ import { retryUpload } from "@/cut/lib/importQueue";
 import { downloadMedia, isMediaFile, revealMedia } from "@/cut/lib/media";
 import { mediaUrl, TRANSITION_MAX } from "@/cut/lib/types";
 import { parseSecondsInput } from "@/cut/components/ScrubValue";
+import { ColorField } from "@/cut/components/ColorField";
 import { ValueSlider } from "@/cut/components/ValueSlider";
 import { genPulseOverlay, isGenTab, useGenNotify, useGenPulse, useWatchGenTab } from "@/cut/lib/genNotify";
 import { useGenerate, type GenerateJob } from "@/cut/lib/generate";
@@ -1531,6 +1532,7 @@ function PublishPanel() {
   const setNotes = useEditor((s) => s.setNotes);
   const fadeIn = useEditor((s) => s.fadeIn);
   const fadeOut = useEditor((s) => s.fadeOut);
+  const background = useEditor((s) => s.background);
   const tagsLine = normalizeTags(publish.tags);
   const combined = [publish.caption.trim(), tagsLine].filter(Boolean).join("\n\n");
   const count = combined.length;
@@ -1553,6 +1555,16 @@ function PublishPanel() {
               value={fadeOut}
               onChange={(v) => useEditor.getState().setProjectFade({ fadeOut: v })}
             />
+            <div className="flex items-center justify-between gap-3 text-[12px] text-muted-foreground">
+              Background
+              <ColorField
+                value={background}
+                label="Background color"
+                onBegin={() => {}}
+                onLive={(c) => useEditor.getState().setBackground(c)}
+                onCommit={(c) => useEditor.getState().setBackground(c)}
+              />
+            </div>
           </div>
         )}
 

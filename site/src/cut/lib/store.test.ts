@@ -115,6 +115,14 @@ describe("the document projection", () => {
     expect(docOverlays(s().overlays)).toBe(a.overlays!);
   });
 
+  test("the frame color survives the round trip, and a bad one falls back", () => {
+    s().setBackground("#ff5500");
+    expect(s().background).toBe("#FF5500");
+    expect(serializeDoc(s() as Parameters<typeof serializeDoc>[0]).background).toBe("#FF5500");
+    s().setBackground("burnt orange");
+    expect(s().background).toBe("#000000");
+  });
+
   test("an edit gives a new projection, and the stamp still comes off", () => {
     useEditor.setState({ overlays: [title({ kind: "text" })] });
     const before = serializeDoc(s() as Parameters<typeof serializeDoc>[0]);

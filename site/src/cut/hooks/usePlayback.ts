@@ -385,6 +385,10 @@ class Engine {
     const s = useEditor.getState();
     const spans = getClipSpans(s.clips, s.assets);
     const total = projectDuration(s);
+    // The frame's color is the project's, read fresh each frame: every clear
+    // and every letterbox below paints it, so a cut with no footage at all
+    // still plays a picture.
+    this.comp.background = s.background;
     this.pool.beginFrame();
     this.used.clear();
 

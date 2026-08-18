@@ -72,7 +72,7 @@ import { blobToInlineAudio, refToInlineAudio, visualRefs, type InlineImage } fro
 import { characterPrompt, stockAspectDims, stockTitle } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
-import { applyOverlayPatchSettled, track0Clips, laneGapAt, getClipSpans, nextFreeStart, overlayLayers, parkedTransitions, resolveTransitions, totalDuration, useEditor } from "./store";
+import { applyOverlayPatchSettled, track0Clips, laneGapAt, getClipSpans, nextFreeStart, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt } from "./playhead";
 import { renderProjectFrame } from "./exportRender";
 import { rasterCanvasToDataUrl } from "./raster";
@@ -92,6 +92,7 @@ import {
   allFonts,
   ANIM_DEFAULT_SECONDS,
   ANIM_STYLE_IDS,
+  DEFAULT_BACKGROUND,
   frameOf,
   IMAGE_CLIP_SECONDS,
   isEffectOverlay,
@@ -102,6 +103,7 @@ import {
   nearestAspect,
   normalizeAspect,
   overlayAnimStyle,
+  projectBackground,
   rectOf,
   regionLabel,
   SHAPE_LABELS,
@@ -211,6 +213,12 @@ const CAPTURE_LONG_SIDE = 640;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
+/** The row an element tool was aimed at, if it named one. Rows are how
+ * elements stack: two on the same row slide clear of each other, so a title
+ * that has to sit over a shape has to name a row above it. */
+const aimedLane = (input: Record<string, unknown>): { lane?: number } | undefined =>
+  isNum(input.lane) ? { lane: Math.max(0, Math.round(input.lane)) } : undefined;
+
 /** Every tool that runs in the browser: the full catalog minus the
  * `server: true` skills tools the engine answers itself. */
 type BrowserToolName = Exclude<
@@ -248,7 +256,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     if (!(shape in SHAPE_LABELS))
       throw new ToolError(`shape must be one of ${SHAPE_KINDS.join(", ")}.`);
     if (isNum(input.start)) s.seek(input.start);
-    s.addShape(shape);
+    s.addShape(shape, aimedLane(input));
     const sel = useEditor.getState().selection;
     if (sel?.kind !== "overlay") throw new ToolError("Could not create the shape.");
     applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "shape"));
@@ -262,7 +270,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     const stickerAsset = s.assets.find((a) => a.id === assetId);
     if (stickerAsset?.type !== "image") throw new ToolError(`No image asset with id ${assetId}.`);
     if (isNum(input.start)) s.seek(input.start);
-    s.addSticker({ assetId, ...(isLottieAsset(stickerAsset) ? { lottie: true } : {}) });
+    s.addSticker({ assetId, ...(isLottieAsset(stickerAsset) ? { lottie: true } : {}), ...aimedLane(input) });
     const sel = useEditor.getState().selection;
     if (sel?.kind !== "overlay") throw new ToolError("Could not create the sticker.");
     applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "sticker"));
@@ -277,7 +285,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     const { createCustomSticker } = await import("./stickerCreate");
     const asset = await createCustomSticker(s.projectId, idea);
     if (isNum(input.start)) s.seek(input.start);
-    useEditor.getState().addSticker({ assetId: asset.id });
+    useEditor.getState().addSticker({ assetId: asset.id, ...aimedLane(input) });
     const sel = useEditor.getState().selection;
     if (sel?.kind !== "overlay") throw new ToolError("Could not place the sticker.");
     applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "sticker"));
@@ -290,7 +298,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     if (!(EFFECT_IDS as string[]).includes(effect))
       throw new ToolError(`effect must be one of ${EFFECT_IDS.join(", ")}.`);
     if (isNum(input.start)) s.seek(input.start);
-    s.addEffect(effect as EffectId);
+    s.addEffect(effect as EffectId, aimedLane(input));
     const sel = useEditor.getState().selection;
     if (sel?.kind !== "overlay") throw new ToolError("Could not create the effect.");
     applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "effect"));
@@ -563,6 +571,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           subtitles: s.subtitles,
           fadeIn: s.fadeIn,
           fadeOut: s.fadeOut,
+          background: s.background,
         },
         at,
         { width: Math.round(frame.w * k), height: Math.round(frame.h * k) },
@@ -1204,7 +1213,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (typeof input.text !== "string" || !input.text.trim())
         throw new ToolError("text is required.");
       if (isNum(input.start)) s.seek(input.start);
-      s.addOverlay();
+      s.addOverlay(aimedLane(input));
       const sel = useEditor.getState().selection;
       if (sel?.kind !== "overlay") throw new ToolError("Could not create the title.");
       applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "text"));
@@ -2354,8 +2363,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   },
 
   open_export: (s) => {
-      if (getClipSpans(s.clips, s.assets).length === 0)
-        throw new ToolError("Add a video to the timeline first.");
+      if (!(projectDuration(s) > 0))
+        throw new ToolError("Add something to the timeline first.");
       s.setExportOpen(true);
       return { open: true };
   },
@@ -2414,6 +2423,17 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       });
       const after = useEditor.getState();
       return { fadeIn: after.fadeIn, fadeOut: after.fadeOut };
+  },
+
+  set_background: (s, input) => {
+    const raw = typeof input.color === "string" ? input.color : "";
+    const hex = projectBackground(raw);
+    // projectBackground falls back rather than throwing, so a color it could
+    // not read would silently paint the frame black. Say so instead.
+    if (raw.trim() && hex === DEFAULT_BACKGROUND && !/^#?(000|000000)$/i.test(raw.trim()))
+      throw new ToolError(`Could not read ${raw} as a color — pass a hex like #FFFFFF.`);
+    s.setBackground(hex);
+    return { background: useEditor.getState().background };
   },
 
   set_project_name: (s, input) => {
@@ -2849,6 +2869,7 @@ function overlayPatch(input: Record<string, unknown>, kind: "text" | "shape" | "
   const patch: Record<string, unknown> = {};
   if (isNum(input.start)) patch.start = Math.max(0, input.start);
   if (isNum(input.end)) patch.end = input.end;
+  if (isNum(input.lane)) patch.lane = Math.max(0, Math.round(input.lane));
   if (isNum(input.x)) patch.x = clamp(input.x, 0.02, 0.98);
   if (isNum(input.y)) patch.y = clamp(input.y, 0.02, 0.98);
   if (isNum(input.rotation))

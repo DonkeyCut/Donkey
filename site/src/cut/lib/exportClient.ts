@@ -17,7 +17,7 @@ import { clipSpeed, getClipSpans, overlayLayers, projectDuration, spanSequence, 
 import { captionStyle, cueOverlay, cueWordWindows, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
 import { isMaskAnimated, isOverlayAnimated, normalizeGrade, paintMaskLuma } from "@donkeycut/effects-kit";
 import { renderElementFrames, renderElementPng } from "./textRender";
-import { clipPoseAt, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, rectOf, regionPx, subjectMasked } from "./types";
+import { clipPoseAt, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, regionPx, subjectMasked } from "./types";
 import type {
   Aspect,
   AudioClip,
@@ -182,6 +182,8 @@ export interface ExportDoc {
    * composite. */
   fadeIn?: number;
   fadeOut?: number;
+  /** The frame's own color behind every clip and element (hex); absent = black. */
+  background?: string;
 }
 
 
@@ -321,18 +323,14 @@ async function buildExportPayload(
   const duration = projectDuration(doc);
   const pngs: ExportPayload["pngs"] = [];
   const assetById = new Map(doc.assets.map((a) => [a.id, a]));
-  // Overlay-only cuts (empty track 0) still export: track 0 becomes a black bed
-  // the length of the project and the overlays/soundtrack composite onto it —
-  // the same path as a gap before the first track-0 clip. Refuse only a cut with
-  // no renderable content at all.
-  const hasOverlayVideo = overlayLayers(doc.clips).some(
-    (c) => !c.hidden && assetById.has(c.assetId) && c.start < duration,
-  );
-  const hasAudio = doc.audioClips.some(
-    (a) => !a.hidden && a.start < duration && assetById.has(a.assetId),
-  );
-  if (spans.length === 0 && !hasOverlayVideo && !hasAudio) {
-    throw new Error("Add a video to the timeline first.");
+  // Cuts with an empty track 0 still export: track 0 becomes a bed of the
+  // project's background color the length of the cut and the elements, layers
+  // and soundtrack composite onto it — the same path as a gap before the first
+  // track-0 clip. A cut of nothing but titles and shapes is that case for its
+  // whole length. Anything on any row gives the project a duration, so having
+  // one is the same question as having something to render.
+  if (!(duration > 0)) {
+    throw new Error("Add something to the timeline first.");
   }
 
   // The person matte renders first, so the loops below attach subject fields
@@ -722,6 +720,7 @@ async function buildExportPayload(
       duration,
       fadeIn: doc.fadeIn ?? 0,
       fadeOut: doc.fadeOut ?? 0,
+      background: projectBackground(doc.background),
       clips,
       audio,
       overlayVideos,
@@ -1157,7 +1156,7 @@ async function renderShareCard(projectId: string, doc: ExportDoc): Promise<void>
  * previous one (or the generated placeholder) in place. */
 export function refreshShareCard(projectId: string): void {
   const s = useEditor.getState();
-  if (!s.loaded || s.projectId !== projectId || s.clips.length === 0) return;
+  if (!s.loaded || s.projectId !== projectId || projectDuration(s) <= 0) return;
   void renderShareCard(projectId, {
     aspect: s.aspect,
     assets: s.assets,
@@ -1167,6 +1166,7 @@ export function refreshShareCard(projectId: string): void {
     subtitles: s.subtitles,
     fadeIn: s.fadeIn,
     fadeOut: s.fadeOut,
+    background: s.background,
   }).catch(() => {});
 }
 
@@ -1185,7 +1185,7 @@ export function refreshShareCard(projectId: string): void {
  */
 export async function refreshShareLadder(projectId: string): Promise<void> {
   const s = useEditor.getState();
-  if (!s.loaded || s.projectId !== projectId || s.clips.length === 0) return;
+  if (!s.loaded || s.projectId !== projectId || projectDuration(s) <= 0) return;
   const backend = getBackend();
   // The share decides what the render may contain, so it is read first. This
   // also settles whether to render at all: an unshared project has no viewer to
@@ -1207,6 +1207,7 @@ export async function refreshShareLadder(projectId: string): Promise<void> {
       subtitles: s.subtitles,
       fadeIn: s.fadeIn,
       fadeOut: s.fadeOut,
+      background: s.background,
     },
     body.share.features?.subtitles === true
   );

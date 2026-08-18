@@ -460,3 +460,29 @@ describe("clip keyframes in the filtergraph", () => {
     expect(xfadeMismatches(g)).toEqual([]);
   });
 });
+
+describe("the project background in the filtergraph", () => {
+  test("a cut of nothing but elements renders the background for its whole length", async () => {
+    const g = await graphFor({
+      clips: [clip("", { out: 6, hidden: true, muted: true })],
+      background: "#FF5500",
+      overlays: [{ file: "o0.png", start: 0, end: 6 }],
+    });
+    const joined = g.join(";");
+    expect(joined).toContain("color=c=0xFF5500");
+    expect(joined).not.toContain("color=c=black:");
+  });
+
+  test("a fitted clip letterboxes into the background rather than into black", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { fit: "fit" })],
+      background: "#FFFFFF",
+    });
+    expect(g.join(";")).toContain("color=0xFFFFFF");
+  });
+
+  test("no background named keeps the black frame every cut had before", async () => {
+    const g = await graphFor({ clips: [clip("", { out: 4, hidden: true, muted: true })] });
+    expect(g.join(";")).toContain("color=c=black:");
+  });
+});

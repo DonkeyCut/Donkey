@@ -21,7 +21,7 @@
 
 import { applyMaskToCanvas, gradeTint, gradeToCssFilter, grainTile, isNeutralGrade, lookCssFilter, lookPost, maskComposite } from "@donkeycut/effects-kit";
 import { createRasterCanvas } from "./raster";
-import { clipKeyed, clipPoseAt, isFullRect, rectOf } from "./types";
+import { clipKeyed, clipPoseAt, DEFAULT_BACKGROUND, isFullRect, rectOf } from "./types";
 import type { FrameRect, TransitionStyle, VideoClip } from "./types";
 
 /** A clip's picture at some instant, or the reasons there isn't one.
@@ -90,6 +90,13 @@ export class FrameCompositor {
     | ((at: number) => { alpha: CanvasImageSource | null } | null)
     | null = null;
 
+  /**
+   * The frame's own color, behind everything drawn into it. The project owns
+   * it, so the caller writes it before each frame; black keeps a compositor
+   * nobody told rendering the way it always did.
+   */
+  background = DEFAULT_BACKGROUND;
+
   constructor(private canvas: Surface) {}
 
   /** Point the compositor at a different surface, keeping the scratch buffers. */
@@ -140,7 +147,7 @@ export class FrameCompositor {
   clear() {
     const ctx = this.ctx();
     if (!ctx) return;
-    ctx.fillStyle = "#000";
+    ctx.fillStyle = this.background;
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
   }
 
@@ -527,7 +534,7 @@ export class FrameCompositor {
     const H = this.canvas.height;
     const blank = () => {
       if (clear) {
-        ctx.fillStyle = "#000";
+        ctx.fillStyle = this.background;
         ctx.fillRect(0, 0, W, H);
       }
     };

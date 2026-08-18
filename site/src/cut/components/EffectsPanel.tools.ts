@@ -27,6 +27,7 @@ export const EFFECTS_TOOLS = [
       amount: num("Strength 0.05..1 (default 0.5). For zoom it is the depth: 0.25 shallow, 0.5 moderate, 1 deep"),
       focus_x: num("Zoom only: the x of the point to zoom into, 0..1 (default 0.5)"),
       focus_y: num("Zoom only: the y of the point to zoom into, 0..1 (default 0.5)"),
+      lane: num("Element row (0 = the bottom row). Elements on one row never overlap — a title over a shape needs a higher row than the shape."),
     }, ["effect"]),
   },
 ] as const satisfies readonly AiToolDef[];

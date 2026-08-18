@@ -36,7 +36,7 @@ import { applyEffectToCanvas, evalOverlayFrame, grainTile, isMaskAnimated, isOve
 import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
 import { createRasterCanvas, type RasterSurface } from "./raster";
 import { renderElementPng } from "./textRender";
-import { behindSubjectOverlay, frameOf, frontSubjectOverlay, isEffectOverlay, isFullRect, isTextOverlay, laneOf, overlayAnimStyle, projectFadeSeconds, rectOf } from "./types";
+import { behindSubjectOverlay, frameOf, frontSubjectOverlay, isEffectOverlay, isFullRect, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, projectFadeSeconds, rectOf } from "./types";
 import type { ClipSpan, EffectOverlay, MediaAsset, Overlay, StickerOverlay } from "./types";
 import type { ExportDoc, ExportSettings } from "./exportClient";
 
@@ -798,6 +798,7 @@ export class FramePainter {
     private resolve: (asset: MediaAsset) => string
   ) {
     this.comp = new FrameCompositor(canvas);
+    this.comp.background = projectBackground(doc.background);
     this.stamps = new StampCache(canvas.width, canvas.height, doc.assets);
     this.duration = projectDuration(doc);
   }

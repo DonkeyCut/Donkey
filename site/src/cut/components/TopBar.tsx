@@ -32,7 +32,7 @@ import { clearProjectThreads } from "@/cut/lib/chatThreads";
 import { retryUpload } from "@/cut/lib/importQueue";
 import { backTarget, projectHref, useCutBase } from "@/cut/lib/nav";
 import { copyProjectAcross } from "@/cut/lib/projectCopy";
-import { useEditor } from "@/cut/lib/store";
+import { projectDuration, useEditor } from "@/cut/lib/store";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { ASPECT_PRESETS, aspectLabel, aspectOrientation, normalizeAspect, parseRatio, type Aspect } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
@@ -62,7 +62,9 @@ export function TopBar({
 }) {
   const base = useCutBase();
   const back = backTarget(base, from, folder);
-  const hasClips = useEditor((s) => s.clips.length > 0);
+  // Something to render, which footage is only one way to have: a cut of
+  // titles and shapes over the background frame exports like any other.
+  const hasPicture = useEditor((s) => projectDuration(s) > 0);
   const aspect = useEditor((s) => s.aspect);
   const projectName = useEditor((s) => s.projectName);
   const saveState = useEditor((s) => s.saveState);
@@ -353,7 +355,7 @@ export function TopBar({
         // A render reads the saved document, which an import still uploading
         // (or one that failed) is deliberately absent from — exporting now
         // would quietly leave it out of the video.
-        disabled={!hasClips || cloudUploading || failedImports > 0}
+        disabled={!hasPicture || cloudUploading || failedImports > 0}
         title={
           failedImports > 0
             ? "Retry the failed imports first"
@@ -655,7 +657,7 @@ export function TopBar({
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem
-                  disabled={!hasClips || cloudUploading}
+                  disabled={!hasPicture || cloudUploading}
                   onClick={() => {
                     const s = useEditor.getState();
                     s.setPlaying(false);

@@ -26,6 +26,10 @@ export interface ExportSpec {
    * final composite and mix after all overlays and soundtrack. */
   fadeIn?: number;
   fadeOut?: number;
+  /** The frame's own color (hex): what letterboxes a fitted clip, what a gap
+   * on track 0 plays, and what a cut of nothing but elements composites over.
+   * Absent = black. */
+  background?: string;
   clips: {
     file: string;
     in: number;
@@ -274,6 +278,14 @@ export function sdrConvert(c: Awaited<ReturnType<typeof videoColorInfo>>) {
 }
 
 /** A clip's effective playback rate (>0, default 1). */
+/** A spec color as an ffmpeg color argument: `0xRRGGBB`. Anything the spec
+ * did not carry, or carried malformed, is black — the frame every cut had
+ * before the project could choose one. */
+function ffColor(hex: string | undefined): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec((hex ?? "").trim());
+  return m ? `0x${m[1].toUpperCase()}` : "black";
+}
+
 function clipRate(c: ExportSpec["clips"][number]) {
   return c.speed && c.speed > 0 ? c.speed : 1;
 }
@@ -372,7 +384,10 @@ export async function runExport(
     (a, b) => a.track - b.track || a.start - b.start
   );
   const clipFmt = "yuv420p";
-  const padColor = "black";
+  // Every bare patch of frame in the graph — the letterbox around a fitted
+  // clip, a gap on track 0, the backdrop behind an edge animation — is the
+  // project's own background color. ffmpeg takes it as 0xRRGGBB.
+  const padColor = ffColor(spec.background);
   // One ffmpeg input per distinct media file (from the project folder),
   // plus one per uploaded overlay PNG.
   // Still images are excluded here: a plain `-i file` decodes one frame, so
@@ -755,11 +770,11 @@ export async function runExport(
         return;
       }
       // The backdrop behind the window: a neighbor's held frame when given
-      // (an abutting cut), else black (timeline ends and gaps).
+      // (an abutting cut), else the bare frame (timeline ends and gaps).
       let bg = fx.bg;
       if (!bg) {
         bg = `xb${tag}_${side}`;
-        filters.push(`color=c=black:s=${w}x${h}:r=${fps}:d=${d},format=${fmt}[${bg}]`);
+        filters.push(`color=c=${padColor}:s=${w}x${h}:r=${fps}:d=${d},format=${fmt}[${bg}]`);
       }
       if (fx.kind === "xfade") {
         // Entering: the backdrop hands off to the picture; exiting: the
@@ -1055,11 +1070,12 @@ export async function runExport(
         );
       }
     } else {
-      // No video stream, or a hidden clip: the slot plays black. trim+setpts
+      // No video stream, or a hidden clip: the slot plays the bare frame — an
+      // elements-only cut is one such slot for its whole length. trim+setpts
       // clear the frame-rate stamp a transitioned join's xfade demands —
       // re-stamp it.
       filters.push(
-        `color=c=black:s=${W}x${H}:r=${fps},trim=0:${num(dur)},setpts=PTS-STARTPTS,fps=${fps},format=${clipFmt}[v${j}]`
+        `color=c=${padColor}:s=${W}x${H}:r=${fps},trim=0:${num(dur)},setpts=PTS-STARTPTS,fps=${fps},format=${clipFmt}[v${j}]`
       );
     }
     if (!c.muted && !c.hidden && audioPresence.get(c.file)) {

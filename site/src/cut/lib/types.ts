@@ -444,6 +444,21 @@ export function projectFadeSeconds(fade: number | undefined, duration: number): 
   return Math.max(0, Math.min(fade ?? 0, duration / 2));
 }
 
+/** The frame color a project takes when it has not chosen one. Black is what
+ * every cut rendered before the field existed, so an old document opens
+ * looking exactly as it did. */
+export const DEFAULT_BACKGROUND = "#000000";
+
+/** A project's frame color as a `#RRGGBB` string. Anything unparseable — a
+ * hand-edited document, a tool argument — falls back to the default rather
+ * than reaching a canvas or an ffmpeg argument as garbage. */
+export function projectBackground(raw: string | undefined | null): string {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec((raw ?? "").trim());
+  if (!m) return DEFAULT_BACKGROUND;
+  const h = m[1];
+  return `#${(h.length === 3 ? [...h].map((c) => c + c).join("") : h).toUpperCase()}`;
+}
+
 /** How a clip hands off to the next one. Every style is a render-time blend
  * across the outgoing clip's last transition-length seconds: the incoming
  * clip's first frame arrives over the live tail and playback hands over at
@@ -1077,6 +1092,10 @@ export interface ProjectDoc {
    * soundtrack fade together), so they survive clip reordering. */
   fadeIn?: number;
   fadeOut?: number;
+  /** The color of the frame itself, behind everything: what a text-and-graphics
+   * cut plays over, what letterboxes a fitted clip, and what fills a gap in the
+   * timeline. Hex; absent = `DEFAULT_BACKGROUND`. */
+  background?: string;
   /** Auto-generated (then hand-edited) subtitles. */
   subtitles?: SubtitlesBlock;
   /** Legacy per-project view metadata — view state now lives in IndexedDB;

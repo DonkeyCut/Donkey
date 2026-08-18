@@ -68,6 +68,12 @@ export const SIDE_PANEL_TOOLS = [
       "Set the whole video's fade in from black and/or fade out to black, in seconds (0 clears, max 2). Applied to the final picture and mix at the start/end of the cut, independent of which clip sits there.",
     inputSchema: obj({ fadeIn: num("Fade-in seconds (omit to keep)"), fadeOut: num("Fade-out seconds (omit to keep)") }),
   },
+  {
+    name: "set_background",
+    description:
+      "Set the color of the video frame itself — what sits behind every clip and element. It fills the frame wherever no footage covers it: a cut made only of titles and shapes plays over it end to end, a fitted clip letterboxes into it, and a gap on track 0 shows it. Use this for \"make the background white/orange\" rather than laying a full-frame rectangle over the timeline. Default is black.",
+    inputSchema: obj({ color: str("Hex color, e.g. #FFFFFF") }, ["color"]),
+  },
 ] as const satisfies readonly AiToolDef[];
 
 export type SidePanelToolName = (typeof SIDE_PANEL_TOOLS)[number]["name"];

@@ -60,7 +60,7 @@ import { useGenNotify } from "./genNotify";
 import { clampPlayhead, playheadAt, previewAt, setPlayhead, setSkim } from "./playhead";
 import { engineTranscribeSamples, withEngineStt } from "./localStt";
 import { trackLocale } from "./subtitles";
-import { ANIM_STYLE_IDS, animStyleOfTransition, clipPoseAt, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionStyleOfAnim } from "./types";
+import { ANIM_STYLE_IDS, animStyleOfTransition, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionStyleOfAnim } from "./types";
 import { readTextStyle } from "./textStyle";
 import { loadUiState, saveUiState, type ProjectUiState } from "./uiState";
 import { captureTimelineFrames } from "./visualFrames";
@@ -213,6 +213,10 @@ export interface EditorState {
    * black at the end of the cut. Applied to the final picture and mix. */
   fadeIn: number;
   fadeOut: number;
+  /** The frame's own color, behind every clip and element. A cut made of
+   * nothing but titles and shapes plays over it, a fitted clip letterboxes
+   * into it, and a gap on track 0 shows it. */
+  background: string;
   selection: Selection;
   /** Everything selected, including `selection` (the primary that drives the
    * inspector). Bulk actions — delete, copy — act on this whole set. */
@@ -284,6 +288,9 @@ export interface EditorState {
   /** Set the whole-video fade in/out (seconds; 0 clears). Like the aspect,
    * project-level settings sit outside the undo history. */
   setProjectFade: (patch: { fadeIn?: number; fadeOut?: number }) => void;
+  /** Set the frame color. Project-level, so it sits outside undo like the
+   * aspect and the fades. */
+  setBackground: (hex: string) => void;
   addAsset: (asset: MediaAsset) => void;
   updateAsset: (id: string, patch: Partial<MediaAsset>) => void;
   /** Swap asset URLs in place (fileName -> url), e.g. after re-minting an
@@ -332,7 +339,8 @@ export interface EditorState {
    * owned them) and clear the gen sets, so post-run edits to generated clips
    * undo like any other edit. */
   releaseGenClips: () => void;
-  addOverlay: () => void;
+  /** Place a title element; a drop (or the assistant) passes where it landed. */
+  addOverlay: (aim?: { at?: number; lane?: number }) => void;
   /** Add a vector shape element on the title lanes at the playhead. */
   /** Place a shape element; a drop passes where it landed. */
   addShape: (shape: ShapeKind, aim?: { at?: number; lane?: number }) => void;
@@ -1041,6 +1049,7 @@ const DOC_KEYS = [
   "aspect",
   "fadeIn",
   "fadeOut",
+  "background",
   "publish",
   "notes",
   "subtitles",
@@ -1261,6 +1270,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       aspectTouched: false,
       fadeIn: 0,
       fadeOut: 0,
+      background: DEFAULT_BACKGROUND,
       selection: null,
       multiSelection: [],
       playing: false,
@@ -1307,6 +1317,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     aspectTouched: false,
     fadeIn: 0,
     fadeOut: 0,
+    background: DEFAULT_BACKGROUND,
     selection: null,
     multiSelection: [],
     selectedKey: null,
@@ -1616,6 +1627,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           aspectTouched: doc.aspect !== undefined,
           fadeIn: doc.fadeIn ?? 0,
           fadeOut: doc.fadeOut ?? 0,
+          background: projectBackground(doc.background),
           // View state lives in IndexedDB; doc.ui covers projects saved
           // before the move.
           pxPerSec: Math.max(12, Math.min(800, ui.pxPerSec ?? doc.ui?.pxPerSec ?? 60)),
@@ -1834,6 +1846,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       }));
     },
 
+    setBackground: (hex) => set({ background: projectBackground(hex) }),
+
     addAsset: (asset) =>
       set((s) => {
         // The first video in an untouched project decides the starting frame
@@ -2049,7 +2063,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       get().addVideoFromAsset(assetId, { kind: "track", track }, t);
     },
 
-    addOverlay: () => {
+    addOverlay: (aim) => {
       // Seed the visual style from the last-used title so repeated titles in a
       // project share one look; fall back to the built-in defaults.
       const remembered = readTextStyle();
@@ -2076,7 +2090,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         plateOpacity: remembered.plateOpacity,
         plateRadius: remembered.plateRadius,
         lane,
-      }));
+      }), aim);
     },
 
     addShape: (shape, aim) => {
@@ -4363,6 +4377,7 @@ export function serializeDoc(s: {
   aspect: Aspect;
   fadeIn: number;
   fadeOut: number;
+  background: string;
   publish: { caption: string; tags: string; soundTitle: string; handle: string };
   notes: { text: string; publishedAt: string; links: string[] };
   subtitles: SubtitlesBlock;
@@ -4383,6 +4398,7 @@ export function serializeDoc(s: {
     aspect: s.aspect,
     fadeIn: s.fadeIn,
     fadeOut: s.fadeOut,
+    background: s.background,
     subtitles: s.subtitles,
     publish: { ...s.publish },
     notes: { ...s.notes, links: [...s.notes.links] },
