@@ -16,10 +16,9 @@ import { cn } from "@/lib/utils";
  * width, the top/bottom pair pulls height. */
 export type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
-/** The default set: four corners and the two side grips. */
+/** Corners and the side pair, for a box with no height to pull on. */
 export const BOX_HANDLES: ResizeHandle[] = ["nw", "ne", "se", "sw", "w", "e"];
-/** Corners and all four sides, for a box whose width and height each pull on
- * their own. */
+/** The default set: four corners and all four sides. */
 export const FRAME_HANDLES: ResizeHandle[] = ["nw", "ne", "se", "sw", "w", "e", "n", "s"];
 /** Corners alone, for a box whose axes are locked together. */
 export const CORNER_HANDLES: ResizeHandle[] = ["nw", "ne", "se", "sw"];
@@ -49,7 +48,7 @@ export function resizeCursor(handle: ResizeHandle, rotation = 0): string {
 
 export function TransformHandles({
   color = "#0a84ff",
-  handles = BOX_HANDLES,
+  handles = FRAME_HANDLES,
   rotation = 0,
   angle = null,
   onResize,

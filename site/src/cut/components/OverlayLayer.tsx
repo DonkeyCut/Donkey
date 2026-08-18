@@ -954,8 +954,10 @@ function OverlayItem({
             rotation={live?.rotation ?? o.rotation ?? 0}
             angle={spin}
             rotateCursor={rotateCursor(live?.rotation ?? o.rotation ?? 0)}
+            // Every element wears the whole frame; a line has only its own
+            // length to pull on.
             handles={
-              o.kind === "shape" && !lineLikeShape(o.shape) ? FRAME_HANDLES : BOX_HANDLES
+              o.kind === "shape" && lineLikeShape(o.shape) ? BOX_HANDLES : FRAME_HANDLES
             }
             onResize={resizeFrom}
             onRotate={rotateFrom}
