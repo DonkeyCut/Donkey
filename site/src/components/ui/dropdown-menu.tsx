@@ -18,6 +18,19 @@ function DropdownMenuTrigger({ ...props }: MenuPrimitive.Trigger.Props) {
   return <MenuPrimitive.Trigger data-slot="dropdown-menu-trigger" {...props} />
 }
 
+// The popup renders through a portal, but React still routes its events up
+// the component tree to whatever rendered the menu — a timeline clip reads a
+// press on a menu item as a press on itself and starts a drag. The portal's
+// outermost node ends the trip: pointer events inside a menu stay in the menu.
+const stayInMenu = {
+  onPointerDown: (e: React.PointerEvent) => e.stopPropagation(),
+  onPointerUp: (e: React.PointerEvent) => e.stopPropagation(),
+  onMouseDown: (e: React.MouseEvent) => e.stopPropagation(),
+  onMouseUp: (e: React.MouseEvent) => e.stopPropagation(),
+  onClick: (e: React.MouseEvent) => e.stopPropagation(),
+  onContextMenu: (e: React.MouseEvent) => e.stopPropagation(),
+}
+
 function DropdownMenuContent({
   align = "start",
   alignOffset = 0,
@@ -38,6 +51,7 @@ function DropdownMenuContent({
         alignOffset={alignOffset}
         side={side}
         sideOffset={sideOffset}
+        {...stayInMenu}
       >
         <MenuPrimitive.Popup
           data-slot="dropdown-menu-content"
