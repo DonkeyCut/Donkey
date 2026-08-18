@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 
 import { DONKEY_DOWNLOAD_URL } from "@/app/_components/landing/data";
 import { track } from "@/lib/analytics";
@@ -93,6 +93,9 @@ export function ConnectGate({ children }: { children: ReactNode }) {
   const [blocked, setBlocked] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [howOpen, setHowOpen] = useState(false);
+  // The user closed the banner: it stays down for this stretch of being
+  // disconnected, and comes back if the engine connects and drops again.
+  const [dismissed, setDismissed] = useState(false);
 
   const bindEngine = useCallback(() => {
     markEngineSeen();
@@ -100,6 +103,7 @@ export function ConnectGate({ children }: { children: ReactNode }) {
     setBlocked(false);
     // Whatever was reached for is reachable again.
     setNeedsApp(false);
+    setDismissed(false);
     setCutMode("local");
     engineGateOpen();
     announceLocalCompute();
@@ -199,7 +203,8 @@ export function ConnectGate({ children }: { children: ReactNode }) {
   // click on a recalled library item raises the flag. Both listings stay on
   // screen either way, so nothing is hidden by keeping the banner off them.
   // The instructions behind it are a dialog the user closes.
-  const banner = reached === false && seen && (mode === "local" || needsApp) && !onSettings;
+  const banner =
+    reached === false && seen && (mode === "local" || needsApp) && !onSettings && !dismissed;
 
   // The banner takes its 32px out of the viewport rather than pushing the app
   // past it: the surfaces below fill this column's remaining height (h-full),
@@ -207,7 +212,7 @@ export function ConnectGate({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-screen flex-col">
       {banner && (
-        <div className="flex h-8 shrink-0 items-center justify-center gap-3 bg-red-600 px-4 text-xs font-medium text-white">
+        <div className="relative flex h-8 shrink-0 items-center justify-center gap-3 bg-red-600 px-10 text-xs font-medium text-white">
           <span className="min-w-0 truncate">
             This project is stored on this Mac, and{" "}
             {blocked
@@ -220,6 +225,15 @@ export function ConnectGate({ children }: { children: ReactNode }) {
             type="button"
           >
             How to fix this
+          </button>
+          <button
+            aria-label="Dismiss"
+            title="Dismiss"
+            className="absolute right-2 grid size-5 place-items-center rounded-full text-white/80 hover:bg-white/20 hover:text-white"
+            onClick={() => setDismissed(true)}
+            type="button"
+          >
+            <X className="size-3.5" />
           </button>
         </div>
       )}
