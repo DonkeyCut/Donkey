@@ -12,10 +12,16 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { AnalyticsBilling, AnalyticsReferrals, AnalyticsRollup } from "@/lib/analytics/schema";
+import type {
+  AnalyticsBilling,
+  AnalyticsReferrals,
+  AnalyticsRollup,
+  AnalyticsRollupUser,
+} from "@/lib/analytics/schema";
 import { REFERRAL_SOURCES } from "@/lib/onboarding/sequence";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { cn } from "@/lib/utils";
+import { DragBlock, useReorder } from "@/app/cut/app/su/analytics/Reorder";
 import { useAnalyticsRollup } from "@/queries/analytics";
 import { ApiError } from "@/queries/apiClient";
 
@@ -219,6 +225,28 @@ function deriveRevenue(days: string[], billing: AnalyticsBilling) {
   }));
 }
 
+// The dashboard blocks in their default order. The ids are the saved-layout
+// contract: renaming one drops that block back to its default position.
+const TILE_IDS = [
+  "registered",
+  "activeYesterday",
+  "active7d",
+  "balance",
+  "pro",
+  "funded",
+  "churn",
+] as const;
+const CARD_IDS = [
+  "actives",
+  "signups",
+  "referralSources",
+  "referralResponses",
+  "revenue",
+  "totalRegistered",
+] as const;
+type TileId = (typeof TILE_IDS)[number];
+type CardId = (typeof CARD_IDS)[number];
+
 function StatTile({
   label,
   value,
@@ -287,6 +315,57 @@ function ActivityDot({
   );
 }
 
+// Ranking weight decays with age — a working day two weeks back counts half
+// of yesterday's — so the list leads with who is active now. A day the user
+// only visited counts a fraction of one they worked.
+const HALF_LIFE_DAYS = 14;
+const VISIT_WEIGHT = 0.35;
+
+const USER_SORTS = [
+  { id: "active", label: "Most active" },
+  { id: "recent", label: "Recently active" },
+  { id: "joined", label: "Newest" },
+  { id: "paid", label: "Top paid" },
+] as const;
+type UserSort = (typeof USER_SORTS)[number]["id"];
+
+type RankedUser = AnalyticsRollupUser & {
+  score: number;
+  activeDays: number;
+  /** Index into rollup.days of the last day with any activity; -1 for never. */
+  lastActive: number;
+};
+
+function rankUsers(rollup: AnalyticsRollup, workBits: number, sort: UserSort): RankedUser[] {
+  const len = rollup.days.length;
+  const ranked = rollup.users.map((user) => {
+    let score = 0;
+    let activeDays = 0;
+    let lastActive = -1;
+    for (let i = 0; i < len; i++) {
+      const mask = user.activity[i] ?? 0;
+      if (mask === 0) continue;
+      activeDays++;
+      lastActive = i;
+      score +=
+        ((mask & workBits) !== 0 ? 1 : VISIT_WEIGHT) * 0.5 ** ((len - 1 - i) / HALF_LIFE_DAYS);
+    }
+    return { ...user, activeDays, lastActive, score };
+  });
+  const funded = (user: RankedUser) => Number(user.fundedMicros ?? "0");
+  const by: Record<UserSort, (a: RankedUser, b: RankedUser) => number> = {
+    active: (a, b) => b.score - a.score,
+    joined: (a, b) => (a.registeredAt < b.registeredAt ? 1 : -1),
+    paid: (a, b) => funded(b) - funded(a) || b.score - a.score,
+    recent: (a, b) => b.lastActive - a.lastActive || b.score - a.score,
+  };
+  // Our own accounts sink to the bottom under every sort: they are active
+  // every day and would otherwise own the top of the list.
+  return ranked.sort(
+    (a, b) => Number(a.superUser === true) - Number(b.superUser === true) || by[sort](a, b),
+  );
+}
+
 function ActivityGrid({
   rollup,
   workBits,
@@ -296,6 +375,13 @@ function ActivityGrid({
   workBits: number;
   missingDays: Set<string>;
 }) {
+  const [sort, setSort] = useLocalPref<UserSort>(
+    "su-analytics-user-sort",
+    "active",
+    (v) => USER_SORTS.some((option) => option.id === v),
+  );
+  const users = useMemo(() => rankUsers(rollup, workBits, sort), [rollup, workBits, sort]);
+
   const dotLabel = (email: string, day: string, mask: number) => {
     if (missingDays.has(day)) return `${email} — ${formatDay(day)}: no data`;
     if (mask === 0) return `${email} — ${formatDay(day)}: inactive`;
@@ -306,17 +392,35 @@ function ActivityGrid({
   // before any horizontal scroll; each column keeps its index into the
   // activity masks.
   const columns = rollup.days.map((day, i) => ({ day, i })).reverse();
-  // Paying users first; the stable sort keeps recency within each group.
-  const users = [...rollup.users].sort(
-    (a, b) => Number(b.fundedMicros !== undefined) - Number(a.fundedMicros !== undefined),
-  );
   return (
     <div className="rounded-xl border bg-card p-5">
-      <p className="font-medium">User activity</p>
-      <p className="text-sm text-muted-foreground">
-        One dot per user per day, last {rollup.days.length} days
-        {missingDays.size > 0 && ` · ${missingDays.size} without data`}
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="font-medium">User activity</p>
+          <p className="text-sm text-muted-foreground">
+            One dot per user per day, last {rollup.days.length} days
+            {missingDays.size > 0 && ` · ${missingDays.size} without data`}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {USER_SORTS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              aria-pressed={sort === option.id}
+              onClick={() => setSort(option.id)}
+              className={cn(
+                "rounded-full border px-2.5 py-1 text-xs transition-colors",
+                sort === option.id
+                  ? "border-border bg-muted"
+                  : "border-transparent text-muted-foreground hover:bg-muted/60",
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="mt-4 overflow-x-auto">
         <table className="border-separate border-spacing-0">
           <thead>
@@ -336,11 +440,21 @@ function ActivityGrid({
             {users.map((user) => (
               <tr key={user.id}>
                 <td className="sticky left-0 z-10 bg-card py-1 pr-4 whitespace-nowrap">
-                  <span className="block max-w-56 truncate text-sm" title={user.name}>
-                    {user.email}
+                  <span className="flex items-center gap-1.5">
+                    <span className="block max-w-56 truncate text-sm" title={user.name}>
+                      {user.email}
+                    </span>
+                    {user.superUser === true && (
+                      <span className="rounded-sm bg-muted px-1 text-[10px] text-muted-foreground">
+                        su
+                      </span>
+                    )}
                   </span>
                   <span className="block text-xs text-muted-foreground">
-                    Joined {formatDay(user.registeredAt.slice(0, 10))} ·{" "}
+                    {user.activeDays === 0
+                      ? "no activity"
+                      : `${user.activeDays} active ${user.activeDays === 1 ? "day" : "days"} · last ${formatDay(rollup.days[user.lastActive])}`}{" "}
+                    · joined {formatDay(user.registeredAt.slice(0, 10))} ·{" "}
                     {formatMicros(BigInt(user.balanceMicros))}
                     {user.fundedMicros !== undefined && (
                       <span className="text-emerald-700 dark:text-emerald-500">
@@ -404,6 +518,10 @@ export default function SuAnalyticsPage() {
     [],
     (v) => Array.isArray(v) && v.every((x) => typeof x === "string"),
   );
+  // The layout is the reader's: every tile and card drags into any order, and
+  // the arrangement sticks per browser. The user grid stays pinned last.
+  const tiles = useReorder("su-analytics-tile-order", TILE_IDS);
+  const cards = useReorder("su-analytics-card-order", CARD_IDS);
 
   if (rollup.isPending) {
     return (
@@ -448,360 +566,420 @@ export default function SuAnalyticsPage() {
   const churnBase = billing ? billing.subscribers + billing.churned : 0;
   const staleBilling = "not in this rollup yet — run analytics";
 
-  return (
-    <div className="space-y-6 pb-9">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile
-          label="Registered users"
-          value={view.registered.toLocaleString("en-US")}
-          sub={`+${view.signups7d} in the last 7 days`}
-        />
-        <StatTile
-          label="Active yesterday"
-          value={count(view.activeYesterday)}
-          sub={
-            view.activeYesterday === null
-              ? `no extract for ${formatDay(lastDay)} yet`
-              : `of ${view.registered.toLocaleString("en-US")} registered`
-          }
-        />
-        <StatTile
-          label="Active last 7 days"
-          value={count(view.active7d)}
-          sub={
-            view.active7d === null ? (
-              "no extracts for the last 7 days"
-            ) : deltaPct === null ? (
-              "no prior-week baseline"
-            ) : (
-              <>
-                <span
-                  className={cn(
-                    deltaPct.startsWith("-")
-                      ? "text-destructive"
-                      : "text-emerald-700 dark:text-emerald-500",
-                  )}
-                >
-                  {deltaPct.startsWith("-") ? deltaPct : `+${deltaPct}`}
-                </span>{" "}
-                vs prior 7 days
-              </>
-            )
-          }
-        />
-        <StatTile
-          label="Outstanding balance"
-          value={formatMicros(view.totalBalanceMicros)}
-          sub="credits across all accounts"
-        />
-        <StatTile
-          label="Pro subscribers"
-          value={billing ? billing.subscribers.toLocaleString("en-US") : "—"}
-          sub={billing ? `${billing.canceling} canceling at period end` : staleBilling}
-        />
-        <StatTile
-          label="People funded"
-          value={billing ? billing.funded.toLocaleString("en-US") : "—"}
-          sub={
-            billing ? `${formatMicros(BigInt(billing.fundedMicros))} paid all time` : staleBilling
-          }
-        />
-        <StatTile
-          label="Churn rate"
-          value={
-            billing && churnBase > 0
-              ? `${((billing.churned / churnBase) * 100).toFixed(1)}%`
-              : "—"
-          }
-          sub={
-            !billing
-              ? staleBilling
-              : churnBase === 0
-                ? "no subscriptions yet"
-                : `${billing.churned} of ${churnBase} subscriptions ended`
-          }
-        />
-      </div>
+  const tileNodes: Record<TileId, React.ReactNode> = {
+    registered: (
+      <StatTile
+        label="Registered users"
+        value={view.registered.toLocaleString("en-US")}
+        sub={`+${view.signups7d} in the last 7 days`}
+      />
+    ),
+    activeYesterday: (
+      <StatTile
+        label="Active yesterday"
+        value={count(view.activeYesterday)}
+        sub={
+          view.activeYesterday === null
+            ? `no extract for ${formatDay(lastDay)} yet`
+            : `of ${view.registered.toLocaleString("en-US")} registered`
+        }
+      />
+    ),
+    active7d: (
+      <StatTile
+        label="Active last 7 days"
+        value={count(view.active7d)}
+        sub={
+          view.active7d === null ? (
+            "no extracts for the last 7 days"
+          ) : deltaPct === null ? (
+            "no prior-week baseline"
+          ) : (
+            <>
+              <span
+                className={cn(
+                  deltaPct.startsWith("-")
+                    ? "text-destructive"
+                    : "text-emerald-700 dark:text-emerald-500",
+                )}
+              >
+                {deltaPct.startsWith("-") ? deltaPct : `+${deltaPct}`}
+              </span>{" "}
+              vs prior 7 days
+            </>
+          )
+        }
+      />
+    ),
+    balance: (
+      <StatTile
+        label="Outstanding balance"
+        value={formatMicros(view.totalBalanceMicros)}
+        sub="credits across all accounts"
+      />
+    ),
+    pro: (
+      <StatTile
+        label="Pro subscribers"
+        value={billing ? billing.subscribers.toLocaleString("en-US") : "—"}
+        sub={billing ? `${billing.canceling} canceling at period end` : staleBilling}
+      />
+    ),
+    funded: (
+      <StatTile
+        label="People funded"
+        value={billing ? billing.funded.toLocaleString("en-US") : "—"}
+        sub={
+          billing ? `${formatMicros(BigInt(billing.fundedMicros))} paid all time` : staleBilling
+        }
+      />
+    ),
+    churn: (
+      <StatTile
+        label="Churn rate"
+        value={
+          billing && churnBase > 0
+            ? `${((billing.churned / churnBase) * 100).toFixed(1)}%`
+            : "—"
+        }
+        sub={
+          !billing
+            ? staleBilling
+            : churnBase === 0
+              ? "no subscriptions yet"
+              : `${billing.churned} of ${churnBase} subscriptions ended`
+        }
+      />
+    ),
+  };
 
-      <div className="grid gap-6 xl:grid-cols-2">
-        <ChartCard
-          title="Active users"
-          subtitle={
-            view.missingDays.size > 0
-              ? `Daily actives, last 60 days · ${view.missingDays.size} days without data are left blank`
-              : "Daily actives, last 60 days"
-          }
-        >
-          <ChartContainer className="w-full" config={activesConfig}>
-            <AreaChart accessibilityLayer data={view.series} margin={{ left: -16 }}>
-              <CartesianGrid vertical={false} />
-              <XAxis
-                axisLine={false}
-                dataKey="day"
-                minTickGap={32}
-                tickFormatter={formatDay}
-                tickLine={false}
-                tickMargin={8}
-              />
-              <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={48} />
-              <ChartTooltip
-                content={<ChartTooltipContent labelFormatter={(label) => formatDay(String(label))} />}
-              />
-              <Area
-                dataKey="active"
-                dot={false}
-                fill="var(--color-active)"
-                fillOpacity={0.1}
-                stroke="var(--color-active)"
-                strokeWidth={2}
-                type="monotone"
-              />
-              <Area
-                dataKey="working"
-                dot={false}
-                fill="var(--color-working)"
-                fillOpacity={0.1}
-                stroke="var(--color-working)"
-                strokeWidth={2}
-                type="monotone"
-              />
-              <ChartLegend content={<ChartLegendContent />} />
-            </AreaChart>
-          </ChartContainer>
-        </ChartCard>
+  // Column spans belong to the grid's own children — the drag blocks — so a
+  // card that should fill the row says so here rather than on the card inside
+  // it, where `col-span` would have nothing to act on.
+  const cardSpan: Partial<Record<CardId, string>> = {
+    ...(revenue ? {} : { totalRegistered: "xl:col-span-2" }),
+  };
 
-        <ChartCard
-          title="Signups"
-          subtitle={`New registrations per day · ${view.signupsWindow.toLocaleString("en-US")} in the last 60 days`}
-        >
-          <ChartContainer className="w-full" config={signupsConfig}>
-            <BarChart accessibilityLayer data={view.series} margin={{ left: -16 }}>
-              <CartesianGrid vertical={false} />
-              <XAxis
-                axisLine={false}
-                dataKey="day"
-                minTickGap={32}
-                tickFormatter={formatDay}
-                tickLine={false}
-                tickMargin={8}
-              />
-              <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={48} />
-              <ChartTooltip
-                content={<ChartTooltipContent labelFormatter={(label) => formatDay(String(label))} />}
-              />
-              <Bar
-                dataKey="signups"
-                fill="var(--color-signups)"
-                maxBarSize={24}
-                radius={[4, 4, 0, 0]}
-              />
-            </BarChart>
-          </ChartContainer>
-        </ChartCard>
-      </div>
-
-      {referrals && (
-        <div className="grid gap-6 xl:grid-cols-2">
-          <ChartCard
-            title="Referral sources"
-            subtitle="Onboarding answers per day, by source · one user can pick several"
-          >
-            <ChartContainer className="w-full" config={referrals.config}>
-              <BarChart accessibilityLayer data={referrals.series} margin={{ left: -16 }}>
-                <CartesianGrid vertical={false} />
-                <XAxis
-                  axisLine={false}
-                  dataKey="day"
-                  minTickGap={32}
-                  tickFormatter={formatDay}
-                  tickLine={false}
-                  tickMargin={8}
-                />
-                <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={48} />
-                <ChartTooltip
-                  content={
-                    <NonZeroTooltipContent labelFormatter={(label) => formatDay(String(label))} />
-                  }
-                />
-                {Object.keys(referrals.config).map((id) => (
-                  <Bar
-                    key={id}
-                    dataKey={id}
-                    fill={`var(--color-${id})`}
-                    maxBarSize={24}
-                    stackId="sources"
+  // A card the rollup can't fill stays out of the record; the saved order
+  // skips it.
+  const cardNodes: Partial<Record<CardId, React.ReactNode>> = {
+    actives: (
+      <ChartCard
+        title="Active users"
+        subtitle={
+          view.missingDays.size > 0
+            ? `Daily actives, last 60 days · ${view.missingDays.size} days without data are left blank`
+            : "Daily actives, last 60 days"
+        }
+      >
+        <ChartContainer className="w-full" config={activesConfig}>
+          <AreaChart accessibilityLayer data={view.series} margin={{ left: -16 }}>
+            <CartesianGrid vertical={false} />
+            <XAxis
+              axisLine={false}
+              dataKey="day"
+              minTickGap={32}
+              tickFormatter={formatDay}
+              tickLine={false}
+              tickMargin={8}
+            />
+            <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={48} />
+            <ChartTooltip
+              content={<ChartTooltipContent labelFormatter={(label) => formatDay(String(label))} />}
+            />
+            <Area
+              dataKey="active"
+              dot={false}
+              fill="var(--color-active)"
+              fillOpacity={0.1}
+              stroke="var(--color-active)"
+              strokeWidth={2}
+              type="monotone"
+            />
+            <Area
+              dataKey="working"
+              dot={false}
+              fill="var(--color-working)"
+              fillOpacity={0.1}
+              stroke="var(--color-working)"
+              strokeWidth={2}
+              type="monotone"
+            />
+            <ChartLegend content={<ChartLegendContent />} />
+          </AreaChart>
+        </ChartContainer>
+      </ChartCard>
+    ),
+    signups: (
+      <ChartCard
+        title="Signups"
+        subtitle={`New registrations per day · ${view.signupsWindow.toLocaleString("en-US")} in the last 60 days`}
+      >
+        <ChartContainer className="w-full" config={signupsConfig}>
+          <BarChart accessibilityLayer data={view.series} margin={{ left: -16 }}>
+            <CartesianGrid vertical={false} />
+            <XAxis
+              axisLine={false}
+              dataKey="day"
+              minTickGap={32}
+              tickFormatter={formatDay}
+              tickLine={false}
+              tickMargin={8}
+            />
+            <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={48} />
+            <ChartTooltip
+              content={<ChartTooltipContent labelFormatter={(label) => formatDay(String(label))} />}
+            />
+            <Bar
+              dataKey="signups"
+              fill="var(--color-signups)"
+              maxBarSize={24}
+              radius={[4, 4, 0, 0]}
+            />
+          </BarChart>
+        </ChartContainer>
+      </ChartCard>
+    ),
+    totalRegistered: (
+      <ChartCard title="Total registered" subtitle="Cumulative registrations, last 60 days">
+        <ChartContainer className="max-h-56 w-full" config={totalRegisteredConfig}>
+          <AreaChart accessibilityLayer data={view.series} margin={{ left: -16 }}>
+            <CartesianGrid vertical={false} />
+            <XAxis
+              axisLine={false}
+              dataKey="day"
+              minTickGap={32}
+              tickFormatter={formatDay}
+              tickLine={false}
+              tickMargin={8}
+            />
+            <YAxis
+              allowDecimals={false}
+              axisLine={false}
+              domain={["auto", "auto"]}
+              tickLine={false}
+              width={48}
+            />
+            <ChartTooltip
+              content={
+                <ChartTooltipContent labelFormatter={(label) => formatDay(String(label))} />
+              }
+            />
+            <Area
+              dataKey="totalRegistered"
+              dot={false}
+              fill="var(--color-totalRegistered)"
+              fillOpacity={0.1}
+              stroke="var(--color-totalRegistered)"
+              strokeWidth={2}
+              type="monotone"
+            />
+          </AreaChart>
+        </ChartContainer>
+      </ChartCard>
+    ),
+    ...(referrals
+      ? {
+          referralResponses: (
+            <ChartCard
+              title="Referral responses"
+              subtitle={`Running totals by source · ${referrals.respondents.toLocaleString("en-US")} users answered all time`}
+            >
+              <ChartContainer className="w-full" config={referrals.trendConfig}>
+                <LineChart accessibilityLayer data={referrals.cumulative} margin={{ left: -16 }}>
+                  <CartesianGrid vertical={false} />
+                  <XAxis
+                    axisLine={false}
+                    dataKey="day"
+                    minTickGap={32}
+                    tickFormatter={formatDay}
+                    tickLine={false}
+                    tickMargin={8}
                   />
-                ))}
-              </BarChart>
-            </ChartContainer>
-            {/* The legend renders as its own row below the plot, in the
-                survey's order, so it wraps freely at narrow widths. */}
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-              {Object.entries(referrals.config).map(([id, entry]) => (
-                <span key={id} className="flex items-center gap-1.5 whitespace-nowrap">
-                  <span
-                    className="size-2 shrink-0 rounded-full"
-                    style={{ background: "color" in entry ? entry.color : undefined }}
+                  <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={48} />
+                  <ChartTooltip
+                    content={
+                      <NonZeroTooltipContent labelFormatter={(label) => formatDay(String(label))} />
+                    }
                   />
-                  {entry.label}
-                </span>
-              ))}
-            </div>
-          </ChartCard>
-
-          <ChartCard
-            title="Referral responses"
-            subtitle={`Running totals by source · ${referrals.respondents.toLocaleString("en-US")} users answered all time`}
-          >
-            <ChartContainer className="w-full" config={referrals.trendConfig}>
-              <LineChart accessibilityLayer data={referrals.cumulative} margin={{ left: -16 }}>
-                <CartesianGrid vertical={false} />
-                <XAxis
-                  axisLine={false}
-                  dataKey="day"
-                  minTickGap={32}
-                  tickFormatter={formatDay}
-                  tickLine={false}
-                  tickMargin={8}
-                />
-                <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={48} />
-                <ChartTooltip
-                  content={
-                    <NonZeroTooltipContent labelFormatter={(label) => formatDay(String(label))} />
-                  }
-                />
-                {Object.keys(referrals.trendConfig)
-                  .filter((id) => !hiddenTrends.includes(id))
-                  .map((id) => (
-                    <Line
+                  {Object.keys(referrals.trendConfig)
+                    .filter((id) => !hiddenTrends.includes(id))
+                    .map((id) => (
+                      <Line
+                        key={id}
+                        dataKey={id}
+                        dot={false}
+                        stroke={`var(--color-${id})`}
+                        strokeWidth={2}
+                        type="monotone"
+                      />
+                    ))}
+                </LineChart>
+              </ChartContainer>
+              {/* The legend doubles as the filter: a chip toggles its line, and
+                  the choice sticks (localStorage). */}
+              <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                {Object.entries(referrals.trendConfig).map(([id, entry]) => {
+                  const off = hiddenTrends.includes(id);
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      aria-pressed={!off}
+                      title={off ? "Show" : "Hide"}
+                      onClick={() =>
+                        setHiddenTrends(
+                          off ? hiddenTrends.filter((h) => h !== id) : [...hiddenTrends, id],
+                        )
+                      }
+                      className={cn(
+                        "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors",
+                        off
+                          ? "border-transparent bg-muted text-muted-foreground"
+                          : "border-border hover:bg-muted/60",
+                      )}
+                    >
+                      <span
+                        className={cn("size-2 rounded-full", off && "opacity-30")}
+                        style={{ background: "color" in entry ? entry.color : undefined }}
+                      />
+                      {entry.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </ChartCard>
+          ),
+          referralSources: (
+            <ChartCard
+              title="Referral sources"
+              subtitle="Onboarding answers per day, by source · one user can pick several"
+            >
+              <ChartContainer className="w-full" config={referrals.config}>
+                <BarChart accessibilityLayer data={referrals.series} margin={{ left: -16 }}>
+                  <CartesianGrid vertical={false} />
+                  <XAxis
+                    axisLine={false}
+                    dataKey="day"
+                    minTickGap={32}
+                    tickFormatter={formatDay}
+                    tickLine={false}
+                    tickMargin={8}
+                  />
+                  <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={48} />
+                  <ChartTooltip
+                    content={
+                      <NonZeroTooltipContent labelFormatter={(label) => formatDay(String(label))} />
+                    }
+                  />
+                  {Object.keys(referrals.config).map((id) => (
+                    <Bar
                       key={id}
                       dataKey={id}
-                      dot={false}
-                      stroke={`var(--color-${id})`}
-                      strokeWidth={2}
-                      type="monotone"
+                      fill={`var(--color-${id})`}
+                      maxBarSize={24}
+                      stackId="sources"
                     />
                   ))}
-              </LineChart>
-            </ChartContainer>
-            {/* The legend doubles as the filter: a chip toggles its line, and
-                the choice sticks (localStorage). */}
-            <div className="mt-3 flex flex-wrap items-center gap-1.5">
-              {Object.entries(referrals.trendConfig).map(([id, entry]) => {
-                const off = hiddenTrends.includes(id);
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    aria-pressed={!off}
-                    title={off ? "Show" : "Hide"}
-                    onClick={() =>
-                      setHiddenTrends(
-                        off ? hiddenTrends.filter((h) => h !== id) : [...hiddenTrends, id],
-                      )
-                    }
-                    className={cn(
-                      "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors",
-                      off
-                        ? "border-transparent bg-muted text-muted-foreground"
-                        : "border-border hover:bg-muted/60",
-                    )}
-                  >
+                </BarChart>
+              </ChartContainer>
+              {/* The legend renders as its own row below the plot, in the
+                  survey's order, so it wraps freely at narrow widths. */}
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+                {Object.entries(referrals.config).map(([id, entry]) => (
+                  <span key={id} className="flex items-center gap-1.5 whitespace-nowrap">
                     <span
-                      className={cn("size-2 rounded-full", off && "opacity-30")}
+                      className="size-2 shrink-0 rounded-full"
                       style={{ background: "color" in entry ? entry.color : undefined }}
                     />
                     {entry.label}
-                  </button>
-                );
-              })}
-            </div>
-          </ChartCard>
+                  </span>
+                ))}
+              </div>
+            </ChartCard>
+          ),
+        }
+      : {}),
+    ...(revenue
+      ? {
+          revenue: (
+            <ChartCard
+              title="Revenue"
+              subtitle={`Paid Stripe charges per day · $${revenue
+                .reduce((sum, point) => sum + point.pro + point.topups, 0)
+                .toLocaleString("en-US", { maximumFractionDigits: 2 })} in the last 60 days`}
+            >
+              <ChartContainer className="max-h-56 w-full" config={revenueConfig}>
+                <BarChart accessibilityLayer data={revenue} margin={{ left: -16 }}>
+                  <CartesianGrid vertical={false} />
+                  <XAxis
+                    axisLine={false}
+                    dataKey="day"
+                    minTickGap={32}
+                    tickFormatter={formatDay}
+                    tickLine={false}
+                    tickMargin={8}
+                  />
+                  <YAxis
+                    axisLine={false}
+                    tickFormatter={(value) => `$${value}`}
+                    tickLine={false}
+                    width={48}
+                  />
+                  <ChartTooltip
+                    content={
+                      <NonZeroTooltipContent labelFormatter={(label) => formatDay(String(label))} />
+                    }
+                  />
+                  <Bar dataKey="pro" fill="var(--color-pro)" maxBarSize={24} stackId="revenue" />
+                  <Bar
+                    dataKey="topups"
+                    fill="var(--color-topups)"
+                    maxBarSize={24}
+                    stackId="revenue"
+                  />
+                  <ChartLegend content={<ChartLegendContent />} />
+                </BarChart>
+              </ChartContainer>
+            </ChartCard>
+          ),
+        }
+      : {}),
+  };
+
+  return (
+    <div className="space-y-6 pb-9">
+      {(tiles.customized || cards.customized) && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => {
+              tiles.reset();
+              cards.reset();
+            }}
+            className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+          >
+            Reset layout
+          </button>
         </div>
       )}
 
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {tiles.order.map((id) => (
+          <DragBlock key={id} {...tiles.blockProps(id)}>
+            {tileNodes[id]}
+          </DragBlock>
+        ))}
+      </div>
+
       <div className="grid gap-6 xl:grid-cols-2">
-        {revenue && (
-          <ChartCard
-            title="Revenue"
-            subtitle={`Paid Stripe charges per day · $${revenue
-              .reduce((sum, point) => sum + point.pro + point.topups, 0)
-              .toLocaleString("en-US", { maximumFractionDigits: 2 })} in the last 60 days`}
-          >
-            <ChartContainer className="max-h-56 w-full" config={revenueConfig}>
-              <BarChart accessibilityLayer data={revenue} margin={{ left: -16 }}>
-                <CartesianGrid vertical={false} />
-                <XAxis
-                  axisLine={false}
-                  dataKey="day"
-                  minTickGap={32}
-                  tickFormatter={formatDay}
-                  tickLine={false}
-                  tickMargin={8}
-                />
-                <YAxis
-                  axisLine={false}
-                  tickFormatter={(value) => `$${value}`}
-                  tickLine={false}
-                  width={48}
-                />
-                <ChartTooltip
-                  content={
-                    <NonZeroTooltipContent labelFormatter={(label) => formatDay(String(label))} />
-                  }
-                />
-                <Bar dataKey="pro" fill="var(--color-pro)" maxBarSize={24} stackId="revenue" />
-                <Bar
-                  dataKey="topups"
-                  fill="var(--color-topups)"
-                  maxBarSize={24}
-                  stackId="revenue"
-                />
-                <ChartLegend content={<ChartLegendContent />} />
-              </BarChart>
-            </ChartContainer>
-          </ChartCard>
-        )}
-        <ChartCard
-          title="Total registered"
-          subtitle="Cumulative registrations, last 60 days"
-          className={cn(!revenue && "xl:col-span-2")}
-        >
-          <ChartContainer className="max-h-56 w-full" config={totalRegisteredConfig}>
-            <AreaChart accessibilityLayer data={view.series} margin={{ left: -16 }}>
-              <CartesianGrid vertical={false} />
-              <XAxis
-                axisLine={false}
-                dataKey="day"
-                minTickGap={32}
-                tickFormatter={formatDay}
-                tickLine={false}
-                tickMargin={8}
-              />
-              <YAxis
-                allowDecimals={false}
-                axisLine={false}
-                domain={["auto", "auto"]}
-                tickLine={false}
-                width={48}
-              />
-              <ChartTooltip
-                content={
-                  <ChartTooltipContent labelFormatter={(label) => formatDay(String(label))} />
-                }
-              />
-              <Area
-                dataKey="totalRegistered"
-                dot={false}
-                fill="var(--color-totalRegistered)"
-                fillOpacity={0.1}
-                stroke="var(--color-totalRegistered)"
-                strokeWidth={2}
-                type="monotone"
-              />
-            </AreaChart>
-          </ChartContainer>
-        </ChartCard>
+        {cards.order
+          .filter((id) => cardNodes[id] !== undefined)
+          .map((id) => (
+            <DragBlock key={id} {...cards.blockProps(id)} className={cardSpan[id]}>
+              {cardNodes[id]}
+            </DragBlock>
+          ))}
       </div>
 
       <ActivityGrid missingDays={view.missingDays} rollup={data} workBits={view.workBits} />

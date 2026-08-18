@@ -194,6 +194,7 @@ async function writeSnapshot(): Promise<AnalyticsSnapshotFile> {
           id: true,
           name: true,
           onboarding: { select: { referralAnsweredAt: true, referralSources: true } },
+          superUser: true,
         },
         take: SNAPSHOT_PAGE_SIZE,
         ...cursorArgs,
@@ -204,6 +205,7 @@ async function writeSnapshot(): Promise<AnalyticsSnapshotFile> {
     email: u.email,
     id: u.id,
     name: u.name,
+    ...(u.superUser ? { superUser: true } : {}),
     ...(u.onboarding?.referralAnsweredAt
       ? {
           referralAnsweredAt: u.onboarding.referralAnsweredAt.toISOString(),
@@ -338,6 +340,7 @@ async function consolidate(
         id: u.id,
         name: u.name,
         registeredAt: u.createdAt,
+        ...(u.superUser ? { superUser: true } : {}),
       };
     })
     .sort((a, b) => (a.registeredAt < b.registeredAt ? 1 : -1));

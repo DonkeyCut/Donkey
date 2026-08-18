@@ -70,6 +70,8 @@ export const analyticsSnapshotFileSchema = z.object({
       email: z.string(),
       name: z.string(),
       createdAt: z.string(),
+      // True for accounts with the super-user role.
+      superUser: z.boolean().optional(),
       // The onboarding referral answer; present once the user answered.
       referralAnsweredAt: z.string().optional(),
       referralSources: z.array(z.string()).optional(),
@@ -158,6 +160,8 @@ export const analyticsRollupSchema = z.object({
       // All-time paid Stripe grants, BigInt micros as a decimal string. Absent
       // for users who never paid and in rollups written before this shipped.
       fundedMicros: z.string().optional(),
+      // True for accounts with the super-user role.
+      superUser: z.boolean().optional(),
       // One mask per entry of days; a dot is mask !== 0.
       activity: z.array(z.number()),
     }),
