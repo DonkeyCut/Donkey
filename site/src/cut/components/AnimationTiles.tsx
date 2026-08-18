@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import {
   evalOverlayAnim,
@@ -16,11 +16,13 @@ import {
   type OverlayLoopStyle,
 } from "@donkeycut/effects-kit";
 import { Tile } from "@/cut/components/PanelTile";
+import { fontStack } from "@/cut/lib/types";
 
 /**
  * The animation picker: a grid of tiles, each playing its style on the style's
- * own name, in the element's own text — the grid reads as what every motion
- * does without asking the reader to hunt for it. A card outside the picker
+ * own name — the grid reads as what every motion does without asking the
+ * reader to hunt for it. The names wear one heavy face across every tile, so
+ * what changes from tile to tile is the motion. A card outside the picker
  * holds its name still until the pointer reaches it.
  *
  * Playback samples `evalOverlayAnim` — the same function the preview, the
@@ -90,7 +92,11 @@ function demoStateAt(
 // already one, and a second inside it would both box the motion in and steal
 // the room the motion needs. Clipping is what sells a slide leaving.
 const STAGE = "grid h-12 w-full place-items-center overflow-hidden";
-const WORD = "text-[13px] font-semibold whitespace-nowrap";
+const WORD = "text-[13px] whitespace-nowrap";
+
+/** The one face every demo name wears: bold enough that a letter still reads
+ * mid-slide, open enough that a name fits the tile at 13px. */
+const wordStyle = () => ({ fontFamily: fontStack("montserrat"), fontWeight: 700, lineHeight: 1 });
 
 /** Whether the demo has to lay the name out letter by letter: the per-glyph
  * ramps and the per-glyph loops both move each character on its own delay. */
@@ -101,20 +107,9 @@ const splitsGlyphs = (slot: Slot, style: string) =>
 
 /** The name standing still: what a card wears until the pointer reaches it,
  * and what every tile falls back to when the reader asks for less motion. */
-function FrozenName({
-  slot,
-  style,
-  textStyle,
-}: {
-  slot: Slot;
-  style: string;
-  textStyle?: CSSProperties;
-}) {
+function FrozenName({ slot, style }: { slot: Slot; style: string }) {
   return (
-    <span
-      className={`${WORD} ${textStyle ? "" : "text-foreground"}`}
-      style={{ lineHeight: 1, ...textStyle }}
-    >
+    <span className={`${WORD} text-foreground`} style={wordStyle()}>
       {labelOf(slot, style)}
     </span>
   );
@@ -130,7 +125,6 @@ function LiveName({
   seconds,
   speed,
   index = 0,
-  textStyle,
 }: {
   slot: Slot;
   style: string;
@@ -140,9 +134,6 @@ function LiveName({
   /** Place in the grid. It sets where in its own cycle this demo starts, so a
    * grid of them spreads out instead of running in unison. */
   index?: number;
-  /** The element's own look — font, color, stroke, shadow — so the demo
-   * plays on the text it will actually move. */
-  textStyle?: CSSProperties;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
   const label = labelOf(slot, style);
@@ -214,8 +205,8 @@ function LiveName({
     <span
       ref={ref}
       data-word={style === "typewriter" ? label : undefined}
-      className={`${WORD} ${textStyle ? "" : "text-foreground"}`}
-      style={{ willChange: "transform", lineHeight: 1, ...textStyle }}
+      className={`${WORD} text-foreground`}
+      style={{ willChange: "transform", ...wordStyle() }}
     >
       {isText && splitsGlyphs(slot, style)
         ? [...label].map((ch, i) => (
@@ -241,12 +232,11 @@ function AnimName({
   speed: number;
   playing: boolean;
   index?: number;
-  textStyle?: CSSProperties;
 }) {
   return playing ? (
     <LiveName {...rest} />
   ) : (
-    <FrozenName slot={rest.slot} style={rest.style} textStyle={rest.textStyle} />
+    <FrozenName slot={rest.slot} style={rest.style} />
   );
 }
 
@@ -275,7 +265,6 @@ function AnimTile({
   index,
   selected,
   onPick,
-  textStyle,
 }: {
   slot: Slot;
   style: string;
@@ -286,7 +275,6 @@ function AnimTile({
   index: number;
   selected: boolean;
   onPick: () => void;
-  textStyle?: CSSProperties;
 }) {
   const ref = useRef<HTMLButtonElement>(null);
   const onScreen = useOnScreen(ref);
@@ -307,7 +295,6 @@ function AnimTile({
           speed={speed}
           index={index}
           playing={onScreen}
-          textStyle={textStyle}
         />
       </span>
     </Tile>
@@ -328,7 +315,6 @@ export function AnimationCard({
   index = 0,
   onOpen,
   onClear,
-  textStyle,
 }: {
   slot: Slot;
   style: string;
@@ -339,7 +325,6 @@ export function AnimationCard({
   index?: number;
   onOpen: () => void;
   onClear: () => void;
-  textStyle?: CSSProperties;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const onScreen = useOnScreen(ref);
@@ -361,7 +346,6 @@ export function AnimationCard({
             speed={speed}
             index={index}
             playing={onScreen}
-            textStyle={textStyle}
           />
         </span>
       </button>
@@ -388,7 +372,6 @@ export function AnimationTiles({
   seconds,
   speed,
   onPick,
-  textStyle,
 }: {
   slot: Slot;
   /** The style in use, or undefined for none. */
@@ -400,8 +383,6 @@ export function AnimationTiles({
   /** The loop speed the panel has set — the hover demo's cycle rate. */
   speed: number;
   onPick: (style: string | null) => void;
-  /** The element's own look, applied to every tile's demo text. */
-  textStyle?: CSSProperties;
 }) {
   const ids: string[] =
     slot === "loop"
@@ -412,7 +393,9 @@ export function AnimationTiles({
     <div className="grid grid-cols-2 gap-[9px]">
       <Tile selected={!value} onClick={() => onPick(null)} title="None" className="p-1">
         <span className={STAGE}>
-          <span className={`${WORD} text-muted-foreground/70`}>None</span>
+          <span className={`${WORD} text-muted-foreground/70`} style={wordStyle()}>
+            None
+          </span>
         </span>
       </Tile>
       {ids.map((id, i) => (
@@ -426,7 +409,6 @@ export function AnimationTiles({
           index={i}
           selected={value === id}
           onPick={() => onPick(id)}
-          textStyle={textStyle}
         />
       ))}
     </div>

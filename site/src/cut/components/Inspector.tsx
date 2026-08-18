@@ -98,7 +98,7 @@ import {
   type TextOverlay,
   type VideoClip,
 } from "@/cut/lib/types";
-import { autoGradeFromImageData, isNeutralGrade, normalizeGrade, resolveShadow } from "@donkeycut/effects-kit";
+import { autoGradeFromImageData, isNeutralGrade, normalizeGrade } from "@donkeycut/effects-kit";
 import { getPreviewCanvas, sampleClipFrameData } from "@/cut/lib/previewCanvas";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -1611,26 +1611,6 @@ function AnimSlotSlider({
   );
 }
 
-/** A title's own look at tile scale, for the picker's demo text: family,
- * weight, color, stroke and shadow ride along (the stroke's em units scale
- * with the demo font); layout knobs stay out. */
-function demoTextStyle(o: Overlay): React.CSSProperties | undefined {
-  if (!isTextOverlay(o)) return undefined;
-  const shadow = resolveShadow(o.shadow);
-  const k = 13 / o.size;
-  return {
-    fontFamily: fontStack(o.font),
-    fontWeight: o.weight,
-    fontStyle: o.italic ? "italic" : undefined,
-    color: o.color,
-    WebkitTextStroke: o.stroke ? `${o.stroke.width * 2}em ${o.stroke.color}` : undefined,
-    paintOrder: o.stroke ? ("stroke fill" as const) : undefined,
-    textShadow: shadow
-      ? `0 ${shadow.offsetY * k}px ${shadow.blur * k}px ${shadow.color}`
-      : undefined,
-  };
-}
-
 /** The Animation entry every overlay panel carries: the current picks at a
  * glance on a drill-in to the picker, with each set slot's length or speed
  * right under it. */
@@ -1684,7 +1664,6 @@ function AnimationSection({
               speed={anim.loop?.speed ?? 1}
               onOpen={onOpen}
               onClear={() => clear(slot)}
-              textStyle={demoTextStyle(o)}
             />
           ))}
         </div>
@@ -1779,7 +1758,6 @@ function AnimationPanel({ overlay: o, onBack }: { overlay: Overlay; onBack: () =
           seconds={seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS}
           speed={anim.loop?.speed ?? 1}
           onPick={pick}
-          textStyle={demoTextStyle(o)}
         />
       </div>
     </>
