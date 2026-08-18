@@ -40,7 +40,7 @@ import {
 import { originalSettings, type ExportDoc } from "@/cut/lib/exportClient";
 import { useExports } from "@/cut/lib/exportStore";
 import { isDragActive, startDrag, subscribeDragActive } from "@/cut/lib/drag";
-import { CLIP_GAP, startLaneMove, startLaneTrim, type LaneDrag } from "@/cut/lib/laneTracks";
+import { CLIP_GAP, startLaneMove, startLaneTrim, type LaneDrag, type LaneKind } from "@/cut/lib/laneTracks";
 import { downloadMedia, ensurePeaks, importImage, importStockMusic, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia } from "@/cut/lib/media";
 import { track0Clips, laneGapAt, sameLane, type LaneRef, clipLen, clipSpeed, getClipSpans, overlayLaneOrder, overlayLayers, projectDuration, resolveTransitions, rippleInsert, useEditor } from "@/cut/lib/store";
 import type { VideoTrackPlacement } from "@/cut/lib/store";
@@ -2263,10 +2263,9 @@ export function Timeline() {
                 />
               )}
               {(overlayTrackSpans.get(track) ?? []).map((span) => (
-                <OverlayClipView
+                <ClipView
                   key={span.clip.id}
-                  clip={span.clip}
-                  asset={span.asset}
+                  span={span}
                   pps={pps}
                   selected={selKeys.has(`clip:${span.clip.id}`)}
                   drag={
@@ -3214,6 +3213,14 @@ function PlayheadCap({
 }
 
 
+/**
+ * One video clip's box, on track 0 or on an upper track. Every video track
+ * draws the same bar — filmstrip, chips, keys, trim grips — and the row it
+ * sits on decides the two things that differ: the spine carries the chat
+ * mention and the detach-audio action, and the lane gestures are keyed to it.
+ * Full-frame upper clips (`scale === 1`) read as a stacked composite; smaller
+ * ones are picture-in-picture. Hidden clips gray out.
+ */
 function ClipView({
   span,
   mention,
@@ -3232,13 +3239,14 @@ function ClipView({
 }: {
   span: ClipSpan;
   /** The clip's chat mention token ("@c2"), shown on hover so the user can
-   * point the assistant at this exact segment. */
-  mention: string;
+   * point the assistant at this exact segment. Track 0 only — the spine is
+   * what the assistant addresses. */
+  mention?: string;
   pps: number;
   selected: boolean;
   /** This clip's live drag when it is the one being carried (ghost mode). */
   drag: LaneDrag | null;
-  /** Another track-0 clip is dragging: animate this one's parting shifts. */
+  /** Another clip on this row is dragging: animate this one's parting shifts. */
   parting: boolean;
   /** The start this clip previews at while a hovering drop parts its row. */
   partAt?: number;
@@ -3261,12 +3269,16 @@ function ClipView({
   ) => void;
 }) {
   const { clip, asset } = span;
+  // The row the clip lives on names its lane; the two gesture kinds write
+  // through different store actions.
+  const lane: LaneKind = clip.track === 0 ? "clip" : "overlayClip";
+  const spine = lane === "clip";
   const loading = useEditor((s) => s.loadingMedia.has(asset.fileName));
   const speed = clipSpeed(clip);
   // Every box is its clip's whole footprint. Clips never overlap — a
   // transition is a render-time blend at the cut, drawn as the bar above the
   // tracks — so a box's width is the clip's own length, whatever joins it.
-  const w = span.len * pps;
+  const w = Math.max(10, span.len * pps);
   const filmIn = clip.in;
   const filmOut = filmIn + span.len * speed;
 
@@ -3282,7 +3294,7 @@ function ClipView({
   );
 
   // The move gesture is the shared lane behavior (parting, snapping); its
-  // verticality is the video placement system — upper tracks and the new
+  // verticality is the video placement system — the other tracks and the new
   // tracks past the stack — resolved from the rows' geometry.
   const ui = {
     pps,
@@ -3294,7 +3306,7 @@ function ClipView({
     onSnap,
     vertical: {
       resolve: (ev: PointerEvent) => resolveTarget(ev.clientX, ev.clientY, clip.id),
-      isHome: (t: TrackTarget) => samePlacement(t, TRACK_ZERO),
+      isHome: (t: TrackTarget) => samePlacement(t, { kind: "track", track: clip.track }),
       preview: (t: TrackTarget | null, start: number, len: number) =>
         t ? onCrossMove(t, start, len) : onCrossMove(null),
       commit: (id: string, t: TrackTarget, start: number) => onCrossDrop(id, t, start),
@@ -3322,7 +3334,7 @@ function ClipView({
         zIndex: drag ? 20 : undefined,
       }}
       data-tl-sel={`clip:${clip.id}`}
-      onPointerDown={(e) => startLaneMove(e, "clip", clip.id, ui)}
+      onPointerDown={(e) => startLaneMove(e, lane, clip.id, ui)}
       onContextMenu={(e) => {
         if (asset.type !== "video") return;
         const rect = e.currentTarget.getBoundingClientRect();
@@ -3339,15 +3351,16 @@ function ClipView({
         // glance, not just from the thin border.
         <div className="pointer-events-none absolute inset-0 z-[1] bg-[#0a84ff]/25" />
       )}
-      {drag ? (
-        <span className="tl-dur-chip pointer-events-none absolute top-1 left-1 z-2 rounded-[5px] bg-black/65 px-1.5 py-px font-mono text-[10px] tabular-nums text-white">
-          {(Math.round(span.len * 10) / 10).toFixed(1)}s
-        </span>
-      ) : loading ? null : (
-        <span className="tl-mention-chip pointer-events-none absolute top-1 left-1 z-2 rounded-[5px] bg-black/65 px-1.5 py-px font-mono text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100">
-          {mention}
-        </span>
-      )}
+      {mention &&
+        (drag ? (
+          <span className="tl-dur-chip pointer-events-none absolute top-1 left-1 z-2 rounded-[5px] bg-black/65 px-1.5 py-px font-mono text-[10px] tabular-nums text-white">
+            {(Math.round(span.len * 10) / 10).toFixed(1)}s
+          </span>
+        ) : loading ? null : (
+          <span className="tl-mention-chip pointer-events-none absolute top-1 left-1 z-2 rounded-[5px] bg-black/65 px-1.5 py-px font-mono text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100">
+            {mention}
+          </span>
+        ))}
       {loading && <LoadingChip />}
       {asset.type === "video" && !loading && (
         <MuteChip
@@ -3373,7 +3386,7 @@ function ClipView({
       )}
       {!loading && (
         <ClipMenu asset={asset} clip={clip}>
-          {asset.type === "video" ? (
+          {spine && asset.type === "video" ? (
             <DropdownMenuItem
               disabled={clip.muted}
               onClick={() => {
@@ -3402,11 +3415,11 @@ function ClipView({
       ))}
       <span
         className={cn(trimHandle, "tl-trim-l left-0")}
-        onPointerDown={(e) => startLaneTrim(e, "clip", clip.id, "l", ui)}
+        onPointerDown={(e) => startLaneTrim(e, lane, clip.id, "l", ui)}
       />
       <span
         className={cn(trimHandle, "tl-trim-r right-0")}
-        onPointerDown={(e) => startLaneTrim(e, "clip", clip.id, "r", ui)}
+        onPointerDown={(e) => startLaneTrim(e, lane, clip.id, "r", ui)}
       />
     </div>
     <ClipMaskKeyStrip clip={clip} start={span.start} len={span.len} pps={pps} w={w} hidden={!!drag} />
@@ -4047,194 +4060,6 @@ function AudioView({
         onPointerDown={(e) => startLaneTrim(e, "audio", clip.id, "r", ui)}
       />
     </div>
-  );
-}
-
-/** Timeline footprint (seconds) of an overlay clip, honoring its speed. */
-function overlayLen(c: VideoClip) {
-  const src = c.out - c.in;
-  const eff = c.speed && c.speed > 0 ? src / c.speed : src;
-  return Math.max(0.1, eff);
-}
-
-/**
- * An upper-track video clip: free-positioned by `start` like an audio clip,
- * draggable and trimmable. Full-frame layers (`scale === 1`) read as a stacked
- * composite; smaller ones are picture-in-picture. Hidden clips gray out.
- */
-function OverlayClipView({
-  clip,
-  asset,
-  pps,
-  selected,
-  drag,
-  parting,
-  partAt,
-  onDrag,
-  onSnap,
-  resolveTarget,
-  onCrossMove,
-  onCrossDrop,
-  onDragActive,
-  onFrameMenu,
-}: {
-  clip: VideoClip;
-  asset: MediaAsset | undefined;
-  pps: number;
-  selected: boolean;
-  /** This clip's live drag when it is the one being carried (ghost mode). */
-  drag: LaneDrag | null;
-  /** Another upper-layer clip is dragging: animate this one's parting shifts. */
-  parting: boolean;
-  /** The start this clip previews at while a hovering drop parts its row. */
-  partAt?: number;
-  onDrag: (d: LaneDrag | null) => void;
-  onSnap: (x: number | null) => void;
-  /** Which drop the given screen point is over: a video row, or a new track
-   * past the stack's edge. The carried clip's id decides whether a new track
-   * is on offer at all. */
-  resolveTarget: (clientX: number, clientY: number, draggedId?: string) => TrackTarget;
-  onCrossMove: (target: TrackTarget | null, start?: number, len?: number) => void;
-  onCrossDrop: (id: string, target: TrackTarget, start: number) => void;
-  onDragActive: (active: boolean) => void;
-  /** Right-click: offer the frame under the pointer to the chat composer. */
-  onFrameMenu: (
-    e: React.MouseEvent,
-    grab: { asset: MediaAsset; srcT: number; from: FrameGrabOrigin }
-  ) => void;
-}) {
-  // Its whole footprint, like a track-0 box: clips never overlap, and a
-  // transition is the bar above the tracks, never a bite out of a box.
-  const loading = useEditor((s) => (asset ? s.loadingMedia.has(asset.fileName) : false));
-  const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
-  const w = Math.max(10, overlayLen(clip) * pps);
-  const filmIn = clip.in;
-  const filmOut = filmIn + (w / pps) * speed;
-
-  // Same filmstrip as a track-0 clip so an overlay reads as a video, not a
-  // featureless bar — sampled across the clip's trimmed span.
-  const startFrame = useEdgeFrame(asset, filmIn, `${clip.id}:in`);
-  const endFrame = useEdgeFrame(asset, filmOut, `${clip.id}:out`);
-  const filmstrip = useMemo(
-    () =>
-      filmstripFrames(asset, filmIn, w, pps, speed, OVERLAY_H - 4, 24, {
-        start: startFrame,
-        end: endFrame,
-      }),
-    [asset, filmIn, speed, w, pps, startFrame, endFrame]
-  );
-
-  if (!asset) return null;
-
-  // The move gesture is the shared lane behavior (parting, snapping); its
-  // verticality is the video placement system — other tracks (0 included) and
-  // the new tracks past the stack — resolved from the rows' geometry.
-  const ui = {
-    pps,
-    rowH: OVERLAY_H,
-    laneCount: 0,
-    homeRow: 0,
-    visStart: clip.start,
-    onDrag,
-    onSnap,
-    vertical: {
-      resolve: (ev: PointerEvent) => resolveTarget(ev.clientX, ev.clientY, clip.id),
-      isHome: (t: TrackTarget) => samePlacement(t, { kind: "track", track: clip.track }),
-      preview: (t: TrackTarget | null, start: number, len: number) =>
-        t ? onCrossMove(t, start, len) : onCrossMove(null),
-      commit: (id: string, t: TrackTarget, start: number) => onCrossDrop(id, t, start),
-      setActive: onDragActive,
-    },
-  };
-
-  return (
-    <>
-    <div
-      className={cn(
-        "tl-overlay-clip group absolute top-0.5 cursor-grab overflow-hidden rounded-lg bg-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
-        selected && SELECTED_SHADOW,
-        clip.hidden && "opacity-40 grayscale",
-        drag
-          ? "tl-overlay-ghost pointer-events-none cursor-grabbing opacity-80 shadow-2xl"
-          : parting && "transition-[left] duration-150 ease-out"
-      )}
-      style={{
-        left: drag ? drag.ghostX : (partAt ?? clip.start) * pps,
-        top: drag ? 2 + drag.ghostY : undefined,
-        width: Math.max(10, w - CLIP_GAP),
-        height: OVERLAY_H - 4,
-        // Inline so it beats SELECTED_SHADOW's z-10 class on the same element.
-        zIndex: drag ? 20 : undefined,
-      }}
-      data-tl-sel={`clip:${clip.id}`}
-      onPointerDown={(e) => startLaneMove(e, "overlayClip", clip.id, ui)}
-      onContextMenu={(e) => {
-        if (asset.type !== "video") return;
-        const rect = e.currentTarget.getBoundingClientRect();
-        onFrameMenu(e, {
-          asset,
-          srcT: filmIn + ((e.clientX - rect.left) / pps) * speed,
-          from: { x: e.clientX, top: rect.top, height: rect.height },
-        });
-      }}
-    >
-      <Filmstrip frames={filmstrip} grade={clip.grade} />
-      {selected && (
-        <div className="pointer-events-none absolute inset-0 z-[1] bg-[#0a84ff]/25" />
-      )}
-      {loading && <LoadingChip />}
-      {asset.type === "video" && !loading && (
-        <MuteChip
-          muted={clip.muted}
-          className="bottom-1 left-1"
-          onToggle={() => useEditor.getState().updateClip(clip.id, { muted: !clip.muted })}
-        />
-      )}
-      {(clip.speed ?? 1) !== 1 && (
-        <span
-          className="tl-speed-chip absolute right-[30px] bottom-1 z-2 rounded-[5px] bg-black/70 px-1 py-px font-mono text-[9.5px] tabular-nums text-white"
-          title={`${clip.speed}× speed`}
-        >
-          {+(clip.speed ?? 1).toFixed(2)}×
-        </span>
-      )}
-      {!loading && <ClipMenu asset={asset} clip={clip} />}
-      {!loading && (
-        <HideChip
-          hidden={!!clip.hidden}
-          className="bottom-1 right-2"
-          onToggle={() => useEditor.getState().updateClip(clip.id, { hidden: !clip.hidden })}
-        />
-      )}
-      {/* Keys sit on the bar where they fall, same as the element bars. */}
-      {(clip.kf ?? []).map((k) => (
-        <KeyMarker
-          key={k.t}
-          item={{ id: clip.id, start: clip.start, end: clip.start + overlayLen(clip) }}
-          kind="clip"
-          t={k.t}
-          pps={pps}
-          width={w}
-        />
-      ))}
-      <span
-        className={cn(trimHandle, "tl-trim-l left-0")}
-        onPointerDown={(e) => startLaneTrim(e, "overlayClip", clip.id, "l", ui)}
-      />
-      <span
-        className={cn(trimHandle, "tl-trim-r right-0")}
-        onPointerDown={(e) => startLaneTrim(e, "overlayClip", clip.id, "r", ui)}
-      />
-    </div>
-    <ClipMaskKeyStrip
-      clip={clip}
-      start={clip.start}
-      len={overlayLen(clip)}
-      pps={pps}
-      w={w}
-      hidden={!!drag}
-    />
-    </>
   );
 }
 

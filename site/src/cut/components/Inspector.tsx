@@ -1834,6 +1834,54 @@ function HiddenRow({ overlay: o }: { overlay: Overlay }) {
   );
 }
 
+/** X and Y as percentages of the frame, the pair of scrubs both the element
+ * and the clip transform sections show. The range differs — an element stays
+ * inside the frame, a keyed clip pans past it. */
+function PositionRow({
+  pose,
+  min,
+  max,
+  ck,
+  onSet,
+}: {
+  pose: { x: number; y: number };
+  min: number;
+  max: number;
+  ck: { begin: () => void; end: () => void };
+  onSet: (axis: "x" | "y", pct: number) => void;
+}) {
+  return (
+    <Row label="Position">
+      {(["x", "y"] as const).map((axis) => (
+        <span key={axis} className="flex items-center gap-1">
+          <span className="text-[11px] text-muted-foreground/70 uppercase">{axis}</span>
+          <ScrubValue
+            label={`${axis.toUpperCase()} position`}
+            className="w-9 text-muted-foreground"
+            value={pose[axis] * 100}
+            min={min}
+            max={max}
+            step={0.5}
+            keyStep={1}
+            snap={[50]}
+            format={(v) => String(Math.round(v))}
+            parse={parseNumberInput}
+            onScrub={(v) => {
+              ck.begin();
+              onSet(axis, v);
+            }}
+            onCommit={(v) => {
+              ck.begin();
+              onSet(axis, v);
+              ck.end();
+            }}
+          />
+        </span>
+      ))}
+    </Row>
+  );
+}
+
 function TransformRows({ overlay: o }: { overlay: Overlay }) {
   const rotationCk = useSliderCheckpoint();
   const opacityCk = useSliderCheckpoint();
@@ -1868,34 +1916,7 @@ function TransformRows({ overlay: o }: { overlay: Overlay }) {
   return (
     <Section title="Transform">
       <KeyframeControls overlay={o} />
-      <Row label="Position">
-        {(["x", "y"] as const).map((axis) => (
-          <span key={axis} className="flex items-center gap-1">
-            <span className="text-[11px] text-muted-foreground/70 uppercase">{axis}</span>
-            <ScrubValue
-              label={`${axis.toUpperCase()} position`}
-              className="w-9 text-muted-foreground"
-              value={pose[axis] * 100}
-              min={2}
-              max={98}
-              step={0.5}
-              keyStep={1}
-              snap={[50]}
-              format={(v) => String(Math.round(v))}
-              parse={parseNumberInput}
-              onScrub={(v) => {
-                posCk.begin();
-                setPos(axis, v);
-              }}
-              onCommit={(v) => {
-                posCk.begin();
-                setPos(axis, v);
-                posCk.end();
-              }}
-            />
-          </span>
-        ))}
-      </Row>
+      <PositionRow pose={pose} min={2} max={98} ck={posCk} onSet={setPos} />
       {keyed && (
         <Row label="Scale">
           <ValueSlider
@@ -2151,34 +2172,13 @@ function ClipTransformSection({ clip }: { clip: VideoClip }) {
       />
       {keyed && (
         <>
-          <Row label="Position">
-            {(["x", "y"] as const).map((axis) => (
-              <span key={axis} className="flex items-center gap-1">
-                <span className="text-[11px] text-muted-foreground/70 uppercase">{axis}</span>
-                <ScrubValue
-                  label={`${axis.toUpperCase()} position`}
-                  className="w-9 text-muted-foreground"
-                  value={pose[axis] * 100}
-                  min={-50}
-                  max={150}
-                  step={0.5}
-                  keyStep={1}
-                  snap={[50]}
-                  format={(v) => String(Math.round(v))}
-                  parse={parseNumberInput}
-                  onScrub={(v) => {
-                    posCk.begin();
-                    setKey({ [axis]: v / 100 });
-                  }}
-                  onCommit={(v) => {
-                    posCk.begin();
-                    setKey({ [axis]: v / 100 });
-                    posCk.end();
-                  }}
-                />
-              </span>
-            ))}
-          </Row>
+          <PositionRow
+            pose={pose}
+            min={-50}
+            max={150}
+            ck={posCk}
+            onSet={(axis, pct) => setKey({ [axis]: pct / 100 })}
+          />
           <Row label="Scale">
             <ValueSlider
               label="Scale"

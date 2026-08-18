@@ -76,6 +76,15 @@ const ROTATE_SNAP_DEG = 6;
 
 /** Land an angle on the quarter turn within reach: the angle to use and the
  * detent it locked to (null when free). */
+/** Degrees from a box's center to a pointer. `offset` orients the reading:
+ * an element's lollipop sits above its top edge (+90), a mask's on its line. */
+const angleFrom = (cx: number, cy: number, offset = 0) =>
+  (ev: { clientX: number; clientY: number }) =>
+    (Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180) / Math.PI + offset;
+
+/** Into (-180, 180], the range every rotation is stored and detented in. */
+const normDeg = (deg: number) => ((((deg + 180) % 360) + 360) % 360) - 180;
+
 function snapQuarter(deg: number): { deg: number; locked: number | null } {
   for (const q of [-180, -90, 0, 90, 180]) {
     if (Math.abs(deg - q) < ROTATE_SNAP_DEG) return { deg: q, locked: q };
@@ -783,13 +792,11 @@ function OverlayItem({
     const members = groupSnapshot();
     const gx = members.reduce((sum, m) => sum + m.x, 0) / members.length;
     const gy = members.reduce((sum, m) => sum + m.y, 0) / members.length;
-    const angleAt = (ev: { clientX: number; clientY: number }) =>
-      (Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180) / Math.PI + 90;
+    const angleAt = angleFrom(cx, cy, 90);
     const start0 = angleAt(e);
     // The grabbed member's start position, for placing the guide while the
     // group orbit carries its center away from the box rect measured above.
     const grabbed = members.find((m) => m.id === o.id) ?? o;
-    const norm = (deg: number) => ((((deg + 180) % 360) + 360) % 360) - 180;
     // The cursor turns with the element for the whole drag, so its heads keep
     // pointing the way the next bit of travel will take it.
     let liveRotation = o.rotation ?? 0;
@@ -798,7 +805,7 @@ function OverlayItem({
       cursor: () => rotateCursor(liveRotation),
       onMove: (_dx, _dy, ev) => {
         if (members.length === 1) {
-          const { deg, locked } = snapQuarter(norm(angleAt(ev)));
+          const { deg, locked } = snapQuarter(normDeg(angleAt(ev)));
           const rotation = Math.round(deg);
           liveRotation = rotation;
           setSpin(rotation);
@@ -806,11 +813,11 @@ function OverlayItem({
           writeTransform([{ id: o.id, patch: { rotation: rotation === 0 ? undefined : rotation } }]);
           return;
         }
-        let delta = norm(angleAt(ev) - start0);
-        const lead = norm((o.rotation ?? 0) + delta);
+        let delta = normDeg(angleAt(ev) - start0);
+        const lead = normDeg((o.rotation ?? 0) + delta);
         const { locked } = snapQuarter(lead);
-        if (locked !== null) delta = norm(delta + locked - lead);
-        liveRotation = norm((o.rotation ?? 0) + delta);
+        if (locked !== null) delta = normDeg(delta + locked - lead);
+        liveRotation = normDeg((o.rotation ?? 0) + delta);
         setSpin(Math.round(liveRotation));
         const rad = (delta * Math.PI) / 180;
         // Positions are frame fractions with unequal axes; orbit in a square
@@ -821,7 +828,7 @@ function OverlayItem({
           members.map((m) => {
             const ox = (m.x - gx) * ax;
             const oy = (m.y - gy) * ay;
-            const rotation = Math.round(norm((m.rotation ?? 0) + delta));
+            const rotation = Math.round(normDeg((m.rotation ?? 0) + delta));
             return {
               id: m.id,
               patch: {
@@ -1255,17 +1262,15 @@ export function MaskGizmoCore({
     const box = interiorRef.current?.getBoundingClientRect();
     const mcx = box ? box.left + box.width / 2 : e.clientX;
     const mcy = box ? box.top + box.height / 2 : e.clientY;
-    const angleAt = (ev: { clientX: number; clientY: number }) =>
-      (Math.atan2(ev.clientY - mcy, ev.clientX - mcx) * 180) / Math.PI;
+    const angleAt = angleFrom(mcx, mcy);
     const a0 = angleAt(e);
     const g0 = f;
-    const norm = (deg: number) => ((((deg + 180) % 360) + 360) % 360) - 180;
     let liveRot = rotation + g0.rotation;
     setSpin(Math.round(g0.rotation));
     startDrag(e, {
       cursor: () => rotateCursor(liveRot),
       onMove: (_dx, _dy, ev) => {
-        const { deg, locked } = snapQuarter(norm(g0.rotation + (angleAt(ev) - a0)));
+        const { deg, locked } = snapQuarter(normDeg(g0.rotation + (angleAt(ev) - a0)));
         const rot = Math.round(deg);
         liveRot = rotation + rot;
         setSpin(rot);
