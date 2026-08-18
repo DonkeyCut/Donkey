@@ -80,6 +80,7 @@ export function ExportDialog() {
         subtitles: s.subtitles,
         fadeIn: s.fadeIn,
         fadeOut: s.fadeOut,
+        background: s.background,
       },
       selected.settings
     ).then((ok) => {
@@ -105,6 +106,7 @@ export function ExportDialog() {
         subtitles: s.subtitles,
         fadeIn: s.fadeIn,
         fadeOut: s.fadeOut,
+        background: s.background,
       },
       settings,
       s.projectName

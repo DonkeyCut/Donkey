@@ -397,6 +397,7 @@ export function Editor({
       aspect: string;
       fadeIn: number;
       fadeOut: number;
+      background: string;
     } | null = null;
     const unsub = useEditor.subscribe((s) => {
       if (!s.loaded || s.projectId !== projectId) return;
@@ -408,7 +409,8 @@ export function Editor({
           s.subtitles !== last.subtitles ||
           s.aspect !== last.aspect ||
           s.fadeIn !== last.fadeIn ||
-          s.fadeOut !== last.fadeOut);
+          s.fadeOut !== last.fadeOut ||
+          s.background !== last.background);
       last = {
         clips: s.clips,
         audioClips: s.audioClips,
@@ -417,9 +419,12 @@ export function Editor({
         aspect: s.aspect,
         fadeIn: s.fadeIn,
         fadeOut: s.fadeOut,
+        background: s.background,
       };
       if (!changed) return; // first tick just primes the baseline
-      if (s.clips.length === 0) return; // nothing to render a card from yet
+      // A cut of titles and shapes over the background has a picture to show;
+      // only an empty project has nothing to render a card from.
+      if (projectDuration(s) <= 0) return;
       pending = {
         aspect: s.aspect,
         assets: s.assets,
@@ -429,6 +434,7 @@ export function Editor({
         subtitles: s.subtitles,
         fadeIn: s.fadeIn,
         fadeOut: s.fadeOut,
+        background: s.background,
       };
     });
     return () => {
