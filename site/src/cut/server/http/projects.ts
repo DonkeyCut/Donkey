@@ -22,10 +22,11 @@ import {
   sweepOrphanMedia,
   writeProject,
 } from "../projects";
+import { convertToMp4, mp4NameFor } from "../convert";
 import { serveFileRange, wantsDownload } from "../serveFile";
 import { importUrlToProject } from "../urlImport";
 import { createTranscribeJob, getTranscribeJob, type TranscribeSpec } from "../transcribe";
-import { exists } from "../util";
+import { exists, uniqueName } from "../util";
 
 const err = (message: string, status: number) => Response.json({ error: message }, { status });
 const caught = (e: unknown, fallback: string, status = 500) =>
@@ -400,6 +401,35 @@ export const projectsApi = {
       });
     } catch (e) {
       return caught(e, String(e));
+    }
+  },
+
+  /** Convert a media file in this project to MP4 (H.264/AAC), remuxing when
+   * the streams already fit. The new file lands beside the original; swapping
+   * the asset over to it and dropping the old bytes is the client's call. */
+  async convert(req: Request, { id }: { id: string }) {
+    try {
+      if (!(await readProject(id))) return err("Project not found.", 404);
+      const body = (await req.json()) as { file?: string; maxHeight?: number };
+      if (!body.file) return err("file is required.", 400);
+      const src = mediaPath(id, body.file);
+      if (!(await exists(src))) return err("Media file missing from project.", 404);
+      const fileName = await uniqueName(mp4NameFor(body.file), (n) => mediaPath(id, n));
+      const outPath = mediaPath(id, fileName);
+      const handle = { tmpDir: "", outPath, progress: 0, log: [] as string[] };
+      const outcome = await convertToMp4(handle, src, outPath, {
+        maxHeight: typeof body.maxHeight === "number" ? body.maxHeight : undefined,
+      });
+      // Nothing was written for a file that already fits; the project keeps
+      // the one it has.
+      const made = outcome.unchanged ? { file: body.file, path: src } : { file: fileName, path: outPath };
+      return Response.json({
+        fileName: made.file,
+        duration: await probeDuration(made.path),
+        ...outcome,
+      });
+    } catch (e) {
+      return caught(e, "Could not convert that file.");
     }
   },
 

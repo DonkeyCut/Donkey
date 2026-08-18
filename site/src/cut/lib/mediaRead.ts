@@ -60,9 +60,15 @@ export interface FrameSize {
 }
 
 export class UnreadableMediaError extends Error {
-  constructor(message = "Cut can't read this media file.") {
+  /** The container parsed and the file carries video — this browser just has
+   * no decoder for it. Callers that can convert branch on this rather than on
+   * the message. */
+  readonly undecodable: boolean;
+
+  constructor(message = "Cut can't read this media file.", undecodable = false) {
     super(message);
     this.name = "UnreadableMediaError";
+    this.undecodable = undecodable;
   }
 }
 
@@ -135,7 +141,10 @@ export async function probeMediaFile(src: string | Blob): Promise<MediaProbe> {
     // audio would be a quieter failure, not a smaller one: the clip would look
     // imported and simply have no picture.
     if (!video && (await hasUndecodableVideo(input))) {
-      throw new UnreadableMediaError("This video is in a format Cut can't decode in this browser.");
+      throw new UnreadableMediaError(
+        "This video is in a format Cut can't decode in this browser.",
+        true
+      );
     }
     if (!video && !audio) throw new UnreadableMediaError();
     const duration = await input.computeDuration();

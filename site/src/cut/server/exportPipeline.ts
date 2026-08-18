@@ -215,7 +215,7 @@ export interface RenderHandle {
  * it has no libx264 and `-preset`/`-crf` don't exist there; fall back to the
  * always-present VideoToolbox hardware H.264 encoder. */
 let h264EncoderCache: Promise<"libx264" | "h264_videotoolbox"> | null = null;
-function h264Encoder(): Promise<"libx264" | "h264_videotoolbox"> {
+export function h264Encoder(): Promise<"libx264" | "h264_videotoolbox"> {
   return (h264EncoderCache ??= new Promise((resolve) => {
     let out = "";
     const proc = spawn("ffmpeg", ["-hide_banner", "-encoders"]);
@@ -227,7 +227,7 @@ function h264Encoder(): Promise<"libx264" | "h264_videotoolbox"> {
 
 /** VideoToolbox constant quality (1–100, higher = better) from the CRF knob the
  * presets carry (lower CRF = better). Maps the 19/24/30 tiers to ~66/57/46. */
-function vtQuality(crf: number) {
+export function vtQuality(crf: number) {
   return Math.round(Math.max(35, Math.min(80, 100 - crf * 1.8)));
 }
 
@@ -261,7 +261,7 @@ async function resolveMedia(
  * when the matrix itself is BT.2020, or when it's untagged and the wide
  * primaries/transfer tags are the only signal there is.
  */
-function sdrConvert(c: Awaited<ReturnType<typeof videoColorInfo>>) {
+export function sdrConvert(c: Awaited<ReturnType<typeof videoColorInfo>>) {
   if (c == null) return "";
   const matrix = c.matrix && c.matrix !== "unknown" ? c.matrix : null;
   const wide =

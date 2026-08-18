@@ -35,14 +35,14 @@ export async function renderJobCheck(userId: string): Promise<Response | null> {
   if (limits.renderJobsPerDay === null) return null;
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const used = await prisma.cutRenderJob.count({
-    where: { userId, kind: { in: ["export", "import_url"] }, createdAt: { gte: since } },
+    where: { userId, kind: { in: ["export", "import_url", "convert"] }, createdAt: { gte: since } },
   });
   if (used < limits.renderJobsPerDay) return null;
   // `error` is what the client's shared error paths render — keep it human.
   return Response.json(
     {
       error:
-        "You've reached today's limit for exports and imports. It resets over the next 24 hours — or Pro raises it.",
+        "You've reached today's limit for exports, imports, and conversions. It resets over the next 24 hours — or Pro raises it.",
       code: "daily_render_limit",
       limit: limits.renderJobsPerDay,
     },

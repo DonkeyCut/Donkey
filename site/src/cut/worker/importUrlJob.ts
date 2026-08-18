@@ -14,7 +14,7 @@ export interface ImportUrlResult {
 
 /** First variant of `base` (stem, stem-1, stem-2, …) not already `taken` —
  * the engine's on-disk dedupe scheme, run against the project's media rows. */
-function dedupeName(base: string, taken: Set<string>): string {
+export function dedupeName(base: string, taken: Set<string>): string {
   const ext = path.extname(base);
   const stem = base.slice(0, base.length - ext.length) || "media";
   let name = base;

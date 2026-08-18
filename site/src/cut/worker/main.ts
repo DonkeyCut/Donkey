@@ -3,13 +3,14 @@ import type { RenderHandle } from "../server/exportPipeline";
 import { prisma, type ClaimedJob } from "./db";
 import { overlayKeysOf, runExportJob } from "./exportJob";
 import { runHlsJob } from "./hlsJob";
+import { runConvertJob } from "./convertJob";
 import { runImportUrlJob } from "./importUrlJob";
 import { runTurnJob } from "./turnJob";
 import { describeRuntime, installHeadlessRuntime } from "../lib/headless/runtime";
 import { deleteObjects } from "./r2";
 
 // The cloud render worker: a headless loop that claims CutRenderJob rows the
-// hosted API queues (export, preview, import_url), executes them with the
+// hosted API queues (export, preview, import_url, convert), executes them with the
 // same pipeline code the local engine runs, and writes progress and results
 // back to the row the client polls. Scale is horizontal: one job per process,
 // several processes — the atomic claim keeps them apart.
@@ -57,7 +58,7 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 /** The kinds someone is watching happen: an export, a URL import, or a chat
  * turn has a progress surface on screen, while a hover proxy and a share card
  * are background polish nobody is waiting on. */
-const WATCHED_KINDS = ["export", "import_url", "agent_turn"];
+const WATCHED_KINDS = ["export", "import_url", "convert", "agent_turn"];
 
 /** Atomically claim the next queued job: the updateMany's state guard makes
  * exactly one worker win each row, so replicas never double-run a job.
@@ -157,6 +158,12 @@ async function runJob(job: ClaimedJob): Promise<void> {
       });
     } else if (job.kind === "import_url") {
       const result = await runImportUrlJob(job, () => entry.canceled);
+      await prisma.cutRenderJob.updateMany({
+        where: { id: job.id, state: "running" },
+        data: { state: "done", progress: 1, result: result as unknown as Prisma.InputJsonValue },
+      });
+    } else if (job.kind === "convert") {
+      const result = await runConvertJob(job, handle, () => entry.canceled);
       await prisma.cutRenderJob.updateMany({
         where: { id: job.id, state: "running" },
         data: { state: "done", progress: 1, result: result as unknown as Prisma.InputJsonValue },

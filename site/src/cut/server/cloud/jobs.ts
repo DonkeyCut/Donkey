@@ -453,7 +453,36 @@ export const jobsCloud = {
     }
   },
 
-  /** Generic job poll for non-export kinds (import_url). */
+  /** Queue a media conversion: the worker rewrites one of the project's media
+   * files as MP4 and registers it beside the original. */
+  async convert(userId: string, projectId: string, req: Request) {
+    try {
+      const { file, maxHeight } = (await req.json()) as { file?: string; maxHeight?: number };
+      if (!file) return err("file is required.", 400);
+      if (!(await getProject(userId, projectId))) return err("Project not found.", 404);
+      const source = await prisma.cutMediaObject.findFirst({
+        where: { userId, projectId, fileName: file, kind: "media" },
+        select: { id: true },
+      });
+      if (!source) return err("Media file missing from project.", 404);
+      const capped = await renderJobCheck(userId);
+      if (capped) return capped;
+      const row = await prisma.cutRenderJob.create({
+        data: {
+          userId,
+          projectId,
+          kind: "convert",
+          spec: { file, ...(maxHeight ? { maxHeight } : {}) } as unknown as Prisma.InputJsonValue,
+        },
+      });
+      wakeRenderWorker();
+      return Response.json({ jobId: row.id });
+    } catch (e) {
+      return caught(e, "Could not convert that file.");
+    }
+  },
+
+  /** Generic job poll for non-export kinds (import_url, convert). */
   async status(userId: string, jobId: string) {
     const row = await findJob(userId, jobId);
     if (!row) return err("Unknown job.", 404);

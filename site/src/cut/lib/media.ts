@@ -6,6 +6,7 @@ import { quotaErrorMessage } from "./backend/cloud";
 import { encodeWav } from "./cloudTranscribe";
 import { downloadFromUrl } from "./download";
 import { startUpload, uploadInFlight } from "./importQueue";
+import { convertProjectFile, dropProjectFile, mp4DisplayName } from "./mediaConvert";
 import {
   audioChunks,
   audioPeaks,
@@ -456,8 +457,19 @@ export async function prepareImport(
     const storedUrl = signed
       ? await stashCloudMedia(projectId, file, signed.fileName)
       : stashed!.url;
-    const meta = await metaP;
     const fileName = signed ? signed.fileName : stashed!.fileName;
+    // Footage this browser has no decoder for imports the plain way instead:
+    // the file reaches the project first and converts there, which local-first
+    // can't do — the optimistic asset would be one nothing here can play.
+    const meta = await metaP.catch((e: unknown) => {
+      if (e instanceof UnreadableMediaError && e.undecodable) return null;
+      throw e;
+    });
+    if (!meta) {
+      URL.revokeObjectURL(objectUrl);
+      await dropLocalMedia(projectId, fileName);
+      return null;
+    }
     const localUrl = storedUrl ?? objectUrl;
     if (storedUrl) URL.revokeObjectURL(objectUrl);
     const asset: MediaAsset = {
@@ -600,15 +612,35 @@ export async function importFileToProject(
   const type = assetTypeOf(file);
   if (!type) return null;
 
-  const fileName = await uploadProjectMediaTo(backend, projectId, file, file.name);
-  const url = mediaUrl(projectId, fileName, backend);
+  let fileName = await uploadProjectMediaTo(backend, projectId, file, file.name);
+  let name = file.name;
   // Probe the bytes in hand: the same file the upload just wrote, with no
   // second network read — which also lets a headless process import media.
-  const meta = await probeMedia(type, file);
+  const meta = await probeMedia(type, file).catch(async (e: unknown) => {
+    // Footage this browser has no decoder for — a phone's HEVC, a camera's
+    // ProRes. The file is already in the project, so convert it there and
+    // import what comes back; the raw upload goes with the failure otherwise.
+    if (!(e instanceof UnreadableMediaError && e.undecodable)) throw e;
+    const made = await convertProjectFile(
+      projectId,
+      { fileName, url: mediaUrl(projectId, fileName, backend), name: file.name },
+      { backend }
+    ).catch((convertError: unknown) => {
+      void dropProjectFile(projectId, fileName, backend).catch(() => {});
+      throw convertError;
+    });
+    void dropProjectFile(projectId, fileName, backend).catch(() => {});
+    fileName = made.fileName;
+    // The asset answers to what it now is: a card reading .MOV over an MP4
+    // file is the card lying about the media.
+    name = mp4DisplayName(name);
+    return probeMedia(type, mediaUrl(projectId, fileName, backend));
+  });
+  const url = mediaUrl(projectId, fileName, backend);
   return {
     id: uid(),
     fileName,
-    name: file.name,
+    name,
     type: meta.type,
     duration: meta.duration,
     ...(meta.width !== undefined ? { width: meta.width } : {}),
