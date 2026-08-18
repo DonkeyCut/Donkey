@@ -564,12 +564,14 @@ export interface EditorState {
    * from the original recording, so the word highlighter would otherwise drift). */
   retimeCues: (entries: { id: string; start: number; end: number }[]) => void;
   sortCues: () => void;
-  /** Delete the current selection. While track 0 is the only video track, a
-   * track-0 clip delete ripples: the footprint it occupied closes and
-   * everything after it — clips, titles, captions, soundtrack — slides left
-   * in sync (see exciseRange). With upper video layers present the slide
-   * would shear them against track 0, so the delete leaves the gap; closing
-   * it is `removeLaneGap`. Deletes on every other track remove just that item. */
+  /** Delete the current selection. While track 0 is the only video track and
+   * some of its footage survives, a track-0 clip delete ripples: the footprint
+   * it occupied closes and everything after it — clips, titles, captions,
+   * soundtrack — slides left in sync (see exciseRange). With upper video
+   * layers present the slide would shear them against track 0, and with track
+   * 0 emptied there is nothing left for the close to keep contiguous, so both
+   * leave the gap and everything laid over the footage stands; closing it is
+   * `removeLaneGap`. Deletes on every other track remove just that item. */
   deleteSelection: () => void;
   /** Close the empty span on `lane` containing `at` — a video track, an audio
    * track, or a title track. Only that row's later items slide left; every
@@ -3055,19 +3057,23 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         // Deleting a track-0 clip closes the hole it leaves: everything after
         // it — clips, titles, captions, soundtrack — slides left with the
         // surviving footage, and anything living inside the hole annotated
-        // footage that is gone, so it goes too. That ripple runs only while
-        // track 0 is the only video track: with upper layers surviving, the
-        // slide would shear them against the footage they were composed over,
-        // so the delete leaves the gap and closing it is an explicit act
-        // (removeGap, via right-click on the empty space). Deletes on every
-        // other track are plain removals (already applied above). Holes close
-        // right-to-left so each one's coordinates stay valid while the ones
-        // before it are unprocessed.
-        const holes = clips.some((c) => c.track !== 0)
-          ? []
-          : s.clips
+        // footage that is gone, so it goes too. Two conditions gate that
+        // ripple. Track 0 has to be the only video track, since with upper
+        // layers surviving the slide would shear them against the footage they
+        // were composed over. And some track-0 footage has to survive the
+        // delete: clearing the whole track leaves no hole to close, and closing
+        // it anyway would carry every title, card and caption in the project
+        // into the excision. Either way the delete leaves the gap and closing
+        // it is an explicit act (removeGap, via right-click on the empty
+        // space). Deletes on every other track are plain removals (already
+        // applied above). Holes close right-to-left so each one's coordinates
+        // stay valid while the ones before it are unprocessed.
+        const rippling = clips.some((c) => c.track === 0) && !clips.some((c) => c.track !== 0);
+        const holes = rippling
+          ? s.clips
               .filter((c) => c.track === 0 && clipIds.has(c.id))
-              .sort((a, b) => b.start - a.start);
+              .sort((a, b) => b.start - a.start)
+          : [];
         for (const gone of holes) {
           const next = clips.reduce(
             (acc, c) => (c.track === 0 && c.start > gone.start + 0.001 ? Math.min(acc, c.start) : acc),

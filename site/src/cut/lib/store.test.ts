@@ -709,6 +709,44 @@ describe("delete ripple and gaps", () => {
     expect(clipById(b.id).transition).toBeCloseTo(0.5);
   });
 
+  test("clearing track 0 leaves the titles and captions standing", () => {
+    const a = vclip({ track: 0, start: 0, out: 2 });
+    const b = vclip({ track: 0, start: 2, out: 2 });
+    const t = title({ start: 1, end: 3 });
+    const au = aclip({ start: 1, out: 2 });
+    useEditor.setState({
+      clips: [a, b],
+      audioClips: [au],
+      overlays: [t],
+      multiSelection: [
+        { kind: "clip", id: a.id },
+        { kind: "clip", id: b.id },
+      ],
+      selection: { kind: "clip", id: b.id },
+    });
+    s().deleteSelection();
+    expect(s().clips).toEqual([]);
+    // No footage left means no hole to close, so nothing laid over it moves
+    // and nothing goes with it.
+    expect(s().overlays.map((o) => o.id)).toEqual([t.id]);
+    expect(s().overlays[0].start).toBeCloseTo(1);
+    expect(audioById(au.id).start).toBeCloseTo(1);
+  });
+
+  test("deleting the only clip keeps the elements written over it", () => {
+    const only = vclip({ track: 0, start: 0, out: 6 });
+    const t = title({ start: 1, end: 3 });
+    useEditor.setState({
+      clips: [only],
+      overlays: [t],
+      selection: { kind: "clip", id: only.id },
+    });
+    s().deleteSelection();
+    expect(s().clips).toEqual([]);
+    expect(s().overlays.map((o) => o.id)).toEqual([t.id]);
+    expect(s().overlays[0].start).toBeCloseTo(1);
+  });
+
   test("delete with an overlay video track leaves the gap in place", () => {
     const a = vclip({ track: 0, start: 0, out: 2 });
     const b = vclip({ track: 0, start: 2, out: 2 });
