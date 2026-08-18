@@ -5,6 +5,9 @@
 //
 //   cut-store/users/<accountId>/
 //     index.json                    folders + media sync ledger
+//     library/
+//       library.json                the shelf's assets, folders, templates
+//       media/<fileName>
 //     projects/<projectId>/
 //       project.json                the doc (createWritable commits on close,
 //                                   so a torn write never replaces a good doc)
@@ -103,7 +106,10 @@ export async function writeFileAt(
   await w.close();
 }
 
-async function readJsonAt<T>(dir: FileSystemDirectoryHandle | null, name: string): Promise<T | null> {
+export async function readJson<T>(
+  dir: FileSystemDirectoryHandle | null,
+  name: string
+): Promise<T | null> {
   const file = await readFileAt(dir, name);
   if (!file) return null;
   try {
@@ -138,7 +144,7 @@ type StoreIndex = {
 const EMPTY_INDEX: StoreIndex = { version: 1, folders: [], pendingUploads: [], opens: {} };
 
 export async function readIndex(): Promise<StoreIndex> {
-  const idx = await readJsonAt<StoreIndex>(await dirAt(userParts(), false), "index.json");
+  const idx = await readJson<StoreIndex>(await dirAt(userParts(), false), "index.json");
   return idx && Array.isArray(idx.folders)
     ? { ...EMPTY_INDEX, ...idx, pendingUploads: idx.pendingUploads ?? [], opens: idx.opens ?? {} }
     : EMPTY_INDEX;
@@ -158,7 +164,7 @@ export async function updateIndex(mutate: (idx: StoreIndex) => StoreIndex | void
 // --- docs ---
 
 export async function readDoc(id: string): Promise<ProjectDoc | null> {
-  return readJsonAt<ProjectDoc>(await projectDir(id), "project.json");
+  return readJson<ProjectDoc>(await projectDir(id), "project.json");
 }
 
 export async function writeDoc(id: string, doc: ProjectDoc): Promise<void> {
@@ -228,12 +234,13 @@ export async function summarize(id: string, doc: ProjectDoc): Promise<ProjectSum
 
 // --- media ---
 
-/** Store media bytes under a deduped name — the engine's sanitize + suffix
- * rules, so a project copied across residencies keeps consistent names. */
-export async function saveMedia(id: string, file: File, wantName?: string): Promise<string> {
-  const dir = await mediaDir(id, true);
-  if (!dir) throw new Error("Browser storage is unavailable.");
-  const base = (wantName ?? file.name)
+/** A name nothing in `dir` holds yet — the engine's sanitize + suffix rules,
+ * so a project copied across residencies keeps consistent names. */
+export async function freeName(
+  dir: FileSystemDirectoryHandle,
+  wantName: string
+): Promise<string> {
+  const base = wantName
     .split("/")
     .pop()!
     .replace(/[^\w.\-() ]+/g, "_")
@@ -243,6 +250,14 @@ export async function saveMedia(id: string, file: File, wantName?: string): Prom
   const stem = (dot > 0 ? base.slice(0, dot) : base) || "media";
   let name = base || `media${ext}`;
   for (let n = 1; await readFileAt(dir, name); n++) name = `${stem}-${n}${ext}`;
+  return name;
+}
+
+/** Store media bytes in a project under a deduped name. */
+export async function saveMedia(id: string, file: Blob, wantName: string): Promise<string> {
+  const dir = await mediaDir(id, true);
+  if (!dir) throw new Error("Browser storage is unavailable.");
+  const name = await freeName(dir, wantName);
   await writeFileAt(dir, name, file);
   askPersist();
   return name;
@@ -256,6 +271,29 @@ export async function deleteMedia(id: string, fileName: string): Promise<void> {
 export async function deleteProject(id: string): Promise<void> {
   const dir = await projectsDir();
   await dir?.removeEntry(id, { recursive: true }).catch(() => {});
+}
+
+// --- library ---
+
+// The shelf beside the projects: reusable media, its folders, and templates,
+// all in this browser's own storage. The route handlers live in ./library.ts.
+const libraryParts = () => [...userParts(), "library"];
+
+export const libraryDir = (create = false) => dirAt(libraryParts(), create);
+export const libraryMediaDir = (create = false) => dirAt([...libraryParts(), "media"], create);
+
+export async function saveLibraryMedia(file: Blob, wantName: string): Promise<string> {
+  const dir = await libraryMediaDir(true);
+  if (!dir) throw new Error("Browser storage is unavailable.");
+  const name = await freeName(dir, wantName);
+  await writeFileAt(dir, name, file);
+  askPersist();
+  return name;
+}
+
+export async function deleteLibraryMedia(fileName: string): Promise<void> {
+  const dir = await libraryMediaDir();
+  await dir?.removeEntry(fileName).catch(() => {});
 }
 
 // --- exports ---

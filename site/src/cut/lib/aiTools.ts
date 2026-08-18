@@ -2159,7 +2159,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   },
 
   library_organize: async (_s, input) => {
-      // The library spans both shelves, so every id is resolved against the
+      // The library spans every shelf, so each id is resolved against the
       // current listing to find the backend that owns it.
       const lib = await fetchLibrary();
       const folderShelf = (id: string) => lib.folders.find((f) => f.id === id)?.residency;
@@ -2196,7 +2196,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           const r = itemShelf(id);
           if (!r) throw new ToolError(`No library item with id ${id}.`);
           if (folderId && folderShelf(folderId) !== r) {
-            throw new ToolError("That folder is on the other library shelf.");
+            throw new ToolError("That folder is on a different library shelf.");
           }
           await moveLibraryItem(r, id, folderId);
           return { moved: true, folderId };

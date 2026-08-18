@@ -27,7 +27,6 @@ import { fetchLibrary, type LibraryData } from "./library";
 import {
   availableResidencies,
   backendFor,
-  libraryResidencies,
   listedResidencies,
   projectsSnapshotKey,
   type Residency,
@@ -47,7 +46,7 @@ export const projectsKey = (r: Residency) => ["cut", "projects", r] as const;
  * the memory. */
 export const libraryScope = () => {
   const live = availableResidencies();
-  return libraryResidencies(listedResidencies())
+  return listedResidencies()
     .map((r) => (live.includes(r) ? r : `${r}!`))
     .join("+");
 };

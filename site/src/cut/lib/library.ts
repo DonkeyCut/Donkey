@@ -1,6 +1,8 @@
 "use client";
 
 import { apiJson, getBackend } from "./backend";
+import { browserBackend } from "./backend/browser";
+import { cloudBackend } from "./backend/cloud";
 import { readSnapshot, writeSnapshot } from "./cache";
 import { pollCloudJob } from "./cloudJob";
 import { downloadFromUrl } from "./download";
@@ -15,7 +17,6 @@ import {
   activeResidency,
   availableResidencies,
   backendFor,
-  libraryResidencies,
   libraryShelfKey,
   listedResidencies,
   type Residency,
@@ -108,8 +109,8 @@ async function rememberedLibraryFrom(r: Residency): Promise<LibraryData | null> 
  * item it can't copy into the project has no business in a picker.
  */
 export async function fetchLibrary(opts?: { remembered?: boolean }): Promise<LibraryData> {
-  const live = libraryResidencies(availableResidencies());
-  const rs = libraryResidencies(opts?.remembered ? listedResidencies() : live);
+  const live = availableResidencies();
+  const rs = opts?.remembered ? listedResidencies() : live;
   const parts = await Promise.all(
     rs.map((r) =>
       live.includes(r) ? fetchLibraryFrom(r).catch(() => null) : rememberedLibraryFrom(r)
@@ -130,6 +131,7 @@ export async function importUrlToLibrary(
   url: string,
   residency: Residency = activeResidency()
 ): Promise<LibraryAsset[]> {
+  if (residency === "browser") return importUrlToBrowserShelf(url);
   const backend = backendFor(residency);
   const res = await backend.fetch("/api/cut/library/import-url", {
     method: "POST",
@@ -154,6 +156,71 @@ export async function importUrlToLibrary(
   const body = await apiJson<LibraryAsset[]>(res);
   if (!res.ok) throw new Error(body.error ?? "Could not import that URL.");
   return (Array.isArray(body) ? body : []).map((a) => ({ ...a, residency }));
+}
+
+/**
+ * A link imported onto the browser shelf.
+ *
+ * Nothing in a page can fetch a video off a YouTube or TikTok link, so the
+ * cloud worker does it — into the account's cloud shelf, where this browser
+ * can read it — and the bytes come straight back down into this browser's own
+ * storage. The staged cloud copy is dropped once they land, however this ends,
+ * so an import leaves nothing behind on a shelf the user wasn't importing to.
+ */
+async function importUrlToBrowserShelf(url: string): Promise<LibraryAsset[]> {
+  const res = await cloudBackend.fetch("/api/cut/library/import-url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  const started = await apiJson<{ jobId?: string }>(res);
+  if (!res.ok || !started.jobId) throw new Error(started.error ?? "Could not import that URL.");
+  const done = await pollCloudJob<{ assets?: LibraryAsset[] }>(
+    started.jobId,
+    cloudBackend,
+    "Could not import that URL."
+  );
+  // The library holds media, so a source that turned out to be only words
+  // fails here — the same line the engine's library import draws.
+  if (!done.assets?.length) throw new Error("That link has no media to import.");
+  const landed: LibraryAsset[] = [];
+  try {
+    for (const staged of done.assets) {
+      const bytes = await cloudBackend.fetch(
+        `/api/cut/library/media/${encodeURIComponent(staged.fileName)}`
+      );
+      if (!bytes.ok) throw new Error("Could not import that URL.");
+      const form = new FormData();
+      form.append("file", await bytes.blob(), staged.fileName);
+      form.append("name", staged.name);
+      form.append(
+        "meta",
+        JSON.stringify({
+          type: staged.type,
+          duration: staged.duration,
+          width: staged.width,
+          height: staged.height,
+        })
+      );
+      if (staged.source) form.append("source", JSON.stringify(staged.source));
+      const saved = await browserBackend.fetch("/api/cut/library", { method: "POST", body: form });
+      const body = await apiJson<LibraryAsset>(saved);
+      if (!saved.ok) throw new Error(body.error ?? "Could not import that URL.");
+      landed.push({ ...body, residency: "browser" });
+    }
+  } catch (e) {
+    // A part-written import is worse than none: the user reads an error and is
+    // left holding half a link.
+    for (const a of landed) await deleteFromLibrary("browser", a.id).catch(() => {});
+    throw e;
+  } finally {
+    for (const staged of done.assets) {
+      await cloudBackend
+        .fetch(`/api/cut/library/${staged.id}`, { method: "DELETE" })
+        .catch(() => {});
+    }
+  }
+  return landed;
 }
 
 export async function createLibraryFolder(
@@ -234,6 +301,16 @@ export async function uploadToLibrary(
   }
   const form = new FormData();
   form.append("file", file, file.name);
+  if (residency === "browser") {
+    // The shelf is this page's storage, with no ffprobe behind it: the file is
+    // measured here, and one this browser can't read is refused rather than
+    // shelved as an asset nothing can play.
+    const meta = await probeFileMeta(file).catch(() => null);
+    if (!meta || (meta.type !== "image" && !(meta.duration > 0))) {
+      throw new Error("This file can't be read in this browser, so it can't go in the library.");
+    }
+    form.append("meta", JSON.stringify(meta));
+  }
   const res = await backend.fetch("/api/cut/library", { method: "POST", body: form });
   const body = await apiJson<LibraryAsset>(res);
   if (!res.ok) throw new Error(body.error ?? "Upload failed.");

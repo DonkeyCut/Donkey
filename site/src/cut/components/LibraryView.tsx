@@ -70,7 +70,6 @@ import { useListedResidencies, useLocalCompute } from "@/cut/lib/backend/hooks";
 import { setNeedsApp } from "@/cut/lib/needsApp";
 import {
   availableResidencies,
-  libraryResidencies,
   RESIDENCY_LABEL,
   type Residency,
 } from "@/cut/lib/residency";
@@ -125,7 +124,9 @@ export function LibraryView() {
   const library = useLibrary();
   const listed = useListedResidencies();
   const engineUp = useLocalCompute();
-  const live = useCallback((r: Residency) => r === "cloud" || engineUp, [engineUp]);
+  // Every shelf but the Mac's is always answering: the cloud is a request away
+  // and the browser shelf is this page's own storage.
+  const live = useCallback((r: Residency) => r !== "local" || engineUp, [engineUp]);
   // Drop the flag when this view goes away: the banner belongs to the surface
   // that raised it.
   useEffect(() => () => setNeedsApp(false), []);
@@ -623,7 +624,7 @@ export function LibraryCard({
   const videoRef = useRef<HTMLVideoElement>(null);
   const { flash, attachReveal } = useRevealFlash("library", a.id);
   // With one shelf listed, every card is on it — the badge would say nothing.
-  const bothShelves = libraryResidencies(availableResidencies()).length > 1 || offline;
+  const bothShelves = availableResidencies().length > 1 || offline;
   // Each card is a real media element, so the source waits until the tile has
   // been scrolled near: a large library would otherwise pull every file's
   // metadata across the network the moment the page opened.

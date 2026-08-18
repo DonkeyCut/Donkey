@@ -4,36 +4,23 @@
 // (`server/http/projects.ts`) — call sites can't tell which backend answered.
 //
 // Owned here: projects CRUD + folders, media bytes, image import, presign-get
-// (answered with blob URLs), exports, and the export-jobs feed. Everything
-// else is the driver's cloud proxy.
+// (answered with blob URLs), exports, the export-jobs feed, and the library
+// shelf (./library.ts). Everything else is the driver's cloud proxy.
 import { normalizeAspect, type ProjectDoc, type ProjectFolder } from "../../types";
 import {
   getBrowserExportJob,
   listBrowserExportJobs,
   removeBrowserExportJob,
 } from "./exportJobs";
+import { dispatchLibraryRoute } from "./library";
 import * as store from "./opfs";
 import { registerBlobFile, registeredUrl, revokeRegistered } from "./registry";
-
-const json = (body: unknown, status = 200) => Response.json(body, { status });
-const err = (message: string, status: number) => json({ error: message }, status);
-const caught = (e: unknown, fallback: string) =>
-  err(e instanceof Error ? e.message : fallback, 500);
+import { caught, err, json, serveFile } from "./respond";
 
 const mediaApiPath = (id: string, fileName: string) =>
   `/api/cut/projects/${id}/media/${encodeURIComponent(fileName)}`;
 const exportApiPath = (id: string, fileName: string) =>
   `/api/cut/projects/${id}/exports/${encodeURIComponent(fileName)}`;
-
-/** Serve a store file the way serveFileRange presents it: typed bytes, an
- * attachment disposition when the URL asks to download. Blob-backed Responses
- * satisfy media-element range requests without explicit 206 handling. */
-function serveFile(file: File, name: string, download: boolean): Response {
-  const headers: Record<string, string> = {};
-  if (file.type) headers["Content-Type"] = file.type;
-  if (download) headers["Content-Disposition"] = `attachment; filename="${name.replace(/"/g, "")}"`;
-  return new Response(file, { headers });
-}
 
 async function listSummaries(): Promise<Response> {
   const ids = await store.listProjectIds();
@@ -221,7 +208,7 @@ async function uploadMedia(req: Request, id: string): Promise<Response> {
     const form = await req.formData();
     const file = form.get("file");
     if (!(file instanceof File)) return err("No file in upload.", 400);
-    const fileName = await store.saveMedia(id, file);
+    const fileName = await store.saveMedia(id, file, file.name);
     registerBlobFile(mediaApiPath(id, fileName), file);
     return json({ fileName });
   } catch (e) {
@@ -239,7 +226,7 @@ async function importImage(req: Request, id: string): Promise<Response> {
     const name = typeof nameField === "string" && nameField.trim() ? nameField.trim() : file.name;
     const raw = form.get("origin");
     const origin = raw === "generated" || raw === "sticker" ? raw : undefined;
-    const fileName = await store.saveMedia(id, file);
+    const fileName = await store.saveMedia(id, file, file.name);
     registerBlobFile(mediaApiPath(id, fileName), file);
     let width = 0;
     let height = 0;
@@ -410,6 +397,10 @@ export async function dispatchBrowserRoute(
     // Engine-only compute under /projects (freeze, silence, transcribe, …):
     // no browser implementation, answered like the cloud twin answers them.
     return err("Not available for browser projects.", 404);
+  }
+
+  if (rest[0] === "library") {
+    return dispatchLibraryRoute(rest.slice(1), method, req, download);
   }
 
   if (rest[0] === "media" && rest[1] === "presign-get" && method === "POST") {

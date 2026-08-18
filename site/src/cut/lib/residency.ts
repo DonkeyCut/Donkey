@@ -8,9 +8,9 @@
 // app has to come back for.
 //
 // A project opens into one residency. The library is the other way around: it
-// is the user's shelf, and both halves of it are theirs, so every surface that
+// is the user's shelf, and every part of it is theirs, so every surface that
 // shows the library shows every residency this browser can reach — a cloud
-// project can still pull a clip off this Mac's disk, and a local project can
+// project can still pull a clip off this Mac's disk, and a browser project can
 // still pull one out of the cloud.
 import { engineOrigin, servedFromEngine } from "./api";
 import { cutMode } from "./backend";
@@ -56,12 +56,6 @@ export function availableResidencies(): Residency[] {
   out.push("cloud");
   return out;
 }
-
-/** The shelves the library spans. Library items keep a Mac and a cloud home;
- * browser-resident storage holds projects only, so library reads and writes
- * pass over it. */
-export const libraryResidencies = (rs: Residency[]): Residency[] =>
-  rs.filter((r) => r !== "browser");
 
 /** Set the first time an engine answers in this browser (by the ConnectGate).
  * It separates a browser that never had the Donkey app from one whose app
@@ -114,11 +108,11 @@ async function lastLocalProjects(): Promise<Set<string>> {
 }
 
 /** The library residency the app is bound to: where a new library upload
- * lands. Browser mode uploads to the cloud shelf — the library passes over
- * browser storage. A shared view reads the local shelf. */
+ * lands. Every residency keeps its own shelf, so this follows the open
+ * project. A shared view reads the local shelf. */
 export function activeResidency(): Residency {
   const mode = cutMode();
-  return mode === "cloud" || mode === "browser" ? "cloud" : "local";
+  return mode === "cloud" || mode === "browser" ? mode : "local";
 }
 
 const owners = new Map<string, Promise<CutBackend>>();
