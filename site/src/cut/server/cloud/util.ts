@@ -61,10 +61,12 @@ export function dedupeName(base: string, taken: ReadonlySet<string>): string {
 const VIDEO_RE = /\.(mp4|mov|m4v|webm|mkv)$/i;
 const AUDIO_RE = /\.(mp3|m4a|aac|wav|ogg|flac)$/i;
 const IMAGE_RE = /\.(png|jpe?g|webp|gif|avif|bmp)$/i;
+const FONT_RE = /\.(ttf|otf|woff2?)$/i;
 
-export function typeOf(fileName: string): "video" | "audio" | "image" | null {
+export function typeOf(fileName: string): "video" | "audio" | "image" | "font" | null {
   if (VIDEO_RE.test(fileName)) return "video";
   if (AUDIO_RE.test(fileName)) return "audio";
   if (IMAGE_RE.test(fileName)) return "image";
+  if (FONT_RE.test(fileName)) return "font";
   return null;
 }

@@ -7,7 +7,16 @@ import { getClipSpans, overlayLayers, resolveTransitions, totalDuration, useEdit
 import { playheadAt, skimAt } from "./playhead";
 import { laneCues, subtitleLaneCount } from "./subtitles";
 import { watchSweepActive } from "./watch/sweep";
-import { frameOf, rectOf, regionLabel, type ClipSpan, type Overlay, type VideoClip } from "./types";
+import { libraryFontId, listLibraryFonts } from "./linkedLibrary";
+import {
+  frameOf,
+  rectOf,
+  regionLabel,
+  uploadedFontId,
+  type ClipSpan,
+  type Overlay,
+  type VideoClip,
+} from "./types";
 
 const r = (n: number) => Math.round(n * 100) / 100;
 
@@ -86,7 +95,9 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
   // content, so it stays visible even when a chat made it.
   const ownedByOtherChat = (a: { origin?: string; chatId?: string; id: string }) =>
     a.origin === "chat" && !!a.chatId && a.chatId !== chatId && !placed.has(a.id);
-  const visibleAssets = s.assets.filter((a) => !ownedByOtherChat(a));
+  // A font asset is a typeface, not footage: it is listed under `fonts` with
+  // the account's shelf fonts, where a font id is what the model needs.
+  const visibleAssets = s.assets.filter((a) => a.type !== "font" && !ownedByOtherChat(a));
   // The cap trims the tail of a huge media list, and a source someone has
   // watched and written up stays regardless of where it sits: the record is
   // what later decisions are made from.
@@ -165,6 +176,15 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
     // another chat still owns is filtered out above). `origin` marks Cut-made
     // media (generated/voiceover/recording/stock/freeze); no origin = a user
     // import shown in the Media panel.
+    // Every font a title or caption can be set in beyond the built-in list:
+    // the account's own, off the Library shelf, plus any still living in this
+    // project from before fonts moved to the shelf.
+    fonts: [
+      ...listLibraryFonts().map((f) => ({ id: libraryFontId(f.key), label: f.label })),
+      ...s.assets
+        .filter((a) => a.type === "font")
+        .map((a) => ({ id: uploadedFontId(a.id), label: a.name })),
+    ],
     media: shownAssets.map((a) => ({
       id: a.id,
       name: a.name,

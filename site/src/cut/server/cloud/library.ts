@@ -25,7 +25,7 @@ import { caught, decodeFileParam, dedupeName, err, redirect, safeFileName, typeO
  * the source project doc. */
 interface AssetMeta {
   name?: string;
-  type?: "video" | "audio" | "image";
+  type?: "video" | "audio" | "image" | "font";
   duration?: number;
   width?: number;
   height?: number;
@@ -281,13 +281,36 @@ export const libraryCloud = {
   /** Finish a library upload: verify, mark complete, register the asset. */
   async complete(userId: string, req: Request) {
     try {
-      const { key, meta } = (await req.json()) as { key?: string; meta?: AssetMeta };
+      const { key, posterKey, meta } = (await req.json()) as {
+        key?: string;
+        posterKey?: string;
+        meta?: AssetMeta;
+      };
       if (!key) return err("key is required.", 400);
       const obj = await prisma.cutMediaObject.findFirst({ where: { userId, r2Key: key } });
       if (!obj) return err("Unknown upload.", 404);
       const info = obj.uploadState === "complete" ? null : await head(key);
       if (obj.uploadState !== "complete" && !info) return err("The upload never arrived.", 400);
+      // A cover that came up alongside the file: its own object, finished the
+      // same way, named on the asset so the delete cascade takes it too.
+      const posterObj = posterKey
+        ? await prisma.cutMediaObject.findFirst({ where: { userId, r2Key: posterKey } })
+        : null;
+      const posterInfo =
+        posterObj && posterObj.uploadState !== "complete" ? await head(posterKey!) : null;
+      const posterFile = posterInfo || posterObj?.uploadState === "complete" ? posterObj!.fileName : undefined;
       const row = await prisma.$transaction(async (tx) => {
+        if (posterObj && posterInfo) {
+          await tx.cutMediaObject.update({
+            where: { id: posterObj.id },
+            data: {
+              uploadState: "complete",
+              bytes: BigInt(posterInfo.bytes),
+              ...(posterInfo.mime ? { mime: posterInfo.mime } : {}),
+            },
+          });
+          await addUsage(tx, userId, posterInfo.bytes);
+        }
         if (info) {
           await tx.cutMediaObject.update({
             where: { id: obj.id },
@@ -309,6 +332,9 @@ export const libraryCloud = {
               duration: meta?.duration ?? 0,
               ...(meta?.width ? { width: meta.width, height: meta.height } : {}),
               ...(meta?.source ? { source: meta.source } : {}),
+              ...(posterFile ?? meta?.posterFile
+                ? { posterFile: posterFile ?? meta?.posterFile }
+                : {}),
             } as unknown as Prisma.InputJsonValue,
           },
         });
@@ -616,3 +642,15 @@ export const libraryCloud = {
     }
   },
 };
+
+/** The folder a new account starts with, so the Library shows that it takes
+ * font files before anyone has dropped one in. Derived from the user id, so a
+ * retried signup lands on the same row; an ordinary folder otherwise, free to
+ * rename, empty, or delete. */
+export const fontsFolderId = (userId: string) => `fonts-${userId}`;
+
+export async function seedFontsFolder(userId: string): Promise<void> {
+  const id = fontsFolderId(userId);
+  if (await prisma.cutFolder.findUnique({ where: { id } })) return;
+  await prisma.cutFolder.create({ data: { id, userId, name: "Fonts", scope: "library" } });
+}

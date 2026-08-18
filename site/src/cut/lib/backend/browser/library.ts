@@ -87,11 +87,13 @@ async function mutateIndex<T>(fn: (idx: LibraryIndex) => T): Promise<T> {
 const VIDEO_RE = /\.(mp4|mov|m4v|webm|mkv)$/i;
 const AUDIO_RE = /\.(mp3|m4a|aac|wav|ogg|flac)$/i;
 const IMAGE_RE = /\.(png|jpe?g|webp|gif|avif|bmp)$/i;
+const FONT_RE = /\.(ttf|otf|woff2?)$/i;
 
 function typeOf(fileName: string): AssetType | null {
   if (VIDEO_RE.test(fileName)) return "video";
   if (AUDIO_RE.test(fileName)) return "audio";
   if (IMAGE_RE.test(fileName)) return "image";
+  if (FONT_RE.test(fileName)) return "font";
   return null;
 }
 

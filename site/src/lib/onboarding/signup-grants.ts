@@ -1,3 +1,4 @@
+import { seedFontsFolder } from "@/cut/server/cloud/library";
 import { seedStarterProject } from "@/cut/server/cloud/starter";
 import { creditStringToMicros } from "@/lib/credits/amounts";
 import { grantCredits } from "@/lib/credits/inference";
@@ -17,6 +18,7 @@ export async function provisionSignupGrants(user: EmailUser): Promise<void> {
   const results = await Promise.allSettled([
     grantSignupAppCredits(user.id),
     seedStarterProject(user.id),
+    seedFontsFolder(user.id),
     sendWelcomeEmail(user),
     syncResendContact(user),
   ]);

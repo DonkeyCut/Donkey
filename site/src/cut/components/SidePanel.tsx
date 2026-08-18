@@ -72,6 +72,15 @@ import {
 } from "@/cut/lib/residency";
 import { isStylePresetTemplate } from "@/cut/lib/stylePresets";
 import { retryUpload } from "@/cut/lib/importQueue";
+import {
+  forgetLinkedCopy,
+  expandLinkedFiles,
+  isLinkedFile,
+  linkedAccept,
+  isLinkedType,
+  shelfForNewItem,
+  syncLinkedLibrary,
+} from "@/cut/lib/linkedLibrary";
 import { downloadMedia, isMediaFile, revealMedia } from "@/cut/lib/media";
 import { mediaUrl, TRANSITION_MAX } from "@/cut/lib/types";
 import { parseSecondsInput } from "@/cut/components/ScrubValue";
@@ -731,7 +740,7 @@ function ProjectFilesPanel({
           <input
             ref={inputRef}
             type="file"
-            accept="video/*,audio/*"
+            accept={`video/*,audio/*,${linkedAccept()}`}
             multiple
             hidden
             onChange={(e) => {
@@ -1214,6 +1223,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
     const { id, residency } = deleting;
     setAssets((prev) => (prev ?? []).filter((a) => a.id !== id));
     setDeleting(null);
+    if (isLinkedType(deleting.type)) forgetLinkedCopy(id);
     try {
       await deleteFromLibrary(residency, id);
     } catch {
@@ -1244,18 +1254,27 @@ function LibraryPanel({ projectId }: { projectId: string }) {
     (folderId ? folders.find((f) => f.id === folderId)?.residency : null) ?? activeResidency();
 
   const upload = async (files: FileList | File[], folderId: string | null = openFolder) => {
-    const list = Array.from(files).filter(isMediaFile);
+    const list = (await expandLinkedFiles(Array.from(files))).filter(
+      (f) => isMediaFile(f) || isLinkedFile(f)
+    );
     if (list.length === 0) return;
     const residency = shelfForNew(folderId);
     setUploading((n) => n + list.length);
     for (const file of list) {
       try {
-        const asset = await uploadToLibrary(file, residency);
+        // Something the Library lends rather than copies, dropped outside a
+        // folder, takes the shelf every surface can read; dropped into one, the
+        // folder still decides.
+        const shelf =
+          isLinkedFile(file) && !folderId ? await shelfForNewItem(file.size) : residency;
+        const asset = await uploadToLibrary(file, shelf);
         if (folderId) {
-          await moveLibraryItem(residency, asset.id, folderId).catch(() => {});
+          await moveLibraryItem(shelf, asset.id, folderId).catch(() => {});
           asset.folderId = folderId;
         }
         setAssets((prev) => [asset, ...(prev ?? [])]);
+        // A lent item is only usable once it is in reach of the menus.
+        if (isLinkedType(asset.type)) void syncLinkedLibrary();
       } catch {
         // Skip unreadable files; the rest of the batch still uploads.
       } finally {
@@ -1413,7 +1432,8 @@ function LibraryPanel({ projectId }: { projectId: string }) {
           ) : null
         ) : all.length === 0 && folders.length === 0 && templates.length === 0 ? (
           <div className="text-balance px-3.5 py-6 text-center text-xs text-muted-foreground">
-            Drag video, audio and image assets here. Library assets are shared across all projects.
+            Drag video, audio, image and font files here. Library assets are shared across all
+            projects.
           </div>
         ) : null
       ) : (
@@ -1426,7 +1446,10 @@ function LibraryPanel({ projectId }: { projectId: string }) {
               key={a.id}
               asset={a}
               mention
-              onUse={() => void addLibraryAssetToProject(projectId, a)}
+              // A font is used from the font menu; there is nothing to place.
+              onUse={
+                a.type === "font" ? undefined : () => void addLibraryAssetToProject(projectId, a)
+              }
               onDelete={() => setDeleting(a)}
               onDragStartExtra={(e) => onCardDragExtra(e, a)}
             />

@@ -38,6 +38,14 @@ export function setFontInstaller(install: FontInstaller): void {
   installFace = install;
 }
 
+/** Install one face through whichever seam this process filled. Font bytes
+ * reach a family exactly one way, whether they came off a project's media
+ * folder or the account's Library shelf. Throws on bytes that are not a font,
+ * which is what makes it double as the upload's validity check. */
+export function installFontFace(family: string, bytes: ArrayBuffer): Promise<void> {
+  return installFace(family, bytes);
+}
+
 /** A display label from the uploaded file's name, extension dropped. */
 const fontLabel = (name: string) => name.replace(/\.(ttf|otf|woff2?|TTF|OTF)$/, "") || "Custom font";
 

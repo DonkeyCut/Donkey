@@ -2099,6 +2099,10 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const lib = (await fetchLibrary()).assets.find((a) => a.id === String(input.id ?? ""));
       if (!lib)
         throw new ToolError(`No library asset with id ${String(input.id)}. Call library_list for ids.`);
+      if (lib.type === "font")
+        throw new ToolError(
+          `"${lib.name}" is a font. It is already available to this project — set a title or the captions to font id font:${lib.id}.`
+        );
       // Captured before the import: the media files under the chat that asked,
       // even if the user switches threads while it copies.
       const chatId = chatOwner();

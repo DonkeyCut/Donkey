@@ -149,6 +149,16 @@ export function isTextFile(file: File) {
   return file.type.startsWith("text/") || /\.(txt|md|markdown|srt|vtt|csv|json)$/i.test(file.name);
 }
 
+/** A font file the Library takes. Browsers often report an empty type for
+ * .otf, so the extension has the final say. */
+export function isFontFile(file: File) {
+  return file.type.startsWith("font/") || /\.(ttf|otf|woff2?)$/i.test(file.name);
+}
+
+/** Fonts are small; a file past this is a mistake worth catching before the
+ * bytes move. The storage quota is the real ceiling. */
+export const MAX_FONT_BYTES = 10 * 1024 ** 2;
+
 /** Claim a name and mint a direct-to-R2 PUT for one file. The name is deduped
  * and reserved server-side before the URL comes back, so callers can build the
  * asset's final identity before a single byte moves. */

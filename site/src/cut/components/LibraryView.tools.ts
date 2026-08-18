@@ -12,13 +12,13 @@ export const LIBRARY_TOOLS = [
   {
     name: "library_list",
     description:
-      "List the shared Library — reusable media saved across projects: folders, assets (video/audio/image), and templates (saved arrangements of clips, overlays, titles, and captions). Library items live outside the project: library_add imports an asset, template_add re-materializes a template.",
+      "List the shared Library — reusable media saved across projects: folders, assets (video/audio/image, and the account's own font files), and templates (saved arrangements of clips, overlays, titles, and captions). Library items live outside the project: library_add imports an asset, template_add re-materializes a template.",
     inputSchema: obj({}),
   },
   {
     name: "library_add",
     description:
-      "Copy a Library asset into the project (it appears in `media` and previews as a card in this chat). This is the import step \"library\"-scope attachments need before editor tools can touch them. Pass add_to_timeline:true (or start/index) only when the user asked for it in the cut: video/image land on track 0, audio on the soundtrack.",
+      "Copy a Library asset into the project (it appears in `media` and previews as a card in this chat). This is the import step \"library\"-scope attachments need before editor tools can touch them. Fonts are not imported — a font on the shelf is already offered to every project as font id \"font:<id>\". Pass add_to_timeline:true (or start/index) only when the user asked for it in the cut: video/image land on track 0, audio on the soundtrack.",
     inputSchema: obj({
       id: str("Library asset id (from library_list or an attachment's metadata)"),
       add_to_timeline: bool("Also place it on the timeline (default false — it stays a project asset until the user asks)"),

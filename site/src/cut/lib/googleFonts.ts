@@ -25,6 +25,7 @@ import {
   Poppins,
   Space_Grotesk,
 } from "next/font/google";
+import { GOOGLE_FONTS } from "./fontCatalog";
 import { registerFonts } from "./types";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "700"], preload: false });
@@ -43,20 +44,24 @@ const pacifico = Pacifico({ subsets: ["latin"], weight: "400", preload: false })
 const permanentMarker = Permanent_Marker({ subsets: ["latin"], weight: "400", preload: false });
 const dmSerifDisplay = DM_Serif_Display({ subsets: ["latin"], weight: "400", preload: false });
 
-registerFonts([
-  { id: "inter", label: "Inter", stack: inter.style.fontFamily },
-  { id: "montserrat", label: "Montserrat", stack: montserrat.style.fontFamily },
-  { id: "poppins", label: "Poppins", stack: poppins.style.fontFamily },
-  { id: "oswald", label: "Oswald", stack: oswald.style.fontFamily },
-  { id: "space-grotesk", label: "Space Grotesk", stack: spaceGrotesk.style.fontFamily },
-  { id: "playfair", label: "Playfair Display", stack: playfair.style.fontFamily },
-  { id: "caveat", label: "Caveat", stack: caveat.style.fontFamily },
-  { id: "bebas", label: "Bebas Neue", stack: bebas.style.fontFamily },
-  { id: "anton", label: "Anton", stack: anton.style.fontFamily },
-  { id: "archivo-black", label: "Archivo Black", stack: archivoBlack.style.fontFamily },
-  { id: "bangers", label: "Bangers", stack: bangers.style.fontFamily },
-  { id: "lobster", label: "Lobster", stack: lobster.style.fontFamily },
-  { id: "pacifico", label: "Pacifico", stack: pacifico.style.fontFamily },
-  { id: "permanent-marker", label: "Permanent Marker", stack: permanentMarker.style.fontFamily },
-  { id: "dm-serif", label: "DM Serif Display", stack: dmSerifDisplay.style.fontFamily },
-]);
+// One stack per bundled id; the list itself lives in fontCatalog.ts, which the
+// assistant's catalog reads too.
+const STACKS: Record<string, string> = {
+  inter: inter.style.fontFamily,
+  montserrat: montserrat.style.fontFamily,
+  poppins: poppins.style.fontFamily,
+  oswald: oswald.style.fontFamily,
+  "space-grotesk": spaceGrotesk.style.fontFamily,
+  playfair: playfair.style.fontFamily,
+  caveat: caveat.style.fontFamily,
+  bebas: bebas.style.fontFamily,
+  anton: anton.style.fontFamily,
+  "archivo-black": archivoBlack.style.fontFamily,
+  bangers: bangers.style.fontFamily,
+  lobster: lobster.style.fontFamily,
+  pacifico: pacifico.style.fontFamily,
+  "permanent-marker": permanentMarker.style.fontFamily,
+  "dm-serif": dmSerifDisplay.style.fontFamily,
+};
+
+registerFonts(GOOGLE_FONTS.map((f) => ({ ...f, stack: STACKS[f.id] })));

@@ -22,6 +22,10 @@ const TYPES: Record<string, string> = {
   ".gif": "image/gif",
   ".avif": "image/avif",
   ".heic": "image/heic",
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
 };
 
 export function contentTypeFor(p: string) {

@@ -1,5 +1,6 @@
 import type { HeadlessSession } from "./bind";
 import { syncFontAssets } from "../fontAssets";
+import { syncLinkedLibrary } from "../linkedLibrary";
 import { serializeDoc, useEditor } from "../store";
 import type { MediaAsset, ProjectDoc } from "../types";
 
@@ -52,8 +53,10 @@ export async function openCloudProject(
   }));
   await useEditor.getState().openProjectDoc(projectId, doc, assets);
   // The page does this from the editor; a run has to do it before it draws,
-  // or a title set in the project's own font comes out in the fallback face.
-  await syncFontAssets(assets);
+  // or a title set in the user's own font comes out in the fallback face. The
+  // account's shelf fonts come along the same way — a run reaches the cloud
+  // shelf, so a font kept on a device shelf is the one case that falls back.
+  await Promise.all([syncFontAssets(assets), syncLinkedLibrary()]);
   return { projectId, version };
 }
 

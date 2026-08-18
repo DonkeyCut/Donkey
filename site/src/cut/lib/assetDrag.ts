@@ -260,6 +260,11 @@ export function setObjectDragImage(e: React.DragEvent) {
   object.style.height = `${rect.height}px`;
   object.style.margin = "0";
   object.style.opacity = "0.85";
+  // The ghost floats free of the page, so its edge is drawn at twice the
+  // strength the card wears in the grid: a pale tile lifted over a pale
+  // backdrop has no shape otherwise.
+  const edge = getComputedStyle(el).borderTopColor;
+  if (edge) object.style.borderColor = `color-mix(in oklab, ${edge}, black 50%)`;
   object.style.transition = "opacity 150ms ease, transform 150ms ease";
   object.style.transformOrigin = `${ox}px ${oy}px`;
   object.style.transform = `scale(${fit})`;

@@ -7,6 +7,7 @@
 import type { CutBackend } from "./backend/types";
 import { fetchCloudThreads, putCloudThread } from "./chatCloud";
 import { mergeThreads, readProjectThreads, writeProjectThreads } from "./chatThreads";
+import { ensureLinkedOnCloud, linkedIdsIn } from "./linkedLibrary";
 import { uploadProjectMediaTo } from "./media";
 import { localMediaFile } from "./mediaSync";
 import type { ProjectDoc } from "./types";
@@ -84,6 +85,11 @@ export async function copyProjectAcross(
       names.set(a.fileName, await uploadProjectMediaTo(dst, summary.id, blob, a.fileName));
       opts.onProgress?.(names.size, unique);
     }
+    // A project moving to the cloud takes what it links to with it: a render
+    // job reads the cloud shelf alone, so a title set in a font that lives only
+    // on this Mac would come out in the fallback face once it renders there.
+    // Linked ids are the bytes, so nothing in the document changes.
+    if (dst.kind === "cloud") await ensureLinkedOnCloud(linkedIdsIn(doc));
     const copied: ProjectDoc = {
       ...doc,
       // The copy is a new project; the target backend stamps its own id.

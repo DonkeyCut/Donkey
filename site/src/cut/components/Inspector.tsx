@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, Info, Italic, RotateCcw, SlidersHorizontal, Smile, Trash2, Type, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmojiPicker } from "@/cut/components/EmojiPicker";
+import { FontPicker } from "@/cut/components/FontPicker";
 import {
   Select,
   SelectContent,
@@ -69,7 +70,6 @@ import {
 import { writeTextStyle } from "@/cut/lib/textStyle";
 import { formatTime } from "@/cut/lib/time";
 import {
-  allFonts,
   fontStack,
   frameOf,
   GRADE_HUE_MAX,
@@ -1013,12 +1013,10 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
   const strokeCk = useSliderCheckpoint();
   const shadowCk = useSliderCheckpoint();
   const taRef = useRef<HTMLTextAreaElement>(null);
-  // The font menu re-reads the registry when Google families finish
-  // registering or an uploaded font lands (the bump re-renders, and the
-  // render re-reads allFonts()).
+  // The saved-style previews below are set in whatever font each style names,
+  // so they re-render when a family finishes registering.
   const [, bumpFonts] = useState(0);
   useEffect(() => onFontsChanged(() => bumpFonts((n) => n + 1)), []);
-  const fonts = allFonts();
 
   // Remember this title's look across clips and projects, so the next new title
   // starts from the same style.
@@ -1088,22 +1086,10 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
           />
         </div>
         <StylePresetsRow overlay={o} />
-        <Select
+        <FontPicker
           value={o.font}
-          items={Object.fromEntries(fonts.map((f) => [f.id, f.label]))}
-          onValueChange={(v) => update(o.id, { font: v as TextOverlay["font"] })}
-        >
-          <SelectTrigger size="sm" className="w-full" style={{ fontFamily: fontStack(o.font) }}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {fonts.map((f) => (
-              <SelectItem key={f.id} value={f.id}>
-                <span style={{ fontFamily: f.stack }}>{f.label}</span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          onChange={(v) => update(o.id, { font: v as TextOverlay["font"] })}
+        />
         <div className="mt-1 flex items-center gap-2">
           <SegGroup>
             <SegToggle

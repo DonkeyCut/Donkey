@@ -109,7 +109,8 @@ export const refFromLibrary = (a: LibraryAsset): AssetRef => ({
   scope: "library",
   id: a.id,
   name: a.name,
-  kind: a.type,
+  // A font is not media to point a tool at; the mapping only stays total.
+  kind: a.type === "font" ? "text" : a.type,
   url: libraryMediaUrl(a.fileName, a.residency),
   duration: a.duration,
   ...(a.width !== undefined ? { width: a.width } : {}),

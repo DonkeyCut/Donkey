@@ -56,6 +56,8 @@ export function TemplateCard({
   onRefDrop,
   onDragStartExtra,
   extraMenu,
+  selectId,
+  selected = false,
 }: {
   template: LibraryTemplate;
   /** Resolve a template media file to a playable URL (project or library). */
@@ -76,6 +78,10 @@ export function TemplateCard({
   onDragStartExtra?: (e: React.DragEvent) => void;
   /** Extra menu items rendered between Rename and Delete. */
   extraMenu?: React.ReactNode;
+  /** Marks the card as sweepable by a marquee under this id, so a template
+   * files into folders in the same selection as the media around it. */
+  selectId?: string;
+  selected?: boolean;
 }) {
   const refDrop = useAssetDrop((r) => onRefDrop?.(r));
   const [renaming, setRenaming] = useState(false);
@@ -90,7 +96,8 @@ export function TemplateCard({
   // equalizer — sound needs no floating preview.
   const [audioRow, setAudioRow] = useState<number | null>(null);
 
-  const itemCount = t.layers.length + t.audio.length + t.texts.length + t.cues.length;
+  const itemCount =
+    t.layers.length + t.audio.length + t.texts.length + t.cues.length;
 
   // The contents, one row per item, in save order: clips and stills, sounds,
   // titles, then a caption count.
@@ -140,8 +147,10 @@ export function TemplateCard({
     <div
       ref={onRefDrop ? refDrop.attachTarget : undefined}
       {...(onRefDrop ? refDrop.targetProps : {})}
+      data-sel-id={selectId}
       className={cn(
-        "group flex flex-col rounded-lg border border-border bg-background px-2.5 py-1.5",
+        "group flex flex-col rounded-lg border bg-background px-2.5 py-1.5",
+        selected ? "border-[#0a84ff] ring-2 ring-[#0a84ff]" : "border-border",
         drag ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
         onRefDrop && refDrop.active && "border-primary bg-primary/10",
       )}
@@ -180,7 +189,8 @@ export function TemplateCard({
             <div className="truncate text-[12px] font-medium">{t.name}</div>
           )}
           <div className="flex items-center gap-0.5 text-[10.5px] text-muted-foreground">
-            {formatTime(t.duration)} · {itemCount} item{itemCount === 1 ? "" : "s"}
+            {formatTime(t.duration)} · {itemCount} item
+            {itemCount === 1 ? "" : "s"}
             <ChevronDown
               className={cn(
                 "size-3 transition-transform",

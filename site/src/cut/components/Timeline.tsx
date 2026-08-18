@@ -1761,7 +1761,7 @@ export function Timeline() {
         let duration = 0;
         if (isLib) {
           const lib = draggingLibrary();
-          type = lib?.type;
+          type = lib && lib.type !== "font" ? lib.type : undefined;
           duration = lib?.duration ?? 0;
         } else if (stockMusic) {
           type = "audio";

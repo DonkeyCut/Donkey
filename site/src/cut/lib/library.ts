@@ -6,9 +6,14 @@ import { readSnapshot, writeSnapshot } from "./cache";
 import { pollCloudJob } from "./cloudJob";
 import { downloadFromUrl } from "./download";
 import { normalizeLink } from "./link";
+import { installFontFace } from "./fontAssets";
+import { fontLabelFor } from "./fontName";
+import { specimenPng } from "./fontSpecimen";
 import {
   enrichAsset,
   importRemote,
+  isFontFile,
+  MAX_FONT_BYTES,
   presignedUpload,
   probeFileMeta,
   uploadProjectMediaTo,
@@ -37,7 +42,7 @@ export interface LibraryAsset {
   id: string;
   fileName: string;
   name: string;
-  type: "video" | "audio" | "image";
+  type: "video" | "audio" | "image" | "font";
   duration: number;
   width?: number;
   height?: number;
@@ -329,27 +334,111 @@ export async function moveLibraryItem(
   if (!res.ok) throw new Error("Could not move item.");
 }
 
+/**
+ * Carry a library file to another shelf, filed where it lands.
+ *
+ * A folder belongs to one shelf, so filing an item into one can mean crossing
+ * shelves. Neither server can see the other, so the bytes come down here and go
+ * back up, the item keeps its name and the link it was imported from, and the
+ * copy left behind comes off.
+ */
+export async function carryAssetTo(
+  asset: LibraryAsset,
+  to: Residency,
+  folderId: string | null
+): Promise<LibraryAsset> {
+  const res = await backendFor(asset.residency).fetch(
+    `/api/cut/library/media/${encodeURIComponent(asset.fileName)}`
+  );
+  if (!res.ok) throw new Error("Could not read that file off its shelf.");
+  const from = libraryPosterUrl(asset);
+  const cover = from
+    ? await backendFor(asset.residency)
+        .fetch(`/api/cut/library/media/${encodeURIComponent(asset.posterFile!)}`)
+        .then((r) => (r.ok ? r.blob() : null))
+        .catch(() => null)
+    : null;
+  const landed = await uploadToLibrary(new File([await res.blob()], asset.fileName), to, {
+    name: asset.name,
+    ...(asset.source ? { source: asset.source } : {}),
+    ...(cover ? { poster: cover } : {}),
+  });
+  if (folderId) await moveLibraryItem(to, landed.id, folderId).catch(() => {});
+  await deleteFromLibrary(asset.residency, asset.id).catch(() => {});
+  return { ...landed, folderId };
+}
+
+/** A font is readable when the renderer can install it, so the check runs
+ * through the installer seam: the file that passes here is exactly the file a
+ * preview and a render job can draw with, and a renamed archive or a truncated
+ * download is refused before a byte leaves the browser. It comes back with the
+ * family name the font calls itself — the shelf's label and the font menu's —
+ * and a specimen drawn in the face it just installed, which becomes the file's
+ * cover, so a card never has to have the font installed to show it. */
+async function checkFont(file: File): Promise<{ label: string; poster: Blob | null }> {
+  if (file.size > MAX_FONT_BYTES) {
+    throw new Error(`Fonts are limited to ${Math.round(MAX_FONT_BYTES / 1024 ** 2)}MB.`);
+  }
+  const bytes = await file.arrayBuffer();
+  const family = `lf-check-${file.size}`;
+  try {
+    await installFontFace(family, bytes);
+  } catch {
+    throw new Error("That file isn't a font Cut can read.");
+  }
+  return {
+    label: fontLabelFor(bytes, file.name),
+    poster: await specimenPng(family).catch(() => null),
+  };
+}
+
 export async function uploadToLibrary(
   file: File,
-  residency: Residency = activeResidency()
+  residency: Residency = activeResidency(),
+  /** What the shelf should call it and where it came from, when the file is
+   * arriving from somewhere that already knows — a carry from another shelf,
+   * say. Left out, the file names itself and keeps whatever cover it makes. */
+  keep: { name?: string; source?: LibrarySource; poster?: Blob } = {}
 ): Promise<LibraryAsset> {
   const backend = backendFor(residency);
+  // A font has no streams to measure; it is checked by installing it instead,
+  // and the check hands back the specimen the shelf keeps as its cover.
+  const font = isFontFile(file) ? await checkFont(file) : null;
+  const fontLabel = font?.label ?? null;
+  const poster = keep.poster ?? font?.poster ?? null;
+  const posterName = `${file.name}.specimen.png`;
+  const fontMeta = { type: "font" as const, duration: 0 };
   if (residency === "cloud") {
     // Presign -> direct R2 PUT -> complete, with the media probed here — the
     // cloud can't cheaply probe an R2 object the way the engine probes disk.
     // A file this browser can't decode would land as a zero-length asset it
     // also couldn't preview, so reject it before any bytes go up.
-    const meta = await probeFileMeta(file).catch(() => null);
-    if (!meta || (meta.type !== "image" && !(meta.duration > 0))) {
+    const meta = fontLabel ? fontMeta : await probeFileMeta(file).catch(() => null);
+    if (!meta || (meta.type !== "image" && meta.type !== "font" && !(meta.duration > 0))) {
       throw new Error(
         "This file can't be read in this browser, so it can't go in the cloud library. Import it in the Mac app instead."
       );
     }
     const key = await presignedUpload("/api/cut/library/presign", file, file.name, backend);
+    // The cover rides up as an object of its own; `complete` marks it and
+    // records it against the asset.
+    const posterKey = poster
+      ? await presignedUpload("/api/cut/library/presign", poster, posterName, backend).catch(
+          () => null
+        )
+      : null;
     const res = await backend.fetch("/api/cut/library/complete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key, meta: { name: file.name, ...meta } }),
+      body: JSON.stringify({
+        key,
+        ...(posterKey ? { posterKey } : {}),
+        meta: {
+          name: keep.name ?? fontLabel ?? file.name,
+          ...(keep.source ? { source: keep.source } : {}),
+          ...meta,
+        },
+      }),
     });
     const body = await apiJson<LibraryAsset>(res);
     if (!res.ok) throw new Error(body.error ?? "Upload failed.");
@@ -357,12 +446,16 @@ export async function uploadToLibrary(
   }
   const form = new FormData();
   form.append("file", file, file.name);
+  const name = keep.name ?? fontLabel;
+  if (name) form.append("name", name);
+  if (keep.source) form.append("source", JSON.stringify(keep.source));
+  if (poster) form.append("poster", poster, posterName);
   if (residency === "browser") {
     // The shelf is this page's storage, with no ffprobe behind it: the file is
     // measured here, and one this browser can't read is refused rather than
     // shelved as an asset nothing can play.
-    const meta = await probeFileMeta(file).catch(() => null);
-    if (!meta || (meta.type !== "image" && !(meta.duration > 0))) {
+    const meta = fontLabel ? fontMeta : await probeFileMeta(file).catch(() => null);
+    if (!meta || (meta.type !== "image" && meta.type !== "font" && !(meta.duration > 0))) {
       throw new Error("This file can't be read in this browser, so it can't go in the library.");
     }
     form.append("meta", JSON.stringify(meta));
@@ -420,6 +513,7 @@ export async function importLibraryAsset(
   projectId: string,
   lib: LibraryAsset
 ): Promise<MediaAsset> {
+  if (lib.type === "font") throw new Error("Fonts are used from the font menu, not the timeline.");
   return importRemote(
     projectId,
     {

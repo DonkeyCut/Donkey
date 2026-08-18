@@ -3,15 +3,9 @@
 import React, { memo, useEffect, useRef, useState } from "react";
 import { AlertCircle, Captions, ChevronDown, Languages, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { ColorField } from "@/cut/components/ColorField";
+import { FontPicker } from "@/cut/components/FontPicker";
 import { parseNumberInput } from "@/cut/components/ScrubValue";
 import { ValueSlider } from "@/cut/components/ValueSlider";
 import { GenerateSubtitlesAudio } from "@/cut/components/VoicePicker";
@@ -30,7 +24,6 @@ import { TIMELINE_H_MIN, useEditor } from "@/cut/lib/store";
 import { usePreviewSelector } from "@/cut/lib/playhead";
 import { PLATE_PAD_X, PLATE_PAD_Y, PLATE_RADIUS, plateFill } from "@/cut/lib/textRender";
 import {
-  FONTS,
   fontStack,
   type FontId,
   type SubtitleCue,
@@ -231,22 +224,11 @@ function OptionsTab() {
       </label>
       <div className="flex min-h-8 items-center justify-between text-xs font-medium">
         Font
-        <Select
+        <FontPicker
+          className="sub-font w-28"
           value={subtitles.font ?? captionStyle(subtitles.style).font}
-          items={Object.fromEntries(FONTS.map((f) => [f.id, f.label]))}
-          onValueChange={(v) => useEditor.getState().setSubtitlesView({ font: v as FontId })}
-        >
-          <SelectTrigger size="sm" className="sub-font w-28">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {FONTS.map((f) => (
-              <SelectItem key={f.id} value={f.id}>
-                <span style={{ fontFamily: fontStack(f.id) }}>{f.label}</span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          onChange={(v) => useEditor.getState().setSubtitlesView({ font: v as FontId })}
+        />
       </div>
       <div className="flex min-h-8 items-center justify-between text-xs font-medium">
         Size

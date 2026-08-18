@@ -8,7 +8,7 @@ import type { AssetRef } from "./assetRef";
 // surface can open it and a single mounted overlay renders it.
 
 export interface LightboxItem {
-  kind: "video" | "image" | "audio" | "text";
+  kind: "video" | "image" | "audio" | "text" | "font";
   /** Fetchable source for the media or file. */
   src: string;
   name: string;

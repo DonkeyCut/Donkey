@@ -19,6 +19,7 @@ import {
   Plus,
   RotateCcw,
   Trash2,
+  Type,
   Upload,
   X,
 } from "lucide-react";
@@ -56,7 +57,11 @@ import {
 } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
-import { clearAssetDrag, setLibraryDragData, setObjectDragImage } from "@/cut/lib/assetDrag";
+import {
+  clearAssetDrag,
+  setLibraryDragData,
+  setObjectDragImage,
+} from "@/cut/lib/assetDrag";
 import { useInView } from "@/cut/hooks/useInView";
 import { isMediaFile } from "@/cut/lib/media";
 import { patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
@@ -70,6 +75,7 @@ import {
   importUrlToLibrary,
   libraryMediaUrl,
   libraryPosterUrl,
+  carryAssetTo,
   moveLibraryItem,
   renameLibraryFolder,
   renameTemplate,
@@ -91,13 +97,29 @@ import {
 import { Lightbox } from "./Lightbox";
 import { TemplateCard } from "./TemplateCard";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
+import {
+  forgetLinkedCopy,
+  expandLinkedFiles,
+  isLinkedFile,
+  linkedAccept,
+  isLinkedType,
+  shelfForNewItem,
+  syncLinkedLibrary,
+} from "@/cut/lib/linkedLibrary";
 import { shapeBand } from "@/cut/lib/types";
 import { useRevealFlash } from "@/cut/lib/refReveal";
 import { formatTime } from "@/cut/lib/time";
 import { cn } from "@/lib/utils";
 import { CopyNameLabel } from "./AssetRefs";
+import { FontSpecimen } from "./FontSpecimen";
 import { AudioCardFace } from "./AudioPanel";
-import { buildDragGhost, FolderCrumb, FolderShelf, formatBytes, Marquee } from "./desktopFolders";
+import {
+  buildDragGhost,
+  FolderCrumb,
+  FolderShelf,
+  formatBytes,
+  Marquee,
+} from "./desktopFolders";
 import { useMediaFileSize } from "@/cut/hooks/useMediaFileSize";
 
 // A dragged library selection travels as a JSON array of asset ids, so a whole
@@ -165,7 +187,8 @@ function linkLabel(url: string): string {
         .split("/")
         .filter(Boolean)
         .reverse()
-        .find((seg) => !ROUTE_SEGMENT.has(seg.toLowerCase())) ?? u.searchParams.get("v");
+        .find((seg) => !ROUTE_SEGMENT.has(seg.toLowerCase())) ??
+      u.searchParams.get("v");
     return id ? `${host}/${id}` : host;
   } catch {
     return url;
@@ -200,7 +223,7 @@ function PendingTile({
     <div
       className={cn(
         "relative max-w-full overflow-hidden rounded-xl border",
-        item.error ? "border-destructive/50 bg-muted" : "border-border"
+        item.error ? "border-destructive/50 bg-muted" : "border-border",
       )}
       style={{
         width: Math.round(Math.sqrt((area * frame.width) / frame.height)),
@@ -210,7 +233,12 @@ function PendingTile({
       {item.error ? (
         // Clear of the strip the link and the reason share along the top.
         <div className="flex size-full flex-col items-center justify-center gap-1.5 pt-8">
-          <Button variant="outline" size="sm" className="w-24 justify-start" onClick={onRetry}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-24 justify-start"
+            onClick={onRetry}
+          >
             <RotateCcw data-icon="inline-start" /> Retry
           </Button>
           <Button
@@ -232,14 +260,16 @@ function PendingTile({
               <span
                 className={cn(
                   "absolute top-1.5 left-1.5 truncate rounded-lg bg-black/55 px-2 py-1 text-[11px] font-medium text-white backdrop-blur-sm",
-                  item.error ? "max-w-[calc(100%-4rem)]" : "max-w-[70%]"
+                  item.error ? "max-w-[calc(100%-4rem)]" : "max-w-[70%]",
                 )}
               />
             }
           >
             {item.name}
           </TooltipTrigger>
-          <TooltipContent className="max-w-xs break-all">{item.source ?? item.name}</TooltipContent>
+          <TooltipContent className="max-w-xs break-all">
+            {item.source ?? item.name}
+          </TooltipContent>
         </Tooltip>
       </TooltipProvider>
       {item.error ? (
@@ -282,7 +312,11 @@ export function ShelfBadge({
   const Icon = residency === "cloud" ? Cloud : Laptop;
   return (
     <span
-      title={offline ? "Local — open the Donkey app to use it" : RESIDENCY_LABEL[residency]}
+      title={
+        offline
+          ? "Local — open the Donkey app to use it"
+          : RESIDENCY_LABEL[residency]
+      }
       className={className}
     >
       <Icon className="size-3" />
@@ -305,10 +339,17 @@ export function LibraryView() {
   const engineUp = useLocalCompute();
   // Every shelf but the Mac's is always answering: the cloud is a request away
   // and the browser shelf is this page's own storage.
-  const live = useCallback((r: Residency) => r !== "local" || engineUp, [engineUp]);
+  const live = useCallback(
+    (r: Residency) => r !== "local" || engineUp,
+    [engineUp],
+  );
   // Drop the flag when this view goes away: the banner belongs to the surface
   // that raised it.
   useEffect(() => () => setNeedsApp(false), []);
+  // Lent items draw themselves in what they are — a font card is set in its own
+  // face — so the shelf's kinds are put to use as soon as the page is open,
+  // ahead of any upload.
+  useEffect(() => void syncLinkedLibrary(), []);
   // New projects and new library items answer the same question — which shelf
   // is this browser putting things on — so they read the one choice the user
   // already made, rather than the backend the app happens to be bound to.
@@ -318,7 +359,7 @@ export function LibraryView() {
   const templates = library.data?.templates ?? [];
   const patch = useCallback(
     (fn: (prev: LibraryData) => LibraryData) => patchLibrary(client, fn),
-    [client]
+    [client],
   );
   const reload = useCallback(() => refetchLibrary(client), [client]);
   // The open folder lives in the URL (?folder=…) so the browser's back button
@@ -350,14 +391,19 @@ export function LibraryView() {
   // that isn't answering can't take one, so the item goes to the root of the
   // shelf new items go to.
   const landing = (folderId: string | null) => {
-    const owner = folderId ? folders.find((f) => f.id === folderId)?.residency : null;
+    const owner = folderId
+      ? folders.find((f) => f.id === folderId)?.residency
+      : null;
     const residency = owner && live(owner) ? owner : target;
     return { residency, folderId: owner === residency ? folderId : null };
   };
 
   const renameTpl = async (r: Residency, id: string, name: string) => {
     if (!live(r)) return;
-    patch((d) => ({ ...d, templates: d.templates.map((t) => (t.id === id ? { ...t, name } : t)) }));
+    patch((d) => ({
+      ...d,
+      templates: d.templates.map((t) => (t.id === id ? { ...t, name } : t)),
+    }));
     await renameTemplate(r, id, name).catch(() => void reload());
   };
 
@@ -375,39 +421,62 @@ export function LibraryView() {
     setPending((q) => q.map((p) => (p.id === id ? { ...p, stage } : p)));
   const failPending = (id: string, error: string) =>
     setPending((q) => q.map((p) => (p.id === id ? { ...p, error } : p)));
-  const dropPending = (id: string) => setPending((q) => q.filter((p) => p.id !== id));
+  const dropPending = (id: string) =>
+    setPending((q) => q.filter((p) => p.id !== id));
   // Run a failed arrival again on the tile it already has: the reason clears,
   // the clock restarts, and the same work goes out once more.
   const retryPending = (item: Pending) => {
     setPending((q) =>
       q.map((p) =>
         p.id === item.id
-          ? { ...p, error: undefined, stage: item.startStage, startedAt: Date.now() }
-          : p
-      )
+          ? {
+              ...p,
+              error: undefined,
+              stage: item.startStage,
+              startedAt: Date.now(),
+            }
+          : p,
+      ),
     );
     void item.run();
   };
 
   // Upload a batch into `folderId` (the open folder by default — folder tiles
   // pass their own id when files are dropped straight onto them).
-  const upload = async (files: FileList | File[], into: string | null = openFolder) => {
-    const list = Array.from(files).filter(isMediaFile);
+  const upload = async (
+    files: FileList | File[],
+    into: string | null = openFolder,
+  ) => {
+    const list = (await expandLinkedFiles(Array.from(files))).filter(
+      (f) => isMediaFile(f) || isLinkedFile(f),
+    );
     const { residency, folderId } = landing(into);
     if (!live(residency)) return;
     for (const file of list) {
       const id = crypto.randomUUID();
       const run = async () => {
         try {
-          const asset = await uploadToLibrary(file, residency);
+          // Something the Library lends rather than copies, dropped outside a
+          // folder, takes the shelf every surface can read; dropped into one,
+          // the folder still decides.
+          const shelf =
+            isLinkedFile(file) && !folderId
+              ? await shelfForNewItem(file.size)
+              : residency;
+          const asset = await uploadToLibrary(file, shelf);
           if (folderId) {
-            await moveLibraryItem(residency, asset.id, folderId).catch(() => {});
+            await moveLibraryItem(shelf, asset.id, folderId).catch(() => {});
             asset.folderId = folderId;
           }
           patch((d) => ({ ...d, assets: [asset, ...d.assets] }));
+          // A lent item is only usable once it is in reach of the menus.
+          if (isLinkedType(asset.type)) void syncLinkedLibrary();
           dropPending(id);
         } catch (e) {
-          failPending(id, e instanceof Error ? e.message : "Could not upload that file.");
+          failPending(
+            id,
+            e instanceof Error ? e.message : "Could not upload that file.",
+          );
         }
       };
       addPending({
@@ -435,17 +504,24 @@ export function LibraryView() {
     const id = crypto.randomUUID();
     const run = async () => {
       try {
-        const imported = await importUrlToLibrary(value, residency, (stage) => setStage(id, stage));
+        const imported = await importUrlToLibrary(value, residency, (stage) =>
+          setStage(id, stage),
+        );
         if (folderId) {
           for (const asset of imported) {
-            await moveLibraryItem(residency, asset.id, folderId).catch(() => {});
+            await moveLibraryItem(residency, asset.id, folderId).catch(
+              () => {},
+            );
             asset.folderId = folderId;
           }
         }
         patch((d) => ({ ...d, assets: [...imported, ...d.assets] }));
         dropPending(id);
       } catch (e) {
-        failPending(id, e instanceof Error ? e.message : "Could not import that URL.");
+        failPending(
+          id,
+          e instanceof Error ? e.message : "Could not import that URL.",
+        );
       }
     };
     addPending({
@@ -467,6 +543,7 @@ export function LibraryView() {
     setDeleting(null);
     if (!live(residency)) return;
     patch((d) => ({ ...d, assets: d.assets.filter((a) => a.id !== id) }));
+    if (isLinkedType(deleting.type)) forgetLinkedCopy(id);
     try {
       await deleteFromLibrary(residency, id);
     } catch {
@@ -482,35 +559,64 @@ export function LibraryView() {
   };
 
   // A folder belongs to one shelf, so a drag that spans both files only the
-  // items already on that folder's shelf; the rest stay where they are.
+  // items already on that folder's shelf — except a lent item, which is small
+  // enough to carry to the folder's shelf and follow the user's filing.
   const moveItems = async (ids: string[], folderId: string | null) => {
-    const target = folderId ? folders.find((f) => f.id === folderId)?.residency : null;
+    const target = folderId
+      ? folders.find((f) => f.id === folderId)?.residency
+      : null;
     const moving = ids
       .map((id) => ({ id, residency: shelfOf(id) }))
       .filter((x): x is { id: string; residency: Residency } => !!x.residency)
       .filter((x) => live(x.residency))
       .filter((x) => !target || x.residency === target);
+    const carried =
+      target && live(target)
+        ? ids
+            .map((id) => all.find((a) => a.id === id))
+            .filter(
+              (a): a is LibraryAsset =>
+                !!a && a.residency !== target && live(a.residency),
+            )
+        : [];
+    if (carried.length > 0) {
+      setSelected(new Set());
+      await Promise.all(
+        carried.map((a) => carryAssetTo(a, target!, folderId).catch(() => {})),
+      );
+      // The listing decides what the font menu offers, and it just changed.
+      void syncLinkedLibrary();
+      void reload();
+    }
     if (moving.length === 0) return;
     const idset = new Set(moving.map((x) => x.id));
     patch((d) => ({
       ...d,
       assets: d.assets.map((a) => (idset.has(a.id) ? { ...a, folderId } : a)),
-      templates: d.templates.map((t) => (idset.has(t.id) ? { ...t, folderId } : t)),
+      templates: d.templates.map((t) =>
+        idset.has(t.id) ? { ...t, folderId } : t,
+      ),
     }));
     setSelected(new Set());
     await Promise.all(
-      moving.map((x) => moveLibraryItem(x.residency, x.id, folderId))
+      moving.map((x) => moveLibraryItem(x.residency, x.id, folderId)),
     ).catch(() => void reload());
   };
 
   // Carry the current selection (or just this card) as a folder-move payload,
   // with a ghost — alongside the timeline-drag payload the card already sets.
   // A single card drags as itself; a multi-selection keeps the counted stack.
-  const onCardDragExtra = (e: React.DragEvent, a: LibraryAsset) => {
-    const ids = selected.has(a.id) && selected.size > 0 ? Array.from(selected) : [a.id];
-    if (!selected.has(a.id)) setSelected(new Set([a.id]));
+  const dragSelection = (e: React.DragEvent, id: string): string[] => {
+    const ids =
+      selected.has(id) && selected.size > 0 ? Array.from(selected) : [id];
+    if (!selected.has(id)) setSelected(new Set([id]));
     e.dataTransfer.setData(LIBRARY_MOVE_MIME, JSON.stringify(ids));
     e.dataTransfer.effectAllowed = "copyMove";
+    return ids;
+  };
+
+  const onCardDragExtra = (e: React.DragEvent, a: LibraryAsset) => {
+    const ids = dragSelection(e, a.id);
     if (ids.length > 1) {
       const ghost = buildDragGhost(ids.length, `${ids.length} items`);
       document.body.appendChild(ghost);
@@ -529,35 +635,48 @@ export function LibraryView() {
   // bands by the shape its link is expected to take and waits at the front of
   // that band, which is where the finished asset lands.
   const shapeOf = (a: LibraryAsset) =>
-    a.type === "audio" || !a.width || !a.height ? 0 : shapeBand(a.width, a.height);
-  const shownBands = new Map<number, ({ pending: Pending } | { asset: LibraryAsset })[]>();
+    a.type === "audio" || !a.width || !a.height
+      ? 0
+      : shapeBand(a.width, a.height);
+  const shownBands = new Map<
+    number,
+    ({ pending: Pending } | { asset: LibraryAsset })[]
+  >();
   const band = (key: number) => {
     const found = shownBands.get(key) ?? [];
     if (found.length === 0) shownBands.set(key, found);
     return found;
   };
   for (const p of pending)
-    band(p.shape ? shapeBand(p.shape.width, p.shape.height) : 0).push({ pending: p });
+    band(p.shape ? shapeBand(p.shape.width, p.shape.height) : 0).push({
+      pending: p,
+    });
   for (const a of shown) band(shapeOf(a)).push({ asset: a });
   // Every tile takes the same area — a wide clip spreads, a tall one stands,
   // and each carries equal weight on the page. The area is the projects grid's,
   // so a clip and a project of the same shape are the same card.
   const TILE_AREA = 180 * 320;
-  const shownTemplates = templates.filter((t) => (t.folderId ?? null) === openFolder);
+  const shownTemplates = templates.filter(
+    (t) => (t.folderId ?? null) === openFolder,
+  );
   const openFolderName = folders.find((f) => f.id === openFolder)?.name;
   const hasContent =
-    all.length > 0 || folders.length > 0 || templates.length > 0 || pending.length > 0;
+    all.length > 0 ||
+    folders.length > 0 ||
+    templates.length > 0 ||
+    pending.length > 0;
 
   // Only OS-file drags are drop targets here; internal card drags carry
   // LIBRARY_MOVE_MIME and are handled by the folder tiles and breadcrumb.
-  const isFileDrag = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes("Files");
+  const isFileDrag = (e: React.DragEvent) =>
+    Array.from(e.dataTransfer.types).includes("Files");
 
   return (
     <div
       className={cn(
         "min-h-full",
         fileOver &&
-          "rounded-3xl outline-2 outline-dashed outline-offset-[-10px] outline-[#0a84ff]/60"
+          "rounded-3xl outline-2 outline-dashed outline-offset-[-10px] outline-[#0a84ff]/60",
       )}
       onDragEnter={(e) => {
         if (!isFileDrag(e)) return;
@@ -586,262 +705,296 @@ export function LibraryView() {
         void upload(e.dataTransfer.files);
       }}
     >
-    <div className="mx-auto w-full max-w-6xl px-10 py-9">
-      <div className="mb-5 flex items-center justify-between gap-4">
-        {openFolder === null ? (
-          <h1 className="text-lg font-semibold tracking-tight">Library</h1>
-        ) : (
-          <FolderCrumb
-            root="Library"
-            name={openFolderName ?? "Folder"}
-            mime={LIBRARY_MOVE_MIME}
-            onBack={() => gotoFolder(null)}
-            onDropOut={(ids) => void moveItems(ids, null)}
-          />
-        )}
-        <div className="flex items-center gap-2">
-          {openFolder === null && (
-            <Button variant="outline" onClick={() => setFolderCreating(true)}>
-              <FolderPlus data-icon="inline-start" /> New folder
-            </Button>
-          )}
-          <Button onClick={() => setAddOpen(true)}>
-            <Upload data-icon="inline-start" /> Add media
-          </Button>
-        </div>
-        <input
-          ref={inputRef}
-          type="file"
-          accept="video/*,audio/*"
-          multiple
-          hidden
-          onChange={(e) => {
-            if (e.target.files?.length) {
-              void upload(e.target.files);
-              setAddOpen(false);
-            }
-            e.target.value = "";
-          }}
-        />
-      </div>
-
-      {openFolder === null && (folders.length > 0 || folderCreating) ? (
-        <FolderShelf
-          folders={folders}
-          mime={LIBRARY_MOVE_MIME}
-          creating={folderCreating}
-          onCreatingChange={setFolderCreating}
-          statOf={(id) => ({
-            count:
-              all.filter((a) => (a.folderId ?? null) === id).length +
-              templates.filter((t) => (t.folderId ?? null) === id).length,
-          })}
-          badgeOf={(id) => {
-            const r = folders.find((f) => f.id === id)?.residency;
-            return bothShelves && r ? <ShelfBadge residency={r} offline={!live(r)} /> : null;
-          }}
-          onOpen={gotoFolder}
-          onCreate={async (name) => {
-            if (!live(target)) return;
-            const f = await createLibraryFolder(name, target);
-            patch((d) => ({ ...d, folders: [...d.folders, f] }));
-          }}
-          onRename={async (id, name) => {
-            const r = folders.find((f) => f.id === id)?.residency;
-            if (!r || !live(r)) return;
-            patch((d) => ({
-              ...d,
-              folders: d.folders.map((f) => (f.id === id ? { ...f, name } : f)),
-            }));
-            await renameLibraryFolder(r, id, name).catch(() => void reload());
-          }}
-          onDelete={async (id) => {
-            const r = folders.find((f) => f.id === id)?.residency;
-            if (!r || !live(r)) return;
-            patch((d) => ({
-              folders: d.folders.filter((f) => f.id !== id),
-              assets: d.assets.map((a) => (a.folderId === id ? { ...a, folderId: null } : a)),
-              templates: d.templates.map((t) =>
-                t.folderId === id ? { ...t, folderId: null } : t
-              ),
-            }));
-            if (openFolder === id) router.replace(homeHref(base, "library"));
-            await deleteLibraryFolder(r, id).catch(() => void reload());
-          }}
-          onDropIds={(ids, fid) => void moveItems(ids, fid)}
-          onDropFiles={(files, fid) => void upload(files, fid)}
-        />
-      ) : null}
-
-      {shownTemplates.length > 0 && (
-        <div className="mb-6 grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
-          {shownTemplates.map((t) => (
-            <TemplateCard
-              key={t.id}
-              template={t}
-              mediaSrc={(f) => libraryMediaUrl(f, t.residency)}
-              drag={live(t.residency) ? { scope: "library", template: t } : undefined}
-              onDragStartExtra={(e) => {
-                e.dataTransfer.setData(LIBRARY_MOVE_MIME, JSON.stringify([t.id]));
-                e.dataTransfer.effectAllowed = "copyMove";
-              }}
-              onRename={
-                live(t.residency) ? (name) => void renameTpl(t.residency, t.id, name) : undefined
-              }
-              onDelete={
-                live(t.residency) ? () => void removeTpl(t.residency, t.id) : undefined
-              }
+      <div className="mx-auto w-full max-w-6xl px-10 py-9">
+        <div className="mb-5 flex items-center justify-between gap-4">
+          {openFolder === null ? (
+            <h1 className="text-lg font-semibold tracking-tight">Library</h1>
+          ) : (
+            <FolderCrumb
+              root="Library"
+              name={openFolderName ?? "Folder"}
+              mime={LIBRARY_MOVE_MIME}
+              onBack={() => gotoFolder(null)}
+              onDropOut={(ids) => void moveItems(ids, null)}
             />
-          ))}
-        </div>
-      )}
-
-      {!library.data && library.isPending ? (
-        <div className="grid place-items-center py-24 text-muted-foreground">
-          <Loader2 className="size-5 animate-spin" />
-        </div>
-      ) : !hasContent ? (
-        <button
-          className="grid w-full cursor-pointer place-items-center rounded-2xl py-24"
-          onClick={() => setAddOpen(true)}
-        >
-          <div className="flex flex-col items-center gap-3 text-center">
-            <FolderOpen className="size-8 text-muted-foreground" />
-            <div className="text-base font-medium">
-              Your Library is shared across all projects.
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Drag and drop videos, images, or audio files here.
-            </p>
+          )}
+          <div className="flex items-center gap-2">
+            {openFolder === null && (
+              <Button variant="outline" onClick={() => setFolderCreating(true)}>
+                <FolderPlus data-icon="inline-start" /> New folder
+              </Button>
+            )}
+            <Button onClick={() => setAddOpen(true)}>
+              <Upload data-icon="inline-start" /> Add media
+            </Button>
           </div>
-        </button>
-      ) : shown.length === 0 && pending.length === 0 ? null : (
-        <Marquee
-          className="flex min-h-[40vh] flex-col content-start gap-8"
-          selected={selected}
-          setSelected={setSelected}
-        >
-          {[...shownBands.entries()].map(([shape, tiles]) => (
-            <div key={shape} className="flex flex-wrap items-start gap-4">
-              {tiles.map((tile) => {
-                if ("pending" in tile)
+          <input
+            ref={inputRef}
+            type="file"
+            accept={`video/*,audio/*,${linkedAccept()}`}
+            multiple
+            hidden
+            onChange={(e) => {
+              if (e.target.files?.length) {
+                void upload(e.target.files);
+                setAddOpen(false);
+              }
+              e.target.value = "";
+            }}
+          />
+        </div>
+
+        {/* Folders live at the root and nowhere else, so an open folder shows
+          only what is filed in it. */}
+        {openFolder === null && (folders.length > 0 || folderCreating) ? (
+          <FolderShelf
+            folders={folders}
+            mime={LIBRARY_MOVE_MIME}
+            creating={folderCreating}
+            onCreatingChange={setFolderCreating}
+            statOf={(id) => ({
+              count:
+                all.filter((a) => (a.folderId ?? null) === id).length +
+                templates.filter((t) => (t.folderId ?? null) === id).length,
+            })}
+            badgeOf={(id) => {
+              const r = folders.find((f) => f.id === id)?.residency;
+              return bothShelves && r ? (
+                <ShelfBadge residency={r} offline={!live(r)} />
+              ) : null;
+            }}
+            onOpen={gotoFolder}
+            onCreate={async (name) => {
+              if (!live(target)) return;
+              const f = await createLibraryFolder(name, target);
+              patch((d) => ({ ...d, folders: [...d.folders, f] }));
+            }}
+            onRename={async (id, name) => {
+              const r = folders.find((f) => f.id === id)?.residency;
+              if (!r || !live(r)) return;
+              patch((d) => ({
+                ...d,
+                folders: d.folders.map((f) =>
+                  f.id === id ? { ...f, name } : f,
+                ),
+              }));
+              await renameLibraryFolder(r, id, name).catch(() => void reload());
+            }}
+            onDelete={async (id) => {
+              const r = folders.find((f) => f.id === id)?.residency;
+              if (!r || !live(r)) return;
+              patch((d) => ({
+                folders: d.folders.filter((f) => f.id !== id),
+                assets: d.assets.map((a) =>
+                  a.folderId === id ? { ...a, folderId: null } : a,
+                ),
+                templates: d.templates.map((t) =>
+                  t.folderId === id ? { ...t, folderId: null } : t,
+                ),
+              }));
+              if (openFolder === id) router.replace(homeHref(base, "library"));
+              await deleteLibraryFolder(r, id).catch(() => void reload());
+            }}
+            onDropIds={(ids, fid) => void moveItems(ids, fid)}
+            onDropFiles={(files, fid) => void upload(files, fid)}
+          />
+        ) : null}
+
+        {!library.data && library.isPending ? (
+          <div className="grid place-items-center py-24 text-muted-foreground">
+            <Loader2 className="size-5 animate-spin" />
+          </div>
+        ) : !hasContent ? (
+          <button
+            className="grid w-full cursor-pointer place-items-center rounded-2xl py-24"
+            onClick={() => setAddOpen(true)}
+          >
+            <div className="flex flex-col items-center gap-3 text-center">
+              <FolderOpen className="size-8 text-muted-foreground" />
+              <div className="text-base font-medium">
+                Your Library is shared across all projects.
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Drag and drop videos, images, audio, or font files here.
+              </p>
+            </div>
+          </button>
+        ) : shown.length === 0 &&
+          pending.length === 0 &&
+          shownTemplates.length === 0 ? null : (
+          <Marquee
+            className="flex min-h-[40vh] flex-col content-start gap-8"
+            selected={selected}
+            setSelected={setSelected}
+          >
+            {shownTemplates.length > 0 && (
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
+                {shownTemplates.map((t) => (
+                  <TemplateCard
+                    key={t.id}
+                    template={t}
+                    mediaSrc={(f) => libraryMediaUrl(f, t.residency)}
+                    drag={
+                      live(t.residency)
+                        ? { scope: "library", template: t }
+                        : undefined
+                    }
+                    selectId={t.id}
+                    selected={selected.has(t.id)}
+                    onDragStartExtra={(e) => void dragSelection(e, t.id)}
+                    onRename={
+                      live(t.residency)
+                        ? (name) => void renameTpl(t.residency, t.id, name)
+                        : undefined
+                    }
+                    onDelete={
+                      live(t.residency)
+                        ? () => void removeTpl(t.residency, t.id)
+                        : undefined
+                    }
+                  />
+                ))}
+              </div>
+            )}
+            {[...shownBands.entries()].map(([shape, tiles]) => (
+              <div key={shape} className="flex flex-wrap items-start gap-4">
+                {tiles.map((tile) => {
+                  if ("pending" in tile)
+                    return (
+                      <PendingTile
+                        key={tile.pending.id}
+                        item={tile.pending}
+                        area={TILE_AREA}
+                        onRetry={() => retryPending(tile.pending)}
+                        onDismiss={() => dropPending(tile.pending.id)}
+                      />
+                    );
+                  const a = tile.asset;
                   return (
-                    <PendingTile
-                      key={tile.pending.id}
-                      item={tile.pending}
+                    <LibraryCard
+                      key={a.id}
+                      asset={a}
                       area={TILE_AREA}
-                      onRetry={() => retryPending(tile.pending)}
-                      onDismiss={() => dropPending(tile.pending.id)}
+                      selected={selected.has(a.id)}
+                      offline={!live(a.residency)}
+                      // A live item opens in the viewer. Clicking one this browser
+                      // can only remember is the moment something is actually
+                      // blocked, so that is when the gate's banner — and the way
+                      // out of it — comes up.
+                      onClick={
+                        live(a.residency)
+                          ? () =>
+                              useLightbox.getState().open({
+                                kind: a.type,
+                                src: libraryMediaUrl(a.fileName, a.residency),
+                                name: a.name,
+                                prompt: "",
+                                assetId: null,
+                                libraryId: a.id,
+                                bare: true,
+                                ...(a.width && a.height
+                                  ? { ratio: a.width / a.height }
+                                  : {}),
+                                ...(libraryPosterUrl(a)
+                                  ? { poster: libraryPosterUrl(a) }
+                                  : {}),
+                              })
+                          : () => setNeedsApp(true)
+                      }
+                      onDelete={
+                        live(a.residency) ? () => setDeleting(a) : undefined
+                      }
+                      onDragStartExtra={(e) => onCardDragExtra(e, a)}
                     />
                   );
-                const a = tile.asset;
-                return (
-                <LibraryCard
-                  key={a.id}
-                  asset={a}
-                  area={TILE_AREA}
-                  selected={selected.has(a.id)}
-                  offline={!live(a.residency)}
-                  // A live item opens in the viewer. Clicking one this browser
-                  // can only remember is the moment something is actually
-                  // blocked, so that is when the gate's banner — and the way
-                  // out of it — comes up.
-                  onClick={
-                    live(a.residency)
-                      ? () =>
-                          useLightbox.getState().open({
-                            kind: a.type,
-                            src: libraryMediaUrl(a.fileName, a.residency),
-                            name: a.name,
-                            prompt: "",
-                            assetId: null,
-                            libraryId: a.id,
-                            bare: true,
-                            ...(a.width && a.height ? { ratio: a.width / a.height } : {}),
-                            ...(libraryPosterUrl(a) ? { poster: libraryPosterUrl(a) } : {}),
-                          })
-                      : () => setNeedsApp(true)
-                  }
-                  onDelete={live(a.residency) ? () => setDeleting(a) : undefined}
-                  onDragStartExtra={(e) => onCardDragExtra(e, a)}
-                />
-                );
-              })}
-            </div>
-          ))}
-        </Marquee>
-      )}
+                })}
+              </div>
+            ))}
+          </Marquee>
+        )}
 
-      <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Add media</DialogTitle>
-          </DialogHeader>
-          <div className="flex flex-col gap-4">
-            <button
-              className="flex flex-col items-center gap-2 rounded-xl py-8 transition-colors hover:bg-muted/40"
-              onClick={() => inputRef.current?.click()}
-            >
-              <Upload className="size-6 text-muted-foreground" />
-              <span className="text-sm font-medium">Choose files</span>
-            </button>
-            <div className="flex items-center gap-3 text-[11px] tracking-wide text-muted-foreground uppercase">
-              <div className="h-px flex-1 bg-border" /> or paste a link{" "}
-              <div className="h-px flex-1 bg-border" />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1">
-                  <LinkIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    autoFocus
-                    value={url}
-                    placeholder="TikTok, YouTube, or Instagram link…"
-                    className="pl-8"
-                    onChange={(e) => setUrl(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") void importUrl();
-                    }}
-                  />
+        <Dialog open={addOpen} onOpenChange={setAddOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Add media</DialogTitle>
+            </DialogHeader>
+            <div className="flex flex-col gap-4">
+              <button
+                className="flex flex-col items-center gap-2 rounded-xl py-8 transition-colors hover:bg-muted/40"
+                onClick={() => inputRef.current?.click()}
+              >
+                <Upload className="size-6 text-muted-foreground" />
+                <span className="text-sm font-medium">Choose files</span>
+              </button>
+              <div className="flex items-center gap-3 text-[11px] tracking-wide text-muted-foreground uppercase">
+                <div className="h-px flex-1 bg-border" /> or paste a link{" "}
+                <div className="h-px flex-1 bg-border" />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <LinkIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      autoFocus
+                      value={url}
+                      placeholder="TikTok, YouTube, or Instagram link…"
+                      className="pl-8"
+                      onChange={(e) => setUrl(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void importUrl();
+                      }}
+                    />
+                  </div>
+                  <Button
+                    disabled={!url.trim()}
+                    onClick={() => void importUrl()}
+                  >
+                    <LinkIcon /> Import
+                  </Button>
                 </div>
-                <Button disabled={!url.trim()} onClick={() => void importUrl()}>
-                  <LinkIcon /> Import
-                </Button>
               </div>
             </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+          </DialogContent>
+        </Dialog>
 
-      <AlertDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remove “{deleting?.name}” from the library?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Projects that already use it keep their own copy.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive/10 text-destructive hover:bg-destructive/20"
-              onClick={(e) => {
-                e.preventDefault();
-                void remove();
-              }}
-            >
-              Remove
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        <AlertDialog
+          open={!!deleting}
+          onOpenChange={(o) => !o && setDeleting(null)}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                Remove “{deleting?.name}” from the library?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                Projects that already use it keep their own copy.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive/10 text-destructive hover:bg-destructive/20"
+                onClick={(e) => {
+                  e.preventDefault();
+                  void remove();
+                }}
+              >
+                Remove
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
-      <Lightbox />
-    </div>
+        <Lightbox />
+      </div>
     </div>
   );
 }
 
+/** A font's card is set in the font: once the shelf sync has installed it, the
+ * family resolves through the registry and the tile shows the typeface itself.
+ * Until then (or on a shelf that isn't answering) it falls back to the UI face,
+ * which still reads as a name. */
 export function LibraryCard({
   asset: a,
   selected,
@@ -887,12 +1040,14 @@ export function LibraryCard({
   const [hovered, setHovered] = useState(false);
   const sizeBytes = useMediaFileSize(
     offline ? "" : libraryMediaUrl(a.fileName, a.residency),
-    hovered
+    hovered,
   );
   const frame =
     area && a.type !== "audio" && a.width && a.height
       ? { w: a.width, h: a.height }
-      : { w: 1, h: 1 };
+      : a.type === "font"
+        ? { w: 16, h: 9 }
+        : { w: 1, h: 1 };
   const tileStyle = area
     ? {
         width: Math.round(Math.sqrt((area * frame.w) / frame.h)),
@@ -929,8 +1084,10 @@ export function LibraryCard({
         data-drag-object
         className={cn(
           "relative max-w-full cursor-grab overflow-hidden rounded-xl border bg-muted transition-shadow group-hover:shadow-[0_4px_20px_rgba(0,0,0,0.1)] active:cursor-grabbing",
-          !area && "aspect-square",
-          selected || flash ? "border-[#0a84ff] ring-2 ring-[#0a84ff]" : "border-border"
+          !area && (a.type === "font" ? "aspect-video" : "aspect-square"),
+          selected || flash
+            ? "border-[#0a84ff] ring-2 ring-[#0a84ff]"
+            : "border-border",
         )}
         style={tileStyle}
       >
@@ -942,6 +1099,8 @@ export function LibraryCard({
               <Music className="size-6 text-muted-foreground/50" />
             ) : a.type === "image" ? (
               <ImageIcon className="size-6 text-muted-foreground/50" />
+            ) : a.type === "font" ? (
+              <Type className="size-6 text-muted-foreground/50" />
             ) : (
               <Film className="size-6 text-muted-foreground/50" />
             )}
@@ -979,13 +1138,26 @@ export function LibraryCard({
           )
         ) : a.type === "image" ? (
           // eslint-disable-next-line @next/next/no-img-element -- library media file, not Next-optimizable
-          <img crossOrigin={MEDIA_CORS} src={libraryMediaUrl(a.fileName, a.residency)} alt={a.name} loading="lazy" className="size-full object-cover" />
+          <img
+            crossOrigin={MEDIA_CORS}
+            src={libraryMediaUrl(a.fileName, a.residency)}
+            alt={a.name}
+            loading="lazy"
+            className="size-full object-cover"
+          />
+        ) : a.type === "font" ? (
+          <FontSpecimen
+            assetId={a.id}
+            className="size-full bg-white text-black"
+          />
         ) : (
           <AudioCardFace
             url={libraryMediaUrl(a.fileName, a.residency)}
             duration={a.duration}
             // On hover the + button takes the pill's corner.
-            durationClassName={!!onUse && "transition-opacity group-hover:opacity-0"}
+            durationClassName={
+              !!onUse && "transition-opacity group-hover:opacity-0"
+            }
           />
         )}
         {a.type !== "audio" && (a.type === "video" || sizeBytes != null) && (
@@ -996,7 +1168,8 @@ export function LibraryCard({
             data-drag-omit
             className={cn(
               "absolute right-1.5 bottom-1.5 rounded-md bg-black/65 px-1.5 py-0.5 font-mono text-[10px] text-white tabular-nums",
-              a.type !== "video" && "opacity-0 transition-opacity group-hover:opacity-100"
+              a.type !== "video" &&
+                "opacity-0 transition-opacity group-hover:opacity-100",
             )}
           >
             {a.type === "video" && (
@@ -1005,7 +1178,11 @@ export function LibraryCard({
               </span>
             )}
             {sizeBytes != null && (
-              <span className={cn(a.type === "video" && "hidden group-hover:inline")}>
+              <span
+                className={cn(
+                  a.type === "video" && "hidden group-hover:inline",
+                )}
+              >
                 {formatBytes(sizeBytes)}
               </span>
             )}
@@ -1024,7 +1201,9 @@ export function LibraryCard({
             className={cn(
               "absolute grid size-6 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow transition-all group-hover:opacity-100 hover:scale-110",
               // Audio keeps play bottom-left; + swaps in where the badge hides.
-              a.type === "audio" ? "right-1.5 bottom-1.5" : "bottom-1.5 left-1.5"
+              a.type === "audio"
+                ? "right-1.5 bottom-1.5"
+                : "bottom-1.5 left-1.5",
             )}
             onClick={(e) => {
               e.stopPropagation();
@@ -1042,7 +1221,7 @@ export function LibraryCard({
               "absolute top-2 right-2 transition-opacity",
               offline ? "text-muted-foreground" : "text-white/85",
               // The actions menu takes this corner on hover.
-              "group-hover:opacity-0"
+              "group-hover:opacity-0",
             )}
           />
         )}
@@ -1055,15 +1234,24 @@ export function LibraryCard({
           >
             <Ellipsis className="size-3.5" />
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44" onClick={(e) => e.stopPropagation()}>
-            <DropdownMenuItem onClick={() => downloadLibraryAsset(a)} disabled={offline}>
+          <DropdownMenuContent
+            align="end"
+            className="w-44"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <DropdownMenuItem
+              onClick={() => downloadLibraryAsset(a)}
+              disabled={offline}
+            >
               <Download /> Download
             </DropdownMenuItem>
             {a.source?.url && (
               // An imported clip keeps the link it came from, so the post it was
               // cut out of is one click away.
               <DropdownMenuItem
-                onClick={() => window.open(a.source!.url, "_blank", "noopener,noreferrer")}
+                onClick={() =>
+                  window.open(a.source!.url, "_blank", "noopener,noreferrer")
+                }
               >
                 <ExternalLink /> Open original
               </DropdownMenuItem>
@@ -1085,7 +1273,7 @@ export function LibraryCard({
           className={cn(
             "absolute top-1.5 left-1.5 max-w-[70%] px-2 py-1 text-[11px] font-medium text-white transition-[max-width] group-hover:max-w-[calc(100%-2.75rem)]",
             // The emerald fill is its own backdrop; thumbnails need the scrim pill.
-            a.type !== "audio" && "rounded-lg bg-black/55 backdrop-blur-sm"
+            a.type !== "audio" && "rounded-lg bg-black/55 backdrop-blur-sm",
           )}
         />
       </div>

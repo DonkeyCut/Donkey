@@ -24,7 +24,7 @@ export interface LibraryAsset {
   id: string;
   fileName: string;
   name: string;
-  type: "video" | "audio" | "image";
+  type: "video" | "audio" | "image" | "font";
   duration: number;
   width?: number;
   height?: number;
@@ -163,6 +163,7 @@ export async function listLibrary(): Promise<LibraryAsset[]> {
 const VIDEO_RE = /\.(mp4|mov|m4v|webm|mkv)$/i;
 const AUDIO_RE = /\.(mp3|m4a|aac|wav|ogg|flac)$/i;
 const IMAGE_RE = /\.(png|jpe?g|webp|gif|avif|bmp)$/i;
+const FONT_RE = /\.(ttf|otf|woff2?)$/i;
 
 function ffprobe(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -210,10 +211,11 @@ async function freeName(original: string) {
   return uniqueName(base, libMediaPath);
 }
 
-function typeOf(fileName: string): "video" | "audio" | "image" | null {
+function typeOf(fileName: string): "video" | "audio" | "image" | "font" | null {
   if (VIDEO_RE.test(fileName)) return "video";
   if (AUDIO_RE.test(fileName)) return "audio";
   if (IMAGE_RE.test(fileName)) return "image";
+  if (FONT_RE.test(fileName)) return "font";
   return null;
 }
 
@@ -225,7 +227,8 @@ export async function register(
 ): Promise<LibraryAsset> {
   const type = typeOf(fileName);
   if (!type) throw new Error("Unsupported file type.");
-  const meta = await probe(libMediaPath(fileName));
+  const meta: { duration: number; width?: number; height?: number } =
+    type === "font" ? { duration: 0 } : await probe(libMediaPath(fileName));
   const asset: LibraryAsset = {
     id: crypto.randomUUID().slice(0, 8),
     fileName,

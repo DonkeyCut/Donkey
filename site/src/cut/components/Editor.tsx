@@ -30,6 +30,7 @@ import "@/cut/lib/genScene";
 // self-hosted) into the shared font registry before any text renders.
 import "@/cut/lib/googleFonts";
 import { syncFontAssets } from "@/cut/lib/fontAssets";
+import { syncLinkedLibrary } from "@/cut/lib/linkedLibrary";
 import { installDevHooks } from "@/cut/lib/devHooks";
 import { ensureCloudThreads } from "@/cut/lib/chatCloud";
 import { readProjectThreads, writeActiveChat } from "@/cut/lib/chatThreads";
@@ -141,6 +142,9 @@ export function Editor({
   // drop out when deleted), so titles set in them never measure a fallback.
   const assetsForFonts = useEditor((s) => s.assets);
   useEffect(() => void syncFontAssets(assetsForFonts), [assetsForFonts]);
+  // What the Library lends rather than copies — the account's own typefaces
+  // today — is in reach whichever project is open.
+  useEffect(() => void syncLinkedLibrary(), []);
   const [conflictReloaded, setConflictReloaded] = useState(false);
   const [shareGone, setShareGone] = useState(false);
   // This project lives on this Mac and the Donkey app isn't answering. Nothing

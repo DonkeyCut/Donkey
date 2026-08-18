@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy, FileText, Loader2, Music, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { addLibraryAssetToProject, fetchLibrary } from "@/cut/lib/library";
 import { useLightbox, type LightboxItem } from "@/cut/lib/lightbox";
@@ -10,6 +11,7 @@ import { importImage, importStockVideo } from "@/cut/lib/media";
 import { usePreviewAudio } from "@/cut/lib/previewAudio";
 import { useEditor } from "@/cut/lib/store";
 import { DocText, useDocText } from "./DocText";
+import { FontSpecimen } from "./FontSpecimen";
 import { PeakStrip } from "./AudioPanel";
 
 // The asset lightbox: the big version of a stock, generated, or chat asset
@@ -52,14 +54,19 @@ export function Lightbox() {
       } else if (item.libraryId) {
         // Library media copies in through the library route, like using it
         // from the Library panel.
-        const lib = (await fetchLibrary()).assets.find((a) => a.id === item.libraryId);
+        const lib = (await fetchLibrary()).assets.find(
+          (a) => a.id === item.libraryId,
+        );
         if (!lib) throw new Error("Library asset not found.");
         await addLibraryAssetToProject(projectId, lib);
       } else {
         // A stock clip imports as footage; a stock image bakes into a still.
         const asset =
           item.kind === "video"
-            ? await importStockVideo(projectId, { url: item.src, name: item.name })
+            ? await importStockVideo(projectId, {
+                url: item.src,
+                name: item.name,
+              })
             : await importImage(projectId, { url: item.src, name: item.name });
         useEditor.getState().addAssetAtPlayhead(asset.id);
       }
@@ -76,7 +83,10 @@ export function Lightbox() {
   const canAdd =
     !item.bare &&
     item.kind !== "text" &&
-    (item.kind !== "audio" || item.assetId !== null || item.libraryId !== undefined);
+    item.kind !== "font" &&
+    (item.kind !== "audio" ||
+      item.assetId !== null ||
+      item.libraryId !== undefined);
 
   // With a known aspect the dialog width follows it — capped so the media
   // stays within 68vh tall and 860px/92vw wide — and the media box carries the
@@ -86,11 +96,13 @@ export function Lightbox() {
   const width =
     item.kind === "audio"
       ? "min(92vw, 480px)"
-      : item.kind === "text"
-        ? "min(92vw, 720px)"
-        : ratio
-          ? `min(92vw, 860px, ${Math.round(68 * ratio * 100) / 100}vh)`
-          : "min(92vw, 860px)";
+      : item.kind === "font"
+        ? "min(92vw, 1000px)"
+        : item.kind === "text"
+          ? "min(92vw, 720px)"
+          : ratio
+            ? `min(92vw, 860px, ${Math.round(68 * ratio * 100) / 100}vh)`
+            : "min(92vw, 860px)";
 
   return (
     <div
@@ -121,7 +133,10 @@ export function Lightbox() {
               {canAdd && (
                 <Button className="shrink-0" disabled={adding} onClick={add}>
                   {adding ? (
-                    <Loader2 data-icon="inline-start" className="animate-spin" />
+                    <Loader2
+                      data-icon="inline-start"
+                      className="animate-spin"
+                    />
                   ) : added ? (
                     <Check data-icon="inline-start" />
                   ) : (
@@ -142,13 +157,19 @@ export function Lightbox() {
                     title="Copy prompt"
                     className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium text-white/60 transition-colors hover:bg-white/10 hover:text-white"
                     onClick={() => {
-                      void navigator.clipboard.writeText(item.prompt).then(() => {
-                        setCopied(true);
-                        setTimeout(() => setCopied(false), 1500);
-                      });
+                      void navigator.clipboard
+                        .writeText(item.prompt)
+                        .then(() => {
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 1500);
+                        });
                     }}
                   >
-                    {copied ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
+                    {copied ? (
+                      <Check className="size-3 text-emerald-400" />
+                    ) : (
+                      <Copy className="size-3" />
+                    )}
                     {copied ? "Copied" : "Copy"}
                   </button>
                 </div>
@@ -164,9 +185,16 @@ export function Lightbox() {
   );
 }
 
-function LightboxMedia({ item, ratio }: { item: LightboxItem; ratio?: number }) {
+function LightboxMedia({
+  item,
+  ratio,
+}: {
+  item: LightboxItem;
+  ratio?: number;
+}) {
   if (item.kind === "audio") return <AudioBody item={item} />;
   if (item.kind === "text") return <TextBody item={item} />;
+  if (item.kind === "font") return <FontBody item={item} />;
 
   const mediaClass = ratio
     ? "block w-full rounded-2xl bg-black object-cover shadow-2xl"
@@ -175,7 +203,8 @@ function LightboxMedia({ item, ratio }: { item: LightboxItem; ratio?: number }) 
 
   if (item.kind === "video") {
     return (
-      <video crossOrigin={MEDIA_CORS}
+      <video
+        crossOrigin={MEDIA_CORS}
         controls
         autoPlay
         loop
@@ -189,13 +218,19 @@ function LightboxMedia({ item, ratio }: { item: LightboxItem; ratio?: number }) 
   }
   return (
     // eslint-disable-next-line @next/next/no-img-element -- static/project image, client-only page
-    <img crossOrigin={MEDIA_CORS} src={item.src} alt={item.name} className={mediaClass} style={mediaStyle} />
+    <img
+      crossOrigin={MEDIA_CORS}
+      src={item.src}
+      alt={item.name}
+      className={mediaClass}
+      style={mediaStyle}
+    />
   );
 }
 
 function AudioBody({ item }: { item: LightboxItem }) {
   const asset = useEditor((s) =>
-    item.assetId ? s.assets.find((a) => a.id === item.assetId) : undefined
+    item.assetId ? s.assets.find((a) => a.id === item.assetId) : undefined,
   );
   const audioEl = useRef<HTMLAudioElement>(null);
   // The big player takes over from any row/card preview, and closing the
@@ -212,7 +247,32 @@ function AudioBody({ item }: { item: LightboxItem }) {
       {asset?.peaks && asset.peaks.length > 0 && (
         <PeakStrip peaks={asset.peaks} className="h-10 text-white/85" />
       )}
-      <audio ref={audioEl} controls autoPlay src={item.src} className="w-full" />
+      <audio
+        ref={audioEl}
+        controls
+        autoPlay
+        src={item.src}
+        className="w-full"
+      />
+    </div>
+  );
+}
+
+/** A font, big: the sheet a font file previews on, the alphabet filling it. */
+function FontBody({ item }: { item: LightboxItem }) {
+  return (
+    <div
+      className={cn(
+        "overflow-hidden rounded-2xl bg-white text-black shadow-2xl",
+        item.poster ? "" : "px-10 py-12"
+      )}
+    >
+      <FontSpecimen
+        assetId={item.libraryId ?? ""}
+        poster={item.poster}
+        pad={0}
+        className="w-full"
+      />
     </div>
   );
 }
