@@ -7,6 +7,7 @@ import {
   Cloud,
   Download,
   Ellipsis,
+  ExternalLink,
   Film,
   FolderOpen,
   FolderPlus,
@@ -16,8 +17,10 @@ import {
   Loader2,
   Music,
   Plus,
+  RotateCcw,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,7 +30,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { LiveElapsed } from "@/cut/components/Elapsed";
+import { useElapsed } from "@/cut/hooks/useElapsed";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -45,6 +48,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { Skeleton } from "@/components/ui/skeleton";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { clearAssetDrag, setLibraryDragData, setObjectDragImage } from "@/cut/lib/assetDrag";
 import { useInView } from "@/cut/hooks/useInView";
@@ -56,15 +66,20 @@ import {
   deleteLibraryFolder,
   deleteTemplate,
   downloadLibraryAsset,
+  estimatedShape,
   importUrlToLibrary,
   libraryMediaUrl,
+  libraryPosterUrl,
   moveLibraryItem,
   renameLibraryFolder,
   renameTemplate,
   uploadToLibrary,
+  type ImportStage,
   type LibraryAsset,
   type LibraryData,
 } from "@/cut/lib/library";
+import { normalizeLink } from "@/cut/lib/link";
+import { useLightbox } from "@/cut/lib/lightbox";
 import { useNewProjectTarget } from "@/cut/lib/newProject";
 import { useListedResidencies, useLocalCompute } from "@/cut/lib/backend/hooks";
 import { setNeedsApp } from "@/cut/lib/needsApp";
@@ -73,6 +88,7 @@ import {
   RESIDENCY_LABEL,
   type Residency,
 } from "@/cut/lib/residency";
+import { Lightbox } from "./Lightbox";
 import { TemplateCard } from "./TemplateCard";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
 import { shapeBand } from "@/cut/lib/types";
@@ -87,6 +103,169 @@ import { useMediaFileSize } from "@/cut/hooks/useMediaFileSize";
 // A dragged library selection travels as a JSON array of asset ids, so a whole
 // marquee-selected collection can be dropped onto a folder at once.
 const LIBRARY_MOVE_MIME = "application/x-cut-library-move";
+
+/** What an arriving item is doing right now. An upload is one push from this
+ * browser; a link is fetched by whichever shelf is taking it, and comes down
+ * in stages. */
+type PendingStage = "uploading" | ImportStage;
+
+/** Media on its way into the library: the tile it will occupy, standing in
+ * for it while the work runs. */
+interface Pending {
+  id: string;
+  /** The whole link, for the tile's tooltip: the label on the face is cut to
+   * the site and the post's id. */
+  source?: string;
+  /** The file name being uploaded, or the link being imported. */
+  name: string;
+  stage: PendingStage;
+  startedAt: number;
+  /** A guess at the media's shape, for a link, so the tile opens near the size
+   * the clip will take. Uploads sit square until the file lands. */
+  shape?: { width: number; height: number };
+  /** Set when the arrival failed: the tile holds the reason, and the way to
+   * try again or give up, until the user picks one. */
+  error?: string;
+  /** The stage the work opens in, so a retry reads from the start again. */
+  startStage: PendingStage;
+  /** The whole arrival, ready to run once more: a failed tile retries by
+   * calling this, with the file or link and where it was headed still in
+   * hand. */
+  run: () => Promise<void>;
+}
+
+/** Routing words a path spends on the way to the thing: they say nothing about
+ * which post this is, so a label built from one ("youtube.com/watch") reads the
+ * same for every import from that site. */
+const ROUTE_SEGMENT = new Set([
+  "watch",
+  "video",
+  "videos",
+  "embed",
+  "v",
+  "e",
+  "p",
+  "post",
+  "posts",
+  "status",
+  "share",
+  "media",
+  "download",
+]);
+
+/** A link's name on its tile: the site it points at and the token that
+ * identifies the post — the last telling path segment, or the id a watch URL
+ * carries in its query — so two imports from one site read apart. */
+function linkLabel(url: string): string {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, "");
+    const id =
+      u.pathname
+        .split("/")
+        .filter(Boolean)
+        .reverse()
+        .find((seg) => !ROUTE_SEGMENT.has(seg.toLowerCase())) ?? u.searchParams.get("v");
+    return id ? `${host}/${id}` : host;
+  } catch {
+    return url;
+  }
+}
+
+const STAGE_LABEL: Record<PendingStage, string> = {
+  uploading: "Uploading",
+  queued: "Starting",
+  downloading: "Downloading",
+  saving: "Saving",
+};
+
+/** The tile an arriving item occupies: a card the size and shape the media
+ * will take, its face a skeleton until the file lands, with the link it came
+ * from and what the work is doing riding on top. A failed arrival holds the
+ * reason until the user clears it. */
+function PendingTile({
+  item,
+  area,
+  onRetry,
+  onDismiss,
+}: {
+  item: Pending;
+  area: number;
+  onRetry: () => void;
+  onDismiss: () => void;
+}) {
+  const elapsed = useElapsed(item.error ? null : item.startedAt);
+  const frame = item.shape ?? { width: 1, height: 1 };
+  return (
+    <div
+      className={cn(
+        "relative max-w-full overflow-hidden rounded-xl border",
+        item.error ? "border-destructive/50 bg-muted" : "border-border"
+      )}
+      style={{
+        width: Math.round(Math.sqrt((area * frame.width) / frame.height)),
+        aspectRatio: `${frame.width} / ${frame.height}`,
+      }}
+    >
+      {item.error ? (
+        // Clear of the strip the link and the reason share along the top.
+        <div className="flex size-full flex-col items-center justify-center gap-1.5 pt-8">
+          <Button variant="outline" size="sm" className="w-24 justify-start" onClick={onRetry}>
+            <RotateCcw data-icon="inline-start" /> Retry
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-24 justify-start text-destructive hover:text-destructive"
+            onClick={onDismiss}
+          >
+            <X data-icon="inline-start" /> Cancel
+          </Button>
+        </div>
+      ) : (
+        <Skeleton className="size-full rounded-none" />
+      )}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span
+                className={cn(
+                  "absolute top-1.5 left-1.5 truncate rounded-lg bg-black/55 px-2 py-1 text-[11px] font-medium text-white backdrop-blur-sm",
+                  item.error ? "max-w-[calc(100%-4rem)]" : "max-w-[70%]"
+                )}
+              />
+            }
+          >
+            {item.name}
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs break-all">{item.source ?? item.name}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+      {item.error ? (
+        // The reason rides in the tooltip: on a tile this size the message
+        // itself would cover the media it stands in for.
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span className="absolute top-1.5 right-1.5 rounded-md bg-destructive/90 px-1.5 py-0.5 text-[10px] text-white" />
+              }
+            >
+              Failed
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs">{item.error}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ) : (
+        <span className="absolute bottom-1.5 left-1.5 flex max-w-[calc(100%-0.75rem)] items-center gap-1 rounded-md bg-black/65 px-1.5 py-0.5 text-[10px] text-white">
+          <span className="truncate">{STAGE_LABEL[item.stage]}</span>
+          <span className="shrink-0 font-mono tabular-nums">{elapsed}</span>
+        </span>
+      )}
+    </div>
+  );
+}
 
 /** Which shelf an item sits on, on its card. The library merges both, so the
  * badge is how you tell a clip on this Mac from one in the cloud — and, when
@@ -146,11 +325,12 @@ export function LibraryView() {
   // steps folder → root and the location survives reloads.
   const openFolder = useSearchParams().get("folder");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [uploading, setUploading] = useState(0);
+  // Media on its way in — an upload or a link — each one a tile in the grid
+  // from the moment it starts, so the library shows the work rather than the
+  // dialog holding it.
+  const [pending, setPending] = useState<Pending[]>([]);
   const [addOpen, setAddOpen] = useState(false);
-  const [importing, setImporting] = useState(false);
   const [url, setUrl] = useState("");
-  const [urlError, setUrlError] = useState<string | null>(null);
   const [folderCreating, setFolderCreating] = useState(false);
   const [deleting, setDeleting] = useState<LibraryAsset | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -187,52 +367,98 @@ export function LibraryView() {
     await deleteTemplate(r, id).catch(() => void reload());
   };
 
+  // Track one arrival from its first moment to its last: the tile goes up
+  // before any bytes move, follows the work, and comes down when the asset
+  // itself takes its place. A failure leaves the tile up with the reason.
+  const addPending = (p: Pending) => setPending((q) => [...q, p]);
+  const setStage = (id: string, stage: PendingStage) =>
+    setPending((q) => q.map((p) => (p.id === id ? { ...p, stage } : p)));
+  const failPending = (id: string, error: string) =>
+    setPending((q) => q.map((p) => (p.id === id ? { ...p, error } : p)));
+  const dropPending = (id: string) => setPending((q) => q.filter((p) => p.id !== id));
+  // Run a failed arrival again on the tile it already has: the reason clears,
+  // the clock restarts, and the same work goes out once more.
+  const retryPending = (item: Pending) => {
+    setPending((q) =>
+      q.map((p) =>
+        p.id === item.id
+          ? { ...p, error: undefined, stage: item.startStage, startedAt: Date.now() }
+          : p
+      )
+    );
+    void item.run();
+  };
+
   // Upload a batch into `folderId` (the open folder by default — folder tiles
   // pass their own id when files are dropped straight onto them).
   const upload = async (files: FileList | File[], into: string | null = openFolder) => {
     const list = Array.from(files).filter(isMediaFile);
     const { residency, folderId } = landing(into);
     if (!live(residency)) return;
-    setUploading((n) => n + list.length);
     for (const file of list) {
-      try {
-        const asset = await uploadToLibrary(file, residency);
-        if (folderId) {
-          await moveLibraryItem(residency, asset.id, folderId).catch(() => {});
-          asset.folderId = folderId;
+      const id = crypto.randomUUID();
+      const run = async () => {
+        try {
+          const asset = await uploadToLibrary(file, residency);
+          if (folderId) {
+            await moveLibraryItem(residency, asset.id, folderId).catch(() => {});
+            asset.folderId = folderId;
+          }
+          patch((d) => ({ ...d, assets: [asset, ...d.assets] }));
+          dropPending(id);
+        } catch (e) {
+          failPending(id, e instanceof Error ? e.message : "Could not upload that file.");
         }
-        patch((d) => ({ ...d, assets: [asset, ...d.assets] }));
-      } catch {
-        // Skip unreadable files; the rest of the batch still uploads.
-      } finally {
-        setUploading((n) => n - 1);
-      }
+      };
+      addPending({
+        id,
+        name: file.name,
+        stage: "uploading",
+        startStage: "uploading",
+        startedAt: Date.now(),
+        run,
+      });
+      await run();
     }
   };
 
+  // The link's tile goes up at once — shaped by what that kind of link usually
+  // holds — and the dialog closes, so the wait happens in the library rather
+  // than in front of it.
   const importUrl = async () => {
-    const value = url.trim();
-    if (!value || importing) return;
+    const value = normalizeLink(url);
+    if (!value) return;
     const { residency, folderId } = landing(openFolder);
     if (!live(residency)) return;
-    setImporting(true);
-    setUrlError(null);
-    try {
-      const imported = await importUrlToLibrary(value, residency);
-      if (folderId) {
-        for (const asset of imported) {
-          await moveLibraryItem(residency, asset.id, folderId).catch(() => {});
-          asset.folderId = folderId;
+    setUrl("");
+    setAddOpen(false);
+    const id = crypto.randomUUID();
+    const run = async () => {
+      try {
+        const imported = await importUrlToLibrary(value, residency, (stage) => setStage(id, stage));
+        if (folderId) {
+          for (const asset of imported) {
+            await moveLibraryItem(residency, asset.id, folderId).catch(() => {});
+            asset.folderId = folderId;
+          }
         }
+        patch((d) => ({ ...d, assets: [...imported, ...d.assets] }));
+        dropPending(id);
+      } catch (e) {
+        failPending(id, e instanceof Error ? e.message : "Could not import that URL.");
       }
-      patch((d) => ({ ...d, assets: [...imported, ...d.assets] }));
-      setUrl("");
-      setAddOpen(false);
-    } catch (e) {
-      setUrlError(e instanceof Error ? e.message : "Could not import that URL.");
-    } finally {
-      setImporting(false);
-    }
+    };
+    addPending({
+      id,
+      name: linkLabel(value),
+      source: value,
+      stage: "queued",
+      startStage: "queued",
+      startedAt: Date.now(),
+      shape: estimatedShape(value),
+      run,
+    });
+    await run();
   };
 
   const remove = async () => {
@@ -299,22 +525,28 @@ export function LibraryView() {
   const shown = all.filter((a) => (a.folderId ?? null) === openFolder);
   // Similar-shape tiles get their own band of wrapped rows, so a wide tile
   // never shares a row with a tall one; audio and unmeasured assets band as
-  // squares. Order within and across bands follows the listing.
+  // squares. Order within and across bands follows the listing. An arrival
+  // bands by the shape its link is expected to take and waits at the front of
+  // that band, which is where the finished asset lands.
   const shapeOf = (a: LibraryAsset) =>
     a.type === "audio" || !a.width || !a.height ? 0 : shapeBand(a.width, a.height);
-  const shownBands = new Map<number, LibraryAsset[]>();
-  for (const a of shown) {
-    const band = shownBands.get(shapeOf(a)) ?? [];
-    if (band.length === 0) shownBands.set(shapeOf(a), band);
-    band.push(a);
-  }
+  const shownBands = new Map<number, ({ pending: Pending } | { asset: LibraryAsset })[]>();
+  const band = (key: number) => {
+    const found = shownBands.get(key) ?? [];
+    if (found.length === 0) shownBands.set(key, found);
+    return found;
+  };
+  for (const p of pending)
+    band(p.shape ? shapeBand(p.shape.width, p.shape.height) : 0).push({ pending: p });
+  for (const a of shown) band(shapeOf(a)).push({ asset: a });
   // Every tile takes the same area — a wide clip spreads, a tall one stands,
-  // and each carries equal weight on the page.
-  const TILE_AREA = 180 * 180;
+  // and each carries equal weight on the page. The area is the projects grid's,
+  // so a clip and a project of the same shape are the same card.
+  const TILE_AREA = 180 * 320;
   const shownTemplates = templates.filter((t) => (t.folderId ?? null) === openFolder);
   const openFolderName = folders.find((f) => f.id === openFolder)?.name;
   const hasContent =
-    all.length > 0 || folders.length > 0 || templates.length > 0 || uploading > 0;
+    all.length > 0 || folders.length > 0 || templates.length > 0 || pending.length > 0;
 
   // Only OS-file drags are drop targets here; internal card drags carry
   // LIBRARY_MOVE_MIME and are handled by the folder tiles and breadcrumb.
@@ -373,7 +605,7 @@ export function LibraryView() {
               <FolderPlus data-icon="inline-start" /> New folder
             </Button>
           )}
-          <Button onClick={() => { setUrlError(null); setAddOpen(true); }}>
+          <Button onClick={() => setAddOpen(true)}>
             <Upload data-icon="inline-start" /> Add media
           </Button>
         </div>
@@ -471,10 +703,7 @@ export function LibraryView() {
       ) : !hasContent ? (
         <button
           className="grid w-full cursor-pointer place-items-center rounded-2xl py-24"
-          onClick={() => {
-            setUrlError(null);
-            setAddOpen(true);
-          }}
+          onClick={() => setAddOpen(true)}
         >
           <div className="flex flex-col items-center gap-3 text-center">
             <FolderOpen className="size-8 text-muted-foreground" />
@@ -486,39 +715,60 @@ export function LibraryView() {
             </p>
           </div>
         </button>
-      ) : shown.length === 0 && uploading === 0 ? null : (
+      ) : shown.length === 0 && pending.length === 0 ? null : (
         <Marquee
           className="flex min-h-[40vh] flex-col content-start gap-8"
           selected={selected}
           setSelected={setSelected}
         >
-          {[...shownBands.entries()].map(([shape, band]) => (
+          {[...shownBands.entries()].map(([shape, tiles]) => (
             <div key={shape} className="flex flex-wrap items-start gap-4">
-              {band.map((a) => (
+              {tiles.map((tile) => {
+                if ("pending" in tile)
+                  return (
+                    <PendingTile
+                      key={tile.pending.id}
+                      item={tile.pending}
+                      area={TILE_AREA}
+                      onRetry={() => retryPending(tile.pending)}
+                      onDismiss={() => dropPending(tile.pending.id)}
+                    />
+                  );
+                const a = tile.asset;
+                return (
                 <LibraryCard
                   key={a.id}
                   asset={a}
                   area={TILE_AREA}
                   selected={selected.has(a.id)}
                   offline={!live(a.residency)}
-                  // Clicking an item this browser can only remember is the
-                  // moment something is actually blocked, so that is when the
-                  // gate's banner — and the way out of it — comes up.
-                  onClick={live(a.residency) ? undefined : () => setNeedsApp(true)}
+                  // A live item opens in the viewer. Clicking one this browser
+                  // can only remember is the moment something is actually
+                  // blocked, so that is when the gate's banner — and the way
+                  // out of it — comes up.
+                  onClick={
+                    live(a.residency)
+                      ? () =>
+                          useLightbox.getState().open({
+                            kind: a.type,
+                            src: libraryMediaUrl(a.fileName, a.residency),
+                            name: a.name,
+                            prompt: "",
+                            assetId: null,
+                            libraryId: a.id,
+                            bare: true,
+                            ...(a.width && a.height ? { ratio: a.width / a.height } : {}),
+                            ...(libraryPosterUrl(a) ? { poster: libraryPosterUrl(a) } : {}),
+                          })
+                      : () => setNeedsApp(true)
+                  }
                   onDelete={live(a.residency) ? () => setDeleting(a) : undefined}
                   onDragStartExtra={(e) => onCardDragExtra(e, a)}
                 />
-              ))}
+                );
+              })}
             </div>
           ))}
-          {uploading > 0 && (
-            <div className="flex size-[180px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-input text-xs text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              <span>
-                Uploading… <LiveElapsed />
-              </span>
-            </div>
-          )}
         </Marquee>
       )}
 
@@ -554,16 +804,10 @@ export function LibraryView() {
                     }}
                   />
                 </div>
-                <Button disabled={!url.trim() || importing} onClick={() => void importUrl()}>
-                  {importing ? <Loader2 className="animate-spin" /> : <LinkIcon />} Import
+                <Button disabled={!url.trim()} onClick={() => void importUrl()}>
+                  <LinkIcon /> Import
                 </Button>
               </div>
-              {importing && (
-                <p className="text-xs text-muted-foreground">
-                  Downloading… <LiveElapsed />
-                </p>
-              )}
-              {urlError && <p className="text-xs text-destructive">{urlError}</p>}
             </div>
           </div>
         </DialogContent>
@@ -591,6 +835,8 @@ export function LibraryView() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Lightbox />
     </div>
     </div>
   );
@@ -601,6 +847,7 @@ export function LibraryCard({
   selected,
   offline = false,
   area,
+  mention = false,
   onClick,
   onDelete,
   onUse,
@@ -616,6 +863,9 @@ export function LibraryCard({
    * every card carries the same weight. Unset, the tile fills its grid cell
    * as a square. Audio and unmeasured assets sit square either way. */
   area?: number;
+  /** The card sits beside a prompt (the editor's Library panel), so its name
+   * doubles as a mention token to copy. */
+  mention?: boolean;
   onClick?: () => void;
   onDelete?: () => void;
   onUse?: () => void;
@@ -698,16 +948,34 @@ export function LibraryCard({
           </span>
         ) : a.type === "video" ? (
           seen && (
-            <video
-              crossOrigin={MEDIA_CORS}
-              ref={videoRef}
-              src={`${libraryMediaUrl(a.fileName, a.residency)}#t=${posterT}`}
-              muted
-              loop
-              playsInline
-              preload="metadata"
-              className="size-full object-cover"
-            />
+            <>
+              <video
+                crossOrigin={MEDIA_CORS}
+                ref={videoRef}
+                src={`${libraryMediaUrl(a.fileName, a.residency)}#t=${posterT}`}
+                poster={libraryPosterUrl(a)}
+                muted
+                loop
+                playsInline
+                preload="metadata"
+                className="size-full object-cover"
+              />
+              {/* The source's own cover — a video's thumbnail where it came
+                  from — is the face at rest: the element's poster gives way as
+                  soon as the browser has the frame at #t, and that frame is
+                  whatever the clip happens to hold a second in. Hovering
+                  uncovers the video, which is what plays. */}
+              {libraryPosterUrl(a) && (
+                // eslint-disable-next-line @next/next/no-img-element -- library media file, not Next-optimizable
+                <img
+                  crossOrigin={MEDIA_CORS}
+                  src={libraryPosterUrl(a)}
+                  alt=""
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 size-full object-cover transition-opacity group-hover:opacity-0"
+                />
+              )}
+            </>
           )
         ) : a.type === "image" ? (
           // eslint-disable-next-line @next/next/no-img-element -- library media file, not Next-optimizable
@@ -791,6 +1059,15 @@ export function LibraryCard({
             <DropdownMenuItem onClick={() => downloadLibraryAsset(a)} disabled={offline}>
               <Download /> Download
             </DropdownMenuItem>
+            {a.source?.url && (
+              // An imported clip keeps the link it came from, so the post it was
+              // cut out of is one click away.
+              <DropdownMenuItem
+                onClick={() => window.open(a.source!.url, "_blank", "noopener,noreferrer")}
+              >
+                <ExternalLink /> Open original
+              </DropdownMenuItem>
+            )}
             {onDelete && (
               <>
                 <DropdownMenuSeparator />
@@ -804,6 +1081,7 @@ export function LibraryCard({
         <CopyNameLabel
           name={a.name}
           dark={a.type === "audio"}
+          mention={mention}
           className={cn(
             "absolute top-1.5 left-1.5 max-w-[70%] px-2 py-1 text-[11px] font-medium text-white transition-[max-width] group-hover:max-w-[calc(100%-2.75rem)]",
             // The emerald fill is its own backdrop; thumbnails need the scrim pill.
