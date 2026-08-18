@@ -1,7 +1,11 @@
 import { runAiTool, UI_TOOLS } from "../../lib/aiTools";
+import { mp4NameFor, setHostMediaStore } from "../../lib/mediaConvert";
 import { serializeDoc, useEditor } from "../../lib/store";
 import type { MediaAsset, ProjectDoc } from "../../lib/types";
-import { readProject, writeProject } from "../projects";
+import { convertToMp4 } from "../convert";
+import { probeDuration } from "../frames";
+import { deleteMedia, mediaPath, readProject, writeProject } from "../projects";
+import { uniqueName } from "../util";
 
 // The engine's own tool executor, for a chat whose editor tab is gone: the
 // project doc hydrates into the same store the page uses, tools run against
@@ -51,6 +55,29 @@ const PAGE_SESSION_TOOLS: ReadonlySet<string> = new Set([
   "file_asset",
   "import_url",
 ]);
+
+// Converting media is the one media job this process can do: ffmpeg is right
+// here, and the file is in the project folder. Going through the client's
+// backend seam would have the engine call itself over HTTP, so the converter
+// works the folder directly and the shared client code never notices.
+setHostMediaStore({
+  async convert(projectId, source, opts) {
+    const src = mediaPath(projectId, source.fileName);
+    const fileName = await uniqueName(mp4NameFor(source.fileName), (n) => mediaPath(projectId, n));
+    const outPath = mediaPath(projectId, fileName);
+    const handle = { tmpDir: "", outPath, progress: 0, log: [] as string[] };
+    const outcome = await convertToMp4(handle, src, outPath, { maxHeight: opts.maxHeight });
+    return {
+      fileName,
+      reencoded: outcome.transcodedVideo || outcome.transcodedAudio,
+      duration: await probeDuration(outPath),
+      ...(outcome.width !== undefined ? { width: outcome.width, height: outcome.height } : {}),
+    };
+  },
+  drop(projectId, fileName) {
+    return deleteMedia(projectId, fileName);
+  },
+});
 
 interface OpenDoc {
   projectId: string;

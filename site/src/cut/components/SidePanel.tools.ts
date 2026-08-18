@@ -33,6 +33,19 @@ export const SIDE_PANEL_TOOLS = [
     }, ["asset_id", "to"]),
   },
   {
+    name: "convert_media",
+    description:
+      "Convert project media to MP4 — H.264 picture, AAC sound — replacing each asset's file in place, so clips already cut from it keep playing. This is the fix for footage that previews black or refuses to play: a phone's HEVC .mov, a screen recorder's ProRes, a camera file with raw PCM sound. It is also the whole answer to \"turn these into mp4\": the user drops the files on this chat, you convert them, and each converted file is on its own card right here for them to download or drag in — nothing to go looking for. A file already in Media stays in Media. Streams that already fit the container are copied packet for packet, so a .mov of H.264 converts in seconds and loses nothing, and a file that is already an MP4 of those streams comes back untouched. `max_height` shrinks the picture at the same time (1080 for a 4K source that only needs to be a timeline clip). It runs wherever the project's bytes already are — this Mac, the render worker, or the tab — so it needs no setup; when nothing available can decode the source the error says what would fix it, and retrying changes nothing.",
+    inputSchema: obj({
+      asset_ids: {
+        type: "array",
+        items: { type: "string" },
+        description: "Project asset ids from `media`, converted in order",
+      },
+      max_height: num("Cap the output height in pixels (e.g. 1080); omit to keep the source size"),
+    }, ["asset_ids"]),
+  },
+  {
     name: "delete_asset",
     description:
       "Remove a project asset and every timeline clip that uses it — the Media panel's trash. Removed media does not come back with undo, so call it only when the user explicitly asked to remove that media, and report how many clips went with it.",

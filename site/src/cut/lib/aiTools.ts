@@ -64,6 +64,7 @@ import {
   renderAudioSpanWav,
   sampleWatchFrames,
 } from "./media";
+import { convertAssetToMp4 } from "./mediaConvert";
 import { isLottieAsset } from "./lottieAssets";
 import { BREATH, REACH, refineEdge, type SilenceSpan } from "./cutRefine";
 import { requestSidePanel } from "./panelRequest";
@@ -1947,6 +1948,60 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         return { filed: "library", libraryId: saved.id, name: saved.name };
       }
       throw new ToolError('`to` must be "media" or "library".');
+  },
+
+  convert_media: async (s, input) => {
+      const projectId = s.projectId;
+      if (!projectId) throw new ToolError("No project open.");
+      const ids = Array.isArray(input.asset_ids) ? input.asset_ids.map((v) => String(v)) : [];
+      if (ids.length === 0) throw new ToolError("Pass the asset ids to convert.");
+      const maxHeight = isNum(input.max_height) ? Math.round(input.max_height) : undefined;
+      // Named `assets` so each converted file renders as its own card in the
+      // thread (ToolOutputAssets keys off assetId) — the user drops files on
+      // the chat and takes the MP4s back from the same place.
+      const converted: Record<string, unknown>[] = [];
+      const failed: { assetId: string; name?: string; error: string }[] = [];
+      for (const id of ids) {
+        // Read live: each conversion rewrites the asset it just finished.
+        const asset = useEditor.getState().assets.find((a) => a.id === id);
+        if (!asset) {
+          failed.push({ assetId: id, error: `No project asset with id ${id}.` });
+          continue;
+        }
+        try {
+          const out = await convertAssetToMp4(projectId, asset, { maxHeight });
+          converted.push({
+            assetId: out.assetId,
+            // The card now reads `name`; `from` is what the user dropped.
+            name: out.name,
+            ...(out.name !== asset.name ? { from: asset.name } : {}),
+            file: out.fileName,
+            // False means the packets were copied — same picture, new container.
+            reencoded: out.reencoded,
+            ...(out.unchanged ? { unchanged: true } : {}),
+            duration: round2(out.duration),
+            ...(out.width !== undefined ? { width: out.width, height: out.height } : {}),
+            // The file stayed where it already lived: a chat attachment on its
+            // card in this thread, an import in the Media panel.
+            where: asset.origin === "chat" ? "chat card" : asset.origin ?? "media panel",
+          });
+        } catch (e) {
+          failed.push({
+            assetId: id,
+            name: asset.name,
+            error: e instanceof Error ? e.message : "Could not convert that file.",
+          });
+        }
+      }
+      if (converted.length === 0) throw new ToolError(failed[0]?.error ?? "Nothing was converted.");
+      const untouched = converted.every((c) => c.unchanged);
+      return {
+        assets: converted,
+        ...(failed.length > 0 ? { failed } : {}),
+        ...(untouched
+          ? { note: "These were already MP4 with H.264 picture and AAC sound, so they were left as they are — say so." }
+          : {}),
+      };
   },
 
   delete_asset: (s, input) => {
