@@ -1790,7 +1790,18 @@ function ToolChipGroup({ parts }: { parts: ToolPartView[] }) {
  * reveals the individual chips, each still expandable to its payload. */
 function ToolRunGroup({ groups }: { groups: ToolPartView[][] }) {
   const calls = groups.reduce((n, g) => n + g.length, 0);
-  const failed = groups.some((g) => g.some((p) => p.state === "output-error"));
+  // A failure the turn went back and made good is not a failure of the run: a
+  // tool that errored and then ran clean got where it was going, so the header
+  // only reddens for an error nothing after it answered. The chip itself keeps
+  // its own mark, so the attempt is still visible inside.
+  const flat = groups.flat();
+  const failed = flat.some(
+    (p, i) =>
+      p.state === "output-error" &&
+      !flat
+        .slice(i + 1)
+        .some((q) => toolPartName(q) === toolPartName(p) && q.state === "output-available"),
+  );
   return (
     <details className="ai-tool-run group/run max-w-full">
       <summary
