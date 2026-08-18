@@ -14,12 +14,11 @@ import { PeakStrip } from "./AudioPanel";
 
 // The asset lightbox: the big version of a stock, generated, or chat asset
 // floating straight on the backdrop — media on top, name and prompt below,
-// plus a button to drop it onto the timeline. Mounted once in the editor.
+// plus a button to drop it onto the timeline. Mounted once in the editor and
+// once on the library page, which opens it bare — media alone.
 // Video and images size the dialog from a known aspect before the media
 // loads; audio gets a waveform player and text files render formatted
 // (markdown, CSV table, plain text).
-
-const ASPECT_RATIO: Record<string, number> = { "16:9": 16 / 9, "9:16": 9 / 16, "1:1": 1 };
 
 export function Lightbox() {
   const item = useLightbox((s) => s.item);
@@ -75,6 +74,7 @@ export function Lightbox() {
   // Text never rides the timeline; audio needs a project or library home to
   // land from.
   const canAdd =
+    !item.bare &&
     item.kind !== "text" &&
     (item.kind !== "audio" || item.assetId !== null || item.libraryId !== undefined);
 
@@ -82,7 +82,7 @@ export function Lightbox() {
   // stays within 68vh tall and 860px/92vw wide — and the media box carries the
   // same ratio, so nothing shifts when the file loads. Audio and text use
   // fixed reading widths instead.
-  const ratio = item.aspect ? ASPECT_RATIO[item.aspect] : undefined;
+  const ratio = item.ratio;
   const width =
     item.kind === "audio"
       ? "min(92vw, 480px)"
@@ -112,51 +112,53 @@ export function Lightbox() {
 
         <LightboxMedia item={item} ratio={ratio} />
 
-        <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 text-[15px] leading-snug font-semibold tracking-tight break-words text-white">
-              {item.name}
+        {!item.bare && (
+          <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 text-[15px] leading-snug font-semibold tracking-tight break-words text-white">
+                {item.name}
+              </div>
+              {canAdd && (
+                <Button className="shrink-0" disabled={adding} onClick={add}>
+                  {adding ? (
+                    <Loader2 data-icon="inline-start" className="animate-spin" />
+                  ) : added ? (
+                    <Check data-icon="inline-start" />
+                  ) : (
+                    <Plus data-icon="inline-start" />
+                  )}
+                  {added ? "Added" : "Use"}
+                </Button>
+              )}
             </div>
-            {canAdd && (
-              <Button className="shrink-0" disabled={adding} onClick={add}>
-                {adding ? (
-                  <Loader2 data-icon="inline-start" className="animate-spin" />
-                ) : added ? (
-                  <Check data-icon="inline-start" />
-                ) : (
-                  <Plus data-icon="inline-start" />
-                )}
-                {added ? "Added" : "Use"}
-              </Button>
+
+            {item.prompt && item.prompt !== item.name && (
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold tracking-wide text-white/60 uppercase">
+                    Prompt
+                  </span>
+                  <button
+                    title="Copy prompt"
+                    className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(item.prompt).then(() => {
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 1500);
+                      });
+                    }}
+                  >
+                    {copied ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
+                    {copied ? "Copied" : "Copy"}
+                  </button>
+                </div>
+                <p className="rounded-lg bg-white/10 px-3 py-2 text-[12.5px] leading-relaxed text-white/90">
+                  {item.prompt}
+                </p>
+              </div>
             )}
           </div>
-
-          {item.prompt && item.prompt !== item.name && (
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-semibold tracking-wide text-white/60 uppercase">
-                  Prompt
-                </span>
-                <button
-                  title="Copy prompt"
-                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium text-white/60 transition-colors hover:bg-white/10 hover:text-white"
-                  onClick={() => {
-                    void navigator.clipboard.writeText(item.prompt).then(() => {
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 1500);
-                    });
-                  }}
-                >
-                  {copied ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
-                  {copied ? "Copied" : "Copy"}
-                </button>
-              </div>
-              <p className="rounded-lg bg-white/10 px-3 py-2 text-[12.5px] leading-relaxed text-white/90">
-                {item.prompt}
-              </p>
-            </div>
-          )}
-        </div>
+        )}
       </div>
     </div>
   );
@@ -178,6 +180,7 @@ function LightboxMedia({ item, ratio }: { item: LightboxItem; ratio?: number }) 
         autoPlay
         loop
         playsInline
+        poster={item.poster}
         src={item.src}
         className={mediaClass}
         style={mediaStyle}

@@ -1425,6 +1425,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
             <LibraryCard
               key={a.id}
               asset={a}
+              mention
               onUse={() => void addLibraryAssetToProject(projectId, a)}
               onDelete={() => setDeleting(a)}
               onDragStartExtra={(e) => onCardDragExtra(e, a)}

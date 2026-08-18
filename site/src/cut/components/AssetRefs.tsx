@@ -802,15 +802,23 @@ export function CopyNameLabel({
   name,
   className,
   dark,
+  mention = true,
 }: {
   name: string;
   className?: string;
   /** On a dark/filled surface (audio cards): white badge and copied text. */
   dark?: boolean;
+  /** Whether a prompt is within reach. A mention token is only worth copying
+   * where it can be pasted, so surfaces outside the editor — the library and
+   * projects homes — show the name and nothing more. */
+  mention?: boolean;
 }) {
   const [copied, copy] = useCopied();
   const ref = useRefFor(name);
   const token = ref ? refToken(ref) : mentionToken(name);
+  if (!mention) {
+    return <span className={cn("block min-w-0 truncate text-left", className)}>{name}</span>;
+  }
   return (
     <button
       type="button"

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
-import { fetchLibrary, libraryMediaUrl, type LibraryAsset } from "./library";
+import { fetchLibrary, libraryMediaUrl, libraryPosterUrl, type LibraryAsset } from "./library";
 import { stockAspectDims, stockTitle, type StockImage, type StockMusic, type StockVideo } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
@@ -114,6 +114,7 @@ export const refFromLibrary = (a: LibraryAsset): AssetRef => ({
   duration: a.duration,
   ...(a.width !== undefined ? { width: a.width } : {}),
   ...(a.height !== undefined ? { height: a.height } : {}),
+  ...(libraryPosterUrl(a) ? { thumb: libraryPosterUrl(a) } : {}),
 });
 
 export const refFromStock = (i: StockImage): AssetRef => ({

@@ -7,7 +7,7 @@ import { setObjectDragImage } from "@/cut/lib/assetDrag";
 import { useLightbox } from "@/cut/lib/lightbox";
 import { useRevealEffect, useRevealFlash } from "@/cut/lib/refReveal";
 import { useImageGen } from "@/cut/lib/imageGen";
-import { STOCK_CATEGORIES, type StockCategory, type StockImage } from "@/cut/lib/stock";
+import { aspectRatio, STOCK_CATEGORIES, type StockCategory, type StockImage } from "@/cut/lib/stock";
 import { STOCK_IMAGES } from "@/cut/lib/stockManifest";
 import { cn } from "@/lib/utils";
 import { CopyRefButton, RefHandlePill } from "./AssetRefs";
@@ -191,7 +191,7 @@ function StockTile({ item }: { item: StockImage }) {
             useLightbox.getState().open({
               kind: "image",
               src: item.file,
-              aspect: item.aspect,
+              ratio: aspectRatio(item.aspect),
               name: titleFromId(item.id),
               prompt: item.prompt,
               assetId: null,

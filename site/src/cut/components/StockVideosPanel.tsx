@@ -7,7 +7,7 @@ import { setObjectDragImage } from "@/cut/lib/assetDrag";
 import { useLightbox } from "@/cut/lib/lightbox";
 import { useRevealEffect, useRevealFlash } from "@/cut/lib/refReveal";
 import { useVideoGen } from "@/cut/lib/videoGen";
-import { STOCK_CATEGORIES, stockTitle, type StockCategory, type StockVideo } from "@/cut/lib/stock";
+import { aspectRatio, STOCK_CATEGORIES, stockTitle, type StockCategory, type StockVideo } from "@/cut/lib/stock";
 import { STOCK_VIDEOS } from "@/cut/lib/stockVideoManifest";
 import { cn } from "@/lib/utils";
 import { CopyRefButton, RefHandlePill } from "./AssetRefs";
@@ -279,7 +279,7 @@ function StockTile({ item }: { item: StockVideo }) {
             useLightbox.getState().open({
               kind: "video",
               src: item.file,
-              aspect: item.aspect,
+              ratio: aspectRatio(item.aspect),
               name: stockTitle(item.id),
               prompt: item.prompt,
               assetId: null,

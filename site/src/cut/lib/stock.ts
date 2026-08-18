@@ -71,6 +71,11 @@ export interface StockMusic {
 export const stockAspectDims = (aspect: StockVideoAspect): { width: number; height: number } =>
   aspect === "9:16" ? { width: 1080, height: 1920 } : { width: 1920, height: 1080 };
 
+/** Width ÷ height behind a catalog aspect label, for surfaces that size
+ * themselves from the ratio alone. */
+export const aspectRatio = (aspect: StockAspect): number =>
+  aspect === "9:16" ? 9 / 16 : aspect === "1:1" ? 1 : 16 / 9;
+
 export const STOCK_MUSIC_CATEGORIES = [
   "Songs",
   "Cinematic",
