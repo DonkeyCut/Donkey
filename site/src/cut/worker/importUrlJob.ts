@@ -84,13 +84,34 @@ export async function runImportUrlJob(
           files.push({ fileName, title: f.title });
           continue;
         }
+        // The source's cover rides in as its own object under the same
+        // library prefix: the media route serves it by name like any other
+        // file, and the asset's delete takes it down with the media.
+        let posterFile: string | undefined;
+        if (f.poster) {
+          posterFile = dedupeName(`${fileName}.poster${path.extname(f.poster)}`, taken);
+          taken.add(posterFile);
+          const posterKey = libraryKey(job.userId, posterFile);
+          staged.push(posterKey);
+          const posterBytes = await uploadFile(posterKey, f.poster, mimeFor(posterFile));
+          await registerObject({
+            userId: job.userId,
+            projectId: null,
+            r2Key: posterKey,
+            fileName: posterFile,
+            mime: mimeFor(posterFile),
+            bytes: posterBytes,
+            kind: "library",
+          });
+        }
         const asset = await addLibraryRow(
           job.userId,
           objectId,
           fileName,
           f.file,
           f.title,
-          dl.source
+          dl.source,
+          posterFile
         );
         libraryRows.push(asset.id);
         assets.push(asset);
@@ -119,7 +140,8 @@ async function addLibraryRow(
   fileName: string,
   localFile: string,
   title: string,
-  source: LibraryAsset["source"]
+  source: LibraryAsset["source"],
+  posterFile?: string
 ): Promise<LibraryAsset> {
   const type = typeOf(fileName);
   if (!type) throw new Error("Unsupported file type.");
@@ -131,6 +153,7 @@ async function addLibraryRow(
     duration,
     ...(dims ? { width: dims.width, height: dims.height } : {}),
     ...(source ? { source } : {}),
+    ...(posterFile ? { posterFile } : {}),
   };
   const row = await prisma.cutLibraryAsset.create({
     data: {
@@ -149,5 +172,6 @@ async function addLibraryRow(
     addedAt: row.createdAt.getTime(),
     folderId: null,
     ...(source ? { source } : {}),
+    ...(posterFile ? { posterFile } : {}),
   };
 }

@@ -44,6 +44,9 @@ type StoredAsset = {
   addedAt: number;
   folderId?: string | null;
   source?: LibrarySource;
+  /** The source's cover image, stored beside the media and served by the same
+   * route — an import from a site that publishes one carries it. */
+  posterFile?: string;
 };
 
 type StoredFolder = { id: string; name: string; createdAt: number };
@@ -116,6 +119,7 @@ async function list(): Promise<Response> {
   const idx = await readIndex();
   for (const name of new Set([
     ...idx.assets.map((a) => a.fileName),
+    ...idx.assets.flatMap((a) => (a.posterFile ? [a.posterFile] : [])),
     ...idx.templates.flatMap((t) => t.media.map((m) => m.fileName)),
   ])) {
     await register(name);
@@ -132,7 +136,8 @@ async function addAsset(
   fileName: string,
   name: string,
   meta: { type?: AssetType; duration?: number; width?: number; height?: number } | null,
-  source?: LibrarySource | null
+  source?: LibrarySource | null,
+  posterFile?: string
 ): Promise<StoredAsset> {
   const type = meta?.type ?? typeOf(fileName);
   if (!type) throw new Error("Unsupported file type.");
@@ -146,6 +151,7 @@ async function addAsset(
     addedAt: Date.now(),
     folderId: null,
     ...(source ? { source } : {}),
+    ...(posterFile ? { posterFile } : {}),
   };
   await mutateIndex((idx) => {
     idx.assets.push(asset);
@@ -175,7 +181,16 @@ async function upload(req: Request): Promise<Response> {
     if (!(meta?.type ?? typeOf(file.name))) return err("Unsupported file type.", 400);
     const fileName = await store.saveLibraryMedia(file, file.name);
     await register(fileName, file);
-    return json(await addAsset(fileName, name, meta, source));
+    // An import carries the source's cover alongside the media; it is stored
+    // like any other library file and named after the media it belongs to.
+    const posterField = form.get("poster");
+    let posterFile: string | undefined;
+    if (posterField instanceof File) {
+      const ext = posterField.name.match(/\.[a-z0-9]+$/i)?.[0] ?? ".jpg";
+      posterFile = await store.saveLibraryMedia(posterField, `${fileName}.poster${ext}`);
+      await register(posterFile, posterField);
+    }
+    return json(await addAsset(fileName, name, meta, source, posterFile));
   } catch (e) {
     return caught(e, "Upload failed.");
   }
@@ -190,14 +205,18 @@ async function serveMedia(fileName: string, download: boolean): Promise<Response
 
 async function removeAsset(id: string): Promise<Response> {
   try {
-    const fileName = await mutateIndex((idx) => {
+    const { fileName, posterFile } = await mutateIndex((idx) => {
       const asset = idx.assets.find((a) => a.id === id);
       if (!asset) throw new Error("Library asset not found.");
       idx.assets = idx.assets.filter((a) => a.id !== id);
-      return asset.fileName;
+      return { fileName: asset.fileName, posterFile: asset.posterFile };
     });
     await store.deleteLibraryMedia(fileName);
     revokeRegistered(libraryMediaApiPath(fileName));
+    if (posterFile) {
+      await store.deleteLibraryMedia(posterFile).catch(() => {});
+      revokeRegistered(libraryMediaApiPath(posterFile));
+    }
     return json({ ok: true });
   } catch (e) {
     return caught(e, "Could not delete.");

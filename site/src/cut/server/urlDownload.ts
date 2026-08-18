@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { readdir, stat, writeFile } from "node:fs/promises";
+import { accessSync, constants as fsConstants, realpathSync } from "node:fs";
+import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Defuddle } from "defuddle/node";
 import { parseHTML } from "linkedom";
@@ -16,6 +17,7 @@ const MEDIA_EXT = /\.(mp4|mov|m4v|webm|mkv|mp3|m4a|aac|wav|ogg|flac)$/i;
 
 interface YtMeta {
   title?: string;
+  thumbnail?: string;
   description?: string;
   uploader?: string;
   upload_date?: string;
@@ -26,11 +28,12 @@ interface YtMeta {
 /** What a finished download hands its consumer: the media files (inside a
  * temp dir the wrapper deletes afterwards — one for yt-dlp's merged output,
  * one per photo for a photo post) plus what the extractor knew about them.
- * `text` is the source's own words — a post's body, an Article, a video's
+ * Each file may carry a `poster`: the source's own cover image, saved beside
+ * it. `text` is the source's own words — a post's body, an Article, a video's
  * title and description — shown in the chat beside the media it came with. A
  * source that is only words lands with no files and that text alone. */
 export interface Downloaded {
-  files: { file: string; title: string }[];
+  files: { file: string; title: string; poster?: string }[];
   source: LibrarySource;
   text?: string;
 }
@@ -71,6 +74,11 @@ export async function download(url: string, tmp: string): Promise<Downloaded> {
   if (IMAGE_URL_RE.test(url)) return downloadDirectImage(url, tmp);
   const rungs: (() => Promise<Downloaded | null>)[] = [];
   const postId = X_STATUS_RE.exec(url)?.[1];
+  // An X post's lower rungs are the post itself — its stills, its words — so a
+  // video stream that won't come down still imports as the post. Everywhere
+  // else the page under a video host is its thumbnail, and filing that as the
+  // import is worse than saying why the video didn't arrive.
+  const xLadder = !!postId || X_ARTICLE_RE.test(url);
   if (postId) {
     // One syndication fetch feeds every X rung.
     const post = fetchPost(postId);
@@ -91,6 +99,7 @@ export async function download(url: string, tmp: string): Promise<Downloaded> {
       const got = await rung();
       if (got) return got;
     } catch (e) {
+      if (e instanceof MediaHostError && !xLadder) throw e;
       failures.push(e);
     }
   }
@@ -98,16 +107,57 @@ export async function download(url: string, tmp: string): Promise<Downloaded> {
   throw first instanceof Error ? first : new Error("Nothing could be imported from that URL.");
 }
 
+/** yt-dlp knows this site as a video host and still could not bring the video
+ * back. The import fails on it rather than falling through to the page. */
+class MediaHostError extends Error {}
+
+/** The bundled tool is missing — every retry lands here, so the first attempt
+ * is the last. */
+class MissingToolError extends Error {}
+
 async function downloadMedia(url: string, tmp: string): Promise<Downloaded> {
-  const meta = await runYtDlp(url, tmp);
+  // Read what sits at the URL before pulling any bytes. The extractor name
+  // says whether this is a site that serves video, and that decides what a
+  // failed download means: on a video host the import stops with the real
+  // reason, on an ordinary page the page rung takes over. A URL yt-dlp can't
+  // read at all throws here, so a page import spawns it once.
+  let probe: YtMeta;
+  let bin: string;
+  try {
+    ({ meta: probe, bin } = await probeUrl(url));
+  } catch (e) {
+    // The failure names the extractor that produced it. A media host that
+    // could not be read is the end of the import — falling through to the page
+    // rung here would land a video site's cover image and its markup in place
+    // of the video, and bury the reason the download failed.
+    if (e instanceof YtDlpError && e.extractor && !PAGE_EXTRACTORS.has(e.extractor))
+      throw new MediaHostError(e.message);
+    throw e;
+  }
+  const videoHost = !PAGE_EXTRACTORS.has((probe.extractor ?? "").toLowerCase());
+  let meta: YtMeta;
+  let out: string;
+  try {
+    ({ meta, dir: out } = await runYtDlp(url, tmp, bin));
+  } catch (e) {
+    if (!videoHost) throw e;
+    throw new MediaHostError(e instanceof Error ? e.message : "Download failed.");
+  }
   // Pick the largest media file left behind (the merged output).
-  const names = (await readdir(tmp)).filter((f) => MEDIA_EXT.test(f));
+  const names = (await readdir(out)).filter((f) => MEDIA_EXT.test(f));
   if (names.length === 0) throw new Error("Nothing downloadable was found at that URL.");
   const sized = await Promise.all(
-    names.map(async (n) => ({ n, size: (await stat(path.join(tmp, n))).size }))
+    names.map(async (n) => ({ n, size: (await stat(path.join(out, n))).size }))
   );
   const file = sized.sort((a, b) => b.size - a.size)[0].n;
-  const clip = { file: path.join(tmp, file), title: (meta.title || "Imported clip").slice(0, 120) };
+  // The site's own cover for this video, so a card and the viewer have a first
+  // frame to show before a byte of the video is decoded.
+  const poster = await savePoster(meta.thumbnail, out, path.parse(file).name);
+  const clip = {
+    file: path.join(out, file),
+    title: (meta.title || "Imported clip").slice(0, 120),
+    ...(poster ? { poster } : {}),
+  };
   const source = {
     url: meta.webpage_url || url,
     title: meta.title,
@@ -129,6 +179,30 @@ async function downloadMedia(url: string, tmp: string): Promise<Downloaded> {
 const PAGE_EXTRACTORS = new Set(["generic", "html5"]);
 
 const IMAGE_URL_RE = /\.(png|jpe?g|webp|gif|avif|bmp)(?:$|\?)/i;
+
+/** Save the source's cover image beside the media it belongs to. A cover that
+ * won't download is no reason to fail an import, so this answers nothing and
+ * the media lands without one. */
+async function savePoster(
+  url: string | undefined,
+  dir: string,
+  base: string
+): Promise<string | undefined> {
+  if (!url) return undefined;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+    if (!res.ok) return undefined;
+    const ext = IMAGE_TYPES[(res.headers.get("content-type") ?? "").split(";")[0].toLowerCase()];
+    if (!ext) return undefined;
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (bytes.byteLength === 0 || bytes.byteLength > MAX_IMAGE_BYTES) return undefined;
+    const file = path.join(dir, `${base}.poster.${ext}`);
+    await writeFile(file, bytes);
+    return file;
+  } catch {
+    return undefined;
+  }
+}
 
 async function downloadDirectImage(url: string, dir: string): Promise<Downloaded> {
   const res = await fetch(url);
@@ -541,21 +615,179 @@ function clamp(text: string, max: number): string {
   return t.length > max ? `${t.slice(0, max).trimEnd()}…` : t;
 }
 
-function runYtDlp(url: string, dir: string): Promise<YtMeta> {
+// YouTube hands each of its player clients a different set of formats, and the
+// one yt-dlp reaches for first can serve URLs that 403 the moment the download
+// starts — the site breaks them one at a time. Each entry is a full attempt
+// with a different client, so a broken one costs a retry instead of the
+// import. Only YouTube reads the argument, so only YouTube pays for the ladder.
+const YT_PLAYER_CLIENTS = [null, "mweb", "android"];
+const YT_HOST = /(^|\.)(youtube\.com|youtu\.be)$/i;
+
+function playerClients(url: string): (string | null)[] {
+  try {
+    return YT_HOST.test(new URL(url).hostname) ? YT_PLAYER_CLIENTS : [null];
+  } catch {
+    return [null];
+  }
+}
+
+/** Every yt-dlp this machine can run, in PATH order and deduped by the file
+ * they point at — the copy we ship comes first, since the engine puts its
+ * tools ahead of the rest of PATH.
+ *
+ * They are not interchangeable. The build we bundle carries curl_cffi, so it
+ * impersonates a browser on every request; a copy installed with pip or
+ * Homebrew usually can't, and takes yt-dlp's plain path instead. Sites tell
+ * the two apart: TikTok currently answers the impersonated request with a page
+ * the extractor can't read, while the plain path solves its challenge and gets
+ * the video. So a run that fails on one build is worth retrying on the next. */
+function ytDlpBinaries(): string[] {
+  const seen = new Set<string>();
+  const bins: string[] = [];
+  for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
+    if (!dir) continue;
+    const file = path.join(dir, "yt-dlp");
+    try {
+      accessSync(file, fsConstants.X_OK);
+      const real = realpathSync(file);
+      if (seen.has(real)) continue;
+      seen.add(real);
+      bins.push(file);
+    } catch {
+      // Not on this entry of PATH.
+    }
+  }
+  return bins;
+}
+
+/** Read what sits at a URL, through whichever yt-dlp can read it. Hands back
+ * the build that answered so the download starts with the one that works. */
+async function probeUrl(url: string): Promise<{ meta: YtMeta; bin: string }> {
+  const bins = ytDlpBinaries();
+  if (bins.length === 0) throw new MissingToolError("yt-dlp is not available in this build.");
+  let first: unknown;
+  for (const bin of bins) {
+    try {
+      return { meta: await ytDlpJson(bin, ["--skip-download", "--dump-json", url]), bin };
+    } catch (e) {
+      first ??= e;
+    }
+  }
+  throw first instanceof Error ? first : new Error("Nothing could be read at that URL.");
+}
+
+// What the whole ladder may spend. Someone is watching a tile the entire time,
+// and the cloud rung gives up on a job at ten minutes, so every retry together
+// has to finish inside that.
+const DOWNLOAD_BUDGET_MS = 8 * 60_000;
+
+/** Pull the media at `url` into a fresh directory under `dir`, working through
+ * the builds and player clients until one comes back with the file. Each
+ * attempt writes into its own directory: a failed one can leave a finished
+ * video-only format behind, and the largest file in the directory is the one
+ * that lands — a leftover would beat a smaller merged file that has sound. */
+async function runYtDlp(
+  url: string,
+  dir: string,
+  preferred: string
+): Promise<{ meta: YtMeta; dir: string }> {
+  const bins = [preferred, ...ytDlpBinaries().filter((b) => b !== preferred)];
+  const deadline = Date.now() + DOWNLOAD_BUDGET_MS;
+  const attempts = bins.flatMap((bin) => playerClients(url).map((client) => ({ bin, client })));
+  let first: unknown;
+  for (const [i, { bin, client }] of attempts.entries()) {
+    const left = deadline - Date.now();
+    if (left <= 0) break;
+    const out = path.join(dir, `try${i}`);
+    await mkdir(out, { recursive: true });
+    try {
+      return { meta: await ytDlp(bin, url, out, client, left), dir: out };
+    } catch (e) {
+      if (e instanceof MissingToolError) throw e;
+      first ??= e;
+    }
+  }
+  throw first instanceof Error ? first : new Error("Download failed.");
+}
+
+function ytDlp(
+  bin: string,
+  url: string,
+  dir: string,
+  client: string | null,
+  timeoutMs: number
+): Promise<YtMeta> {
+  return ytDlpJson(bin, [
+    ...(client ? ["--extractor-args", `youtube:player_client=${client}`] : []),
+    // Take the best video and the best audio and put them together. Asking for
+    // a ready-made mp4 first would land whatever single file the site keeps
+    // around for compatibility — on YouTube that is 360p next to a 4K original.
+    // Codec preference is a sort, never a filter, so an mp4-friendly stream
+    // wins ties without a resolution ever being traded for it.
+    "-f", "bestvideo*+bestaudio/best",
+    "-S", "res,fps,hdr:sdr,vcodec:h264,acodec:aac",
+    "--merge-output-format", "mp4",
+    "-o", path.join(dir, "%(id)s.%(ext)s"),
+    "--print-json",
+    url,
+  ], timeoutMs);
+}
+
+// yt-dlp reports failures as a stderr line aimed at people who file issues on
+// its tracker. The library tile shows whatever comes back, so the shapes worth
+// naming get a sentence someone can act on and the rest is trimmed down to the
+// part that says what happened.
+const YT_DLP_REASONS: [RegExp, string][] = [
+  [/IP address is blocked|blocked from accessing|rate.?limit|too many requests|HTTP Error 429/i,
+    "That site is blocking downloads from this network right now. Try again later."],
+  [/private video|login required|sign in|requires authentication|members-only|age.?restrict/i,
+    "That post is private or needs a sign-in."],
+  [/not available in your country|geo.?restrict|geo.?block/i,
+    "That post isn't available in this region."],
+  [/video unavailable|does not exist|has been removed|HTTP Error 404|account.*(private|banned)/i,
+    "That post isn't available any more."],
+  [/unsupported url|no video formats found|no media found/i,
+    "That link has nothing this can download."],
+  [/unable to extract|unexpected response|failed to parse|rehydration/i,
+    "That site changed how it serves this post, so the download tool can't read it."],
+];
+
+/** A yt-dlp run that ended in an error, holding the extractor named in its
+ * last line — `ERROR: [TikTok] 76720…: …` — so the caller can tell a media
+ * host's refusal from an ordinary page yt-dlp found no video in. */
+class YtDlpError extends Error {
+  constructor(
+    message: string,
+    readonly extractor: string | null
+  ) {
+    super(message);
+  }
+}
+
+function ytDlpExtractor(stderr: string): string | null {
+  const line = stderr.split("\n").filter(Boolean).slice(-1)[0] ?? "";
+  return line.match(/^ERROR:\s*\[([^\]]+)\]/i)?.[1].toLowerCase() ?? null;
+}
+
+function ytDlpReason(stderr: string): string {
+  const line = stderr.split("\n").filter(Boolean).slice(-1)[0] ?? "";
+  for (const [pattern, reason] of YT_DLP_REASONS) if (pattern.test(line)) return reason;
+  const clean = line
+    .replace(/^ERROR:\s*/i, "")
+    .replace(/^\[[^\]]+\]\s*[^:]*:\s*/, "")
+    .split(/;\s*please report/i)[0]
+    .trim();
+  return clean ? clean.slice(0, 200) : "Download failed.";
+}
+
+/** Run yt-dlp and read the info dict it prints. */
+function ytDlpJson(bin: string, args: string[], timeoutMs = 300_000): Promise<YtMeta> {
   return new Promise((resolve, reject) => {
-    const p = spawn("yt-dlp", [
-      "--no-playlist",
-      "--no-progress",
-      "-f", "mp4/bestvideo*+bestaudio/best",
-      "--merge-output-format", "mp4",
-      "-o", path.join(dir, "%(id)s.%(ext)s"),
-      "--print-json",
-      url,
-    ]);
+    const p = spawn(bin, ["--no-playlist", "--no-progress", ...args]);
     const timer = setTimeout(() => {
       p.kill("SIGKILL");
       reject(new Error("Download timed out."));
-    }, 300_000);
+    }, timeoutMs);
     timer.unref();
     let out = "";
     let err = "";
@@ -563,19 +795,20 @@ function runYtDlp(url: string, dir: string): Promise<YtMeta> {
     p.stderr.on("data", (d) => (err = (err + d.toString()).slice(-2000)));
     p.on("error", (e) => {
       clearTimeout(timer);
+      // Bun and Node word a missing binary differently; the code is the same.
       reject(
-        e.message.includes("ENOENT")
-          ? new Error("yt-dlp is not available in this build.")
+        (e as NodeJS.ErrnoException).code === "ENOENT"
+          ? new MissingToolError("yt-dlp is not available in this build.")
           : e
       );
     });
     p.on("close", (code) => {
       clearTimeout(timer);
       if (code !== 0) {
-        reject(new Error(err.split("\n").filter(Boolean).slice(-1)[0] || "Download failed."));
+        reject(new YtDlpError(ytDlpReason(err), ytDlpExtractor(err)));
         return;
       }
-      // --print-json emits the info dict as JSON; take the last JSON line.
+      // The info dict comes back as JSON; take the last JSON line.
       const line = out.trim().split("\n").reverse().find((l) => l.trimStart().startsWith("{"));
       try {
         resolve(line ? (JSON.parse(line) as YtMeta) : {});

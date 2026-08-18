@@ -6,6 +6,7 @@ import { cloudBackend } from "./backend/cloud";
 import { pollCloudJob } from "./cloudJob";
 import { quotaErrorMessage } from "./backend/cloud";
 import { encodeWav } from "./cloudTranscribe";
+import { normalizeLink } from "./link";
 import { downloadFromUrl } from "./download";
 import { startUpload, uploadInFlight } from "./importQueue";
 import { convertProjectFile, dropProjectFile, mp4DisplayName } from "./mediaConvert";
@@ -829,6 +830,7 @@ export async function importUrlMedia(
   projectId: string,
   url: string
 ): Promise<{ assets: MediaAsset[]; text?: string }> {
+  url = normalizeLink(url);
   // Pinned at start: the download can outlast navigation into a project of
   // the other residency, and every poll must hit the backend the job started on.
   const backend = getBackend();

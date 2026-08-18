@@ -1,11 +1,11 @@
 "use client";
 
 import { apiJson, getBackend } from "./backend";
-import { browserBackend } from "./backend/browser";
 import { cloudBackend } from "./backend/cloud";
 import { readSnapshot, writeSnapshot } from "./cache";
 import { pollCloudJob } from "./cloudJob";
 import { downloadFromUrl } from "./download";
+import { normalizeLink } from "./link";
 import {
   enrichAsset,
   importRemote,
@@ -44,6 +44,10 @@ export interface LibraryAsset {
   addedAt: number;
   folderId?: string | null;
   source?: LibrarySource;
+  /** The source's own cover image, stored beside the media on the same shelf.
+   * An import from a site that publishes one carries it; it is what a card and
+   * the viewer show while the video itself loads. */
+  posterFile?: string;
   /** Which shelf this came off. Stamped on arrival — the servers each answer
    * for themselves and don't know the other exists. */
   residency: Residency;
@@ -68,6 +72,10 @@ export interface LibraryData {
 
 export const libraryMediaUrl = (fileName: string, residency: Residency) =>
   backendFor(residency).url(`/api/cut/library/media/${encodeURIComponent(fileName)}`);
+
+/** The asset's cover image, when the import brought one back. */
+export const libraryPosterUrl = (a: Pick<LibraryAsset, "posterFile" | "residency">) =>
+  a.posterFile ? libraryMediaUrl(a.posterFile, a.residency) : undefined;
 
 /** Save a library file to the user's Downloads folder, off the shelf it sits
  * on. */
@@ -127,11 +135,29 @@ export async function fetchLibrary(opts?: { remembered?: boolean }): Promise<Lib
   };
 }
 
+/** Where an import is in its trip: waiting for a worker, pulling the media
+ * down, or writing it onto the shelf. The library shows it on the tile the
+ * import already took. */
+export type ImportStage = "queued" | "downloading" | "saving";
+
+/** The shape a link is likely to land in, before anything is known about it:
+ * the short-form feeds are vertical, everything else is filmed wide. The tile
+ * takes the real shape the moment the media lands. */
+export function estimatedShape(url: string): { width: number; height: number } {
+  return SHORT_FORM_URL.test(url) ? { width: 9, height: 16 } : { width: 16, height: 9 };
+}
+
+const SHORT_FORM_URL =
+  /^https?:\/\/[^/]*(?:youtube\.com\/shorts\/|tiktok\.com\/|instagram\.com\/(?:reels?|stories)\/)/i;
+
 export async function importUrlToLibrary(
   url: string,
-  residency: Residency = activeResidency()
+  residency: Residency = activeResidency(),
+  onStage?: (stage: ImportStage) => void
 ): Promise<LibraryAsset[]> {
-  if (residency === "browser") return importUrlToBrowserShelf(url);
+  url = normalizeLink(url);
+  if (residency === "browser") return importUrlThroughCloud(url, "browser", onStage);
+  onStage?.("downloading");
   const backend = backendFor(residency);
   const res = await backend.fetch("/api/cut/library/import-url", {
     method: "POST",
@@ -146,7 +172,8 @@ export async function importUrlToLibrary(
     const done = await pollCloudJob<{ assets?: LibraryAsset[] }>(
       started.jobId,
       backend,
-      "Could not import that URL."
+      "Could not import that URL.",
+      { onState: (state) => onStage?.(state === "queued" ? "queued" : "downloading") }
     );
     // The library holds media, so a source that turned out to be only words
     // fails here — the same line the engine's library import draws.
@@ -154,20 +181,38 @@ export async function importUrlToLibrary(
     return done.assets.map((a) => ({ ...a, residency }));
   }
   const body = await apiJson<LibraryAsset[]>(res);
-  if (!res.ok) throw new Error(body.error ?? "Could not import that URL.");
-  return (Array.isArray(body) ? body : []).map((a) => ({ ...a, residency }));
+  if (res.ok) return (Array.isArray(body) ? body : []).map((a) => ({ ...a, residency }));
+  // The engine fetches with the tools it ships, and a site can refuse the
+  // build it happens to carry — TikTok reads the requests it impersonates with
+  // and answers with nothing usable. The cloud worker fetches with a different
+  // one, so the link gets a second chance there and the bytes come back down
+  // to this Mac. The engine's own reason stands if that side can't do it
+  // either: it is the shelf the user was importing to.
+  const reason = body.error ?? "Could not import that URL.";
+  try {
+    return await importUrlThroughCloud(url, residency, onStage);
+  } catch {
+    throw new Error(reason);
+  }
 }
 
 /**
- * A link imported onto the browser shelf.
+ * A link fetched by the cloud worker and landed on a shelf of this machine.
  *
- * Nothing in a page can fetch a video off a YouTube or TikTok link, so the
- * cloud worker does it — into the account's cloud shelf, where this browser
- * can read it — and the bytes come straight back down into this browser's own
- * storage. The staged cloud copy is dropped once they land, however this ends,
- * so an import leaves nothing behind on a shelf the user wasn't importing to.
+ * Nothing in a page can pull a video off a YouTube or TikTok link, so the
+ * browser shelf always imports this way; the engine falls back to it when the
+ * fetch it runs itself comes back empty-handed. The worker stages the media in
+ * the account's cloud shelf, where this browser can read it, and the bytes come
+ * straight back down into the target shelf's own storage. The staged cloud copy
+ * is dropped once they land, however this ends, so an import leaves nothing
+ * behind on a shelf the user wasn't importing to.
  */
-async function importUrlToBrowserShelf(url: string): Promise<LibraryAsset[]> {
+async function importUrlThroughCloud(
+  url: string,
+  target: Residency,
+  onStage?: (stage: ImportStage) => void
+): Promise<LibraryAsset[]> {
+  onStage?.("downloading");
   const res = await cloudBackend.fetch("/api/cut/library/import-url", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -178,12 +223,14 @@ async function importUrlToBrowserShelf(url: string): Promise<LibraryAsset[]> {
   const done = await pollCloudJob<{ assets?: LibraryAsset[] }>(
     started.jobId,
     cloudBackend,
-    "Could not import that URL."
+    "Could not import that URL.",
+    { onState: (state) => onStage?.(state === "queued" ? "queued" : "downloading") }
   );
   // The library holds media, so a source that turned out to be only words
   // fails here — the same line the engine's library import draws.
   if (!done.assets?.length) throw new Error("That link has no media to import.");
   const landed: LibraryAsset[] = [];
+  onStage?.("saving");
   try {
     for (const staged of done.assets) {
       const bytes = await cloudBackend.fetch(
@@ -193,6 +240,12 @@ async function importUrlToBrowserShelf(url: string): Promise<LibraryAsset[]> {
       const form = new FormData();
       form.append("file", await bytes.blob(), staged.fileName);
       form.append("name", staged.name);
+      if (staged.posterFile) {
+        const poster = await cloudBackend.fetch(
+          `/api/cut/library/media/${encodeURIComponent(staged.posterFile)}`
+        );
+        if (poster.ok) form.append("poster", await poster.blob(), staged.posterFile);
+      }
       form.append(
         "meta",
         JSON.stringify({
@@ -203,15 +256,18 @@ async function importUrlToBrowserShelf(url: string): Promise<LibraryAsset[]> {
         })
       );
       if (staged.source) form.append("source", JSON.stringify(staged.source));
-      const saved = await browserBackend.fetch("/api/cut/library", { method: "POST", body: form });
+      const saved = await backendFor(target).fetch("/api/cut/library", {
+        method: "POST",
+        body: form,
+      });
       const body = await apiJson<LibraryAsset>(saved);
       if (!saved.ok) throw new Error(body.error ?? "Could not import that URL.");
-      landed.push({ ...body, residency: "browser" });
+      landed.push({ ...body, residency: target });
     }
   } catch (e) {
     // A part-written import is worse than none: the user reads an error and is
     // left holding half a link.
-    for (const a of landed) await deleteFromLibrary("browser", a.id).catch(() => {});
+    for (const a of landed) await deleteFromLibrary(target, a.id).catch(() => {});
     throw e;
   } finally {
     for (const staged of done.assets) {

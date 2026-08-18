@@ -31,6 +31,10 @@ export interface LibraryAsset {
   addedAt: number;
   folderId?: string | null;
   source?: LibrarySource;
+  /** The source's own cover image, stored beside the media and served by the
+   * same media route — what a card and the viewer show while the video loads.
+   * Only an import from a site that publishes one has it. */
+  posterFile?: string;
 }
 
 export interface LibraryFolder {
@@ -216,7 +220,8 @@ function typeOf(fileName: string): "video" | "audio" | "image" | null {
 export async function register(
   fileName: string,
   name: string,
-  source?: LibrarySource
+  source?: LibrarySource,
+  posterFile?: string
 ): Promise<LibraryAsset> {
   const type = typeOf(fileName);
   if (!type) throw new Error("Unsupported file type.");
@@ -231,6 +236,7 @@ export async function register(
     addedAt: Date.now(),
     folderId: null,
     ...(source ? { source } : {}),
+    ...(posterFile ? { posterFile } : {}),
   };
   await mutateIndex((idx) => {
     idx.assets.push(asset);
@@ -239,12 +245,25 @@ export async function register(
 }
 
 /** Upload a file straight into the library. */
-export async function addUpload(file: File): Promise<LibraryAsset> {
+export async function addUpload(
+  file: File,
+  name?: string,
+  source?: LibrarySource,
+  poster?: File
+): Promise<LibraryAsset> {
   if (!typeOf(file.name)) throw new Error("Unsupported file type.");
   await mkdir(libMedia(), { recursive: true });
   const fileName = await freeName(file.name);
   await writeFile(libMediaPath(fileName), Buffer.from(await file.arrayBuffer()));
-  return register(fileName, file.name);
+  // An import that came down from elsewhere brings the source's cover with it;
+  // it is stored like any other library file, named after the media it belongs
+  // to, and taken down with it.
+  let posterFile: string | undefined;
+  if (poster) {
+    posterFile = `${fileName}.poster${path.extname(poster.name) || ".jpg"}`;
+    await writeFile(libMediaPath(posterFile), Buffer.from(await poster.arrayBuffer()));
+  }
+  return register(fileName, name?.trim() || file.name, source, posterFile);
 }
 
 /** Copy a project's media file into the library for reuse. */
@@ -261,17 +280,26 @@ export async function addFromProject(
   return register(dest, name || fileName);
 }
 
-/** Move a freshly downloaded file into the library and register it. */
+/** Move a freshly downloaded file into the library and register it, with the
+ * source's cover image beside it when the download brought one back. */
 export async function addDownloaded(
   srcPath: string,
   name: string,
-  source?: LibrarySource
+  source?: LibrarySource,
+  posterPath?: string
 ): Promise<LibraryAsset> {
   if (!typeOf(srcPath)) throw new Error("Unsupported file type.");
   await mkdir(libMedia(), { recursive: true });
   const dest = await freeName(path.basename(srcPath));
   await copyFile(srcPath, libMediaPath(dest));
-  return register(dest, name || path.basename(srcPath), source);
+  let posterFile: string | undefined;
+  if (posterPath) {
+    posterFile = await freeName(`${dest}.poster${path.extname(posterPath)}`);
+    await copyFile(posterPath, libMediaPath(posterFile)).catch(() => {
+      posterFile = undefined;
+    });
+  }
+  return register(dest, name || path.basename(srcPath), source, posterFile);
 }
 
 /** Copy a library asset into a project's media folder. Returns the file name
@@ -289,13 +317,14 @@ export async function useInProject(assetId: string, projectId: string): Promise<
 }
 
 export async function removeAsset(id: string) {
-  const fileName = await mutateIndex((idx) => {
+  const { fileName, posterFile } = await mutateIndex((idx) => {
     const asset = idx.assets.find((a) => a.id === id);
     if (!asset) throw new Error("Library asset not found.");
     idx.assets = idx.assets.filter((a) => a.id !== id);
-    return asset.fileName;
+    return { fileName: asset.fileName, posterFile: asset.posterFile };
   });
   await rm(libMediaPath(fileName), { force: true });
+  if (posterFile) await rm(libMediaPath(posterFile), { force: true });
 }
 
 export function getAsset(id: string) {

@@ -246,7 +246,7 @@ async function convertOnBackend(
       started.jobId,
       backend,
       "Could not convert that file.",
-      "The conversion took too long."
+      { timedOut: "The conversion took too long." }
     );
   } else {
     body = (await res.json().catch(() => ({}))) as ServerConvert;

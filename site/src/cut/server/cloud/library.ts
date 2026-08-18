@@ -30,6 +30,9 @@ interface AssetMeta {
   width?: number;
   height?: number;
   source?: LibrarySource;
+  /** File name of the source's cover image, an object of its own under this
+   * account's library prefix. */
+  posterFile?: string;
 }
 
 interface TemplateDoc {
@@ -74,6 +77,7 @@ function assetView(
     addedAt: row.createdAt.getTime(),
     folderId: row.folderId ?? null,
     ...(meta.source ? { source: meta.source } : {}),
+    ...(meta.posterFile ? { posterFile: meta.posterFile } : {}),
   };
 }
 
@@ -153,15 +157,24 @@ export async function deleteLibraryAssetCascade(
   const obj = await prisma.cutMediaObject.findFirst({
     where: { id: asset.mediaObjectId, userId },
   });
-  const freed = obj && obj.uploadState === "complete" ? Number(obj.bytes) : 0;
+  // The cover image is a second object under the library prefix, referenced
+  // only by this row, so it leaves with it.
+  const posterName = ((asset.meta ?? {}) as AssetMeta).posterFile;
+  const poster = posterName
+    ? await prisma.cutMediaObject.findFirst({
+        where: { userId, kind: "library", fileName: posterName },
+      })
+    : null;
+  const objects = [obj, poster].filter((o): o is NonNullable<typeof o> => !!o);
+  const freed = objects
+    .filter((o) => o.uploadState === "complete")
+    .reduce((n, o) => n + Number(o.bytes), 0);
   await prisma.$transaction(async (tx) => {
     await tx.cutLibraryAsset.delete({ where: { id } });
-    if (obj) {
-      await tx.cutMediaObject.delete({ where: { id: obj.id } });
-      if (freed > 0) await addUsage(tx, userId, -freed);
-    }
+    for (const o of objects) await tx.cutMediaObject.delete({ where: { id: o.id } });
+    if (freed > 0) await addUsage(tx, userId, -freed);
   });
-  if (obj) await del([obj.r2Key]);
+  if (objects.length > 0) await del(objects.map((o) => o.r2Key));
   return freed;
 }
 

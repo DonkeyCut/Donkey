@@ -16,6 +16,7 @@ import {
   saveTemplate,
   useInProject,
   useTemplate,
+  type LibrarySource,
   type TemplateInput,
 } from "../library";
 import { serveFileRange, wantsDownload } from "../serveFile";
@@ -138,12 +139,32 @@ export const libraryApi = {
     }
   },
 
+  /** A file put on the shelf: an upload from the picker, or media the client
+   * fetched elsewhere and is landing here — those carry the title, the source
+   * they came from, and the source's cover alongside the bytes. */
   async upload(req: Request) {
     try {
       const form = await req.formData();
       const file = form.get("file");
       if (!(file instanceof File)) return err("No file in upload.", 400);
-      return Response.json(await addUpload(file));
+      const name = form.get("name");
+      const sourceField = form.get("source");
+      let source: LibrarySource | undefined;
+      if (typeof sourceField === "string" && sourceField)
+        try {
+          source = JSON.parse(sourceField) as LibrarySource;
+        } catch {
+          // Malformed notes are dropped; the media still lands.
+        }
+      const poster = form.get("poster");
+      return Response.json(
+        await addUpload(
+          file,
+          typeof name === "string" ? name : undefined,
+          source,
+          poster instanceof File ? poster : undefined
+        )
+      );
     } catch (e) {
       return caught(e, "Upload failed.");
     }

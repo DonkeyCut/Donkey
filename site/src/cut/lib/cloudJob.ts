@@ -8,12 +8,15 @@ import { apiJson, type CutBackend } from "./backend";
  * work, so the client polls: 2s cadence, a ten-minute ceiling, and a run of
  * failed polls before giving up — a single dropped request keeps polling.
  * Failure reports what the job itself said, or `fallback`.
+ *
+ * `onState` sees every state the job reports ("queued", "running", …), so a
+ * surface waiting on the job can say which one it is in.
  */
 export async function pollCloudJob<T>(
   jobId: string,
   backend: CutBackend,
   fallback: string,
-  timedOut = fallback
+  { timedOut = fallback, onState }: { timedOut?: string; onState?: (state: string) => void } = {}
 ): Promise<T> {
   const deadline = Date.now() + 10 * 60 * 1000;
   const MAX_STRIKES = 6;
@@ -35,6 +38,7 @@ export async function pollCloudJob<T>(
     }
     strikes = 0;
     const job = await apiJson<{ state?: string; result?: T }>(res);
+    if (job.state) onState?.(job.state);
     if (job.state === "error") throw new Error(job.error ?? fallback);
     if (job.state === "done") return (job.result ?? {}) as T;
   }

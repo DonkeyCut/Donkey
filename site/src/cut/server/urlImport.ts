@@ -48,7 +48,9 @@ export async function importFromUrl(url: string): Promise<LibraryAsset[]> {
   return withDownload(url, async (dl) => {
     if (dl.files.length === 0) throw new Error("That link has no media to import.");
     const assets: LibraryAsset[] = [];
-    for (const f of dl.files) assets.push(await addDownloaded(f.file, f.title, dl.source));
+    for (const f of dl.files) {
+      assets.push(await addDownloaded(f.file, f.title, dl.source, f.poster));
+    }
     return assets;
   });
 }
