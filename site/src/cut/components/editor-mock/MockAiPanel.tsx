@@ -49,9 +49,9 @@ export function MockAiPanel({ project }: { project: MockProject }) {
       </div>
 
       <div className="shrink-0 px-2.5 pb-2.5">
-        {/* The real composer is bg-background, which the editor's app-surface
-            paints white; on the cream landing that token stays cream, so the
-            mock pins white directly. */}
+        {/* The real composer is bg-background, which the app surface paints
+            white; on the cream landing that token stays cream, so the mock
+            pins white directly. */}
         <div className="rounded-xl border border-input bg-white">
           <div className="min-h-9 px-3 pt-2 text-[12.5px] leading-relaxed text-muted-foreground/70">
             Ask about your video, or tell me what to change… @ references media
