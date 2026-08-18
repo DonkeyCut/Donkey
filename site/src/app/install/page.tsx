@@ -12,6 +12,8 @@ export const metadata: Metadata = {
   alternates: { canonical: `${DONKEYCUT_CANONICAL}/install` },
 };
 
+export const unstable_instant = { prefetch: "static" };
+
 // The install page is passed through by src/proxy.ts and wears the Cut site's
 // header and footer.
 export default function InstallPage() {

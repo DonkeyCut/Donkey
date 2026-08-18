@@ -7,6 +7,8 @@ export const metadata: Metadata = {
   description: "Log in to Donkey with Google.",
 };
 
+export const unstable_instant = { prefetch: "static" };
+
 export default function Page() {
   return <AuthScreen mode="sign-in" />;
 }

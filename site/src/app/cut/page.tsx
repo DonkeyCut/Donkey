@@ -28,6 +28,12 @@ export const metadata: Metadata = {
   },
 };
 
+// The public pages are the ones a visitor lands on cold, so they are the ones
+// that have to be instant. Nothing here reads request data; declaring it makes
+// Next check that in dev and at build, and the check is what keeps a server
+// read added later from quietly turning a link click into a wait.
+export const unstable_instant = { prefetch: "static" };
+
 // The Cut marketing landing, served at "/" on every host by the proxy's
 // "/…" → "/cut/…" rewrite.
 export default function CutLandingPage() {

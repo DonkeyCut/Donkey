@@ -5,6 +5,15 @@ const nextConfig: NextConfig = {
   pageExtensions: ["js", "jsx", "ts", "tsx", "md", "mdx"],
   // Workspace packages ship TypeScript source; the app build transpiles them.
   transpilePackages: ["@donkeycut/effects-kit"],
+  // Cache Components: pages prerender to a static shell and anything uncached
+  // streams behind its own Suspense boundary. It is what the `unstable_instant`
+  // export on the public pages and the app's home routes validates against, and
+  // it puts the router's client cache on React <Activity> — a page you navigate
+  // away from stays mounted hidden (up to three), with its effects torn down.
+  // The editor is built for that already: it paints its loading screen until
+  // the store holds this route's own project, and usePlayback disposes decoders
+  // and the audio mixer from an effect cleanup.
+  cacheComponents: true,
   // Cut (the video editor) uploads large media. Two independent limits apply:
   // its media route reads req.formData() (a route handler), so it isn't covered
   // by serverActions.bodySizeLimit; and src/proxy.ts runs on /api/cut/* on every
@@ -14,6 +23,9 @@ const nextConfig: NextConfig = {
   experimental: {
     serverActions: { bodySizeLimit: "4gb" },
     proxyClientMaxBodySize: "4gb",
+    // Dev-only DevTools panel: freeze a page load or a link click at the shell
+    // the route actually prefetches, so a regression is visible while editing.
+    instantNavigationDevToolsToggle: true,
   },
   // Cut is local-only: /api/cut/* 404s on a hosted deploy and never runs the
   // engine. But Turbopack's file tracer still follows the route's import of the
