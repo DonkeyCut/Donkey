@@ -1,25 +1,18 @@
-"use client";
-
 import { Suspense } from "react";
-import { useParams, useSearchParams } from "next/navigation";
-import { Editor } from "@/cut/components/Editor";
 
-// Client-only: the id comes from the URL in the browser, so the hosted shell
-// carries no server-rendered data. `from` and `folder` record which tab (and
-// folder within it) opened the project so the editor's back button returns
-// there; residency is resolved from the id itself (lib/residency.ts).
-function ProjectEditor() {
-  const { id } = useParams<{ id: string }>();
-  const params = useSearchParams();
-  return (
-    <Editor projectId={id} from={params.get("from")} folder={params.get("folder")} />
-  );
-}
+import { SessionSkeleton } from "@/cut/components/SessionGate";
+import { ProjectEditor } from "./ProjectEditor";
 
-export default function ProjectPage() {
+// The project id is in the URL, so it is request data and the editor can never
+// be part of the prerendered shell. Resolving the param here, inside this
+// boundary, is what keeps the rest of the app — surface, banner, sidebar — in
+// that shell: the page arrives painted with a skeleton where the editor lands.
+export default function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
   return (
-    <Suspense>
-      <ProjectEditor />
+    <Suspense fallback={<SessionSkeleton />}>
+      {params.then(({ id }) => (
+        <ProjectEditor projectId={id} />
+      ))}
     </Suspense>
   );
 }

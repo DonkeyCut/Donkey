@@ -12,18 +12,24 @@ import { authClient } from "@/lib/auth-client";
 // navigation to an app URL the same way, sending the visitor to sign-in with
 // the URL they wanted as the post-auth callback.
 //
-// The app renders only once the session is known: every engine URL carries
-// the account id (the engine keeps each account's data separate), so a
-// component rendered earlier would build unscoped media URLs. Holding
-// children until the id is bound makes that impossible; the session check is
-// a fast same-origin cookie read, and the ConnectGate's own connect flow
-// covers the moment visually.
+// It binds the account id and never holds the tree: the chrome around the
+// content — the surface, the sidebar, the connect banner — is worth painting
+// before a session exists, and it is what a cold load shows. What must wait is
+// anything that reads the engine, because every engine URL carries the id, and
+// SessionGate is where each surface waits for it.
 export function RequireSession({ children }: { children: ReactNode }) {
   const { data: session, isPending } = authClient.useSession();
 
   const signedOut = !isPending && !session;
+  const userId = session?.user.id;
 
   useAppLoaded("cut", session?.user);
+
+  // Bound in an effect so the render stays free of side effects; SessionGate
+  // subscribes to it, so the surfaces redraw the moment the id lands.
+  useEffect(() => {
+    if (userId) setEngineUser(userId);
+  }, [userId]);
 
   useEffect(() => {
     if (!signedOut) return;
@@ -31,7 +37,5 @@ export function RequireSession({ children }: { children: ReactNode }) {
     window.location.replace(authHrefFor("/sign-in", here));
   }, [signedOut]);
 
-  if (!session) return null;
-  setEngineUser(session.user.id);
   return <>{children}</>;
 }

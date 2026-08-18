@@ -129,16 +129,23 @@ export function engineOrigin(): string {
   return resolvedOrigin ?? "";
 }
 
-// The signed-in Donkey account, set by RequireSession before the app renders.
-// Every engine URL carries it (the `u` param) — headers can't, because media
-// loads as plain <video>/<img> src. Local data is shared by every account on
-// the Mac, so current engines ignore the param; engines released before
-// 2026-08 refuse data requests without it, which is why the page keeps
+// The signed-in Donkey account, set by RequireSession once the session
+// resolves. Every engine URL carries it (the `u` param) — headers can't,
+// because media loads as plain <video>/<img> src. Local data is shared by every
+// account on the Mac, so current engines ignore the param; engines released
+// before 2026-08 refuse data requests without it, which is why the page keeps
 // sending it.
+//
+// It is observable because the app shell paints before the session is known:
+// the surfaces that read the engine subscribe through useEngineUser and hold a
+// skeleton until an id is here, so an unscoped read has no moment to happen in.
 let engineUser: string | null = null;
+const listeners = new Set<() => void>();
 
 export function setEngineUser(id: string) {
+  if (engineUser === id) return;
   engineUser = id;
+  for (const fn of listeners) fn();
 }
 
 /** The bound account, or null before the session resolves. Client-side caches
@@ -146,6 +153,12 @@ export function setEngineUser(id: string) {
  * other's snapshots. */
 export function currentEngineUser(): string | null {
   return engineUser;
+}
+
+/** Called when the bound account changes; returns its own unsubscribe. */
+export function subscribeEngineUser(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
 }
 
 const scopedPath = (path: string) =>

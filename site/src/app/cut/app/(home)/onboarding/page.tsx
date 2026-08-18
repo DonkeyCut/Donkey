@@ -4,6 +4,7 @@ import { Suspense, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 import { ProjectsHome } from "@/cut/components/ProjectsHome";
+import { SessionGate } from "@/cut/components/SessionGate";
 import { cloudBackend } from "@/cut/lib/backend/cloud";
 import { CUT_APP_BASE } from "@/cut/lib/nav";
 import { starterProjectId } from "@/cut/lib/starter";
@@ -42,7 +43,9 @@ export default function OnboardingPage() {
 
   return (
     <Suspense>
-      <ProjectsHome />
+      <SessionGate>
+        <ProjectsHome />
+      </SessionGate>
     </Suspense>
   );
 }

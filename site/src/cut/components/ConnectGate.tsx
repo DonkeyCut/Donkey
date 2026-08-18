@@ -22,7 +22,7 @@ import {
   servedFromEngine,
 } from "@/cut/lib/api";
 import { announceLocalCompute, setCutMode } from "@/cut/lib/backend";
-import { useCutMode } from "@/cut/lib/backend/hooks";
+import { useCutMode, useEngineUser } from "@/cut/lib/backend/hooks";
 import {
   CONNECT_ACK_KEY,
   ENGINE_CONNECTED_EVENT,
@@ -80,6 +80,7 @@ export function ConnectGate({ children }: { children: ReactNode }) {
   // needs the app. Either one is what the banner is about.
   const mode = useCutMode();
   const needsApp = useNeedsApp();
+  const user = useEngineUser();
   // Whether the engine on this Mac is reachable right now.
   const [reached, setReached] = useState<boolean | null>(null);
   // This browser has used the engine before, so an unreachable one is news.
@@ -138,10 +139,12 @@ export function ConnectGate({ children }: { children: ReactNode }) {
     bindCloud();
   }, [bindCloud, bindEngine]);
 
+  // The probe carries the account id like every other engine call, so it waits
+  // for one. The banner and the app around it paint before that.
   useEffect(() => {
-    if (onSettings) return;
+    if (onSettings || !user) return;
     void check();
-  }, [check, onSettings]);
+  }, [check, onSettings, user]);
 
   // Keep probing behind the banner so the app connects the moment the engine
   // appears. Both skips are permanent conditions, not slow ones: a pending

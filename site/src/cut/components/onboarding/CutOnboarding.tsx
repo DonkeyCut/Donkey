@@ -61,7 +61,7 @@ const doneHere = (userId: string): boolean =>
 // thing it writes is what it asks for: where the account heard about us.
 export function CutOnboarding() {
   const base = useCutBase();
-  // Mounted inside RequireSession, so the session is already resolved.
+  // Mounted inside a SessionGate, so the session is already resolved.
   const { data: session } = authClient.useSession();
   const userId = session?.user.id ?? "";
   const { data: state, isPending } = useOnboardingState();

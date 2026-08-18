@@ -3,12 +3,19 @@
 import { useQuery } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
 
+import { currentEngineUser, subscribeEngineUser } from "../api";
 import { listedResidencies, type Residency } from "../residency";
 import { cutMode, getBackend, hasLocalCompute, subscribeCutMode } from "./index";
 import type { CutCaps, CutMode } from "./types";
 
 export function useCutMode(): CutMode {
   return useSyncExternalStore(subscribeCutMode, cutMode, () => "local" as const);
+}
+
+/** The account every engine read is scoped to, or null before the session has
+ * resolved. Null on the server, so a prerendered shell holds its skeleton. */
+export function useEngineUser(): string | null {
+  return useSyncExternalStore(subscribeEngineUser, currentEngineUser, () => null);
 }
 
 /** Whether this Mac's engine is reachable, as a subscription: the gate resolves
