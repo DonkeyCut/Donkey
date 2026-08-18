@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Slider } from "@/components/ui/slider";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   clearAssetDrag,
   clearElementDrag,
@@ -3988,7 +3989,7 @@ function Filmstrip({
   // pulsing skeleton fills the box until the strip can draw real frames.
   if (!frames.length) {
     return (
-      <div className="tl-filmstrip-skeleton pointer-events-none absolute inset-0 animate-pulse bg-muted" />
+      <Skeleton className="tl-filmstrip-skeleton pointer-events-none absolute inset-0 rounded-none" />
     );
   }
   return (

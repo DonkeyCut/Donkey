@@ -26,13 +26,12 @@ export function SessionGate({
   return <>{fallback ?? <SessionSkeleton />}</>;
 }
 
-/** The shape of a loading app surface: a title over a body that fills the
- * column it was given, so it reads the same in the home panes and the editor. */
+/** The shape of a loading app surface: the title line alone, so the wait reads
+ * as a pane about to fill rather than a slab of gray. */
 export function SessionSkeleton() {
   return (
     <div className="h-full w-full p-10">
       <Skeleton className="h-8 w-48" />
-      <Skeleton className="mt-6 h-[calc(100%-3.5rem)] w-full" />
     </div>
   );
 }
