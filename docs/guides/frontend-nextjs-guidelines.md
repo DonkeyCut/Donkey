@@ -27,6 +27,48 @@ inline, the call belongs in a hook.
 - Keep secrets and direct database access out of Client Components.
 - Pass plain serializable props from Server Components into Client Components.
 
+## Rendering
+
+Cache Components is on. A page prerenders to a static shell, and anything that
+reads request data — `cookies()`, `headers()`, `params`, `searchParams` — or
+fetches uncached has to sit behind its own `<Suspense>` boundary and streams in
+after the shell. Data that rarely changes goes behind `use cache`, as close to
+the read as you can put it.
+
+The old route segment configs are gone with it. `dynamic`, `revalidate`,
+`fetchCache`, and `runtime` fail the build; a handler that must run per request
+awaits `connection()` from `next/server`, and a cache duration is `cacheLife`
+inside a `use cache` scope.
+
+A page that should feel instant declares it:
+
+```ts
+export const unstable_instant = { prefetch: "static" };
+```
+
+Next then checks, in dev and at build, that the route produces a shell at every
+entry point, and names the component that would block the navigation. The public
+pages carry it, and so do the app's home surfaces.
+
+Getting the app there set the boundary the whole subtree is built around. The
+chrome — the surface, the sidebar, the connect banner — renders with no session
+and no account, and is what a cold load paints. Everything that reads the engine
+waits behind `SessionGate` for the account id, because every engine URL carries
+it. A new surface picks a side: chrome, or behind the gate with a skeleton.
+
+Two things keep metadata out of the way of a static shell, and both are set in
+the root layout: `metadataBase`, so a relative card URL resolves against the
+canonical host, and `icons`, which declares the favicon and Apple icon. Dropping
+those in `src/app` as files makes them file-based metadata, which resolves per
+request and holds back the shell of every page in the app.
+
+Navigating away no longer unmounts a page. Next keeps the last few routes
+mounted in a hidden React `<Activity>`, so their DOM and state survive a trip
+away and back. Effects are torn down on the way out and re-run on the way back,
+so anything holding a real resource — a decoder, an audio graph, a timer —
+releases it in an effect cleanup, and anything transient that should not come
+back open, like a dropdown, closes in a `useLayoutEffect` cleanup.
+
 ## Navigation
 
 - Use the `next/link` `<Link>` component for internal routes (anything
