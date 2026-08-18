@@ -218,8 +218,8 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
 /** The row an element tool was aimed at, if it named one. Rows are how
- * elements stack: two on the same row slide clear of each other, so a title
- * that has to sit over a shape has to name a row above it. */
+ * elements stack, row 0 at the front: two on the same row slide clear of each
+ * other, so a title that has to sit over a shape names a lower row than it. */
 const aimedLane = (input: Record<string, unknown>): { lane?: number } | undefined =>
   isNum(input.lane) ? { lane: Math.max(0, Math.round(input.lane)) } : undefined;
 
@@ -1336,13 +1336,16 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           "Pass lines: [{text, start, end}], or from_captions: true to build the sequence from the caption track."
         );
       if (input.background !== false) s.setBackground(look.frame.background);
-      const textLane = lane + (cards.length > 0 ? 1 : 0);
+      // Row 0 is the front of the element stack, so the words take the row the
+      // caller named and each card goes one row under them. Cards over words
+      // would paint the line out.
+      const cardLane = lane + 1;
       const made: { id: string; start: number; end: number; text: string }[] = [];
       lines.forEach((line, i) => {
         const card = cards.length > 0 ? cards[i % cards.length] : null;
         if (card) {
           useEditor.getState().seek(line.start);
-          useEditor.getState().addShape("rect", { lane });
+          useEditor.getState().addShape("rect", { lane: cardLane });
           const sel = useEditor.getState().selection;
           if (sel?.kind === "overlay")
             applyOverlayPatchSettled(sel.id, {
@@ -1356,7 +1359,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             });
         }
         useEditor.getState().seek(line.start);
-        useEditor.getState().addOverlay({ lane: textLane });
+        useEditor.getState().addOverlay({ lane });
         const sel = useEditor.getState().selection;
         if (sel?.kind !== "overlay") return;
         const onCard =
@@ -1398,14 +1401,14 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return {
         look: look.id,
         count: made.length,
-        lanes: cards.length > 0 ? { cards: lane, text: textLane } : { text: textLane },
+        lanes: cards.length > 0 ? { cards: cardLane, text: lane } : { text: lane },
         background: useEditor.getState().background,
         items: made.slice(0, 40),
         ...(made.length > 40 ? { itemsTruncated: true } : {}),
         note:
           cards.length > 0
-            ? `Cards on row ${lane}, words on row ${textLane}, colors cycling ${look.frame.cards.join(" → ")}.`
-            : `Words on row ${textLane} over the ${look.frame.background} frame.`,
+            ? `Words on row ${lane} with their cards on row ${cardLane} behind them, colors cycling ${look.frame.cards.join(" → ")}.`
+            : `Words on row ${lane} over the ${look.frame.background} frame.`,
       };
   },
 

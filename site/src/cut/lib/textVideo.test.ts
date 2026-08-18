@@ -39,8 +39,10 @@ describe("add_text_sequence", () => {
     const words = overlays().filter(isTextOverlay);
     expect(cards).toHaveLength(3);
     expect(words).toHaveLength(3);
-    expect(cards.map((c) => c.lane ?? 0)).toEqual([0, 0, 0]);
-    expect(words.map((w) => w.lane ?? 0)).toEqual([1, 1, 1]);
+    // Row 0 is the front of the stack: the words own it and the cards sit a
+    // row behind, so a card never paints its own line out.
+    expect(words.map((w) => w.lane ?? 0)).toEqual([0, 0, 0]);
+    expect(cards.map((c) => c.lane ?? 0)).toEqual([1, 1, 1]);
     expect(cards.map((c) => c.fill)).toEqual(look.frame.cards);
     expect(words.map((w) => w.color)).toEqual(look.text.onCards!);
     expect(words.map((w) => w.text)).toEqual(["first line", "second line", "third line"]);

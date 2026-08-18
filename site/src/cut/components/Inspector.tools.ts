@@ -40,7 +40,7 @@ export const INSPECTOR_TOOLS = [
       rotation: num("Degrees clockwise, -180..180 (0 clears)"),
       opacity: num("Whole-element opacity 0..1 (1 clears)"),
       hidden: bool("Hide the element without deleting it"),
-      lane: num("Move the element to another row (0 = the bottom row). Elements on one row never overlap — a title over a shape needs a higher row than the shape."),
+      lane: num("Move the element to another row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape."),
     }, ["id"]),
   },
   {

@@ -33,7 +33,7 @@ export const ELEMENTS_TOOLS = [
       stroke_width: num("Outline width px at 1080 short side (0 removes it)"),
       rotation: num("Degrees clockwise, -180..180"),
       opacity: num("Whole-element opacity 0..1"),
-      lane: num("Element row (0 = the bottom row). Elements on one row never overlap — a title over a shape needs a higher row than the shape."),
+      lane: num("Element row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape."),
     }, ["shape"]),
   },
   {
@@ -49,7 +49,7 @@ export const ELEMENTS_TOOLS = [
       w: num("Width, fraction of frame width (default 0.25)"),
       rotation: num("Degrees clockwise, -180..180"),
       opacity: num("Whole-element opacity 0..1"),
-      lane: num("Element row (0 = the bottom row). Elements on one row never overlap — a title over a shape needs a higher row than the shape."),
+      lane: num("Element row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape."),
     }),
   },
   {
@@ -63,7 +63,7 @@ export const ELEMENTS_TOOLS = [
       x: num("Center x 0..1 (default 0.5)"),
       y: num("Center y 0..1 (default 0.5)"),
       w: num("Width, fraction of frame width (default 0.25)"),
-      lane: num("Element row (0 = the bottom row). Elements on one row never overlap — a title over a shape needs a higher row than the shape."),
+      lane: num("Element row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape."),
     }, ["idea"]),
   },
 ] as const satisfies readonly AiToolDef[];

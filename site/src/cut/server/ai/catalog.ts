@@ -134,7 +134,7 @@ What the user sees on the transitions row: one badge per bar, and nothing else �
 
   "graphics": `# Graphics: titles, shapes & stickers
 The title lanes hold three overlay element kinds, all sharing timing (start/end), center position (x/y fractions 0..1), rotation (degrees), opacity, and a lane; \`overlays\` in editor_state lists them with their \`kind\`. All burn into the export exactly as previewed.
-Rows are how elements stack (\`lane\`, 0 = bottom). Two elements on ONE row never overlap in time — placing a title where a shape already sits slides it clear instead of laying it on top — so anything meant to sit over something else names a higher row: background shape on lane 0, its title on lane 1. Every add tool and update_overlay take \`lane\`.
+Rows are how elements stack (\`lane\`, 0 = the front row; a higher row draws further back). Two elements on ONE row never overlap in time — placing a title where a shape already sits slides it clear instead of laying it on top — so anything meant to sit over something else names a LOWER row: title on lane 0, the background shape behind it on lane 1. Every add tool and update_overlay take \`lane\`.
 The frame's own color is set_background, not a full-frame rectangle: it fills the frame behind every clip and element, holds for the whole cut, letterboxes fitted footage, and shows through gaps on track 0. "Make the background white", a colored card behind a title sequence, a text-and-graphics video with no footage at all — all of them start with set_background. A rectangle element is for a panel or a band inside the frame, not for the frame itself.
 A whole run of text — a lyric video, a kinetic-typography passage, a quote sequence — is add_text_sequence, one call carrying a named look (frame color, card colors, type, motion): read the text-videos skill for the looks and the flow. A video needs no footage. Titles, shapes and stickers over a background color are a complete cut on their own: it plays, exports, and shares like any other. Build one by setting the background, then placing elements on the rows the stack needs — reach for footage only when the user asks for it.
 Titles (add_title / update_overlay): text, size (frame px; the design short side is 1080), font (sf=SF Pro, serif=New York, rounded, mono, impact), weight (400/700), color, shadow, plate (translucent dark backdrop).
@@ -174,7 +174,7 @@ With no lyrics text, transcribe with subtitles_generate and work from the cues i
 
 **Words over the user's footage.** Same flow, with the over-footage look (or any look with \`cards: false\`) and \`background: false\` — the clips keep playing and the words ride above them. Aim them off the caption band when captions are also on.
 
-**Words on plain color.** A cut with nothing on track 0 is a complete video: set the background, place the run, export. Cards are how the color changes line to line — the sequence paints one per line on its own row and puts the words on the row above, so they stack instead of sliding apart.
+**Words on plain color.** A cut with nothing on track 0 is a complete video: set the background, place the run, export. Cards are how the color changes line to line — the sequence paints one per line on its own row behind the words, so they stack instead of sliding apart.
 
 **Timing.** One line per screen beats two. A line needs about 0.4s minimum to read; 1.5–2.5s is the normal beat for a spoken line, and a sung line takes whatever the vocal takes. Lines never overlap on a row — the sequence tool lays them end to end from the times you give it.
 

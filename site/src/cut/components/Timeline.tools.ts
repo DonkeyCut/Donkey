@@ -188,13 +188,13 @@ export const TIMELINE_TOOLS = [
       plate: bool("Translucent plate behind text (default false)"),
       rotation: num("Degrees clockwise, -180..180"),
       opacity: num("Whole-element opacity 0..1"),
-      lane: num("Element row (0 = the bottom row). Elements on one row never overlap — a title over a shape needs a higher row than the shape."),
+      lane: num("Element row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape."),
     }, ["text"]),
   },
   {
     name: "add_text_sequence",
     description:
-      "Place a run of text on the timeline in one call — a lyric video, a kinetic-typography passage, a quote sequence — styled by a named look. `look` carries the whole design: the frame color, the card colors it cycles line to line, the type, and how each line arrives (ids and what each is for are in the text-videos skill). Lines come from `lines` ({text, start, end} in timeline seconds, plus an optional color/size override per line), or from the caption track with from_captions when a sync already timed them. Cards land on `lane` and the words one row above, so they stack instead of sliding apart. It sets the project background to the look's frame color unless background is false — words over the user's own footage want a look with no cards, and the footage keeps playing underneath.",
+      "Place a run of text on the timeline in one call — a lyric video, a kinetic-typography passage, a quote sequence — styled by a named look. `look` carries the whole design: the frame color, the card colors it cycles line to line, the type, and how each line arrives (ids and what each is for are in the text-videos skill). Lines come from `lines` ({text, start, end} in timeline seconds, plus an optional color/size override per line), or from the caption track with from_captions when a sync already timed them. The words land on `lane` and each card on the row under them, so they stack instead of sliding apart. It sets the project background to the look's frame color unless background is false — words over the user's own footage want a look with no cards, and the footage keeps playing underneath.",
     inputSchema: obj({
       look: str("Look id from the text-videos skill (default lyric-card)"),
       lines: {
@@ -212,7 +212,7 @@ export const TIMELINE_TOOLS = [
         ),
       },
       from_captions: num("Build the run from this caption track's cues (0-based) instead of `lines`"),
-      lane: num("Row for the color cards; the words go one row above (default 0)"),
+      lane: num("Row for the words; their color cards go one row under them (default 0, the front row)"),
       cards: bool("Paint the look's color cards behind each line (default: whatever the look does)"),
       background: bool("Set the project background to the look's frame color (default true)"),
     }),
