@@ -4,7 +4,7 @@ import { normalizeAspect, type ProjectDoc, type ProjectFolder, type ProjectSumma
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { deleteLadder } from "./ladderStore";
-import { mediaObjectUrl } from "./mediaCdn";
+import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl } from "./mediaCdn";
 import { del, deletePrefix, projectExportKey, projectHlsRoot, projectMediaKey } from "./r2";
 import { addUsage } from "./usage";
 import { caught, decodeFileParam, err, redirect } from "./util";
@@ -387,7 +387,12 @@ export const projectsCloud = {
     try {
       const fileName = decodeFileParam(file);
       const key = projectExportKey(userId, id, fileName);
-      return redirect(mediaObjectUrl(key, download ? { downloadName: fileName } : undefined));
+      // Export names are reserved once (exportName), so the mapping is
+      // write-once and the redirect is cacheable.
+      return redirect(
+        mediaObjectUrl(key, download ? { downloadName: fileName } : undefined),
+        MEDIA_REDIRECT_HEADERS
+      );
     } catch (e) {
       return caught(e, "Bad request.", 400);
     }

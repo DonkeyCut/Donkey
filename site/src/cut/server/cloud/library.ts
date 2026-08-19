@@ -14,7 +14,7 @@ import type {
 import type { StoredAsset } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { mediaObjectUrl } from "./mediaCdn";
+import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl } from "./mediaCdn";
 import { getProject, takenMediaNames } from "./projects";
 import { copy, del, head, libraryKey, presignPut, projectMediaKey } from "./r2";
 import { addUsage, quotaCheck } from "./usage";
@@ -522,11 +522,15 @@ export const libraryCloud = {
   async serveMedia(userId: string, file: string, download = false) {
     try {
       const fileName = decodeFileParam(file);
+      // Library files are written once — an import lands under a fresh name —
+      // so the redirect itself is cacheable and a revisit paints every poster
+      // from the browser's cache.
       return redirect(
         mediaObjectUrl(
           libraryKey(userId, fileName),
           download ? { downloadName: fileName } : undefined,
         ),
+        MEDIA_REDIRECT_HEADERS,
       );
     } catch (e) {
       return caught(e, "Bad request.", 400);

@@ -65,6 +65,17 @@ function tokenExpiry(minLifetimeSeconds = TOKEN_GRACE_SECONDS, at = Date.now()):
  * ahead of expiry rather than after a 403. */
 export const mediaUrlLifetime = (): number => tokenExpiry() - Math.floor(Date.now() / 1000);
 
+/** Headers for a 302 that points at a signed object URL for a write-once key.
+ * Every token carries at least TOKEN_GRACE_SECONDS of life at mint, so a
+ * redirect replayed from the browser's cache within that window still opens —
+ * posters and thumbnails paint straight from disk with zero round trips.
+ * Private: these routes answer for one signed-in user. A key whose bytes
+ * rotate (preview proxies, versioned media) keeps its uncached redirect, since
+ * a cached one would pin the version it was minted with. */
+export const MEDIA_REDIRECT_HEADERS: Record<string, string> = {
+  "Cache-Control": `private, max-age=${TOKEN_GRACE_SECONDS}`,
+};
+
 /** The longest a tree token may live. A tree token is the revocation window for
  * everything under its prefix, so a very long cut does not get to hold one
  * open indefinitely. */
