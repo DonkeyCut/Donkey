@@ -61,15 +61,36 @@ export async function serveFileRange(
   if (!info?.isFile()) return new Response("Not found.", { status: 404 });
 
   const size = info.size;
+  // no-cache means revalidate, and the ETag is what makes revalidation cheap:
+  // an unchanged file answers 304 and the browser paints its cached bytes,
+  // while a rewritten file (a new size or mtime) streams fresh ones.
+  const etag = `"${size.toString(16)}-${Math.round(info.mtimeMs).toString(16)}"`;
   const headers: Record<string, string> = {
     "Content-Type": opts.contentType ?? contentTypeFor(filePath),
     "Accept-Ranges": "bytes",
     "Cache-Control": "no-cache",
+    ETag: etag,
   };
+  const ifNoneMatch = req.headers.get("if-none-match");
+  if (
+    ifNoneMatch &&
+    ifNoneMatch
+      .split(",")
+      .map((t) => t.trim().replace(/^W\//, ""))
+      .some((t) => t === etag || t === "*")
+  ) {
+    return new Response(null, {
+      status: 304,
+      headers: { "Cache-Control": "no-cache", ETag: etag },
+    });
+  }
   if (opts.downloadName)
     headers["Content-Disposition"] = `attachment; filename="${opts.downloadName}"`;
 
-  const range = req.headers.get("range");
+  // A Range conditioned on a validator that no longer matches must get the
+  // whole file: a 206 of the new bytes would be stitched onto the old ones.
+  const ifRange = req.headers.get("if-range");
+  const range = ifRange && ifRange !== etag ? null : req.headers.get("range");
   const m = range ? /bytes=(\d*)-(\d*)/.exec(range) : null;
   if (m && (m[1] || m[2])) {
     let start = m[1] ? parseInt(m[1], 10) : 0;
