@@ -3068,7 +3068,7 @@ function HoverLine({
   return (
     <div
       className={cn(
-        "tl-hover-line pointer-events-none absolute top-0 bottom-0 z-30 w-px",
+        "tl-hover-line pointer-events-none absolute top-0 bottom-0 z-30 w-px will-change-transform",
         hold ? "bg-foreground/70" : "bg-foreground/30"
       )}
       style={{ transform: `translateX(${skimTime * pps}px)` }}
@@ -3399,7 +3399,10 @@ function Playhead({
       // Over the gutter as well as the clips: at 0 the playhead stands on the
       // gutter's own edge. The clips pass under the gutter; the time it is
       // showing does not. The grab cap lives in the pinned ruler.
-      className="pointer-events-none absolute top-0 bottom-0 left-0 z-50 w-[1.5px] bg-[#0a84ff] shadow-[0_0_8px_rgba(10,132,255,0.6)]"
+      // will-change: the line moves sixty times a second; its own compositor
+      // layer keeps each move off the tracks layer's paint, where a machine
+      // that falls behind leaves ghost lines at old positions.
+      className="pointer-events-none absolute top-0 bottom-0 left-0 z-50 w-[1.5px] bg-[#0a84ff] shadow-[0_0_8px_rgba(10,132,255,0.6)] will-change-transform"
     />
   );
 }
@@ -3424,7 +3427,7 @@ function PlayheadCap({
   return (
     <div
       ref={ref}
-      className="tl-playhead-cap absolute top-0 left-[-7px] h-5 w-4 cursor-ew-resize"
+      className="tl-playhead-cap absolute top-0 left-[-7px] h-5 w-4 cursor-ew-resize will-change-transform"
       onPointerDown={onScrub}
     >
       <div className="mx-auto h-3 w-2.5 rounded-t-[3px] bg-[#0a84ff] [clip-path:polygon(0_0,100%_0,100%_58%,50%_100%,0_58%)]" />
