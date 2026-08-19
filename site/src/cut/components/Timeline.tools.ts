@@ -7,6 +7,14 @@
  */
 
 import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
+import {
+  TEXT_EMPHASIS_IDS,
+  TEXT_LAYOUT_IDS,
+  TEXT_LAYOUT_NOTES,
+  TEXT_VARIATION_IDS,
+} from "@/cut/lib/textCompose";
+import { TEXT_MOVE_IDS, TEXT_MOVE_NOTES } from "@/cut/lib/textMotion";
+import { OVERLAY_ANIM_STYLE_IDS } from "@donkeycut/effects-kit";
 
 export const TIMELINE_TOOLS = [
   {
@@ -194,9 +202,20 @@ export const TIMELINE_TOOLS = [
   {
     name: "add_text_sequence",
     description:
-      "Place a run of text on the timeline in one call — a lyric video, a kinetic-typography passage, a quote sequence — styled by a named look. `look` carries the whole design: the frame color, the card colors it cycles line to line, the type, and how each line arrives (ids and what each is for are in the text-videos skill). Lines come from `lines` ({text, start, end} in timeline seconds, plus an optional color/size override per line), or from the caption track with from_captions when a sync already timed them. The words land on `lane` and each card on the row under them, so they stack instead of sliding apart. It sets the project background to the look's frame color unless background is false — words over the user's own footage want a look with no cards, and the footage keeps playing underneath.",
+      "Place a run of text on the timeline in one call — a lyric video, a kinetic-typography passage, a quote sequence — composed by a named look. `look` carries the design of one line (frame color, cards, type, entrance) AND the ensemble the run walks across its whole length: where successive lines land, which faces they rotate through, which entrances, and what each line does while it holds. So one call already produces a varied, composed run; it never lays a hundred identical lines at dead center. Lines come from `lines` ({text, start, end} in timeline seconds), or from the caption track with from_captions when a sync already timed them. Mark the loud lines with `emphasis: \"hero\"` and the quiet ones `\"whisper\"`, and label passages with `section` (\"verse\", \"chorus\") — a new section restarts the type and color rotas, so a chorus does not look like the verse before it. Anything you set per line (font, x/y, rotation, in_style, move, color, size) wins over the ensemble. The words land on `lane` and each card on the row under them. It sets the project background to the look's frame color unless background is false. Look ids, layouts and moves are in the text-videos and text-creativity skills.",
     inputSchema: obj({
       look: str("Look id from the text-videos skill (default lyric-card)"),
+      variation: {
+        type: "string",
+        enum: [...TEXT_VARIATION_IDS],
+        description:
+          "How far the run departs from one repeated design. bold (default) walks the look's whole ensemble — faces, tilts, palette, keyframe moves; subtle keeps one typeface and varies placement and entrance; none lays every line identical, for a run you intend to hand-compose.",
+      },
+      layout: {
+        type: "string",
+        enum: [...TEXT_LAYOUT_IDS],
+        description: `Where successive lines land, overriding the look's own. ${TEXT_LAYOUT_IDS.map((id) => `${id}: ${TEXT_LAYOUT_NOTES[id]}`).join(" ")}`,
+      },
       lines: {
         type: "array",
         description: "The run, in order. Omit times on a line and it follows the one before it.",
@@ -205,8 +224,29 @@ export const TIMELINE_TOOLS = [
             text: str("The line (\\n for a break inside it)"),
             start: num("Timeline start s"),
             end: num("Timeline end s"),
-            color: str("Override the look's text color for this line — for an accent word or a section change"),
-            size: num("Override the look's size for this line"),
+            emphasis: {
+              type: "string",
+              enum: [...TEXT_EMPHASIS_IDS],
+              description:
+                "How loud this line is: hero is markedly bigger and takes the look's hero move, whisper is small and quiet. Default normal.",
+            },
+            section: str('Passage label ("verse", "chorus", "bridge") — a new label restarts the type and color rotas'),
+            color: str("Override the run's color for this line"),
+            size: num("Override the composed size for this line"),
+            font: str("Override the face carrying this line"),
+            x: num("Frame-width fraction 0..1, overriding the layout"),
+            y: num("Frame-height fraction 0..1, overriding the layout"),
+            rotation: num("Tilt in degrees, -45..45"),
+            in_style: {
+              type: "string",
+              enum: [...OVERLAY_ANIM_STYLE_IDS],
+              description: "Entrance for this line, overriding the rota",
+            },
+            move: {
+              type: "string",
+              enum: [...TEXT_MOVE_IDS],
+              description: `What this line does WHILE it holds (a keyframe move; the entrance is separate). ${TEXT_MOVE_IDS.filter((m) => m !== "none").map((m) => `${m}: ${TEXT_MOVE_NOTES[m]}`).join(" ")}`,
+            },
           },
           ["text"]
         ),

@@ -82,7 +82,21 @@ import { CAPTION_STYLES, laneCues, subtitleLaneCount } from "./subtitles";
 import { fuseTimeline, renderFusedTimeline } from "./watch/fuse";
 import { mergeWatch, mergeWatchNotes, uncoveredSeconds, unnotedSpans } from "./watch/merge";
 import { syncLines, type TimedWord } from "./lyricSync";
+import {
+  composeTextRun,
+  TEXT_LAYOUT_IDS,
+  type ComposeLine,
+  type TextLayout,
+  type TextVariation,
+} from "./textCompose";
 import { requireTextLook } from "./textLooks";
+import {
+  MOVE_STRENGTH_MAX,
+  MOVE_STRENGTH_MIN,
+  TEXT_MOVE_IDS,
+  textMoveKeys,
+  type TextMoveId,
+} from "./textMotion";
 import { queueWatchSweep, withSweepPaused } from "./watch/sweep";
 import { synthesizeMusic } from "./audioGen";
 import { composeMusicPrompt } from "./composeGen";
@@ -95,6 +109,7 @@ import {
   ANIM_DEFAULT_SECONDS,
   ANIM_STYLE_IDS,
   DEFAULT_BACKGROUND,
+  clampOverlayPos,
   frameOf,
   IMAGE_CLIP_SECONDS,
   isEffectOverlay,
@@ -347,6 +362,29 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     };
     edge("in", "in_style", "in_seconds");
     edge("out", "out_style", "out_seconds");
+    // A move is not a fourth slot on the element: it writes the pose track
+    // the inspector's diamond writes, so the user can drag the keys after.
+    if (typeof input.move === "string") {
+      if (input.move === "none") s.updateOverlay(o.id, { kf: [] });
+      else {
+        if (!TEXT_MOVE_IDS.includes(input.move))
+          throw new ToolError(`Unknown move: ${input.move}. Use one of: ${TEXT_MOVE_IDS.join(", ")}.`);
+        const strength = isNum(input.move_strength)
+          ? clamp(input.move_strength, MOVE_STRENGTH_MIN, MOVE_STRENGTH_MAX)
+          : 1;
+        const keys = textMoveKeys(
+          input.move,
+          { x: o.x, y: o.y, rotation: o.rotation ?? 0 },
+          o.end - o.start,
+          strength
+        );
+        if (!keys)
+          throw new ToolError(
+            `This element is too short for a move to read (${round2(o.end - o.start)}s).`
+          );
+        s.updateOverlay(o.id, { kf: keys });
+      }
+    }
     const rawLoop = input.loop_style;
     const speed = isNum(input.loop_speed) ? clamp(input.loop_speed, 0.25, 4) : undefined;
     if (typeof rawLoop === "string") {
@@ -1335,13 +1373,26 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         throw new ToolError(
           "Pass lines: [{text, start, end}], or from_captions: true to build the sequence from the caption track."
         );
+      const variation: TextVariation =
+        input.variation === "none" || input.variation === "subtle" || input.variation === "bold"
+          ? input.variation
+          : "bold";
+      if (typeof input.layout === "string" && !TEXT_LAYOUT_IDS.includes(input.layout as TextLayout))
+        throw new ToolError(`Unknown layout. Use one of: ${TEXT_LAYOUT_IDS.join(", ")}.`);
+      const layout = typeof input.layout === "string" ? (input.layout as TextLayout) : undefined;
       if (input.background !== false) s.setBackground(look.frame.background);
       // Row 0 is the front of the element stack, so the words take the row the
       // caller named and each card goes one row under them. Cards over words
       // would paint the line out.
       const cardLane = lane + 1;
+      const composed = composeTextRun(lines, look, {
+        variation,
+        layout,
+        frame: frameOf(s.aspect),
+        cards,
+      });
       const made: { id: string; start: number; end: number; text: string }[] = [];
-      lines.forEach((line, i) => {
+      composed.forEach((line, i) => {
         const card = cards.length > 0 ? cards[i % cards.length] : null;
         if (card) {
           useEditor.getState().seek(line.start);
@@ -1362,20 +1413,18 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         useEditor.getState().addOverlay({ lane });
         const sel = useEditor.getState().selection;
         if (sel?.kind !== "overlay") return;
-        const onCard =
-          card && look.text.onCards ? look.text.onCards[i % look.text.onCards.length] : undefined;
-        const fit = fitTextToFrame(line.text, look, frameOf(s.aspect), line.size ?? look.text.size);
         applyOverlayPatchSettled(sel.id, {
           start: line.start,
           end: line.end,
-          text: fit.text,
-          x: look.text.x,
-          y: look.text.y,
-          size: fit.size,
-          font: look.text.font,
-          weight: look.text.weight,
-          color: line.color ?? onCard ?? look.text.color,
-          italic: look.text.italic,
+          text: line.text,
+          x: line.x,
+          y: line.y,
+          rotation: line.rotation,
+          size: line.size,
+          font: line.font,
+          weight: line.weight,
+          color: line.color,
+          italic: line.italic || look.text.italic,
           letterSpacing: look.text.letterSpacing,
           lineHeight: look.text.lineHeight,
           stroke: look.text.stroke,
@@ -1385,29 +1434,29 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           shadow: look.text.shadow ?? false,
           align: "center",
         });
-        if (look.motion.in || look.motion.out || look.motion.loop)
-          useEditor.getState().updateOverlay(sel.id, {
-            anim: {
-              ...(look.motion.in ? { in: look.motion.in } : {}),
-              ...(look.motion.out ? { out: look.motion.out } : {}),
-              ...(look.motion.loop
-                ? { loop: { style: look.motion.loop.style, speed: look.motion.loop.speed ?? 1 } }
-                : {}),
-            },
-          });
+        useEditor.getState().updateOverlay(sel.id, {
+          anim: line.anim,
+          ...(line.kf ? { kf: line.kf } : {}),
+        });
         const o = useEditor.getState().overlays.find((x) => x.id === sel.id);
         if (o) made.push({ id: o.id, start: round2(o.start), end: round2(o.end), text: line.text });
       });
+      const faces = [...new Set(composed.map((l) => l.font))];
+      const moves = [...new Set(composed.map((l) => l.move))].filter((m) => m !== "none");
       return {
         look: look.id,
+        variation,
+        layout: layout ?? (variation === "none" ? "center" : look.ensemble.layout),
         count: made.length,
         lanes: cards.length > 0 ? { cards: cardLane, text: lane } : { text: lane },
         background: useEditor.getState().background,
+        faces,
+        moves,
         items: made.slice(0, 40),
         ...(made.length > 40 ? { itemsTruncated: true } : {}),
         note:
           cards.length > 0
-            ? `Words on row ${lane} with their cards on row ${cardLane} behind them, colors cycling ${look.frame.cards.join(" → ")}.`
+            ? `Words on row ${lane} with their cards on row ${cardLane} behind them, colors cycling ${look.frame.cards.join(" \u2192 ")}.`
             : `Words on row ${lane} over the ${look.frame.background} frame.`,
       };
   },
@@ -2854,55 +2903,12 @@ function cueWords(cues: { start: number; end: number; text: string; words?: Time
   return out;
 }
 
-/** A line broken and sized to the frame it is going into. The look's size is
- * a ceiling written for a wide frame; a vertical cut, or a long line, gets
- * breaks at word boundaries first and a smaller size only when breaking is
- * not enough. Type the user hand-sized (a per-line `size`) is left alone
- * apart from the breaks. */
-function fitTextToFrame(
-  text: string,
-  look: { text: { size: number; widthRatio?: number; lineHeight?: number } },
-  frame: { w: number; h: number },
-  size: number
-): { text: string; size: number } {
-  if (text.includes("\n")) return { text, size }; // the caller broke it themselves
-  const ratio = look.text.widthRatio ?? 0.55;
-  const usable = frame.w * 0.86;
-  const words = text.split(/\s+/).filter((w) => w.length > 0);
-  if (words.length === 0) return { text, size };
-  const maxLines = 3;
-  // The widest a line may run, in characters, at this size.
-  const budget = Math.max(6, Math.floor(usable / (size * ratio)));
-  const lines: string[] = [];
-  let cur = "";
-  for (const w of words) {
-    const next = cur ? `${cur} ${w}` : w;
-    if (next.length <= budget || cur === "") cur = next;
-    else {
-      lines.push(cur);
-      cur = w;
-    }
-  }
-  if (cur) lines.push(cur);
-  const longest = lines.reduce((n, l) => Math.max(n, l.length), 0);
-  // Still over the frame (one long word, or more rows than the look wants):
-  // shrink until it sits inside.
-  let fitted = size;
-  if (longest > budget) fitted = Math.min(fitted, Math.floor(usable / (longest * ratio)));
-  if (lines.length > maxLines) fitted = Math.min(fitted, Math.floor(size * (maxLines / lines.length)));
-  const rows = lines.length;
-  const lineH = look.text.lineHeight ?? 1.25;
-  const tall = rows * fitted * lineH;
-  if (tall > frame.h * 0.8) fitted = Math.floor((frame.h * 0.8) / (rows * lineH));
-  return { text: lines.join("\n"), size: Math.max(16, Math.min(size, fitted)) };
-}
-
 /** The lines a text sequence should place: the ones passed in, or the caption
  * track read as a running order. */
 function textSequenceLines(
   s: ReturnType<typeof useEditor.getState>,
   input: Record<string, unknown>
-): { text: string; start: number; end: number; color?: string; size?: number }[] {
+): ComposeLine[] {
   if (input.from_captions === true || isNum(input.from_captions)) {
     const lane = isNum(input.from_captions) ? Math.max(0, Math.round(input.from_captions)) : 0;
     return laneCues(s.subtitles, lane).map((c) => ({
@@ -2920,6 +2926,18 @@ function textSequenceLines(
       end: isNum(l.end) ? l.end : NaN,
       ...(typeof l.color === "string" ? { color: l.color } : {}),
       ...(isNum(l.size) ? { size: clamp(Math.round(l.size), 16, 320) } : {}),
+      ...(l.emphasis === "whisper" || l.emphasis === "hero" || l.emphasis === "normal"
+        ? { emphasis: l.emphasis }
+        : {}),
+      ...(typeof l.section === "string" && l.section ? { section: l.section } : {}),
+      ...(typeof l.font === "string" ? { font: l.font } : {}),
+      ...(isNum(l.x) ? { x: clampOverlayPos(l.x) } : {}),
+      ...(isNum(l.y) ? { y: clampOverlayPos(l.y) } : {}),
+      ...(isNum(l.rotation) ? { rotation: clamp(l.rotation, -45, 45) } : {}),
+      ...(typeof l.in_style === "string" ? { inStyle: l.in_style as OverlayAnimStyle } : {}),
+      ...(typeof l.move === "string" && TEXT_MOVE_IDS.includes(l.move as TextMoveId)
+        ? { move: l.move as TextMoveId }
+        : {}),
     }))
     .filter((l) => l.text.length > 0);
   // A line with no times follows the one before it; the first starts at the
@@ -2934,7 +2952,7 @@ function textSequenceLines(
     // decided — a following line that starts earlier cannot invert it.
     const end = Math.max(Number.isNaN(l.end) ? fallbackEnd : l.end, start + 0.2);
     cursor = end;
-    return { ...l, start: round2(start), end: round2(end) };
+    return { ...l, start: round2(start), end: round2(end) } as ComposeLine;
   });
 }
 

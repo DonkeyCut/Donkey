@@ -10,7 +10,9 @@
  */
 
 import { AI_PANEL_TOOLS } from "@/cut/components/AiPanel.tools";
+import { TEXT_LAYOUT_IDS, TEXT_LAYOUT_NOTES } from "@/cut/lib/textCompose";
 import { textLookCatalog } from "@/cut/lib/textLooks";
+import { textMoveCatalog } from "@/cut/lib/textMotion";
 import { OVERLAY_ANIMATION_TOOLS } from "@/cut/components/AnimationTiles.tools";
 import { AUDIO_TOOLS } from "@/cut/components/AudioPanel.tools";
 import { EDITOR_TOOLS } from "@/cut/components/Editor.tools";
@@ -137,14 +139,14 @@ What the user sees on the transitions row: one badge per bar, and nothing else �
 The title lanes hold three overlay element kinds, all sharing timing (start/end), center position (x/y fractions 0..1), rotation (degrees), opacity, and a lane; \`overlays\` in editor_state lists them with their \`kind\`. All burn into the export exactly as previewed.
 Rows are how elements stack (\`lane\`, 0 = the front row; a higher row draws further back). Two elements on ONE row never overlap in time — placing a title where a shape already sits slides it clear instead of laying it on top — so anything meant to sit over something else names a LOWER row: title on lane 0, the background shape behind it on lane 1. Every add tool and update_overlay take \`lane\`.
 The frame's own color is set_background, not a full-frame rectangle: it fills the frame behind every clip and element, holds for the whole cut, letterboxes fitted footage, and shows through gaps on track 0. "Make the background white", a colored card behind a title sequence, a text-and-graphics video with no footage at all — all of them start with set_background. A rectangle element is for a panel or a band inside the frame, not for the frame itself.
-A whole run of text — a lyric video, a kinetic-typography passage, a quote sequence — is add_text_sequence, one call carrying a named look (frame color, card colors, type, motion): read the text-videos skill for the looks and the flow. A video needs no footage. Titles, shapes and stickers over a background color are a complete cut on their own: it plays, exports, and shares like any other. Build one by setting the background, then placing elements on the rows the stack needs — reach for footage only when the user asks for it.
+A whole run of text — a lyric video, a kinetic-typography passage, a quote sequence — is add_text_sequence, one call carrying a named look. A look is the design of the whole run, not one line: the frame color, the cards, and the ensemble the run walks across its length — faces, entrances, where successive lines land, and what each holds. Read the text-videos skill for the looks and the flow, and text-creativity for the fifty devices that keep a long run from reading flat. Never lay a run of identical centered lines and then repair it element by element. A video needs no footage. Titles, shapes and stickers over a background color are a complete cut on their own: it plays, exports, and shares like any other. Build one by setting the background, then placing elements on the rows the stack needs — reach for footage only when the user asks for it.
 Titles (add_title / update_overlay): text, size (frame px; the design short side is 1080), font (${FONTS.map((f) => `${f.id}=${f.label}`).join(", ")}), weight (400/700), color, shadow, plate (translucent dark backdrop).
 Shapes (add_shape): rect, ellipse, line, arrow. w/h are frame fractions; rect/ellipse take fill + fill_opacity, corner radius (rect), and an outline (stroke_color/stroke_width); line/arrow draw in \`fill\` with h as their thickness, and rotation gives them their direction (0° points right, 90° points down).
 Stickers (add_sticker): a project image asset (generated cutouts in the Elements panel carry origin "sticker"); w is a frame-width fraction and height follows the source's aspect. Lottie JSON uploads become animated stickers that loop for the element's duration.
 Custom stickers (create_sticker): one call generates the image, removes the background, adds the die-cut outline, and places it — use it when the user asks for a sticker of something they don't have (it spends credits like image generation).
 Effects (add_effect): time-ranged treatments over the finished picture — the footage and everything laid over it. Two families, one list: the treatments (${EFFECT_TREATMENTS.join(", ")}) and the graded looks (${LOOK_EFFECTS.join(", ")}). Placed like any element and tuned with \`amount\` (update_overlay); an effect added over a clip opens covering that clip, and trims like anything else. One effect at a time reads best, amounts under ~0.5.
 Advanced text (update_overlay): italic, align (multi-line), letter_spacing (em), line_height, stroke_color/stroke_width (em outline behind the fill), and richer shadows. Bundled Google families join the system set — ${GOOGLE_FONT_IDS.join(", ")} — and so do the user's own: a .ttf/.otf/.woff/.woff2 file dropped on the Library is offered in every project under a font id like "font:<id>". Editor_state lists the ones this account has under \`fonts\` — use an id from there instead of guessing at a family name, and when someone asks for a typeface that is not in the list, tell them the Library takes font files.
-Animation (set_overlay_animation): every element takes preset In/Out ramps (${OVERLAY_ANIM_STYLE_IDS.join(", ")} — typewriter for titles only; the per-letter styles sweep a title character by character) and a Loop (${OVERLAY_LOOP_STYLE_IDS.join(", ")}) that runs its whole duration. Entrances 0.3–0.6s read well; one loop per scene, sparingly.
+Animation (set_overlay_animation): every element takes preset In/Out ramps (${OVERLAY_ANIM_STYLE_IDS.join(", ")} — typewriter for titles only; the per-letter styles sweep a title character by character), a Loop (${OVERLAY_LOOP_STYLE_IDS.join(", ")}) that runs its whole duration, and a Move that says what it does WHILE it holds. Entrances 0.3–0.6s read well; one loop per scene, sparingly; a move on the lines that matter. Every one of these is keyframe data — the same poses set_overlay_keyframes writes — so a named move lands as ordinary keys the user can drag, and anything the names do not cover is keyed directly.
 Keyframes (set_overlay_keyframes): for motion no preset covers — a path across the frame, a slow push in, a drift that holds first. A key is a whole pose (position, scale, rotation, opacity) at a time in seconds from the element's start; the pose moves linearly between keys and holds outside them, and presets still compose on top. Two or three keys carry almost everything; reach for a preset first and keyframes when the user describes a specific path or timing. In the UI the diamond in the inspector adds a key at the playhead, and dragging the element then records into it. set_clip_keyframes is the same track on a video clip (any track): pans, push-ins, picture-in-picture flights, spins, and fades on the footage itself.
 Masks (set_mask): trim any element or video clip to a shape — rect, square, circle, linear, mirror — with feather, invert, and its own keyframe track for reveals and wipes. The subject kind trims by the person in the shot (on-device segmentation; preview and export match): inverted sits the item behind the speaker, plain keeps it only on the speaker. Behind-speaker reads well when the speaker is clearly separated from the background; with no detectable person it degrades to the plain picture. Groups: the user can group elements (select several, Group in the inspector) — selecting one selects all, and moves/resize/rotate/timing ride together.
 Composite builds: these primitives compose. Stacked overlay video copies, masks and their keys, pose keyframes, staggered starts, and shapes construct effects beyond any preset list. Given a reference (a screenshot or clip of an effect the user wants), reverse-engineer it:
@@ -159,27 +161,108 @@ Tasteful graphics: shapes read best as accents (a highlight box behind a stat, a
 In the UI: the timeline toolbar adds Text; the Elements side-panel tab browses stickers and shapes and creates sticker images, and the Effects tab holds the effects — a click in any panel picks a tile, and dragging one onto the timeline is what places it; dragging in the preview places an element, its corner handle resizes, the top handle rotates; the Inspector edits every field.`,
 
   "text-videos": `# Text-driven videos: lyrics, kinetic type, quote cards
-A video whose picture is words. Three pieces: the frame behind them (set_background, or the user's footage), the words themselves, and the clock that says when each line lands.
+A video whose picture is words. Three pieces: the frame behind them (set_background, or the user's footage), the words themselves, and the clock that says when each line lands. For the device list — fifty ways to make a run of text worth watching — read the text-creativity skill.
 
-**Two ways to carry the words.** A caption track is one styled row of text that follows a voice — it holds word timings, so karaoke (each word lighting as it is sung) is only possible here, and one call restyles every line. Elements are separate titles and cards on the timeline — per-line color, per-glyph motion, a color card behind each line — which is what kinetic typography and lyric cards are made of. Captions for a song you want to sing along to; elements when each line is its own picture. Both burn into the export.
+**Two ways to carry the words.** A caption track is one styled row of text that follows a voice — it holds word timings, so karaoke (each word lighting as it is sung) is only possible here, and one call restyles every line. Elements are separate titles and cards on the timeline — per-line face, per-line placement, per-glyph motion, a color card behind each line — which is what kinetic typography and lyric cards are made of. Captions for a song you want to sing along to; elements when each line is its own picture. Both burn into the export.
 
-**The looks.** Every look sets the frame color, the card colors it cycles, the type, the motion, and the caption equivalent, so a whole video comes from one id:
+**The looks.** A look is not one line's styling — it is the design of a whole run. It sets the frame color, the cards it cycles, the type, the entrance, the caption equivalent, AND the ensemble the run walks across its length: the faces it rotates through, the entrances, where successive lines land, and what each line does while it holds. So one add_text_sequence call already produces a composed, varied run:
 ${textLookCatalog()}
+
+**Composing a run (this is the part that decides whether it reads as creative).** add_text_sequence takes the whole run in one call and walks the look's rotas by index, so no two neighbouring lines land the same. Steer it:
+- \`variation\`: bold (default) walks faces, tilts, palette and keyframe moves; subtle keeps one face and varies placement and entrance; none lays every line identical — only for a run you are about to hand-compose yourself.
+- \`layout\` overrides where lines land: ${TEXT_LAYOUT_IDS.map((id) => `${id} — ${TEXT_LAYOUT_NOTES[id]}`).join(" ")}
+- \`emphasis\` per line: hero is markedly bigger and takes the look's hero move, whisper is small and quiet. Mark the hook, the title line, the punchline. Two or three heroes in a verse; a run where everything is a hero is a run where nothing is.
+- \`section\` per line ("verse", "chorus", "bridge"): a new label restarts the type and color rotas, so a chorus does not look like the verse before it. Label every line of a song — it is the cheapest way to make three passages read as three passages.
+- \`move\` per line: what it does WHILE it holds, separate from the entrance. The rota gives each line one already; name one when a specific line wants a specific move.
+- Anything you set per line — font, x, y, rotation, in_style, color, size — wins over the ensemble.
+Never lay a run at variation "none" and then repair it with a hundred update_overlay calls. Compose it in the call.
 
 **A lyric video, from an audio track and the words.** The user has the song and the lyrics.
 1. The song is in the cut (a soundtrack clip). \`get_state\` confirms it and gives the duration.
 2. sync_lyrics with the lyrics text, one line per screen. It transcribes the cut, aligns the user's words to what it recognized, and writes the user's text — verbatim — onto a caption track with per-word times. Singing defeats recognizers; that is why the wording comes from the user and only the clock comes from the transcript.
-3. Dress it: set_caption_look with a look id (karaoke-glow for words lighting up, neon-club, serif-mood…), or add_text_sequence from_captions to turn the same timed lines into full-frame cards.
-4. Check it: seek + capture_frame at two or three lines, and listen_audio across one of them. A line that sits early or late retimes with update_cue — the recognizer's gaps are where drift comes from.
+3. Dress it: set_caption_look with a look id (karaoke-glow for words lighting up, neon-club, serif-mood…), or add_text_sequence from_captions to turn the same timed lines into full-frame cards. Going the element route, re-send the lines yourself with emphasis and section on them rather than from_captions — from_captions carries the timing but knows nothing about which line is the hook.
+4. Check it: seek + capture_frame at three or four lines that landed on DIFFERENT rota steps, and listen_audio across one of them. A line that sits early or late retimes with update_cue.
 With no lyrics text, transcribe with subtitles_generate and work from the cues it wrote.
 
-**Words over the user's footage.** Same flow, with the over-footage look (or any look with \`cards: false\`) and \`background: false\` — the clips keep playing and the words ride above them. Aim them off the caption band when captions are also on.
+**Words over the user's footage.** Same flow, with the over-footage look (or any look with no cards) and \`background: false\` — the clips keep playing and the words ride above them. Aim them off the caption band when captions are also on, and prefer layouts that stay out of the middle of the shot.
 
 **Words on plain color.** A cut with nothing on track 0 is a complete video: set the background, place the run, export. Cards are how the color changes line to line — the sequence paints one per line on its own row behind the words, so they stack instead of sliding apart.
 
 **Timing.** One line per screen beats two. A line needs about 0.4s minimum to read; 1.5–2.5s is the normal beat for a spoken line, and a sung line takes whatever the vocal takes. Lines never overlap on a row — the sequence tool lays them end to end from the times you give it.
 
-**Making it yours.** Every look is a starting point: after add_text_sequence, update_overlay retimes or recolors any line, set_overlay_animation swaps a line's motion, and set_overlay_keyframes moves it on a path. A per-line \`color\` on the sequence call marks the word that matters without touching the rest.`,
+**Fixing a run.** update_overlay retimes or recolors any line, set_overlay_animation swaps its entrance, set_overlay_keyframes gives it a path. Reach for those to fix a handful of lines. When the whole run is wrong, delete it and re-compose with different look, layout, or variation — that is one call against a hundred.`,
+
+  "text-creativity": `# Text creativity: fifty devices
+Ways to make a run of words worth watching. Every one is buildable with the tools you already have — add_text_sequence composes most of them in a single call; the rest are update_overlay, set_overlay_keyframes, set_mask, add_shape and add_overlay_video on top.
+
+Read this before any text-heavy job the user calls flat, boring, samey, or "not creative". The failure mode is always the same: one design repeated a hundred times at dead center. Pick three or four devices from different groups and commit to them for the whole video — a run using twenty devices is noise, and a run using none is wallpaper.
+
+## Rhythm — what changes from line to line
+1. **Hero and whisper.** Mark the hook \`emphasis: hero\`, the throwaway line \`whisper\`. Size contrast is the single strongest signal that a video was designed.
+2. **Small to large.** March size up across a passage: whisper, normal, normal, hero. The build is the payoff.
+3. **Large to small.** The reverse, for a line that trails off or an admission.
+4. **Section palettes.** Label verse/chorus/bridge with \`section\` — the rotas restart and the passages stop looking alike.
+5. **Escalating repeat.** A repeated hook already steps up size each time it comes round. Push it further by naming the last one hero.
+6. **One word per screen.** Break a line into its words as separate lines on the beat. Fast, percussive, made for a drop.
+7. **Held line, moving words.** The opposite: one line up for four bars with a slow \`push\` move under it, while everything else is fast.
+8. **The rest.** Leave a beat with nothing on screen before the hook. Silence in the picture makes the next line land.
+9. **Off-beat entry.** Start a line a sixth of a second before its vocal rather than on it — text read early feels sung, text read late feels subtitled.
+10. **Anticipation card.** A whisper line holding a single word ("almost…") between two loud passages.
+
+## Type — the faces themselves
+11. **Two-face pairing.** A display face for the hook, a neutral one for the rest. The bold ensembles already do this; hold it steady rather than adding a third.
+12. **Mixed case on purpose.** Caps faces (anton, bebas, bangers, archivo-black) shout; sentence-case faces (montserrat, poppins, space-grotesk, playfair, dm-serif) speak. When a user says everything is shouting, the fix is a mixed-case face, not smaller type.
+13. **Handwriting for confession.** caveat and permanent-marker read as a person, not a title card.
+14. **Serif for weight.** playfair and dm-serif carry ballads, credits and anything that should feel written down.
+15. **Mono for machinery.** mono plus a typewriter entrance for anything that should read as a screen.
+16. **Tracking as tone.** letter_spacing 0.06–0.12em on a serif reads expensive; -0.01em on caps reads like a poster.
+17. **Line height as pace.** lineHeight under 1.0 on caps packs a block; 1.4 on a serif opens it out.
+18. **Stroke instead of shadow.** A heavy stroke (0.03–0.05em) over footage keeps type legible where a shadow goes muddy.
+19. **Word-level color.** A per-line \`color\` on the one line that matters marks it without touching the rest.
+20. **The mismatched word.** One word of a phrase on its own element, in another face, tilted, overlapping the rest. Two calls, enormous effect.
+
+## Composition — where words sit
+21. **Stop centering everything.** A hundred lines at 0.5/0.5 is the flattest thing text can do. Every layout except \`center\` fixes it in one parameter.
+22. **Stack.** Lines step up and down the middle column so a phrase builds vertically.
+23. **Call and response.** \`alternate\` swings left and right — perfect for question/answer or two voices.
+24. **Ladder.** Each line a rung lower, then back to the top: lists, countdowns, verses.
+25. **Drift.** A slow diagonal walk for long holds and ballads.
+26. **Scatter.** Scattered chaos for punk, comedy and anything frantic.
+27. **Corners.** Poster energy — words claiming the edges of the frame.
+28. **Left rail.** Pin a whole passage to x 0.22 with align left; the empty right half is the composition.
+29. **Overlap on purpose.** Two elements on DIFFERENT rows at the same time, one behind the other — a big pale word behind a small sharp one. Same row would slide them apart, so give the back word a higher lane.
+30. **Off-frame bleed.** A hero word sized past the frame edge so it is cropped. Set size well over the fit and let it bleed.
+31. **Rule of thirds.** Park the run at y 0.33 or 0.66 rather than 0.5 and leave the other two thirds empty.
+32. **Follow the subject.** Over footage, place words in the empty half of the shot and move them when the shot changes.
+
+## Motion — arrival and hold
+**Everything here is keyframes.** Entrances, exits, loops and moves are one format: a pose (position, scale, rotation, opacity, letter-spacing) keyed over a normalized window with cubic-bezier easing, plus a range selector that hands the motion from one character to the next — the After Effects text-animator model, the one Lottie serializes. So a named preset and a hand-keyed track are the same object at different levels of convenience. Reach for a name first; key it directly when no name says what you mean.
+
+33. **Arrival and hold are two decisions.** \`in_style\` is how it appears; \`move\` is what it does for the rest of its life. A line with only an entrance freezes the moment it lands.
+34. **The moves** — each writes the element's own pose track, so the keys are there to drag afterwards:
+${textMoveCatalog()}
+35. **Per-glyph entrances.** rise, drop, grow, flip, swivel, bounce, wave, converge, streak, tumble and scatter move a title's letters one at a time. They cost nothing extra and are the difference between a title and kinetic typography.
+36. **Typewriter for a reveal.** Slow it to two thirds of the line's hold so the text finishes typing just before it leaves.
+37. **Wipe for a band.** A wipe entrance on a line sitting in a shape band reads as a broadcast lower third.
+38. **Loops, sparingly.** flicker on neon, float on dreamy, wiggle on comedy — one loop per passage, never on every line.
+39. **Exit matters.** A run where every line simply cuts out feels cheap; a 0.2s fade or a converge out costs nothing.
+40. **Contrast the move to the entrance.** A violent entrance (slam, tumble) into a still hold; a soft entrance (fade) into a slow push. Both loud reads as noise.
+41. **Match the move to the beat.** punch and slam on hits, push and creep under sustained notes, float and breathe under held vocals.
+42. **Key it yourself when no name says it.** set_overlay_keyframes takes whole poses in seconds from the element's start — a path across the frame, a hold-then-drift, a beat that lands on a specific hit in the music. Two or three keys carry almost everything, and a preset entrance still composes over them.
+
+## Frame and color
+43. **Cards as punctuation.** A full-frame color card behind each line, cycling — the color change IS the edit. lyric-card and pastel-pop do it; \`cards: true\` adds it to any look that has them.
+44. **Invert on the hook.** One card in the cycle with the light/dark relationship flipped. The eye reads it as a cut.
+45. **Band, not plate.** A shape rectangle at fill_opacity 0.2–0.5 behind a line on a lower row, wider than the text, beats a plate for anything editorial.
+46. **Color as the section marker.** One accent per passage, changing at the chorus. Cheaper and clearer than changing everything.
+47. **Two colors only.** A frame color and one accent, everywhere. Restraint reads as design; six colors read as defaults.
+
+## Construction — beyond the presets
+48. **Masked reveal.** set_mask a linear mask on a title and keyframe it: the line wipes on from one side, no entrance preset involved.
+49. **Text behind the speaker.** A subject mask (inverted) on a title over footage sits the words behind the person in the shot. Nothing else in a text video looks as expensive.
+50. **Text in the footage.** add_overlay_video a copy of the shot, mask it to the text's shape region, and the picture plays inside the word. The graphics skill's composite-builds section has the geometry.
+
+**How to use this list.** Pick a look for the base design, one composition device, one rhythm device and one motion device, and hold them for the whole video. Then break the pattern exactly once, on the hook. That single break is what a viewer remembers.`,
 
   "audio-and-subtitles": `# Audio, voiceover & subtitles
 Lyrics and scripts the user already has: sync_lyrics times their exact words against the audio (transcribing first when needed) and writes them to a caption track with per-word timings; set_caption_look then dresses the track — preset, size, font, karaoke word highlight, accent color — from a text-videos look id or field by field. The text-videos skill has the whole flow, including turning the same timed lines into full-frame cards.
