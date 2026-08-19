@@ -36,7 +36,7 @@ import { applyEffectToCanvas, evalOverlayFrame, grainTile, isMaskAnimated, isOve
 import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
 import { createRasterCanvas, type RasterSurface } from "./raster";
 import { renderElementPng } from "./textRender";
-import { behindSubjectOverlay, frameOf, frontSubjectOverlay, isEffectOverlay, isFullRect, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, projectFadeSeconds, rectOf } from "./types";
+import { behindSubjectOverlay, clipCovers, frameOf, frontSubjectOverlay, isEffectOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, projectFadeSeconds, rectOf } from "./types";
 import type { ClipSpan, EffectOverlay, MediaAsset, Overlay, StickerOverlay } from "./types";
 import type { ExportDoc, ExportSettings } from "./exportClient";
 
@@ -890,9 +890,15 @@ export class FramePainter {
       const span = this.spanOfClip.get(layer.clip.id);
       if (!span) continue;
       const frame = await this.readerFor(layer.asset).frameAt(sourceTimeAt(span, t));
-      const rect = rectOf(layer.clip);
-      const cover = layer.clip.fit === "fill" || (layer.clip.fit == null && isFullRect(rect));
-      comp.drawIntoRect(frame, rect, cover, layer.alpha, t, layer.zoom, layer.clip);
+      comp.drawIntoRect(
+        frame,
+        rectOf(layer.clip),
+        clipCovers(layer.clip),
+        layer.alpha,
+        t,
+        layer.zoom,
+        layer.clip
+      );
     }
 
     // The subject pass: video → behind elements → segmented person, exactly

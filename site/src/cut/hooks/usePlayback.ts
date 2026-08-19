@@ -9,7 +9,7 @@ import {
   useEditor,
 } from "@/cut/lib/store";
 import { playheadAt, previewAt, setPlayhead, subscribePlayhead } from "@/cut/lib/playhead";
-import { isFullRect, projectFadeSeconds, rectOf } from "@/cut/lib/types";
+import { clipCovers, projectFadeSeconds, rectOf } from "@/cut/lib/types";
 import type { ClipSpan, MediaAsset, VideoClip } from "@/cut/lib/types";
 import { SubjectMaskCompositor } from "@/cut/lib/behindPass";
 import { FrameCompositor, MISSING_FRAME, PENDING_FRAME, type Frame } from "@/cut/lib/composite";
@@ -361,9 +361,7 @@ class Engine {
       };
       const frame = this.frameFor(span, t, playing);
       if (frame.kind !== "ready") continue;
-      const rect = rectOf(clip);
-      const cover = clip.fit === "fill" || (clip.fit == null && isFullRect(rect));
-      this.comp.drawIntoRect(frame, rect, cover, alpha, t, zoom, clip);
+      this.comp.drawIntoRect(frame, rectOf(clip), clipCovers(clip), alpha, t, zoom, clip);
     }
   }
 

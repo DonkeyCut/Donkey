@@ -9,6 +9,7 @@ import { laneCues, subtitleLaneCount } from "./subtitles";
 import { watchSweepActive } from "./watch/sweep";
 import { libraryFontId, listLibraryFonts } from "./linkedLibrary";
 import {
+  clipZoom,
   frameOf,
   rectOf,
   regionLabel,
@@ -39,6 +40,7 @@ function clipEffects(clip: VideoClip) {
       ? { animOut: { style: clip.animOut.style, seconds: r(clip.animOut.seconds) } }
       : {}),
     ...(clip.look ? { look: clip.look, lookAmount: r(clip.lookAmount ?? 1) } : {}),
+    ...(clip.boxStyle ? { boxStyle: clip.boxStyle } : {}),
   };
 }
 
@@ -280,9 +282,15 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
         const t = transitionToNext(sp, index, spans);
         return t ? { transitionToNext: t } : {};
       })(),
-      ...(sp.clip.fit === "fill"
-        ? { panX: r(sp.clip.panX ?? 0), panY: r(sp.clip.panY ?? 0) }
+      ...(sp.clip.fit === "fill" || clipZoom(sp.clip) > 1
+        ? {
+            ...(clipZoom(sp.clip) > 1 ? { zoom: r(clipZoom(sp.clip)) } : {}),
+            panX: r(sp.clip.panX ?? 0),
+            panY: r(sp.clip.panY ?? 0),
+          }
         : {}),
+      ...(sp.clip.rotation ? { rotation: sp.clip.rotation } : {}),
+      ...((sp.clip.opacity ?? 1) < 1 ? { opacity: r(sp.clip.opacity ?? 1) } : {}),
       ...(sp.clip.grade ? { colorGrade: sp.clip.grade } : {}),
       ...(sp.clip.mask ? { mask: sp.clip.mask } : {}),
       ...(sp.clip.kf?.length
@@ -407,9 +415,17 @@ function describeOverlayClip(c: VideoClip, assets: Map<string, { name: string }>
     layout: regionLabel(rect),
     region: { x: r(rect.x), y: r(rect.y), w: r(rect.w), h: r(rect.h) },
     fit: c.fit ?? "fit",
+    ...(clipZoom(c) > 1
+      ? { zoom: r(clipZoom(c)), panX: r(c.panX ?? 0), panY: r(c.panY ?? 0) }
+      : c.fit === "fill"
+        ? { panX: r(c.panX ?? 0), panY: r(c.panY ?? 0) }
+        : {}),
+    ...(c.rotation ? { rotation: c.rotation } : {}),
+    ...((c.opacity ?? 1) < 1 ? { opacity: r(c.opacity ?? 1) } : {}),
     ...(speed !== 1 ? { speed: r(speed) } : {}),
     ...(c.grade ? { colorGrade: c.grade } : {}),
     ...(c.mask ? { mask: c.mask } : {}),
+    ...(c.boxStyle ? { boxStyle: c.boxStyle } : {}),
     ...(c.kf?.length
       ? { keyframes: c.kf.map((k) => ({ ...k, t: r(k.t), x: r(k.x), y: r(k.y) })) }
       : {}),

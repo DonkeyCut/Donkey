@@ -374,7 +374,7 @@ export const projectsApi = {
         srcTime?: number;
         duration?: number;
         frame?: { w?: number; h?: number };
-        framing?: { fit?: "fit" | "fill"; panX?: number; panY?: number };
+        framing?: { fit?: "fit" | "fill"; zoom?: number; panX?: number; panY?: number };
       };
       if (!body.file || typeof body.srcTime !== "number") {
         return err("file and srcTime are required.", 400);
@@ -386,6 +386,7 @@ export const projectsApi = {
       const framing = frame
         ? {
             fit: body.framing?.fit === "fill" ? ("fill" as const) : ("fit" as const),
+            zoom: typeof body.framing?.zoom === "number" ? body.framing.zoom : 1,
             panX: typeof body.framing?.panX === "number" ? body.framing.panX : 0,
             panY: typeof body.framing?.panY === "number" ? body.framing.panY : 0,
           }

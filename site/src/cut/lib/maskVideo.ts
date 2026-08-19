@@ -26,7 +26,7 @@ import { ClipReader, VIDEO_CODECS } from "./exportRender";
 import type { ExportDoc } from "./exportClient";
 import { createRasterCanvas } from "./raster";
 import { getClipSpans } from "./store";
-import { frameOf, isEffectOverlay, isFullRect, isTextOverlay, rectOf, subjectMasked, type ClipSpan, type MediaAsset } from "./types";
+import { clipCovers, frameOf, isEffectOverlay, isTextOverlay, rectOf, subjectMasked, type ClipSpan, type MediaAsset } from "./types";
 
 /** Encoded mask rate — the server's fps filter duplicates frames up to the
  * output rate, and a person moves little in 1/15s. */
@@ -131,9 +131,7 @@ export async function renderSubjectMask(
         const span = spanOfClip.get(layer.clip.id);
         if (!span) continue;
         const f = await readerFor(layer.asset).frameAt(sourceTimeAt(span, t));
-        const rect = rectOf(layer.clip);
-        const cover = layer.clip.fit === "fill" || (layer.clip.fit == null && isFullRect(rect));
-        comp.drawIntoRect(f, rect, cover, layer.alpha, t, layer.zoom, layer.clip);
+        comp.drawIntoRect(f, rectOf(layer.clip), clipCovers(layer.clip), layer.alpha, t, layer.zoom, layer.clip);
       }
       // Luma mask: black frame, the subject's alpha silhouette drawn white.
       mctx.globalCompositeOperation = "source-over";

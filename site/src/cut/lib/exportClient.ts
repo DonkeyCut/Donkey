@@ -17,7 +17,7 @@ import { clipSpeed, getClipSpans, overlayLayers, projectDuration, spanSequence, 
 import { captionStyle, cueOverlay, cueWordWindows, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
 import { isMaskAnimated, isOverlayAnimated, normalizeGrade, paintMaskLuma } from "@donkeycut/effects-kit";
 import { renderElementFrames, renderElementPng } from "./textRender";
-import { clipPoseAt, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, regionPx, subjectMasked } from "./types";
+import { clipCovers, clipKeyed, clipPosed, clipPoseAt, clipZoom, contentRect, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, regionPx, shadowInk, subjectMasked } from "./types";
 import type {
   Aspect,
   AudioClip,
@@ -283,6 +283,102 @@ async function renderClipMaskPictures(
   return { frames };
 }
 
+/**
+ * Paint the shadow a clip casts, frame-sized and transparent everywhere else.
+ * The silhouette is the picture the clip really shows — its box, its rounded
+ * corners, its mask, its pose — thrown behind itself and then punched back
+ * out, so the graph can lay the result over the frame and get what sitting
+ * behind the clip would have looked like. A moving clip samples the shadow
+ * per frame, the way a keyframed mask samples its coverage. Null without a
+ * shadow.
+ */
+async function renderClipShadowPictures(
+  clip: VideoClip,
+  asset: { width?: number; height?: number },
+  W: number,
+  H: number,
+  dur: number,
+  tag: string,
+  pngs: ExportPayload["pngs"]
+): Promise<SpecMask | undefined> {
+  const sh = clip.boxStyle?.shadow;
+  if (!sh) return undefined;
+  const scale = Math.min(W, H) / 1080;
+  const frame = { width: W, height: H, scale };
+  const rect = rectOf(clip);
+  const box = { x: rect.x * W, y: rect.y * H, w: rect.w * W, h: rect.h * H };
+  const radius = Math.max(0, (clip.boxStyle?.radius ?? 0) * scale);
+  const mask = clip.mask && clip.mask.kind !== "subject" ? clip.mask : undefined;
+  // The picture's own footprint inside the box — a fitted clip's shadow follows
+  // the picture, not the empty margins beside it.
+  const pic =
+    asset.width && asset.height
+      ? contentRect(box, asset.width, asset.height, clipCovers(clip), clipZoom(clip), clip.panX ?? 0, clip.panY ?? 0)
+      : box;
+  const shape = createRasterCanvas(W, H);
+  const cover = createRasterCanvas(W, H);
+  const canvas = createRasterCanvas(W, H);
+  const anchor = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
+  const blobAt = (tLocal: number) => {
+    const shapeCtx = shape.getContext("2d") as CanvasRenderingContext2D;
+    shapeCtx.setTransform(1, 0, 0, 1, 0, 0);
+    shapeCtx.clearRect(0, 0, W, H);
+    const pose = clipPosed(clip) ? clipPoseAt(clip, tLocal) : null;
+    if (pose) {
+      shapeCtx.translate(pose.x * W, pose.y * H);
+      shapeCtx.rotate((pose.rotation * Math.PI) / 180);
+      shapeCtx.scale(pose.scale, pose.scale);
+      shapeCtx.translate(-anchor.x * W, -anchor.y * H);
+    }
+    // The lit shape: the picture, trimmed at the box's rounded corners.
+    shapeCtx.save();
+    shapeCtx.beginPath();
+    shapeCtx.roundRect(box.x, box.y, box.w, box.h, radius);
+    shapeCtx.clip();
+    shapeCtx.fillStyle = "#ffffff";
+    shapeCtx.fillRect(pic.x, pic.y, pic.w, pic.h);
+    shapeCtx.restore();
+    if (mask) {
+      // The mask decides the rest of the shape; its luma becomes coverage.
+      paintMaskLuma(cover, mask, tLocal, frame, anchor, 0, 0);
+      shapeCtx.setTransform(1, 0, 0, 1, 0, 0);
+      shapeCtx.globalCompositeOperation = "destination-in";
+      shapeCtx.drawImage(cover as CanvasImageSource, 0, 0);
+      shapeCtx.globalCompositeOperation = "source-over";
+    }
+    const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.clearRect(0, 0, W, H);
+    ctx.save();
+    ctx.shadowColor = shadowInk(sh);
+    ctx.shadowBlur = Math.max(0, sh.blur) * scale;
+    ctx.shadowOffsetX = (sh.x ?? 0) * scale;
+    ctx.shadowOffsetY = (sh.y ?? 0) * scale;
+    ctx.drawImage(shape as CanvasImageSource, 0, 0);
+    ctx.restore();
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.drawImage(shape as CanvasImageSource, 0, 0);
+    ctx.globalCompositeOperation = "source-over";
+    return rasterCanvasToPng(canvas);
+  };
+  const moves = (mask && isMaskAnimated(mask)) || clipKeyed(clip);
+  if (!moves) {
+    const name = `${tag}.png`;
+    pngs.push({ name, blob: await blobAt(0) });
+    return { file: name };
+  }
+  const step = 1 / MASK_SAMPLE_FPS;
+  const n = Math.max(1, Math.round(dur * MASK_SAMPLE_FPS));
+  const frames: { file: string; duration: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    const name = `${tag}_f${i}.png`;
+    pngs.push({ name, blob: await blobAt(i * step) });
+    frames.push({ file: name, duration: i === n - 1 ? Math.max(step, dur - (n - 1) * step) : step });
+  }
+  return { frames };
+}
+
 /** Paint the clip's border ring — a stroked rounded rect along its box edge,
  * transparent everywhere else — sized to the segment the graph frames (the
  * full frame for track 0, the region box for overlays). The engine overlays
@@ -351,6 +447,28 @@ async function buildExportPayload(
       behindMask = { file: "behind_mask.mp4", from: mask.from };
     }
   }
+  /** A clip whose resting turn or fade rides as a one-key pose track: the
+   * graph and the mask painter both read the picture's pose off `kf`, and a
+   * single key holds flat, so the export renders the resting transform
+   * through the path the animated one already takes. */
+  const posed = (c: VideoClip): VideoClip => {
+    if (!clipPosed(c) || clipKeyed(c)) return c;
+    const rect = rectOf(c);
+    return {
+      ...c,
+      kf: [
+        {
+          t: 0,
+          x: rect.x + rect.w / 2,
+          y: rect.y + rect.h / 2,
+          scale: 1,
+          rotation: c.rotation ?? 0,
+          opacity: c.opacity ?? 1,
+        },
+      ],
+    };
+  };
+
   /** The subject entry a masked item ships, or undefined without a matte. */
   const subjectOf = (m: { invert?: boolean; feather?: number } | undefined) =>
     behindMask && m
@@ -367,6 +485,7 @@ async function buildExportPayload(
     muted: sp.clip.muted,
     volume: sp.clip.volume ?? 1,
     fit: sp.clip.fit ?? "fit",
+    zoom: clipZoom(sp.clip),
     panX: sp.clip.panX ?? 0,
     panY: sp.clip.panY ?? 0,
     frame: sp.clip.frame,
@@ -386,7 +505,8 @@ async function buildExportPayload(
     image: sp.asset.type === "image",
     grade: normalizeGrade(sp.clip.grade),
     mask: undefined as SpecMask | undefined,
-    kf: sp.clip.kf,
+    shadow: undefined as SpecMask | undefined,
+    kf: posed(sp.clip).kf,
     border: undefined as string | undefined,
   }));
   // Track-0 segments render at the full output frame (regioned clips pad out
@@ -394,7 +514,7 @@ async function buildExportPayload(
   // matte; painted pictures still travel beside it when the pose track keys
   // opacity, since opacity ships as coverage luma.
   for (let i = 0; i < spans.length; i++) {
-    const c = spans[i].clip;
+    const c = posed(spans[i].clip);
     const dur = Math.max(0.1, (c.out - c.in) / clipSpeed(c));
     const pictures = await renderClipMaskPictures(
       c,
@@ -425,6 +545,15 @@ async function buildExportPayload(
       pngs.push({ name, blob: await borderBlob });
       clipEntries[i].border = name;
     }
+    clipEntries[i].shadow = await renderClipShadowPictures(
+      c,
+      spans[i].asset,
+      settings.width,
+      settings.height,
+      dur,
+      `shadow_c${i}`,
+      pngs
+    );
   }
 
   // The server's video graph is a sequential fold, so gaps between the
@@ -437,6 +566,7 @@ async function buildExportPayload(
     muted: true,
     volume: 0,
     fit: "fit" as const,
+    zoom: 1,
     panX: 0,
     panY: 0,
     frame: undefined,
@@ -507,6 +637,7 @@ async function buildExportPayload(
           // Pass `fit` through unset so the server's "default full-frame overlay
           // covers what's below" branch fires — normalizing to "fit" defeated it.
           fit: c.fit,
+          zoom: clipZoom(c),
           panX: c.panX ?? 0,
           panY: c.panY ?? 0,
           muted: c.muted,
@@ -517,11 +648,12 @@ async function buildExportPayload(
           look: c.look,
           lookAmount: c.lookAmount,
           mask: undefined as SpecMask | undefined,
-          kf: c.kf,
+          shadow: undefined as SpecMask | undefined,
+          kf: posed(c).kf,
           border: undefined as string | undefined,
           ...ramp,
         };
-        overlayClipOf.set(entry, c);
+        overlayClipOf.set(entry, posed(c));
         return entry;
       });
   });
@@ -563,6 +695,15 @@ async function buildExportPayload(
       pngs.push({ name, blob: await borderBlob });
       entry.border = name;
     }
+    entry.shadow = await renderClipShadowPictures(
+      c,
+      assetById.get(c.assetId) ?? {},
+      settings.width,
+      settings.height,
+      olen,
+      `shadow_ov${i}`,
+      pngs
+    );
   }
 
   const audio = doc.audioClips

@@ -242,12 +242,96 @@ export interface BoxStyle {
   borderWidth?: number;
   /** Border stroke color (hex). */
   borderColor?: string;
+  /** Drop shadow cast by the clip's own shape — its box, its rounded corners,
+   * its mask. Absent = none. */
+  shadow?: ClipShadow;
+}
+
+/** A drop shadow's ink and throw. Lengths are design px at the 1080 short
+ * side, like the rest of BoxStyle. */
+export interface ClipShadow {
+  /** Blur radius; 0 casts a hard-edged copy. */
+  blur: number;
+  /** Offset; absent = straight down by nothing. */
+  x?: number;
+  y?: number;
+  /** Ink (hex); absent = black. */
+  color?: string;
+  /** 0..1; absent = 0.35. */
+  opacity?: number;
+}
+
+/** The shadow's ink as a CSS color, ready for a canvas shadow. */
+export function shadowInk(sh: ClipShadow): string {
+  const hex = (sh.color ?? "#000000").replace("#", "");
+  const full = hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex;
+  const n = parseInt(full.slice(0, 6) || "000000", 16);
+  const a = Math.max(0, Math.min(1, sh.opacity ?? 0.35));
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
 }
 
 /** How far a region box may oversize the frame on each axis. Oversizing is
  * the zoom-into-an-area move; the ceiling keeps export scale targets and
  * mask canvases within what ffmpeg and browser canvases handle. */
 export const REGION_MAX_SCALE = 3;
+
+/** How far a clip's picture may zoom past the size its box fits it to. The
+ * ceiling keeps export scale targets inside what ffmpeg and browser canvases
+ * handle, the same reason `REGION_MAX_SCALE` has one. */
+export const CLIP_MAX_ZOOM = 4;
+
+/** A clip's zoom, clamped to what every surface renders. */
+export const clipZoom = (c: { zoom?: number }): number =>
+  Math.max(1, Math.min(CLIP_MAX_ZOOM, c.zoom ?? 1));
+
+/**
+ * Where a clip's picture lands inside a box, in the box's own units: fitted
+ * (letterboxed) or covering (cropped), zoomed, and slid by the pan.
+ *
+ * The preview outlines this rect, the compositor draws into it, and the export
+ * graph scales and crops to the same numbers; one geometry keeps the three in
+ * step.
+ */
+export function contentRect(
+  box: { x: number; y: number; w: number; h: number },
+  srcW: number,
+  srcH: number,
+  cover: boolean,
+  zoom = 1,
+  panX = 0,
+  panY = 0
+): { x: number; y: number; w: number; h: number } {
+  // The clip's own zoom arrives already clamped (`clipZoom`); a transition's
+  // push rides on top of it and may pull below 1, so nothing is clamped here.
+  const z = zoom > 0 ? zoom : 1;
+  const base = cover
+    ? Math.max(box.w / srcW, box.h / srcH)
+    : Math.min(box.w / srcW, box.h / srcH);
+  const w = srcW * base * z;
+  const h = srcH * base * z;
+  // Centered, then slid by the pan across whatever overflows the box — an axis
+  // with nothing to spare stays centered, which is the export's
+  // `crop=min(iw,box)` on the same picture.
+  const kx = 0.5 + Math.max(-1, Math.min(1, panX)) / 2;
+  const ky = 0.5 + Math.max(-1, Math.min(1, panY)) / 2;
+  return {
+    x: box.x + (box.w - w) / 2 + Math.max(0, w - box.w) * (0.5 - kx),
+    y: box.y + (box.h - h) / 2 + Math.max(0, h - box.h) * (0.5 - ky),
+    w,
+    h,
+  };
+}
+
+/** Whether a clip's picture covers its box, cropping what hangs over. Track 0
+ * letterboxes until it is told to fill; a clip on an upper track with the whole
+ * frame to itself covers by default, since it stands in for the picture
+ * beneath it. */
+export const clipCovers = (c: {
+  fit?: "fit" | "fill";
+  frame?: FrameRect;
+  track?: number;
+}): boolean =>
+  c.fit === "fill" || (c.fit == null && (c.track ?? 0) > 0 && isFullRect(rectOf(c)));
 
 /** A clip's effective region: its own `frame`, or the full frame if unset. */
 export function rectOf(clip: { frame?: FrameRect }): FrameRect {
@@ -292,13 +376,30 @@ export function regionPx(
 /** Whether the clip carries pose keys worth evaluating. */
 export const clipKeyed = (c: { kf?: OverlayKey[] }): boolean => !!c.kf && c.kf.length > 0;
 
+/** Whether the clip's picture needs the pose pass at all: a key track, or a
+ * resting turn or fade the compositor has to blit rather than draw. */
+export const clipPosed = (c: {
+  kf?: OverlayKey[];
+  rotation?: number;
+  opacity?: number;
+}): boolean =>
+  clipKeyed(c) || Math.abs(c.rotation ?? 0) > 0.001 || (c.opacity ?? 1) < 0.999;
+
 /**
  * The clip's pose at `tLocal` seconds into its window: resting at its region
  * center, or moving along its key track — the overlay evaluator over the
  * clip's own anchor, so clips and elements share one interpolation.
  */
 export function clipPoseAt(
-  clip: { frame?: FrameRect; in: number; out: number; speed?: number; kf?: OverlayKey[] },
+  clip: {
+    frame?: FrameRect;
+    in: number;
+    out: number;
+    speed?: number;
+    rotation?: number;
+    opacity?: number;
+    kf?: OverlayKey[];
+  },
   tLocal: number
 ): OverlayPose {
   const rect = rectOf(clip);
@@ -309,6 +410,8 @@ export function clipPoseAt(
       end: len,
       x: rect.x + rect.w / 2,
       y: rect.y + rect.h / 2,
+      rotation: clip.rotation,
+      opacity: clip.opacity,
       kf: clip.kf,
     },
     tLocal
@@ -369,10 +472,20 @@ export interface VideoClip {
    * clip share the frame with another track (e.g. a split-screen half) or float
    * small over it (picture-in-picture). */
   frame?: FrameRect;
-  /** Crop-window pan in fill mode, -1..1 per axis (0 = centered): which part
-   * of the oversized video stays visible. */
+  /** How far the picture zooms past the size its box fits it to, 1..
+   * CLIP_MAX_ZOOM; absent = 1. Zooming crops, so the pan below chooses what
+   * stays visible. */
+  zoom?: number;
+  /** Crop-window pan, -1..1 per axis (0 = centered): which part of an
+   * oversized picture stays visible. Live whenever the picture overflows its
+   * box — covering it, zoomed into it, or both. */
   panX?: number;
   panY?: number;
+  /** Resting turn, degrees clockwise about the box center; absent = upright.
+   * A pose key track overrides it while it plays. */
+  rotation?: number;
+  /** Resting opacity 0..1; absent = opaque. */
+  opacity?: number;
   /** Playback rate, default 1 (absent). The source (out-in) seconds play in
    * (out-in)/speed timeline seconds, so >1 is faster and shorter. */
   speed?: number;
@@ -744,6 +857,12 @@ export interface TemplateLayer {
   out: number;
   frame?: FrameRect;
   fit?: "fit" | "fill";
+  /** The picture's own framing inside that box: zoom, crop pan, turn, fade. */
+  zoom?: number;
+  panX?: number;
+  panY?: number;
+  rotation?: number;
+  opacity?: number;
   muted: boolean;
   speed?: number;
   track: number;

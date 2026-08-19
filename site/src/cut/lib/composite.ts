@@ -21,8 +21,8 @@
 
 import { applyMaskToCanvas, gradeTint, gradeToCssFilter, grainTile, isNeutralGrade, lookCssFilter, lookPost, maskComposite } from "@donkeycut/effects-kit";
 import { createRasterCanvas } from "./raster";
-import { clipKeyed, clipPoseAt, DEFAULT_BACKGROUND, isFullRect, rectOf } from "./types";
-import type { FrameRect, TransitionStyle, VideoClip } from "./types";
+import { clipCovers, clipPosed, clipPoseAt, clipZoom, contentRect, DEFAULT_BACKGROUND, isFullRect, rectOf, shadowInk } from "./types";
+import type { ClipShadow, FrameRect, TransitionStyle, VideoClip } from "./types";
 
 /** A clip's picture at some instant, or the reasons there isn't one.
  *
@@ -79,6 +79,8 @@ export class FrameCompositor {
   private layerScratch: Surface | null = null;
   private maskScratch: Surface | null = null;
   private poseScratch: Surface | null = null;
+  /** Where a shadow is cast before the picture goes down over it. */
+  private shadowScratch: Surface | null = null;
 
   /** Where a subject-masked clip's person matte comes from: the host hands a
    * reader over the canvas as it stands (the layers beneath the clip), so
@@ -126,7 +128,8 @@ export class FrameCompositor {
       | "vignetteCanvas"
       | "layerScratch"
       | "maskScratch"
-      | "poseScratch",
+      | "poseScratch"
+      | "shadowScratch",
     w: number,
     h: number
   ): { surface: Surface; resized: boolean } {
@@ -339,7 +342,8 @@ export class FrameCompositor {
   private needsFx(clip?: VideoClip): boolean {
     return (
       !!clip &&
-      (clipKeyed(clip) ||
+      (clipPosed(clip) ||
+        !!clip.boxStyle?.shadow ||
         !!(clip.mask && (clip.mask.kind !== "subject" || this.subjectMatteProvider)))
     );
   }
@@ -364,7 +368,7 @@ export class FrameCompositor {
     const W = this.canvas.width;
     const H = this.canvas.height;
     const tLocal = Math.max(0, at - clip.start);
-    const pose = clipKeyed(clip) ? clipPoseAt(clip, tLocal) : null;
+    const pose = clipPosed(clip) ? clipPoseAt(clip, tLocal) : null;
     if (pose && pose.opacity <= 0.001) return;
     const mask = clip.mask;
     const { surface: layer } = this.scratch("layerScratch", W, H);
@@ -374,7 +378,17 @@ export class FrameCompositor {
     const prev = this.canvas;
     this.canvas = layer;
     try {
-      draw({ ...clip, mask: undefined, kf: undefined });
+      // The pose pass owns the turn and the fade; the inner draw takes the
+      // picture plain, or it would apply them a second time (and re-enter
+      // here forever).
+      draw({
+        ...clip,
+        mask: undefined,
+        kf: undefined,
+        rotation: undefined,
+        opacity: undefined,
+        ...(clip.boxStyle ? { boxStyle: { ...clip.boxStyle, shadow: undefined } } : {}),
+      });
     } finally {
       this.canvas = prev;
     }
@@ -437,8 +451,43 @@ export class FrameCompositor {
       ctx.save();
       ctx.translate(Math.round(fx.dx ?? 0), Math.round(fx.dy ?? 0));
     }
+    const shade = this.shadowOf(out, clip.boxStyle?.shadow);
+    if (shade) ctx.drawImage(shade, 0, 0);
     ctx.drawImage(out, 0, 0);
     if (hasFx) ctx.restore();
+  }
+
+  /**
+   * The shadow a finished layer casts: the layer blurred and thrown behind
+   * itself, with the layer's own shape punched back out. What is left is the
+   * shadow alone, so it can be laid down before the picture (here) or over the
+   * frame beside it (the export's painted PNG) and look the same either way.
+   * Null when the clip casts none.
+   */
+  private shadowOf(layer: Surface, sh: ClipShadow | undefined): Surface | null {
+    const ctx = this.ctx();
+    if (!ctx || !sh) return null;
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    const { surface } = this.scratch("shadowScratch", W, H);
+    const sctx = surface.getContext("2d") as Ctx | null;
+    if (!sctx) return null;
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.globalCompositeOperation = "source-over";
+    sctx.clearRect(0, 0, W, H);
+    // Shadow lengths are design px at the 1080 short side, like masks.
+    const ds = Math.min(W, H) / 1080;
+    sctx.save();
+    sctx.shadowColor = shadowInk(sh);
+    sctx.shadowBlur = Math.max(0, sh.blur) * ds;
+    sctx.shadowOffsetX = (sh.x ?? 0) * ds;
+    sctx.shadowOffsetY = (sh.y ?? 0) * ds;
+    sctx.drawImage(layer as CanvasImageSource, 0, 0);
+    sctx.restore();
+    sctx.globalCompositeOperation = "destination-out";
+    sctx.drawImage(layer as CanvasImageSource, 0, 0);
+    sctx.globalCompositeOperation = "source-over";
+    return surface;
   }
 
   /** Draw a frame into a sub-rectangle of the canvas (a split-screen half, an
@@ -467,20 +516,22 @@ export class FrameCompositor {
     const ry = rect.y * H;
     const rw = rect.w * W;
     const rh = rect.h * H;
-    const vw = frame.width;
-    const vh = frame.height;
-    const sc = (fill ? Math.max(rw / vw, rh / vh) : Math.min(rw / vw, rh / vh)) * zoom;
-    const dw = vw * sc;
-    const dh = vh * sc;
-    let dx = rx + (rw - dw) / 2;
-    let dy = ry + (rh - dh) / 2;
-    if (fill) {
-      // Pan the crop window across the overflow (matches the export crop).
-      const kx = 0.5 + Math.max(-1, Math.min(1, clip?.panX ?? 0)) / 2;
-      const ky = 0.5 + Math.max(-1, Math.min(1, clip?.panY ?? 0)) / 2;
-      dx = rx - (dw - rw) * kx;
-      dy = ry - (dh - rh) * ky;
-    }
+    // The clip's own zoom rides on the transition's, so a cross zoom over a
+    // zoomed clip pushes in from where the clip already sits.
+    const {
+      x: dx,
+      y: dy,
+      w: dw,
+      h: dh,
+    } = contentRect(
+      { x: rx, y: ry, w: rw, h: rh },
+      frame.width,
+      frame.height,
+      fill,
+      clipZoom(clip ?? {}) * zoom,
+      clip?.panX ?? 0,
+      clip?.panY ?? 0
+    );
     const src = this.gradedSource(frame, clip);
     const bs = clip?.boxStyle;
     // Box style lengths are design px at the 1080 short side, like masks.
@@ -488,7 +539,7 @@ export class FrameCompositor {
     const rad = Math.max(0, (bs?.radius ?? 0) * ds);
     const prevAlpha = ctx.globalAlpha;
     ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-    if (fill || zoom > 1 || rad > 0) {
+    if (fill || dw > rw + 0.5 || dh > rh + 0.5 || rad > 0) {
       ctx.save();
       ctx.beginPath();
       ctx.roundRect(rx, ry, rw, rh, rad);
@@ -570,25 +621,25 @@ export class FrameCompositor {
     // which knows how to draw the style at full frame too.
     const rect = rectOf(clip ?? {});
     if (!isFullRect(rect) || clip?.boxStyle) {
-      this.drawIntoRect(frame, rect, clip?.fit === "fill", alpha, at, zoom, clip);
+      this.drawIntoRect(frame, rect, !!clip && clipCovers(clip), alpha, at, zoom, clip);
       if (hasFx) ctx.restore();
       return;
     }
-    const fill = clip?.fit === "fill";
-    const vw = frame.width;
-    const vh = frame.height;
-    const scale = (fill ? Math.max(W / vw, H / vh) : Math.min(W / vw, H / vh)) * zoom;
-    const dw = vw * scale;
-    const dh = vh * scale;
-    let dx = (W - dw) / 2;
-    let dy = (H - dh) / 2;
-    if (fill) {
-      // Pan the crop window across the overflow (matches the export crop).
-      const kx = 0.5 + (clip?.panX ?? 0) / 2;
-      const ky = 0.5 + (clip?.panY ?? 0) / 2;
-      dx = -(dw - W) * kx;
-      dy = -(dh - H) * ky;
-    }
+    const fill = !!clip && clipCovers(clip);
+    const {
+      x: dx,
+      y: dy,
+      w: dw,
+      h: dh,
+    } = contentRect(
+      { x: 0, y: 0, w: W, h: H },
+      frame.width,
+      frame.height,
+      fill,
+      clipZoom(clip ?? {}) * zoom,
+      clip?.panX ?? 0,
+      clip?.panY ?? 0
+    );
     const prevAlpha = ctx.globalAlpha;
     ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
     ctx.drawImage(this.gradedSource(frame, clip), dx, dy, dw, dh);

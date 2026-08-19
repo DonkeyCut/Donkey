@@ -67,6 +67,28 @@ import { captureTimelineFrames } from "./visualFrames";
 
 const uid = () => crypto.randomUUID().slice(0, 8);
 
+/** How a clip meets its box, for a template to remember. */
+const framingOf = (c: VideoClip) => ({
+  ...(c.frame ? { frame: c.frame } : {}),
+  ...(c.fit ? { fit: c.fit } : {}),
+  ...(c.zoom && c.zoom > 1 ? { zoom: c.zoom } : {}),
+  ...(c.panX ? { panX: c.panX } : {}),
+  ...(c.panY ? { panY: c.panY } : {}),
+  ...(c.rotation ? { rotation: c.rotation } : {}),
+  ...((c.opacity ?? 1) < 1 ? { opacity: c.opacity } : {}),
+});
+
+/** The same framing, back on a clip a template stands up. */
+const templateFraming = (l: TemplateLayer) => ({
+  ...(l.frame ? { frame: l.frame } : {}),
+  ...(l.fit ? { fit: l.fit } : {}),
+  ...(l.zoom && l.zoom > 1 ? { zoom: l.zoom } : {}),
+  ...(l.panX ? { panX: l.panX } : {}),
+  ...(l.panY ? { panY: l.panY } : {}),
+  ...(l.rotation ? { rotation: l.rotation } : {}),
+  ...((l.opacity ?? 1) < 1 ? { opacity: l.opacity } : {}),
+});
+
 const MIN_LEN = 0.1;
 
 /** Where a video clip lands when dropped: an existing track or a brand-new
@@ -3241,13 +3263,13 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             if (mi == null) continue;
             // Track-0 clips re-materialize onto track 0 (asClip), so a template
             // stands up its own video instead of an empty timeline.
-            layers.push({ media: mi, start: sp.start - start0, in: sp.clip.in, out: sp.clip.out, frame: sp.clip.frame, fit: sp.clip.fit, muted: sp.clip.muted, speed: sp.clip.speed, track: 1, asClip: true });
+            layers.push({ media: mi, start: sp.start - start0, in: sp.clip.in, out: sp.clip.out, ...framingOf(sp.clip), muted: sp.clip.muted, speed: sp.clip.speed, track: 1, asClip: true });
           } else {
             const c = s.clips.find((x) => x.id === sel.id);
             if (!c) continue;
             const mi = mediaFor(c.assetId);
             if (mi == null) continue;
-            layers.push({ media: mi, start: c.start - start0, in: c.in, out: c.out, frame: c.frame, fit: c.fit, muted: c.muted, speed: c.speed, track: c.track + 1 });
+            layers.push({ media: mi, start: c.start - start0, in: c.in, out: c.out, ...framingOf(c), muted: c.muted, speed: c.speed, track: c.track + 1 });
           }
         } else if (sel.kind === "audio") {
           const c = s.audioClips.find((x) => x.id === sel.id);
@@ -3346,8 +3368,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           in: l.in,
           out: l.out,
           muted: l.muted,
-          ...(l.frame ? { frame: l.frame } : {}),
-          ...(l.fit ? { fit: l.fit } : {}),
+          ...templateFraming(l),
           ...(l.speed ? { speed: l.speed } : {}),
         }));
       const topTrack = Math.max(0, ...overlayLayers(get().clips).map((c) => c.track));
@@ -3364,8 +3385,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         in: l.in,
         out: l.out,
         muted: l.muted,
-        ...(l.frame ? { frame: l.frame } : {}),
-        ...(l.fit ? { fit: l.fit } : {}),
+        ...templateFraming(l),
         ...(l.speed ? { speed: l.speed } : {}),
       }));
       const newAudio: AudioClip[] = template.audio

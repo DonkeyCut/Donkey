@@ -43,7 +43,7 @@ import {
 } from "./raster";
 import { useEditor } from "./store";
 import type { AssetType, AudioClip, MediaAsset, ProjectSummary, StoredAsset, VideoClip, WatchKeepReason } from "./types";
-import { IMAGE_CLIP_SECONDS, mediaUrl } from "./types";
+import { contentRect, IMAGE_CLIP_SECONDS, mediaUrl } from "./types";
 import { createDedupSelector, DEDUP_TUNING } from "./watch/dedupSelector";
 import { diffCellPct, frameSig } from "./watch/signatures";
 import { SIGNATURE_SIZE } from "./watch/types";
@@ -1001,11 +1001,46 @@ export async function captureFreezeFrame(
   projectId: string,
   sourceUrl: string,
   srcTime: number,
-  duration = 0
+  duration = 0,
+  /** Bake the still at the project frame, framed as the clip is — the engine's
+   * /freeze route does the same with ffmpeg, so a still captured in the browser
+   * and one captured on the Mac are the same picture. */
+  framed?: {
+    frame: { w: number; h: number };
+    cover: boolean;
+    zoom?: number;
+    panX?: number;
+    panY?: number;
+  }
 ): Promise<MediaAsset> {
   const frame = await frameAt(sourceUrl, srcTime);
   if (!frame) throw new Error("Could not render the freeze frame.");
-  const blob = await rasterCanvasToBlob(frame.canvas, "image/png");
+  let picture = frame.canvas;
+  if (framed) {
+    const { w, h } = framed.frame;
+    const out = createRasterCanvas(w, h);
+    const ctx = out.getContext("2d") as CanvasRenderingContext2D;
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, w, h);
+    const box = { x: 0, y: 0, w, h };
+    const r = contentRect(
+      box,
+      frame.canvas.width,
+      frame.canvas.height,
+      framed.cover,
+      framed.zoom,
+      framed.panX,
+      framed.panY
+    );
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, w, h);
+    ctx.clip();
+    ctx.drawImage(frame.canvas as CanvasImageSource, r.x, r.y, r.w, r.h);
+    ctx.restore();
+    picture = out;
+  }
+  const blob = await rasterCanvasToBlob(picture, "image/png");
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   const fileName = `freeze-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}-${uid().slice(0, 4)}.png`;

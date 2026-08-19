@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { migrateLegacyTransitions, normalizeAspect, TRANSITION_STYLE_IDS, type VideoClip } from "./types";
+import { clipCovers, contentRect, migrateLegacyTransitions, normalizeAspect, TRANSITION_STYLE_IDS, type VideoClip } from "./types";
 
 /** A minimal track-0 clip; legacy docs carry retired transitionStyle strings. */
 function clip(
@@ -124,5 +124,72 @@ describe("normalizeAspect", () => {
     expect(normalizeAspect("1.855:1")).toBe(null);
     expect(normalizeAspect("")).toBe(null);
     expect(normalizeAspect(null)).toBe(null);
+  });
+});
+
+describe("contentRect", () => {
+  // A vertical frame and a landscape source: the shape every phone shot has to
+  // be framed into.
+  const box = { x: 0, y: 0, w: 720, h: 1280 };
+  const src = { w: 1920, h: 1080 };
+  const near = (a: number, b: number) => expect(Math.abs(a - b)).toBeLessThan(0.01);
+
+  test("a fitted picture is centered, with margins", () => {
+    const r = contentRect(box, src.w, src.h, false);
+    near(r.w, 720);
+    near(r.h, 405);
+    near(r.x, 0);
+    near(r.y, (1280 - 405) / 2);
+  });
+
+  test("a fitted picture ignores the pan on an axis with nothing to spare", () => {
+    const r = contentRect(box, src.w, src.h, false, 1, -1, -1);
+    near(r.x, 0);
+    near(r.y, (1280 - 405) / 2);
+  });
+
+  test("a covering picture fills the box and crops the rest", () => {
+    const r = contentRect(box, src.w, src.h, true);
+    near(r.w, 1280 * (16 / 9));
+    near(r.h, 1280);
+    // Centered: the same slice hangs off each side.
+    near(r.x, (720 - r.w) / 2);
+  });
+
+  test("panning a covering picture slides the box to the picture's edge", () => {
+    const left = contentRect(box, src.w, src.h, true, 1, -1, 0);
+    near(left.x, 0);
+    const right = contentRect(box, src.w, src.h, true, 1, 1, 0);
+    near(right.x, 720 - right.w);
+  });
+
+  test("zoom scales the picture about the box and starts cropping", () => {
+    const r = contentRect(box, src.w, src.h, false, 2);
+    near(r.w, 1440);
+    near(r.h, 810);
+    // Half the picture's width now hangs outside the box, evenly split.
+    near(r.x, -360);
+    // The short axis still fits, so it stays centered.
+    near(r.y, (1280 - 810) / 2);
+  });
+
+  test("a zoomed pan reaches the picture's edge, matching the export crop", () => {
+    const r = contentRect(box, src.w, src.h, false, 2, 1, 0);
+    near(r.x, 720 - 1440);
+  });
+});
+
+describe("clipCovers", () => {
+  const base = { id: "c", assetId: "a", start: 0, in: 0, out: 4, muted: false };
+  test("track 0 letterboxes until it is told to fill", () => {
+    expect(clipCovers({ ...base, track: 0 } as VideoClip)).toBe(false);
+    expect(clipCovers({ ...base, track: 0, fit: "fill" } as VideoClip)).toBe(true);
+  });
+
+  test("a full-frame upper track covers, a regioned one fits", () => {
+    expect(clipCovers({ ...base, track: 1 } as VideoClip)).toBe(true);
+    expect(
+      clipCovers({ ...base, track: 1, frame: { x: 0.1, y: 0.1, w: 0.4, h: 0.4 } } as VideoClip)
+    ).toBe(false);
   });
 });

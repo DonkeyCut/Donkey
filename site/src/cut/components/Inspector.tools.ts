@@ -138,13 +138,31 @@ export const INSPECTOR_TOOLS = [
   {
     name: "set_framing",
     description:
-      "Set how a video clip meets the 9:16 frame: 'fit' letterboxes the whole picture (default), 'fill' scales it to cover the frame and crops the overflow. In fill mode panX/panY (-1..1, 0=centered) choose which part stays visible — e.g. panY=-1 keeps the top.",
+      "Set how a video clip meets its box (the project frame, or its region): 'fit' letterboxes the whole picture (default), 'fill' scales it to cover the box and crops the overflow. zoom pushes further in from there, 1..4. Whenever the picture overflows, panX/panY (-1..1, 0=centered) choose what stays visible — e.g. panY=-1 keeps the top. Landscape footage in a vertical project usually wants fill plus a pan that holds the subject.",
     inputSchema: obj({
       clipId: str("Video clip id"),
       mode: { type: "string", enum: ["fit", "fill"], description: "Framing mode" },
-      panX: num("Crop pan -1 (left) .. 1 (right), fill mode only"),
-      panY: num("Crop pan -1 (top) .. 1 (bottom), fill mode only"),
+      zoom: num("Zoom past the fitted size, 1 (none) .. 4"),
+      panX: num("Crop pan -1 (left) .. 1 (right), when the picture overflows"),
+      panY: num("Crop pan -1 (top) .. 1 (bottom), when the picture overflows"),
     }, ["clipId", "mode"]),
+  },
+  {
+    name: "set_clip_style",
+    description:
+      "Style a video clip's box: rounded corners, a border ring along its edge, and a drop shadow cast by the clip's shape (its box, corners, and mask together — a circle-masked clip casts a circular shadow). Lengths are design px at the 1080 short side. Only the fields you pass change; pass clear:true to remove all styling.",
+    inputSchema: obj({
+      clipId: str("Video clip id"),
+      radius: num("Corner radius, design px (0 squares the corners)"),
+      border_width: num("Border stroke width, design px (0 removes the ring)"),
+      border_color: str("Border color (hex)"),
+      shadow_blur: num("Shadow blur radius, design px; 0 with no offset removes the shadow"),
+      shadow_x: num("Shadow x offset, design px (default 0)"),
+      shadow_y: num("Shadow y offset, design px (default 0)"),
+      shadow_color: str("Shadow ink (hex, default #000000)"),
+      shadow_opacity: num("Shadow opacity 0..1 (default 0.35)"),
+      clear: bool("Remove the box styling entirely"),
+    }, ["clipId"]),
   },
   {
     name: "set_speed",

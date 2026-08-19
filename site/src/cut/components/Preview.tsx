@@ -19,11 +19,11 @@ import {
   readPoster,
 } from "@/cut/lib/posterCache";
 import { setPreviewCanvas } from "@/cut/lib/previewCanvas";
-import { clipKeyed, clipPoseAt, frameOf, isFullRect, rectOf, REGION_MAX_SCALE, type Aspect, type ClipSpan, type FrameRect, type MediaAsset, type VideoClip } from "@/cut/lib/types";
+import { CLIP_MAX_ZOOM, clipCovers, clipKeyed, clipPoseAt, clipZoom, contentRect, frameOf, isFullRect, rectOf, REGION_MAX_SCALE, type Aspect, type ClipSpan, type FrameRect, type MediaAsset, type VideoClip } from "@/cut/lib/types";
 import { hasMaskKeys, type MaskKey } from "@donkeycut/effects-kit";
 import { cn } from "@/lib/utils";
 import { MaskGizmoCore, OverlayLayer } from "./OverlayLayer";
-import { HANDLE_AXIS, TransformHandles, type ResizeHandle } from "./TransformHandles";
+import { CORNER_HANDLES, HANDLE_AXIS, TransformHandles, type ResizeHandle } from "./TransformHandles";
 import {
   StageEffectPaint,
   StagePictureFx,
@@ -31,22 +31,47 @@ import {
   useEffectLanes,
 } from "./StageEffects";
 
-/** The clip under the playhead, when it overflows the frame in fill mode. */
+/** How far a clip's picture hangs past its box, in the box's units. Zero on an
+ * axis with nothing to spare. */
+function overflowOf(
+  clip: VideoClip,
+  asset: { width?: number; height?: number },
+  box: FrameRect
+): { ox: number; oy: number } {
+  if (!asset.width || !asset.height) return { ox: 0, oy: 0 };
+  const pic = contentRect(
+    box,
+    asset.width,
+    asset.height,
+    clipCovers(clip),
+    clipZoom(clip),
+    clip.panX ?? 0,
+    clip.panY ?? 0
+  );
+  return { ox: Math.max(0, pic.w - box.w), oy: Math.max(0, pic.h - box.h) };
+}
+
+/** Play or pause, rewinding first when the playhead is parked at the end. */
+function togglePlayback() {
+  const s = useEditor.getState();
+  const total = projectDuration(s);
+  if (!total) return;
+  if (!s.playing && playheadAt() >= total - 0.01) s.seek(0);
+  s.setPlaying(!s.playing);
+}
+
+/** The clip under the playhead, when its picture overflows the whole frame —
+ * covering it or zoomed into it. A regioned clip is panned from its own
+ * preview handle instead. */
 function pannableSpan(
   s: { clips: VideoClip[]; assets: MediaAsset[]; aspect: Aspect },
   t: number
 ): ClipSpan | null {
   const spans = getClipSpans(s.clips, s.assets);
   const span = spans.find((sp) => t >= sp.start && sp.start + sp.len > t) ?? spans[spans.length - 1];
-  // Pan only makes sense for a full-frame fill clip; a regioned clip is moved
-  // with its own preview handle instead.
-  if (!span || span.clip.fit !== "fill" || !isFullRect(rectOf(span.clip))) return null;
-  const { width, height } = span.asset;
-  if (!width || !height) return null;
+  if (!span || !isFullRect(rectOf(span.clip))) return null;
   const frame = frameOf(s.aspect);
-  const scale = Math.max(frame.w / width, frame.h / height);
-  const ox = width * scale - frame.w;
-  const oy = height * scale - frame.h;
+  const { ox, oy } = overflowOf(span.clip, span.asset, { x: 0, y: 0, w: frame.w, h: frame.h });
   return ox > 1 || oy > 1 ? span : null;
 }
 
@@ -111,7 +136,9 @@ export function Preview() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
-  const [stage, setStage] = useState({ w: 270, h: 480 });
+  // The picture's box plus the empty room around it in the pane, which is where
+  // the outline of an oversized picture gets to show.
+  const [stage, setStage] = useState({ w: 270, h: 480, padX: 0, padY: 0 });
   const aspect = useEditor((s) => s.aspect);
   const frame = frameOf(aspect);
 
@@ -153,7 +180,14 @@ export function Preview() {
       const availW = Math.max(120, r.width - pad);
       const availH = Math.max(120, r.height - pad);
       const scale = Math.min(availW / rw, availH / rh);
-      setStage({ w: Math.floor(scale * rw), h: Math.floor(scale * rh) });
+      const w = Math.floor(scale * rw);
+      const h = Math.floor(scale * rh);
+      setStage({
+        w,
+        h,
+        padX: Math.max(0, Math.floor((r.width - w) / 2)),
+        padY: Math.max(0, Math.floor((r.height - h) / 2)),
+      });
     };
     fit();
     const ro = new ResizeObserver(fit);
@@ -161,24 +195,13 @@ export function Preview() {
     return () => ro.disconnect();
   }, [aspect]);
 
-  const togglePlayback = () => {
-    const s = useEditor.getState();
-    const total = projectDuration(s);
-    if (!total) return;
-    if (!s.playing && playheadAt() >= total - 0.01) s.seek(0);
-    s.setPlaying(!s.playing);
-  };
-
   // Drag a fill-mode clip inside the frame to choose the visible crop.
   const panDrag = (e: React.PointerEvent) => {
     const s = useEditor.getState();
     const span = pannableSpan(s, previewAt());
     if (!span) return false;
     const fr = frameOf(s.aspect);
-    const { width = 1, height = 1 } = span.asset;
-    const scale = Math.max(fr.w / width, fr.h / height);
-    const ox = width * scale - fr.w;
-    const oy = height * scale - fr.h;
+    const { ox, oy } = overflowOf(span.clip, span.asset, { x: 0, y: 0, w: fr.w, h: fr.h });
     const clipId = span.clip.id;
     const panX0 = span.clip.panX ?? 0;
     const panY0 = span.clip.panY ?? 0;
@@ -319,7 +342,7 @@ export function Preview() {
             )
           )}
         </div>
-        <OverlayPipHandle stage={stage} />
+        <ClipTransformGizmo stage={stage} />
         </div>
       </div>
     </section>
@@ -327,14 +350,22 @@ export function Preview() {
 }
 
 /**
- * Direct-manipulation handle for the selected video layer's frame region: drag
- * the box to reposition, drag the corner to resize (both update the clip's
- * `frame` rect). Works for a regioned track-0 clip (split-screen half) or an
- * overlay clip, and only while that clip is live under the playhead so it lines
- * up with the compositor. A full-frame layer needs no handle.
+ * Direct manipulation for the selected video clip, on any track and at any
+ * size: drag the blue box to move it, a corner to scale it whole, a side to
+ * pull one edge, the button above to turn it. Every gesture writes the clip's
+ * own `frame`/`rotation`, and the gizmo shows only while the clip is live under
+ * the playhead so it lines up with what the compositor draws.
+ *
+ * The grey outline beside it is the picture itself — where the source lands
+ * once its box has fitted or cropped it. When it overflows, its corners zoom
+ * and its interior pans, which is how a landscape shot gets framed for a
+ * vertical cut.
  */
 /** How close (screen px) a box edge pulls onto a snap line while dragging. */
 const SNAP_PX = 8;
+
+/** The picture's box on screen plus the empty room around it in the pane. */
+type Stage = { w: number; h: number; padX: number; padY: number };
 
 /** Snap a moving box along one axis: its leading edge, center, and trailing
  * edge each pull to the frame's edges and centerline. Returns the snapped
@@ -364,13 +395,18 @@ function snapEdge(v: number, tol: number): number | null {
   return best;
 }
 
-function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
+function ClipTransformGizmo({ stage }: { stage: Stage }) {
   const selection = useEditor((s) => s.selection);
   const clips = useEditor((s) => s.clips);
   const assets = useEditor((s) => s.assets);
-  const aspect = useEditor((s) => s.aspect);
   const skimTime = useSkim();
-  // The handle only cares whether its clip is on screen, so it subscribes to
+  const layerRef = useRef<HTMLDivElement>(null);
+  const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({
+    x: null,
+    y: null,
+  });
+  const [turning, setTurning] = useState<number | null>(null);
+  // The gizmo only cares whether its clip is on screen, so it subscribes to
   // that answer instead of to the clock: one render when the clip comes and
   // goes, rather than one per frame while it stays.
   const selectedClip = selection?.kind === "clip" ? clips.find((c) => c.id === selection.id) : null;
@@ -380,77 +416,127 @@ function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
     const len = Math.max(0.1, (selectedClip.out - selectedClip.in) / speed);
     return t >= selectedClip.start && t < selectedClip.start + len;
   });
-  const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({
-    x: null,
-    y: null,
-  });
   // While hover-scrubbing the preview shows the skimmer's frame, where the
-  // selected clip may not even be on screen — selection stays, the handle hides.
+  // selected clip may not even be on screen — selection stays, the gizmo hides.
   if (skimTime !== null) return null;
+  const clip = selectedClip;
+  if (!clip || clip.hidden || !live) return null;
 
-  // Resolve the selected, live, regioned clip (any track) plus how to patch its
-  // rect. A clip's own footprint equals its span length, so one path serves
-  // every track.
-  let rect: FrameRect | null = null;
-  let apply: ((frame: FrameRect) => void) | null = null;
-  // A fill clip whose content overflows the box can pan its crop window: how
-  // far the scaled picture overhangs the box (frame px), and the pan to start
-  // the gesture from.
-  let pan: { id: string; ox: number; oy: number; panX0: number; panY0: number } | null = null;
-  {
-    const clip = selectedClip;
-    if (clip && !clip.hidden) {
-      if (live) {
-        rect = rectOf(clip);
-        apply = (frame) => useEditor.getState().updateClipTransient(clip.id, { frame });
-        const asset = assets.find((a) => a.id === clip.assetId);
-        if (clip.fit === "fill" && asset?.width && asset?.height) {
-          const fr = frameOf(aspect);
-          const bw = rect.w * fr.w;
-          const bh = rect.h * fr.h;
-          const sc = Math.max(bw / asset.width, bh / asset.height);
-          const ox = asset.width * sc - bw;
-          const oy = asset.height * sc - bh;
-          if (ox > 1 || oy > 1) {
-            pan = { id: clip.id, ox, oy, panX0: clip.panX ?? 0, panY0: clip.panY ?? 0 };
-          }
+  const st = () => useEditor.getState();
+  const patch = (p: Partial<VideoClip>) => st().updateClipTransient(clip.id, p);
+  /**
+   * A drag on one of the gizmo's large surfaces — the box body, the picture's
+   * interior. The history checkpoint waits for real travel, and a press that
+   * never travels is a click on the picture, which plays and pauses.
+   */
+  const surfaceDrag = (
+    e: React.PointerEvent,
+    onMove: (dx: number, dy: number) => void,
+    onEnd?: () => void
+  ) => {
+    e.stopPropagation();
+    let began = false;
+    startDrag(e, {
+      onMove: (dx, dy) => {
+        if (!began) {
+          if (Math.abs(dx) <= 3 && Math.abs(dy) <= 3) return;
+          began = true;
+          st().pushHistory();
         }
-      }
-    }
-  }
-  if (!rect || !apply || isFullRect(rect)) return null;
-  const r = rect;
-  const patch = apply;
+        onMove(dx, dy);
+      },
+      onUp: (_dx, _dy, moved) => {
+        onEnd?.();
+        if (!moved) togglePlayback();
+      },
+    });
+  };
+  const asset = assets.find((a) => a.id === clip.assetId);
+  const r = rectOf(clip);
+  const rotation = clip.rotation ?? 0;
+  const zoom = clipZoom(clip);
+  // Where the source actually lands inside the box — the same geometry the
+  // compositor draws and the export crops, measured in stage pixels so the two
+  // axes share one scale.
+  const boxPx = { x: r.x * stage.w, y: r.y * stage.h, w: r.w * stage.w, h: r.h * stage.h };
+  const pic =
+    asset?.width && asset?.height
+      ? contentRect(
+          boxPx,
+          asset.width,
+          asset.height,
+          clipCovers(clip),
+          zoom,
+          clip.panX ?? 0,
+          clip.panY ?? 0
+        )
+      : boxPx;
+  const ox = Math.max(0, pic.w - boxPx.w);
+  const oy = Math.max(0, pic.h - boxPx.h);
+  const overflows = ox > 1 || oy > 1;
+  // The outline is worth drawing whenever the picture and its box part ways:
+  // cropped past the edges, or sitting inside them with margins.
+  const showPicture = Math.abs(pic.w - boxPx.w) > 2 || Math.abs(pic.h - boxPx.h) > 2;
 
   // The box may leave the frame — oversize it to focus on an area, or park it
   // partly off screen — as long as a sliver stays inside to grab.
-  const onMove = (e: React.PointerEvent) => {
-    e.stopPropagation();
-    useEditor.getState().pushHistory();
-    startDrag(e, {
-      onMove: (dx, dy) => {
+  const onMoveBox = (e: React.PointerEvent) =>
+    surfaceDrag(
+      e,
+      (dx, dy) => {
         const sx = snapAxis(r.x + dx / stage.w, r.w, SNAP_PX / stage.w);
         const sy = snapAxis(r.y + dy / stage.h, r.h, SNAP_PX / stage.h);
         setGuides({ x: sx.guide, y: sy.guide });
         patch({
-          ...r,
-          x: Math.max(0.05 - r.w, Math.min(0.95, sx.v)),
-          y: Math.max(0.05 - r.h, Math.min(0.95, sy.v)),
+          frame: {
+            ...r,
+            x: Math.max(0.05 - r.w, Math.min(0.95, sx.v)),
+            y: Math.max(0.05 - r.h, Math.min(0.95, sy.v)),
+          },
         });
       },
-      onUp: () => setGuides({ x: null, y: null }),
-    });
+      () => setGuides({ x: null, y: null })
+    );
+
+  // A turned box is grabbed on screen but sized in the frame's own axes, so a
+  // grip's travel comes back the way the box went out.
+  const unturn = (dx: number, dy: number) => {
+    if (!rotation) return { dx, dy };
+    const a = (-rotation * Math.PI) / 180;
+    return { dx: dx * Math.cos(a) - dy * Math.sin(a), dy: dx * Math.sin(a) + dy * Math.cos(a) };
   };
 
-  // A grip drags its own edges and leaves the opposite ones where they are:
-  // the box keeps its far corner planted while the grabbed side travels, and
-  // a moving edge snaps to the frame the same way a move does.
+  // A corner scales the box whole, the way every editor's corner does: the
+  // shape holds and the opposite corner stays planted. A side grip pulls its
+  // own edge and snaps to the frame.
   const onResize = (handle: ResizeHandle, e: React.PointerEvent) => {
     e.stopPropagation();
-    useEditor.getState().pushHistory();
+    st().pushHistory();
     const a = HANDLE_AXIS[handle];
+    const corner = a.x !== 0 && a.y !== 0;
     startDrag(e, {
-      onMove: (dx, dy) => {
+      onMove: (rawX, rawY) => {
+        const { dx, dy } = unturn(rawX, rawY);
+        if (corner) {
+          const grow =
+            1 + (a.x * (dx / stage.w) / r.w + a.y * (dy / stage.h) / r.h) / 2;
+          const k = Math.max(
+            0.05 / Math.min(r.w, r.h),
+            Math.min(REGION_MAX_SCALE / Math.max(r.w, r.h), grow)
+          );
+          const w = r.w * k;
+          const h = r.h * k;
+          setGuides({ x: null, y: null });
+          patch({
+            frame: {
+              x: a.x > 0 ? r.x : r.x + r.w - w,
+              y: a.y > 0 ? r.y : r.y + r.h - h,
+              w,
+              h,
+            },
+          });
+          return;
+        }
         // One axis at a time: where the grabbed edge lands, snapped to the
         // frame, then the span it leaves against the planted edge.
         const pull = (
@@ -478,65 +564,158 @@ function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
         const hx = pull(a.x, r.x, r.w, dx, stage.w);
         const hy = pull(a.y, r.y, r.h, dy, stage.h);
         setGuides({ x: hx.guide, y: hy.guide });
-        patch({ ...r, x: hx.pos, w: hx.size, y: hy.pos, h: hy.size });
+        patch({ frame: { x: hx.pos, w: hx.size, y: hy.pos, h: hy.size } });
       },
       onUp: () => setGuides({ x: null, y: null }),
     });
   };
 
-  const panContent = pan;
-  const onPanContent = (e: React.PointerEvent) => {
-    if (!panContent) return;
+  /** Client coordinates of a point given in stage pixels. */
+  const clientOf = (px: number, py: number) => {
+    const at = layerRef.current?.getBoundingClientRect();
+    return { x: (at?.left ?? 0) + stage.padX + px, y: (at?.top ?? 0) + stage.padY + py };
+  };
+
+  const onRotate = (e: React.PointerEvent) => {
     e.stopPropagation();
-    useEditor.getState().pushHistory();
-    const toFrame = frameOf(aspect).w / stage.w; // screen px → frame px
+    st().pushHistory();
+    const c = clientOf(boxPx.x + boxPx.w / 2, boxPx.y + boxPx.h / 2);
+    const angleAt = (x: number, y: number) =>
+      (Math.atan2(y - c.y, x - c.x) * 180) / Math.PI + 90;
+    const grabX = e.clientX;
+    const grabY = e.clientY;
+    const from = angleAt(grabX, grabY);
+    setTurning(rotation);
     startDrag(e, {
       onMove: (dx, dy) => {
-        // Content follows the pointer; pan is the crop-window position.
-        useEditor.getState().updateClipTransient(panContent.id, {
-          panX:
-            panContent.ox > 1
-              ? Math.max(-1, Math.min(1, panContent.panX0 - (dx * toFrame) / (panContent.ox / 2)))
-              : 0,
-          panY:
-            panContent.oy > 1
-              ? Math.max(-1, Math.min(1, panContent.panY0 - (dy * toFrame) / (panContent.oy / 2)))
-              : 0,
-        });
+        const raw = rotation + (angleAt(grabX + dx, grabY + dy) - from);
+        const wrapped = ((((raw + 180) % 360) + 360) % 360) - 180;
+        // Square angles pull the turn straight, the way the box edges snap to
+        // the frame.
+        const snapped = [-180, -90, 0, 90, 180].find((t) => Math.abs(wrapped - t) < 4);
+        const deg = Math.round(snapped ?? wrapped);
+        setTurning(deg);
+        patch({ rotation: deg === 0 ? undefined : deg });
+      },
+      onUp: () => setTurning(null),
+    });
+  };
+
+  // The picture's own grips, live only while something overflows: dragging a
+  // corner out zooms further in, dragging it back settles at the box.
+  const onZoom = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    st().pushHistory();
+    const c = clientOf(pic.x + pic.w / 2, pic.y + pic.h / 2);
+    const reach = (x: number, y: number) => Math.hypot(x - c.x, y - c.y);
+    const grabX = e.clientX;
+    const grabY = e.clientY;
+    const from = Math.max(8, reach(grabX, grabY));
+    startDrag(e, {
+      onMove: (dx, dy) => {
+        const k = reach(grabX + dx, grabY + dy) / from;
+        const next = Math.max(1, Math.min(CLIP_MAX_ZOOM, zoom * k));
+        patch({ zoom: next > 1.001 ? next : undefined });
       },
     });
   };
 
-  const box = {
-    left: r.x * stage.w,
-    top: r.y * stage.h,
-    width: r.w * stage.w,
-    height: r.h * stage.h,
+  const onPanPicture = (e: React.PointerEvent) => {
+    const panX0 = clip.panX ?? 0;
+    const panY0 = clip.panY ?? 0;
+    // Content follows the pointer; pan is the crop window's position.
+    surfaceDrag(e, (rawX, rawY) => {
+      const { dx, dy } = unturn(rawX, rawY);
+      patch({
+        panX: ox > 1 ? Math.max(-1, Math.min(1, panX0 - dx / (ox / 2))) : 0,
+        panY: oy > 1 ? Math.max(-1, Math.min(1, panY0 - dy / (oy / 2))) : 0,
+      });
+    });
   };
-  // The dashed box draws the full extent; the frame-clipped solid ring paints
-  // over it, so dashes show only where the box leaves the frame.
+
+  // Everything draws in the pane's own space, so an oversized picture's outline
+  // keeps going into the empty room around the frame instead of stopping at its
+  // edge; the layer clips it at the pane so it never reaches another panel.
+  const at = (rect: { x: number; y: number; w: number; h: number }) => ({
+    left: stage.padX + rect.x,
+    top: stage.padY + rect.y,
+    width: rect.w,
+    height: rect.h,
+  });
+  const box = at(boxPx);
+  const picBox = at(pic);
+  const turn = {
+    transform: rotation ? `rotate(${rotation}deg)` : undefined,
+    transformOrigin: `${box.left + box.width / 2}px ${box.top + box.height / 2}px`,
+  };
   return (
-    <>
-      <div
-        className="absolute cursor-move rounded-[3px] border-2 border-dashed border-[#0a84ff]"
-        style={box}
-        onPointerDown={onMove}
-      >
-        {/* Overflowing fill content pans from the interior; the ring at the
-            border moves the box, the corner resizes it. */}
-        {panContent && (
+    <div
+      ref={layerRef}
+      className="pointer-events-none absolute overflow-hidden"
+      style={{
+        left: -stage.padX,
+        top: -stage.padY,
+        width: stage.w + 2 * stage.padX,
+        height: stage.h + 2 * stage.padY,
+      }}
+    >
+      <div className="absolute inset-0" style={turn}>
+        {/* The picture as the source really lands it: grey where the frame
+            throws it away, so a crop is something you can see and grab. */}
+        {showPicture && (
           <div
-            className="absolute inset-2 cursor-grab active:cursor-grabbing"
-            onPointerDown={onPanContent}
+            className="absolute rounded-[3px] border border-dashed border-white/70 shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
+            style={picBox}
+          >
+            {overflows && (
+              <TransformHandles
+                color="#c7c7cc"
+                handles={CORNER_HANDLES}
+                rotation={rotation}
+                onResize={(_h, e) => onZoom(e)}
+                resizeTitle="Drag to zoom the picture"
+              />
+            )}
+          </div>
+        )}
+        {/* The dashed box draws the full extent; the frame-clipped solid ring
+            paints over it, so dashes show only where the box leaves the frame. */}
+        <div
+          className="pointer-events-auto absolute cursor-move rounded-[3px] border-2 border-dashed border-[#0a84ff]"
+          style={box}
+          onPointerDown={onMoveBox}
+        >
+          {/* An overflowing picture pans from the interior; the ring at the
+              border moves the box, the grips resize it. */}
+          {overflows && (
+            <div
+              className="absolute inset-2 cursor-grab active:cursor-grabbing"
+              onPointerDown={onPanPicture}
+            />
+          )}
+          <TransformHandles
+            color="#0a84ff"
+            className="z-20"
+            rotation={rotation}
+            angle={turning}
+            onResize={onResize}
+            onRotate={onRotate}
+          />
+        </div>
+      </div>
+      {/* The solid ring and the snap guides live outside the turn: the ring's
+          frame clipping is the frame's own edges, and a guide is a frame line.
+          A turned box keeps just its dashed outline. */}
+      <div
+        className="pointer-events-none absolute overflow-hidden rounded-xl"
+        style={{ left: stage.padX, top: stage.padY, width: stage.w, height: stage.h }}
+      >
+        {!rotation && (
+          <div
+            className="absolute rounded-[3px] shadow-[inset_0_0_0_2px_#0a84ff]"
+            style={{ ...box, left: box.left - stage.padX, top: box.top - stage.padY }}
           />
         )}
-        <TransformHandles color="#0a84ff" className="z-20" onResize={onResize} />
-      </div>
-      <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden rounded-xl">
-        <div
-          className="absolute rounded-[3px] shadow-[inset_0_0_0_2px_#0a84ff]"
-          style={box}
-        />
         {guides.x !== null && (
           <div className="absolute inset-y-0 w-px bg-[#0a84ff]" style={{ left: guides.x * stage.w }} />
         )}
@@ -544,7 +723,7 @@ function OverlayPipHandle({ stage }: { stage: { w: number; h: number } }) {
           <div className="absolute inset-x-0 h-px bg-[#0a84ff]" style={{ top: guides.y * stage.h }} />
         )}
       </div>
-    </>
+    </div>
   );
 }
 

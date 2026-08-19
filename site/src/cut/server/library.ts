@@ -66,6 +66,12 @@ export interface TemplateLayer {
   out: number;
   frame?: { x: number; y: number; w: number; h: number };
   fit?: "fit" | "fill";
+  /** The picture's own framing inside that box: zoom, crop pan, turn, fade. */
+  zoom?: number;
+  panX?: number;
+  panY?: number;
+  rotation?: number;
+  opacity?: number;
   muted: boolean;
   speed?: number;
   track: number;

@@ -108,8 +108,11 @@ import {
   allFonts,
   ANIM_DEFAULT_SECONDS,
   ANIM_STYLE_IDS,
+  CLIP_MAX_ZOOM,
+  clipCovers,
   DEFAULT_BACKGROUND,
   clampOverlayPos,
+  clipZoom,
   frameOf,
   IMAGE_CLIP_SECONDS,
   isEffectOverlay,
@@ -131,6 +134,7 @@ import {
   type AssetWatch,
   type CaptionStyleId,
   type AudioClip,
+  type ClipShadow,
   type ColorGrade,
   type FontId,
   type MediaAsset,
@@ -1042,6 +1046,18 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         patch.frame = { x: clamp(rg.x, 0, 1 - w), y: clamp(rg.y, 0, 1 - h), w, h };
       }
       if (input.fit === "fit" || input.fit === "fill") patch.fit = input.fit;
+      if (isNum(input.zoom)) {
+        const z = clamp(input.zoom, 1, CLIP_MAX_ZOOM);
+        patch.zoom = z > 1 ? z : undefined;
+      }
+      if (isNum(input.rotation)) {
+        const deg = Math.round(clamp(input.rotation, -180, 180));
+        patch.rotation = deg === 0 ? undefined : deg;
+      }
+      if (isNum(input.opacity)) {
+        const o = clamp(input.opacity, 0, 1);
+        patch.opacity = o >= 1 ? undefined : o;
+      }
       if (isNum(input.speed)) patch.speed = Math.max(SPEED_FLOOR, input.speed);
       if (Object.keys(patch).length === 0) throw new ToolError("Nothing to change.");
       s.updateClip(c.id, patch);
@@ -1052,6 +1068,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         start: round2(next.start),
         layout: regionLabel(rectOf(next)),
         fit: next.fit ?? "fit",
+        ...(clipZoom(next) > 1 ? { zoom: clipZoom(next) } : {}),
+        ...(next.rotation ? { rotation: next.rotation } : {}),
+        ...((next.opacity ?? 1) < 1 ? { opacity: next.opacity } : {}),
         muted: next.muted,
         ...(next.hidden ? { hidden: true } : {}),
       };
@@ -1600,13 +1619,64 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   set_framing: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
       const mode = input.mode === "fill" ? "fill" : "fit";
+      const zoom = isNum(input.zoom) ? clamp(input.zoom, 1, CLIP_MAX_ZOOM) : 1;
+      // Pan only means something once something overflows the box.
+      const pannable = mode === "fill" || zoom > 1;
       s.updateClip(clip.id, {
         fit: mode,
-        panX: mode === "fill" && isNum(input.panX) ? clamp(input.panX, -1, 1) : 0,
-        panY: mode === "fill" && isNum(input.panY) ? clamp(input.panY, -1, 1) : 0,
+        zoom: zoom > 1 ? zoom : undefined,
+        panX: pannable && isNum(input.panX) ? clamp(input.panX, -1, 1) : 0,
+        panY: pannable && isNum(input.panY) ? clamp(input.panY, -1, 1) : 0,
       });
       const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
-      return { id: next.id, fit: next.fit, panX: next.panX ?? 0, panY: next.panY ?? 0 };
+      return {
+        id: next.id,
+        fit: next.fit,
+        zoom: clipZoom(next),
+        panX: next.panX ?? 0,
+        panY: next.panY ?? 0,
+      };
+  },
+
+  set_clip_style: (s, input) => {
+      const clip = requireItem(s.clips, input.clipId, "video clip");
+      if (input.clear === true) {
+        s.updateClip(clip.id, { boxStyle: undefined });
+        return { id: clip.id, boxStyle: null };
+      }
+      const bs = { ...clip.boxStyle };
+      if (isNum(input.radius)) bs.radius = Math.max(0, input.radius) || undefined;
+      if (isNum(input.border_width)) bs.borderWidth = Math.max(0, input.border_width) || undefined;
+      if (typeof input.border_color === "string") bs.borderColor = input.border_color;
+      const shadowTouched =
+        isNum(input.shadow_blur) ||
+        isNum(input.shadow_x) ||
+        isNum(input.shadow_y) ||
+        typeof input.shadow_color === "string" ||
+        isNum(input.shadow_opacity);
+      if (shadowTouched) {
+        const sh: ClipShadow = {
+          blur: Math.max(0, isNum(input.shadow_blur) ? input.shadow_blur : bs.shadow?.blur ?? 24),
+          ...(isNum(input.shadow_x)
+            ? input.shadow_x !== 0 && { x: input.shadow_x }
+            : bs.shadow?.x !== undefined && { x: bs.shadow.x }),
+          ...(isNum(input.shadow_y)
+            ? input.shadow_y !== 0 && { y: input.shadow_y }
+            : bs.shadow?.y !== undefined && { y: bs.shadow.y }),
+          ...(typeof input.shadow_color === "string"
+            ? { color: input.shadow_color }
+            : bs.shadow?.color !== undefined && { color: bs.shadow.color }),
+          ...(isNum(input.shadow_opacity)
+            ? { opacity: clamp(input.shadow_opacity, 0, 1) }
+            : bs.shadow?.opacity !== undefined && { opacity: bs.shadow.opacity }),
+        };
+        // A shadow with no blur and no throw is no shadow.
+        bs.shadow = sh.blur > 0 || sh.x || sh.y ? sh : undefined;
+      }
+      const boxStyle =
+        bs.radius || bs.borderWidth || bs.shadow ? bs : undefined;
+      s.updateClip(clip.id, { boxStyle });
+      return { id: clip.id, boxStyle: boxStyle ?? null };
   },
 
   freeze_frame: async (s, input) => {
@@ -1630,7 +1700,13 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         // sized below to the requested duration, mirroring the engine's
         // /freeze clamps (default 1s, 0.5..10s).
         const freezeDur = Math.min(10, Math.max(0.5, isNum(input.duration) ? input.duration : 1));
-        body = await captureFreezeFrame(projectId, span.asset.url, srcTime, freezeDur).catch(
+        body = await captureFreezeFrame(projectId, span.asset.url, srcTime, freezeDur, {
+          frame: frameOf(s.aspect),
+          cover: clipCovers(span.clip),
+          zoom: clipZoom(span.clip),
+          panX: span.clip.panX ?? 0,
+          panY: span.clip.panY ?? 0,
+        }).catch(
           (e) => {
             throw new ToolError(
               e instanceof Error ? e.message : "Could not render the freeze frame."
@@ -1651,6 +1727,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             frame: frameOf(s.aspect),
             framing: {
               fit: span.clip.fit ?? "fit",
+              zoom: clipZoom(span.clip),
               panX: span.clip.panX ?? 0,
               panY: span.clip.panY ?? 0,
             },

@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { atempoChain, hasStream, num, videoColorInfo } from "./util";
-import { projectFadeSeconds, regionPx, TRANSITION_XFADE, TRANSITION_ZOOM, type ColorGrade, type TransitionStyle } from "../lib/types";
+import { CLIP_MAX_ZOOM, projectFadeSeconds, regionPx, TRANSITION_XFADE, TRANSITION_ZOOM, type ColorGrade, type TransitionStyle } from "../lib/types";
 import { effectFilterLines, gradeToFfmpegFilter, lookFilterLines, shortestTurn, sortedKeys, type OverlayKey } from "@donkeycut/effects-kit";
 
 // The render pipeline itself: spec in, finished mp4 out. Shared by the local
@@ -39,7 +39,10 @@ export interface ExportSpec {
     volume?: number;
     /** "fit" letterboxes (default); "fill" covers the region and crops. */
     fit?: "fit" | "fill";
-    panX?: number; // crop-window pan -1..1 (fill mode)
+    /** How far the picture zooms past the size its box fits it to (1 = none).
+     * Whatever the zoom pushes outside the box is cropped. */
+    zoom?: number;
+    panX?: number; // crop-window pan -1..1, across whatever overflows
     panY?: number;
     /** Region of the frame this clip fills; absent = full frame. */
     frame?: { x: number; y: number; w: number; h: number };
@@ -86,6 +89,14 @@ export interface ExportSpec {
      * box, transparent elsewhere), full-frame sized; overlaid onto the
      * segment before fades, masks and pose so it rides the clip. */
     border?: string;
+    /** Client-painted drop shadow: the clip's own silhouette blurred, thrown,
+     * and punched back out, full-frame sized. It goes down last — a mask would
+     * otherwise trim away the very ink that lies outside the shape — and a
+     * clip that moves ships it as a `frames` sequence like a keyframed mask. */
+    shadow?: {
+      file?: string;
+      frames?: { file: string; duration: number }[];
+    };
   }[];
   /** Video tracks composited over the track-0 `clips`, lowest track first. */
   overlayVideos?: {
@@ -97,7 +108,9 @@ export interface ExportSpec {
     /** Region of the frame this overlay fills; absent = full frame. */
     frame?: { x: number; y: number; w: number; h: number };
     fit?: "fit" | "fill";
-    panX?: number; // crop-window pan -1..1 (fill mode)
+    /** How far the picture zooms past the size its box fits it to (1 = none). */
+    zoom?: number;
+    panX?: number; // crop-window pan -1..1, across whatever overflows
     panY?: number;
     muted: boolean;
     /** Gain on the clip's own audio, 0..1.5; absent = 1 (unchanged). */
@@ -135,6 +148,12 @@ export interface ExportSpec {
      * to its box when bordered); overlaid onto the segment so it rides the
      * clip through fades, masks and pose. */
     border?: string;
+    /** Client-painted drop shadow, full-frame sized: laid over the frame just
+     * before the clip goes down, so it falls on the tracks beneath it. */
+    shadow?: {
+      file?: string;
+      frames?: { file: string; duration: number }[];
+    };
   }[];
   audio: {
     file: string;
@@ -388,6 +407,34 @@ export async function runExport(
   // clip, a gap on track 0, the backdrop behind an edge animation — is the
   // project's own background color. ffmpeg takes it as 0xRRGGBB.
   const padColor = ffColor(spec.background);
+  /**
+   * The chain that meets a clip's picture with its box: covering it (cropping
+   * the overflow) or fitted inside it, zoomed, with the pan choosing what the
+   * box keeps. The crop takes `min(picture, box)` per axis, so an axis with
+   * room to spare passes through untouched and stays centered — the same
+   * geometry `contentRect` draws on the canvas.
+   */
+  const boxFraming = (
+    bw: number,
+    bh: number,
+    cover: boolean,
+    zoom?: number,
+    panX?: number,
+    panY?: number
+  ): string => {
+    const z = Math.max(1, Math.min(CLIP_MAX_ZOOM, zoom ?? 1));
+    const even = (n: number) => 2 * Math.round(n / 2);
+    const tw = even(bw * z);
+    const th = even(bh * z);
+    const scale = cover
+      ? `scale=${tw}:${th}:force_original_aspect_ratio=increase`
+      : `scale=${tw}:${th}:force_original_aspect_ratio=decrease:force_divisible_by=2`;
+    // A fitted picture at rest overflows nothing, so it needs no crop at all.
+    if (!cover && z <= 1.0001) return scale;
+    const kx = num(0.5 + Math.max(-1, Math.min(1, panX ?? 0)) / 2);
+    const ky = num(0.5 + Math.max(-1, Math.min(1, panY ?? 0)) / 2);
+    return `${scale},crop=min(iw\,${bw}):min(ih\,${bh}):(iw-ow)*${kx}:(ih-oh)*${ky}`;
+  };
   // One ffmpeg input per distinct media file (from the project folder),
   // plus one per uploaded overlay PNG.
   // Still images are excluded here: a plain `-i file` decodes one frame, so
@@ -537,6 +584,27 @@ export async function runExport(
     const olen = Math.max(0.1, (oc.out - oc.in) / ospeed);
     const idx = await maskInput(oc.mask, olen, `mask_ovl_${k}`);
     if (idx !== undefined) overlayMaskInput.set(oc, idx);
+  }
+  // Shadows arrive the same way coverage does — one looped still, or a
+  // slideshow when the clip moves — so they take the same input builder.
+  const clipShadowInput = new Map<number, number>();
+  for (let j = 0; j < spec.clips.length; j++) {
+    const c = spec.clips[j];
+    if (!c.shadow) continue;
+    const dur = c.file ? Math.max(0.1, (c.out - c.in) / clipRate(c)) : Math.max(0, c.out - c.in);
+    const idx = await maskInput(c.shadow, dur, `shadow_clip_${j}`);
+    if (idx !== undefined) clipShadowInput.set(j, idx);
+  }
+  const overlayShadowInput = new Map<(typeof overlayVideos)[number], number>();
+  for (let k = 0; k < overlayVideos.length; k++) {
+    const oc = overlayVideos[k];
+    if (!oc.shadow) continue;
+    const ospeed = oc.speed && oc.speed > 0 ? oc.speed : 1;
+    // An overlay's shadow lands on the timeline beside the clip, so it plays
+    // for the clip's whole window rather than the segment's local clock.
+    const olen = Math.max(0.1, (oc.out - oc.in) / ospeed);
+    const idx = await maskInput(oc.shadow, olen, `shadow_ovl_${k}`);
+    if (idx !== undefined) overlayShadowInput.set(oc, idx);
   }
   // Border rings loop as stills for their segment's length, like mask files.
   const borderStill = (file: string, dur: number): number => {
@@ -953,23 +1021,17 @@ export async function runExport(
         const bw = Math.max(W, rx + rw) - bx;
         const bh = Math.max(H, ry + rh) - by;
         const win = bw > W || bh > H ? `,crop=${W}:${H}:${-bx}:${-by}` : "";
+        // The framed picture lands centered in its rect: a covering one fills
+        // the rect exactly, a fitted one keeps its margins.
         frame =
-          c.fit === "fill"
-            ? `scale=${rw}:${rh}:force_original_aspect_ratio=increase,` +
-              `crop=${rw}:${rh}:(iw-ow)*${num(0.5 + Math.max(-1, Math.min(1, c.panX ?? 0)) / 2)}` +
-              `:(ih-oh)*${num(0.5 + Math.max(-1, Math.min(1, c.panY ?? 0)) / 2)},` +
-              `pad=${bw}:${bh}:${rx - bx}:${ry - by}:color=${padColor}${win}`
-            : `scale=${rw}:${rh}:force_original_aspect_ratio=decrease:force_divisible_by=2,` +
-              `pad=${bw}:${bh}:${rx - bx}+(${rw}-iw)/2:${ry - by}+(${rh}-ih)/2:color=${padColor}${win}`;
+          `${boxFraming(rw, rh, c.fit === "fill", c.zoom, c.panX, c.panY)},` +
+          `pad=${bw}:${bh}:${rx - bx}+(${rw}-iw)/2:${ry - by}+(${rh}-ih)/2:color=${padColor}${win}`;
       } else {
+        const cover = c.fit === "fill";
         frame =
-          c.fit === "fill"
-            ? // Cover the frame, then crop; the pan chooses the visible window.
-              `scale=${W}:${H}:force_original_aspect_ratio=increase,` +
-              `crop=${W}:${H}:(iw-ow)*${num(0.5 + Math.max(-1, Math.min(1, c.panX ?? 0)) / 2)}` +
-              `:(ih-oh)*${num(0.5 + Math.max(-1, Math.min(1, c.panY ?? 0)) / 2)}`
-            : `scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
-              `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=${padColor}`;
+          boxFraming(W, H, cover, c.zoom, c.panX, c.panY) +
+          // A covering picture already spans the frame; a fitted one letterboxes.
+          (cover ? "" : `,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=${padColor}`);
       }
       // setpts/speed rescales the clip's duration on the timeline (footage);
       // a still just replays its looped input.
@@ -1001,6 +1063,12 @@ export async function runExport(
       // split the copies it needs off the pre-backdrop picture.
       const nFz = (needFirstFreeze[j] ? 1 : 0) + (needLastFreeze[j] ? 1 : 0);
       const segOut = nFz > 0 ? `vseg${j}` : `v${j}`;
+      // The shadow is ink the clip's own mask must not reach, so the segment
+      // finishes first and the shadow goes over it — outside the clip's shape
+      // the segment is bare frame, which is what the shadow would have fallen
+      // on anyway.
+      const shIdx = clipShadowInput.get(j);
+      const segCore = shIdx === undefined ? segOut : `vshi${j}`;
       const mkIdx = clipMaskInput.get(j);
       const subjMask = subjectActive && matteConsumers > 0 ? c.mask?.subject : undefined;
       const keyed = !!c.kf?.length;
@@ -1057,10 +1125,16 @@ export async function runExport(
         }
         filters.push(`color=c=black:s=${W}x${H}:r=${fps}:d=${num(dur)}[cmb${j}]`);
         filters.push(
-          `[cmb${j}][${cur}]overlay=0:0:shortest=1,format=${clipFmt},fps=${fps}[${segOut}]`
+          `[cmb${j}][${cur}]overlay=0:0:shortest=1,format=${clipFmt},fps=${fps}[${segCore}]`
         );
       } else {
-        pushEdgeFx(core, dur, headFx, tailFx, W, H, clipFmt, fades, segOut, `c${j}`);
+        pushEdgeFx(core, dur, headFx, tailFx, W, H, clipFmt, fades, segCore, `c${j}`);
+      }
+      if (shIdx !== undefined) {
+        filters.push(`[${shIdx}:v]fps=${fps},scale=${W}:${H},setsar=1,format=rgba[csh${j}]`);
+        filters.push(
+          `[${segCore}][csh${j}]overlay=0:0:eof_action=pass,format=${clipFmt},fps=${fps}[${segOut}]`
+        );
       }
       if (nFz > 0) {
         filters.push(
@@ -1237,23 +1311,14 @@ export async function runExport(
     const keyed = !!oc.kf?.length;
     const boxW = region ? region.rw : W;
     const boxH = region ? region.rh : H;
-    let framing: string;
+    // The overlay's picture meets its box the same way a track-0 clip meets
+    // the frame; whatever the box does not swallow sits centered in it.
+    const framing = boxFraming(boxW, boxH, cover, oc.zoom, oc.panX, oc.panY);
     let pos: string;
-    // A fill overlay's crop window follows the clip's pan, matching the
-    // preview compositor.
-    const panCrop =
-      `:(iw-ow)*${num(0.5 + Math.max(-1, Math.min(1, oc.panX ?? 0)) / 2)}` +
-      `:(ih-oh)*${num(0.5 + Math.max(-1, Math.min(1, oc.panY ?? 0)) / 2)}`;
     if (!region) {
-      framing = cover
-        ? `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}${panCrop}`
-        : `scale=${W}:${H}:force_original_aspect_ratio=decrease:force_divisible_by=2`;
       pos = cover ? "0:0" : `x=(${W}-w)/2:y=(${H}-h)/2`;
     } else {
       const { rx, ry, rw, rh } = region;
-      framing = cover
-        ? `scale=${rw}:${rh}:force_original_aspect_ratio=increase,crop=${rw}:${rh}${panCrop}`
-        : `scale=${rw}:${rh}:force_original_aspect_ratio=decrease:force_divisible_by=2`;
       pos = cover ? `${rx}:${ry}` : `x=${rx}+(${rw}-w)/2:y=${ry}+(${rh}-h)/2`;
     }
     // zoompan needs a constant frame size — and a mask trims at the box, so
@@ -1343,6 +1408,19 @@ export async function runExport(
     filters.push(`[${masked}]fps=${fps},tpad=start_duration=${num(oc.start)}[${seg}]`);
     const next = `vovv${k}`;
     const enable = `enable='between(t,${num(oc.start)},${num(end)})'`;
+    // The shadow falls on whatever is already there, then the clip goes down
+    // over it. Its silhouette is punched out, so the two never fight.
+    const oshIdx = overlayShadowInput.get(oc);
+    if (oshIdx !== undefined) {
+      const lit = `ovsh${k}`;
+      filters.push(
+        `[${oshIdx}:v]fps=${fps},scale=${W}:${H},setsar=1,format=rgba,` +
+          `tpad=start_duration=${num(oc.start)}:color=black@0.0[${lit}]`
+      );
+      const shOnto = `vovs${k}`;
+      filters.push(`[${onto}][${lit}]overlay=0:0:${enable}:eof_action=pass[${shOnto}]`);
+      onto = shOnto;
+    }
     if (subjMask) {
       // Subject-masked overlay clip: the delayed segment lands on the full
       // frame at its spot — a static pad, or an expression overlay onto a

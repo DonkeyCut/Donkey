@@ -45,7 +45,7 @@ import {
 } from "@donkeycut/effects-kit";
 import { clipWindow, useEditor, type EditorState } from "@/cut/lib/store";
 import { usePreviewTime } from "@/cut/lib/playhead";
-import { clipKeyed, clipPoseAt } from "@/cut/lib/types";
+import { CLIP_MAX_ZOOM, clipKeyed, clipPoseAt, clipZoom, contentRect } from "@/cut/lib/types";
 import { AnimationCard, AnimationTiles } from "@/cut/components/AnimationTiles";
 import { ColorField } from "@/cut/components/ColorField";
 import { NumberField } from "@/cut/components/NumberField";
@@ -88,6 +88,7 @@ import {
   clampOverlayPos,
   type AudioClip,
   type BoxStyle,
+  type ClipShadow,
   type ColorGrade,
   type FrameRect,
   type LayoutId,
@@ -402,17 +403,39 @@ const formatPercent = (v: number) => `${Math.round(v * 100)}%`;
 /** One-click frame layouts (Full / Top / Bottom / Left / Right / PiP) shared by
  * the video-clip and overlay-clip panels. Picking one regions the clip so two
  * videos can share the frame; "Full" clears the region. */
+/** The clip's box narrowed to the source's own shape: the picture area a fit
+ * clip already draws inside `rect`, which is the box that shows the whole shot
+ * with no margins around it. */
+function sourceAspectRect(
+  rect: FrameRect,
+  srcW: number,
+  srcH: number,
+  frame: { w: number; h: number }
+): FrameRect {
+  const px = contentRect(
+    { x: rect.x * frame.w, y: rect.y * frame.h, w: rect.w * frame.w, h: rect.h * frame.h },
+    srcW,
+    srcH,
+    false
+  );
+  return { x: px.x / frame.w, y: px.y / frame.h, w: px.w / frame.w, h: px.h / frame.h };
+}
+
 function LayoutButtons({
   rect,
   onPick,
+  onSourceAspect,
 }: {
   rect: FrameRect;
   onPick: (frame: FrameRect | undefined, fit: "fit" | "fill") => void;
+  /** Narrow the box to the source's own shape, dropping the margins. */
+  onSourceAspect?: () => void;
 }) {
   const currentId =
     (Object.keys(LAYOUTS) as LayoutId[]).find((id) => LAYOUTS[id].label === regionLabel(rect)) ??
     "full";
   return (
+    <>
     <div className="flex items-center justify-between gap-2 py-1">
       <span className="text-[11.5px] font-medium text-muted-foreground">Layout</span>
       <Select
@@ -435,12 +458,27 @@ function LayoutButtons({
         </SelectContent>
       </Select>
     </div>
+    {onSourceAspect && (
+      <Row label="Shape">
+        <button
+          className="clip-source-aspect rounded-md border border-input px-2 py-0.5 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground"
+          onClick={onSourceAspect}
+        >
+          Match source
+        </button>
+      </Row>
+    )}
+    </>
   );
 }
 
 function ClipPanel({ clip }: { clip: VideoClip }) {
   const asset = useEditor((s) => s.assets.find((a) => a.id === clip.assetId));
+  const aspect = useEditor((s) => s.aspect);
   const updateClip = useEditor((s) => s.updateClip);
+  const zoomCk = useSliderCheckpoint();
+  const turnCk = useSliderCheckpoint();
+  const fadeCk = useSliderCheckpoint();
   const [speedDraft, setSpeedDraft] = useState<number | null>(null);
   const [volumeDraft, setVolumeDraft] = useState<number | null>(null);
   // The panel can push into the color-grade subview, which remembers which
@@ -607,7 +645,38 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
             ))}
           </div>
         </Row>
-        {clip.fit === "fill" && ((clip.panX ?? 0) !== 0 || (clip.panY ?? 0) !== 0) && (
+        <Row label="Zoom">
+          <ValueSlider
+            label="Zoom"
+            sliderClassName="clip-zoom data-horizontal:w-24"
+            valueClassName="w-9 text-muted-foreground"
+            value={clipZoom(clip)}
+            min={1}
+            max={CLIP_MAX_ZOOM}
+            step={0.01}
+            snap={[1]}
+            keyStep={0.05}
+            format={formatPercent}
+            parse={parsePercentInput}
+            onDraft={(v) => {
+              zoomCk.begin();
+              useEditor.getState().updateClipTransient(clip.id, {
+                zoom: v > 1.001 ? v : undefined,
+              });
+            }}
+            onCommit={(v) => {
+              zoomCk.begin();
+              updateClip(clip.id, { zoom: v > 1.001 ? v : undefined });
+              zoomCk.end();
+            }}
+          />
+          <ResetButton
+            title="Reset zoom"
+            show={clipZoom(clip) > 1}
+            onClick={() => updateClip(clip.id, { zoom: undefined, panX: 0, panY: 0 })}
+          />
+        </Row>
+        {((clip.panX ?? 0) !== 0 || (clip.panY ?? 0) !== 0) && (
           <Row label="Position">
             <button
               className="clip-recenter rounded-md border border-input px-2 py-0.5 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground"
@@ -617,12 +686,85 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
             </button>
           </Row>
         )}
+        <Row label="Rotation">
+          <ValueSlider
+            label="Rotation"
+            sliderClassName="clip-rotation data-horizontal:w-24"
+            valueClassName="w-9 text-muted-foreground"
+            value={clip.rotation ?? 0}
+            min={-180}
+            max={180}
+            step={1}
+            snap={[-90, 0, 90]}
+            format={(v) => `${Math.round(v)}°`}
+            parse={parseNumberInput}
+            onDraft={(v) => {
+              turnCk.begin();
+              useEditor.getState().updateClipTransient(clip.id, {
+                rotation: Math.round(v) || undefined,
+              });
+            }}
+            onCommit={(v) => {
+              turnCk.begin();
+              updateClip(clip.id, { rotation: Math.round(v) || undefined });
+              turnCk.end();
+            }}
+          />
+          <ResetButton
+            title="Reset rotation"
+            show={!!clip.rotation}
+            onClick={() => updateClip(clip.id, { rotation: undefined })}
+          />
+        </Row>
+        <Row label="Opacity">
+          <ValueSlider
+            label="Opacity"
+            sliderClassName="clip-opacity data-horizontal:w-24"
+            valueClassName="w-9 text-muted-foreground"
+            value={clip.opacity ?? 1}
+            min={0}
+            max={1}
+            step={0.01}
+            snap={[1]}
+            format={formatPercent}
+            parse={parsePercentInput}
+            onDraft={(v) => {
+              fadeCk.begin();
+              useEditor.getState().updateClipTransient(clip.id, {
+                opacity: v >= 0.999 ? undefined : v,
+              });
+            }}
+            onCommit={(v) => {
+              fadeCk.begin();
+              updateClip(clip.id, { opacity: v >= 0.999 ? undefined : v });
+              fadeCk.end();
+            }}
+          />
+          <ResetButton
+            title="Reset opacity"
+            show={(clip.opacity ?? 1) < 1}
+            onClick={() => updateClip(clip.id, { opacity: undefined })}
+          />
+        </Row>
         <LayoutButtons
           rect={rectOf(clip)}
           onPick={(frame, fit) => updateClip(clip.id, { frame, fit })}
+          onSourceAspect={
+            asset?.width && asset?.height
+              ? () =>
+                  updateClip(clip.id, {
+                    frame: sourceAspectRect(rectOf(clip), asset.width!, asset.height!, frameOf(aspect)),
+                    fit: "fit",
+                    zoom: undefined,
+                    panX: 0,
+                    panY: 0,
+                  })
+              : undefined
+          }
         />
         <ClipTransformSection clip={clip} />
         <ClipBorderSection clip={clip} />
+        <ClipShadowSection clip={clip} />
         <ClipMaskSection clip={clip} />
         <ClipGeneratedAudio clip={clip} />
       </div>
@@ -2551,6 +2693,121 @@ function ClipBorderSection({ clip }: { clip: VideoClip }) {
               onBegin={() => st().pushHistory()}
               onLive={(c) => write({ borderColor: c })}
               onCommit={(c) => st().updateClip(clip.id, { boxStyle: { ...bs, borderColor: c } })}
+            />
+          </Row>
+        </>
+      )}
+    </Section>
+  );
+}
+
+/** The clip's drop shadow: cast by whatever shape the clip really shows — the
+ * box, its rounded corners, and its mask together. */
+function ClipShadowSection({ clip }: { clip: VideoClip }) {
+  const blurCk = useSliderCheckpoint();
+  const offsetCk = useSliderCheckpoint();
+  const opacityCk = useSliderCheckpoint();
+  const st = () => useEditor.getState();
+  const sh = clip.boxStyle?.shadow;
+  const write = (patch: Partial<ClipShadow>) => {
+    const cur = st().clips.find((c) => c.id === clip.id)?.boxStyle;
+    st().updateClipTransient(clip.id, {
+      boxStyle: { ...cur, shadow: { blur: cur?.shadow?.blur ?? 24, ...cur?.shadow, ...patch } },
+    });
+  };
+  return (
+    <Section
+      title="Shadow"
+      info="Cast a drop shadow from the clip's shape — its box, corners, and mask together, so a circle-masked clip throws a circular shadow. Sizes are design pixels, matched between preview and export."
+      enabled={!!sh}
+      onEnabledChange={(v) =>
+        st().updateClip(clip.id, {
+          boxStyle: v
+            ? { ...clip.boxStyle, shadow: { blur: 24, y: 12 } }
+            : clip.boxStyle?.radius || clip.boxStyle?.borderWidth
+              ? { ...clip.boxStyle, shadow: undefined }
+              : undefined,
+        })
+      }
+    >
+      {sh && (
+        <>
+          <Row label="Blur">
+            <ScrubValue
+              label="Shadow blur"
+              className="w-9 text-muted-foreground"
+              value={sh.blur}
+              min={0}
+              max={120}
+              step={1}
+              format={(v) => String(Math.round(v))}
+              parse={parseNumberInput}
+              onScrub={(v) => {
+                blurCk.begin();
+                write({ blur: v });
+              }}
+              onCommit={(v) => {
+                blurCk.begin();
+                write({ blur: v });
+                blurCk.end();
+              }}
+            />
+          </Row>
+          <Row label="Offset">
+            {(["x", "y"] as const).map((axis) => (
+              <span key={axis} className="flex items-center gap-1">
+                <span className="text-[11px] text-muted-foreground/70 uppercase">{axis}</span>
+                <ScrubValue
+                  label={`Shadow ${axis.toUpperCase()} offset`}
+                  className="w-9 text-muted-foreground"
+                  value={sh[axis] ?? 0}
+                  min={-120}
+                  max={120}
+                  step={1}
+                  format={(v) => String(Math.round(v))}
+                  parse={parseNumberInput}
+                  onScrub={(v) => {
+                    offsetCk.begin();
+                    write({ [axis]: Math.round(v) || undefined });
+                  }}
+                  onCommit={(v) => {
+                    offsetCk.begin();
+                    write({ [axis]: Math.round(v) || undefined });
+                    offsetCk.end();
+                  }}
+                />
+              </span>
+            ))}
+          </Row>
+          <Row label="Opacity">
+            <ValueSlider
+              label="Shadow opacity"
+              sliderClassName="data-horizontal:w-24"
+              valueClassName="w-9 text-muted-foreground"
+              value={sh.opacity ?? 0.35}
+              min={0}
+              max={1}
+              step={0.01}
+              format={formatPercent}
+              parse={parsePercentInput}
+              onDraft={(v) => {
+                opacityCk.begin();
+                write({ opacity: v });
+              }}
+              onCommit={(v) => {
+                opacityCk.begin();
+                write({ opacity: v });
+                opacityCk.end();
+              }}
+            />
+          </Row>
+          <Row label="Color">
+            <ColorField
+              value={sh.color ?? "#000000"}
+              label="Shadow color"
+              onBegin={() => st().pushHistory()}
+              onLive={(c) => write({ color: c })}
+              onCommit={(c) => write({ color: c })}
             />
           </Row>
         </>

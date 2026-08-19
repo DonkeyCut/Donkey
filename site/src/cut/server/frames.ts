@@ -60,6 +60,8 @@ export function probeDims(file: string): Promise<{ width: number; height: number
 
 export interface FreezeFraming {
   fit: "fit" | "fill";
+  /** How far the picture zooms past the size the frame fits it to (1 = none). */
+  zoom?: number;
   panX: number;
   panY: number;
 }
@@ -95,14 +97,20 @@ export async function makeFreezeFrame(
     let vf: string | null = null;
     if (frame) {
       const { w, h } = frame;
-      if (framing?.fit === "fill") {
-        // Same crop-window math as the preview canvas: pan -1..1 → 0..1.
-        const kx = (0.5 + (framing.panX ?? 0) / 2).toFixed(4);
-        const ky = (0.5 + (framing.panY ?? 0) / 2).toFixed(4);
-        vf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}:(iw-ow)*${kx}:(ih-oh)*${ky}`;
-      } else {
-        vf = `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:black`;
-      }
+      // The clip's own framing, baked: the picture meets the frame the way the
+      // preview shows it — covering or fitted, zoomed, panned. Same chain as
+      // the export graph's `boxFraming`.
+      const cover = framing?.fit === "fill";
+      const z = Math.max(1, Math.min(4, framing?.zoom ?? 1));
+      const even = (n: number) => 2 * Math.round(n / 2);
+      const kx = (0.5 + (framing?.panX ?? 0) / 2).toFixed(4);
+      const ky = (0.5 + (framing?.panY ?? 0) / 2).toFixed(4);
+      const crop = `,crop=min(iw\,${w}):min(ih\,${h}):(iw-ow)*${kx}:(ih-oh)*${ky}`;
+      vf = cover
+        ? `scale=${even(w * z)}:${even(h * z)}:force_original_aspect_ratio=increase${crop}`
+        : `scale=${even(w * z)}:${even(h * z)}:force_original_aspect_ratio=decrease` +
+          (z > 1.0001 ? crop : "") +
+          `,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:black`;
     }
 
     await run("ffmpeg", [
