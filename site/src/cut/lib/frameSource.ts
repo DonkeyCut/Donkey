@@ -49,6 +49,17 @@ const POOL = RING + 2;
  * playhead and the decoder would burn through the file to put it there.
  */
 export const DECODE_AHEAD_S = 0.3;
+/** How far past a walk's last landed frame the playhead may read before the
+ * walk is re-anchored there. A walk running behind still lands frames — the
+ * picture advances, a beat late — so it keeps walking while the lag stays
+ * watchable, and hops forward to the playhead once the frames it lands are
+ * history. */
+const LAG_HOP_S = 2;
+/** How far the playhead may travel past a walk's start while its first frame
+ * is still decoding. That first step is a keyframe seek — every frame from the
+ * keyframe to the start decodes before one lands — and a restart pays the
+ * whole seek again from scratch, so a slow decoder gets room to finish it. */
+const FIRST_FRAME_S = 4;
 /** Two source times closer than this are the same frame. */
 const SAME = 1e-4;
 /** Frames a source must go unwanted before the pool will close it. About a
@@ -414,27 +425,34 @@ export class ClipFrameSource {
    *
    * A walk already covering `t` is left alone — restarting it would throw away
    * the buffer it has built and re-decode from the nearest keyframe, which is
-   * the hitch this design exists to remove. It restarts only for a real jump:
-   * a scrub, or a clip re-entered from somewhere else.
+   * the hitch this design exists to remove. It ends only for a real jump — a
+   * scrub, a clip re-entered from somewhere else — or once the playhead has
+   * outrun it past its allowance, where a fresh walk anchored at the playhead
+   * is the faster way back to a current picture.
    */
   private pumpStream(t: number): void {
-    // Whether the walk covers `t` is a question about the walk — where it
-    // started and the last frame it has landed. A walk whose first frame is
-    // still decoding is already the right walk: that first step is a keyframe
-    // seek, longer than a display frame, and judging it by frames landed would
-    // tear it down on every tick and it would never land anything. It gets a
-    // second of slack for the reader to advance while that first frame comes.
+    // Whether the walk serves `t` is a question about the walk — where it
+    // started and the last frame it has landed. On a machine whose decoder
+    // trails real time the tail falls behind the playhead while frames keep
+    // landing: the picture advances, a beat late. A restart there pays a
+    // keyframe seek that lands nothing for even longer, and a walk held to a
+    // tight deadline gets restarted before any such seek can finish — the
+    // picture freezes solid while the playhead runs on the audio clock. So a
+    // lagging walk keeps its claim until the frames it lands are history
+    // (`LAG_HOP_S`), and a walk still decoding toward its first frame — mid
+    // keyframe-seek, with nothing landed yet to show for it — gets the longer
+    // `FIRST_FRAME_S`, since a restart would begin that same seek again.
     if (this.stream) {
-      // The walk serves `t` if the frame is already held, or if `t` sits just
-      // past the tail — where the next pulls will land. Its span behind the
-      // tail proves nothing: frames there have been aging out of the ring the
-      // whole time, so a reader that went back to the walk's beginning would
-      // find a record of coverage and no frames.
+      // The walk serves `t` if the frame is already held, or if `t` reads at
+      // or past the walk's edge — the tail once frames have landed, its start
+      // until then — within the allowance. Its span behind the tail proves
+      // nothing: frames there have been aging out of the ring the whole time,
+      // so a reader that went back to the walk's beginning would find a
+      // record of coverage and no frames.
       const landed = this.streamTail > this.streamFrom + SAME;
-      const ahead = landed
-        ? t >= this.streamTail - SAME && t <= this.streamTail + DECODE_AHEAD_S
-        : t >= this.streamFrom - SAME && t <= this.streamFrom + DECODE_AHEAD_S + 1;
-      if (ahead || this.ring.covers(t)) {
+      const edge = landed ? this.streamTail : this.streamFrom;
+      const slack = landed ? LAG_HOP_S : FIRST_FRAME_S;
+      if ((t >= edge - SAME && t <= edge + slack) || this.ring.covers(t)) {
         void this.drain(t);
         return;
       }
