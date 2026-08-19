@@ -27,7 +27,8 @@
     "test": "bun test src packages/effects-kit/src",
     "test:genvideo": "bun run scripts/genvideo-selftest.ts",
     "eval:genvideo": "bun run scripts/genvideo-eval.ts",
-    "eval:cut-perf": "bun run scripts/eval-cut-perf.ts"
+    "eval:cut-perf": "bun run scripts/eval-cut-perf.ts",
+    "eval:cut-export": "bun run scripts/eval-cut-export.ts"
   },
   "dependencies": {
     "@ai-sdk/react": "^4.0.15",

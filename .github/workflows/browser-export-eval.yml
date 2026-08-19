@@ -1,0 +1,82 @@
+name: Browser Export Eval
+
+# Renders the export eval project through the browser pipeline — framePlan,
+# FrameCompositor, WebCodecs, the mediabunny muxer, the audio mix — in a real
+# Chrome against a hermetic dev server (scripts/eval-cut-export.ts --hermetic).
+# Every API call is answered inside the browser context, so the server needs
+# no database and boots on placeholder env values.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - site/src/cut/lib/**
+      - site/packages/effects-kit/**
+      - site/scripts/eval-cut-export.ts
+      - .github/workflows/browser-export-eval.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-export-eval
+  cancel-in-progress: true
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+
+      # Placeholder values: the hermetic eval answers every API call inside
+      # the browser context, so nothing on the server ever reads these — they
+      # only have to exist for the dev server to boot.
+      - name: Write placeholder env
+        run: |
+          for key in BETTER_AUTH_SECRET GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET \
+            R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY \
+            CUT_MEDIA_SIGNING_SECRET; do
+            echo "$key=placeholder" >> .env
+          done
+          echo "DATABASE_URL=postgresql://placeholder:placeholder@localhost:5432/placeholder" >> .env
+          echo "DIRECT_URL=postgresql://placeholder:placeholder@localhost:5432/placeholder" >> .env
+
+      - name: Start dev server
+        run: |
+          npm run dev > /tmp/next-dev.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null http://localhost:3000; then exit 0; fi
+            sleep 2
+          done
+          echo "dev server never answered" >&2
+          tail -50 /tmp/next-dev.log >&2
+          exit 1
+
+      - name: Render the eval project in Chrome
+        run: npm run eval:cut-export -- --hermetic
+
+      - name: Dev server log on failure
+        if: failure()
+        run: tail -100 /tmp/next-dev.log

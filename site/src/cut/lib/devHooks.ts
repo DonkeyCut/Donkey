@@ -7,12 +7,13 @@
  * the editor root; a no-op in production builds.
  */
 
+import { renderProjectToMp4 } from "./exportRender";
 import { useGenerate } from "./generate";
 import { useGenScene } from "./genScene";
 import { enrichAsset, importFileToProject } from "./media";
 import { awaitingFrame, startTrace, stopTrace } from "./perfTrace";
 import { playheadAt } from "./playhead";
-import { useEditor } from "./store";
+import { projectDuration, useEditor } from "./store";
 
 export function installDevHooks(): void {
   if (process.env.NODE_ENV === "production" || typeof window === "undefined") return;
@@ -23,6 +24,10 @@ export function installDevHooks(): void {
     importFileToProject,
     enrichAsset,
     playheadAt,
+    // The export eval renders a doc through the tab's own pipeline and reads
+    // the bytes back out.
+    renderProjectToMp4,
+    projectDuration,
   };
   // The perf eval arms and reads the frame trace through here. Off until
   // `start()` is called, so an ordinary dev session records nothing.
