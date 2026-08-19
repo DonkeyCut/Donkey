@@ -47,7 +47,7 @@ const demoCycle = (ramp: number) => ramp + Math.max(DEMO_HOLD, ramp * HOLD_RATIO
 /** How far apart in its cycle each tile starts from the one before it. The
  * golden ratio spreads any run of tiles evenly around the cycle, so the few
  * that are mid-motion at a given moment are scattered through the grid. */
-const PHASE_STEP = 0.618;
+export const PHASE_STEP = 0.618;
 /** The cycle a loop tile steps against; loops hold the name the whole way
  * round, so this only has to look unsynchronised. */
 const LOOP_SPREAD = 1.2;

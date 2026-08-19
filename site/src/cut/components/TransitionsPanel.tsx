@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { PHASE_STEP } from "@/cut/components/AnimationTiles";
 import { SwatchScene, useSwatchClock } from "@/cut/components/EffectsPanel";
 import { SectionTitle } from "@/cut/components/SectionTitle";
 import { clearElementDrag, setElementDragData, setObjectDragImage } from "@/cut/lib/assetDrag";
@@ -154,6 +155,13 @@ const X_LOOP = 2.4;
 const X_HOLD = 0.5;
 const X_RUN = 1.2;
 
+/** Each tile's place across the whole list, group boundaries included. The
+ * golden-ratio phase steps against it, so at any moment only a few tiles —
+ * scattered through the grid — are mid-handover. */
+const TILE_INDEX = new Map(
+  TRANSITION_STYLE_GROUPS.flatMap((g) => g.ids).map((id, i) => [id, i] as const)
+);
+
 function TransitionTile({
   style,
   live,
@@ -170,7 +178,18 @@ function TransitionTile({
   // Hovering a tile starts its handover over from the top, so the pointer
   // never lands mid-blend waiting for the loop to come around.
   const [runEpoch, setRunEpoch] = useState(0);
-  const t = useSwatchClock(true, X_LOOP, runEpoch);
+  // A golden-ratio phase by place in the list staggers the grid's loops. The
+  // hover restart plays from the top, so it zeroes this tile's phase too.
+  const [phase, setPhase] = useState(() => (((TILE_INDEX.get(style) ?? 0) * PHASE_STEP) % 1) * X_LOOP);
+  const restart = () => {
+    setPhase(0);
+    setRunEpoch((n) => n + 1);
+  };
+  const playing = useEditor((s) => s.playing);
+  const clock = useSwatchClock(true, X_LOOP, runEpoch);
+  // At rest during playback the clock holds its still frame; the phase only
+  // shifts a running loop.
+  const t = playing ? clock : (clock + phase) % X_LOOP;
   // What the selection means for this tile: it wears the ring when it is the
   // live bar's style, and a click swaps that bar onto it.
   const isLive = !!live && live.style === style;
@@ -192,8 +211,8 @@ function TransitionTile({
         setObjectDragImage(e);
       }}
       onDragEnd={clearElementDrag}
-      onPointerEnter={() => setRunEpoch((n) => n + 1)}
-      onFocus={() => setRunEpoch((n) => n + 1)}
+      onPointerEnter={restart}
+      onFocus={restart}
       onClick={() => {
         if (!live) return pick();
         if (!isLive) useEditor.getState().updateTransition(live.id, { style });
