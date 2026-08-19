@@ -1296,12 +1296,18 @@ function ChatSession({
                 )
               }
               onRemove={(id) => setQueue((q) => q.filter((m) => m.id !== id))}
-              onReorder={(from, to) =>
+              onReorder={(ids) =>
                 setQueue((q) => {
-                  const next = [...q];
-                  const [grabbed] = next.splice(from, 1);
-                  next.splice(to, 0, grabbed);
-                  return next;
+                  // The tray only shows part of the queue, so the dropped
+                  // order refills the slots those rows already occupied and
+                  // everything else stays where it is.
+                  const byId = new Map(q.map((m) => [m.id, m]));
+                  const landed = ids.filter((id) => byId.has(id));
+                  const moved = new Set(landed);
+                  let next = 0;
+                  return q.map((m) =>
+                    moved.has(m.id) ? (byId.get(landed[next++]) ?? m) : m,
+                  );
                 })
               }
               onTogglePaused={() => {

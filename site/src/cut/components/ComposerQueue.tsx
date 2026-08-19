@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useDragSort } from "@/components/Sortable";
 import { RefThumb } from "./AssetRefs";
 import type { AssetRef } from "@/cut/lib/assetRef";
 
@@ -59,18 +60,19 @@ export function ComposerQueue({
   onEditingChange: (id: string | null) => void;
   onCommitEdit: (id: string, text: string) => void;
   onRemove: (id: string) => void;
-  onReorder: (from: number, to: number) => void;
+  /** The queued rows in the order they were dropped into. */
+  onReorder: (ids: string[]) => void;
   onTogglePaused: () => void;
 }) {
   const [open, setOpen] = useState(true);
-  const dragFrom = useRef<number | null>(null);
-  const [dragOver, setDragOver] = useState<number | null>(null);
   const frozen = editingId !== null;
   const waiting = items.filter((m) => m.status === "queued");
-  // Rows carry their index in the full queue so a reorder maps back to it.
-  const rows = items
-    .map((item, index) => ({ item, index }))
-    .filter(({ item }) => frozen || item.status === "queued");
+  const rows = items.filter((item) => frozen || item.status === "queued");
+  // Dragging renders the queue in the order it would land in, so the rows
+  // shift out of the way and the hole is the drop zone.
+  const rowIds = rows.map((it) => it.id);
+  const byId = new Map(rows.map((it) => [it.id, it] as const));
+  const sort = useDragSort(rowIds, onReorder);
   // The wrapper owns the list height: the rows' measured height capped at
   // 38vh, animated to zero on collapse, clipped while it moves. The scroll
   // area fills the wrapper and floats the slim scrollbar over the rows once
@@ -146,8 +148,11 @@ export function ComposerQueue({
         style={{ height: open ? listH : 0, opacity: open ? 1 : 0 }}
       >
         <ScrollArea className="h-full">
-          <div ref={listRef}>
-            {rows.map(({ item: it, index }) => {
+          <div ref={listRef} {...sort.containerProps}>
+            {sort.order.map((rowId) => {
+              const it = byId.get(rowId);
+              if (!it) return null;
+              const { dragging, onDragStart, ...drag } = sort.itemProps(rowId);
               const isEditing = editingId === it.id;
               const shown =
                 it.status === "running" && !busy ? "done" : it.status;
@@ -156,10 +161,9 @@ export function ComposerQueue({
               return (
                 <div
                   key={it.id}
+                  {...drag}
                   draggable={!frozen}
                   onDragStart={(e) => {
-                    dragFrom.current = index;
-                    e.dataTransfer.effectAllowed = "move";
                     // The browser snapshots the row on a flat backdrop, which
                     // squares off its corners; hand it a styled clone so the
                     // ghost keeps the rounded row shape.
@@ -182,26 +186,12 @@ export function ComposerQueue({
                       e.clientY - rect.top,
                     );
                     setTimeout(() => ghost.remove(), 0);
-                  }}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setDragOver(index);
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    if (dragFrom.current !== null && dragFrom.current !== index)
-                      onReorder(dragFrom.current, index);
-                    dragFrom.current = null;
-                    setDragOver(null);
-                  }}
-                  onDragEnd={() => {
-                    dragFrom.current = null;
-                    setDragOver(null);
+                    onDragStart(e);
                   }}
                   className={cn(
                     "group flex items-start gap-1.5 px-2.5 py-1.5 transition-colors duration-100 motion-reduce:transition-none",
-                    dragOver === index
-                      ? "bg-muted-foreground/20"
+                    dragging
+                      ? "bg-muted-foreground/5 outline-1 outline-dashed -outline-offset-2 outline-muted-foreground/40 [&>*]:invisible"
                       : !isEditing &&
                           !locked &&
                           !gone &&
