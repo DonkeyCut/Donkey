@@ -5,7 +5,11 @@
  */
 declare module "bun:test" {
   export function describe(label: string, fn: () => void): void;
-  export function test(label: string, fn: () => void | Promise<void>): void;
+  export interface TestFn {
+    (label: string, fn: () => void | Promise<void>, timeoutMs?: number): void;
+    skipIf(condition: boolean): TestFn;
+  }
+  export const test: TestFn;
   export function beforeEach(fn: () => void | Promise<void>): void;
   export function afterEach(fn: () => void | Promise<void>): void;
   export interface Matchers {

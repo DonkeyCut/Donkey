@@ -100,6 +100,20 @@ jobs:
           DONKEY_APP_BUILD: ${{ steps.nightly.outputs.build }}
         run: ./scripts/package-donkey-app.sh
 
+      # Render a project that uses every export feature through the packaged
+      # app's own ffmpeg/ffprobe (site/src/cut/server/exportPipeline.e2e.test.ts).
+      # The bundled LGPL ffmpeg carries a narrower filter and encoder set than
+      # the Homebrew ffmpeg on dev machines, so the render has to pass against
+      # the binaries that ship. Site deps are already installed — packaging ran
+      # npm ci to build the Cut engine.
+      - name: Render the export test project with the bundled ffmpeg
+        if: steps.changes.outputs.should_build == 'true'
+        run: |
+          export PATH="$GITHUB_WORKSPACE/dist/Donkey.app/Contents/Resources/donkey-tools:$PATH"
+          ffmpeg -version | head -n 1
+          cd site
+          ./node_modules/.bin/bun test src/cut/server/exportPipeline.e2e.test.ts
+
       - name: Generate checksum
         if: steps.changes.outputs.should_build == 'true'
         run: shasum -a 256 dist/Donkey.dmg > dist/Donkey.dmg.sha256

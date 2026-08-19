@@ -17,6 +17,8 @@ on:
       - site/packages/effects-kit/**
       - site/scripts/fetch-cut-fonts.mjs
       - site/src/cut/server/exportPipeline.ts
+      - site/src/cut/server/exportPipeline.e2e.test.ts
+      - site/src/cut/server/filterGraph.ts
       - site/src/cut/server/hlsLadder.ts
       - site/src/cut/server/urlDownload.ts
       - site/src/cut/server/jobs.ts
@@ -59,6 +61,16 @@ jobs:
 
       - name: Bundle worker
         run: npm run worker:build
+
+      # Render the export test project through the same runExport the container
+      # runs (site/src/cut/server/exportPipeline.e2e.test.ts), against a Linux
+      # GPL ffmpeg like the image's Debian build. A graph the container's
+      # ffmpeg family rejects fails the deploy here.
+      - name: Render the export test project
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          bun test src/cut/server/exportPipeline.e2e.test.ts
 
       - name: Deploy to Cloudflare
         uses: cloudflare/wrangler-action@v4
