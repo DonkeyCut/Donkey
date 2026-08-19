@@ -504,6 +504,12 @@ export class ClipFrameSource {
   private drain(t: number): Promise<void> {
     if (this.drainRun) return this.drainRun;
     if (!this.stream) return Promise.resolve();
+    // A run whose first stop condition already holds finishes synchronously:
+    // its `finally` clears the field before the assignment below writes it,
+    // and the settled promise would then sit in `drainRun` forever, answering
+    // every later drain with "already pulling". The flag remembers that the
+    // run is over so the assignment is undone, whichever order they land in.
+    let ended = false;
     this.drainRun = (async () => {
       try {
         for (;;) {
@@ -530,10 +536,12 @@ export class ClipFrameSource {
       } catch {
         this.stopStream();
       } finally {
+        ended = true;
         this.drainRun = null;
       }
     })();
-    return this.drainRun;
+    if (ended) this.drainRun = null;
+    return this.drainRun ?? Promise.resolve();
   }
 
   /**
