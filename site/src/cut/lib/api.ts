@@ -145,7 +145,36 @@ const listeners = new Set<() => void>();
 export function setEngineUser(id: string) {
   if (engineUser === id) return;
   engineUser = id;
+  try {
+    localStorage.setItem(REMEMBERED_USER_KEY, id);
+  } catch {
+    // Private mode or headless: the next visit waits on the session as before.
+  }
   for (const fn of listeners) fn();
+}
+
+const REMEMBERED_USER_KEY = "cut:user";
+
+/** The account that was signed in here last time. RequireSession binds it on
+ * boot so the surfaces paint their cached snapshots while the live session
+ * request is still in flight; the resolved session then confirms or replaces
+ * it. Cookies decide identity on every server read, so a stale id costs a
+ * wrong-keyed cache miss and nothing else. */
+export function rememberedEngineUser(): string | null {
+  try {
+    return localStorage.getItem(REMEMBERED_USER_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Called on sign-out, so the next visitor to this browser starts unbound. */
+export function forgetRememberedEngineUser(): void {
+  try {
+    localStorage.removeItem(REMEMBERED_USER_KEY);
+  } catch {
+    // Nothing stored where nothing can be read.
+  }
 }
 
 /** The bound account, or null before the session resolves. Client-side caches

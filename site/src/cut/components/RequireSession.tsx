@@ -3,7 +3,11 @@
 import { useEffect, type ReactNode } from "react";
 
 import { authHrefFor } from "@/app/_components/landing/useAppEntryHref";
-import { setEngineUser } from "@/cut/lib/api";
+import {
+  forgetRememberedEngineUser,
+  rememberedEngineUser,
+  setEngineUser,
+} from "@/cut/lib/api";
 import { useAppLoaded } from "@/lib/analytics";
 import { authClient } from "@/lib/auth-client";
 
@@ -25,6 +29,17 @@ export function RequireSession({ children }: { children: ReactNode }) {
 
   useAppLoaded("cut", session?.user);
 
+  // Paint first, verify behind: the account remembered from the last visit
+  // opens the gate immediately, so a reload shows cached shelves while the
+  // session request is still in flight. The resolved session overrides it —
+  // a different account re-binds, a signed-out visitor is redirected. Ordered
+  // before the live binding below so a session that resolved during hydration
+  // wins on the same commit.
+  useEffect(() => {
+    const remembered = rememberedEngineUser();
+    if (remembered) setEngineUser(remembered);
+  }, []);
+
   // Bound in an effect so the render stays free of side effects; SessionGate
   // subscribes to it, so the surfaces redraw the moment the id lands.
   useEffect(() => {
@@ -33,6 +48,7 @@ export function RequireSession({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!signedOut) return;
+    forgetRememberedEngineUser();
     const here = window.location.pathname + window.location.search;
     window.location.replace(authHrefFor("/sign-in", here));
   }, [signedOut]);

@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UserAvatar } from "@/cut/components/UserAvatar";
+import { forgetRememberedEngineUser } from "@/cut/lib/api";
 import { connectToEngine } from "@/cut/lib/connect";
 import { cutInstallHref } from "@/cut/lib/install";
 import { openOnboarding } from "@/cut/lib/onboarding";
@@ -77,6 +78,7 @@ export function NavUser() {
       try {
         await authClient.revokeSessions();
       } finally {
+        forgetRememberedEngineUser();
         await authClient.signOut();
         router.push("/");
       }
