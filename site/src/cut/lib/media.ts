@@ -1403,6 +1403,30 @@ export async function composeSheets(
   return sheets;
 }
 
+// Filmstrip generation that failed, by asset id — session state, never doc
+// state. The clip box reads it to swap the loading pulse for a still
+// placeholder; each new enrich attempt (imports fire one, and every project
+// open sweeps all assets) clears the mark before trying again.
+const failedStrips = new Set<string>();
+const stripListeners = new Set<() => void>();
+
+export function subscribeStripStatus(fn: () => void) {
+  stripListeners.add(fn);
+  return () => {
+    stripListeners.delete(fn);
+  };
+}
+
+/** Whether the last filmstrip attempt for this asset failed. */
+export const stripFailedFor = (assetId: string) => failedStrips.has(assetId);
+
+function setStripFailed(assetId: string, failed: boolean) {
+  if (failed === failedStrips.has(assetId)) return;
+  if (failed) failedStrips.add(assetId);
+  else failedStrips.delete(assetId);
+  for (const fn of stripListeners) fn();
+}
+
 /** Generate filmstrip thumbnails / waveform peaks and merge them into the
  * store. Safe to call repeatedly; skips assets that are already enriched.
  * `src` overrides where the frames are read from — an import still uploading
@@ -1415,12 +1439,16 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
         useEditor.getState().updateAsset(asset.id, { thumbs: [src], thumbStep: IMAGE_CLIP_SECONDS });
       }
     } else if (asset.type === "video" && !asset.thumbs?.length) {
+      setStripFailed(asset.id, false);
       const key = stripCacheKey(useEditor.getState().projectId, asset.fileName);
       const cached = await readCachedStrip(key, asset.duration);
       if (cached) {
         useEditor.getState().updateAsset(asset.id, { thumbs: cached.thumbs, thumbStep: cached.thumbStep });
       } else {
         const { thumbs, thumbStep } = await makeThumbs(src, asset.duration);
+        // An empty strip is a failure, not a result: persisting it would
+        // leave the asset looking permanently mid-load.
+        if (!thumbs.length) throw new UnreadableMediaError("No frames could be read for the filmstrip.");
         useEditor.getState().updateAsset(asset.id, { thumbs, thumbStep });
         writeCachedStrip(key, { thumbs, thumbStep, duration: asset.duration, at: Date.now() });
       }
@@ -1428,8 +1456,17 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
       const peaks = await makePeaks(src);
       useEditor.getState().updateAsset(asset.id, { peaks });
     }
-  } catch {
+  } catch (err) {
     // Thumbnails and waveforms are decorative; editing works without them.
+    // The failure still gets recorded — clips stop their loading pulse — and
+    // logged at error level, which carries it into PostHog error tracking
+    // (console.error autocapture) with the file's shape beside the cause.
+    if (asset.type === "video") setStripFailed(asset.id, true);
+    console.error(
+      `[cut] enrich failed for ${asset.fileName}`,
+      { type: asset.type, durationSec: Math.round(asset.duration) },
+      err
+    );
   }
 }
 
@@ -1441,8 +1478,10 @@ export async function ensurePeaks(asset: MediaAsset) {
       const peaks = await makePeaks(asset.url);
       useEditor.getState().updateAsset(asset.id, { peaks });
     }
-  } catch {
-    // Waveforms are decorative; editing works without them.
+  } catch (err) {
+    // Waveforms are decorative; editing works without them. Error level
+    // carries the failure into PostHog error tracking.
+    console.error(`[cut] peaks failed for ${asset.fileName}`, err);
   }
 }
 

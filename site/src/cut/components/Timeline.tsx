@@ -42,7 +42,7 @@ import { originalSettings, type ExportDoc } from "@/cut/lib/exportClient";
 import { useExports } from "@/cut/lib/exportStore";
 import { isDragActive, startDrag, subscribeDragActive } from "@/cut/lib/drag";
 import { CLIP_GAP, startLaneMove, startLaneTrim, type LaneDrag, type LaneKind } from "@/cut/lib/laneTracks";
-import { downloadMedia, ensurePeaks, importImage, importStockMusic, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia } from "@/cut/lib/media";
+import { downloadMedia, ensurePeaks, importImage, importStockMusic, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia, stripFailedFor, subscribeStripStatus } from "@/cut/lib/media";
 import { track0Clips, laneGapAt, sameLane, type LaneRef, clipLen, clipSpeed, getClipSpans, overlayLaneOrder, overlayLayers, projectDuration, resolveTransitions, rippleInsert, useEditor } from "@/cut/lib/store";
 import type { VideoTrackPlacement } from "@/cut/lib/store";
 import { playheadAt, setSkim, skimAt, subscribePlayhead, usePlayhead, useSkim } from "@/cut/lib/playhead";
@@ -3504,6 +3504,11 @@ function ClipView({
 
   const startFrame = useEdgeFrame(asset, filmIn, `${clip.id}:in`);
   const endFrame = useEdgeFrame(asset, filmOut, `${clip.id}:out`);
+  const stripFailed = useSyncExternalStore(
+    subscribeStripStatus,
+    () => stripFailedFor(asset.id),
+    () => false
+  );
   const filmstrip = useMemo(
     () =>
       filmstripFrames(asset, filmIn, w, pps, speed, VIDEO_H - 4, 26, {
@@ -3565,7 +3570,7 @@ function ClipView({
         });
       }}
     >
-      <Filmstrip frames={filmstrip} grade={clip.grade} />
+      <Filmstrip frames={filmstrip} grade={clip.grade} failed={stripFailed} />
       {selected && (
         // A blue wash over the whole clip so a multi-selection reads at a
         // glance, not just from the thin border.
@@ -3980,14 +3985,24 @@ function useEdgeFrame(asset: MediaAsset | undefined, time: number, slot: string)
 function Filmstrip({
   frames,
   grade,
+  failed,
 }: {
   frames: { src: string; left: number; width: number }[];
   grade?: ColorGrade;
+  /** The strip's last generation attempt failed: hold a still placeholder.
+   * An endless pulse reads as loading forever, and animating a clip-width
+   * element burns paint time for the life of the timeline. */
+  failed?: boolean;
 }) {
   const tint = gradeTint(grade);
   // No thumbs yet — the media is still streaming into the browser store. A
   // pulsing skeleton fills the box until the strip can draw real frames.
   if (!frames.length) {
+    if (failed) {
+      return (
+        <div className="tl-filmstrip-failed pointer-events-none absolute inset-0 bg-accent" />
+      );
+    }
     return (
       <Skeleton className="tl-filmstrip-skeleton pointer-events-none absolute inset-0 rounded-none" />
     );
