@@ -75,6 +75,8 @@ export const analyticsSnapshotFileSchema = z.object({
       // The onboarding referral answer; present once the user answered.
       referralAnsweredAt: z.string().optional(),
       referralSources: z.array(z.string()).optional(),
+      // The free text that comes with picking "other".
+      referralOther: z.string().optional(),
     }),
   ),
   balances: z.array(z.object({ userId: z.string(), balanceMicros: z.string() })),
@@ -125,6 +127,8 @@ export const analyticsRollupSchema = z.object({
           day: analyticsDaySchema,
           respondents: z.number(),
           counts: z.array(z.number()),
+          // The free text behind that day's "other" answers, in no order.
+          others: z.array(z.string()).default([]),
         }),
       ),
     })

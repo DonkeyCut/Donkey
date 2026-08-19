@@ -144,7 +144,7 @@ function deriveView(rollup: AnalyticsRollup): RollupView {
 type ReferralView = {
   config: ChartConfig;
   trendConfig: ChartConfig;
-  series: Record<string, number | string>[];
+  series: Record<string, number | string | string[]>[];
   cumulative: Record<string, number | string>[];
   respondents: number;
 };
@@ -173,11 +173,14 @@ function deriveReferrals(referrals: AnalyticsReferrals): ReferralView {
   };
   let respondents = 0;
   const running = new Map<string, number>();
-  const series: Record<string, number | string>[] = [];
+  const series: Record<string, number | string | string[]>[] = [];
   const cumulative: Record<string, number | string>[] = [];
   for (const entry of referrals.days) {
     respondents += entry.respondents;
-    const daily: Record<string, number | string> = { day: entry.day };
+    const daily: Record<string, number | string | string[]> = {
+      day: entry.day,
+      otherAnswers: entry.others,
+    };
     const total: Record<string, number | string> = { day: entry.day, totalResponses: respondents };
     referrals.sources.forEach((id, i) => {
       daily[id] = entry.counts[i] ?? 0;
@@ -195,6 +198,46 @@ function deriveReferrals(referrals: AnalyticsReferrals): ReferralView {
 function NonZeroTooltipContent(props: React.ComponentProps<typeof ChartTooltipContent>) {
   return (
     <ChartTooltipContent {...props} payload={props.payload?.filter((item) => item.value !== 0)} />
+  );
+}
+
+/** The sources tooltip, which carries what "Other" meant: the day's free-text
+ * answers hang under that row as an indented bulleted list. */
+function SourcesTooltipContent({
+  config,
+  ...props
+}: React.ComponentProps<typeof ChartTooltipContent> & { config: ChartConfig }) {
+  return (
+    <NonZeroTooltipContent
+      {...props}
+      formatter={(value, name, item) => {
+        const id = String(name);
+        const answers = (item.payload as { otherAnswers?: string[] } | undefined)?.otherAnswers;
+        return (
+          <>
+            <div
+              className="size-2.5 shrink-0 rounded-[2px]"
+              style={{ background: item.color }}
+            />
+            <div className="flex flex-1 items-center justify-between gap-3 leading-none">
+              <span className="text-muted-foreground">{config[id]?.label ?? id}</span>
+              <span className="font-mono font-medium text-foreground tabular-nums">
+                {typeof value === "number" ? value.toLocaleString() : String(value)}
+              </span>
+            </div>
+            {id === "other" && answers?.length ? (
+              <ul className="ml-[1.125rem] w-full list-disc space-y-0.5 pl-3 text-muted-foreground marker:text-muted-foreground/60">
+                {answers.map((answer, i) => (
+                  <li key={`${answer}-${i}`} className="break-words">
+                    {answer}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </>
+        );
+      }}
+    />
   );
 }
 
@@ -869,7 +912,10 @@ export default function SuAnalyticsPage() {
                   <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={48} />
                   <ChartTooltip
                     content={
-                      <NonZeroTooltipContent labelFormatter={(label) => formatDay(String(label))} />
+                      <SourcesTooltipContent
+                        config={referrals.config}
+                        labelFormatter={(label) => formatDay(String(label))}
+                      />
                     }
                   />
                   {Object.keys(referrals.config).map((id) => (
@@ -964,7 +1010,7 @@ export default function SuAnalyticsPage() {
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" {...tiles.containerProps}>
         {tiles.order.map((id) => (
           <DragBlock key={id} {...tiles.blockProps(id)}>
             {tileNodes[id]}
@@ -972,7 +1018,7 @@ export default function SuAnalyticsPage() {
         ))}
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid gap-6 xl:grid-cols-2" {...cards.containerProps}>
         {cards.order
           .filter((id) => cardNodes[id] !== undefined)
           .map((id) => (

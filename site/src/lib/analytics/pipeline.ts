@@ -193,7 +193,9 @@ async function writeSnapshot(): Promise<AnalyticsSnapshotFile> {
           email: true,
           id: true,
           name: true,
-          onboarding: { select: { referralAnsweredAt: true, referralSources: true } },
+          onboarding: {
+            select: { referralAnsweredAt: true, referralOther: true, referralSources: true },
+          },
           superUser: true,
         },
         take: SNAPSHOT_PAGE_SIZE,
@@ -210,6 +212,9 @@ async function writeSnapshot(): Promise<AnalyticsSnapshotFile> {
       ? {
           referralAnsweredAt: u.onboarding.referralAnsweredAt.toISOString(),
           referralSources: u.onboarding.referralSources,
+          ...(u.onboarding.referralOther?.trim()
+            ? { referralOther: u.onboarding.referralOther.trim() }
+            : {}),
         }
       : {}),
   }));
@@ -415,7 +420,13 @@ function buildReferrals(
     .flatMap((u) =>
       u.referralAnsweredAt === undefined
         ? []
-        : [{ day: utcDayOf(new Date(u.referralAnsweredAt)), sources: u.referralSources ?? [] }],
+        : [
+            {
+              day: utcDayOf(new Date(u.referralAnsweredAt)),
+              other: u.referralOther,
+              sources: u.referralSources ?? [],
+            },
+          ],
     )
     .filter((a) => a.day <= through);
   if (answered.length === 0) return undefined;
@@ -426,10 +437,13 @@ function buildReferrals(
   }
 
   const first = answered.reduce((min, a) => (a.day < min ? a.day : min), through);
-  const byDay = new Map<string, { day: string; respondents: number; counts: number[] }>();
+  const byDay = new Map<
+    string,
+    { day: string; respondents: number; counts: number[]; others: string[] }
+  >();
   const days: NonNullable<AnalyticsRollup["referrals"]>["days"] = [];
   for (let day = first; day <= through; day = addUtcDays(day, 1)) {
-    const entry = { counts: sources.map(() => 0), day, respondents: 0 };
+    const entry = { counts: sources.map(() => 0), day, others: [], respondents: 0 };
     byDay.set(day, entry);
     days.push(entry);
   }
@@ -437,6 +451,7 @@ function buildReferrals(
     const entry = byDay.get(a.day);
     if (!entry) continue;
     entry.respondents++;
+    if (a.other) entry.others.push(a.other);
     for (const id of a.sources) entry.counts[sources.indexOf(id)]++;
   }
   return { days, sources };
