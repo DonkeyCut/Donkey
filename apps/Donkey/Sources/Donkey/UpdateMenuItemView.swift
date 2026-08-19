@@ -12,17 +12,22 @@ final class UpdateMenuItemView: NSView {
     private enum Metrics {
         static let height: CGFloat = 22
         static let textLeading: CGFloat = 14
+        /// Text position while the indicator shows, matching the text of sibling rows that carry
+        /// a menu-item image (Go to App, Record Screen).
+        static let indicatedTextLeading: CGFloat = 38
         static let highlightInset: CGFloat = 5
         static let cornerRadius: CGFloat = 4
         static let spinnerSize: CGFloat = 14
         static let spinnerTrailing: CGFloat = 10
         static let indicatorDiameter: CGFloat = 6
-        static let indicatorLeading: CGFloat = 3
+        /// Centers the dot on the icon column of the rows above (icon centers sit ~24pt in).
+        static let indicatorCenterX: CGFloat = 24
     }
 
     private let label = NSTextField(labelWithString: "")
     private let spinner = NSProgressIndicator()
     private let onClick: () -> Void
+    private var labelLeading: NSLayoutConstraint!
 
     private var isClickable = true
     private var isHovered = false
@@ -48,9 +53,10 @@ final class UpdateMenuItemView: NSView {
         spinner.translatesAutoresizingMaskIntoConstraints = false
         addSubview(spinner)
 
+        labelLeading = label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.textLeading)
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: Metrics.height),
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.textLeading),
+            labelLeading,
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
             spinner.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.spinnerTrailing),
             spinner.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -68,6 +74,9 @@ final class UpdateMenuItemView: NSView {
         label.stringValue = title
         self.isClickable = isClickable
         self.showsIndicator = showsIndicator
+        // With the dot in the icon column, the text lines up with the image rows above; without
+        // it, the text sits at the plain-row position shared with Quit.
+        labelLeading.constant = showsIndicator ? Metrics.indicatedTextLeading : Metrics.textLeading
         if isBusy {
             spinner.startAnimation(nil)
         } else {
@@ -104,7 +113,7 @@ final class UpdateMenuItemView: NSView {
         guard showsIndicator else { return }
         let diameter = Metrics.indicatorDiameter
         let dot = NSRect(
-            x: Metrics.indicatorLeading,
+            x: Metrics.indicatorCenterX - diameter / 2,
             y: (bounds.height - diameter) / 2,
             width: diameter,
             height: diameter
