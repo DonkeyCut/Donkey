@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { atempoChain, hasStream, num, videoColorInfo } from "./util";
+import { assertGraphSafe, fexpr } from "./filterGraph";
 import { CLIP_MAX_ZOOM, projectFadeSeconds, regionPx, TRANSITION_XFADE, TRANSITION_ZOOM, type ColorGrade, type TransitionStyle } from "../lib/types";
 import { effectFilterLines, gradeToFfmpegFilter, lookFilterLines, shortestTurn, sortedKeys, type OverlayKey } from "@donkeycut/effects-kit";
 
@@ -433,7 +434,7 @@ export async function runExport(
     if (!cover && z <= 1.0001) return scale;
     const kx = num(0.5 + Math.max(-1, Math.min(1, panX ?? 0)) / 2);
     const ky = num(0.5 + Math.max(-1, Math.min(1, panY ?? 0)) / 2);
-    return `${scale},crop=min(iw\,${bw}):min(ih\,${bh}):(iw-ow)*${kx}:(ih-oh)*${ky}`;
+    return `${scale},crop=${fexpr(`min(iw,${bw})`)}:${fexpr(`min(ih,${bh})`)}:(iw-ow)*${kx}:(ih-oh)*${ky}`;
   };
   // One ffmpeg input per distinct media file (from the project folder),
   // plus one per uploaded overlay PNG.
@@ -1688,7 +1689,7 @@ export async function runExport(
     [
       "-y",
       ...inputs,
-      "-filter_complex", filters.join(";"),
+      "-filter_complex", assertGraphSafe(filters.join(";")),
       "-map", `[${vLabel}]`,
       "-map", `[${aLabel}]`,
       ...videoCodecArgs,

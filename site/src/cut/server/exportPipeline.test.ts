@@ -481,6 +481,11 @@ describe("the project background in the filtergraph", () => {
     expect(g.join(";")).toContain("color=0xFFFFFF");
   });
 
+  test("a covering clip's crop quotes its min() so the graph parser keeps it whole", async () => {
+    const g = await graphFor({ clips: [clip("a.mp4", { fit: "fill", zoom: 1.5 })] });
+    expect(g.join(";")).toContain("crop='min(iw,1080)':'min(ih,1920)'");
+  });
+
   test("no background named keeps the black frame every cut had before", async () => {
     const g = await graphFor({ clips: [clip("", { out: 4, hidden: true, muted: true })] });
     expect(g.join(";")).toContain("color=c=black:");

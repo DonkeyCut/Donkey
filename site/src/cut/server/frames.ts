@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { mediaPath } from "./projects";
+import { assertGraphSafe, fexpr } from "./filterGraph";
 import { num, round } from "./util";
 
 function run(cmd: string, args: string[]): Promise<void> {
@@ -105,7 +106,7 @@ export async function makeFreezeFrame(
       const even = (n: number) => 2 * Math.round(n / 2);
       const kx = (0.5 + (framing?.panX ?? 0) / 2).toFixed(4);
       const ky = (0.5 + (framing?.panY ?? 0) / 2).toFixed(4);
-      const crop = `,crop=min(iw\,${w}):min(ih\,${h}):(iw-ow)*${kx}:(ih-oh)*${ky}`;
+      const crop = `,crop=${fexpr(`min(iw,${w})`)}:${fexpr(`min(ih,${h})`)}:(iw-ow)*${kx}:(ih-oh)*${ky}`;
       vf = cover
         ? `scale=${even(w * z)}:${even(h * z)}:force_original_aspect_ratio=increase${crop}`
         : `scale=${even(w * z)}:${even(h * z)}:force_original_aspect_ratio=decrease` +
@@ -119,7 +120,7 @@ export async function makeFreezeFrame(
       "-i", png,
       "-t", dur.toFixed(3),
       "-r", "30",
-      ...(vf ? ["-vf", vf] : []),
+      ...(vf ? ["-vf", assertGraphSafe(vf)] : []),
       "-c:v", "libx264",
       "-preset", "veryfast",
       "-pix_fmt", "yuv420p",

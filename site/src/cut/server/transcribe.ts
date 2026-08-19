@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import os from "node:os";
 import path from "node:path";
 import { alignCues } from "../lib/cueAlign";
+import { assertGraphSafe } from "./filterGraph";
 import { assertLocalRuntime } from "./local-only";
 import { createJobRegistry } from "./jobRegistry";
 import { mediaPath, readProject } from "./projects";
@@ -422,7 +423,7 @@ async function runTranscribe(job: TranscribeJob, spec: TranscribeSpec) {
       [
         "-y",
         ...inputs,
-        "-filter_complex", filters.join(";"),
+        "-filter_complex", assertGraphSafe(filters.join(";")),
         "-map", `[${aLabel}]`,
         "-ac", "1",
         "-ar", "16000",

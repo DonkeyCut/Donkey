@@ -15,6 +15,7 @@ import { spawn } from "node:child_process";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { runFfmpeg, type RenderHandle } from "./exportPipeline";
+import { assertGraphSafe } from "./filterGraph";
 import { hasStream, videoDimensions } from "./util";
 
 /** Segment length. Six seconds is the common VOD choice: long enough that
@@ -171,7 +172,7 @@ export async function encodeRungs(
     [
       "-y",
       "-i", source,
-      "-filter_complex", [split, ...scales].join(";"),
+      "-filter_complex", assertGraphSafe([split, ...scales].join(";")),
       ...maps,
       ...codecArgs,
       ...(withAudio ? ["-c:a", "aac", "-b:a", `${AUDIO_KBPS}k`, "-ac", "2"] : []),

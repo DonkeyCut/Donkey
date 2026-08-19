@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import type { RenderHandle } from "../server/exportPipeline";
+import { assertGraphSafe } from "../server/filterGraph";
 import { prisma, registerObject, type ClaimedJob } from "./db";
 import { cardKey, uploadFile } from "./r2";
 
@@ -68,9 +69,11 @@ async function renderAnimation(source: string, dest: string): Promise<number> {
       "-i",
       source,
       "-vf",
-      `fps=${recipe.fps},scale=w=${recipe.box}:h=${recipe.box}:` +
-        `force_original_aspect_ratio=decrease:flags=lanczos,split[s0][s1];` +
-        `[s0]palettegen=max_colors=${recipe.colors}[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3`,
+      assertGraphSafe(
+        `fps=${recipe.fps},scale=w=${recipe.box}:h=${recipe.box}:` +
+          `force_original_aspect_ratio=decrease:flags=lanczos,split[s0][s1];` +
+          `[s0]palettegen=max_colors=${recipe.colors}[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3`
+      ),
       "-loop",
       "0",
       dest,

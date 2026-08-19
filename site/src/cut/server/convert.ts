@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { h264Encoder, runFfmpeg, sdrConvert, vtQuality, type RenderHandle } from "./exportPipeline";
+import { assertGraphSafe } from "./filterGraph";
 import { videoColorInfo, videoDimensions } from "./util";
 
 /**
@@ -132,7 +133,7 @@ export async function convertToMp4(
       // is where an odd source height would otherwise land.
       const scale = shrink ? `scale=-2:${cap - (cap % 2)},` : "";
       const chain = `${sdr}${scale}`.replace(/,$/, "");
-      if (chain) video.push("-vf", chain);
+      if (chain) video.push("-vf", assertGraphSafe(chain));
       const enc = await h264Encoder();
       video.push(
         ...(enc === "libx264"
