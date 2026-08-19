@@ -327,6 +327,10 @@ export interface LaneDrag {
   /** Hovered display row. One past the end opens a new row below; -1 opens
    * one above the top, for a stack whose order is z-order. */
   targetRow: number;
+  /** The rows this drag can land on, inclusive — the band paints exactly
+   * these and nothing else. */
+  minRow: number;
+  maxRow: number;
   ghostX: number; // ghost left in px — follows the pointer
   ghostY: number; // ghost vertical offset in px from its resting row — follows the pointer
   slotStart: number; // resolved landing start, seconds
@@ -435,6 +439,20 @@ export function startLaneMove<V = unknown>(
     .filter((x) => x.view.lane === self.lane)
     .reduce((m, x) => Math.max(m, restAt(x) + x.view.len), 0);
   const usedLanes = laneOrder(kind, s, [...rest.map((x) => x.view.lane), self.lane]);
+  // The rows this drag can reach. A row past either end opens a brand-new
+  // track, and from an outermost row an item alone there has nothing to open
+  // on its side: the row it left collapses behind it, so the fresh one
+  // renumbers straight back to the picture already on screen. Single-lane
+  // kinds stay on the row they were grabbed from.
+  const alone = !rest.some((x) => x.view.lane === self.lane);
+  const minRow = ad.multiLane
+    ? ui.topInsert && !(alone && ui.homeRow === 0)
+      ? -1
+      : 0
+    : ui.homeRow;
+  const maxRow = ad.multiLane
+    ? ui.laneCount - (alone && ui.homeRow === ui.laneCount - 1 ? 1 : 0)
+    : ui.homeRow;
   const targets = snapTargets(s, kind, id);
   const tol = SNAP_PX / ui.pps;
   // Dragging a media-backed item can also hand its asset to a reference drop
@@ -521,6 +539,8 @@ export function startLaneMove<V = unknown>(
             kind,
             id,
             targetRow: ui.homeRow,
+            minRow,
+            maxRow,
             ghostX: ds * ui.pps,
             ghostY,
             slotStart: ds,
@@ -533,13 +553,8 @@ export function startLaneMove<V = unknown>(
         ui.vertical.preview(null, 0, 0);
       }
 
-      // Vertical drag retracks the item; one row past the end opens a new one.
-      targetRow = ad.multiLane
-        ? Math.min(
-            ui.laneCount,
-            Math.max(ui.topInsert ? -1 : 0, ui.homeRow + Math.round(dy / ui.rowH))
-          )
-        : ui.homeRow;
+      // Vertical drag retracks the item, across the rows it can reach.
+      targetRow = Math.min(maxRow, Math.max(minRow, ui.homeRow + Math.round(dy / ui.rowH)));
       // Which lane to part/collide on: multi-lane rows are display indexes
       // into the compacted used-lane list (a row past the end is a brand-new
       // lane with no neighbors); single-lane kinds stay on their own lane —
@@ -604,7 +619,17 @@ export function startLaneMove<V = unknown>(
       const pushed = new Set(after.map((x) => x.view.id));
       ui.onSnap(guide);
       applyMoves((x) => (pushed.has(x.view.id) ? restAt(x) + delta : restAt(x)), clamped);
-      ui.onDrag({ kind, id, targetRow, ghostX: ds * ui.pps, ghostY, slotStart: clamped, len });
+      ui.onDrag({
+        kind,
+        id,
+        targetRow,
+        minRow,
+        maxRow,
+        ghostX: ds * ui.pps,
+        ghostY,
+        slotStart: clamped,
+        len,
+      });
     },
     onUp: (_dx, _dy, moved) => {
       ui.vertical?.setActive?.(false);

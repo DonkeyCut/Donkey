@@ -2130,9 +2130,9 @@ export function Timeline() {
                 height:
                   Math.max(
                     overlayLanes.count,
-                    // An in-flight element drag shows the whole landing area,
-                    // the would-be new row below included.
-                    laneDrag?.kind === "overlay" ? overlayLanes.count + 1 : 0,
+                    // An in-flight element drag shows its whole landing area —
+                    // only the rows it can actually reach.
+                    laneDrag?.kind === "overlay" ? laneDrag.maxRow + 1 : 0,
                     // A panel drag over an empty band opens the first row for
                     // its landing preview.
                     elementDrop !== null ? elementDrop.row + 1 : 0
@@ -2245,7 +2245,7 @@ export function Timeline() {
                 />
               )}
               {laneDrag?.kind === "overlay" &&
-                Array.from({ length: overlayLanes.count + 1 }, (_, r) => (
+                Array.from({ length: laneDrag.maxRow + 1 }, (_, r) => (
                   <div
                     key={r}
                     className={cn(
@@ -2532,9 +2532,9 @@ export function Timeline() {
                 height:
                   Math.max(
                     audioLanes.count,
-                    // An in-flight audio drag shows the whole landing area,
-                    // the would-be new track included.
-                    laneDrag?.kind === "audio" ? audioLanes.count + 1 : 0,
+                    // An in-flight audio drag shows its whole landing area —
+                    // only the rows it can actually reach.
+                    laneDrag?.kind === "audio" ? laneDrag.maxRow + 1 : 0,
                     (audioDrop?.row ?? -1) + 1
                   ) * AUDIO_H,
               }}
@@ -2554,7 +2554,7 @@ export function Timeline() {
                 </Fragment>
               ))}
               {laneDrag?.kind === "audio" &&
-                Array.from({ length: audioLanes.count + 1 }, (_, r) => (
+                Array.from({ length: laneDrag.maxRow + 1 }, (_, r) => (
                   <div
                     key={r}
                     className={cn(
