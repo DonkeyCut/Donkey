@@ -66,13 +66,34 @@ describe("FrameRing", () => {
     expect(ring.at(0)?.timestamp).toBeCloseTo(3);
   });
 
-  test("keep() drops what a reader moved away from", () => {
+  test("a window keeps the answer on the asking clip's side of a split", () => {
+    // Two clips split from one file share a ring. The clip past the split asks
+    // inside its own span; a garden frame from before the split is nearer but
+    // shows the other scene.
     const ring = new FrameRing<Timed>(16);
-    for (let i = 0; i < 10; i++) ring.push(f(i));
-    ring.keep(4, 6);
-    expect(ring.size).toBe(3);
-    expect(ring.oldest).toBeCloseTo(4);
-    expect(ring.newest).toBeCloseTo(6);
+    ring.push(f(45.4));
+    ring.push(f(45.5));
+    ring.push(f(46.0));
+    // Ask at 45.68 in a clip whose span starts at the 45.57 split: the frames
+    // before the split are out, and the earliest in-window frame answers.
+    expect(ring.at(45.68, 45.57, 60)?.timestamp).toBeCloseTo(46.0);
+    // The clip before the split never shows the far side.
+    expect(ring.at(45.55, 40, 45.57)?.timestamp).toBeCloseTo(45.5);
+    expect(ring.at(46.2, 40, 45.57)?.timestamp).toBeCloseTo(45.5);
+  });
+
+  test("a frame spanning the window's edge still answers inside it", () => {
+    // A split lands mid-frame: the frame covering the second clip's `in`
+    // starts just before it, and it is that clip's real first picture.
+    const ring = new FrameRing<Timed>(16);
+    ring.push(f(45.55));
+    expect(ring.at(45.58, 45.57, 60)?.timestamp).toBeCloseTo(45.55);
+  });
+
+  test("nothing on the asking side answers null", () => {
+    const ring = new FrameRing<Timed>(16);
+    ring.push(f(45.4));
+    expect(ring.at(46.1, 45.57, 60)).toBe(null);
   });
 });
 

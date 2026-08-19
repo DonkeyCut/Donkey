@@ -144,11 +144,21 @@ export class FrameRing<T extends Timed> {
    * The frame covering `t`: the last one starting at or before it. Before the
    * first frame held, the earliest — at a clip's head that is the frame the cut
    * opens on, and showing it beats showing nothing.
+   *
+   * `from`/`to` bound the answer to frames whose span overlaps that window.
+   * Two clips split from one file share a ring, and near the split the nearest
+   * frame is often from the other clip's side of the cut — a paused playhead
+   * just past a scene change would show the old scene and call it held. A clip
+   * asking within its own source span can only ever be answered from it; with
+   * nothing held there yet, no answer is the honest one, and the reader keeps
+   * its last painted picture until the right frame lands.
    */
-  at(t: number): T | null {
+  at(t: number, from = -Infinity, to = Infinity): T | null {
     let best: T | null = null;
     let earliest: T | null = null;
     for (const i of this.items) {
+      if (i.timestamp > to + SAME) continue;
+      if (i.timestamp + Math.max(i.duration, SAME) < from - SAME) continue;
       if (!earliest || i.timestamp < earliest.timestamp) earliest = i;
       if (i.timestamp <= t + SAME && (!best || i.timestamp > best.timestamp)) best = i;
     }
@@ -183,10 +193,6 @@ export class FrameRing<T extends Timed> {
     return n;
   }
 
-  /** Drop frames outside a window a reader has moved away from. */
-  keep(from: number, to: number): void {
-    this.items = this.items.filter((i) => i.timestamp >= from - SAME && i.timestamp <= to + SAME);
-  }
 }
 
 /**
@@ -272,11 +278,12 @@ export class ClipFrameSource {
    *
    * Exact when the ring holds the frame covering `t`; otherwise the nearest
    * frame before it, which is what a decoder running slightly behind should
-   * show. Null only when nothing has been decoded yet.
+   * show. `from`/`to` bound the answer to the asking clip's source span — see
+   * `FrameRing.at`. Null when nothing decoded yet answers inside it.
    */
-  frameAt(t: number): SourceFrame | null {
+  frameAt(t: number, from = -Infinity, to = Infinity): SourceFrame | null {
     if (this.still) return this.still;
-    const c = this.ring.at(t);
+    const c = this.ring.at(t, from, to);
     return c ? frameOfCanvas(c) : null;
   }
 
@@ -328,12 +335,6 @@ export class ClipFrameSource {
       this.wanted = t;
       void this.pumpSeek();
     }
-  }
-
-  /** Frames outside [from, to] are of no further use — a clip whose window
-   * moved on, or a scrub that jumped. */
-  trim(from: number, to: number): void {
-    this.ring.keep(from, to);
   }
 
   close(): void {

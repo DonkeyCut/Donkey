@@ -150,7 +150,7 @@ class Engine {
     const asset = clip && s.assets.find((a) => a.id === clip.assetId);
     if (!clip || !asset) return null;
     const src = this.pool.get(keyOf(clip, asset), asset, this.decodeHeight());
-    return src.frameAt(sourceTimeOf(clip, previewAt()))?.image ?? null;
+    return src.frameAt(sourceTimeOf(clip, previewAt()), clip.in, clip.out)?.image ?? null;
   }
 
   /**
@@ -170,8 +170,10 @@ class Engine {
     // A failed source that already decoded frames keeps showing the nearest
     // one it holds — a transient blip (a network drop, a signed URL mid
     // re-mint) reads as a held frame, and only a source with nothing at all
-    // to show goes missing.
-    const frame = src.frameAt(st);
+    // to show goes missing. The clip's own span bounds the answer: two clips
+    // split from one file share a source, and a held frame from across the
+    // split would show the other scene at a paused playhead.
+    const frame = src.frameAt(st, span.clip.in, span.clip.out);
     if (frame)
       return { kind: "ready", image: frame.image, width: frame.width, height: frame.height };
     return src.failed ? MISSING_FRAME : PENDING_FRAME;
@@ -315,7 +317,7 @@ class Engine {
       const src = this.pool.get(keyOf(b.span.clip, b.span.asset), b.span.asset, this.decodeHeight());
       this.used.add(src);
       src.want(b.at, false);
-      const f = src.frameAt(b.at);
+      const f = src.frameAt(b.at, b.span.clip.in, b.span.clip.out);
       this.comp.drawLayer(
         f ? { kind: "ready", image: f.image, width: f.width, height: f.height } : PENDING_FRAME,
         b.span.clip,
@@ -492,7 +494,7 @@ class Engine {
           this.decodeHeight()
         );
         const st = sourceTimeOf(master.clip, t);
-        srcTs = src.frameAt(st)?.timestamp ?? null;
+        srcTs = src.frameAt(st, master.clip.in, master.clip.out)?.timestamp ?? null;
         exact = src.hasExact(st);
       }
       markPresent({
