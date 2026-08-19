@@ -92,7 +92,7 @@ export function CutOnboarding() {
   useEffect(() => {
     if (!state || seeded.current) return;
     seeded.current = true;
-    const saved = state.referralSources.filter(isKnownReferralSource);
+    const saved = (state.referralSources ?? []).filter(isKnownReferralSource);
     if (!saved.length) return;
     const other = saved.includes("other") ? (state.referralOther ?? "") : "";
     setReferrals(saved);
