@@ -12,7 +12,9 @@ const REPLAY_FREE = /^\/(?:cut\/)?(?:app|s)(?:\/|$)/;
 // embed one get it masked before the event leaves the browser.
 const scrubUrls = (s: string) => s.replace(/https?:\/\/\S+/g, "<url>");
 
-if (process.env.NEXT_PUBLIC_POSTHOG_KEY) {
+// Production builds only: a dev server on localhost sends HMR build overlays
+// and half-saved-file errors straight into production error tracking.
+if (process.env.NEXT_PUBLIC_POSTHOG_KEY && process.env.NODE_ENV === "production") {
   posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY, {
     api_host: "https://us.i.posthog.com",
     defaults: "2026-05-30",
