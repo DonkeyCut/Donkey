@@ -26,18 +26,29 @@ const SPIN_MS = 90;
 const strip = (title: string) =>
   title.startsWith(BUSY_MARK) || title.startsWith(DONE_MARK) ? title.slice(2) : title;
 
+/**
+ * The link this component paints on — its own, never the page's.
+ *
+ * The site's icon is declared in the app metadata, so React renders that link
+ * and owns the node. Taking it out of the head leaves React holding a node
+ * with no parent, and the next render that tries to remove it throws. This
+ * one is appended after it instead: the browser takes the last icon declared,
+ * and handing the tab back is a matter of dropping this link again.
+ */
 function iconLink(): HTMLLinkElement {
   const held = document.querySelector<HTMLLinkElement>("link[data-tab-status]");
   if (held) return held;
   const link = document.createElement("link");
   link.rel = "icon";
   link.dataset.tabStatus = "";
-  // The page's own icon, kept so the tab can be handed back as it was.
-  const first = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
-  link.dataset.rest = first?.href ?? "/favicon.ico";
-  first?.remove();
   document.head.appendChild(link);
   return link;
+}
+
+/** Hand the tab back: this link goes and the page's own icon, still in the
+ * head where React put it, is what the browser is left with. */
+function dropIconLink(): void {
+  document.querySelector("link[data-tab-status]")?.remove();
 }
 
 /** The status icon: a turning ring, or a check on a green disc. */
@@ -130,13 +141,13 @@ export function TabStatus() {
   }, [done]);
 
   useEffect(() => {
-    const link = iconLink();
     const base = strip(document.title);
     if (!busy && !done) {
       document.title = base;
-      link.href = link.dataset.rest || "/favicon.ico";
+      dropIconLink();
       return;
     }
+    const link = iconLink();
     document.title = (busy ? BUSY_MARK : DONE_MARK) + base;
     if (!busy) {
       link.href = paint("done", 0);
@@ -151,6 +162,9 @@ export function TabStatus() {
     const timer = setInterval(step, SPIN_MS);
     return () => clearInterval(timer);
   }, [busy, done, projectName]);
+
+  // Leaving the editor leaves the tab as it was found.
+  useEffect(() => dropIconLink, []);
 
   return null;
 }
