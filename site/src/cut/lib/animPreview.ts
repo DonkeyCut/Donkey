@@ -72,32 +72,47 @@ export function releaseAnimRest(id: string): void {
   notify();
 }
 
+/** The longest a move rehearsal takes. A move runs the element's whole span,
+ * which can be half a minute; anything past this sweeps the same motion
+ * through in this long instead, so the shape reads without the wait. */
+const MOVE_REHEARSAL_MAX = 2.4;
+
 /**
  * Play `slot` on `o` from its own starting point: In sweeps the head of the
- * element, Out its tail, and a loop runs one cycle. The run carries that slot
- * alone, so rehearsing one animation never drags the element's other two into
- * the picture. Nothing plays when the slot is empty.
+ * element, Out its tail, a loop runs one cycle, and a move runs the element's
+ * whole span. The run carries that slot alone, so rehearsing one animation
+ * never drags the element's others into the picture. Nothing plays when the
+ * slot is empty.
  */
 export function playAnimPreview(
   o: { id: string; start: number; end: number; anim?: OverlayAnim },
-  slot: "in" | "out" | "loop"
+  slot: "in" | "out" | "loop" | "move"
 ): void {
   stopAnimPreview();
+  // A move is not an anim slot: it is written into the element's own pose
+  // track, so its run carries no anim at all and the track alone draws it.
   const anim: OverlayAnim =
     slot === "in"
       ? { in: o.anim?.in }
       : slot === "out"
         ? { out: o.anim?.out }
-        : { loop: o.anim?.loop };
+        : slot === "loop"
+          ? { loop: o.anim?.loop }
+          : {};
   const dur = Math.max(0.1, o.end - o.start);
-  const window =
-    slot === "loop"
-      ? (loopPeriod(anim) ?? 0)
-      : Math.min((slot === "in" ? anim.in?.seconds : anim.out?.seconds) ?? 0, dur);
-  if (window <= 0) return;
-  // Where the slot lives inside the element: In and a loop start at its head,
-  // Out ends at its tail.
-  const from = slot === "out" ? dur - window : 0;
+  const span =
+    slot === "move"
+      ? dur
+      : slot === "loop"
+        ? (loopPeriod(anim) ?? 0)
+        : Math.min((slot === "in" ? anim.in?.seconds : anim.out?.seconds) ?? 0, dur);
+  if (span <= 0) return;
+  // How long the rehearsal takes on the wall clock. Every slot but a move
+  // plays at its own speed; a long move is compressed into the cap.
+  const window = slot === "move" ? Math.min(span, MOVE_REHEARSAL_MAX) : span;
+  // Where the slot lives inside the element: In, a loop and a move start at
+  // its head, Out ends at its tail.
+  const from = slot === "out" ? dur - span : 0;
   const t0 = performance.now();
   const step = () => {
     const elapsed = (performance.now() - t0) / 1000;
@@ -107,7 +122,7 @@ export function playAnimPreview(
       notify();
       return;
     }
-    run = { id: o.id, tLocal: from + elapsed, anim };
+    run = { id: o.id, tLocal: from + (elapsed / window) * span, anim };
     notify();
     frame = requestAnimationFrame(step);
   };

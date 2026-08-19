@@ -7,18 +7,16 @@
 
 import {
   bakesPixels,
+  edgeMotion,
   glyphStateAt,
-  GLYPH_TRAVEL_MAX,
   hasGlyphMotion,
-  isGlyphAnimStyle,
   loopExtent,
   loopPeriod,
-  SLIDE_TRAVEL,
   type GlyphLoopPhase,
   type GlyphPhase,
   type OverlayAnim,
-  type OverlayAnimStyle,
 } from "./anim";
+import { presetExtent } from "./motion/evaluate";
 import { evalOverlayFrame, hasOverlayKeys, poseAt, poseExtent, sortedKeys } from "./keys";
 import { applyMaskToCanvas, isMaskAnimated } from "./mask";
 import type { LottieHandle } from "./lottie";
@@ -674,10 +672,7 @@ export function planAnimatedLayers(o: Overlay, end: number): AnimatedLayer[] {
   const anim: OverlayAnim = o.anim ?? {};
   const dur = Math.max(0.1, o.end - o.start);
   const isText = (o.kind ?? "text") === "text";
-  const baked = (slot: "in" | "out") => {
-    const style = anim[slot]?.style;
-    return !!style && bakesPixels(style, isText);
-  };
+  const baked = (slot: "in" | "out") => bakesPixels(anim[slot], isText);
   const inS = anim.in ? Math.min(anim.in.seconds, dur) : 0;
   const outS = anim.out ? Math.min(anim.out.seconds, Math.max(0, dur - inS)) : 0;
   const out: AnimatedLayer[] = [];
@@ -702,9 +697,14 @@ export function planAnimatedLayers(o: Overlay, end: number): AnimatedLayer[] {
   /** One window per slice, each drawn at the ramp's position mid-window. The
    * slot leaves the window's anim: its motion is in the picture already. */
   const slices = (from: number, secs: number, slot: "in" | "out") => {
-    const style = anim[slot]!.style;
+    const edge = anim[slot]!;
+    // Which of the three bakes this is comes from the preset's own channels,
+    // so a composed animation is sliced by what it does.
+    const preset = edgeMotion(edge);
+    const types = !!preset?.animate.typed;
+    const perGlyph = !!preset?.selector;
     const text = isText ? (o as TextOverlay).text : "";
-    const cap = style === "typewriter" ? Math.max(1, text.length) : Infinity;
+    const cap = types ? Math.max(1, text.length) : Infinity;
     const n = Math.max(1, Math.min(cap, Math.ceil(secs * TYPE_SLICE_FPS)));
     const rest: OverlayAnim = { ...anim, [slot]: undefined };
     for (let i = 0; i < n; i++) {
@@ -712,11 +712,13 @@ export function planAnimatedLayers(o: Overlay, end: number): AnimatedLayer[] {
       const p = slot === "out" ? 1 - mid : mid;
       const at = from + (i / n) * secs;
       const to = from + ((i + 1) / n) * secs;
-      if (style === "typewriter") {
+      if (types) {
         const chars = Math.max(1, Math.ceil(p * text.length));
         push({ ...o, text: text.slice(0, chars) } as Overlay, at, to, rest);
-      } else if (isGlyphAnimStyle(style)) {
-        push(o, at, to, rest, { glyphs: { style, p, exiting: slot === "out" } });
+      } else if (perGlyph) {
+        push(o, at, to, rest, {
+          glyphs: { style: edge.style, preset: edge.preset, p, exiting: slot === "out" },
+        });
       } else {
         push(o, at, to, rest, { reveal: p });
       }
@@ -782,18 +784,16 @@ export async function renderOverlayFrames(
   // The crop region: the resting box, grown for travel, scale overshoot,
   // shadow spill, and — when anything rotates — the circumscribed square.
   const base = await measureElementBounds(overlay, frame, env);
-  const styles: OverlayAnimStyle[] = [anim?.in?.style, anim?.out?.style].filter(
-    (s): s is OverlayAnimStyle => !!s
-  );
-  const slides = styles.some((s) => s.startsWith("slide"));
-  // Glyphs stray from the resting box on their own; pad by the farthest any
-  // of them travels.
-  const glyphs = styles.some(isGlyphAnimStyle);
-  const loop = loopExtent(anim?.loop?.style);
-  const travel =
-    (slides ? SLIDE_TRAVEL : 0) * scale +
-    (glyphs ? GLYPH_TRAVEL_MAX : 0) * scale +
-    loop.travel * scale;
+  // Read from the presets themselves, so a composed animation pads its crop
+  // by what it actually travels rather than by what its name suggests.
+  const edges = [anim?.in, anim?.out]
+    .map(edgeMotion)
+    .filter((p): p is NonNullable<typeof p> => !!p);
+  const edgeTravel = edges.reduce((max, p) => Math.max(max, presetExtent(p).travel), 0);
+  // A per-glyph ramp hands each character its share of the same tracks, so
+  // the preset's own reach already covers where the glyphs get to.
+  const loop = loopExtent(anim?.loop);
+  const travel = (edgeTravel + loop.travel) * scale;
   // A keyframed element carries its own travel and its own zoom: the region
   // spans every pose the track visits, at the largest scale it reaches.
   const keyed = hasOverlayKeys(overlay);

@@ -1,0 +1,895 @@
+{
+  "push": {
+    "label": "Push in",
+    "note": "A slow zoom in across the whole hold \u2014 the workhorse for a line that has to feel urgent.",
+    "slots": [
+      "hold"
+    ],
+    "animate": {
+      "scale": [
+        {
+          "t": 0,
+          "v": [
+            1,
+            1
+          ],
+          "ease": [
+            0.645,
+            0.045,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 1,
+          "v": [
+            1.16,
+            1.16
+          ]
+        }
+      ]
+    }
+  },
+  "pull": {
+    "label": "Pull out",
+    "note": "A slow zoom out, the frame opening up. Endings, reveals, the last line of a verse.",
+    "slots": [
+      "hold"
+    ],
+    "animate": {
+      "scale": [
+        {
+          "t": 0,
+          "v": [
+            1.16,
+            1.16
+          ],
+          "ease": [
+            0.645,
+            0.045,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 1,
+          "v": [
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  },
+  "settle": {
+    "label": "Settle",
+    "note": "Lands oversized and leaning, eases to rest in the first third, then creeps. Hero lines.",
+    "slots": [
+      "hold"
+    ],
+    "animate": {
+      "scale": [
+        {
+          "t": 0,
+          "v": [
+            1.14,
+            1.14
+          ],
+          "ease": [
+            0.215,
+            0.61,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 0.35,
+          "v": [
+            1,
+            1
+          ],
+          "ease": [
+            0.645,
+            0.045,
+            0.355,
+            1
+          ],
+          "tMax": 0.55
+        },
+        {
+          "t": 1,
+          "v": [
+            1.03,
+            1.03
+          ]
+        }
+      ],
+      "rotation": [
+        {
+          "t": 0,
+          "v": -4,
+          "ease": [
+            0.215,
+            0.61,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 0.35,
+          "v": 0,
+          "tMax": 0.55
+        }
+      ]
+    }
+  },
+  "swing": {
+    "label": "Swing",
+    "note": "Overshoots past its resting angle and swings back. Playful, hand-drawn.",
+    "slots": [
+      "hold"
+    ],
+    "animate": {
+      "rotation": [
+        {
+          "t": 0,
+          "v": -14,
+          "ease": [
+            0.215,
+            0.61,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 0.35,
+          "v": 7,
+          "ease": [
+            0.645,
+            0.045,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 0.62,
+          "v": -3,
+          "ease": [
+            0.645,
+            0.045,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 1,
+          "v": 0
+        }
+      ],
+      "scale": [
+        {
+          "t": 0,
+          "v": [
+            0.94,
+            0.94
+          ],
+          "ease": [
+            0.215,
+            0.61,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 0.35,
+          "v": [
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  },
+  "punch": {
+    "label": "Punch",
+    "note": "Snaps big, snaps back, then creeps. A hit on the beat.",
+    "slots": [
+      "hold"
+    ],
+    "animate": {
+      "scale": [
+        {
+          "t": 0,
+          "v": [
+            1.3,
+            1.3
+          ],
+          "ease": [
+            0.215,
+            0.61,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 0.2,
+          "v": [
+            0.97,
+            0.97
+          ],
+          "ease": [
+            0.215,
+            0.61,
+            0.355,
+            1
+          ],
+          "tMax": 0.18
+        },
+        {
+          "t": 0.35,
+          "v": [
+            1,
+            1
+          ],
+          "ease": [
+            0.645,
+            0.045,
+            0.355,
+            1
+          ],
+          "tMax": 0.32
+        },
+        {
+          "t": 1,
+          "v": [
+            1.06,
+            1.06
+          ]
+        }
+      ]
+    }
+  },
+  "float": {
+    "label": "Float",
+    "note": "Rises a little the whole time it is up. Dreamy, weightless.",
+    "slots": [
+      "hold"
+    ],
+    "animate": {
+      "position": [
+        {
+          "t": 0,
+          "v": [
+            0,
+            43
+          ],
+          "ease": [
+            0.645,
+            0.045,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 1,
+          "v": [
+            0,
+            -43
+          ]
+        }
+      ]
+    }
+  },
+  "sink": {
+    "label": "Sink",
+    "note": "Drifts down. Regret, endings, a line that gives up.",
+    "slots": [
+      "hold"
+    ],
+    "animate": {
+      "position": [
+        {
+          "t": 0,
+          "v": [
+            0,
+            -43
+          ],
+          "ease": [
+            0.645,
+            0.045,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 1,
+          "v": [
+            0,
+            54
+          ]
+        }
+      ]
+    }
+  },
+  "driftleft": {
+    "label": "Drift left",
+    "note": "Slides steadily left across the hold \u2014 a parallax bed under other lines.",
+    "slots": [
+      "hold"
+    ],
+    "animate": {
+      "position": [
+        {
+          "t": 0,
+          "v": [
+            115,
+            0
+          ]
+        },
+        {
+          "t": 1,
+          "v": [
+            -115,
+            0
+          ]
+        }
+      ]
+    }
+  },
+  "driftright": {
+    "label": "Drift right",
+    "note": "Slides steadily right.",
+    "slots": [
+      "hold"
+    ],
+    "animate": {
+      "position": [
+        {
+          "t": 0,
+          "v": [
+            -115,
+            0
+          ]
+        },
+        {
+          "t": 1,
+          "v": [
+            115,
+            0
+          ]
+        }
+      ]
+    }
+  },
+  "sway": {
+    "label": "Sway",
+    "note": "Leans one way, then the other, and back to level. Drunk, loose, swung.",
+    "slots": [
+      "hold"
+    ],
+    "animate": {
+      "rotation": [
+        {
+          "t": 0,
+          "v": -5,
+          "ease": [
+            0.645,
+            0.045,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 0.5,
+          "v": 5,
+          "ease": [
+            0.645,
+            0.045,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 1,
+          "v": -2
+        }
+      ]
+    }
+  },
+  "arc": {
+    "label": "Arc",
+    "note": "Travels along a shallow curve rather than a straight line.",
+    "slots": [
+      "hold"
+    ],
+    "animate": {
+      "position": [
+        {
+          "t": 0,
+          "v": [
+            -150,
+            32
+          ],
+          "ease": [
+            0.645,
+            0.045,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 0.5,
+          "v": [
+            0,
+            -54
+          ],
+          "ease": [
+            0.645,
+            0.045,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 1,
+          "v": [
+            150,
+            32
+          ]
+        }
+      ]
+    }
+  },
+  "tiltsettle": {
+    "label": "Tilt settle",
+    "note": "Arrives rotated a quarter turn out and unwinds to level.",
+    "slots": [
+      "hold"
+    ],
+    "animate": {
+      "rotation": [
+        {
+          "t": 0,
+          "v": -25,
+          "ease": [
+            0.215,
+            0.61,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 0.45,
+          "v": 0,
+          "tMax": 0.6
+        }
+      ],
+      "scale": [
+        {
+          "t": 0,
+          "v": [
+            0.9,
+            0.9
+          ],
+          "ease": [
+            0.215,
+            0.61,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 0.45,
+          "v": [
+            1,
+            1
+          ],
+          "ease": [
+            0.645,
+            0.045,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 1,
+          "v": [
+            1.04,
+            1.04
+          ]
+        }
+      ]
+    }
+  },
+  "breathe": {
+    "label": "Breathe",
+    "note": "Grows and shrinks a few percent, twice. Living, patient.",
+    "slots": [
+      "hold"
+    ],
+    "animate": {
+      "scale": [
+        {
+          "t": 0,
+          "v": [
+            1,
+            1
+          ],
+          "ease": [
+            0.645,
+            0.045,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 0.25,
+          "v": [
+            1.05,
+            1.05
+          ],
+          "ease": [
+            0.645,
+            0.045,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 0.5,
+          "v": [
+            1,
+            1
+          ],
+          "ease": [
+            0.645,
+            0.045,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 0.75,
+          "v": [
+            1.05,
+            1.05
+          ],
+          "ease": [
+            0.645,
+            0.045,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 1,
+          "v": [
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  },
+  "creep": {
+    "label": "Creep",
+    "note": "A scale rise so slow you only notice it in the cut. Dread, tension.",
+    "slots": [
+      "hold"
+    ],
+    "animate": {
+      "scale": [
+        {
+          "t": 0,
+          "v": [
+            0.98,
+            0.98
+          ]
+        },
+        {
+          "t": 1,
+          "v": [
+            1.06,
+            1.06
+          ]
+        }
+      ]
+    }
+  },
+  "slam": {
+    "label": "Slam",
+    "note": "Enormous for two frames, then hard down to rest. Impact.",
+    "slots": [
+      "hold"
+    ],
+    "animate": {
+      "scale": [
+        {
+          "t": 0,
+          "v": [
+            1.9,
+            1.9
+          ],
+          "ease": [
+            0.55,
+            0.055,
+            0.675,
+            0.19
+          ]
+        },
+        {
+          "t": 0.12,
+          "v": [
+            0.94,
+            0.94
+          ],
+          "ease": [
+            0.215,
+            0.61,
+            0.355,
+            1
+          ],
+          "tMax": 0.1
+        },
+        {
+          "t": 0.22,
+          "v": [
+            1,
+            1
+          ],
+          "tMax": 0.2
+        }
+      ],
+      "opacity": [
+        {
+          "t": 0,
+          "v": 0.6,
+          "ease": [
+            0.55,
+            0.055,
+            0.675,
+            0.19
+          ]
+        },
+        {
+          "t": 0.12,
+          "v": 1,
+          "tMax": 0.1
+        }
+      ]
+    }
+  },
+  "orbit": {
+    "label": "Orbit",
+    "note": "Circles its own resting point once. Playful chaos.",
+    "slots": [
+      "hold"
+    ],
+    "animate": {
+      "position": [
+        {
+          "t": 0,
+          "v": [
+            0,
+            0
+          ],
+          "ease": [
+            0.645,
+            0.045,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 0.25,
+          "v": [
+            54,
+            -43
+          ],
+          "ease": [
+            0.645,
+            0.045,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 0.5,
+          "v": [
+            0,
+            -76
+          ],
+          "ease": [
+            0.645,
+            0.045,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 0.75,
+          "v": [
+            -54,
+            -43
+          ],
+          "ease": [
+            0.645,
+            0.045,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 1,
+          "v": [
+            0,
+            0
+          ]
+        }
+      ]
+    }
+  },
+  "spring": {
+    "label": "Spring",
+    "note": "Overshoots the size and bounces once past it before resting.",
+    "slots": [
+      "hold"
+    ],
+    "animate": {
+      "scale": [
+        {
+          "t": 0,
+          "v": [
+            0.6,
+            0.6
+          ],
+          "ease": [
+            0.34,
+            1.56,
+            0.64,
+            1
+          ]
+        },
+        {
+          "t": 0.3,
+          "v": [
+            1.18,
+            1.18
+          ],
+          "ease": [
+            0.215,
+            0.61,
+            0.355,
+            1
+          ],
+          "tMax": 0.22
+        },
+        {
+          "t": 0.48,
+          "v": [
+            0.96,
+            0.96
+          ],
+          "ease": [
+            0.215,
+            0.61,
+            0.355,
+            1
+          ],
+          "tMax": 0.38
+        },
+        {
+          "t": 0.62,
+          "v": [
+            1,
+            1
+          ],
+          "tMax": 0.5
+        }
+      ]
+    }
+  },
+  "fall": {
+    "label": "Fall",
+    "note": "Drops in from above resting position and stops dead. Weight.",
+    "slots": [
+      "hold"
+    ],
+    "animate": {
+      "position": [
+        {
+          "t": 0,
+          "v": [
+            0,
+            -237
+          ],
+          "ease": [
+            0.55,
+            0.055,
+            0.675,
+            0.19
+          ]
+        },
+        {
+          "t": 0.3,
+          "v": [
+            0,
+            0
+          ],
+          "tMax": 0.28
+        }
+      ],
+      "scale": [
+        {
+          "t": 0,
+          "v": [
+            1.1,
+            1.1
+          ],
+          "ease": [
+            0.55,
+            0.055,
+            0.675,
+            0.19
+          ]
+        },
+        {
+          "t": 0.3,
+          "v": [
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  },
+  "reveal": {
+    "label": "Reveal",
+    "note": "Starts offset up at zero opacity and eases down into place.",
+    "slots": [
+      "hold"
+    ],
+    "animate": {
+      "position": [
+        {
+          "t": 0,
+          "v": [
+            0,
+            -65
+          ],
+          "ease": [
+            0.215,
+            0.61,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 0.3,
+          "v": [
+            0,
+            0
+          ],
+          "tMax": 0.4
+        }
+      ],
+      "opacity": [
+        {
+          "t": 0,
+          "v": 0,
+          "ease": [
+            0.215,
+            0.61,
+            0.355,
+            1
+          ]
+        },
+        {
+          "t": 0.3,
+          "v": 1,
+          "tMax": 0.4
+        }
+      ]
+    }
+  }
+}

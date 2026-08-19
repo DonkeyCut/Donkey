@@ -26,6 +26,7 @@ export function ScrubValue({
   parse,
   onScrub,
   onCommit,
+  disabled,
   className,
   label,
 }: {
@@ -41,6 +42,9 @@ export function ScrubValue({
   parse: (raw: string) => number | null;
   onScrub?: (v: number) => void;
   onCommit: (v: number) => void;
+  /** Nothing to write: the readout still shows the value and takes no drag,
+   * no keystroke and no click. */
+  disabled?: boolean;
   className?: string;
   label: string;
 }) {
@@ -146,10 +150,14 @@ export function ScrubValue({
     <button
       ref={buttonRef}
       type="button"
+      disabled={disabled}
       aria-label={label}
-      title="Drag to adjust · click to type"
+      title={disabled ? undefined : "Drag to adjust · click to type"}
       className={cn(
-        "cursor-ew-resize touch-none select-none text-right font-mono text-[11.5px] tabular-nums underline decoration-transparent decoration-dotted underline-offset-3 transition-colors hover:text-foreground hover:decoration-current",
+        "touch-none select-none text-right font-mono text-[11.5px] tabular-nums underline decoration-transparent decoration-dotted underline-offset-3 transition-colors",
+        disabled
+          ? "cursor-default opacity-50"
+          : "cursor-ew-resize hover:text-foreground hover:decoration-current",
         className
       )}
       onPointerDown={(e) => {

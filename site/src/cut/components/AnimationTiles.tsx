@@ -8,6 +8,10 @@ import {
   hasGlyphMotion,
   isGlyphAnimStyle,
   isGlyphLoopStyle,
+  HOLD_IDS,
+  MOTION,
+  presetExtent,
+  sampleProperties,
   OVERLAY_ANIM_STYLE_IDS,
   OVERLAY_ANIM_STYLE_LABELS,
   OVERLAY_LOOP_STYLE_IDS,
@@ -57,14 +61,40 @@ const DEMO_REFERENCE_PX = 190;
  * it maps against a shorter reference and stays visible at tile size. */
 const LOOP_REFERENCE_PX = 64;
 
-const referencePx = (slot: Slot) => (slot === "loop" ? LOOP_REFERENCE_PX : DEMO_REFERENCE_PX);
+/** The share of the tile the widest part of a move is drawn at. Small enough
+ * that the name is still inside the card at the far end of the travel. */
+const MOVE_REACH = 0.15;
 
-type Slot = "in" | "out" | "loop";
+/** A move is mapped against its own reach: the holds run from a breath that
+ * never leaves the spot to a fall the depth of the frame, and one fixed
+ * mapping either loses the small ones or throws the big ones clean off the
+ * tile. Every move then reads at the same amplitude, and what tells them
+ * apart in the grid is the shape of the motion. */
+const moveReferencePx = (style: string) => {
+  const preset = MOTION.holds[style];
+  const travel = preset ? presetExtent(preset).travel : 0;
+  return Math.max(LOOP_REFERENCE_PX, travel / MOVE_REACH);
+};
+
+const referencePx = (slot: Slot, style: string) =>
+  slot === "move"
+    ? moveReferencePx(style)
+    : slot === "loop"
+      ? LOOP_REFERENCE_PX
+      : DEMO_REFERENCE_PX;
+
+type Slot = "in" | "out" | "loop" | "move";
+
+/** A move runs the element's whole span, so the tile gives it one of its own
+ * to play in — long enough to read a push, short enough to come round again. */
+const MOVE_DEMO_SECONDS = 2.4;
 
 const labelOf = (slot: Slot, style: string) =>
-  slot === "loop"
-    ? (OVERLAY_LOOP_STYLE_LABELS[style as OverlayLoopStyle] ?? style)
-    : (OVERLAY_ANIM_STYLE_LABELS[style as OverlayAnimStyle] ?? style);
+  slot === "move"
+    ? (MOTION.holds[style]?.label ?? style)
+    : slot === "loop"
+      ? (OVERLAY_LOOP_STYLE_LABELS[style as OverlayLoopStyle] ?? style)
+      : (OVERLAY_ANIM_STYLE_LABELS[style as OverlayAnimStyle] ?? style);
 
 function demoStateAt(
   slot: Slot,
@@ -74,6 +104,24 @@ function demoStateAt(
   ramp: number,
   speed: number
 ) {
+  if (slot === "move") {
+    // A move is a pose track, not a preset slot: sample it straight and hand
+    // back the same shape the ramps produce, so the tile draws it the same way.
+    const preset = MOTION.holds[style];
+    if (!preset) return { dx: 0, dy: 0, scale: 1, rotate: 0, alpha: 1 };
+    const pose = sampleProperties(
+      preset.animate,
+      (t % MOVE_DEMO_SECONDS) / MOVE_DEMO_SECONDS,
+      MOVE_DEMO_SECONDS
+    );
+    return {
+      dx: pose.dx,
+      dy: pose.dy,
+      scale: (pose.sx + pose.sy) / 2,
+      rotate: pose.rotate,
+      alpha: pose.alpha,
+    };
+  }
   if (slot === "loop") {
     return evalOverlayAnim({ loop: { style: style as OverlayLoopStyle, speed } }, t, 60, isText);
   }
@@ -98,12 +146,21 @@ const WORD = "text-[13px] whitespace-nowrap";
  * mid-slide, open enough that a name fits the tile at 13px. */
 const wordStyle = () => ({ fontFamily: fontStack("montserrat"), fontWeight: 700, lineHeight: 1 });
 
+/** Whether the demo types its name out rather than moving it. A typed demo
+ * rewrites the element's text every frame, so React must render it with no
+ * children at all — a text node React still tracks would be destroyed under
+ * it, and the crash lands later, when the tile unmounts. */
+const typesItsName = (slot: Slot, style: string) =>
+  slot === "in" || slot === "out" ? !!MOTION.edges[style]?.animate.typed : false;
+
 /** Whether the demo has to lay the name out letter by letter: the per-glyph
  * ramps and the per-glyph loops both move each character on its own delay. */
 const splitsGlyphs = (slot: Slot, style: string) =>
-  slot === "loop"
-    ? isGlyphLoopStyle(style as OverlayLoopStyle)
-    : isGlyphAnimStyle(style as OverlayAnimStyle);
+  slot === "move"
+    ? false
+    : slot === "loop"
+      ? isGlyphLoopStyle(style as OverlayLoopStyle)
+      : isGlyphAnimStyle(style as OverlayAnimStyle);
 
 /** The name standing still: what a card wears until the pointer reaches it,
  * and what every tile falls back to when the reader asks for less motion. */
@@ -137,12 +194,16 @@ function LiveName({
 }) {
   const ref = useRef<HTMLSpanElement>(null);
   const label = labelOf(slot, style);
+  const typed = typesItsName(slot, style);
   // Golden-ratio steps around the cycle: neighbouring tiles land far apart in
   // it, and no run of them ever bunches up mid-motion together.
   const phase = index * (slot === "loop" ? LOOP_SPREAD : demoCycle(seconds)) * PHASE_STEP;
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    // A typed demo's element comes from React empty; its content is this
+    // effect's to write, starting with the whole name.
+    if (el.dataset.word) el.textContent = el.dataset.word;
     const letters = () => Array.from(el.children) as HTMLElement[];
     const rest = () => {
       el.style.transform = "";
@@ -164,7 +225,7 @@ function LiveName({
     const tick = (now: number) => {
       if (!start) start = now;
       const st = demoStateAt(slot, style, (now - start) / 1000 + phase, isText, seconds, speed);
-      const px = (v: number) => (v * el.clientWidth) / referencePx(slot);
+      const px = (v: number) => (v * el.clientWidth) / referencePx(slot, style);
       if (hasGlyphMotion(st)) {
         // The letters carry the motion; the word itself stays put.
         const kids = letters();
@@ -204,17 +265,19 @@ function LiveName({
   return (
     <span
       ref={ref}
-      data-word={style === "typewriter" ? label : undefined}
+      data-word={typed ? label : undefined}
       className={`${WORD} text-foreground`}
       style={{ willChange: "transform", ...wordStyle() }}
     >
-      {isText && splitsGlyphs(slot, style)
-        ? [...label].map((ch, i) => (
-            <span key={i} className="inline-block">
-              {ch}
-            </span>
-          ))
-        : label}
+      {typed
+        ? null
+        : isText && splitsGlyphs(slot, style)
+          ? [...label].map((ch, i) => (
+              <span key={i} className="inline-block">
+                {ch}
+              </span>
+            ))
+          : label}
     </span>
   );
 }
@@ -368,6 +431,7 @@ export function AnimationCard({
 export function AnimationTiles({
   slot,
   value,
+  custom,
   isText,
   seconds,
   speed,
@@ -376,6 +440,9 @@ export function AnimationTiles({
   slot: Slot;
   /** The style in use, or undefined for none. */
   value?: string;
+  /** The slot plays an animation the project carries itself, so none of these
+   * tiles is what is running — including None. */
+  custom?: boolean;
   /** Typewriter is offered on titles only. */
   isText: boolean;
   /** The In/Out length the panel has set — the hover demo's ramp. */
@@ -385,13 +452,15 @@ export function AnimationTiles({
   onPick: (style: string | null) => void;
 }) {
   const ids: string[] =
-    slot === "loop"
-      ? OVERLAY_LOOP_STYLE_IDS
-      : OVERLAY_ANIM_STYLE_IDS.filter((s) => s !== "typewriter" || isText);
+    slot === "move"
+      ? HOLD_IDS
+      : slot === "loop"
+        ? OVERLAY_LOOP_STYLE_IDS
+        : OVERLAY_ANIM_STYLE_IDS.filter((s) => s !== "typewriter" || isText);
 
   return (
     <div className="grid grid-cols-2 gap-[9px]">
-      <Tile selected={!value} onClick={() => onPick(null)} title="None" className="p-1">
+      <Tile selected={!value && !custom} onClick={() => onPick(null)} title="None" className="p-1">
         <span className={STAGE}>
           <span className={`${WORD} text-muted-foreground/70`} style={wordStyle()}>
             None

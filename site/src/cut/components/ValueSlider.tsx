@@ -91,6 +91,7 @@ export function ValueSlider({
         snap={snap}
         format={format}
         parse={parse}
+        disabled={disabled}
         onScrub={onDraft}
         onCommit={onCommit}
       />

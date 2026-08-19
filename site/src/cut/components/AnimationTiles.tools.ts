@@ -18,6 +18,12 @@ import {
   OVERLAY_LOOP_STYLE_IDS,
 } from "@donkeycut/effects-kit";
 import { num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
+import {
+  MOVE_STRENGTH_MAX,
+  MOVE_STRENGTH_MIN,
+  TEXT_MOVE_IDS,
+  TEXT_MOVE_NOTES,
+} from "@/cut/lib/textMotion";
 
 const RAMP_SECONDS = `${OVERLAY_ANIM_MIN_SECONDS}..${OVERLAY_ANIM_MAX_SECONDS} (default ${OVERLAY_ANIM_DEFAULT_SECONDS})`;
 
@@ -25,9 +31,17 @@ export const OVERLAY_ANIMATION_TOOLS = [
   {
     name: "set_overlay_animation",
     description:
-      `Animate an overlay element (title, shape, or sticker): preset In/Out ramps plus a Loop that runs its whole duration. Omitted slots keep their setting; pass "none" to clear one. In/Out styles: ${OVERLAY_ANIM_STYLE_IDS.join(", ")} — slide names are the motion direction; typewriter animates titles only; ${GLYPH_ANIM_STYLE_IDS.join(", ")} move a title's letters one at a time, and move any other kind as one piece. Loop styles: ${OVERLAY_LOOP_STYLE_IDS.join(", ")} — ${GLYPH_LOOP_STYLE_IDS.join(", ")} carry a title's letters on their own delays, and carry any other kind as one piece.`,
+      `Animate an overlay element (title, shape, or sticker): preset In/Out ramps, a Loop that runs its whole duration, and a Move that says what the element does WHILE it holds. Omitted slots keep their setting; pass "none" to clear one. In/Out styles: ${OVERLAY_ANIM_STYLE_IDS.join(", ")} — slide names are the motion direction; typewriter animates titles only; ${GLYPH_ANIM_STYLE_IDS.join(", ")} move a title's letters one at a time, and move any other kind as one piece. Loop styles: ${OVERLAY_LOOP_STYLE_IDS.join(", ")} — ${GLYPH_LOOP_STYLE_IDS.join(", ")} carry a title's letters on their own delays, and carry any other kind as one piece. A move writes the element's own keyframe pose track, so it lands as ordinary keys the user can then drag; set_overlay_keyframes replaces it when no named move fits.`,
     inputSchema: obj({
       id: str("Overlay element id"),
+      move: {
+        type: "string",
+        enum: [...TEXT_MOVE_IDS],
+        description: `What the element does while it holds, written onto its pose track. ${TEXT_MOVE_IDS.filter((m) => m !== "none").map((m) => `${m}: ${TEXT_MOVE_NOTES[m]}`).join(" ")}`,
+      },
+      move_strength: num(
+        `How hard the move pushes, ${MOVE_STRENGTH_MIN}..${MOVE_STRENGTH_MAX} (1 = as written). Scales every offset from rest and leaves the timing alone, so the move stays on the beat.`
+      ),
       in_style: {
         type: "string",
         enum: [...OVERLAY_ANIM_STYLE_IDS, "none"],
@@ -51,7 +65,7 @@ export const OVERLAY_ANIMATION_TOOLS = [
   {
     name: "set_overlay_keyframes",
     description:
-      "Give an overlay element a keyframed pose track, for motion the presets cannot express (a path across the frame, a slow push in, a hold-then-drift). Each key is a whole pose at a time measured in seconds from the element's own start; the pose moves linearly between keys and holds outside them. Omitted fields on a key take the element's current value. Pass an empty list to clear the track and return the element to its resting pose. Preset In/Out/Loop animation still composes on top, so a keyframed title can also fade in.",
+      "Give an overlay element a keyframed pose track, for motion no named move covers (a specific path across the frame, a timing tied to the footage). Each key is a whole pose at a time measured in seconds from the element's own start; the pose moves linearly between keys and holds outside them. Omitted fields on a key take the element's current value. Pass an empty list to clear the track and return the element to its resting pose. Preset In/Out/Loop animation still composes on top, so a keyframed title can also fade in.",
     inputSchema: obj(
       {
         id: str("Overlay element id"),
