@@ -224,13 +224,17 @@ final class DonkeyStatusItemController: NSObject, NSMenuDelegate {
     }
 
     /// `base` with a blue badge in its top-right corner: a filled dot ringed by a thin transparent
-    /// gap punched out of the glyph beneath, so the badge reads apart from it.
+    /// gap punched out of the glyph beneath, so the badge reads apart from it. The canvas carries a
+    /// gutter past the glyph so the dot sits clear of the head, 2pt in from the right edge.
     private static func badged(_ base: NSImage) -> NSImage {
-        let image = NSImage(size: base.size, flipped: false) { rect in
-            base.draw(in: rect)
-            let diameter: CGFloat = 7
+        let diameter: CGFloat = 7
+        let gutter: CGFloat = 4
+        let trailing: CGFloat = 2
+        let canvas = NSSize(width: base.size.width + gutter, height: base.size.height)
+        let image = NSImage(size: canvas, flipped: false) { rect in
+            base.draw(in: NSRect(origin: rect.origin, size: base.size))
             let dot = NSRect(
-                x: rect.maxX - diameter,
+                x: rect.maxX - trailing - diameter,
                 y: rect.maxY - diameter,
                 width: diameter,
                 height: diameter

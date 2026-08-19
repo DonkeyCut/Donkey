@@ -17,7 +17,7 @@ final class UpdateMenuItemView: NSView {
         static let spinnerSize: CGFloat = 14
         static let spinnerTrailing: CGFloat = 10
         static let indicatorDiameter: CGFloat = 6
-        static let indicatorLeading: CGFloat = 6
+        static let indicatorLeading: CGFloat = 3
     }
 
     private let label = NSTextField(labelWithString: "")
