@@ -1427,6 +1427,34 @@ function setStripFailed(assetId: string, failed: boolean) {
   for (const fn of stripListeners) fn();
 }
 
+// A failed enrich books itself more tries. Filmstrip and waveform reads drop
+// out together with the preview's when media reads fail, and the sweep that
+// would try again runs only on project open — so a blip at open used to leave
+// every clip blank for the whole session. The tries are few and well spaced;
+// an asset that gains its thumbs or peaks stops the clock, and one that keeps
+// failing goes quiet after the last try.
+const ENRICH_RETRY_BASE_MS = 30_000;
+const ENRICH_RETRIES = 3;
+const enrichRetries = new Map<string, number>();
+const enrichRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleEnrichRetry(assetId: string) {
+  if (typeof window === "undefined") return;
+  if (enrichRetryTimers.has(assetId)) return;
+  const n = enrichRetries.get(assetId) ?? 0;
+  if (n >= ENRICH_RETRIES) return;
+  enrichRetries.set(assetId, n + 1);
+  const timer = setTimeout(() => {
+    enrichRetryTimers.delete(assetId);
+    const asset = useEditor.getState().assets.find((a) => a.id === assetId);
+    if (!asset) return;
+    const done = asset.type === "audio" ? !!asset.peaks?.length : !!asset.thumbs?.length;
+    if (done) return;
+    void enrichAsset(asset);
+  }, ENRICH_RETRY_BASE_MS * 3 ** n);
+  enrichRetryTimers.set(assetId, timer);
+}
+
 /** Generate filmstrip thumbnails / waveform peaks and merge them into the
  * store. Safe to call repeatedly; skips assets that are already enriched.
  * `src` overrides where the frames are read from — an import still uploading
@@ -1452,9 +1480,11 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
         useEditor.getState().updateAsset(asset.id, { thumbs, thumbStep });
         writeCachedStrip(key, { thumbs, thumbStep, duration: asset.duration, at: Date.now() });
       }
+      enrichRetries.delete(asset.id);
     } else if (asset.type === "audio" && !asset.peaks?.length) {
       const peaks = await makePeaks(src);
       useEditor.getState().updateAsset(asset.id, { peaks });
+      enrichRetries.delete(asset.id);
     }
   } catch (err) {
     // Thumbnails and waveforms are decorative; editing works without them.
@@ -1462,6 +1492,7 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
     // logged at error level, which carries it into PostHog error tracking
     // (console.error autocapture) with the file's shape beside the cause.
     if (asset.type === "video") setStripFailed(asset.id, true);
+    if (asset.type !== "image") scheduleEnrichRetry(asset.id);
     console.error(
       `[cut] enrich failed for ${asset.fileName}`,
       { type: asset.type, durationSec: Math.round(asset.duration) },

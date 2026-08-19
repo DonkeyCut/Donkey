@@ -66,11 +66,18 @@ const SAME = 1e-4;
  * second of playback — long enough that crossing a cut and coming back finds
  * the decoder still open. */
 const EVICT_GRACE = 90;
-/** A failed open tries again this much later, growing per attempt, and gives
- * up after this many. A network blip heals on its own; a file that is truly
- * unreadable stops costing anything after a few seconds. */
+/** A failed open tries again this much later, growing per attempt over the
+ * first `RETRIES` tries, so a network blip heals within seconds. */
 const RETRY_MS = 1000;
 const RETRIES = 3;
+/** Past the quick tries, a failed source keeps itself willing on this
+ * cadence. An open error is the healable kind of failure — a network stall, a
+ * signed URL that expired mid-session — and the heal costs one open attempt
+ * per interval, paid only while something still draws the clip: the timer
+ * clears the mark and nudges a redraw, and the next ask is what reopens. A
+ * file with no track this browser can decode stays latched; that verdict is
+ * durable and books no timer. */
+const FAIL_RECHECK_MS = 10_000;
 
 /** A clip's picture at an instant, with where it came from. */
 export interface SourceFrame {
@@ -345,15 +352,19 @@ export class ClipFrameSource {
    * An open failed. That is usually a moment — a network blip, a signed URL a
    * few seconds past its window — so the source tells the link keeper (which
    * re-mints an expired URL; the pool then swaps this source out under the new
-   * one) and books itself another try. Only a file that keeps failing stays
-   * marked unreadable, and only after it has had its chances.
+   * one) and books itself another try: quick ones first, then on a slow
+   * cadence for as long as the failure holds. The cadence carries the case the
+   * swap cannot: inside a signing window a re-mint returns the identical URL
+   * string, so no swap ever comes, and the cadence is what bounds a
+   * mid-session outage to seconds of black once reads work again.
    */
   private fail(): void {
     this.unreadable = true;
     this.opening = null;
     void import("./mediaLinks").then((m) => m.reportMediaUrlError(this.asset.url));
-    if (this.closed || this.attempts >= RETRIES || typeof window === "undefined") return;
+    if (this.closed || typeof window === "undefined") return;
     this.attempts++;
+    const wait = this.attempts <= RETRIES ? RETRY_MS * this.attempts : FAIL_RECHECK_MS;
     this.retryTimer = window.setTimeout(() => {
       this.retryTimer = 0;
       if (this.closed) return;
@@ -361,7 +372,7 @@ export class ClipFrameSource {
       // Nothing asks a failed source for frames, so nothing would notice it is
       // willing again without a nudge.
       this.onFrame();
-    }, RETRY_MS * this.attempts);
+    }, wait);
   }
 
   private open(): Promise<void> {
@@ -384,6 +395,9 @@ export class ClipFrameSource {
         // file's rotation, so a phone clip arrives upright at preview size and
         // no caller has to know it was ever sideways.
         this.sink = frameSink(track, { height: this.height }, POOL);
+        // A clean open ends any failure streak: the next outage starts from
+        // the quick retries again.
+        this.attempts = 0;
       } catch {
         input.dispose();
         this.fail();
@@ -405,6 +419,7 @@ export class ClipFrameSource {
           height: bitmap.height,
           timestamp: 0,
         };
+        this.attempts = 0;
         this.onFrame();
       } catch {
         this.fail();
