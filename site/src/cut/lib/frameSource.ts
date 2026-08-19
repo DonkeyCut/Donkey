@@ -23,8 +23,8 @@
  * capacity and the pool size move together, and that is the whole memory story.
  */
 
-import type { Input, WrappedCanvas } from "mediabunny";
-import { frameSink, openMedia, videoTrackOf, type FrameCanvasSink } from "./mediaRead";
+import type { Input, InputVideoTrack, WrappedCanvas } from "mediabunny";
+import { frameSink, keyframeTimeAt, openMedia, videoTrackOf, type FrameCanvasSink } from "./mediaRead";
 import type { MediaAsset } from "./types";
 
 /**
@@ -207,6 +207,7 @@ export class FrameRing<T extends Timed> {
  */
 export class ClipFrameSource {
   private input: Input | null = null;
+  private track: InputVideoTrack | null = null;
   private sink: FrameCanvasSink | null = null;
   private ring = new FrameRing<WrappedCanvas>(RING);
   /** A still's single frame; stills never stream. */
@@ -348,6 +349,7 @@ export class ClipFrameSource {
     this.still = null;
     this.input?.dispose();
     this.input = null;
+    this.track = null;
     this.sink = null;
   }
 
@@ -394,6 +396,7 @@ export class ClipFrameSource {
           return;
         }
         this.input = input;
+        this.track = track;
         // Height alone: the sink keeps the source's aspect and applies the
         // file's rotation, so a phone clip arrives upright at preview size and
         // no caller has to know it was ever sideways.
@@ -499,6 +502,25 @@ export class ClipFrameSource {
     void this.drain(from);
   }
 
+  /**
+   * Land the keyframe covering `t`, when nothing near `t` is on hand.
+   *
+   * One index read finds it and one packet decodes it, so it shows within a
+   * frame or two of the ask on any decoder — the coarse picture a drag skims
+   * across. A frame already held between that keyframe and `t` is at least as
+   * close, so the decode is skipped and the held frame keeps standing in.
+   */
+  private async roughFrame(t: number): Promise<void> {
+    if (!this.track || !this.sink) return;
+    const kt = await keyframeTimeAt(this.track, Math.max(0, t)).catch(() => null);
+    if (kt === null || this.closed) return;
+    if (this.ring.between(kt, t) > 0) return;
+    const c = await this.sink.getCanvas(kt).catch(() => null);
+    if (!c || this.closed) return;
+    this.ring.push(c);
+    this.onFrame();
+  }
+
   /** Pull frames until the ring reaches `DECODE_AHEAD_S` past `t`. Returns the
    * run in flight when one is already pulling. */
   private drain(t: number): Promise<void> {
@@ -563,6 +585,15 @@ export class ClipFrameSource {
         const t = this.wanted;
         if (t === null || this.closed || !this.sink) break;
         this.wanted = null;
+        // A drag wants a picture under the pointer more than it wants the
+        // exact frame. The keyframe covering `t` decodes in one packet on any
+        // machine, so it lands first and holds the fort; the walk below
+        // replaces it with the true frame once the pointer rests.
+        await this.roughFrame(t);
+        if (this.closed) break;
+        // The pointer has already moved on; chase it rather than finishing
+        // an exact decode nobody is looking at.
+        if (this.wanted !== null) continue;
         this.stopStream();
         // Let the replaced walk's drain finish letting go, so the new walk is
         // never pulled by a loop still holding the old one.

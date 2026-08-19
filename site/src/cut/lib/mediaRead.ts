@@ -30,6 +30,7 @@ import {
   AudioBufferSink,
   BlobSource,
   CanvasSink,
+  EncodedPacketSink,
   Input,
   UrlSource,
   type InputAudioTrack,
@@ -254,6 +255,14 @@ export async function* framesAt(
   } finally {
     input.dispose();
   }
+}
+
+/** When the keyframe at or before `t` starts. Read from the file's index —
+ * nothing decodes — so a scrub can find the one frame that answers in a
+ * single-packet decode. Null when the track has no keyframe there. */
+export async function keyframeTimeAt(track: InputVideoTrack, t: number): Promise<number | null> {
+  const packet = await new EncodedPacketSink(track).getKeyPacket(t, { verifyKeyPackets: true });
+  return packet ? packet.timestamp : null;
 }
 
 /** A single frame at `time`, at native size unless one is given. */
