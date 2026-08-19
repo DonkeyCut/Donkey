@@ -2880,7 +2880,20 @@ function MaskSection({ target }: { target: MaskTarget }) {
           <Row label="Shape">
             <Select
               value={m.kind}
-              onValueChange={(kind) => target.set({ ...m, kind: kind as MaskKind })}
+              onValueChange={(kind) => {
+                // A fresh circle starts perfectly round: w and h are frame
+                // fractions, so equal pixels means unequal fractions. ⇧-drag
+                // on the stage keeps it round through resizes.
+                const patch =
+                  kind === "circle" && !hasMaskKeys(m)
+                    ? (() => {
+                        const fr = frameOf(useEditor.getState().aspect);
+                        const w = m.w ?? 0.5;
+                        return { w, h: (w * fr.w) / fr.h };
+                      })()
+                    : {};
+                target.set({ ...m, ...patch, kind: kind as MaskKind });
+              }}
             >
               <SelectTrigger className="h-8 w-36 text-[12px]">
                 <SelectValue />

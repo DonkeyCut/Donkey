@@ -506,6 +506,12 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       ...(typeof input.invert === "boolean" ? { invert: input.invert || undefined } : {}),
       ...(isNum(input.radius) ? { radius: clamp(input.radius, 0, 400) || undefined } : {}),
     };
+    // A circle with no explicit h is a perfect circle: w and h are fractions
+    // of different frame edges, so round means unequal fractions.
+    if (mask.kind === "circle" && !isNum(input.h)) {
+      const fr = frameOf(s.aspect);
+      mask.h = clamp(((mask.w ?? 0.5) * fr.w) / fr.h, 0.01, 2);
+    }
     setMask(mask);
     // Keys layer on after the mask lands, so each one captures against the
     // geometry the call just set.

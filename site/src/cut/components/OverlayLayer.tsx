@@ -1312,13 +1312,33 @@ export function MaskGizmoCore({
     const a = HANDLE_AXIS[handle];
     const g0 = f;
     startDrag(e, {
-      onMove: (dx, dy) => {
+      onMove: (dx, dy, ev) => {
         const l = toLocal(dx, dy);
         const mx = l.x * Math.cos(theta) + l.y * Math.sin(theta);
         const my = -l.x * Math.sin(theta) + l.y * Math.cos(theta);
         const grow = m.kind === "mirror" ? 2 : 1;
-        const nw = clampSize(snapTo(g0.w + (grow * mx * a.x) / stageWidth, 1));
-        const nh = clampSize(snapTo(g0.h + (grow * my * a.y) / stageHeight, 1));
+        let nw = clampSize(snapTo(g0.w + (grow * mx * a.x) / stageWidth, 1));
+        let nh = clampSize(snapTo(g0.h + (grow * my * a.y) / stageHeight, 1));
+        // ⇧ holds the shape true — equal pixel sides, a perfect circle or
+        // square — with the pulled axis driving; a circle also settles onto
+        // true round on its own when a drag lands within a hair of it. The
+        // fractions differ because w is measured against the frame's width
+        // and h against its height.
+        const round = (m.kind === "circle" || m.kind === "rect") && (a.x !== 0 || a.y !== 0);
+        if (round && (ev.shiftKey || m.kind === "circle")) {
+          const toH = (w: number) => (w * stageWidth) / stageHeight;
+          const toW = (h: number) => (h * stageHeight) / stageWidth;
+          if (ev.shiftKey) {
+            // The pulled axis drives; a corner drives from the wider pull.
+            const driveW = a.y === 0 || (a.x !== 0 && Math.abs(mx) >= Math.abs(my));
+            if (driveW) nh = clampSize(toH(nw));
+            else nw = clampSize(toW(nh));
+            if (nh !== toH(nw)) nw = clampSize(toW(nh));
+          } else if (a.x !== 0 && a.y !== 0 && Math.abs(nh - toH(nw)) < 0.02) {
+            nh = clampSize(toH(nw));
+          }
+        }
+        const constrained = round && ev.shiftKey;
         const gw = a.x !== 0 && nw === 1;
         const gh = a.y !== 0 && nh === 1;
         setGuide(gw || gh ? { w: gw, h: gh } : null);
@@ -1339,11 +1359,11 @@ export function MaskGizmoCore({
             ? { w: nw, ...shift }
             : m.kind === "mirror"
               ? { h: nh }
-              : a.y === 0
-                ? { w: nw, ...shift }
-                : a.x === 0
-                  ? { h: nh, ...shift }
-                  : { w: nw, h: nh, ...shift }
+              : constrained || (a.x !== 0 && a.y !== 0)
+                ? { w: nw, h: nh, ...shift }
+                : a.y === 0
+                  ? { w: nw, ...shift }
+                  : { h: nh, ...shift }
         );
       },
       onUp: () => setGuide(null),
