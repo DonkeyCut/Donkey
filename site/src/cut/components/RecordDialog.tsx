@@ -10,8 +10,7 @@ import {
   MediaStreamVideoTrackSource,
   Mp4OutputFormat,
   Output,
-  QUALITY_HIGH,
-  QUALITY_MEDIUM,
+  Quality,
 } from "mediabunny";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -234,14 +233,14 @@ export function RecordDialog({
         const codec = await getFirstEncodableVideoCodec([...VIDEO_CODECS]);
         if (!codec) throw new Error("This browser can't encode video.");
         output.addVideoTrack(
-          new MediaStreamVideoTrackSource(videoTrack, { codec, bitrate: QUALITY_HIGH })
+          new MediaStreamVideoTrackSource(videoTrack, { codec, quality: new Quality("high") })
         );
       }
       if (audioTrack) {
         const codec = await getFirstEncodableAudioCodec([...AUDIO_CODECS]);
         if (!codec) throw new Error("This browser can't encode audio.");
         output.addAudioTrack(
-          new MediaStreamAudioTrackSource(audioTrack, { codec, bitrate: QUALITY_MEDIUM })
+          new MediaStreamAudioTrackSource(audioTrack, { codec, quality: new Quality("medium") })
         );
       }
       await output.start();

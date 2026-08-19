@@ -18,6 +18,7 @@ import {
   getFirstEncodableVideoCodec,
   Mp4OutputFormat,
   Output,
+  Quality,
 } from "mediabunny";
 import { personSegmenter, segmentSubjectAlpha } from "./cutout";
 import { FrameCompositor, MISSING_FRAME } from "./composite";
@@ -104,7 +105,7 @@ export async function renderSubjectMask(
   };
 
   const output = new Output({ format: new Mp4OutputFormat(), target: new BufferTarget() });
-  const video = new CanvasSource(mask, { codec, bitrate: 1_000_000 });
+  const video = new CanvasSource(mask, { codec, quality: new Quality({ bitrate: 1_000_000 }) });
   const frames = Math.max(1, Math.ceil((to - from) * MASK_FPS));
   output.addVideoTrack(video, { frameRate: MASK_FPS, maximumPacketCount: frames + 8 });
 

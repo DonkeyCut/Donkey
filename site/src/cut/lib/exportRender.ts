@@ -23,6 +23,7 @@ import {
   Mp4OutputFormat,
   Output,
   AudioBufferSource,
+  Quality,
   StreamTarget,
   type VideoCodec,
 } from "mediabunny";
@@ -609,7 +610,10 @@ export async function renderProjectToMp4(
   });
 
   try {
-    const video = new CanvasSource(canvas, { codec, bitrate: bitrateFor(settings) });
+    const video = new CanvasSource(canvas, {
+      codec,
+      quality: new Quality({ bitrate: bitrateFor(settings) }),
+    });
     // Reserving the index space needs a packet ceiling per track. The video's
     // is exact — one packet per frame; the audio's is the mix's sample count
     // over the smallest samples-per-packet a codec here uses (Opus's 960; AAC
@@ -622,7 +626,10 @@ export async function renderProjectToMp4(
         sampleRate: AUDIO_RATE,
       });
       if (audioCodec) {
-        audio = new AudioBufferSource({ codec: audioCodec, bitrate: 192_000 });
+        audio = new AudioBufferSource({
+          codec: audioCodec,
+          quality: new Quality({ bitrate: 192_000 }),
+        });
         output.addAudioTrack(audio, { maximumPacketCount: Math.ceil(mix.length / 960) + 32 });
       }
     }
