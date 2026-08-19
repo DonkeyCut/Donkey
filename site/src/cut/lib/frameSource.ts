@@ -63,15 +63,15 @@ const LAG_HOP_S = 2;
 const FIRST_FRAME_S = 4;
 /** Two source times closer than this are the same frame. */
 const SAME = 1e-4;
-/** Frames the backward-skim cache keeps of one keyframe span. A drag moving
- * backward reads against the decode direction: every position it crosses would
- * cost a fresh decoder session and a re-decode from the same keyframe. Instead
- * the span is decoded once and this many frames of it are copied out, evenly
- * spread, so backward positions answer from memory at this granularity. */
+/** Frames the backward-skim cache keeps of one span: the span is decoded once
+ * and this many frames of it are copied out, evenly spread, so the positions a
+ * backward drag crosses answer from memory at this granularity. */
 const BACK_FRAMES = 16;
-/** The most source time one backward-skim decode covers. Spans are usually one
- * keyframe interval — a second or two — and this keeps a sparsely-keyframed
- * file from turning one cache fill into a decode of half the file. */
+/** The most source time one backward-skim fill covers. The window ends at the
+ * ask and reaches this far below it, clamped to the keyframe the span decodes
+ * from, so a sparsely-keyframed file — a screen recording with keyframes many
+ * seconds apart — fills the stretch the drag is entering and pays for that
+ * stretch alone. */
 const BACK_SPAN_S = 2.5;
 /** Frames a source must go unwanted before the pool will close it. About a
  * second of playback — long enough that crossing a cut and coming back finds
@@ -113,26 +113,16 @@ export interface Timed {
   duration: number;
 }
 
-/** A frame the backward-skim cache holds. Copied off the sink's pool onto its
- * own canvas, so it stays valid however many frames decode after it. */
-interface CopiedFrame extends Timed {
-  frame: SourceFrame;
-}
-
-const copyOf = (c: WrappedCanvas): CopiedFrame => {
+/** Copy a decoded frame off the sink's pool onto its own canvas, so it stays
+ * valid however many frames decode after it. Null when no drawing context is
+ * available — a frame that could not be drawn must never enter a cache that
+ * answers "we have this one". */
+const copyOf = (c: WrappedCanvas): WrappedCanvas | null => {
   const canvas = createRasterCanvas(c.canvas.width, c.canvas.height);
   const ctx = (canvas as HTMLCanvasElement).getContext("2d");
-  ctx?.drawImage(c.canvas, 0, 0);
-  return {
-    timestamp: c.timestamp,
-    duration: c.duration,
-    frame: {
-      image: canvas,
-      width: c.canvas.width,
-      height: c.canvas.height,
-      timestamp: c.timestamp,
-    },
-  };
+  if (!ctx) return null;
+  ctx.drawImage(c.canvas, 0, 0);
+  return { canvas, timestamp: c.timestamp, duration: c.duration };
 };
 
 /**
@@ -187,15 +177,26 @@ export class FrameRing<T extends Timed> {
    * its last painted picture until the right frame lands.
    */
   at(t: number, from = -Infinity, to = Infinity): T | null {
-    let best: T | null = null;
-    let earliest: T | null = null;
+    let pick: T | null = null;
     for (const i of this.items) {
       if (i.timestamp > to + SAME) continue;
       if (i.timestamp + Math.max(i.duration, SAME) < from - SAME) continue;
-      if (!earliest || i.timestamp < earliest.timestamp) earliest = i;
-      if (i.timestamp <= t + SAME && (!best || i.timestamp > best.timestamp)) best = i;
+      pick = FrameRing.nearer(t, pick, i);
     }
-    return best ?? earliest;
+    return pick;
+  }
+
+  /** Of two frames, the one `at` would pick for `t`: a frame at or before `t`
+   * beats one after it; of two before, the later; of two after, the earlier.
+   * The one selection policy, shared with callers merging answers from two
+   * rings. */
+  static nearer<T extends Timed>(t: number, a: T | null, b: T | null): T | null {
+    if (!a || !b) return a ?? b;
+    const aBefore = a.timestamp <= t + SAME;
+    const bBefore = b.timestamp <= t + SAME;
+    if (aBefore !== bBefore) return aBefore ? a : b;
+    if (aBefore) return a.timestamp >= b.timestamp ? a : b;
+    return a.timestamp <= b.timestamp ? a : b;
   }
 
   /**
@@ -281,7 +282,7 @@ export class ClipFrameSource {
    * lookahead points the wrong way — so backward motion gets its own frames,
    * read through its own sink so the pull never recycles a canvas the ring
    * still shows. */
-  private back: { from: number; to: number; ring: FrameRing<CopiedFrame> } | null = null;
+  private back: { from: number; to: number; ring: FrameRing<WrappedCanvas> } | null = null;
   private backRun: Promise<void> | null = null;
   private backSink: FrameCanvasSink | null = null;
   /** The last paused position asked for, which is how a backward drag is
@@ -309,7 +310,12 @@ export class ClipFrameSource {
 
   /** Decoded frames held right now, for the pool's budget and the perf trace. */
   get held(): number {
-    return this.ring.size + (this.still ? 1 : 0);
+    return this.ring.size + (this.back?.ring.size ?? 0) + (this.still ? 1 : 0);
+  }
+
+  /** Let go of the backward-skim cache and its copies. */
+  dropBack(): void {
+    this.back = null;
   }
 
   get ready(): boolean {
@@ -330,18 +336,8 @@ export class ClipFrameSource {
    */
   frameAt(t: number, from = -Infinity, to = Infinity): SourceFrame | null {
     if (this.still) return this.still;
-    const c = this.ring.at(t, from, to);
-    const b = this.back?.ring.at(t, from, to) ?? null;
-    const cf = c ? frameOfCanvas(c) : null;
-    const bf = b ? b.frame : null;
-    if (!cf || !bf) return cf ?? bf;
-    // Of the two answers, the one standing closest at or before `t`; a frame
-    // past `t` only stands in when neither holds one before it.
-    const cBefore = cf.timestamp <= t + SAME;
-    const bBefore = bf.timestamp <= t + SAME;
-    if (cBefore !== bBefore) return cBefore ? cf : bf;
-    if (cBefore) return cf.timestamp >= bf.timestamp ? cf : bf;
-    return cf.timestamp <= bf.timestamp ? cf : bf;
+    const c = FrameRing.nearer(t, this.ring.at(t, from, to), this.back?.ring.at(t, from, to) ?? null);
+    return c ? frameOfCanvas(c) : null;
   }
 
   /** Whether a frame covering `t` exactly is already held. */
@@ -366,16 +362,21 @@ export class ClipFrameSource {
       this.wanted = null;
       this.lastAsk = null;
       // Playback reads forward; the backward cache's copies are dead weight.
-      if (this.back) this.back = null;
+      this.back = null;
       this.pumpStream(t);
     } else {
       const prev = this.lastAsk;
       this.lastAsk = t;
+      // Reading far from the cache's span means the gesture it served has
+      // moved on; the copies are dead weight until a drag backs through
+      // somewhere again, and that drag fills its own span.
+      if (this.back && (t > this.back.to + BACK_SPAN_S || t < this.back.from - BACK_SPAN_S))
+        this.back = null;
+      if (this.hasExact(t)) return;
       // Moving backward reads against the decode direction, where the walk
       // and its lookahead cannot help. Fill the backward cache for the span
       // being backed through, so the positions still to come answer from it.
-      if (prev !== null && t < prev - SAME && !this.backCovers(t)) void this.backfill(t, prev);
-      if (this.hasExact(t)) return;
+      if (prev !== null && t < prev - SAME && !this.backCovers(t)) this.backfill(t, prev);
       // A drag creeping along is a forward walk, not a series of jumps. Asking
       // the file for each position separately means decoding from the nearest
       // keyframe every time — the same cost the `<video>` element charged. If
@@ -597,16 +598,20 @@ export class ClipFrameSource {
   /**
    * Decode the span a drag is backing through, once, into the backward cache.
    *
-   * The span runs from the keyframe at or before `t` up to where the drag
-   * came from. It decodes forward — the only direction a decoder goes — and
-   * every `BACK_FRAMES`th of it is copied out as it passes, so by the time
-   * the pointer reaches any position in the span, a frame within one stride
-   * of it answers from memory. The cache is swapped in before the pull so a
-   * fast drag reads the early copies while the later ones still decode.
+   * The window ends at the position the drag came from, reaches at most
+   * `BACK_SPAN_S` below the ask, and is clamped to the keyframe the decode
+   * starts from, so it always contains the ask: on a densely-keyframed file
+   * that is the whole keyframe interval, and on a sparse one — a screen
+   * recording with keyframes many seconds apart — it is the stretch the drag
+   * is entering, with the next window down filled when the drag reaches it.
+   * `BACK_FRAMES` evenly-spread timestamps are fetched in one decode pass and
+   * copied out. The cache is swapped in before the pull so a fast drag reads
+   * the early copies while the later ones still decode, and the pull stands
+   * down the moment playback takes the source over.
    *
    * The pull runs on its own sink. The main sink cycles a fixed canvas pool
-   * that the ring holds references into; sixty frames pulled through it would
-   * redraw every canvas the compositor is showing.
+   * that the ring holds references into; a span of frames pulled through it
+   * would redraw every canvas the compositor is showing.
    */
   private backfill(t: number, upTo: number): void {
     if (this.backRun || this.closed) return;
@@ -615,28 +620,33 @@ export class ClipFrameSource {
         await this.open();
         if (this.closed || !this.track) return;
         const kt = await keyframeTimeAt(this.track, Math.max(0, t)).catch(() => null);
-        if (kt === null || this.closed) return;
-        if (this.back && Math.abs(this.back.from - kt) < SAME) return;
+        if (kt === null || this.closed || this.backCovers(t)) return;
         if (!this.backSink)
           this.backSink = frameSink(
             this.track,
             { height: this.height },
             { poolSize: 6, lowLatency: true }
           );
-        const to = Math.min(Math.max(upTo, kt + SAME), kt + BACK_SPAN_S);
-        const step = (to - kt) / BACK_FRAMES;
-        const ring = new FrameRing<CopiedFrame>(BACK_FRAMES + 1);
-        this.back = { from: kt, to, ring };
-        const stream = this.backSink.canvases(Math.max(0, kt));
+        const from = Math.max(kt, t - BACK_SPAN_S, 0);
+        const to = Math.min(Math.max(upTo, t + SAME), from + BACK_SPAN_S);
+        const step = (to - from) / BACK_FRAMES;
+        const asks: number[] = [];
+        for (let ts = from; ts <= to + SAME; ts += step) asks.push(ts);
+        const ring = new FrameRing<WrappedCanvas>(asks.length);
+        this.back = { from, to, ring };
+        const stream = this.backSink.canvasesAtTimestamps(asks);
         try {
-          let next = kt;
+          let last = -1;
           for (;;) {
             const { value, done } = await stream.next();
-            if (done || !value || this.closed) break;
-            if (value.timestamp > to + SAME) break;
-            if (value.timestamp + SAME >= next) {
-              ring.push(copyOf(value));
-              next = value.timestamp + step;
+            // `lastAsk` clearing means playback owns the source now; the
+            // cache was dropped and this pull is decoding for nobody.
+            if (done || this.closed || this.lastAsk === null) break;
+            if (!value || value.timestamp === last) continue;
+            last = value.timestamp;
+            const copy = copyOf(value);
+            if (copy) {
+              ring.push(copy);
               this.onFrame();
             }
           }
@@ -733,6 +743,9 @@ export class ClipFrameSource {
           await new Promise((r) => setTimeout(r, 40));
           if (this.closed) break;
           if (this.wanted !== null) continue;
+          // Playback may have started its walk during the wait; that walk
+          // owns the stream and must not be torn down under it.
+          if (this.stream) break;
         }
         this.stopStream();
         // Let the replaced walk's drain finish letting go, so the new walk is
@@ -828,6 +841,11 @@ export class FrameSourcePool {
    * crossed back and forth over is never the one closed.
    */
   evict(): void {
+    // A backward-skim cache on a source nothing reads any more is copies held
+    // for a gesture that ended; the source itself may be worth keeping warm,
+    // its cache is not.
+    for (const s of this.sources.values())
+      if (this.tick - s.touched >= EVICT_GRACE) s.dropBack();
     if (this.sources.size <= this.budget) return;
     const idle = [...this.sources.entries()]
       .filter(([, s]) => this.tick - s.touched >= EVICT_GRACE)

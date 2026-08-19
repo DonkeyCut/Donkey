@@ -66,6 +66,24 @@ describe("FrameRing", () => {
     expect(ring.at(0)?.timestamp).toBeCloseTo(3);
   });
 
+  test("nearer merges two rings' answers under at()'s own policy", () => {
+    // The backward-skim cache and the main ring each answer separately; the
+    // frame served is the one a single ring holding both would have picked.
+    const a = f(1);
+    const b = f(2);
+    const late = f(5);
+    // A frame at or before the ask beats one after it.
+    expect(FrameRing.nearer(3, a, late)).toBe(a);
+    expect(FrameRing.nearer(3, late, a)).toBe(a);
+    // Of two before, the later; of two after, the earlier.
+    expect(FrameRing.nearer(3, a, b)).toBe(b);
+    expect(FrameRing.nearer(0.5, a, b)).toBe(a);
+    // A lone answer stands.
+    expect(FrameRing.nearer(3, null, b)).toBe(b);
+    expect(FrameRing.nearer(3, a, null)).toBe(a);
+    expect(FrameRing.nearer(3, null, null)).toBe(null);
+  });
+
   test("a window keeps the answer on the asking clip's side of a split", () => {
     // Two clips split from one file share a ring. The clip past the split asks
     // inside its own span; a garden frame from before the split is nearer but
