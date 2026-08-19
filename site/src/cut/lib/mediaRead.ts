@@ -170,14 +170,28 @@ export interface FrameCanvasSink {
   ): AsyncGenerator<WrappedCanvas | null, void, unknown>;
 }
 
+export interface FrameSinkOptions {
+  poolSize?: number;
+  /** Ask the decoder to emit each frame as soon as it is decoded. Interactive
+   * readers — the preview, a trim drag — set this: Windows hardware decoders
+   * otherwise hold output until their input queue runs deep, and frames arrive
+   * in bursts with stalls between them. Batch readers leave it off and keep
+   * the deeper pipeline's throughput. */
+  lowLatency?: boolean;
+}
+
 export type FrameSinkFactory = (
   track: InputVideoTrack,
   size?: FrameSize,
-  poolSize?: number
+  opts?: FrameSinkOptions
 ) => FrameCanvasSink;
 
-const canvasSinkFactory: FrameSinkFactory = (track, size, poolSize) =>
-  new CanvasSink(track, { ...size, ...(poolSize ? { poolSize } : {}) });
+const canvasSinkFactory: FrameSinkFactory = (track, size, opts) =>
+  new CanvasSink(track, {
+    ...size,
+    ...(opts?.poolSize ? { poolSize: opts.poolSize } : {}),
+    ...(opts?.lowLatency ? { decoderOptions: { optimizeForLatency: true } } : {}),
+  });
 
 let sinkFactory: FrameSinkFactory = canvasSinkFactory;
 
@@ -195,9 +209,9 @@ export function setFrameSinkFactory(f: FrameSinkFactory): void {
 export function frameSink(
   track: InputVideoTrack,
   size?: FrameSize,
-  poolSize?: number
+  opts?: FrameSinkOptions
 ): FrameCanvasSink {
-  return sinkFactory(track, capToTrack(track, size), poolSize);
+  return sinkFactory(track, capToTrack(track, size), opts);
 }
 
 function capToTrack(track: InputVideoTrack, size?: FrameSize): FrameSize | undefined {

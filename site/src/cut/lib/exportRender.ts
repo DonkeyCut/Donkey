@@ -177,7 +177,7 @@ export class ClipReader {
       this.input = input;
       // A small pool keeps the render's canvas allocation flat over thousands
       // of frames.
-      this.sink = frameSink(track, undefined, 4);
+      this.sink = frameSink(track, undefined, { poolSize: 4 });
       return this.sink;
     })());
   }

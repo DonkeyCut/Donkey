@@ -226,7 +226,9 @@ export class ClipFrameSource {
    * are no frames past its tail to decode — so a reader inside it must not
    * keep restarting a walk that can only end again. */
   private streamDone = false;
-  private streaming = false;
+  /** The drain in flight, when one is. A seek that replaces the stream awaits
+   * this so the old drain has truly let go before the new walk is pulled. */
+  private drainRun: Promise<void> | null = null;
   /** The time a paused reader last asked for, and whether a read is in flight.
    * Latest wins: a fast drag decodes where it stopped, never every point it
    * crossed. */
@@ -394,7 +396,7 @@ export class ClipFrameSource {
         // Height alone: the sink keeps the source's aspect and applies the
         // file's rotation, so a phone clip arrives upright at preview size and
         // no caller has to know it was ever sideways.
-        this.sink = frameSink(track, { height: this.height }, POOL);
+        this.sink = frameSink(track, { height: this.height }, { poolSize: POOL, lowLatency: true });
         // A clean open ends any failure streak: the next outage starts from
         // the quick retries again.
         this.attempts = 0;
@@ -431,7 +433,6 @@ export class ClipFrameSource {
   private stopStream(): void {
     const s = this.stream;
     this.stream = null;
-    this.streaming = false;
     void s?.return(undefined).catch(() => {});
   }
 
@@ -487,6 +488,9 @@ export class ClipFrameSource {
 
   private async startStream(from: number): Promise<void> {
     await this.open();
+    // A drain still letting go of a replaced walk holds the pull loop; the new
+    // walk starts once it has.
+    await this.drainRun;
     if (this.closed || !this.sink || this.stream) return;
     // The read may have been overtaken while the file was opening.
     if (Math.abs(this.streamFrom - from) > SAME) return;
@@ -494,40 +498,53 @@ export class ClipFrameSource {
     void this.drain(from);
   }
 
-  /** Pull frames until the ring reaches `DECODE_AHEAD_S` past `t`. */
-  private async drain(t: number): Promise<void> {
-    if (this.streaming || !this.stream) return;
-    this.streaming = true;
-    try {
-      for (;;) {
-        const stream: AsyncGenerator<WrappedCanvas, void, unknown> | null = this.stream;
-        if (!stream || this.closed) break;
-        // Stop at the lookahead, and stop early once the walk's own frames at
-        // or past `t` fill the ring — pushing another would drop one that is
-        // still wanted. Only the walk's frames count: leftovers from other
-        // gestures merely age out of the cache as the walk pushes.
-        if (this.streamTail >= t + DECODE_AHEAD_S) break;
-        if (this.ring.between(Math.max(t, this.streamFrom), this.streamTail) >= RING - 1) break;
-        const { value, done } = await stream.next();
-        // A restart or a close while awaiting: this walk is no longer the one.
-        if (this.stream !== stream) break;
-        if (done || !value) {
-          this.stream = null;
-          this.streamDone = true;
-          break;
+  /** Pull frames until the ring reaches `DECODE_AHEAD_S` past `t`. Returns the
+   * run in flight when one is already pulling. */
+  private drain(t: number): Promise<void> {
+    if (this.drainRun) return this.drainRun;
+    if (!this.stream) return Promise.resolve();
+    this.drainRun = (async () => {
+      try {
+        for (;;) {
+          const stream: AsyncGenerator<WrappedCanvas, void, unknown> | null = this.stream;
+          if (!stream || this.closed) break;
+          // Stop at the lookahead, and stop early once the walk's own frames at
+          // or past `t` fill the ring — pushing another would drop one that is
+          // still wanted. Only the walk's frames count: leftovers from other
+          // gestures merely age out of the cache as the walk pushes.
+          if (this.streamTail >= t + DECODE_AHEAD_S) break;
+          if (this.ring.between(Math.max(t, this.streamFrom), this.streamTail) >= RING - 1) break;
+          const { value, done } = await stream.next();
+          // A restart or a close while awaiting: this walk is no longer the one.
+          if (this.stream !== stream) break;
+          if (done || !value) {
+            this.stream = null;
+            this.streamDone = true;
+            break;
+          }
+          this.streamTail = value.timestamp;
+          this.ring.push(value);
+          this.onFrame();
         }
-        this.streamTail = value.timestamp;
-        this.ring.push(value);
-        this.onFrame();
+      } catch {
+        this.stopStream();
+      } finally {
+        this.drainRun = null;
       }
-    } catch {
-      this.stopStream();
-    } finally {
-      this.streaming = false;
-    }
+    })();
+    return this.drainRun;
   }
 
-  /** Fetch the single frame a paused reader is waiting on. */
+  /**
+   * Serve the position a paused reader is waiting on, newest ask first.
+   *
+   * The seek is a walk anchored at the ask. A single-frame fetch would build a
+   * decoder, run it from the keyframe to the frame, flush it, and throw it
+   * away — and the flush and the teardown are the slow part on some machines.
+   * The walk decodes the same span once, lands the covering frame as it passes
+   * it, and is still warm exactly where the user just landed, so the creep or
+   * the play that usually follows starts on frames already in hand.
+   */
   private async pumpSeek(): Promise<void> {
     if (this.reading) return;
     this.reading = true;
@@ -537,12 +554,18 @@ export class ClipFrameSource {
         const t = this.wanted;
         if (t === null || this.closed || !this.sink) break;
         this.wanted = null;
-        const c = await this.sink.getCanvas(Math.max(0, t));
+        this.stopStream();
+        // Let the replaced walk's drain finish letting go, so the new walk is
+        // never pulled by a loop still holding the old one.
+        await this.drainRun;
         if (this.closed) break;
-        if (c) {
-          this.ring.push(c);
-          this.onFrame();
-        }
+        // Playback took over while this ask waited; its walk owns the stream.
+        if (this.stream) break;
+        this.streamDone = false;
+        this.streamFrom = t;
+        this.streamTail = t;
+        this.stream = this.sink.canvases(Math.max(0, t));
+        await this.drain(t);
         // Another position was asked for while this one decoded; that one is
         // where the pointer actually is now.
         if (this.wanted === null) break;

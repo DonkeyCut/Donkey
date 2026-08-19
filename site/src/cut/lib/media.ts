@@ -1715,7 +1715,7 @@ function edgeReader(url: string): Promise<EdgeReader> {
     const sinkFor = (height: number) => {
       let sink = sinks.get(height);
       if (!sink) {
-        sink = frameSink(track, { height }, 4);
+        sink = frameSink(track, { height }, { poolSize: 4, lowLatency: true });
         sinks.set(height, sink);
       }
       return sink;
