@@ -8,7 +8,7 @@ import { downloadFromUrl } from "./download";
 import { normalizeLink } from "./link";
 import { installFontFace } from "./fontAssets";
 import { fontLabelFor } from "./fontName";
-import { specimenPng } from "./fontSpecimen";
+import { SPECIMEN_FILE_SUFFIX, specimenPng } from "./fontSpecimen";
 import {
   enrichAsset,
   importRemote,
@@ -395,7 +395,9 @@ export async function carryAssetTo(
     `/api/cut/library/media/${encodeURIComponent(asset.fileName)}`,
   );
   if (!res.ok) throw new Error("Could not read that file off its shelf.");
-  const from = libraryPosterUrl(asset);
+  // A font's cover is baked from its bytes on the way in, so the shelf it
+  // lands on draws its own — always the current sheet.
+  const from = asset.type === "font" ? undefined : libraryPosterUrl(asset);
   const cover = from
     ? await backendFor(asset.residency)
         .fetch(
@@ -460,7 +462,7 @@ export async function uploadToLibrary(
   const font = isFontFile(file) ? await checkFont(file) : null;
   const fontLabel = font?.label ?? null;
   const poster = keep.poster ?? font?.poster ?? null;
-  const posterName = `${file.name}.specimen.png`;
+  const posterName = `${file.name}${SPECIMEN_FILE_SUFFIX}`;
   const fontMeta = { type: "font" as const, duration: 0 };
   if (residency === "cloud") {
     // Presign -> direct R2 PUT -> complete, with the media probed here — the

@@ -841,6 +841,12 @@ export function onFontsChanged(cb: () => void): () => void {
   return () => fontListeners.delete(cb);
 }
 
+/** Whether the registry holds this id, which is to say the face behind it is
+ * installed and will draw. Registration happens after the bytes install, so a
+ * hit here means live text shows the typeface rather than the fallback face. */
+export const hasFont = (id: string) =>
+  FONTS.some((f) => f.id === id) || registeredFonts.some((f) => f.id === id);
+
 /** CSS stack for a font id, tolerant of unknown ids (falls back to the first
  * font) so kit-typed elements and older docs always resolve to something. */
 export const fontStack = (id: string) =>

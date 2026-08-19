@@ -155,6 +155,11 @@ export function isFontFile(file: File) {
   return file.type.startsWith("font/") || /\.(ttf|otf|woff2?)$/i.test(file.name);
 }
 
+/** The kind mark a card wears for a file: its extension, uppercased. Empty for
+ * a name that carries none. */
+export const fileKind = (fileName: string) =>
+  (/\.([a-z0-9]+)$/i.exec(fileName)?.[1] ?? "").toUpperCase();
+
 /** Fonts are small; a file past this is a mistake worth catching before the
  * bytes move. The storage quota is the real ceiling. */
 export const MAX_FONT_BYTES = 10 * 1024 ** 2;

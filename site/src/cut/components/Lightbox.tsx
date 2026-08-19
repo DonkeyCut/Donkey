@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy, FileText, Loader2, Music, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { addLibraryAssetToProject, fetchLibrary } from "@/cut/lib/library";
 import { useLightbox, type LightboxItem } from "@/cut/lib/lightbox";
@@ -12,6 +11,11 @@ import { usePreviewAudio } from "@/cut/lib/previewAudio";
 import { useEditor } from "@/cut/lib/store";
 import { DocText, useDocText } from "./DocText";
 import { FontSpecimen } from "./FontSpecimen";
+import {
+  SPECIMEN_ALPHABET,
+  SPECIMEN_BG,
+  SPECIMEN_INK,
+} from "@/cut/lib/fontSpecimen";
 import { PeakStrip } from "./AudioPanel";
 
 // The asset lightbox: the big version of a stock, generated, or chat asset
@@ -261,15 +265,16 @@ function AudioBody({ item }: { item: LightboxItem }) {
 /** A font, big: the sheet a font file previews on, the alphabet filling it. */
 function FontBody({ item }: { item: LightboxItem }) {
   return (
+    // The sheet keeps its margin whichever way the alphabet arrives: the baked
+    // picture is the same charcoal, so padding it reads as more sheet.
     <div
-      className={cn(
-        "overflow-hidden rounded-2xl bg-white text-black shadow-2xl",
-        item.poster ? "" : "px-10 py-12",
-      )}
+      className="overflow-hidden rounded-2xl px-10 py-12 shadow-2xl"
+      style={{ backgroundColor: SPECIMEN_BG, color: SPECIMEN_INK }}
     >
       <FontSpecimen
         assetId={item.libraryId ?? ""}
         poster={item.poster}
+        lines={SPECIMEN_ALPHABET}
         pad={0}
         className="w-full"
       />

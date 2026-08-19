@@ -63,7 +63,7 @@ import {
   setObjectDragImage,
 } from "@/cut/lib/assetDrag";
 import { useInView } from "@/cut/hooks/useInView";
-import { isMediaFile } from "@/cut/lib/media";
+import { fileKind, isMediaFile } from "@/cut/lib/media";
 import { patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
 import {
   createLibraryFolder,
@@ -116,6 +116,11 @@ import { formatTime } from "@/cut/lib/time";
 import { cn } from "@/lib/utils";
 import { CopyNameLabel } from "./AssetRefs";
 import { FontSpecimen } from "./FontSpecimen";
+import {
+  SPECIMEN_BG,
+  SPECIMEN_INK,
+  SPECIMEN_META,
+} from "@/cut/lib/fontSpecimen";
 import { AudioCardFace } from "./AudioPanel";
 import {
   buildDragGhost,
@@ -1064,23 +1069,36 @@ export function LibraryCard({
   // the video correctly, so we render the frame instead of a baked thumbnail.
   const posterT = Math.min(1, Math.max(0.1, (a.duration || 2) / 10));
   // The size pill only shows on hover, so the lookup waits for the first one.
+  // A font wears its size in the footer at rest, so that one asks as it scrolls
+  // into view.
   const [hovered, setHovered] = useState(false);
+  const font = a.type === "font";
   const sizeBytes = useMediaFileSize(
     offline ? "" : libraryMediaUrl(a.fileName, a.residency),
-    hovered,
+    hovered || (font && seen),
   );
+  // TTF · 42 KB — what the file is, and how much of it there is.
+  const fontMeta = [
+    fileKind(a.fileName),
+    sizeBytes != null && formatBytes(sizeBytes),
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const frame =
     area && a.type !== "audio" && a.width && a.height
       ? { w: a.width, h: a.height }
-      : a.type === "font"
-        ? { w: 16, h: 9 }
+      : font
+        ? { w: 16, h: 6 }
         : { w: 1, h: 1 };
-  const tileStyle = area
-    ? {
-        width: Math.round(Math.sqrt((area * frame.w) / frame.h)),
-        aspectRatio: `${frame.w} / ${frame.h}`,
-      }
-    : undefined;
+  const tileStyle = {
+    ...(area
+      ? {
+          width: Math.round(Math.sqrt((area * frame.w) / frame.h)),
+          aspectRatio: `${frame.w} / ${frame.h}`,
+        }
+      : {}),
+    ...(font ? { backgroundColor: SPECIMEN_BG, color: SPECIMEN_INK } : {}),
+  };
 
   return (
     <div
@@ -1111,14 +1129,54 @@ export function LibraryCard({
         data-drag-object
         className={cn(
           "relative max-w-full cursor-grab overflow-hidden rounded-xl border bg-muted transition-shadow group-hover:shadow-[0_4px_20px_rgba(0,0,0,0.1)] active:cursor-grabbing",
-          !area && (a.type === "font" ? "aspect-video" : "aspect-square"),
+          !area && (font ? "aspect-[16/7]" : "aspect-square"),
+          // The sheet is the card, so nothing is drawn around it; the type
+          // scales with the tile, which runs from a panel column to a full row.
+          font && "@container flex flex-col",
           selected || flash
             ? "border-[#0a84ff] ring-2 ring-[#0a84ff]"
-            : "border-border",
+            : font
+              ? "border-transparent"
+              : "border-border",
         )}
         style={tileStyle}
       >
-        {offline ? (
+        {font ? (
+          // A pangram set in the face, and under a hairline the name it goes by
+          // with the file behind it. Nothing to load from a shelf that isn't
+          // answering, so that card shows the kind mark instead.
+          <div className="flex size-full min-h-0 flex-col">
+            <div className="grid min-h-0 flex-1 place-items-center px-3 pt-3 @[220px]:px-5 @[220px]:pt-5">
+              {offline ? (
+                <Type className="size-6 text-white/35" />
+              ) : (
+                <FontSpecimen
+                  assetId={a.id}
+                  fitHeight
+                  pad={0}
+                  className="size-full"
+                />
+              )}
+            </div>
+            <div className="mx-3 flex items-center justify-between gap-2 border-t border-white/10 py-2 @[220px]:mx-5 @[220px]:py-3">
+              <CopyNameLabel
+                name={a.name}
+                dark
+                mention={mention}
+                className="min-w-0 text-[11px] font-medium @[220px]:text-[13px]"
+              />
+              {fontMeta && (
+                <span
+                  data-drag-omit
+                  className="shrink-0 text-[10px] tabular-nums @[220px]:text-[11px]"
+                  style={{ color: SPECIMEN_META }}
+                >
+                  {fontMeta}
+                </span>
+              )}
+            </div>
+          </div>
+        ) : offline ? (
           // Nothing to load from a shelf that isn't answering, so the card
           // shows what it knows: the kind of file, its name, its length.
           <span className="grid size-full place-items-center">
@@ -1126,8 +1184,6 @@ export function LibraryCard({
               <Music className="size-6 text-muted-foreground/50" />
             ) : a.type === "image" ? (
               <ImageIcon className="size-6 text-muted-foreground/50" />
-            ) : a.type === "font" ? (
-              <Type className="size-6 text-muted-foreground/50" />
             ) : (
               <Film className="size-6 text-muted-foreground/50" />
             )}
@@ -1172,11 +1228,6 @@ export function LibraryCard({
             loading="lazy"
             className="size-full object-cover"
           />
-        ) : a.type === "font" ? (
-          <FontSpecimen
-            assetId={a.id}
-            className="size-full bg-white text-black"
-          />
         ) : (
           <AudioCardFace
             url={libraryMediaUrl(a.fileName, a.residency)}
@@ -1187,34 +1238,36 @@ export function LibraryCard({
             }
           />
         )}
-        {a.type !== "audio" && (a.type === "video" || sizeBytes != null) && (
-          // Length and size share one pill in the corner: on a card this narrow
-          // two of them collide. The length reads at rest, the size takes over
-          // on hover, where the + button is what the pointer is there for.
-          <span
-            data-drag-omit
-            className={cn(
-              "absolute right-1.5 bottom-1.5 rounded-md bg-black/65 px-1.5 py-0.5 font-mono text-[10px] text-white tabular-nums",
-              a.type !== "video" &&
-                "opacity-0 transition-opacity group-hover:opacity-100",
-            )}
-          >
-            {a.type === "video" && (
-              <span className={cn(sizeBytes != null && "group-hover:hidden")}>
-                {formatTime(a.duration)}
-              </span>
-            )}
-            {sizeBytes != null && (
-              <span
-                className={cn(
-                  a.type === "video" && "hidden group-hover:inline",
-                )}
-              >
-                {formatBytes(sizeBytes)}
-              </span>
-            )}
-          </span>
-        )}
+        {a.type !== "audio" &&
+          !font &&
+          (a.type === "video" || sizeBytes != null) && (
+            // Length and size share one pill in the corner: on a card this narrow
+            // two of them collide. The length reads at rest, the size takes over
+            // on hover, where the + button is what the pointer is there for.
+            <span
+              data-drag-omit
+              className={cn(
+                "absolute right-1.5 bottom-1.5 rounded-md bg-black/65 px-1.5 py-0.5 font-mono text-[10px] text-white tabular-nums",
+                a.type !== "video" &&
+                  "opacity-0 transition-opacity group-hover:opacity-100",
+              )}
+            >
+              {a.type === "video" && (
+                <span className={cn(sizeBytes != null && "group-hover:hidden")}>
+                  {formatTime(a.duration)}
+                </span>
+              )}
+              {sizeBytes != null && (
+                <span
+                  className={cn(
+                    a.type === "video" && "hidden group-hover:inline",
+                  )}
+                >
+                  {formatBytes(sizeBytes)}
+                </span>
+              )}
+            </span>
+          )}
         {a.type === "audio" && sizeBytes != null && (
           // Clear of the play circle, matching the face's duration pill.
           <span className="absolute bottom-3 left-12 rounded-md bg-[#2b4e42] px-1.5 py-0.5 font-mono text-[10px] text-[#d6eddf] tabular-nums opacity-0 transition-opacity group-hover:opacity-100">
@@ -1228,9 +1281,13 @@ export function LibraryCard({
             className={cn(
               "absolute grid size-6 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow transition-all group-hover:opacity-100 hover:scale-110",
               // Audio keeps play bottom-left; + swaps in where the badge hides.
+              // A font's bottom edge is its footer, so its + takes the corner
+              // the name used to sit in.
               a.type === "audio"
                 ? "right-1.5 bottom-1.5"
-                : "bottom-1.5 left-1.5",
+                : font
+                  ? "top-1.5 left-1.5"
+                  : "bottom-1.5 left-1.5",
             )}
             onClick={(e) => {
               e.stopPropagation();
@@ -1256,13 +1313,22 @@ export function LibraryCard({
           <DropdownMenuTrigger
             aria-label="More actions"
             title="More actions"
-            className="absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full bg-black/40 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/60 data-[state=open]:opacity-100"
+            className={cn(
+              "absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full text-white opacity-0 transition-opacity group-hover:opacity-100 data-[state=open]:opacity-100",
+              // A black scrim disappears into the charcoal sheet.
+              font
+                ? "bg-white/10 hover:bg-white/20"
+                : "bg-black/40 hover:bg-black/60",
+            )}
             onClick={(e) => e.stopPropagation()}
           >
             <Ellipsis className="size-3.5" />
           </DropdownMenuTrigger>
           <DropdownMenuContent
-            align="end"
+            // Hung off the card's right edge rather than laid over the media:
+            // the tile stays readable behind the open menu.
+            align="start"
+            alignOffset={4}
             className="w-44"
             onClick={(e) => e.stopPropagation()}
           >
@@ -1293,16 +1359,18 @@ export function LibraryCard({
             )}
           </DropdownMenuContent>
         </DropdownMenu>
-        <CopyNameLabel
-          name={a.name}
-          dark={a.type === "audio"}
-          mention={mention}
-          className={cn(
-            "absolute top-1.5 left-1.5 max-w-[70%] px-2 py-1 text-[11px] font-medium text-white transition-[max-width] group-hover:max-w-[calc(100%-2.75rem)]",
-            // The emerald fill is its own backdrop; thumbnails need the scrim pill.
-            a.type !== "audio" && "rounded-lg bg-black/55 backdrop-blur-sm",
-          )}
-        />
+        {!font && (
+          <CopyNameLabel
+            name={a.name}
+            dark={a.type === "audio"}
+            mention={mention}
+            className={cn(
+              "absolute top-1.5 left-1.5 max-w-[70%] px-2 py-1 text-[11px] font-medium text-white transition-[max-width] group-hover:max-w-[calc(100%-2.75rem)]",
+              // The emerald fill is its own backdrop; thumbnails need the scrim pill.
+              a.type !== "audio" && "rounded-lg bg-black/55 backdrop-blur-sm",
+            )}
+          />
+        )}
       </div>
     </div>
   );
