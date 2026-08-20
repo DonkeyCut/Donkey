@@ -13,7 +13,8 @@ struct MediaScreen: View {
     private let columns = [GridItem(.adaptive(minimum: 150, maximum: 240), spacing: 12)]
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            ScreenHeader(title: "Library", app: app, auth: auth)
             Group {
                 if media.recordings.isEmpty {
                     EmptyState(
@@ -35,23 +36,19 @@ struct MediaScreen: View {
                                         Button("Delete", systemImage: "trash", role: .destructive) {
                                             media.delete(recording)
                                         }
+                                        .tint(.red)
                                     }
                             }
                         }
                         .padding(.horizontal, 20)
+                        .padding(.top, 14)
                         .padding(.bottom, 24)
                     }
                 }
             }
-            .navigationTitle("Library")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    AvatarMenu(app: app, auth: auth)
-                }
-            }
-            .fullScreenCover(item: $playing) { recording in
-                RecordingPlayerView(url: media.movieURL(for: recording))
-            }
+        }
+        .fullScreenCover(item: $playing) { recording in
+            RecordingPlayerView(url: media.movieURL(for: recording))
         }
     }
 }

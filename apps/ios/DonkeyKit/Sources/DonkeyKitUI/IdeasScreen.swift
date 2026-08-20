@@ -10,61 +10,75 @@ struct IdeasScreen: View {
     var auth: AuthModel
     let onRecordNote: (Note) -> Void
 
-    @State private var showsInspirationSheet = false
+    @State private var showsLinkSheet = false
+    @State private var showsPhotoPicker = false
+    @State private var pickerItems: [PhotosPickerItem] = []
 
     private let columns = [GridItem(.adaptive(minimum: 160, maximum: 260), spacing: 14)]
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            ScreenHeader(title: "Ideas", app: app, auth: auth)
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     filterChips
                     content
                 }
                 .padding(.horizontal, 20)
+                .padding(.top, 14)
                 .padding(.bottom, 24)
             }
-            .navigationTitle("Ideas")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    AvatarMenu(app: app, auth: auth)
+        }
+        .overlay(alignment: .bottomTrailing) { addMenu }
+        .fullScreenCover(item: $ideas.draft) { _ in
+            NoteEditorView(app: app, ideas: ideas, onRecordNote: onRecordNote)
+        }
+        .sheet(isPresented: $showsLinkSheet) {
+            LinkSheet(app: app, ideas: ideas)
+                .presentationDetents([.medium])
+        }
+        .photosPicker(
+            isPresented: $showsPhotoPicker,
+            selection: $pickerItems,
+            matching: .any(of: [.images, .videos])
+        )
+        .onChange(of: pickerItems) { _, items in
+            guard !items.isEmpty else { return }
+            Task {
+                for item in items {
+                    guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
+                    let isVideo = item.supportedContentTypes.contains { $0.conforms(to: .movie) }
+                    ideas.addInspiration(mediaData: data, isVideo: isVideo)
                 }
-            }
-            .overlay(alignment: .bottomTrailing) { fab }
-            .fullScreenCover(item: $ideas.draft) { _ in
-                NoteEditorView(app: app, ideas: ideas, onRecordNote: onRecordNote)
-            }
-            .sheet(isPresented: $showsInspirationSheet) {
-                InspirationSheet(app: app, ideas: ideas)
-                    .presentationDetents([.height(240)])
+                pickerItems = []
+                app.show(toast: "Saved to Inspiration")
             }
         }
     }
 
-    private var filterChips: some View {
-        HStack(spacing: 10) {
-            ForEach(IdeasFilter.allCases, id: \.self) { filter in
-                Button {
-                    ideas.filter = filter
-                } label: {
-                    Text(filter.rawValue.capitalized)
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 9)
-                }
-                .buttonStyle(.plain)
-                .background(
-                    Capsule().fill(ideas.filter == filter ? Color.primary.opacity(0.12) : Color.clear)
-                )
-                .overlay(
-                    Capsule().strokeBorder(
-                        ideas.filter == filter ? Color.primary : Color.secondary.opacity(0.35),
-                        lineWidth: 1.5
-                    )
-                )
-            }
-            Spacer()
+    private var addMenu: some View {
+        Menu {
+            Button("Paste link", systemImage: "link") { showsLinkSheet = true }
+            Button("Camera roll", systemImage: "photo") { showsPhotoPicker = true }
+            Button("New note", systemImage: "pencil") { ideas.openEditor() }
+        } label: {
+            Image(systemName: "plus")
+                .font(.title2.weight(.bold))
+                .frame(width: 60, height: 60)
         }
+        .glassEffect(.regular.interactive())
+        .padding(.trailing, 20)
+        .padding(.bottom, 20)
+        .accessibilityLabel("Add")
+    }
+
+    private var filterChips: some View {
+        Picker("Filter", selection: $ideas.filter) {
+            ForEach(IdeasFilter.allCases, id: \.self) { filter in
+                Text(filter.rawValue.capitalized).tag(filter)
+            }
+        }
+        .pickerStyle(.segmented)
     }
 
     @ViewBuilder private var content: some View {
@@ -122,6 +136,7 @@ struct IdeasScreen: View {
                     Button("Delete", systemImage: "trash", role: .destructive) {
                         ideas.deleteNote(id: note.id)
                     }
+                    .tint(.red)
                 }
             }
         }
@@ -135,28 +150,12 @@ struct IdeasScreen: View {
                         Button("Delete", systemImage: "trash", role: .destructive) {
                             ideas.deleteInspiration(id: item.id)
                         }
+                        .tint(.red)
                     }
             }
         }
     }
 
-    private var fab: some View {
-        Button {
-            if ideas.filter == .inspiration {
-                showsInspirationSheet = true
-            } else {
-                ideas.openEditor()
-            }
-        } label: {
-            Image(systemName: "plus")
-                .font(.title2.weight(.bold))
-                .frame(width: 60, height: 60)
-        }
-        .glassEffect(.regular.interactive())
-        .padding(.trailing, 20)
-        .padding(.bottom, 20)
-        .accessibilityLabel(ideas.filter == .inspiration ? "Save inspiration" : "New note")
-    }
 }
 
 struct NoteCard: View {
@@ -241,54 +240,37 @@ struct InspirationCard: View {
     }
 }
 
-struct InspirationSheet: View {
+struct LinkSheet: View {
     @Bindable var app: AppModel
     var ideas: IdeasModel
 
     @State private var urlText = ""
-    @State private var pickerItems: [PhotosPickerItem] = []
     @FocusState private var urlFocused: Bool
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Save inspiration")
-                .font(.headline)
-            TextField("TikTok, Reels, YouTube, link...", text: $urlText)
-                .textFieldStyle(.roundedBorder)
-                .keyboardType(.URL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .focused($urlFocused)
-                .onSubmit(saveURL)
-            HStack(spacing: 10) {
-                PhotosPicker(selection: $pickerItems, matching: .any(of: [.images, .videos])) {
-                    Label("Camera roll", systemImage: "photo.on.rectangle")
-                        .frame(maxWidth: .infinity)
+        NavigationStack {
+            Form {
+                TextField("TikTok, Reels, YouTube, link...", text: $urlText)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .focused($urlFocused)
+                    .onSubmit(saveURL)
+            }
+            .navigationTitle("Paste Link")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
                 }
-                .buttonStyle(.bordered)
-                Button("Save", action: saveURL)
-                    .buttonStyle(.borderedProminent)
-                    .frame(maxWidth: .infinity)
-                    .disabled(urlText.trimmingCharacters(in: .whitespaces).isEmpty)
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save", action: saveURL)
+                        .disabled(urlText.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
             }
         }
-        .padding(20)
-        .presentationDragIndicator(.visible)
         .task { urlFocused = true }
-        .onChange(of: pickerItems) { _, items in
-            guard !items.isEmpty else { return }
-            Task {
-                for item in items {
-                    guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
-                    let isVideo = item.supportedContentTypes.contains { $0.conforms(to: .movie) }
-                    ideas.addInspiration(mediaData: data, isVideo: isVideo)
-                }
-                pickerItems = []
-                dismiss()
-                app.show(toast: "Saved to Inspiration")
-            }
-        }
     }
 
     private func saveURL() {

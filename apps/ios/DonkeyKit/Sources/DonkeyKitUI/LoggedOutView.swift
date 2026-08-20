@@ -9,26 +9,11 @@ struct LoggedOutView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            RoundedRectangle(cornerRadius: 24)
-                .fill(LinearGradient(
-                    colors: [Color(hex: "#ff8a3d"), Color.recordPink],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ))
-                .frame(width: 84, height: 84)
-                .overlay {
-                    Image(systemName: "record.circle")
-                        .font(.system(size: 40, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-                .shadow(color: Color.recordPink.opacity(0.35), radius: 20, y: 14)
-                .padding(.bottom, 18)
+            BacklitDonkeyMark(width: 108)
+                .padding(.bottom, 26)
 
-            Text("Turn ideas into videos")
+            Text("Send Donkey back to work.")
                 .font(.title2.weight(.bold))
-            Text("Write a note, load it into the teleprompter, and record. Everything lives in one place.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
             VStack(spacing: 12) {
@@ -65,9 +50,11 @@ struct LoggedOutView: View {
                     .padding(.top, 10)
             }
 
-            Text("By continuing you agree to the Terms and Privacy Policy.")
+            Text("By continuing, you agree to the **[Terms of Use](https://donkeycut.com/terms)** and **[Privacy Policy](https://donkeycut.com/privacy)**.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .tint(.primary)
+                .multilineTextAlignment(.center)
                 .padding(.top, 18)
         }
         .padding(.horizontal, 40)
@@ -105,6 +92,47 @@ struct LoggedOutView: View {
 
     private func isSigningIn(_ provider: AuthProvider) -> Bool {
         auth.state == .signingIn(provider)
+    }
+}
+
+/// The donkey mark. In dark mode it gets the backlit treatment from
+/// docs/guides/backlit-icon.md: three white silhouette sources behind the
+/// mark, each drawn as a tight halo and a wide bloom, every length a
+/// multiple of the rendered width. Light mode shows the mark at its own fills.
+struct BacklitDonkeyMark: View {
+    let width: CGFloat
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    private static let sources: [(dx: CGFloat, dy: CGFloat, halo: Double, bloom: Double)] = [
+        (-0.0297, 0.0043, 0.80, 0.192),
+        (-0.0095, -0.0285, 0.62, 0.149),
+        (0.0190, 0.0232, 0.35, 0.084),
+    ]
+
+    var body: some View {
+        ZStack {
+            if colorScheme == .dark {
+                glow(blurFactor: 0.088, wide: true)
+                glow(blurFactor: 0.030, wide: false)
+            }
+            Image("DonkeyMark", bundle: .main)
+                .resizable()
+                .scaledToFit()
+        }
+        // The mark's artwork is 264 x 318.
+        .frame(width: width, height: width * 318 / 264)
+    }
+
+    private func glow(blurFactor: CGFloat, wide: Bool) -> some View {
+        ForEach(Array(Self.sources.enumerated()), id: \.offset) { _, source in
+            Image("DonkeySilhouette", bundle: .main)
+                .resizable()
+                .scaledToFit()
+                .blur(radius: width * blurFactor)
+                .opacity(wide ? source.bloom : source.halo)
+                .offset(x: width * source.dx, y: width * source.dy)
+        }
     }
 }
 #endif

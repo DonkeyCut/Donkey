@@ -47,7 +47,7 @@ public struct RootView<CameraPreview: View>: View {
                     ProjectsScreen(app: app, projects: projects, auth: auth)
                 }
                 Tab("Camera", systemImage: "camera", value: .camera) {
-                    CameraScreen(camera: camera, ideas: ideas, cameraPreview: cameraPreview)
+                    CameraScreen(camera: camera, ideas: ideas, media: media, cameraPreview: cameraPreview)
                 }
             }
             .tabViewStyle(.sidebarAdaptable)
@@ -59,6 +59,7 @@ public struct RootView<CameraPreview: View>: View {
 
             ToastOverlay(app: app)
         }
+        .tint(.accentBlue)
         .animation(.default, value: auth.isSignedIn)
         .preferredColorScheme(app.appearance.colorScheme)
         .task { await auth.restore() }

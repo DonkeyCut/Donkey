@@ -12,25 +12,29 @@ struct ProjectsScreen: View {
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(projects.projects) { project in
-                        ProjectCard(project: project) { playing = project }
+        VStack(spacing: 0) {
+            ScreenHeader(title: "Projects", app: app, auth: auth)
+            if projects.projects.isEmpty {
+                EmptyState(
+                    title: "No projects yet",
+                    message: "Projects you create in Donkey Cut will show up here."
+                )
+                .frame(maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: 12) {
+                        ForEach(projects.projects) { project in
+                            ProjectCard(project: project) { playing = project }
+                        }
                     }
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 24)
-            }
-            .navigationTitle("Projects")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    AvatarMenu(app: app, auth: auth)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 14)
+                    .padding(.bottom, 24)
                 }
             }
-            .fullScreenCover(item: $playing) { project in
-                ProjectPlayerView(project: project)
-            }
+        }
+        .fullScreenCover(item: $playing) { project in
+            ProjectPlayerView(project: project)
         }
     }
 }
@@ -70,7 +74,6 @@ struct ProjectCard: View {
                 GhostCard(title: project.name, subtitle: "Exporting \(percent)%")
                     .overlay(alignment: .bottom) {
                         ProgressView(value: Double(percent), total: 100)
-                            .tint(.recordPink)
                             .padding(.horizontal, 12)
                             .padding(.bottom, 12)
                     }

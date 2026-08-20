@@ -15,6 +15,8 @@ extension Color {
     }
 
     static let recordPink = Color(hex: "#d81b60")
+    /// The Cut app's accent blue; tints everything except recording controls.
+    static let accentBlue = Color(hex: "#0a84ff")
     static let notePaperInk = Color(hex: "#201a0d")
 }
 

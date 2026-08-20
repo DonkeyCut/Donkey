@@ -223,7 +223,7 @@
 				DEVELOPMENT_TEAM = Q593LLEXEN;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Donkey/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Donkey;
+				INFOPLIST_KEY_CFBundleDisplayName = "Donkey Cut";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Donkey Cut uses the camera to record your videos.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Donkey Cut uses the microphone to record audio with your videos.";
@@ -260,7 +260,7 @@
 				DEVELOPMENT_TEAM = Q593LLEXEN;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Donkey/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Donkey;
+				INFOPLIST_KEY_CFBundleDisplayName = "Donkey Cut";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Donkey Cut uses the camera to record your videos.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Donkey Cut uses the microphone to record audio with your videos.";

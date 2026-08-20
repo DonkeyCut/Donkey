@@ -77,6 +77,9 @@ struct NoteEditorView: View {
                 } label: {
                     Text("Save")
                         .font(.body.weight(.bold))
+                        // The editor paints everything in the note's ink, which
+                        // would hide the label on the ink-tinted prominent pill.
+                        .foregroundStyle(.white)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 6)
                 }

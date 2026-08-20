@@ -2,6 +2,25 @@
 import SwiftUI
 import DonkeyKitModels
 
+/// The tab screens' title row: large title on the left, the profile avatar
+/// on the same line.
+struct ScreenHeader: View {
+    let title: String
+    @Bindable var app: AppModel
+    var auth: AuthModel
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.largeTitle.weight(.bold))
+            Spacer()
+            AvatarMenu(app: app, auth: auth)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+    }
+}
+
 struct AvatarMenu: View {
     @Bindable var app: AppModel
     var auth: AuthModel
@@ -18,6 +37,7 @@ struct AvatarMenu: View {
             Button("Log Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
                 Task { await auth.signOut() }
             }
+            .tint(.red)
         } label: {
             Circle()
                 .fill(LinearGradient(
