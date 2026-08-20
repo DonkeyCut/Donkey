@@ -651,14 +651,18 @@ function ProjectFilesPanel({
   // A render that finishes in the background (dialog closed) drops a new file in
   // the exports folder; re-read the list when it lands so it shows without a
   // manual refresh.
-  // Refetch the finished-file list whenever an export for this project settles
-  // (its file lands in the exports folder). Counting settled jobs gives a value
-  // that changes exactly on that transition.
+  // Refetch the finished-file list whenever a settled export job for this
+  // project enters or leaves the feed. The trigger is the joined id list, so a
+  // render landing on the same poll that drops a dismissed card still reads as
+  // a change — a settled-job count stays equal through that swap and left the
+  // new file off the shelf.
   const exportsSettled = useExports(
     (s) =>
-      s.jobs.filter(
-        (j) => j.projectId === projectId && (j.status === "done" || j.status === "error")
-      ).length
+      s.jobs
+        .filter((j) => j.projectId === projectId && (j.status === "done" || j.status === "error"))
+        .map((j) => j.id)
+        .sort()
+        .join()
   );
   // This project's exports still in flight: queued/running jobs plus the brief
   // client-only "preparing" window before the engine hands back a job id.
