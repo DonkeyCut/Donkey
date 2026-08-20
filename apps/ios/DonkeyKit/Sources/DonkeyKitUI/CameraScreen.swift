@@ -1,20 +1,26 @@
 #if os(iOS)
 import SwiftUI
+import UIKit
 import DonkeyKitModels
 
 struct CameraScreen<CameraPreview: View>: View {
     @Bindable var camera: CameraModel
     var ideas: IdeasModel
+    var media: MediaModel
     let cameraPreview: () -> CameraPreview
 
     @State private var showsZoomPicker = false
     @State private var showsQualityPopover = false
     @State private var showsTeleSettings = false
     @State private var showsNotePicker = false
+    @State private var playingRecording: Recording?
 
     var body: some View {
         ZStack {
             stage
+            if camera.isFillLightOn, camera.availability == .running {
+                FillLightOverlay()
+            }
             if camera.isRecording, camera.teleprompter.hasScript {
                 TeleprompterOverlay(camera: camera)
             }
@@ -27,6 +33,9 @@ struct CameraScreen<CameraPreview: View>: View {
                 camera.loadTeleprompter(script: note.script)
                 showsNotePicker = false
             }
+        }
+        .fullScreenCover(item: $playingRecording) { recording in
+            RecordingPlayerView(url: media.movieURL(for: recording))
         }
     }
 
@@ -66,9 +75,47 @@ struct CameraScreen<CameraPreview: View>: View {
             }
             Spacer()
         }
+        // Fill the screen so the leading/bottom overlays anchor to its edges;
+        // without this the stack hugs its content and the rail floats mid-screen.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .leading) { rail }
         .overlay(alignment: .bottom) { recordButton }
+        .overlay(alignment: .bottomLeading) { thumbnailWell }
+        .animation(.spring(duration: 0.45), value: media.recordings.first?.id)
+        .animation(.spring(duration: 0.45), value: camera.isRecording)
         .padding(.top, 8)
+    }
+
+    /// The last recording, docked in the corner the way the system camera
+    /// does it; tapping plays it.
+    @ViewBuilder private var thumbnailWell: some View {
+        if !camera.isRecording, let recording = media.recordings.first {
+            Button {
+                playingRecording = recording
+            } label: {
+                ZStack {
+                    if let url = media.thumbnailURL(for: recording),
+                       let image = UIImage(contentsOfFile: url.path()) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        Rectangle().fill(.fill.secondary)
+                        Image(systemName: "play.fill")
+                            .foregroundStyle(.white)
+                    }
+                }
+                .frame(width: 54, height: 54)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.5), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 20)
+            .padding(.bottom, 44)
+            .id(recording.id)
+            .transition(.scale(scale: 0.25, anchor: .bottomLeading).combined(with: .opacity))
+            .accessibilityLabel("Play last recording")
+        }
     }
 
     private var rail: some View {
@@ -105,8 +152,8 @@ struct CameraScreen<CameraPreview: View>: View {
                         .frame(width: 40, height: 40)
                 }
                 .glassEffect(.regular.interactive())
-                .disabled(!camera.hasTorch)
-                .opacity(camera.hasTorch ? 1 : 0.4)
+                .disabled(!camera.flashAvailable)
+                .opacity(camera.flashAvailable ? 1 : 0.4)
 
                 Button {
                     camera.flip()
@@ -233,6 +280,18 @@ struct CameraScreen<CameraPreview: View>: View {
         .opacity(camera.availability == .running ? 1 : 0.5)
         .padding(.bottom, 30)
         .accessibilityLabel(camera.isRecording ? "Stop recording" : "Record")
+    }
+}
+
+/// A bright frame around the preview: the screen fill light for cameras
+/// without a torch.
+struct FillLightOverlay: View {
+    var body: some View {
+        Rectangle()
+            .strokeBorder(.white.opacity(0.95), lineWidth: 64)
+            .blur(radius: 22)
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
     }
 }
 

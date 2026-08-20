@@ -65,9 +65,18 @@ public final class CameraModel {
         controller?.setZoom(display: display)
     }
 
+    /// True when the flash button does anything: the hardware torch, or the
+    /// screen fill light on cameras without one.
+    public var flashAvailable: Bool { hasTorch || facing == .front }
+
+    /// The screen stands in for a torch the current camera lacks.
+    public var isFillLightOn: Bool { isTorchOn && !hasTorch }
+
     public func toggleTorch() {
         isTorchOn.toggle()
-        controller?.setTorch(isTorchOn)
+        if hasTorch {
+            controller?.setTorch(isTorchOn)
+        }
     }
 
     public func update(_ transform: (inout CameraSettings) -> Void) {
