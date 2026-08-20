@@ -28,27 +28,8 @@ nonisolated public struct Project: Identifiable, Equatable, Sendable {
 public final class ProjectsModel {
     public private(set) var projects: [Project]
 
-    /// Sample projects and a simulated export: the cloud projects API is not
-    /// wired up yet, so the tab shows every card state on realistic data.
+    /// Empty until projects stream from the cloud projects API.
     public init() {
-        projects = [
-            Project(name: "6: End of Week Demo", duration: 108, export: .ready(renderedOn: "Aug 18")),
-            Project(name: "Pizza", duration: 27, export: .ready(renderedOn: "Aug 15")),
-            Project(name: "Animation", duration: 158, export: .exporting(percent: 48)),
-            Project(name: "Local project", duration: 0, export: .none),
-        ]
-        advanceExports()
-    }
-
-    private func advanceExports() {
-        Task {
-            while let index = projects.firstIndex(where: { $0.export.isExporting }) {
-                try? await Task.sleep(for: .seconds(0.9))
-                guard case .exporting(let percent) = projects[index].export else { continue }
-                projects[index].export = percent + 2 >= 100
-                    ? .ready(renderedOn: "Today")
-                    : .exporting(percent: percent + 2)
-            }
-        }
+        projects = []
     }
 }
