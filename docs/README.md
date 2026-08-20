@@ -24,6 +24,7 @@ Supported product and engineering guides live in `docs/guides/`. This list is th
 
 **Operations**
 
+- [The iOS App](guides/ios-app.md) — the phone app's structure, building and testing it, sign-in configuration, and the TestFlight path.
 - [Install Donkey Locally](guides/install-donkey.md) — building the app bundle and disk image for local testing.
 - [Releasing Donkey](guides/releasing-donkey.md) — how production releases are built and shipped, including the tools that ship inside the app.
 
