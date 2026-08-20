@@ -107,6 +107,9 @@ back open, like a dropdown, closes in a `useLayoutEffect` cleanup.
 - Compose conditional classes with the `cn` helper from `@/lib/utils`.
 - Prefer existing icon components for buttons and compact actions when an icon
   fits the control.
+- On dark surfaces, render the donkey mark with the treatment in the
+  [Backlit Icon guide](backlit-icon.md). Its layer stack, tokens, and rules are
+  the supported values; the mark itself always renders untouched on top.
 - Keep controls at stable dimensions so hover states, icons, labels, and
   loading states do not shift layout.
 - Keep cards for repeated items, modals, and genuinely framed content. Avoid

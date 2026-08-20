@@ -42,7 +42,7 @@ Pay it only when it buys something.
   five.
 
 Indirection that maps to a real boundary is good: the Swift MVC split
-(`docs/guides/swift-mvc.md`) exists for a reason. The tax is forwarding
+(`docs/guides/swift.md`) exists for a reason. The tax is forwarding
 layers that exist for their own sake.
 
 ## Design Simplicity
@@ -77,7 +77,7 @@ layers that exist for their own sake.
    turn through an LLM or a typed model boundary, then match on structured
    output only.
 2. **Keep the Swift MVC boundaries intact.** Views render and emit intents,
-   models own state, controllers own AppKit. See `docs/guides/swift-mvc.md`.
+   models own state, controllers own AppKit. See `docs/guides/swift.md`.
 3. **Follow the site guides.** For `site` UI,
    `docs/guides/frontend-nextjs-guidelines.md`: server components by default,
    no `fetch` from components, no `any`. For database work,

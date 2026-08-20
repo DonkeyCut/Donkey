@@ -21,6 +21,7 @@ Supported product and engineering guides live in `docs/guides/`. This list is th
 
 - [Backend API Guide](guides/backend-apis.md) — the hosted routes the app and site call for model-backed work.
 - [Frontend and Next.js Guidelines](guides/frontend-nextjs-guidelines.md) — route structure, server/client boundaries, styling, and data access in the site app.
+- [Backlit Icon](guides/backlit-icon.md) — the dark treatment that lights the donkey mark from behind: the layer stack, the tokens, and the rules that keep the mark clean.
 
 **Operations**
 
@@ -30,7 +31,7 @@ Supported product and engineering guides live in `docs/guides/`. This list is th
 
 **Working in this repo**
 
-- [Swift MVC Guide](guides/swift-mvc.md) — keeping product state, UI rendering, and AppKit orchestration separate in the app.
+- [Swift Guide](guides/swift.md) — the MVC split, language defaults, concurrency, SwiftUI, Mac platform behavior, data, and tests for the iOS and Mac apps.
 - [Code Review Guide](guides/code-review.md) — what makes a change reviewable, and how we review.
 - [Engineering Doc Style Guide](guides/eng-doc-style.md) — the required structure, sentence-level rules, and post-writing test for every doc here.
 
