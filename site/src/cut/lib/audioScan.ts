@@ -93,8 +93,11 @@ export async function scanSilence(
   for await (const { channels, timestamp, sampleRate } of chunks) {
     if (channels.length === 0) continue;
     const length = channels[0].length;
+    // Sample times rebuild from an integer sample index, so a chunk split
+    // cannot move a boundary sample across a window by a rounding error.
+    const base = Math.round(timestamp * sampleRate);
     for (let i = 0; i < length; i++) {
-      const at = timestamp + i / sampleRate;
+      const at = (base + i) / sampleRate;
       if (at < from) continue;
       if (to !== undefined && at >= to) break;
       const window = Math.floor((at - from) / WINDOW);
