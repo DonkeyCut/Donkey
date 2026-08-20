@@ -6,16 +6,16 @@
     <description>Donkey macOS app updates.</description>
     <language>en</language>
     <item>
-      <title>Version 0.1.136</title>
-      <sparkle:releaseNotesLink>https://github.com/DonkeyCut/Donkey/releases/tag/v0.1.136</sparkle:releaseNotesLink>
-      <pubDate>Wed, 19 Aug 2026 12:24:26 GMT</pubDate>
+      <title>Version 0.1.137</title>
+      <sparkle:releaseNotesLink>https://github.com/DonkeyCut/Donkey/releases/tag/v0.1.137</sparkle:releaseNotesLink>
+      <pubDate>Thu, 20 Aug 2026 10:20:51 GMT</pubDate>
       <enclosure
-        url="https://github.com/DonkeyCut/Donkey/releases/download/v0.1.136/Donkey.dmg"
-        sparkle:version="202"
-        sparkle:shortVersionString="0.1.136"
+        url="https://github.com/DonkeyCut/Donkey/releases/download/v0.1.137/Donkey.dmg"
+        sparkle:version="205"
+        sparkle:shortVersionString="0.1.137"
         sparkle:minimumSystemVersion="14.0"
-        sparkle:edSignature="VzZThzuyRtk63oD+DFd6JuLo2u/qDdDdkD6jy2KXD9PL2jKyPpmCLriT0fL2vZK6B1ntmtb5t/ij1warDC2iAA=="
-        length="80528600"
+        sparkle:edSignature="1MqUy1/ormbmGi7P4eoCEgrPQukc+J4uOpTU9S9R13aI56QR5RM41arH32+tQhh9dgGLuAJBadNLrYbb8Ai9Bw=="
+        length="80529206"
         type="application/x-apple-diskimage" />
     </item>
   </channel>
