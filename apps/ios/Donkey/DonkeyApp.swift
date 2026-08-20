@@ -1,5 +1,6 @@
 import DonkeyKitModels
 import DonkeyKitUI
+import GoogleSignIn
 import SwiftUI
 
 @main
@@ -16,10 +17,11 @@ struct DonkeyApp: App {
                 projects: wiring.projects,
                 auth: wiring.auth
             ) {
-                CameraPreviewView(session: wiring.cameraController.session) {
+                CameraPreviewView(host: wiring.cameraController.previewView) {
                     wiring.camera.toggleRecording()
                 }
             }
+            .onOpenURL { _ = GIDSignIn.sharedInstance.handle($0) }
         }
     }
 }
@@ -49,9 +51,8 @@ final class AppWiring {
 
         cameraController.model = camera
         camera.controller = cameraController
-        cameraController.onRecordingFinished = { [media, app] url, duration, thumbnail in
+        cameraController.onRecordingFinished = { [media] url, duration, thumbnail in
             media.ingest(movieAt: url, duration: duration, thumbnail: thumbnail)
-            app.show(toast: "Saved to Library")
         }
     }
 }

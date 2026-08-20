@@ -160,7 +160,7 @@ final class AuthController: NSObject, AuthServicing {
     // MARK: Google
 
     private func googleIdToken() async throws -> String {
-        guard !AuthBackend.googleClientID.isEmpty else {
+        guard !AuthBackend.googleClientID.isEmpty, Self.hasGoogleCallbackScheme() else {
             throw AuthError.googleNotConfigured
         }
         guard let presenter = Self.presentingViewController() else {
@@ -172,6 +172,16 @@ final class AuthController: NSObject, AuthServicing {
             throw AuthError.missingIdentityToken
         }
         return token
+    }
+
+    /// The Google SDK raises an uncatchable exception when the app lacks the
+    /// URL scheme it redirects back on (the client id with its dot-segments
+    /// reversed), so verify the registration before starting the flow.
+    private static func hasGoogleCallbackScheme() -> Bool {
+        let reversed = AuthBackend.googleClientID
+            .split(separator: ".").reversed().joined(separator: ".")
+        let types = Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]] ?? []
+        return types.contains { ($0["CFBundleURLSchemes"] as? [String] ?? []).contains(reversed) }
     }
 
     private static func presentingViewController() -> UIViewController? {
