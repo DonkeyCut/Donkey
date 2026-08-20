@@ -43,6 +43,7 @@ import { useExports } from "@/cut/lib/exportStore";
 import { isDragActive, startDrag, subscribeDragActive } from "@/cut/lib/drag";
 import { CLIP_GAP, startLaneMove, startLaneTrim, type LaneDrag, type LaneKind } from "@/cut/lib/laneTracks";
 import { downloadMedia, ensurePeaks, importImage, importStockMusic, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia, stripFailedFor, subscribeStripStatus } from "@/cut/lib/media";
+import { planFilmstrip, type FilmTile } from "@/cut/lib/filmstrip";
 import { track0Clips, laneGapAt, sameLane, type LaneRef, clipLen, clipSpeed, getClipSpans, overlayLaneOrder, overlayLayers, projectDuration, resolveTransitions, rippleInsert, useEditor } from "@/cut/lib/store";
 import type { VideoTrackPlacement } from "@/cut/lib/store";
 import { playheadAt, setSkim, skimAt, subscribePlayhead, usePlayhead, useSkim } from "@/cut/lib/playhead";
@@ -3512,14 +3513,19 @@ function ClipView({
     () => stripFailedFor(asset.id),
     () => false
   );
+  const boxRef = useRef<HTMLDivElement>(null);
+  // Bumped as tile captures land, so the memo re-plans and picks them up.
+  const [filmGen, onTileFrame] = useReducer((x: number) => x + 1, 0);
   const filmstrip = useMemo(
     () =>
       filmstripFrames(asset, filmIn, w, pps, speed, VIDEO_H - 4, 26, {
         start: startFrame,
         end: endFrame,
       }),
-    [asset, filmIn, w, pps, speed, startFrame, endFrame]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [asset, filmIn, w, pps, speed, startFrame, endFrame, filmGen]
   );
+  useTileFrames(boxRef, clip.id, asset, filmstrip, filmIn, w, pps, speed, onTileFrame);
 
   // The move gesture is the shared lane behavior (parting, snapping); its
   // verticality is the video placement system — the other tracks and the new
@@ -3561,6 +3567,7 @@ function ClipView({
         // Inline so it beats SELECTED_SHADOW's z-10 class on the same element.
         zIndex: drag ? 20 : undefined,
       }}
+      ref={boxRef}
       data-tl-sel={`clip:${clip.id}`}
       onPointerDown={(e) => startLaneMove(e, lane, clip.id, ui)}
       onContextMenu={(e) => {
@@ -3923,7 +3930,9 @@ function DropGhostFilm({
  * tiles at each end). Tiles keep the asset's aspect until the box would blow
  * the tile cap; past that they widen by whole grid cells, still on the grid.
  * The first and last tiles pin to the segment's exact boundary frames once
- * captured; middle tiles keep the nearest pre-sampled thumb. */
+ * captured; middle tiles show the nearest pre-sampled thumb until the zoom
+ * outruns the strip's sampling, when each carries a true frame at its own
+ * moment as its capture lands (see `planFilmstrip`). */
 function filmstripFrames(
   asset: MediaAsset | undefined,
   filmIn: number,
@@ -3933,30 +3942,114 @@ function filmstripFrames(
   tileH: number,
   minTileW: number,
   edges?: { start: string | null; end: string | null }
-) {
+): FilmTile[] {
   if (!asset?.thumbs?.length || !asset.thumbStep) return [];
-  const aspect = (asset.width ?? 16) / Math.max(1, asset.height ?? 9);
-  const natural = Math.max(minTileW, Math.round(tileH * aspect));
-  const cells = Math.max(1, Math.ceil(w / natural));
-  const imgW = natural * Math.ceil(cells / 120);
-  const stepT = (imgW / pps) * speed;
-  const filmOut = filmIn + (w / pps) * speed;
-  const first = Math.max(0, Math.floor(filmIn / stepT));
-  const last = Math.max(first, Math.ceil(filmOut / stepT) - 1);
-  const frames = Array.from({ length: last - first + 1 }, (_, i) => {
-    const k = first + i;
-    const timeAt = (k + 0.5) * stepT;
-    const idx = Math.min(
-      asset.thumbs!.length - 1,
-      Math.max(0, Math.floor(timeAt / asset.thumbStep!))
-    );
-    return { src: asset.thumbs![idx], left: ((k * stepT - filmIn) / speed) * pps, width: imgW };
+  const frames = planFilmstrip({
+    thumbs: asset.thumbs,
+    thumbStep: asset.thumbStep,
+    duration: asset.duration,
+    aspect: (asset.width ?? 16) / Math.max(1, asset.height ?? 9),
+    filmIn,
+    w,
+    pps,
+    speed,
+    tileH,
+    minTileW,
+    cuts: asset.sceneCuts,
+    exactFrame: asset.type === "video" ? (t) => peekEdgeFrame(asset.url, t) : undefined,
   });
   if (edges?.start) frames[0] = { ...frames[0], src: edges.start };
   if (edges?.end && frames.length > 1) {
     frames[frames.length - 1] = { ...frames[frames.length - 1], src: edges.end };
   }
   return frames;
+}
+
+/** How far past the scroller's view a tile still gets its true frame, so a
+ * small scroll shows captured tiles at once. */
+const TILE_CAPTURE_MARGIN = 240;
+
+/** Capture the true frames a zoomed strip's tiles ask for. The plan names a
+ * capture time on each tile the pre-sampled strip is too coarse for; this
+ * effect requests the ones inside the scroller's view (plus a margin) through
+ * the edge reader's background lane and re-renders as they land. Scroll fills
+ * in newly visible tiles; a zoom or trim re-aims the same per-tile slots, so
+ * superseded captures fall away on their own. */
+function useTileFrames(
+  boxRef: React.RefObject<HTMLDivElement | null>,
+  clipId: string,
+  asset: MediaAsset | undefined,
+  tiles: FilmTile[],
+  filmIn: number,
+  w: number,
+  pps: number,
+  speed: number,
+  onFrame: () => void
+) {
+  // The landed-frame re-render hands this hook a fresh `tiles` array with the
+  // same geometry; the ref keeps that from re-running the capture effect,
+  // while scroll and the effect body always read the newest plan.
+  const tilesRef = useRef(tiles);
+  useEffect(() => {
+    tilesRef.current = tiles;
+  });
+  const wanted = tiles.some((t) => t.wantT !== null);
+  useEffect(() => {
+    const box = boxRef.current;
+    const url = asset?.type === "video" ? asset.url : null;
+    if (!box || !url || !wanted) return;
+    const scroller = box.closest("[data-tl-scroll]") as HTMLElement | null;
+    let live = true;
+    let scheduled = false;
+    let bumping = false;
+    // One request per capture time per plan: a failed read stays quiet until
+    // a zoom or trim re-plans, and a scroll walk re-asks for nothing.
+    const asked = new Set<string>();
+    const landed = () => {
+      if (bumping) return;
+      bumping = true;
+      requestAnimationFrame(() => {
+        bumping = false;
+        if (live) onFrame();
+      });
+    };
+    const request = () => {
+      scheduled = false;
+      if (!live) return;
+      let lo = 0;
+      let hi = w;
+      if (scroller) {
+        const boxR = box.getBoundingClientRect();
+        const view = scroller.getBoundingClientRect();
+        lo = view.left - boxR.left - TILE_CAPTURE_MARGIN;
+        hi = view.right - boxR.left + TILE_CAPTURE_MARGIN;
+      }
+      tilesRef.current.forEach((t, i) => {
+        if (t.wantT === null || t.exact) return;
+        if (t.left + t.width < lo || t.left > hi) return;
+        const key = `${i}:${t.wantT.toFixed(2)}`;
+        if (asked.has(key)) return;
+        asked.add(key);
+        void requestEdgeFrame(`${clipId}:tile:${i}`, url, t.wantT, undefined, {
+          background: true,
+        }).then((src) => {
+          if (live && src) landed();
+        });
+      });
+    };
+    const schedule = () => {
+      if (scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(request);
+    };
+    schedule();
+    scroller?.addEventListener("scroll", schedule, { passive: true });
+    return () => {
+      live = false;
+      scroller?.removeEventListener("scroll", schedule);
+    };
+    // Geometry names the plan; `tiles` itself rides the ref above.
+  }, [boxRef, clipId, asset, wanted, filmIn, w, pps, speed, onFrame]);
 }
 
 /** The exact source frame at a clip edge. Returns null (the nearest sampled

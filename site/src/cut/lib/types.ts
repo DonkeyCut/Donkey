@@ -183,6 +183,10 @@ export interface StoredAsset {
   /** BCP-47 of the audio's spoken language, when known (stamped on voiceovers
    * at synthesis) — what transcription should run its recognizer in. */
   language?: string;
+  /** Scene changes detected in the source at import (seconds, near frame
+   * accurate). The timeline strip splits its tiles on these so the strip
+   * changes picture where the source does. */
+  sceneCuts?: number[];
   /** For origin "chat": the chat thread that made it. Deleting that thread
    * deletes the assets it still owns (see chatAssets.ts). */
   chatId?: string;

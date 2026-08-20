@@ -10,7 +10,7 @@
 import { renderProjectToMp4 } from "./exportRender";
 import { useGenerate } from "./generate";
 import { useGenScene } from "./genScene";
-import { enrichAsset, importFileToProject } from "./media";
+import { edgeFramesPending, enrichAsset, importFileToProject } from "./media";
 import { awaitingFrame, startTrace, stopTrace } from "./perfTrace";
 import { playheadAt } from "./playhead";
 import { projectDuration, useEditor } from "./store";
@@ -23,6 +23,9 @@ export function installDevHooks(): void {
     useGenScene,
     importFileToProject,
     enrichAsset,
+    // The filmstrip eval waits on zero pending captures before it reads the
+    // strip's tiles back out of the DOM.
+    edgeFramesPending,
     playheadAt,
     // The export eval renders a doc through the tab's own pipeline and reads
     // the bytes back out.

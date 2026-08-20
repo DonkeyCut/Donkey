@@ -41,6 +41,7 @@ import {
   rasterCanvasToDataUrl,
   type RasterSurface,
 } from "./raster";
+import { pickThumbTimes, type ThumbProbe } from "./filmstrip";
 import { useEditor } from "./store";
 import type { AssetType, AudioClip, MediaAsset, ProjectSummary, StoredAsset, VideoClip, WatchKeepReason } from "./types";
 import { contentRect, IMAGE_CLIP_SECONDS, mediaUrl } from "./types";
@@ -1471,14 +1472,18 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
       const key = stripCacheKey(useEditor.getState().projectId, asset.fileName);
       const cached = await readCachedStrip(key, asset.duration);
       if (cached) {
-        useEditor.getState().updateAsset(asset.id, { thumbs: cached.thumbs, thumbStep: cached.thumbStep });
+        useEditor.getState().updateAsset(asset.id, {
+          thumbs: cached.thumbs,
+          thumbStep: cached.thumbStep,
+          sceneCuts: cached.cuts ?? [],
+        });
       } else {
-        const { thumbs, thumbStep } = await makeThumbs(src, asset.duration);
+        const { thumbs, thumbStep, cuts } = await makeThumbs(src, asset.duration);
         // An empty strip is a failure, not a result: persisting it would
         // leave the asset looking permanently mid-load.
         if (!thumbs.length) throw new UnreadableMediaError("No frames could be read for the filmstrip.");
-        useEditor.getState().updateAsset(asset.id, { thumbs, thumbStep });
-        writeCachedStrip(key, { thumbs, thumbStep, duration: asset.duration, at: Date.now() });
+        useEditor.getState().updateAsset(asset.id, { thumbs, thumbStep, sceneCuts: cuts });
+        writeCachedStrip(key, { thumbs, thumbStep, cuts, duration: asset.duration, at: Date.now() });
       }
       enrichRetries.delete(asset.id);
     } else if (asset.type === "audio" && !asset.peaks?.length) {
@@ -1528,10 +1533,17 @@ const STRIP_DB = "cut-filmstrips";
 const STRIP_STORE = "strips";
 const STRIP_CAP = 500; // prune oldest beyond this many cached strips
 
-type CachedStrip = { thumbs: string[]; thumbStep: number; duration: number; at: number };
+type CachedStrip = {
+  thumbs: string[];
+  thumbStep: number;
+  cuts?: number[];
+  duration: number;
+  at: number;
+};
 
 function stripCacheKey(projectId: string | null, fileName: string) {
-  return `${projectId ?? ""}/${fileName}@${THUMB_H}`;
+  // "s3" marks strips that carry scene cuts; strips cached before them regenerate.
+  return `${projectId ?? ""}/${fileName}@${THUMB_H}s3`;
 }
 
 function openStripDb(): Promise<IDBDatabase> {
@@ -1594,13 +1606,123 @@ function writeCachedStrip(key: string, strip: CachedStrip) {
   })();
 }
 
+/** Probes per strip bucket for scene-change detection, and the cap on the
+ * whole probe sweep so long files stay a bounded pass. */
+const THUMB_PROBE_CAP = 120;
+/** % of 16-grid cells that must change between adjacent probes to call a
+ * scene cut. Far above the watch selector's "meaningfully new" bar (8%), so
+ * motion and pans pass under it and only a real cut splits a bucket. */
+const THUMB_PROBE_CUT_PCT = 45;
+
+/** g16 grid signatures for ascending `times`, decoded small in one sweep;
+ * null where the decoder had no frame. */
+async function g16Sweep(url: string, times: number[]): Promise<(Float32Array | null)[]> {
+  const sig = createRasterCanvas(SIGNATURE_SIZE, SIGNATURE_SIZE);
+  const ctx = sig.getContext("2d", {
+    willReadFrequently: true,
+  }) as CanvasRenderingContext2D | null;
+  if (!ctx) return times.map(() => null);
+  const out: (Float32Array | null)[] = [];
+  for await (const frame of framesAt(url, times, { height: SIGNATURE_SIZE })) {
+    if (!frame) {
+      out.push(null);
+      continue;
+    }
+    ctx.drawImage(frame.canvas as CanvasImageSource, 0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE);
+    out.push(
+      frameSig({
+        width: SIGNATURE_SIZE,
+        height: SIGNATURE_SIZE,
+        channels: 4,
+        data: ctx.getImageData(0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE).data,
+      }).g16
+    );
+  }
+  return out;
+}
+
+/** Scene-change signals across the clip: one small decoded frame every
+ * fraction of a bucket, compared through the watch pipeline's grid signature.
+ * A probe is flagged `cut` when the picture changed scene since the probe
+ * before it. */
+async function thumbProbes(url: string, duration: number, count: number): Promise<ThumbProbe[]> {
+  const perBucket = Math.max(3, Math.floor(THUMB_PROBE_CAP / count));
+  const n = count * perBucket;
+  const times = Array.from({ length: n }, (_, i) =>
+    Math.max(0, Math.min(duration - 0.05, ((i + 0.5) * duration) / n))
+  );
+  const sigs = await g16Sweep(url, times);
+  return times.map((t, i) => {
+    const p = i > 0 ? sigs[i - 1] : null;
+    const q = sigs[i];
+    return {
+      t,
+      cut: !!p && !!q && diffCellPct(q, p, DEDUP_TUNING.GLOBAL_TOL) > THUMB_PROBE_CUT_PCT,
+    };
+  });
+}
+
+/** How many cut brackets get the dense second sweep, samples per bracket, and
+ * the most cuts an asset stores at all. */
+const CUT_REFINE_MAX = 32;
+const CUT_REFINE_STEPS = 8;
+const SCENE_CUTS_MAX = 256;
+
+/** The clip's scene-change moments. The probe pass brackets each cut between
+ * two probes; a denser sweep inside each bracket places the cut within an
+ * eighth of the probe spacing (tens of milliseconds on a typical clip).
+ * Brackets past the refinement cap keep their bracket midpoint. */
+async function sceneCutTimes(url: string, probes: ThumbProbe[]): Promise<number[]> {
+  const brackets: [number, number][] = [];
+  for (let i = 1; i < probes.length; i++) {
+    if (probes[i].cut) brackets.push([probes[i - 1].t, probes[i].t]);
+  }
+  const refine = brackets.slice(0, CUT_REFINE_MAX);
+  const cuts = brackets.slice(CUT_REFINE_MAX).map(([a, b]) => (a + b) / 2);
+  if (refine.length) {
+    const S = CUT_REFINE_STEPS;
+    const times = refine.flatMap(([a, b]) =>
+      Array.from({ length: S + 1 }, (_, j) => a + (j * (b - a)) / S)
+    );
+    const sigs = await g16Sweep(url, times);
+    refine.forEach(([a, b], r) => {
+      let at = (a + b) / 2;
+      let strongest = -1;
+      for (let j = 1; j <= S; j++) {
+        const p = sigs[r * (S + 1) + j - 1];
+        const q = sigs[r * (S + 1) + j];
+        if (!p || !q) continue;
+        const d = diffCellPct(q, p, DEDUP_TUNING.GLOBAL_TOL);
+        if (d > strongest) {
+          strongest = d;
+          at = a + ((j - 0.5) * (b - a)) / S;
+        }
+      }
+      cuts.push(at);
+    });
+  }
+  return cuts
+    .map((c) => Math.round(c * 100) / 100)
+    .sort((x, y) => x - y)
+    .slice(0, SCENE_CUTS_MAX);
+}
+
 async function makeThumbs(url: string, duration: number) {
   // One frame every ~2s (min 10, max 24) so long clips don't repeat frames.
   const count = Math.min(24, Math.max(10, Math.round(duration / 2)));
   const thumbStep = duration / count;
-  const times = Array.from({ length: count }, (_, i) =>
-    Math.max(0, Math.min(duration - 0.05, (i + 0.5) * thumbStep))
-  );
+  // Scene-aware grab points: probe the clip for scene changes, then grab each
+  // bucket's thumb from its dominant scene (bucket midpoints when the probe
+  // pass yields nothing).
+  let probes: ThumbProbe[] = [];
+  let cuts: number[] = [];
+  try {
+    probes = await thumbProbes(url, duration, count);
+    cuts = await sceneCutTimes(url, probes);
+  } catch {
+    // Probing is advisory; the strip still builds from midpoints.
+  }
+  const times = pickThumbTimes(count, thumbStep, duration, probes);
   // Ascending times over one decode pass — the strip is a single sweep of the
   // file rather than `count` seeks into it.
   //
@@ -1623,7 +1745,7 @@ async function makeThumbs(url: string, duration: number) {
       thumbs.push(fill);
     }
   }
-  return { thumbs, thumbStep };
+  return { thumbs, thumbStep, cuts };
 }
 
 // Exact edge frames: a clip's first and last filmstrip tiles show the true
@@ -1658,6 +1780,9 @@ type EdgeReader = {
 
 const edgeCache = new Map<string, string>();
 const edgeQueue = new Map<string, EdgeRequest>();
+/** Filmstrip tile captures wait here, behind every queued clip-edge capture,
+ * so a trim drag's frames land first while a zoomed strip fills in behind. */
+const edgeBackQueue = new Map<string, EdgeRequest>();
 const edgePool = new Map<string, Promise<EdgeReader>>();
 let edgePumping = false;
 
@@ -1670,28 +1795,37 @@ export function peekEdgeFrame(url: string, time: number, height = THUMB_H): stri
   return edgeCache.get(edgeKey(url, time, height)) ?? null;
 }
 
-/** Capture the frame at `time`, latest-wins per `slot` (a clip edge). Resolves
- * with the frame, or null when superseded by a newer request or on a failed
- * read. */
+/** Capture the frame at `time`, latest-wins per `slot` (a clip edge or a
+ * strip tile). Resolves with the frame, or null when superseded by a newer
+ * request or on a failed read. `background` requests wait behind every queued
+ * foreground one. */
 export function requestEdgeFrame(
   slot: string,
   url: string,
   time: number,
-  height = THUMB_H
+  height = THUMB_H,
+  opts?: { background?: boolean }
 ): Promise<string | null> {
   const key = edgeKey(url, time, height);
   const hit = edgeCache.get(key);
   if (hit) return Promise.resolve(hit);
+  const queue = opts?.background ? edgeBackQueue : edgeQueue;
   return new Promise((resolve) => {
-    const prev = edgeQueue.get(slot);
+    const prev = queue.get(slot);
     if (prev?.key === key) {
       prev.resolvers.push(resolve);
     } else {
       prev?.resolvers.forEach((r) => r(null));
-      edgeQueue.set(slot, { url, time, height, key, resolvers: [resolve] });
+      queue.set(slot, { url, time, height, key, resolvers: [resolve] });
     }
     void pumpEdgeFrames();
   });
+}
+
+/** Captures still queued or mid-read. The filmstrip eval waits on zero to
+ * know a zoomed strip has finished filling in. */
+export function edgeFramesPending(): number {
+  return edgeQueue.size + edgeBackQueue.size + (edgePumping ? 1 : 0);
 }
 
 function edgeReader(url: string): Promise<EdgeReader> {
@@ -1736,10 +1870,11 @@ async function pumpEdgeFrames() {
   edgePumping = true;
   try {
     for (;;) {
-      const next = edgeQueue.entries().next();
+      const queue = edgeQueue.size ? edgeQueue : edgeBackQueue;
+      const next = queue.entries().next();
       if (next.done) break;
       const [slot, req] = next.value;
-      edgeQueue.delete(slot);
+      queue.delete(slot);
       let src = edgeCache.get(req.key) ?? null;
       if (!src) {
         try {
