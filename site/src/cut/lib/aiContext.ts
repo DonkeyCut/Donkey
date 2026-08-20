@@ -31,15 +31,39 @@ function transitionToNext(sp: ClipSpan, index: number, spans: ClipSpan[]) {
   return { style, seconds: r(sp.transitionOut) };
 }
 
-/** The clip's own effects — entrance/exit animations and filter look — in
- * the shape set_animation/set_look take. */
+/** The clip's own effects — entrance/exit animations, box styling, and its
+ * color state in the shape the grading tools take: the preset ref plus a
+ * compact summary of the manual grade (nonzero sliders verbatim; curves and
+ * wheels as presence flags; the touched hue bands by name). */
 function clipEffects(clip: VideoClip) {
+  const grade = clip.grade;
+  const sliders: Record<string, number> = {};
+  for (const [k, v] of Object.entries(grade ?? {})) {
+    if (typeof v === "number" && v !== 0) sliders[k] = v;
+  }
+  const color = grade
+    ? {
+        ...(grade.preset
+          ? {
+              colorPreset: {
+                id: grade.preset.id,
+                amount: r(grade.preset.amount ?? 1),
+                ...(grade.preset.skin ? { protectSkin: true } : {}),
+              },
+            }
+          : {}),
+        ...(Object.keys(sliders).length ? { grade: sliders } : {}),
+        ...(grade.curves ? { curves: Object.keys(grade.curves) } : {}),
+        ...(grade.wheels ? { wheels: Object.keys(grade.wheels) } : {}),
+        ...(grade.hsl ? { hslBands: Object.keys(grade.hsl) } : {}),
+      }
+    : {};
   return {
     ...(clip.animIn ? { animIn: { style: clip.animIn.style, seconds: r(clip.animIn.seconds) } } : {}),
     ...(clip.animOut
       ? { animOut: { style: clip.animOut.style, seconds: r(clip.animOut.seconds) } }
       : {}),
-    ...(clip.look ? { look: clip.look, lookAmount: r(clip.lookAmount ?? 1) } : {}),
+    ...color,
     ...(clip.boxStyle ? { boxStyle: clip.boxStyle } : {}),
   };
 }

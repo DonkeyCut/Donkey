@@ -2,9 +2,20 @@
 
 import {
   autoGradeFromImageData,
+  colorStatsFromImageData,
   EFFECT_IDS,
+  GRADE_BASIC_FIELDS,
+  GRADE_PRESETS,
+  HSL_BANDS,
+  matchGrade,
   normalizeGrade,
+  semanticMasterCurve,
+  type ColorStats,
+  type CurvePoint,
   type EffectId,
+  type GradeCurves,
+  type HslBand,
+  type WheelTuple,
   type Mask,
   OVERLAY_ANIM_DEFAULT_SECONDS,
   OVERLAY_ANIM_MAX_SECONDS,
@@ -75,7 +86,7 @@ import { STOCK_VIDEOS } from "./stockVideoManifest";
 import { applyOverlayPatchSettled, track0Clips, laneGapAt, getClipSpans, nextFreeStart, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt } from "./playhead";
 import { renderProjectFrame } from "./exportRender";
-import { rasterCanvasToDataUrl } from "./raster";
+import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
 import { buildAiContext } from "./aiContext";
 import { sampleClipFrameData } from "./previewCanvas";
 import { CAPTION_STYLES, laneCues, subtitleLaneCount } from "./subtitles";
@@ -227,7 +238,64 @@ const ANIM_STYLE_SYNONYMS: Record<string, AnimStyle> = {
   wipedown: "slidedown",
 };
 
-const GRADE_KEYS = ["brightness", "contrast", "saturation", "exposure", "temperature", "hue"] as const;
+/** The basic sliders the grade tool patches — the panel's field list plus the
+ * legacy pair, so the schema and handler can never disagree. */
+const GRADE_KEYS = [...GRADE_BASIC_FIELDS.map((f) => f.key), "brightness", "hue"] as const;
+
+/** Color stats for a grading reference: a clip's current decoded frame
+ * (pre-grade, like Auto reads) or an image asset's pixels. */
+async function colorStatsForRef(
+  s: ReturnType<typeof useEditor.getState>,
+  ref: { clipId?: string; assetId?: string }
+): Promise<ColorStats> {
+  if (ref.clipId) {
+    const clip = requireItem(s.clips, ref.clipId, "video clip");
+    const data = sampleClipFrameData(clip.id, 192, 108);
+    if (!data)
+      throw new ToolError(
+        "No decoded frame for that clip yet — seek into it so it is on screen, then retry."
+      );
+    const stats = colorStatsFromImageData(data);
+    if (!stats) throw new ToolError("Could not read pixels off that clip's frame.");
+    return stats;
+  }
+  if (ref.assetId) {
+    const asset = requireItem(s.assets, ref.assetId, "project asset");
+    if (asset.type !== "image")
+      throw new ToolError(
+        "Color stats read images and clip frames — for a video asset, place it on the timeline and pass its clip id."
+      );
+    const img = await decodeRasterImageUrl(asset.url);
+    if (!img || !img.width) throw new ToolError("Could not decode that image.");
+    const w = 192;
+    const h = Math.max(1, Math.round((img.height / img.width) * w));
+    const c = createRasterCanvas(w, h);
+    const ctx = c.getContext("2d") as CanvasRenderingContext2D | null;
+    if (!ctx) throw new ToolError("Could not read that image's pixels.");
+    ctx.drawImage(img.source, 0, 0, w, h);
+    const stats = colorStatsFromImageData(ctx.getImageData(0, 0, w, h).data);
+    if (!stats) throw new ToolError("Could not read pixels off that image.");
+    return stats;
+  }
+  throw new ToolError("Pass clipId or assetId.");
+}
+
+/** Stats shaped for the model: rounded, with the quantile probes labeled. */
+function statsReport(stats: ColorStats) {
+  const r1 = (v: number) => Math.round(v * 100) / 100;
+  return {
+    quantiles: "values 0..255 at p2, p10, p25, p50, p75, p90, p98",
+    r: stats.r,
+    g: stats.g,
+    b: stats.b,
+    luma: stats.luma,
+    meanR: Math.round(stats.meanR),
+    meanG: Math.round(stats.meanG),
+    meanB: Math.round(stats.meanB),
+    meanSat: r1(stats.meanSat),
+    warmth: r1(stats.warmth),
+  };
+}
 
 /** Long side of a captured frame: enough for the model to read a title, small
  * enough to ride a turn. */
@@ -2794,19 +2862,146 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
 
   set_color_grade: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
-      let grade: ColorGrade = input.reset === true ? {} : { ...clip.grade };
+      // reset and auto rebuild the manual layer; the preset layer stays.
+      let grade: ColorGrade =
+        input.reset === true ? { preset: clip.grade?.preset } : { ...clip.grade };
       if (input.auto === true) {
         const data = sampleClipFrameData(clip.id);
         if (!data)
           throw new ToolError(
             "No decoded frame for that clip yet — seek into it so it is on screen, then retry."
           );
-        grade = { ...autoGradeFromImageData(data) };
+        grade = { ...autoGradeFromImageData(data), preset: clip.grade?.preset };
       }
       for (const k of GRADE_KEYS) if (isNum(input[k])) grade[k] = input[k];
       s.updateClip(clip.id, { grade: normalizeGrade(grade) });
       const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
       return { id: next.id, grade: next.grade ?? "neutral" };
+  },
+
+  set_color_preset: (s, input) => {
+      const clip = requireItem(s.clips, input.clipId, "video clip");
+      const id = typeof input.preset === "string" ? input.preset : "";
+      if (id !== "none" && !GRADE_PRESETS[id])
+        throw new ToolError(`No color preset "${id}" — pass one of the catalog ids or "none".`);
+      const preset =
+        id === "none"
+          ? undefined
+          : {
+              id,
+              amount: isNum(input.amount) ? Math.max(0, Math.min(1, input.amount)) : undefined,
+              skin: input.protect_skin === true || undefined,
+            };
+      s.updateClip(clip.id, { grade: normalizeGrade({ ...clip.grade, preset }) });
+      const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
+      return {
+        id: next.id,
+        preset: next.grade?.preset ?? "none",
+        ...(preset ? { label: GRADE_PRESETS[id].label } : {}),
+        ...(preset && next.grade?.preset?.amount === 0
+          ? { note: "amount 0 holds the preset at neutral — raise it for the look to show." }
+          : {}),
+      };
+  },
+
+  set_color_curves: (s, input) => {
+      const clip = requireItem(s.clips, input.clipId, "video clip");
+      const curves: GradeCurves = input.reset === true ? {} : { ...clip.grade?.curves };
+      const channels = [
+        ["m", input.master],
+        ["r", input.red],
+        ["g", input.green],
+        ["b", input.blue],
+      ] as const;
+      for (const [ch, pts] of channels) {
+        if (!Array.isArray(pts)) continue;
+        if (pts.length === 0) delete curves[ch];
+        else curves[ch] = pts as CurvePoint[];
+      }
+      if (isNum(input.curve_contrast) || isNum(input.fade)) {
+        const master = semanticMasterCurve(
+          isNum(input.curve_contrast) ? input.curve_contrast : 0,
+          isNum(input.fade) ? input.fade : 0
+        );
+        if (master) curves.m = master;
+        else delete curves.m;
+      }
+      s.updateClip(clip.id, { grade: normalizeGrade({ ...clip.grade, curves }) });
+      const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
+      return { id: next.id, curves: next.grade?.curves ?? "neutral" };
+  },
+
+  set_color_wheels: (s, input) => {
+      const clip = requireItem(s.clips, input.clipId, "video clip");
+      const wheels = input.reset === true ? {} : { ...clip.grade?.wheels };
+      const zones = [
+        ["s", input.shadows],
+        ["m", input.midtones],
+        ["h", input.highlights],
+      ] as const;
+      for (const [zone, w] of zones) {
+        if (!w || typeof w !== "object") continue;
+        const t = w as { dx?: number; dy?: number; luma?: number };
+        wheels[zone] = [t.dx ?? 0, t.dy ?? 0, t.luma ?? 0] as WheelTuple;
+      }
+      s.updateClip(clip.id, { grade: normalizeGrade({ ...clip.grade, wheels }) });
+      const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
+      return { id: next.id, wheels: next.grade?.wheels ?? "neutral" };
+  },
+
+  set_color_hsl: (s, input) => {
+      const clip = requireItem(s.clips, input.clipId, "video clip");
+      const hsl = input.reset_all === true ? {} : { ...clip.grade?.hsl };
+      const band = typeof input.band === "string" ? (input.band as HslBand) : undefined;
+      if (band) {
+        if (!HSL_BANDS.some((b) => b.id === band))
+          throw new ToolError(`band must be one of ${HSL_BANDS.map((b) => b.id).join(", ")}.`);
+        hsl[band] = [
+          isNum(input.hue) ? input.hue : 0,
+          isNum(input.sat) ? input.sat : 0,
+          isNum(input.luma) ? input.luma : 0,
+        ];
+      } else if (input.reset_all !== true) {
+        throw new ToolError("Pass a band to adjust, or reset_all to clear every band.");
+      }
+      s.updateClip(clip.id, { grade: normalizeGrade({ ...clip.grade, hsl }) });
+      const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
+      return { id: next.id, hsl: next.grade?.hsl ?? "neutral" };
+  },
+
+  read_color_stats: async (s, input) => {
+      const stats = await colorStatsForRef(s, {
+        clipId: typeof input.clipId === "string" ? input.clipId : undefined,
+        assetId: typeof input.assetId === "string" ? input.assetId : undefined,
+      });
+      return statsReport(stats);
+  },
+
+  match_color_grade: async (s, input) => {
+      const clip = requireItem(s.clips, input.clipId, "video clip");
+      const source = await colorStatsForRef(s, { clipId: clip.id });
+      const reference = await colorStatsForRef(s, {
+        clipId: typeof input.ref_clip_id === "string" ? input.ref_clip_id : undefined,
+        assetId: typeof input.ref_asset_id === "string" ? input.ref_asset_id : undefined,
+      });
+      const grade = matchGrade(source, reference);
+      // The frames already agree: the clip's own grade stays as it is rather
+      // than being wiped by a match that has nothing to say.
+      if (!grade)
+        return {
+          id: clip.id,
+          grade: clip.grade ?? "neutral",
+          note: "The footage already matches the reference — nothing changed.",
+        };
+      // The computed curves carry the whole look, so the match replaces the
+      // clip's grade — a preset left underneath would double the move.
+      s.updateClip(clip.id, { grade });
+      const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
+      return {
+        id: next.id,
+        grade: next.grade ?? "already matched (no change needed)",
+        note: "Verify with read_color_stats on the clip and refine with the grading tools.",
+      };
   },
 
   merge_cue: (s, input) => {
@@ -3004,7 +3199,7 @@ function textSequenceLines(
   const lines = raw
     .filter((l): l is Record<string, unknown> => typeof l === "object" && l !== null)
     .map((l) => ({
-      text: typeof l.text === "string" ? l.text.trim() : "",
+      text: typeof l.text === "string" ? l.text.replace(/\\n/g, "\n").trim() : "",
       start: isNum(l.start) ? Math.max(0, l.start) : NaN,
       end: isNum(l.end) ? l.end : NaN,
       ...(typeof l.color === "string" ? { color: l.color } : {}),
@@ -3393,7 +3588,10 @@ function overlayPatch(input: Record<string, unknown>, kind: "text" | "shape" | "
   if (typeof input.hidden === "boolean") patch.hidden = input.hidden || undefined;
 
   if (kind === "text") {
-    if (typeof input.text === "string" && input.text.trim()) patch.text = input.text;
+    // A literal backslash-n in the call is always a meant newline — models
+    // double-escape multi-line titles.
+    if (typeof input.text === "string" && input.text.trim())
+      patch.text = input.text.replace(/\\n/g, "\n");
     if (isNum(input.size)) patch.size = clamp(Math.round(input.size), 16, 320);
     if (typeof input.color === "string") patch.color = input.color;
     // Only ids the registry knows: an unknown one resolves to the default

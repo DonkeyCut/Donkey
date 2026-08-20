@@ -9,6 +9,7 @@
  *   multi-tool  — composed edits over several calls
  */
 
+import { gradePresetsInCategory } from "@donkeycut/effects-kit";
 import {
   AUDIO_STATE,
   CLIP_REFS,
@@ -759,6 +760,118 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       reply: /crosszoom|cross.?zoom/i,
       state: STYLED_STATE,
       maxToolCalls: 2,
+    },
+    {
+      // Grading: a mood ask lands as one set_color_preset with a pick from
+      // the matching catalog category — a hand-rolled slider stack fails.
+      name: "cinematic-ask-picks-preset",
+      bucket: "single-tool",
+      input: () => [userTurn("give my video a cinematic color grade")],
+      reply: /cinematic|grade|preset|teal|look/i,
+      requiredTools: ["set_color_preset"],
+      maxToolCalls: 4,
+      simulate: () => (name, args) => {
+        if (name !== "set_color_preset") return undefined;
+        const pick = String(args.preset);
+        const ids = gradePresetsInCategory("cinematic").map((p) => p.id);
+        if (!ids.includes(pick))
+          throw new Error(`preset ${pick} — expected a cinematic pick (${ids.join(", ")})`);
+        return { id: args.clipId ?? "c1", preset: pick, amount: Number(args.amount ?? 1) };
+      },
+    },
+    {
+      // Semantic grading: "warmer" is temperature above zero and "crush the
+      // blacks" pushes shadows down (or deepens the low end of the master
+      // curve) — the interceptor fails any move in the wrong direction.
+      name: "warmer-crushed-blacks-in-range",
+      bucket: "single-tool",
+      input: () => [userTurn("make the beach clip warmer and crush the blacks a little")],
+      reply: /warm|black|shadow|grade/i,
+      requiredTools: ["set_color_grade"],
+      maxToolCalls: 5,
+      simulate: () => (name, args) => {
+        if (name === "set_color_grade") {
+          if (typeof args.temperature === "number" && args.temperature <= 0)
+            throw new Error(`temperature ${args.temperature} — warmer means above 0`);
+          if (typeof args.shadows === "number" && args.shadows >= 0)
+            throw new Error(`shadows ${args.shadows} — crushing blacks means below 0`);
+          return { id: args.clipId ?? "c1", grade: { temperature: args.temperature ?? 0, shadows: args.shadows ?? 0 } };
+        }
+        if (name === "set_color_curves") {
+          if (typeof args.fade === "number" && args.fade > 0)
+            throw new Error(`fade ${args.fade} — fade lifts the blacks, the ask crushes them`);
+          const master = Array.isArray(args.master) ? (args.master as number[][]) : [];
+          for (const [x, y] of master)
+            if (x <= 80 && y > x)
+              throw new Error(`master point [${x}, ${y}] lifts the low end — crushing pulls it down`);
+          return { id: args.clipId ?? "c1", curves: { master } };
+        }
+        return undefined;
+      },
+    },
+    {
+      // Per-hue isolation: "just the sky" is one hue band, so the move is
+      // set_color_hsl on aqua or blue — a whole-frame saturation push leaks
+      // onto everything else and fails.
+      name: "sky-bluer-single-band",
+      bucket: "single-tool",
+      input: () => [userTurn("make the sky bluer without changing anything else")],
+      reply: /sky|blue/i,
+      requiredTools: ["set_color_hsl"],
+      maxToolCalls: 4,
+      simulate: () => (name, args) => {
+        if (name === "set_color_grade" && (typeof args.saturation === "number" || typeof args.hue === "number"))
+          throw new Error("whole-frame color move — the ask isolates one hue, use set_color_hsl");
+        if (name !== "set_color_hsl") return undefined;
+        const band = String(args.band);
+        if (band !== "aqua" && band !== "blue")
+          throw new Error(`band ${band} — the sky lives in aqua/blue`);
+        const sat = Number(args.sat ?? 0);
+        const hue = Number(args.hue ?? 0);
+        if (sat === 0 && hue === 0)
+          throw new Error("all-zero band clears it — bluer needs a sat or hue move");
+        if (sat < 0) throw new Error(`sat ${sat} — bluer means saturation up`);
+        return { id: args.clipId ?? "c1", band, hue, sat, luma: Number(args.luma ?? 0) };
+      },
+    },
+    {
+      // Reference matching: a shared look-to-copy routes to the computed
+      // match on the attached photo — an eyeballed slider stack fails. The
+      // stats stub keeps a read-before/verify-after pass cheap and grounded.
+      name: "reference-photo-matches-grade",
+      bucket: "single-tool",
+      input: () => [
+        userTurn("match my video's colors to this photo", { attachRefs: [PHOTO_REFS[0]] }),
+      ],
+      reply: /match|color|grade|photo/i,
+      requiredTools: ["match_color_grade"],
+      maxToolCalls: 6,
+      simulate: () => (name, args) => {
+        if (name !== "match_color_grade") return undefined;
+        if (args.ref_asset_id !== PHOTO_REFS[0].id)
+          throw new Error(`ref ${args.ref_asset_id ?? args.ref_clip_id} — the attached photo is asset ${PHOTO_REFS[0].id}`);
+        if (args.clipId !== "c1")
+          throw new Error(`clip ${args.clipId} — the video on the timeline is c1`);
+        return {
+          id: "c1",
+          grade: { curves: { r: [[0, 0], [128, 138], [255, 255]], b: [[0, 0], [128, 120], [255, 255]] }, saturation: 6 },
+          note: "Verify with read_color_stats on the clip and refine with the grading tools.",
+        };
+      },
+      stubs: {
+        read_color_stats: {
+          quantiles: "values 0..255 at p2, p10, p25, p50, p75, p90, p98",
+          r: [8, 24, 62, 118, 172, 214, 244],
+          g: [7, 22, 58, 112, 166, 208, 240],
+          b: [10, 28, 70, 130, 182, 220, 248],
+          luma: [8, 23, 61, 116, 170, 211, 242],
+          meanR: 121,
+          meanG: 114,
+          meanB: 133,
+          meanSat: 0.24,
+          warmth: 0.91,
+        },
+      },
     },
   ];
 }

@@ -23,6 +23,7 @@ export const SAFE_TOOLS = new Set([
   "watch_video",
   "detect_silence",
   "listen_audio",
+  "read_color_stats",
   "library_list",
   "stock_search",
   "list_voices",

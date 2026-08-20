@@ -15,6 +15,7 @@ const READ_ONLY = new Set([
   "note_source",
   "detect_silence",
   "listen_audio",
+  "read_color_stats",
   "library_list",
   "library_list_folder",
   "stock_search",
