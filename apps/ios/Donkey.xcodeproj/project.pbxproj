@@ -1,0 +1,346 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A100000100000000000000B1 /* DonkeyKitModels in Frameworks */ = {isa = PBXBuildFile; productRef = A100001100000000000000B1 /* DonkeyKitModels */; };
+		A100000200000000000000B1 /* DonkeyKitUI in Frameworks */ = {isa = PBXBuildFile; productRef = A100001200000000000000B1 /* DonkeyKitUI */; };
+		A100000300000000000000B1 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = A100001300000000000000B1 /* GoogleSignIn */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A100002100000000000000B1 /* Donkey.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Donkey.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A100002200000000000000B1 /* Donkey.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Donkey.xcconfig; path = Config/Donkey.xcconfig; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A100003100000000000000B1 /* Exceptions for "Donkey" folder in "Donkey" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = A100004100000000000000B1 /* Donkey */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		A100003200000000000000B1 /* Donkey */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A100003100000000000000B1 /* Exceptions for "Donkey" folder in "Donkey" target */,
+			);
+			path = Donkey;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A100005100000000000000B1 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A100000100000000000000B1 /* DonkeyKitModels in Frameworks */,
+				A100000200000000000000B1 /* DonkeyKitUI in Frameworks */,
+				A100000300000000000000B1 /* GoogleSignIn in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A100006100000000000000B1 = {
+			isa = PBXGroup;
+			children = (
+				A100003200000000000000B1 /* Donkey */,
+				A100002200000000000000B1 /* Donkey.xcconfig */,
+				A100006200000000000000B1 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A100006200000000000000B1 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A100002100000000000000B1 /* Donkey.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A100004100000000000000B1 /* Donkey */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A100007100000000000000B1 /* Build configuration list for PBXNativeTarget "Donkey" */;
+			buildPhases = (
+				A100005200000000000000B1 /* Sources */,
+				A100005100000000000000B1 /* Frameworks */,
+				A100005300000000000000B1 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A100003200000000000000B1 /* Donkey */,
+			);
+			name = Donkey;
+			packageProductDependencies = (
+				A100001100000000000000B1 /* DonkeyKitModels */,
+				A100001200000000000000B1 /* DonkeyKitUI */,
+				A100001300000000000000B1 /* GoogleSignIn */,
+			);
+			productName = Donkey;
+			productReference = A100002100000000000000B1 /* Donkey.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A100008100000000000000B1 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					A100004100000000000000B1 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+				};
+			};
+			buildConfigurationList = A100007200000000000000B1 /* Build configuration list for PBXProject "Donkey" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A100006100000000000000B1;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A100009100000000000000B1 /* XCLocalSwiftPackageReference "DonkeyKit" */,
+				A100009200000000000000B1 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = A100006200000000000000B1 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A100004100000000000000B1 /* Donkey */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A100005300000000000000B1 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A100005200000000000000B1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A10000A100000000000000B1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		A10000A200000000000000B1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 6.0;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		A10000A300000000000000B1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = A100002200000000000000B1 /* Donkey.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Donkey/Donkey.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Q593LLEXEN;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Donkey/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Donkey;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Donkey Cut uses the camera to record your videos.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Donkey Cut uses the microphone to record audio with your videos.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Donkey saves videos you choose to your photo library.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				"INFOPLIST_KEY_UISupportedInterfaceOrientations[sdk=iphoneos*]" = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.donkeycut.donkeycut;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A10000A400000000000000B1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = A100002200000000000000B1 /* Donkey.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Donkey/Donkey.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Q593LLEXEN;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Donkey/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Donkey;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Donkey Cut uses the camera to record your videos.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Donkey Cut uses the microphone to record audio with your videos.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Donkey saves videos you choose to your photo library.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				"INFOPLIST_KEY_UISupportedInterfaceOrientations[sdk=iphoneos*]" = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.donkeycut.donkeycut;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A100007100000000000000B1 /* Build configuration list for PBXNativeTarget "Donkey" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000A300000000000000B1 /* Debug */,
+				A10000A400000000000000B1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A100007200000000000000B1 /* Build configuration list for PBXProject "Donkey" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000A100000000000000B1 /* Debug */,
+				A10000A200000000000000B1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A100009100000000000000B1 /* XCLocalSwiftPackageReference "DonkeyKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = DonkeyKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A100009200000000000000B1 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 8.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A100001100000000000000B1 /* DonkeyKitModels */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DonkeyKitModels;
+		};
+		A100001200000000000000B1 /* DonkeyKitUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DonkeyKitUI;
+		};
+		A100001300000000000000B1 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A100009200000000000000B1 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A100008100000000000000B1 /* Project object */;
+}

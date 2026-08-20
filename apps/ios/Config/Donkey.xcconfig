@@ -1,0 +1,10 @@
+// Build-time configuration for the Donkey iOS app.
+//
+// The Google iOS OAuth client id identifies a deployment, so it stays out of
+// the open-source tree: copy Donkey.local.xcconfig.example to
+// Donkey.local.xcconfig (gitignored) and fill in your values. Without it the
+// app builds and runs; the Google button reports sign-in as not configured.
+GOOGLE_IOS_CLIENT_ID =
+GOOGLE_IOS_REVERSED_CLIENT_ID = donkey-google-signin-unset
+
+#include? "Donkey.local.xcconfig"

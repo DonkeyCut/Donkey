@@ -24,3 +24,6 @@ __pycache__/
 
 ## Project policy
 # Keep Package.resolved tracked for reproducible dependency resolution.
+
+# iOS app local build config (deployment OAuth ids)
+apps/ios/Config/Donkey.local.xcconfig

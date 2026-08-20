@@ -1,0 +1,5 @@
+// Copy this file to Donkey.local.xcconfig and fill in the iOS OAuth client
+// from your Google Cloud project. The reversed id is the same value with its
+// dot-segments reversed, as shown on the client's detail page.
+GOOGLE_IOS_CLIENT_ID = 1234567890-abcdef.apps.googleusercontent.com
+GOOGLE_IOS_REVERSED_CLIENT_ID = com.googleusercontent.apps.1234567890-abcdef
