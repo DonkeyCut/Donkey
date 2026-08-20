@@ -19,10 +19,12 @@
  * answers with captures already in hand; a tile without one keeps the nearest
  * pre-sampled thumb until its capture lands.
  *
- * Detected scene cuts (`cuts`, measured at import) split any refining tile
- * they pass through: each side captures its own scene, so the strip changes
- * picture at the cut's own pixel and the boundary area under the pointer
- * shows what actually plays there.
+ * Detected scene cuts (`cuts`, measured at import) become tile edges while
+ * refining: each scene divides into even tiles as close to the grid width as
+ * its span allows, so the strip changes picture at the cut's own pixel, the
+ * boundary area under the pointer shows what actually plays there, and tiles
+ * between two cuts all share one width — a scene shorter than a tile is the
+ * one place a narrow tile is the truth.
  */
 
 export type FilmTile = {
@@ -47,7 +49,8 @@ export const FILM_TILE_CAP = 120;
  * a strip re-planned by a scroll or a trim asks for the same times again. */
 export const WANT_GRID_S = 0.1;
 
-/** Narrowest sub-tile a scene cut may split off. */
+/** Narrowest tile a scene cut may leave behind; cuts closer than this to the
+ * source's ends or to each other merge away. */
 export const MIN_SUB_TILE_PX = 5;
 
 /** A probe of the source: a moment, and whether the picture changed scene
@@ -108,9 +111,9 @@ export function planFilmstrip(p: {
   speed: number;
   tileH: number;
   minTileW: number;
-  /** Scene changes in the source, seconds. A refining tile a cut passes
-   * through splits at it, so the strip changes picture at the cut's own
-   * pixel; the boundary area then shows what actually plays there. */
+  /** Scene changes in the source, seconds, ascending. While refining they
+   * become tile edges, so the strip changes picture at the cut's own pixel;
+   * the boundary area then shows what actually plays there. */
   cuts?: number[];
   /** Synchronous lookup of a captured true frame at a `wantT`. */
   exactFrame?: (wantT: number) => string | null;
@@ -121,23 +124,32 @@ export function planFilmstrip(p: {
   const imgW = natural * Math.ceil(cells / FILM_TILE_CAP);
   const stepT = (imgW / p.pps) * p.speed;
   const filmOut = p.filmIn + (p.w / p.pps) * p.speed;
-  const first = Math.max(0, Math.floor(p.filmIn / stepT));
-  const last = Math.max(first, Math.ceil(filmOut / stepT) - 1);
   const refine = stepT < p.thumbStep;
-  // A sub-tile narrower than a few pixels reads as a rendering artifact; a
-  // cut that close to a tile boundary already flips within that distance.
+  // A tile narrower than a few pixels reads as a rendering artifact; a cut
+  // that close to an edge already flips within that distance.
   const minSubT = (MIN_SUB_TILE_PX / p.pps) * p.speed;
+  // Scene seams partition the whole source, so the tiling depends only on
+  // the source and the zoom: scrolls and trims re-plan onto the same tiles.
+  const end = Math.max(p.duration, filmOut);
+  const seams = [0];
+  if (refine) {
+    for (const c of p.cuts ?? []) {
+      if (c >= seams[seams.length - 1] + minSubT && c <= end - minSubT) seams.push(c);
+    }
+  }
+  seams.push(end);
   const tiles: FilmTile[] = [];
-  for (let k = first; k <= last; k++) {
-    const t0 = k * stepT;
-    const t1 = (k + 1) * stepT;
-    const inner = refine
-      ? (p.cuts ?? []).filter((c) => c > t0 + minSubT && c < t1 - minSubT).slice(0, 2)
-      : [];
-    const bounds = [t0, ...inner, t1];
-    for (let s = 0; s + 1 < bounds.length; s++) {
-      const a = bounds[s];
-      const b = bounds[s + 1];
+  for (let s = 0; s + 1 < seams.length; s++) {
+    const segA = seams[s];
+    const segB = seams[s + 1];
+    if (segB <= p.filmIn || segA >= filmOut) continue;
+    const n = Math.max(1, Math.round((segB - segA) / stepT));
+    const tw = (segB - segA) / n;
+    const i0 = Math.max(0, Math.floor((p.filmIn - segA) / tw));
+    const i1 = Math.min(n - 1, Math.ceil((filmOut - segA) / tw) - 1);
+    for (let i = i0; i <= i1; i++) {
+      const a = segA + i * tw;
+      const b = segA + (i + 1) * tw;
       const mid = (a + b) / 2;
       const idx = Math.min(p.thumbs.length - 1, Math.max(0, Math.floor(mid / p.thumbStep)));
       let src = p.thumbs[idx];
@@ -148,8 +160,8 @@ export function planFilmstrip(p: {
         // (whole and half seconds above all), and a capture that lands
         // exactly on a cut decodes the next scene's first frame — a tile
         // whose midpoint sits a hair before a cut would flip to the wrong
-        // side of it. A sub-tile too narrow for a grid center inside it
-        // captures at its own midpoint.
+        // side of it. A tile too narrow for a grid center inside it captures
+        // at its own midpoint.
         const snapped = (Math.floor(mid / WANT_GRID_S) + 0.5) * WANT_GRID_S;
         wantT = snapped > a && snapped < b ? snapped : mid;
         wantT = Math.max(0, Math.min(p.duration - 0.05, wantT));

@@ -130,14 +130,12 @@ describe("planFilmstrip", () => {
     expect(plan({ thumbs: [] })).toEqual([]);
   });
 
-  test("a scene cut inside a refining tile splits it at the cut", () => {
+  test("a scene cut becomes a tile edge, and each side captures its own scene", () => {
     const pps = 300;
     const cut = 3.0;
     const tiles = plan({ pps, cuts: [cut] });
-    // Some tile boundary sits exactly on the cut...
     const edges = tiles.map((t) => t.left);
     expect(edges.some((x) => Math.abs(x - cut * pps) < 1e-6)).toBe(true);
-    // ...and each side captures strictly on its own side of it.
     for (const t of tiles) {
       const a = t.left / pps;
       const b = (t.left + t.width) / pps;
@@ -146,19 +144,31 @@ describe("planFilmstrip", () => {
     }
   });
 
-  test("split tiles still tile the strip without gaps", () => {
+  test("cut-aligned tiles still tile the strip without gaps", () => {
     const tiles = plan({ pps: 300, cuts: [1.7, 3.0, 9.13] });
     for (let i = 1; i < tiles.length; i++) {
       expect(tiles[i].left).toBeCloseTo(tiles[i - 1].left + tiles[i - 1].width, 6);
     }
   });
 
-  test("a cut a sliver from a tile boundary does not split off a sub-pixel tile", () => {
+  test("tiles between two cuts share one width", () => {
     const pps = 300;
-    const stepT = plan({ pps })[1].width / pps;
-    const sliver = stepT + MIN_SUB_TILE_PX / pps / 2; // just inside tile 1
-    const tiles = plan({ pps, cuts: [sliver] });
+    const tiles = plan({ pps, cuts: [3.0, 9.13] });
+    const widthsIn = (lo: number, hi: number) =>
+      tiles
+        .filter((t) => t.left >= lo * pps - 1e-6 && t.left + t.width <= hi * pps + 1e-6)
+        .map((t) => t.width);
+    for (const ws of [widthsIn(0, 3), widthsIn(3, 9.13), widthsIn(9.13, DURATION)]) {
+      expect(ws.length).toBeGreaterThan(1);
+      for (const w of ws) expect(w).toBeCloseTo(ws[0], 6);
+    }
+  });
+
+  test("cuts crowding the ends or each other merge instead of leaving slivers", () => {
+    const pps = 300;
+    const tiles = plan({ pps, cuts: [0.001, 3.0, 3.005, 23.659] });
     for (const t of tiles) expect(t.width).toBeGreaterThanOrEqual(MIN_SUB_TILE_PX - 1e-6);
+    expect(tiles.map((t) => t.left).some((x) => Math.abs(x - 3.0 * pps) < 1e-6)).toBe(true);
   });
 
   test("zoomed out, cuts split nothing", () => {
