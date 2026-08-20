@@ -53,7 +53,7 @@ import { EFFECT_LABELS } from "@donkeycut/effects-kit";
 import { emptySubtitles, IMAGE_CLIP_SECONDS, SHAPE_LABELS, TRANSITION_DEFAULT_SECONDS, TRANSITION_MAX, TRANSITION_STYLE_LABELS, type ShapeKind } from "@/cut/lib/types";
 import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, Selection, StickerOverlay, SubtitleCue, TimelineTransition, TransitionStyle, VideoClip } from "@/cut/lib/types";
 import { isLottieAsset } from "@/cut/lib/lottieAssets";
-import { gradeTint, gradeToCssFilter } from "@donkeycut/effects-kit";
+import { gradeCssApprox } from "@donkeycut/effects-kit";
 import { cn } from "@/lib/utils";
 
 const TRANSITION_ICONS: Record<TransitionStyle, LucideIcon> = {
@@ -4090,7 +4090,10 @@ function Filmstrip({
    * element burns paint time for the life of the timeline. */
   failed?: boolean;
 }) {
-  const tint = gradeTint(grade);
+  // The filmstrip is a 40px always-on surface: the grade renders as a CSS
+  // approximation (exact for the scalar sliders and the preset's scalars;
+  // curves/wheels/hue bands show in the preview and exports).
+  const { filter, tint } = gradeCssApprox(grade);
   // No thumbs yet — the media is still streaming into the browser store. A
   // pulsing skeleton fills the box until the strip can draw real frames.
   if (!frames.length) {
@@ -4106,7 +4109,7 @@ function Filmstrip({
   return (
     <div
       className="tl-filmstrip pointer-events-none absolute inset-0 isolate"
-      style={{ filter: gradeToCssFilter(grade) || undefined }}
+      style={{ filter: filter || undefined }}
     >
       {frames.map((f, k) => (
         // eslint-disable-next-line @next/next/no-img-element

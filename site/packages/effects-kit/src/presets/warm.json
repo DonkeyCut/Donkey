@@ -1,0 +1,101 @@
+[
+  {
+    "id": "golden-hour",
+    "label": "Golden Hour",
+    "category": "warm",
+    "grade": {
+      "exposure": 6,
+      "temperature": 18,
+      "tint": 3,
+      "contrast": 4,
+      "highlights": -6,
+      "vibrance": 10,
+      "hsl": { "orange": [0, 10, 4] }
+    }
+  },
+  {
+    "id": "amber",
+    "label": "Amber",
+    "category": "warm",
+    "grade": {
+      "temperature": 22,
+      "tint": 2,
+      "contrast": 6,
+      "shadows": 6,
+      "saturation": 4
+    }
+  },
+  {
+    "id": "honey",
+    "label": "Honey",
+    "category": "warm",
+    "grade": {
+      "temperature": 14,
+      "tint": 6,
+      "exposure": 4,
+      "contrast": -2,
+      "vibrance": 8,
+      "highlights": -4
+    }
+  },
+  {
+    "id": "sunbaked",
+    "label": "Sunbaked",
+    "category": "warm",
+    "grade": {
+      "temperature": 16,
+      "contrast": 10,
+      "saturation": -8,
+      "highlights": -10,
+      "shadows": -4
+    }
+  },
+  {
+    "id": "peach",
+    "label": "Peach",
+    "category": "warm",
+    "grade": {
+      "temperature": 10,
+      "tint": 8,
+      "exposure": 5,
+      "saturation": 6,
+      "contrast": -4,
+      "curves": { "m": [[0, 10], [255, 250]] }
+    }
+  },
+  {
+    "id": "sepia",
+    "label": "Sepia",
+    "category": "warm",
+    "grade": {
+      "temperature": 30,
+      "tint": 4,
+      "saturation": -35,
+      "contrast": 4
+    }
+  },
+  {
+    "id": "ember",
+    "label": "Ember",
+    "category": "warm",
+    "grade": {
+      "temperature": 24,
+      "shadows": -8,
+      "contrast": 12,
+      "vibrance": 6,
+      "hsl": { "red": [0, 12, 0] }
+    }
+  },
+  {
+    "id": "bronze",
+    "label": "Bronze",
+    "category": "warm",
+    "grade": {
+      "temperature": 18,
+      "tint": -4,
+      "contrast": 8,
+      "saturation": -6,
+      "wheels": { "m": [10, 5, 0] }
+    }
+  }
+]

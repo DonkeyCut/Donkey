@@ -531,8 +531,8 @@ export interface VideoClip {
 
 // Color grading (the dual-renderer math) lives in the effects kit; the model
 // types and ranges re-export here so doc-model consumers keep one import.
-export { GRADE_HUE_MAX, GRADE_MAX } from "@donkeycut/effects-kit";
-export type { ColorGrade } from "@donkeycut/effects-kit";
+export { GRADE_BASIC_FIELDS, GRADE_HUE_MAX, GRADE_MAX, HSL_BANDS } from "@donkeycut/effects-kit";
+export type { ColorGrade, GradePresetRef, HslBand } from "@donkeycut/effects-kit";
 
 /** Speed slider range. Typed entry and tools may go beyond it; SPEED_FLOOR is
  * the only hard bound, keeping rates positive so length math stays finite. */
@@ -763,6 +763,12 @@ export const transitionStyleOfAnim = (style: AnimStyle): TransitionStyle =>
 // Looks (dual preview/export recipes) live in the effects kit; the ids and
 // labels re-export here so doc-model consumers keep one import.
 export { LOOK_IDS, LOOK_LABELS } from "@donkeycut/effects-kit";
+export {
+  GRADE_PRESET_CATEGORIES,
+  GRADE_PRESET_IDS,
+  GRADE_PRESETS,
+} from "@donkeycut/effects-kit";
+export type { GradePreset, GradePresetCategory } from "@donkeycut/effects-kit";
 export type { LookStyle } from "@donkeycut/effects-kit";
 
 /** Migrate docs saved before per-clip animations existed: the retired edge

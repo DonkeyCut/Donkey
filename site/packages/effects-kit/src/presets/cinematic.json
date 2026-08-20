@@ -1,0 +1,97 @@
+[
+  {
+    "id": "teal-orange",
+    "label": "Teal & Orange",
+    "category": "cinematic",
+    "grade": {
+      "contrast": 10,
+      "vibrance": 10,
+      "saturation": 6,
+      "wheels": { "s": [-22, 0, 0], "h": [12, 7, 0] }
+    }
+  },
+  {
+    "id": "bleach-bypass",
+    "label": "Bleach Bypass",
+    "category": "cinematic",
+    "grade": {
+      "contrast": 22,
+      "saturation": -30,
+      "highlights": -6,
+      "shadows": -8
+    }
+  },
+  {
+    "id": "matinee",
+    "label": "Matinee",
+    "category": "cinematic",
+    "grade": {
+      "exposure": 3,
+      "contrast": 8,
+      "temperature": 4,
+      "saturation": 18,
+      "vibrance": 8
+    }
+  },
+  {
+    "id": "thriller",
+    "label": "Thriller",
+    "category": "cinematic",
+    "grade": {
+      "temperature": -14,
+      "contrast": 16,
+      "shadows": -10,
+      "saturation": -10,
+      "wheels": { "s": [-8, -14, 0] }
+    }
+  },
+  {
+    "id": "night-market",
+    "label": "Night Market",
+    "category": "cinematic",
+    "grade": {
+      "temperature": -6,
+      "tint": 8,
+      "contrast": 10,
+      "shadows": 6,
+      "vibrance": 16,
+      "hsl": { "magenta": [0, 12, 4], "aqua": [0, 10, 0] }
+    }
+  },
+  {
+    "id": "sci-fi",
+    "label": "Sci-Fi",
+    "category": "cinematic",
+    "grade": {
+      "temperature": -18,
+      "tint": -8,
+      "contrast": 12,
+      "saturation": -6,
+      "highlights": -4
+    }
+  },
+  {
+    "id": "western",
+    "label": "Western",
+    "category": "cinematic",
+    "grade": {
+      "temperature": 16,
+      "tint": 4,
+      "contrast": 6,
+      "shadows": 4,
+      "saturation": -4,
+      "hsl": { "green": [-10, -25, -4] }
+    }
+  },
+  {
+    "id": "indie",
+    "label": "Indie",
+    "category": "cinematic",
+    "grade": {
+      "temperature": 3,
+      "contrast": -4,
+      "saturation": -12,
+      "curves": { "m": [[0, 18], [128, 128], [255, 244]] }
+    }
+  }
+]

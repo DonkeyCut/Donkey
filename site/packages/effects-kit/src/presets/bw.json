@@ -1,0 +1,90 @@
+[
+  {
+    "id": "mono",
+    "label": "Mono",
+    "category": "bw",
+    "grade": {
+      "saturation": -50,
+      "contrast": 10
+    }
+  },
+  {
+    "id": "silver",
+    "label": "Silver",
+    "category": "bw",
+    "grade": {
+      "saturation": -50,
+      "contrast": -4,
+      "exposure": 6,
+      "shadows": 8,
+      "highlights": -4
+    }
+  },
+  {
+    "id": "ink",
+    "label": "Ink",
+    "category": "bw",
+    "grade": {
+      "saturation": -50,
+      "contrast": 24,
+      "shadows": -10
+    }
+  },
+  {
+    "id": "high-key",
+    "label": "High Key",
+    "category": "bw",
+    "grade": {
+      "saturation": -50,
+      "exposure": 10,
+      "contrast": -6,
+      "shadows": 10,
+      "highlights": -2
+    }
+  },
+  {
+    "id": "low-key",
+    "label": "Low Key",
+    "category": "bw",
+    "grade": {
+      "saturation": -50,
+      "exposure": -8,
+      "contrast": 16,
+      "shadows": -10,
+      "highlights": -4
+    }
+  },
+  {
+    "id": "charcoal",
+    "label": "Charcoal",
+    "category": "bw",
+    "grade": {
+      "saturation": -50,
+      "contrast": 6,
+      "curves": { "m": [[0, 16], [128, 120], [255, 240]] }
+    }
+  },
+  {
+    "id": "soft-mono",
+    "label": "Soft Mono",
+    "category": "bw",
+    "grade": {
+      "saturation": -50,
+      "contrast": -10,
+      "exposure": 3,
+      "curves": { "m": [[0, 12], [255, 244]] }
+    }
+  },
+  {
+    "id": "grit",
+    "label": "Grit",
+    "category": "bw",
+    "grade": {
+      "saturation": -50,
+      "contrast": 20,
+      "exposure": -2,
+      "shadows": -6,
+      "highlights": 6
+    }
+  }
+]

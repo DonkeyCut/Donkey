@@ -1,0 +1,97 @@
+[
+  {
+    "id": "super-8",
+    "label": "Super 8",
+    "category": "film",
+    "grade": {
+      "temperature": 14,
+      "tint": -3,
+      "contrast": 8,
+      "saturation": -6,
+      "shadows": 8,
+      "curves": { "m": [[0, 12], [255, 246]] }
+    }
+  },
+  {
+    "id": "faded-film",
+    "label": "Faded Film",
+    "category": "film",
+    "grade": {
+      "contrast": -6,
+      "saturation": -14,
+      "curves": { "m": [[0, 26], [64, 74], [255, 235]] }
+    }
+  },
+  {
+    "id": "chrome",
+    "label": "Chrome",
+    "category": "film",
+    "grade": {
+      "contrast": 14,
+      "saturation": 14,
+      "vibrance": 6,
+      "highlights": -6,
+      "temperature": 2
+    }
+  },
+  {
+    "id": "push-process",
+    "label": "Push Process",
+    "category": "film",
+    "grade": {
+      "exposure": 4,
+      "contrast": 18,
+      "saturation": -8,
+      "shadows": -6
+    }
+  },
+  {
+    "id": "cine-print",
+    "label": "Cine Print",
+    "category": "film",
+    "grade": {
+      "contrast": 10,
+      "saturation": 4,
+      "wheels": { "s": [-10, -6, 0], "m": [8, 4, 0] },
+      "curves": { "m": [[0, 10], [192, 198], [255, 248]] }
+    }
+  },
+  {
+    "id": "tungsten",
+    "label": "Tungsten",
+    "category": "film",
+    "grade": {
+      "temperature": 20,
+      "tint": 2,
+      "shadows": 4,
+      "contrast": 6,
+      "vibrance": 4
+    }
+  },
+  {
+    "id": "instant",
+    "label": "Instant",
+    "category": "film",
+    "grade": {
+      "exposure": 6,
+      "contrast": -8,
+      "temperature": 5,
+      "tint": 6,
+      "saturation": -10,
+      "curves": { "m": [[0, 20], [255, 240]] }
+    }
+  },
+  {
+    "id": "expired",
+    "label": "Expired",
+    "category": "film",
+    "grade": {
+      "tint": -12,
+      "temperature": 6,
+      "saturation": -16,
+      "contrast": -4,
+      "hsl": { "yellow": [8, -10, 0] },
+      "curves": { "m": [[0, 14], [255, 240]] }
+    }
+  }
+]

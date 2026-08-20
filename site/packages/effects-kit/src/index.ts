@@ -11,4 +11,8 @@ export * from "./cutout";
 export * from "./lottie";
 export * from "./looks";
 export * from "./colorGrade";
+export * from "./gradeMath";
+export * from "./gradeLut";
+export * from "./gradePresets";
+export * from "./gradeMatch";
 export * from "./effects";

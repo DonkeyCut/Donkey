@@ -19,7 +19,8 @@
  * it was reached by playing there or by rendering the 135th frame.
  */
 
-import { applyMaskToCanvas, gradeTint, gradeToCssFilter, grainTile, isNeutralGrade, lookCssFilter, lookPost, maskComposite } from "@donkeycut/effects-kit";
+import { applyLutToImageData, applyMaskToCanvas, buildGradeLut, gradeKey, gradeNeedsLut, gradeTint, gradeToCssFilter, grainTile, isNeutralGrade, lookCssFilter, lookPost, maskComposite, type GradeLut } from "@donkeycut/effects-kit";
+import { applyLutGpu } from "./gradeGpu";
 import { createRasterCanvas } from "./raster";
 import { clipCovers, clipPosed, clipPoseAt, clipZoom, contentRect, DEFAULT_BACKGROUND, isFullRect, rectOf, shadowInk } from "./types";
 import type { ClipShadow, FrameRect, TransitionStyle, VideoClip } from "./types";
@@ -65,12 +66,63 @@ type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 /** The grain tile advances on this cadence, in seconds per step. */
 const GRAIN_STEP = 0.08;
 
+/** Compiled grade LUTs, shared across compositors and rebuilt only when a
+ * grade actually changes. A cut rarely holds more than a handful of distinct
+ * grades at once; the cap just bounds a long editing session. */
+const lutCache = new Map<string, GradeLut | null>();
+const LUT_CACHE_MAX = 24;
+
+/** What a grade object means to the renderer, memoized on the object itself.
+ * Every store edit hands out a fresh grade, so identity is a safe key — and
+ * the reads that decide the path (neutral? LUT? which LUT?) each normalize the
+ * grade, which is far too much allocation to repeat per clip per frame. */
+interface GradeFacts {
+  neutral: boolean;
+  needsLut: boolean;
+  key: string;
+}
+const gradeFacts = new WeakMap<object, GradeFacts>();
+
+function factsFor(grade: VideoClip["grade"]): GradeFacts | null {
+  if (!grade) return null;
+  let facts = gradeFacts.get(grade);
+  if (!facts) {
+    facts = {
+      neutral: isNeutralGrade(grade),
+      needsLut: gradeNeedsLut(grade),
+      key: gradeKey(grade) ?? "",
+    };
+    gradeFacts.set(grade, facts);
+  }
+  return facts;
+}
+
+function lutForGrade(grade: VideoClip["grade"], key: string): { lut: GradeLut; key: string } | null {
+  if (!key) return null;
+  if (lutCache.has(key)) {
+    const hit = lutCache.get(key)!;
+    // Re-insert so the cap evicts the least recently used grade, never one the
+    // cut is still playing.
+    lutCache.delete(key);
+    lutCache.set(key, hit);
+    return hit ? { lut: hit, key } : null;
+  }
+  const lut = buildGradeLut(grade);
+  if (lutCache.size >= LUT_CACHE_MAX) {
+    const oldest = lutCache.keys().next().value;
+    if (oldest !== undefined) lutCache.delete(oldest);
+  }
+  lutCache.set(key, lut);
+  return lut ? { lut, key } : null;
+}
+
 export class FrameCompositor {
   /** Scratch buffers, kept for the compositor's life: the grade pass, the
    * look's self-copy passes, and the vignette gradient. Allocating these per
    * frame is the difference between a preview that holds 60fps and one that
    * fights the garbage collector. */
   private gradeCanvas: Surface | null = null;
+  private gradeLutScratch: Surface | null = null;
   private lookScratch: Surface | null = null;
   private vignetteCanvas: Surface | null = null;
   /** The masked/keyframed-layer pass: the layer draws into `layerScratch`,
@@ -124,6 +176,7 @@ export class FrameCompositor {
   private scratch(
     field:
       | "gradeCanvas"
+      | "gradeLutScratch"
       | "lookScratch"
       | "vignetteCanvas"
       | "layerScratch"
@@ -195,8 +248,9 @@ export class FrameCompositor {
     clip: VideoClip | undefined
   ): CanvasImageSource {
     const grade = clip?.grade;
+    const facts = factsFor(grade);
     const lookCss = lookCssFilter(clip?.look, clip?.lookAmount);
-    if (isNeutralGrade(grade) && !lookCss) return frame.image;
+    if ((!facts || facts.neutral) && !lookCss) return frame.image;
     const w = frame.width;
     const h = frame.height;
     const { surface: scratch } = this.scratch("gradeCanvas", w, h);
@@ -205,6 +259,35 @@ export class FrameCompositor {
     // half-applying the tint.
     if (!ctx || !("filter" in ctx)) return frame.image;
     ctx.clearRect(0, 0, w, h);
+    if (facts?.needsLut) {
+      const compiled = lutForGrade(grade, facts.key);
+      if (compiled) {
+        // The LUT carries the whole grade (preset, curves, wheels, HSL and
+        // the scalar sliders); the look's color pass still applies after it,
+        // keeping the export's grade-before-look order.
+        const gpu = applyLutGpu(frame.image, w, h, compiled.lut, compiled.key);
+        if (gpu) {
+          ctx.filter = lookCss || "none";
+          ctx.drawImage(gpu as CanvasImageSource, 0, 0, w, h);
+          ctx.filter = "none";
+        } else {
+          const { surface: pixels } = this.scratch("gradeLutScratch", w, h);
+          const pctx = pixels.getContext("2d") as Ctx | null;
+          if (!pctx) return frame.image;
+          pctx.clearRect(0, 0, w, h);
+          pctx.drawImage(frame.image, 0, 0, w, h);
+          const img = pctx.getImageData(0, 0, w, h);
+          applyLutToImageData(img.data, compiled.lut);
+          pctx.putImageData(img, 0, 0);
+          ctx.filter = lookCss || "none";
+          ctx.drawImage(pixels, 0, 0, w, h);
+          ctx.filter = "none";
+        }
+        return scratch;
+      }
+      // A grade whose LUT resolves neutral (an unknown preset id alone)
+      // falls through to the fast path for whatever scalars remain.
+    }
     ctx.filter = [gradeToCssFilter(grade), lookCss].filter(Boolean).join(" ") || "none";
     ctx.drawImage(frame.image, 0, 0, w, h);
     ctx.filter = "none";

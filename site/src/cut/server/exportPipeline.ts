@@ -4,7 +4,7 @@ import path from "node:path";
 import { atempoChain, hasStream, num, videoColorInfo } from "./util";
 import { assertGraphSafe, fexpr } from "./filterGraph";
 import { CLIP_MAX_ZOOM, projectFadeSeconds, regionPx, TRANSITION_XFADE, TRANSITION_ZOOM, type ColorGrade, type TransitionStyle } from "../lib/types";
-import { effectFilterLines, gradeToFfmpegFilter, lookFilterLines, shortestTurn, sortedKeys, type OverlayKey } from "@donkeycut/effects-kit";
+import { buildGradeLut, effectFilterLines, gradeKey, gradeNeedsLut, gradeToFfmpegFilter, lookFilterLines, lutToCube, shortestTurn, sortedKeys, type OverlayKey } from "@donkeycut/effects-kit";
 
 // The render pipeline itself: spec in, finished mp4 out. Shared by the local
 // engine's job registry (jobs.ts) and the cloud render worker, which stage
@@ -666,6 +666,30 @@ export async function runExport(
 
   const filters: string[] = [];
 
+  // Grades that use the extended primitives (curves, wheels, HSL, presets…)
+  // bake through the shared 3D LUT: one .cube per distinct grade, written to
+  // the job dir and applied with lut3d at the exact chain position the
+  // fast-path lutrgb/hue chain occupies. Scalar-only grades keep that
+  // original chain byte for byte.
+  const gradeLutChain = new Map<string, string>();
+  for (const owner of [...spec.clips, ...(spec.overlayVideos ?? [])]) {
+    if (!gradeNeedsLut(owner.grade)) continue;
+    const key = gradeKey(owner.grade);
+    if (!key || gradeLutChain.has(key)) continue;
+    const lut = buildGradeLut(owner.grade);
+    if (!lut) {
+      gradeLutChain.set(key, "");
+      continue;
+    }
+    const file = path.join(job.tmpDir, `grade_${gradeLutChain.size}.cube`);
+    await io.writeFile(file, lutToCube(lut));
+    gradeLutChain.set(key, `lut3d=file=${fexpr(file)}:interp=tetrahedral,`);
+  }
+  const gradeChain = (grade: ExportSpec["clips"][number]["grade"]): string =>
+    gradeNeedsLut(grade)
+      ? gradeLutChain.get(gradeKey(grade)) ?? ""
+      : gradeToFfmpegFilter(grade);
+
   // Per-clip timeline length (source span compressed/expanded by speed). A
   // gap spacer (no file) keeps its exact length: flooring it at 0.1s would
   // land everything after the gap later than the timeline shows, drifting
@@ -1038,7 +1062,7 @@ export async function runExport(
       // a still just replays its looped input.
       // The grade sits after the color conversion (so it acts on the same
       // BT.709 values the preview shows) and before the terminal format.
-      let core = `${timebase},fps=${fps},${frame},setsar=1,${colorFix.get(c.file) ?? ""}${gradeToFfmpegFilter(c.grade)}format=${clipFmt}`;
+      let core = `${timebase},fps=${fps},${frame},setsar=1,${colorFix.get(c.file) ?? ""}${gradeChain(c.grade)}format=${clipFmt}`;
       // The look bakes in after grade + framing, before the edge effects, so
       // animations move already-graded pixels (matching the preview order).
       if (c.look) {
@@ -1349,7 +1373,7 @@ export async function runExport(
     const timebase = oc.image
       ? `[${idx}:v]setpts=PTS-STARTPTS`
       : `[${idx}:v]trim=${num(oc.in)}:${num(oc.out)},setpts=(PTS-STARTPTS)/${num(ospeed)}`;
-    let core = `${timebase},fps=${fps},${framing},setsar=1,${colorFix.get(oc.file) ?? ""}${gradeToFfmpegFilter(oc.grade)}format=${lookFmt}`;
+    let core = `${timebase},fps=${fps},${framing},setsar=1,${colorFix.get(oc.file) ?? ""}${gradeChain(oc.grade)}format=${lookFmt}`;
     // Looks bake into footage overlays only: an image may carry alpha, which
     // the look chain's internal filters would flatten onto black over the
     // tracks beneath. The alpha fades stay safe: they apply after the look.

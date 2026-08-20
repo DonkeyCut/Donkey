@@ -1,0 +1,102 @@
+[
+  {
+    "id": "midnight",
+    "label": "Midnight",
+    "category": "mood",
+    "grade": {
+      "exposure": -8,
+      "temperature": -12,
+      "contrast": 12,
+      "saturation": -12,
+      "shadows": -6,
+      "wheels": { "s": [-8, -12, 0] }
+    }
+  },
+  {
+    "id": "moss",
+    "label": "Moss",
+    "category": "mood",
+    "grade": {
+      "tint": -14,
+      "temperature": 4,
+      "saturation": -8,
+      "contrast": 6,
+      "hsl": { "green": [0, 8, 0] }
+    }
+  },
+  {
+    "id": "slate",
+    "label": "Slate",
+    "category": "mood",
+    "grade": {
+      "temperature": -8,
+      "tint": -2,
+      "saturation": -20,
+      "contrast": 8
+    }
+  },
+  {
+    "id": "dusk",
+    "label": "Dusk",
+    "category": "mood",
+    "grade": {
+      "temperature": -4,
+      "tint": 8,
+      "exposure": -3,
+      "contrast": 4,
+      "vibrance": 8,
+      "wheels": { "h": [6, -10, 0] }
+    }
+  },
+  {
+    "id": "neon",
+    "label": "Neon",
+    "category": "mood",
+    "grade": {
+      "vibrance": 22,
+      "contrast": 10,
+      "saturation": 10,
+      "temperature": -6,
+      "tint": 10
+    }
+  },
+  {
+    "id": "arctic",
+    "label": "Arctic",
+    "category": "mood",
+    "grade": {
+      "temperature": -20,
+      "tint": -2,
+      "exposure": 2,
+      "contrast": 6,
+      "saturation": -6,
+      "highlights": 4
+    }
+  },
+  {
+    "id": "storm",
+    "label": "Storm",
+    "category": "mood",
+    "grade": {
+      "temperature": -10,
+      "contrast": 14,
+      "saturation": -16,
+      "exposure": -4,
+      "shadows": -8
+    }
+  },
+  {
+    "id": "velvet",
+    "label": "Velvet",
+    "category": "mood",
+    "grade": {
+      "contrast": 10,
+      "exposure": -4,
+      "saturation": 12,
+      "temperature": 4,
+      "tint": 6,
+      "shadows": -6,
+      "curves": { "m": [[0, 6], [64, 56], [255, 252]] }
+    }
+  }
+]
