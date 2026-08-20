@@ -14,6 +14,13 @@
  *   frames at a cut — every boundary in the fixture is crossed while playing and
  *                    the trace is checked for a source frame shown twice or
  *                    skipped over.
+ *   filmstrip truth — the timeline strip's tile under (and around) the playhead
+ *                    shows the frame at the tile's own midpoint, at every zoom.
+ *                    The fixture's color walks an RGB circle over the clip, so
+ *                    each tile's color names the source moment it was captured
+ *                    at; the tile is compared against this same browser's
+ *                    decode of the file, which cancels colorspace drift between
+ *                    the encoder and the canvas.
  *
  * Fixtures build deterministically into dist/cut-perf/ (gitignored) from the
  * bundled stock clips, so the montage's cut times are known exactly.
@@ -73,6 +80,12 @@ const GATE = {
   // does not belong at that instant.
   boundaryDrops: 0,
   longTaskMs: 16,
+  // A strip tile shows the frame at its own midpoint; this is the measurement
+  // slack around that moment (capture grid, frame quantization, jpeg noise),
+  // on top of the truth lookup's own step. A capture allowed to drift toward
+  // a tile's edge lands on the neighboring scene whenever a cut sits inside
+  // the tile — the standard is the midpoint, so that drift is a failure.
+  filmstripSlackS: 0.2,
 };
 
 // ── Types shared with perfTrace.ts ──────────────────────────────────────────
@@ -176,6 +189,55 @@ async function buildFixtures(): Promise<string[]> {
   return made;
 }
 
+/** The filmstrip fixture's length. The shape it replicates: a clip in the low
+ * twenties of seconds carries about twelve pre-sampled thumbs, one every two
+ * seconds, and on fast-cutting footage a zoomed tile drawn from those sits a
+ * scene away from its own moment. */
+const RAMP_S = 24;
+
+/** A clip whose color names its own timestamp: red and green trace one full
+ * circle over the clip (r = sin, g = cos of the clip's phase), so every frame
+ * has a color no other moment in the clip shares. Explicit bt709 tags keep
+ * the browser's decode on the encoder's matrix. */
+async function buildRamp(): Promise<void> {
+  const dst = path.join(OUT, "ramp.mp4");
+  if (existsSync(dst)) return;
+  await run("ffmpeg", [
+    "-y", "-loglevel", "error",
+    "-f", "lavfi", "-i", `color=c=black:s=1280x720:r=30:d=${RAMP_S}`,
+    "-vf",
+    `format=rgb24,geq=r='128+112*sin(2*PI*(N/30)/${RAMP_S})':g='128+112*cos(2*PI*(N/30)/${RAMP_S})':b='64'`,
+    "-c:v", "libx264", "-preset", "veryfast", "-g", "30", "-keyint_min", "30",
+    "-pix_fmt", "yuv420p",
+    "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
+    dst,
+  ]);
+}
+
+/** Where the scene-cut fixture changes scene: every three seconds. */
+const CUT_SEG_S = 3;
+const FIXTURE_CUTS = Array.from({ length: RAMP_S / CUT_SEG_S - 1 }, (_, i) => (i + 1) * CUT_SEG_S);
+
+/** The ramp with a hard scene cut every three seconds: the color circle jumps
+ * phase at each segment, and blue names the segment so no two moments across
+ * the clip share a color. Every frame still names its own timestamp, and every
+ * cut lands on a known second. */
+async function buildCutsClip(): Promise<void> {
+  const dst = path.join(OUT, "cuts.mp4");
+  if (existsSync(dst)) return;
+  const seg = `floor(N/${30 * CUT_SEG_S})`;
+  await run("ffmpeg", [
+    "-y", "-loglevel", "error",
+    "-f", "lavfi", "-i", `color=c=black:s=1280x720:r=30:d=${RAMP_S}`,
+    "-vf",
+    `format=rgb24,geq=r='128+112*sin(2*PI*(N/30)/${RAMP_S}+2.4*${seg})':g='128+112*cos(2*PI*(N/30)/${RAMP_S}+2.4*${seg})':b='40+24*${seg}'`,
+    "-c:v", "libx264", "-preset", "veryfast", "-g", "30", "-keyint_min", "30",
+    "-pix_fmt", "yuv420p",
+    "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
+    dst,
+  ]);
+}
+
 // ── Driving the page ────────────────────────────────────────────────────────
 
 interface Fixture {
@@ -231,6 +293,48 @@ async function seed(page: Page, files: string[], transitions: boolean): Promise<
   );
 }
 
+/** Seed one time-coded fixture clip for a filmstrip case and generate its
+ * pre-sampled strip, so the case starts where a real project does: thumbs in
+ * hand, captures still to earn. */
+const seedTimeCoded = (src: string, cuts: number[]) => async (page: Page): Promise<Fixture> =>
+  page.evaluate(
+    async ({ duration, src, cuts }) => {
+      const dev = (window as unknown as {
+        __cutDev: {
+          useEditor: {
+            getState(): { assets: { thumbs?: string[] }[] };
+            setState(p: unknown): void;
+          };
+          enrichAsset: (asset: unknown) => Promise<void>;
+        };
+      }).__cutDev;
+      const name = src.split("/").pop()!;
+      dev.useEditor.setState({
+        assets: [
+          {
+            id: "fixture",
+            name,
+            fileName: name,
+            type: "video",
+            url: src,
+            duration,
+            width: 1280,
+            height: 720,
+          },
+        ],
+        clips: [{ id: "c-fixture", assetId: "fixture", track: 0, start: 0, in: 0, out: duration }],
+        audioClips: [],
+        overlays: [],
+        transitions: [],
+        loaded: true,
+      });
+      await new Promise((r) => setTimeout(r, 200));
+      await dev.enrichAsset(dev.useEditor.getState().assets[0]);
+      return { cuts, duration };
+    },
+    { duration: RAMP_S, src, cuts }
+  );
+
 const startTrace = (page: Page) =>
   page.evaluate(() => (window as unknown as { __cutPerf: { start(): void } }).__cutPerf.start());
 
@@ -285,7 +389,7 @@ const settle = (page: Page, ms = 2500) =>
 
 // ── Cases ───────────────────────────────────────────────────────────────────
 
-type Bucket = "scrub" | "playback" | "boundary";
+type Bucket = "scrub" | "playback" | "boundary" | "filmstrip";
 
 interface CaseResult {
   name: string;
@@ -299,12 +403,17 @@ interface CaseResult {
   idleTicks?: number;
   longTasks?: Agg;
   liveSamples?: number;
+  /** Seconds between a strip tile's own moment and the moment its picture
+   * was captured at. */
+  tileErr?: Agg;
 }
 
 interface EvalCase {
   name: string;
   bucket: Bucket;
   transitions: boolean;
+  /** The project this case measures; the montage of stock clips when unset. */
+  seed?: (page: Page) => Promise<Fixture>;
   run: (page: Page, fx: Fixture) => Promise<CaseResult>;
 }
 
@@ -467,6 +576,292 @@ const idleCase: EvalCase = {
   },
 };
 
+/** A strip tile's picture against the tile's own moment, sampled around the
+ * playhead. One measurement per zoom: the timeline is zoomed, scrolled to the
+ * playhead, and left to finish its tile captures; then every visible tile's
+ * color is matched against this browser's decode of the ramp at known times,
+ * which turns each tile back into the source second it actually shows. */
+interface TileSample {
+  tileT: number;
+  impliedT: number;
+  err: number;
+  tol: number;
+}
+
+/** Wait until the strip has no captures queued or mid-read, checked twice so
+ * a re-render that queues one more round is also drained. */
+async function settleTiles(page: Page): Promise<void> {
+  for (let i = 0; i < 2; i++) {
+    await page.waitForFunction(
+      () =>
+        (window as unknown as { __cutDev: { edgeFramesPending(): number } }).__cutDev
+          .edgeFramesPending() === 0,
+      undefined,
+      { timeout: 30_000 }
+    );
+    await page.waitForTimeout(300);
+  }
+}
+
+/** Wait for the seeded asset's pre-sampled strip to exist. */
+async function awaitThumbs(page: Page): Promise<void> {
+  await setPlaying(page, false);
+  await page.waitForFunction(
+    () => {
+      const dev = (window as unknown as {
+        __cutDev: { useEditor: { getState(): { assets: { thumbs?: string[] }[] } } };
+      }).__cutDev;
+      return !!dev.useEditor.getState().assets[0]?.thumbs?.length;
+    },
+    undefined,
+    { timeout: 60_000 }
+  );
+}
+
+/** Zoom to `pps`, park the playhead at `at` and scroll it to the view's
+ * center, then wait for every capture the strip asked for. */
+async function zoomTo(page: Page, c: { pps: number; at: number }): Promise<void> {
+  await page.evaluate(({ pps, at }) => {
+    const dev = (window as unknown as {
+      __cutDev: {
+        useEditor: { getState(): { setPxPerSec(v: number): void; seek(t: number): void } };
+      };
+    }).__cutDev;
+    dev.useEditor.getState().setPxPerSec(pps);
+    dev.useEditor.getState().seek(at);
+  }, c);
+  await page.waitForTimeout(150);
+  await page.evaluate(({ at }) => {
+    const dev = (window as unknown as {
+      __cutDev: { useEditor: { getState(): { pxPerSec: number } } };
+    }).__cutDev;
+    const scroller = document.querySelector("[data-tl-scroll]") as HTMLElement;
+    const box = document.querySelector('[data-tl-sel^="clip:"]') as HTMLElement;
+    const view = scroller.getBoundingClientRect();
+    const pps = dev.useEditor.getState().pxPerSec;
+    scroller.scrollLeft +=
+      box.getBoundingClientRect().left + at * pps - (view.left + view.width / 2);
+  }, c);
+  await settleTiles(page);
+}
+
+/** In-page measure of the visible strip against ground truth: what moment
+ * each tile's picture implies, read off the time-coded fixture through this
+ * browser's own decoder. */
+const measureStrip = async ({ at, slackS, src }: { at: number; slackS: number; src: string }) => {
+  const dev = (window as unknown as {
+    __cutDev: { useEditor: { getState(): { pxPerSec: number } } };
+  }).__cutDev;
+  const pps = dev.useEditor.getState().pxPerSec;
+  const scroller = document.querySelector("[data-tl-scroll]") as HTMLElement;
+  const box = document.querySelector('[data-tl-sel^="clip:"]') as HTMLElement;
+  const view = scroller.getBoundingClientRect();
+  const boxR = box.getBoundingClientRect();
+  // The seeded clip starts at 0 with no trim at speed 1, so a tile
+  // center's offset in the box is its source time.
+  const tiles = (Array.from(
+    box.querySelectorAll(".tl-filmstrip img")
+  ) as HTMLImageElement[])
+    .map((img) => {
+      const r = img.getBoundingClientRect();
+      return { img, left: r.left, width: r.width, t: (r.left + r.width / 2 - boxR.left) / pps };
+    })
+    // Tiles on screen, clear of the clamped end captures, nearest the
+    // playhead first; twenty is plenty to convict a wrong strip. The
+    // strip's first and last tiles pin to the clip's exact boundary
+    // frames (trim feedback), so the midpoint standard exempts them.
+    .filter((x) => x.left + x.width > view.left && x.left < view.right)
+    .filter((x) => x.t > 0.8 && x.t < 23.2)
+    .filter(
+      (x) => x.left > boxR.left + 2 && x.left + x.width < boxR.left + boxR.width - 2
+    )
+    .sort((a, b) => Math.abs(a.t - at) - Math.abs(b.t - at))
+    .slice(0, 20);
+  if (tiles.length === 0) return [];
+  const avg = (draw: (ctx: CanvasRenderingContext2D) => void) => {
+    const c = document.createElement("canvas");
+    c.width = 4;
+    c.height = 4;
+    const ctx = c.getContext("2d", { willReadFrequently: true })!;
+    draw(ctx);
+    const d = ctx.getImageData(0, 0, 4, 4).data;
+    let r = 0, g = 0, b = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      r += d[i];
+      g += d[i + 1];
+      b += d[i + 2];
+    }
+    const n = d.length / 4;
+    return [r / n, g / n, b / n];
+  };
+  // Ground truth from the same file through this browser's own
+  // decoder, so whatever the canvas does to the colors it does to
+  // both sides of the comparison.
+  const video = document.createElement("video");
+  video.src = src;
+  video.muted = true;
+  video.preload = "auto";
+  await new Promise<void>((res, rej) => {
+    video.onloadeddata = () => res();
+    video.onerror = () => rej(new Error("fixture did not load"));
+  });
+  const seekTo = (t: number) =>
+    new Promise<void>((res) => {
+      video.onseeked = () => res();
+      video.currentTime = t;
+    });
+  const span = tiles[0].width / pps;
+  const step = Math.max(0.04, span / 8);
+  const ts = tiles.map((x) => x.t);
+  const lo = Math.max(0.05, Math.min(...ts) - 2.5);
+  const hi = Math.min(23.9, Math.max(...ts) + 2.5);
+  const lookup: { t: number; c: number[] }[] = [];
+  for (let t = lo; t <= hi; t += step) {
+    await seekTo(t);
+    lookup.push({ t, c: avg((ctx) => ctx.drawImage(video, 0, 0, 4, 4)) });
+  }
+  const out: { tileT: number; impliedT: number; err: number; tol: number }[] = [];
+  for (const tile of tiles) {
+    const el = new Image();
+    el.src = tile.img.src;
+    await el.decode();
+    const c = avg((ctx) => ctx.drawImage(el, 0, 0, 4, 4));
+    let impliedT = lookup[0].t;
+    let bestD = Infinity;
+    for (const p of lookup) {
+      const d =
+        (p.c[0] - c[0]) ** 2 + (p.c[1] - c[1]) ** 2 + (p.c[2] - c[2]) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        impliedT = p.t;
+      }
+    }
+    out.push({
+      tileT: tile.t,
+      impliedT,
+      err: Math.abs(impliedT - tile.t),
+      tol: slackS + step,
+    });
+  }
+  return out;
+};
+
+/** Zoom to one check, settle the captures, and hold every visible tile to
+ * the midpoint standard, turning misses into notes. */
+async function checkMidpoints(
+  page: Page,
+  src: string,
+  c: { pps: number; at: number },
+  notes: string[],
+  samples: (TileSample & { pps: number })[]
+): Promise<void> {
+  await zoomTo(page, c);
+  const got = (await page.evaluate(measureStrip, {
+    at: c.at,
+    slackS: GATE.filmstripSlackS,
+    src,
+  })) as TileSample[];
+  if (got.length < 8) notes.push(`only ${got.length} tiles sampled at ${c.pps}px/s`);
+  for (const s of got) {
+    if (s.err > s.tol) {
+      notes.push(
+        `tile at ${s.tileT.toFixed(2)}s shows ${s.impliedT.toFixed(2)}s (${s.err.toFixed(2)}s off, tol ${s.tol.toFixed(2)}s) at ${c.pps}px/s`
+      );
+    }
+  }
+  samples.push(...got.map((s) => ({ ...s, pps: c.pps })));
+}
+
+const filmstripCase: EvalCase = {
+  name: "filmstrip-under-the-playhead",
+  bucket: "filmstrip",
+  transitions: false,
+  seed: seedTimeCoded("/__cutperf/ramp.mp4", []),
+  run: async (page) => {
+    await awaitThumbs(page);
+    // The user's gesture at three zooms: the fit view, a working zoom, and
+    // the deepest the timeline goes.
+    const samples: (TileSample & { pps: number })[] = [];
+    const notes: string[] = [];
+    for (const c of [
+      { pps: 60, at: 15 },
+      { pps: 300, at: 15.45 },
+      { pps: 800, at: 8 },
+    ]) {
+      await checkMidpoints(page, "/__cutperf/ramp.mp4", c, notes, samples);
+    }
+    return {
+      name: "filmstrip-under-the-playhead",
+      bucket: "filmstrip",
+      pass: notes.length === 0,
+      notes: notes.slice(0, 12),
+      tileErr: agg(samples.map((s) => s.err)),
+    };
+  },
+};
+
+/** How far a strip's tile boundary may sit from the scene cut it marks: the
+ * detected cut's own precision (an eighth of the probe spacing) plus room
+ * for the strip's minimum sub-tile. */
+const CUT_ALIGN_S = 0.12;
+
+const filmstripCutsCase: EvalCase = {
+  name: "filmstrip-at-scene-cuts",
+  bucket: "filmstrip",
+  transitions: false,
+  seed: seedTimeCoded("/__cutperf/cuts.mp4", FIXTURE_CUTS),
+  run: async (page, fx) => {
+    await awaitThumbs(page);
+    // Zooms where a tile spans a fraction of a scene, parked on a known cut:
+    // every tile still shows its own moment, and the strip changes picture at
+    // the cut itself — some tile boundary sits on each cut in view.
+    const samples: (TileSample & { pps: number })[] = [];
+    const notes: string[] = [];
+    for (const c of [
+      { pps: 150, at: 9 },
+      { pps: 400, at: 9 },
+    ]) {
+      await checkMidpoints(page, "/__cutperf/cuts.mp4", c, notes, samples);
+      const misses = await page.evaluate(
+        ({ cuts }) => {
+          const dev = (window as unknown as {
+            __cutDev: { useEditor: { getState(): { pxPerSec: number } } };
+          }).__cutDev;
+          const pps = dev.useEditor.getState().pxPerSec;
+          const scroller = document.querySelector("[data-tl-scroll]") as HTMLElement;
+          const box = document.querySelector('[data-tl-sel^="clip:"]') as HTMLElement;
+          const view = scroller.getBoundingClientRect();
+          const boxR = box.getBoundingClientRect();
+          const edges = (Array.from(
+            box.querySelectorAll(".tl-filmstrip img")
+          ) as HTMLImageElement[]).map((img) => (img.getBoundingClientRect().left - boxR.left) / pps);
+          const lo = (Math.max(view.left, boxR.left) - boxR.left) / pps;
+          const hi = (Math.min(view.right, boxR.right) - boxR.left) / pps;
+          return cuts
+            .filter((cut) => cut > lo + 0.5 && cut < hi - 0.5)
+            .map((cut) => ({ cut, off: Math.min(...edges.map((e) => Math.abs(e - cut))) }));
+        },
+        { cuts: fx.cuts }
+      );
+      if (misses.length === 0) notes.push(`no cuts in view at ${c.pps}px/s`);
+      for (const m of misses) {
+        if (m.off > CUT_ALIGN_S) {
+          notes.push(
+            `no tile boundary at the ${m.cut}s cut (nearest ${m.off.toFixed(2)}s away) at ${c.pps}px/s`
+          );
+        }
+      }
+    }
+    return {
+      name: "filmstrip-at-scene-cuts",
+      bucket: "filmstrip",
+      pass: notes.length === 0,
+      notes: notes.slice(0, 12),
+      tileErr: agg(samples.map((s) => s.err)),
+    };
+  },
+};
+
 const CASES: EvalCase[] = [
   // The gesture the complaint was about: the pointer slides along the timeline
   // and the picture has to keep up with it, frame by frame.
@@ -499,6 +894,8 @@ const CASES: EvalCase[] = [
   playbackCase("play-hard-cuts", false),
   playbackCase("play-with-transitions", true),
   idleCase,
+  filmstripCase,
+  filmstripCutsCase,
 ];
 
 // ── Run ─────────────────────────────────────────────────────────────────────
@@ -548,11 +945,33 @@ async function launch(): Promise<{ browser: Browser; page: Page }> {
     });
   });
   // Serve the fixture clips from disk, so no upload or network variance sits
-  // between the eval and the decoder.
+  // between the eval and the decoder. Range requests get real 206 slices: a
+  // <video> element treats a source without them as unseekable and clamps
+  // every seek to zero, which the filmstrip case's ground-truth probe relies
+  // on being wrong about.
   await context.route("**/__cutperf/*", async (route, request) => {
     const name = path.basename(new URL(request.url()).pathname);
     const body = await readFile(path.join(OUT, name));
-    await route.fulfill({ status: 200, contentType: "video/mp4", body });
+    const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers()["range"] ?? "");
+    if (range) {
+      const from = Number(range[1]);
+      const to = range[2] ? Math.min(Number(range[2]), body.length - 1) : body.length - 1;
+      await route.fulfill({
+        status: 206,
+        body: body.subarray(from, to + 1),
+        headers: {
+          "Content-Type": "video/mp4",
+          "Accept-Ranges": "bytes",
+          "Content-Range": `bytes ${from}-${to}/${body.length}`,
+        },
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      body,
+      headers: { "Content-Type": "video/mp4", "Accept-Ranges": "bytes" },
+    });
   });
   const page = await context.newPage();
   page.on("pageerror", (e) => console.log(`[pageerror] ${String(e).slice(0, 200)}`));
@@ -611,13 +1030,17 @@ async function fanOut(names: string[]): Promise<CaseResult[]> {
 const detailOf = (r: CaseResult) =>
   r.scrub
     ? `p50=${r.scrub.p50}ms p95=${r.scrub.p95}ms max=${r.scrub.max}ms n=${r.scrub.n}`
-    : r.idleTicks !== undefined
-      ? `ticks=${r.idleTicks}`
-      : `late=${r.drops}/${r.presented} atCut=${r.boundaryDrops}`;
+    : r.tileErr
+      ? `errP50=${r.tileErr.p50}s errMax=${r.tileErr.max}s n=${r.tileErr.n}`
+      : r.idleTicks !== undefined
+        ? `ticks=${r.idleTicks}`
+        : `late=${r.drops}/${r.presented} atCut=${r.boundaryDrops}`;
 
 async function main(): Promise<void> {
   const files = await buildFixtures();
-  console.log(`[fixtures] ${files.length} clips in ${OUT}`);
+  await buildRamp();
+  await buildCutsClip();
+  console.log(`[fixtures] ${files.length} clips + ramp + cuts in ${OUT}`);
 
   const cases = CASES.filter(
     (c) => (!ONLY || c.name === ONLY) && (!BUCKET || c.bucket === BUCKET)
@@ -646,7 +1069,7 @@ async function main(): Promise<void> {
   for (const c of cases) {
     for (let i = 0; i < RUNS; i++) {
       await open(page, projectId);
-      const fx = await seed(page, files, c.transitions);
+      const fx = await (c.seed ? c.seed(page) : seed(page, files, c.transitions));
       await settle(page);
       const r = await c.run(page, fx);
       results.push(r);
