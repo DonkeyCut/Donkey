@@ -4,28 +4,39 @@ import DonkeyKitModels
 import SwiftUI
 import UIKit
 
-/// SwiftUI has no native capture preview; this hosts an
-/// AVCaptureVideoPreviewLayer and attaches the hardware capture events
+/// SwiftUI has no native capture preview; this hosts the controller's
+/// persistent preview view and attaches the hardware capture events
 /// (volume buttons, Camera Control) to the record action.
+///
+/// The preview layer attaches to the session once, at controller init while
+/// the session is idle. Attaching or detaching later runs on the main thread
+/// and takes the session's lock, which stalls the UI for as long as the
+/// capture queue is busy starting or stopping — so the host view lives for
+/// the app's lifetime and tab switches only re-parent it.
 struct CameraPreviewView: UIViewRepresentable {
-    let session: AVCaptureSession
+    let host: PreviewHostView
     let onCaptureEvent: () -> Void
 
-    func makeUIView(context: Context) -> PreviewHostView {
-        let view = PreviewHostView()
-        view.previewLayer.session = session
-        view.previewLayer.videoGravity = .resizeAspectFill
+    func makeUIView(context: Context) -> UIView {
+        let container = UIView()
+        host.frame = container.bounds
+        host.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        container.addSubview(host)
 
         let interaction = AVCaptureEventInteraction { event in
             guard event.phase == .ended else { return }
             context.coordinator.onCaptureEvent()
         }
-        view.addInteraction(interaction)
-        return view
+        container.addInteraction(interaction)
+        return container
     }
 
-    func updateUIView(_ uiView: PreviewHostView, context: Context) {
+    func updateUIView(_ uiView: UIView, context: Context) {
         context.coordinator.onCaptureEvent = onCaptureEvent
+        if host.superview !== uiView {
+            host.frame = uiView.bounds
+            uiView.addSubview(host)
+        }
     }
 
     func makeCoordinator() -> Coordinator {

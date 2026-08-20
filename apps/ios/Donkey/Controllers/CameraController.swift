@@ -6,6 +6,9 @@ import UIKit
 /// engine, and routing engine events into CameraModel state.
 final class CameraController: CameraControlling {
     let session: AVCaptureSession
+    /// One preview view for the app's lifetime; its layer attaches to the
+    /// session here, while the session is idle and the lock is free.
+    let previewView = CameraPreviewView.PreviewHostView()
     weak var model: CameraModel?
     var onRecordingFinished: ((URL, TimeInterval, Data?) -> Void)?
 
@@ -13,6 +16,8 @@ final class CameraController: CameraControlling {
 
     init() {
         session = engine.session
+        previewView.previewLayer.session = session
+        previewView.previewLayer.videoGravity = .resizeAspectFill
         engine.events = { [weak self] event in
             Task { @MainActor in self?.handle(event) }
         }
