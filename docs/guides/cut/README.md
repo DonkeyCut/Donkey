@@ -48,6 +48,16 @@ The playhead lives apart from the document. It moves sixty times a second and th
 
 Whether any of this is true of a given build is measured rather than assumed: `npm run eval:cut-perf` drives a real editor in a real browser against a fixture montage and reports how long the picture takes to answer a moved playhead and whether any frame crossing a cut was the wrong one. Its committed report is the baseline a change is diffed against.
 
+## Color grading
+
+A clip's color is one field on the clip: an optional preset underneath and manual adjustments on top — sliders, tone curves, color wheels, per-hue bands. Every part is absent when neutral, so an untouched clip carries nothing, and the preset's intensity scales its parameters toward neutral so half-strength means half the move, never a crossfade through gray.
+
+Presets are JSON documents beside the effects kit, one file per category, and the kit's parser is the only doorway that data has into the engine — the shipped catalog loads through the same validation a user-imported or shared grade will use later. Every shipped recipe is an original design on this model.
+
+One transform renders everywhere. Grades that stay within the original scalar sliders keep the long-standing cheap path — a CSS filter string in the canvas and a lutrgb/hue chain in ffmpeg, derived from the same numbers — and saved grades from before the extension render byte-for-byte as they always did. Anything richer compiles to a single 3D lookup table sampled from one pure function: ffmpeg applies it as a .cube file through lut3d, the browser preview applies it in a WebGL pass, and a headless export applies it on the CPU, all three interpolating the same way. The timeline filmstrip alone approximates, carrying the scalar part of the grade as CSS and stating so in code; the preview and every export render the whole grade.
+
+The assistant grades through the same model: tools for presets, sliders, curves, wheels and hue bands, a stats reader so it grades from measured numbers, and a matcher that computes a grade carrying one shot onto a reference image or neighboring clip by quantile-mapping the channels into curves.
+
 ## Cloud projects
 
 Cloud projects follow the account: the same project opens in any browser on any OS. They run alongside local ones — every account has both halves, and which home a project uses is decided per project.
