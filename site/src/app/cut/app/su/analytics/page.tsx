@@ -226,7 +226,7 @@ function SourcesTooltipContent({
               </span>
             </div>
             {id === "other" && answers?.length ? (
-              <ul className="ml-[1.125rem] w-full list-disc space-y-0.5 pl-3 text-muted-foreground marker:text-muted-foreground/60">
+              <ul className="-mt-1 ml-[1.125rem] w-full list-disc space-y-0.5 pl-3 text-muted-foreground marker:text-muted-foreground/60">
                 {answers.map((answer, i) => (
                   <li key={`${answer}-${i}`} className="break-words">
                     {answer}
