@@ -52,9 +52,15 @@ function overflowOf(
   return { ox: Math.max(0, pic.w - box.w), oy: Math.max(0, pic.h - box.h) };
 }
 
-/** Play or pause, rewinding first when the playhead is parked at the end. */
-function togglePlayback() {
+/** A stationary click on the stage: the first click clears whatever is
+ * selected; with nothing selected it plays or pauses, rewinding first when
+ * the playhead is parked at the end. */
+function stageClick() {
   const s = useEditor.getState();
+  if (s.selection || s.multiSelection.length) {
+    s.select(null);
+    return;
+  }
   const total = projectDuration(s);
   if (!total) return;
   if (!s.playing && playheadAt() >= total - 0.01) s.seek(0);
@@ -389,7 +395,8 @@ export function Preview() {
     const panY0 = span.clip.panY ?? 0;
     const toFrame = fr.w / stage.w; // screen px → frame px
     // Selection moves to the panned clip only once the pointer actually travels;
-    // a stationary press is a play/pause and leaves the selection alone.
+    // a stationary press is a stage click: it deselects first, and plays or
+    // pauses once nothing is selected.
     let began = false;
     startDrag(e, {
       onMove: (dx, dy) => {
@@ -407,9 +414,10 @@ export function Preview() {
         });
       },
       // startDrag suppresses the click event, so a stationary press on a
-      // pannable clip toggles playback here instead.
+      // pannable clip runs the stage click here instead: clear the selection
+      // first, play or pause once nothing is selected.
       onUp: (_dx, _dy, moved) => {
-        if (!moved) togglePlayback();
+        if (!moved) stageClick();
       },
     });
     return true;
@@ -417,7 +425,7 @@ export function Preview() {
 
   // The topmost regioned clip under a stage point at the playhead — clicking
   // its picture selects it, in the preview and the timeline alike. Full-frame
-  // clips stay out: a click on the backdrop keeps playing and pausing.
+  // clips stay out: a click on the backdrop clears the selection.
   const clipAtPoint = (e: React.MouseEvent): string | null => {
     const rct = e.currentTarget.getBoundingClientRect();
     const px = (e.clientX - rct.left) / rct.width;
@@ -469,8 +477,8 @@ export function Preview() {
           el.addEventListener("pointercancel", up);
         }}
         // A drag on the empty room around the picture pans the camera; a
-        // stationary press there clears the selection. The picture itself
-        // plays and pauses.
+        // stationary press there clears the selection, and so does one on
+        // the picture itself.
         onPointerDown={(e) => {
           if (e.target !== e.currentTarget) return;
           const v0 = { ...camRef.current };
@@ -523,7 +531,7 @@ export function Preview() {
                 useEditor.getState().select({ kind: "clip", id: hit });
                 return;
               }
-              togglePlayback();
+              stageClick();
             }
           }}
         >
@@ -765,8 +773,9 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
   const patch = (p: Partial<VideoClip>) => st().updateClipTransient(clip.id, p);
   /**
    * A drag on one of the gizmo's large surfaces — the box body, the picture's
-   * interior. The history checkpoint waits for real travel, and a press that
-   * never travels is a click on the picture, which plays and pauses.
+   * interior. The history checkpoint waits for real travel; a press that
+   * never travels is a stage click, which here clears the clip's selection
+   * (playback stays put — something was selected).
    */
   const surfaceDrag = (
     e: React.PointerEvent,
@@ -786,7 +795,7 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
       },
       onUp: (_dx, _dy, moved) => {
         onEnd?.();
-        if (!moved) togglePlayback();
+        if (!moved) stageClick();
       },
     });
   };
