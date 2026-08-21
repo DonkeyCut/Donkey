@@ -3,12 +3,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Check, Copy, ZoomIn, ZoomOut } from "lucide-react";
 import { usePlayback } from "@/cut/hooks/usePlayback";
-import { clearAssetDrag, setAssetDragData } from "@/cut/lib/assetDrag";
 import { startDrag } from "@/cut/lib/drag";
 import {
   playheadAt,
   previewAt,
-  subscribePlayhead,
   usePreviewSelector,
   useSkim,
 } from "@/cut/lib/playhead";
@@ -83,34 +81,6 @@ function pannableSpan(
   return ox > 1 || oy > 1 ? span : null;
 }
 
-/**
- * Show the grab cursor while the clip under the playhead can be panned.
- *
- * Which clip that is changes sixty times a second, and the answer is one class
- * on one element. Rendering the whole preview to find out would put every
- * frame of playback through React; the class goes on from a subscription
- * instead, and only when the answer actually changes.
- */
-function usePannableCursor(target: RefObject<HTMLElement | null>) {
-  const clips = useEditor((s) => s.clips);
-  const assets = useEditor((s) => s.assets);
-  const aspect = useEditor((s) => s.aspect);
-  useEffect(() => {
-    const el = target.current;
-    if (!el) return;
-    let on: boolean | null = null;
-    const apply = () => {
-      const next = pannableSpan({ clips, assets, aspect }, previewAt()) !== null;
-      if (next === on) return;
-      on = next;
-      el.classList.toggle("cursor-grab", next);
-      el.classList.toggle("active:cursor-grabbing", next);
-    };
-    apply();
-    return subscribePlayhead(apply);
-  }, [target, clips, assets, aspect]);
-}
-
 /** Paint the picture this project's preview last showed, then hand the canvas
  * back to the engine. Cloud media is a network away, so without this the
  * preview holds black for about a second on every open while the first decoder
@@ -183,7 +153,6 @@ function pictureInPane(
 export function Preview() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const stageRef = useRef<HTMLDivElement>(null);
   // The camera: the picture's fitted size at 100%, the pane it lives in, and
   // the view's zoom and pan on top. The stage's on-screen size stays the unit
   // every gizmo and drag measures in.
@@ -340,7 +309,6 @@ export function Preview() {
   // for the clock; each slice reads the clock for itself.
   const effectLanes = useEffectLanes();
   const slices = useMemo(() => stageSliceStructure(effectLanes), [effectLanes]);
-  usePannableCursor(stageRef);
 
   // Right-click on the picture: a one-item menu that copies the frame the
   // preview is showing. The copy goes onto the system clipboard as a PNG, so
@@ -499,29 +467,44 @@ export function Preview() {
     return () => wrap.removeEventListener("wheel", onWheel);
   }, [zoomAt, pokeHud, panTo, holdPanGuide]);
 
-  // Drag a fill-mode clip inside the frame to choose the visible crop.
+  /** Grab the picture, or the room around it, and move the camera. */
+  const cameraDrag = (e: React.PointerEvent, onTap: () => void) => {
+    const v0 = { ...camRef.current };
+    startDrag(e, {
+      onMove: (dx, dy, ev) => {
+        panTo(v0.x + dx, v0.y + dy, ev.metaKey || ev.ctrlKey);
+        pokeHud();
+      },
+      onUp: (_dx, _dy, moved) => {
+        endPan();
+        if (!moved) onTap();
+      },
+      cursor: () => "grabbing",
+    });
+  };
+
+  // Drag a selected fill-mode clip inside the frame to choose the visible crop.
+  // The clip has to be the selection: an unselected picture is something to
+  // grab and move around the pane, and that press goes to the camera.
   const panDrag = (e: React.PointerEvent) => {
     const s = useEditor.getState();
     const span = pannableSpan(s, previewAt());
-    if (!span) return false;
+    if (!span || s.selection?.kind !== "clip" || s.selection.id !== span.clip.id) return false;
     const fr = frameOf(s.aspect);
     const { ox, oy } = overflowOf(span.clip, span.asset, { x: 0, y: 0, w: fr.w, h: fr.h });
     const clipId = span.clip.id;
     const panX0 = span.clip.panX ?? 0;
     const panY0 = span.clip.panY ?? 0;
     const toFrame = fr.w / stage.w; // screen px → frame px
-    // Selection moves to the panned clip only once the pointer actually travels;
-    // a stationary press is a stage click: it deselects first, and plays or
-    // pauses once nothing is selected.
+    // History opens only once the pointer actually travels; a stationary press
+    // is a stage click, which deselects.
     let began = false;
     startDrag(e, {
       onMove: (dx, dy, ev) => {
         if (!began) {
           if (Math.abs(dx) <= 3 && Math.abs(dy) <= 3) return;
           began = true;
-          const st = useEditor.getState();
-          st.select({ kind: "clip", id: clipId });
-          st.pushHistory();
+          useEditor.getState().pushHistory();
         }
         // Content follows the pointer; pan is the crop-window position. Each
         // axis pulls onto the middle of the picture as it passes, so a crop
@@ -608,18 +591,7 @@ export function Preview() {
         // the picture itself.
         onPointerDown={(e) => {
           if (e.target !== e.currentTarget) return;
-          const v0 = { ...camRef.current };
-          startDrag(e, {
-            onMove: (dx, dy, ev) => {
-              panTo(v0.x + dx, v0.y + dy, ev.metaKey || ev.ctrlKey);
-              pokeHud();
-            },
-            onUp: (_dx, _dy, moved) => {
-              endPan();
-              if (!moved) useEditor.getState().select(null);
-            },
-            cursor: () => "grabbing",
-          });
+          cameraDrag(e, () => useEditor.getState().select(null));
         }}
       >
         {/* The axis a pan is parked on shows its line through the pane, the
@@ -638,9 +610,8 @@ export function Preview() {
           style={{ width: stage.w, height: stage.h }}
         >
         <div
-          ref={stageRef}
           className={cn(
-            "stage absolute inset-0 overflow-hidden bg-black shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_36px_rgba(0,0,0,0.18)]"
+            "stage absolute inset-0 cursor-grab overflow-hidden bg-black shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_36px_rgba(0,0,0,0.18)] active:cursor-grabbing"
           )}
           style={{ borderRadius: stageRadius(stage.w, stage.h) }}
           onContextMenu={openFrameMenu}
@@ -652,22 +623,19 @@ export function Preview() {
               // A press over a regioned clip belongs to the click handler
               // below (select it); a pan gesture here would swallow the click.
               if (clipAtPoint(e)) return;
-              panDrag(e);
+              if (!panDrag(e)) cameraDrag(e, stageClick);
             }
           }}
-          // A native drag on the canvas swallows the click, so this only fires
-          // for a stationary click.
+          // Every other press starts a drag, and a drag swallows its own
+          // click; the click that still lands here is the one press that
+          // starts no gesture — on a regioned clip's picture.
           onClick={(e) => {
             if (
               e.target === e.currentTarget ||
               (e.target as HTMLElement).tagName === "CANVAS"
             ) {
               const hit = clipAtPoint(e);
-              if (hit) {
-                useEditor.getState().select({ kind: "clip", id: hit });
-                return;
-              }
-              stageClick();
+              if (hit) useEditor.getState().select({ kind: "clip", id: hit });
             }
           }}
         >
@@ -678,22 +646,6 @@ export function Preview() {
             // picture across the resize; rendering it as an attribute would
             // blank the canvas on every change.
             className="block size-full"
-            // Drag the viewport to reference what's on screen: the clip under
-            // the playhead travels as a media drag (timeline placement, chat
-            // attachment, generation reference). Pan on a fill clip wins —
-            // its pointerdown cancels the native drag.
-            draggable
-            onDragStart={(e) => {
-              const s = useEditor.getState();
-              const spans = getClipSpans(s.clips, s.assets);
-              const t = previewAt();
-              const span =
-                spans.find((sp) => t >= sp.start && sp.start + sp.len > t) ??
-                spans[spans.length - 1];
-              if (!span) return e.preventDefault();
-              setAssetDragData(e, span.asset.id);
-            }}
-            onDragEnd={clearAssetDrag}
           />
           </StagePictureFx>
           {slices.map((slice) =>
