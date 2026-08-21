@@ -6,21 +6,27 @@ nonisolated public struct UserProfile: Equatable, Codable, Sendable {
     public var email: String
     /// Accounts with the operator role; gates the analytics dashboard.
     public var superUser: Bool
+    /// The provider's profile photo (Google's picture claim); nil for Apple
+    /// accounts and pre-photo caches.
+    public var imageURL: URL?
 
-    public init(id: String, name: String, email: String, superUser: Bool = false) {
+    public init(id: String, name: String, email: String, superUser: Bool = false, imageURL: URL? = nil) {
         self.id = id
         self.name = name
         self.email = email
         self.superUser = superUser
+        self.imageURL = imageURL
     }
 
-    /// Profiles cached before the role field existed decode with it off.
+    /// Profiles cached before the role and photo fields existed decode with
+    /// them off.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
         email = try container.decode(String.self, forKey: .email)
         superUser = try container.decodeIfPresent(Bool.self, forKey: .superUser) ?? false
+        imageURL = try container.decodeIfPresent(URL.self, forKey: .imageURL)
     }
 
     public var initial: String {

@@ -596,4 +596,17 @@ import Testing
         let decoded = try JSONDecoder().decode(UserProfile.self, from: JSONEncoder().encode(profile))
         #expect(decoded.superUser)
     }
+
+    @Test func profileCachedBeforePhotoFieldDecodesWithoutOne() throws {
+        let data = Data(#"{"id":"u1","name":"Dana","email":"dana@example.com"}"#.utf8)
+        let profile = try JSONDecoder().decode(UserProfile.self, from: data)
+        #expect(profile.imageURL == nil)
+    }
+
+    @Test func photoRoundTrips() throws {
+        let url = URL(string: "https://lh3.googleusercontent.com/a/photo")
+        let profile = UserProfile(id: "u1", name: "Dana", email: "dana@example.com", imageURL: url)
+        let decoded = try JSONDecoder().decode(UserProfile.self, from: JSONEncoder().encode(profile))
+        #expect(decoded.imageURL == url)
+    }
 }

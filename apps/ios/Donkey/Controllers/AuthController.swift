@@ -142,13 +142,20 @@ final class AuthController: NSObject, AuthServicing {
                 var id: String
                 var name: String?
                 var email: String
+                var image: String?
             }
             var user: User?
         }
         guard let user = try? JSONDecoder().decode(SessionResponse.self, from: data).user else {
             throw AuthError.server("Your session has expired. Sign in again.")
         }
-        return UserProfile(id: user.id, name: user.name ?? "", email: user.email, superUser: await superUser)
+        return UserProfile(
+            id: user.id,
+            name: user.name ?? "",
+            email: user.email,
+            superUser: await superUser,
+            imageURL: user.image.flatMap(URL.init(string:))
+        )
     }
 
     /// The session payload carries identity only; /api/account/me carries the

@@ -27,38 +27,59 @@ struct AvatarMenu: View {
 
     var body: some View {
         Menu {
+            Picker(selection: $app.appearance) {
+                Text("System").tag(AppearancePreference.system)
+                Text("Light").tag(AppearancePreference.light)
+                Text("Dark").tag(AppearancePreference.dark)
+            } label: {
+                Label("Appearance", systemImage: "circle.lefthalf.filled")
+            }
+            .pickerStyle(.menu)
             if auth.user?.superUser == true {
                 Button("Analytics", systemImage: "chart.xyaxis.line") {
                     app.showsAnalytics = true
                 }
-                Divider()
             }
-            Picker("Appearance", selection: $app.appearance) {
-                Text("System").tag(AppearancePreference.system)
-                Text("Light").tag(AppearancePreference.light)
-                Text("Dark").tag(AppearancePreference.dark)
-            }
-            .pickerStyle(.menu)
             Divider()
             Button("Log Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
                 Task { await auth.signOut() }
             }
             .tint(.red)
         } label: {
-            Circle()
-                .fill(LinearGradient(
-                    colors: [Color(hex: "#7b8cff"), Color(hex: "#d86bd1")],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ))
+            avatar
                 .frame(width: 34, height: 34)
-                .overlay {
-                    Text(auth.user?.initial ?? "?")
-                        .font(.footnote.weight(.bold))
-                        .foregroundStyle(.white)
-                }
+                .clipShape(Circle())
         }
         .accessibilityLabel("Profile")
+    }
+
+    /// The account's profile photo when the provider supplied one, with the
+    /// initial monogram standing in while it loads or when there is none.
+    @ViewBuilder
+    private var avatar: some View {
+        if let url = auth.user?.imageURL {
+            AsyncImage(url: url) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                monogram
+            }
+        } else {
+            monogram
+        }
+    }
+
+    private var monogram: some View {
+        Circle()
+            .fill(LinearGradient(
+                colors: [Color(hex: "#7b8cff"), Color(hex: "#d86bd1")],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ))
+            .overlay {
+                Text(auth.user?.initial ?? "?")
+                    .font(.footnote.weight(.bold))
+                    .foregroundStyle(.white)
+            }
     }
 }
 
