@@ -44,7 +44,12 @@ struct IdeasScreen: View {
                 )
             }
         }
-        .overlay(alignment: .bottomTrailing) { addMenu }
+        // The menu adds to the top level: a link, a camera-roll import, a
+        // loose note, a folder. An open folder has its own New note button in
+        // the navigation bar, which files into that folder.
+        .overlay(alignment: .bottomTrailing) {
+            if path.isEmpty { addMenu }
+        }
         .fullScreenCover(item: $ideas.draft) { _ in
             NoteEditorView(app: app, ideas: ideas, onRecordNote: onRecordNote)
         }
