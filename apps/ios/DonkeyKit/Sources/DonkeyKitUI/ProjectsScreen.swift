@@ -56,14 +56,12 @@ struct ProjectCard: View {
             switch project.export {
             case .ready(let renderedOn):
                 Button(action: onPlay) {
-                    ZStack {
+                    MediaTile(ratio: 9 / 13) {
                         if let thumbnail = project.thumbnail,
                            let image = UIImage(contentsOfFile: thumbnail.localPath) {
                             Image(uiImage: image)
                                 .resizable()
                                 .scaledToFill()
-                        } else {
-                            RoundedRectangle(cornerRadius: 16).fill(.fill.secondary)
                         }
                         Circle()
                             .fill(.black.opacity(0.35))
@@ -75,7 +73,6 @@ struct ProjectCard: View {
                                     .offset(x: 2)
                             }
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
                     .overlay(alignment: .topLeading) {
                         ProjectTag(text: formattedDuration(project.duration))
                             .padding(8)
@@ -88,9 +85,9 @@ struct ProjectCard: View {
                 .buttonStyle(.plain)
             case .none:
                 GhostCard(title: project.name, subtitle: "No export yet")
+                    .aspectRatio(9 / 13, contentMode: .fit)
             }
         }
-        .aspectRatio(9 / 13, contentMode: .fit)
         .frame(maxWidth: .infinity)
     }
 }

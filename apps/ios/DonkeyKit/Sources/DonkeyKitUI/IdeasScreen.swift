@@ -222,20 +222,15 @@ struct InspirationCard: View {
             .buttonStyle(.plain)
         case .media(let fileName, let isVideo):
             let url = ideas.mediaURL(fileName: fileName)
-            Group {
+            MediaTile(ratio: 3 / 4) {
                 if isVideo {
                     VideoPlayer(player: AVPlayer(url: url))
                 } else if let image = UIImage(contentsOfFile: url.localPath) {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
-                } else {
-                    Rectangle().fill(.fill.tertiary)
                 }
             }
-            .aspectRatio(3 / 4, contentMode: .fit)
-            .frame(maxWidth: .infinity)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
         }
     }
 }

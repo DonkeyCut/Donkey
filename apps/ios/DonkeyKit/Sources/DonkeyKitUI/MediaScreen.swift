@@ -75,21 +75,17 @@ struct RecordingCard: View {
     var media: MediaModel
 
     var body: some View {
-        ZStack {
+        MediaTile(ratio: 9 / 14) {
             if let url = media.thumbnailURL(for: recording),
                let image = UIImage(contentsOfFile: url.localPath) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
             } else {
-                Rectangle().fill(.fill.secondary)
                 Image(systemName: "play.fill")
                     .foregroundStyle(.secondary)
             }
         }
-        .aspectRatio(9 / 14, contentMode: .fit)
-        .frame(maxWidth: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(alignment: .bottomTrailing) {
             Text(formattedDuration(recording.duration))
                 .font(.caption2.weight(.bold))

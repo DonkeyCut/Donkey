@@ -83,6 +83,24 @@ struct AvatarMenu: View {
     }
 }
 
+/// A grid cell of fixed aspect ratio. Artwork rides in an overlay, so a
+/// landscape frame filling a portrait cell is cropped at the cell's edge; the
+/// cell keeps the size the grid gave it and rows stay aligned.
+struct MediaTile<Content: View>: View {
+    var ratio: CGFloat
+    var corner: CGFloat = 16
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        Color.clear
+            .aspectRatio(ratio, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .background(.fill.secondary)
+            .overlay { content }
+            .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+    }
+}
+
 struct EmptyState: View {
     let title: String
     let message: String
