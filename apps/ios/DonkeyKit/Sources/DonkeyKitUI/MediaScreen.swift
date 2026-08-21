@@ -136,6 +136,10 @@ struct SyncBadge: View {
 
 struct RecordingPlayerView: View {
     let url: URL
+    /// Set when the player was opened from the camera. The leading control
+    /// then reads "< Library" and goes there, the way the system camera's
+    /// viewer walks back into Photos; the close button moves to the right.
+    var onOpenLibrary: (() -> Void)?
 
     @State private var player: AVPlayer?
     @Environment(\.dismiss) private var dismiss
@@ -147,22 +151,34 @@ struct RecordingPlayerView: View {
                 VideoPlayer(player: player)
                     .ignoresSafeArea()
             }
-            HStack {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.title3.weight(.bold))
-                        .frame(width: 40, height: 40)
+            GlassEffectContainer {
+                HStack(spacing: 10) {
+                    if let onOpenLibrary {
+                        Button(action: onOpenLibrary) {
+                            HStack(spacing: 3) {
+                                Image(systemName: "chevron.left")
+                                    .font(.subheadline.weight(.bold))
+                                Text("Library")
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            .padding(.horizontal, 14)
+                            .frame(height: 40)
+                        }
+                        .glassEffect(.regular.interactive())
+                    } else {
+                        closeButton
+                    }
+                    Spacer()
+                    ShareLink(item: url) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.title3.weight(.bold))
+                            .frame(width: 40, height: 40)
+                    }
+                    .glassEffect(.regular.interactive())
+                    if onOpenLibrary != nil {
+                        closeButton
+                    }
                 }
-                .glassEffect(.regular.interactive())
-                Spacer()
-                ShareLink(item: url) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.title3.weight(.bold))
-                        .frame(width: 40, height: 40)
-                }
-                .glassEffect(.regular.interactive())
             }
             .padding(16)
         }
@@ -172,6 +188,18 @@ struct RecordingPlayerView: View {
             player.play()
         }
         .onDisappear { player?.pause() }
+    }
+
+    private var closeButton: some View {
+        Button {
+            dismiss()
+        } label: {
+            Image(systemName: "xmark")
+                .font(.title3.weight(.bold))
+                .frame(width: 40, height: 40)
+        }
+        .glassEffect(.regular.interactive())
+        .accessibilityLabel("Close")
     }
 }
 #endif

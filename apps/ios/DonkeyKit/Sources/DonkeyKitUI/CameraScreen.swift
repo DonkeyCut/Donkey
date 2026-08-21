@@ -3,7 +3,17 @@ import SwiftUI
 import UIKit
 import DonkeyKitModels
 
+/// The clip parked in the corner after a take: the poster the flight
+/// animation carries down, and the recording the well opens.
+private struct CornerClip: Identifiable {
+    var recording: Recording
+    var poster: UIImage?
+
+    var id: UUID { recording.id }
+}
+
 struct CameraScreen<CameraPreview: View>: View {
+    var app: AppModel
     @Bindable var camera: CameraModel
     var ideas: IdeasModel
     var media: MediaModel
@@ -14,6 +24,17 @@ struct CameraScreen<CameraPreview: View>: View {
     @State private var showsTeleSettings = false
     @State private var showsNotePicker = false
     @State private var playingRecording: Recording?
+    /// The take that just finished, docked in the corner until it is watched
+    /// or `Self.wellLifetime` passes.
+    @State private var corner: CornerClip?
+    /// True while the poster is still flying from the stage into the well.
+    @State private var isFlying = false
+    /// The well's rectangle in stage coordinates — the flight's landing spot.
+    @State private var wellFrame: CGRect = .zero
+
+    private static var stageSpace: String { "cameraStage" }
+    private static var wellSide: CGFloat { 54 }
+    private static var wellLifetime: Duration { .seconds(30) }
 
     var body: some View {
         ZStack {
@@ -25,21 +46,50 @@ struct CameraScreen<CameraPreview: View>: View {
                 TeleprompterOverlay(camera: camera)
             }
             controls
+            if isFlying, let poster = corner?.poster, wellFrame != .zero {
+                CaptureFlight(poster: poster, landing: wellFrame, corner: 10) {
+                    isFlying = false
+                }
+            }
         }
+        .coordinateSpace(.named(Self.stageSpace))
         .background(.black, ignoresSafeAreaEdges: .all)
         // The stage is live video: the chrome is dark whatever the app-wide
         // appearance says. Setting the environment (not a color-scheme
         // preference) keeps the root appearance choice from overriding it.
         .environment(\.colorScheme, .dark)
+        .onChange(of: media.recordings.first?.id) { _, _ in dockLatestTake() }
+        // The docked clip keeps itself to one appearance: watching it or
+        // waiting out the timer both retire it.
+        .task(id: corner?.id) {
+            guard corner != nil else { return }
+            try? await Task.sleep(for: Self.wellLifetime)
+            guard !Task.isCancelled else { return }
+            corner = nil
+        }
         .sheet(isPresented: $showsNotePicker) {
             NotePickerSheet(ideas: ideas) { note in
                 camera.loadTeleprompter(script: note.script)
                 showsNotePicker = false
             }
         }
-        .fullScreenCover(item: $playingRecording) { recording in
-            RecordingPlayerView(url: media.movieURL(for: recording))
+        .fullScreenCover(item: $playingRecording, onDismiss: { corner = nil }) { recording in
+            RecordingPlayerView(url: media.movieURL(for: recording)) {
+                playingRecording = nil
+                app.selectedTab = .media
+            }
         }
+    }
+
+    private func dockLatestTake() {
+        // The head of the list also changes when a clip is deleted over in the
+        // Library; only a take that just finished gets docked.
+        guard let recording = media.recordings.first,
+              recording.createdAt.timeIntervalSinceNow > -5 else { return }
+        let poster = media.thumbnailURL(for: recording)
+            .flatMap { UIImage(contentsOfFile: $0.localPath) }
+        corner = CornerClip(recording: recording, poster: poster)
+        isFlying = poster != nil && wellFrame != .zero
     }
 
     @ViewBuilder private var stage: some View {
@@ -84,41 +134,51 @@ struct CameraScreen<CameraPreview: View>: View {
         .overlay(alignment: .leading) { rail }
         .overlay(alignment: .bottom) { recordButton }
         .overlay(alignment: .bottomLeading) { thumbnailWell }
-        .animation(.spring(duration: 0.45), value: media.recordings.first?.id)
+        .animation(.spring(duration: 0.45), value: corner?.id)
         .animation(.spring(duration: 0.45), value: camera.isRecording)
         .padding(.top, 8)
     }
 
-    /// The last recording, docked in the corner the way the system camera
-    /// does it; tapping plays it.
-    @ViewBuilder private var thumbnailWell: some View {
-        if !camera.isRecording, let recording = media.recordings.first {
-            Button {
-                playingRecording = recording
-            } label: {
-                ZStack {
-                    if let url = media.thumbnailURL(for: recording),
-                       let image = UIImage(contentsOfFile: url.localPath) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFill()
-                    } else {
-                        Rectangle().fill(.fill.secondary)
-                        Image(systemName: "play.fill")
-                            .foregroundStyle(.white)
-                    }
+    /// Where the take lands. The slot holds its place whether or not a clip
+    /// is docked, so the flight always has a measured rectangle to fly to.
+    private var thumbnailWell: some View {
+        Color.clear
+            .frame(width: Self.wellSide, height: Self.wellSide)
+            .onGeometryChange(for: CGRect.self) { proxy in
+                proxy.frame(in: .named(Self.stageSpace))
+            } action: { wellFrame = $0 }
+            .overlay {
+                if let corner, !camera.isRecording, !isFlying {
+                    wellButton(corner)
                 }
-                .frame(width: 54, height: 54)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.5), lineWidth: 1))
             }
-            .buttonStyle(.plain)
             .padding(.leading, 20)
             .padding(.bottom, 44)
-            .id(recording.id)
-            .transition(.scale(scale: 0.25, anchor: .bottomLeading).combined(with: .opacity))
-            .accessibilityLabel("Play last recording")
+    }
+
+    private func wellButton(_ clip: CornerClip) -> some View {
+        Button {
+            playingRecording = clip.recording
+        } label: {
+            ZStack {
+                if let poster = clip.poster {
+                    Image(uiImage: poster)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Rectangle().fill(.fill.secondary)
+                    Image(systemName: "play.fill")
+                        .foregroundStyle(.white)
+                }
+            }
+            .frame(width: Self.wellSide, height: Self.wellSide)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.5), lineWidth: 1))
         }
+        .buttonStyle(.plain)
+        .id(clip.id)
+        .transition(.scale(scale: 0.25, anchor: .bottomLeading).combined(with: .opacity))
+        .accessibilityLabel("Play last recording")
     }
 
     private var rail: some View {
@@ -283,6 +343,35 @@ struct CameraScreen<CameraPreview: View>: View {
         .opacity(camera.availability == .running ? 1 : 0.5)
         .padding(.bottom, 30)
         .accessibilityLabel(camera.isRecording ? "Stop recording" : "Record")
+    }
+}
+
+/// The take shrinking from the stage into the corner well, the way a
+/// screenshot drops to the bottom of the screen.
+private struct CaptureFlight: View {
+    let poster: UIImage
+    let landing: CGRect
+    let corner: CGFloat
+    let onLanded: () -> Void
+
+    @State private var landed = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            let frame = landed ? landing : CGRect(origin: .zero, size: proxy.size)
+            Image(uiImage: poster)
+                .resizable()
+                .scaledToFill()
+                .frame(width: frame.width, height: frame.height)
+                .clipShape(RoundedRectangle(cornerRadius: landed ? corner : 0, style: .continuous))
+                .position(x: frame.midX, y: frame.midY)
+        }
+        .allowsHitTesting(false)
+        .task {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.72)) { landed = true }
+            try? await Task.sleep(for: .milliseconds(620))
+            onLanded()
+        }
     }
 }
 

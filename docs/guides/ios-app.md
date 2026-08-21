@@ -41,6 +41,15 @@ Every request carries an `x-donkey-cut-client: ios` header. The server
 remembers accounts it has seen it from, and the desktop shows its phone
 surfaces (Camera Roll and Notes tabs) only to those accounts.
 
+## Camera
+
+A finished take flies from the stage down into a well in the bottom-left
+corner, the way a screenshot shrinks to the edge of the screen. Tapping it
+plays the clip, with a "< Library" control in the player that carries on into
+the Library tab. The well holds one take and retires it once it has been
+watched or thirty seconds pass, so the viewfinder goes back to being a
+viewfinder.
+
 ## Teleprompter
 
 The teleprompter paces raw notes by itself. Reading speed is words per
