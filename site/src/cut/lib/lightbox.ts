@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import type { AssetRef } from "./assetRef";
+import { libraryMediaUrl, libraryPosterUrl, type LibraryAsset } from "./library";
 
 // The asset lightbox: a full-screen viewer opened from stock tiles, generated
 // media, chat asset cards, and library cards. Held in its own store so any
@@ -43,6 +44,23 @@ export const lightboxItemFromRef = (ref: AssetRef): LightboxItem => ({
   ...(ref.thumb ? { poster: ref.thumb } : {}),
   assetId: ref.scope === "project" ? ref.id : null,
   ...(ref.scope === "library" ? { libraryId: ref.id } : {}),
+});
+
+/** The lightbox view of a library asset — what a library card opens on a
+ * double-click. `bare` where the surface has no project to add anything to. */
+export const lightboxItemFromLibrary = (
+  a: LibraryAsset,
+  bare = false,
+): LightboxItem => ({
+  kind: a.type,
+  src: libraryMediaUrl(a.fileName, a.residency),
+  name: a.name,
+  prompt: "",
+  assetId: null,
+  libraryId: a.id,
+  ...(bare ? { bare: true } : {}),
+  ...(a.width && a.height ? { ratio: a.width / a.height } : {}),
+  ...(libraryPosterUrl(a) ? { poster: libraryPosterUrl(a) } : {}),
 });
 
 interface LightboxState {

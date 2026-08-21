@@ -13,13 +13,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  deleteFromLibrary,
-  libraryMediaUrl,
-  libraryPosterUrl,
-  type LibraryAsset,
-} from "@/cut/lib/library";
-import { useLightbox } from "@/cut/lib/lightbox";
+import { deleteFromLibrary, type LibraryAsset } from "@/cut/lib/library";
+import { lightboxItemFromLibrary, useLightbox } from "@/cut/lib/lightbox";
 import { patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
 import { shapeBand } from "@/cut/lib/types";
 import { Lightbox } from "./Lightbox";
@@ -88,17 +83,7 @@ export function CameraRollView() {
                   asset={a}
                   area={TILE_AREA}
                   onClick={() =>
-                    useLightbox.getState().open({
-                      kind: a.type,
-                      src: libraryMediaUrl(a.fileName, a.residency),
-                      name: a.name,
-                      prompt: "",
-                      assetId: null,
-                      libraryId: a.id,
-                      bare: true,
-                      ...(a.width && a.height ? { ratio: a.width / a.height } : {}),
-                      ...(libraryPosterUrl(a) ? { poster: libraryPosterUrl(a) } : {}),
-                    })
+                    useLightbox.getState().open(lightboxItemFromLibrary(a, true))
                   }
                   onDelete={() => setDeleting(a)}
                 />

@@ -87,7 +87,7 @@ import {
   type LibraryData,
 } from "@/cut/lib/library";
 import { normalizeLink } from "@/cut/lib/link";
-import { useLightbox } from "@/cut/lib/lightbox";
+import { lightboxItemFromLibrary, useLightbox } from "@/cut/lib/lightbox";
 import { reportActivity } from "@/cut/lib/tabActivity";
 import { useNewProjectTarget } from "@/cut/lib/newProject";
 import { useListedResidencies, useLocalCompute } from "@/cut/lib/backend/hooks";
@@ -917,21 +917,9 @@ export function LibraryView() {
                       onClick={
                         live(a.residency)
                           ? () =>
-                              useLightbox.getState().open({
-                                kind: a.type,
-                                src: libraryMediaUrl(a.fileName, a.residency),
-                                name: a.name,
-                                prompt: "",
-                                assetId: null,
-                                libraryId: a.id,
-                                bare: true,
-                                ...(a.width && a.height
-                                  ? { ratio: a.width / a.height }
-                                  : {}),
-                                ...(libraryPosterUrl(a)
-                                  ? { poster: libraryPosterUrl(a) }
-                                  : {}),
-                              })
+                              useLightbox
+                                .getState()
+                                .open(lightboxItemFromLibrary(a, true))
                           : () => setNeedsApp(true)
                       }
                       onDelete={
@@ -1111,6 +1099,18 @@ export function LibraryCard({
       className="group flex flex-col"
       draggable={!offline}
       onClick={onClick}
+      // Double-click plays the asset in the viewer, wherever the card sits:
+      // the editor's panel keeps its single click for selection and drag.
+      onDoubleClick={
+        offline
+          ? undefined
+          : () =>
+              useLightbox
+                .getState()
+                // Without a + button there is no project to add it to, so the
+                // viewer opens bare.
+                .open(lightboxItemFromLibrary(a, !onUse))
+      }
       onDragStart={(e) => {
         setLibraryDragData(e, a);
         onDragStartExtra?.(e);
