@@ -5,8 +5,15 @@
  * off skin tones) and the manual adjustments on top — and each layer applies
  * its stages in one canonical order:
  *
- *   gain → contrast → wheels → highlights/shadows → curves → cast tint →
- *   HSL (global hue/saturation, vibrance, feathered hue bands) → clamp
+ *   gain → contrast → wheels → highlights/shadows → curves →
+ *   HSL (global hue/saturation, vibrance, feathered hue bands) → cast tint →
+ *   clamp
+ *
+ * The cast lands last because a cast is a print-side process — the silver is
+ * replaced by a colored compound, a density multiply over the finished image.
+ * Applying it before the saturation stage would let a desaturating grade strip
+ * the very tone it just laid down, which is what makes a toned monochrome
+ * (sepia and its relatives) expressible at all.
  *
  * The tonal stages reuse the exact fast-path formulas from colorGrade.ts, so
  * a scalar grade evaluated through the LUT lands on the fast path's result to
@@ -362,7 +369,13 @@ function buildLayer(g: ColorGrade, skinDamp: boolean): Layer | null {
 }
 
 function applyLayer(v: [number, number, number], L: Layer, skinW: number): void {
-  const chromaScale = L.skinDamp ? 1 - skinW : 1;
+  // Skin protection is one rule applied at the layer's end: the layer's tone
+  // lands in full, and the chroma it moved blends back toward the pixel's own
+  // by the skin weight. Every stage — casts, curves, hue bands, saturation —
+  // is covered by construction, so a stage added later cannot leak color onto
+  // faces and no stage has to remember to damp itself.
+  const damp = L.skinDamp ? skinW : 0;
+  const pre: [number, number, number] | null = damp > 0 ? [v[0], v[1], v[2]] : null;
   // Tonal: the fast path's exact gain + mid-gray contrast, clipped like the
   // combined lutrgb expression.
   for (let c = 0; c < 3; c++) {
@@ -377,7 +390,7 @@ function applyLayer(v: [number, number, number], L: Layer, skinW: number): void 
       const weight = w.zone === "s" ? wS : w.zone === "h" ? wH : wM;
       if (weight <= 0) continue;
       for (let c = 0; c < 3; c++) {
-        const shift = w.chroma[c] * chromaScale + w.luma;
+        const shift = w.chroma[c] + w.luma;
         if (w.zone === "s") v[c] += shift * weight;
         else if (w.zone === "h") v[c] *= 1 + shift * weight;
         else v[c] = Math.pow(clamp01(v[c]), 1 / Math.max(0.2, 1 + shift * weight * 1.5));
@@ -400,30 +413,42 @@ function applyLayer(v: [number, number, number], L: Layer, skinW: number): void 
       v[c] = x;
     }
   }
-  if (L.tint) {
-    v[0] = clamp01(v[0] * (1 + (L.tint.r - 1) * chromaScale));
-    v[1] = clamp01(v[1] * (1 + (L.tint.g - 1) * chromaScale));
-    v[2] = clamp01(v[2] * (1 + (L.tint.b - 1) * chromaScale));
-  }
   const needsHslStage =
     L.hue !== 0 || L.saturate !== 1 || L.vibrance !== 0 || L.bands.length > 0;
   if (needsHslStage) {
     let [h, s, l] = rgbToHsl(v[0], v[1], v[2]);
     const entryHue = h;
-    if (L.hue) h += L.hue * chromaScale;
-    if (L.saturate !== 1) s *= 1 + (L.saturate - 1) * chromaScale;
-    if (L.vibrance) s += L.vibrance * 0.8 * s * (1 - s) * chromaScale;
+    if (L.hue) h += L.hue;
+    if (L.saturate !== 1) s *= L.saturate;
+    if (L.vibrance) s += L.vibrance * 0.8 * s * (1 - s);
     for (const b of L.bands) {
       const w = hueBandWeight(entryHue, b.band);
       if (w <= 0) continue;
-      h += b.hueShift * w * chromaScale;
-      s *= 1 + b.sat * w * chromaScale;
+      h += b.hueShift * w;
+      s *= 1 + b.sat * w;
       l *= 1 + b.lum * 0.5 * w;
     }
     const rgb = hslToRgb(h, clamp01(s), clamp01(l));
     v[0] = clamp01(rgb[0]);
     v[1] = clamp01(rgb[1]);
     v[2] = clamp01(rgb[2]);
+  }
+  if (L.tint) {
+    v[0] = clamp01(v[0] * L.tint.r);
+    v[1] = clamp01(v[1] * L.tint.g);
+    v[2] = clamp01(v[2] * L.tint.b);
+  }
+  if (pre) {
+    // The protected color is the pixel's own, carried to wherever the layer's
+    // tone landed: scaling by the luma ratio keeps hue and saturation exactly,
+    // where holding the chroma difference instead would raise saturation
+    // whenever the layer darkened.
+    const y0 = luma(pre[0], pre[1], pre[2]);
+    const y1 = luma(v[0], v[1], v[2]);
+    const k = y0 > 1e-4 ? y1 / y0 : 1;
+    for (let c = 0; c < 3; c++) {
+      v[c] = clamp01(v[c] * (1 - damp) + clamp01(pre[c] * k) * damp);
+    }
   }
 }
 

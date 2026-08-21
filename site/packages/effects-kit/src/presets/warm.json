@@ -68,9 +68,9 @@
     "label": "Sepia",
     "category": "warm",
     "grade": {
-      "temperature": 30,
-      "tint": 4,
-      "saturation": -35,
+      "saturation": -50,
+      "temperature": 34,
+      "tint": 5,
       "contrast": 4
     }
   },
@@ -79,11 +79,11 @@
     "label": "Ember",
     "category": "warm",
     "grade": {
-      "temperature": 24,
+      "temperature": 20,
       "shadows": -8,
       "contrast": 12,
-      "vibrance": 6,
-      "hsl": { "red": [0, 12, 0] }
+      "vibrance": 4,
+      "hsl": { "red": [0, 4, 0] }
     }
   },
   {

@@ -27,7 +27,8 @@
     "grade": {
       "saturation": -50,
       "contrast": 24,
-      "shadows": -10
+      "shadows": -8,
+      "curves": { "m": [[0, 0], [48, 32], [128, 134], [208, 244], [255, 255]] }
     }
   },
   {
@@ -81,10 +82,10 @@
     "category": "bw",
     "grade": {
       "saturation": -50,
-      "contrast": 20,
+      "contrast": 16,
       "exposure": -2,
-      "shadows": -6,
-      "highlights": 6
+      "highlights": 10,
+      "curves": { "m": [[0, 16], [48, 38], [128, 138], [200, 226], [255, 255]] }
     }
   }
 ]
