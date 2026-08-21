@@ -42,6 +42,7 @@ import {
   type RasterSurface,
 } from "./raster";
 import { pickThumbTimes, type ThumbProbe } from "./filmstrip";
+import { reportSwallowed } from "./report";
 import { useEditor } from "./store";
 import type { AssetType, AudioClip, MediaAsset, ProjectSummary, StoredAsset, VideoClip, WatchKeepReason } from "./types";
 import { contentRect, IMAGE_CLIP_SECONDS, mediaUrl } from "./types";
@@ -1516,7 +1517,7 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
       if (live && stripComplete(live) && live.sceneCuts === undefined) {
         void refineSceneCuts(asset.id, src, asset.duration).catch((err) => {
           // Scene cuts only sharpen the strip; the tiles already painted.
-          console.error(`[cut] scene probe failed for ${asset.fileName}`, err);
+          reportSwallowed(`[cut] scene probe failed for ${asset.fileName}`, err);
         });
       }
       // The clip box draws the sound under the picture, so a video enriches
@@ -1529,7 +1530,7 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
         } catch (err) {
           // The strip above already painted; a peaks failure (an expired
           // signed URL, an undecodable track) never marks it failed.
-          console.error(`[cut] peaks failed for ${asset.fileName}`, err);
+          reportSwallowed(`[cut] peaks failed for ${asset.fileName}`, err);
         }
       }
       enrichRetries.delete(asset.id);
@@ -1541,13 +1542,12 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
   } catch (err) {
     // Thumbnails and waveforms are decorative; editing works without them.
     // The failure still gets recorded — clips stop their loading pulse — and
-    // logged at error level, which carries it into PostHog error tracking
-    // (console.error autocapture) with the file's shape beside the cause.
+    // reported, which carries it into PostHog error tracking with the file's
+    // shape beside the cause (lib/report.ts).
     if (asset.type === "video") setStripFailed(asset.id, true);
     if (asset.type !== "image") scheduleEnrichRetry(asset.id);
-    console.error(
-      `[cut] enrich failed for ${asset.fileName}`,
-      { type: asset.type, durationSec: Math.round(asset.duration) },
+    reportSwallowed(
+      `[cut] enrich failed for ${asset.fileName} (${asset.type}, ${Math.round(asset.duration)}s)`,
       err
     );
   } finally {
@@ -1564,9 +1564,8 @@ export async function ensurePeaks(asset: MediaAsset) {
       if (peaks?.length) useEditor.getState().updateAsset(asset.id, { peaks });
     }
   } catch (err) {
-    // Waveforms are decorative; editing works without them. Error level
-    // carries the failure into PostHog error tracking.
-    console.error(`[cut] peaks failed for ${asset.fileName}`, err);
+    // Waveforms are decorative; editing works without them.
+    reportSwallowed(`[cut] peaks failed for ${asset.fileName}`, err);
   }
 }
 

@@ -12,6 +12,7 @@ import {
   renderAudioSpanWav,
 } from "./media";
 import { frameSink, openMedia, videoTrackOf } from "./mediaRead";
+import { reportSwallowed } from "./report";
 import { createRasterCanvas, rasterCanvasToDataUrl } from "./raster";
 import { useEditor } from "./store";
 import { formatTime } from "./time";
@@ -331,7 +332,7 @@ export async function refsFromDroppedFiles(
       if (pending) startUpload(projectId, pending);
       refs.push(refFromAsset(asset));
     } catch (err) {
-      console.error(`Attach failed for ${file.name}:`, err);
+      reportSwallowed(`[cut] attach failed for ${file.name}`, err);
     }
   }
   return refs;

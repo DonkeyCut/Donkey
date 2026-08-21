@@ -42,6 +42,7 @@ import { useOnboardingCover } from "@/cut/lib/onboarding";
 import { requestSidePanel } from "@/cut/lib/panelRequest";
 import { resolveProjectPlacement } from "@/cut/lib/residency";
 import {
+import { reportSwallowed } from "@/cut/lib/report";
   docAudioClips,
   docClips,
   docOverlays,
@@ -666,7 +667,7 @@ export function Editor({
           void enrichAsset(asset, pending?.localUrl);
           if (pending) startUpload(projectId, pending);
         } catch (err) {
-          console.error(`Import failed for ${file.name}:`, err);
+          reportSwallowed(`[cut] import failed for ${file.name}`, err);
         } finally {
           setImporting((n) => n - 1);
         }
@@ -875,7 +876,7 @@ export function Editor({
         if (s.paste()) e.preventDefault();
         else if (hasCopiedFrame()) {
           e.preventDefault();
-          void pasteCopiedFrame().catch((err) => console.error("Paste frame failed:", err));
+          void pasteCopiedFrame().catch((err) => reportSwallowed("[cut] paste frame failed", err));
         }
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "g") {
         // ⌘G groups the multi-selected elements, ⇧⌘G dissolves the primary's
