@@ -11,7 +11,7 @@ import { renderProjectToMp4 } from "./exportRender";
 import { useGenerate } from "./generate";
 import { useGenScene } from "./genScene";
 import { edgeFramesPending, enrichAsset, importFileToProject } from "./media";
-import { awaitingFrame, startTrace, stopTrace } from "./perfTrace";
+import { awaitingFrame, startTrace, stopTrace, traceReport } from "./perfTrace";
 import { playheadAt } from "./playhead";
 import { projectDuration, useEditor } from "./store";
 
@@ -38,5 +38,10 @@ export function installDevHooks(): void {
     start: startTrace,
     stop: stopTrace,
     awaiting: awaitingFrame,
+    /** Stop recording and answer with the summary. */
+    report: () => {
+      const trace = stopTrace();
+      return trace ? traceReport(trace) : null;
+    },
   };
 }

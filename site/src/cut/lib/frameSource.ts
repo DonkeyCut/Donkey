@@ -60,17 +60,58 @@ const POOL = RING + 2;
  * playhead and the decoder would burn through the file to put it there.
  */
 export const DECODE_AHEAD_S = 0.3;
-/** How far past a walk's last landed frame the playhead may read before the
- * walk is re-anchored there. A walk running behind still lands frames — the
- * picture advances, a beat late — so it keeps walking while the lag stays
- * watchable, and hops forward to the playhead once the frames it lands are
- * history. */
+/**
+ * How far past a walk's last landed frame the playhead may read before the
+ * walk is re-anchored ahead of it.
+ *
+ * A walk running behind still lands frames — the picture advances, a beat
+ * late — so it keeps walking while the lag stays watchable, and hops forward
+ * once the frames it lands are history. The tolerance is wide because ending
+ * the lag costs a keyframe seek that lands nothing at all until it finishes:
+ * on the machine that trails in the first place, that seek is longer than the
+ * lag it would cure, and a walk restarted every time it slips runs that seek
+ * over and over while the picture sits frozen. Measured on the eval's few-slot
+ * profiles, tightening this to a fifth of a second took late frames from 8% to
+ * 52% and the worst lag from a tenth of a second to four tenths.
+ */
 const LAG_HOP_S = 2;
+
 /** How far the playhead may travel past a walk's start while its first frame
  * is still decoding. That first step is a keyframe seek — every frame from the
  * keyframe to the start decodes before one lands — and a restart pays the
  * whole seek again from scratch, so a slow decoder gets room to finish it. */
 const FIRST_FRAME_S = 4;
+/**
+ * How long recent walks took to land their first frame, newest last.
+ *
+ * A walk begins at the keyframe before the time asked for and decodes forward
+ * to it, so this is the real price of reaching a clip that is not already
+ * open — and it is the number that separates one machine from another far
+ * better than any count of cores. With hardware decode behind it a walk lands
+ * in a fraction of the time it takes to play the clip. With every stream on
+ * the CPU, and a keyframe a couple of seconds back, the same walk can take
+ * longer than the clip is on screen. The median over a dozen of them is what
+ * the engine's log reports, and it is the first thing to read when a preview
+ * is stuttering on a machine that is not this one.
+ */
+const WALK_COSTS: number[] = [];
+const WALK_SAMPLES = 12;
+/** Walks timed before the median is worth reading. */
+const WALK_MIN = 4;
+
+function noteWalkCost(ms: number): void {
+  WALK_COSTS.push(ms);
+  if (WALK_COSTS.length > WALK_SAMPLES) WALK_COSTS.shift();
+}
+
+/** The median time a recent walk took to land its first frame, in
+ * milliseconds; zero until enough of them have been timed to mean anything. */
+export function walkCostMs(): number {
+  if (WALK_COSTS.length < WALK_MIN) return 0;
+  const xs = [...WALK_COSTS].sort((a, b) => a - b);
+  return Math.round(xs[xs.length >> 1]);
+}
+
 /** Two source times closer than this are the same frame. */
 const SAME = 1e-4;
 /** Frames the backward-skim cache keeps of one span: the span is decoded once
@@ -299,6 +340,10 @@ export class ClipFrameSource {
   private stream: AsyncGenerator<WrappedCanvas, void, unknown> | null = null;
   private streamFrom = 0;
   private streamTail = 0;
+  /** When the current walk was started, and whether it has landed anything
+   * yet, for timing what reaching a clip costs on this machine. */
+  private walkAt = 0;
+  private walkFirst = false;
   /** The walk ran off the end of the file. Its span is still the truth — there
    * are no frames past its tail to decode — so a reader inside it must not
    * keep restarting a walk that can only end again. */
@@ -636,14 +681,11 @@ export class ClipFrameSource {
     // Whether the walk serves `t` is a question about the walk — where it
     // started and the last frame it has landed. On a machine whose decoder
     // trails real time the tail falls behind the playhead while frames keep
-    // landing: the picture advances, a beat late. A restart there pays a
-    // keyframe seek that lands nothing for even longer, and a walk held to a
-    // tight deadline gets restarted before any such seek can finish — the
-    // picture freezes solid while the playhead runs on the audio clock. So a
-    // lagging walk keeps its claim until the frames it lands are history
-    // (`LAG_HOP_S`), and a walk still decoding toward its first frame — mid
-    // keyframe-seek, with nothing landed yet to show for it — gets the longer
-    // `FIRST_FRAME_S`, since a restart would begin that same seek again.
+    // landing: the picture advances, a beat late. It keeps its claim until the
+    // frames it lands are history (`LAG_HOP_S`), and then re-anchors at the
+    // playhead. A walk still decoding toward its first frame — mid keyframe
+    // seek, nothing landed yet — gets the longer `FIRST_FRAME_S`, since a
+    // restart would begin that same seek again.
     if (this.stream) {
       // The walk serves `t` if the frame is already held, or if `t` reads at
       // or past the walk's edge — the tail once frames have landed, its start
@@ -680,6 +722,8 @@ export class ClipFrameSource {
     if (this.closed || !this.sink || this.stream) return;
     // The read may have been overtaken while the file was opening.
     if (Math.abs(this.streamFrom - from) > SAME) return;
+    this.walkAt = performance.now();
+    this.walkFirst = true;
     this.stream = this.sink.canvases(Math.max(0, from));
     void this.drain(from);
   }
@@ -808,6 +852,10 @@ export class ClipFrameSource {
             break;
           }
           this.streamTail = value.timestamp;
+          if (this.walkFirst) {
+            this.walkFirst = false;
+            noteWalkCost(performance.now() - this.walkAt);
+          }
           this.ring.push(value);
           this.onFrame();
         }

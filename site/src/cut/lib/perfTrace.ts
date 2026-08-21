@@ -10,8 +10,10 @@
  * frame" become numbers a script can hold to a budget.
  *
  * The trace is off until something arms it, and while it is off every call here
- * is a null check. The eval arms it through `window.__cutPerf`; nothing in the
- * product turns it on.
+ * is a null check. The perf eval arms it through `window.__cutPerf`, and so can
+ * a person on a machine we cannot reproduce: `__cutPerf.start()`, play the part
+ * that stutters, then `__cutPerf.report()` for a summary small enough to paste
+ * into a bug report. Nothing turns it on by itself.
  */
 
 /** One composited frame that reached the canvas. */
@@ -26,9 +28,10 @@ export interface PresentRecord {
   /**
    * The source time the master layer was asked for.
    *
-   * With `srcTs` this is the whole sync story: sound is scheduled against the
-   * same clock `t` comes from, so `wantSrc - srcTs` is how far the picture sits
-   * behind the sound at that instant.
+   * With `srcTs` this is how far the picture sits behind the clock it is drawn
+   * against. That clock is the audible one — see `audioLead` for the separate
+   * question of whether the preview is reading it, which this cannot see: a
+   * picture drawn against the wrong clock is exactly on time against it.
    */
   wantSrc: number | null;
   /** The clip the master picture came from, so a boundary is findable. */
@@ -78,7 +81,38 @@ export interface Trace {
   /** Megabytes of canvas backing on the warm shelf — the stood-down sources,
    * which is the part the pool's memory budget governs. */
   warmMb: number[];
+  /**
+   * Seconds the picture is held behind the graph's clock, and seconds the
+   * output device says it holds, sampled per present.
+   *
+   * A rendered sample has not been heard yet — it is in the buffer the device
+   * reads next — so the moment the picture belongs at is the rendered moment
+   * less that buffer. These two are read independently, one from the clock the
+   * preview actually uses and one from the device, and they should agree. A
+   * lead of zero against a device reporting otherwise is the picture running
+   * ahead of its own sound by however much the device holds, which is tens of
+   * milliseconds on CoreAudio and can be a fifth of a second on shared-mode
+   * WASAPI or a Bluetooth output.
+   */
+  audioLead: number[];
+  audioLatency: number[];
   startedAt: number;
+}
+
+/**
+ * Records one trace keeps of each kind.
+ *
+ * The eval's runs are a fraction of this. What it bounds is a recording left
+ * armed on a real machine: at sixty frames a second this is around twenty
+ * minutes, after which the oldest records fall off and the trace describes the
+ * most recent stretch — which is the stretch someone recording a stutter cares
+ * about.
+ */
+const CAP = 72_000;
+
+function keep<T>(xs: T[], x: T): void {
+  xs.push(x);
+  if (xs.length > CAP) xs.shift();
 }
 
 /** Times equal within this are the same instant. Half a frame at 120fps —
@@ -105,6 +139,8 @@ export function startTrace(): void {
     liveSources: [],
     keptSources: [],
     warmMb: [],
+    audioLead: [],
+    audioLatency: [],
     startedAt: performance.now(),
   };
   pendingSeek = null;
@@ -112,7 +148,7 @@ export function startTrace(): void {
   try {
     observer = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) {
-        trace?.longTasks.push({ at: entry.startTime, ms: entry.duration });
+        if (trace) keep(trace.longTasks, { at: entry.startTime, ms: entry.duration });
       }
     });
     observer.observe({ entryTypes: ["longtask"] });
@@ -136,7 +172,7 @@ export function stopTrace(): Trace | null {
 export function markSeek(t: number): void {
   if (!trace) return;
   const rec: SeekRecord = { t, at: performance.now(), latencyMs: null };
-  trace.seeks.push(rec);
+  keep(trace.seeks, rec);
   pendingSeek = rec;
 }
 
@@ -144,7 +180,7 @@ export function markSeek(t: number): void {
 export function markPresent(rec: Omit<PresentRecord, "at">): void {
   if (!trace) return;
   const at = performance.now();
-  trace.presents.push({ ...rec, at });
+  keep(trace.presents, { ...rec, at });
   // A held or black frame is not an answer to the question the scrub asked —
   // neither is the neighbouring frame drawn while the real one decodes. The
   // clock keeps running until the frame that belongs at that time is on screen.
@@ -164,17 +200,91 @@ export function markTick(): void {
   trace.ticks++;
 }
 
+/** What the preview's clock is doing about the output device: how far the
+ * picture is being held back, and how far the device says it should be. */
+export function markAudioClock(lead: number, reported: number): void {
+  if (!trace) return;
+  keep(trace.audioLead, lead);
+  keep(trace.audioLatency, reported);
+}
+
 /** How many decoded frames are being held open right now. */
 export function markLiveSamples(n: number): void {
   if (!trace) return;
-  trace.liveSamples.push(n);
+  keep(trace.liveSamples, n);
 }
 
 /** What the decoder pool is holding right now: sources with a decoder, sources
  * kept at all, and the canvas backing behind them. */
 export function markLiveSources(active: number, kept: number, warmPixels: number): void {
   if (!trace) return;
-  trace.liveSources.push(active);
-  trace.keptSources.push(kept);
-  trace.warmMb.push(Math.round(warmPixels * 4e-6));
+  keep(trace.liveSources, active);
+  keep(trace.keptSources, kept);
+  keep(trace.warmMb, Math.round(warmPixels * 4e-6));
+}
+
+/** A trace boiled down to the numbers that name a stutter. */
+export interface TraceReport {
+  /** Seconds the recording covers, and frames painted in them. */
+  seconds: number;
+  presented: number;
+  /** Frames a second the preview actually held. */
+  fps: number;
+  /** Share of frames that were not the one belonging at that moment: the
+   * stutter, as the viewer sees it. */
+  late: number;
+  /** The same share over the first and last third, so a preview that decays
+   * across a session is tellable from one that was always this way. */
+  decay: { first: number; last: number };
+  /** Seconds the picture sat behind the moment asked for. */
+  lagP50: number;
+  lagP95: number;
+  lagMax: number;
+  /** Seconds the picture is held back for the output device, and what the
+   * device says it holds. These agree when the preview is reading the clock
+   * its sound leaves on; a lead of zero against a device holding a fifth of a
+   * second is a picture running that far ahead of its own audio. */
+  audioLeadS: number;
+  audioLatencyS: number;
+  /** Decoders open, frames held, and the canvas backing behind them. */
+  sources: number;
+  held: number;
+  warmMb: number;
+  /** The longest the main thread was blocked, in milliseconds. */
+  longTaskMs: number;
+}
+
+const pct = (xs: PresentRecord[]): number =>
+  xs.length ? +(xs.filter((p) => !p.exact || p.stale).length / xs.length).toFixed(3) : 0;
+
+const at = (xs: number[], q: number): number => {
+  if (!xs.length) return 0;
+  const sorted = [...xs].sort((a, b) => a - b);
+  return +sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))].toFixed(3);
+};
+
+/** Boil a trace down to something a person can paste into a bug report. */
+export function traceReport(t: Trace): TraceReport {
+  const presents = t.presents;
+  const span = presents.length ? (presents[presents.length - 1].at - presents[0].at) / 1000 : 0;
+  const lags = presents
+    .filter((p) => p.srcTs !== null && p.wantSrc !== null)
+    .map((p) => Math.max(0, p.wantSrc! - p.srcTs!));
+  const third = Math.floor(presents.length / 3);
+  return {
+    seconds: +span.toFixed(1),
+    presented: presents.length,
+    fps: span > 0 ? +(presents.length / span).toFixed(1) : 0,
+    late: pct(presents),
+    decay: { first: pct(presents.slice(0, third)), last: pct(presents.slice(-third)) },
+    lagP50: at(lags, 0.5),
+    lagP95: at(lags, 0.95),
+    lagMax: +Math.max(0, ...lags).toFixed(3),
+    audioLeadS: at(t.audioLead, 0.5),
+    audioLatencyS: at(t.audioLatency, 0.5),
+    sources: Math.max(0, ...t.liveSources),
+    held: Math.max(0, ...t.liveSamples),
+    warmMb: Math.max(0, ...t.warmMb),
+    longTaskMs: Math.round(Math.max(0, ...t.longTasks.map((l) => l.ms))),
+  };
 }

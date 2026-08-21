@@ -33,6 +33,10 @@ const WINDOW_S = 20;
 const WINDOW_STRETCHED_S = 4;
 /** Schedule the next window once the playhead is this close to running out. */
 const AHEAD_S = 2;
+/** Most the picture will be held back for the output device, whatever the
+ * device claims. Well past a Bluetooth headset, and short of anything that
+ * would read as the playhead refusing to move. */
+const MAX_LATENCY_S = 0.4;
 
 /** One audible thing on the timeline: a clip's own sound, or a soundtrack item. */
 export interface Voice {
@@ -104,11 +108,49 @@ export class PreviewMixer {
   }
 
   /**
+   * How far behind the graph's clock the sound is actually heard.
+   *
+   * `ctx.currentTime` is the moment the graph has *rendered* to, and a rendered
+   * sample has not left the machine yet: it is sitting in the output buffer the
+   * device will read next. `baseLatency` is what the graph itself holds and
+   * `outputLatency` is what the device does, and their sum is the gap between
+   * a sample being written and a person hearing it.
+   *
+   * The size of that gap is the platform's to decide, and platforms disagree by
+   * an order of magnitude. CoreAudio hands back something in the tens of
+   * milliseconds. WASAPI in shared mode — every Windows browser, by default —
+   * routinely holds several times that, and a Bluetooth output holds more
+   * again. A picture drawn against the unadjusted clock therefore runs ahead of
+   * its own sound by an amount that is invisible where this is developed and
+   * plainly wrong on the machines most people edit on.
+   *
+   * Capped, because the number comes from a driver: a device reporting
+   * something absurd would otherwise hold the picture at the play position for
+   * as long as it claimed.
+   */
+  private latency(): number {
+    const ctx = this.ctx;
+    if (!ctx) return 0;
+    const reported = (ctx.baseLatency || 0) + (ctx.outputLatency || 0);
+    return Math.min(MAX_LATENCY_S, Math.max(0, reported));
+  }
+
+  /** The moment leaving the speakers, given the moment the graph has rendered
+   * to. Held at the play position over the first buffer: the sound starts at
+   * once and the picture waits out the device rather than stepping backwards
+   * into what has already been heard. */
+  private heard(graph: number): number {
+    return Math.max(this.anchor?.timeline ?? 0, graph - this.latency());
+  }
+
+  /**
    * Where the playhead is, from the sound's own clock.
    *
    * This is the whole point of the arrangement: the number the picture is drawn
    * against comes from the same clock the samples leave on, so they cannot
-   * drift apart no matter what the main thread is doing.
+   * drift apart no matter what the main thread is doing. Leaving is the word —
+   * what the graph has rendered is a buffer ahead of what is audible, and the
+   * picture is drawn against the audible one.
    */
   now(): number {
     if (!this.anchor) return 0;
@@ -121,8 +163,13 @@ export class PreviewMixer {
     // until the audio clock agrees with it, and a clock that disagrees is
     // re-anchored rather than believed.
     if (!this.ctx || this.ctx.state !== "running") return wall;
-    const audio = this.anchor.timeline + (this.ctx.currentTime - this.anchor.ctx);
-    if (Math.abs(audio - wall) > 0.25) {
+    const graph = this.anchor.timeline + (this.ctx.currentTime - this.anchor.ctx);
+    // Measured on the graph's clock, which is the one the anchor was taken on.
+    // Comparing the heard clock against the wall would read the device's own
+    // buffer as drift and tear down every scheduled window to correct for it,
+    // which on the machines with the largest buffers is the loudest thing this
+    // class could do.
+    if (Math.abs(graph - wall) > 0.25) {
       this.anchor.ctx = this.ctx.currentTime - (wall - this.anchor.timeline);
       // Everything already scheduled was placed against the old anchor and is
       // now wrong by the size of the jump — a context that sat suspended until
@@ -131,9 +178,27 @@ export class PreviewMixer {
       // their full length, so they stop here and the next update refills from
       // where the clock now stands.
       this.restart(wall);
-      return wall;
+      return this.heard(wall);
     }
-    return audio;
+    return this.heard(graph);
+  }
+
+  /**
+   * How far the picture is being held behind the graph's clock right now, and
+   * what the output device says it holds. Zero when nothing is playing.
+   *
+   * These are two independent readings of the same thing — one taken from what
+   * the clock actually returns, one from the device — and the perf eval holds
+   * them against each other. A preview that went back to drawing against the
+   * rendered clock reports a lead of zero on a device claiming a fifth of a
+   * second, which is the picture running that far ahead of its own sound.
+   */
+  clockLead(): { lead: number; reported: number } {
+    const ctx = this.ctx;
+    const reported = ctx ? (ctx.baseLatency || 0) + (ctx.outputLatency || 0) : 0;
+    if (!this.anchor || !ctx || ctx.state !== "running") return { lead: 0, reported };
+    const graph = this.anchor.timeline + (ctx.currentTime - this.anchor.ctx);
+    return { lead: Math.max(0, graph - this.heard(graph)), reported };
   }
 
   /** Stop every scheduled window and mark each voice to refill at `timeline`. */

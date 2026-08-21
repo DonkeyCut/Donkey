@@ -14,9 +14,10 @@ import type { ClipSpan, MediaAsset, VideoClip } from "@/cut/lib/types";
 import { SubjectMaskCompositor } from "@/cut/lib/behindPass";
 import { FrameCompositor, MISSING_FRAME, PENDING_FRAME, type Frame } from "@/cut/lib/composite";
 import { duckGainAt, overlayPlan, trackZeroPlan } from "@/cut/lib/framePlan";
-import { type ClipFrameSource, FrameSourcePool, mappingKey } from "@/cut/lib/frameSource";
+import { type ClipFrameSource, FrameSourcePool, mappingKey, walkCostMs } from "@/cut/lib/frameSource";
 import { PreviewMixer, type Voice } from "@/cut/lib/previewMixer";
 import {
+  markAudioClock,
   markLiveSamples,
   markLiveSources,
   markPresent,
@@ -45,10 +46,20 @@ import { registerSourceSampler } from "@/cut/lib/previewCanvas";
 
 /** How far ahead of the playhead a clip's decoder is opened and started. */
 const WARM_HORIZON_S = 2.5;
-/** Inside this, an upcoming clip is walked rather than merely opened. */
+/** Inside this, an upcoming clip is walked as well as opened. */
 const WARM_STREAM_S = 0.75;
-/** Decoders alive at once. Past the tab's hardware decode slots the rest fall
- * back to software, and frames start arriving late. */
+/**
+ * Decoders alive at once.
+ *
+ * Past the tab's hardware decode slots the rest fall back to software, where
+ * they are the same processor split further, so it reads as a number that
+ * should shrink on a machine with few slots. It does not. Shrinking it makes
+ * a fast cut suspend and reopen sources it is about to need again, and a
+ * reopen on such a machine costs a fresh decoder and a full walk from the
+ * keyframe — the expensive thing, paid repeatedly. Measured on the eval's
+ * few-slot profiles, cutting this to six moved late frames from 42% to 52%
+ * and turned a flat play into one that decayed across its length.
+ */
 const DECODER_BUDGET = 12;
 
 /** Source time of a clip at timeline time `t`. */
@@ -91,6 +102,7 @@ class Engine {
   /** The playhead value the engine itself wrote last, so its own echo is
    * tellable from an outside move — a seek while playing. */
   private written: number | null = null;
+  private lastWalkCost = 0;
 
   private unsubscribe: () => void;
   private unwatch: () => void;
@@ -132,6 +144,11 @@ class Engine {
    * decode slots in a second. Rounding up keeps the identity still while the
    * box moves and never decodes below display size, and the step is small
    * enough that the extra rows decoded above it stay cheap.
+   *
+   * It holds still for the life of the engine for a second reason: the pool
+   * keys on it, so moving it mid-play abandons every open decoder at once and
+   * pays a fresh keyframe walk for each — on the machines this would be meant
+   * to help, that storm costs far more than the pixels it saves.
    */
   private decodeHeight(): number {
     return Math.ceil(this.canvas.height / 180) * 180 || 180;
@@ -213,6 +230,13 @@ class Engine {
    * the overlay tracks alike — so a cut or an overlay's entrance lands on a
    * ring that is already full. */
   private warm(t: number, playing: boolean) {
+    if (process.env.NODE_ENV !== "production") {
+      const cost = walkCostMs();
+      if (cost && cost !== this.lastWalkCost) {
+        this.lastWalkCost = cost;
+        engineLog(`walk cost ${cost}ms`);
+      }
+    }
     const s = useEditor.getState();
     const lists = [getClipSpans(s.clips, s.assets)];
     for (const track of new Set(overlayLayers(s.clips).map((c) => c.track))) {
@@ -548,6 +572,8 @@ class Engine {
         stale: masterFrame.kind !== "ready",
       });
       markLiveSamples(this.pool.held);
+      const clock = this.mixer.clockLead();
+      markAudioClock(clock.lead, clock.reported);
       markLiveSources(this.pool.active, this.pool.size, this.pool.warmPixels);
     }
   }
