@@ -391,7 +391,7 @@ async function probeMedia(type: AssetType, src: string | Blob): Promise<ProbedMe
   if (!meta.hasVideo) {
     // The waveform rides along with the probe: the file is open and its audio
     // is being read either way, so enrichAsset has nothing left to do.
-    return { type: "audio", duration: meta.duration, peaks: await audioPeaks(src, PEAK_BUCKETS) };
+    return { type: "audio", duration: meta.duration, peaks: await makePeaks(src, meta.duration) };
   }
   return { type: "video", duration: meta.duration, width: meta.width, height: meta.height };
 }
@@ -1449,7 +1449,10 @@ function scheduleEnrichRetry(assetId: string) {
     enrichRetryTimers.delete(assetId);
     const asset = useEditor.getState().assets.find((a) => a.id === assetId);
     if (!asset) return;
-    const done = asset.type === "audio" ? !!asset.peaks?.length : !!asset.thumbs?.length;
+    const done =
+      asset.type === "audio"
+        ? !!asset.peaks?.length
+        : !!asset.thumbs?.length && (asset.type !== "video" || asset.peaks !== undefined);
     if (done) return;
     void enrichAsset(asset);
   }, ENRICH_RETRY_BASE_MS * 3 ** n);
@@ -1467,28 +1470,43 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
       if (!asset.thumbs?.length) {
         useEditor.getState().updateAsset(asset.id, { thumbs: [src], thumbStep: IMAGE_CLIP_SECONDS });
       }
-    } else if (asset.type === "video" && !asset.thumbs?.length) {
-      setStripFailed(asset.id, false);
-      const key = stripCacheKey(useEditor.getState().projectId, asset.fileName);
-      const cached = await readCachedStrip(key, asset.duration);
-      if (cached) {
-        useEditor.getState().updateAsset(asset.id, {
-          thumbs: cached.thumbs,
-          thumbStep: cached.thumbStep,
-          sceneCuts: cached.cuts ?? [],
-        });
-      } else {
-        const { thumbs, thumbStep, cuts } = await makeThumbs(src, asset.duration);
-        // An empty strip is a failure, not a result: persisting it would
-        // leave the asset looking permanently mid-load.
-        if (!thumbs.length) throw new UnreadableMediaError("No frames could be read for the filmstrip.");
-        useEditor.getState().updateAsset(asset.id, { thumbs, thumbStep, sceneCuts: cuts });
-        writeCachedStrip(key, { thumbs, thumbStep, cuts, duration: asset.duration, at: Date.now() });
+    } else if (asset.type === "video") {
+      if (!asset.thumbs?.length) {
+        setStripFailed(asset.id, false);
+        const key = stripCacheKey(useEditor.getState().projectId, asset.fileName);
+        const cached = await readCachedStrip(key, asset.duration);
+        if (cached) {
+          useEditor.getState().updateAsset(asset.id, {
+            thumbs: cached.thumbs,
+            thumbStep: cached.thumbStep,
+            sceneCuts: cached.cuts ?? [],
+          });
+        } else {
+          const { thumbs, thumbStep, cuts } = await makeThumbs(src, asset.duration);
+          // An empty strip is a failure, not a result: persisting it would
+          // leave the asset looking permanently mid-load.
+          if (!thumbs.length) throw new UnreadableMediaError("No frames could be read for the filmstrip.");
+          useEditor.getState().updateAsset(asset.id, { thumbs, thumbStep, sceneCuts: cuts });
+          writeCache(key, { thumbs, thumbStep, cuts, duration: asset.duration, at: Date.now() });
+        }
+      }
+      // The clip box draws the sound under the picture, so a video enriches
+      // waveform peaks alongside its filmstrip. `[]` is an answer too — a
+      // silent file — and stops the strip from re-decoding every open.
+      if (asset.peaks === undefined) {
+        try {
+          const peaks = await loadPeaks(asset, src);
+          if (peaks) useEditor.getState().updateAsset(asset.id, { peaks });
+        } catch (err) {
+          // The strip above already painted; a peaks failure (an expired
+          // signed URL, an undecodable track) never marks it failed.
+          console.error(`[cut] peaks failed for ${asset.fileName}`, err);
+        }
       }
       enrichRetries.delete(asset.id);
     } else if (asset.type === "audio" && !asset.peaks?.length) {
-      const peaks = await makePeaks(src);
-      useEditor.getState().updateAsset(asset.id, { peaks });
+      const peaks = await loadPeaks(asset, src);
+      if (peaks) useEditor.getState().updateAsset(asset.id, { peaks });
       enrichRetries.delete(asset.id);
     }
   } catch (err) {
@@ -1511,8 +1529,8 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
 export async function ensurePeaks(asset: MediaAsset) {
   try {
     if (!asset.peaks?.length) {
-      const peaks = await makePeaks(asset.url);
-      useEditor.getState().updateAsset(asset.id, { peaks });
+      const peaks = await loadPeaks(asset);
+      if (peaks?.length) useEditor.getState().updateAsset(asset.id, { peaks });
     }
   } catch (err) {
     // Waveforms are decorative; editing works without them. Error level
@@ -1546,6 +1564,13 @@ function stripCacheKey(projectId: string | null, fileName: string) {
   return `${projectId ?? ""}/${fileName}@${THUMB_H}s3`;
 }
 
+type CachedPeaks = { peaks: number[]; duration: number; at: number };
+
+function peaksCacheKey(projectId: string | null, fileName: string) {
+  // The density marker versions the cache; peaks sampled differently regenerate.
+  return `${projectId ?? ""}/${fileName}@peaks${PEAKS_PER_SECOND}`;
+}
+
 function openStripDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(STRIP_DB, 1);
@@ -1575,13 +1600,44 @@ async function readCachedStrip(key: string, duration: number): Promise<CachedStr
   }
 }
 
-function writeCachedStrip(key: string, strip: CachedStrip) {
+async function readCachedPeaks(key: string, duration: number): Promise<number[] | null> {
+  try {
+    const db = await openStripDb();
+    const entry = await new Promise<CachedPeaks | undefined>((resolve, reject) => {
+      const req = db.transaction(STRIP_STORE).objectStore(STRIP_STORE).get(key);
+      req.onsuccess = () => resolve(req.result as CachedPeaks | undefined);
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+    // A same-path file with a different duration was rewritten; regenerate.
+    if (!Array.isArray(entry?.peaks) || Math.abs(entry.duration - duration) > 0.25) return null;
+    return entry.peaks;
+  } catch {
+    return null;
+  }
+}
+
+/** Waveform peaks for an asset, from the cache when this file was already
+ * decoded — a real audio decode otherwise. Empty peaks are an answer (a file
+ * with no audible track) and cache like any other. A headless runtime returns
+ * undefined so the browser decodes on its next open. */
+async function loadPeaks(asset: MediaAsset, src = asset.url): Promise<number[] | undefined> {
+  if (typeof AudioDecoder === "undefined") return undefined;
+  const key = peaksCacheKey(useEditor.getState().projectId, asset.fileName);
+  const cached = await readCachedPeaks(key, asset.duration);
+  if (cached) return cached;
+  const peaks = await makePeaks(src, asset.duration);
+  writeCache(key, { peaks, duration: asset.duration, at: Date.now() });
+  return peaks;
+}
+
+function writeCache(key: string, entry: CachedStrip | CachedPeaks) {
   void (async () => {
     try {
       const db = await openStripDb();
       const tx = db.transaction(STRIP_STORE, "readwrite");
       const store = tx.objectStore(STRIP_STORE);
-      store.put(strip, key);
+      store.put(entry, key);
       const count = await new Promise<number>((resolve, reject) => {
         const req = store.count();
         req.onsuccess = () => resolve(req.result);
@@ -1897,8 +1953,13 @@ async function pumpEdgeFrames() {
   }
 }
 
-const PEAK_BUCKETS = 1600;
+/** Waveform buckets per second of media. Density scaling with length keeps a
+ * zoomed-in strip honest; the bounds keep tiny stings drawable and hour-long
+ * files a bounded array. */
+const PEAKS_PER_SECOND = 50;
 
-function makePeaks(url: string): Promise<number[]> {
-  return audioPeaks(url, PEAK_BUCKETS);
+function makePeaks(src: string | Blob, duration: number): Promise<number[]> {
+  const buckets =
+    duration > 0 ? Math.min(30_000, Math.max(400, Math.round(duration * PEAKS_PER_SECOND))) : 1600;
+  return audioPeaks(src, buckets);
 }

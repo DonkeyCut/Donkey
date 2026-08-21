@@ -76,7 +76,8 @@ const TRANSITION_ICONS: Record<TransitionStyle, LucideIcon> = {
   splitclose: FoldHorizontal,
 };
 
-const VIDEO_H = 64;
+/** Video row height: the picture band plus the sound band under it. */
+const VIDEO_H = 88;
 /** How far past the top or bottom of the video stack a drag has to carry a
  * clip to open a new track. Every drop inside the stack lands on a row, which
  * opens room for it, so this reach is the one gesture that adds a track — and
@@ -90,6 +91,12 @@ const OVERLAY_H = VIDEO_H; // every video track shares the same row height
  * and the next row keeps its usual distance below the line. */
 const KEYRAIL_EXTRA = 20;
 const AUDIO_H = 44;
+/** The sound band along a video clip box's bottom edge. */
+const WAVE_H = 24;
+/** The picture band above it — the filmstrip's height. A clip with nothing to
+ * play in the band (an image, a muted or silent video) drops the band and its
+ * box stops at the filmstrip's edge. */
+const FILM_H = VIDEO_H - 4 - WAVE_H;
 /** The `mt-1.5` every row carries, so a row drag knows what one row's worth of
  * travel is. */
 const ROW_GAP = 6;
@@ -1605,7 +1612,9 @@ export function Timeline() {
       style={{ left: t * pps, width: Math.max(10, len * pps - CLIP_GAP), height: h }}
     >
       {ghost && (
-        <DropGhostFilm ghost={ghost} w={Math.max(10, len * pps - CLIP_GAP)} h={h} pps={pps} />
+        <div className="pointer-events-none absolute inset-x-0 top-0" style={{ height: h - WAVE_H }}>
+          <DropGhostFilm ghost={ghost} w={Math.max(10, len * pps - CLIP_GAP)} h={h - WAVE_H} pps={pps} />
+        </div>
       )}
       <span className="absolute top-1 left-1 rounded-[5px] bg-black/65 px-1.5 py-px font-mono text-[10px] tabular-nums text-white">
         {len.toFixed(1)}s
@@ -3514,11 +3523,15 @@ function ClipView({
     () => false
   );
   const boxRef = useRef<HTMLDivElement>(null);
+  // The clip's own sound, drawn in the box's band under the picture. Muting —
+  // detach included — takes the sound off the clip, so the band drops and the
+  // box stops at the filmstrip (a detached copy draws on the soundtrack row).
+  const hasWave = asset.type === "video" && !clip.muted && !!asset.peaks?.length;
   // Bumped as tile captures land, so the memo re-plans and picks them up.
   const [filmGen, onTileFrame] = useReducer((x: number) => x + 1, 0);
   const filmstrip = useMemo(
     () =>
-      filmstripFrames(asset, filmIn, w, pps, speed, VIDEO_H - 4, 26, {
+      filmstripFrames(asset, filmIn, w, pps, speed, FILM_H, 26, {
         start: startFrame,
         end: endFrame,
       }),
@@ -3563,7 +3576,7 @@ function ClipView({
         left: drag ? drag.ghostX : (partAt ?? span.start) * pps,
         top: drag ? 2 + drag.ghostY : undefined,
         width: Math.max(10, w - CLIP_GAP),
-        height: VIDEO_H - 4,
+        height: hasWave ? VIDEO_H - 4 : FILM_H,
         // Inline so it beats SELECTED_SHADOW's z-10 class on the same element.
         zIndex: drag ? 20 : undefined,
       }}
@@ -3580,7 +3593,17 @@ function ClipView({
         });
       }}
     >
-      <Filmstrip frames={filmstrip} grade={clip.grade} failed={stripFailed} />
+      <div className="pointer-events-none absolute inset-x-0 top-0" style={{ height: FILM_H }}>
+        <Filmstrip frames={filmstrip} grade={clip.grade} failed={stripFailed} />
+      </div>
+      {hasWave && (
+        <div
+          className="tl-clip-wave pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-b from-[#59c09d] to-[#43b18d]"
+          style={{ height: WAVE_H }}
+        >
+          <WaveformCanvas asset={asset} from={filmIn} to={filmOut} w={w} h={WAVE_H - 4} className="inset-x-0 inset-y-0.5" />
+        </div>
+      )}
       {selected && (
         // A blue wash over the whole clip so a multi-selection reads at a
         // glance, not just from the thin border.
@@ -4323,6 +4346,55 @@ function MuteChip({
   );
 }
 
+/** Waveform bars for the slice of `asset` between source times `from` and
+ * `to`, stretched across a `w`px bar. Each bar folds the max of every peak
+ * bucket it covers, so a zoomed-out strip keeps its transients. */
+function WaveformCanvas({
+  asset,
+  from,
+  to,
+  w,
+  h,
+  className,
+}: {
+  asset: MediaAsset;
+  from: number;
+  to: number;
+  w: number;
+  h: number;
+  className?: string;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const peaks = asset.peaks;
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !peaks?.length) return;
+    // Cap the backing store below browser canvas limits; the element is
+    // CSS-stretched to the bar, so past the cap bars widen instead of the
+    // tail going bare (a canvas keeps its intrinsic width under inset-x-0).
+    const width = Math.min(16384, Math.round(w));
+    canvas.width = width;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d")!;
+    ctx.clearRect(0, 0, width, h);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
+    const n = peaks.length;
+    const bars = Math.max(1, Math.floor(width / 3));
+    const start = (from / asset.duration) * n;
+    const perBar = (((to - from) / asset.duration) * n) / bars;
+    for (let i = 0; i < bars; i++) {
+      const a = Math.max(0, Math.min(n - 1, Math.floor(start + i * perBar)));
+      const b = Math.max(a + 1, Math.ceil(start + (i + 1) * perBar));
+      let p = 0;
+      for (let j = a; j < b && j < n; j++) if (peaks[j] > p) p = peaks[j];
+      const bh = Math.max(1.5, p * (h - 2));
+      ctx.fillRect(i * 3, (h - bh) / 2, 2, bh);
+    }
+  }, [asset.duration, peaks, from, to, w, h]);
+  if (!peaks?.length) return null;
+  return <canvas ref={canvasRef} className={cn("pointer-events-none absolute w-full", className)} />;
+}
+
 function AudioView({
   clip,
   asset,
@@ -4361,35 +4433,9 @@ function AudioView({
   /** Paint (or clear) the snap guide at this stage-x pixel. */
   onSnap: (x: number | null) => void;
 }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const loading = useEditor((s) => (asset ? s.loadingMedia.has(asset.fileName) : false));
   const len = clipLen(clip);
   const w = Math.max(10, len * pps);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !asset?.peaks) return;
-    // Cap the backing store below browser canvas limits; the element is
-    // CSS-stretched to the bar, so past the cap bars widen instead of the
-    // tail going bare (a canvas keeps its intrinsic width under inset-x-0).
-    const width = Math.min(16384, Math.round(w));
-    const height = AUDIO_H - 8;
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d")!;
-    ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
-    const peaks = asset.peaks;
-    const n = peaks.length;
-    const from = (clip.in / asset.duration) * n;
-    const span = ((clip.out - clip.in) / asset.duration) * n;
-    const bars = Math.max(1, Math.floor(width / 3));
-    for (let i = 0; i < bars; i++) {
-      const p = peaks[Math.min(n - 1, Math.floor(from + (i / bars) * span))] ?? 0;
-      const h = Math.max(1.5, p * (height - 2));
-      ctx.fillRect(i * 3, (height - h) / 2, 2, h);
-    }
-  }, [asset, clip.in, clip.out, w]);
 
   if (!asset) return null;
 
@@ -4419,7 +4465,7 @@ function AudioView({
       data-tl-sel={`audio:${clip.id}`}
       onPointerDown={(e) => startLaneMove(e, "audio", clip.id, ui)}
     >
-      <canvas ref={canvasRef} className="pointer-events-none absolute inset-x-0 inset-y-1 w-full" />
+      <WaveformCanvas asset={asset} from={clip.in} to={clip.out} w={w} h={AUDIO_H - 8} className="inset-x-0 inset-y-1" />
       {(clip.fadeIn ?? 0) > 0 && (
         <div
           className="tl-fade-in pointer-events-none absolute inset-y-0 left-0 bg-gradient-to-r from-black/45 to-transparent"

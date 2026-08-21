@@ -12,9 +12,10 @@ import type { MockProject } from "@/cut/components/editor-mock/mockData";
 // usable track width is the frame minus that column and some gutter.
 const TRACK_W = 800;
 const CLIP_GAP = 4;
-const PANEL_H = 170;
+const PANEL_H = 190;
 const RULER_H = 26;
-const VIDEO_H = 56;
+const VIDEO_H = 76;
+const WAVE_H = 20;
 const AUDIO_H = 40;
 const SUB_H = 18;
 const SFX_H = 20;
@@ -71,17 +72,33 @@ export function MockTimeline({ project }: { project: MockProject }) {
                 "absolute top-0.5 overflow-hidden rounded-lg bg-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
                 c.selected && "z-10 ring-2 ring-[#0a84ff]"
               )}
-              style={{
-                left: c.left,
-                width: c.width,
-                height: VIDEO_H - 4,
-                // The editor draws a clip as a strip of frames repeated across
-                // its width; one tile at native aspect gives the same read.
-                backgroundImage: `url(${c.thumb})`,
-                backgroundSize: "auto 100%",
-                backgroundRepeat: "repeat-x",
-              }}
+              style={{ left: c.left, width: c.width, height: c.muted ? VIDEO_H - 4 - WAVE_H : VIDEO_H - 4 }}
             >
+              <div
+                className="absolute inset-x-0 top-0"
+                style={{
+                  height: VIDEO_H - 4 - WAVE_H,
+                  // The editor draws a clip as a strip of frames repeated across
+                  // its width; one tile at native aspect gives the same read.
+                  backgroundImage: `url(${c.thumb})`,
+                  backgroundSize: "auto 100%",
+                  backgroundRepeat: "repeat-x",
+                }}
+              />
+              {!c.muted && (
+                <div
+                  className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-b from-[#59c09d] to-[#43b18d] px-1"
+                  style={{ height: WAVE_H }}
+                >
+                  {Array.from({ length: Math.max(8, Math.floor(c.width / 5)) }, (_, i) => (
+                    <span
+                      key={i}
+                      className="w-[2px] rounded-full bg-white/85"
+                      style={{ height: `${WAVE[(i + c.label.length) % WAVE.length] * 0.7}%` }}
+                    />
+                  ))}
+                </div>
+              )}
               {c.muted && (
                 <span className="absolute bottom-1 left-1 grid size-[18px] place-items-center rounded-[5px] bg-black/70 text-white">
                   <VolumeX className="size-3" />

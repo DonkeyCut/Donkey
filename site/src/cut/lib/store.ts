@@ -181,8 +181,8 @@ function placedState(
   };
 }
 
-export const TIMELINE_H_DEFAULT = 248;
-export const TIMELINE_H_MIN = 170;
+export const TIMELINE_H_DEFAULT = 272;
+export const TIMELINE_H_MIN = 194;
 /** Tallest the timeline may grow: the window height less room for the top bar
  * and a usable preview. The constant covers code running without a window. */
 export const timelineHMax = () =>
