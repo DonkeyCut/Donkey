@@ -39,6 +39,7 @@ public struct AnalyticsScreen: View {
                 }
             }
             .navigationTitle("Analytics")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
@@ -61,12 +62,11 @@ private struct SummaryList: View {
 
                 Divider()
                 MetricSection(
-                    title: "Active users",
-                    value: summary.active7d.map { $0.formatted() } ?? "—",
-                    caption: activeCaption,
-                    deltaPercent: summary.weekDeltaPercent
+                    title: "Total registered",
+                    value: summary.registered.formatted(),
+                    caption: "Cumulative registrations"
                 ) {
-                    ActiveChart(points: summary.points)
+                    RegisteredChart(points: summary.points)
                 }
 
                 Divider()
@@ -91,11 +91,12 @@ private struct SummaryList: View {
 
                 Divider()
                 MetricSection(
-                    title: "Total registered",
-                    value: summary.registered.formatted(),
-                    caption: "Cumulative registrations"
+                    title: "Active users",
+                    value: summary.active7d.map { $0.formatted() } ?? "—",
+                    caption: activeCaption,
+                    deltaPercent: summary.weekDeltaPercent
                 ) {
-                    RegisteredChart(points: summary.points)
+                    ActiveChart(points: summary.points)
                 }
 
                 if let generatedAt = summary.generatedAt {
