@@ -276,7 +276,14 @@ async function cacheOne(
     await makeRoom(projectId, Number(res.headers.get("content-length")) || 0);
     const dir = await mediaDir(projectId, true);
     if (!dir) return { go: true, url: null };
-    const w = await (await dir.getFileHandle(fileName, { create: true })).createWritable();
+    // The directory can go out from under this between the two awaits — an
+    // eviction pass sweeping a copy, or the origin's store cleared from
+    // browser settings. The signed URL still serves the file either way.
+    const w = await dir
+      .getFileHandle(fileName, { create: true })
+      .then((h) => h.createWritable())
+      .catch(() => null);
+    if (!w) return { go: true, url: null };
     try {
       await res.body.pipeTo(w, { signal });
       break;
