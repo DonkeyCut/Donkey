@@ -6,8 +6,7 @@ import UIKit
 /// The phone's HTTP client for the hosted Cut API (/api/cut-cloud/*). The
 /// bearer session comes from the keychain, and every request carries the iOS
 /// client header — the marker that links this account for the desktop's phone
-/// features. Media requests are stamped with the caller's cellular decision so
-/// an upload started on Wi-Fi never silently continues over cell.
+/// features.
 final class CutCloudClient: NSObject {
     private let base = AuthBackend.baseURL
 
@@ -20,16 +19,13 @@ final class CutCloudClient: NSObject {
     private func request(
         _ method: String,
         _ path: String,
-        body: [String: Any]? = nil,
-        allowCellular: Bool = true
+        body: [String: Any]? = nil
     ) throws -> URLRequest {
         guard let token else { throw CloudSyncError.unauthorized }
         var request = URLRequest(url: base.appending(path: path))
         request.httpMethod = method
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("ios", forHTTPHeaderField: "x-donkey-cut-client")
-        request.allowsCellularAccess = allowCellular
-        request.allowsExpensiveNetworkAccess = allowCellular
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try? JSONSerialization.data(withJSONObject: body)
@@ -98,22 +94,20 @@ extension CutCloudClient: CloudSyncServicing {
 
     func uploadLibraryMedia(
         _ upload: LibraryUpload,
-        allowCellular: Bool,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> RemoteAsset {
         let presign = try await presignLibrary(
             fileName: upload.fileName,
             mime: upload.mime,
             bytes: upload.bytes,
-            resume: upload.resume,
-            allowCellular: allowCellular
+            resume: upload.resume
         )
         if presign.done != true {
             guard let url = presign.url.flatMap(URL.init(string:)) else { throw CloudSyncError.transport }
-            try await putFile(upload.fileURL, to: url, mime: upload.mime, allowCellular: allowCellular, progress: progress)
+            try await putFile(upload.fileURL, to: url, mime: upload.mime, progress: progress)
         }
         let posterKey: String? = if let poster = upload.poster {
-            try? await uploadPoster(poster, besides: presign.fileName, allowCellular: allowCellular)
+            try? await uploadPoster(poster, besides: presign.fileName)
         } else {
             nil
         }
@@ -130,7 +124,7 @@ extension CutCloudClient: CloudSyncServicing {
         var body: [String: Any] = ["key": presign.key, "meta": meta]
         if let posterKey { body["posterKey"] = posterKey }
         let data = try await send(
-            try request("POST", "/api/cut-cloud/library/complete", body: body, allowCellular: allowCellular)
+            try request("POST", "/api/cut-cloud/library/complete", body: body)
         )
         let asset = try decode(AssetResponse.self, from: data)
         progress(1)
@@ -141,15 +135,13 @@ extension CutCloudClient: CloudSyncServicing {
         fileName: String,
         mime: String,
         bytes: Int64,
-        resume: Bool,
-        allowCellular: Bool
+        resume: Bool
     ) async throws -> PresignResponse {
         let data = try await send(
             try request(
                 "POST",
                 "/api/cut-cloud/library/presign",
-                body: ["fileName": fileName, "mime": mime, "bytes": bytes, "resume": resume],
-                allowCellular: allowCellular
+                body: ["fileName": fileName, "mime": mime, "bytes": bytes, "resume": resume]
             )
         )
         return try decode(PresignResponse.self, from: data)
@@ -157,18 +149,17 @@ extension CutCloudClient: CloudSyncServicing {
 
     /// The recording's thumbnail goes up beside the movie so the desktop card
     /// paints without decoding video. Best-effort: the upload stands without it.
-    private func uploadPoster(_ poster: Data, besides fileName: String, allowCellular: Bool) async throws -> String {
+    private func uploadPoster(_ poster: Data, besides fileName: String) async throws -> String {
         let posterName = (fileName as NSString).deletingPathExtension + "-poster.jpg"
         let presign = try await presignLibrary(
             fileName: posterName,
             mime: "image/jpeg",
             bytes: Int64(poster.count),
-            resume: true,
-            allowCellular: allowCellular
+            resume: true
         )
         if presign.done != true {
             guard let url = presign.url.flatMap(URL.init(string:)) else { throw CloudSyncError.transport }
-            try await putData(poster, to: url, mime: "image/jpeg", allowCellular: allowCellular)
+            try await putData(poster, to: url, mime: "image/jpeg")
         }
         return presign.key
     }
@@ -177,13 +168,12 @@ extension CutCloudClient: CloudSyncServicing {
         _ file: URL,
         to url: URL,
         mime: String,
-        allowCellular: Bool,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws {
         let response: URLResponse
         do {
             (_, response) = try await URLSession.shared.upload(
-                for: putRequest(url, mime: mime, allowCellular: allowCellular),
+                for: putRequest(url, mime: mime),
                 fromFile: file,
                 delegate: UploadProgressDelegate(progress)
             )
@@ -195,11 +185,11 @@ extension CutCloudClient: CloudSyncServicing {
         }
     }
 
-    private func putData(_ data: Data, to url: URL, mime: String, allowCellular: Bool) async throws {
+    private func putData(_ data: Data, to url: URL, mime: String) async throws {
         let response: URLResponse
         do {
             (_, response) = try await URLSession.shared.upload(
-                for: putRequest(url, mime: mime, allowCellular: allowCellular),
+                for: putRequest(url, mime: mime),
                 from: data
             )
         } catch {
@@ -210,13 +200,11 @@ extension CutCloudClient: CloudSyncServicing {
         }
     }
 
-    private func putRequest(_ url: URL, mime: String, allowCellular: Bool) -> URLRequest {
+    private func putRequest(_ url: URL, mime: String) -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
         // The presigned URL is signed over this content type.
         request.setValue(mime, forHTTPHeaderField: "Content-Type")
-        request.allowsCellularAccess = allowCellular
-        request.allowsExpensiveNetworkAccess = allowCellular
         return request
     }
 

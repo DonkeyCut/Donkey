@@ -14,11 +14,10 @@ kept in the app's SwiftData store, so nothing depends on the app staying open
 — whatever was mid-flight when the app died is picked up on the next launch,
 foreground, network change, or edit.
 
-**The one rule on data:** a transfer moves when the network is Wi-Fi, or the
-user turned on "Sync over Cellular" (avatar menu), or the payload is small
-(notes, link imports, JSON). Media otherwise waits for Wi-Fi, and requests are
-stamped with that decision so an upload started on Wi-Fi never quietly
-continues over cell.
+**The one rule on data:** a transfer moves whenever the phone is online. Who
+gets to spend cellular data is the system's call — iOS Settings carries the
+per-app Cellular Data switch, and a request it forbids fails on its own — so
+the app keeps no network preference of its own.
 
 Every byte moves at most once. Uploads go straight to storage on presigned
 URLs; an interrupted upload re-presigns under the name it already claimed, and

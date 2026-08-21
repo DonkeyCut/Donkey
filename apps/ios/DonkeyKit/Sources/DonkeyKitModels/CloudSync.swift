@@ -120,11 +120,9 @@ nonisolated public enum CloudSyncError: Error, Equatable {
 /// What the app target's CutCloudClient does for the sync engine.
 public protocol CloudSyncServicing: AnyObject {
     /// Presign → PUT the bytes to R2 → complete. Reports rough progress in
-    /// 0...1. `allowCellular` is stamped on the requests so a Wi-Fi upload
-    /// never silently continues over cell when the path changes mid-transfer.
+    /// 0...1.
     func uploadLibraryMedia(
         _ upload: LibraryUpload,
-        allowCellular: Bool,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> RemoteAsset
     func deleteLibraryAsset(id: String) async throws
@@ -197,29 +195,11 @@ public protocol CloudProjectsServicing: AnyObject, Sendable {
 
 // MARK: - Network policy
 
+/// The connection the sync engine is working over. Whether cellular data may
+/// be spent is the system's call: iOS Settings carries the per-app Cellular
+/// Data switch, and a request it forbids fails on its own.
 nonisolated public enum NetworkPath: Equatable, Sendable {
     case wifi
     case cellular
     case offline
-}
-
-/// How big a transfer is, as policy sees it. Small-class traffic (notes, link
-/// imports, JSON) moves on any connection; media waits for Wi-Fi unless the
-/// user allows cellular.
-nonisolated public enum TransferClass: Equatable, Sendable {
-    case small
-    case media
-}
-
-/// The one rule that spends the user's data.
-nonisolated public func transferAllowed(
-    _ kind: TransferClass,
-    on path: NetworkPath,
-    cellularAllowed: Bool
-) -> Bool {
-    switch path {
-    case .offline: false
-    case .wifi: true
-    case .cellular: kind == .small || cellularAllowed
-    }
 }

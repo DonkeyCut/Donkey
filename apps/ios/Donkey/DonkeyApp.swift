@@ -53,7 +53,6 @@ final class AppWiring {
         let sync = SyncEngine(
             journal: store,
             service: cloud,
-            cellularAllowed: { app.syncOverCellular },
             signedIn: { auth.isSignedIn },
             uploadFor: { recording in
                 await CutCloudClient.uploadPayload(for: recording, media: media)
@@ -63,7 +62,6 @@ final class AppWiring {
         sync.ideas = ideas
         media.sync = sync
         ideas.onLocalChange = { sync.kick() }
-        app.onSyncPolicyChange = { sync.kick() }
 
         self.app = app
         self.ideas = ideas

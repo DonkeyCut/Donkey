@@ -4,8 +4,8 @@ import Foundation
 // inspiration up, notes both ways, deletes replayed — against a journal the
 // store persists, so nothing depends on the app staying open: whatever was
 // mid-flight when the app died is picked up from the journal on the next
-// kick. Every byte moves at most once; the policy in CloudSync.swift decides
-// what may move on which network.
+// kick. Every byte moves at most once, and it moves on whatever connection
+// the phone has: iOS Settings owns the per-app cellular switch.
 
 nonisolated public struct SyncTombstone: Equatable, Sendable, Identifiable {
     nonisolated public enum Kind: String, Sendable {
@@ -84,7 +84,6 @@ public final class SyncEngine {
 
     private let journal: any SyncJournalStoring
     private let service: any CloudSyncServicing
-    private let cellularAllowed: () -> Bool
     private let signedIn: () -> Bool
     /// Reads a recording's upload payload (bytes, dimensions, poster) off the
     /// file; the app target implements it with AVFoundation.
@@ -95,13 +94,11 @@ public final class SyncEngine {
     public init(
         journal: any SyncJournalStoring,
         service: any CloudSyncServicing,
-        cellularAllowed: @escaping () -> Bool,
         signedIn: @escaping () -> Bool,
         uploadFor: @escaping (Recording) async -> LibraryUpload?
     ) {
         self.journal = journal
         self.service = service
-        self.cellularAllowed = cellularAllowed
         self.signedIn = signedIn
         self.uploadFor = uploadFor
     }
@@ -150,18 +147,17 @@ public final class SyncEngine {
         }
         await replayTombstones()
         await syncNotes()
-        // Link imports are small payloads: they move on any connection, so
-        // they queue ahead of the media gate.
+        // Link imports are small payloads, so they queue ahead of the media.
         await uploadPendingInspirationLinks()
-        guard allowed(.media) else { return }
+        guard online else { return }
         await refreshStorage()
         guard !storageFull else { return }
         await uploadPendingRecordings()
         await uploadPendingInspirationMedia()
     }
 
-    private func allowed(_ kind: TransferClass) -> Bool {
-        transferAllowed(kind, on: network, cellularAllowed: cellularAllowed())
+    private var online: Bool {
+        network != .offline
     }
 
     // MARK: Deletes
@@ -190,7 +186,7 @@ public final class SyncEngine {
     // MARK: Notes (two-way, last writer wins)
 
     private func syncNotes() async {
-        guard allowed(.small) else { return }
+        guard online else { return }
         // Push local edits first so the pull that follows can't overwrite them.
         for note in (try? journal.dirtyNotes()) ?? [] {
             do {
@@ -268,7 +264,7 @@ public final class SyncEngine {
 
     private func uploadPendingRecordings() async {
         for recording in media?.recordings ?? [] {
-            guard allowed(.media), !storageFull else { return }
+            guard online, !storageFull else { return }
             let remote = try? journal.recordingRemote(recording.id)
             guard remote?.assetId == nil, !uploading.contains(recording.id) else { continue }
             guard var upload = await uploadFor(recording) else { continue }
@@ -278,10 +274,7 @@ public final class SyncEngine {
             uploadStates[recording.id] = .uploading(percent: 0)
             defer { uploading.remove(recording.id) }
             do {
-                let asset = try await service.uploadLibraryMedia(
-                    upload,
-                    allowCellular: cellularAllowed()
-                ) { [weak self] fraction in
+                let asset = try await service.uploadLibraryMedia(upload) { [weak self] fraction in
                     Task { @MainActor [weak self] in
                         self?.setUploadProgress(recording.id, fraction)
                     }
@@ -326,7 +319,7 @@ public final class SyncEngine {
     private func uploadPendingInspirationLinks() async {
         for item in ideas?.inspiration ?? [] {
             guard case .link(let url) = item.kind else { continue }
-            guard allowed(.small) else { continue }
+            guard online else { continue }
             guard ((try? journal.isInspirationLinkSynced(item.id)) ?? true) == false else { continue }
             do {
                 try await service.importInspirationLink(url)
@@ -342,7 +335,7 @@ public final class SyncEngine {
     private func uploadPendingInspirationMedia() async {
         for item in ideas?.inspiration ?? [] {
             guard case .media(let fileName, let isVideo) = item.kind else { continue }
-            guard allowed(.media), !storageFull else { continue }
+            guard online, !storageFull else { continue }
             guard ((try? journal.inspirationRemoteAssetId(item.id)) ?? nil) == nil else { continue }
             guard let fileURL = ideas?.mediaURL(fileName: fileName),
                   let bytes = fileSize(fileURL) else { continue }
@@ -358,11 +351,7 @@ public final class SyncEngine {
                 resume: true
             )
             do {
-                let asset = try await service.uploadLibraryMedia(
-                    upload,
-                    allowCellular: cellularAllowed(),
-                    progress: { _ in }
-                )
+                let asset = try await service.uploadLibraryMedia(upload, progress: { _ in })
                 try? journal.markInspirationMediaSynced(item.id, remoteAssetId: asset.id)
                 storageFull = false
             } catch CloudSyncError.storageFull {

@@ -114,25 +114,6 @@ import Testing
     }
 }
 
-@Suite struct SyncPolicyTests {
-    @Test func wifiMovesEverything() {
-        #expect(transferAllowed(.media, on: .wifi, cellularAllowed: false))
-        #expect(transferAllowed(.small, on: .wifi, cellularAllowed: false))
-    }
-
-    @Test func cellularHoldsMediaUntilAllowed() {
-        #expect(!transferAllowed(.media, on: .cellular, cellularAllowed: false))
-        #expect(transferAllowed(.media, on: .cellular, cellularAllowed: true))
-        // Notes and links are small; they always move.
-        #expect(transferAllowed(.small, on: .cellular, cellularAllowed: false))
-    }
-
-    @Test func offlineMovesNothing() {
-        #expect(!transferAllowed(.small, on: .offline, cellularAllowed: true))
-        #expect(!transferAllowed(.media, on: .offline, cellularAllowed: true))
-    }
-}
-
 @MainActor
 @Suite struct SyncEngineTests {
     final class FakeCloud: CloudSyncServicing {
@@ -149,7 +130,6 @@ import Testing
 
         func uploadLibraryMedia(
             _ upload: LibraryUpload,
-            allowCellular: Bool,
             progress: @escaping @Sendable (Double) -> Void
         ) async throws -> RemoteAsset {
             uploads.append(upload.fileName)
@@ -190,7 +170,6 @@ import Testing
         let engine = SyncEngine(
             journal: store,
             service: cloud,
-            cellularAllowed: { false },
             signedIn: { true },
             uploadFor: { recording in
                 LibraryUpload(
@@ -338,16 +317,30 @@ import Testing
         #expect(rig.cloud.links.count == 1)
     }
 
-    @Test func cellularHoldsMediaButMovesNotes() async throws {
+    @Test func cellularMovesEverything() async throws {
+        // iOS Settings owns the cellular switch, so the engine treats a
+        // cellular path like any other connection.
         let rig = try makeRig()
         rig.engine.network = .cellular
-        _ = try ingestClip(rig)
+        let recording = try ingestClip(rig)
         rig.ideas.openEditor()
         rig.ideas.draft?.body = "typed on the train"
         let note = rig.ideas.saveDraft()!
         await rig.engine.run()
-        #expect(rig.cloud.uploads.isEmpty)
+        #expect(rig.cloud.uploads == [recording.fileName])
         #expect(rig.cloud.notes[note.id] != nil)
+    }
+
+    @Test func offlineMovesNothing() async throws {
+        let rig = try makeRig()
+        rig.engine.network = .offline
+        _ = try ingestClip(rig)
+        rig.ideas.openEditor()
+        rig.ideas.draft?.body = "typed in a tunnel"
+        let note = rig.ideas.saveDraft()!
+        await rig.engine.run()
+        #expect(rig.cloud.uploads.isEmpty)
+        #expect(rig.cloud.notes[note.id] == nil)
     }
 }
 
