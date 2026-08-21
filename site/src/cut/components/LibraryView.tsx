@@ -1061,7 +1061,9 @@ export function LibraryCard({
   const videoRef = useRef<HTMLVideoElement>(null);
   const { flash, attachReveal } = useRevealFlash("library", a.id);
   // With one shelf listed, every card is on it — the badge would say nothing.
-  const bothShelves = availableResidencies().length > 1 || offline;
+  // Phone recordings all come up from the cloud, so they carry none either.
+  const bothShelves =
+    a.origin !== "camera" && (availableResidencies().length > 1 || offline);
   // Each card is a real media element, so the source waits until the tile has
   // been scrolled near: a large library would otherwise pull every file's
   // metadata across the network the moment the page opened.

@@ -1,6 +1,7 @@
 import posthog from "posthog-js";
 import { useEffect } from "react";
 
+import type { PerfSample } from "@/cut/lib/perfTrace";
 import type {
   OnboardingRun,
   ReferralSource,
@@ -28,6 +29,10 @@ export type AnalyticsEvents = {
   cut_storage_pill_clicked: void;
   cut_storage_upgrade_shown: { source: "quota-413" | "pill" };
   cut_grace_banner_shown: void;
+  // Preview timing from an account that turned diagnostics on, one summary per
+  // half minute of playback. Numbers only — see `PerfSample` in the Cut
+  // preview's perfTrace for what each one means and why it is here.
+  cut_preview_perf: PerfSample;
   // Billing (settings).
   pro_checkout_started: void;
   billing_portal_opened: void;

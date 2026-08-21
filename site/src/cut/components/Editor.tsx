@@ -35,6 +35,8 @@ import { syncLinkedLibrary } from "@/cut/lib/linkedLibrary";
 import { reportActivity } from "@/cut/lib/tabActivity";
 import { TabStatus } from "./TabStatus";
 import { installDevHooks } from "@/cut/lib/devHooks";
+import { meterPerf, stopMeter } from "@/cut/lib/perfTrace";
+import { track } from "@/lib/analytics";
 import { ensureCloudThreads } from "@/cut/lib/chatCloud";
 import { readProjectThreads, writeActiveChat } from "@/cut/lib/chatThreads";
 import { backTarget, useCutBase } from "@/cut/lib/nav";
@@ -90,6 +92,24 @@ export function Editor({
   viewer?: boolean;
 }) {
   useEffect(() => installDevHooks(), []);
+  // Preview diagnostics, for accounts that turned them on in settings: the
+  // engine counts what its frames did and sends a summary every half minute of
+  // playback. Off — and costing a null check — for everyone else.
+  useEffect(() => {
+    let live = true;
+    void fetch("/api/account/feature-flags")
+      .then((r) => (r.ok ? (r.json() as Promise<{ flags: { id: string; enabled: boolean }[] }>) : null))
+      .then((body) => {
+        if (!live || !body) return;
+        const on = body.flags.some((f) => f.id === "preview_diagnostics" && f.enabled);
+        if (on) meterPerf((sample) => track("cut_preview_perf", sample));
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+      stopMeter();
+    };
+  }, []);
   const back = backTarget(useCutBase(), from, folder);
   const loaded = useEditor((s) => s.loaded);
   const loadError = useEditor((s) => s.loadError);

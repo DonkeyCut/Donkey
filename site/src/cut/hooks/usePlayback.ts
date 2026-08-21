@@ -17,10 +17,15 @@ import { duckGainAt, overlayPlan, trackZeroPlan } from "@/cut/lib/framePlan";
 import { type ClipFrameSource, FrameSourcePool, mappingKey, walkCostMs } from "@/cut/lib/frameSource";
 import { PreviewMixer, type Voice } from "@/cut/lib/previewMixer";
 import {
+  flushMeter,
   markAudioClock,
   markLiveSamples,
   markLiveSources,
   markPresent,
+  meterAudioClock,
+  meterFrame,
+  meterState,
+  metering,
   markTick,
   tracing,
 } from "@/cut/lib/perfTrace";
@@ -126,6 +131,7 @@ class Engine {
 
   dispose() {
     engineLog(`engine ${this.serial} disposed`);
+    flushMeter();
     this.disposed = true;
     if (this.raf) cancelAnimationFrame(this.raf);
     this.unsubscribe();
@@ -209,7 +215,7 @@ class Engine {
    * leave what is already on screen alone. Painting black for a decoder that is
    * merely a moment behind is what strobing looks like.
    */
-  private frameFor(span: ClipSpan, t: number, playing: boolean): Frame {
+  private frameFor(span: ClipSpan, t: number, playing: boolean, master = false): Frame {
     const src = this.pool.get(keyOf(span.clip, span.asset), span.asset, this.decodeHeight());
     this.used.add(src);
     const st = sourceTimeOf(span.clip, t);
@@ -221,6 +227,10 @@ class Engine {
     // split from one file share a source, and a held frame from across the
     // split would show the other scene at a paused playhead.
     const frame = src.frameAt(st, span.clip.in, span.clip.out);
+    // The picture on track 0 is the one being watched, so it is the one the
+    // machine is judged on — see the meter in `perfTrace`.
+    if (master && playing && metering())
+      meterFrame(frame ? Math.max(0, st - frame.timestamp) : 0, !frame);
     if (frame)
       return { kind: "ready", image: frame.image, width: frame.width, height: frame.height };
     return src.failed ? MISSING_FRAME : PENDING_FRAME;
@@ -484,7 +494,10 @@ class Engine {
       // the last frame rather than clear to black.
       const end = Math.max(0, total - 0.001);
       t = Math.max(0, Math.min(previewAt(), end));
-      if (this.mixer.running) this.mixer.stop();
+      if (this.mixer.running) {
+        this.mixer.stop();
+        flushMeter();
+      }
     }
 
     // Nothing anywhere resets to a black frame at 0.
@@ -511,7 +524,7 @@ class Engine {
     // whole design exists to remove. Leave what is on screen and stay dirty;
     // the clock, the audio, and the stop checks below still run, so a slow
     // open can't freeze the playhead or carry playback past a stop mark.
-    const masterFrame = master ? this.frameFor(master, t, playing) : MISSING_FRAME;
+    const masterFrame = master ? this.frameFor(master, t, playing, true) : MISSING_FRAME;
     const pendingMaster = masterFrame.kind === "pending";
     const fadeGain = this.projectFadeGain(t, total);
     if (pendingMaster) {
@@ -575,6 +588,19 @@ class Engine {
       const clock = this.mixer.clockLead();
       markAudioClock(clock.lead, clock.reported);
       markLiveSources(this.pool.active, this.pool.size, this.pool.warmPixels);
+    }
+
+    if (playing && metering()) {
+      const clock = this.mixer.clockLead();
+      meterAudioClock(clock.lead, clock.reported);
+      meterState({
+        sources: this.pool.active,
+        held: this.pool.held,
+        warmMb: Math.round(this.pool.warmPixels * 4e-6),
+        clips: s.clips.length,
+        decodeHeight: this.decodeHeight(),
+        canvasHeight: this.canvas.height,
+      });
     }
   }
 }
