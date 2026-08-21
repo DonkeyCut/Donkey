@@ -17,6 +17,7 @@
  * words that the exported audio says at another time.
  */
 
+import { AUDIO_FX_RAMP, audioFxRecipe, buildAudioFx } from "@donkeycut/effects-kit";
 import { decodeAudioSpan } from "./mediaRead";
 import { timeStretch } from "./timeStretch";
 
@@ -50,11 +51,22 @@ export interface MixItem {
   duck?: number;
 }
 
+/** One audio effect element: the treatment it names, and the stretch of
+ * timeline it treats. */
+export interface MixEffect {
+  effect: string;
+  amount?: number;
+  start: number;
+  end: number;
+}
+
 export interface MixSpec {
   duration: number;
   clips: MixClip[];
   /** Soundtrack, voiceovers, and upper-track clip audio. */
   items: MixItem[];
+  /** Audio effect elements over the finished mix, in timeline order. */
+  effects?: MixEffect[];
   /** Whole-project audio fades, seconds. */
   fadeIn?: number;
   fadeOut?: number;
@@ -187,6 +199,11 @@ export async function renderMix(spec: MixSpec, opts: MixOptions): Promise<AudioB
   const ducked = ctx.createGain();
   scheduleDuck(ducked, duckWindows(spec.items));
 
+  // Every sound meets on the bus, which is what the effect elements treat —
+  // the ffmpeg graph applies them to the mixed stream in the same place.
+  const bus = ctx.createGain();
+  ducked.connect(bus);
+
   // The project fade is the last thing on the way out, matching the export's
   // fade on the final mix.
   const master = ctx.createGain();
@@ -201,7 +218,38 @@ export async function renderMix(spec: MixSpec, opts: MixOptions): Promise<AudioB
     master.gain.setValueAtTime(1, spec.duration - fadeOut);
     master.gain.linearRampToValueAtTime(0, spec.duration);
   }
-  ducked.connect(master);
+  // The effects run in series off the bus, each crossed in over its own
+  // window: inside it the treated signal is heard, outside it the untouched
+  // one, with the edges ramping so the switch cannot click.
+  let treated: AudioNode = bus;
+  for (const fx of spec.effects ?? []) {
+    const recipe = audioFxRecipe(fx.effect, fx.amount);
+    const from = Math.max(0, fx.start);
+    const to = Math.min(fx.end, spec.duration);
+    if (!recipe || !(to > from)) continue;
+    const nodes = buildAudioFx(ctx, recipe, from);
+    const wet = ctx.createGain();
+    const dry = ctx.createGain();
+    const out = ctx.createGain();
+    const ramp = Math.min(AUDIO_FX_RAMP, Math.max(0.001, (to - from) / 2));
+    const cross = (gain: GainNode, inside: number) => {
+      const outside = 1 - inside;
+      gain.gain.setValueAtTime(outside, 0);
+      gain.gain.setValueAtTime(outside, Math.max(0, from - ramp));
+      gain.gain.linearRampToValueAtTime(inside, from + ramp);
+      gain.gain.setValueAtTime(inside, Math.max(from + ramp, to - ramp));
+      gain.gain.linearRampToValueAtTime(outside, to + ramp);
+    };
+    cross(wet, 1);
+    cross(dry, 0);
+    treated.connect(nodes.input);
+    nodes.output.connect(wet);
+    wet.connect(out);
+    treated.connect(dry);
+    dry.connect(out);
+    treated = out;
+  }
+  treated.connect(master);
   master.connect(ctx.destination);
 
   /**
@@ -273,8 +321,9 @@ export async function renderMix(spec: MixSpec, opts: MixOptions): Promise<AudioB
     const buf = a.muted ? undefined : buffers.get(spanKey(a));
     if (!buf) continue;
     const dur = itemDur(a);
-    // A voiceover that ducks everything else is not itself ducked.
-    const into = a.duck !== undefined && a.duck < 1 ? master : ducked;
+    // A voiceover that ducks everything else is not itself ducked; it still
+    // lands on the bus, so the effect elements treat it with the rest.
+    const into = a.duck !== undefined && a.duck < 1 ? bus : ducked;
     play(fitted(spanKey(a), buf, speedOf(a.speed)), a.start, dur, into, (gain) => {
       const level = Math.max(0, a.volume);
       gain.gain.value = level;

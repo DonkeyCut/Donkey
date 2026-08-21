@@ -15,6 +15,7 @@ import { SubjectMaskCompositor } from "@/cut/lib/behindPass";
 import { FrameCompositor, MISSING_FRAME, PENDING_FRAME, type Frame } from "@/cut/lib/composite";
 import { duckGainAt, overlayPlan, trackZeroPlan } from "@/cut/lib/framePlan";
 import { type ClipFrameSource, FrameSourcePool, mappingKey, walkCostMs } from "@/cut/lib/frameSource";
+import { liveAudioFxAt } from "@/cut/lib/audioEffects";
 import { PreviewMixer, type Voice } from "@/cut/lib/previewMixer";
 import {
   flushMeter,
@@ -546,6 +547,16 @@ class Engine {
 
     if (playing) {
       this.mixer.setMasterGain(fadeGain);
+      // The audio effect elements over this moment, each at the level its
+      // window puts it at; the mixer carries them over the whole mix.
+      this.mixer.setEffects(
+        liveAudioFxAt(s.overlays, t).map(({ span, wet }) => ({
+          id: span.id,
+          effect: span.effect,
+          amount: span.amount,
+          wet,
+        }))
+      );
       this.mixer.update(t, this.voicesAt(t, spans, master));
       // A scoped effect preview auto-pauses at its stop mark; the end of the
       // cut stops playback outright.

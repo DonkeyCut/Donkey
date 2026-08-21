@@ -18,11 +18,16 @@
  * which is what keeps its pitch and matches what the export writes.
  *
  * Gains are the only thing touched per frame, and only their value: the clip's
- * own volume, its fades, the duck under a live voiceover, and the whole-project
- * fade. The ramps themselves are the frame plan's, so the mix follows the same
- * description the picture does.
+ * own volume, its fades, the duck under a live voiceover, the whole-project
+ * fade, and how much of each audio effect is heard. The ramps themselves are
+ * the frame plan's, so the mix follows the same description the picture does.
+ *
+ * The audio effect elements sit between the voices and that final fade, each
+ * treating what the one before it handed on — the order the export's filter
+ * chain runs them in.
  */
 
+import { audioFxRecipe, buildAudioFx, type AudioFxNodes } from "@donkeycut/effects-kit";
 import { decodeAudioSpan } from "./mediaRead";
 import { timeStretch } from "./timeStretch";
 
@@ -77,6 +82,26 @@ interface LiveVoice {
   dead: boolean;
 }
 
+/** One audio effect element the graph is carrying: its recipe's chain, and
+ * the pair of gains that cross the mix between treated and untreated. */
+interface LiveFx {
+  nodes: AudioFxNodes;
+  wet: GainNode;
+  dry: GainNode;
+  /** Where the treated and untreated sides meet — the next stage's input. */
+  out: GainNode;
+}
+
+/** What the mixer is told about one effect element on the timeline: which
+ * effect at what strength, and how much of it is heard right now. */
+export interface FxVoice {
+  id: string;
+  effect: string;
+  amount?: number;
+  /** 0 = the untreated mix, 1 = the treated one. */
+  wet: number;
+}
+
 /**
  * The preview's clock and mixer.
  *
@@ -87,6 +112,12 @@ interface LiveVoice {
 export class PreviewMixer {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  /** Where every voice lands, and what the effect chains treat. */
+  private bus: GainNode | null = null;
+  private fx = new Map<string, LiveFx>();
+  /** What the built chains stand for, so a frame that changes nothing about
+   * them touches gains alone. */
+  private fxKey = "";
   private voices = new Map<string, LiveVoice>();
   /** Timeline time, context time and wall time of the same instant. Everything
    * scheduled is placed against this. */
@@ -103,6 +134,10 @@ export class PreviewMixer {
       this.ctx = new AudioContext();
       this.master = this.ctx.createGain();
       this.master.connect(this.ctx.destination);
+      // Voices meet on the bus, the effect chains treat what is on it, and the
+      // project fade rides the sum — the order the export's ffmpeg graph has.
+      this.bus = this.ctx.createGain();
+      this.bus.connect(this.master);
     }
     return this.ctx;
   }
@@ -247,6 +282,78 @@ export class PreviewMixer {
   }
 
   /**
+   * Carry these audio effects over the bus, in the order given.
+   *
+   * The chains run in series — the second effect treats what the first one
+   * handed on, the way the export's filter chain does — and each one is
+   * crossed into the mix by its own `wet`. The graph is rebuilt only when the
+   * list itself changes; a caller that passes the effects near the playhead
+   * therefore rebuilds while the entering or leaving chain is silent, and
+   * every frame in between only moves gains.
+   */
+  setEffects(fx: FxVoice[]): void {
+    const ctx = this.ctx;
+    const bus = this.bus;
+    const master = this.master;
+    if (!ctx || !bus || !master) return;
+    const key = fx.map((f) => `${f.id}:${f.effect}:${f.amount ?? ""}`).join("|");
+    if (key !== this.fxKey) {
+      this.fxKey = key;
+      this.teardownFx();
+      // The bus's old outlet goes first, so the stages built below are the
+      // only path from it to the fade.
+      bus.disconnect();
+      let node: AudioNode = bus;
+      for (const f of fx) {
+        const recipe = audioFxRecipe(f.effect, f.amount);
+        if (!recipe) continue;
+        const nodes = buildAudioFx(ctx, recipe, ctx.currentTime);
+        // One stage: what came in, and the treated copy of it, meeting at a
+        // sum that the next stage reads.
+        const wet = ctx.createGain();
+        const dry = ctx.createGain();
+        const out = ctx.createGain();
+        wet.gain.value = 0;
+        dry.gain.value = 1;
+        node.connect(nodes.input);
+        nodes.output.connect(wet);
+        wet.connect(out);
+        node.connect(dry);
+        dry.connect(out);
+        node = out;
+        this.fx.set(f.id, { nodes, wet, dry, out });
+      }
+      node.connect(master);
+    }
+    for (const f of fx) {
+      const live = this.fx.get(f.id);
+      if (!live) continue;
+      const w = Math.max(0, Math.min(1, f.wet));
+      live.wet.gain.value = w;
+      live.dry.gain.value = 1 - w;
+    }
+  }
+
+  /** Drop every effect chain, stopping the modulators they started. */
+  private teardownFx(): void {
+    for (const live of this.fx.values()) {
+      for (const src of live.nodes.sources) {
+        try {
+          src.stop();
+        } catch {
+          // Already stopped; a spent node throws and means nothing.
+        }
+      }
+      live.nodes.input.disconnect();
+      live.nodes.output.disconnect();
+      live.wet.disconnect();
+      live.dry.disconnect();
+      live.out.disconnect();
+    }
+    this.fx.clear();
+  }
+
+  /**
    * Bring the mix in line with what is audible at timeline time `t`.
    *
    * Called every frame while playing. Voices that just became live are opened
@@ -299,18 +406,21 @@ export class PreviewMixer {
 
   dispose(): void {
     this.stop();
+    this.teardownFx();
+    this.fxKey = "";
     this.decoded.clear();
     void this.ctx?.close();
     this.ctx = null;
     this.master = null;
+    this.bus = null;
   }
 
   private open(v: Voice, t: number): LiveVoice | null {
     const ctx = this.ctx;
-    if (!ctx || !this.master) return null;
+    if (!ctx || !this.bus) return null;
     const gain = ctx.createGain();
     gain.gain.value = 0;
-    gain.connect(this.master);
+    gain.connect(this.bus);
     const live: LiveVoice = {
       url: v.url,
       speed: v.speed,

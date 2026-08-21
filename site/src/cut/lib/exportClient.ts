@@ -736,7 +736,8 @@ async function buildExportPayload(
     lane?: number;
   }[] = [];
   // Effect elements never rasterize: they ship as time-gated filter recipes
-  // the server builds into the graph (the ids ride, never filter text).
+  // the server builds into the graph (the ids ride, never filter text). The
+  // audio ones ride the same list and treat the mix rather than the picture.
   const effects = doc.overlays
     .filter((o) => o.kind === "effect" && !o.hidden && o.start < duration)
     .map((o) => ({

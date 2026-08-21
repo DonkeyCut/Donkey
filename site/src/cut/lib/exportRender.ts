@@ -27,13 +27,14 @@ import {
   StreamTarget,
   type VideoCodec,
 } from "mediabunny";
+import { audioFxSpans } from "./audioEffects";
 import { renderMix, type MixClip, type MixItem, type MixSpec } from "./audioMix";
 import { FrameCompositor, MISSING_FRAME, type Frame } from "./composite";
 import { overlayPlan, trackZeroPlan } from "./framePlan";
 import { frameSink, openMedia, videoTrackOf } from "./mediaRead";
 import { getClipSpans, overlayLayers, projectDuration, spanSequence } from "./store";
 import { captionStyle, cueOverlay, cueWordWindows, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
-import { applyEffectToCanvas, evalOverlayFrame, grainTile, isMaskAnimated, isOverlayAnimated, maskFrameAt, planAnimatedLayers, type LottieHandle, type OverlayAnim, type PaintPhase } from "@donkeycut/effects-kit";
+import { applyEffectToCanvas, evalOverlayFrame, grainTile, isAudioEffect, isMaskAnimated, isOverlayAnimated, maskFrameAt, planAnimatedLayers, type LottieHandle, type OverlayAnim, type PaintPhase } from "@donkeycut/effects-kit";
 import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
 import { createRasterCanvas, type RasterSurface } from "./raster";
 import { renderElementPng } from "./textRender";
@@ -232,6 +233,7 @@ export class ClipReader {
 function liveEffectsAt(overlays: Overlay[], t: number): EffectOverlay[] {
   return overlays
     .filter(isEffectOverlay)
+    .filter((o) => !isAudioEffect(o.effect))
     .filter((o) => !o.hidden && t >= o.start && t < o.end)
     .sort((a, b) => laneOf(b) - laneOf(a));
 }
@@ -527,6 +529,8 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
     duration,
     clips,
     items,
+    // Audio effect elements treat the finished mix over their own windows.
+    effects: audioFxSpans(doc.overlays, duration),
     fadeIn: projectFadeSeconds(doc.fadeIn, duration),
     fadeOut: projectFadeSeconds(doc.fadeOut, duration),
   };

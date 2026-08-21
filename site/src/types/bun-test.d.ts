@@ -22,10 +22,15 @@ declare module "bun:test" {
     toBeLessThanOrEqual(expected: number): void;
     toContain(expected: string): void;
     toBeUndefined(): void;
+    toBeNull(): void;
     toHaveLength(expected: number): void;
     toBeTruthy(): void;
     toBeFalsy(): void;
     not: Matchers;
   }
   export function expect(value: unknown): Matchers;
+  /** Module mocking, for the tests that stand a dependency in. */
+  export const mock: {
+    module(specifier: string, factory: () => unknown): void;
+  };
 }
