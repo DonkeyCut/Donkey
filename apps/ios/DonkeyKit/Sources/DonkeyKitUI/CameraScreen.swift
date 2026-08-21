@@ -412,7 +412,21 @@ struct TeleprompterCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            // The card's controls ride the top row: the camera rail runs up the
+            // leading edge and would sit on top of anything in the low corner.
+            HStack(spacing: 14) {
+                Button {
+                    showsSettings.toggle()
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                }
+                .popover(isPresented: $showsSettings, arrowEdge: .bottom) {
+                    TeleprompterSettingsView(camera: camera)
+                        .presentationCompactAdaptation(.popover)
+                }
+                Button(action: onUseNote) {
+                    Image(systemName: "note.text")
+                }
                 Spacer()
                 Button {
                     camera.teleprompter.isCardShown = false
@@ -421,6 +435,7 @@ struct TeleprompterCard: View {
                         .font(.subheadline.weight(.bold))
                 }
             }
+            .font(.body.weight(.semibold))
             TextEditor(text: $camera.teleprompter.script)
                 .font(.system(size: 19, weight: .semibold))
                 .scrollContentBackground(.hidden)
@@ -435,22 +450,6 @@ struct TeleprompterCard: View {
                             .allowsHitTesting(false)
                     }
                 }
-            HStack(spacing: 14) {
-                Button {
-                    showsSettings.toggle()
-                } label: {
-                    Image(systemName: "slider.horizontal.3")
-                }
-                .popover(isPresented: $showsSettings, arrowEdge: .top) {
-                    TeleprompterSettingsView(camera: camera)
-                        .presentationCompactAdaptation(.popover)
-                }
-                Button(action: onUseNote) {
-                    Image(systemName: "note.text")
-                }
-                Spacer()
-            }
-            .font(.body.weight(.semibold))
         }
         .foregroundStyle(.white)
         .padding(14)
