@@ -50,7 +50,7 @@ import type { VideoTrackPlacement } from "@/cut/lib/store";
 import { playheadAt, setSkim, skimAt, subscribePlayhead, usePlayhead, useSkim } from "@/cut/lib/playhead";
 import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
-import { EFFECT_LABELS } from "@donkeycut/effects-kit";
+import { EFFECT_LABELS, isAudioEffect, type EffectId } from "@donkeycut/effects-kit";
 import { emptySubtitles, IMAGE_CLIP_SECONDS, SHAPE_LABELS, TRANSITION_DEFAULT_SECONDS, TRANSITION_MAX, TRANSITION_STYLE_LABELS, type ShapeKind } from "@/cut/lib/types";
 import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, Selection, StickerOverlay, SubtitleCue, TimelineTransition, TransitionStyle, VideoClip } from "@/cut/lib/types";
 import { isLottieAsset } from "@/cut/lib/lottieAssets";
@@ -230,6 +230,13 @@ const XBAR_MAGNET_PX = 16;
 
 const overlayFamily = (o: Overlay): OverlayFamily =>
   o.kind === "effect" ? "effect" : o.kind === "shape" || o.kind === "sticker" ? "element" : "text";
+
+/** The glyph on an effect's bar: a waveform for the treatments that work on
+ * the sound, sparkles for the ones that work on the picture. */
+function EffectChipIcon({ effect }: { effect: EffectId }) {
+  const Icon = isAudioEffect(effect) ? AudioLines : Sparkles;
+  return <Icon className="mr-1 size-2.5 shrink-0" />;
+}
 
 /** The stretch a panel element takes when dropped — `addElement`'s default
  * length — so the landing ghost matches what the drop makes. */
@@ -2182,7 +2189,7 @@ export function Timeline() {
                       </>
                     ) : el?.kind === "effect" ? (
                       <>
-                        <Sparkles className="mr-1 size-2.5 shrink-0" />
+                        <EffectChipIcon effect={el.effect} />
                         {EFFECT_LABELS[el.effect]}
                       </>
                     ) : (
@@ -4695,7 +4702,7 @@ function TextBar({
       </>
     ) : o.kind === "effect" ? (
       <>
-        <Sparkles className="mr-1 size-2.5 shrink-0" />
+        <EffectChipIcon effect={o.effect} />
         {EFFECT_LABELS[o.effect]}
       </>
     ) : (

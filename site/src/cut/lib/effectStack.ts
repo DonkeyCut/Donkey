@@ -11,7 +11,7 @@
  * The math is here, apart from React, because both exports walk the same stack.
  */
 
-import { effectPreviewState, type EffectPreviewState } from "@donkeycut/effects-kit";
+import { effectPreviewState, isAudioEffect, type EffectPreviewState } from "@donkeycut/effects-kit";
 import { isEffectOverlay, laneOf, type Overlay } from "./types";
 
 /** One effect live at a moment, with the lane that places it in the stack. */
@@ -24,7 +24,8 @@ export interface LiveEffect {
 export function liveEffectsAt(overlays: Overlay[], t: number): LiveEffect[] {
   const live: LiveEffect[] = [];
   for (const o of overlays) {
-    if (!isEffectOverlay(o) || o.hidden || t < o.start || t > o.end) continue;
+    if (!isEffectOverlay(o) || isAudioEffect(o.effect)) continue;
+    if (o.hidden || t < o.start || t > o.end) continue;
     live.push({
       lane: laneOf(o),
       state: effectPreviewState(o.effect, o.amount, t - o.start, o.focus, o.ramp, o.end - o.start),
@@ -34,8 +35,10 @@ export function liveEffectsAt(overlays: Overlay[], t: number): LiveEffect[] {
 }
 
 /** Whether any effect could be live at all. The stage asks before doing the
- * per-frame work of finding out which ones are. */
-export const hasEffects = (overlays: Overlay[]) => overlays.some(isEffectOverlay);
+ * per-frame work of finding out which ones are; the audio ones treat the mix
+ * rather than the picture, so they never build a slice. */
+export const hasEffects = (overlays: Overlay[]) =>
+  overlays.some((o) => isEffectOverlay(o) && !isAudioEffect(o.effect));
 
 /** How the content under an effect moves: a zoom's push in, a shake, and the
  * horizontal jump that reads as tearing. Empty for the effects that only

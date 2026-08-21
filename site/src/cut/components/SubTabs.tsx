@@ -3,7 +3,7 @@
 import { cn } from "@/lib/utils";
 
 /** The segmented sub-tab toggle at the top of a side-panel tab — Voice/Music
- * on Audio, Moving/Filters on Effects, Stickers/Shapes on Elements. */
+ * on Audio, Moving/Filters/Audio on Effects, Stickers/Shapes on Elements. */
 export function SubTabs<T extends string>({
   tabs,
   value,

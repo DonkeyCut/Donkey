@@ -2,10 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  EFFECT_IDS,
+  ALL_EFFECT_IDS,
+  audioFxBars,
   EFFECT_LABELS,
   effectPreviewState,
   grainTileUrl,
+  isAudioEffect,
   LEAK_TINT,
   leakGradient,
   streakGradient,
@@ -23,13 +25,18 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import "./grain.css";
 
 /**
- * The Effects tab: time-ranged treatments over the finished picture — the
- * footage and everything laid over it. A segmented toggle splits the grid
- * into two families: Moving, the effects that play over their stretch of
- * timeline (zoom, grain, VHS, glitch, light leak, flash, shake), and
- * Filters, the still treatments and graded looks (blur, vignette, vintage,
- * noir, halation…). Drag one onto the timeline to place it; a click only
- * picks the tile, the same as every other panel.
+ * The Effects tab: time-ranged treatments over the finished cut. A segmented
+ * toggle splits the grid into three families: Moving, the effects that play
+ * over their stretch of timeline (zoom, grain, VHS, glitch, light leak, flash,
+ * shake), Filters, the still treatments and graded looks (blur, vignette,
+ * vintage, noir, halation…), and Sound, the treatments over the audio under
+ * the window (echo, reverb, muffle, telephone…). Drag one onto the timeline
+ * to place it; a click only picks the tile, the same as every other panel.
+ *
+ * The picture effects treat the footage and everything laid over it; the audio
+ * ones treat everything audible under them — clip sound, upper tracks and the
+ * soundtrack, mixed. A cut's own crossfade at a join stays where it belongs,
+ * on the transition bar.
  *
  * Select an effect on the timeline and the tab follows it: its family opens,
  * its tile is the marked one, and a click on another tile changes that
@@ -37,16 +44,20 @@ import "./grain.css";
  * it retunes what is already there, and with nothing selected it just picks.
  */
 
-type EffectGroup = "moving" | "filters";
+type EffectGroup = "moving" | "filters" | "audio";
 
 const GROUPS = [
   { id: "moving", label: "Moving" },
   { id: "filters", label: "Filters" },
+  // "Sound", because the rail's own Audio tab is where music and voiceover
+  // live; this family is the treatments over whatever is already audible.
+  { id: "audio", label: "Sound" },
 ] as const;
 
 const MOVING: EffectId[] = ["zoom", "grain", "vhs", "glitch", "lightleak", "flash", "shake"];
 
-const groupOf = (id: EffectId): EffectGroup => (MOVING.includes(id) ? "moving" : "filters");
+const groupOf = (id: EffectId): EffectGroup =>
+  isAudioEffect(id) ? "audio" : MOVING.includes(id) ? "moving" : "filters";
 
 export function EffectsPanel() {
   const live = useEditor((s) => {
@@ -76,7 +87,7 @@ export function EffectsPanel() {
           cut off there. */}
       <ScrollArea className="min-h-0 flex-1" contentClassName="px-3.5 pt-1 pb-4">
         <div className="grid grid-cols-2 gap-2" onKeyDown={pickGridNav}>
-          {EFFECT_IDS.filter((id) => groupOf(id) === group).map((id) => (
+          {ALL_EFFECT_IDS.filter((id) => groupOf(id) === group).map((id) => (
             <EffectTile key={id} id={id} live={live} frame={frame} />
           ))}
         </div>
@@ -100,11 +111,12 @@ function EffectTile({
 }) {
   const { picked, pick } = useAssetPick(`effect:${id}`);
   const [hover, setHover] = useState(false);
-  // A moving effect's whole point is its motion, so its swatch always plays;
-  // a filter swatch stands still until the pointer asks it to run. The leak's
-  // motion is a slow continuous wander — the shared 1.4s loop samples a sliver
-  // of it and snaps back, so its clock never wraps and the bloom just roams.
-  const t = useSwatchClock(hover || groupOf(id) === "moving", id === "lightleak" ? Infinity : LOOP_S);
+  // A moving effect's whole point is its motion, so its swatch always plays,
+  // and an audio figure is motion by nature; a filter swatch stands still
+  // until the pointer asks it to run. The leak's motion is a slow continuous
+  // wander — the shared 1.4s loop samples a sliver of it and snaps back, so
+  // its clock never wraps and the bloom just roams.
+  const t = useSwatchClock(hover || groupOf(id) !== "filters", id === "lightleak" ? Infinity : LOOP_S);
   const ref = useRef<HTMLButtonElement>(null);
   // What the selection means for this tile: it wears the ring when it is the
   // selected element's effect, and a click swaps that element onto it.
@@ -139,12 +151,20 @@ function EffectTile({
       // ring is the focus indicator; the browser outline stays off.
       className="flex scroll-m-2 flex-col gap-1.5 text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:text-foreground"
     >
-      <EffectSwatch
-        id={id}
-        t={t}
-        frame={frame}
-        className={cn("w-full rounded-lg border border-border", marked && PICKED_RING)}
-      />
+      {isAudioEffect(id) ? (
+        <AudioSwatch
+          id={id}
+          t={t}
+          className={cn("w-full rounded-lg border border-border", marked && PICKED_RING)}
+        />
+      ) : (
+        <EffectSwatch
+          id={id}
+          t={t}
+          frame={frame}
+          className={cn("w-full rounded-lg border border-border", marked && PICKED_RING)}
+        />
+      )}
       <span className="leading-none">{EFFECT_LABELS[id]}</span>
     </button>
   );
@@ -253,6 +273,53 @@ export function SwatchScene({
         <polygon points="38,56 70,22 100,52 100,56" fill="#3a7a52" />
       </svg>
     </>
+  );
+}
+
+/**
+ * What an audio effect does to the sound: the bar figure its recipe shapes,
+ * rolling on the shared swatch clock.
+ *
+ * The figure comes off the same recipe the mix is built from — a delay tap
+ * shows as its repeat, a low pass rounds the bars off, a wobble swings them —
+ * so a tile can only show what the effect actually does.
+ */
+export function AudioSwatch({
+  id,
+  t = SWATCH_T,
+  className,
+}: {
+  id: EffectId;
+  t?: number;
+  className?: string;
+}) {
+  const bars = audioFxBars(id, t, undefined, 0.9);
+  const w = 100 / (bars.length * 1.7);
+  return (
+    <span
+      data-drag-object
+      className={cn(
+        "relative block aspect-square overflow-hidden rounded-md bg-neutral-900",
+        className
+      )}
+    >
+      <svg viewBox="0 0 100 100" aria-hidden className="absolute inset-0 size-full">
+        {bars.map((v, i) => {
+          const h = Math.max(w, v * 76);
+          return (
+            <rect
+              key={i}
+              x={((i + 0.5) / bars.length) * 100 - w / 2}
+              y={50 - h / 2}
+              width={w}
+              height={h}
+              rx={w / 2}
+              className="fill-white/85"
+            />
+          );
+        })}
+      </svg>
+    </span>
   );
 }
 

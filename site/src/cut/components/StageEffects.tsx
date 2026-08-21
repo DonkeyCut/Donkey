@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import {
   grainTileUrl,
+  isAudioEffect,
   LEAK_TINT,
   leakGradient,
   streakGradient,
@@ -87,13 +88,18 @@ export function StagePictureFx({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** The lanes effects sit on, whether or not one is live right now. The stage
- * splits on these, so its slices stay put while the playhead moves and only
- * change when a row does. */
+/** The lanes picture effects sit on, whether or not one is live right now. The
+ * stage splits on these, so its slices stay put while the playhead moves and
+ * only change when a row does. An audio effect treats the mix, so its row
+ * splits nothing. */
 export function useEffectLanes(): number[] {
   const overlays = useEditor((s) => s.overlays);
   return useMemo(
-    () => [...new Set(overlays.filter(isEffectOverlay).map(laneOf))].sort((a, b) => a - b),
+    () => [
+      ...new Set(
+        overlays.filter((o) => isEffectOverlay(o) && !isAudioEffect(o.effect)).map(laneOf)
+      ),
+    ].sort((a, b) => a - b),
     [overlays]
   );
 }
