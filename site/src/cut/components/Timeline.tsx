@@ -41,7 +41,7 @@ import {
 import { originalSettings, type ExportDoc } from "@/cut/lib/exportClient";
 import { useExports } from "@/cut/lib/exportStore";
 import { isDragActive, startDrag, subscribeDragActive } from "@/cut/lib/drag";
-import { CLIP_GAP, startLaneMove, startLaneTrim, type LaneDrag, type LaneKind } from "@/cut/lib/laneTracks";
+import { CLIP_GAP, laneDragFor, laneDragParts, startLaneMove, startLaneTrim, type LaneDrag, type LaneKind } from "@/cut/lib/laneTracks";
 import { downloadMedia, ensurePeaks, importImage, importStockMusic, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia, stripFailedFor, subscribeStripStatus } from "@/cut/lib/media";
 import { planFilmstrip, type FilmTile } from "@/cut/lib/filmstrip";
 import { track0Clips, laneGapAt, sameLane, type LaneRef, clipLen, clipSpeed, getClipSpans, overlayLaneOrder, overlayLayers, projectDuration, resolveTransitions, rippleInsert, useEditor } from "@/cut/lib/store";
@@ -2279,7 +2279,7 @@ export function Timeline() {
               )}
               {overlays.map((o) => {
                 const homeRow = overlayLanes.rowOf.get(o.lane ?? 0) ?? 0;
-                const drag = laneDrag?.kind === "overlay" && laneDrag.id === o.id ? laneDrag : null;
+                const drag = laneDragFor(laneDrag, "overlay", o.id);
                 return (
                   <TextBar
                     key={o.id}
@@ -2297,7 +2297,7 @@ export function Timeline() {
                     laneCount={overlayLanes.count}
                     selected={selKeys.has(`overlay:${o.id}`)}
                     drag={drag}
-                    parting={laneDrag?.kind === "overlay" && laneDrag.id !== o.id}
+                    parting={laneDragParts(laneDrag, "overlay", o.id)}
                     onDrag={setLaneDrag}
                     onSnap={setSnapX}
                     onMenu={setBarMenu}
@@ -2437,14 +2437,9 @@ export function Timeline() {
                   span={span}
                   pps={pps}
                   selected={selKeys.has(`clip:${span.clip.id}`)}
-                  drag={
-                    laneDrag?.kind === "overlayClip" && laneDrag.id === span.clip.id
-                      ? laneDrag
-                      : null
-                  }
+                  drag={laneDragFor(laneDrag, "overlayClip", span.clip.id)}
                   parting={
-                    (laneDrag?.kind === "overlayClip" && laneDrag.id !== span.clip.id) ||
-                    videoDragActive
+                    laneDragParts(laneDrag, "overlayClip", span.clip.id) || videoDragActive
                   }
                   partAt={dropPartAt.get(span.clip.id)}
                   onDrag={setLaneDrag}
@@ -2510,10 +2505,8 @@ export function Timeline() {
                 mention={`@c${i + 1}`}
                 pps={pps}
                 selected={selKeys.has(`clip:${span.clip.id}`)}
-                drag={laneDrag?.kind === "clip" && laneDrag.id === span.clip.id ? laneDrag : null}
-                parting={
-                  (laneDrag?.kind === "clip" && laneDrag.id !== span.clip.id) || videoDragActive
-                }
+                drag={laneDragFor(laneDrag, "clip", span.clip.id)}
+                parting={laneDragParts(laneDrag, "clip", span.clip.id) || videoDragActive}
                 partAt={dropPartAt.get(span.clip.id)}
                 onDrag={setLaneDrag}
                 onSnap={setSnapX}
@@ -2598,7 +2591,7 @@ export function Timeline() {
               )}
               {audioClips.map((a) => {
                 const homeRow = audioLanes.rowOf.get(a.lane ?? 0) ?? 0;
-                const drag = laneDrag?.kind === "audio" && laneDrag.id === a.id ? laneDrag : null;
+                const drag = laneDragFor(laneDrag, "audio", a.id);
                 return (
                   <AudioView
                     key={a.id}
@@ -2618,7 +2611,7 @@ export function Timeline() {
                     laneCount={audioLanes.count}
                     selected={selKeys.has(`audio:${a.id}`)}
                     drag={drag}
-                    parting={laneDrag?.kind === "audio" && laneDrag.id !== a.id}
+                    parting={laneDragParts(laneDrag, "audio", a.id)}
                     onDrag={setLaneDrag}
                     onSnap={setSnapX}
                   />
@@ -2665,8 +2658,8 @@ export function Timeline() {
                   top={(c.lane ?? 0) * SUB_H}
                   homeRow={c.lane ?? 0}
                   selected={selKeys.has(`cue:${c.id}`)}
-                  drag={laneDrag?.kind === "cue" && laneDrag.id === c.id ? laneDrag : null}
-                  parting={laneDrag?.kind === "cue" && laneDrag.id !== c.id}
+                  drag={laneDragFor(laneDrag, "cue", c.id)}
+                  parting={laneDragParts(laneDrag, "cue", c.id)}
                   onDrag={setLaneDrag}
                   onSnap={setSnapX}
                 />

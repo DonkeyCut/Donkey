@@ -351,6 +351,27 @@ export interface LaneDrag {
   /** Carried off its own lane set (an upper video layer headed elsewhere);
    * the home slot preview hides while away. */
   away?: boolean;
+  /** The rest of a group drag's set: each member rides the pointer as its own
+   * ghost, shifted by the same delta as the grabbed item. */
+  members?: { kind: LaneKind; id: string; ghostX: number }[];
+}
+
+/** The drag a bar renders with: the carried item's own LaneDrag, or — when
+ * the bar is another member of a group drag — a copy whose ghost carries that
+ * member's offset. Null for bars outside the drag. */
+export function laneDragFor(d: LaneDrag | null, kind: LaneKind, id: string): LaneDrag | null {
+  if (!d) return null;
+  if (d.kind === kind && d.id === id) return d;
+  const m = d.members?.find((x) => x.kind === kind && x.id === id);
+  return m ? { ...d, kind, id, ghostX: m.ghostX } : null;
+}
+
+/** True when a live drag moves items on this kind's lanes and this bar is
+ * outside the moving set: the bar animates the shifts that part it out of
+ * the way. */
+export function laneDragParts(d: LaneDrag | null, kind: LaneKind, id: string): boolean {
+  if (!d || laneDragFor(d, kind, id)) return false;
+  return d.kind === kind || !!d.members?.some((m) => m.kind === kind);
 }
 
 export interface LaneMoveUI<V = unknown> {
@@ -513,6 +534,10 @@ function startGroupMove(
   const rowEl = (e.currentTarget as HTMLElement).parentElement;
   const rowTop0 = rowEl?.getBoundingClientRect().top ?? 0;
 
+  // Everyone in the set but the grabbed item: each rides the pointer as its
+  // own ghost, so the whole selection visibly moves as one.
+  const riders = members.filter((m) => m.kind !== grabbed.kind || m.id !== grabbed.id);
+
   let live = false;
   let dt = 0;
   let rowDelta = 0;
@@ -591,16 +616,25 @@ function startGroupMove(
       rowDelta = vertical ? Math.min(rowHi, Math.max(rowLo, Math.round(dy / ui.rowH))) : 0;
       ui.onSnap(guide);
       layout(dt);
+      // Ghosts ride the raw pointer delta, clamped so the set's earliest
+      // member holds at 0 — the same rigid floor the landing uses.
+      const dtGhost = Math.max(-minStart, effDx / ui.pps);
+      const ghostY = dy - (rowEl ? rowEl.getBoundingClientRect().top - rowTop0 : 0);
       ui.onDrag({
         kind: grabbed.kind,
         id: grabbed.id,
         targetRow: homeRow + rowDelta,
         minRow: homeRow + rowLo,
         maxRow: homeRow + rowHi,
-        ghostX: Math.max(0, grabbed.start + (effDx / ui.pps)) * ui.pps,
-        ghostY: dy - (rowEl ? rowEl.getBoundingClientRect().top - rowTop0 : 0),
+        ghostX: (grabbed.start + dtGhost) * ui.pps,
+        ghostY,
         slotStart: grabbed.start + dt,
         len: grabbed.len,
+        members: riders.map((m) => ({
+          kind: m.kind,
+          id: m.id,
+          ghostX: (m.start + dtGhost) * ui.pps,
+        })),
       });
     },
     onUp: (_dx, _dy, moved) => {
