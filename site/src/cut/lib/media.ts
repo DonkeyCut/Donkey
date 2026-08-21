@@ -1452,18 +1452,34 @@ function scheduleEnrichRetry(assetId: string) {
     const done =
       asset.type === "audio"
         ? !!asset.peaks?.length
-        : !!asset.thumbs?.length && (asset.type !== "video" || asset.peaks !== undefined);
+        : asset.type === "video"
+          ? stripComplete(asset) && asset.peaks !== undefined
+          : !!asset.thumbs?.length;
     if (done) return;
     void enrichAsset(asset);
   }, ENRICH_RETRY_BASE_MS * 3 ** n);
   enrichRetryTimers.set(assetId, timer);
 }
 
+/** A strip holds one tile per slot the grid asks for. A sweep that died
+ * midway published fewer, so the tile count is what tells a finished strip
+ * from a partial one — a non-empty strip is not necessarily a whole strip. */
+function stripComplete(asset: MediaAsset) {
+  return (asset.thumbs?.length ?? 0) >= thumbGrid(asset.duration).count;
+}
+
+/** One enrich per asset at a time. A reload re-sweeps every asset, and a
+ * second pass landing mid-sweep would read the partial strip as the finished
+ * one and refine against it. */
+const enrichInFlight = new Set<string>();
+
 /** Generate filmstrip thumbnails / waveform peaks and merge them into the
  * store. Safe to call repeatedly; skips assets that are already enriched.
  * `src` overrides where the frames are read from — an import still uploading
  * has the bytes in the browser already, so it need not wait or re-download. */
 export async function enrichAsset(asset: MediaAsset, src = asset.url) {
+  if (enrichInFlight.has(asset.id)) return;
+  enrichInFlight.add(asset.id);
   try {
     if (asset.type === "image") {
       // A still is its own filmstrip: one frame, tiled across the clip.
@@ -1471,7 +1487,7 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
         useEditor.getState().updateAsset(asset.id, { thumbs: [src], thumbStep: IMAGE_CLIP_SECONDS });
       }
     } else if (asset.type === "video") {
-      if (!asset.thumbs?.length) {
+      if (!stripComplete(asset)) {
         setStripFailed(asset.id, false);
         const key = stripCacheKey(useEditor.getState().projectId, asset.fileName);
         const cached = await readCachedStrip(key, asset.duration);
@@ -1479,16 +1495,29 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
           useEditor.getState().updateAsset(asset.id, {
             thumbs: cached.thumbs,
             thumbStep: cached.thumbStep,
-            sceneCuts: cached.cuts ?? [],
+            sceneCuts: cached.cuts,
           });
         } else {
-          const { thumbs, thumbStep, cuts } = await makeThumbs(src, asset.duration);
+          // Midpoint grabs, published tile by tile: the strip fills in as the
+          // sweep runs, and the scene pass refines the grab points behind it.
+          const { thumbs, thumbStep } = await makeThumbs(src, asset.duration, [], (partial, step) =>
+            useEditor.getState().updateAsset(asset.id, { thumbs: partial, thumbStep: step })
+          );
           // An empty strip is a failure, not a result: persisting it would
           // leave the asset looking permanently mid-load.
           if (!thumbs.length) throw new UnreadableMediaError("No frames could be read for the filmstrip.");
-          useEditor.getState().updateAsset(asset.id, { thumbs, thumbStep, sceneCuts: cuts });
-          writeCache(key, { thumbs, thumbStep, cuts, duration: asset.duration, at: Date.now() });
+          useEditor.getState().updateAsset(asset.id, { thumbs, thumbStep });
+          writeCache(key, { thumbs, thumbStep, duration: asset.duration, at: Date.now() });
         }
+      }
+      // The cuts a strip was built without — a fresh sweep, or a cache written
+      // before the scene pass finished — are probed once the tiles are up.
+      const live = useEditor.getState().assets.find((a) => a.id === asset.id);
+      if (live && stripComplete(live) && live.sceneCuts === undefined) {
+        void refineSceneCuts(asset.id, src, asset.duration).catch((err) => {
+          // Scene cuts only sharpen the strip; the tiles already painted.
+          console.error(`[cut] scene probe failed for ${asset.fileName}`, err);
+        });
       }
       // The clip box draws the sound under the picture, so a video enriches
       // waveform peaks alongside its filmstrip. `[]` is an answer too — a
@@ -1521,6 +1550,8 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
       { type: asset.type, durationSec: Math.round(asset.duration) },
       err
     );
+  } finally {
+    enrichInFlight.delete(asset.id);
   }
 }
 
@@ -1763,45 +1794,149 @@ async function sceneCutTimes(url: string, probes: ThumbProbe[]): Promise<number[
     .slice(0, SCENE_CUTS_MAX);
 }
 
-async function makeThumbs(url: string, duration: number) {
-  // One frame every ~2s (min 10, max 24) so long clips don't repeat frames.
+/** The strip's bucket count and spacing: one frame every ~2s (min 10, max 24)
+ * so long clips don't repeat frames. */
+function thumbGrid(duration: number) {
   const count = Math.min(24, Math.max(10, Math.round(duration / 2)));
-  const thumbStep = duration / count;
-  // Scene-aware grab points: probe the clip for scene changes, then grab each
-  // bucket's thumb from its dominant scene (bucket midpoints when the probe
-  // pass yields nothing).
-  let probes: ThumbProbe[] = [];
-  let cuts: number[] = [];
-  try {
-    probes = await thumbProbes(url, duration, count);
-    cuts = await sceneCutTimes(url, probes);
-  } catch {
-    // Probing is advisory; the strip still builds from midpoints.
-  }
+  return { count, thumbStep: duration / count };
+}
+
+/** How often a sweep in progress hands the tiles it has over to the strip. */
+const THUMB_PUBLISH_MS = 250;
+
+/**
+ * Sweep a clip's filmstrip frames, handing over the tiles that have landed as
+ * the pass runs.
+ *
+ * Ascending times over one decode pass — the strip is a single sweep of the
+ * file rather than `count` seeks into it — and each tile is on screen as soon
+ * as it is read. A long clip streaming in from storage takes real time to
+ * sweep, and a strip that showed nothing until the last tile landed read as
+ * broken next to a preview that plays immediately.
+ *
+ * The strip is read back by position (`thumbs[floor(t / thumbStep)]`), so a
+ * time the decoder has no frame for cannot simply be dropped: that would
+ * slide every later tile onto the wrong moment for the rest of the clip, and
+ * the wrong strip would be cached. A gap repeats the frame before it, which
+ * keeps every index meaning what it says — and the same fill carries the tail
+ * of a strip that is still being swept.
+ */
+async function makeThumbs(
+  url: string,
+  duration: number,
+  probes: ThumbProbe[] = [],
+  onTiles?: (thumbs: string[], thumbStep: number) => void
+) {
+  const { count, thumbStep } = thumbGrid(duration);
   const times = pickThumbTimes(count, thumbStep, duration, probes);
-  // Ascending times over one decode pass — the strip is a single sweep of the
-  // file rather than `count` seeks into it.
-  //
-  // The strip is read back by position (`thumbs[floor(t / thumbStep)]`), so a
-  // time the decoder has no frame for cannot simply be dropped: that would
-  // slide every later tile onto the wrong moment for the rest of the clip, and
-  // the wrong strip would be cached. A gap repeats the frame before it, which
-  // keeps every index meaning what it says.
   const captured: (string | null)[] = [];
+  // Fill gaps from the frame before, so the strip is either populated to the
+  // tile the sweep has reached or empty.
+  const settled = () => {
+    const thumbs: string[] = [];
+    let fill: string | null = captured.find((c) => c !== null) ?? null;
+    if (fill) {
+      for (const shot of captured) {
+        if (shot) fill = shot;
+        thumbs.push(fill);
+      }
+    }
+    return thumbs;
+  };
+  let published = 0;
   for await (const frame of framesAt(url, times, { height: THUMB_H })) {
     captured.push(frame ? await rasterCanvasToDataUrl(frame.canvas, "image/jpeg", 0.92) : null);
+    if (!onTiles || captured.length >= times.length) continue;
+    const now = Date.now();
+    if (now - published < THUMB_PUBLISH_MS) continue;
+    published = now;
+    const partial = settled();
+    if (partial.length) onTiles(partial, thumbStep);
   }
-  // Fill gaps from the nearest frame either side, so a strip is either fully
-  // populated or empty.
-  const thumbs: string[] = [];
-  let fill: string | null = captured.find((c) => c !== null) ?? null;
-  if (fill) {
-    for (const shot of captured) {
-      if (shot) fill = shot;
-      thumbs.push(fill);
+  return { thumbs: settled(), thumbStep };
+}
+
+/**
+ * The clip's scene-change moments, and the probe signals behind them.
+ *
+ * This is the expensive half of building a strip: the probe sweep and its
+ * refinement decode many times the frames the strip itself needs, so it runs
+ * behind the strip rather than in front of it.
+ */
+async function sceneProbe(url: string, duration: number) {
+  const { count } = thumbGrid(duration);
+  const probes = await thumbProbes(url, duration, count);
+  const cuts = await sceneCutTimes(url, probes);
+  return { probes, cuts };
+}
+
+/** A grab point has to move by this share of its bucket before the tile is
+ * worth reading again. */
+const THUMB_REGRAB_SHARE = 0.1;
+
+/** One scene probe per asset at a time. The probe outlives the enrich that
+ * launched it, so the enrich guard cannot cover it: the next pass would see a
+ * complete strip with no cuts yet and start the same sweep over again. */
+const sceneProbeInFlight = new Set<string>();
+
+/**
+ * Scene-aware refinement, once the strip is already on screen: probe the clip
+ * for its cuts, store them, and re-read only the tiles whose grab point moved
+ * far enough that the midpoint was showing a neighbouring scene.
+ */
+async function refineSceneCuts(assetId: string, url: string, duration: number) {
+  if (sceneProbeInFlight.has(assetId)) return;
+  sceneProbeInFlight.add(assetId);
+  try {
+    const live = () => useEditor.getState().assets.find((a) => a.id === assetId);
+    const { probes, cuts } = await sceneProbe(url, duration);
+    if (!live()) return;
+    useEditor.getState().updateAsset(assetId, { sceneCuts: cuts });
+    const { count, thumbStep } = thumbGrid(duration);
+    // The cuts land in the cache however the tiles turn out. A sweep that
+    // moves no grab point still answered the expensive question, and a cache
+    // written without the answer sends every later open through the whole
+    // probe again.
+    const persist = (fileName: string, thumbs: string[]) =>
+      writeCache(stripCacheKey(useEditor.getState().projectId, fileName), {
+        thumbs,
+        thumbStep,
+        cuts,
+        duration,
+        at: Date.now(),
+      });
+    const midpoints = pickThumbTimes(count, thumbStep, duration, []);
+    const scened = pickThumbTimes(count, thumbStep, duration, probes);
+    const moved = scened
+      .map((t, i) => ({ t, i }))
+      .filter(({ t, i }) => Math.abs(t - midpoints[i]) > thumbStep * THUMB_REGRAB_SHARE);
+    const asset = live();
+    if (!asset?.thumbs?.length) return;
+    if (!moved.length) {
+      persist(asset.fileName, asset.thumbs);
+      return;
     }
+    const regrabbed = new Map<number, string>();
+    let k = 0;
+    for await (const frame of framesAt(
+      url,
+      moved.map((m) => m.t),
+      { height: THUMB_H }
+    )) {
+      const at = moved[k++];
+      if (!frame || !at) continue;
+      regrabbed.set(at.i, await rasterCanvasToDataUrl(frame.canvas, "image/jpeg", 0.92));
+    }
+    // The sweep above took a while; the strip on screen is the one to patch.
+    const current = live();
+    if (!current?.thumbs?.length) return;
+    const thumbs = [...current.thumbs];
+    for (const [i, tile] of regrabbed) if (i < thumbs.length) thumbs[i] = tile;
+    useEditor.getState().updateAsset(assetId, { thumbs });
+    persist(current.fileName, thumbs);
+  } finally {
+    sceneProbeInFlight.delete(assetId);
   }
-  return { thumbs, thumbStep, cuts };
 }
 
 // Exact edge frames: a clip's first and last filmstrip tiles show the true
