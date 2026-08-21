@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { releaseAnimRest, useAnimPreview } from "@/cut/lib/animPreview";
 import { startDrag } from "@/cut/lib/drag";
 import { useSkim, usePreviewTime } from "@/cut/lib/playhead";
@@ -53,6 +54,12 @@ import { cn } from "@/lib/utils";
 // Plate geometry as CSS, kept in lockstep with the export burn-in metrics.
 const PLATE_PADDING = `${PLATE_PAD_Y}em ${PLATE_PAD_X}em`;
 const PLATE_RADIUS_EM = `${PLATE_RADIUS}em`;
+
+/** The unclipped layer the selected element's chrome mounts into. The stage
+ * clips its content at the frame; the chrome — outline, grips, mask gizmo —
+ * portals here so the box of an element hanging past the edge stays visible
+ * and grabbable, the way the video clip gizmo already does. */
+export const OverlayChromeHost = createContext<HTMLElement | null>(null);
 
 /**
  * The rotate handle's cursor. CSS has no rotate cursor, so the affordance is
@@ -305,6 +312,7 @@ export function OverlayLayer({
             ghost={!inRange && !selected}
             t={t}
             stageWidth={stageWidth}
+            bandTransform={transform}
             registerBox={registerBox}
             snap={snap}
             onSnapEnd={clearGuides}
@@ -491,6 +499,7 @@ function OverlayItem({
   ghost,
   t,
   stageWidth,
+  bandTransform,
   registerBox,
   snap,
   onSnapEnd,
@@ -502,6 +511,9 @@ function OverlayItem({
   /** The previewed timeline moment (playhead or paused skimmer). */
   t: number;
   stageWidth: number;
+  /** The frame motion of the effects above this element's slice, so lifted
+   * chrome moves with the picture it outlines. */
+  bandTransform?: string;
   registerBox: (id: string, el: HTMLElement | null) => void;
   snap: (id: string, x: number, y: number, ev: PointerEvent) => { x: number; y: number };
   onSnapEnd: () => void;
@@ -589,6 +601,29 @@ function OverlayItem({
   // The mask clips the content wrapper only, never the box itself — the
   // selection chrome and the mask's own grips must stay visible outside it.
   const maskCss = useMaskCss(o, boxRef, stageWidth, stageHeight, scale, tLocal, editing);
+
+  // The selection chrome lifts out of the stage's clipping into the chrome
+  // host, so a box hanging past the frame edge keeps its outline and grips.
+  // The twin copies the box's placement and transform chain; its laid-out
+  // size is read off the real box, which keeps auto-sized text honest.
+  const chromeHost = useContext(OverlayChromeHost);
+  const liftChrome = !!chromeHost && selected && !editing;
+  const [chromeSize, setChromeSize] = useState<{ w: number; h: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!liftChrome) {
+      // Cleared so the next selection starts from the in-box chrome and the
+      // portal twin never paints at a stale size.
+      setChromeSize(null);
+      return;
+    }
+    const el = boxRef.current;
+    if (!el) return;
+    const read = () => setChromeSize({ w: el.offsetWidth, h: el.offsetHeight });
+    read();
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [liftChrome]);
 
   // The box carries position, rotation, and opacity; the content wrapper
   // inside it carries a title's type styles (the edit caret inherits them)
@@ -874,39 +909,74 @@ function OverlayItem({
     });
   };
 
+  const beginMove = (e: React.PointerEvent) => {
+    if (editing) return;
+    const s = useEditor.getState();
+    s.select({ kind: "overlay", id: o.id });
+    s.pushHistory();
+    // A grouped element drags its whole group: the grabbed one snaps, the
+    // rest follow by the same delta.
+    const members = groupSnapshot().map((m) => ({ id: m.id, x: m.x, y: m.y }));
+    const self = members.find((m) => m.id === o.id) ?? { id: o.id, x: o.x, y: o.y };
+    startDrag(e, {
+      onMove: (dx, dy, ev) => {
+        const p = snap(o.id, self.x + dx / stageWidth, self.y + dy / stageHeight, ev);
+        const ddx = clampPos(p.x) - self.x;
+        const ddy = clampPos(p.y) - self.y;
+        writeTransform(
+          members.map((m) => ({
+            id: m.id,
+            patch: { x: clampPos(m.x + ddx), y: clampPos(m.y + ddy) },
+          }))
+        );
+      },
+      onUp: onSnapEnd,
+    });
+  };
+
+  const chrome = selected && !editing && (
+    <>
+      {/* The rotate button clears the element's own top edge, so moving is
+          never caught by it. Its cursor rides the element's rotation, so
+          the glyph's heads keep pointing along the drag. */}
+      <TransformHandles
+        color="#0a84ff"
+        // The selection line draws 3px outside the box (plus half its
+        // stroke); the grips sit centered on it.
+        className="-inset-[3.75px]"
+        rotation={live?.rotation ?? o.rotation ?? 0}
+        angle={spin}
+        rotateCursor={rotateCursor(live?.rotation ?? o.rotation ?? 0)}
+        // Every element wears the whole frame; a line has only its own
+        // length to pull on.
+        handles={o.kind === "shape" && lineLikeShape(o.shape) ? BOX_HANDLES : FRAME_HANDLES}
+        onResize={resizeFrom}
+        onRotate={rotateFrom}
+      />
+      {o.mask && o.mask.kind !== "subject" && (
+        <MaskGizmo
+          overlay={o}
+          stageWidth={stageWidth}
+          stageHeight={stageHeight}
+          tLocal={tLocal}
+          rotation={live?.rotation ?? o.rotation ?? 0}
+          poseScale={live?.scale ?? 1}
+        />
+      )}
+    </>
+  );
+
   return (
+    <>
     <div
       ref={boxRef}
       className={cn(
         "overlay-item pointer-events-auto absolute cursor-grab rounded-xs text-center whitespace-pre active:cursor-grabbing",
-        selected && "outline-[1.5px] outline-offset-[3px] outline-[#0a84ff]",
+        selected && (!liftChrome || !chromeSize) && "outline-[1.5px] outline-offset-[3px] outline-[#0a84ff]",
         editing && "cursor-text"
       )}
       style={style}
-      onPointerDown={(e) => {
-        if (editing) return;
-        const s = useEditor.getState();
-        s.select({ kind: "overlay", id: o.id });
-        s.pushHistory();
-        // A grouped element drags its whole group: the grabbed one snaps, the
-        // rest follow by the same delta.
-        const members = groupSnapshot().map((m) => ({ id: m.id, x: m.x, y: m.y }));
-        const self = members.find((m) => m.id === o.id) ?? { id: o.id, x: o.x, y: o.y };
-        startDrag(e, {
-          onMove: (dx, dy, ev) => {
-            const p = snap(o.id, self.x + dx / stageWidth, self.y + dy / stageHeight, ev);
-            const ddx = clampPos(p.x) - self.x;
-            const ddy = clampPos(p.y) - self.y;
-            writeTransform(
-              members.map((m) => ({
-                id: m.id,
-                patch: { x: clampPos(m.x + ddx), y: clampPos(m.y + ddy) },
-              }))
-            );
-          },
-          onUp: onSnapEnd,
-        });
-      }}
+      onPointerDown={beginMove}
       onDoubleClick={isText ? () => setEditing(true) : undefined}
     >
       <div style={contentStyle}>
@@ -941,40 +1011,62 @@ function OverlayItem({
           <StickerView sticker={o} stageWidth={stageWidth} t={t} />
         ) : null}
       </div>
-      {selected && !editing && (
-        <>
-          {/* The rotate button clears the element's own top edge, so moving is
-              never caught by it. Its cursor rides the element's rotation, so
-              the glyph's heads keep pointing along the drag. */}
-          <TransformHandles
-            color="#0a84ff"
-            // The selection line draws 3px outside the box (plus half its
-            // stroke); the grips sit centered on it.
-            className="-inset-[3.75px]"
-            rotation={live?.rotation ?? o.rotation ?? 0}
-            angle={spin}
-            rotateCursor={rotateCursor(live?.rotation ?? o.rotation ?? 0)}
-            // Every element wears the whole frame; a line has only its own
-            // length to pull on.
-            handles={
-              o.kind === "shape" && lineLikeShape(o.shape) ? BOX_HANDLES : FRAME_HANDLES
-            }
-            onResize={resizeFrom}
-            onRotate={rotateFrom}
-          />
-          {o.mask && o.mask.kind !== "subject" && (
-            <MaskGizmo
-              overlay={o}
-              stageWidth={stageWidth}
-              stageHeight={stageHeight}
-              tLocal={tLocal}
-              rotation={live?.rotation ?? o.rotation ?? 0}
-              poseScale={live?.scale ?? 1}
-            />
-          )}
-        </>
-      )}
+      {/* The twin can't mount until its size is read, so the in-box chrome
+          holds through that first frame — a select never blinks. */}
+      {(!liftChrome || !chromeSize) && chrome}
     </div>
+    {liftChrome && chromeHost && chromeSize &&
+      createPortal(
+        (() => {
+          // The twin: same placement, same transform chain, the box's own
+          // laid-out size — so the chrome lands exactly on the element while
+          // escaping the frame's clipping.
+          const twinStyle: CSSProperties = {
+            left: style.left,
+            top: style.top,
+            width: chromeSize.w,
+            height: chromeSize.h,
+            transform: style.transform,
+          };
+          return (
+            <>
+              {/* The dashed ring draws the box's full extent; the twin carries
+                  the move drag and the text-edit double click, standing in for
+                  the box it covers. */}
+              <div
+                className="pointer-events-none absolute inset-0"
+                style={{ transform: bandTransform || undefined }}
+              >
+                <div
+                  className="pointer-events-auto absolute cursor-grab active:cursor-grabbing"
+                  style={twinStyle}
+                  onPointerDown={beginMove}
+                  onDoubleClick={isText ? () => setEditing(true) : undefined}
+                >
+                  <div className="pointer-events-none absolute -inset-[4.5px] rounded-[5px] border-[1.5px] border-dashed border-[#0a84ff]" />
+                  {chrome}
+                </div>
+              </div>
+              {/* The frame-clipped solid ring paints over it, so dashes show
+                  only where the box leaves the frame — the clip gizmo's own
+                  language. The clip stays frame-aligned; the ring inside it
+                  rides the band's motion like the twin does. */}
+              <div
+                className="pointer-events-none absolute inset-0 overflow-hidden"
+                style={{ borderRadius: "var(--stage-radius)" }}
+              >
+                <div className="absolute inset-0" style={{ transform: bandTransform || undefined }}>
+                  <div className="absolute" style={twinStyle}>
+                    <div className="absolute -inset-[4.5px] rounded-[5px] border-[1.5px] border-[#0a84ff]" />
+                  </div>
+                </div>
+              </div>
+            </>
+          );
+        })(),
+        chromeHost
+      )}
+    </>
   );
 }
 

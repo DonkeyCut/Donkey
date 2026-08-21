@@ -172,6 +172,29 @@ html.app-surface {
   }
 }
 
+/* The preview's zoom bubble unfurling out of its round button: it stretches
+   open past its resting size and settles through a bounce or two. */
+@keyframes cut-hud-unfurl {
+  0% {
+    transform: translateX(14px) scaleX(0.35) scaleY(0.75);
+    opacity: 0;
+  }
+  45% {
+    transform: translateX(-5px) scaleX(1.06) scaleY(1.03);
+    opacity: 1;
+  }
+  70% {
+    transform: translateX(2.5px) scaleX(0.98) scaleY(0.99);
+  }
+  85% {
+    transform: translateX(-1px) scaleX(1.005) scaleY(1);
+  }
+  100% {
+    transform: translateX(0) scale(1);
+    opacity: 1;
+  }
+}
+
 /* The mention pill's stand-in caret: the real one blinks in the textarea
    underneath the pill cover's left edge. */
 @keyframes mention-caret {

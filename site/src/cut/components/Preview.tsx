@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { ZoomIn, ZoomOut } from "lucide-react";
 import { usePlayback } from "@/cut/hooks/usePlayback";
 import { clearAssetDrag, setAssetDragData } from "@/cut/lib/assetDrag";
 import { startDrag } from "@/cut/lib/drag";
@@ -22,7 +23,7 @@ import { setPreviewCanvas } from "@/cut/lib/previewCanvas";
 import { CLIP_MAX_ZOOM, clipCovers, clipKeyed, clipPoseAt, clipZoom, contentRect, frameOf, isFullRect, rectOf, REGION_MAX_SCALE, type Aspect, type ClipSpan, type FrameRect, type MediaAsset, type VideoClip } from "@/cut/lib/types";
 import { hasMaskKeys, type MaskKey } from "@donkeycut/effects-kit";
 import { cn } from "@/lib/utils";
-import { MaskGizmoCore, OverlayLayer } from "./OverlayLayer";
+import { MaskGizmoCore, OverlayChromeHost, OverlayLayer } from "./OverlayLayer";
 import { CORNER_HANDLES, HANDLE_AXIS, TransformHandles, type ResizeHandle } from "./TransformHandles";
 import {
   StageEffectPaint,
@@ -132,15 +133,116 @@ function useCachedFirstFrame(canvasRef: RefObject<HTMLCanvasElement | null>) {
   }, [canvasRef, epoch, projectId]);
 }
 
+/** How far the camera zooms from the fitted size, in multiples of the fit. */
+const MIN_ZOOM = 0.05;
+const MAX_ZOOM = 32;
+/** The ladder the zoom buttons climb; the wheel moves freely between rungs. */
+const ZOOM_STEPS = [0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32];
+/** How long the zoom control lingers after the last camera move. */
+const HUD_LINGER_MS = 2600;
+
+/** The stage's corner rounding: tiny, and gone once the picture is small on
+ * screen. */
+const stageRadius = (w: number, h: number) => (Math.min(w, h) < 140 ? 0 : 6);
+
 export function Preview() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
-  // The picture's box plus the empty room around it in the pane, which is where
-  // the outline of an oversized picture gets to show.
-  const [stage, setStage] = useState({ w: 270, h: 480, padX: 0, padY: 0 });
+  // The camera: the picture's fitted size at 100%, the pane it lives in, and
+  // the view's zoom and pan on top. The stage's on-screen size stays the unit
+  // every gizmo and drag measures in.
+  const [base, setBase] = useState({ w: 270, h: 480 });
+  const [pane, setPane] = useState({ w: 300, h: 500 });
+  // The zoom lives in React state — the stage's size and the canvas backing
+  // store follow it. The pan is one transform on one element, written to the
+  // DOM directly: a pan changes no layout, and the resize compensation has to
+  // land in the same frame as the layout move it cancels, ahead of React's
+  // next render, or the picture blinks to the new center and back.
+  const [zoom, setZoom] = useState(1);
+  const camRef = useRef({ zoom: 1, x: 0, y: 0 });
+  const boxRef = useRef<HTMLDivElement>(null);
+  const applyPan = useCallback(() => {
+    const box = boxRef.current;
+    if (!box) return;
+    const { x, y } = camRef.current;
+    box.style.transform = x || y ? `translate(${x}px, ${y}px)` : "";
+  }, []);
+  // After every commit, so the transform a zoom computed rides the same paint
+  // as the stage's new size.
+  useLayoutEffect(applyPan);
+  const refitRef = useRef(() => {});
+  // The unclipped layer the selected element's chrome portals into, so an
+  // outline hanging past the frame edge stays visible and grabbable.
+  const [chromeHost, setChromeHost] = useState<HTMLDivElement | null>(null);
   const aspect = useEditor((s) => s.aspect);
   const frame = frameOf(aspect);
+
+  // The picture's box plus the empty room around it in the pane, which is where
+  // the outline of an oversized picture gets to show.
+  const stage = useMemo(() => {
+    const w = Math.max(2, Math.round(base.w * zoom));
+    const h = Math.max(2, Math.round(base.h * zoom));
+    return {
+      w,
+      h,
+      padX: Math.max(0, Math.floor((pane.w - w) / 2)),
+      padY: Math.max(0, Math.floor((pane.h - h) / 2)),
+    };
+  }, [base, pane, zoom]);
+
+  // The zoom control shows while the camera is moving and lingers a moment
+  // after, the way the browser's own zoom bubble does.
+  const [hud, setHud] = useState({ shown: false, open: false });
+  const hudTimer = useRef(0);
+  const hudHeld = useRef(false);
+  const pokeHud = useCallback(() => {
+    setHud((h) => (h.shown ? h : { ...h, shown: true }));
+    window.clearTimeout(hudTimer.current);
+    hudTimer.current = window.setTimeout(() => {
+      if (!hudHeld.current) setHud({ shown: false, open: false });
+    }, HUD_LINGER_MS);
+  }, []);
+  useEffect(() => () => window.clearTimeout(hudTimer.current), []);
+
+  /** Scale the view about a screen point, which stays planted on the picture. */
+  const zoomAt = useCallback(
+    (cx: number, cy: number, factor: number) => {
+      const wrap = wrapRef.current;
+      if (!wrap) return;
+      const r = wrap.getBoundingClientRect();
+      const v = camRef.current;
+      const next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, v.zoom * factor));
+      if (next === v.zoom) return;
+      const f = next / v.zoom;
+      const centerX = r.left + r.width / 2;
+      const centerY = r.top + r.height / 2;
+      camRef.current = {
+        zoom: next,
+        x: cx - (cx - (centerX + v.x)) * f - centerX,
+        y: cy - (cy - (centerY + v.y)) * f - centerY,
+      };
+      setZoom(next);
+      pokeHud();
+    },
+    [pokeHud]
+  );
+
+  /** One rung up or down the ladder, about the pane's center. */
+  const stepZoom = useCallback(
+    (dir: 1 | -1) => {
+      const wrap = wrapRef.current;
+      if (!wrap) return;
+      const r = wrap.getBoundingClientRect();
+      const z = camRef.current.zoom;
+      const next =
+        dir > 0
+          ? ZOOM_STEPS.find((s) => s > z * 1.001) ?? MAX_ZOOM
+          : [...ZOOM_STEPS].reverse().find((s) => s < z * 0.999) ?? MIN_ZOOM;
+      zoomAt(r.left + r.width / 2, r.top + r.height / 2, next / z);
+    },
+    [zoomAt]
+  );
 
   usePlayback(canvasRef);
   // An effect grades what plays under it, so the stage is built in slices: the
@@ -180,20 +282,65 @@ export function Preview() {
       const availW = Math.max(120, r.width - pad);
       const availH = Math.max(120, r.height - pad);
       const scale = Math.min(availW / rw, availH / rh);
-      const w = Math.floor(scale * rw);
-      const h = Math.floor(scale * rh);
-      setStage({
-        w,
-        h,
-        padX: Math.max(0, Math.floor((r.width - w) / 2)),
-        padY: Math.max(0, Math.floor((r.height - h) / 2)),
-      });
+      setBase({ w: Math.floor(scale * rw), h: Math.floor(scale * rh) });
+      camRef.current = { zoom: 1, x: 0, y: 0 };
+      applyPan();
+      setZoom(1);
     };
-    fit();
-    const ro = new ResizeObserver(fit);
+    refitRef.current = fit;
+    // The fit happens once per aspect. After that the camera holds its place
+    // on screen: when a panel opens and the pane's center moves, the pan
+    // absorbs the difference. The observer's callback runs after layout and
+    // before paint, and the transform is written right there, so the frame the
+    // pane moved in is the frame the move is cancelled in.
+    let prev: DOMRect | null = null;
+    const measure = () => {
+      const r = wrap.getBoundingClientRect();
+      if (!prev) {
+        fit();
+      } else {
+        const dx = prev.left + prev.width / 2 - (r.left + r.width / 2);
+        const dy = prev.top + prev.height / 2 - (r.top + r.height / 2);
+        if (dx || dy) {
+          camRef.current.x += dx;
+          camRef.current.y += dy;
+          applyPan();
+        }
+      }
+      prev = r;
+      setPane({ w: r.width, h: r.height });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
     ro.observe(wrap);
     return () => ro.disconnect();
-  }, [aspect]);
+  }, [aspect, applyPan]);
+
+  // Pinch and ⌘/ctrl-wheel zoom about the cursor; a plain scroll pans. The
+  // listener is native so preventDefault beats the page's own pinch zoom.
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const k = e.deltaMode === 1 ? 16 : 1;
+      if (e.ctrlKey || e.metaKey) {
+        // A trackpad pinch streams small deltas; a wheel notch arrives as one
+        // big one. The clamp keeps a notch to a comfortable step.
+        const factor = Math.max(1 / 1.6, Math.min(1.6, Math.exp(-e.deltaY * k * 0.01)));
+        zoomAt(e.clientX, e.clientY, factor);
+      } else {
+        const dx = e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX;
+        const dy = e.shiftKey && !e.deltaX ? 0 : e.deltaY;
+        camRef.current.x -= dx * k;
+        camRef.current.y -= dy * k;
+        applyPan();
+        pokeHud();
+      }
+    };
+    wrap.addEventListener("wheel", onWheel, { passive: false });
+    return () => wrap.removeEventListener("wheel", onWheel);
+  }, [zoomAt, pokeHud, applyPan]);
 
   // Drag a fill-mode clip inside the frame to choose the visible crop.
   const panDrag = (e: React.PointerEvent) => {
@@ -257,24 +404,67 @@ export function Preview() {
   };
 
   return (
-    <section className="preview-pane flex min-h-0 min-w-0 flex-col bg-muted/40 select-none">
+    <section className="preview-pane relative flex min-h-0 min-w-0 flex-col bg-muted/40 select-none">
       <div
         ref={wrapRef}
-        className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-3"
-        // The empty room around the picture is the only part of the preview that
-        // clears the selection; the picture itself just plays and pauses.
+        className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 overflow-hidden p-3"
+        // A middle-button drag pans the camera from anywhere in the pane, ahead
+        // of whatever gizmo or clip sits under the pointer.
+        onPointerDownCapture={(e) => {
+          if (e.button !== 1) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const el = e.currentTarget;
+          el.setPointerCapture(e.pointerId);
+          const v0 = { ...camRef.current };
+          const sx = e.clientX;
+          const sy = e.clientY;
+          const move = (ev: PointerEvent) => {
+            camRef.current = { zoom: v0.zoom, x: v0.x + ev.clientX - sx, y: v0.y + ev.clientY - sy };
+            applyPan();
+            pokeHud();
+          };
+          const up = () => {
+            el.removeEventListener("pointermove", move);
+            el.removeEventListener("pointerup", up);
+            el.removeEventListener("pointercancel", up);
+          };
+          el.addEventListener("pointermove", move);
+          el.addEventListener("pointerup", up);
+          el.addEventListener("pointercancel", up);
+        }}
+        // A drag on the empty room around the picture pans the camera; a
+        // stationary press there clears the selection. The picture itself
+        // plays and pauses.
         onPointerDown={(e) => {
-          if (e.target === e.currentTarget) useEditor.getState().select(null);
+          if (e.target !== e.currentTarget) return;
+          const v0 = { ...camRef.current };
+          startDrag(e, {
+            onMove: (dx, dy) => {
+              camRef.current = { zoom: v0.zoom, x: v0.x + dx, y: v0.y + dy };
+              applyPan();
+              pokeHud();
+            },
+            onUp: (_dx, _dy, moved) => {
+              if (!moved) useEditor.getState().select(null);
+            },
+            cursor: () => "grabbing",
+          });
         }}
       >
         {/* The selection handle mounts beside the stage, outside its clipping,
             so a box dragged past the frame edge stays visible and grabbable. */}
-        <div className="relative" style={{ width: stage.w, height: stage.h }}>
+        <div
+          ref={boxRef}
+          className="relative shrink-0"
+          style={{ width: stage.w, height: stage.h }}
+        >
         <div
           ref={stageRef}
           className={cn(
-            "stage absolute inset-0 overflow-hidden rounded-xl bg-black shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_36px_rgba(0,0,0,0.18)]"
+            "stage absolute inset-0 overflow-hidden bg-black shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_36px_rgba(0,0,0,0.18)]"
           )}
+          style={{ borderRadius: stageRadius(stage.w, stage.h) }}
           onPointerDown={(e) => {
             if (
               e.target === e.currentTarget ||
@@ -326,26 +516,139 @@ export function Preview() {
             onDragEnd={clearAssetDrag}
           />
           </StagePictureFx>
-          <ClipMaskGizmo stage={stage} />
           {slices.map((slice) =>
             slice.kind === "elements" ? (
-              <OverlayLayer
-                key={slice.key}
-                stageWidth={stage.w}
-                gradeAbove={slice.gradeAbove}
-                from={slice.from}
-                to={slice.to}
-                captions={slice.captions}
-              />
+              <OverlayChromeHost.Provider key={slice.key} value={chromeHost}>
+                <OverlayLayer
+                  stageWidth={stage.w}
+                  gradeAbove={slice.gradeAbove}
+                  from={slice.from}
+                  to={slice.to}
+                  captions={slice.captions}
+                />
+              </OverlayChromeHost.Provider>
             ) : (
               <StageEffectPaint key={slice.key} lane={slice.lane} />
             )
           )}
         </div>
+        {/* Chrome layers sit beside the stage, outside its clipping: the
+            element chrome host, the clip's mask gizmo, and the clip gizmo.
+            The host hands the frame's corner rounding to the chrome inside,
+            whose frame-clipped rings follow the stage's own corners. */}
+        <div
+          ref={setChromeHost}
+          className="pointer-events-none absolute inset-0"
+          style={{ "--stage-radius": `${stageRadius(stage.w, stage.h)}px` } as React.CSSProperties}
+        />
+        <ClipMaskGizmo stage={stage} />
         <ClipTransformGizmo stage={stage} />
         </div>
       </div>
+      <ZoomHud
+        zoom={zoom}
+        shown={hud.shown}
+        open={hud.open}
+        onToggle={() => {
+          setHud((h) => ({ shown: true, open: !h.open }));
+          pokeHud();
+        }}
+        onZoom={stepZoom}
+        onReset={() => {
+          refitRef.current();
+          pokeHud();
+        }}
+        onHold={(held) => {
+          hudHeld.current = held;
+          if (!held) pokeHud();
+        }}
+      />
     </section>
+  );
+}
+
+/**
+ * The camera's zoom control, in the pane's top-right corner. It appears while
+ * the camera moves and lingers a moment after; the round button opens a bubble
+ * with the zoom level, a step in each direction, and Reset, which refits the
+ * picture to the pane.
+ */
+function ZoomHud({
+  zoom,
+  shown,
+  open,
+  onToggle,
+  onZoom,
+  onReset,
+  onHold,
+}: {
+  zoom: number;
+  shown: boolean;
+  open: boolean;
+  onToggle: () => void;
+  onZoom: (dir: 1 | -1) => void;
+  onReset: () => void;
+  onHold: (held: boolean) => void;
+}) {
+  const Icon = zoom < 0.999 ? ZoomOut : ZoomIn;
+  return (
+    <div
+      className={cn(
+        "absolute top-3 right-3 z-20 flex origin-[right_center] items-center gap-2 transition-[opacity,transform]",
+        shown
+          ? "scale-100 opacity-100 duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]"
+          : "pointer-events-none scale-90 opacity-0 duration-200 ease-in"
+      )}
+      onPointerEnter={() => onHold(true)}
+      onPointerLeave={() => onHold(false)}
+    >
+      {/* The bubble unfurls out of the button's left side — it stretches open
+          past its resting size and settles through a bounce or two — and
+          tucks back in with a quick, smooth ease. */}
+      <div
+        className={cn(
+          "flex origin-right items-center gap-1 rounded-full border bg-background/95 py-1 pr-1 pl-3 shadow-md backdrop-blur",
+          open
+            ? "animate-[cut-hud-unfurl_480ms_both]"
+            : "pointer-events-none translate-x-4 scale-x-50 scale-y-75 opacity-0 transition-[opacity,transform] duration-200 ease-in"
+        )}
+      >
+        <span className="w-11 text-center text-xs font-medium tabular-nums">
+          {Math.round(zoom * 100)}%
+        </span>
+        <button
+          type="button"
+          title="Zoom out"
+          onClick={() => onZoom(-1)}
+          className="grid size-7 place-items-center rounded-full text-foreground hover:bg-accent"
+        >
+          <ZoomOut className="size-4" />
+        </button>
+        <button
+          type="button"
+          title="Zoom in"
+          onClick={() => onZoom(1)}
+          className="grid size-7 place-items-center rounded-full text-foreground hover:bg-accent"
+        >
+          <ZoomIn className="size-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onReset}
+          className="ml-1 rounded-full border px-2.5 py-1 text-xs font-medium hover:bg-accent"
+        >
+          Reset
+        </button>
+      </div>
+      <button
+        type="button"
+        title={`Zoom ${Math.round(zoom * 100)}%`}
+        onClick={onToggle}
+        className="grid size-9 shrink-0 place-items-center rounded-full border bg-background/95 text-foreground shadow-md backdrop-blur hover:bg-accent"
+      >
+        <Icon className="size-4" />
+      </button>
+    </div>
   );
 }
 
@@ -381,11 +684,12 @@ function snapAxis(v: number, size: number, tol: number): { v: number; guide: num
   return best;
 }
 
-/** The frame line nearest a resized trailing edge, within tolerance. */
+/** The frame line nearest a resized edge, within tolerance: either frame
+ * edge or the centerline, whichever way the grip travels. */
 function snapEdge(v: number, tol: number): number | null {
   let best: number | null = null;
   let bd = tol;
-  for (const target of [0.5, 1]) {
+  for (const target of [0, 0.5, 1]) {
     const d = Math.abs(v - target);
     if (d < bd) {
       bd = d;
@@ -520,13 +824,38 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
         if (corner) {
           const grow =
             1 + (a.x * (dx / stage.w) / r.w + a.y * (dy / stage.h) / r.h) / 2;
-          const k = Math.max(
-            0.05 / Math.min(r.w, r.h),
-            Math.min(REGION_MAX_SCALE / Math.max(r.w, r.h), grow)
-          );
+          const kMin = 0.05 / Math.min(r.w, r.h);
+          const kMax = REGION_MAX_SCALE / Math.max(r.w, r.h);
+          let k = Math.max(kMin, Math.min(kMax, grow));
+          // The dragged corner's own edges pull onto the frame lines: the
+          // scale adjusts so whichever edge sits closest lands exactly there.
+          const x0 = a.x > 0 ? r.x : r.x + r.w;
+          const y0 = a.y > 0 ? r.y : r.y + r.h;
+          type EdgeHit = { k: number; axis: "x" | "y"; line: number; d: number };
+          const consider = (
+            dir: number,
+            from: number,
+            size: number,
+            stageSize: number,
+            axis: "x" | "y"
+          ): EdgeHit[] =>
+            [0, 0.5, 1].flatMap((line) => {
+              const kt = (line - from) / (dir * size);
+              if (kt < kMin || kt > kMax) return [];
+              const d = Math.abs(from + dir * size * k - line) * stageSize;
+              return d < SNAP_PX ? [{ k: kt, axis, line, d }] : [];
+            });
+          const hit = [
+            ...consider(a.x, x0, r.w, stage.w, "x"),
+            ...consider(a.y, y0, r.h, stage.h, "y"),
+          ].reduce<EdgeHit | null>((best, c) => (!best || c.d < best.d ? c : best), null);
+          if (hit) k = hit.k;
           const w = r.w * k;
           const h = r.h * k;
-          setGuides({ x: null, y: null });
+          setGuides({
+            x: hit?.axis === "x" ? hit.line : null,
+            y: hit?.axis === "y" ? hit.line : null,
+          });
           patch({
             frame: {
               x: a.x > 0 ? r.x : r.x + r.w - w,
@@ -707,8 +1036,14 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
           frame clipping is the frame's own edges, and a guide is a frame line.
           A turned box keeps just its dashed outline. */}
       <div
-        className="pointer-events-none absolute overflow-hidden rounded-xl"
-        style={{ left: stage.padX, top: stage.padY, width: stage.w, height: stage.h }}
+        className="pointer-events-none absolute overflow-hidden"
+        style={{
+          left: stage.padX,
+          top: stage.padY,
+          width: stage.w,
+          height: stage.h,
+          borderRadius: stageRadius(stage.w, stage.h),
+        }}
       >
         {!rotation && (
           <div

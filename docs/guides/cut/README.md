@@ -46,6 +46,8 @@ Two things follow from that. A cut is a read from a different ring rather than a
 
 What is on screen at a given instant is still a pure function of the document and a time, and it is still the same function an export asks. The preview reaches an instant by playing toward it and an export by jumping straight there; because both draw through one compositor from one plan, the file cannot quietly disagree with what was watched.
 
+The stage sits under a camera. The picture opens fitted to its pane, and that fit is 100%: from there a pinch or ⌘-scroll zooms about the cursor, a plain scroll pans, and a drag on the empty room around the picture — or a middle-button drag anywhere — moves the view. The camera holds its place on screen when a panel opens or the selection changes shape; the pan absorbs the layout's move, so the picture stays where the eye left it. A round control in the pane's top-right corner appears while the camera moves and lingers a moment after, opening into the zoom level, a step in each direction, and a Reset that refits.
+
 The playhead lives apart from the document. It moves sixty times a second and the document does not, so a moved playhead wakes the surfaces that draw it and nothing else — and a paused editor with nothing changing schedules no frames at all.
 
 Whether any of this is true of a given build is measured rather than assumed: `npm run eval:cut-perf` drives a real editor in a real browser against fixture montages and reports how long the picture takes to answer a moved playhead, whether any frame crossing a cut was the wrong one, and whether a fast-cut montage replayed for minutes still holds the picture to the clock the way its first pass did. Its committed report is the baseline a change is diffed against.
