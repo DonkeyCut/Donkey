@@ -13,9 +13,9 @@ export type AccountFeatureFlag = {
 export const ACCOUNT_FEATURE_FLAGS: AccountFeatureFlag[] = [
   {
     id: "preview_diagnostics",
-    title: "Share preview diagnostics",
+    title: "Share diagnostics",
     description:
-      "Sends timing from the preview while you play: frames that arrived late, how far the picture sat behind the sound, and what your machine was holding open. It is how we fix stutters on machines we cannot reproduce. Your video, audio and project stay in your browser.",
+      "Help us diagnose playback issues. Your video, audio, and project stay in your browser.",
     defaultEnabled: false,
   },
 ];
