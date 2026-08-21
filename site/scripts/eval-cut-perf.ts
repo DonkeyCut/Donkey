@@ -110,27 +110,37 @@ interface Machine {
    * frame the decoder failed to deliver on time is a frame the viewer sees
    * repeated or missing. */
   lateShare: number;
+  /**
+   * What this machine's audio output holds before a rendered sample is heard.
+   *
+   * The developer machine is the quiet one here too: CoreAudio reports a few
+   * tens of milliseconds and a picture drawn against the wrong audio clock is
+   * off by less than a frame, which nobody sees and no run catches. Shared-mode
+   * WASAPI — every Windows browser, by default — reports several times that,
+   * and a Bluetooth output more again. Zero leaves the device alone.
+   */
+  outputLatencyS: number;
 }
 
 const MACHINES: Machine[] = [
   // The machine this is being written on: nothing binds, and the numbers are
   // held to the tightest budget in the file.
-  { name: "desktop", cpu: 1, slots: 0, softwareMs: 0, lagP95S: 0.05, stallShare: 0.002, lateShare: 0.02, decayFloor: 0.02 },
+  { name: "desktop", cpu: 1, slots: 0, softwareMs: 0, outputLatencyS: 0, lagP95S: 0.05, stallShare: 0.002, lateShare: 0.02, decayFloor: 0.02 },
   // A mainstream laptop with an integrated GPU.
-  { name: "laptop", cpu: 4, slots: 6, softwareMs: 6, lagP95S: 0.06, stallShare: 0.04, lateShare: 0.1, decayFloor: 0.1 },
+  { name: "laptop", cpu: 4, slots: 6, softwareMs: 6, outputLatencyS: 0.12, lagP95S: 0.06, stallShare: 0.04, lateShare: 0.1, decayFloor: 0.1 },
   // The one people report from: a 15W six-core with Vega graphics, running a
   // browser that is also drawing the editor.
-  { name: "ryzen-5500u", cpu: 10, slots: 4, softwareMs: 8, lagP95S: 0.06, stallShare: 0.03, lateShare: 0.05, decayFloor: 0.08 },
+  { name: "ryzen-5500u", cpu: 10, slots: 4, softwareMs: 8, outputLatencyS: 0.12, lagP95S: 0.06, stallShare: 0.03, lateShare: 0.05, decayFloor: 0.08 },
   // Worse than anything anyone has reported, which is the point: what holds
   // here holds on the machines that have not written in yet.
-  { name: "potato", cpu: 20, slots: 2, softwareMs: 12, lagP95S: 0.1, stallShare: 0.06, lateShare: 0.2, decayFloor: 0.15 },
+  { name: "potato", cpu: 20, slots: 2, softwareMs: 12, outputLatencyS: 0.2, lagP95S: 0.1, stallShare: 0.06, lateShare: 0.2, decayFloor: 0.15 },
   // No hardware video decode at all. This is not an exotic machine — a
   // blocklisted driver, a codec the GPU does not carry, a browser started with
   // acceleration off, and every stream is on the CPU. A software decoder is
   // slower than a hardware one; it is not broken, and neither is an editor
   // running on top of one. This profile is held to the same standard a laptop
   // is, because that is the claim.
-  { name: "software-decode", cpu: 4, slots: 0, softwareMs: 8, lagP95S: 0.06, stallShare: 0.04, lateShare: 0.1, decayFloor: 0.1 },
+  { name: "software-decode", cpu: 4, slots: 0, softwareMs: 8, outputLatencyS: 0.12, lagP95S: 0.06, stallShare: 0.04, lateShare: 0.1, decayFloor: 0.1 },
 ];
 
 const MACHINE_NAME = arg("--machine") ?? "desktop";
@@ -208,6 +218,13 @@ const GATE = {
 /** How far behind the sound the picture has to be for that frame to read as a
  * hitch rather than a beat of lag. */
 const STALL_S = 0.25;
+/** How far the preview's hold-back may sit from what the output device reports
+ * before the picture and the sound are telling different stories. One frame at
+ * sixty hertz. */
+const CLOCK_SLACK_S = 0.02;
+/** Where the preview stops believing a device's claim, mirrored here so a
+ * profile past it does not fail a run the preview is handling correctly. */
+const CLOCK_CAP_S = 0.4;
 
 // ── Types shared with perfTrace.ts ──────────────────────────────────────────
 interface PresentRecord {
@@ -233,6 +250,8 @@ interface Trace {
   liveSources: number[];
   keptSources: number[];
   warmMb: number[];
+  audioLead: number[];
+  audioLatency: number[];
   startedAt: number;
 }
 
@@ -666,6 +685,11 @@ interface CaseResult {
   stallShare?: number;
   /** Late-frame share over the first and last third of a long play. */
   decay?: { first: number; last: number };
+  /** Seconds the preview held the picture back for the output device, against
+   * the seconds the device reported holding. These agree when the picture is
+   * drawn against the sound that is audible rather than the sound that has
+   * been rendered. */
+  clock?: { lead: number; reported: number };
   /** Seconds between a strip tile's own moment and the moment its picture
    * was captured at. */
   tileErr?: Agg;
@@ -976,6 +1000,20 @@ const montageCase = (name: string, passes: number, dressed = false): EvalCase =>
     }
     if (decoders && decoders.peak === 0) notes.push("nothing decoded at all");
     if (lag.p95 > GATE.lagP95S) notes.push(`picture ${lag.p95}s behind the clock at p95`);
+    // Which clock the picture is drawn against, which the lag above cannot ask:
+    // a picture drawn against the rendered clock is exactly on time against it
+    // and a tenth of a second early against the speakers. The device's own
+    // answer is the reference, capped where the preview caps it so a driver
+    // claiming something absurd cannot fail a run on its own.
+    const lead = agg(trace.audioLead ?? []);
+    const reported = agg(trace.audioLatency ?? []);
+    const owed = Math.min(CLOCK_CAP_S, reported.p50);
+    if (reported.n > 0 && Math.abs(lead.p50 - owed) > CLOCK_SLACK_S) {
+      notes.push(
+        `picture drawn ${Math.round((owed - lead.p50) * 1000)}ms ahead of the sound: ` +
+          `the output holds ${Math.round(owed * 1000)}ms and the clock gives back ${Math.round(lead.p50 * 1000)}ms`
+      );
+    }
     const behind = played.filter((p) => p.srcTs !== null && p.wantSrc! - p.srcTs! > STALL_S);
     const stallShare = +(behind.length / played.length).toFixed(4);
     if (stallShare > GATE.stallShare) {
@@ -999,6 +1037,7 @@ const montageCase = (name: string, passes: number, dressed = false): EvalCase =>
       lag,
       stallShare,
       decay,
+      clock: { lead: lead.p50, reported: +reported.p50.toFixed(3) },
       longTasks: agg(trace.longTasks.map((l) => l.ms)),
       liveSamples: Math.max(0, ...trace.liveSamples),
       liveSources: Math.max(0, ...trace.liveSources),
@@ -1464,6 +1503,37 @@ const decoderShim = ({ slots, softwareMs }: Machine) => `
 })();
 `;
 
+/**
+ * Make the page's audio output hold as long as this machine's does.
+ *
+ * `outputLatency` is the device's answer, and on the machine this is written on
+ * the answer is small enough that a preview ignoring it is wrong by less than a
+ * frame. Reporting a Windows-sized buffer instead is what makes the gate below
+ * mean something: a picture drawn against the rendered clock rather than the
+ * audible one now sits a tenth of a second ahead of its own sound, which is
+ * what the reports describe.
+ *
+ * Only the reading changes. The samples still leave the machine when they
+ * leave it; what is under test is whether the preview reads the device at all.
+ */
+const audioShim = (seconds: number) => `
+(() => {
+  const patch = (Klass) => {
+    if (!Klass) return;
+    const d = Object.getOwnPropertyDescriptor(Klass.prototype, "outputLatency");
+    Object.defineProperty(Klass.prototype, "outputLatency", {
+      configurable: true,
+      get() {
+        const own = d && d.get ? d.get.call(this) : 0;
+        return (own || 0) + ${seconds};
+      },
+    });
+  };
+  patch(window.AudioContext);
+  patch(window.webkitAudioContext);
+})();
+`;
+
 async function launch(): Promise<{ browser: Browser; page: Page }> {
   const browser = await chromium.launch({
     channel: "chrome",
@@ -1477,6 +1547,8 @@ async function launch(): Promise<{ browser: Browser; page: Page }> {
     viewport: { width: 1600, height: 1000 },
   });
   if (MACHINE.softwareMs > 0) await context.addInitScript({ content: decoderShim(MACHINE) });
+  if (MACHINE.outputLatencyS > 0)
+    await context.addInitScript({ content: audioShim(MACHINE.outputLatencyS) });
   // The editor's session gate is a client-side cookie read, and the only sign-in
   // this build offers is Google's. Answering that one request for the dev-bypass
   // user is the whole of the fake: every other request the page makes is real,
@@ -1703,7 +1775,7 @@ const detailOf = (r: CaseResult) =>
       : r.idleTicks !== undefined
         ? `ticks=${r.idleTicks}`
         : r.lag
-          ? `late=${r.drops}/${r.presented} lagP95=${r.lag.p95}s hitch=${((r.stallShare ?? 0) * 100).toFixed(1)}% lagMax=${r.lag.max}s sources=${r.liveSources} sw=${r.decoders?.softwarePeak ?? "-"}/${r.decoders?.software ?? "-"} busy=${r.decoders?.busyPeak ?? "-"} warm=${r.warmMb}MB decay=${r.decay?.first}→${r.decay?.last}`
+          ? `late=${r.drops}/${r.presented} lagP95=${r.lag.p95}s hitch=${((r.stallShare ?? 0) * 100).toFixed(1)}% lagMax=${r.lag.max}s sources=${r.liveSources} sw=${r.decoders?.softwarePeak ?? "-"}/${r.decoders?.software ?? "-"} busy=${r.decoders?.busyPeak ?? "-"} clock=${Math.round((r.clock?.lead ?? 0) * 1000)}/${Math.round((r.clock?.reported ?? 0) * 1000)}ms warm=${r.warmMb}MB decay=${r.decay?.first}→${r.decay?.last}`
           : `late=${r.drops}/${r.presented} atCut=${r.boundaryDrops}`;
 
 async function main(): Promise<void> {
