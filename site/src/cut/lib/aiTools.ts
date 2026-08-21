@@ -100,7 +100,7 @@ import {
   type TextLayout,
   type TextVariation,
 } from "./textCompose";
-import { requireTextLook } from "./textLooks";
+import { requireTextLook, type TextLook } from "./textLooks";
 import {
   MOVE_STRENGTH_MAX,
   MOVE_STRENGTH_MIN,
@@ -1469,11 +1469,11 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const variation: TextVariation =
         input.variation === "none" || input.variation === "subtle" || input.variation === "bold"
           ? input.variation
-          : "bold";
+          : (look.defaultVariation ?? "bold");
       if (typeof input.layout === "string" && !TEXT_LAYOUT_IDS.includes(input.layout as TextLayout))
         throw new ToolError(`Unknown layout. Use one of: ${TEXT_LAYOUT_IDS.join(", ")}.`);
       const layout = typeof input.layout === "string" ? (input.layout as TextLayout) : undefined;
-      if (input.background !== false) s.setBackground(look.frame.background);
+      if (paintsFrame(look, input.background)) s.setBackground(look.frame.background);
       // Row 0 is the front of the element stack, so the words take the row the
       // caller named and each card goes one row under them. Cards over words
       // would paint the line out.
@@ -1550,7 +1550,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         note:
           cards.length > 0
             ? `Words on row ${lane} with their cards on row ${cardLane} behind them, colors cycling ${look.frame.cards.join(" \u2192 ")}.`
-            : `Words on row ${lane} over the ${look.frame.background} frame.`,
+            : look.keepsFrame
+              ? `Words on row ${lane} over the cut as it already looks; the frame color is untouched.`
+              : `Words on row ${lane} over the ${look.frame.background} frame.`,
       };
   },
 
@@ -1564,7 +1566,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         if (look.captions.font) patch.font = look.captions.font;
         if (look.captions.accentColor) patch.accentColor = look.captions.accentColor;
         if (look.captions.accentMode) patch.accentMode = look.captions.accentMode;
-        if (input.background !== false) s.setBackground(look.frame.background);
+        if (paintsFrame(look, input.background)) s.setBackground(look.frame.background);
       }
       if (typeof input.style === "string") {
         if (!(input.style in CAPTION_STYLES))
@@ -1628,7 +1630,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           ...(look.captions.accentColor ? { accentColor: look.captions.accentColor } : {}),
           ...(look.captions.accentMode ? { accentMode: look.captions.accentMode } : {}),
         });
-        if (input.background !== false) st.setBackground(look.frame.background);
+        if (paintsFrame(look, input.background)) st.setBackground(look.frame.background);
       }
       const heardWords = cueWords(cues).length;
       return {
@@ -3179,6 +3181,14 @@ function cueWords(cues: { start: number; end: number; text: string; words?: Time
     parts.forEach((w, i) => out.push({ w, t0: c.start + step * i, t1: c.start + step * (i + 1) }));
   }
   return out;
+/** Whether dressing the project in this look repaints the frame color. A look
+ * that keeps the frame only repaints it when the caller asked for it in so
+ * many words — adding words to a cut is not a reason to recolor it. */
+function paintsFrame(look: TextLook, background: unknown): boolean {
+  if (typeof background === "boolean") return background;
+  return look.keepsFrame !== true;
+}
+
 }
 
 /** The lines a text sequence should place: the ones passed in, or the caption

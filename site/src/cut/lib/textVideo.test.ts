@@ -53,6 +53,30 @@ describe("add_text_sequence", () => {
     expect(useEditor.getState().background).toBe(look.frame.background);
   });
 
+  test("a run nobody asked to design comes out plain and leaves the cut alone", async () => {
+    useEditor.setState({ background: "#123456" });
+    await runAiTool("add_text_sequence", {
+      lines: [
+        { text: "first line", start: 0, end: 2 },
+        { text: "second line", start: 2, end: 4 },
+        { text: "third line", start: 4, end: 6 },
+      ],
+    });
+    const words = overlays().filter(isTextOverlay);
+    expect(overlays().filter(isShapeOverlay)).toHaveLength(0);
+    expect(words).toHaveLength(3);
+    // One face, one place, one entrance, no keyframe moves, no tilt.
+    expect(new Set(words.map((w) => w.font)).size).toBe(1);
+    expect(new Set(words.map((w) => w.y)).size).toBe(1);
+    expect(new Set(words.map((w) => w.x)).size).toBe(1);
+    expect(new Set(words.map((w) => w.color)).size).toBe(1);
+    expect(words.every((w) => (w.rotation ?? 0) === 0)).toBe(true);
+    expect(words.every((w) => !w.kf || w.kf.length === 0)).toBe(true);
+    expect(words.every((w) => w.anim?.in?.style === "fade")).toBe(true);
+    // The frame color is the user's, not the look's.
+    expect(useEditor.getState().background).toBe("#123456");
+  });
+
   test("a look with no cards puts the words straight on the frame", async () => {
     await runAiTool("add_text_sequence", {
       look: "over-footage",

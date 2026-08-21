@@ -1,5 +1,5 @@
 import type { OverlayAnimStyle, OverlayLoopStyle, WordAccentMode } from "@donkeycut/effects-kit";
-import type { TextEnsemble } from "./textCompose";
+import type { TextEnsemble, TextVariation } from "./textCompose";
 import type { CaptionStyleId, FontId } from "./types";
 
 /**
@@ -23,6 +23,14 @@ export interface TextLook {
    * `cards` are full-frame color cards a sequence cycles through, one per
    * line; empty means the words sit straight on the frame or on footage. */
   frame: { background: string; cards: string[] };
+  /** This look leaves the project's frame color alone — the words ride over
+   * whatever is already there. A caller can still repaint it by asking for
+   * the background explicitly. */
+  keepsFrame?: boolean;
+  /** How far a run in this look departs from one repeated design when the
+   * caller names no variation. Absent = `bold`, the designed looks' whole
+   * ensemble; `plain` sits at `none` so an unstyled ask stays unstyled. */
+  defaultVariation?: TextVariation;
   /** The type. `onCards` is the text color per card color, index-matched to
    * `frame.cards`; without cards, `color` carries every line. */
   text: {
@@ -75,6 +83,35 @@ export interface TextLook {
 }
 
 export const TEXT_LOOKS: Record<string, TextLook> = {
+  plain: {
+    id: "plain",
+    label: "Plain",
+    when: "One clean sans line low in the frame, white with a shadow, a short fade in and out. The look for text the user asked for without asking for a design — same face, same place, same entrance on every line, no cards, and the frame color untouched.",
+    frame: { background: "#000000", cards: [] },
+    keepsFrame: true,
+    defaultVariation: "none",
+    text: {
+      font: "sf",
+      size: 72,
+      weight: 700,
+      color: "#FFFFFF",
+      lineHeight: 1.25,
+      shadow: true,
+      x: 0.5,
+      y: 0.78,
+      widthRatio: 0.52,
+    },
+    accent: "#FFFFFF",
+    motion: { in: { style: "fade", seconds: 0.25 }, out: { style: "fade", seconds: 0.2 } },
+    ensemble: {
+      faces: [{ font: "sf", weight: 700 }],
+      motion: ["fade"],
+      layout: "center",
+      moves: ["none"],
+    },
+    captions: { style: "clean", wordHighlight: false },
+  },
+
   "lyric-card": {
     id: "lyric-card",
     label: "Lyric cards",
@@ -276,6 +313,7 @@ export const TEXT_LOOKS: Record<string, TextLook> = {
     label: "Over footage",
     when: "No cards at all — heavy outlined white type over whatever is playing. The look for words on the user's own video.",
     frame: { background: "#000000", cards: [] },
+    keepsFrame: true,
     text: {
       font: "anton",
       size: 96,
@@ -447,7 +485,10 @@ export const TEXT_LOOKS: Record<string, TextLook> = {
 
 export const TEXT_LOOK_IDS = Object.keys(TEXT_LOOKS);
 
-export const DEFAULT_TEXT_LOOK = "lyric-card";
+/** The look a run takes when the caller named none. Plain: a design is
+ * something the user asks for, so an unasked run comes out as one readable
+ * face where it was put. */
+export const DEFAULT_TEXT_LOOK = "plain";
 
 export function textLook(id: string | undefined): TextLook {
   return TEXT_LOOKS[id ?? ""] ?? TEXT_LOOKS[DEFAULT_TEXT_LOOK];
@@ -471,5 +512,6 @@ export const textLookCatalog = (): string =>
   TEXT_LOOK_IDS.map((id) => {
     const l = TEXT_LOOKS[id];
     const cards = l.frame.cards.length > 0 ? `cards ${l.frame.cards.join("/")}` : "no cards";
-    return `- ${l.id} (${l.label}): ${l.when} Frame ${l.frame.background}, ${cards}; ${l.text.font} ${l.text.size}px; ${l.motion.in?.style ?? "no"} in; captions ${l.captions.style}${l.captions.wordHighlight ? " + karaoke" : ""}.`;
+    const frame = l.keepsFrame ? "Frame untouched" : `Frame ${l.frame.background}`;
+    return `- ${l.id} (${l.label}): ${l.when} ${frame}, ${cards}; ${l.text.font} ${l.text.size}px; ${l.motion.in?.style ?? "no"} in; ${l.defaultVariation ?? "bold"} by default; captions ${l.captions.style}${l.captions.wordHighlight ? " + karaoke" : ""}.`;
   }).join("\n");
