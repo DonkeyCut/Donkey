@@ -9,6 +9,12 @@ struct MediaScreen: View {
     var auth: AuthModel
 
     @State private var playing: Recording?
+    /// Photos' select mode: the header's control turns the grid into a
+    /// picker, cards take checkmarks, and the actions that work on many
+    /// clips at once ride the bar at the bottom.
+    @State private var selecting = false
+    @State private var selection: Set<UUID> = []
+    @State private var confirmingDelete = false
 
     private let columns = [GridItem(.adaptive(minimum: 150, maximum: 240), spacing: 12)]
 
@@ -17,7 +23,15 @@ struct MediaScreen: View {
             if media.storageFull {
                 StorageBanner()
             }
-            ScreenHeader(title: "Library", app: app, auth: auth)
+            ScreenHeader(title: headerTitle, app: app, auth: auth) {
+                if selecting {
+                    Button("Cancel") { endSelecting() }
+                        .font(.body.weight(.semibold))
+                } else if !media.recordings.isEmpty {
+                    Button("Select") { selecting = true }
+                        .font(.body.weight(.semibold))
+                }
+            }
             Group {
                 if media.recordings.isEmpty {
                     EmptyState(
@@ -32,15 +46,7 @@ struct MediaScreen: View {
                     ScrollView {
                         LazyVGrid(columns: columns, spacing: 12) {
                             ForEach(media.recordings) { recording in
-                                RecordingCard(recording: recording, media: media)
-                                    .onTapGesture { playing = recording }
-                                    .contextMenu {
-                                        ShareLink(item: media.movieURL(for: recording))
-                                        Button("Delete", systemImage: "trash", role: .destructive) {
-                                            media.delete(recording)
-                                        }
-                                        .tint(.red)
-                                    }
+                                card(for: recording)
                             }
                         }
                         .padding(.horizontal, 20)
@@ -50,10 +56,132 @@ struct MediaScreen: View {
                     .refreshable { await media.sync?.refreshNow() }
                 }
             }
+            if selecting {
+                SelectionBar(
+                    urls: selectedURLs,
+                    allSelected: selection.count == media.recordings.count,
+                    toggleAll: toggleAll,
+                    delete: { confirmingDelete = true }
+                )
+            }
+        }
+        .animation(.snappy(duration: 0.2), value: selecting)
+        .onChange(of: media.recordings.isEmpty) { _, empty in
+            if empty { endSelecting() }
+        }
+        .confirmationDialog(
+            selection.count == 1 ? "Delete Video?" : "Delete \(selection.count) Videos?",
+            isPresented: $confirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) { deleteSelected() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The clips go from this phone and from the cloud.")
         }
         .fullScreenCover(item: $playing) { recording in
             RecordingPlayerView(url: media.movieURL(for: recording))
         }
+    }
+
+    private var headerTitle: String {
+        guard selecting else { return "Library" }
+        return selection.isEmpty ? "Select Clips" : "\(selection.count) Selected"
+    }
+
+    private var selectedURLs: [URL] {
+        media.recordings
+            .filter { selection.contains($0.id) }
+            .map { media.movieURL(for: $0) }
+    }
+
+    @ViewBuilder
+    private func card(for recording: Recording) -> some View {
+        let tile = RecordingCard(
+            recording: recording,
+            media: media,
+            selecting: selecting,
+            selected: selection.contains(recording.id)
+        )
+        .onTapGesture {
+            if selecting {
+                toggle(recording)
+            } else {
+                playing = recording
+            }
+        }
+        if selecting {
+            tile
+        } else {
+            tile.contextMenu {
+                ShareLink(item: media.movieURL(for: recording))
+                Button("Delete", systemImage: "trash", role: .destructive) {
+                    media.delete(recording)
+                }
+                .tint(.red)
+            }
+        }
+    }
+
+    private func toggle(_ recording: Recording) {
+        if selection.contains(recording.id) {
+            selection.remove(recording.id)
+        } else {
+            selection.insert(recording.id)
+        }
+    }
+
+    private func toggleAll() {
+        if selection.count == media.recordings.count {
+            selection.removeAll()
+        } else {
+            selection = Set(media.recordings.map(\.id))
+        }
+    }
+
+    private func deleteSelected() {
+        for recording in media.recordings where selection.contains(recording.id) {
+            media.delete(recording)
+        }
+        endSelecting()
+    }
+
+    private func endSelecting() {
+        selecting = false
+        selection.removeAll()
+    }
+}
+
+/// The bottom bar of select mode: share what is picked, pick everything or
+/// nothing, delete the rest of the way.
+struct SelectionBar: View {
+    let urls: [URL]
+    let allSelected: Bool
+    let toggleAll: () -> Void
+    let delete: () -> Void
+
+    var body: some View {
+        HStack {
+            ShareLink(items: urls) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.title3.weight(.semibold))
+            }
+            .disabled(urls.isEmpty)
+            Spacer()
+            Button(allSelected ? "Deselect All" : "Select All", action: toggleAll)
+                .font(.subheadline.weight(.semibold))
+            Spacer()
+            Button(action: delete) {
+                Image(systemName: "trash")
+                    .font(.title3.weight(.semibold))
+            }
+            .disabled(urls.isEmpty)
+            .tint(.red)
+        }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 12)
+        .background(.bar)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 }
 
@@ -74,6 +202,8 @@ struct StorageBanner: View {
 struct RecordingCard: View {
     let recording: Recording
     var media: MediaModel
+    var selecting = false
+    var selected = false
 
     var body: some View {
         MediaTile(ratio: 9 / 14) {
@@ -100,33 +230,35 @@ struct RecordingCard: View {
             SyncBadge(state: media.syncState(for: recording))
                 .padding(8)
         }
+        .overlay(alignment: .topTrailing) {
+            if selecting {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.title3.weight(.semibold))
+                    .symbolRenderingMode(selected ? .palette : .monochrome)
+                    .foregroundStyle(.white, Color.accentColor)
+                    .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                    .padding(8)
+            }
+        }
+        .scaleEffect(selected ? 0.94 : 1)
+        .animation(.snappy(duration: 0.15), value: selected)
     }
 }
 
+/// Shown on a card only while its bytes are on their way up, in the same
+/// white-on-scrim overlay the duration reads in. A clip that is settled —
+/// on the phone or in the cloud — carries no badge.
 struct SyncBadge: View {
     let state: RecordingSyncState
 
     var body: some View {
-        Text(label)
-            .font(.caption2.weight(.bold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(background, in: RoundedRectangle(cornerRadius: 8))
-    }
-
-    private var label: String {
-        switch state {
-        case .onDevice: "On this phone"
-        case .uploading(let percent): "Uploading \(percent)%"
-        case .synced: "Synced ✓"
-        }
-    }
-
-    private var background: Color {
-        switch state {
-        case .synced: Color(hex: "#168c4b").opacity(0.85)
-        default: .black.opacity(0.65)
+        if case .uploading = state {
+            Text("Syncing")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 8))
         }
     }
 }

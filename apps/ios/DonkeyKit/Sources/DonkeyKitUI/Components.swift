@@ -2,22 +2,34 @@
 import SwiftUI
 import DonkeyKitModels
 
-/// The tab screens' title row: large title on the left, the profile avatar
-/// on the same line.
-struct ScreenHeader: View {
+/// The tab screens' title row: large title on the left, a control on the
+/// same line. The trailing slot holds the profile menu until a screen puts
+/// its own control there.
+struct ScreenHeader<Trailing: View>: View {
     let title: String
     @Bindable var app: AppModel
     var auth: AuthModel
+    @ViewBuilder var trailing: Trailing
 
     var body: some View {
         HStack {
             Text(title)
                 .font(.largeTitle.weight(.bold))
+                .lineLimit(1)
             Spacer()
-            AvatarMenu(app: app, auth: auth)
+            trailing
         }
         .padding(.horizontal, 20)
         .padding(.top, 8)
+        .frame(minHeight: 42)
+    }
+}
+
+extension ScreenHeader where Trailing == AvatarMenu {
+    init(title: String, app: AppModel, auth: AuthModel) {
+        self.init(title: title, app: app, auth: auth) {
+            AvatarMenu(app: app, auth: auth)
+        }
     }
 }
 
