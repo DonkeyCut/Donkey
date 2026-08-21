@@ -29,6 +29,11 @@ last-writer-wins on the edit stamp, with tombstones so a delete made offline
 on either side still lands on the other. Deleting a synced recording on the
 phone deletes the cloud copy too.
 
+A pass that ends with work still queued — a request that timed out, a 5xx —
+books its own next try and backs off, up to five minutes between attempts, so
+a clip stranded by a bad moment on the network moves as soon as the network
+does.
+
 When the account is out of cloud storage, uploads pause and the Library shows
 a slim banner pinned over the notch; clips stay on the phone and the banner
 clears once space frees up.

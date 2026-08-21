@@ -90,6 +90,17 @@ public final class SyncEngine {
     private let uploadFor: (Recording) async -> LibraryUpload?
     private var running = false
     private var runAgain = false
+    /// A pass that ends with work still queued books its own next try, so a
+    /// timeout or a 5xx costs a wait instead of stranding the clip until the
+    /// app is next launched. Doubles until the ceiling, resets on a clean pass.
+    @ObservationIgnored private var retryDelay = SyncEngine.firstRetry
+    @ObservationIgnored private var retryScheduled = false
+    /// Recordings whose bytes could not be read: the movie file is gone, so
+    /// no pass will ever produce a payload for them. They stop counting as
+    /// queued work, and the loop stops re-probing them.
+    @ObservationIgnored private var unreadable: Set<UUID> = []
+    private static let firstRetry: Duration = .seconds(15)
+    private static let retryCeiling: Duration = .seconds(300)
 
     public init(
         journal: any SyncJournalStoring,
@@ -143,6 +154,8 @@ public final class SyncEngine {
             if runAgain {
                 runAgain = false
                 kick()
+            } else {
+                scheduleRetry()
             }
         }
         await replayTombstones()
@@ -158,6 +171,37 @@ public final class SyncEngine {
 
     private var online: Bool {
         network != .offline
+    }
+
+    private func scheduleRetry() {
+        guard signedIn(), online, !storageFull, pendingWork else {
+            retryDelay = Self.firstRetry
+            return
+        }
+        guard !retryScheduled else { return }
+        retryScheduled = true
+        let delay = retryDelay
+        retryDelay = min(delay * 2, Self.retryCeiling)
+        Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            self?.retryScheduled = false
+            self?.kick()
+        }
+    }
+
+    /// Anything the journal still owes the cloud after a pass.
+    private var pendingWork: Bool {
+        if !(((try? journal.tombstones()) ?? []).isEmpty) { return true }
+        if !(((try? journal.dirtyNotes()) ?? []).isEmpty) { return true }
+        if (media?.recordings ?? []).contains(where: {
+            !unreadable.contains($0.id) && ((try? journal.recordingRemote($0.id))?.assetId) == nil
+        }) { return true }
+        return (ideas?.inspiration ?? []).contains { item in
+            switch item.kind {
+            case .link: ((try? journal.isInspirationLinkSynced(item.id)) ?? true) == false
+            case .media: ((try? journal.inspirationRemoteAssetId(item.id)) ?? nil) == nil
+            }
+        }
     }
 
     // MARK: Deletes
@@ -266,8 +310,13 @@ public final class SyncEngine {
         for recording in media?.recordings ?? [] {
             guard online, !storageFull else { return }
             let remote = try? journal.recordingRemote(recording.id)
-            guard remote?.assetId == nil, !uploading.contains(recording.id) else { continue }
-            guard var upload = await uploadFor(recording) else { continue }
+            guard remote?.assetId == nil,
+                  !uploading.contains(recording.id),
+                  !unreadable.contains(recording.id) else { continue }
+            guard var upload = await uploadFor(recording) else {
+                unreadable.insert(recording.id)
+                continue
+            }
             upload.resume = remote?.claimedFileName != nil
             if let claimed = remote?.claimedFileName { upload.fileName = claimed }
             uploading.insert(recording.id)
