@@ -4111,21 +4111,18 @@ function Filmstrip({
   // curves/wheels/hue bands show in the preview and exports).
   const { filter, tint } = gradeCssApprox(grade);
   // No thumbs yet — the media is still streaming into the browser store. A
-  // pulsing skeleton fills the box until the strip can draw real frames.
+  // placeholder slab fills the box until the strip can draw real frames.
   if (!frames.length) {
     if (failed) {
       return (
-        <div className="tl-filmstrip-failed pointer-events-none absolute inset-0 bg-white/10" />
+        <div className="tl-filmstrip-failed pointer-events-none absolute inset-0 bg-[var(--skeleton)]" />
       );
     }
-    // Both states paint straight onto the clip box's black, in white alphas
-    // that read the same in either theme. The page-colored tones the stock
-    // skeleton uses are near-white in the light theme, which covered the box
-    // in a flat white slab and left the pulse invisible.
+    // Both states cover the clip box's black with an opaque neutral slab, so a
+    // clip waiting on thumbnails reads as a placeholder against the timeline's
+    // chrome.
     return (
-      <div className="tl-filmstrip-skeleton pointer-events-none absolute inset-0">
-        <Skeleton className="size-full rounded-none bg-white/20" />
-      </div>
+      <Skeleton className="tl-filmstrip-skeleton pointer-events-none absolute inset-0 rounded-none" />
     );
   }
   return (

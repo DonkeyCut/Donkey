@@ -73,6 +73,11 @@
   --muted-foreground: oklch(0.556 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
+  /* Skeleton slab, the tone it breathes to, and the highlight that sweeps
+     across it. */
+  --skeleton: #eaeaec;
+  --skeleton-pulse: #dcdce1;
+  --skeleton-highlight: #f5f5f6;
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
@@ -115,6 +120,9 @@
   --muted-foreground: oklch(0.708 0 0);
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
+  --skeleton: oklch(0.3 0 0);
+  --skeleton-pulse: oklch(0.26 0 0);
+  --skeleton-highlight: oklch(0.38 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
@@ -205,5 +213,56 @@ html.app-surface {
   50%,
   100% {
     opacity: 0;
+  }
+}
+
+/* Every skeleton in the app: an opaque slab breathing between two neutrals
+   with a highlight sweeping across it. The slab animates background-color
+   rather than opacity, so a skeleton laid over a dark surface stays a
+   skeleton instead of blending into what is underneath. */
+@layer base {
+  [data-slot="skeleton"] {
+    position: relative;
+    overflow: hidden;
+    animation: cut-skeleton-pulse 1.6s ease-in-out infinite;
+  }
+}
+
+[data-slot="skeleton"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--skeleton-highlight), transparent 100%) 0%,
+    var(--skeleton-highlight) 50%,
+    color-mix(in srgb, var(--skeleton-highlight), transparent 100%) 100%
+  );
+  animation: cut-skeleton-shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes cut-skeleton-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes cut-skeleton-pulse {
+  0%,
+  100% {
+    background-color: var(--skeleton);
+  }
+  50% {
+    background-color: var(--skeleton-pulse);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="skeleton"],
+  [data-slot="skeleton"]::after {
+    animation: none;
   }
 }
