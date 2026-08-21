@@ -491,3 +491,76 @@ describe("the project background in the filtergraph", () => {
     expect(g.join(";")).toContain("color=c=black:");
   });
 });
+
+describe("audio effects in the filtergraph", () => {
+  test("a windowed effect splices the mix and puts the untreated pieces back", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { out: 10 })],
+      effects: [{ effect: "echo", amount: 0.7, start: 2, end: 4 }],
+    });
+    const joined = g.join(";");
+    expect(joined).toContain("asplit=3");
+    expect(joined).toContain("aecho=");
+    // The head, the treated window, and the tail, joined back in order.
+    expect(joined).toContain("atrim=0:2.000,asetpts=PTS-STARTPTS[afxh0]");
+    expect(joined).toContain("atrim=start=4.000,asetpts=PTS-STARTPTS[afxt0]");
+    expect(joined).toContain("concat=n=3:v=0:a=1[afx0]");
+    // The treated piece leaves at the length it went in at, so a chain that
+    // rings past its window cannot push the rest of the sound late.
+    expect(joined).toContain("apad=whole_dur=2.000,atrim=0:2.000");
+  });
+
+  test("an effect over the whole cut needs no splice", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { out: 4 })],
+      effects: [{ effect: "muffle", amount: 1, start: 0, end: 4 }],
+    });
+    const joined = g.join(";");
+    expect(joined).toContain("lowpass=");
+    expect(joined).not.toContain("asplit=");
+    expect(joined).not.toContain("concat=n=");
+  });
+
+  test("an effect at the head splices in two pieces", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { out: 6 })],
+      effects: [{ effect: "telephone", start: 0, end: 2 }],
+    });
+    const joined = g.join(";");
+    expect(joined).toContain("asplit=2");
+    expect(joined).toContain("concat=n=2:v=0:a=1[afx0]");
+    expect(joined).not.toContain("[afxh0]");
+  });
+
+  test("audio effects stay out of the picture chain, and picture effects out of the mix", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { out: 6 })],
+      effects: [
+        { effect: "reverb", start: 1, end: 3 },
+        { effect: "vignette", amount: 0.5, start: 1, end: 3 },
+      ],
+    });
+    const joined = g.join(";");
+    // The vignette gates the picture; the reverb never reaches a video label.
+    expect(joined).toContain("vignette=");
+    expect(joined).toContain("aecho=");
+    expect(joined).not.toContain("aecho=1:1:23|41|59|79|101|127|151|181:0.35|0.223|0.142|0.091|0.058|0.037|0.024|0.015[vfx");
+  });
+
+  test("two audio effects run in series, each over its own window", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { out: 12 })],
+      effects: [
+        { effect: "echo", start: 6, end: 8 },
+        { effect: "crush", start: 1, end: 3 },
+      ],
+    });
+    const joined = g.join(";");
+    // Sorted by start: the crush splices first, and the echo splices what it
+    // handed on.
+    expect(joined).toContain("acrusher=");
+    expect(joined.indexOf("acrusher=")).toBeLessThan(joined.indexOf("aecho="));
+    expect(joined).toContain("[afx0]asplit=3");
+    expect(joined).toContain("concat=n=3:v=0:a=1[afx1]");
+  });
+});

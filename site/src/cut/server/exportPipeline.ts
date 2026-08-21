@@ -4,7 +4,7 @@ import path from "node:path";
 import { atempoChain, hasStream, num, videoColorInfo } from "./util";
 import { assertGraphSafe, fexpr } from "./filterGraph";
 import { CLIP_MAX_ZOOM, projectFadeSeconds, regionPx, TRANSITION_XFADE, TRANSITION_ZOOM, type ColorGrade, type TransitionStyle } from "../lib/types";
-import { buildGradeLut, effectFilterLines, gradeKey, gradeNeedsLut, gradeToFfmpegFilter, lookFilterLines, lutToCube, shortestTurn, sortedKeys, type OverlayKey } from "@donkeycut/effects-kit";
+import { audioFxFilters, buildGradeLut, effectFilterLines, gradeKey, gradeNeedsLut, gradeToFfmpegFilter, isAudioEffect, lookFilterLines, lutToCube, shortestTurn, sortedKeys, type OverlayKey } from "@donkeycut/effects-kit";
 
 // The render pipeline itself: spec in, finished mp4 out. Shared by the local
 // engine's job registry (jobs.ts) and the cloud render worker, which stage
@@ -196,9 +196,10 @@ export interface ExportSpec {
    * union of their windows. */
   behindMask?: { file: string; from: number };
   /** Time-ranged effect elements — the spec carries ids and knobs; the
-   * LGPL-safe chains are built here from the kit's recipes. Each one grades
-   * what plays under it: the video, the overlay tracks, and every element on
-   * a lane below its own. */
+   * LGPL-safe chains are built here from the kit's recipes. A picture effect
+   * grades what plays under it: the video, the overlay tracks, and every
+   * element on a lane below its own. An audio effect treats the finished mix
+   * over its window instead, and takes no lane. */
   effects?: {
     effect: string;
     amount?: number;
@@ -1564,6 +1565,7 @@ export async function runExport(
     .sort((a, b) => laneOfEntry(b) - laneOfEntry(a));
   const effects = (spec.effects ?? [])
     .map((e, i) => ({ e, i }))
+    .filter(({ e }) => !isAudioEffect(e.effect))
     .sort((a, b) => (b.e.lane ?? 0) - (a.e.lane ?? 0));
   let placed = 0;
   const compositeDownTo = (lane: number) => {
@@ -1679,6 +1681,55 @@ export async function runExport(
     );
     aLabel = "amix";
   }
+
+  // Audio effect elements treat the finished mix over their own windows: the
+  // window is cut out of the stream, run through the effect's chain, and put
+  // back between the untreated pieces. The treated piece is padded and
+  // trimmed back to the length it went in at, so a chain that rings past its
+  // input cannot push the rest of the sound late.
+  (spec.effects ?? [])
+    .filter((e) => isAudioEffect(e.effect))
+    .sort((a, b) => a.start - b.start)
+    .forEach((e, k) => {
+      const chain = audioFxFilters(e.effect, e.amount);
+      const from = Math.max(0, e.start);
+      const to = Math.min(e.end, spec.duration);
+      if (!chain || !(to > from)) return;
+      const len = to - from;
+      const fit = `${chain},apad=whole_dur=${num(len)},atrim=0:${num(len)},asetpts=PTS-STARTPTS`;
+      const head = from > 0.001;
+      const tail = to < spec.duration - 0.001;
+      // An effect covering the whole mix is the chain itself; nothing to splice.
+      if (!head && !tail) {
+        filters.push(`[${aLabel}]${fit}[afx${k}]`);
+        aLabel = `afx${k}`;
+        return;
+      }
+      const branches = 1 + (head ? 1 : 0) + (tail ? 1 : 0);
+      filters.push(
+        `[${aLabel}]asplit=${branches}` +
+          (head ? `[afxsh${k}]` : "") +
+          `[afxsw${k}]` +
+          (tail ? `[afxst${k}]` : "")
+      );
+      const parts: string[] = [];
+      if (head) {
+        filters.push(`[afxsh${k}]atrim=0:${num(from)},asetpts=PTS-STARTPTS[afxh${k}]`);
+        parts.push(`afxh${k}`);
+      }
+      filters.push(
+        `[afxsw${k}]atrim=${num(from)}:${num(to)},asetpts=PTS-STARTPTS,${fit}[afxw${k}]`
+      );
+      parts.push(`afxw${k}`);
+      if (tail) {
+        filters.push(`[afxst${k}]atrim=start=${num(to)},asetpts=PTS-STARTPTS[afxt${k}]`);
+        parts.push(`afxt${k}`);
+      }
+      filters.push(
+        `${parts.map((l) => `[${l}]`).join("")}concat=n=${parts.length}:v=0:a=1[afx${k}]`
+      );
+      aLabel = `afx${k}`;
+    });
 
   // Whole-video fades on the final composite and mix, so titles, captions,
   // overlays, and soundtrack all fade together.
