@@ -133,6 +133,14 @@ import Testing
         var deletedAssets: [String] = []
         var deletedNotes: [UUID] = []
         var links: [URL] = []
+        var polled: [String] = []
+        var downloads: [String] = []
+        var folders: [UUID: RemoteNoteFolder] = [:]
+        var deletedFolders: [UUID] = []
+        /// What an import job answers with once it is asked about.
+        var imported: JobOutcome<ImportedLink> = .done(
+            ImportedLink(assetId: "asset-link", fileName: "source.mp4", isVideo: true)
+        )
         var usage = StorageUsage(bytes: 0, quotaBytes: 1_000_000)
         var uploadResult: Result<RemoteAsset, CloudSyncError> =
             .success(RemoteAsset(id: "asset-1", fileName: "clip.mov"))
@@ -149,9 +157,27 @@ import Testing
         }
 
         func deleteLibraryAsset(id: String) async throws { deletedAssets.append(id) }
-        func importInspirationLink(_ url: URL) async throws { links.append(url) }
+
+        func importInspirationLink(_ url: URL) async throws -> String {
+            links.append(url)
+            return "job-\(links.count)"
+        }
+
+        func importedLink(jobId: String) async throws -> JobOutcome<ImportedLink> {
+            polled.append(jobId)
+            return imported
+        }
+
+        func downloadLibraryMedia(fileName: String, to destination: URL) async throws {
+            downloads.append(fileName)
+            try Data("media".utf8).write(to: destination)
+        }
+
         func fetchUsage() async throws -> StorageUsage { usage }
-        func fetchNotes() async throws -> [RemoteNote] { Array(notes.values) }
+
+        func fetchNotes() async throws -> RemoteNotes {
+            RemoteNotes(notes: Array(notes.values), folders: Array(folders.values))
+        }
 
         func putNote(_ note: RemoteNote) async throws -> RemoteNote {
             if let existing = notes[note.id], existing.updatedAt > note.updatedAt { return existing }
@@ -162,6 +188,19 @@ import Testing
         func deleteNote(id: UUID) async throws {
             deletedNotes.append(id)
             notes[id] = nil
+        }
+
+        func putNoteFolder(_ folder: RemoteNoteFolder) async throws {
+            folders[folder.id] = folder
+        }
+
+        func deleteNoteFolder(id: UUID) async throws {
+            deletedFolders.append(id)
+            folders[id] = nil
+            for (noteId, note) in notes where note.folderId == id {
+                notes[noteId]?.folderId = nil
+                _ = noteId
+            }
         }
     }
 
@@ -319,13 +358,71 @@ import Testing
         #expect(rig.ideas.notes.isEmpty)
     }
 
-    @Test func inspirationLinkImportsOnce() async throws {
+    @Test func inspirationLinkImportsOnceAndLandsItsMedia() async throws {
         let rig = try makeRig()
         #expect(rig.ideas.addInspiration(urlText: "youtube.com/watch?v=9"))
         await rig.engine.run()
         #expect(rig.cloud.links.map(\.host) == ["youtube.com"])
+        // The queue pass only hands the link over; the next pass follows the
+        // job and brings the media down.
         await rig.engine.run()
         #expect(rig.cloud.links.count == 1)
+        #expect(rig.cloud.downloads == ["source.mp4"])
+        let item = try #require(rig.ideas.inspiration.first)
+        #expect(item.media?.isVideo == true)
+        // Nothing is asked of the job again once its media is here.
+        await rig.engine.run()
+        #expect(rig.cloud.downloads.count == 1)
+    }
+
+    @Test func inspirationLinkWithNoMediaStaysALink() async throws {
+        let rig = try makeRig()
+        rig.cloud.imported = .failed
+        #expect(rig.ideas.addInspiration(urlText: "example.com/article"))
+        await rig.engine.run()
+        await rig.engine.run()
+        let item = try #require(rig.ideas.inspiration.first)
+        #expect(item.media == nil)
+        #expect(item.importState == .failed)
+        #expect(rig.cloud.downloads.isEmpty)
+    }
+
+    @Test func folderPushesAheadOfTheNoteFiledInIt() async throws {
+        let rig = try makeRig()
+        let folder = try #require(rig.ideas.addFolder(named: "Scripts"))
+        rig.ideas.openEditor(in: folder.id)
+        rig.ideas.draft?.body = "filed"
+        let note = try #require(rig.ideas.saveDraft())
+        await rig.engine.run()
+        #expect(rig.cloud.folders[folder.id]?.name == "Scripts")
+        #expect(rig.cloud.notes[note.id]?.folderId == folder.id)
+    }
+
+    @Test func folderDeletedInTheCloudReleasesItsNotes() async throws {
+        let rig = try makeRig()
+        let folder = try #require(rig.ideas.addFolder(named: "Scripts"))
+        rig.ideas.openEditor(in: folder.id)
+        rig.ideas.draft?.body = "filed"
+        let note = try #require(rig.ideas.saveDraft())
+        await rig.engine.run()
+        // Gone from the desktop: the listing no longer names it, which is the
+        // only signal a folder delete has.
+        rig.cloud.folders[folder.id] = nil
+        rig.cloud.notes[note.id]?.folderId = nil
+        rig.cloud.notes[note.id]?.updatedAt = note.updatedAt.addingTimeInterval(30)
+        await rig.engine.run()
+        #expect(rig.ideas.folders.isEmpty)
+        #expect(rig.ideas.notes(in: nil).count == 1)
+    }
+
+    @Test func folderDeletedHereReachesTheCloud() async throws {
+        let rig = try makeRig()
+        let folder = try #require(rig.ideas.addFolder(named: "Scripts"))
+        await rig.engine.run()
+        rig.ideas.deleteFolder(id: folder.id)
+        await rig.engine.run()
+        #expect(rig.cloud.deletedFolders == [folder.id])
+        #expect(try rig.store.tombstones().isEmpty)
     }
 
     @Test func cellularMovesEverything() async throws {

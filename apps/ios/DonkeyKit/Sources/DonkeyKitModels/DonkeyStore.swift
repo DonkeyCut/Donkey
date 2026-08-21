@@ -13,6 +13,8 @@ final class NoteRecord {
     var title: String
     var body: String
     var colorIndex: Int
+    /// The folder this note is filed in; nil is the top level.
+    var folderId: UUID?
     var createdAt: Date
     /// Last edit, the sync's last-writer-wins clock. Older rows carry nil and
     /// read as their creation time.
@@ -26,6 +28,7 @@ final class NoteRecord {
         title = note.title
         body = note.body
         colorIndex = note.color.rawValue
+        folderId = note.folderId
         createdAt = note.createdAt
         updatedAt = note.updatedAt
         self.dirty = dirty
@@ -37,9 +40,33 @@ final class NoteRecord {
             title: title,
             body: body,
             color: NoteColor(rawValue: colorIndex) ?? .butter,
+            folderId: folderId,
             createdAt: createdAt,
             updatedAt: updatedAt ?? createdAt
         )
+    }
+}
+
+/// A folder notes are filed in. Folders are few and small, so the whole set
+/// pushes and pulls each pass; `dirty` marks one this phone changed.
+@Model
+final class NoteFolderRecord {
+    @Attribute(.unique) var id: UUID
+    var name: String
+    var createdAt: Date
+    var updatedAt: Date
+    var dirty: Bool
+
+    init(_ folder: NoteFolder, dirty: Bool) {
+        id = folder.id
+        name = folder.name
+        createdAt = folder.createdAt
+        updatedAt = folder.updatedAt
+        self.dirty = dirty
+    }
+
+    var folder: NoteFolder {
+        NoteFolder(id: id, name: name, createdAt: createdAt, updatedAt: updatedAt)
     }
 }
 
@@ -54,6 +81,14 @@ final class InspirationRecord {
     var remoteAssetId: String?
     /// When a link's cloud-side import was queued.
     var linkSyncedAt: Date?
+    /// The import job the worker is running for this link, while it runs.
+    var importJobId: String?
+    /// The media the cloud brought back for this link, downloaded here.
+    var fetchedFileName: String?
+    var fetchedIsVideo: Bool?
+    /// The source had no media to bring back, or the fetch failed. The card
+    /// stays a link and nothing retries.
+    var importFailed: Bool?
 
     init(id: UUID, linkURL: String?, mediaFileName: String?, isVideo: Bool, createdAt: Date) {
         self.id = id
@@ -65,7 +100,17 @@ final class InspirationRecord {
 
     var item: InspirationItem? {
         if let linkURL, let url = URL(string: linkURL) {
-            return InspirationItem(id: id, kind: .link(url), createdAt: createdAt)
+            return InspirationItem(
+                id: id,
+                kind: .link(url),
+                createdAt: createdAt,
+                fetched: fetchedFileName.map {
+                    InspirationMedia(fileName: $0, isVideo: fetchedIsVideo ?? false)
+                },
+                importState: importFailed == true
+                    ? .failed
+                    : (linkSyncedAt == nil ? .waiting : .fetching)
+            )
         }
         if let mediaFileName {
             return InspirationItem(id: id, kind: .media(fileName: mediaFileName, isVideo: isVideo), createdAt: createdAt)
@@ -141,7 +186,13 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
         for directory in [mediaDirectory, recordingsDirectory] {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
-        let schema = Schema([NoteRecord.self, InspirationRecord.self, RecordingRecord.self, TombstoneRecord.self])
+        let schema = Schema([
+            NoteRecord.self,
+            NoteFolderRecord.self,
+            InspirationRecord.self,
+            RecordingRecord.self,
+            TombstoneRecord.self,
+        ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: inMemory)
         container = try ModelContainer(for: schema, configurations: [configuration])
         context = ModelContext(container)
@@ -161,6 +212,7 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
             existing.title = note.title
             existing.body = note.body
             existing.colorIndex = note.color.rawValue
+            existing.folderId = note.folderId
             existing.updatedAt = note.updatedAt
             existing.dirty = true
         } else {
@@ -172,6 +224,38 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
     public func deleteNote(id: UUID) throws {
         try context.delete(model: NoteRecord.self, where: #Predicate { $0.id == id })
         context.insert(TombstoneRecord(kind: SyncTombstone.Kind.note.rawValue, remoteId: id.uuidString, stamp: .now))
+        try context.save()
+    }
+
+    public func loadNoteFolders() throws -> [NoteFolder] {
+        let descriptor = FetchDescriptor<NoteFolderRecord>(sortBy: [SortDescriptor(\.createdAt)])
+        return try context.fetch(descriptor).map(\.folder)
+    }
+
+    public func upsert(_ folder: NoteFolder) throws {
+        let id = folder.id
+        let descriptor = FetchDescriptor<NoteFolderRecord>(predicate: #Predicate { $0.id == id })
+        if let existing = try context.fetch(descriptor).first {
+            existing.name = folder.name
+            existing.updatedAt = folder.updatedAt
+            existing.dirty = true
+        } else {
+            context.insert(NoteFolderRecord(folder, dirty: true))
+        }
+        try context.save()
+    }
+
+    public func deleteNoteFolder(id: UUID) throws {
+        try context.delete(model: NoteFolderRecord.self, where: #Predicate { $0.id == id })
+        // The notes stay; they come back to the top level, and each one is a
+        // write of its own so the cloud files them there too.
+        let descriptor = FetchDescriptor<NoteRecord>(predicate: #Predicate { $0.folderId == id })
+        for record in try context.fetch(descriptor) {
+            record.folderId = nil
+            record.updatedAt = .now
+            record.dirty = true
+        }
+        context.insert(TombstoneRecord(kind: SyncTombstone.Kind.noteFolder.rawValue, remoteId: id.uuidString, stamp: .now))
         try context.save()
     }
 
@@ -200,7 +284,7 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
     public func deleteInspiration(id: UUID) throws {
         let descriptor = FetchDescriptor<InspirationRecord>(predicate: #Predicate { $0.id == id })
         if let record = try context.fetch(descriptor).first {
-            if let fileName = record.mediaFileName {
+            for fileName in [record.mediaFileName, record.fetchedFileName].compactMap({ $0 }) {
                 try? FileManager.default.removeItem(at: mediaDirectory.appending(path: fileName))
             }
             if let remote = record.remoteAssetId {
@@ -277,6 +361,7 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
             existing.title = note.title
             existing.body = note.body
             existing.colorIndex = note.color.rawValue
+            existing.folderId = note.folderId
             existing.updatedAt = note.updatedAt
             existing.dirty = false
         } else {
@@ -295,6 +380,48 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
 
     public func removeNoteFromCloudDelete(id: UUID) throws {
         try context.delete(model: NoteRecord.self, where: #Predicate { $0.id == id })
+        try context.save()
+    }
+
+    public func dirtyNoteFolders() throws -> [NoteFolder] {
+        let descriptor = FetchDescriptor<NoteFolderRecord>(sortBy: [SortDescriptor(\.createdAt)])
+        return try context.fetch(descriptor).filter(\.dirty).map(\.folder)
+    }
+
+    public func applyRemoteNoteFolder(_ folder: NoteFolder) throws {
+        let id = folder.id
+        let descriptor = FetchDescriptor<NoteFolderRecord>(predicate: #Predicate { $0.id == id })
+        if let existing = try context.fetch(descriptor).first {
+            guard !existing.dirty else { return }
+            existing.name = folder.name
+            existing.updatedAt = folder.updatedAt
+        } else {
+            context.insert(NoteFolderRecord(folder, dirty: false))
+        }
+        try context.save()
+    }
+
+    public func clearNoteFolderDirty(id: UUID, ifUpdatedAt stamp: Date) throws {
+        let descriptor = FetchDescriptor<NoteFolderRecord>(predicate: #Predicate { $0.id == id })
+        guard let record = try context.fetch(descriptor).first, record.updatedAt == stamp else { return }
+        record.dirty = false
+        try context.save()
+    }
+
+    /// Folder ids this phone holds that the cloud no longer lists, so they
+    /// were deleted elsewhere. A folder still waiting to be pushed is not one
+    /// of them.
+    public func cleanNoteFolderIds() throws -> [UUID] {
+        let descriptor = FetchDescriptor<NoteFolderRecord>()
+        return try context.fetch(descriptor).filter { !$0.dirty }.map(\.id)
+    }
+
+    public func removeNoteFolderFromCloudDelete(id: UUID) throws {
+        try context.delete(model: NoteFolderRecord.self, where: #Predicate { $0.id == id })
+        let descriptor = FetchDescriptor<NoteRecord>(predicate: #Predicate { $0.folderId == id })
+        for record in try context.fetch(descriptor) where record.dirty != true {
+            record.folderId = nil
+        }
         try context.save()
     }
 
@@ -340,10 +467,48 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
         try context.save()
     }
 
-    public func markInspirationLinkSynced(_ id: UUID) throws {
+    public func markInspirationLinkSynced(_ id: UUID, jobId: String) throws {
         let descriptor = FetchDescriptor<InspirationRecord>(predicate: #Predicate { $0.id == id })
         guard let record = try context.fetch(descriptor).first else { return }
         record.linkSyncedAt = .now
+        record.importJobId = jobId
+        try context.save()
+    }
+
+    public func inspirationImportJobId(_ id: UUID) throws -> String? {
+        let descriptor = FetchDescriptor<InspirationRecord>(predicate: #Predicate { $0.id == id })
+        return try context.fetch(descriptor).first?.importJobId
+    }
+
+    /// Where a link's fetched media is written. The name is the item's, so a
+    /// repeated fetch overwrites rather than piling up files.
+    public func fetchedMediaDestination(_ id: UUID, isVideo: Bool) -> URL {
+        mediaDirectory.appending(path: id.uuidString + "-source" + (isVideo ? ".mp4" : ".jpg"))
+    }
+
+    public func markInspirationFetched(
+        _ id: UUID,
+        fileName: String,
+        isVideo: Bool,
+        remoteAssetId: String
+    ) throws {
+        let descriptor = FetchDescriptor<InspirationRecord>(predicate: #Predicate { $0.id == id })
+        guard let record = try context.fetch(descriptor).first else { return }
+        record.fetchedFileName = fileName
+        record.fetchedIsVideo = isVideo
+        record.remoteAssetId = remoteAssetId
+        record.importJobId = nil
+        record.importFailed = nil
+        try context.save()
+    }
+
+    /// The cloud brought nothing back. The card stays a link and the job is
+    /// not asked about again.
+    public func markInspirationImportFailed(_ id: UUID) throws {
+        let descriptor = FetchDescriptor<InspirationRecord>(predicate: #Predicate { $0.id == id })
+        guard let record = try context.fetch(descriptor).first else { return }
+        record.importJobId = nil
+        record.importFailed = true
         try context.save()
     }
 

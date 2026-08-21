@@ -13,24 +13,49 @@ struct NoteEditorView: View {
 
     var body: some View {
         let color = ideas.draft?.color ?? .butter
+        let hasContent = ideas.draft?.hasContent ?? false
         VStack(spacing: 0) {
-            HStack {
+            // Close on the left, and on the right the two things a finished
+            // note is for: reading it to camera, and putting it away.
+            HStack(spacing: 18) {
                 Button {
                     ideas.closeEditor()
                 } label: {
                     Image(systemName: "xmark")
                         .font(.title3.weight(.bold))
                 }
+                .accessibilityLabel("Close")
+
                 Spacer()
+
                 Button {
-                    ideas.cycleDraftColor()
+                    guard let note = ideas.saveDraft() else { return }
+                    onRecordNote(note)
                 } label: {
-                    Circle()
-                        .fill(color.accentColor)
-                        .strokeBorder(Color.notePaperInk.opacity(0.75), lineWidth: 3)
-                        .frame(width: 28, height: 28)
+                    Image(systemName: "play.circle.fill")
+                        .font(.title2.weight(.bold))
                 }
-                .accessibilityLabel("Note color")
+                .disabled(!hasContent)
+                .accessibilityLabel("Read on camera")
+
+                Button {
+                    // The keyboard goes first when it is up, so Done reads the
+                    // note before it closes it — the way Notes behaves.
+                    if focused != nil {
+                        focused = nil
+                        return
+                    }
+                    let wasNew = ideas.draft?.isNew ?? true
+                    guard ideas.saveDraft() != nil else {
+                        ideas.closeEditor()
+                        return
+                    }
+                    app.show(toast: wasNew ? "Note saved" : "Note updated")
+                } label: {
+                    Image(systemName: "checkmark")
+                        .font(.title3.weight(.bold))
+                }
+                .accessibilityLabel("Done")
             }
             .padding(.horizontal, 20)
             .padding(.top, 16)
@@ -40,10 +65,13 @@ struct NoteEditorView: View {
                 .padding(.horizontal, 22)
                 .padding(.top, 12)
                 .focused($focused, equals: .title)
+                .submitLabel(.next)
+                .onSubmit { focused = .body }
 
             TextEditor(text: bodyBinding)
                 .font(.system(size: 20, weight: .medium))
                 .scrollContentBackground(.hidden)
+                .scrollDismissesKeyboard(.interactively)
                 .padding(.horizontal, 18)
                 .focused($focused, equals: .body)
                 .overlay(alignment: .topLeading) {
@@ -59,36 +87,15 @@ struct NoteEditorView: View {
 
             HStack {
                 Button {
-                    guard let note = ideas.saveDraft() else { return }
-                    onRecordNote(note)
+                    ideas.cycleDraftColor()
                 } label: {
-                    Label("Record", systemImage: "record.circle")
-                        .font(.body.weight(.bold))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
+                    Circle()
+                        .fill(color.accentColor)
+                        .strokeBorder(Color.notePaperInk.opacity(0.75), lineWidth: 3)
+                        .frame(width: 32, height: 32)
                 }
-                .buttonStyle(.bordered)
-                .buttonBorderShape(.roundedRectangle(radius: 14))
-                .disabled(!(ideas.draft?.hasContent ?? false))
-
+                .accessibilityLabel("Note color")
                 Spacer()
-
-                Button {
-                    let wasNew = ideas.draft?.isNew ?? true
-                    guard ideas.saveDraft() != nil else { return }
-                    app.show(toast: wasNew ? "Note saved" : "Note updated")
-                } label: {
-                    Text("Save")
-                        .font(.body.weight(.bold))
-                        // The editor paints everything in the note's ink, which
-                        // would hide the label on the ink-tinted prominent pill.
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 6)
-                }
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.roundedRectangle(radius: 14))
-                .disabled(!(ideas.draft?.hasContent ?? false))
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)

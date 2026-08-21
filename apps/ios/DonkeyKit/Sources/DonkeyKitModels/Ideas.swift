@@ -30,11 +30,30 @@ nonisolated public enum NoteColor: Int, CaseIterable, Codable, Sendable {
     }
 }
 
+/// A folder notes are filed in. Ids are minted by whichever client makes the
+/// folder — the phone here, the desktop in its Notes tab — and the cloud
+/// stores the folder under that id, so a folder made offline pushes as itself.
+nonisolated public struct NoteFolder: Identifiable, Equatable, Hashable, Sendable {
+    public var id: UUID
+    public var name: String
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(id: UUID = UUID(), name: String, createdAt: Date = .now, updatedAt: Date = .now) {
+        self.id = id
+        self.name = name
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
 nonisolated public struct Note: Identifiable, Equatable, Sendable {
     public var id: UUID
     public var title: String
     public var body: String
     public var color: NoteColor
+    /// The folder this note is filed in; nil is the top level.
+    public var folderId: UUID?
     public var createdAt: Date
     /// Last edit, wherever it happened. The sync's last-writer-wins clock:
     /// the newer stamp survives when the phone and the desktop both wrote.
@@ -45,6 +64,7 @@ nonisolated public struct Note: Identifiable, Equatable, Sendable {
         title: String,
         body: String,
         color: NoteColor,
+        folderId: UUID? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
@@ -52,6 +72,7 @@ nonisolated public struct Note: Identifiable, Equatable, Sendable {
         self.title = title
         self.body = body
         self.color = color
+        self.folderId = folderId
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -70,15 +91,68 @@ nonisolated public enum InspirationKind: Equatable, Sendable {
     case media(fileName: String, isVideo: Bool)
 }
 
+/// Media stored on this phone: the file name under the repository's
+/// Inspiration directory, and whether it plays.
+nonisolated public struct InspirationMedia: Equatable, Sendable {
+    public var fileName: String
+    public var isVideo: Bool
+
+    public init(fileName: String, isVideo: Bool) {
+        self.fileName = fileName
+        self.isVideo = isVideo
+    }
+}
+
+/// Where a saved link stands with the cloud fetch that turns it into media.
+nonisolated public enum InspirationImport: Equatable, Sendable {
+    /// Nothing has been asked of the cloud yet — the item was just saved, or
+    /// the phone is offline.
+    case waiting
+    /// The worker is fetching the source.
+    case fetching
+    /// The source had no media to bring back, or the fetch failed. The card
+    /// stays a link.
+    case failed
+}
+
 nonisolated public struct InspirationItem: Identifiable, Equatable, Sendable {
     public var id: UUID
     public var kind: InspirationKind
     public var createdAt: Date
+    /// A saved link whose media the cloud fetched and this phone downloaded.
+    /// The card plays it in place, the way a photo-library import plays.
+    public var fetched: InspirationMedia?
+    /// Where the fetch of a link stands. Media saved from the photo library
+    /// has nothing to fetch and reads as `.waiting`.
+    public var importState: InspirationImport
 
-    public init(id: UUID = UUID(), kind: InspirationKind, createdAt: Date = .now) {
+    public init(
+        id: UUID = UUID(),
+        kind: InspirationKind,
+        createdAt: Date = .now,
+        fetched: InspirationMedia? = nil,
+        importState: InspirationImport = .waiting
+    ) {
         self.id = id
         self.kind = kind
         self.createdAt = createdAt
+        self.fetched = fetched
+        self.importState = importState
+    }
+
+    /// The media this card shows: what the phone imported, or what the cloud
+    /// brought back for a link.
+    public var media: InspirationMedia? {
+        if case .media(let fileName, let isVideo) = kind {
+            return InspirationMedia(fileName: fileName, isVideo: isVideo)
+        }
+        return fetched
+    }
+
+    /// The source link, for a saved link.
+    public var link: URL? {
+        if case .link(let url) = kind { return url }
+        return nil
     }
 }
 
@@ -97,6 +171,11 @@ public protocol IdeasStoring: AnyObject {
     func loadNotes() throws -> [Note]
     func upsert(_ note: Note) throws
     func deleteNote(id: UUID) throws
+    func loadNoteFolders() throws -> [NoteFolder]
+    func upsert(_ folder: NoteFolder) throws
+    /// Delete a folder. Its notes come back to the top level rather than
+    /// going with it — the same line the cloud draws.
+    func deleteNoteFolder(id: UUID) throws
     func loadInspiration() throws -> [InspirationItem]
     func addLink(_ url: URL) throws -> InspirationItem
     func addMedia(data: Data, isVideo: Bool) throws -> InspirationItem
@@ -112,6 +191,7 @@ nonisolated public enum IdeasFilter: String, CaseIterable, Sendable {
 @Observable
 public final class IdeasModel {
     public private(set) var notes: [Note] = []
+    public private(set) var folders: [NoteFolder] = []
     public private(set) var inspiration: [InspirationItem] = []
     public var filter: IdeasFilter = .all
 
@@ -126,14 +206,65 @@ public final class IdeasModel {
 
     public init(store: any IdeasStoring) {
         self.store = store
-        notes = (try? store.loadNotes()) ?? []
-        inspiration = (try? store.loadInspiration()) ?? []
+        reloadFromStore()
     }
 
     /// Re-read what the store holds — how a cloud merge lands on screen.
     public func reloadFromStore() {
         notes = (try? store.loadNotes()) ?? []
+        folders = (try? store.loadNoteFolders()) ?? []
         inspiration = (try? store.loadInspiration()) ?? []
+    }
+
+    /// The notes filed in one folder, or at the top level when `folderId` is
+    /// nil.
+    public func notes(in folderId: UUID?) -> [Note] {
+        notes.filter { $0.folderId == folderId }
+    }
+
+    public func folder(_ id: UUID?) -> NoteFolder? {
+        guard let id else { return nil }
+        return folders.first { $0.id == id }
+    }
+
+    // MARK: Folders
+
+    @discardableResult
+    public func addFolder(named name: String) -> NoteFolder? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let folder = NoteFolder(name: trimmed)
+        try? store.upsert(folder)
+        folders.append(folder)
+        onLocalChange?()
+        return folder
+    }
+
+    public func renameFolder(id: UUID, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, var folder = folders.first(where: { $0.id == id }) else { return }
+        folder.name = trimmed
+        folder.updatedAt = .now
+        try? store.upsert(folder)
+        if let index = folders.firstIndex(where: { $0.id == id }) { folders[index] = folder }
+        onLocalChange?()
+    }
+
+    /// Delete a folder. Its notes come back to the top level.
+    public func deleteFolder(id: UUID) {
+        try? store.deleteNoteFolder(id: id)
+        reloadFromStore()
+        onLocalChange?()
+    }
+
+    /// File a note in a folder, or at the top level.
+    public func move(noteId: UUID, to folderId: UUID?) {
+        guard var note = notes.first(where: { $0.id == noteId }), note.folderId != folderId else { return }
+        note.folderId = folderId
+        note.updatedAt = .now
+        try? store.upsert(note)
+        if let index = notes.firstIndex(where: { $0.id == noteId }) { notes[index] = note }
+        onLocalChange?()
     }
 
     nonisolated public struct NoteDraft: Identifiable, Equatable {
@@ -141,6 +272,9 @@ public final class IdeasModel {
         public var title: String
         public var body: String
         public var color: NoteColor
+        /// The folder the note is filed in — the one it was opened from for a
+        /// new note.
+        public var folderId: UUID?
         public var isNew: Bool
 
         public var hasContent: Bool {
@@ -149,11 +283,18 @@ public final class IdeasModel {
         }
     }
 
-    public func openEditor(for note: Note? = nil) {
+    public func openEditor(for note: Note? = nil, in folderId: UUID? = nil) {
         if let note {
-            draft = NoteDraft(id: note.id, title: note.title, body: note.body, color: note.color, isNew: false)
+            draft = NoteDraft(
+                id: note.id,
+                title: note.title,
+                body: note.body,
+                color: note.color,
+                folderId: note.folderId,
+                isNew: false
+            )
         } else {
-            draft = NoteDraft(id: UUID(), title: "", body: "", color: .butter, isNew: true)
+            draft = NoteDraft(id: UUID(), title: "", body: "", color: .butter, folderId: folderId, isNew: true)
         }
     }
 
@@ -177,6 +318,7 @@ public final class IdeasModel {
             title: title,
             body: body,
             color: draft.color,
+            folderId: draft.folderId,
             createdAt: existing?.createdAt ?? .now,
             updatedAt: .now
         )

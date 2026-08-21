@@ -47,6 +47,7 @@ struct MediaScreen: View {
                         .padding(.top, 14)
                         .padding(.bottom, 24)
                     }
+                    .refreshable { await media.sync?.refreshNow() }
                 }
             }
         }

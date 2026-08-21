@@ -84,6 +84,7 @@ nonisolated public struct RemoteNote: Equatable, Sendable {
     public var title: String
     public var body: String
     public var colorIndex: Int
+    public var folderId: UUID?
     public var updatedAt: Date
     public var deletedAt: Date?
     public var createdAt: Date
@@ -93,6 +94,7 @@ nonisolated public struct RemoteNote: Equatable, Sendable {
         title: String,
         body: String,
         colorIndex: Int,
+        folderId: UUID? = nil,
         updatedAt: Date,
         deletedAt: Date? = nil,
         createdAt: Date = .now
@@ -101,10 +103,62 @@ nonisolated public struct RemoteNote: Equatable, Sendable {
         self.title = title
         self.body = body
         self.colorIndex = colorIndex
+        self.folderId = folderId
         self.updatedAt = updatedAt
         self.deletedAt = deletedAt
         self.createdAt = createdAt
     }
+}
+
+/// A note folder as the cloud stores it. Folders carry no tombstone: a
+/// folder missing from the listing was deleted.
+nonisolated public struct RemoteNoteFolder: Equatable, Sendable {
+    public var id: UUID
+    public var name: String
+    public var updatedAt: Date
+    public var createdAt: Date
+
+    public init(id: UUID, name: String, updatedAt: Date, createdAt: Date) {
+        self.id = id
+        self.name = name
+        self.updatedAt = updatedAt
+        self.createdAt = createdAt
+    }
+}
+
+/// One listing of the account's notes: the notes themselves, tombstones
+/// included, and every folder they file into.
+nonisolated public struct RemoteNotes: Equatable, Sendable {
+    public var notes: [RemoteNote]
+    public var folders: [RemoteNoteFolder]
+
+    public init(notes: [RemoteNote], folders: [RemoteNoteFolder]) {
+        self.notes = notes
+        self.folders = folders
+    }
+}
+
+/// What the cloud brought back for a saved link, once its import job is done.
+nonisolated public struct ImportedLink: Equatable, Sendable {
+    /// The library asset the worker registered, so a delete here takes the
+    /// cloud copy with it.
+    public var assetId: String
+    /// The media's name on the cloud shelf, for the download.
+    public var fileName: String
+    public var isVideo: Bool
+
+    public init(assetId: String, fileName: String, isVideo: Bool) {
+        self.assetId = assetId
+        self.fileName = fileName
+        self.isVideo = isVideo
+    }
+}
+
+/// Where a queued cloud job stands.
+nonisolated public enum JobOutcome<Value: Sendable>: Sendable {
+    case running
+    case done(Value)
+    case failed
 }
 
 nonisolated public enum CloudSyncError: Error, Equatable {
@@ -127,13 +181,22 @@ public protocol CloudSyncServicing: AnyObject {
     ) async throws -> RemoteAsset
     func deleteLibraryAsset(id: String) async throws
     /// Queue a cloud-side import of an inspiration link (the render worker
-    /// fetches the media into the Inspiration folder).
-    func importInspirationLink(_ url: URL) async throws
+    /// fetches the media into the Inspiration folder). Returns the job id the
+    /// phone follows to bring the media down.
+    func importInspirationLink(_ url: URL) async throws -> String
+    /// Where an import job stands. `done` carries the first piece of media
+    /// the source yielded; a source that was only words comes back `failed`.
+    func importedLink(jobId: String) async throws -> JobOutcome<ImportedLink>
+    /// Download one library media file to a local URL.
+    func downloadLibraryMedia(fileName: String, to destination: URL) async throws
     func fetchUsage() async throws -> StorageUsage
-    func fetchNotes() async throws -> [RemoteNote]
+    func fetchNotes() async throws -> RemoteNotes
     /// Returns the winning version — this write, or a newer one already there.
     func putNote(_ note: RemoteNote) async throws -> RemoteNote
     func deleteNote(id: UUID) async throws
+    /// Create or rename one folder under the id the phone gave it.
+    func putNoteFolder(_ folder: RemoteNoteFolder) async throws
+    func deleteNoteFolder(id: UUID) async throws
 }
 
 // MARK: - Projects (down-sync)

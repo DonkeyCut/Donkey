@@ -11,6 +11,9 @@ nonisolated public struct SyncTombstone: Equatable, Sendable, Identifiable {
     nonisolated public enum Kind: String, Sendable {
         /// A synced note deleted here; the cloud keeps a tombstone row.
         case note
+        /// A note folder deleted here. The cloud row goes; the notes in it
+        /// come back to the top level on both sides.
+        case noteFolder
         /// A synced recording or inspiration item deleted here; the cloud
         /// asset goes with it.
         case libraryAsset
@@ -45,6 +48,15 @@ public protocol SyncJournalStoring: AnyObject {
     /// Remove a note the cloud deleted. No tombstone: the delete came down.
     func removeNoteFromCloudDelete(id: UUID) throws
 
+    // Folders: the same push-then-pull, with no tombstone rows in the cloud —
+    // a folder this phone holds clean and the cloud no longer lists was
+    // deleted on the other side.
+    func dirtyNoteFolders() throws -> [NoteFolder]
+    func applyRemoteNoteFolder(_ folder: NoteFolder) throws
+    func clearNoteFolderDirty(id: UUID, ifUpdatedAt: Date) throws
+    func cleanNoteFolderIds() throws -> [UUID]
+    func removeNoteFolderFromCloudDelete(id: UUID) throws
+
     // Recordings
     func recordingRemote(_ id: UUID) throws -> (assetId: String?, claimedFileName: String?)
     /// Journal a recording's cloud copy. Returns false when the row is gone —
@@ -58,7 +70,19 @@ public protocol SyncJournalStoring: AnyObject {
     func inspirationRemoteAssetId(_ id: UUID) throws -> String?
     func isInspirationLinkSynced(_ id: UUID) throws -> Bool
     func markInspirationMediaSynced(_ id: UUID, remoteAssetId: String) throws
-    func markInspirationLinkSynced(_ id: UUID) throws
+    /// A link handed to the cloud worker: the job that is fetching it.
+    func markInspirationLinkSynced(_ id: UUID, jobId: String) throws
+    /// The job still fetching this link, if one is.
+    func inspirationImportJobId(_ id: UUID) throws -> String?
+    /// Where the fetched media is written on this phone.
+    func fetchedMediaDestination(_ id: UUID, isVideo: Bool) -> URL
+    func markInspirationFetched(
+        _ id: UUID,
+        fileName: String,
+        isVideo: Bool,
+        remoteAssetId: String
+    ) throws
+    func markInspirationImportFailed(_ id: UUID) throws
 
     // Tombstones
     func tombstones() throws -> [SyncTombstone]
@@ -134,6 +158,35 @@ public final class SyncEngine {
         return .synced
     }
 
+    /// How often the phone looks at the cloud on its own. Notes are written
+    /// at the desk as well as here, so the list a person is looking at goes
+    /// stale without anyone touching the phone; a pass on this clock brings
+    /// those edits in. Pull to refresh runs the same pass at once.
+    public static let heartbeat: Duration = .seconds(45)
+
+    /// The periodic pull, for as long as the caller keeps the task alive. The
+    /// app entry runs it while the app is in the foreground.
+    public func beat() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: Self.heartbeat)
+            guard !Task.isCancelled else { return }
+            kick()
+        }
+    }
+
+    /// A pass the caller waits on — pull to refresh. A pass already running
+    /// is joined by booking one more, so the gesture never starts a second
+    /// runner over the same queues.
+    public func refreshNow() async {
+        guard signedIn(), network != .offline else { return }
+        if running {
+            runAgain = true
+            return
+        }
+        running = true
+        await run()
+    }
+
     /// Something changed — a new recording, a note edit, the network, a
     /// sign-in. One runner drains every queue; a kick during a run schedules
     /// one more pass so nothing lands between checks.
@@ -164,7 +217,7 @@ public final class SyncEngine {
         await replayTombstones()
         await syncNotes()
         // Link imports are small payloads, so they queue ahead of the media.
-        await uploadPendingInspirationLinks()
+        await syncInspirationLinks()
         guard online else { return }
         await refreshStorage()
         guard !storageFull else { return }
@@ -195,16 +248,25 @@ public final class SyncEngine {
     /// Anything the journal still owes the cloud after a pass.
     private var pendingWork: Bool {
         if !(((try? journal.tombstones()) ?? []).isEmpty) { return true }
-        if !(((try? journal.dirtyNotes()) ?? []).isEmpty) { return true }
+        if notesPending { return true }
         if (media?.recordings ?? []).contains(where: {
             !unreadable.contains($0.id) && ((try? journal.recordingRemote($0.id))?.assetId) == nil
         }) { return true }
         return (ideas?.inspiration ?? []).contains { item in
             switch item.kind {
-            case .link: ((try? journal.isInspirationLinkSynced(item.id)) ?? true) == false
-            case .media: ((try? journal.inspirationRemoteAssetId(item.id)) ?? nil) == nil
+            case .link:
+                ((try? journal.isInspirationLinkSynced(item.id)) ?? true) == false
+                    || ((try? journal.inspirationImportJobId(item.id)) ?? nil) != nil
+            case .media:
+                ((try? journal.inspirationRemoteAssetId(item.id)) ?? nil) == nil
             }
         }
+    }
+
+    /// Folders and notes the phone still owes the cloud.
+    private var notesPending: Bool {
+        !(((try? journal.dirtyNotes()) ?? []).isEmpty)
+            || !(((try? journal.dirtyNoteFolders()) ?? []).isEmpty)
     }
 
     // MARK: Deletes
@@ -216,6 +278,9 @@ public final class SyncEngine {
                 case .note:
                     guard let id = UUID(uuidString: tombstone.remoteId) else { break }
                     try await service.deleteNote(id: id)
+                case .noteFolder:
+                    guard let id = UUID(uuidString: tombstone.remoteId) else { break }
+                    try await service.deleteNoteFolder(id: id)
                 case .libraryAsset:
                     try await service.deleteLibraryAsset(id: tombstone.remoteId)
                 }
@@ -234,6 +299,25 @@ public final class SyncEngine {
 
     private func syncNotes() async {
         guard online else { return }
+        // Folders go up before the notes that name them, so a note filed in a
+        // folder made offline never reaches a cloud that has no such folder.
+        for folder in (try? journal.dirtyNoteFolders()) ?? [] {
+            do {
+                try await service.putNoteFolder(
+                    RemoteNoteFolder(
+                        id: folder.id,
+                        name: folder.name,
+                        updatedAt: folder.updatedAt,
+                        createdAt: folder.createdAt
+                    )
+                )
+                try? journal.clearNoteFolderDirty(id: folder.id, ifUpdatedAt: folder.updatedAt)
+            } catch CloudSyncError.unauthorized {
+                return
+            } catch {
+                // Transient; stays dirty.
+            }
+        }
         // Push local edits first so the pull that follows can't overwrite them.
         for note in (try? journal.dirtyNotes()) ?? [] {
             do {
@@ -243,6 +327,7 @@ public final class SyncEngine {
                         title: note.title,
                         body: note.body,
                         colorIndex: note.color.rawValue,
+                        folderId: note.folderId,
                         updatedAt: note.updatedAt,
                         createdAt: note.createdAt
                     )
@@ -259,10 +344,38 @@ public final class SyncEngine {
         }
         do {
             let remote = try await service.fetchNotes()
-            try mergeRemoteNotes(remote)
+            try mergeRemoteFolders(remote.folders)
+            try mergeRemoteNotes(remote.notes)
             ideas?.reloadFromStore()
         } catch {
             // The next kick pulls again.
+        }
+    }
+
+    /// Folders carry no tombstone in the cloud, so the listing is the truth:
+    /// what it holds is applied, and a folder this phone has clean that the
+    /// listing does not name was deleted on the other side.
+    private func mergeRemoteFolders(_ remote: [RemoteNoteFolder]) throws {
+        let pendingDeletes = Set(
+            ((try? journal.tombstones()) ?? [])
+                .filter { $0.kind == .noteFolder }
+                .compactMap { UUID(uuidString: $0.remoteId) }
+        )
+        var live: Set<UUID> = []
+        for folder in remote {
+            if pendingDeletes.contains(folder.id) { continue }
+            live.insert(folder.id)
+            try journal.applyRemoteNoteFolder(
+                NoteFolder(
+                    id: folder.id,
+                    name: folder.name,
+                    createdAt: folder.createdAt,
+                    updatedAt: folder.updatedAt
+                )
+            )
+        }
+        for id in try journal.cleanNoteFolderIds() where !live.contains(id) {
+            try journal.removeNoteFolderFromCloudDelete(id: id)
         }
     }
 
@@ -297,6 +410,7 @@ public final class SyncEngine {
             title: remote.title,
             body: remote.body,
             color: NoteColor(rawValue: remote.colorIndex) ?? .butter,
+            folderId: remote.folderId,
             createdAt: remote.createdAt,
             updatedAt: remote.updatedAt
         )
@@ -369,20 +483,56 @@ public final class SyncEngine {
 
     // MARK: Inspiration
 
-    private func uploadPendingInspirationLinks() async {
+    /// Saved links, both halves of the round trip: a link the cloud has not
+    /// been told about is queued, and a link it is fetching is followed until
+    /// the media can come down onto this phone. A card shows the spinner from
+    /// the moment the link is saved and the video itself the moment it lands.
+    private func syncInspirationLinks() async {
+        var landed = false
         for item in ideas?.inspiration ?? [] {
             guard case .link(let url) = item.kind else { continue }
             guard online else { continue }
-            guard ((try? journal.isInspirationLinkSynced(item.id)) ?? true) == false else { continue }
+            if ((try? journal.isInspirationLinkSynced(item.id)) ?? true) == false {
+                do {
+                    let jobId = try await service.importInspirationLink(url)
+                    try? journal.markInspirationLinkSynced(item.id, jobId: jobId)
+                    landed = true
+                } catch CloudSyncError.unauthorized {
+                    return
+                } catch {
+                    // Transient or capped for the day; the next kick retries.
+                }
+                continue
+            }
+            guard let job = (try? journal.inspirationImportJobId(item.id)) ?? nil else { continue }
             do {
-                try await service.importInspirationLink(url)
-                try? journal.markInspirationLinkSynced(item.id)
+                switch try await service.importedLink(jobId: job) {
+                case .running:
+                    continue
+                case .failed:
+                    try? journal.markInspirationImportFailed(item.id)
+                    landed = true
+                case .done(let imported):
+                    let destination = journal.fetchedMediaDestination(item.id, isVideo: imported.isVideo)
+                    try await service.downloadLibraryMedia(
+                        fileName: imported.fileName,
+                        to: destination
+                    )
+                    try? journal.markInspirationFetched(
+                        item.id,
+                        fileName: destination.lastPathComponent,
+                        isVideo: imported.isVideo,
+                        remoteAssetId: imported.assetId
+                    )
+                    landed = true
+                }
             } catch CloudSyncError.unauthorized {
                 return
             } catch {
-                // Transient or capped for the day; the next kick retries.
+                // Transient; the next pass asks after the job again.
             }
         }
+        if landed { ideas?.reloadFromStore() }
     }
 
     private func uploadPendingInspirationMedia() async {

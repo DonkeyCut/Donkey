@@ -212,14 +212,69 @@ extension CutCloudClient: CloudSyncServicing {
         _ = try await send(try request("DELETE", "/api/cut-cloud/library/\(id)"))
     }
 
-    func importInspirationLink(_ url: URL) async throws {
-        _ = try await send(
+    func importInspirationLink(_ url: URL) async throws -> String {
+        struct QueuedJob: Decodable { var jobId: String }
+        let data = try await send(
             try request(
                 "POST",
                 "/api/cut-cloud/library/import-url",
                 body: ["url": url.absoluteString, "origin": "inspiration"]
             )
         )
+        return try decode(QueuedJob.self, from: data).jobId
+    }
+
+    func importedLink(jobId: String) async throws -> JobOutcome<ImportedLink> {
+        struct JobStatus: Decodable {
+            struct Result: Decodable {
+                struct Asset: Decodable {
+                    var id: String
+                    var fileName: String
+                    var type: String
+                }
+                var assets: [Asset]?
+            }
+            var state: String
+            var result: Result?
+        }
+        let data = try await send(try request("GET", "/api/cut-cloud/jobs/\(jobId)"))
+        let status = try decode(JobStatus.self, from: data)
+        switch status.state {
+        case "queued", "running":
+            return .running
+        case "done":
+            // A source that was only words brings back no media; the card
+            // stays the link it was saved as.
+            guard let asset = status.result?.assets?.first else { return .failed }
+            return .done(
+                ImportedLink(
+                    assetId: asset.id,
+                    fileName: asset.fileName,
+                    isVideo: asset.type == "video"
+                )
+            )
+        default:
+            return .failed
+        }
+    }
+
+    func downloadLibraryMedia(fileName: String, to destination: URL) async throws {
+        let path = "/api/cut-cloud/library/media/" + (fileName.addingPercentEncoding(
+            withAllowedCharacters: .urlPathAllowed
+        ) ?? fileName)
+        let url = try await resolveRedirect(path)
+        let temporary: URL
+        do {
+            (temporary, _) = try await URLSession.shared.download(from: url)
+        } catch {
+            throw CloudSyncError.transport
+        }
+        try? FileManager.default.removeItem(at: destination)
+        do {
+            try FileManager.default.moveItem(at: temporary, to: destination)
+        } catch {
+            throw CloudSyncError.transport
+        }
     }
 
     func fetchUsage() async throws -> StorageUsage {
@@ -239,55 +294,90 @@ extension CutCloudClient: CloudSyncServicing {
         var title: String
         var body: String
         var colorIndex: Int
+        var folderId: String?
         var updatedAt: Double
         var deletedAt: Double?
         var createdAt: Double
     }
 
-    func fetchNotes() async throws -> [RemoteNote] {
-        struct NotesResponse: Decodable { var notes: [NoteDTO] }
-        let data = try await send(try request("GET", "/api/cut-cloud/notes"))
-        return try decode(NotesResponse.self, from: data).notes.compactMap { dto in
-            guard let id = UUID(uuidString: dto.id) else { return nil }
-            return RemoteNote(
-                id: id,
-                title: dto.title,
-                body: dto.body,
-                colorIndex: dto.colorIndex,
-                updatedAt: Date(timeIntervalSince1970: dto.updatedAt / 1000),
-                deletedAt: dto.deletedAt.map { Date(timeIntervalSince1970: $0 / 1000) },
-                createdAt: Date(timeIntervalSince1970: dto.createdAt / 1000)
-            )
-        }
+    private struct NoteFolderDTO: Decodable {
+        var id: String
+        var name: String
+        var updatedAt: Double
+        var createdAt: Double
     }
 
-    func putNote(_ note: RemoteNote) async throws -> RemoteNote {
-        let data = try await send(
-            try request(
-                "PUT",
-                "/api/cut-cloud/notes/\(note.id.uuidString.lowercased())",
-                body: [
-                    "title": note.title,
-                    "body": note.body,
-                    "colorIndex": note.colorIndex,
-                    "updatedAt": Int(note.updatedAt.timeIntervalSince1970 * 1000),
-                ]
-            )
-        )
-        let dto = try decode(NoteDTO.self, from: data)
-        return RemoteNote(
-            id: note.id,
+    private func remoteNote(_ dto: NoteDTO, id: UUID) -> RemoteNote {
+        RemoteNote(
+            id: id,
             title: dto.title,
             body: dto.body,
             colorIndex: dto.colorIndex,
+            folderId: dto.folderId.flatMap(UUID.init(uuidString:)),
             updatedAt: Date(timeIntervalSince1970: dto.updatedAt / 1000),
             deletedAt: dto.deletedAt.map { Date(timeIntervalSince1970: $0 / 1000) },
             createdAt: Date(timeIntervalSince1970: dto.createdAt / 1000)
         )
     }
 
+    func fetchNotes() async throws -> RemoteNotes {
+        struct NotesResponse: Decodable {
+            var notes: [NoteDTO]
+            var folders: [NoteFolderDTO]?
+        }
+        let data = try await send(try request("GET", "/api/cut-cloud/notes"))
+        let response = try decode(NotesResponse.self, from: data)
+        return RemoteNotes(
+            notes: response.notes.compactMap { dto in
+                guard let id = UUID(uuidString: dto.id) else { return nil }
+                return remoteNote(dto, id: id)
+            },
+            // Folders are keyed by the id whichever client made them chose,
+            // and both clients mint UUIDs; anything else is not this phone's.
+            folders: (response.folders ?? []).compactMap { dto in
+                guard let id = UUID(uuidString: dto.id) else { return nil }
+                return RemoteNoteFolder(
+                    id: id,
+                    name: dto.name,
+                    updatedAt: Date(timeIntervalSince1970: dto.updatedAt / 1000),
+                    createdAt: Date(timeIntervalSince1970: dto.createdAt / 1000)
+                )
+            }
+        )
+    }
+
+    func putNote(_ note: RemoteNote) async throws -> RemoteNote {
+        var body: [String: Any] = [
+            "title": note.title,
+            "body": note.body,
+            "colorIndex": note.colorIndex,
+            "updatedAt": Int(note.updatedAt.timeIntervalSince1970 * 1000),
+        ]
+        body["folderId"] = note.folderId.map { $0.uuidString.lowercased() } ?? NSNull()
+        let data = try await send(
+            try request("PUT", "/api/cut-cloud/notes/\(note.id.uuidString.lowercased())", body: body)
+        )
+        return remoteNote(try decode(NoteDTO.self, from: data), id: note.id)
+    }
+
     func deleteNote(id: UUID) async throws {
         _ = try await send(try request("DELETE", "/api/cut-cloud/notes/\(id.uuidString.lowercased())"))
+    }
+
+    func putNoteFolder(_ folder: RemoteNoteFolder) async throws {
+        _ = try await send(
+            try request(
+                "PUT",
+                "/api/cut-cloud/notes/folders/\(folder.id.uuidString.lowercased())",
+                body: ["name": folder.name]
+            )
+        )
+    }
+
+    func deleteNoteFolder(id: UUID) async throws {
+        _ = try await send(
+            try request("DELETE", "/api/cut-cloud/notes/folders/\(id.uuidString.lowercased())")
+        )
     }
 }
 

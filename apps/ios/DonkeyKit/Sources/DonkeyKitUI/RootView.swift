@@ -41,7 +41,7 @@ public struct RootView<CameraPreview: View>: View {
         ZStack {
             TabView(selection: $app.selectedTab) {
                 Tab("Ideas", systemImage: "lightbulb", value: .ideas) {
-                    IdeasScreen(app: app, ideas: ideas, auth: auth, onRecordNote: recordNote)
+                    IdeasScreen(app: app, ideas: ideas, media: media, auth: auth, onRecordNote: recordNote)
                 }
                 Tab("Library", systemImage: "books.vertical", value: .media) {
                     MediaScreen(app: app, media: media, auth: auth)
@@ -71,6 +71,13 @@ public struct RootView<CameraPreview: View>: View {
                 .preferredColorScheme(app.appearance.colorScheme)
         }
         .task { await auth.restore() }
+        // Notes and folders are written at the desk as well as here, so the
+        // phone looks at the cloud on its own clock for as long as it is on
+        // screen. Pull to refresh asks for the same pass at once.
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            await media.sync?.beat()
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active, auth.isSignedIn {
                 media.sync?.kick()

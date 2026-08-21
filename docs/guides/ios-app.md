@@ -23,11 +23,21 @@ Every byte moves at most once. Uploads go straight to storage on presigned
 URLs; an interrupted upload re-presigns under the name it already claimed, and
 a retried completion lands on the asset it already made. Recordings arrive in
 the desktop library marked as camera clips (the Camera Roll tab), inspiration
-media lands in the Inspiration folder, and inspiration links queue a
-cloud-side import that fetches the media there. Notes merge both ways by
-last-writer-wins on the edit stamp, with tombstones so a delete made offline
-on either side still lands on the other. Deleting a synced recording on the
-phone deletes the cloud copy too.
+media lands in the Inspiration folder, and a saved inspiration link queues a
+cloud-side import: the worker fetches the source, the phone follows the job,
+and the media comes back down onto the phone, so the card that was a link
+plays the video the link pointed at. A source that turns out to be only words
+stays a link. Notes merge both ways by last-writer-wins on the edit stamp,
+with tombstones so a delete made offline on either side still lands on the
+other. The folders notes file into travel with them, under ids whichever
+device made them chose; a folder carries no tombstone, so a folder the cloud
+listing no longer names was deleted elsewhere and its notes come back to the
+top level. Deleting a synced recording on the phone deletes the cloud copy
+too.
+
+Notes are written at the desk as well as here, so the phone pulls on a clock
+of its own while it is on screen, and pull to refresh runs the same pass at
+once.
 
 A pass that ends with work still queued — a request that timed out, a 5xx —
 books its own next try and backs off, up to five minutes between attempts, so
