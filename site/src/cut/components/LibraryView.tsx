@@ -985,7 +985,7 @@ export function LibraryView() {
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>
-                Remove “{deleting?.name}” from the library?
+                Delete “{deleting?.name}”?
               </AlertDialogTitle>
               <AlertDialogDescription>
                 Projects that already use it keep their own copy.
@@ -1357,7 +1357,7 @@ export function LibraryCard({
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem variant="destructive" onClick={onDelete}>
-                  <Trash2 /> Remove from library
+                  <Trash2 /> Delete
                 </DropdownMenuItem>
               </>
             )}

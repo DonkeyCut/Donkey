@@ -1509,7 +1509,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
       <AlertDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove “{deleting?.name}” from the library?</AlertDialogTitle>
+            <AlertDialogTitle>Delete “{deleting?.name}”?</AlertDialogTitle>
             <AlertDialogDescription>
               Projects that already use it keep their own copy.
             </AlertDialogDescription>
