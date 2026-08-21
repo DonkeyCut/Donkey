@@ -16,3 +16,4 @@ export * from "./gradeLut";
 export * from "./gradePresets";
 export * from "./gradeMatch";
 export * from "./effects";
+export * from "./audioFx";

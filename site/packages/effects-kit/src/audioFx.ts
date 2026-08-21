@@ -1,0 +1,450 @@
+/**
+ * Time-ranged audio effects — the sound's side of the effect elements.
+ *
+ * A visual effect filters the picture under its stretch of timeline; an audio
+ * effect filters the mix under it: everything audible in that window, clip
+ * sound, upper-track sound and soundtrack alike, treated as one.
+ *
+ * Each effect is one declarative recipe (`AudioFxRecipe`) that three renderers
+ * read: the Web Audio graph the preview plays and the in-tab export folds, the
+ * ffmpeg chain the engine and the cloud worker splice into their mix, and the
+ * bar figures the picker tiles animate. Describing the effect as data instead
+ * of as three hand-written chains is what keeps those three the same sound —
+ * a delay tap moved here moves in every renderer at once.
+ *
+ * Every ffmpeg filter used is in the LGPL build the shipped engine bundles.
+ */
+
+/** Delay-and-filter recipes cover every effect here; the ids name the sound. */
+export type AudioEffectId =
+  | "echo"
+  | "reverb"
+  | "muffle"
+  | "telephone"
+  | "deep"
+  | "bright"
+  | "wobble"
+  | "crush";
+
+export const AUDIO_EFFECT_IDS: AudioEffectId[] = [
+  "echo",
+  "reverb",
+  "muffle",
+  "telephone",
+  "deep",
+  "bright",
+  "wobble",
+  "crush",
+];
+
+export const AUDIO_EFFECT_LABELS: Record<AudioEffectId, string> = {
+  echo: "Echo",
+  reverb: "Reverb",
+  muffle: "Muffle",
+  telephone: "Telephone",
+  deep: "Deep",
+  bright: "Bright",
+  wobble: "Wobble",
+  crush: "Crush",
+};
+
+export const isAudioEffect = (id: string): id is AudioEffectId =>
+  (AUDIO_EFFECT_IDS as string[]).includes(id);
+
+/** One two-pole section. Shelves and peaks carry a decibel gain; the passes
+ * carry none. The names are the Web Audio filter types, and each maps to the
+ * ffmpeg filter of the same shape. */
+export interface AudioBandSpec {
+  type: "lowpass" | "highpass" | "lowshelf" | "highshelf" | "peaking";
+  hz: number;
+  /** Resonance; absent = 0.707, the flat Butterworth response ffmpeg's
+   * two-pole passes have. */
+  q?: number;
+  /** Shelf or peak gain in decibels. */
+  db?: number;
+}
+
+/**
+ * What an audio effect does, in the terms both renderers can build.
+ *
+ * The delay taps are a finite echo: the dry signal plus each tap's delayed
+ * copy at its own gain, which is exactly what ffmpeg's `aecho` computes, so
+ * one description drives both. Bands, tremolo, bit crush and makeup gain run
+ * after the taps, in that order.
+ */
+export interface AudioFxRecipe {
+  /** Gain on the untreated signal that the taps are added to. */
+  dry: number;
+  /** Delayed copies, in milliseconds and gain. */
+  taps: { ms: number; gain: number }[];
+  /** Filter sections applied in order. */
+  bands: AudioBandSpec[];
+  /** Amplitude modulation: rate in Hz, depth 0..1. */
+  tremolo?: { hz: number; depth: number };
+  /** Bit-depth reduction, and how much of the crushed signal is heard. */
+  crush?: { bits: number; mix: number };
+  /** Makeup gain on the finished chain; absent = 1. */
+  gain?: number;
+}
+
+/** How long the treated signal takes to come in and go out at an effect
+ * window's edges, in seconds. Short enough to read as an instant switch, long
+ * enough that the switch cannot click. */
+export const AUDIO_FX_RAMP = 0.04;
+
+const clampAmount = (k: number | undefined) => Math.max(0.05, Math.min(1, k ?? 0.5));
+const fmt = (n: number) => (Math.round(n * 1000) / 1000).toString();
+
+/** The delays a reverb's early reflections arrive at, in milliseconds. They
+ * are mutually prime so the copies never stack into a single flutter. */
+const ROOM_TAPS = [23, 41, 59, 79, 101, 127, 151, 181];
+
+/**
+ * The recipe for one effect at strength `amount` (0.05..1).
+ *
+ * The strength moves what the effect is made of — how loud the echoes come
+ * back, how far down the muffle closes, how deep the crush bites — so the
+ * slider reads as more of the same sound rather than a wet/dry blend.
+ */
+export function audioFxRecipe(effect: string, amount?: number): AudioFxRecipe | null {
+  const k = clampAmount(amount);
+  switch (effect as AudioEffectId) {
+    case "echo":
+      // Three repeats a quarter second apart, each quieter than the last.
+      return {
+        dry: 1,
+        taps: [
+          { ms: 250, gain: 0.6 * k },
+          { ms: 500, gain: 0.36 * k },
+          { ms: 750, gain: 0.2 * k },
+        ],
+        bands: [],
+      };
+    case "reverb":
+      // A room, built from its early reflections: dense taps inside a fifth of
+      // a second, decaying, with the top rolled off so the tail sits behind
+      // the voice rather than beside it.
+      return {
+        dry: 1,
+        taps: ROOM_TAPS.map((ms, i) => ({ ms, gain: 0.5 * k * Math.exp(-0.45 * i) })),
+        bands: [{ type: "lowpass", hz: 6000 }],
+        gain: 0.9,
+      };
+    case "muffle":
+      // Heard through a wall: two passes, so the top goes rather than dims.
+      return {
+        dry: 1,
+        taps: [],
+        bands: [
+          { type: "lowpass", hz: 3200 - 2400 * k },
+          { type: "lowpass", hz: 3200 - 2400 * k },
+        ],
+        gain: 1 + 0.4 * k,
+      };
+    case "telephone":
+      // The band a phone line passes, with the middle pushed up so speech
+      // carries through it.
+      return {
+        dry: 1,
+        taps: [],
+        bands: [
+          { type: "highpass", hz: 400 + 200 * k },
+          { type: "lowpass", hz: 3400 - 800 * k },
+          { type: "peaking", hz: 1800, q: 1.2, db: 6 * k },
+        ],
+        gain: 1.2,
+      };
+    case "deep":
+      return {
+        dry: 1,
+        taps: [],
+        bands: [{ type: "lowshelf", hz: 110, db: 4 + 8 * k }],
+        gain: 0.85,
+      };
+    case "bright":
+      return {
+        dry: 1,
+        taps: [],
+        bands: [{ type: "highshelf", hz: 4000, db: 3 + 7 * k }],
+        gain: 0.9,
+      };
+    case "wobble":
+      return { dry: 1, taps: [], bands: [], tremolo: { hz: 5, depth: 0.85 * k } };
+    case "crush":
+      // Down to four bits at the top of the slider, mixed in over the clean
+      // signal so the words survive the grit.
+      return {
+        dry: 1,
+        taps: [],
+        bands: [],
+        crush: { bits: Math.max(4, Math.round(12 - 8 * k)), mix: 0.4 + 0.6 * k },
+        gain: 0.9,
+      };
+    default:
+      return null;
+  }
+}
+
+/* ------------------------------------------------------------- ffmpeg */
+
+/** The ffmpeg name and argument spelling of one band. */
+function bandFilter(b: AudioBandSpec): string {
+  const q = b.q ?? 0.707;
+  switch (b.type) {
+    case "lowpass":
+      return `lowpass=f=${fmt(b.hz)}:width_type=q:w=${fmt(q)}`;
+    case "highpass":
+      return `highpass=f=${fmt(b.hz)}:width_type=q:w=${fmt(q)}`;
+    case "lowshelf":
+      return `lowshelf=f=${fmt(b.hz)}:g=${fmt(b.db ?? 0)}`;
+    case "highshelf":
+      return `highshelf=f=${fmt(b.hz)}:g=${fmt(b.db ?? 0)}`;
+    case "peaking":
+      return `equalizer=f=${fmt(b.hz)}:width_type=q:w=${fmt(q)}:g=${fmt(b.db ?? 0)}`;
+  }
+}
+
+/**
+ * The effect as one ffmpeg audio chain — comma-joined filters, no stream
+ * labels, so the caller splices it into whatever window it runs over. Null for
+ * an unknown id: the export then renders the sound untreated rather than
+ * failing.
+ */
+export function audioFxFilters(effect: string, amount?: number): string | null {
+  const r = audioFxRecipe(effect, amount);
+  if (!r) return null;
+  const steps: string[] = [];
+  if (r.taps.length > 0) {
+    // aecho computes in_gain*dry + out_gain*Σ decay_i·delayed_i, which is the
+    // tap list exactly; out_gain stays at 1 so each tap's own gain is what is
+    // heard. Its decays must stay under 1, which the recipes hold to.
+    steps.push(
+      `aecho=${fmt(r.dry)}:1:` +
+        r.taps.map((t) => fmt(t.ms)).join("|") +
+        ":" +
+        r.taps.map((t) => fmt(Math.min(0.9, t.gain))).join("|")
+    );
+  } else if (r.dry !== 1) {
+    steps.push(`volume=${fmt(r.dry)}`);
+  }
+  for (const b of r.bands) steps.push(bandFilter(b));
+  if (r.tremolo) steps.push(`tremolo=f=${fmt(r.tremolo.hz)}:d=${fmt(r.tremolo.depth)}`);
+  if (r.crush) steps.push(`acrusher=bits=${fmt(r.crush.bits)}:mix=${fmt(r.crush.mix)}:mode=lin`);
+  if (r.gain !== undefined && r.gain !== 1) steps.push(`volume=${fmt(r.gain)}`);
+  return steps.length > 0 ? steps.join(",") : null;
+}
+
+/* ---------------------------------------------------------- Web Audio */
+
+/** The two ends of a built chain: connect sound into `input`, take it out of
+ * `output`. */
+export interface AudioFxNodes {
+  input: AudioNode;
+  output: AudioNode;
+  /** Modulators the chain started, so a caller can stop them with it. */
+  sources: AudioScheduledSourceNode[];
+}
+
+/** The quantization curve of a bit crush, as a WaveShaper table: the same
+ * staircase `acrusher` applies in linear mode. */
+function crushCurve(bits: number): Float32Array<ArrayBuffer> {
+  const steps = Math.max(2, Math.pow(2, Math.max(1, bits)) / 2);
+  const curve = new Float32Array(new ArrayBuffer(1024 * 4));
+  for (let i = 0; i < curve.length; i++) {
+    const x = (i / (curve.length - 1)) * 2 - 1;
+    curve[i] = Math.round(x * steps) / steps;
+  }
+  return curve;
+}
+
+/**
+ * Build one effect's Web Audio graph on `ctx`.
+ *
+ * `startAt` is the context time the modulators run from, so an offline fold
+ * can line a wobble's phase up with the window it treats. Live playback passes
+ * the moment the chain joins the graph.
+ */
+export function buildAudioFx(
+  ctx: BaseAudioContext,
+  recipe: AudioFxRecipe,
+  startAt = 0
+): AudioFxNodes {
+  const input = ctx.createGain();
+  const sources: AudioScheduledSourceNode[] = [];
+
+  // The taps and the dry signal meet here; with no taps the sum is the dry
+  // path alone, which is a gain of the recipe's own dry level.
+  const sum = ctx.createGain();
+  const dry = ctx.createGain();
+  dry.gain.value = recipe.dry;
+  input.connect(dry);
+  dry.connect(sum);
+  for (const tap of recipe.taps) {
+    const delay = ctx.createDelay(Math.max(0.05, tap.ms / 1000 + 0.05));
+    delay.delayTime.value = tap.ms / 1000;
+    const gain = ctx.createGain();
+    gain.gain.value = tap.gain;
+    input.connect(delay);
+    delay.connect(gain);
+    gain.connect(sum);
+  }
+
+  let node: AudioNode = sum;
+  for (const b of recipe.bands) {
+    const filter = ctx.createBiquadFilter();
+    filter.type = b.type;
+    filter.frequency.value = b.hz;
+    filter.Q.value = b.q ?? 0.707;
+    if (b.db !== undefined) filter.gain.value = b.db;
+    node.connect(filter);
+    node = filter;
+  }
+
+  if (recipe.tremolo) {
+    const { hz, depth } = recipe.tremolo;
+    const trem = ctx.createGain();
+    // The same swing ffmpeg's tremolo has: the level rides between full and
+    // (1 − depth), so the average stays where the mix was.
+    trem.gain.value = 1 - depth / 2;
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = hz;
+    const swing = ctx.createGain();
+    swing.gain.value = depth / 2;
+    lfo.connect(swing);
+    swing.connect(trem.gain);
+    lfo.start(startAt);
+    sources.push(lfo);
+    node.connect(trem);
+    node = trem;
+  }
+
+  if (recipe.crush) {
+    // The crushed copy and the clean one, at the recipe's mix — `acrusher`'s
+    // own blend.
+    const shaper = ctx.createWaveShaper();
+    shaper.curve = crushCurve(recipe.crush.bits);
+    const wet = ctx.createGain();
+    wet.gain.value = recipe.crush.mix;
+    const clean = ctx.createGain();
+    clean.gain.value = 1 - recipe.crush.mix;
+    const mixed = ctx.createGain();
+    node.connect(shaper);
+    shaper.connect(wet);
+    wet.connect(mixed);
+    node.connect(clean);
+    clean.connect(mixed);
+    node = mixed;
+  }
+
+  if (recipe.gain !== undefined && recipe.gain !== 1) {
+    const makeup = ctx.createGain();
+    makeup.gain.value = recipe.gain;
+    node.connect(makeup);
+    node = makeup;
+  }
+
+  return { input, output: node, sources };
+}
+
+/* -------------------------------------------------------------- tiles */
+
+/** How many bars a picker tile draws. */
+export const AUDIO_FX_BARS = 28;
+
+/** The untreated level at bar `i` of `n` at time `t` — a rolling figure with
+ * a speech-like envelope, so every tile shapes the same sound. */
+function baseBar(i: number, n: number, t: number): number {
+  const u = i / n + t * 0.4;
+  const detail =
+    0.5 * Math.abs(Math.sin(2 * Math.PI * 1.3 * u)) +
+    0.3 * Math.abs(Math.sin(2 * Math.PI * 2.9 * u + 1.1)) +
+    0.2 * Math.abs(Math.sin(2 * Math.PI * 7.1 * u + 2.3));
+  const envelope = 0.45 + 0.55 * Math.abs(Math.sin(Math.PI * (u * 0.6 + 0.15)));
+  return detail * envelope;
+}
+
+/** A box blur over the bars, the figure's stand-in for a filter that takes
+ * the top off. */
+function smooth(bars: number[], width: number): number[] {
+  const w = Math.max(1, Math.round(width));
+  if (w <= 1) return bars;
+  return bars.map((_, i) => {
+    let sum = 0;
+    let count = 0;
+    for (let j = i - w; j <= i + w; j++) {
+      if (j < 0 || j >= bars.length) continue;
+      sum += bars[j];
+      count++;
+    }
+    return sum / Math.max(1, count);
+  });
+}
+
+/**
+ * The bar figure a picker tile draws for one effect at time `t`, each value
+ * 0..1.
+ *
+ * It is read off the same recipe the sound is built from — taps add their
+ * delayed copies, a low pass rounds the figure off, a shelf leans it toward
+ * body or detail, tremolo swings the whole thing, a crush steps it — so a
+ * recipe change shows on its tile without a second description of the effect.
+ */
+export function audioFxBars(
+  effect: string | null,
+  t: number,
+  n = AUDIO_FX_BARS,
+  amount?: number
+): number[] {
+  let bars = Array.from({ length: n }, (_, i) => baseBar(i, n, t));
+  const recipe = effect ? audioFxRecipe(effect, amount) : null;
+  if (recipe) {
+    if (recipe.taps.length > 0) {
+      const dry = bars.map((v) => v * recipe.dry);
+      const withTaps = [...dry];
+      for (const tap of recipe.taps) {
+        // A second of sound reads as the tile's width, so a quarter-second
+        // repeat lands a quarter of the way along and can be seen as one.
+        const shift = Math.max(1, Math.round((tap.ms / 1000) * n * 0.9));
+        for (let i = 0; i < n; i++) {
+          const from = i - shift;
+          if (from >= 0) withTaps[i] += dry[from] * tap.gain;
+        }
+      }
+      bars = withTaps;
+    }
+    for (const b of recipe.bands) {
+      if (b.type === "lowpass") bars = smooth(bars, Math.min(4, 2400 / Math.max(200, b.hz)));
+      if (b.type === "highpass") {
+        const body = smooth(bars, 3);
+        bars = bars.map((v, i) => Math.max(0, v - body[i] * Math.min(0.9, b.hz / 1200)));
+      }
+      if (b.type === "lowshelf" || b.type === "highshelf" || b.type === "peaking") {
+        const body = smooth(bars, 3);
+        const lift = (b.db ?? 0) / 24;
+        bars =
+          b.type === "highshelf"
+            ? bars.map((v, i) => v + Math.max(0, v - body[i]) * lift * 3)
+            : bars.map((v, i) => v + body[i] * lift);
+      }
+    }
+    if (recipe.tremolo) {
+      const { hz, depth } = recipe.tremolo;
+      const swing = 1 - depth / 2 + (depth / 2) * Math.sin(2 * Math.PI * hz * t);
+      bars = bars.map((v) => v * swing);
+    }
+    if (recipe.crush) {
+      const steps = Math.max(2, Math.round(recipe.crush.bits / 2));
+      bars = bars.map(
+        (v) => v * (1 - recipe.crush!.mix) + (Math.round(v * steps) / steps) * recipe.crush!.mix
+      );
+    }
+    if (recipe.gain !== undefined) bars = bars.map((v) => v * recipe.gain!);
+  }
+  // Louder than the tile is tall: the figure is scaled back to fit rather than
+  // flattened against the top, so an effect that adds level keeps its shape.
+  const peak = Math.max(...bars);
+  if (peak > 1) bars = bars.map((v) => v / peak);
+  // A floor keeps every bar visible: the figure shows the shape of the effect,
+  // and a bar at zero reads as a gap in the tile.
+  return bars.map((v) => Math.max(0.1, Math.min(1, v)));
+}

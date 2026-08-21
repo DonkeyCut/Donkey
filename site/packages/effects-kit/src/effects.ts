@@ -9,9 +9,11 @@
  */
 
 import type { OverlayBase } from "./types";
+import { AUDIO_EFFECT_IDS, AUDIO_EFFECT_LABELS, type AudioEffectId } from "./audioFx";
 import { LOOK_LABELS, lookCssFilter, lookFilterLines, lookPost, type LookStyle } from "./looks";
 
-export type EffectId =
+/** The effects that treat the picture. */
+export type VisualEffectId =
   | "zoom"
   | "grain"
   | "vhs"
@@ -31,6 +33,12 @@ export type EffectId =
   | "blockbuster"
   | "dreamy";
 
+/** Every effect an element can carry: the picture treatments above and the
+ * audio treatments in `audioFx.ts`. One element kind covers both — an effect
+ * is a stretch of timeline that treats what runs under it, and which of the
+ * two it treats is the id. */
+export type EffectId = VisualEffectId | AudioEffectId;
+
 export interface EffectOverlay extends OverlayBase {
   kind: "effect";
   effect: EffectId;
@@ -46,7 +54,9 @@ export interface EffectOverlay extends OverlayBase {
   region?: { w: number; h: number };
 }
 
-export const EFFECT_IDS: EffectId[] = [
+/** The picture treatments, in picker order. The audio ones are their own list
+ * (`AUDIO_EFFECT_IDS`); `ALL_EFFECT_IDS` is both. */
+export const EFFECT_IDS: VisualEffectId[] = [
   "zoom",
   "grain",
   "vhs",
@@ -88,7 +98,10 @@ export const LOOK_EFFECTS: LookStyle[] = [
 const lookOf = (effect: string): LookStyle | null =>
   (LOOK_EFFECTS as string[]).includes(effect) ? (effect as LookStyle) : null;
 
+export const ALL_EFFECT_IDS: EffectId[] = [...EFFECT_IDS, ...AUDIO_EFFECT_IDS];
+
 export const EFFECT_LABELS: Record<EffectId, string> = {
+  ...AUDIO_EFFECT_LABELS,
   zoom: "Zoom",
   grain: "Film grain",
   vhs: "VHS",
@@ -302,7 +315,7 @@ export function effectPreviewState(
       glow: post?.glow,
     };
   }
-  switch (effect as EffectId) {
+  switch (effect as VisualEffectId) {
     case "zoom":
       // A push in on one part of the picture: the frame renders larger and is
       // cropped back to size around the focus, which stays where it is. The
@@ -585,7 +598,7 @@ export function effectFilterLines(
       `[lkfb${tag}][lkfo${tag}]overlay=0:0:${en}:eof_action=pass[${outLabel}]`,
     ];
   }
-  switch (effect as EffectId) {
+  switch (effect as VisualEffectId) {
     case "zoom": {
       // The pushed-in copy renders on its own branch — scaled up, then laid
       // back over the frame so the focus point stays where it is — and
