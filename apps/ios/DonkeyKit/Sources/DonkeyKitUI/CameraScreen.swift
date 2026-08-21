@@ -420,7 +420,9 @@ struct TeleprompterCard: View {
                 } label: {
                     Image(systemName: "slider.horizontal.3")
                 }
-                .popover(isPresented: $showsSettings, arrowEdge: .bottom) {
+                // The card rides the top of the screen, so the sliders drop
+                // below the button; upward they run off under the status bar.
+                .popover(isPresented: $showsSettings, arrowEdge: .top) {
                     TeleprompterSettingsView(camera: camera)
                         .presentationCompactAdaptation(.popover)
                 }
