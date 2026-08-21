@@ -12,6 +12,7 @@ public struct RootView<CameraPreview: View>: View {
     var media: MediaModel
     var projects: ProjectsModel
     var auth: AuthModel
+    var analytics: AnalyticsModel
     let cameraPreview: () -> CameraPreview
 
     @Environment(\.scenePhase) private var scenePhase
@@ -23,6 +24,7 @@ public struct RootView<CameraPreview: View>: View {
         media: MediaModel,
         projects: ProjectsModel,
         auth: AuthModel,
+        analytics: AnalyticsModel,
         @ViewBuilder cameraPreview: @escaping () -> CameraPreview
     ) {
         self.app = app
@@ -31,6 +33,7 @@ public struct RootView<CameraPreview: View>: View {
         self.media = media
         self.projects = projects
         self.auth = auth
+        self.analytics = analytics
         self.cameraPreview = cameraPreview
     }
 
@@ -62,6 +65,11 @@ public struct RootView<CameraPreview: View>: View {
         .tint(.accentBlue)
         .animation(.default, value: auth.isSignedIn)
         .preferredColorScheme(app.appearance.colorScheme)
+        .fullScreenCover(isPresented: $app.showsAnalytics) {
+            AnalyticsScreen(analytics: analytics)
+                .tint(.accentBlue)
+                .preferredColorScheme(app.appearance.colorScheme)
+        }
         .task { await auth.restore() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active, auth.isSignedIn {
@@ -69,7 +77,10 @@ public struct RootView<CameraPreview: View>: View {
             }
         }
         .onChange(of: auth.isSignedIn) { _, signedIn in
-            guard signedIn else { return }
+            guard signedIn else {
+                app.showsAnalytics = false
+                return
+            }
             media.sync?.kick()
             Task { await projects.refresh() }
         }

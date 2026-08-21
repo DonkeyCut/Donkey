@@ -27,6 +27,12 @@ struct AvatarMenu: View {
 
     var body: some View {
         Menu {
+            if auth.user?.superUser == true {
+                Button("Analytics", systemImage: "chart.xyaxis.line") {
+                    app.showsAnalytics = true
+                }
+                Divider()
+            }
             Picker("Appearance", selection: $app.appearance) {
                 Text("System").tag(AppearancePreference.system)
                 Text("Light").tag(AppearancePreference.light)

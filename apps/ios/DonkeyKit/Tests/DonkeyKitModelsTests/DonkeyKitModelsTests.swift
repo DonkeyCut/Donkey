@@ -523,3 +523,84 @@ import Testing
         #expect(!model.isTorchOn)
     }
 }
+
+@Suite struct AnalyticsSummaryTests {
+    // Three days over two sources (one DB, one posthog); day two never got
+    // extracted. User A signed up before the window and works daily; user B
+    // signed up on day two and only opened the app on day three.
+    func rollup(billing: AnalyticsRollup.Billing? = nil) -> AnalyticsRollup {
+        AnalyticsRollup(
+            generatedAt: "2026-08-21T04:00:00.000Z",
+            days: ["2026-08-18", "2026-08-19", "2026-08-20"],
+            sources: ["renders", "posthog"],
+            missing: [.init(day: "2026-08-19")],
+            billing: billing,
+            users: [
+                .init(registeredAt: "2026-08-01T10:00:00.000Z", balanceMicros: "3000000", activity: [1, 0, 3]),
+                .init(registeredAt: "2026-08-19T12:00:00.000Z", balanceMicros: "500000", activity: [0, 0, 2]),
+            ]
+        )
+    }
+
+    @Test func derivesCountsAndSkipsMissingDays() {
+        let summary = AnalyticsSummary(rollup: rollup())
+        #expect(summary.registered == 2)
+        #expect(summary.points.count == 3)
+        #expect(summary.points[0].active == 1)
+        #expect(summary.points[0].working == 1)
+        #expect(summary.points[1].active == nil)
+        #expect(summary.points[2].active == 2)
+        #expect(summary.points[2].working == 1)
+        #expect(summary.missingDayCount == 1)
+        #expect(summary.activeYesterday == 2)
+        #expect(summary.active7d == 2)
+    }
+
+    @Test func signupsAndTotalsCarryThePreWindowBase() {
+        let summary = AnalyticsSummary(rollup: rollup())
+        #expect(summary.points.map(\.signups) == [0, 1, 0])
+        #expect(summary.points.map(\.totalRegistered) == [1, 2, 2])
+        #expect(summary.signups7d == 1)
+        #expect(summary.balanceDollars == 3.5)
+    }
+
+    @Test func billingRidesIntoRevenue() {
+        let billing = AnalyticsRollup.Billing(
+            subscribers: 4,
+            canceling: 1,
+            funded: 6,
+            fundedMicros: "120000000",
+            revenue: [
+                .init(proMicros: "10000000", topupMicros: "0"),
+                .init(proMicros: "0", topupMicros: "5000000"),
+                .init(proMicros: "0", topupMicros: "0"),
+            ]
+        )
+        let summary = AnalyticsSummary(rollup: rollup(billing: billing))
+        #expect(summary.subscribers == 4)
+        #expect(summary.fundedDollars == 120)
+        #expect(summary.revenueDollars == 15)
+        #expect(summary.points[0].proDollars == 10)
+        #expect(summary.points[1].topupDollars == 5)
+    }
+
+    @Test func billinglessRollupLeavesRevenueUnknown() {
+        let summary = AnalyticsSummary(rollup: rollup())
+        #expect(summary.revenueDollars == nil)
+        #expect(summary.subscribers == nil)
+    }
+}
+
+@Suite struct UserProfileDecodingTests {
+    @Test func profileCachedBeforeRoleFieldDecodesAsRegular() throws {
+        let data = Data(#"{"id":"u1","name":"Dana","email":"dana@example.com"}"#.utf8)
+        let profile = try JSONDecoder().decode(UserProfile.self, from: data)
+        #expect(profile.superUser == false)
+    }
+
+    @Test func superUserRoundTrips() throws {
+        let profile = UserProfile(id: "u1", name: "Dana", email: "dana@example.com", superUser: true)
+        let decoded = try JSONDecoder().decode(UserProfile.self, from: JSONEncoder().encode(profile))
+        #expect(decoded.superUser)
+    }
+}

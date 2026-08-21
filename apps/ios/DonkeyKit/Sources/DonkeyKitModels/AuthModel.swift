@@ -4,11 +4,23 @@ nonisolated public struct UserProfile: Equatable, Codable, Sendable {
     public var id: String
     public var name: String
     public var email: String
+    /// Accounts with the operator role; gates the analytics dashboard.
+    public var superUser: Bool
 
-    public init(id: String, name: String, email: String) {
+    public init(id: String, name: String, email: String, superUser: Bool = false) {
         self.id = id
         self.name = name
         self.email = email
+        self.superUser = superUser
+    }
+
+    /// Profiles cached before the role field existed decode with it off.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        email = try container.decode(String.self, forKey: .email)
+        superUser = try container.decodeIfPresent(Bool.self, forKey: .superUser) ?? false
     }
 
     public var initial: String {

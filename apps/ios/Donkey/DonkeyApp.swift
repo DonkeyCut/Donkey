@@ -15,7 +15,8 @@ struct DonkeyApp: App {
                 camera: wiring.camera,
                 media: wiring.media,
                 projects: wiring.projects,
-                auth: wiring.auth
+                auth: wiring.auth,
+                analytics: wiring.analytics
             ) {
                 CameraPreviewView(host: wiring.cameraController.previewView) {
                     wiring.camera.toggleRecording()
@@ -36,6 +37,7 @@ final class AppWiring {
     let media: MediaModel
     let projects: ProjectsModel
     let auth: AuthModel
+    let analytics: AnalyticsModel
     let cameraController: CameraController
     let sync: SyncEngine
     private let networkMonitor: NetworkMonitor
@@ -69,6 +71,7 @@ final class AppWiring {
         self.auth = auth
         self.sync = sync
         camera = CameraModel()
+        analytics = AnalyticsModel(service: cloud)
         projects = ProjectsModel(service: cloud)
         cameraController = CameraController()
         networkMonitor = NetworkMonitor { sync.network = $0 }

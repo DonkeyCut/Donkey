@@ -33,6 +33,9 @@ public final class AppModel {
     /// A transient confirmation message ("Note saved"), cleared by the UI.
     public var toast: String?
 
+    /// The super-user analytics dashboard, opened from the avatar menu.
+    public var showsAnalytics = false
+
     private let defaults: UserDefaults
     private static let appearanceKey = "appearancePreference"
     private static let cellularKey = "syncOverCellular"

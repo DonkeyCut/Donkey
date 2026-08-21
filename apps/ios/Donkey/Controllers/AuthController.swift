@@ -129,6 +129,7 @@ final class AuthController: NSObject, AuthServicing {
     }
 
     private func fetchProfile(token: String) async throws -> UserProfile {
+        async let superUser = fetchSuperUser(token: token)
         var request = URLRequest(url: AuthBackend.baseURL.appending(path: "/api/auth/get-session"))
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -147,7 +148,20 @@ final class AuthController: NSObject, AuthServicing {
         guard let user = try? JSONDecoder().decode(SessionResponse.self, from: data).user else {
             throw AuthError.server("Your session has expired. Sign in again.")
         }
-        return UserProfile(id: user.id, name: user.name ?? "", email: user.email)
+        return UserProfile(id: user.id, name: user.name ?? "", email: user.email, superUser: await superUser)
+    }
+
+    /// The session payload carries identity only; /api/account/me carries the
+    /// super-user bit. Best-effort: a failed read means a regular account
+    /// until the next restore.
+    private func fetchSuperUser(token: String) async -> Bool {
+        var request = URLRequest(url: AuthBackend.baseURL.appending(path: "/api/account/me"))
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else { return false }
+        struct MeResponse: Decodable { var superUser: Bool? }
+        return (try? JSONDecoder().decode(MeResponse.self, from: data))?.superUser == true
     }
 
     private static func serverMessage(from data: Data, status: Int) -> String {

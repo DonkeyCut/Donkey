@@ -398,6 +398,31 @@ extension CutCloudClient: CloudProjectsServicing {
     }
 }
 
+// MARK: - Analytics
+
+extension CutCloudClient: AnalyticsServicing {
+    /// The nightly analytics rollup. The API serves it to super users only,
+    /// so a regular account reads as unauthorized here.
+    func fetchAnalyticsRollup() async throws -> AnalyticsRollup {
+        let request = try request("GET", "/api/analytics/rollup")
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw CloudSyncError.transport
+        }
+        guard let http = response as? HTTPURLResponse else { throw CloudSyncError.transport }
+        switch http.statusCode {
+        case 200..<300: break
+        case 404: throw AnalyticsError.noRollup
+        case 401, 403: throw CloudSyncError.unauthorized
+        default: throw CloudSyncError.transport
+        }
+        return try decode(AnalyticsRollup.self, from: data)
+    }
+}
+
 // MARK: - Recording payloads
 
 extension CutCloudClient {
