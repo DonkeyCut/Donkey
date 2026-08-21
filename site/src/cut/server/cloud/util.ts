@@ -58,6 +58,11 @@ export function dedupeName(base: string, taken: ReadonlySet<string>): string {
   return name;
 }
 
+/** The library folder inspiration items land in, derived from the user id so
+ * every writer — the complete route, the URL-import worker — upserts the same
+ * row instead of racing to create one. An ordinary folder otherwise. */
+export const inspirationFolderId = (userId: string) => `inspiration-${userId}`;
+
 const VIDEO_RE = /\.(mp4|mov|m4v|webm|mkv)$/i;
 const AUDIO_RE = /\.(mp3|m4a|aac|wav|ogg|flac)$/i;
 const IMAGE_RE = /\.(png|jpe?g|webp|gif|avif|bmp)$/i;

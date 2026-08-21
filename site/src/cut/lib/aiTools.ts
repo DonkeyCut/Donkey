@@ -62,6 +62,7 @@ import {
   renameLibraryFolder,
   saveAssetToLibrary,
 } from "./library";
+import { fetchNotes } from "./notes";
 import {
   captureFreezeFrame,
   detectSilenceClientSide,
@@ -2420,12 +2421,27 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           kind: a.type,
           duration: round2(a.duration),
           ...(a.folderId ? { folderId: a.folderId } : {}),
+          // "camera" = recorded on the user's phone (their Camera Roll);
+          // "inspiration" = saved from the phone's Ideas tab.
+          ...(a.origin ? { origin: a.origin } : {}),
         })),
         templates: lib.templates.map((t) => ({
           id: t.id,
           name: t.name,
           duration: round2(t.duration),
           parts: t.layers.length + t.audio.length + t.texts.length + t.cues.length,
+        })),
+      };
+  },
+
+  notes_list: async () => {
+      const notes = await fetchNotes();
+      return {
+        notes: notes.map((n) => ({
+          id: n.id,
+          title: n.title,
+          body: n.body,
+          updatedAt: new Date(n.updatedAt).toISOString(),
         })),
       };
   },

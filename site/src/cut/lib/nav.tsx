@@ -14,17 +14,20 @@ export function useCutBase(): string {
 // project was opened from — Projects, Library, or a folder within one. The
 // home pages read ?folder=… as the open folder, which also lets the browser's
 // own back button step folder → root.
-export type CutTab = "projects" | "library";
+export type CutTab = "projects" | "library" | "camera-roll" | "notes";
 
 /** Which home tab a pathname is on (base-agnostic). */
 export function tabForPath(pathname: string): CutTab {
-  return pathname.endsWith("/library") ? "library" : "projects";
+  if (pathname.endsWith("/library")) return "library";
+  if (pathname.endsWith("/camera-roll")) return "camera-roll";
+  if (pathname.endsWith("/notes")) return "notes";
+  return "projects";
 }
 
 /** Home tab URL under the given base, optionally inside a folder. Projects is
  * the base root. */
 export function homeHref(base: string, tab: CutTab, folder?: string | null): string {
-  const root = tab === "library" ? `${base}/library` : base || "/";
+  const root = tab === "projects" ? base || "/" : `${base}/${tab}`;
   return folder ? `${root}?folder=${encodeURIComponent(folder)}` : root;
 }
 

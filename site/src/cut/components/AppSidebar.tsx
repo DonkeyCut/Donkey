@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Clapperboard, FolderOpen, Loader2 } from "lucide-react";
+import { Camera, Clapperboard, FolderOpen, Loader2, StickyNote } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { seedNewProjectDoc } from "@/cut/lib/docCache";
-import { patchProjects } from "@/cut/lib/queries";
+import { patchProjects, usePhoneLink } from "@/cut/lib/queries";
 import { backendFor, type Residency } from "@/cut/lib/residency";
 import { track } from "@/lib/analytics";
 import { NavStorage } from "@/cut/components/NavStorage";
@@ -30,11 +30,18 @@ const NAV: { tab: CutTab; label: string; icon: typeof Clapperboard }[] = [
   { tab: "library", label: "Library", icon: FolderOpen },
 ];
 
+// Surfaces fed by the iOS app, listed only for accounts that use it.
+const PHONE_NAV: { tab: CutTab; label: string; icon: typeof Clapperboard }[] = [
+  { tab: "camera-roll", label: "Camera Roll", icon: Camera },
+  { tab: "notes", label: "Notes", icon: StickyNote },
+];
+
 export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const base = useCutBase();
   const client = useQueryClient();
+  const phoneLinked = usePhoneLink();
   // The residency the pending creation was launched for; null when the naming
   // dialog is closed.
   const [createIn, setCreateIn] = useState<Residency | null>(null);
@@ -93,7 +100,7 @@ export function AppSidebar() {
       />
 
       <nav className="flex flex-col gap-0.5">
-        {NAV.map(({ tab, label, icon: Icon }) => {
+        {[...NAV, ...(phoneLinked ? PHONE_NAV : [])].map(({ tab, label, icon: Icon }) => {
           const href = homeHref(base, tab);
           const active = pathname === href;
           return (

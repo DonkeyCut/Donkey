@@ -51,6 +51,7 @@ const PAGE_SESSION_TOOLS: ReadonlySet<string> = new Set([
   "library_list",
   "library_add",
   "library_organize",
+  "notes_list",
   "template_add",
   "file_asset",
   "import_url",

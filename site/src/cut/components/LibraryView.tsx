@@ -363,7 +363,9 @@ export function LibraryView() {
   // is this browser putting things on — so they read the one choice the user
   // already made, rather than the backend the app happens to be bound to.
   const { target } = useNewProjectTarget();
-  const all = library.data?.assets ?? [];
+  // Phone camera recordings have their own home tab (Camera Roll); the
+  // Library grid lists everything else.
+  const all = (library.data?.assets ?? []).filter((a) => a.origin !== "camera");
   const folders = library.data?.folders ?? [];
   const templates = library.data?.templates ?? [];
   const patch = useCallback(

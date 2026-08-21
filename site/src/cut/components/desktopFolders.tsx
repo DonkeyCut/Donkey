@@ -23,6 +23,10 @@ import { cn } from "@/lib/utils";
 export interface DeskFolder {
   id: string;
   name: string;
+  /** A folder the host derives from the items themselves (the editor's Camera
+   * Roll): it opens like any other but can't be renamed, deleted, or dropped
+   * into. */
+  locked?: boolean;
 }
 
 export function formatBytes(n: number): string {
@@ -297,32 +301,36 @@ export function FolderShelf<F extends DeskFolder>({
           );
         const interact = {
           onClick: () => onOpen(f.id),
-          onDoubleClick: () => {
-            setDraft(f.name);
-            setEditingId(f.id);
-          },
-          onDragOver: (e: React.DragEvent) => {
-            if (!accepts(e)) return;
-            e.preventDefault();
-            e.dataTransfer.dropEffect = dragTypes(e).includes(mime) ? "move" : "copy";
-            setOver(f.id);
-          },
-          onDragLeave: () => setOver((o) => (o === f.id ? null : o)),
-          onDrop: (e: React.DragEvent) => {
-            if (!accepts(e)) return;
-            e.preventDefault();
-            setOver(null);
-            // Files land in this folder; stop the drop bubbling to the page's
-            // catch-all so it isn't also imported at the current level.
-            if (onDropFiles && dragTypes(e).includes("Files") && e.dataTransfer.files.length) {
-              e.stopPropagation();
-              onDropFiles(e.dataTransfer.files, f.id);
-              return;
-            }
-            onDropIds(readDragIds(e, mime), f.id);
-          },
+          ...(f.locked
+            ? {}
+            : {
+                onDoubleClick: () => {
+                  setDraft(f.name);
+                  setEditingId(f.id);
+                },
+                onDragOver: (e: React.DragEvent) => {
+                  if (!accepts(e)) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = dragTypes(e).includes(mime) ? "move" : "copy";
+                  setOver(f.id);
+                },
+                onDragLeave: () => setOver((o: string | null) => (o === f.id ? null : o)),
+                onDrop: (e: React.DragEvent) => {
+                  if (!accepts(e)) return;
+                  e.preventDefault();
+                  setOver(null);
+                  // Files land in this folder; stop the drop bubbling to the page's
+                  // catch-all so it isn't also imported at the current level.
+                  if (onDropFiles && dragTypes(e).includes("Files") && e.dataTransfer.files.length) {
+                    e.stopPropagation();
+                    onDropFiles(e.dataTransfer.files, f.id);
+                    return;
+                  }
+                  onDropIds(readDragIds(e, mime), f.id);
+                },
+              }),
         };
-        const menu = (
+        const menu = f.locked ? null : (
           <DropdownMenu>
             <DropdownMenuTrigger
               render={

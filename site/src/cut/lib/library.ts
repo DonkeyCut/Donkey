@@ -58,6 +58,10 @@ export interface LibraryAsset {
    * An import from a site that publishes one carries it; it is what a card and
    * the viewer show while the video itself loads. */
   posterFile?: string;
+  /** How the asset entered the account from the iOS app: a phone camera
+   * recording (shown in Camera Roll, kept out of the Library grid) or an
+   * inspiration item. Cloud shelf only. */
+  origin?: "camera" | "inspiration";
   /** Which shelf this came off. Stamped on arrival — the servers each answer
    * for themselves and don't know the other exists. */
   residency: Residency;

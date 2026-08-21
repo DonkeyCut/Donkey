@@ -35,6 +35,10 @@ export interface LibraryAsset {
    * same media route — what a card and the viewer show while the video loads.
    * Only an import from a site that publishes one has it. */
   posterFile?: string;
+  /** How the asset entered the account from the iOS app: a phone camera
+   * recording (the desktop's Camera Roll) or an inspiration item. Cloud shelf
+   * only. */
+  origin?: "camera" | "inspiration";
 }
 
 export interface LibraryFolder {

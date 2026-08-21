@@ -12,7 +12,13 @@ export const LIBRARY_TOOLS = [
   {
     name: "library_list",
     description:
-      "List the shared Library — reusable media saved across projects: folders, assets (video/audio/image, and the account's own font files), and templates (saved arrangements of clips, overlays, titles, and captions). Library items live outside the project: library_add imports an asset, template_add re-materializes a template.",
+      "List the shared Library — reusable media saved across projects: folders, assets (video/audio/image, and the account's own font files), and templates (saved arrangements of clips, overlays, titles, and captions). An asset's `origin` says it came from the user's iOS app: \"camera\" is a clip they recorded on their phone (their Camera Roll), \"inspiration\" a reference they saved to the Inspiration folder. Library items live outside the project: library_add imports an asset, template_add re-materializes a template.",
+    inputSchema: obj({}),
+  },
+  {
+    name: "notes_list",
+    description:
+      "List the user's synced notes — short scripts and ideas written in the Donkey Cut iOS app or the desktop Notes tab. Read them when the user points at \"my note(s)\" for a script, caption, or voiceover text; quote a note's body verbatim when they ask for its words.",
     inputSchema: obj({}),
   },
   {

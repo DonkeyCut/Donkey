@@ -460,7 +460,7 @@ export const jobsCloud = {
    * the assets, and the client polls this job for them. */
   async importUrlToLibrary(userId: string, req: Request) {
     try {
-      const { url } = (await req.json()) as { url?: string };
+      const { url, origin } = (await req.json()) as { url?: string; origin?: string };
       if (!url) return err("No URL provided.", 400);
       const capped = await renderJobCheck(userId);
       if (capped) return capped;
@@ -468,7 +468,13 @@ export const jobsCloud = {
         data: {
           userId,
           kind: "import_url",
-          spec: { url, target: "library" } as unknown as Prisma.InputJsonValue,
+          spec: {
+            url,
+            target: "library",
+            // An inspiration link's downloads land in the Inspiration folder,
+            // carrying the origin the Camera Roll and Library filters read.
+            ...(origin === "inspiration" ? { origin } : {}),
+          } as unknown as Prisma.InputJsonValue,
         },
       });
       wakeRenderWorker();

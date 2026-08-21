@@ -24,6 +24,7 @@ import { cutMode } from "./backend";
 import { useCutMode } from "./backend/hooks";
 import { readSnapshot, snapshotKey, writeSnapshot } from "./cache";
 import { fetchLibrary, type LibraryData } from "./library";
+import { fetchNotes, type CutNote } from "./notes";
 import {
   availableResidencies,
   backendFor,
@@ -189,4 +190,52 @@ export function refetchProjects(client: QueryClient, r: Residency) {
 
 export function refetchLibrary(client: QueryClient) {
   return client.invalidateQueries({ queryKey: libraryKey(libraryScope()) });
+}
+
+// --- Phone surfaces: the iOS link flag and synced notes ---
+
+const PHONE_KEY = ["cut", "phone"] as const;
+
+/** Whether this account has been seen from the iOS app. Gates the mobile
+ * surfaces (Camera Roll, Notes) in the home sidebar; an account that never
+ * signed in on a phone keeps the desktop exactly as it was. */
+export function usePhoneLink() {
+  const query = useQuery<boolean>({
+    queryKey: PHONE_KEY,
+    queryFn: async () => {
+      const res = await backendFor("cloud").fetch("/api/cut/phone");
+      if (!res.ok) throw new Error(String(res.status));
+      return ((await res.json()) as { linked?: boolean }).linked === true;
+    },
+    // The flag only ever turns on, and once on it never needs re-asking.
+    staleTime: Infinity,
+    retry: false,
+  });
+  return query.data === true;
+}
+
+export const notesKey = ["cut", "notes"] as const;
+const NOTES_SNAPSHOT = "cut-notes";
+
+/** The account's synced notes, phone and desktop edits merged server-side. */
+export function useNotes() {
+  const client = useQueryClient();
+  useEffect(() => seedFromSnapshot<CutNote[]>(client, notesKey, NOTES_SNAPSHOT), [client]);
+  return useQuery<CutNote[]>({
+    queryKey: notesKey,
+    queryFn: async () => {
+      const notes = await fetchNotes();
+      writeSnapshot(NOTES_SNAPSHOT, notes);
+      return notes;
+    },
+    staleTime: 0,
+    refetchOnMount: "always",
+    retry: false,
+  });
+}
+
+/** Optimistic edit of the cached notes list, snapshot moving with it. */
+export function patchNotes(client: QueryClient, fn: (prev: CutNote[]) => CutNote[]) {
+  const next = client.setQueryData<CutNote[]>(notesKey, (prev) => (prev ? fn(prev) : prev));
+  if (next) writeSnapshot(NOTES_SNAPSHOT, next);
 }

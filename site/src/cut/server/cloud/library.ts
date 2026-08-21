@@ -23,6 +23,7 @@ import {
   decodeFileParam,
   dedupeName,
   err,
+  inspirationFolderId,
   redirect,
   safeFileName,
   typeOf,
@@ -41,6 +42,9 @@ interface AssetMeta {
   /** File name of the source's cover image, an object of its own under this
    * account's library prefix. */
   posterFile?: string;
+  /** How the asset entered the account from the iOS app: a phone camera
+   * recording (the desktop's Camera Roll) or an inspiration item. */
+  origin?: "camera" | "inspiration";
 }
 
 interface TemplateDoc {
@@ -86,6 +90,7 @@ function assetView(
     folderId: row.folderId ?? null,
     ...(meta.source ? { source: meta.source } : {}),
     ...(meta.posterFile ? { posterFile: meta.posterFile } : {}),
+    ...(meta.origin ? { origin: meta.origin } : {}),
   };
 }
 
@@ -291,11 +296,30 @@ export const libraryCloud = {
         fileName?: string;
         mime?: string;
         bytes?: number;
+        resume?: boolean;
       };
       if (!body.fileName || typeof body.bytes !== "number" || body.bytes <= 0) {
         return err("fileName and bytes are required.", 400);
       }
       if (!typeOf(body.fileName)) return err("Unsupported file type.", 400);
+      // A resumed upload already holds its claim: the client kept the bytes
+      // (the iOS app's journal) and asks for a fresh URL under the same name.
+      // A claim that completed in the meantime reports done and uploads
+      // nothing; a same-named row of a different size is a different file and
+      // falls through to a fresh claim under a deduped name.
+      if (body.resume) {
+        const row = await prisma.cutMediaObject.findFirst({
+          where: { userId, kind: "library", fileName: safeFileName(body.fileName) },
+          orderBy: { createdAt: "desc" },
+        });
+        if (row && Number(row.bytes) === Math.round(body.bytes)) {
+          if (row.uploadState === "complete") {
+            return Response.json({ fileName: row.fileName, key: row.r2Key, done: true });
+          }
+          const url = await presignPut(row.r2Key, body.mime ?? "application/octet-stream");
+          return Response.json({ fileName: row.fileName, key: row.r2Key, url });
+        }
+      }
       const over = await quotaCheck(userId, body.bytes);
       if (over) return over;
       const fileName = dedupeName(
@@ -324,19 +348,38 @@ export const libraryCloud = {
     }
   },
 
-  /** Finish a library upload: verify, mark complete, register the asset. */
+  /** Finish a library upload: verify, mark complete, register the asset. An
+   * inspiration upload files itself into the ensured Inspiration folder; any
+   * other folderId must name one of this user's library folders. */
   async complete(userId: string, req: Request) {
     try {
-      const { key, posterKey, meta } = (await req.json()) as {
+      const { key, posterKey, meta, folderId } = (await req.json()) as {
         key?: string;
         posterKey?: string;
         meta?: AssetMeta;
+        folderId?: string;
       };
       if (!key) return err("key is required.", 400);
+      let destFolder: string | null = null;
+      if (meta?.origin === "inspiration") {
+        destFolder = await ensureInspirationFolder(userId);
+      } else if (folderId) {
+        const folder = await prisma.cutFolder.findFirst({
+          where: { id: folderId, userId, scope: "library" },
+        });
+        if (!folder) return err("Folder not found.", 404);
+        destFolder = folderId;
+      }
       const obj = await prisma.cutMediaObject.findFirst({
         where: { userId, r2Key: key },
       });
       if (!obj) return err("Unknown upload.", 404);
+      // A retried complete (the iOS app reconciling after an interrupted
+      // sync) lands on the asset it already made instead of minting a twin.
+      const already = await prisma.cutLibraryAsset.findFirst({
+        where: { userId, mediaObjectId: obj.id },
+      });
+      if (already) return Response.json(assetView(already, obj));
       const info = obj.uploadState === "complete" ? null : await head(key);
       if (obj.uploadState !== "complete" && !info)
         return err("The upload never arrived.", 400);
@@ -382,6 +425,7 @@ export const libraryCloud = {
           data: {
             userId,
             mediaObjectId: obj.id,
+            folderId: destFolder,
             meta: {
               name: meta?.name ?? obj.fileName,
               type: meta?.type ?? typeOf(obj.fileName) ?? "video",
@@ -392,6 +436,9 @@ export const libraryCloud = {
               ...(meta?.source ? { source: meta.source } : {}),
               ...((posterFile ?? meta?.posterFile)
                 ? { posterFile: posterFile ?? meta?.posterFile }
+                : {}),
+              ...(meta?.origin === "camera" || meta?.origin === "inspiration"
+                ? { origin: meta.origin }
                 : {}),
             } as unknown as Prisma.InputJsonValue,
           },
@@ -511,8 +558,9 @@ export const libraryCloud = {
 
   async remove(userId: string, id: string) {
     try {
-      const freed = await deleteLibraryAssetCascade(userId, id);
-      if (freed === null) throw new Error("Library asset not found.");
+      // Idempotent: a delete replayed from the iOS app's journal after the
+      // asset already left reports done, so the tombstone clears.
+      await deleteLibraryAssetCascade(userId, id);
       return Response.json({ ok: true });
     } catch (e) {
       return caught(e, "Could not delete.");
@@ -837,6 +885,19 @@ export const libraryCloud = {
  * retried signup lands on the same row; an ordinary folder otherwise, free to
  * rename, empty, or delete. */
 export const fontsFolderId = (userId: string) => `fonts-${userId}`;
+
+/** The Inspiration folder, created the first time an inspiration item lands.
+ * Its id is derived (util.inspirationFolderId), so every writer converges on
+ * one row; an ordinary folder otherwise, free to rename or delete. */
+export async function ensureInspirationFolder(userId: string): Promise<string> {
+  const id = inspirationFolderId(userId);
+  await prisma.cutFolder.upsert({
+    where: { id },
+    create: { id, userId, name: "Inspiration", scope: "library" },
+    update: {},
+  });
+  return id;
+}
 
 export async function seedFontsFolder(userId: string): Promise<void> {
   const id = fontsFolderId(userId);

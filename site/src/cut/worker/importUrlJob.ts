@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { Prisma } from "@/generated/prisma/client";
-import { dedupeName, safeFileName, typeOf } from "../server/cloud/util";
+import { dedupeName, inspirationFolderId, safeFileName, typeOf } from "../server/cloud/util";
 import type { LibraryAsset } from "../server/library";
 import { probeDuration } from "../server/frames";
 import { download } from "../server/urlDownload";
@@ -35,11 +35,27 @@ export async function runImportUrlJob(
   job: ClaimedJob,
   isCanceled: () => boolean
 ): Promise<ImportUrlResult | LibraryImportResult> {
-  const { url, target } = (job.spec ?? {}) as { url?: string; target?: string };
+  const { url, target, origin } = (job.spec ?? {}) as {
+    url?: string;
+    target?: string;
+    origin?: string;
+  };
   if (!url || !/^https?:\/\//i.test(url.trim())) throw new Error("Enter a valid http(s) URL.");
   const toLibrary = target === "library";
   const projectId = job.projectId;
   if (!toLibrary && !projectId) throw new Error("Import job has no project.");
+  // An inspiration link's downloads are filed into the ensured Inspiration
+  // folder and tagged with the origin the desktop filters read.
+  const inspiration = toLibrary && origin === "inspiration";
+  let folderId: string | null = null;
+  if (inspiration) {
+    folderId = inspirationFolderId(job.userId);
+    await prisma.cutFolder.upsert({
+      where: { id: folderId },
+      create: { id: folderId, userId: job.userId, name: "Inspiration", scope: "library" },
+      update: {},
+    });
+  }
 
   const tmp = await mkdtemp(path.join(os.tmpdir(), "cut-dl-"));
   try {
@@ -111,7 +127,8 @@ export async function runImportUrlJob(
           f.file,
           f.title,
           dl.source,
-          posterFile
+          posterFile,
+          inspiration ? { folderId: folderId!, origin: "inspiration" } : undefined
         );
         libraryRows.push(asset.id);
         assets.push(asset);
@@ -141,7 +158,8 @@ async function addLibraryRow(
   localFile: string,
   title: string,
   source: LibraryAsset["source"],
-  posterFile?: string
+  posterFile?: string,
+  filing?: { folderId: string; origin: "inspiration" }
 ): Promise<LibraryAsset> {
   const type = typeOf(fileName);
   if (!type) throw new Error("Unsupported file type.");
@@ -154,11 +172,13 @@ async function addLibraryRow(
     ...(dims ? { width: dims.width, height: dims.height } : {}),
     ...(source ? { source } : {}),
     ...(posterFile ? { posterFile } : {}),
+    ...(filing ? { origin: filing.origin } : {}),
   };
   const row = await prisma.cutLibraryAsset.create({
     data: {
       userId,
       mediaObjectId,
+      folderId: filing?.folderId ?? null,
       meta: meta as unknown as Prisma.InputJsonValue,
     },
   });
@@ -170,8 +190,9 @@ async function addLibraryRow(
     duration,
     ...(dims ? { width: dims.width, height: dims.height } : {}),
     addedAt: row.createdAt.getTime(),
-    folderId: null,
+    folderId: filing?.folderId ?? null,
     ...(source ? { source } : {}),
     ...(posterFile ? { posterFile } : {}),
+    ...(filing ? { origin: filing.origin } : {}),
   };
 }

@@ -1174,6 +1174,11 @@ function AssetCard({ asset, projectId }: { asset: MediaAsset; projectId: string 
   );
 }
 
+// The derived folder holding phone recordings in the editor's Library panel.
+// Not a server folder: assets tagged origin "camera" file here by themselves,
+// so phone footage is one click from any project.
+const CAMERA_ROLL_FOLDER = "camera-roll";
+
 function LibraryPanel({ projectId }: { projectId: string }) {
   const [assets, setAssets] = useState<LibraryAsset[] | null>(null);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
@@ -1197,18 +1202,26 @@ function LibraryPanel({ projectId }: { projectId: string }) {
       })
       .catch(() => setAssets([]));
 
+  // Where an asset shows: phone recordings gather in the derived Camera Roll
+  // folder whatever their server folderId says.
+  const folderOf = (a: LibraryAsset) =>
+    a.origin === "camera" ? CAMERA_ROLL_FOLDER : (a.folderId ?? null);
+  const cameraCount = (assets ?? []).filter((a) => a.origin === "camera").length;
+
   // A remembered folder can vanish between sessions; drop back to the root.
   useEffect(() => {
-    if (assets !== null && openFolder !== null && !folders.some((f) => f.id === openFolder))
-      setOpenFolder(null);
-  }, [assets, folders, openFolder, setOpenFolder]);
+    const known =
+      folders.some((f) => f.id === openFolder) ||
+      (openFolder === CAMERA_ROLL_FOLDER && cameraCount > 0);
+    if (assets !== null && openFolder !== null && !known) setOpenFolder(null);
+  }, [assets, folders, openFolder, cameraCount, setOpenFolder]);
 
   // A revealed library asset may sit inside a folder — open it so the card is
   // on screen to scroll to and flash.
   useRevealEffect((ref) => {
     if (ref.scope !== "library") return;
     const a = (assets ?? []).find((x) => x.id === ref.id);
-    if (a) setOpenFolder(a.folderId ?? null);
+    if (a) setOpenFolder(folderOf(a));
   });
 
   const removeTemplate = async (r: Residency, id: string) => {
@@ -1247,6 +1260,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
     null;
 
   const move = async (id: string, folderId: string | null) => {
+    if (folderId === CAMERA_ROLL_FOLDER) return; // derived; only the phone files here
     const residency = shelfOf(id);
     if (!residency) return;
     if (folderId && folders.find((f) => f.id === folderId)?.residency !== residency) return;
@@ -1260,7 +1274,10 @@ function LibraryPanel({ projectId }: { projectId: string }) {
   const shelfForNew = (folderId: string | null) =>
     (folderId ? folders.find((f) => f.id === folderId)?.residency : null) ?? activeResidency();
 
-  const upload = async (files: FileList | File[], folderId: string | null = openFolder) => {
+  const upload = async (files: FileList | File[], into: string | null = openFolder) => {
+    // The Camera Roll takes nothing by hand; an upload made while it is open
+    // lands at the root like any other.
+    const folderId = into === CAMERA_ROLL_FOLDER ? null : into;
     const list = (await expandLinkedFiles(Array.from(files))).filter(
       (f) => isMediaFile(f) || isLinkedFile(f)
     );
@@ -1315,9 +1332,26 @@ function LibraryPanel({ projectId }: { projectId: string }) {
 
   const all = assets ?? [];
   const bothShelves = availableResidencies().length > 1;
-  const shown = all.filter((a) => (a.folderId ?? null) === openFolder);
+  const shown = all.filter((a) => folderOf(a) === openFolder);
   const shownTemplates = templates.filter((t) => (t.folderId ?? null) === openFolder);
-  const openFolderName = folders.find((f) => f.id === openFolder)?.name;
+  // The Camera Roll tile leads the shelf while the phone has synced anything.
+  const shelfFolders: (LibraryFolder & { locked?: boolean })[] =
+    cameraCount > 0
+      ? [
+          {
+            id: CAMERA_ROLL_FOLDER,
+            name: "Camera Roll",
+            createdAt: 0,
+            residency: "cloud",
+            locked: true,
+          },
+          ...folders,
+        ]
+      : folders;
+  const openFolderName =
+    openFolder === CAMERA_ROLL_FOLDER
+      ? "Camera Roll"
+      : folders.find((f) => f.id === openFolder)?.name;
 
   return (
     <div
@@ -1341,15 +1375,15 @@ function LibraryPanel({ projectId }: { projectId: string }) {
           />
         </div>
       )}
-      {openFolder === null && folders.length > 0 ? (
+      {openFolder === null && shelfFolders.length > 0 ? (
         <div className="shrink-0 px-3.5">
           <FolderShelf
             rows
-            folders={folders}
+            folders={shelfFolders}
             mime={LIBRARY_MOVE_MIME}
             statOf={(id) => ({
               count:
-                all.filter((a) => (a.folderId ?? null) === id).length +
+                all.filter((a) => folderOf(a) === id).length +
                 templates.filter((t) => (t.folderId ?? null) === id).length,
             })}
             badgeOf={(id) => {

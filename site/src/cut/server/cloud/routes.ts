@@ -13,6 +13,8 @@ import { runGc } from "./gc";
 import { jobsCloud } from "./jobs";
 import { libraryCloud } from "./library";
 import { mediaCloud } from "./media";
+import { notesCloud } from "./notes";
+import { notePhoneClient, phoneApi } from "./phone";
 import { projectsCloud } from "./projects";
 import { turnsCloud } from "./turns";
 import { shareCloud } from "./share";
@@ -96,6 +98,11 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "POST", path: "/api/cut-cloud/projects/:id/turns", handler: (r, u, p) => turnsCloud.queue(u, p.id, r) },
   { method: "POST", path: "/api/cut-cloud/turns/:jobId/cancel", handler: (_r, u, p) => turnsCloud.cancel(u, p.jobId) },
 
+  { method: "GET", path: "/api/cut-cloud/notes", handler: (_r, u) => notesCloud.list(u) },
+  { method: "PUT", path: "/api/cut-cloud/notes/:id", handler: (r, u, p) => notesCloud.put(u, p.id, r) },
+  { method: "DELETE", path: "/api/cut-cloud/notes/:id", handler: (_r, u, p) => notesCloud.remove(u, p.id) },
+  { method: "GET", path: "/api/cut-cloud/phone", handler: (_r, u) => phoneApi.get(u) },
+
   { method: "POST", path: "/api/cut-cloud/transcribe", handler: (r, u) => transcribeCloud.transcribe(u, r) },
   { method: "POST", path: "/api/cut-cloud/ai/captions", handler: (r, u) => captionsCloud.captions(u, r) },
   { method: "POST", path: "/api/cut-cloud/ai/visual-subtitles", handler: (r, u) => captionsCloud.visualSubtitles(u, r) },
@@ -135,6 +142,7 @@ export async function cutCloudCatchAll(req: DonkeyAuthenticatedRequest): Promise
       headers: { Allow: match.methodNotAllowed.join(", ") },
     });
   }
+  notePhoneClient(req, req.donkey.userId);
   const res = await match.route.handler(req, req.donkey.userId, match.params);
   // A HEAD reply carries the GET headers but no body.
   if (match.head && res.body) {

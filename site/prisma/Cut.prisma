@@ -133,6 +133,30 @@ model CutStorageUsage {
   updatedAt DateTime @updatedAt
 }
 
+// One synced note, shared by the iOS app and the desktop Notes tab. The id is
+// client-generated (the phone's UUID). `updatedAt` is the last-writer-wins
+// clock and comes from the writing client; a delete keeps the row as a
+// tombstone so the other side drops its copy on the next merge.
+model CutNote {
+  id         String    @id
+  userId     String
+  title      String    @default("")
+  body       String    @default("")
+  colorIndex Int       @default(0)
+  updatedAt  DateTime
+  deletedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, updatedAt])
+}
+
+// Set once an account has been seen from the iOS app. The desktop shows its
+// mobile surfaces (Camera Roll, Notes) only for accounts with this row.
+model CutPhoneLink {
+  userId     String   @id
+  lastSeenAt DateTime @updatedAt
+}
+
 // Work the render worker executes: exports, hover preview proxies, URL
 // imports. The client polls through the hosted API; only the worker claims
 // rows.
