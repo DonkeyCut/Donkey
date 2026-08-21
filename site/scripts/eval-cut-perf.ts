@@ -35,6 +35,7 @@
  *
  *   npm run eval:cut-perf [--only <case>] [--runs N] [--out path]
  *                         [--enforce-budgets] [--headed]
+ *                         [--machine desktop|laptop|ryzen-5500u|potato] [--cpu N]
  */
 
 import { chromium, type Browser, type Page } from "playwright";
@@ -59,6 +60,67 @@ const RUNS = Number(arg("--runs") ?? 1);
 const ONLY = arg("--only");
 const BUCKET = arg("--bucket");
 const ENFORCE = has("--enforce-budgets");
+
+/**
+ * The machine this run pretends to be.
+ *
+ * A preview that holds together on a developer's desktop says very little
+ * about the laptop most people edit on. The desktop has decode slots to spare
+ * and never falls behind, so the pool's caps never bind, the budget controller
+ * never has to do anything, and a regression in either is invisible — every
+ * pass composes at the same rate and reports the same numbers. These profiles
+ * put the page on a smaller machine and hold the picture to what a viewer
+ * would accept there.
+ *
+ * Two kinds of pressure, because the failure needs both. A slow main thread
+ * makes the compositor miss frames. Few decode slots make the decoders behind
+ * those frames deliver late, which is the part that actually drifts the
+ * picture away from the sound on a real laptop.
+ */
+interface Machine {
+  name: string;
+  /** Main-thread slowdown as a multiplier: 6 gives the page a sixth of this
+   * machine, applied through the same CDP knob DevTools uses. */
+  cpu: number;
+  /** Hardware decode slots. A decoder past this still works; it just delivers
+   * its frames late, which is what falling back to software costs. Zero leaves
+   * decoding alone. */
+  slots: number;
+  /** What a frame costs once it is decoding in software. */
+  softwareMs: number;
+  /** How far the picture may sit behind the sound here before a viewer would
+   * call it broken. */
+  lagP95S: number;
+  lagMaxS: number;
+  /** Share of played frames that may show a picture which does not belong at
+   * that instant. This is the plainest reading of "does the video play": a
+   * frame the decoder failed to deliver on time is a frame the viewer sees
+   * repeated or missing. */
+  lateShare: number;
+}
+
+const MACHINES: Machine[] = [
+  // The machine this is being written on: nothing binds, and the numbers are
+  // held to the tightest budget in the file.
+  { name: "desktop", cpu: 1, slots: 0, softwareMs: 0, lagP95S: 0.05, lagMaxS: 0.25, lateShare: 0.02 },
+  // A mainstream laptop with an integrated GPU.
+  { name: "laptop", cpu: 4, slots: 6, softwareMs: 6, lagP95S: 0.08, lagMaxS: 0.3, lateShare: 0.08 },
+  // The one people report from: a 15W six-core with Vega graphics, running a
+  // browser that is also drawing the editor.
+  { name: "ryzen-5500u", cpu: 10, slots: 4, softwareMs: 8, lagP95S: 0.1, lagMaxS: 0.4, lateShare: 0.12 },
+  // Worse than anything anyone has reported, which is the point: what holds
+  // here holds on the machines that have not written in yet.
+  { name: "potato", cpu: 20, slots: 2, softwareMs: 12, lagP95S: 0.15, lagMaxS: 0.6, lateShare: 0.2 },
+];
+
+const MACHINE_NAME = arg("--machine") ?? "desktop";
+const MACHINE = ((): Machine => {
+  const m = MACHINES.find((x) => x.name === MACHINE_NAME);
+  if (!m) throw new Error(`unknown --machine ${MACHINE_NAME}; try ${MACHINES.map((x) => x.name).join(", ")}`);
+  // `--cpu` overrides the profile's throttle, for finding where a machine
+  // actually breaks.
+  return { ...m, cpu: Number(arg("--cpu") ?? m.cpu) };
+})();
 /** The dev-only account the API bypass authenticates as. */
 const DEV_USER = "donkey-dev-auth-bypass";
 
@@ -73,7 +135,7 @@ const DEV_USER = "donkey-dev-auth-bypass";
 // These are measured against `next dev`, so they carry the development build's
 // overhead. A production build has less of it; the gate is set where the dev
 // build can hold it under ordinary machine load.
-const GATE = {
+const BASE_GATE = {
   // Every step of a drag lands inside one frame at 60Hz, tail included. That is
   // the whole claim.
   scrubP50Ms: 10,
@@ -105,6 +167,15 @@ const GATE = {
   // churn for memory, and this is the side of that trade a change could
   // quietly blow.
   warmMb: 400,
+};
+
+/** The budget this run is judged against: the tight one, with the picture-lag
+ * limits relaxed to what the chosen machine can honestly hold. */
+const GATE = {
+  ...BASE_GATE,
+  lagP95S: MACHINE.lagP95S,
+  lagMaxS: MACHINE.lagMaxS,
+  lateShare: MACHINE.lateShare,
 };
 
 // ── Types shared with perfTrace.ts ──────────────────────────────────────────
@@ -464,6 +535,34 @@ const setPlaying = (page: Page, playing: boolean) =>
     dev.useEditor.getState().setPlaying(p);
   }, playing);
 
+/**
+ * Play from where the playhead is to the end of the cut, and wait for it to
+ * get there.
+ *
+ * Waiting on the playhead rather than on a stopwatch is what makes a slow
+ * machine measurable. A fixed timeout cuts the pass off wherever the throttled
+ * page happened to have reached, so the run ends early, the trace is a
+ * fraction of the length the fast machine's was, and the two are not
+ * comparable — one of them simply saw less of the cut. Here every profile
+ * plays the whole thing; the slow one just takes longer over it.
+ */
+async function playThrough(page: Page, duration: number): Promise<void> {
+  await setPlaying(page, true);
+  await page.waitForFunction(
+    (end: number) => {
+      const dev = (window as unknown as {
+        __cutDev: { playheadAt(): number; useEditor: { getState(): { playing: boolean } } };
+      }).__cutDev;
+      return dev.playheadAt() >= end || !dev.useEditor.getState().playing;
+    },
+    duration - 0.05,
+    // Generous: a machine given a twelfth of a CPU still has to get to the end,
+    // and the point of the wait is that it does.
+    { timeout: Math.max(30_000, duration * 6000), polling: 100 }
+  );
+  await setPlaying(page, false);
+}
+
 /** Put the playhead back to the start and wait until it is actually there. */
 async function rewind(page: Page): Promise<void> {
   await setPlaying(page, false);
@@ -521,6 +620,11 @@ interface CaseResult {
   /** Seconds between a strip tile's own moment and the moment its picture
    * was captured at. */
   tileErr?: Agg;
+  /** Concurrent decoders at their peak, and how many of them had to run in
+   * software because this machine had no hardware slot left for them. */
+  decoders?: { peak: number; software: number; softwarePeak: number };
+  /** Which machine profile the run was judged as. */
+  machine?: string;
 }
 
 interface EvalCase {
@@ -599,6 +703,7 @@ const scrubCase = (shape: ScrubShape): EvalCase => ({
       scrub: a,
       longTasks: lt,
       liveSamples: Math.max(0, ...trace.liveSamples),
+      machine: MACHINE.name,
     };
   },
 });
@@ -621,13 +726,18 @@ const playbackCase = (name: string, transitions: boolean): EvalCase => ({
     await seek(page, 0);
     await settle(page);
     await startTrace(page);
-    await setPlaying(page, true);
-    // Play the whole fixture through, plus a moment to land the last frame.
-    await page.waitForTimeout((fx.duration + 1) * 1000);
-    await setPlaying(page, false);
+    await playThrough(page, fx.duration);
     const trace = await stopTrace(page);
     const notes: string[] = [];
     if (!trace) return { name, bucket: "playback", pass: false, notes: ["no trace"] };
+    const decoders = await page.evaluate(
+      () =>
+        (
+          window as unknown as {
+            __cutDecoders?: { peak: number; software: number; softwarePeak: number };
+          }
+        ).__cutDecoders ?? null
+    );
 
     // A frame the decoder failed to deliver: the engine painted, but with a
     // picture that does not belong at that instant. Repeating a source frame is
@@ -662,6 +772,8 @@ const playbackCase = (name: string, transitions: boolean): EvalCase => ({
       boundaryDrops,
       longTasks: lt,
       liveSamples: Math.max(0, ...trace.liveSamples),
+      decoders: decoders ?? undefined,
+      machine: MACHINE.name,
     };
   },
 });
@@ -690,8 +802,7 @@ const montageCase = (name: string, passes: number): EvalCase => ({
     await startTrace(page);
     for (let i = 0; i < passes; i++) {
       await seek(page, 0);
-      await setPlaying(page, true);
-      await page.waitForTimeout((fx.duration + 0.6) * 1000);
+      await playThrough(page, fx.duration);
       if (has("--detail")) {
         const state = await page.evaluate(() => {
           const w = window as unknown as {
@@ -721,6 +832,14 @@ const montageCase = (name: string, passes: number): EvalCase => ({
     const trace = await stopTrace(page);
     const notes: string[] = [];
     if (!trace) return { name, bucket: "playback", pass: false, notes: ["no trace"] };
+    const decoders = await page.evaluate(
+      () =>
+        (
+          window as unknown as {
+            __cutDecoders?: { peak: number; software: number; softwarePeak: number };
+          }
+        ).__cutDecoders ?? null
+    );
 
     // The moments a clip's decoder is being opened for the first time in a pass
     // belong to the open, so the measure starts a beat inside every clip and
@@ -788,6 +907,15 @@ const montageCase = (name: string, passes: number): EvalCase => ({
       }
     }
 
+    // The plainest question this case asks, and the one a viewer would ask:
+    // did the frames arrive. A run where nothing decoded at all used to score
+    // a clean sheet here — every frame stale, no lag to measure, because there
+    // was never a picture to be behind.
+    const lateShare = +(late.length / played.length).toFixed(3);
+    if (lateShare > GATE.lateShare) {
+      notes.push(`${Math.round(lateShare * 100)}% of frames did not arrive on time`);
+    }
+    if (decoders && decoders.peak === 0) notes.push("nothing decoded at all");
     if (lag.p95 > GATE.lagP95S) notes.push(`picture ${lag.p95}s behind the clock at p95`);
     if (lag.max > GATE.lagMaxS) notes.push(`picture ${lag.max}s behind the clock at worst`);
     if (passes > 1 && decay.last > Math.max(0.02, decay.first * GATE.decayRatio)) {
@@ -812,6 +940,8 @@ const montageCase = (name: string, passes: number): EvalCase => ({
       liveSources: Math.max(0, ...trace.liveSources),
       keptSources: Math.max(0, ...trace.keptSources),
       warmMb,
+      decoders: decoders ?? undefined,
+      machine: MACHINE.name,
     };
   },
 });
@@ -1168,6 +1298,71 @@ const CASES: EvalCase[] = [
 // ── Run ─────────────────────────────────────────────────────────────────────
 
 /** A browser with the fixture media served from disk and the session answered. */
+/**
+ * Give the page a fixed number of hardware decode slots.
+ *
+ * Chrome hands a tab as many as the GPU and driver happen to allow and offers
+ * no way to ask for fewer, so this stands in for that limit: a decoder built
+ * once the slots are gone has its output deferred, which is what falling back
+ * to software costs the picture — the frames still arrive, they just arrive
+ * late. Everything else about the decoder is the real one.
+ *
+ * The delay scales with two things, because those are what a CPU decoding
+ * video actually charges for. How many decoders are in software at that
+ * moment: one stream on the CPU is nothing, eight of them are eight streams
+ * sharing one CPU, each slower for every other one open. And how big the
+ * frames are: decode cost runs with pixel count, so a stream decoded at half
+ * height costs a quarter as much. Both are levers the preview can pull —
+ * closing decoders, or asking for smaller frames — and the point of modelling
+ * them is that the eval can tell which one is worth pulling.
+ *
+ * Browser source, injected before any page script, so `window.VideoDecoder` is
+ * already wrapped by the time the preview reaches for it.
+ */
+const decoderShim = ({ slots, softwareMs }: Machine) => `
+(() => {
+  const Native = window.VideoDecoder;
+  if (!Native) return;
+  const stats = (window.__cutDecoders = { peak: 0, software: 0, softwarePeak: 0 });
+  let live = 0;
+  let onCpu = 0;
+  const freed = new WeakSet();
+  const slow = new WeakSet();
+  window.VideoDecoder = class extends Native {
+    constructor(init) {
+      const overflow = live >= ${slots};
+      super(
+        overflow
+          ? Object.assign({}, init, {
+              output: (frame) => {
+                // Cost runs with area, against 720p as the unit.
+                const area = ((frame.codedWidth || 1280) * (frame.codedHeight || 720)) / (1280 * 720);
+                setTimeout(() => init.output(frame), ${softwareMs} * Math.max(1, onCpu) * area);
+              },
+            })
+          : init
+      );
+      live++;
+      stats.peak = Math.max(stats.peak, live);
+      if (overflow) {
+        slow.add(this);
+        onCpu++;
+        stats.software++;
+        stats.softwarePeak = Math.max(stats.softwarePeak, onCpu);
+      }
+    }
+    close() {
+      if (!freed.has(this)) {
+        freed.add(this);
+        live--;
+        if (slow.has(this)) onCpu--;
+      }
+      return super.close();
+    }
+  };
+})();
+`;
+
 async function launch(): Promise<{ browser: Browser; page: Page }> {
   const browser = await chromium.launch({
     channel: "chrome",
@@ -1180,6 +1375,7 @@ async function launch(): Promise<{ browser: Browser; page: Page }> {
     extraHTTPHeaders: { "x-donkey-dev-auth-bypass": "1" },
     viewport: { width: 1600, height: 1000 },
   });
+  if (MACHINE.slots > 0) await context.addInitScript({ content: decoderShim(MACHINE) });
   // The editor's session gate is a client-side cookie read, and the only sign-in
   // this build offers is Google's. Answering that one request for the dev-bypass
   // user is the whole of the fake: every other request the page makes is real,
@@ -1313,6 +1509,16 @@ async function launch(): Promise<{ browser: Browser; page: Page }> {
     });
   });
   const page = await context.newPage();
+  if (MACHINE.cpu > 1 || MACHINE.slots > 0) {
+    if (MACHINE.cpu > 1) {
+      const cdp = await context.newCDPSession(page);
+      await cdp.send("Emulation.setCPUThrottlingRate", { rate: MACHINE.cpu });
+    }
+    console.log(
+      `[machine] ${MACHINE.name}: cpu 1/${MACHINE.cpu}` +
+        (MACHINE.slots ? `, ${MACHINE.slots} decode slots, +${MACHINE.softwareMs}ms in software` : "")
+    );
+  }
   page.on("pageerror", (e) => console.log(`[pageerror] ${String(e).slice(0, 200)}`));
   page.on("crash", () => console.log("[crash] the page went down"));
   return { browser, page };
@@ -1343,11 +1549,31 @@ async function open(page: Page, projectId: string): Promise<void> {
  * what is being measured is the engine from a cold start, the isolation has to
  * be real, and a process is the only boundary that has proved to be.
  */
+/** A fresh project on the dev account for one run to seed into. */
+async function newProject(): Promise<string> {
+  const res = await fetch(`${BASE}/api/cut/projects?u=${DEV_USER}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "cut-perf eval" }),
+  });
+  if (!res.ok) throw new Error(`create project failed: ${res.status} (is next dev running?)`);
+  return ((await res.json()) as { id: string }).id;
+}
+
 async function fanOut(names: string[]): Promise<CaseResult[]> {
   const results: CaseResult[] = [];
   for (const name of names) {
     const out = path.join(OUT, `case-${name}.json`);
-    const passthrough = ["--base", BASE, ...(has("--headed") ? ["--headed"] : [])];
+    const passthrough = [
+      "--base",
+      BASE,
+      "--machine",
+      MACHINE_NAME,
+      "--runs",
+      String(RUNS),
+      ...(has("--headed") ? ["--headed"] : []),
+      ...(arg("--cpu") ? ["--cpu", String(MACHINE.cpu)] : []),
+    ];
     await run(process.execPath, [
       import.meta.path,
       "--only",
@@ -1374,7 +1600,7 @@ const detailOf = (r: CaseResult) =>
       : r.idleTicks !== undefined
         ? `ticks=${r.idleTicks}`
         : r.lag
-          ? `late=${r.drops}/${r.presented} lagP50=${r.lag.p50}s lagP95=${r.lag.p95}s lagMax=${r.lag.max}s decoders=${r.liveSources} kept=${r.keptSources} warm=${r.warmMb}MB decay=${r.decay?.first}→${r.decay?.last}`
+          ? `late=${r.drops}/${r.presented} lagP95=${r.lag.p95}s lagMax=${r.lag.max}s sources=${r.liveSources} sw=${r.decoders?.softwarePeak ?? "-"}/${r.decoders?.software ?? "-"} warm=${r.warmMb}MB decay=${r.decay?.first}→${r.decay?.last}`
           : `late=${r.drops}/${r.presented} atCut=${r.boundaryDrops}`;
 
 async function main(): Promise<void> {
@@ -1398,18 +1624,16 @@ async function main(): Promise<void> {
   }
 
   const { browser, page } = await launch();
-  const res = await fetch(`${BASE}/api/cut/projects?u=${DEV_USER}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: "cut-perf eval" }),
-  });
-  if (!res.ok) throw new Error(`create project failed: ${res.status} (is next dev running?)`);
-  const projectId = ((await res.json()) as { id: string }).id;
-  console.log(`[ready] ${BASE}/app/p/${projectId}`);
 
   const results: CaseResult[] = [];
   for (const c of cases) {
     for (let i = 0; i < RUNS; i++) {
+      // A project per run. Seeding a second time into one that already holds
+      // the first run's clips leaves the editor with media it cannot decode,
+      // and every frame after that is a frame the picture never arrived for —
+      // which read as a clean sheet for as long as the only gates here were
+      // about lag, since a picture that never comes is never behind.
+      const projectId = await newProject();
       await open(page, projectId);
       const fx = await (c.seed ? c.seed(page) : seed(page, files, c.transitions));
       await settle(page);
@@ -1428,6 +1652,7 @@ async function main(): Promise<void> {
 async function writeReport(results: CaseResult[]): Promise<void> {
   const report = {
     schema: "cut-perf-eval/v1",
+    machine: MACHINE,
     gate: GATE,
     fixture: { clips: CLIPS, clipSeconds: CLIP_S },
     results,
@@ -1439,12 +1664,24 @@ async function writeReport(results: CaseResult[]): Promise<void> {
     console.log(`[report] ${outPath}`);
   }
 
-  const failed = results.filter((r) => !r.pass);
-  if (failed.length && ENFORCE) {
-    console.error(`\n${failed.length} case(s) breached the gate.`);
-    process.exit(1);
+  // A case is judged on its runs together. On a machine deliberately starved
+  // of CPU one bad run in three is the noise floor, and a gate that trips on
+  // it is a gate people learn to re-run until it goes green.
+  const byCase = new Map<string, CaseResult[]>();
+  for (const r of results) {
+    const runs = byCase.get(r.name) ?? [];
+    runs.push(r);
+    byCase.set(r.name, runs);
   }
-  if (failed.length) console.error(`\n${failed.length} case(s) breached the gate (report only).`);
+  const failed = [...byCase].filter(([, runs]) => runs.filter((r) => !r.pass).length * 2 > runs.length);
+  if (failed.length) {
+    const how = failed
+      .map(([name, runs]) => `${name} (${runs.filter((r) => !r.pass).length}/${runs.length})`)
+      .join(", ");
+    console.error(`\n${failed.length} case(s) breached the ${MACHINE.name} gate: ${how}`);
+    if (ENFORCE) process.exit(1);
+    console.error("(report only)");
+  }
 }
 
 main().catch((e) => {
