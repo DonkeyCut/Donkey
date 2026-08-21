@@ -83,10 +83,13 @@ interface Machine {
    * machine, applied through the same CDP knob DevTools uses. */
   cpu: number;
   /** Hardware decode slots. A decoder past this still works; it just delivers
-   * its frames late, which is what falling back to software costs. Zero leaves
-   * decoding alone. */
+   * its frames late, which is what falling back to software costs. Zero means
+   * this machine has no hardware video decode at all — a blocklisted driver, a
+   * codec the GPU does not carry — and every decoder runs on the CPU. */
   slots: number;
-  /** What a frame costs once it is decoding in software. */
+  /** What a frame costs once it is decoding in software. Zero leaves decoding
+   * alone, which is what makes a profile a real machine rather than a
+   * simulated one. */
   softwareMs: number;
   /** How far the picture may sit behind the sound here before a viewer would
    * call it broken. */
@@ -121,6 +124,13 @@ const MACHINES: Machine[] = [
   // Worse than anything anyone has reported, which is the point: what holds
   // here holds on the machines that have not written in yet.
   { name: "potato", cpu: 20, slots: 2, softwareMs: 12, lagP95S: 0.1, stallShare: 0.06, lateShare: 0.2, decayFloor: 0.15 },
+  // No hardware video decode at all. This is not an exotic machine — a
+  // blocklisted driver, a codec the GPU does not carry, a browser started with
+  // acceleration off, and every stream is on the CPU. A software decoder is
+  // slower than a hardware one; it is not broken, and neither is an editor
+  // running on top of one. This profile is held to the same standard a laptop
+  // is, because that is the claim.
+  { name: "software-decode", cpu: 4, slots: 0, softwareMs: 8, lagP95S: 0.06, stallShare: 0.04, lateShare: 0.1, decayFloor: 0.1 },
 ];
 
 const MACHINE_NAME = arg("--machine") ?? "desktop";
@@ -661,7 +671,7 @@ interface CaseResult {
   tileErr?: Agg;
   /** Concurrent decoders at their peak, and how many of them had to run in
    * software because this machine had no hardware slot left for them. */
-  decoders?: { peak: number; software: number; softwarePeak: number };
+  decoders?: { peak: number; software: number; softwarePeak: number; busyPeak: number };
   /** Which machine profile the run was judged as. */
   machine?: string;
 }
@@ -773,7 +783,12 @@ const playbackCase = (name: string, transitions: boolean): EvalCase => ({
       () =>
         (
           window as unknown as {
-            __cutDecoders?: { peak: number; software: number; softwarePeak: number };
+            __cutDecoders?: {
+              peak: number;
+              software: number;
+              softwarePeak: number;
+              busyPeak: number;
+            };
           }
         ).__cutDecoders ?? null
     );
@@ -875,7 +890,12 @@ const montageCase = (name: string, passes: number, dressed = false): EvalCase =>
       () =>
         (
           window as unknown as {
-            __cutDecoders?: { peak: number; software: number; softwarePeak: number };
+            __cutDecoders?: {
+              peak: number;
+              software: number;
+              softwarePeak: number;
+              busyPeak: number;
+            };
           }
         ).__cutDecoders ?? null
     );
@@ -1354,14 +1374,26 @@ const CASES: EvalCase[] = [
  * to software costs the picture — the frames still arrive, they just arrive
  * late. Everything else about the decoder is the real one.
  *
- * The delay scales with two things, because those are what a CPU decoding
- * video actually charges for. How many decoders are in software at that
- * moment: one stream on the CPU is nothing, eight of them are eight streams
- * sharing one CPU, each slower for every other one open. And how big the
- * frames are: decode cost runs with pixel count, so a stream decoded at half
- * height costs a quarter as much. Both are levers the preview can pull —
- * closing decoders, or asking for smaller frames — and the point of modelling
- * them is that the eval can tell which one is worth pulling.
+ * What it charges is a rate, not a delay. This distinction is the whole model:
+ * a decoder that hands every frame over 90ms late still delivers thirty of
+ * them a second, and playback barely notices. A decoder that can only finish a
+ * frame every 90ms delivers eleven, and playback starves. Software decoding is
+ * the second kind, so each stream here has a queue and a frame leaves it only
+ * once the one before it has had its turn.
+ *
+ * The turn costs more the more streams are *working* at that moment — eight
+ * decoders actually producing frames are eight streams splitting one
+ * processor — and more the bigger the frames are, since decode cost runs with
+ * pixel count. Working is the word that matters. A preview walk fills its ring
+ * a fraction of a second ahead and then stops until something reads it, and a
+ * decoder sitting there having decoded nothing recently costs a CPU nothing.
+ * Charging for open decoders rather than busy ones would make the eval argue
+ * for closing decoders that were already free, which is a fix aimed at the
+ * wrong thing.
+ *
+ * Both of these are levers the preview can pull: how many streams it keeps
+ * fed, and how large it decodes. Modelling them is what lets the eval say
+ * which lever is worth pulling.
  *
  * Browser source, injected before any page script, so `window.VideoDecoder` is
  * already wrapped by the time the preview reaches for it.
@@ -1370,21 +1402,43 @@ const decoderShim = ({ slots, softwareMs }: Machine) => `
 (() => {
   const Native = window.VideoDecoder;
   if (!Native) return;
-  const stats = (window.__cutDecoders = { peak: 0, software: 0, softwarePeak: 0 });
+  const stats = (window.__cutDecoders = { peak: 0, software: 0, softwarePeak: 0, busyPeak: 0 });
   let live = 0;
   let onCpu = 0;
+  // When each software stream last finished a frame. A stream that has not
+  // decoded recently is not on the CPU, whatever else it is holding open.
+  const lastOut = new Map();
+  const BUSY_MS = 250;
+  const busy = (now) => {
+    let n = 0;
+    for (const [d, at] of lastOut) {
+      if (now - at < BUSY_MS) n++;
+      else lastOut.delete(d);
+    }
+    return n;
+  };
   const freed = new WeakSet();
   const slow = new WeakSet();
   window.VideoDecoder = class extends Native {
     constructor(init) {
       const overflow = live >= ${slots};
+      // When this stream's next frame can come off the CPU.
+      let turn = 0;
       super(
         overflow
           ? Object.assign({}, init, {
               output: (frame) => {
-                // Cost runs with area, against 720p as the unit.
+                // Cost runs with area, against 720p as the unit, and with how
+                // many streams are splitting the CPU right now.
                 const area = ((frame.codedWidth || 1280) * (frame.codedHeight || 720)) / (1280 * 720);
-                setTimeout(() => init.output(frame), ${softwareMs} * Math.max(1, onCpu) * area);
+                const now = performance.now();
+                lastOut.set(this, now);
+                const sharing = Math.max(1, busy(now));
+                stats.busyPeak = Math.max(stats.busyPeak, sharing);
+                const cost = ${softwareMs} * sharing * area;
+                // The queue: this frame waits for the one before it to finish.
+                turn = Math.max(now, turn) + cost;
+                setTimeout(() => init.output(frame), turn - now);
               },
             })
           : init
@@ -1422,7 +1476,7 @@ async function launch(): Promise<{ browser: Browser; page: Page }> {
     extraHTTPHeaders: { "x-donkey-dev-auth-bypass": "1" },
     viewport: { width: 1600, height: 1000 },
   });
-  if (MACHINE.slots > 0) await context.addInitScript({ content: decoderShim(MACHINE) });
+  if (MACHINE.softwareMs > 0) await context.addInitScript({ content: decoderShim(MACHINE) });
   // The editor's session gate is a client-side cookie read, and the only sign-in
   // this build offers is Google's. Answering that one request for the dev-bypass
   // user is the whole of the fake: every other request the page makes is real,
@@ -1556,14 +1610,16 @@ async function launch(): Promise<{ browser: Browser; page: Page }> {
     });
   });
   const page = await context.newPage();
-  if (MACHINE.cpu > 1 || MACHINE.slots > 0) {
+  if (MACHINE.cpu > 1 || MACHINE.softwareMs > 0) {
     if (MACHINE.cpu > 1) {
       const cdp = await context.newCDPSession(page);
       await cdp.send("Emulation.setCPUThrottlingRate", { rate: MACHINE.cpu });
     }
     console.log(
       `[machine] ${MACHINE.name}: cpu 1/${MACHINE.cpu}` +
-        (MACHINE.slots ? `, ${MACHINE.slots} decode slots, +${MACHINE.softwareMs}ms in software` : "")
+        (MACHINE.softwareMs
+          ? `, ${MACHINE.slots || "no"} hardware decode slot${MACHINE.slots === 1 ? "" : "s"}, +${MACHINE.softwareMs}ms per frame on the CPU`
+          : "")
     );
   }
   page.on("pageerror", (e) => console.log(`[pageerror] ${String(e).slice(0, 200)}`));
@@ -1647,7 +1703,7 @@ const detailOf = (r: CaseResult) =>
       : r.idleTicks !== undefined
         ? `ticks=${r.idleTicks}`
         : r.lag
-          ? `late=${r.drops}/${r.presented} lagP95=${r.lag.p95}s hitch=${((r.stallShare ?? 0) * 100).toFixed(1)}% lagMax=${r.lag.max}s sources=${r.liveSources} sw=${r.decoders?.softwarePeak ?? "-"}/${r.decoders?.software ?? "-"} warm=${r.warmMb}MB decay=${r.decay?.first}→${r.decay?.last}`
+          ? `late=${r.drops}/${r.presented} lagP95=${r.lag.p95}s hitch=${((r.stallShare ?? 0) * 100).toFixed(1)}% lagMax=${r.lag.max}s sources=${r.liveSources} sw=${r.decoders?.softwarePeak ?? "-"}/${r.decoders?.software ?? "-"} busy=${r.decoders?.busyPeak ?? "-"} warm=${r.warmMb}MB decay=${r.decay?.first}→${r.decay?.last}`
           : `late=${r.drops}/${r.presented} atCut=${r.boundaryDrops}`;
 
 async function main(): Promise<void> {
