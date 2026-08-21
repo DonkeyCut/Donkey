@@ -95,9 +95,12 @@ public final class SyncEngine {
     /// app is next launched. Doubles until the ceiling, resets on a clean pass.
     @ObservationIgnored private var retryDelay = SyncEngine.firstRetry
     @ObservationIgnored private var retryScheduled = false
-    /// Recordings whose bytes could not be read: the movie file is gone, so
-    /// no pass will ever produce a payload for them. They stop counting as
-    /// queued work, and the loop stops re-probing them.
+    /// Recordings whose bytes could not be read. They stop counting as queued
+    /// work, and the loop stops re-probing them. A read can also fail because
+    /// the file was momentarily out of reach — offloaded storage, a move the
+    /// library had not finished settling — so the set clears whenever a new
+    /// recording lands, which is a point where the library has demonstrably
+    /// changed and the stranded takes deserve another look.
     @ObservationIgnored private var unreadable: Set<UUID> = []
     private static let firstRetry: Duration = .seconds(15)
     private static let retryCeiling: Duration = .seconds(300)
@@ -303,6 +306,7 @@ public final class SyncEngine {
 
     /// A finished recording heads for the cloud at once (policy permitting).
     public func recordingAdded(_ recording: Recording) {
+        unreadable.removeAll()
         kick()
     }
 
