@@ -145,6 +145,9 @@ const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 32;
 /** The ladder the zoom buttons climb; the wheel moves freely between rungs. */
 const ZOOM_STEPS = [0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32];
+/** How long a center guide stays up after a wheel pan stops moving. */
+const GUIDE_LINGER_MS = 700;
+
 /** How long the zoom control lingers after the last camera move. */
 const HUD_LINGER_MS = 2600;
 /** How still the camera has to be before the backing store re-resolves to the
@@ -157,6 +160,10 @@ const stageRadius = (w: number, h: number) => (Math.min(w, h) < 140 ? 0 : 6);
 
 /** How much of the picture has to stay inside the pane to count as on screen. */
 const ONSCREEN_MIN_PX = 24;
+
+/** How close (screen px) a pan comes to centered before it pulls onto center —
+ * the camera on the pane, a fill clip's crop on its frame. */
+const PAN_SNAP_PX = 14;
 
 /** Whether any of the picture still lands in the pane. A pan or a zoom can
  * carry the whole stage past an edge, and a pane showing nothing but backdrop
@@ -189,6 +196,15 @@ export function Preview() {
   // next render, or the picture blinks to the new center and back.
   const [zoom, setZoom] = useState(1);
   const camRef = useRef({ zoom: 1, x: 0, y: 0 });
+  // Where the gesture has carried the pan with no snapping applied. The camera
+  // is this position pulled onto the pane's center whenever it lands close, so
+  // the picture parks dead center on its own and the same travel that reached
+  // center carries the pan back out of it.
+  const rawRef = useRef({ x: 0, y: 0 });
+  const [centered, setCentered] = useState({ x: false, y: false });
+  // The same for a fill clip's crop: which axis the picture inside the frame
+  // is parked on center in, drawn as a guide over the stage.
+  const [cropCentered, setCropCentered] = useState({ x: false, y: false });
   const boxRef = useRef<HTMLDivElement>(null);
   // Whether the picture has left the pane entirely. Every camera move funnels
   // through applyPan, so that is where it gets decided; the geometry it reads
@@ -206,6 +222,32 @@ export function Preview() {
     lostRef.current = gone;
     setLost(gone);
   }, []);
+  /** Move the pan to a gesture's raw position, snapping each axis to the
+   * pane's center when it comes within reach. ⌘/Ctrl passes straight through. */
+  const panTo = useCallback(
+    (x: number, y: number, free = false) => {
+      rawRef.current = { x, y };
+      const sx = !free && Math.abs(x) <= PAN_SNAP_PX;
+      const sy = !free && Math.abs(y) <= PAN_SNAP_PX;
+      camRef.current = { zoom: camRef.current.zoom, x: sx ? 0 : x, y: sy ? 0 : y };
+      setCentered((c) => (c.x === sx && c.y === sy ? c : { x: sx, y: sy }));
+      applyPan();
+    },
+    [applyPan]
+  );
+  /** Drop the center guides once the gesture that could show them is over. */
+  const guideTimer = useRef(0);
+  const endPan = useCallback(() => {
+    window.clearTimeout(guideTimer.current);
+    setCentered((c) => (c.x || c.y ? { x: false, y: false } : c));
+  }, []);
+  // A wheel pan has no release to end it, so its guide fades on its own once
+  // the scrolling stops.
+  const holdPanGuide = useCallback(() => {
+    window.clearTimeout(guideTimer.current);
+    guideTimer.current = window.setTimeout(endPan, GUIDE_LINGER_MS);
+  }, [endPan]);
+  useEffect(() => () => window.clearTimeout(guideTimer.current), []);
   const refitRef = useRef(() => {});
   // The unclipped layer the selected element's chrome portals into, so an
   // outline hanging past the frame edge stays visible and grabbable.
@@ -267,6 +309,7 @@ export function Preview() {
         x: cx - (cx - (centerX + v.x)) * f - centerX,
         y: cy - (cy - (centerY + v.y)) * f - centerY,
       };
+      rawRef.current = { x: camRef.current.x, y: camRef.current.y };
       setZoom(next);
       pokeHud();
     },
@@ -396,6 +439,7 @@ export function Preview() {
       const scale = Math.min(availW / rw, availH / rh);
       setBase({ w: Math.floor(scale * rw), h: Math.floor(scale * rh) });
       camRef.current = { zoom: 1, x: 0, y: 0 };
+      rawRef.current = { x: 0, y: 0 };
       applyPan();
       setZoom(1);
     };
@@ -416,6 +460,8 @@ export function Preview() {
         if (dx || dy) {
           camRef.current.x += dx;
           camRef.current.y += dy;
+          rawRef.current.x += dx;
+          rawRef.current.y += dy;
           applyPan();
         }
       }
@@ -444,15 +490,14 @@ export function Preview() {
       } else {
         const dx = e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX;
         const dy = e.shiftKey && !e.deltaX ? 0 : e.deltaY;
-        camRef.current.x -= dx * k;
-        camRef.current.y -= dy * k;
-        applyPan();
+        panTo(rawRef.current.x - dx * k, rawRef.current.y - dy * k);
+        holdPanGuide();
         pokeHud();
       }
     };
     wrap.addEventListener("wheel", onWheel, { passive: false });
     return () => wrap.removeEventListener("wheel", onWheel);
-  }, [zoomAt, pokeHud, applyPan]);
+  }, [zoomAt, pokeHud, panTo, holdPanGuide]);
 
   // Drag a fill-mode clip inside the frame to choose the visible crop.
   const panDrag = (e: React.PointerEvent) => {
@@ -470,7 +515,7 @@ export function Preview() {
     // pauses once nothing is selected.
     let began = false;
     startDrag(e, {
-      onMove: (dx, dy) => {
+      onMove: (dx, dy, ev) => {
         if (!began) {
           if (Math.abs(dx) <= 3 && Math.abs(dy) <= 3) return;
           began = true;
@@ -478,16 +523,27 @@ export function Preview() {
           st.select({ kind: "clip", id: clipId });
           st.pushHistory();
         }
-        // Content follows the pointer; pan is the crop-window position.
+        // Content follows the pointer; pan is the crop-window position. Each
+        // axis pulls onto the middle of the picture as it passes, so a crop
+        // lands centered on purpose. ⌘/Ctrl passes straight through.
+        const free = ev.metaKey || ev.ctrlKey;
+        const near = (v: number, over: number) =>
+          !free && (Math.abs(v) * (over / 2) * stage.w) / fr.w <= PAN_SNAP_PX;
+        const rawX = ox > 1 ? Math.max(-1, Math.min(1, panX0 - (dx * toFrame) / (ox / 2))) : 0;
+        const rawY = oy > 1 ? Math.max(-1, Math.min(1, panY0 - (dy * toFrame) / (oy / 2))) : 0;
+        const sx = ox > 1 && near(rawX, ox);
+        const sy = oy > 1 && near(rawY, oy);
+        setCropCentered((c) => (c.x === sx && c.y === sy ? c : { x: sx, y: sy }));
         useEditor.getState().updateClipTransient(clipId, {
-          panX: ox > 1 ? Math.max(-1, Math.min(1, panX0 - (dx * toFrame) / (ox / 2))) : 0,
-          panY: oy > 1 ? Math.max(-1, Math.min(1, panY0 - (dy * toFrame) / (oy / 2))) : 0,
+          panX: sx ? 0 : rawX,
+          panY: sy ? 0 : rawY,
         });
       },
       // startDrag suppresses the click event, so a stationary press on a
       // pannable clip runs the stage click here instead: clear the selection
       // first, play or pause once nothing is selected.
       onUp: (_dx, _dy, moved) => {
+        setCropCentered((c) => (c.x || c.y ? { x: false, y: false } : c));
         if (!moved) stageClick();
       },
     });
@@ -521,7 +577,7 @@ export function Preview() {
     <section className="preview-pane relative flex min-h-0 min-w-0 flex-col bg-muted/40 select-none">
       <div
         ref={wrapRef}
-        className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 overflow-hidden p-3"
+        className="relative flex min-h-0 flex-1 flex-col items-center justify-center gap-3 overflow-hidden p-3"
         // A middle-button drag pans the camera from anywhere in the pane, ahead
         // of whatever gizmo or clip sits under the pointer.
         onPointerDownCapture={(e) => {
@@ -534,11 +590,11 @@ export function Preview() {
           const sx = e.clientX;
           const sy = e.clientY;
           const move = (ev: PointerEvent) => {
-            camRef.current = { zoom: v0.zoom, x: v0.x + ev.clientX - sx, y: v0.y + ev.clientY - sy };
-            applyPan();
+            panTo(v0.x + ev.clientX - sx, v0.y + ev.clientY - sy, ev.metaKey || ev.ctrlKey);
             pokeHud();
           };
           const up = () => {
+            endPan();
             el.removeEventListener("pointermove", move);
             el.removeEventListener("pointerup", up);
             el.removeEventListener("pointercancel", up);
@@ -554,18 +610,26 @@ export function Preview() {
           if (e.target !== e.currentTarget) return;
           const v0 = { ...camRef.current };
           startDrag(e, {
-            onMove: (dx, dy) => {
-              camRef.current = { zoom: v0.zoom, x: v0.x + dx, y: v0.y + dy };
-              applyPan();
+            onMove: (dx, dy, ev) => {
+              panTo(v0.x + dx, v0.y + dy, ev.metaKey || ev.ctrlKey);
               pokeHud();
             },
             onUp: (_dx, _dy, moved) => {
+              endPan();
               if (!moved) useEditor.getState().select(null);
             },
             cursor: () => "grabbing",
           });
         }}
       >
+        {/* The axis a pan is parked on shows its line through the pane, the
+            same guide an element's own snapping paints. */}
+        {centered.x && (
+          <div className="pointer-events-none absolute inset-y-0 left-1/2 z-20 w-px bg-neutral-400/80" />
+        )}
+        {centered.y && (
+          <div className="pointer-events-none absolute inset-x-0 top-1/2 z-20 h-px bg-neutral-400/80" />
+        )}
         {/* The selection handle mounts beside the stage, outside its clipping,
             so a box dragged past the frame edge stays visible and grabbable. */}
         <div
@@ -657,6 +721,14 @@ export function Preview() {
           className="pointer-events-none absolute inset-0"
           style={{ "--stage-radius": `${stageRadius(stage.w, stage.h)}px` } as React.CSSProperties}
         />
+        {/* A crop parked on the middle of its picture shows the axis it is
+            centered on, drawn across the frame it sits in. */}
+        {cropCentered.x && (
+          <div className="pointer-events-none absolute inset-y-0 left-1/2 z-20 w-px bg-neutral-400/80" />
+        )}
+        {cropCentered.y && (
+          <div className="pointer-events-none absolute inset-x-0 top-1/2 z-20 h-px bg-neutral-400/80" />
+        )}
         <ClipMaskGizmo stage={stage} />
         <ClipTransformGizmo stage={stage} />
         </div>
