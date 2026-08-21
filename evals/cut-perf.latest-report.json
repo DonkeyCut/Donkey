@@ -1,5 +1,15 @@
 {
   "schema": "cut-perf-eval/v1",
+  "machine": {
+    "name": "desktop",
+    "cpu": 1,
+    "slots": 0,
+    "softwareMs": 0,
+    "lagP95S": 0.05,
+    "stallShare": 0.002,
+    "lateShare": 0.02,
+    "decayFloor": 0.02
+  },
   "gate": {
     "scrubP50Ms": 10,
     "scrubP95Ms": 16.7,
@@ -11,7 +21,10 @@
     "lagP95S": 0.05,
     "lagMaxS": 0.25,
     "decayRatio": 1.5,
-    "warmMb": 400
+    "warmMb": 400,
+    "stallShare": 0.002,
+    "lateShare": 0.02,
+    "decayFloor": 0.02
   },
   "fixture": {
     "clips": 6,
@@ -24,10 +37,10 @@
       "pass": true,
       "notes": [],
       "scrub": {
-        "p50": 7.5,
-        "p95": 15.8,
-        "mean": 8.59,
-        "max": 21.5,
+        "p50": 7.4,
+        "p95": 15.6,
+        "mean": 8.45,
+        "max": 24.1,
         "n": 41
       },
       "longTasks": {
@@ -37,7 +50,8 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 60
+      "liveSamples": 81,
+      "machine": "desktop"
     },
     {
       "name": "drag-across-a-cut",
@@ -45,10 +59,10 @@
       "pass": true,
       "notes": [],
       "scrub": {
-        "p50": 7.5,
-        "p95": 16.1,
-        "mean": 8.8,
-        "max": 19.6,
+        "p50": 7.4,
+        "p95": 15.7,
+        "mean": 8.2,
+        "max": 16.4,
         "n": 41
       },
       "longTasks": {
@@ -58,7 +72,8 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 52
+      "liveSamples": 77,
+      "machine": "desktop"
     },
     {
       "name": "drag-across-a-transition",
@@ -66,10 +81,10 @@
       "pass": true,
       "notes": [],
       "scrub": {
-        "p50": 7.5,
-        "p95": 15.8,
-        "mean": 8.59,
-        "max": 22.9,
+        "p50": 7.4,
+        "p95": 15.7,
+        "mean": 8.34,
+        "max": 17.9,
         "n": 41
       },
       "longTasks": {
@@ -79,7 +94,8 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 63
+      "liveSamples": 64,
+      "machine": "desktop"
     },
     {
       "name": "jump-across-the-cut",
@@ -87,10 +103,10 @@
       "pass": true,
       "notes": [],
       "scrub": {
-        "p50": 15.9,
-        "p95": 24,
-        "mean": 15.6,
-        "max": 25.6,
+        "p50": 15.5,
+        "p95": 18.2,
+        "mean": 14.96,
+        "max": 23.7,
         "n": 41
       },
       "longTasks": {
@@ -100,7 +116,8 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 88
+      "liveSamples": 71,
+      "machine": "desktop"
     },
     {
       "name": "play-hard-cuts",
@@ -108,7 +125,7 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 2076,
+      "presented": 2075,
       "boundaryDrops": 0,
       "longTasks": {
         "p50": 0,
@@ -117,7 +134,8 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 60
+      "liveSamples": 60,
+      "machine": "desktop"
     },
     {
       "name": "play-with-transitions",
@@ -125,7 +143,7 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 2076,
+      "presented": 2074,
       "boundaryDrops": 0,
       "longTasks": {
         "p50": 0,
@@ -134,7 +152,8 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 60
+      "liveSamples": 60,
+      "machine": "desktop"
     },
     {
       "name": "play-fast-cuts",
@@ -142,14 +161,15 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 1619,
+      "presented": 1617,
       "lag": {
         "p50": 0.02,
         "p95": 0.03,
         "mean": 0.02,
         "max": 0.03,
-        "n": 1619
+        "n": 1617
       },
+      "stallShare": 0,
       "decay": {
         "first": 0,
         "last": 0
@@ -164,7 +184,8 @@
       "liveSamples": 120,
       "liveSources": 12,
       "keptSources": 20,
-      "warmMb": 354
+      "warmMb": 354,
+      "machine": "desktop"
     },
     {
       "name": "play-fast-cuts-long",
@@ -180,6 +201,7 @@
         "max": 0.03,
         "n": 6481
       },
+      "stallShare": 0,
       "decay": {
         "first": 0,
         "last": 0
@@ -194,7 +216,8 @@
       "liveSamples": 120,
       "liveSources": 12,
       "keptSources": 20,
-      "warmMb": 354
+      "warmMb": 354,
+      "machine": "desktop"
     },
     {
       "name": "idle-costs-nothing",

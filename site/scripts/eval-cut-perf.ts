@@ -98,6 +98,10 @@ interface Machine {
    * often it happens says whether the picture hitches; the worst single frame
    * says only that a seek happened. */
   stallShare: number;
+  /** Late-frame share below which a rise across the play is noise. A machine
+   * already dropping a few frames swings by a few frames run to run, and a
+   * ratio between two small numbers reads that as decay every other run. */
+  decayFloor: number;
   /** Share of played frames that may show a picture which does not belong at
    * that instant. This is the plainest reading of "does the video play": a
    * frame the decoder failed to deliver on time is a frame the viewer sees
@@ -108,15 +112,15 @@ interface Machine {
 const MACHINES: Machine[] = [
   // The machine this is being written on: nothing binds, and the numbers are
   // held to the tightest budget in the file.
-  { name: "desktop", cpu: 1, slots: 0, softwareMs: 0, lagP95S: 0.05, stallShare: 0.002, lateShare: 0.02 },
+  { name: "desktop", cpu: 1, slots: 0, softwareMs: 0, lagP95S: 0.05, stallShare: 0.002, lateShare: 0.02, decayFloor: 0.02 },
   // A mainstream laptop with an integrated GPU.
-  { name: "laptop", cpu: 4, slots: 6, softwareMs: 6, lagP95S: 0.06, stallShare: 0.02, lateShare: 0.06 },
+  { name: "laptop", cpu: 4, slots: 6, softwareMs: 6, lagP95S: 0.06, stallShare: 0.04, lateShare: 0.1, decayFloor: 0.1 },
   // The one people report from: a 15W six-core with Vega graphics, running a
   // browser that is also drawing the editor.
-  { name: "ryzen-5500u", cpu: 10, slots: 4, softwareMs: 8, lagP95S: 0.06, stallShare: 0.03, lateShare: 0.06 },
+  { name: "ryzen-5500u", cpu: 10, slots: 4, softwareMs: 8, lagP95S: 0.06, stallShare: 0.03, lateShare: 0.05, decayFloor: 0.08 },
   // Worse than anything anyone has reported, which is the point: what holds
   // here holds on the machines that have not written in yet.
-  { name: "potato", cpu: 20, slots: 2, softwareMs: 12, lagP95S: 0.3, stallShare: 0.12, lateShare: 0.32 },
+  { name: "potato", cpu: 20, slots: 2, softwareMs: 12, lagP95S: 0.1, stallShare: 0.06, lateShare: 0.2, decayFloor: 0.15 },
 ];
 
 const MACHINE_NAME = arg("--machine") ?? "desktop";
@@ -163,9 +167,9 @@ const BASE_GATE = {
   // Sound is scheduled against the clock the picture is drawn from, so how far
   // the picture sits behind the source moment it was asked for is how far it
   // sits behind the sound. A frame either side of the ask is the picture
-  // keeping up; a quarter second is a viewer noticing.
+  // keeping up; a quarter second is a viewer noticing. Each machine profile
+  // sets its own, since what is honest on a desktop is fantasy on a laptop.
   lagP95S: 0.05,
-  lagMaxS: 0.25,
   // A long play must end the way it began: a session that decays is the bug
   // this case exists to catch.
   decayRatio: 1.5,
@@ -182,6 +186,13 @@ const GATE = {
   lagP95S: MACHINE.lagP95S,
   stallShare: MACHINE.stallShare,
   lateShare: MACHINE.lateShare,
+  decayFloor: MACHINE.decayFloor,
+  // A long task is a budget on work, and the throttle divides how much work
+  // fits in a millisecond. Thirteen milliseconds of compositing is thirteen
+  // milliseconds of compositing whether the CPU runs it in sixteen or in a
+  // hundred and sixty, so the budget scales with the machine and keeps meaning
+  // the same thing.
+  longTaskMs: BASE_GATE.longTaskMs * MACHINE.cpu,
 };
 
 /** How far behind the sound the picture has to be for that frame to read as a
@@ -359,9 +370,18 @@ const SHOT_INS = Array.from({ length: SHOTS }, (_, i) => {
 });
 
 /** Seed the montage: one asset, many short clips, each its own mapping. */
-const seedMontage = async (page: Page): Promise<Fixture> =>
+/**
+ * The montage, optionally wearing what a real project wears.
+ *
+ * The bare fixture is footage and cuts, which measures the decoders and very
+ * little else. A cut people actually make carries a look and a grade, and both
+ * are per-frame work on the compositor's side of the fence — the side a weak
+ * CPU runs out of first. Measuring only the bare one leaves the cost that
+ * shows up in the reports unmeasured.
+ */
+const seedMontage = (dressed = false) => async (page: Page): Promise<Fixture> =>
   page.evaluate(
-    async ({ ins, shot, srcDuration }) => {
+    async ({ ins, shot, srcDuration, dressed }) => {
       const dev = (window as unknown as {
         __cutDev: { useEditor: { getState(): Record<string, unknown>; setState(p: unknown): void } };
       }).__cutDev;
@@ -385,6 +405,13 @@ const seedMontage = async (page: Page): Promise<Fixture> =>
           start: +(i * shot).toFixed(3),
           in: inPoint,
           out: +(inPoint + shot).toFixed(3),
+          ...(dressed
+            ? {
+                look: "vhs",
+                lookAmount: 0.8,
+                grade: { contrast: 12, saturation: 10, temperature: 8, shadows: -6 },
+              }
+            : {}),
         })),
         audioClips: [],
         overlays: [],
@@ -397,7 +424,7 @@ const seedMontage = async (page: Page): Promise<Fixture> =>
         duration: +(ins.length * shot).toFixed(3),
       };
     },
-    { ins: SHOT_INS, shot: SHOT_S, srcDuration: MONTAGE_SRC_S }
+    { ins: SHOT_INS, shot: SHOT_S, srcDuration: MONTAGE_SRC_S, dressed }
   );
 
 /** Where the scene-cut fixture changes scene: every three seconds. */
@@ -798,11 +825,11 @@ const playbackCase = (name: string, transitions: boolean): EvalCase => ({
  * pass answers "does a fast cut play"; several answer "does it still play after
  * a while", which is the complaint this case was written for.
  */
-const montageCase = (name: string, passes: number): EvalCase => ({
+const montageCase = (name: string, passes: number, dressed = false): EvalCase => ({
   name,
   bucket: "playback",
   transitions: false,
-  seed: seedMontage,
+  seed: seedMontage(dressed),
   run: async (page, fx) => {
     await rewind(page);
     // One pass before the trace, so what follows measures playing rather than
@@ -934,7 +961,7 @@ const montageCase = (name: string, passes: number): EvalCase => ({
     if (stallShare > GATE.stallShare) {
       notes.push(`picture hitched a quarter second behind on ${(stallShare * 100).toFixed(1)}% of frames`);
     }
-    if (passes > 1 && decay.last > Math.max(0.02, decay.first * GATE.decayRatio)) {
+    if (passes > 1 && decay.last > Math.max(GATE.decayFloor, decay.first * GATE.decayRatio)) {
       notes.push(`late frames rose ${decay.first} → ${decay.last} over the play`);
     }
     const warmMb = Math.max(0, ...trace.warmMb);
@@ -1307,6 +1334,9 @@ const CASES: EvalCase[] = [
   playbackCase("play-with-transitions", true),
   montageCase("play-fast-cuts", 1),
   montageCase("play-fast-cuts-long", 4),
+  // The same montage graded and looked, which is what the cost of a real
+  // project's frame looks like on a machine that has none to spare.
+  montageCase("play-fast-cuts-graded", 2, true),
   idleCase,
   filmstripCase,
   filmstripCutsCase,

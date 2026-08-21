@@ -52,6 +52,8 @@ The playhead lives apart from the document. It moves sixty times a second and th
 
 Whether any of this is true of a given build is measured rather than assumed: `npm run eval:cut-perf` drives a real editor in a real browser against fixture montages and reports how long the picture takes to answer a moved playhead, whether any frame crossing a cut was the wrong one, and whether a fast-cut montage replayed for minutes still holds the picture to the clock the way its first pass did. Its committed report is the baseline a change is diffed against.
 
+The machine it measures on is part of the measurement. A developer desktop has decode slots to spare and never falls behind, so the preview's caps never bind there and a change that would ruin a laptop reads as a clean sheet. `--machine` puts the page on a smaller one: it takes away hardware decode slots, so decoders past the limit deliver their frames late the way software decoding does, and it slows the main thread to a fraction of this one. `npm run eval:cut-perf-lowend` is the profile the reports come from. What the gates ask there is what a viewer would ask — did the frames arrive, did the picture hitch a quarter second behind the sound, and was the last pass as good as the first — and each machine has its own budget for those, because a number that is honest on a desktop is fantasy on a fifteen-watt laptop.
+
 ## Color grading
 
 A clip's color is one field on the clip: an optional preset underneath and manual adjustments on top — sliders, tone curves, color wheels, per-hue bands. Every part is absent when neutral, so an untouched clip carries nothing, and the preset's intensity scales its parameters toward neutral so half-strength means half the move, never a crossfade through gray.
