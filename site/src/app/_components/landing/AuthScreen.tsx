@@ -139,7 +139,12 @@ export function AuthScreen({ mode }: Props) {
   );
 
   return (
-    <main className="min-h-screen w-full bg-background font-system text-ink antialiased">
+    // Sign-in is a client tree the browser's translator rewrites out from
+    // under hydration; the app it leads into is marked the same way.
+    <main
+      translate="no"
+      className="min-h-screen w-full bg-background font-system text-ink antialiased"
+    >
       {/* Auth serves same-host on donkeycut.com, so the chrome is Cut's. */}
       <TopNav
         wordmark="Donkey Cut"

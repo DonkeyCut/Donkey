@@ -26,7 +26,16 @@ import { SessionGate, SessionSkeleton } from "@/cut/components/SessionGate";
 
 export default function CutAppLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-screen bg-white font-system text-foreground antialiased">
+    // translate="no" covers the whole app subtree. A browser's built-in
+    // translator rewrites text nodes in place under a running React tree: the
+    // rewrite lands mid-hydration as a text mismatch, and then a later commit
+    // that moves one of the rewritten nodes throws NotFoundError out of
+    // insertBefore and takes the editor down. The editor's text is chrome
+    // around a canvas, so the page keeps its own words and stays standing.
+    <div
+      translate="no"
+      className="min-h-screen bg-white font-system text-foreground antialiased"
+    >
       <AppSurfaceBackground />
       <NoSessionReplay />
       {/* A route whose address carries data — the editor's project id — can't be

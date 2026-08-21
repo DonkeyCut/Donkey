@@ -82,7 +82,13 @@ export default function SharedProjectPage() {
   return (
     <>
       <NoSessionReplay />
-      <SharedProjectView />
+      {/* Same reason the app subtree is marked (app/cut/app/layout.tsx): a
+          browser's translator rewriting text nodes under this tree breaks
+          hydration and then a later commit. `contents` keeps the wrapper out
+          of the layout the view below sets up. */}
+      <div translate="no" className="contents">
+        <SharedProjectView />
+      </div>
     </>
   );
 }
