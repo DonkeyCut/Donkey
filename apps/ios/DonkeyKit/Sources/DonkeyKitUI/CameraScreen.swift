@@ -507,6 +507,11 @@ struct TeleprompterOverlay: View {
     /// Where the idle loop counts from, so a preview runs the script the same
     /// way a take does.
     @State private var previewStart = Date.now
+    /// How far the reader has dragged the script from where the pacing puts
+    /// it. It rides along with the scroll rather than replacing it, so a nudge
+    /// mid-take moves the words and the pace carries on.
+    @State private var dragged: Double = 0
+    @GestureState private var dragging: Double = 0
     /// Beat between the end of a preview pass and the top of the next one.
     private static var previewGap: TimeInterval { 1.5 }
     /// Room kept at the foot of the screen for the record button and the tabs.
@@ -535,7 +540,7 @@ struct TeleprompterOverlay: View {
                             elapsed: elapsed,
                             overlayHeight: height,
                             textHeight: textHeight
-                        )
+                        ) + dragged + dragging
                     )
                     .padding(.horizontal, 24)
             }
@@ -553,9 +558,20 @@ struct TeleprompterOverlay: View {
                 .frame(height: height * 0.35),
                 alignment: .top
             )
+            // The reader places the words: a drag anywhere over the picture
+            // moves the script. The rail and the record button sit above this
+            // in the stack, so they still take their own touches.
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 6)
+                    .updating($dragging) { value, state, _ in state = value.translation.height }
+                    .onEnded { dragged += $0.translation.height }
+            )
         }
         .ignoresSafeArea()
-        .allowsHitTesting(false)
+        // A fresh run puts the script back where the pacing wants it.
+        .onChange(of: camera.recordingStartedAt) { dragged = 0 }
+        .onChange(of: camera.teleprompter.testStartedAt) { dragged = 0 }
     }
 
     /// Seconds into the script. A take counts from the moment recording

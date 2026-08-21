@@ -77,12 +77,12 @@ nonisolated public struct TeleprompterState: Equatable, Sendable {
 
     /// Where the first line sits before the script starts moving, as a share
     /// of the prompter's height.
-    public static let leadShare = 0.25
+    public static let leadShare = 0.5
 
     /// Vertical offset of the script at `elapsed` seconds into a recording.
-    /// The text starts a quarter down the prompter and travels its own
-    /// rendered height plus that lead-in over the read duration, so the last
-    /// words leave the top exactly when the speaker should be finishing them.
+    /// The text starts halfway down the prompter and travels its own rendered
+    /// height plus that lead-in over the read duration, so the last words
+    /// leave the top exactly when the speaker should be finishing them.
     /// Paragraph gaps are part of the height, so they read as natural pauses.
     public func scrollOffset(elapsed: TimeInterval, overlayHeight: Double, textHeight: Double) -> Double {
         let lead = overlayHeight * Self.leadShare

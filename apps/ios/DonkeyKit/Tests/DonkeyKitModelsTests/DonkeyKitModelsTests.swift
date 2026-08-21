@@ -65,20 +65,20 @@ import Testing
         var state = TeleprompterState()
         state.settings.wordsPerMinute = 120
         state.script = Array(repeating: "word", count: 120).joined(separator: " ")
-        // 120 words at 120 wpm = 60s. Lead-in is a quarter of the prompter;
-        // the text travels its own height plus the lead over the minute.
+        // 120 words at 120 wpm = 60s. The script starts halfway down the
+        // prompter and travels its own height plus that lead over the minute.
         #expect(state.duration == 60)
         let start = state.scrollOffset(elapsed: 0, overlayHeight: 300, textHeight: 420)
-        #expect(start == 75)
+        #expect(start == 150)
         let mid = state.scrollOffset(elapsed: 30, overlayHeight: 300, textHeight: 420)
-        #expect(mid == 75 - (420.0 + 75.0) / 2)
+        #expect(mid == 150 - (420.0 + 150.0) / 2)
         let end = state.scrollOffset(elapsed: 60, overlayHeight: 300, textHeight: 420)
         #expect(end == -420)
     }
 
     @Test func emptyScriptHoldsAtLead() {
         let state = TeleprompterState()
-        #expect(state.scrollOffset(elapsed: 5, overlayHeight: 300, textHeight: 0) == 75)
+        #expect(state.scrollOffset(elapsed: 5, overlayHeight: 300, textHeight: 0) == 150)
     }
 
     @Test func hasScriptIgnoresWhitespace() {

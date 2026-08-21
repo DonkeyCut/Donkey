@@ -74,6 +74,11 @@ loop until the take starts, and the card's test button restarts that run from
 the top. A speed and a size are something a person watches before they commit
 to them.
 
+The script starts halfway down the screen, and a drag moves it: the nudge
+rides along with the pacing, so the words land where the reader wants them and
+the pace carries on. Each run puts the script back where the pacing wants
+it.
+
 ## How It Is Put Together
 
 The app follows the Swift Guide's MVC split across two layers:
