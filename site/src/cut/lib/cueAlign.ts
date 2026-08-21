@@ -51,6 +51,12 @@ const BRIDGE = 0.12;
  * that way. */
 const QUIET_RUN = 0.15;
 const QUIET_MARGIN = 6;
+/** How closely the evidence on both sides of an unverifiable edge must agree
+ * before their shift is read as the clock's error and carried through it. The
+ * allowance grows with the distance between the two anchors, because the one
+ * clock error that varies — a drifting chunk clock — varies with time. */
+const AGREE = 0.12;
+const AGREE_PER_S = 0.04;
 /** A cue never collapses below this while being snapped. */
 const MIN_CUE = 0.2;
 /** Speech and cues must overlap at least this well before any of this is
@@ -147,11 +153,14 @@ export function speechSpans(samples: ArrayLike<number>, rate: number): SpeechSpa
     }
     return true;
   };
+  // The window sits one frame off the edge: the frame straddling the onset
+  // carries the word's own attack (or decay), and reading it as "not quiet"
+  // would disqualify every boundary the threshold split mid-frame.
   return kept.map((r) => ({
     start: r.from * HOP,
     end: r.to * HOP,
-    cleanStart: r.from === 0 || isQuiet(r.from - span, r.from),
-    cleanEnd: r.to === frames || isQuiet(r.to, r.to + span),
+    cleanStart: r.from === 0 || isQuiet(r.from - span - 1, r.from - 1),
+    cleanEnd: r.to === frames || isQuiet(r.to + 1, r.to + span + 1),
   }));
 }
 
@@ -182,29 +191,76 @@ function overlap(cues: Uint8Array, speech: Uint8Array): number {
   return hit / (cueTotal + speechTotal - hit);
 }
 
-/** The value in `sorted` closest to `t` within [`t - back`, `t + ahead`], and
- * inside [`floor`, `ceil`]. Null when the audio offers no edge there. */
-function nearest(
-  sorted: number[],
-  t: number,
-  back: number,
-  ahead: number,
-  floor: number,
-  ceil: number
-): number | null {
-  let best: number | null = null;
-  let bestGap = Infinity;
-  for (const v of sorted) {
-    if (v < t - back || v < floor) continue;
-    if (v > t + ahead) break;
-    if (v > ceil) break;
-    const gap = Math.abs(v - t);
-    if (gap < bestGap) {
-      bestGap = gap;
-      best = v;
+/** Overlap below this is a rounding sliver, not a claim on the run. */
+const SHARED_EPS = 0.05;
+
+/** How much of `cue` falls inside `span`. Which runs of speech a cue is about
+ * is decided by this and nothing else. */
+const shared = (cue: AlignCue, span: SpeechSpan): number =>
+  Math.max(0, Math.min(cue.end, span.end) - Math.max(cue.start, span.start));
+
+/** For each span, the first and last cue meaningfully overlapping it (-1 when
+ * none). A caption OPENS a run when no earlier caption covers any of that run,
+ * and CLOSES it when no later one does. Only those two roles have an audible
+ * boundary of their own: every other edge on the run sits inside continuous
+ * speech, where any word boundary could be the true one. */
+function spanRoles(cues: readonly AlignCue[], spans: readonly SpeechSpan[]) {
+  const opener = spans.map(() => -1);
+  const closer = spans.map(() => -1);
+  for (const [j, span] of spans.entries()) {
+    for (const [i, cue] of cues.entries()) {
+      if (shared(cue, span) <= SHARED_EPS) continue;
+      if (opener[j] < 0) opener[j] = i;
+      closer[j] = i;
     }
   }
-  return best;
+  return { opener, closer };
+}
+
+/**
+ * Where cue `i`'s start may legally travel, or null.
+ *
+ * Only one boundary can testify about this edge: the opening of the first run
+ * of speech this caption covers, and only when the caption is the one that
+ * opens it. A start inside that run pulls back to where the run began; one
+ * sitting in silence crosses forward to it (the silence a transcriber hands to
+ * a sentence's first word). A caption whose first run an earlier caption
+ * already covers begins mid-speech — the audio offers no boundary that is
+ * hers, and pulling her onto a later run's opening would caption the wrong
+ * words.
+ */
+function startTarget(
+  i: number,
+  cues: readonly AlignCue[],
+  spans: readonly SpeechSpan[],
+  opener: readonly number[],
+  back: number
+): number | null {
+  const cue = cues[i];
+  const first = spans.findIndex((sp) => shared(cue, sp) > SHARED_EPS);
+  if (first < 0 || opener[first] !== i) return null;
+  const span = spans[first];
+  if (!span.cleanStart) return null;
+  const travel = span.start - cue.start;
+  return travel >= -back && travel <= LEAD ? span.start : null;
+}
+
+/** The same reasoning for the closing edge: the end of the last run this
+ * caption covers, only when the caption is the one that closes it. */
+function endTarget(
+  i: number,
+  cues: readonly AlignCue[],
+  spans: readonly SpeechSpan[],
+  closer: readonly number[],
+  back: number
+): number | null {
+  const cue = cues[i];
+  let last = -1;
+  for (const [j, sp] of spans.entries()) if (shared(cue, sp) > SHARED_EPS) last = j;
+  if (last < 0 || closer[last] !== i) return null;
+  const span = spans[last];
+  if (!span.cleanEnd) return null;
+  return Math.abs(span.end - cue.end) <= back ? span.end : null;
 }
 
 /**
@@ -213,8 +269,14 @@ function nearest(
  * along with them. A cue the audio has nothing to say about arrives unchanged,
  * as does every cue when the mix as a whole disagrees with the transcript.
  *
+ * Each edge is settled against the run of speech its own cue is about, so a
+ * caption can be pulled onto the voice it captions and never onto the next
+ * line's. An edge in the middle of continuous speech, where nothing audible
+ * says a caption began or ended, keeps the time the transcriber gave it.
+ *
  * `snap` widens the backward search for a transcriber whose times are guesses
- * (the hosted model) over one that reports real word ranges.
+ * (the hosted model, a lyric sync's interpolated lines) over one that reports
+ * real word ranges.
  */
 export function alignCues<T extends AlignCue>(
   cues: T[],
@@ -234,21 +296,57 @@ export function alignCues<T extends AlignCue>(
   if (fit < MIN_IOU) return cues; // the audio is describing something else
 
   const back = opts.snap ?? SNAP;
-  const onsets = spans.filter((s) => s.cleanStart).map((s) => s.start);
-  const offsets = spans.filter((s) => s.cleanEnd).map((s) => s.end);
   const roomFor = (cue: AlignCue) => Math.min(MIN_CUE, Math.max(0.05, cue.end - cue.start));
 
-  // Starts first: each looks for the voice its caption belongs to, reaching
-  // well ahead to cross the silence a transcriber hands to a sentence's first
-  // word, stopping short of the cue's own end so the caption keeps a life on
-  // screen, and never opening before the cue in front of it.
+  // What the audio testifies to directly: each edge's own target, where its
+  // run offers one.
+  const { opener, closer } = spanRoles(cues, spans);
+  const startEvidence = cues.map((_, i) => startTarget(i, cues, spans, opener, back));
+  const endEvidence = cues.map((_, i) => endTarget(i, cues, spans, closer, back));
+
+  // The transcriber's clock is one clock, so its error travels: when the
+  // verifiable edges on both sides of an unverifiable one moved by the same
+  // amount, that boundary — mid-sentence, where nothing audible marks it —
+  // was off by the same amount too, and it inherits the interpolated shift.
+  // Edges whose neighbours disagree (one moved, one stayed) keep their time:
+  // there the error was local, not the clock's.
+  // A start that traveled FORWARD is not a clock reading — it crossed the
+  // silence a transcriber handed to a sentence's first word, a flaw local to
+  // that one edge. The clock shows in starts pulled back and in ends, whose
+  // travel has no such flaw to hide.
+  const anchors: { t: number; shift: number }[] = [];
+  for (const [i, cue] of cues.entries()) {
+    const dS = startEvidence[i] !== null ? startEvidence[i]! - cue.start : null;
+    if (dS !== null && dS <= 0) anchors.push({ t: cue.start, shift: dS });
+    if (endEvidence[i] !== null) anchors.push({ t: cue.end, shift: endEvidence[i]! - cue.end });
+  }
+  anchors.sort((a, b) => a.t - b.t);
+  const inferred = (t: number): number | null => {
+    let prev: { t: number; shift: number } | null = null;
+    let next: { t: number; shift: number } | null = null;
+    for (const a of anchors) {
+      if (a.t <= t) prev = a;
+      else {
+        next = a;
+        break;
+      }
+    }
+    if (!prev || !next) return null;
+    if (Math.abs(prev.shift - next.shift) > AGREE + AGREE_PER_S * (next.t - prev.t)) return null;
+    const k = next.t === prev.t ? 0 : (t - prev.t) / (next.t - prev.t);
+    return prev.shift + (next.shift - prev.shift) * k;
+  };
+
+  // Starts first: the edge's own evidence, else the clock error its
+  // neighbours agree on, else the time the transcriber gave it — stopping
+  // short of the cue's own end so the caption keeps a life on screen, and
+  // never opening before the cue in front of it.
   const starts: number[] = [];
   for (const [i, cue] of cues.entries()) {
     const floor = i > 0 ? starts[i - 1] : 0;
     const ceil = cue.end - roomFor(cue);
-    starts.push(
-      Math.max(floor, nearest(onsets, cue.start, back, LEAD, floor, ceil) ?? cue.start)
-    );
+    const target = startEvidence[i] ?? (cue.start + (inferred(cue.start) ?? 0));
+    starts.push(Math.max(floor, Math.min(target, Math.max(floor, ceil))));
   }
 
   // Ends then close inside the room the next cue's start leaves, which is what
@@ -259,7 +357,7 @@ export function alignCues<T extends AlignCue>(
     const minLen = Math.max(0.01, Math.min(roomFor(cue), ceil - start));
     const end = Math.max(
       start + minLen,
-      Math.min(ceil, nearest(offsets, cue.end, back, back, start, ceil) ?? cue.end)
+      Math.min(ceil, endEvidence[i] ?? (cue.end + (inferred(cue.end) ?? 0)))
     );
 
     // Word timings follow the edge that moved. A cue that slid whole carries

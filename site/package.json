@@ -28,6 +28,7 @@
     "test:genvideo": "bun run scripts/genvideo-selftest.ts",
     "eval:genvideo": "bun run scripts/genvideo-eval.ts",
     "eval:cut-perf": "bun run scripts/eval-cut-perf.ts",
+    "eval:cut-sync": "bun run scripts/eval-cut-sync.ts",
     "eval:cut-export": "bun run scripts/eval-cut-export.ts"
   },
   "dependencies": {

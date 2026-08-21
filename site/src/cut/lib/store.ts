@@ -542,6 +542,10 @@ export interface EditorState {
   setNotes: (patch: Partial<{ text: string; publishedAt: string; links: string[] }>) => void;
   /** Kick off (and poll) an on-device transcription of the current cut. */
   generateSubtitles: () => Promise<void>;
+  /** The cut's audible mix as mono samples — the audio a caption is measured
+   * against. Null when nothing on the timeline makes a sound, or the mix
+   * could not be rendered. */
+  cutMixSamples: () => Promise<{ samples: Float32Array; sampleRate: number } | null>;
   /** Transcribe one clip's own audio (even when muted) and merge its cues into
    * the subtitles; cues elsewhere on the timeline stay put. Throws a
    * user-facing error on failure. */
@@ -578,6 +582,16 @@ export interface EditorState {
    * right past occupied stretches on the cue's own lane so cues never overlap,
    * and detach the word timings (they described the old window). One undo step. */
   setCueTiming: (id: string, start: number, end: number) => void;
+  /** Re-time cues and elements onto windows something else measured — the
+   * caption alignment pass, which reads the mix itself. Exact times, ids,
+   * text, word timings and lanes all kept, in one undo step, and nothing
+   * slides: the caller's windows are already in order and non-overlapping,
+   * so a per-item write that shoved its neighbours would undo the alignment
+   * it was given. */
+  retimeItems: (patch: {
+    cues?: { id: string; start: number; end: number; words?: { t0: number; t1: number; w: string }[] }[];
+    overlays?: { id: string; start: number; end: number }[];
+  }) => void;
   /** Replace one subtitle track's captions wholesale, in timeline seconds —
    * what a lyric sync writes once it knows when every line lands. */
   setLaneCues: (lane: number, cues: { start: number; end: number; text: string; words?: { t0: number; t1: number; w: string }[] }[]) => void;
@@ -1145,6 +1159,74 @@ function normalizeWrite(prev: EditorState, incoming: Partial<EditorState>): Part
     );
   }
   return next;
+}
+
+/**
+ * The whole cut as a transcribe spec: the track-0 spans in order with their
+ * gaps as explicit silent spacers, plus every audible soundtrack and layer
+ * clip as a positioned source. Speech can live anywhere on the timeline, so
+ * dialogue on a layer clip gets captioned and a layer-only cut still works.
+ *
+ * One builder serves both readers of the cut's audio — the transcriber and
+ * the mix render the caption alignment pass measures against — so a caption is
+ * always checked against the same audio it was written from. Null when the
+ * timeline has nothing audible.
+ */
+function cutTranscribeSpec(
+  s: Pick<EditorState, "clips" | "assets" | "audioClips" | "overlays">,
+  locale?: string
+): CloudTranscribeSpec | null {
+  const spans = getClipSpans(s.clips, s.assets);
+  const duration = projectDuration(s);
+  const assetById = new Map(s.assets.map((a) => [a.id, a]));
+  const audio = s.audioClips
+    .filter((a) => !a.hidden && a.start < duration && assetById.has(a.assetId))
+    .map((a) => ({
+      file: assetById.get(a.assetId)!.fileName,
+      in: a.in,
+      out: a.out,
+      start: a.start,
+      volume: a.volume,
+      speed: a.speed,
+    }))
+    .concat(
+      overlayLayers(s.clips)
+        .filter((c) => !c.hidden && !c.muted && c.start < duration && assetById.has(c.assetId))
+        .map((c) => ({
+          file: assetById.get(c.assetId)!.fileName,
+          in: c.in,
+          out: c.out,
+          start: c.start,
+          volume: 1,
+          speed: c.speed,
+        }))
+    );
+  if (spans.length === 0 && audio.length === 0) return null;
+  const silentSpacer = (len: number) => ({ file: "", in: 0, out: len, muted: true, speed: 1, transition: 0 });
+  return {
+    duration,
+    ...(locale ? { locale } : {}),
+    // The mix is a sequential fold, so gaps between the free-placed clips ship
+    // as explicit silent spacers (empty file). An overlay-only cut has no
+    // track-0 spans: the whole bed is one spacer.
+    clips:
+      spans.length === 0
+        ? [silentSpacer(duration)]
+        : spanSequence(spans).flatMap(({ gapBefore, span: sp }) => [
+            ...(gapBefore > 0 ? [silentSpacer(gapBefore)] : []),
+            {
+              file: sp.asset.fileName,
+              in: sp.clip.in,
+              out: sp.clip.out,
+              muted: sp.clip.muted,
+              speed: clipSpeed(sp.clip),
+              // The clamped cross-dissolve overlap, so the mix overlaps clip
+              // audio the same way the timeline does and cues stay in sync.
+              transition: sp.transitionOut,
+            },
+          ]),
+    audio,
+  };
 }
 
 export const useEditor = create<EditorState>((baseSet, get, api) => {
@@ -3516,75 +3598,28 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     setPublish: (patch) => set((s) => ({ publish: { ...s.publish, ...patch } })),
     setNotes: (patch) => set((s) => ({ notes: { ...s.notes, ...patch } })),
 
+    cutMixSamples: async () => {
+      const s = get();
+      if (!s.projectId) return null;
+      const spec = cutTranscribeSpec(s);
+      if (!spec) return null;
+      const mix = await renderMix(s.projectId, spec);
+      if (!mix) return null;
+      return { samples: mix.getChannelData(0), sampleRate: mix.sampleRate };
+    },
+
     generateSubtitles: async () => {
       const s = get();
       if (!s.projectId || s.subtitleStatus === "running") return;
       const projectId = s.projectId;
-      const spans = getClipSpans(s.clips, s.assets);
-      const duration = projectDuration(s);
-      const assetById = new Map(s.assets.map((a) => [a.id, a]));
-      // Speech can live on the soundtrack or on a layer video track, not just
-      // track 0. Layer-clip audio mixes into the transcribe pass as a
-      // positioned source (exactly like a soundtrack clip), so dialogue carried
-      // on a layer clip gets captioned and a layer-only cut still works.
-      const audio = s.audioClips
-        .filter((a) => !a.hidden && a.start < duration && assetById.has(a.assetId))
-        .map((a) => ({
-          file: assetById.get(a.assetId)!.fileName,
-          in: a.in,
-          out: a.out,
-          start: a.start,
-          volume: a.volume,
-          speed: a.speed,
-        }))
-        .concat(
-          overlayLayers(s.clips)
-            .filter(
-              (c) => !c.hidden && !c.muted && c.start < duration && assetById.has(c.assetId),
-            )
-            .map((c) => ({
-              file: assetById.get(c.assetId)!.fileName,
-              in: c.in,
-              out: c.out,
-              start: c.start,
-              volume: 1,
-              speed: c.speed,
-            })),
-        );
-      if (spans.length === 0 && audio.length === 0) {
+      // Generation targets the active subtitle track, with its own language.
+      const lane = s.subtitleLane;
+      const spec = cutTranscribeSpec(s, trackLocale(s.subtitles, lane));
+      if (!spec) {
         set({ subtitleStatus: "error", subtitleError: "Add a video to the timeline first." });
         return;
       }
-      // Generation targets the active subtitle track, with its own language.
-      const lane = s.subtitleLane;
       const epoch = laneEpoch;
-      const silentSpacer = (len: number) =>
-        ({ file: "", in: 0, out: len, muted: true, speed: 1, transition: 0 });
-      const spec = {
-        duration,
-        locale: trackLocale(s.subtitles, lane),
-        // The transcribe mix is a sequential fold, so gaps between the
-        // free-placed clips ship as explicit silent spacers (empty file). An
-        // overlay-only cut has no track-0 spans: the whole bed is one spacer.
-        clips:
-          spans.length === 0
-            ? [silentSpacer(duration)]
-            : spanSequence(spans).flatMap(({ gapBefore, span: sp }) => [
-                ...(gapBefore > 0 ? [silentSpacer(gapBefore)] : []),
-                {
-                  file: sp.asset.fileName,
-                  in: sp.clip.in,
-                  out: sp.clip.out,
-                  muted: sp.clip.muted,
-                  speed: clipSpeed(sp.clip),
-                  // The clamped cross-dissolve overlap, so the transcribe mix
-                  // overlaps clip audio the same way the timeline does and cues
-                  // stay in sync.
-                  transition: sp.transitionOut,
-                },
-              ]),
-        audio,
-      };
       set({ subtitleStatus: "running", subtitleError: null, subtitleStartedAt: Date.now() });
       try {
         const cues = await runTranscription(projectId, spec);
@@ -4131,6 +4166,46 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           cues: s.subtitles.cues.map((c) => (c.id === id ? { ...c, ...patch } : c)),
         },
       })),
+
+    retimeItems: ({ cues = [], overlays = [] }) => {
+      if (cues.length === 0 && overlays.length === 0) return;
+      const cueBy = new Map(cues.map((c) => [c.id, c]));
+      const overlayBy = new Map(overlays.map((o) => [o.id, o]));
+      push();
+      set((s) => ({
+        subtitles:
+          cues.length === 0
+            ? s.subtitles
+            : {
+                ...s.subtitles,
+                cues: s.subtitles.cues
+                  .map((c) => {
+                    const next = cueBy.get(c.id);
+                    if (!next) return c;
+                    // The floor is applied before the end is measured against
+                    // the start, so a negative time can never leave an item
+                    // ending before it begins.
+                    const start = Math.max(0, next.start);
+                    return {
+                      ...c,
+                      start,
+                      end: Math.max(start, next.end),
+                      ...(next.words ? { words: next.words } : {}),
+                    };
+                  })
+                  .sort((a, b) => a.start - b.start),
+              },
+        overlays:
+          overlays.length === 0
+            ? s.overlays
+            : s.overlays.map((o) => {
+                const next = overlayBy.get(o.id);
+                if (!next) return o;
+                const start = Math.max(0, next.start);
+                return { ...o, start, end: Math.max(start, next.end) };
+              }),
+      }));
+    },
 
     setLaneCues: (lane, cues) => {
       push();

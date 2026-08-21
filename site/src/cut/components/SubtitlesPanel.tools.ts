@@ -39,7 +39,7 @@ export const SUBTITLES_TOOLS = [
   {
     name: "sync_lyrics",
     description:
-      "Time a text the user already has — song lyrics, a script, a poem — to the audio in the cut, and put it on a caption track. Transcribes the cut first when the track is empty, then aligns the user's words to the recognized ones and keeps the user's text exactly as written: the recognizer supplies the clock, never the wording, which is what makes it work on singing it half-mishears. Words it missed take interpolated times from the words around them. Pass `look` to dress the track in a text-videos look at the same time (karaoke word highlight included). For lyrics as full-frame cards rather than captions, follow this with add_text_sequence from_captions.",
+      "Time a text the user already has — song lyrics, a script, a poem — to the audio in the cut, and put it on a caption track. Transcribes the cut first when the track is empty, then aligns the user's words to the recognized ones and keeps the user's text exactly as written: the recognizer supplies the clock, never the wording, which is what makes it work on singing it half-mishears. Words it missed take interpolated times from the words around them. Pass `look` to dress the track in a text-videos look at the same time (karaoke word highlight included) — only when the user asked for a designed run; without it the captions keep the track's current styling. For lyrics as full-frame cards rather than captions, follow this with add_text_sequence from_captions.",
     inputSchema: obj(
       {
         text: str("The lyrics or script, one line per screen (newline separated)"),
@@ -47,15 +47,38 @@ export const SUBTITLES_TOOLS = [
         look: str("Text-videos look id to dress the captions in"),
         from: num("Ignore audio before this timeline second"),
         to: num("Ignore audio after this timeline second"),
-        background: bool("With `look`, also set the project background to its frame color (default true)"),
+        background: bool("With `look`, also set the project background to its frame color (default: whatever the look does — the designed looks paint it, plain and over-footage leave it alone)"),
       },
       ["text"]
     ),
   },
   {
+    name: "align_to_audio",
+    description:
+      "Re-time captions or a run of text elements onto the speech in the cut's own mix — the waveform, not the transcript. It renders the audible mix, reads a 10ms energy envelope to find where speech actually starts and stops, and moves each edge to the speech edge it belongs to; an edge with no audible boundary near it (mid-sentence, or under a bed of music that never lets up) keeps the time it had. Ids, text, word timings and order all survive, and it is one undo step. This is the answer to \"the subtitles are off\", \"sync the text to the audio\", \"the words land late\" — never retime cue by cue with update_cue guesses, and never re-transcribe (that throws away the user's wording). Follow a lyric sync, a hand-edit, or a run built with add_text_sequence from_captions with it. The result says whether the audio could testify at all: `evidence: false` means the mix offered no readable edges and nothing moved, which is not the same as captions already being in sync.",
+    inputSchema: obj({
+      target: {
+        type: "string",
+        enum: ["captions", "elements"],
+        description:
+          "What to align: captions on a subtitle track (default), or the text elements of a run on a title row.",
+      },
+      track: num("With target captions: the subtitle track, 0-based (default: the active track)"),
+      lane: num("With target elements: the element row to align (default 0)"),
+      ids: {
+        type: "array",
+        items: { type: "string" },
+        description: "With target elements: align exactly these elements instead of a whole row.",
+      },
+      reach: num(
+        "How far an edge may travel back to meet a speech edge, seconds (0.1–2, default 0.6). A start also reaches up to 1.5s forward to cross the silence a transcriber hands to a sentence's first word. Widen it for times that are guesses, tighten it when captions are nearly right and should not wander."
+      ),
+    }),
+  },
+  {
     name: "set_caption_look",
     description:
-      "Style the caption track: a text-videos look id in `look` sets everything at once (preset, size, font, karaoke highlight, accent color, frame background), or set the pieces yourself. Karaoke — word_highlight — lights each word as it is spoken or sung, in the preview and the export burn-in; it needs word timings, which transcription and sync_lyrics leave on the cues.",
+      "Style the caption track: a text-videos look id in `look` sets everything at once (preset, size, font, karaoke highlight, accent color, frame background), or set the pieces yourself. Restyling captions is a change the user asks for — leave the track as it is when they only asked for the words. Karaoke — word_highlight — lights each word as it is spoken or sung, in the preview and the export burn-in; it needs word timings, which transcription and sync_lyrics leave on the cues.",
     inputSchema: obj({
       look: str("Text-videos look id — sets the whole caption look"),
       style: str("Caption preset: clean, hook, punchy, minimal, editorial, typewriter, block, highlight, bubble, neon"),
@@ -66,7 +89,7 @@ export const SUBTITLES_TOOLS = [
       accent_mode: { type: "string", enum: ["color", "underline", "box"], description: "How the word lights up" },
       x: num("Caption center x 0..1"),
       y: num("Caption center y 0..1"),
-      background: bool("With `look`, also set the project background (default true)"),
+      background: bool("With `look`, also set the project background (default: whatever the look does — the designed looks paint it, plain and over-footage leave it alone)"),
     }),
   },
   {

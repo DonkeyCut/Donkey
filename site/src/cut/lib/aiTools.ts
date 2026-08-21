@@ -100,6 +100,7 @@ import {
   type TextLayout,
   type TextVariation,
 } from "./textCompose";
+import { partialWrites, syncToSpeech, type SyncReport } from "./cueSync";
 import { requireTextLook, type TextLook } from "./textLooks";
 import {
   MOVE_STRENGTH_MAX,
@@ -1619,7 +1620,15 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         to: isNum(input.to) ? input.to : Math.max(projectDuration(st), cues[cues.length - 1]?.end ?? 0),
       };
       const timed = syncLines(lines, cueWords(cues), span);
-      st.setLaneCues(lane, timed);
+      // The transcript's clock only covers the words it recognized. Every other
+      // line here was interpolated between them, so the run is measured against
+      // the mix itself before it is written — the same pass the captions got,
+      // reaching wider because these times are guesses.
+      const mix = await st.cutMixSamples();
+      const report = mix
+        ? syncToSpeech(timed, mix.samples, mix.sampleRate, { reach: 0.6 })
+        : null;
+      st.setLaneCues(lane, report?.evidence ? report.items : timed);
       if (typeof input.look === "string") {
         const look = requireTextLook(input.look);
         st.setSubtitlesView({
@@ -1633,14 +1642,140 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         if (paintsFrame(look, input.background)) st.setBackground(look.frame.background);
       }
       const heardWords = cueWords(cues).length;
+      // What the track now carries, which is what the assistant must reason
+      // against: the aligned times when the mix moved them, the transcript's
+      // own otherwise.
+      const written = report?.evidence ? report.items : timed;
       return {
         track: lane,
-        count: timed.length,
-        lines: timed.slice(0, 40).map((l) => ({ start: l.start, end: l.end, text: l.text })),
-        ...(timed.length > 40 ? { linesTruncated: true } : {}),
+        count: written.length,
+        lines: written.slice(0, 40).map((l) => ({ start: l.start, end: l.end, text: l.text })),
+        ...(written.length > 40 ? { linesTruncated: true } : {}),
+        aligned: report?.evidence === true,
+        ...(report?.evidence ? { movedOntoSpeech: report.moved.length, maxShift: report.maxShift } : {}),
         note:
           `Your text is on the track verbatim, timed against ${heardWords} recognized words. ` +
-          "Words the recognizer missed took interpolated times, so spot-check a line or two with seek + capture_frame and retime with update_cue.",
+          (report?.evidence
+            ? `${report.moved.length} line(s) then moved onto the speech in the mix itself (farthest ${report.maxShift}s). `
+            : "The mix offered no readable speech edges to check them against, so the lines carry the transcript's clock alone. ") +
+          "Spot-check a line or two with seek + capture_frame, and retime with update_cue.",
+      };
+  },
+
+  align_to_audio: async (s, input) => {
+      if (!s.projectId) throw new ToolError("No project open.");
+      const target = input.target === "elements" ? "elements" : "captions";
+      const reach = isNum(input.reach) ? clamp(input.reach, 0.1, 2) : 0.6;
+      const only = Array.isArray(input.ids) ? new Set(input.ids.map(String)) : null;
+      const mix = await useEditor.getState().cutMixSamples();
+      if (!mix)
+        throw new ToolError(
+          "Nothing audible on the timeline to measure against — the audio or video the words belong to has to be in the cut."
+        );
+
+      if (target === "captions") {
+        const lane = targetSubtitleTrack(input);
+        // The whole track is measured even when only some cues are being
+        // written: the pass weighs the transcript against the mix as a whole
+        // before it moves anything, and a handful of cues out of a hundred
+        // look like a mix about something else.
+        const cues = laneCues(useEditor.getState().subtitles, lane);
+        if (cues.length === 0)
+          throw new ToolError(`Subtitle track ${lane} has no captions to align.`);
+        const report = syncToSpeech(cues, mix.samples, mix.sampleRate, { reach });
+        // Writing part of an aligned track fits the written cues between the
+        // ones left where they were; captions on a track may not overlap.
+        const writes = partialWrites(report.items, cues, (c) => !only || only.has(c.id));
+        if (report.evidence)
+          useEditor.getState().retimeItems({
+            cues: writes.map((c) => ({
+              id: c.id,
+              start: c.start,
+              end: c.end,
+              ...(c.words ? { words: c.words } : {}),
+            })),
+          });
+        return {
+          target,
+          track: lane,
+          count: cues.length,
+          ...syncResult(report, cues, only),
+        };
+      }
+
+      const overlays = useEditor.getState().overlays;
+      const row = isNum(input.lane) ? Math.max(0, Math.round(input.lane)) : 0;
+      const picked = only
+        ? [...only].map((id) => requireItem(overlays, id, "overlay element"))
+        : overlays.filter((o) => (o.lane ?? 0) === row);
+      if (picked.length === 0)
+        throw new ToolError(`No elements on row ${row} to align — pass ids, or the row the run sits on.`);
+
+      // Rows are measured whole, one at a time. A row's items are what may not
+      // overlap each other, and the fit against the mix is read over the whole
+      // run rather than the few elements being written.
+      const lanes = [...new Set(picked.map((o) => o.lane ?? 0))].sort((a, b) => a - b);
+      const writes = new Map<string, { id: string; start: number; end: number }>();
+      const partners: { from: { start: number; end: number }; to: { start: number; end: number } }[] = [];
+      const reports = lanes.map((lane) => {
+        const items = overlays
+          .filter((o) => (o.lane ?? 0) === lane)
+          .sort((a, b) => a.start - b.start);
+        const report = syncToSpeech(
+          items.map((o) => ({
+            id: o.id,
+            text: isTextOverlay(o) ? o.text : o.kind ?? "element",
+            start: o.start,
+            end: o.end,
+          })),
+          mix.samples,
+          mix.sampleRate,
+          { reach }
+        );
+        if (report.evidence) {
+          // Part of a row may be written while the rest stays; each written
+          // item is fitted between the neighbours it lands among, since items
+          // sharing a row may never overlap.
+          const fitted = partialWrites(report.items, items, (next) =>
+            picked.some((p) => p.id === next.id)
+          );
+          for (const next of fitted) {
+            const was = items.find((o) => o.id === next.id)!;
+            writes.set(next.id, { id: next.id, start: next.start, end: next.end });
+            // Only a move that is actually being written can carry a partner
+            // with it: a card following a word that stayed put would be the
+            // desync this ride-along exists to prevent.
+            partners.push({ from: { start: was.start, end: was.end }, to: next });
+          }
+        }
+        return { lane, items, report };
+      });
+
+      // A look's color cards sit on the row under its words, one per line and
+      // timed to it. They belong to the line, so an element elsewhere holding
+      // exactly a moved item's old window rides along — otherwise the words
+      // land on the speech and their cards stay behind.
+      const EPS = 0.05;
+      for (const o of overlays) {
+        if (writes.has(o.id) || lanes.includes(o.lane ?? 0)) continue;
+        const pair = partners.find(
+          (p) => Math.abs(p.from.start - o.start) <= EPS && Math.abs(p.from.end - o.end) <= EPS
+        );
+        if (pair) writes.set(o.id, { id: o.id, start: pair.to.start, end: pair.to.end });
+      }
+      if (writes.size > 0) useEditor.getState().retimeItems({ overlays: [...writes.values()] });
+      return {
+        target,
+        lane: lanes[0],
+        ...(lanes.length > 1 ? { lanes } : {}),
+        count: reports.reduce((n, r) => n + r.items.length, 0),
+        ...syncResult(
+          mergeReports(reports.map((r) => r.report)),
+          reports.flatMap((r) =>
+            r.items.map((o) => ({ id: o.id, text: isTextOverlay(o) ? o.text : o.kind ?? "element" }))
+          ),
+          only
+        ),
       };
   },
 
@@ -3089,6 +3224,8 @@ export const MEDIA_RUNTIME_TOOLS: ReadonlySet<string> = new Set([
   "subtitles_generate",
   "captions_generate",
   "subtitles_from_visuals",
+  "sync_lyrics",
+  "align_to_audio",
   "stock_add",
 ]);
 
@@ -3181,14 +3318,78 @@ function cueWords(cues: { start: number; end: number; text: string; words?: Time
     parts.forEach((w, i) => out.push({ w, t0: c.start + step * i, t1: c.start + step * (i + 1) }));
   }
   return out;
+}
+
+/** An alignment pass as the model reads it. The audio declining to testify is
+ * a result of its own, never a silent success: a caller told "0 moved" without
+ * `evidence` would report a mix it could not read as captions already in sync. */
+function syncResult(
+  report: SyncReport<{ id: string; text: string; start: number; end: number }>,
+  items: { id: string; text: string }[],
+  only: ReadonlySet<string> | null
+) {
+  if (!report.evidence)
+    return {
+      evidence: false,
+      moved: 0,
+      note:
+        "The mix has no readable speech edges over these times — digital silence, a bed of music that never lets up, " +
+        "or speech that does not line up with them at all. Nothing moved, and nothing was confirmed either: check by ear with listen_audio.",
+    };
+  const moved = report.moved.filter((m) => !only || only.has(report.items[m.index].id));
+  const sizes = moved.map((m) => Math.abs(m.shift)).sort((a, b) => a - b);
+  const median = sizes.length > 0 ? sizes[Math.floor(sizes.length / 2)] : 0;
+  const worst = sizes.length > 0 ? sizes[sizes.length - 1] : 0;
+  return {
+    evidence: true,
+    moved: moved.length,
+    medianShift: median,
+    maxShift: worst,
+    items: moved.slice(0, 40).map((m) => ({
+      id: report.items[m.index].id,
+      text: items.find((i) => i.id === report.items[m.index].id)?.text,
+      start: m.start,
+      end: m.end,
+      shift: m.shift,
+    })),
+    ...(moved.length > 40 ? { itemsTruncated: true } : {}),
+    note:
+      moved.length === 0
+        ? "Every edge was already on the speech; nothing needed moving."
+        : `${moved.length} moved onto the speech in the mix itself (median ${median}s, farthest ${worst}s). Times sitting inside continuous speech, where nothing audible marks a boundary, kept what they had.`,
+  };
+}
+
+/** Several rows' passes read as one. Indexes are rebased onto the concatenated
+ * item list the caller reports from. */
+function mergeReports<T extends { id: string; text: string; start: number; end: number }>(
+  reports: SyncReport<T>[]
+): SyncReport<T> {
+  const items: T[] = [];
+  const moved: SyncReport<T>["moved"] = [];
+  let evidence = false;
+  for (const r of reports) {
+    const base = items.length;
+    items.push(...r.items);
+    moved.push(...r.moved.map((m) => ({ ...m, index: base + m.index })));
+    evidence ||= r.evidence;
+  }
+  const sizes = moved.map((m) => Math.abs(m.shift)).sort((a, b) => a - b);
+  return {
+    items,
+    evidence,
+    moved,
+    medianShift: sizes.length > 0 ? sizes[Math.floor(sizes.length / 2)] : 0,
+    maxShift: sizes.length > 0 ? sizes[sizes.length - 1] : 0,
+  };
+}
+
 /** Whether dressing the project in this look repaints the frame color. A look
  * that keeps the frame only repaints it when the caller asked for it in so
  * many words — adding words to a cut is not a reason to recolor it. */
 function paintsFrame(look: TextLook, background: unknown): boolean {
   if (typeof background === "boolean") return background;
   return look.keepsFrame !== true;
-}
-
 }
 
 /** The lines a text sequence should place: the ones passed in, or the caption

@@ -1,0 +1,221 @@
+{
+  "cases": [
+    {
+      "name": "captions/lead-in",
+      "what": "The silence before each sentence billed to its first word — the on-device transcriber's habit.",
+      "evidence": true,
+      "before": {
+        "lines": 7,
+        "medianStart": 0.004,
+        "p90Start": 0.9,
+        "worstStart": 0.9,
+        "within100ms": 0.571,
+        "within250ms": 0.571
+      },
+      "after": {
+        "lines": 7,
+        "medianStart": 0.001,
+        "p90Start": 0.004,
+        "worstStart": 0.004,
+        "within100ms": 1,
+        "within250ms": 1
+      },
+      "budget": {
+        "medianStart": 0.1,
+        "p90Start": 0.15,
+        "within250ms": 1
+      },
+      "breaches": []
+    },
+    {
+      "name": "captions/lag",
+      "what": "Every cue a quarter second late; the shape is right, the placement is not.",
+      "evidence": true,
+      "before": {
+        "lines": 6,
+        "medianStart": 0.251,
+        "p90Start": 0.255,
+        "worstStart": 0.255,
+        "within100ms": 0,
+        "within250ms": 0.333
+      },
+      "after": {
+        "lines": 6,
+        "medianStart": 0.001,
+        "p90Start": 0.005,
+        "worstStart": 0.005,
+        "within100ms": 1,
+        "within250ms": 1
+      },
+      "budget": {
+        "medianStart": 0.1,
+        "p90Start": 0.15,
+        "within250ms": 1
+      },
+      "breaches": []
+    },
+    {
+      "name": "captions/drift",
+      "what": "A clock that slips as the chunk runs on, ending 0.6s out — the hosted transcriber's, unchunked. The tail budget allows one cue: once the slip exceeds the line gap, a caption's true onset sits mid-speech in the previous line's run, which no waveform can testify to. Chunking bounds real drift far under that (cloudTranscribe.ts).",
+      "evidence": true,
+      "before": {
+        "lines": 6,
+        "medianStart": 0.305,
+        "p90Start": 0.506,
+        "worstStart": 0.506,
+        "within100ms": 0.167,
+        "within250ms": 0.5
+      },
+      "after": {
+        "lines": 6,
+        "medianStart": 0.013,
+        "p90Start": 0.846,
+        "worstStart": 0.846,
+        "within100ms": 0.667,
+        "within250ms": 0.833
+      },
+      "budget": {
+        "medianStart": 0.12,
+        "p90Start": 0.9,
+        "within250ms": 0.8
+      },
+      "breaches": []
+    },
+    {
+      "name": "captions/noisy-room",
+      "what": "The same lag over a room 22dB louder — a noise floor close enough to the voice to blur its edges.",
+      "evidence": true,
+      "before": {
+        "lines": 6,
+        "medianStart": 0.251,
+        "p90Start": 0.255,
+        "worstStart": 0.255,
+        "within100ms": 0,
+        "within250ms": 0.333
+      },
+      "after": {
+        "lines": 6,
+        "medianStart": 0.002,
+        "p90Start": 0.01,
+        "worstStart": 0.01,
+        "within100ms": 1,
+        "within250ms": 1
+      },
+      "budget": {
+        "medianStart": 0.12,
+        "p90Start": 0.2,
+        "within250ms": 1
+      },
+      "breaches": []
+    },
+    {
+      "name": "captions/music-bed",
+      "what": "A steady bed under the whole cut: the gaps between lines are the only readable quiet.",
+      "evidence": true,
+      "before": {
+        "lines": 6,
+        "medianStart": 0.251,
+        "p90Start": 0.255,
+        "worstStart": 0.255,
+        "within100ms": 0,
+        "within250ms": 0.333
+      },
+      "after": {
+        "lines": 6,
+        "medianStart": 0.001,
+        "p90Start": 0.005,
+        "worstStart": 0.005,
+        "within100ms": 1,
+        "within250ms": 1
+      },
+      "budget": {
+        "medianStart": 0.15,
+        "p90Start": 0.3,
+        "within250ms": 0.9
+      },
+      "breaches": []
+    },
+    {
+      "name": "captions/fast-cadence",
+      "what": "Lines a quarter second apart, where a snap that overshoots lands on the wrong line.",
+      "evidence": true,
+      "before": {
+        "lines": 6,
+        "medianStart": 0.005,
+        "p90Start": 0.4,
+        "worstStart": 0.4,
+        "within100ms": 0.667,
+        "within250ms": 0.667
+      },
+      "after": {
+        "lines": 6,
+        "medianStart": 0.003,
+        "p90Start": 0.005,
+        "worstStart": 0.005,
+        "within100ms": 1,
+        "within250ms": 1
+      },
+      "budget": {
+        "medianStart": 0.12,
+        "p90Start": 0.2,
+        "within250ms": 1
+      },
+      "breaches": []
+    },
+    {
+      "name": "lyrics/half-heard",
+      "what": "The user's lyrics against a transcript that missed a third of the words and misheard a quarter.",
+      "evidence": true,
+      "before": {
+        "lines": 8,
+        "medianStart": 0.193,
+        "p90Start": 0.697,
+        "worstStart": 0.697,
+        "within100ms": 0,
+        "within250ms": 0.625
+      },
+      "after": {
+        "lines": 8,
+        "medianStart": 0.004,
+        "p90Start": 0.006,
+        "worstStart": 0.006,
+        "within100ms": 1,
+        "within250ms": 1
+      },
+      "budget": {
+        "medianStart": 0.12,
+        "p90Start": 0.25,
+        "within250ms": 0.9
+      },
+      "breaches": []
+    },
+    {
+      "name": "lyrics/mostly-unheard",
+      "what": "Singing the recognizer barely follows: two words in three unheard, so most line times are interpolated.",
+      "evidence": true,
+      "before": {
+        "lines": 8,
+        "medianStart": 0.296,
+        "p90Start": 0.84,
+        "worstStart": 0.84,
+        "within100ms": 0.125,
+        "within250ms": 0.5
+      },
+      "after": {
+        "lines": 8,
+        "medianStart": 0.004,
+        "p90Start": 0.006,
+        "worstStart": 0.006,
+        "within100ms": 1,
+        "within250ms": 1
+      },
+      "budget": {
+        "medianStart": 0.15,
+        "p90Start": 0.35,
+        "within250ms": 0.85
+      },
+      "breaches": []
+    }
+  ],
+  "failed": []
+}
