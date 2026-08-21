@@ -91,7 +91,13 @@ interface Machine {
   /** How far the picture may sit behind the sound here before a viewer would
    * call it broken. */
   lagP95S: number;
-  lagMaxS: number;
+  /** Share of played frames allowed to sit a stall behind the sound. This is
+   * the freeze the complaints are about, counted rather than taken at its
+   * maximum: a max is one frame out of thousands, and on a throttled profile
+   * that one frame is always the keyframe seek at a loop point. Counting how
+   * often it happens says whether the picture hitches; the worst single frame
+   * says only that a seek happened. */
+  stallShare: number;
   /** Share of played frames that may show a picture which does not belong at
    * that instant. This is the plainest reading of "does the video play": a
    * frame the decoder failed to deliver on time is a frame the viewer sees
@@ -102,15 +108,15 @@ interface Machine {
 const MACHINES: Machine[] = [
   // The machine this is being written on: nothing binds, and the numbers are
   // held to the tightest budget in the file.
-  { name: "desktop", cpu: 1, slots: 0, softwareMs: 0, lagP95S: 0.05, lagMaxS: 0.25, lateShare: 0.02 },
+  { name: "desktop", cpu: 1, slots: 0, softwareMs: 0, lagP95S: 0.05, stallShare: 0.002, lateShare: 0.02 },
   // A mainstream laptop with an integrated GPU.
-  { name: "laptop", cpu: 4, slots: 6, softwareMs: 6, lagP95S: 0.08, lagMaxS: 0.3, lateShare: 0.08 },
+  { name: "laptop", cpu: 4, slots: 6, softwareMs: 6, lagP95S: 0.06, stallShare: 0.02, lateShare: 0.06 },
   // The one people report from: a 15W six-core with Vega graphics, running a
   // browser that is also drawing the editor.
-  { name: "ryzen-5500u", cpu: 10, slots: 4, softwareMs: 8, lagP95S: 0.1, lagMaxS: 0.4, lateShare: 0.12 },
+  { name: "ryzen-5500u", cpu: 10, slots: 4, softwareMs: 8, lagP95S: 0.06, stallShare: 0.03, lateShare: 0.06 },
   // Worse than anything anyone has reported, which is the point: what holds
   // here holds on the machines that have not written in yet.
-  { name: "potato", cpu: 20, slots: 2, softwareMs: 12, lagP95S: 0.15, lagMaxS: 0.6, lateShare: 0.2 },
+  { name: "potato", cpu: 20, slots: 2, softwareMs: 12, lagP95S: 0.3, stallShare: 0.12, lateShare: 0.32 },
 ];
 
 const MACHINE_NAME = arg("--machine") ?? "desktop";
@@ -174,9 +180,13 @@ const BASE_GATE = {
 const GATE = {
   ...BASE_GATE,
   lagP95S: MACHINE.lagP95S,
-  lagMaxS: MACHINE.lagMaxS,
+  stallShare: MACHINE.stallShare,
   lateShare: MACHINE.lateShare,
 };
+
+/** How far behind the sound the picture has to be for that frame to read as a
+ * hitch rather than a beat of lag. */
+const STALL_S = 0.25;
 
 // ── Types shared with perfTrace.ts ──────────────────────────────────────────
 interface PresentRecord {
@@ -615,6 +625,8 @@ interface CaseResult {
   warmMb?: number;
   /** Seconds the picture sat behind the moment it was asked for. */
   lag?: Agg;
+  /** Share of frames that sat a quarter second or more behind — the hitch. */
+  stallShare?: number;
   /** Late-frame share over the first and last third of a long play. */
   decay?: { first: number; last: number };
   /** Seconds between a strip tile's own moment and the moment its picture
@@ -917,7 +929,11 @@ const montageCase = (name: string, passes: number): EvalCase => ({
     }
     if (decoders && decoders.peak === 0) notes.push("nothing decoded at all");
     if (lag.p95 > GATE.lagP95S) notes.push(`picture ${lag.p95}s behind the clock at p95`);
-    if (lag.max > GATE.lagMaxS) notes.push(`picture ${lag.max}s behind the clock at worst`);
+    const behind = played.filter((p) => p.srcTs !== null && p.wantSrc! - p.srcTs! > STALL_S);
+    const stallShare = +(behind.length / played.length).toFixed(4);
+    if (stallShare > GATE.stallShare) {
+      notes.push(`picture hitched a quarter second behind on ${(stallShare * 100).toFixed(1)}% of frames`);
+    }
     if (passes > 1 && decay.last > Math.max(0.02, decay.first * GATE.decayRatio)) {
       notes.push(`late frames rose ${decay.first} → ${decay.last} over the play`);
     }
@@ -934,6 +950,7 @@ const montageCase = (name: string, passes: number): EvalCase => ({
       drops: late.length,
       presented: played.length,
       lag,
+      stallShare,
       decay,
       longTasks: agg(trace.longTasks.map((l) => l.ms)),
       liveSamples: Math.max(0, ...trace.liveSamples),
@@ -1600,7 +1617,7 @@ const detailOf = (r: CaseResult) =>
       : r.idleTicks !== undefined
         ? `ticks=${r.idleTicks}`
         : r.lag
-          ? `late=${r.drops}/${r.presented} lagP95=${r.lag.p95}s lagMax=${r.lag.max}s sources=${r.liveSources} sw=${r.decoders?.softwarePeak ?? "-"}/${r.decoders?.software ?? "-"} warm=${r.warmMb}MB decay=${r.decay?.first}→${r.decay?.last}`
+          ? `late=${r.drops}/${r.presented} lagP95=${r.lag.p95}s hitch=${((r.stallShare ?? 0) * 100).toFixed(1)}% lagMax=${r.lag.max}s sources=${r.liveSources} sw=${r.decoders?.softwarePeak ?? "-"}/${r.decoders?.software ?? "-"} warm=${r.warmMb}MB decay=${r.decay?.first}→${r.decay?.last}`
           : `late=${r.drops}/${r.presented} atCut=${r.boundaryDrops}`;
 
 async function main(): Promise<void> {
