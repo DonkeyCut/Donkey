@@ -19,7 +19,7 @@ import {
   paintPoster,
   readPoster,
 } from "@/cut/lib/posterCache";
-import { setPreviewCanvas } from "@/cut/lib/previewCanvas";
+import { resizePreviewSurface, setPreviewCanvas } from "@/cut/lib/previewCanvas";
 import { CLIP_MAX_ZOOM, clipCovers, clipKeyed, clipPoseAt, clipZoom, contentRect, frameOf, isFullRect, rectOf, REGION_MAX_SCALE, type Aspect, type ClipSpan, type FrameRect, type MediaAsset, type VideoClip } from "@/cut/lib/types";
 import { hasMaskKeys, type MaskKey } from "@donkeycut/effects-kit";
 import { cn } from "@/lib/utils";
@@ -146,6 +146,9 @@ const MAX_ZOOM = 32;
 const ZOOM_STEPS = [0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32];
 /** How long the zoom control lingers after the last camera move. */
 const HUD_LINGER_MS = 2600;
+/** How still the camera has to be before the backing store re-resolves to the
+ * size on screen. */
+const SURFACE_SETTLE_MS = 220;
 
 /** The stage's corner rounding: tiny, and gone once the picture is small on
  * screen. */
@@ -307,11 +310,51 @@ export function Preview() {
   // a few hundred pixels wide put every grade, look and mask pass through
   // millions of pixels nobody could see; the export renders at full size on its
   // own surface, so nothing about the file changes.
-  const surface = useMemo(() => {
+  const wantSurface = useMemo(() => {
     const dpr = typeof window === "undefined" ? 1 : Math.min(2, window.devicePixelRatio || 1);
     const w = Math.max(2, Math.min(frame.w, Math.round(stage.w * dpr)));
     return { w, h: Math.max(2, Math.round((w * frame.h) / frame.w)) };
   }, [stage.w, frame.w, frame.h]);
+
+  /**
+   * The resolution the store actually holds, which is not the same thing as
+   * the size on screen.
+   *
+   * Re-resolving costs the picture: the store is erased, and the decoders are
+   * keyed to their decode height, so a new height opens sources that have yet
+   * to produce a frame. Doing that on every step of a zoom is the flicker —
+   * the resize empties the canvas and the replacement frame is not there yet.
+   * So the resolution follows the screen only once the picture is standing
+   * still: never mid-playback, and only after the camera has settled. In
+   * between, the pixels already on the canvas are scaled to the box, which
+   * costs sharpness and nothing else.
+   */
+  const playing = useEditor((s) => s.playing);
+  const [surface, setSurface] = useState(wantSurface);
+  // What the store was last resolved for. The wait below is there to absorb a
+  // camera in motion, so everything else lands at once: the opening fit, and a
+  // change of project aspect, which the store has to match or the picture is
+  // squashed into the wrong shape.
+  const resolved = useRef({ frameW: 0, fitted: false });
+  useEffect(() => {
+    if (wantSurface.w === surface.w && wantSurface.h === surface.h) return;
+    const camera = resolved.current.fitted && resolved.current.frameW === frame.w;
+    resolved.current = { frameW: frame.w, fitted: true };
+    if (!camera) {
+      setSurface(wantSurface);
+      return;
+    }
+    if (playing) return;
+    const id = window.setTimeout(() => setSurface(wantSurface), SURFACE_SETTLE_MS);
+    return () => window.clearTimeout(id);
+  }, [wantSurface, surface, playing, frame.w]);
+
+  // The store is written here rather than as a rendered attribute, because
+  // assigning one erases the canvas and the picture has to come across.
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (canvas) resizePreviewSurface(canvas, surface.w, surface.h);
+  }, [surface]);
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -538,8 +581,9 @@ export function Preview() {
           <StagePictureFx>
           <canvas
             ref={canvasRef}
-            width={surface.w}
-            height={surface.h}
+            // The backing store is sized in a layout effect, which carries the
+            // picture across the resize; rendering it as an attribute would
+            // blank the canvas on every change.
             className="block size-full"
             // Drag the viewport to reference what's on screen: the clip under
             // the playhead travels as a media drag (timeline placement, chat
