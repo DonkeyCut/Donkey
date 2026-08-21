@@ -1,9 +1,9 @@
 "use client";
 
 import {
+  ALL_EFFECT_IDS,
   autoGradeFromImageData,
   colorStatsFromImageData,
-  EFFECT_IDS,
   GRADE_BASIC_FIELDS,
   GRADE_PRESETS,
   HSL_BANDS,
@@ -388,8 +388,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
 
   add_effect: (s, input) => {
     const effect = String(input.effect ?? "");
-    if (!(EFFECT_IDS as string[]).includes(effect))
-      throw new ToolError(`effect must be one of ${EFFECT_IDS.join(", ")}.`);
+    if (!(ALL_EFFECT_IDS as string[]).includes(effect))
+      throw new ToolError(`effect must be one of ${ALL_EFFECT_IDS.join(", ")}.`);
     if (isNum(input.start)) s.seek(input.start);
     s.addEffect(effect as EffectId, aimedLane(input));
     const sel = useEditor.getState().selection;

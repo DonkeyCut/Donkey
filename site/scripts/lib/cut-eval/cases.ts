@@ -429,6 +429,32 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       },
     },
     {
+      // A treatment on the SOUND is the same effect element as a treatment on
+      // the picture: "sound like a phone call" over a clip is one add_effect
+      // with the telephone id spanning that clip. Reaching for the per-clip
+      // audio knobs (volume, fades, duck) instead misses the ask.
+      name: "audio-effect-single-tool",
+      bucket: "single-tool",
+      input: () => [
+        userTurn("make the second clip sound like it's coming through a phone", {
+          state: TWO_CLIP_STATE,
+        }),
+      ],
+      reply: /phone|telephone|effect/i,
+      requiredTools: ["add_effect"],
+      maxToolCalls: 3,
+      state: TWO_CLIP_STATE,
+      simulate: () => (name, args) => {
+        if (name !== "add_effect") return undefined;
+        if (args.effect !== "telephone") throw new Error(`effect ${args.effect} — expected telephone`);
+        const start = Number(args.start ?? 0);
+        const end = Number(args.end ?? start + 3);
+        if (start > 6.5 || end < 11.5)
+          throw new Error(`effect spans ${start}..${end} — the second clip runs 6..12.5`);
+        return { id: "fx1", effect: "telephone", start, end, amount: Number(args.amount) || 0.5 };
+      },
+    },
+    {
       // Last pick wins per edge: swapping a crossfading joint for an entrance
       // animation is a set_animation — the override clears the transition
       // itself (an explicit set_transition 0 first is fine, not required).
