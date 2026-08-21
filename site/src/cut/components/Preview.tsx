@@ -145,6 +145,24 @@ const HUD_LINGER_MS = 2600;
  * screen. */
 const stageRadius = (w: number, h: number) => (Math.min(w, h) < 140 ? 0 : 6);
 
+/** How much of the picture has to stay inside the pane to count as on screen. */
+const ONSCREEN_MIN_PX = 24;
+
+/** Whether any of the picture still lands in the pane. A pan or a zoom can
+ * carry the whole stage past an edge, and a pane showing nothing but backdrop
+ * is the moment the camera control has to stay up. */
+function pictureInPane(
+  cam: { x: number; y: number },
+  stage: { w: number; h: number },
+  pane: { w: number; h: number }
+): boolean {
+  const left = (pane.w - stage.w) / 2 + cam.x;
+  const top = (pane.h - stage.h) / 2 + cam.y;
+  const visX = Math.min(pane.w, left + stage.w) - Math.max(0, left);
+  const visY = Math.min(pane.h, top + stage.h) - Math.max(0, top);
+  return visX >= Math.min(ONSCREEN_MIN_PX, stage.w) && visY >= Math.min(ONSCREEN_MIN_PX, stage.h);
+}
+
 export function Preview() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -162,15 +180,22 @@ export function Preview() {
   const [zoom, setZoom] = useState(1);
   const camRef = useRef({ zoom: 1, x: 0, y: 0 });
   const boxRef = useRef<HTMLDivElement>(null);
+  // Whether the picture has left the pane entirely. Every camera move funnels
+  // through applyPan, so that is where it gets decided; the geometry it reads
+  // is mirrored into a ref because a pan runs between renders.
+  const [lost, setLost] = useState(false);
+  const lostRef = useRef(false);
+  const geomRef = useRef({ stage: { w: 0, h: 0 }, pane: { w: 0, h: 0 } });
   const applyPan = useCallback(() => {
     const box = boxRef.current;
     if (!box) return;
     const { x, y } = camRef.current;
     box.style.transform = x || y ? `translate(${x}px, ${y}px)` : "";
+    const g = geomRef.current;
+    const gone = g.stage.w > 0 && !pictureInPane(camRef.current, g.stage, g.pane);
+    lostRef.current = gone;
+    setLost(gone);
   }, []);
-  // After every commit, so the transform a zoom computed rides the same paint
-  // as the stage's new size.
-  useLayoutEffect(applyPan);
   const refitRef = useRef(() => {});
   // The unclipped layer the selected element's chrome portals into, so an
   // outline hanging past the frame edge stays visible and grabbable.
@@ -191,8 +216,18 @@ export function Preview() {
     };
   }, [base, pane, zoom]);
 
+  // After every commit, so the transform a zoom computed rides the same paint
+  // as the stage's new size, and the picture is judged against the geometry
+  // that commit settled on.
+  useLayoutEffect(() => {
+    geomRef.current = { stage, pane };
+    applyPan();
+  });
+
   // The zoom control shows while the camera is moving and lingers a moment
-  // after, the way the browser's own zoom bubble does.
+  // after, the way the browser's own zoom bubble does. It stays up for as long
+  // as the picture is off screen, which is the one state a blank pane cannot
+  // be recovered from without it.
   const [hud, setHud] = useState({ shown: false, open: false });
   const hudTimer = useRef(0);
   const hudHeld = useRef(false);
@@ -200,7 +235,7 @@ export function Preview() {
     setHud((h) => (h.shown ? h : { ...h, shown: true }));
     window.clearTimeout(hudTimer.current);
     hudTimer.current = window.setTimeout(() => {
-      if (!hudHeld.current) setHud({ shown: false, open: false });
+      if (!hudHeld.current && !lostRef.current) setHud({ shown: false, open: false });
     }, HUD_LINGER_MS);
   }, []);
   useEffect(() => () => window.clearTimeout(hudTimer.current), []);
@@ -547,7 +582,7 @@ export function Preview() {
       </div>
       <ZoomHud
         zoom={zoom}
-        shown={hud.shown}
+        shown={hud.shown || lost}
         open={hud.open}
         onToggle={() => {
           setHud((h) => ({ shown: true, open: !h.open }));
@@ -569,9 +604,9 @@ export function Preview() {
 
 /**
  * The camera's zoom control, in the pane's top-right corner. It appears while
- * the camera moves and lingers a moment after; the round button opens a bubble
- * with the zoom level, a step in each direction, and Reset, which refits the
- * picture to the pane.
+ * the camera moves and lingers a moment after, and holds while the picture is
+ * off screen; the round button opens a bubble with the zoom level, a step in
+ * each direction, and Reset, which refits the picture to the pane.
  */
 function ZoomHud({
   zoom,
