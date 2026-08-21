@@ -42,9 +42,9 @@ import { readProjectThreads, writeActiveChat } from "@/cut/lib/chatThreads";
 import { backTarget, useCutBase } from "@/cut/lib/nav";
 import { useOnboardingCover } from "@/cut/lib/onboarding";
 import { requestSidePanel } from "@/cut/lib/panelRequest";
+import { reportSwallowed } from "@/cut/lib/report";
 import { resolveProjectPlacement } from "@/cut/lib/residency";
 import {
-import { reportSwallowed } from "@/cut/lib/report";
   docAudioClips,
   docClips,
   docOverlays,
