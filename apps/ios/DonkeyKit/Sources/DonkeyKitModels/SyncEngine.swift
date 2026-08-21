@@ -355,7 +355,12 @@ public final class SyncEngine {
     /// Folders carry no tombstone in the cloud, so the listing is the truth:
     /// what it holds is applied, and a folder this phone has clean that the
     /// listing does not name was deleted on the other side.
-    private func mergeRemoteFolders(_ remote: [RemoteNoteFolder]) throws {
+    ///
+    /// That truth holds only for a listing that reported folders. A nil one
+    /// came from a site that does not speak folders, and its silence leaves
+    /// this phone's folders where they are.
+    private func mergeRemoteFolders(_ remote: [RemoteNoteFolder]?) throws {
+        guard let remote else { return }
         let pendingDeletes = Set(
             ((try? journal.tombstones()) ?? [])
                 .filter { $0.kind == .noteFolder }

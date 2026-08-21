@@ -128,11 +128,16 @@ nonisolated public struct RemoteNoteFolder: Equatable, Sendable {
 
 /// One listing of the account's notes: the notes themselves, tombstones
 /// included, and every folder they file into.
+///
+/// `folders` is nil when the listing carried no folder key at all — an older
+/// site speaking to a newer phone. A reader treats that as "this response says
+/// nothing about folders", which is different from an empty list meaning the
+/// account has none.
 nonisolated public struct RemoteNotes: Equatable, Sendable {
     public var notes: [RemoteNote]
-    public var folders: [RemoteNoteFolder]
+    public var folders: [RemoteNoteFolder]?
 
-    public init(notes: [RemoteNote], folders: [RemoteNoteFolder]) {
+    public init(notes: [RemoteNote], folders: [RemoteNoteFolder]?) {
         self.notes = notes
         self.folders = folders
     }

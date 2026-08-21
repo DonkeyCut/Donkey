@@ -334,7 +334,8 @@ extension CutCloudClient: CloudSyncServicing {
             },
             // Folders are keyed by the id whichever client made them chose,
             // and both clients mint UUIDs; anything else is not this phone's.
-            folders: (response.folders ?? []).compactMap { dto in
+            // A missing key stays nil so the merge can tell it from "none".
+            folders: response.folders?.compactMap { dto in
                 guard let id = UUID(uuidString: dto.id) else { return nil }
                 return RemoteNoteFolder(
                     id: id,

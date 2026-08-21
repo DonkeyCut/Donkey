@@ -137,6 +137,9 @@ import Testing
         var downloads: [String] = []
         var folders: [UUID: RemoteNoteFolder] = [:]
         var deletedFolders: [UUID] = []
+        /// Whether the listing carries a folders key at all. A site that
+        /// predates folders answers without one.
+        var reportsFolders = true
         /// What an import job answers with once it is asked about.
         var imported: JobOutcome<ImportedLink> = .done(
             ImportedLink(assetId: "asset-link", fileName: "source.mp4", isVideo: true)
@@ -176,7 +179,10 @@ import Testing
         func fetchUsage() async throws -> StorageUsage { usage }
 
         func fetchNotes() async throws -> RemoteNotes {
-            RemoteNotes(notes: Array(notes.values), folders: Array(folders.values))
+            RemoteNotes(
+                notes: Array(notes.values),
+                folders: reportsFolders ? Array(folders.values) : nil
+            )
         }
 
         func putNote(_ note: RemoteNote) async throws -> RemoteNote {
@@ -413,6 +419,22 @@ import Testing
         await rig.engine.run()
         #expect(rig.ideas.folders.isEmpty)
         #expect(rig.ideas.notes(in: nil).count == 1)
+    }
+
+    @Test func aListingWithoutFoldersKeepsTheOnesHere() async throws {
+        let rig = try makeRig()
+        let folder = try #require(rig.ideas.addFolder(named: "Scripts"))
+        rig.ideas.openEditor(in: folder.id)
+        rig.ideas.draft?.body = "filed"
+        let note = try #require(rig.ideas.saveDraft())
+        await rig.engine.run()
+        // A site that does not speak folders answers without the key. Its
+        // silence says nothing about folders, so this phone keeps its own —
+        // an absent key is not an empty list.
+        rig.cloud.reportsFolders = false
+        await rig.engine.run()
+        #expect(rig.ideas.folders.map(\.id) == [folder.id])
+        #expect(rig.ideas.notes(in: folder.id).map(\.id) == [note.id])
     }
 
     @Test func folderDeletedHereReachesTheCloud() async throws {
