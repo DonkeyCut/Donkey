@@ -33,6 +33,9 @@ const args = parseArgs(process.argv.slice(2))
 const bundleId = args["bundle-id"] ?? "com.donkeycut.donkeycut"
 const uploadedAfter = Number(args["uploaded-after"] ?? 0) * 1000
 const waitMs = Number(args["wait-minutes"] ?? 60) * 60_000
+// Beta review runs on Apple's clock, so the wait for the slot is measured in
+// hours rather than minutes.
+const reviewWaitMs = Number(args["review-wait-minutes"] ?? 720) * 60_000
 
 let token = ""
 
@@ -82,20 +85,47 @@ async function distribute() {
     log(`Added ${build.attributes.version} to "${group.attributes.name}"`)
   }
 
-  // External testers only see a build once beta review clears it. Submitting
-  // here is what makes the release automatic; a build already in review answers
-  // 409 and is left alone.
-  await api(`/v1/betaAppReviewSubmissions`, {
-    method: "POST",
-    body: {
-      data: {
-        type: "betaAppReviewSubmissions",
-        relationships: { build: { data: { type: "builds", id: build.id } } },
+  await submitForReview(build)
+}
+
+// External testers only see a build once beta review clears it, and Apple
+// reviews one build of an app at a time: shipping twice in an afternoon leaves
+// the second build waiting on the first. The script waits that out rather than
+// leaving the newer build parked in the group.
+async function submitForReview(build) {
+  const deadline = Date.now() + reviewWaitMs
+  let waiting = false
+  for (;;) {
+    const failure = await api(`/v1/betaAppReviewSubmissions`, {
+      method: "POST",
+      body: {
+        data: {
+          type: "betaAppReviewSubmissions",
+          relationships: { build: { data: { type: "builds", id: build.id } } },
+        },
       },
-    },
-    allow: [409],
-  })
-  log("Submitted for beta review; testers get it as soon as review passes")
+      soft: true,
+    })
+    if (!failure) {
+      log("Submitted for beta review; testers get it as soon as review passes")
+      return
+    }
+    if (!/already in review|another build/i.test(failure)) {
+      if (/already exists|ENTITY_ERROR.RELATIONSHIP/i.test(failure)) {
+        log("Already submitted for beta review")
+        return
+      }
+      throw new Error(failure)
+    }
+    if (!waiting) {
+      log("An earlier build holds the review slot; waiting for it to clear")
+      waiting = true
+    }
+    if (Date.now() > deadline) {
+      throw new Error("The review slot never cleared; submit this build from App Store Connect")
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5 * 60_000))
+  }
 }
 
 function parseArgs(argv) {
@@ -150,7 +180,9 @@ function base64url(value) {
   return Buffer.from(value).toString("base64url")
 }
 
-async function api(path, { method = "GET", body, allow = [] } = {}) {
+// Returns the parsed body, or — with `soft` — the failure text for the caller
+// to read, since App Store Connect says why in the error detail.
+async function api(path, { method = "GET", body, allow = [], soft = false } = {}) {
   const response = await fetch(`${API}${path}`, {
     method,
     headers: {
@@ -161,8 +193,11 @@ async function api(path, { method = "GET", body, allow = [] } = {}) {
   })
   if (allow.includes(response.status)) return null
   if (!response.ok) {
-    throw new Error(`${method} ${path} → ${response.status} ${await response.text()}`)
+    const failure = `${method} ${path} → ${response.status} ${await response.text()}`
+    if (soft) return failure
+    throw new Error(failure)
   }
+  if (soft) return null
   return response.status === 204 ? null : response.json()
 }
 

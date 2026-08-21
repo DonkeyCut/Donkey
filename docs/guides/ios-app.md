@@ -157,6 +157,11 @@ group on the app, turns on the tester notification, and submits it for beta
 review, which is the step external testers wait on. Apple releases the build
 to them the moment review passes, and nobody opens App Store Connect.
 
+Apple reviews one build of an app at a time, so shipping twice in an afternoon
+leaves the second build waiting on the first. The script waits the slot out and
+submits, which is the difference between a build that reaches testers and one
+parked in the group.
+
 That handoff needs the App Store Connect API key — the Apple ID session Xcode
 holds cannot reach the API. Create one under Users and Access → Integrations →
 App Store Connect API with the App Manager role, then either export the
