@@ -27,7 +27,10 @@ struct CameraScreen<CameraPreview: View>: View {
             controls
         }
         .background(.black, ignoresSafeAreaEdges: .all)
-        .preferredColorScheme(.dark)
+        // The stage is live video: the chrome is dark whatever the app-wide
+        // appearance says. Setting the environment (not a color-scheme
+        // preference) keeps the root appearance choice from overriding it.
+        .environment(\.colorScheme, .dark)
         .sheet(isPresented: $showsNotePicker) {
             NotePickerSheet(ideas: ideas) { note in
                 camera.loadTeleprompter(script: note.script)
@@ -196,10 +199,10 @@ struct CameraScreen<CameraPreview: View>: View {
                         .font(.headline.weight(.bold))
                         .frame(width: 72, height: 44)
                         .background(
-                            camera.zoom == option ? AnyShapeStyle(.white) : AnyShapeStyle(.clear),
+                            camera.zoom == option ? AnyShapeStyle(.primary) : AnyShapeStyle(.clear),
                             in: RoundedRectangle(cornerRadius: 14)
                         )
-                        .foregroundStyle(camera.zoom == option ? .black : .primary)
+                        .foregroundStyle(camera.zoom == option ? AnyShapeStyle(.background) : AnyShapeStyle(.primary))
                 }
                 .buttonStyle(.plain)
             }
