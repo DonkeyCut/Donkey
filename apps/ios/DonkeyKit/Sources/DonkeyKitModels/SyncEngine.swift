@@ -338,7 +338,7 @@ public final class SyncEngine {
             guard online, !storageFull else { continue }
             guard ((try? journal.inspirationRemoteAssetId(item.id)) ?? nil) == nil else { continue }
             guard let fileURL = ideas?.mediaURL(fileName: fileName),
-                  let bytes = fileSize(fileURL) else { continue }
+                  let bytes = fileURL.fileByteCount else { continue }
             let upload = LibraryUpload(
                 fileURL: fileURL,
                 fileName: fileName,
@@ -363,12 +363,6 @@ public final class SyncEngine {
                 // Transient; retried on the next kick.
             }
         }
-    }
-
-    private nonisolated func fileSize(_ url: URL) -> Int64? {
-        let size = (try? FileManager.default.attributesOfItem(atPath: url.path()))?[.size] as? NSNumber
-        guard let size, size.int64Value > 0 else { return nil }
-        return size.int64Value
     }
 
     // MARK: Storage

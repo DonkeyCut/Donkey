@@ -58,7 +58,7 @@ struct ProjectCard: View {
                 Button(action: onPlay) {
                     ZStack {
                         if let thumbnail = project.thumbnail,
-                           let image = UIImage(contentsOfFile: thumbnail.path()) {
+                           let image = UIImage(contentsOfFile: thumbnail.localPath) {
                             Image(uiImage: image)
                                 .resizable()
                                 .scaledToFill()

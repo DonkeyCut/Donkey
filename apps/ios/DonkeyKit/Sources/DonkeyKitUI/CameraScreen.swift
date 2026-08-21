@@ -98,7 +98,7 @@ struct CameraScreen<CameraPreview: View>: View {
             } label: {
                 ZStack {
                     if let url = media.thumbnailURL(for: recording),
-                       let image = UIImage(contentsOfFile: url.path()) {
+                       let image = UIImage(contentsOfFile: url.localPath) {
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFill()

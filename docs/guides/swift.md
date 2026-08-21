@@ -103,6 +103,10 @@ Mac users expect:
   Feature-layer models stay plain structs; persistence types stay at the edge.
 - Network with URLSession, async/await, and Codable. Decode at the boundary
   into domain types; wire formats never leak past the client layer.
+- Keep files as `URL` end to end. `URL.path()` percent-encodes, and app
+  storage is rooted at "Application Support" — a name with a space — so an
+  encoded path names nothing on disk and every read fails silently. Where an
+  API insists on a string, hand it `localPath`.
 
 ## Tests
 

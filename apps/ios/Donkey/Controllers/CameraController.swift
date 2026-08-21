@@ -305,7 +305,7 @@ private nonisolated final class CaptureEngine: NSObject, AVCaptureFileOutputReco
         error: (any Error)?
     ) {
         // A stop can report a benign error while still writing a usable file.
-        let wroteFile = FileManager.default.fileExists(atPath: outputFileURL.path())
+        let wroteFile = FileManager.default.fileExists(atPath: outputFileURL.localPath)
         guard wroteFile else {
             events?(.recordingFailed)
             return

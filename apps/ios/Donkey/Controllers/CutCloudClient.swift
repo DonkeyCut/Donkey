@@ -347,11 +347,11 @@ extension CutCloudClient: CloudProjectsServicing {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let stamp = Int(project.updatedAt.timeIntervalSince1970 * 1000)
         let file = directory.appending(path: "\(project.id)-\(stamp).jpg")
-        if FileManager.default.fileExists(atPath: file.path()) { return file }
+        if FileManager.default.fileExists(atPath: file.localPath) { return file }
         guard let image = await thumbnailImage(for: project),
               let data = image.jpegData(compressionQuality: 0.8) else { return nil }
         // Versions of this project from before the edit leave with the refresh.
-        let stale = (try? FileManager.default.contentsOfDirectory(atPath: directory.path()))?
+        let stale = (try? FileManager.default.contentsOfDirectory(atPath: directory.localPath))?
             .filter { $0.hasPrefix("\(project.id)-") } ?? []
         for name in stale {
             try? FileManager.default.removeItem(at: directory.appending(path: name))
@@ -418,9 +418,7 @@ extension CutCloudClient {
     /// disk, probed dimensions, and the stored thumbnail as the poster.
     static func uploadPayload(for recording: Recording, media: MediaModel) async -> LibraryUpload? {
         let fileURL = media.movieURL(for: recording)
-        let size = ((try? FileManager.default.attributesOfItem(atPath: fileURL.path()))?[.size] as? NSNumber)?
-            .int64Value ?? 0
-        guard size > 0 else { return nil }
+        guard let size = fileURL.fileByteCount else { return nil }
         var width: Int?
         var height: Int?
         let asset = AVURLAsset(url: fileURL)

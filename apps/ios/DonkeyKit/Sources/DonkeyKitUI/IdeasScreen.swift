@@ -225,7 +225,7 @@ struct InspirationCard: View {
             Group {
                 if isVideo {
                     VideoPlayer(player: AVPlayer(url: url))
-                } else if let image = UIImage(contentsOfFile: url.path()) {
+                } else if let image = UIImage(contentsOfFile: url.localPath) {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFill()

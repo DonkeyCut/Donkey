@@ -77,7 +77,7 @@ struct RecordingCard: View {
     var body: some View {
         ZStack {
             if let url = media.thumbnailURL(for: recording),
-               let image = UIImage(contentsOfFile: url.path()) {
+               let image = UIImage(contentsOfFile: url.localPath) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()

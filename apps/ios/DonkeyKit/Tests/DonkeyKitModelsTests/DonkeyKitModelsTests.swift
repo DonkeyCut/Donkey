@@ -331,6 +331,17 @@ import Testing
         #expect(rig.cloud.notes[note.id] != nil)
     }
 
+    @Test func inspirationMediaUploadsOnce() async throws {
+        // The bytes sit under Application Support, whose name carries a
+        // space: the engine reads their size off the URL, not a path string.
+        let rig = try makeRig()
+        rig.ideas.addInspiration(mediaData: Data(repeating: 3, count: 64), isVideo: false)
+        await rig.engine.run()
+        #expect(rig.cloud.uploads.count == 1)
+        await rig.engine.run()
+        #expect(rig.cloud.uploads.count == 1)
+    }
+
     @Test func offlineMovesNothing() async throws {
         let rig = try makeRig()
         rig.engine.network = .offline
@@ -341,6 +352,32 @@ import Testing
         await rig.engine.run()
         #expect(rig.cloud.uploads.isEmpty)
         #expect(rig.cloud.notes[note.id] == nil)
+    }
+}
+
+@Suite struct FileURLTests {
+    /// The app's own container sits under "Application Support", so a path
+    /// with a space in it is the normal case, not the edge one.
+    func spacedDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "Application Support \(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    @Test func bytesReadThroughASpacedPath() throws {
+        let file = try spacedDirectory().appending(path: "clip.mov")
+        try Data(repeating: 7, count: 512).write(to: file)
+        #expect(file.fileByteCount == 512)
+        #expect(FileManager.default.fileExists(atPath: file.localPath))
+    }
+
+    @Test func missingAndEmptyFilesReadAsNoBytes() throws {
+        let directory = try spacedDirectory()
+        let empty = directory.appending(path: "empty.mov")
+        try Data().write(to: empty)
+        #expect(empty.fileByteCount == nil)
+        #expect(directory.appending(path: "gone.mov").fileByteCount == nil)
     }
 }
 
