@@ -65,20 +65,31 @@ import Testing
         var state = TeleprompterState()
         state.settings.wordsPerMinute = 120
         state.script = Array(repeating: "word", count: 120).joined(separator: " ")
-        // 120 words at 120 wpm = 60s. The script starts halfway down the
-        // prompter and travels its own height plus that lead over the minute.
+        // 120 words at 120 wpm = 60s, so 420pt of script passes in a minute.
+        // The script starts halfway down the prompter and rises at that pace.
         #expect(state.duration == 60)
-        let start = state.scrollOffset(elapsed: 0, overlayHeight: 300, textHeight: 420)
+        let start = state.scrollOffset(elapsed: 0, overlayHeight: 300, textHeight: 420, gap: 100)
         #expect(start == 150)
-        let mid = state.scrollOffset(elapsed: 30, overlayHeight: 300, textHeight: 420)
-        #expect(mid == 150 - (420.0 + 150.0) / 2)
-        let end = state.scrollOffset(elapsed: 60, overlayHeight: 300, textHeight: 420)
-        #expect(end == -420)
+        let mid = state.scrollOffset(elapsed: 30, overlayHeight: 300, textHeight: 420, gap: 100)
+        #expect(mid == 150 - 210)
+        let end = state.scrollOffset(elapsed: 60, overlayHeight: 300, textHeight: 420, gap: 100)
+        #expect(end == 150 - 420)
+    }
+
+    @Test func scrollWrapsAtTheGapWithoutAnEmptyScreen() {
+        var state = TeleprompterState()
+        state.settings.wordsPerMinute = 120
+        state.script = Array(repeating: "word", count: 120).joined(separator: " ")
+        // 7pt a second: the second copy of the script reaches the first one's
+        // starting place exactly when the travel wraps.
+        let cycle = (420.0 + 100.0) / 7
+        let wrapped = state.scrollOffset(elapsed: cycle, overlayHeight: 300, textHeight: 420, gap: 100)
+        #expect(abs(wrapped - 150) < 0.000_001)
     }
 
     @Test func emptyScriptHoldsAtLead() {
         let state = TeleprompterState()
-        #expect(state.scrollOffset(elapsed: 5, overlayHeight: 300, textHeight: 0) == 150)
+        #expect(state.scrollOffset(elapsed: 5, overlayHeight: 300, textHeight: 0, gap: 100) == 150)
     }
 
     @Test func hasScriptIgnoresWhitespace() {

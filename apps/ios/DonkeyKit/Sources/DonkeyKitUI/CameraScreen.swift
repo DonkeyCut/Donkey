@@ -512,37 +512,49 @@ struct TeleprompterOverlay: View {
     /// mid-take moves the words and the pace carries on.
     @State private var dragged: Double = 0
     @GestureState private var dragging: Double = 0
-    /// Beat between the end of a preview pass and the top of the next one.
-    private static var previewGap: TimeInterval { 1.5 }
+    /// Breathing room between one pass of the script and the next, as a share
+    /// of the prompter's height.
+    private static var gapShare: Double { 0.3 }
     /// Room kept at the foot of the screen for the record button and the tabs.
     private static var controlsInset: Double { 190 }
+
+    private var scriptText: some View {
+        Text(camera.teleprompter.displayScript)
+            .font(.system(size: camera.teleprompter.settings.textSize, weight: .heavy))
+            .foregroundStyle(.white)
+            .lineSpacing(4)
+            .shadow(color: .black.opacity(0.7), radius: 6, y: 1)
+            // The window the script scrolls through is a fraction of the
+            // screen, and a Text offered that height lays out only what fits
+            // and ends the last line in an ellipsis. The script is laid out
+            // whole and scrolled past the window.
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
     var body: some View {
         GeometryReader { geometry in
             // The script gets the screen, stopping short of the controls.
             let height = max(geometry.size.height - Self.controlsInset, 0)
+            let gap = height * Self.gapShare
             TimelineView(.animation) { context in
                 let elapsed = elapsed(at: context.date)
-                Text(camera.teleprompter.displayScript)
-                    .font(.system(size: camera.teleprompter.settings.textSize, weight: .heavy))
-                    .foregroundStyle(.white)
-                    .lineSpacing(4)
-                    .shadow(color: .black.opacity(0.7), radius: 6, y: 1)
-                    // The window the script scrolls through is a fraction of
-                    // the screen, and a Text offered that height lays out only
-                    // what fits and ends the last line in an ellipsis. The
-                    // script is laid out whole and scrolled past the window.
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .onGeometryChange(for: Double.self, of: { $0.size.height }) { textHeight = $0 }
-                    .offset(
-                        y: camera.teleprompter.scrollOffset(
-                            elapsed: elapsed,
-                            overlayHeight: height,
-                            textHeight: textHeight
-                        ) + dragged + dragging
-                    )
-                    .padding(.horizontal, 24)
+                // Two passes, one behind the other: the script runs without
+                // ever leaving the screen empty, in a take as in a preview.
+                VStack(alignment: .leading, spacing: gap) {
+                    scriptText
+                        .onGeometryChange(for: Double.self, of: { $0.size.height }) { textHeight = $0 }
+                    scriptText
+                }
+                .offset(
+                    y: camera.teleprompter.scrollOffset(
+                        elapsed: elapsed,
+                        overlayHeight: height,
+                        textHeight: textHeight,
+                        gap: gap
+                    ) + dragged + dragging
+                )
+                .padding(.horizontal, 24)
             }
             .frame(height: height, alignment: .top)
             .clipped()
@@ -575,16 +587,13 @@ struct TeleprompterOverlay: View {
     }
 
     /// Seconds into the script. A take counts from the moment recording
-    /// started; idle, the script runs the same pass on a loop, from the top
-    /// again each time the test button is pressed.
+    /// started; idle, from when the prompter came up, or from the last press
+    /// of the test button. The loop itself lives in the offset.
     private func elapsed(at now: Date) -> TimeInterval {
         if let startedAt = camera.recordingStartedAt {
             return now.timeIntervalSince(startedAt)
         }
-        let anchor = camera.teleprompter.testStartedAt ?? previewStart
-        let pass = camera.teleprompter.duration + Self.previewGap
-        guard pass > 0 else { return 0 }
-        return now.timeIntervalSince(anchor).truncatingRemainder(dividingBy: pass)
+        return now.timeIntervalSince(camera.teleprompter.testStartedAt ?? previewStart)
     }
 }
 

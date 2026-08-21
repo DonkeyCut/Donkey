@@ -22,6 +22,7 @@ nonisolated public struct TeleprompterSettings: Equatable, Codable, Sendable {
 /// so the eye has a rhythm to follow. Nobody has to format a note to read it.
 nonisolated public func pacedScript(_ raw: String) -> String {
     let paragraphs = raw
+        .trimmingCharacters(in: .whitespacesAndNewlines)
         .split(separator: "\n", omittingEmptySubsequences: true)
         .map { pacedParagraph(String($0)) }
         .filter { !$0.isEmpty }
@@ -79,16 +80,25 @@ nonisolated public struct TeleprompterState: Equatable, Sendable {
     /// of the prompter's height.
     public static let leadShare = 0.5
 
-    /// Vertical offset of the script at `elapsed` seconds into a recording.
-    /// The text starts halfway down the prompter and travels its own rendered
-    /// height plus that lead-in over the read duration, so the last words
-    /// leave the top exactly when the speaker should be finishing them.
-    /// Paragraph gaps are part of the height, so they read as natural pauses.
-    public func scrollOffset(elapsed: TimeInterval, overlayHeight: Double, textHeight: Double) -> Double {
+    /// Vertical offset of the script at `elapsed` seconds in. The script
+    /// starts halfway down the prompter and rises at the reading pace — its
+    /// own rendered height per read duration, so the words pass the reader at
+    /// the set words per minute, paragraph gaps included as natural pauses.
+    ///
+    /// The travel wraps at the script's height plus `gap`, which is the copy
+    /// the screen draws twice: the next pass comes up from below as the last
+    /// one leaves, so the loop never runs through an empty screen.
+    public func scrollOffset(
+        elapsed: TimeInterval,
+        overlayHeight: Double,
+        textHeight: Double,
+        gap: Double
+    ) -> Double {
         let lead = overlayHeight * Self.leadShare
         let total = duration
-        guard total > 0 else { return lead }
-        let speed = (textHeight + lead) / total
-        return lead - speed * elapsed
+        guard total > 0, textHeight > 0 else { return lead }
+        let speed = textHeight / total
+        let cycle = textHeight + gap
+        return lead - (speed * elapsed).truncatingRemainder(dividingBy: cycle)
     }
 }

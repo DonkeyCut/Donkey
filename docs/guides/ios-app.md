@@ -69,10 +69,11 @@ A note is read for what is written in it — its body, or its title when that is
 all it has. The script is laid out whole and scrolled past the screen, so
 length is never a reason for a note to arrive half-read.
 
-Closing the card hands the screen to the prompter, which runs the script on a
-loop until the take starts, and the card's test button restarts that run from
-the top. A speed and a size are something a person watches before they commit
-to them.
+Closing the card hands the screen to the prompter. The script runs on a loop
+the same way in a preview as in a take: the screen draws it twice, so the next
+pass rises as the last one leaves and the loop never runs through an empty
+screen. The card's test button starts a run from the top, which is how a speed
+and a size get watched before anyone commits to them.
 
 The script starts halfway down the screen, and a drag moves it: the nudge
 rides along with the pacing, so the words land where the reader wants them and
