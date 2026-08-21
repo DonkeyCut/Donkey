@@ -18,7 +18,7 @@ export const LIBRARY_TOOLS = [
   {
     name: "notes_list",
     description:
-      "List the user's synced notes — short scripts and ideas written in the Donkey Cut iOS app or the desktop Notes tab. Read them when the user points at \"my note(s)\" for a script, caption, or voiceover text; quote a note's body verbatim when they ask for its words.",
+      "List the user's synced notes — short scripts and ideas written in the Donkey Cut iOS app or the desktop Notes tab — with the folders they are filed in. Read them when the user points at \"my note(s)\" for a script, caption, or voiceover text, and when they name a folder (\"the scripts folder\") match it against `folders` and read the notes carrying that folder. Quote a note's body verbatim when they ask for its words.",
     inputSchema: obj({}),
   },
   {

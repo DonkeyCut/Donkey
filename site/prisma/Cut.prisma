@@ -60,7 +60,7 @@ model CutFolder {
   id        String   @id @default(cuid())
   userId    String
   name      String
-  scope     String   @default("project") // project | library
+  scope     String   @default("project") // project | library | note
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -143,6 +143,8 @@ model CutNote {
   title      String    @default("")
   body       String    @default("")
   colorIndex Int       @default(0)
+  // The CutFolder (scope "note") this note is filed in; null is the top level.
+  folderId   String?
   updatedAt  DateTime
   deletedAt  DateTime?
   createdAt  DateTime  @default(now())

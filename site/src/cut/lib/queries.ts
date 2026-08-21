@@ -24,7 +24,7 @@ import { cutMode } from "./backend";
 import { useCutMode } from "./backend/hooks";
 import { readSnapshot, snapshotKey, writeSnapshot } from "./cache";
 import { fetchLibrary, type LibraryData } from "./library";
-import { fetchNotes, type CutNote } from "./notes";
+import { fetchNotes, type NotesData } from "./notes";
 import {
   availableResidencies,
   backendFor,
@@ -215,18 +215,21 @@ export function usePhoneLink() {
 }
 
 export const notesKey = ["cut", "notes"] as const;
-const NOTES_SNAPSHOT = "cut-notes";
+// The snapshot carries the notes and their folders together; the key moved
+// with that shape so a page holding the old array never paints from it.
+const NOTES_SNAPSHOT = "cut-notes-v2";
 
-/** The account's synced notes, phone and desktop edits merged server-side. */
+/** The account's synced notes and their folders, phone and desktop edits
+ * merged server-side. */
 export function useNotes() {
   const client = useQueryClient();
-  useEffect(() => seedFromSnapshot<CutNote[]>(client, notesKey, NOTES_SNAPSHOT), [client]);
-  return useQuery<CutNote[]>({
+  useEffect(() => seedFromSnapshot<NotesData>(client, notesKey, NOTES_SNAPSHOT), [client]);
+  return useQuery<NotesData>({
     queryKey: notesKey,
     queryFn: async () => {
-      const notes = await fetchNotes();
-      writeSnapshot(NOTES_SNAPSHOT, notes);
-      return notes;
+      const data = await fetchNotes();
+      writeSnapshot(NOTES_SNAPSHOT, data);
+      return data;
     },
     staleTime: 0,
     refetchOnMount: "always",
@@ -234,8 +237,8 @@ export function useNotes() {
   });
 }
 
-/** Optimistic edit of the cached notes list, snapshot moving with it. */
-export function patchNotes(client: QueryClient, fn: (prev: CutNote[]) => CutNote[]) {
-  const next = client.setQueryData<CutNote[]>(notesKey, (prev) => (prev ? fn(prev) : prev));
+/** Optimistic edit of the cached notes, snapshot moving with it. */
+export function patchNotes(client: QueryClient, fn: (prev: NotesData) => NotesData) {
+  const next = client.setQueryData<NotesData>(notesKey, (prev) => (prev ? fn(prev) : prev));
   if (next) writeSnapshot(NOTES_SNAPSHOT, next);
 }

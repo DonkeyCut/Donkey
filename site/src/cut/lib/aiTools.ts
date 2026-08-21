@@ -2426,12 +2426,15 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   },
 
   notes_list: async () => {
-      const notes = await fetchNotes();
+      const { notes, folders } = await fetchNotes();
+      const folderName = new Map(folders.map((f) => [f.id, f.name]));
       return {
+        folders: folders.map((f) => ({ id: f.id, name: f.name })),
         notes: notes.map((n) => ({
           id: n.id,
           title: n.title,
           body: n.body,
+          ...(n.folderId ? { folder: folderName.get(n.folderId) ?? n.folderId } : {}),
           updatedAt: new Date(n.updatedAt).toISOString(),
         })),
       };
