@@ -150,6 +150,12 @@ unattended runs (the variables are documented in the script header). Once
 processing finishes, internal testers in App Store Connect → TestFlight get
 the build without review.
 
+A build that testers install has to be a build you can go back to, so the
+archive is cut from a commit: the script checks the ref out into a worktree of
+its own and builds there, and whatever else is uncommitted in the checkout
+stays out of the upload. `--ref` picks the commit and `--working-tree`
+archives the checkout as it stands, for trying a build before committing it.
+
 Export compliance is answered in the project (`ITSAppUsesNonExemptEncryption`
 is NO) and the privacy manifest ships in the app target, so uploads land
 ready to test.
