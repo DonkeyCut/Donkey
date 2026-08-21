@@ -25,6 +25,7 @@ import { elementPlugin } from "./registry";
 import { kitCanvas } from "./surface";
 import {
   lineLikeShape,
+  textStretch,
   type Overlay,
   type ShapeKind,
   type ShapeOverlay,
@@ -335,6 +336,24 @@ async function paintText(
   frame: PaintFrame,
   env: RenderEnv
 ) {
+  // Glyph stretch scales everything the element paints — plate, stroke,
+  // per-glyph motion — about its center, the same space the DOM pair
+  // stretches with its CSS transform.
+  const { sx, sy } = textStretch(overlay);
+  if (sx !== 1 || sy !== 1) {
+    const cx = overlay.x * frame.width;
+    const cy = overlay.y * frame.height;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(sx, sy);
+    ctx.translate(-cx, -cy);
+    try {
+      await paintText(ctx, { ...overlay, stretchX: undefined, stretchY: undefined }, frame, env);
+    } finally {
+      ctx.restore();
+    }
+    return;
+  }
   const { width, scale } = frame;
   const fpx = overlay.size * scale;
   const cssFont = textCssFont(overlay, fpx, env);
@@ -631,12 +650,18 @@ export async function measureElementBounds(
     w += PLATE_PAD_X * fpx * 2;
     h += PLATE_PAD_Y * fpx * 2;
   }
-  if (opts?.pad === false) return { cx, cy, w, h };
+  const { sx, sy } = textStretch(o);
+  if (opts?.pad === false) return { cx, cy, w: w * sx, h: h * sy };
   const strokePad = (o.stroke?.width ?? 0) * fpx * 2;
   const shadow = resolveShadow(o.shadow);
   const shadowPad = shadow ? (shadow.blur + Math.abs(shadow.offsetY)) * frame.scale : 0;
   // Ascenders/descenders overhang the em-box line grid a little.
-  return { cx, cy, w: w + strokePad * 2 + shadowPad * 2, h: h + fpx * 0.3 + strokePad * 2 + shadowPad * 2 };
+  return {
+    cx,
+    cy,
+    w: (w + strokePad * 2 + shadowPad * 2) * sx,
+    h: (h + fpx * 0.3 + strokePad * 2 + shadowPad * 2) * sy,
+  };
 }
 
 /** One window of an animated element, ready to be drawn under a per-frame

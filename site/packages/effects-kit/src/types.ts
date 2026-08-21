@@ -76,6 +76,11 @@ export interface TextOverlay extends OverlayBase {
   /** How lines align inside the text block; absent = center. The block
    * itself stays centered on (x, y). */
   align?: TextAlign;
+  /** Glyph stretch: width and height multipliers on the laid-out block,
+   * applied about its center. The frame's side grips write these; absent
+   * means 1. */
+  stretchX?: number;
+  stretchY?: number;
   /** Drop shadow: `true` = the legacy default look, an object customizes it. */
   shadow: boolean | TextShadowSpec;
   plate: boolean; // rounded plate behind the text
@@ -150,6 +155,11 @@ export function overlayKind(o: Overlay): OverlayKind {
 
 export function isTextOverlay(o: Overlay): o is TextOverlay {
   return (o.kind ?? "text") === "text";
+}
+
+/** A text element's glyph stretch, resolved to concrete multipliers. */
+export function textStretch(o: TextOverlay): { sx: number; sy: number } {
+  return { sx: o.stretchX ?? 1, sy: o.stretchY ?? 1 };
 }
 
 export function isShapeOverlay(o: Overlay): o is ShapeOverlay {

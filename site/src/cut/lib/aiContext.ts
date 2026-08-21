@@ -509,5 +509,7 @@ function describeOverlay(o: Overlay) {
     plate: o.plate,
     ...(o.groupId ? { groupId: o.groupId } : {}),
     ...(o.plateRadius !== undefined && { plateRadius: r(o.plateRadius) }),
+    ...(o.stretchX !== undefined ? { stretchX: r(o.stretchX) } : {}),
+    ...(o.stretchY !== undefined ? { stretchY: r(o.stretchY) } : {}),
   };
 }

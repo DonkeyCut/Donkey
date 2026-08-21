@@ -3825,6 +3825,10 @@ function overlayPatch(input: Record<string, unknown>, kind: "text" | "shape" | "
       patch.letterSpacing = Math.abs(input.letter_spacing) < 0.0025 ? undefined : clamp(input.letter_spacing, -0.05, 0.5);
     if (isNum(input.line_height))
       patch.lineHeight = Math.abs(input.line_height - 1.25) < 0.01 ? undefined : clamp(input.line_height, 0.7, 2.5);
+    if (isNum(input.stretch_x))
+      patch.stretchX = Math.abs(input.stretch_x - 1) < 0.005 ? undefined : clamp(input.stretch_x, 0.25, 4);
+    if (isNum(input.stretch_y))
+      patch.stretchY = Math.abs(input.stretch_y - 1) < 0.005 ? undefined : clamp(input.stretch_y, 0.25, 4);
     if (typeof input.shadow === "boolean") patch.shadow = input.shadow;
     if (typeof input.plate === "boolean") patch.plate = input.plate;
     if (isNum(input.plateRadius)) patch.plateRadius = clamp(input.plateRadius, 0, 1);

@@ -72,6 +72,8 @@ export const INSPECTOR_TOOLS = [
       align: { type: "string", enum: ["left", "center", "right"], description: "Multi-line alignment (titles)" },
       letter_spacing: num("Tracking in em (titles; 0 = normal)"),
       line_height: num("Line height multiplier (titles; default 1.25)"),
+      stretch_x: num("Glyph stretch, width multiplier 0.25..4 (titles; 1 clears)"),
+      stretch_y: num("Glyph stretch, height multiplier 0.25..4 (titles; 1 clears)"),
       shadow: bool("Drop shadow (titles)"),
       plate: bool("Backdrop plate (titles)"),
       w: num("Width, fraction of frame width (shapes/stickers)"),

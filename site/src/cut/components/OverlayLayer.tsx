@@ -17,7 +17,7 @@ import {
   subtitleLaneCount,
   trackPos,
 } from "@/cut/lib/subtitles";
-import { evalOverlayFrame, glyphStateAt, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, maskFrameAt, paintMaskCoverage, resolveShadow, shapeMetrics, shapePathD, type LottieHandle, type Mask, type MaskKey, type OverlayFrameState } from "@donkeycut/effects-kit";
+import { evalOverlayFrame, glyphStateAt, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, maskFrameAt, paintMaskCoverage, resolveShadow, shapeMetrics, shapePathD, textStretch, type LottieHandle, type Mask, type MaskKey, type OverlayFrameState } from "@donkeycut/effects-kit";
 import {
   LINE_HEIGHT,
   PLATE_PAD_X,
@@ -628,11 +628,17 @@ function OverlayItem({
   // The box carries position, rotation, and opacity; the content wrapper
   // inside it carries a title's type styles (the edit caret inherits them)
   // and the mask.
+  // A title's glyph stretch rides the box transform, so every rect the stage
+  // reads off the box — snapping, the rotate gesture — is the stretched one.
+  // The chrome twin composes its own transform from the base, keeping its
+  // grips circular.
+  const { sx, sy } = isText ? textStretch(o) : { sx: 1, sy: 1 };
+  const baseTransform = `translate(-50%, -50%)${animTransform}`;
   const style: CSSProperties = {
     // A keyframed element is placed by its pose, not by its resting x/y.
     left: `${(live?.x ?? o.x) * 100}%`,
     top: `${(live?.y ?? o.y) * 100}%`,
-    transform: `translate(-50%, -50%)${animTransform}`,
+    transform: sx !== 1 || sy !== 1 ? `${baseTransform} scale(${sx}, ${sy})` : baseTransform,
     opacity: (live ? live.opacity : (o.opacity ?? 1)) * (ghost ? 0.35 : 1),
   };
   const contentStyle: CSSProperties = {
@@ -741,12 +747,13 @@ function OverlayItem({
     if (direct.length) s.updateOverlaysTransient(direct);
   };
 
-  // A grip resizes what the kind actually stores: a title's font size, a
-  // shape's box, a sticker's width. The grip's opposite corner or side stays
-  // planted: a corner takes both axes by how far it travels from the far
-  // corner, a side grip takes width alone measured from the far side, and the
-  // center walks out so the planted edge holds still on screen. A group
-  // scales as one about the same planted point.
+  // A grip resizes what the kind actually stores: a corner takes a title's
+  // font size, a shape's box, a sticker's width; a side grip takes one axis
+  // alone — a shape's width or height, a title's glyph stretch. The grip's
+  // opposite corner or side stays planted: a corner takes both axes by how
+  // far it travels from the far corner, a side grip its own axis measured
+  // from the far side, and the center walks out so the planted edge holds
+  // still on screen. A group scales as one about the same planted point.
   const resizeFrom = (handle: ResizeHandle, e: React.PointerEvent) => {
     const s = useEditor.getState();
     s.pushHistory();
@@ -757,9 +764,10 @@ function OverlayItem({
     const axis = HANDLE_AXIS[handle];
     const rad = (-(live?.rotation ?? o.rotation ?? 0) * Math.PI) / 180;
     // The box's own size on screen: the bounding rect is the turned box's
-    // envelope, so take the layout size under the pose's scale.
-    const ow = el.offsetWidth * (live?.scale ?? 1);
-    const oh = el.offsetHeight * (live?.scale ?? 1);
+    // envelope, so take the layout size under the pose's scale and the glyph
+    // stretch.
+    const ow = el.offsetWidth * (live?.scale ?? 1) * sx;
+    const oh = el.offsetHeight * (live?.scale ?? 1) * sy;
     // The planted point, in the element's own space relative to its center.
     const ax = (-axis.x * ow) / 2;
     const ay = (-axis.y * oh) / 2;
@@ -777,8 +785,17 @@ function OverlayItem({
     const d0 = Math.max(8, reach(e.clientX, e.clientY));
     const members = groupSnapshot();
     const self = members.find((m) => m.id === o.id) ?? members[0];
+    // A stretch multiplier, clamped and stored as absence at 1.
+    const stretchVal = (v: number): number | undefined => {
+      const c = Math.round(Math.min(4, Math.max(0.25, v)) * 1000) / 1000;
+      return Math.abs(c - 1) < 0.005 ? undefined : c;
+    };
     const scaled = (m: Overlay, k: number): Partial<Overlay> => {
       if (isTextOverlay(m)) {
+        // A side grip pulls one axis of the glyph stretch; a corner scales
+        // the font, stretch carried along.
+        if (axis.y === 0) return { stretchX: stretchVal((m.stretchX ?? 1) * k) };
+        if (axis.x === 0) return { stretchY: stretchVal((m.stretchY ?? 1) * k) };
         return { size: Math.round(Math.min(320, Math.max(16, m.size * k))) };
       }
       if (m.kind === "shape") {
@@ -793,34 +810,48 @@ function OverlayItem({
       if (m.kind === "sticker") return { w: Math.min(1.5, Math.max(0.02, m.w * k)) };
       return {};
     };
-    // How much the grabbed element actually grew once its size clamps, so
-    // the planted point holds through the clamp too.
-    const grew = (patch: Partial<Overlay>): number => {
-      const p = patch as { size?: number; w?: number; h?: number };
-      if (isTextOverlay(self)) return (p.size ?? self.size) / self.size;
-      // A top/bottom grip on a shape moves its height, so that is the side
-      // the planted point reads.
-      if (self.kind === "shape" && axis.x === 0) return (p.h ?? self.h) / self.h;
-      if (self.kind === "shape" || self.kind === "sticker") return (p.w ?? self.w) / self.w;
-      return 1;
+    // How much the grabbed element actually grew per axis once its size
+    // clamps, so the planted point holds through the clamp too.
+    const grew = (patch: Partial<Overlay>): { kx: number; ky: number } => {
+      const p = patch as {
+        size?: number;
+        w?: number;
+        h?: number;
+        stretchX?: number;
+        stretchY?: number;
+      };
+      if (isTextOverlay(self)) {
+        const ks = (p.size ?? self.size) / self.size;
+        return {
+          kx: "stretchX" in p ? (p.stretchX ?? 1) / (self.stretchX ?? 1) : ks,
+          ky: "stretchY" in p ? (p.stretchY ?? 1) / (self.stretchY ?? 1) : ks,
+        };
+      }
+      if (self.kind === "shape")
+        return { kx: (p.w ?? self.w) / self.w, ky: (p.h ?? self.h) / self.h };
+      if (self.kind === "sticker") {
+        const k = (p.w ?? self.w) / self.w;
+        return { kx: k, ky: k };
+      }
+      return { kx: 1, ky: 1 };
     };
     startDrag(e, {
       onMove: (_dx, _dy, ev) => {
         const k = reach(ev.clientX, ev.clientY) / d0;
-        const keff = grew(scaled(self, k));
+        const { kx, ky } = grew(scaled(self, k));
         // The center's walk that keeps the planted point on its screen spot,
         // rotated back to the screen and into frame fractions.
-        const sx = axis.x ? ((keff - 1) * axis.x * ow) / 2 : 0;
-        const sy = axis.y ? ((keff - 1) * axis.y * oh) / 2 : 0;
-        const mx = (sx * Math.cos(rad) + sy * Math.sin(rad)) / stageWidth;
-        const my = (-sx * Math.sin(rad) + sy * Math.cos(rad)) / stageHeight;
+        const wx = axis.x ? ((kx - 1) * axis.x * ow) / 2 : 0;
+        const wy = axis.y ? ((ky - 1) * axis.y * oh) / 2 : 0;
+        const mx = (wx * Math.cos(rad) + wy * Math.sin(rad)) / stageWidth;
+        const my = (-wx * Math.sin(rad) + wy * Math.cos(rad)) / stageHeight;
         writeTransform(
           members.map((m) => ({
             id: m.id,
             patch: {
               ...scaled(m, k),
-              x: clampPos(self.x + keff * (m.x - self.x) + mx),
-              y: clampPos(self.y + keff * (m.y - self.y) + my),
+              x: clampPos(self.x + kx * (m.x - self.x) + mx),
+              y: clampPos(self.y + ky * (m.y - self.y) + my),
             },
           }))
         );
@@ -1018,15 +1049,16 @@ function OverlayItem({
     {liftChrome && chromeHost && chromeSize &&
       createPortal(
         (() => {
-          // The twin: same placement, same transform chain, the box's own
-          // laid-out size — so the chrome lands exactly on the element while
-          // escaping the frame's clipping.
+          // The twin: same placement, the base transform chain, the box's
+          // laid-out size with the glyph stretch folded into it — so the
+          // chrome lands exactly on the element while escaping the frame's
+          // clipping, and the grips it carries stay circular.
           const twinStyle: CSSProperties = {
             left: style.left,
             top: style.top,
-            width: chromeSize.w,
-            height: chromeSize.h,
-            transform: style.transform,
+            width: chromeSize.w * sx,
+            height: chromeSize.h * sy,
+            transform: baseTransform,
           };
           return (
             <>
@@ -1044,7 +1076,6 @@ function OverlayItem({
                   onDoubleClick={isText ? () => setEditing(true) : undefined}
                 >
                   <div className="pointer-events-none absolute -inset-[4.5px] rounded-[5px] border-[1.5px] border-dashed border-[#0a84ff]" />
-                  {chrome}
                 </div>
               </div>
               {/* The frame-clipped solid ring paints over it, so dashes show
@@ -1059,6 +1090,16 @@ function OverlayItem({
                   <div className="absolute" style={twinStyle}>
                     <div className="absolute -inset-[4.5px] rounded-[5px] border-[1.5px] border-[#0a84ff]" />
                   </div>
+                </div>
+              </div>
+              {/* The grips and the rotate button ride their own top layer, so
+                  the solid ring never draws across their white faces. */}
+              <div
+                className="pointer-events-none absolute inset-0"
+                style={{ transform: bandTransform || undefined }}
+              >
+                <div className="absolute" style={twinStyle}>
+                  {chrome}
                 </div>
               </div>
             </>
@@ -1147,6 +1188,10 @@ function useMaskCss(
   disabled: boolean
 ): CSSProperties | undefined {
   const m = o.mask;
+  // The mask image lands on the content wrapper, inside the box's glyph
+  // stretch — so the frame-space geometry pre-divides by the stretch, and the
+  // transform lands it back where every canvas renderer draws it.
+  const { sx, sy } = isTextOverlay(o) ? textStretch(o) : { sx: 1, sy: 1 };
   // A behind (inverted subject) element renders in the canvas pass; the DOM
   // masks shapes and front subject elements.
   const subjectFront = !!m && m.kind === "subject" && !m.invert;
@@ -1201,17 +1246,17 @@ function useMaskCss(
       ctx.drawImage(snap.canvas, 0, 0);
       ctx.filter = "none";
       const url = canvas.toDataURL();
-      const boxLeft = o.x * stageWidth - box.w / 2;
-      const boxTop = o.y * stageHeight - box.h / 2;
+      const posX = box.w / 2 - (o.x * stageWidth) / sx;
+      const posY = box.h / 2 - (o.y * stageHeight) / sy;
       return {
         maskImage: `url(${url})`,
         WebkitMaskImage: `url(${url})`,
         maskRepeat: "no-repeat",
         WebkitMaskRepeat: "no-repeat",
-        maskSize: `${stageWidth}px ${stageHeight}px`,
-        WebkitMaskSize: `${stageWidth}px ${stageHeight}px`,
-        maskPosition: `${-boxLeft}px ${-boxTop}px`,
-        WebkitMaskPosition: `${-boxLeft}px ${-boxTop}px`,
+        maskSize: `${stageWidth / sx}px ${stageHeight / sy}px`,
+        WebkitMaskSize: `${stageWidth / sx}px ${stageHeight / sy}px`,
+        maskPosition: `${posX}px ${posY}px`,
+        WebkitMaskPosition: `${posX}px ${posY}px`,
       };
     }
     // The canvas caps below the box size and the CSS mask stretches it back:
@@ -1236,7 +1281,9 @@ function useMaskCss(
     // Map frame coordinates onto the box: the element's anchor sits at the
     // box center, which is where the painter anchors the mask.
     ctx.scale(s, s);
-    ctx.translate(box.w / 2 - o.x * stageWidth, box.h / 2 - o.y * stageHeight);
+    ctx.translate(box.w / 2, box.h / 2);
+    ctx.scale(1 / sx, 1 / sy);
+    ctx.translate(-o.x * stageWidth, -o.y * stageHeight);
     paintMaskCoverage(
       ctx,
       { ...m, invert: undefined },
@@ -1256,7 +1303,7 @@ function useMaskCss(
     // The keyed tick folds a 15fps-quantized tLocal in only when the mask
     // actually animates; the matte stamp refreshes the subject branch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, m, box, o.x, o.y, stageWidth, stageHeight, scale, keyTick, snapTick]);
+  }, [active, m, box, o.x, o.y, sx, sy, stageWidth, stageHeight, scale, keyTick, snapTick]);
 }
 
 /**
