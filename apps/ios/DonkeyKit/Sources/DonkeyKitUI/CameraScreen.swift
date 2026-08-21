@@ -437,6 +437,14 @@ struct TeleprompterCard: View {
                 Button(action: onUseNote) {
                     Image(systemName: "note.text")
                 }
+                // A run of the script at the current pace, without spending a
+                // take on finding out whether it reads right.
+                Button {
+                    camera.startTeleprompterTest()
+                } label: {
+                    Image(systemName: "play.fill")
+                }
+                .disabled(!camera.teleprompter.hasScript)
                 Spacer()
                 Button {
                     camera.teleprompter.isCardShown = false
@@ -501,16 +509,25 @@ struct TeleprompterOverlay: View {
     @State private var previewStart = Date.now
     /// Beat between the end of a preview pass and the top of the next one.
     private static var previewGap: TimeInterval { 1.5 }
+    /// Room kept at the foot of the screen for the record button and the tabs.
+    private static var controlsInset: Double { 190 }
 
     var body: some View {
         GeometryReader { geometry in
-            let height = geometry.size.height * 0.42
+            // The script gets the screen, stopping short of the controls.
+            let height = max(geometry.size.height - Self.controlsInset, 0)
             TimelineView(.animation) { context in
                 let elapsed = elapsed(at: context.date)
                 Text(camera.teleprompter.displayScript)
                     .font(.system(size: camera.teleprompter.settings.textSize, weight: .heavy))
                     .foregroundStyle(.white)
                     .lineSpacing(4)
+                    .shadow(color: .black.opacity(0.7), radius: 6, y: 1)
+                    // The window the script scrolls through is a fraction of
+                    // the screen, and a Text offered that height lays out only
+                    // what fits and ends the last line in an ellipsis. The
+                    // script is laid out whole and scrolled past the window.
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .onGeometryChange(for: Double.self, of: { $0.size.height }) { textHeight = $0 }
                     .offset(
@@ -525,12 +542,15 @@ struct TeleprompterOverlay: View {
             .frame(height: height, alignment: .top)
             .clipped()
             .background(
+                // A scrim over the top of the frame, where the status bar and
+                // the brightest part of most rooms are. Past it the script
+                // carries its own shadow and the picture stays the picture.
                 LinearGradient(
-                    colors: [.black.opacity(0.75), .black.opacity(0)],
+                    colors: [.black.opacity(0.6), .black.opacity(0)],
                     startPoint: .top,
                     endPoint: .bottom
                 )
-                .frame(height: height),
+                .frame(height: height * 0.35),
                 alignment: .top
             )
         }
@@ -539,14 +559,16 @@ struct TeleprompterOverlay: View {
     }
 
     /// Seconds into the script. A take counts from the moment recording
-    /// started; idle, the script runs the same pass on a loop.
+    /// started; idle, the script runs the same pass on a loop, from the top
+    /// again each time the test button is pressed.
     private func elapsed(at now: Date) -> TimeInterval {
         if let startedAt = camera.recordingStartedAt {
             return now.timeIntervalSince(startedAt)
         }
+        let anchor = camera.teleprompter.testStartedAt ?? previewStart
         let pass = camera.teleprompter.duration + Self.previewGap
         guard pass > 0 else { return 0 }
-        return now.timeIntervalSince(previewStart).truncatingRemainder(dividingBy: pass)
+        return now.timeIntervalSince(anchor).truncatingRemainder(dividingBy: pass)
     }
 }
 

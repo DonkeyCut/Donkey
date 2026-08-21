@@ -118,6 +118,12 @@ public final class CameraModel {
         teleprompter.isCardShown = true
     }
 
+    /// Clears the card and runs the script from the top at the set pace.
+    public func startTeleprompterTest() {
+        teleprompter.isCardShown = false
+        teleprompter.testStartedAt = .now
+    }
+
     // MARK: Controller events
 
     public func sessionDidStart(zoomMapping: ZoomMapping, hasTorch: Bool, effective: CameraSettings) {

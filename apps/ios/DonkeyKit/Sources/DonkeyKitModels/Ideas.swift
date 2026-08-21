@@ -56,13 +56,11 @@ nonisolated public struct Note: Identifiable, Equatable, Sendable {
         self.updatedAt = updatedAt
     }
 
-    /// The text a teleprompter reads for this note: the whole of it, title
-    /// first. What a person wrote in the note is what they meant to say.
+    /// The text a teleprompter reads for this note: what is written in it. A
+    /// title names the note, so it is read only when it is all the note has.
     public var script: String {
-        [title, body]
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n\n")
+        let written = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        return written.isEmpty ? title.trimmingCharacters(in: .whitespacesAndNewlines) : written
     }
 }
 

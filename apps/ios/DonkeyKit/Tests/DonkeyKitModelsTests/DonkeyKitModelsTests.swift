@@ -65,20 +65,20 @@ import Testing
         var state = TeleprompterState()
         state.settings.wordsPerMinute = 120
         state.script = Array(repeating: "word", count: 120).joined(separator: " ")
-        // 120 words at 120 wpm = 60s. Lead-in is 60% of the overlay; the text
-        // travels its own height plus the lead over the minute.
+        // 120 words at 120 wpm = 60s. Lead-in is a quarter of the prompter;
+        // the text travels its own height plus the lead over the minute.
         #expect(state.duration == 60)
         let start = state.scrollOffset(elapsed: 0, overlayHeight: 300, textHeight: 420)
-        #expect(start == 180)
+        #expect(start == 75)
         let mid = state.scrollOffset(elapsed: 30, overlayHeight: 300, textHeight: 420)
-        #expect(mid == 180 - (420 + 180) / 2)
+        #expect(mid == 75 - (420.0 + 75.0) / 2)
         let end = state.scrollOffset(elapsed: 60, overlayHeight: 300, textHeight: 420)
         #expect(end == -420)
     }
 
     @Test func emptyScriptHoldsAtLead() {
         let state = TeleprompterState()
-        #expect(state.scrollOffset(elapsed: 5, overlayHeight: 300, textHeight: 0) == 180)
+        #expect(state.scrollOffset(elapsed: 5, overlayHeight: 300, textHeight: 0) == 75)
     }
 
     @Test func hasScriptIgnoresWhitespace() {
@@ -448,13 +448,12 @@ import Testing
         #expect(model.notes[1].body == "edited")
     }
 
-    @Test func scriptReadsTheWholeNote() {
+    @Test func scriptIsWhatTheNoteSays() {
+        // The title names the note; the prompter reads what is written in it.
         let note = Note(title: "Title", body: "Body", color: .butter)
-        #expect(note.script == "Title\n\nBody")
+        #expect(note.script == "Body")
         let titleOnly = Note(title: "Title", body: "", color: .butter)
         #expect(titleOnly.script == "Title")
-        let bodyOnly = Note(title: "", body: "Body", color: .butter)
-        #expect(bodyOnly.script == "Body")
     }
 
     @Test func inspirationLinkRoundTrips() throws {

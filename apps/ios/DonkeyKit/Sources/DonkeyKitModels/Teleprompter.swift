@@ -60,6 +60,8 @@ nonisolated public struct TeleprompterState: Equatable, Sendable {
     public var script: String = ""
     public var isCardShown = false
     public var settings = TeleprompterSettings()
+    /// When a test run was asked for, so the script starts from the top.
+    public var testStartedAt: Date?
 
     public init() {}
 
@@ -73,13 +75,17 @@ nonisolated public struct TeleprompterState: Equatable, Sendable {
     /// Seconds the whole script takes at the set pace.
     public var duration: TimeInterval { readDuration(of: script, wordsPerMinute: settings.wordsPerMinute) }
 
+    /// Where the first line sits before the script starts moving, as a share
+    /// of the prompter's height.
+    public static let leadShare = 0.25
+
     /// Vertical offset of the script at `elapsed` seconds into a recording.
-    /// The text starts 60% down the overlay and travels its own rendered
-    /// height plus that lead-in over the read duration, so the last words
-    /// leave the top exactly when the speaker should be finishing them.
+    /// The text starts a quarter down the prompter and travels its own
+    /// rendered height plus that lead-in over the read duration, so the last
+    /// words leave the top exactly when the speaker should be finishing them.
     /// Paragraph gaps are part of the height, so they read as natural pauses.
     public func scrollOffset(elapsed: TimeInterval, overlayHeight: Double, textHeight: Double) -> Double {
-        let lead = overlayHeight * 0.6
+        let lead = overlayHeight * Self.leadShare
         let total = duration
         guard total > 0 else { return lead }
         let speed = (textHeight + lead) / total

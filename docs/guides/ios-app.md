@@ -65,10 +65,14 @@ paragraph breaks, and long unbroken paragraphs wrap into short lines at
 clause boundaries. Speed and text size persist across sessions — set once,
 kept forever.
 
-A note is read whole: its title, then its body. Closing the card hands the
-screen to the prompter, which runs the script on a loop until the take starts,
-so a speed and size are something a person watches before they commit to
-them.
+A note is read for what is written in it — its body, or its title when that is
+all it has. The script is laid out whole and scrolled past the screen, so
+length is never a reason for a note to arrive half-read.
+
+Closing the card hands the screen to the prompter, which runs the script on a
+loop until the take starts, and the card's test button restarts that run from
+the top. A speed and a size are something a person watches before they commit
+to them.
 
 ## How It Is Put Together
 

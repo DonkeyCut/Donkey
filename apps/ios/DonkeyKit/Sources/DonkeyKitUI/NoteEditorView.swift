@@ -7,7 +7,9 @@ struct NoteEditorView: View {
     @Bindable var ideas: IdeasModel
     let onRecordNote: (Note) -> Void
 
-    @FocusState private var bodyFocused: Bool
+    private enum Field { case title, body }
+
+    @FocusState private var focused: Field?
 
     var body: some View {
         let color = ideas.draft?.color ?? .butter
@@ -37,12 +39,13 @@ struct NoteEditorView: View {
                 .font(.system(size: 32, weight: .bold))
                 .padding(.horizontal, 22)
                 .padding(.top, 12)
+                .focused($focused, equals: .title)
 
             TextEditor(text: bodyBinding)
                 .font(.system(size: 20, weight: .medium))
                 .scrollContentBackground(.hidden)
                 .padding(.horizontal, 18)
-                .focused($bodyFocused)
+                .focused($focused, equals: .body)
                 .overlay(alignment: .topLeading) {
                     if (ideas.draft?.body ?? "").isEmpty {
                         Text("Write down an idea...")
@@ -93,7 +96,16 @@ struct NoteEditorView: View {
         .foregroundStyle(Color.notePaperInk)
         .tint(Color.notePaperInk)
         .background(color.backgroundColor, ignoresSafeAreaEdges: .all)
-        .task { bodyFocused = true }
+        .toolbar {
+            // Opening a note is reading it as often as writing it, so the
+            // keyboard comes and goes on the writer's word.
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { focused = nil }
+                    .font(.body.weight(.bold))
+            }
+        }
+        .task { if ideas.draft?.isNew == true { focused = .body } }
         .animation(.easeInOut(duration: 0.2), value: color)
     }
 
