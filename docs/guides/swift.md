@@ -27,9 +27,8 @@ Screen recording follows this split: the recorder and its destination types
 hold the capture state; the control bar view renders it; controllers own the
 AppKit-only work such as the control bar panel, the region and window pickers,
 and screen positioning; the app delegate bootstraps the feature and the menu
-bar without owning product behavior. The pointer is captured as data: the
-stream draws no cursor, and a track recorder samples where it went into a
-`.cursor.json` beside the movie for an editor to draw or follow.
+bar without owning product behavior. The stream draws the pointer straight
+into the video.
 
 ## Language
 

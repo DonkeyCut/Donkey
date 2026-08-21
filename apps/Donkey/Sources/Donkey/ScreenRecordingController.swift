@@ -30,9 +30,6 @@ final class ScreenRecordingController {
     private let recordingDim = RecordingRegionDimOverlayController()
 
     private var recorder: (any ScreenRecording)?
-    /// The pointer's path through the recording. The video never draws a cursor, so this is the only
-    /// record of where it went — an editor draws its own, or zooms to follow it.
-    private let cursorTrack = CursorTrackRecorder()
     private var phase: Phase = .idle
     private var armScreen: NSScreen?
     private var selectedRegion: (rect: CGRect, displayID: CGDirectDisplayID)?
@@ -216,7 +213,6 @@ final class ScreenRecordingController {
 
         do {
             try await recorder.start(configuration)
-            cursorTrack.start(captureRect: Self.captureRectProvider(for: target))
             phase = .recording
             recordingStart = Date()
             model.isRecording = true
@@ -242,10 +238,8 @@ final class ScreenRecordingController {
 
         Task {
             defer { finishAfterRecording() }
-            let track = cursorTrack.finish()
             do {
                 let url = try await recorder.stop()
-                Self.writeCursorTrack(track, beside: url)
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             } catch {
                 model.statusMessage = "Recording failed to finalize."
@@ -255,7 +249,6 @@ final class ScreenRecordingController {
 
     private func handleUnexpectedStop() {
         stopTimer()
-        _ = cursorTrack.finish()
         recorder = nil
         recordingDim.close()
         phase = .idle
@@ -289,38 +282,6 @@ final class ScreenRecordingController {
             guard let selectedWindowID else { return nil }
             return .window(windowID: selectedWindowID)
         }
-    }
-
-    // MARK: - Cursor track
-
-    /// The rect the pointer is measured against, in CoreGraphics global points. It is read on every
-    /// sample, so a window dragged mid-recording keeps yielding positions in its own frame.
-    private static func captureRectProvider(for target: ScreenCaptureTarget) -> @MainActor () -> CGRect? {
-        switch target {
-        case .display(let displayID, let region):
-            let bounds = CGDisplayBounds(displayID)
-            let rect = region.map { $0.offsetBy(dx: bounds.minX, dy: bounds.minY) } ?? bounds
-            return { rect }
-        case .window(let windowID):
-            return { windowFrame(windowID) }
-        }
-    }
-
-    /// A window's frame right now, straight from the window server.
-    private static func windowFrame(_ windowID: CGWindowID) -> CGRect? {
-        guard let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], windowID) as? [[String: Any]],
-              let bounds = list.first?[kCGWindowBounds as String] as? [String: CGFloat],
-              let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary) else {
-            return nil
-        }
-        return rect
-    }
-
-    private static func writeCursorTrack(_ track: CursorTrack, beside movieURL: URL) {
-        guard !track.samples.isEmpty else { return }
-        let encoder = JSONEncoder()
-        guard let data = try? encoder.encode(track) else { return }
-        try? data.write(to: ScreenRecordingDestination.cursorTrackURL(for: movieURL))
     }
 
     // MARK: - Audio inputs
