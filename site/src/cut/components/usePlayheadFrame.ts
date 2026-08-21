@@ -81,20 +81,62 @@ export function snapshotClipSource(clipId: string): string | null {
   }
 }
 
+/** Sampling beats per second while the playhead is being moved by hand. */
+const SCRUB_BEATS = 5;
+/** Beats folded into one sample while playback runs: the swatches want
+ * variety, and once a second is variety enough. */
+const PLAY_BEAT = 5;
+
+/**
+ * The swatch feed's shared schedule and hand-off. Playing publishes about
+ * once a second; paused publishes on every move, so the tiles land on the
+ * exact frame under the playhead — including the frame playback stops on,
+ * which gets its own sample when `playing` flips. Every URL is decoded before
+ * it publishes: an <img> handed an undecoded one paints blank for a beat,
+ * which is what made the swatches flicker.
+ */
+function useSampledFrame(
+  snapshot: () => string | null,
+  enabled: boolean,
+  key: unknown,
+  initial: string | null = null,
+  onShot?: (url: string) => void
+): string | null {
+  const [frame, setFrame] = useState<string | null>(initial);
+  const playing = useEditor((s) => s.playing);
+  const tick = usePreviewTimeEvery(SCRUB_BEATS);
+  const epoch = useEditor((s) => s.loadEpoch);
+  const beat = playing ? Math.floor(tick / PLAY_BEAT) : tick;
+  useEffect(() => {
+    if (!enabled) return;
+    let gone = false;
+    // A beat after the move, so the decoder has painted the frame.
+    const t = setTimeout(() => {
+      const shot = snapshot();
+      if (!shot) return;
+      const img = new Image();
+      img.src = shot;
+      const land = () => {
+        if (gone) return;
+        onShot?.(shot);
+        setFrame(shot);
+      };
+      img.decode().then(land, land);
+    }, 160);
+    return () => {
+      gone = true;
+      clearTimeout(t);
+    };
+    // snapshot and onShot read live state; the beat is the schedule.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [beat, playing, epoch, enabled, key]);
+  return frame;
+}
+
 /** The clip's ungraded frame under the playhead, re-sampled as it moves — the
  * base every color preset swatch paints its own recipe onto. */
 export function useClipSourceFrame(clipId: string): string | null {
-  const [frame, setFrame] = useState<string | null>(null);
-  const tick = usePreviewTimeEvery(5);
-  const epoch = useEditor((s) => s.loadEpoch);
-  useEffect(() => {
-    const t = setTimeout(() => {
-      const shot = snapshotClipSource(clipId);
-      if (shot) setFrame(shot);
-    }, 160);
-    return () => clearTimeout(t);
-  }, [tick, epoch, clipId]);
-  return frame;
+  return useSampledFrame(() => snapshotClipSource(clipId), true, clipId);
 }
 
 /** The last sampled frame, kept across tab switches: a panel unmounts when
@@ -107,24 +149,17 @@ let lastFrame: { project: string; url: string } | null = null;
  * decoder has painted); null until the preview has a picture. */
 export function usePlayheadFrame(): string | null {
   const projectId = useEditor((s) => s.projectId);
-  const [frame, setFrame] = useState<string | null>(() =>
-    lastFrame && lastFrame.project === projectId ? lastFrame.url : null
-  );
-  const tick = usePreviewTimeEvery(5);
-  const epoch = useEditor((s) => s.loadEpoch);
   // The tile shows the live frame, which a cut of titles and shapes over the
   // background has as much as one made of footage.
   const hasPicture = useEditor((s) => projectDuration(s) > 0);
-  useEffect(() => {
-    if (!hasPicture || !projectId) return;
-    const t = setTimeout(() => {
-      const shot = snapshotPreview();
-      if (shot) {
-        lastFrame = { project: projectId, url: shot };
-        setFrame(shot);
-      }
-    }, 160);
-    return () => clearTimeout(t);
-  }, [tick, epoch, hasPicture, projectId]);
+  const frame = useSampledFrame(
+    snapshotPreview,
+    hasPicture && !!projectId,
+    projectId,
+    lastFrame && lastFrame.project === projectId ? lastFrame.url : null,
+    (url) => {
+      if (projectId) lastFrame = { project: projectId, url };
+    }
+  );
   return hasPicture ? frame : null;
 }

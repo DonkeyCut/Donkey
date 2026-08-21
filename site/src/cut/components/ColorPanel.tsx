@@ -174,7 +174,16 @@ function PresetView({
         contentClassName="grid grid-cols-2 gap-2 px-3.5 pt-1 pb-2"
       >
         {presets.map((p) => (
-          <PresetTile key={p.id} preset={p} frame={frame} selected={active?.id === p.id} onPick={pick} />
+          // Keyed by the clip too: a tile holds its last thumb across a
+          // moving playhead, and that hold has to break when the footage
+          // under it changes, or the swatches show the clip just left.
+          <PresetTile
+            key={`${clip.id}:${p.id}`}
+            preset={p}
+            frame={frame}
+            selected={active?.id === p.id}
+            onPick={pick}
+          />
         ))}
       </ScrollArea>
       <div className="shrink-0 border-t border-border bg-card px-3.5 py-1">
@@ -277,7 +286,14 @@ function PresetTile({
       if (presetThumbCache.size > 128)
         for (const k of presetThumbCache.keys())
           if (!k.endsWith(`|${frame}`)) presetThumbCache.delete(k);
-      bump((n) => n + 1);
+      // Decoded before the swap, so the tile flips straight from the old
+      // thumb to a ready bitmap.
+      const pre = new Image();
+      pre.src = url;
+      const land = () => {
+        if (!gone) bump((n) => n + 1);
+      };
+      pre.decode().then(land, land);
     };
     img.src = frame;
     return () => {
@@ -285,7 +301,12 @@ function PresetTile({
     };
   }, [key, frame, preset]);
 
-  const src = needsLut ? (key ? presetThumbCache.get(key) ?? null : null) : frame;
+  const fresh = needsLut ? (key ? presetThumbCache.get(key) ?? null : null) : frame;
+  // The last thumb this tile showed holds while the fresh frame's is still
+  // rendering, so a moving playhead never drops the tile to its stand-in.
+  const [held, setHeld] = useState<string | null>(null);
+  if (fresh && fresh !== held) setHeld(fresh);
+  const src = fresh ?? held;
   return (
     <button
       type="button"
@@ -298,7 +319,7 @@ function PresetTile({
     >
       <span
         className={cn(
-          "relative block aspect-video w-full overflow-hidden rounded-md bg-muted",
+          "relative block aspect-square w-full overflow-hidden rounded-md bg-muted",
           selected && "ring-2 ring-[#0a84ff] ring-offset-1 ring-offset-card"
         )}
       >
