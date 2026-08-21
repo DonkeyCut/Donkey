@@ -65,6 +65,11 @@ paragraph breaks, and long unbroken paragraphs wrap into short lines at
 clause boundaries. Speed and text size persist across sessions — set once,
 kept forever.
 
+A note is read whole: its title, then its body. Closing the card hands the
+screen to the prompter, which runs the script on a loop until the take starts,
+so a speed and size are something a person watches before they commit to
+them.
+
 ## How It Is Put Together
 
 The app follows the Swift Guide's MVC split across two layers:

@@ -42,7 +42,10 @@ struct CameraScreen<CameraPreview: View>: View {
             if camera.isFillLightOn, camera.availability == .running {
                 FillLightOverlay()
             }
-            if camera.isRecording, camera.teleprompter.hasScript {
+            // Closing the card hands the screen to the prompter, recording or
+            // not: the script runs on a loop so the speed and size a person
+            // just set are something they can watch before the take.
+            if camera.teleprompter.hasScript, camera.isRecording || !camera.teleprompter.isCardShown {
                 TeleprompterOverlay(camera: camera)
             }
             controls
@@ -425,6 +428,11 @@ struct TeleprompterCard: View {
                 .popover(isPresented: $showsSettings, arrowEdge: .top) {
                     TeleprompterSettingsView(camera: camera)
                         .presentationCompactAdaptation(.popover)
+                        // The popover's own chrome follows the phone's
+                        // appearance, so in light mode it drew a pale panel
+                        // under the camera chrome's white type. It carries the
+                        // stage's dark instead.
+                        .presentationBackground(Color.black.opacity(0.78))
                 }
                 Button(action: onUseNote) {
                     Image(systemName: "note.text")
@@ -488,12 +496,17 @@ struct TeleprompterOverlay: View {
     /// Rendered height of the paced script, measured off the Text itself so
     /// the scroll rate can pace the exact copy on screen.
     @State private var textHeight: Double = 0
+    /// Where the idle loop counts from, so a preview runs the script the same
+    /// way a take does.
+    @State private var previewStart = Date.now
+    /// Beat between the end of a preview pass and the top of the next one.
+    private static var previewGap: TimeInterval { 1.5 }
 
     var body: some View {
         GeometryReader { geometry in
             let height = geometry.size.height * 0.42
             TimelineView(.animation) { context in
-                let elapsed = camera.recordingStartedAt.map { context.date.timeIntervalSince($0) } ?? 0
+                let elapsed = elapsed(at: context.date)
                 Text(camera.teleprompter.displayScript)
                     .font(.system(size: camera.teleprompter.settings.textSize, weight: .heavy))
                     .foregroundStyle(.white)
@@ -523,6 +536,17 @@ struct TeleprompterOverlay: View {
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
+    }
+
+    /// Seconds into the script. A take counts from the moment recording
+    /// started; idle, the script runs the same pass on a loop.
+    private func elapsed(at now: Date) -> TimeInterval {
+        if let startedAt = camera.recordingStartedAt {
+            return now.timeIntervalSince(startedAt)
+        }
+        let pass = camera.teleprompter.duration + Self.previewGap
+        guard pass > 0 else { return 0 }
+        return now.timeIntervalSince(previewStart).truncatingRemainder(dividingBy: pass)
     }
 }
 

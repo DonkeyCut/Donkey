@@ -414,7 +414,10 @@ import Testing
         model.openEditor()
         model.draft?.body = "Hey there this is cool"
         let note = model.saveDraft()
-        #expect(note?.title == "Untitled")
+        // A note nobody titled carries no title, so the prompter never reads
+        // a stand-in out loud.
+        #expect(note?.title == "")
+        #expect(note?.script == "Hey there this is cool")
         #expect(model.notes.count == 1)
         #expect(model.draft == nil)
     }
@@ -445,11 +448,13 @@ import Testing
         #expect(model.notes[1].body == "edited")
     }
 
-    @Test func scriptPrefersBody() {
+    @Test func scriptReadsTheWholeNote() {
         let note = Note(title: "Title", body: "Body", color: .butter)
-        #expect(note.script == "Body")
+        #expect(note.script == "Title\n\nBody")
         let titleOnly = Note(title: "Title", body: "", color: .butter)
         #expect(titleOnly.script == "Title")
+        let bodyOnly = Note(title: "", body: "Body", color: .butter)
+        #expect(bodyOnly.script == "Body")
     }
 
     @Test func inspirationLinkRoundTrips() throws {

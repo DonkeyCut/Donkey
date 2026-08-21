@@ -56,8 +56,14 @@ nonisolated public struct Note: Identifiable, Equatable, Sendable {
         self.updatedAt = updatedAt
     }
 
-    /// The text a teleprompter reads for this note.
-    public var script: String { body.isEmpty ? title : body }
+    /// The text a teleprompter reads for this note: the whole of it, title
+    /// first. What a person wrote in the note is what they meant to say.
+    public var script: String {
+        [title, body]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+    }
 }
 
 nonisolated public enum InspirationKind: Equatable, Sendable {
@@ -166,9 +172,11 @@ public final class IdeasModel {
         let title = draft.title.trimmingCharacters(in: .whitespaces)
         let body = draft.body.trimmingCharacters(in: .whitespaces)
         let existing = notes.first(where: { $0.id == draft.id })
+        // A stand-in title would be read out by the prompter, so an untitled
+        // note stays untitled and the card shows the placeholder.
         let note = Note(
             id: draft.id,
-            title: title.isEmpty ? "Untitled" : title,
+            title: title,
             body: body,
             color: draft.color,
             createdAt: existing?.createdAt ?? .now,

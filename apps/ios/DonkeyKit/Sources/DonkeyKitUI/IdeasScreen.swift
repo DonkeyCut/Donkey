@@ -163,8 +163,10 @@ struct NoteCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(note.title)
-                .font(.subheadline.weight(.bold))
+            if !note.title.isEmpty {
+                Text(note.title)
+                    .font(.subheadline.weight(.bold))
+            }
             Text(note.body)
                 .font(.footnote)
                 .opacity(0.75)
