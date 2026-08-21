@@ -31,6 +31,7 @@ public final class ProjectsModel {
 
     private var summaries: [String: RemoteProject] = [:]
     private var latestExports: [String: RemoteExport] = [:]
+    private var thumbnails: [String: URL] = [:]
     private let service: (any CloudProjectsServicing)?
 
     public init(service: (any CloudProjectsServicing)? = nil) {
@@ -38,14 +39,24 @@ public final class ProjectsModel {
     }
 
     /// Pull the listing and per-project latest exports, then fill thumbnails
-    /// as they cache — cards paint with names first, posters as they land.
+    /// as they cache. A card keeps the poster and export it already carries
+    /// while the refresh runs, so revisiting the screen repaints in place.
     public func refresh() async {
         guard let service, !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
         guard let remote = try? await service.fetchProjects() else { return }
         summaries = Dictionary(uniqueKeysWithValues: remote.map { ($0.id, $0) })
-        projects = remote.map { project(for: $0, latest: nil, thumbnail: nil) }
+        let live = Set(remote.map(\.id))
+        latestExports = latestExports.filter { live.contains($0.key) }
+        thumbnails = thumbnails.filter { live.contains($0.key) }
+        projects = remote.map { project(for: $0, latest: latestExports[$0.id], thumbnail: thumbnails[$0.id]) }
+        async let exports: Void = fillExports(remote, service: service)
+        async let posters: Void = fillThumbnails(remote, service: service)
+        _ = await (exports, posters)
+    }
+
+    private func fillExports(_ remote: [RemoteProject], service: any CloudProjectsServicing) async {
         await withTaskGroup(of: (String, RemoteExport?).self) { group in
             for summary in remote {
                 group.addTask { (summary.id, (try? await service.fetchExports(projectId: summary.id))?.first) }
@@ -57,12 +68,17 @@ public final class ProjectsModel {
                 projects[index] = project(for: summary, latest: latest, thumbnail: projects[index].thumbnail)
             }
         }
+    }
+
+    private func fillThumbnails(_ remote: [RemoteProject], service: any CloudProjectsServicing) async {
         await withTaskGroup(of: (String, URL?).self) { group in
             for summary in remote {
                 group.addTask { (summary.id, await service.thumbnailFile(for: summary)) }
             }
             for await (id, file) in group {
-                guard let file, let index = projects.firstIndex(where: { $0.id == id }) else { continue }
+                guard let file else { continue }
+                thumbnails[id] = file
+                guard let index = projects.firstIndex(where: { $0.id == id }) else { continue }
                 projects[index].thumbnail = file
             }
         }

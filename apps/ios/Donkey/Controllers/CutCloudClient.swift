@@ -440,13 +440,14 @@ extension CutCloudClient: CloudProjectsServicing {
         if FileManager.default.fileExists(atPath: file.localPath) { return file }
         guard let image = await thumbnailImage(for: project),
               let data = image.jpegData(compressionQuality: 0.8) else { return nil }
-        // Versions of this project from before the edit leave with the refresh.
+        try? data.write(to: file, options: .atomic)
+        // Versions of this project from before the edit leave once the new
+        // poster is on disk, so a card never points at a file that is gone.
         let stale = (try? FileManager.default.contentsOfDirectory(atPath: directory.localPath))?
-            .filter { $0.hasPrefix("\(project.id)-") } ?? []
+            .filter { $0.hasPrefix("\(project.id)-") && $0 != file.lastPathComponent } ?? []
         for name in stale {
             try? FileManager.default.removeItem(at: directory.appending(path: name))
         }
-        try? data.write(to: file, options: .atomic)
         return file
     }
 
