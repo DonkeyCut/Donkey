@@ -77,11 +77,19 @@ export async function copyStageFrame(): Promise<void> {
   const png = renderStageFrame(at);
   // The write's verdict is kept rather than awaited here: a frame that fails
   // to draw fails the write with it, and the draw is the failure worth
-  // reporting.
-  const wroteOk = navigator.clipboard.write([new ClipboardItem({ "image/png": png })]).then(
-    () => true,
-    () => false
-  );
+  // reporting. A browser that refuses the call on the spot — no clipboard on
+  // an insecure context, a ClipboardItem that wants a settled blob — throws
+  // where it stands, so it is caught into the same verdict and the frame
+  // below is still held for ⌘V.
+  let wroteOk: Promise<boolean>;
+  try {
+    wroteOk = navigator.clipboard.write([new ClipboardItem({ "image/png": png })]).then(
+      () => true,
+      () => false
+    );
+  } catch {
+    wroteOk = Promise.resolve(false);
+  }
   held = { png: await png, at };
   // The frame is the clipboard's contents now; a timeline copy no longer
   // outranks it at the next ⌘V.
