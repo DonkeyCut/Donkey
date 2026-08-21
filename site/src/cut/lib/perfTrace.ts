@@ -23,6 +23,14 @@ export interface PresentRecord {
   /** Source timestamp of the master layer's picture, for spotting a frame that
    * was shown twice or skipped. */
   srcTs: number | null;
+  /**
+   * The source time the master layer was asked for.
+   *
+   * With `srcTs` this is the whole sync story: sound is scheduled against the
+   * same clock `t` comes from, so `wantSrc - srcTs` is how far the picture sits
+   * behind the sound at that instant.
+   */
+  wantSrc: number | null;
   /** The clip the master picture came from, so a boundary is findable. */
   clipId: string | null;
   /**
@@ -62,6 +70,14 @@ export interface Trace {
   ticks: number;
   /** Decoded frames the sources are holding open, sampled per present. */
   liveSamples: number[];
+  /** Decoders open, sampled per present. Stood-down sources hold none, so this
+   * is what the pool's budget is measured against. */
+  liveSources: number[];
+  /** Sources the pool holds at all, decoder or not, sampled per present. */
+  keptSources: number[];
+  /** Megabytes of canvas backing on the warm shelf — the stood-down sources,
+   * which is the part the pool's memory budget governs. */
+  warmMb: number[];
   startedAt: number;
 }
 
@@ -86,6 +102,9 @@ export function startTrace(): void {
     longTasks: [],
     ticks: 0,
     liveSamples: [],
+    liveSources: [],
+    keptSources: [],
+    warmMb: [],
     startedAt: performance.now(),
   };
   pendingSeek = null;
@@ -149,4 +168,13 @@ export function markTick(): void {
 export function markLiveSamples(n: number): void {
   if (!trace) return;
   trace.liveSamples.push(n);
+}
+
+/** What the decoder pool is holding right now: sources with a decoder, sources
+ * kept at all, and the canvas backing behind them. */
+export function markLiveSources(active: number, kept: number, warmPixels: number): void {
+  if (!trace) return;
+  trace.liveSources.push(active);
+  trace.keptSources.push(kept);
+  trace.warmMb.push(Math.round(warmPixels * 4e-6));
 }

@@ -5,13 +5,15 @@ import type { MediaAsset } from "./types";
 /** A decoded frame at 30fps, as the sink would hand it over. */
 const f = (timestamp: number, duration = 1 / 30): Timed => ({ timestamp, duration });
 
-const asset = (id: string): MediaAsset => ({
+const asset = (id: string, width = 1280, height = 720): MediaAsset => ({
   id,
   name: `${id}.mp4`,
   fileName: `${id}.mp4`,
   type: "video",
   url: `https://example.test/${id}.mp4`,
   duration: 10,
+  width,
+  height,
 });
 
 describe("FrameRing", () => {
@@ -166,7 +168,7 @@ describe("FrameSourcePool", () => {
     expect(pool.size).toBe(1);
   });
 
-  test("evicts the least recently asked-for, never this frame's", () => {
+  test("suspends the least recently asked-for, never this frame's", () => {
     const pool = new FrameSourcePool(2);
     pool.beginFrame();
     const old = pool.get("old", asset("a"), 480);
@@ -177,11 +179,55 @@ describe("FrameSourcePool", () => {
     const live = pool.get("live", asset("c"), 480);
     expect(pool.size).toBe(3);
     pool.evict();
-    // Down to the budget, and the one this frame is drawn from survives.
-    expect(pool.size).toBe(2);
+    // Past the budget the idle ones stand down, and standing down keeps the
+    // source — its parsed file and its sink's canvases — so the next visit
+    // finds the same instance instead of paying for a fresh open.
+    expect(pool.size).toBe(3);
     expect(pool.get("live", asset("c"), 480)).toBe(live);
     expect(pool.get("mid", asset("b"), 480)).toBe(mid);
-    expect(pool.get("old", asset("a"), 480)).not.toBe(old);
+    expect(pool.get("old", asset("a"), 480)).toBe(old);
+  });
+
+  test("standing down costs a decoder, not a source", () => {
+    const pool = new FrameSourcePool(1);
+    pool.beginFrame();
+    const a = pool.get("a", asset("a"), 360);
+    pool.beginFrame();
+    pool.get("b", asset("b"), 360);
+    for (let i = 0; i < 200; i++) pool.beginFrame();
+    // Both are idle and the budget is one, so the older gives up its decoder.
+    pool.evict();
+    expect(pool.size).toBe(2);
+    expect(pool.active).toBe(1);
+    // Suspension is a state: evicting again changes nothing, and reading the
+    // source is what wakes it.
+    pool.evict();
+    expect(pool.active).toBe(1);
+    a.want(0, false);
+    expect(pool.active).toBe(2);
+  });
+
+  test("closes what the canvas budget cannot keep", () => {
+    // Big frames: a handful of sinks is the whole budget, so a montage of them
+    // is bounded by memory rather than by a count.
+    const pool = new FrameSourcePool(2);
+    for (let i = 0; i < 24; i++) {
+      pool.beginFrame();
+      pool.get(`s${i}`, asset(`x${i}`, 3840, 2160), 2160);
+    }
+    for (let i = 0; i < 200; i++) pool.beginFrame();
+    pool.evict();
+    expect(pool.size).toBeLessThan(6);
+    // Small frames of the same count fit, and all of them stay.
+    const small = new FrameSourcePool(2);
+    for (let i = 0; i < 24; i++) {
+      small.beginFrame();
+      small.get(`s${i}`, asset(`x${i}`, 640, 360), 360);
+    }
+    for (let i = 0; i < 200; i++) small.beginFrame();
+    small.evict();
+    expect(small.size).toBe(24);
+    expect(small.active).toBe(2);
   });
 
   test("holds a source through the grace, so a busy cut never thrashes", () => {

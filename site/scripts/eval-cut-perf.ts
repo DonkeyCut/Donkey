@@ -21,6 +21,12 @@
  *                    at; the tile is compared against this same browser's
  *                    decode of the file, which cancels colorspace drift between
  *                    the encoder and the canvas.
+ *   holding sync    — a montage of sub-second clips sliced from one long file
+ *                    plays through repeatedly, and the trace is checked for the
+ *                    picture falling behind the clock it shares with the sound
+ *                    and for late frames rising from the first pass to the
+ *                    last. This is the session-decay case: a preview that is
+ *                    smooth for a minute and choppy after five fails here.
  *
  * Fixtures build deterministically into dist/cut-perf/ (gitignored) from the
  * bundled stock clips, so the montage's cut times are known exactly.
@@ -86,6 +92,19 @@ const GATE = {
   // a tile's edge lands on the neighboring scene whenever a cut sits inside
   // the tile — the standard is the midpoint, so that drift is a failure.
   filmstripSlackS: 0.2,
+  // Sound is scheduled against the clock the picture is drawn from, so how far
+  // the picture sits behind the source moment it was asked for is how far it
+  // sits behind the sound. A frame either side of the ask is the picture
+  // keeping up; a quarter second is a viewer noticing.
+  lagP95S: 0.05,
+  lagMaxS: 0.25,
+  // A long play must end the way it began: a session that decays is the bug
+  // this case exists to catch.
+  decayRatio: 1.5,
+  // Canvas backing the pool's warm shelf is holding. The shelf trades decoder
+  // churn for memory, and this is the side of that trade a change could
+  // quietly blow.
+  warmMb: 400,
 };
 
 // ── Types shared with perfTrace.ts ──────────────────────────────────────────
@@ -93,6 +112,7 @@ interface PresentRecord {
   t: number;
   at: number;
   srcTs: number | null;
+  wantSrc: number | null;
   clipId: string | null;
   exact: boolean;
   stale: boolean;
@@ -108,6 +128,9 @@ interface Trace {
   longTasks: { at: number; ms: number }[];
   ticks: number;
   liveSamples: number[];
+  liveSources: number[];
+  keptSources: number[];
+  warmMb: number[];
   startedAt: number;
 }
 
@@ -213,6 +236,88 @@ async function buildRamp(): Promise<void> {
     dst,
   ]);
 }
+
+// ── The fast-cut fixture ────────────────────────────────────────────────────
+//
+// The shape people actually edit in: one long file, sliced into a montage of
+// sub-second clips in shuffled source order, with sound. Every clip is its own
+// decode mapping, so a play crosses a cut about once a second and each cut
+// lands on a source moment the last clip's decoder was nowhere near.
+
+/** The fast-cut source: long enough that its slices are spread across the file. */
+const MONTAGE_SRC_S = 30;
+/** One slice, and how many the montage holds. */
+const SHOT_S = 0.9;
+const SHOTS = 20;
+
+/** A long clip with sound and a sparse keyframe cadence, which is what a phone
+ * or a screen recording gives you. */
+async function buildMontageSource(): Promise<void> {
+  const dst = path.join(OUT, "montage-src.mp4");
+  if (existsSync(dst)) return;
+  const src = path.join(STOCK, "animal-dog-sprint.mp4");
+  await run("ffmpeg", [
+    "-y", "-loglevel", "error",
+    "-stream_loop", "-1", "-i", src,
+    "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
+    "-t", String(MONTAGE_SRC_S),
+    "-map", "0:v:0", "-map", "1:a:0",
+    "-c:v", "libx264", "-preset", "veryfast", "-g", "60", "-keyint_min", "60",
+    "-r", "30", "-vf", "scale=1280:-2", "-pix_fmt", "yuv420p",
+    "-c:a", "aac", "-b:a", "128k",
+    "-shortest",
+    dst,
+  ]);
+}
+
+/** Where each shot reads from, spread over the source and shuffled by a fixed
+ * step so no two neighbours share a decoder or a keyframe. */
+const SHOT_INS = Array.from({ length: SHOTS }, (_, i) => {
+  const slot = (i * 7) % SHOTS;
+  return +((slot / SHOTS) * (MONTAGE_SRC_S - SHOT_S)).toFixed(3);
+});
+
+/** Seed the montage: one asset, many short clips, each its own mapping. */
+const seedMontage = async (page: Page): Promise<Fixture> =>
+  page.evaluate(
+    async ({ ins, shot, srcDuration }) => {
+      const dev = (window as unknown as {
+        __cutDev: { useEditor: { getState(): Record<string, unknown>; setState(p: unknown): void } };
+      }).__cutDev;
+      dev.useEditor.setState({
+        assets: [
+          {
+            id: "montage",
+            name: "montage-src.mp4",
+            fileName: "montage-src.mp4",
+            type: "video",
+            url: "/__cutperf/montage-src.mp4",
+            duration: srcDuration,
+            width: 1280,
+            height: 720,
+          },
+        ],
+        clips: ins.map((inPoint, i) => ({
+          id: `m-${i}`,
+          assetId: "montage",
+          track: 0,
+          start: +(i * shot).toFixed(3),
+          in: inPoint,
+          out: +(inPoint + shot).toFixed(3),
+        })),
+        audioClips: [],
+        overlays: [],
+        transitions: [],
+        loaded: true,
+      });
+      await new Promise((r) => setTimeout(r, 200));
+      return {
+        cuts: ins.slice(1).map((_, i) => +((i + 1) * shot).toFixed(3)),
+        duration: +(ins.length * shot).toFixed(3),
+      };
+    },
+    { ins: SHOT_INS, shot: SHOT_S, srcDuration: MONTAGE_SRC_S }
+  );
 
 /** Where the scene-cut fixture changes scene: every three seconds. */
 const CUT_SEG_S = 3;
@@ -367,13 +472,15 @@ async function rewind(page: Page): Promise<void> {
     () =>
       (window as unknown as { __cutDev: { playheadAt(): number } }).__cutDev.playheadAt() < 0.01,
     undefined,
-    { timeout: 5000 }
+    { timeout: 15_000, polling: 100 }
   );
   await page.waitForTimeout(150);
 }
 
-/** Wait for the picture to catch up to the last thing asked for. */
-const settle = (page: Page, ms = 2500) =>
+/** Wait for the perf hook, then a beat for the picture to catch up. Polled on
+ * an interval: a fresh seed kicks off filmstrip captures for every clip, and
+ * rAF-polled waits starve under that burst. */
+const settle = (page: Page, ms = 15_000) =>
   page
     .waitForFunction(
       () => {
@@ -383,7 +490,7 @@ const settle = (page: Page, ms = 2500) =>
         return !!perf;
       },
       undefined,
-      { timeout: ms }
+      { timeout: ms, polling: 100 }
     )
     .then(() => page.waitForTimeout(120));
 
@@ -403,6 +510,14 @@ interface CaseResult {
   idleTicks?: number;
   longTasks?: Agg;
   liveSamples?: number;
+  liveSources?: number;
+  /** Sources the pool kept, and the canvas backing on its warm shelf. */
+  keptSources?: number;
+  warmMb?: number;
+  /** Seconds the picture sat behind the moment it was asked for. */
+  lag?: Agg;
+  /** Late-frame share over the first and last third of a long play. */
+  decay?: { first: number; last: number };
   /** Seconds between a strip tile's own moment and the moment its picture
    * was captured at. */
   tileErr?: Agg;
@@ -547,6 +662,156 @@ const playbackCase = (name: string, transitions: boolean): EvalCase => ({
       boundaryDrops,
       longTasks: lt,
       liveSamples: Math.max(0, ...trace.liveSamples),
+    };
+  },
+});
+
+/**
+ * A montage played straight through, `passes` times over, with the sound on.
+ *
+ * What it measures is drift: how far the picture sits behind the moment the
+ * clock asked for, and whether the last pass is worse than the first. A single
+ * pass answers "does a fast cut play"; several answer "does it still play after
+ * a while", which is the complaint this case was written for.
+ */
+const montageCase = (name: string, passes: number): EvalCase => ({
+  name,
+  bucket: "playback",
+  transitions: false,
+  seed: seedMontage,
+  run: async (page, fx) => {
+    await rewind(page);
+    // One pass before the trace, so what follows measures playing rather than
+    // opening twenty decoders for the first time.
+    await setPlaying(page, true);
+    await page.waitForTimeout(WARM_PLAY_S * 1000);
+    await rewind(page);
+    await settle(page);
+    await startTrace(page);
+    for (let i = 0; i < passes; i++) {
+      await seek(page, 0);
+      await setPlaying(page, true);
+      await page.waitForTimeout((fx.duration + 0.6) * 1000);
+      if (has("--detail")) {
+        const state = await page.evaluate(() => {
+          const w = window as unknown as {
+            __cutDevEngine?: { poolState(): Record<string, unknown>[] };
+            __cutDev: { useEditor: { getState(): { clips: unknown[]; playing: boolean } } };
+          };
+          const s = w.__cutDev.useEditor.getState();
+          return { pool: w.__cutDevEngine?.poolState() ?? [], clips: s.clips.length, playing: s.playing };
+        });
+        const res = await page.evaluate(
+          () => (window as unknown as { __resourceStats?: unknown }).__resourceStats ?? null
+        );
+        console.log(
+          `[pool] pass ${i + 1}: clips=${state.clips} playing=${state.playing} res=${JSON.stringify(res)}`
+        );
+        for (const s of state.pool) console.log(`[pool]   ${JSON.stringify(s)}`);
+        const log = (await page.evaluate(() => {
+          const w = window as unknown as { __cutEngineLog?: { at: number; msg: string }[] };
+          const out = w.__cutEngineLog ?? [];
+          w.__cutEngineLog = [];
+          return out;
+        })) as { at: number; msg: string }[];
+        for (const e of log) console.log(`[elog] ${(e.at / 1000).toFixed(1)}s ${e.msg}`);
+      }
+      await setPlaying(page, false);
+    }
+    const trace = await stopTrace(page);
+    const notes: string[] = [];
+    if (!trace) return { name, bucket: "playback", pass: false, notes: ["no trace"] };
+
+    // The moments a clip's decoder is being opened for the first time in a pass
+    // belong to the open, so the measure starts a beat inside every clip and
+    // ends a beat before the cut.
+    const played = trace.presents.filter((p) => {
+      const into = p.t % SHOT_S;
+      return p.t > 0.4 && p.t < fx.duration - 0.3 && into > 0.15 && into < SHOT_S - 0.05;
+    });
+    if (played.length < 60) {
+      return { name, bucket: "playback", pass: false, notes: [`only ${played.length} frames`] };
+    }
+    const lag = agg(
+      played
+        .filter((p) => p.srcTs !== null && p.wantSrc !== null)
+        .map((p) => Math.max(0, +(p.wantSrc! - p.srcTs!).toFixed(4)))
+    );
+    const late = played.filter((p) => !p.exact || p.stale);
+    const share = (xs: PresentRecord[]) =>
+      xs.length ? +(xs.filter((p) => !p.exact || p.stale).length / xs.length).toFixed(3) : 0;
+    const third = Math.floor(played.length / 3);
+    const decay = { first: share(played.slice(0, third)), last: share(played.slice(-third)) };
+    if (has("--detail")) {
+      const span = (trace.presents.at(-1)!.at - trace.presents[0].at) / 1000;
+      console.log(
+        `[detail] presents=${trace.presents.length} over ${span.toFixed(1)}s (${(
+          trace.presents.length / span
+        ).toFixed(1)}/s) stale=${played.filter((p) => p.stale).length} notExact=${
+          played.filter((p) => !p.exact && !p.stale).length
+        } sources p50=${agg(trace.liveSources).p50} max=${agg(trace.liveSources).max} held p50=${
+          agg(trace.liveSamples).p50
+        } max=${agg(trace.liveSamples).max}`
+      );
+      for (let i = 0; i < passes; i++) {
+        const from = (i * played.length) / passes;
+        const slice = played.slice(Math.floor(from), Math.floor(from + played.length / passes));
+        const gaps = slice.slice(1).map((p, j) => p.at - slice[j].at);
+        console.log(
+          `[detail] pass ${i + 1}: late=${share(slice)} lagP95=${
+            agg(slice.filter((p) => p.srcTs !== null).map((p) => Math.max(0, p.wantSrc! - p.srcTs!)))
+              .p95
+          }s frameGapP95=${agg(gaps).p95}ms n=${slice.length}`
+        );
+        // Which clips went dark, and for how long at a stretch.
+        const byClip = new Map<string, { n: number; stale: number; worst: number }>();
+        let streak = 0;
+        for (let j = 0; j < slice.length; j++) {
+          const p = slice[j];
+          const key = p.clipId ?? "none";
+          const row = byClip.get(key) ?? { n: 0, stale: 0, worst: 0 };
+          row.n++;
+          if (p.stale) {
+            row.stale++;
+            streak = streak + (j > 0 ? p.at - slice[j - 1].at : 0);
+            row.worst = Math.max(row.worst, streak);
+          } else {
+            streak = 0;
+          }
+          byClip.set(key, row);
+        }
+        const dark = [...byClip.entries()]
+          .filter(([, r]) => r.stale > 0)
+          .sort((a, b) => b[1].stale / b[1].n - a[1].stale / a[1].n)
+          .map(([id, r]) => `${id}:${Math.round((100 * r.stale) / r.n)}%/${Math.round(r.worst)}ms`);
+        if (dark.length) console.log(`[detail]   dark ${dark.join(" ")}`);
+      }
+    }
+
+    if (lag.p95 > GATE.lagP95S) notes.push(`picture ${lag.p95}s behind the clock at p95`);
+    if (lag.max > GATE.lagMaxS) notes.push(`picture ${lag.max}s behind the clock at worst`);
+    if (passes > 1 && decay.last > Math.max(0.02, decay.first * GATE.decayRatio)) {
+      notes.push(`late frames rose ${decay.first} → ${decay.last} over the play`);
+    }
+    const warmMb = Math.max(0, ...trace.warmMb);
+    if (warmMb > GATE.warmMb) notes.push(`warm shelf holding ${warmMb}MB of canvas`);
+    // Long tasks are reported, not gated: this case judges sync, decay and
+    // memory, and the stray dev-build hiccup that leaves every frame exact is
+    // not a fail.
+    return {
+      name,
+      bucket: "playback",
+      pass: notes.length === 0,
+      notes,
+      drops: late.length,
+      presented: played.length,
+      lag,
+      decay,
+      longTasks: agg(trace.longTasks.map((l) => l.ms)),
+      liveSamples: Math.max(0, ...trace.liveSamples),
+      liveSources: Math.max(0, ...trace.liveSources),
+      keptSources: Math.max(0, ...trace.keptSources),
+      warmMb,
     };
   },
 });
@@ -893,6 +1158,8 @@ const CASES: EvalCase[] = [
   }),
   playbackCase("play-hard-cuts", false),
   playbackCase("play-with-transitions", true),
+  montageCase("play-fast-cuts", 1),
+  montageCase("play-fast-cuts-long", 4),
   idleCase,
   filmstripCase,
   filmstripCutsCase,
@@ -941,6 +1208,78 @@ async function launch(): Promise<{ browser: Browser; page: Page }> {
           createdAt: stamp,
           updatedAt: stamp,
         },
+      }),
+    });
+  });
+  // With `--detail`, count what the page opens against what it lets go of:
+  // a picture that locks up mid-session is usually a resource nobody closed.
+  if (has("--detail")) {
+    await context.addInitScript(() => {
+      const w = window as unknown as Record<string, unknown>;
+      const stats = { made: 0, closed: 0, errors: 0, lastError: "", canvases: 0, pixels: 0 };
+      w.__resourceStats = stats;
+      const RealDecoder = (w as { VideoDecoder?: unknown }).VideoDecoder as
+        | (new (init: { error?: (e: unknown) => void }) => { close(): void })
+        | undefined;
+      if (RealDecoder) {
+        w.VideoDecoder = class extends RealDecoder {
+          constructor(init: { error?: (e: unknown) => void }) {
+            super({
+              ...init,
+              error: (e: unknown) => {
+                stats.errors++;
+                stats.lastError = String(e).slice(0, 200);
+                init.error?.(e);
+              },
+            });
+            stats.made++;
+          }
+          close() {
+            stats.closed++;
+            return super.close();
+          }
+        };
+        Object.assign(w.VideoDecoder as object, RealDecoder);
+      }
+      const f = Object.assign(stats, { fetches: 0, fetchLive: 0, fetchWorst: 0 });
+      const realFetch = window.fetch.bind(window);
+      window.fetch = (async (...fetchArgs: Parameters<typeof fetch>) => {
+        f.fetches++;
+        f.fetchLive++;
+        f.fetchWorst = Math.max(f.fetchWorst, f.fetchLive);
+        try {
+          return await realFetch(...fetchArgs);
+        } finally {
+          f.fetchLive--;
+        }
+      }) as typeof fetch;
+      const create = document.createElement.bind(document);
+      document.createElement = ((tag: string, ...rest: unknown[]) => {
+        const el = create(tag as "canvas", ...(rest as []));
+        if (tag === "canvas") {
+          stats.canvases++;
+          queueMicrotask(() => {
+            const c = el as HTMLCanvasElement;
+            stats.pixels += c.width * c.height;
+          });
+        }
+        return el;
+      }) as typeof document.createElement;
+    });
+  }
+  // The welcome sequence opens over the editor for an account that has yet to
+  // run it, covers the stage and holds playback. Answering the account read as
+  // finished keeps the eval on the editor, whatever the dev account's row says.
+  await context.route("**/api/account/onboarding*", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        version: 99,
+        completedAt: new Date(0).toISOString(),
+        skipped: false,
+        referralSources: [],
+        referralOther: null,
       }),
     });
   });
@@ -1034,12 +1373,15 @@ const detailOf = (r: CaseResult) =>
       ? `errP50=${r.tileErr.p50}s errMax=${r.tileErr.max}s n=${r.tileErr.n}`
       : r.idleTicks !== undefined
         ? `ticks=${r.idleTicks}`
-        : `late=${r.drops}/${r.presented} atCut=${r.boundaryDrops}`;
+        : r.lag
+          ? `late=${r.drops}/${r.presented} lagP50=${r.lag.p50}s lagP95=${r.lag.p95}s lagMax=${r.lag.max}s decoders=${r.liveSources} kept=${r.keptSources} warm=${r.warmMb}MB decay=${r.decay?.first}→${r.decay?.last}`
+          : `late=${r.drops}/${r.presented} atCut=${r.boundaryDrops}`;
 
 async function main(): Promise<void> {
   const files = await buildFixtures();
   await buildRamp();
   await buildCutsClip();
+  await buildMontageSource();
   console.log(`[fixtures] ${files.length} clips + ramp + cuts in ${OUT}`);
 
   const cases = CASES.filter(

@@ -28,6 +28,16 @@ import { frameSink, keyframeTimeAt, openMedia, videoTrackOf, type FrameCanvasSin
 import { createRasterCanvas } from "./raster";
 import type { MediaAsset } from "./types";
 
+/** Dev-only: pool lifecycle events, into the same log the engine writes.
+ * Bounded so an ordinary dev session never accumulates it. */
+function poolLog(msg: string): void {
+  if (process.env.NODE_ENV === "production" || typeof window === "undefined") return;
+  const w = window as unknown as { __cutEngineLog?: { at: number; msg: string }[] };
+  const log = (w.__cutEngineLog ??= []);
+  log.push({ at: Math.round(performance.now()), msg });
+  if (log.length > 500) log.splice(0, log.length - 500);
+}
+
 /**
  * Decoded frames a source keeps around where it is being read.
  *
@@ -73,10 +83,36 @@ const BACK_FRAMES = 16;
  * seconds apart — fills the stretch the drag is entering and pays for that
  * stretch alone. */
 const BACK_SPAN_S = 2.5;
-/** Frames a source must go unwanted before the pool will close it. About a
+/** Frames a source must go unwanted before the pool will suspend it. About a
  * second of playback — long enough that crossing a cut and coming back finds
  * the decoder still open. */
 const EVICT_GRACE = 90;
+/**
+ * Canvas backing the pool may hold in stood-down sources, past the ones the
+ * decoder budget is keeping live.
+ *
+ * A suspended source has let go of its decoder but keeps the parsed file and
+ * the sink whose canvases its frames land on, and the canvases are what this
+ * budget is about. They must not churn: allocating them floods the GPU
+ * process, and a montage of short clips replayed for a few minutes — every
+ * pass reopening every clip's source, each open minting a sink's worth of
+ * canvases — grinds the whole tab down until frames stop arriving at all. They
+ * also must not pile up: a sink's pool is `POOL` full-size canvases, so
+ * counting sources rather than pixels would keep as many of them at 4K as at
+ * 360p and put gigabytes behind a large stage.
+ *
+ * So the warm shelf is capped by the memory itself, at four bytes a pixel.
+ * What that buys is decided by the decode size: a small stage keeps a
+ * montage's whole cast warm, a large one keeps a few — the right trade in both
+ * directions, since the big frames are the expensive ones to hold and the
+ * cheap ones to lose. The live sources are governed by the decoder budget
+ * alone: closing one the picture is about to need would trade the churn back
+ * for a black frame.
+ */
+const WARM_PIXELS = 96e6;
+/** Stood-down sources kept regardless of the pixel budget, so a project of
+ * tiny frames cannot leave hundreds of parsed files open. */
+const WARM_KEEP_MAX = 32;
 /** A failed open tries again this much later, growing per attempt over the
  * first `RETRIES` tries, so a network blip heals within seconds. */
 const RETRY_MS = 1000;
@@ -293,6 +329,30 @@ export class ClipFrameSource {
    * pool's eviction order. */
   touched = 0;
 
+  /** When the pull awaiting the walk's next frame started, for the debug dump. */
+  private nextStartedAt = 0;
+
+  /** Stood down: no decoder, file and sink still held. See `suspend`. */
+  private asleep = false;
+
+  get suspended(): boolean {
+    return this.asleep;
+  }
+
+  /**
+   * Canvas backing this source can be holding: the sink's pool at the decode
+   * size, which is the frame height asked for and the file's own aspect. Read
+   * before the sink has opened — the pool budget has to decide what a source
+   * would cost, and a decode not yet started still costs it a moment later.
+   */
+  get keptPixels(): number {
+    if (this.asset.type === "image") return this.still ? this.height * this.height * 2 : 0;
+    const aspect =
+      this.asset.width && this.asset.height ? this.asset.width / this.asset.height : 16 / 9;
+    const width = Math.min(Math.round(this.height * aspect), this.asset.width ?? Infinity);
+    return POOL * width * this.height;
+  }
+
   /** The URL this source is reading. The pool compares it against the store's
    * current one, so a re-minted signed URL replaces the source under it. */
   get url(): string {
@@ -316,6 +376,32 @@ export class ClipFrameSource {
   /** Let go of the backward-skim cache and its copies. */
   dropBack(): void {
     this.back = null;
+  }
+
+  /** What this source is doing, for the perf eval's pool dump. */
+  debugState(): Record<string, unknown> {
+    return {
+      url: this.asset.url.slice(-24),
+      ring: this.ring.size,
+      oldest: this.ring.size ? +this.ring.oldest.toFixed(2) : null,
+      newest: this.ring.size ? +this.ring.newest.toFixed(2) : null,
+      still: !!this.still,
+      opened: !!this.sink,
+      opening: !!this.opening,
+      unreadable: this.unreadable,
+      attempts: this.attempts,
+      walking: !!this.stream,
+      draining: !!this.drainRun,
+      streamFrom: +this.streamFrom.toFixed(2),
+      streamTail: +this.streamTail.toFixed(2),
+      streamDone: this.streamDone,
+      reading: this.reading,
+      wanted: this.wanted,
+      touched: this.touched,
+      suspended: this.asleep,
+      keptMb: +(this.keptPixels * 4e-6).toFixed(1),
+      nextPendingMs: this.nextStartedAt ? Math.round(performance.now() - this.nextStartedAt) : 0,
+    };
   }
 
   get ready(): boolean {
@@ -353,6 +439,9 @@ export class ClipFrameSource {
    */
   want(t: number, playing: boolean): void {
     if (this.closed || this.unreadable) return;
+    // Being read is what wakes a stood-down source; the walk below is what
+    // gives it a decoder again.
+    this.asleep = false;
     if (this.asset.type === "image") {
       void this.openStill();
       return;
@@ -402,6 +491,30 @@ export class ClipFrameSource {
       this.wanted = t;
       void this.pumpSeek();
     }
+  }
+
+  /**
+   * Stand down without letting go of the file.
+   *
+   * The walk ends — which is what releases the decoder — while the parsed
+   * input and the sink stay, so waking this source later costs one keyframe
+   * seek on canvases it already owns. The ring is dropped with the walk: a
+   * revival starts a fresh walk on the same sink, whose pool then recycles the
+   * canvases the ring's old frames live on, and a held reference would show
+   * whatever the new walk drew over it.
+   *
+   * Standing down is a state rather than an act, so the pool can name the same
+   * source every frame and only the first one does anything.
+   */
+  suspend(): void {
+    if (this.asleep) return;
+    this.asleep = true;
+    this.stopStream();
+    this.streamDone = false;
+    this.ring.clear();
+    this.back = null;
+    this.wanted = null;
+    this.lastAsk = null;
   }
 
   close(): void {
@@ -505,6 +618,7 @@ export class ClipFrameSource {
   private stopStream(): void {
     const s = this.stream;
     this.stream = null;
+    this.nextStartedAt = 0;
     void s?.return(undefined).catch(() => {});
   }
 
@@ -683,7 +797,9 @@ export class ClipFrameSource {
           // gestures merely age out of the cache as the walk pushes.
           if (this.streamTail >= t + DECODE_AHEAD_S) break;
           if (this.ring.between(Math.max(t, this.streamFrom), this.streamTail) >= RING - 1) break;
+          this.nextStartedAt = performance.now();
           const { value, done } = await stream.next();
+          this.nextStartedAt = 0;
           // A restart or a close while awaiting: this walk is no longer the one.
           if (this.stream !== stream) break;
           if (done || !value) {
@@ -811,6 +927,7 @@ export class FrameSourcePool {
       src = undefined;
     }
     if (!src) {
+      poolLog(`pool open ${id}`);
       src = new ClipFrameSource(asset, height, this.onFrame);
       this.sources.set(id, src);
     }
@@ -829,8 +946,29 @@ export class FrameSourcePool {
     return this.sources.size;
   }
 
+  /** Sources holding a decoder — what the budget is a budget of. The rest are
+   * stood down: a file and its canvases, waiting to be read again. */
+  get active(): number {
+    let n = 0;
+    for (const s of this.sources.values()) if (!s.suspended) n++;
+    return n;
+  }
+
+  /** Canvas backing the warm shelf is holding — the stood-down sources, which
+   * is the part `WARM_PIXELS` governs. For the perf trace. */
+  get warmPixels(): number {
+    let n = 0;
+    for (const s of this.sources.values()) if (s.suspended) n += s.keptPixels;
+    return n;
+  }
+
+  /** Every open source and what it is doing, for the perf eval's pool dump. */
+  debugState(): Record<string, unknown>[] {
+    return [...this.sources.entries()].map(([id, s]) => ({ id, tick: this.tick, ...s.debugState() }));
+  }
+
   /**
-   * Close the decoders nothing has asked for lately.
+   * Stand down the decoders nothing has asked for lately.
    *
    * "Lately" is doing real work here. Evicting everything untouched by the
    * current frame reads as tidy and behaves terribly: a cut with more clips
@@ -839,6 +977,10 @@ export class FrameSourcePool {
    * expensive than the memory it was saving. A source is only a candidate once
    * nothing has wanted it for a while, which is long enough that a clip being
    * crossed back and forth over is never the one closed.
+   *
+   * Standing down is suspension, not closure: the decoder goes, the sink and
+   * its canvases stay for the next visit — see `KEEP_PIXELS`, which is where
+   * sources actually close.
    */
   evict(): void {
     // A backward-skim cache on a source nothing reads any more is copies held
@@ -846,19 +988,41 @@ export class FrameSourcePool {
     // its cache is not.
     for (const s of this.sources.values())
       if (this.tick - s.touched >= EVICT_GRACE) s.dropBack();
-    if (this.sources.size <= this.budget) return;
     const idle = [...this.sources.entries()]
       .filter(([, s]) => this.tick - s.touched >= EVICT_GRACE)
       .sort((a, b) => a[1].touched - b[1].touched);
-    let over = this.sources.size - this.budget;
+
+    // Past the decoder budget, the least recently read decoders stand down.
+    // The budget counts the sources actually holding one, so a stood-down
+    // source is not what pushes the next one out.
+    let live = this.active;
     for (const [id, src] of idle) {
-      if (over-- <= 0) break;
+      if (live <= this.budget) break;
+      if (src.suspended) continue;
+      poolLog(`pool suspend ${id}`);
+      src.suspend();
+      live--;
+    }
+
+    // Then the memory. The warm shelf is filled most-recently-read first until
+    // the canvas budget runs out, and what does not fit closes for real. Only
+    // stood-down sources are on the shelf, so nothing holding a decoder — and
+    // nothing the picture is being drawn from — is ever closed here.
+    let pixels = 0;
+    let warm = 0;
+    for (const [id, src] of [...this.sources.entries()].sort((a, b) => b[1].touched - a[1].touched)) {
+      if (!src.suspended) continue;
+      pixels += src.keptPixels;
+      warm++;
+      if (pixels <= WARM_PIXELS && warm <= WARM_KEEP_MAX) continue;
+      poolLog(`pool close ${id}`);
       src.close();
       this.sources.delete(id);
     }
   }
 
   closeAll(): void {
+    poolLog(`pool closeAll (${this.sources.size})`);
     for (const s of this.sources.values()) s.close();
     this.sources.clear();
   }

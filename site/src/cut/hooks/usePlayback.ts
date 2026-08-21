@@ -16,7 +16,13 @@ import { FrameCompositor, MISSING_FRAME, PENDING_FRAME, type Frame } from "@/cut
 import { duckGainAt, overlayPlan, trackZeroPlan } from "@/cut/lib/framePlan";
 import { type ClipFrameSource, FrameSourcePool, mappingKey } from "@/cut/lib/frameSource";
 import { PreviewMixer, type Voice } from "@/cut/lib/previewMixer";
-import { markLiveSamples, markPresent, markTick, tracing } from "@/cut/lib/perfTrace";
+import {
+  markLiveSamples,
+  markLiveSources,
+  markPresent,
+  markTick,
+  tracing,
+} from "@/cut/lib/perfTrace";
 import { registerSourceSampler } from "@/cut/lib/previewCanvas";
 
 /**
@@ -53,7 +59,21 @@ const sourceTimeOf = (clip: VideoClip, t: number) =>
 const keyOf = (clip: VideoClip, asset: MediaAsset) =>
   mappingKey(asset.id, clipSpeed(clip), clip.in, clip.start);
 
+let engineSerial = 0;
+
+/** Dev-only: engine lifecycle events, for the perf eval's timeline. Bounded so
+ * an ordinary dev session never accumulates it. */
+export function engineLog(msg: string): void {
+  if (process.env.NODE_ENV === "production" || typeof window === "undefined") return;
+  const w = window as unknown as { __cutEngineLog?: { at: number; msg: string }[] };
+  const log = (w.__cutEngineLog ??= []);
+  log.push({ at: Math.round(performance.now()), msg });
+  if (log.length > 500) log.splice(0, log.length - 500);
+}
+
 class Engine {
+  /** Which engine this is, for the perf eval's pool dump. */
+  readonly serial = ++engineSerial;
   private comp: FrameCompositor;
   private pool = new FrameSourcePool(DECODER_BUDGET, () => this.wake());
   private mixer = new PreviewMixer();
@@ -88,10 +108,12 @@ class Engine {
     // document edit — so the attributes themselves are the wake signal.
     this.sizeWatch = new MutationObserver(() => this.wake());
     this.sizeWatch.observe(canvas, { attributes: true, attributeFilter: ["width", "height"] });
+    engineLog(`engine ${this.serial} constructed`);
     this.wake();
   }
 
   dispose() {
+    engineLog(`engine ${this.serial} disposed`);
     this.disposed = true;
     if (this.raf) cancelAnimationFrame(this.raf);
     this.unsubscribe();
@@ -140,6 +162,14 @@ class Engine {
   private schedule() {
     if (this.raf || this.disposed) return;
     this.raf = requestAnimationFrame(this.tick);
+  }
+
+  /** Every open decoder and what it is doing, for the perf eval's pool dump. */
+  poolState(): Record<string, unknown>[] {
+    return [
+      { serial: this.serial, disposed: this.disposed, raf: this.raf, dirty: this.dirty },
+      ...this.pool.debugState(),
+    ];
   }
 
   /** The clip's raw, ungraded decoder frame for analysis (the color panel's
@@ -367,10 +397,20 @@ class Engine {
     }
   }
 
+  /** When the last tick ran, for spotting a starved loop in the dev log. */
+  private lastTickAt = 0;
+
   private tick() {
     this.raf = 0;
     if (this.disposed) return;
     markTick();
+    if (process.env.NODE_ENV !== "production") {
+      const now = performance.now();
+      if (this.lastTickAt && now - this.lastTickAt > 500) {
+        engineLog(`engine ${this.serial} tick gap ${Math.round(now - this.lastTickAt)}ms`);
+      }
+      this.lastTickAt = now;
+    }
     const playing = useEditor.getState().playing;
     // Playing redraws every frame; paused, only what changed since the last
     // paint. Either way the loop stops as soon as there is nothing to do.
@@ -486,6 +526,7 @@ class Engine {
 
     if (tracing()) {
       let srcTs: number | null = null;
+      let wantSrc: number | null = null;
       let exact = true;
       if (master) {
         const src = this.pool.get(
@@ -494,17 +535,20 @@ class Engine {
           this.decodeHeight()
         );
         const st = sourceTimeOf(master.clip, t);
+        wantSrc = st;
         srcTs = src.frameAt(st, master.clip.in, master.clip.out)?.timestamp ?? null;
         exact = src.hasExact(st);
       }
       markPresent({
         t,
         srcTs,
+        wantSrc,
         clipId: master?.clip.id ?? null,
         exact,
         stale: masterFrame.kind !== "ready",
       });
       markLiveSamples(this.pool.held);
+      markLiveSources(this.pool.active, this.pool.size, this.pool.warmPixels);
     }
   }
 }

@@ -124,9 +124,32 @@ export class PreviewMixer {
     const audio = this.anchor.timeline + (this.ctx.currentTime - this.anchor.ctx);
     if (Math.abs(audio - wall) > 0.25) {
       this.anchor.ctx = this.ctx.currentTime - (wall - this.anchor.timeline);
+      // Everything already scheduled was placed against the old anchor and is
+      // now wrong by the size of the jump — a context that sat suspended until
+      // the user's next gesture, an output device switch. The clock alone
+      // moving would leave those windows playing the wrong moment for up to
+      // their full length, so they stop here and the next update refills from
+      // where the clock now stands.
+      this.restart(wall);
       return wall;
     }
     return audio;
+  }
+
+  /** Stop every scheduled window and mark each voice to refill at `timeline`. */
+  private restart(timeline: number): void {
+    for (const live of this.voices.values()) {
+      for (const w of live.windows) {
+        try {
+          w.node.stop();
+        } catch {
+          // Already finished; stopping a spent node throws and means nothing.
+        }
+        w.node.disconnect();
+      }
+      live.windows = [];
+      live.scheduled = Math.max(live.start, timeline);
+    }
   }
 
   /**
@@ -295,20 +318,24 @@ export class PreviewMixer {
         this.decoded.set(key, buffer);
       }
       // The mixer may have been stopped, or the voice dropped, while decoding.
-      const still = this.voices.get(id);
-      if (!still || still !== live || !this.anchor || !this.ctx) return;
+      if (this.voices.get(id) !== live || !this.anchor || !this.ctx) return;
+      // Reading the clock can restart the voices (`restart`), so it happens
+      // before the placement below is computed — and a restarted voice, moved
+      // to a different position while this window decoded, abandons it.
+      const tNow = this.now();
+      if (live.scheduled !== from) return;
+      const until = from + buffer.duration;
+      if (until <= tNow) {
+        // The decode outlived the window it was for — a long read, or a tab
+        // that was in the background. Skip it and let the next fill catch up.
+        live.scheduled = Math.max(live.scheduled, tNow);
+        return;
+      }
       const node = this.ctx.createBufferSource();
       node.buffer = buffer;
       node.connect(live.gain);
       const at = this.anchor.ctx + (from - this.anchor.timeline);
       const now = this.ctx.currentTime;
-      const until = from + buffer.duration;
-      if (until <= this.now()) {
-        // The decode outlived the window it was for — a long read, or a tab
-        // that was in the background. Skip it and let the next fill catch up.
-        live.scheduled = Math.max(live.scheduled, this.now());
-        return;
-      }
       if (at >= now) {
         node.start(at);
       } else {
