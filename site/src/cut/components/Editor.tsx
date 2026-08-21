@@ -23,6 +23,7 @@ import {
 import { fileZoneAt, hasRefDrag, selectionRefTokens } from "@/cut/lib/assetRef";
 import { startUpload } from "@/cut/lib/importQueue";
 import { enrichAsset, importFileToProject, prepareImport } from "@/cut/lib/media";
+import { clearCopiedFrame, hasCopiedFrame, pasteCopiedFrame } from "@/cut/lib/stageFrame";
 // Side-effect import: registers the brief-to-video resume subscription, so a
 // persisted run resumes on project load even when the AI panel never mounts.
 import "@/cut/lib/genScene";
@@ -49,7 +50,7 @@ import {
   storedAssets,
   useEditor,
 } from "@/cut/lib/store";
-import { playheadAt, skimAt } from "@/cut/lib/playhead";
+import { playheadAt, previewAt, skimAt } from "@/cut/lib/playhead";
 import type { MediaAsset } from "@/cut/lib/types";
 import { AiPanel } from "./AiPanel";
 import { ExportDialog } from "./ExportDialog";
@@ -782,6 +783,35 @@ export function Editor({
     };
   }, [importFiles, viewer]);
 
+  // An image on the system clipboard joins the cut: a frame copied from
+  // another tab's preview, a screenshot, a picture from anywhere else. The
+  // editor's own ⌘V claims the timeline clipboard and the copied frame before
+  // this — both stop the keystroke, so no paste event follows them — and a
+  // composer marks its own paste handled, so this only ever sees the pastes
+  // nobody else wanted. The picture lands at the preview time.
+  useEffect(() => {
+    if (viewer) return;
+    const onPaste = (e: ClipboardEvent) => {
+      if (e.defaultPrevented || useEditor.getState().readOnly) return;
+      const target = e.target as HTMLElement | null;
+      const textEntry =
+        !!target &&
+        (target.tagName === "TEXTAREA" ||
+          target.tagName === "INPUT" ||
+          target.isContentEditable);
+      if (textEntry) return;
+      const files = Array.from(e.clipboardData?.items ?? [])
+        .filter((i) => i.kind === "file" && i.type.startsWith("image/"))
+        .map((i) => i.getAsFile())
+        .filter((f): f is File => f !== null);
+      if (files.length === 0) return;
+      e.preventDefault();
+      void importFiles(files, { at: Math.max(0, previewAt()) });
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [importFiles, viewer]);
+
   // Keyboard shortcuts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -833,10 +863,20 @@ export function Editor({
         if (!window.getSelection()?.toString()) {
           const token = selectionRefTokens(s);
           if (token) void navigator.clipboard.writeText(token).catch(() => {});
-          if (s.copySelection() || token) e.preventDefault();
+          // The newer copy owns the clipboard: a copied preview frame steps
+          // aside for this one.
+          const copied = s.copySelection();
+          if (copied) clearCopiedFrame();
+          if (copied || token) e.preventDefault();
         }
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "v") {
+        // The timeline clipboard first; a frame copied off the preview canvas
+        // lands as a still at the preview time.
         if (s.paste()) e.preventDefault();
+        else if (hasCopiedFrame()) {
+          e.preventDefault();
+          void pasteCopiedFrame().catch((err) => console.error("Paste frame failed:", err));
+        }
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "g") {
         // ⌘G groups the multi-selected elements, ⇧⌘G dissolves the primary's
         // group — the panel's Group button is out of reach while a

@@ -268,6 +268,9 @@ export const TIMELINE_TOOLS = [
       t: num("Timeline time of the frame to grab (default: playhead)"),
       duration: num("Still clip length in seconds, 0.5–10 (default 1)"),
       index: num("Insert position on the video track (default 0 = first)"),
+      with_elements: bool(
+        "Bake the whole picture as the preview shows it — titles, captions and effects burned into the still (default false: the video frame alone)"
+      ),
     }),
   },
   {

@@ -87,6 +87,7 @@ import { STOCK_VIDEOS } from "./stockVideoManifest";
 import { applyOverlayPatchSettled, track0Clips, laneGapAt, getClipSpans, nextFreeStart, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt } from "./playhead";
 import { renderProjectFrame } from "./exportRender";
+import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
 import { buildAiContext } from "./aiContext";
 import { sampleClipFrameData } from "./previewCanvas";
@@ -1897,12 +1898,23 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         (t - span.start) *
           (span.clip.speed && span.clip.speed > 0 ? span.clip.speed : 1);
       let body: MediaAsset;
-      if (getBackend().kind !== "local") {
+      const freezeDur = Math.min(10, Math.max(0.5, isNum(input.duration) ? input.duration : 1));
+      if (input.with_elements === true) {
+        // The whole picture, as the preview shows it — titles, captions and
+        // effects burned in. Same render path the canvas's Copy frame uses,
+        // so a still the assistant makes and one the user copies match.
+        const png = await renderStageFrame(t).catch((e) => {
+          throw new ToolError(e instanceof Error ? e.message : "Could not draw the frame.");
+        });
+        body = {
+          ...(await storeStageStill(projectId, png, t, "Could not render the freeze frame.")),
+          duration: freezeDur,
+        };
+      } else if (getBackend().kind !== "local") {
         // No engine to bake a still video — grab the frame in the browser and
         // store it as a project image; image clips carry their own length,
         // sized below to the requested duration, mirroring the engine's
         // /freeze clamps (default 1s, 0.5..10s).
-        const freezeDur = Math.min(10, Math.max(0.5, isNum(input.duration) ? input.duration : 1));
         body = await captureFreezeFrame(projectId, span.asset.url, srcTime, freezeDur, {
           frame: frameOf(s.aspect),
           cover: clipCovers(span.clip),

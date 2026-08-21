@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { ZoomIn, ZoomOut } from "lucide-react";
+import { Check, Copy, ZoomIn, ZoomOut } from "lucide-react";
 import { usePlayback } from "@/cut/hooks/usePlayback";
 import { clearAssetDrag, setAssetDragData } from "@/cut/lib/assetDrag";
 import { startDrag } from "@/cut/lib/drag";
@@ -13,6 +13,7 @@ import {
   useSkim,
 } from "@/cut/lib/playhead";
 import { getClipSpans, projectDuration, useEditor } from "@/cut/lib/store";
+import { copyStageFrame, stageHasFrame } from "@/cut/lib/stageFrame";
 import {
   capturePoster,
   capturePosterWhenReady,
@@ -298,6 +299,33 @@ export function Preview() {
   const slices = useMemo(() => stageSliceStructure(effectLanes), [effectLanes]);
   usePannableCursor(stageRef);
 
+  // Right-click on the picture: a one-item menu that copies the frame the
+  // preview is showing. The copy goes onto the system clipboard as a PNG, so
+  // it pastes into a message, a post, or another app, and onto the editor's
+  // own clipboard, so ⌘V drops it on the timeline as a still.
+  const [frameMenu, setFrameMenu] = useState<{ x: number; y: number } | null>(null);
+  const [copyState, setCopyState] = useState<"idle" | "working" | "done" | "failed">("idle");
+  useEffect(() => {
+    if (!frameMenu) return;
+    const close = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFrameMenu(null);
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [frameMenu]);
+  const openFrameMenu = (e: React.MouseEvent) => {
+    // An empty cut has no picture to take; the browser's own menu can have the
+    // click.
+    if (!stageHasFrame()) return;
+    e.preventDefault();
+    // The frame is grabbed when the item is clicked, so playback stops here —
+    // what you right-clicked is what you copy.
+    const s = useEditor.getState();
+    if (s.playing) s.setPlaying(false);
+    setCopyState("idle");
+    setFrameMenu({ x: e.clientX, y: e.clientY });
+  };
+
   useEffect(() => {
     setPreviewCanvas(canvasRef.current);
     return () => setPreviewCanvas(null);
@@ -551,6 +579,7 @@ export function Preview() {
             "stage absolute inset-0 overflow-hidden bg-black shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_36px_rgba(0,0,0,0.18)]"
           )}
           style={{ borderRadius: stageRadius(stage.w, stage.h) }}
+          onContextMenu={openFrameMenu}
           onPointerDown={(e) => {
             if (
               e.target === e.currentTarget ||
@@ -650,6 +679,52 @@ export function Preview() {
           if (!held) pokeHud();
         }}
       />
+      {frameMenu && (
+        <div
+          className="fixed inset-0 z-50"
+          onPointerDown={() => setFrameMenu(null)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setFrameMenu(null);
+          }}
+        >
+          <div
+            className="absolute min-w-44 rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+            style={{ left: frameMenu.x, top: frameMenu.y }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <button
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-60"
+              disabled={copyState === "working"}
+              onClick={() => {
+                setCopyState("working");
+                copyStageFrame().then(
+                  () => {
+                    setCopyState("done");
+                    // A beat on “Copied” before the menu goes, so the copy is
+                    // something you saw happen.
+                    window.setTimeout(() => setFrameMenu(null), 800);
+                  },
+                  () => setCopyState("failed")
+                );
+              }}
+            >
+              {copyState === "done" ? (
+                <Check className="size-3.5 text-muted-foreground" />
+              ) : (
+                <Copy className="size-3.5 text-muted-foreground" />
+              )}
+              {copyState === "working"
+                ? "Copying frame…"
+                : copyState === "done"
+                  ? "Copied"
+                  : copyState === "failed"
+                    ? "Couldn't copy the frame"
+                    : "Copy frame"}
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

@@ -676,6 +676,9 @@ export interface EditorState {
   endHistoryBatch: () => void;
   /** Copy the selected clip/audio/overlay/title(s) to the timeline clipboard. */
   copySelection: () => boolean;
+  /** Empty the timeline clipboard, so the next paste is somebody else's — a
+   * frame copied off the preview canvas takes the clipboard over this way. */
+  clearClipboard: () => void;
   /** Paste the clipboard at the preview time (the skimmer while one is live,
    * the playhead otherwise) — sliding past anything already on the target
    * lane — and select the pasted item(s). */
@@ -4340,6 +4343,10 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       if (items.length === 0) return false;
       clipboard = items;
       return true;
+    },
+
+    clearClipboard: () => {
+      clipboard = [];
     },
 
     paste: () => {
