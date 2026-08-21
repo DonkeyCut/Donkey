@@ -73,6 +73,15 @@ export function NotesView() {
       saved: { title: n.title, body: n.body, colorIndex: n.colorIndex },
     });
 
+  // A folder tile is on screen the moment it is made, so a note can be filed
+  // into it while its own write is still in flight. The write is held here
+  // and awaited before any note names that folder, so the server knows the
+  // folder by the time it has to resolve the id.
+  const folderWrites = useRef(new Map<string, Promise<unknown>>());
+  const settleFolder = async (folderId: string | null) => {
+    if (folderId) await folderWrites.current.get(folderId);
+  };
+
   /** Save the draft and close the composer. A note that was only read closes
    * untouched, so the list keeps the order it had. */
   const commit = async (d: NoteDraft | null = draft) => {
@@ -100,6 +109,7 @@ export function NotesView() {
         notes: [{ ...optimistic, createdAt: existing?.createdAt ?? now }, ...rest],
       };
     });
+    await settleFolder(folderId);
     const saved = await saveNote({
       id,
       title: optimistic.title,
@@ -139,7 +149,8 @@ export function NotesView() {
       notes: prev.notes.map((n) => (ids.includes(n.id) ? { ...n, folderId } : n)),
     }));
     setSelected(new Set());
-    await Promise.all(
+    await settleFolder(folderId);
+    const saved = await Promise.all(
       moving.map((n) =>
         saveNote({
           id: n.id,
@@ -147,9 +158,21 @@ export function NotesView() {
           body: n.body,
           colorIndex: n.colorIndex,
           folderId,
-        }).catch(() => reload()),
+        }).catch(() => null),
       ),
     );
+    const landed = saved.filter((n): n is CutNote => n !== null);
+    if (landed.length !== moving.length) {
+      reload();
+      return;
+    }
+    // The server answers with where each note is filed, so a folder that is
+    // gone shows its notes back at the top level right away.
+    const byId = new Map(landed.map((n) => [n.id, n]));
+    patchNotes(client, (prev) => ({
+      ...prev,
+      notes: prev.notes.map((n) => byId.get(n.id) ?? n),
+    }));
   };
 
   // Leaving the page (the sidebar, the back button) closes the composer the
@@ -237,7 +260,13 @@ export function NotesView() {
               ...prev,
               folders: [...prev.folders, folder],
             }));
-            await saveNoteFolder(folder.id, name).catch(() => reload());
+            const write = saveNoteFolder(folder.id, name).catch(() => reload());
+            folderWrites.current.set(folder.id, write);
+            try {
+              await write;
+            } finally {
+              folderWrites.current.delete(folder.id);
+            }
           }}
           onRename={async (id, name) => {
             patchNotes(client, (prev) => ({
