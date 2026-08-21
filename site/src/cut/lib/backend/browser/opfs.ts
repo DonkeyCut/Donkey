@@ -49,6 +49,9 @@ const userParts = () => [ROOT_DIR, "users", accountId()];
 const projectParts = (id: string) => [...userParts(), "projects", id];
 
 export const projectsDir = (create = false) => dirAt([...userParts(), "projects"], create);
+/** The chunk cache (lib/chunkCache.ts): partial copies of cloud media, one
+ * directory per object holding fixed-size byte chunks and a meta.json. */
+export const chunksDir = (create = false) => dirAt([...userParts(), "chunks"], create);
 export const projectDir = (id: string, create = false) => dirAt(projectParts(id), create);
 export const mediaDir = (id: string, create = false) => dirAt([...projectParts(id), "media"], create);
 export const exportsDir = (id: string, create = false) =>

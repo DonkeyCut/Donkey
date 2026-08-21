@@ -1610,17 +1610,26 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             const queue = missing
               .flatMap((a) => {
                 const url = signed.urls.get(a.fileName);
-                return url ? [{ fileName: a.fileName, url }] : [];
+                return url ? [{ fileName: a.fileName, url, type: a.type }] : [];
               })
               .sort(
                 (x, y) =>
                   (firstUse.get(x.fileName) ?? Infinity) - (firstUse.get(y.fileName) ?? Infinity)
               );
-            set({ loadingMedia: new Set(queue.map((f) => f.fileName)) });
+            // Video reads through the chunk cache and plays from its first
+            // chunk, so only whole-file fetches show as loading.
+            set({
+              loadingMedia: new Set(
+                queue.filter((f) => f.type !== "video").map((f) => f.fileName)
+              ),
+            });
             prefetchCloudMedia(id, queue, (fileName, url) => {
               const st = get();
               if (st.projectId !== id) return;
               if (url) st.applyMediaUrls(new Map([[fileName, url]]));
+              // Video was never in the set; re-seating it would hand every
+              // subscriber a new Set identity for no change.
+              if (!st.loadingMedia.has(fileName)) return;
               set((s) => {
                 const next = new Set(s.loadingMedia);
                 next.delete(fileName);

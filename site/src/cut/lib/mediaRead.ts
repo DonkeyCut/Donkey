@@ -30,6 +30,7 @@ import {
   AudioBufferSink,
   BlobSource,
   CanvasSink,
+  CustomSource,
   EncodedPacketSink,
   Input,
   UrlSource,
@@ -40,6 +41,7 @@ import {
   type WrappedCanvas,
 } from "mediabunny";
 import { resolveRegisteredBlob } from "./backend/browser/registry";
+import { chunkSourceOptions } from "./chunkCache";
 
 /** What a file turns out to be, read from its container. */
 export interface MediaProbe {
@@ -73,15 +75,42 @@ export class UnreadableMediaError extends Error {
   }
 }
 
+/** Ranged requests kept in the air for one URL.
+ *
+ * Widening only pays where a round trip is the cost. The local engine serves
+ * files off this Mac's disk over HTTP/1.1, where a browser allows six
+ * connections per origin in total — a handful of clips each asking for eight
+ * would put the frame being drawn behind readahead for clips nobody is
+ * looking at. So the local engine and any other plain-HTTP origin keep the
+ * library's pair, and so does a link that says it is slow or metered. The
+ * width is for multiplexed cloud media over a real network. */
+function urlParallelism(url: string): number {
+  if (!/^https:/i.test(url)) return 2;
+  const conn =
+    typeof navigator === "undefined"
+      ? undefined
+      : (navigator as { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+  if (conn?.saveData || /(^|-)2g$|^3g$/.test(conn?.effectiveType ?? "")) return 2;
+  return 8;
+}
+
 /** Open a file for reading. The caller owns it and must `dispose()` it. A URL
  * the browser store minted resolves to its backing File and reads as a blob —
- * ranged fetches of blob URLs are unreliable across browsers. */
+ * ranged fetches of blob URLs are unreliable across browsers. Signed cloud
+ * media reads through the chunk cache (chunkCache.ts), so bytes touched once
+ * are on disk for the next read of the same object. */
 export function openMedia(src: string | Blob): Input {
   const blob = typeof src === "string" ? resolveRegisteredBlob(src) ?? src : src;
-  return new Input({
-    formats: ALL_FORMATS,
-    source: typeof blob === "string" ? new UrlSource(blob) : new BlobSource(blob),
-  });
+  let source;
+  if (typeof blob === "string") {
+    const chunked = chunkSourceOptions(blob);
+    source = chunked
+      ? new CustomSource({ ...chunked, prefetchProfile: "network", maxCacheSize: 64 * 2 ** 20 })
+      : new UrlSource(blob, { parallelism: urlParallelism(blob) });
+  } else {
+    source = new BlobSource(blob);
+  }
+  return new Input({ formats: ALL_FORMATS, source });
 }
 
 /** Run `fn` against an open input and dispose it however that ends. */

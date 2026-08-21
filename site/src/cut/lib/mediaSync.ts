@@ -38,6 +38,8 @@ import {
   type PendingUpload,
 } from "./backend/browser/opfs";
 import { registerBlobFile, registeredUrl, revokeRegistered } from "./backend/browser/registry";
+import { dropChunksMatching, evictChunkBytes, prefetchChunks } from "./chunkCache";
+import type { AssetType } from "./types";
 
 const mediaPath = (projectId: string, fileName: string) =>
   `/api/cut/projects/${projectId}/media/${encodeURIComponent(fileName)}`;
@@ -165,11 +167,12 @@ export async function localMediaUrl(projectId: string, fileName: string): Promis
   return file ? registerBlobFile(path, file) : null;
 }
 
-/** A media delete's local half: the file, its blob URL, and its pin. */
+/** A media delete's local half: the file, its chunks, its blob URL, its pin. */
 export async function dropLocalMedia(projectId: string, fileName: string): Promise<void> {
   if (!supportsBrowserStore()) return;
   revokeRegistered(mediaPath(projectId, fileName));
   await deleteMedia(projectId, fileName).catch(() => {});
+  void dropChunksMatching(`/projects/${projectId}/media/${fileName}`);
   await clearPendingUpload(projectId, fileName);
 }
 
@@ -178,6 +181,7 @@ export async function dropLocalProjectCopy(projectId: string): Promise<void> {
   if (!supportsBrowserStore()) return;
   if (prefetch?.projectId === projectId) prefetch.ctrl.abort();
   revokeRegistered(`/api/cut/projects/${projectId}/`);
+  void dropChunksMatching(`/projects/${projectId}/`);
   await deleteProject(projectId).catch(() => {});
   try {
     await updateIndex((idx) => {
@@ -195,16 +199,19 @@ type PrefetchRun = { projectId: string; ctrl: AbortController };
 let prefetch: PrefetchRun | null = null;
 
 /** Prefetch a cloud project's missing media into the store, one file at a
- * time in the order given. Every file reports back through `onDone` exactly
- * once — its blob URL when the bytes landed, null when the run gave up on it
- * — so the caller can swap playing assets onto local bytes mid-session and
- * retire per-file loading state either way. Starting a prefetch cancels any
- * earlier one — the queue follows the open project — and records the open for
- * eviction recency. Fire-and-forget; a failed or refused write costs nothing
- * but the cache. */
+ * time in the order given. Video fills the chunk cache (chunkCache.ts): the
+ * asset keeps its signed URL, playback reads resident chunks off disk, and an
+ * interrupted walk keeps every chunk it landed. Other files stream in whole
+ * and swap onto blob URLs, so an <img> paints local bytes offline. Every file
+ * reports back through `onDone` exactly once — its blob URL when whole bytes
+ * landed, null otherwise — so the caller can swap playing assets mid-session
+ * and retire per-file loading state either way. Starting a prefetch cancels
+ * any earlier one — the queue follows the open project — and records the open
+ * for eviction recency. Fire-and-forget; a failed or refused write costs
+ * nothing but the cache. */
 export function prefetchCloudMedia(
   projectId: string,
-  files: { fileName: string; url: string }[],
+  files: { fileName: string; url: string; type?: AssetType }[],
   onDone?: (fileName: string, blobUrl: string | null) => void
 ): void {
   if (!supportsBrowserStore()) {
@@ -221,10 +228,13 @@ export function prefetchCloudMedia(
     for (let i = 0; i < files.length; i++) {
       if (run.ctrl.signal.aborted) return;
       const f = files[i];
-      const r = await cacheOne(projectId, f.fileName, f.url, run.ctrl.signal).catch(
-        // Offline mid-stream: the abort discarded the partial write.
-        () => ({ go: true, url: null as string | null })
-      );
+      const r =
+        f.type === "video"
+          ? await cacheVideoChunks(f.url, run.ctrl.signal)
+          : await cacheOne(projectId, f.fileName, f.url, run.ctrl.signal).catch(
+              // Offline mid-stream: the abort discarded the partial write.
+              () => ({ go: true, url: null as string | null })
+            );
       if (run.ctrl.signal.aborted) return;
       onDone?.(f.fileName, r.url);
       if (!r.go) {
@@ -234,6 +244,17 @@ export function prefetchCloudMedia(
       }
     }
   })();
+}
+
+/** Walk a video's chunks into the chunk cache. The asset plays through its
+ * signed URL either way, so any failure just leaves the file partial —
+ * on-demand reads finish it — and the queue always goes on. */
+async function cacheVideoChunks(
+  url: string,
+  signal: AbortSignal
+): Promise<{ go: boolean; url: string | null }> {
+  await prefetchChunks(url, signal).catch(() => {});
+  return { go: !signal.aborted, url: null };
 }
 
 /** Stream one file into the store. `go: false` means storage is out of room
@@ -294,6 +315,10 @@ async function makeRoom(keepId: string, bytes: number): Promise<void> {
   if (!est?.quota) return;
   const margin = Math.min(QUOTA_MARGIN, est.quota * 0.1);
   let deficit = (est.usage ?? 0) + bytes + margin - est.quota;
+  if (deficit <= 0) return;
+  // The chunk cache is the cheapest byte to lose — losing one costs a ranged
+  // re-fetch, where losing a whole-file copy costs the file — so it goes first.
+  deficit -= await evictChunkBytes(deficit);
   if (deficit <= 0) return;
   const idx = await readIndex();
   const pinned = new Set(idx.pendingUploads.map((p) => `${p.projectId}/${p.fileName}`));
