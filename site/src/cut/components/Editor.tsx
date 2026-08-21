@@ -813,7 +813,10 @@ export function Editor({
   useEffect(() => {
     if (viewer) return;
     const onPaste = (e: ClipboardEvent) => {
-      if (e.defaultPrevented || useEditor.getState().readOnly) return;
+      const s = useEditor.getState();
+      if (e.defaultPrevented || s.readOnly) return;
+      // A dialog on top owns the paste, the same way it owns the shortcuts.
+      if (s.exportOpen || document.querySelector('[data-slot="dialog-content"]')) return;
       const target = e.target as HTMLElement | null;
       const textEntry =
         !!target &&
