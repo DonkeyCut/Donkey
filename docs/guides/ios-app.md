@@ -150,6 +150,21 @@ unattended runs (the variables are documented in the script header). Once
 processing finishes, internal testers in App Store Connect → TestFlight get
 the build without review.
 
+External testers are served by the same command. Processing outlives the
+upload, so the ship hands off to `scripts/asc-distribute.mjs` in the
+background: it polls until the build is processed, adds it to every external
+group on the app, turns on the tester notification, and submits it for beta
+review, which is the step external testers wait on. Apple releases the build
+to them the moment review passes, and nobody opens App Store Connect.
+
+That handoff needs the App Store Connect API key — the Apple ID session Xcode
+holds cannot reach the API. Create one under Users and Access → Integrations →
+App Store Connect API with the App Manager role, then either export the
+`DONKEY_ASC_KEY_*` variables or drop `AuthKey_XXXX.p8` in
+`~/.appstoreconnect/private_keys/` with the issuer id in an `issuer_id` file
+beside it. Without a key the ship still uploads and says the build is waiting
+for a manual release; `--no-distribute` asks for that on purpose.
+
 A build that testers install has to be a build you can go back to, so the
 archive is cut from a commit: the script checks the ref out into a worktree of
 its own and builds there, and whatever else is uncommitted in the checkout
