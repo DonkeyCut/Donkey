@@ -52,6 +52,19 @@ async function ownerProject(share: ShareRow) {
   return prisma.cutProject.findFirst({ where: { id: share.projectId, userId: share.userId } });
 }
 
+/** Cache versions for the owner's media, by file name. A media URL without
+ * one is a URL that never changes when its bytes do, and both the edge and
+ * the browser's chunk cache key on it — so a viewer who returns after the
+ * owner re-imports the same name would play the old file. */
+async function mediaVersions(share: ShareRow, fileNames: string[]): Promise<Map<string, string>> {
+  if (!fileNames.length) return new Map();
+  const rows = await prisma.cutMediaObject.findMany({
+    where: { userId: share.userId, projectId: share.projectId, kind: "media", fileName: { in: fileNames } },
+    select: { fileName: true, updatedAt: true },
+  });
+  return new Map(rows.map((r) => [r.fileName, String(r.updatedAt.getTime())]));
+}
+
 /** What the share offers a viewer. Chat drops out when the owner's project has
  * no threads: there is nothing to open, so the viewer gets no chat button and
  * no panel rather than an empty conversation. */
@@ -162,8 +175,9 @@ export const sharedView = {
       const fileName = decodeFileParam(file);
       const allowed = await allowedFileNames(view.share, view.features);
       if (!allowed.has(fileName)) return err("Media not found.", 404);
+      const version = (await mediaVersions(view.share, [fileName])).get(fileName);
       return redirect(
-        mediaObjectUrl(projectMediaKey(view.share.userId, id, fileName)),
+        mediaObjectUrl(projectMediaKey(view.share.userId, id, fileName), { version }),
         shareRedirectHeaders(view.share, MEDIA_REDIRECT_TTL)
       );
     } catch (e) {
@@ -181,20 +195,23 @@ export const sharedView = {
       if (!Array.isArray(items)) return err("items is required.", 400);
       if (items.length > PRESIGN_GET_BATCH_MAX) return err("Too many items.", 400);
       const allowed = await allowedFileNames(view.share, view.features);
-      const urls = await Promise.all(
-        items
-          .filter(
-            (i) =>
-              i.projectId === view.share.projectId &&
-              typeof i.fileName === "string" &&
-              allowed.has(i.fileName)
-          )
-          .map((i) => ({
-            projectId: i.projectId!,
-            fileName: i.fileName!,
-            url: mediaObjectUrl(projectMediaKey(view.share.userId, i.projectId!, i.fileName!)),
-          }))
+      const wanted = items.filter(
+        (i) =>
+          i.projectId === view.share.projectId &&
+          typeof i.fileName === "string" &&
+          allowed.has(i.fileName)
       );
+      const versions = await mediaVersions(
+        view.share,
+        wanted.map((i) => i.fileName!)
+      );
+      const urls = wanted.map((i) => ({
+        projectId: i.projectId!,
+        fileName: i.fileName!,
+        url: mediaObjectUrl(projectMediaKey(view.share.userId, i.projectId!, i.fileName!), {
+          version: versions.get(i.fileName!),
+        }),
+      }));
       return Response.json({ urls, expiresIn: mediaUrlLifetime() });
     } catch (e) {
       return caught(e, "Could not sign the media URLs.");
@@ -280,7 +297,7 @@ export const sharedView = {
         return new Response("Not found.", { status: 404 });
       }
       return redirect(
-        mediaObjectUrl(row.previewKey),
+        mediaObjectUrl(row.previewKey, { version: String(row.updatedAt.getTime()) }),
         shareRedirectHeaders(view.share, MEDIA_REDIRECT_TTL)
       );
     } catch (e) {
