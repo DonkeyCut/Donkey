@@ -4102,8 +4102,12 @@ function Filmstrip({
         <div className="tl-filmstrip-failed pointer-events-none absolute inset-0 bg-accent" />
       );
     }
+    // The clip box under the strip is black; a backdrop in the page color
+    // keeps the pulse between accent and background, the stock skeleton look.
     return (
-      <Skeleton className="tl-filmstrip-skeleton pointer-events-none absolute inset-0 rounded-none" />
+      <div className="tl-filmstrip-skeleton pointer-events-none absolute inset-0 bg-background">
+        <Skeleton className="size-full rounded-none" />
+      </div>
     );
   }
   return (
