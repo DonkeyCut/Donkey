@@ -16,9 +16,7 @@ nonisolated public struct Recording: Identifiable, Equatable, Sendable {
     }
 }
 
-/// Where a clip's bytes live relative to the cloud. Upload is simulated
-/// until the cloud clip endpoint exists; the states and badge UI are the
-/// supported shape.
+/// Where a clip's bytes live relative to the cloud.
 nonisolated public enum RecordingSyncState: Equatable, Sendable {
     case onDevice
     case uploading(percent: Int)
@@ -37,7 +35,10 @@ public protocol RecordingStoring: AnyObject {
 @Observable
 public final class MediaModel {
     public private(set) var recordings: [Recording] = []
-    private var syncStates: [UUID: RecordingSyncState] = [:]
+
+    /// The engine that carries recordings to the cloud. Wired by the app
+    /// entry; nil in tests, where everything reads as on-device.
+    public var sync: SyncEngine?
 
     private let store: any RecordingStoring
 
@@ -47,33 +48,24 @@ public final class MediaModel {
     }
 
     public func syncState(for recording: Recording) -> RecordingSyncState {
-        syncStates[recording.id] ?? .onDevice
+        sync?.state(for: recording) ?? .onDevice
     }
+
+    /// The cloud is out of room; the Library banner reads this.
+    public var storageFull: Bool { sync?.storageFull ?? false }
 
     public func ingest(movieAt url: URL, duration: TimeInterval, thumbnail: Data?) {
         guard let recording = try? store.ingest(movieAt: url, duration: duration, thumbnail: thumbnail) else { return }
         recordings.insert(recording, at: 0)
-        beginUpload(of: recording)
+        sync?.recordingAdded(recording)
     }
 
+    /// Deletes the clip everywhere: the local file now, and the cloud copy
+    /// through the tombstone the store records.
     public func delete(_ recording: Recording) {
         try? store.deleteRecording(recording)
         recordings.removeAll { $0.id == recording.id }
-        syncStates[recording.id] = nil
-    }
-
-    private func beginUpload(of recording: Recording) {
-        syncStates[recording.id] = .uploading(percent: 0)
-        Task {
-            var percent = 0.0
-            while percent < 100 {
-                try? await Task.sleep(for: .seconds(0.6))
-                guard recordings.contains(where: { $0.id == recording.id }) else { return }
-                percent = min(percent + .random(in: 6 ... 22), 100)
-                syncStates[recording.id] = .uploading(percent: Int(percent))
-            }
-            syncStates[recording.id] = .synced
-        }
+        sync?.kick()
     }
 
     public func movieURL(for recording: Recording) -> URL { store.movieURL(for: recording) }

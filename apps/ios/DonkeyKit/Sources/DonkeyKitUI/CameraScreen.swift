@@ -372,10 +372,10 @@ struct TeleprompterSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Teleprompter speed")
+                Text("Reading speed · \(Int(camera.teleprompter.settings.wordsPerMinute)) wpm")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                Slider(value: $camera.teleprompter.settings.speed, in: TeleprompterSettings.speedRange)
+                Slider(value: $camera.teleprompter.settings.wordsPerMinute, in: TeleprompterSettings.speedRange)
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text("Text size")
@@ -392,17 +392,28 @@ struct TeleprompterSettingsView: View {
 struct TeleprompterOverlay: View {
     var camera: CameraModel
 
+    /// Rendered height of the paced script, measured off the Text itself so
+    /// the scroll rate can pace the exact copy on screen.
+    @State private var textHeight: Double = 0
+
     var body: some View {
         GeometryReader { geometry in
             let height = geometry.size.height * 0.42
             TimelineView(.animation) { context in
                 let elapsed = camera.recordingStartedAt.map { context.date.timeIntervalSince($0) } ?? 0
-                Text(camera.teleprompter.script)
+                Text(camera.teleprompter.displayScript)
                     .font(.system(size: camera.teleprompter.settings.textSize, weight: .heavy))
                     .foregroundStyle(.white)
                     .lineSpacing(4)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .offset(y: camera.teleprompter.scrollOffset(elapsed: elapsed, overlayHeight: height))
+                    .onGeometryChange(for: Double.self, of: { $0.size.height }) { textHeight = $0 }
+                    .offset(
+                        y: camera.teleprompter.scrollOffset(
+                            elapsed: elapsed,
+                            overlayHeight: height,
+                            textHeight: textHeight
+                        )
+                    )
                     .padding(.horizontal, 24)
             }
             .frame(height: height, alignment: .top)

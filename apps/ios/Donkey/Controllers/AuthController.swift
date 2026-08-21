@@ -38,7 +38,8 @@ enum AuthError: LocalizedError {
 /// Cut session (better-auth with the bearer plugin). The session token and
 /// profile live in the keychain.
 final class AuthController: NSObject, AuthServicing {
-    private static let tokenKey = "session-token"
+    /// Shared with CutCloudClient, which reads the same session token.
+    static let tokenKey = "session-token"
     private static let profileKey = "session-profile"
 
     private var appleContinuation: CheckedContinuation<(token: String, nonce: String), any Error>?

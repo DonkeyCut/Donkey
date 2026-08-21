@@ -14,6 +14,9 @@ struct MediaScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if media.storageFull {
+                StorageBanner()
+            }
             ScreenHeader(title: "Library", app: app, auth: auth)
             Group {
                 if media.recordings.isEmpty {
@@ -50,6 +53,20 @@ struct MediaScreen: View {
         .fullScreenCover(item: $playing) { recording in
             RecordingPlayerView(url: media.movieURL(for: recording))
         }
+    }
+}
+
+/// Pinned above everything in the library when the cloud is full: edge to
+/// edge, under the status bar, just tall enough to say why clips stay local.
+struct StorageBanner: View {
+    var body: some View {
+        Text("Not enough cloud storage — recordings stay on this phone")
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 8)
+            .background(Color(hex: "#b3261e").ignoresSafeArea(edges: [.top, .horizontal]))
     }
 }
 

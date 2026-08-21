@@ -36,13 +36,24 @@ nonisolated public struct Note: Identifiable, Equatable, Sendable {
     public var body: String
     public var color: NoteColor
     public var createdAt: Date
+    /// Last edit, wherever it happened. The sync's last-writer-wins clock:
+    /// the newer stamp survives when the phone and the desktop both wrote.
+    public var updatedAt: Date
 
-    public init(id: UUID = UUID(), title: String, body: String, color: NoteColor, createdAt: Date = .now) {
+    public init(
+        id: UUID = UUID(),
+        title: String,
+        body: String,
+        color: NoteColor,
+        createdAt: Date = .now,
+        updatedAt: Date = .now
+    ) {
         self.id = id
         self.title = title
         self.body = body
         self.color = color
         self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 
     /// The text a teleprompter reads for this note.
@@ -103,10 +114,20 @@ public final class IdeasModel {
     /// The note open in the editor; nil when the editor is closed.
     public var draft: NoteDraft?
 
+    /// Fires after any local edit so the sync engine pushes it. Wired by the
+    /// app entry; nil in tests.
+    public var onLocalChange: (() -> Void)?
+
     private let store: any IdeasStoring
 
     public init(store: any IdeasStoring) {
         self.store = store
+        notes = (try? store.loadNotes()) ?? []
+        inspiration = (try? store.loadInspiration()) ?? []
+    }
+
+    /// Re-read what the store holds — how a cloud merge lands on screen.
+    public func reloadFromStore() {
         notes = (try? store.loadNotes()) ?? []
         inspiration = (try? store.loadInspiration()) ?? []
     }
@@ -150,7 +171,8 @@ public final class IdeasModel {
             title: title.isEmpty ? "Untitled" : title,
             body: body,
             color: draft.color,
-            createdAt: existing?.createdAt ?? .now
+            createdAt: existing?.createdAt ?? .now,
+            updatedAt: .now
         )
         try? store.upsert(note)
         if let index = notes.firstIndex(where: { $0.id == note.id }) {
@@ -159,6 +181,7 @@ public final class IdeasModel {
             notes.insert(note, at: 0)
         }
         self.draft = nil
+        onLocalChange?()
         return note
     }
 
@@ -167,6 +190,7 @@ public final class IdeasModel {
     public func deleteNote(id: UUID) {
         try? store.deleteNote(id: id)
         notes.removeAll { $0.id == id }
+        onLocalChange?()
     }
 
     @discardableResult
@@ -174,17 +198,20 @@ public final class IdeasModel {
         guard let url = normalizedInspirationURL(urlText),
               let item = try? store.addLink(url) else { return false }
         inspiration.insert(item, at: 0)
+        onLocalChange?()
         return true
     }
 
     public func addInspiration(mediaData: Data, isVideo: Bool) {
         guard let item = try? store.addMedia(data: mediaData, isVideo: isVideo) else { return }
         inspiration.insert(item, at: 0)
+        onLocalChange?()
     }
 
     public func deleteInspiration(id: UUID) {
         try? store.deleteInspiration(id: id)
         inspiration.removeAll { $0.id == id }
+        onLocalChange?()
     }
 
     public func mediaURL(fileName: String) -> URL { store.mediaURL(fileName: fileName) }

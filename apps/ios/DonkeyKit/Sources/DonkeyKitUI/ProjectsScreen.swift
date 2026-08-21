@@ -1,4 +1,5 @@
 #if os(iOS)
+import AVKit
 import SwiftUI
 import DonkeyKitModels
 
@@ -15,11 +16,16 @@ struct ProjectsScreen: View {
         VStack(spacing: 0) {
             ScreenHeader(title: "Projects", app: app, auth: auth)
             if projects.projects.isEmpty {
-                EmptyState(
-                    title: "No projects yet",
-                    message: "Projects you create in Donkey Cut will show up here."
-                )
-                .frame(maxHeight: .infinity)
+                if projects.isLoading {
+                    ProgressView()
+                        .frame(maxHeight: .infinity)
+                } else {
+                    EmptyState(
+                        title: "No projects yet",
+                        message: "Projects you create in Donkey Cut will show up here."
+                    )
+                    .frame(maxHeight: .infinity)
+                }
             } else {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 12) {
@@ -31,10 +37,12 @@ struct ProjectsScreen: View {
                     .padding(.top, 14)
                     .padding(.bottom, 24)
                 }
+                .refreshable { await projects.refresh() }
             }
         }
+        .task { await projects.refresh() }
         .fullScreenCover(item: $playing) { project in
-            ProjectPlayerView(project: project)
+            ProjectPlayerView(project: project, projects: projects)
         }
     }
 }
@@ -49,17 +57,25 @@ struct ProjectCard: View {
             case .ready(let renderedOn):
                 Button(action: onPlay) {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 16).fill(.fill.secondary)
+                        if let thumbnail = project.thumbnail,
+                           let image = UIImage(contentsOfFile: thumbnail.path()) {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFill()
+                        } else {
+                            RoundedRectangle(cornerRadius: 16).fill(.fill.secondary)
+                        }
                         Circle()
-                            .fill(.white.opacity(0.14))
+                            .fill(.black.opacity(0.35))
                             .frame(width: 46, height: 46)
                             .overlay {
                                 Image(systemName: "play.fill")
                                     .font(.body.weight(.bold))
-                                    .foregroundStyle(.primary)
+                                    .foregroundStyle(.white)
                                     .offset(x: 2)
                             }
                     }
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
                     .overlay(alignment: .topLeading) {
                         ProjectTag(text: formattedDuration(project.duration))
                             .padding(8)
@@ -70,13 +86,6 @@ struct ProjectCard: View {
                     }
                 }
                 .buttonStyle(.plain)
-            case .exporting(let percent):
-                GhostCard(title: project.name, subtitle: "Exporting \(percent)%")
-                    .overlay(alignment: .bottom) {
-                        ProgressView(value: Double(percent), total: 100)
-                            .padding(.horizontal, 12)
-                            .padding(.bottom, 12)
-                    }
             case .none:
                 GhostCard(title: project.name, subtitle: "No export yet")
             }
@@ -120,104 +129,59 @@ struct GhostCard: View {
     }
 }
 
-/// Plays the project's latest render. Playback is a clock over the render's
-/// duration until renders stream from the cloud.
+/// Streams the project's latest export, or the composited preview when no
+/// export exists. The URL resolves at open time because CDN links expire.
 struct ProjectPlayerView: View {
     let project: Project
+    var projects: ProjectsModel
 
-    @State private var time: TimeInterval = 0
-    @State private var isPlaying = false
+    @State private var player: AVPlayer?
+    @State private var failed = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack(alignment: .topLeading) {
+            Color.black.ignoresSafeArea()
+            if let player {
+                VideoPlayer(player: player)
+                    .ignoresSafeArea()
+            } else if failed {
+                Text("Couldn't load this project's video")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.8))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ProgressView()
+                    .tint(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
             HStack(spacing: 12) {
                 Button {
                     dismiss()
                 } label: {
                     Image(systemName: "xmark")
                         .font(.title3.weight(.bold))
+                        .foregroundStyle(.white)
                         .frame(width: 40, height: 40)
                 }
+                .glassEffect(.regular.interactive())
                 Text(project.name)
                     .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.white)
                     .lineLimit(1)
-                    .frame(maxWidth: .infinity)
-                Spacer().frame(width: 40)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-
-            Spacer()
-
-            Button {
-                isPlaying.toggle()
-            } label: {
-                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                    .font(.title.weight(.bold))
-                    .frame(width: 76, height: 76)
-                    .background(.white.opacity(0.15), in: Circle())
-            }
-
-            Spacer()
-
-            VStack(alignment: .leading, spacing: 8) {
-                scrubber
-                HStack {
-                    Text(formattedDuration(time))
-                    Spacer()
-                    Text(formattedDuration(project.duration))
-                }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.75))
-                if case .ready(let renderedOn) = project.export {
-                    Text("Latest render · \(renderedOn)")
-                        .font(.caption2.weight(.bold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(.white.opacity(0.14), in: Capsule())
-                        .padding(.top, 4)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 24)
+            .padding(16)
         }
-        .foregroundStyle(.white)
-        .background(Color.black.ignoresSafeArea())
-        .task(id: isPlaying) {
-            guard isPlaying else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(0.1))
-                time = min(time + 0.1, project.duration)
-                if time >= project.duration {
-                    isPlaying = false
-                    return
-                }
+        .task {
+            guard let url = await projects.streamURL(for: project) else {
+                failed = true
+                return
             }
+            let player = AVPlayer(url: url)
+            self.player = player
+            player.play()
         }
-    }
-
-    private var scrubber: some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.22))
-                Capsule()
-                    .fill(.white)
-                    .frame(width: max(0, proxy.size.width * progress))
-            }
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0).onChanged { value in
-                    let fraction = min(max(value.location.x / proxy.size.width, 0), 1)
-                    time = fraction * project.duration
-                }
-            )
-        }
-        .frame(height: 5)
-    }
-
-    private var progress: Double {
-        project.duration > 0 ? time / project.duration : 0
+        .onDisappear { player?.pause() }
     }
 }
 #endif

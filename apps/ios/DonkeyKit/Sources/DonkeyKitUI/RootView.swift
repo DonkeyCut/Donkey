@@ -63,6 +63,16 @@ public struct RootView<CameraPreview: View>: View {
         .animation(.default, value: auth.isSignedIn)
         .preferredColorScheme(app.appearance.colorScheme)
         .task { await auth.restore() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active, auth.isSignedIn {
+                media.sync?.kick()
+            }
+        }
+        .onChange(of: auth.isSignedIn) { _, signedIn in
+            guard signedIn else { return }
+            media.sync?.kick()
+            Task { await projects.refresh() }
+        }
         .onChange(of: cameraShouldRun) { _, run in
             if run {
                 camera.appeared()

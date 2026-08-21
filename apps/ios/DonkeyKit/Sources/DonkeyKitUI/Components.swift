@@ -33,6 +33,7 @@ struct AvatarMenu: View {
                 Text("Dark").tag(AppearancePreference.dark)
             }
             .pickerStyle(.menu)
+            Toggle("Sync over Cellular", systemImage: "antenna.radiowaves.left.and.right", isOn: $app.syncOverCellular)
             Divider()
             Button("Log Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
                 Task { await auth.signOut() }

@@ -1,0 +1,225 @@
+import Foundation
+
+// The cloud as the phone sees it: plain records for the Donkey Cut hosted API
+// (/api/cut-cloud/*), the transport protocols the app target implements with
+// URLSession, and the pure policy that decides what may move on which network.
+
+nonisolated public struct StorageUsage: Equatable, Sendable {
+    public var bytes: Int64
+    /// nil = unlimited.
+    public var quotaBytes: Int64?
+
+    public init(bytes: Int64, quotaBytes: Int64?) {
+        self.bytes = bytes
+        self.quotaBytes = quotaBytes
+    }
+
+    public var isFull: Bool {
+        guard let quotaBytes else { return false }
+        return bytes >= quotaBytes
+    }
+}
+
+/// One library upload: a recording off the camera or an inspiration item.
+nonisolated public struct LibraryUpload: Sendable {
+    public var fileURL: URL
+    public var fileName: String
+    public var mime: String
+    public var bytes: Int64
+    public var name: String
+    public var type: String // "video" | "image"
+    public var duration: TimeInterval
+    public var width: Int?
+    public var height: Int?
+    public var origin: String // "camera" | "inspiration"
+    /// JPEG poster stored beside the media so the desktop card paints at once.
+    public var poster: Data?
+    /// True when this upload was claimed before (the journal holds the name):
+    /// the server re-mints the same claim instead of minting a twin.
+    public var resume: Bool
+
+    public init(
+        fileURL: URL,
+        fileName: String,
+        mime: String,
+        bytes: Int64,
+        name: String,
+        type: String,
+        duration: TimeInterval,
+        width: Int? = nil,
+        height: Int? = nil,
+        origin: String,
+        poster: Data? = nil,
+        resume: Bool = false
+    ) {
+        self.fileURL = fileURL
+        self.fileName = fileName
+        self.mime = mime
+        self.bytes = bytes
+        self.name = name
+        self.type = type
+        self.duration = duration
+        self.width = width
+        self.height = height
+        self.origin = origin
+        self.poster = poster
+        self.resume = resume
+    }
+}
+
+nonisolated public struct RemoteAsset: Equatable, Sendable {
+    public var id: String
+    public var fileName: String
+
+    public init(id: String, fileName: String) {
+        self.id = id
+        self.fileName = fileName
+    }
+}
+
+/// A note as the cloud stores it. `updatedAt` is the last-writer-wins clock;
+/// a tombstone carries `deletedAt`.
+nonisolated public struct RemoteNote: Equatable, Sendable {
+    public var id: UUID
+    public var title: String
+    public var body: String
+    public var colorIndex: Int
+    public var updatedAt: Date
+    public var deletedAt: Date?
+    public var createdAt: Date
+
+    public init(
+        id: UUID,
+        title: String,
+        body: String,
+        colorIndex: Int,
+        updatedAt: Date,
+        deletedAt: Date? = nil,
+        createdAt: Date = .now
+    ) {
+        self.id = id
+        self.title = title
+        self.body = body
+        self.colorIndex = colorIndex
+        self.updatedAt = updatedAt
+        self.deletedAt = deletedAt
+        self.createdAt = createdAt
+    }
+}
+
+nonisolated public enum CloudSyncError: Error, Equatable {
+    /// The account is out of cloud storage: uploads pause, the Library shows
+    /// its banner, and nothing retries until space frees up.
+    case storageFull
+    /// The session is gone; syncing waits for the next sign-in.
+    case unauthorized
+    /// Anything transient: network, 5xx. The item stays queued.
+    case transport
+}
+
+/// What the app target's CutCloudClient does for the sync engine.
+public protocol CloudSyncServicing: AnyObject {
+    /// Presign → PUT the bytes to R2 → complete. Reports rough progress in
+    /// 0...1. `allowCellular` is stamped on the requests so a Wi-Fi upload
+    /// never silently continues over cell when the path changes mid-transfer.
+    func uploadLibraryMedia(
+        _ upload: LibraryUpload,
+        allowCellular: Bool,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> RemoteAsset
+    func deleteLibraryAsset(id: String) async throws
+    /// Queue a cloud-side import of an inspiration link (the render worker
+    /// fetches the media into the Inspiration folder).
+    func importInspirationLink(_ url: URL) async throws
+    func fetchUsage() async throws -> StorageUsage
+    func fetchNotes() async throws -> [RemoteNote]
+    /// Returns the winning version — this write, or a newer one already there.
+    func putNote(_ note: RemoteNote) async throws -> RemoteNote
+    func deleteNote(id: UUID) async throws
+}
+
+// MARK: - Projects (down-sync)
+
+/// A cloud project summary reduced to what the phone shows.
+nonisolated public struct RemoteProject: Equatable, Sendable, Identifiable {
+    public var id: String
+    public var name: String
+    public var duration: TimeInterval
+    public var updatedAt: Date
+    /// The composited hover-proxy render exists; it is the stream of record
+    /// when no export does.
+    public var hasPreview: Bool
+    public var previewFile: String?
+    public var previewIsImage: Bool
+    public var previewStart: TimeInterval
+
+    public init(
+        id: String,
+        name: String,
+        duration: TimeInterval,
+        updatedAt: Date,
+        hasPreview: Bool,
+        previewFile: String? = nil,
+        previewIsImage: Bool = false,
+        previewStart: TimeInterval = 0
+    ) {
+        self.id = id
+        self.name = name
+        self.duration = duration
+        self.updatedAt = updatedAt
+        self.hasPreview = hasPreview
+        self.previewFile = previewFile
+        self.previewIsImage = previewIsImage
+        self.previewStart = previewStart
+    }
+}
+
+nonisolated public struct RemoteExport: Equatable, Sendable {
+    public var file: String
+    public var modifiedAt: Date
+
+    public init(file: String, modifiedAt: Date) {
+        self.file = file
+        self.modifiedAt = modifiedAt
+    }
+}
+
+public protocol CloudProjectsServicing: AnyObject, Sendable {
+    func fetchProjects() async throws -> [RemoteProject]
+    func fetchExports(projectId: String) async throws -> [RemoteExport]
+    /// CDN URL behind the API's redirect for the latest render of a project:
+    /// its newest export, or the composited preview proxy.
+    func streamURL(project: RemoteProject, export: RemoteExport?) async throws -> URL
+    /// A local poster image for the project card, cached on disk keyed by the
+    /// project's updatedAt so only thumbnails ride the network.
+    func thumbnailFile(for project: RemoteProject) async -> URL?
+}
+
+// MARK: - Network policy
+
+nonisolated public enum NetworkPath: Equatable, Sendable {
+    case wifi
+    case cellular
+    case offline
+}
+
+/// How big a transfer is, as policy sees it. Small-class traffic (notes, link
+/// imports, JSON) moves on any connection; media waits for Wi-Fi unless the
+/// user allows cellular.
+nonisolated public enum TransferClass: Equatable, Sendable {
+    case small
+    case media
+}
+
+/// The one rule that spends the user's data.
+nonisolated public func transferAllowed(
+    _ kind: TransferClass,
+    on path: NetworkPath,
+    cellularAllowed: Bool
+) -> Bool {
+    switch path {
+    case .offline: false
+    case .wifi: true
+    case .cellular: kind == .small || cellularAllowed
+    }
+}

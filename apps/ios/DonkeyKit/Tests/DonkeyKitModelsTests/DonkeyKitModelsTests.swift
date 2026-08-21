@@ -63,10 +63,22 @@ import Testing
 @Suite struct TeleprompterTests {
     @Test func scrollStartsLowAndMovesUp() {
         var state = TeleprompterState()
-        state.settings.speed = 40
-        let start = state.scrollOffset(elapsed: 0, overlayHeight: 300)
+        state.settings.wordsPerMinute = 120
+        state.script = Array(repeating: "word", count: 120).joined(separator: " ")
+        // 120 words at 120 wpm = 60s. Lead-in is 60% of the overlay; the text
+        // travels its own height plus the lead over the minute.
+        #expect(state.duration == 60)
+        let start = state.scrollOffset(elapsed: 0, overlayHeight: 300, textHeight: 420)
         #expect(start == 180)
-        #expect(state.scrollOffset(elapsed: 2, overlayHeight: 300) == 100)
+        let mid = state.scrollOffset(elapsed: 30, overlayHeight: 300, textHeight: 420)
+        #expect(mid == 180 - (420 + 180) / 2)
+        let end = state.scrollOffset(elapsed: 60, overlayHeight: 300, textHeight: 420)
+        #expect(end == -420)
+    }
+
+    @Test func emptyScriptHoldsAtLead() {
+        let state = TeleprompterState()
+        #expect(state.scrollOffset(elapsed: 5, overlayHeight: 300, textHeight: 0) == 180)
     }
 
     @Test func hasScriptIgnoresWhitespace() {
@@ -75,6 +87,267 @@ import Testing
         #expect(!state.hasScript)
         state.script = "Hello"
         #expect(state.hasScript)
+    }
+
+    @Test func readDurationCountsWordsNotSpacing() {
+        #expect(readDuration(of: "one   two\n\nthree", wordsPerMinute: 60) == 3)
+        #expect(readDuration(of: "", wordsPerMinute: 150) == 0)
+    }
+
+    @Test func pacingRespectsUserNewlines() {
+        let paced = pacedScript("First thought\nSecond thought")
+        #expect(paced == "First thought\n\nSecond thought")
+    }
+
+    @Test func pacingCollapsesSpaceRuns() {
+        #expect(pacedScript("hello    there   friend") == "hello there friend")
+    }
+
+    @Test func pacingWrapsLongParagraphsAtClauses() {
+        let paced = pacedScript("Hey everyone, welcome back to the channel where we talk about editing")
+        let lines = paced.split(separator: "\n").map(String.init)
+        // The clause end takes the first break; no line outruns the word cap.
+        #expect(lines.first == "Hey everyone,")
+        #expect(lines.allSatisfy { $0.split(separator: " ").count <= 6 })
+        // Every word survives the wrap.
+        #expect(paced.split(whereSeparator: { $0.isWhitespace }).count == 12)
+    }
+}
+
+@Suite struct SyncPolicyTests {
+    @Test func wifiMovesEverything() {
+        #expect(transferAllowed(.media, on: .wifi, cellularAllowed: false))
+        #expect(transferAllowed(.small, on: .wifi, cellularAllowed: false))
+    }
+
+    @Test func cellularHoldsMediaUntilAllowed() {
+        #expect(!transferAllowed(.media, on: .cellular, cellularAllowed: false))
+        #expect(transferAllowed(.media, on: .cellular, cellularAllowed: true))
+        // Notes and links are small; they always move.
+        #expect(transferAllowed(.small, on: .cellular, cellularAllowed: false))
+    }
+
+    @Test func offlineMovesNothing() {
+        #expect(!transferAllowed(.small, on: .offline, cellularAllowed: true))
+        #expect(!transferAllowed(.media, on: .offline, cellularAllowed: true))
+    }
+}
+
+@MainActor
+@Suite struct SyncEngineTests {
+    final class FakeCloud: CloudSyncServicing {
+        var notes: [UUID: RemoteNote] = [:]
+        var uploads: [String] = []
+        var deletedAssets: [String] = []
+        var deletedNotes: [UUID] = []
+        var links: [URL] = []
+        var usage = StorageUsage(bytes: 0, quotaBytes: 1_000_000)
+        var uploadResult: Result<RemoteAsset, CloudSyncError> =
+            .success(RemoteAsset(id: "asset-1", fileName: "clip.mov"))
+        /// Runs while the bytes are "in flight", before the upload returns.
+        var onUpload: (() -> Void)?
+
+        func uploadLibraryMedia(
+            _ upload: LibraryUpload,
+            allowCellular: Bool,
+            progress: @escaping @Sendable (Double) -> Void
+        ) async throws -> RemoteAsset {
+            uploads.append(upload.fileName)
+            onUpload?()
+            return try uploadResult.get()
+        }
+
+        func deleteLibraryAsset(id: String) async throws { deletedAssets.append(id) }
+        func importInspirationLink(_ url: URL) async throws { links.append(url) }
+        func fetchUsage() async throws -> StorageUsage { usage }
+        func fetchNotes() async throws -> [RemoteNote] { Array(notes.values) }
+
+        func putNote(_ note: RemoteNote) async throws -> RemoteNote {
+            if let existing = notes[note.id], existing.updatedAt > note.updatedAt { return existing }
+            notes[note.id] = note
+            return note
+        }
+
+        func deleteNote(id: UUID) async throws {
+            deletedNotes.append(id)
+            notes[id] = nil
+        }
+    }
+
+    struct Rig {
+        let store: DonkeyStore
+        let cloud: FakeCloud
+        let ideas: IdeasModel
+        let media: MediaModel
+        let engine: SyncEngine
+    }
+
+    func makeRig() throws -> Rig {
+        let store = try DonkeyStore(inMemory: true)
+        let cloud = FakeCloud()
+        let ideas = IdeasModel(store: store)
+        let media = MediaModel(store: store)
+        let engine = SyncEngine(
+            journal: store,
+            service: cloud,
+            cellularAllowed: { false },
+            signedIn: { true },
+            uploadFor: { recording in
+                LibraryUpload(
+                    fileURL: media.movieURL(for: recording),
+                    fileName: recording.fileName,
+                    mime: "video/quicktime",
+                    bytes: 100,
+                    name: "Recording",
+                    type: "video",
+                    duration: recording.duration,
+                    origin: "camera"
+                )
+            }
+        )
+        engine.media = media
+        engine.ideas = ideas
+        media.sync = engine
+        // Assigned before the engine is observed so the didSet kick (a no-op
+        // pass) can't race the manual run() calls below.
+        engine.network = .wifi
+        return Rig(store: store, cloud: cloud, ideas: ideas, media: media, engine: engine)
+    }
+
+    func ingestClip(_ rig: Rig) throws -> Recording {
+        let temp = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".mov")
+        try Data("movie".utf8).write(to: temp)
+        rig.media.ingest(movieAt: temp, duration: 2, thumbnail: nil)
+        return rig.media.recordings[0]
+    }
+
+    @Test func recordingUploadsOnceAndJournals() async throws {
+        let rig = try makeRig()
+        let recording = try ingestClip(rig)
+        await rig.engine.run()
+        #expect(rig.cloud.uploads == [recording.fileName])
+        #expect(rig.engine.state(for: recording) == .synced)
+        // A second pass moves nothing: the journal already holds the asset.
+        await rig.engine.run()
+        #expect(rig.cloud.uploads.count == 1)
+    }
+
+    @Test func fullStoragePausesUploadsAndRaisesBanner() async throws {
+        let rig = try makeRig()
+        rig.cloud.usage = StorageUsage(bytes: 10, quotaBytes: 10)
+        _ = try ingestClip(rig)
+        await rig.engine.run()
+        #expect(rig.engine.storageFull)
+        #expect(rig.cloud.uploads.isEmpty)
+    }
+
+    @Test func transientFailureKeepsClaimForResume() async throws {
+        let rig = try makeRig()
+        let recording = try ingestClip(rig)
+        rig.cloud.uploadResult = .failure(.transport)
+        await rig.engine.run()
+        let journaled = try rig.store.recordingRemote(recording.id)
+        #expect(journaled.assetId == nil)
+        #expect(journaled.claimedFileName == recording.fileName)
+        #expect(rig.engine.state(for: recording) == .onDevice)
+        rig.cloud.uploadResult = .success(RemoteAsset(id: "asset-9", fileName: recording.fileName))
+        await rig.engine.run()
+        #expect(rig.engine.state(for: recording) == .synced)
+    }
+
+    @Test func deleteDuringUploadTombstonesTheFreshAsset() async throws {
+        let rig = try makeRig()
+        let recording = try ingestClip(rig)
+        rig.cloud.onUpload = { rig.media.delete(recording) }
+        await rig.engine.run()
+        // The finished upload found its row gone, so the journal holds a
+        // tombstone for the asset; the next pass takes the cloud copy down.
+        await rig.engine.run()
+        #expect(rig.cloud.deletedAssets == ["asset-1"])
+        #expect(try rig.store.tombstones().isEmpty)
+    }
+
+    @Test func deleteOfSyncedRecordingReachesCloud() async throws {
+        let rig = try makeRig()
+        let recording = try ingestClip(rig)
+        await rig.engine.run()
+        rig.media.delete(recording)
+        await rig.engine.run()
+        #expect(rig.cloud.deletedAssets == ["asset-1"])
+        #expect(try rig.store.tombstones().isEmpty)
+    }
+
+    @Test func localNotePushesAndRemoteNewerWins() async throws {
+        let rig = try makeRig()
+        rig.ideas.openEditor()
+        rig.ideas.draft?.body = "phone words"
+        let note = rig.ideas.saveDraft()!
+        await rig.engine.run()
+        #expect(rig.cloud.notes[note.id]?.body == "phone words")
+
+        // The desktop edits later; the next pass adopts its version.
+        rig.cloud.notes[note.id] = RemoteNote(
+            id: note.id,
+            title: note.title,
+            body: "desktop words",
+            colorIndex: 2,
+            updatedAt: note.updatedAt.addingTimeInterval(60)
+        )
+        await rig.engine.run()
+        #expect(rig.ideas.notes.first?.body == "desktop words")
+        #expect(rig.ideas.notes.first?.color == .sky)
+    }
+
+    @Test func noteDeleteTombstonePropagates() async throws {
+        let rig = try makeRig()
+        rig.ideas.openEditor()
+        rig.ideas.draft?.body = "short lived"
+        let note = rig.ideas.saveDraft()!
+        await rig.engine.run()
+        rig.ideas.deleteNote(id: note.id)
+        await rig.engine.run()
+        #expect(rig.cloud.deletedNotes == [note.id])
+        #expect(rig.ideas.notes.isEmpty)
+    }
+
+    @Test func cloudDeleteComesDownAsRemoval() async throws {
+        let rig = try makeRig()
+        rig.ideas.openEditor()
+        rig.ideas.draft?.body = "doomed"
+        let note = rig.ideas.saveDraft()!
+        await rig.engine.run()
+        // The desktop deleted it; the cloud keeps a newer tombstone.
+        rig.cloud.notes[note.id] = RemoteNote(
+            id: note.id,
+            title: note.title,
+            body: note.body,
+            colorIndex: 0,
+            updatedAt: note.updatedAt.addingTimeInterval(30),
+            deletedAt: note.updatedAt.addingTimeInterval(30)
+        )
+        await rig.engine.run()
+        #expect(rig.ideas.notes.isEmpty)
+    }
+
+    @Test func inspirationLinkImportsOnce() async throws {
+        let rig = try makeRig()
+        #expect(rig.ideas.addInspiration(urlText: "youtube.com/watch?v=9"))
+        await rig.engine.run()
+        #expect(rig.cloud.links.map(\.host) == ["youtube.com"])
+        await rig.engine.run()
+        #expect(rig.cloud.links.count == 1)
+    }
+
+    @Test func cellularHoldsMediaButMovesNotes() async throws {
+        let rig = try makeRig()
+        rig.engine.network = .cellular
+        _ = try ingestClip(rig)
+        rig.ideas.openEditor()
+        rig.ideas.draft?.body = "typed on the train"
+        let note = rig.ideas.saveDraft()!
+        await rig.engine.run()
+        #expect(rig.cloud.uploads.isEmpty)
+        #expect(rig.cloud.notes[note.id] != nil)
     }
 }
 

@@ -33,13 +33,33 @@ public final class CameraModel {
     public private(set) var isTorchOn = false
     public internal(set) var hasTorch = false
     public internal(set) var recordingStartedAt: Date?
-    public var teleprompter = TeleprompterState()
+    /// Teleprompter settings persist across sessions: set the pace once and
+    /// every later recording starts with it.
+    public var teleprompter = TeleprompterState() {
+        didSet {
+            if teleprompter.settings != oldValue.settings { persistTeleprompterSettings() }
+        }
+    }
 
     public var isRecording: Bool { recordingStartedAt != nil }
 
     public var controller: (any CameraControlling)?
 
-    public init() {}
+    private let defaults: UserDefaults
+    private static let teleprompterKey = "teleprompterSettings"
+
+    public init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        if let data = defaults.data(forKey: Self.teleprompterKey),
+           let settings = try? JSONDecoder().decode(TeleprompterSettings.self, from: data) {
+            teleprompter.settings = settings
+        }
+    }
+
+    private func persistTeleprompterSettings() {
+        guard let data = try? JSONEncoder().encode(teleprompter.settings) else { return }
+        defaults.set(data, forKey: Self.teleprompterKey)
+    }
 
     // MARK: Intents
 

@@ -37,17 +37,41 @@ final class AppWiring {
     let projects: ProjectsModel
     let auth: AuthModel
     let cameraController: CameraController
+    let sync: SyncEngine
+    private let networkMonitor: NetworkMonitor
 
     init() {
         // A store that cannot open is a programmer error worth crashing on.
         let store = try! DonkeyStore()
-        app = AppModel()
-        ideas = IdeasModel(store: store)
+        let cloud = CutCloudClient()
+        let app = AppModel()
+        let ideas = IdeasModel(store: store)
+        let media = MediaModel(store: store)
+        let auth = AuthModel(service: AuthController())
+        let sync = SyncEngine(
+            journal: store,
+            service: cloud,
+            cellularAllowed: { app.syncOverCellular },
+            signedIn: { auth.isSignedIn },
+            uploadFor: { recording in
+                await CutCloudClient.uploadPayload(for: recording, media: media)
+            }
+        )
+        sync.media = media
+        sync.ideas = ideas
+        media.sync = sync
+        ideas.onLocalChange = { sync.kick() }
+        app.onSyncPolicyChange = { sync.kick() }
+
+        self.app = app
+        self.ideas = ideas
+        self.media = media
+        self.auth = auth
+        self.sync = sync
         camera = CameraModel()
-        media = MediaModel(store: store)
-        projects = ProjectsModel()
-        auth = AuthModel(service: AuthController())
+        projects = ProjectsModel(service: cloud)
         cameraController = CameraController()
+        networkMonitor = NetworkMonitor { sync.network = $0 }
 
         cameraController.model = camera
         camera.controller = cameraController

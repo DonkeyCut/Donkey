@@ -1,10 +1,56 @@
 # The iOS App
 
-Donkey's iOS app lives at `apps/ios/`. It records videos on the phone and
-keeps everything local: notes and inspiration in the Library tab, the camera
-with a teleprompter in the middle, and the recordings grid in Media. Sign-in
-is Google or Apple, exchanged for a Donkey Cut session on donkeycut.com; the
-recordings themselves never leave the device today.
+Donkey's iOS app lives at `apps/ios/`. It is the phone end of Donkey Cut:
+record clips with a teleprompter, jot notes and collect inspiration, and let
+everything flow to the desktop editor through the cloud shelf. Sign-in is
+Google or Apple, exchanged for a Donkey Cut session on donkeycut.com; the same
+bearer session authenticates every cloud call.
+
+## Sync
+
+One engine (`SyncEngine` in `DonkeyKitModels`) owns every queue: recordings
+up, inspiration up, notes both ways, deletes replayed. It works off a journal
+kept in the app's SwiftData store, so nothing depends on the app staying open
+— whatever was mid-flight when the app died is picked up on the next launch,
+foreground, network change, or edit.
+
+**The one rule on data:** a transfer moves when the network is Wi-Fi, or the
+user turned on "Sync over Cellular" (avatar menu), or the payload is small
+(notes, link imports, JSON). Media otherwise waits for Wi-Fi, and requests are
+stamped with that decision so an upload started on Wi-Fi never quietly
+continues over cell.
+
+Every byte moves at most once. Uploads go straight to storage on presigned
+URLs; an interrupted upload re-presigns under the name it already claimed, and
+a retried completion lands on the asset it already made. Recordings arrive in
+the desktop library marked as camera clips (the Camera Roll tab), inspiration
+media lands in the Inspiration folder, and inspiration links queue a
+cloud-side import that fetches the media there. Notes merge both ways by
+last-writer-wins on the edit stamp, with tombstones so a delete made offline
+on either side still lands on the other. Deleting a synced recording on the
+phone deletes the cloud copy too.
+
+When the account is out of cloud storage, uploads pause and the Library shows
+a slim banner pinned over the notch; clips stay on the phone and the banner
+clears once space frees up.
+
+Projects sync down as thumbnails only: the Projects tab lists cloud projects
+with cached poster images, and a tap streams the latest export — or the
+composited preview when none exists — straight from the CDN.
+
+Every request carries an `x-donkey-cut-client: ios` header. The server
+remembers accounts it has seen it from, and the desktop shows its phone
+surfaces (Camera Roll and Notes tabs) only to those accounts.
+
+## Teleprompter
+
+The teleprompter paces raw notes by itself. Reading speed is words per
+minute; the scroll rate is derived from the script's word count and the
+rendered height, so however the words are spaced they pass the reader at the
+set pace. Runs of spaces collapse, the writer's own line breaks hold as
+paragraph breaks, and long unbroken paragraphs wrap into short lines at
+clause boundaries. Speed and text size persist across sessions — set once,
+kept forever.
 
 ## How It Is Put Together
 
