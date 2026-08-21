@@ -44,6 +44,7 @@ import { isDragActive, startDrag, subscribeDragActive } from "@/cut/lib/drag";
 import { CLIP_GAP, laneDragFor, laneDragParts, startLaneMove, startLaneTrim, type LaneDrag, type LaneKind } from "@/cut/lib/laneTracks";
 import { downloadMedia, ensurePeaks, importImage, importStockMusic, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia, stripFailedFor, subscribeStripStatus } from "@/cut/lib/media";
 import { planFilmstrip, type FilmTile } from "@/cut/lib/filmstrip";
+import { waveGain } from "@/cut/lib/waveform";
 import { track0Clips, laneGapAt, sameLane, type LaneRef, clipLen, clipSpeed, getClipSpans, overlayLaneOrder, overlayLayers, projectDuration, resolveTransitions, rippleInsert, useEditor } from "@/cut/lib/store";
 import type { VideoTrackPlacement } from "@/cut/lib/store";
 import { playheadAt, setSkim, skimAt, subscribePlayhead, usePlayhead, useSkim } from "@/cut/lib/playhead";
@@ -4358,6 +4359,9 @@ function WaveformCanvas({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const peaks = asset.peaks;
+  // The strip is drawn against the clip's own loudest moment, so a quietly
+  // recorded clip shows its shape instead of a flat line (lib/waveform.ts).
+  const gain = useMemo(() => waveGain(peaks ?? []), [peaks]);
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !peaks?.length) return;
@@ -4379,10 +4383,10 @@ function WaveformCanvas({
       const b = Math.max(a + 1, Math.ceil(start + (i + 1) * perBar));
       let p = 0;
       for (let j = a; j < b && j < n; j++) if (peaks[j] > p) p = peaks[j];
-      const bh = Math.max(1.5, p * (h - 2));
+      const bh = Math.max(1.5, Math.min(1, p * gain) * (h - 2));
       ctx.fillRect(i * 3, (h - bh) / 2, 2, bh);
     }
-  }, [asset.duration, peaks, from, to, w, h]);
+  }, [asset.duration, peaks, gain, from, to, w, h]);
   if (!peaks?.length) return null;
   return <canvas ref={canvasRef} className={cn("pointer-events-none absolute w-full", className)} />;
 }
