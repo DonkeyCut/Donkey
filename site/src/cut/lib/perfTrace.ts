@@ -263,6 +263,14 @@ const at = (xs: number[], q: number): number => {
   return +sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))].toFixed(3);
 };
 
+/** The largest of a series, walked rather than spread: these arrays run to
+ * CAP, which is far more arguments than a call frame takes. */
+const maxOf = (xs: number[]): number => {
+  let m = 0;
+  for (const x of xs) if (x > m) m = x;
+  return m;
+};
+
 /** Boil a trace down to something a person can paste into a bug report. */
 export function traceReport(t: Trace): TraceReport {
   const presents = t.presents;
@@ -279,13 +287,13 @@ export function traceReport(t: Trace): TraceReport {
     decay: { first: pct(presents.slice(0, third)), last: pct(presents.slice(-third)) },
     lagP50: at(lags, 0.5),
     lagP95: at(lags, 0.95),
-    lagMax: +Math.max(0, ...lags).toFixed(3),
+    lagMax: +maxOf(lags).toFixed(3),
     audioLeadS: at(t.audioLead, 0.5),
     audioLatencyS: at(t.audioLatency, 0.5),
-    sources: Math.max(0, ...t.liveSources),
-    held: Math.max(0, ...t.liveSamples),
-    warmMb: Math.max(0, ...t.warmMb),
-    longTaskMs: Math.round(Math.max(0, ...t.longTasks.map((l) => l.ms))),
+    sources: maxOf(t.liveSources),
+    held: maxOf(t.liveSamples),
+    warmMb: maxOf(t.warmMb),
+    longTaskMs: Math.round(maxOf(t.longTasks.map((l) => l.ms))),
   };
 }
 
