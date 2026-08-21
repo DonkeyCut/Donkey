@@ -212,7 +212,7 @@ export const TIMELINE_TOOLS = [
         type: "string",
         enum: [...TEXT_VARIATION_IDS],
         description:
-          "How far the run departs from one repeated design. Defaults to what the look carries: the plain look runs at none, the designed looks at bold. bold walks the look's whole ensemble — faces, tilts, palette, keyframe moves; subtle keeps one typeface and varies placement and entrance; none lays every line identical.",
+          "How far the run departs from one repeated design. Defaults to what the look carries: the plain look runs at none, the designed looks at bold. bold walks the look's whole ensemble — faces, tilts, palette, moves; subtle keeps one typeface and varies placement and entrance; none lays every line identical.",
       },
       layout: {
         type: "string",
@@ -248,7 +248,7 @@ export const TIMELINE_TOOLS = [
             move: {
               type: "string",
               enum: [...TEXT_MOVE_IDS],
-              description: `What this line does WHILE it holds (a keyframe move; the entrance is separate). ${TEXT_MOVE_IDS.filter((m) => m !== "none").map((m) => `${m}: ${TEXT_MOVE_NOTES[m]}`).join(" ")}`,
+              description: `What this line does WHILE it holds (the entrance is separate). ${TEXT_MOVE_IDS.filter((m) => m !== "none").map((m) => `${m}: ${TEXT_MOVE_NOTES[m]}`).join(" ")}`,
             },
           },
           ["text"]

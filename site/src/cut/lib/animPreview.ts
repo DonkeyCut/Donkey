@@ -89,8 +89,6 @@ export function playAnimPreview(
   slot: "in" | "out" | "loop" | "move"
 ): void {
   stopAnimPreview();
-  // A move is not an anim slot: it is written into the element's own pose
-  // track, so its run carries no anim at all and the track alone draws it.
   const anim: OverlayAnim =
     slot === "in"
       ? { in: o.anim?.in }
@@ -98,7 +96,8 @@ export function playAnimPreview(
         ? { out: o.anim?.out }
         : slot === "loop"
           ? { loop: o.anim?.loop }
-          : {};
+          : { move: o.anim?.move };
+  if (slot === "move" && !anim.move) return;
   const dur = Math.max(0.1, o.end - o.start);
   const span =
     slot === "move"

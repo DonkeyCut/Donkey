@@ -61,6 +61,7 @@ import { clampPlayhead, playheadAt, previewAt, setPlayhead, setSkim } from "./pl
 import { engineTranscribeSamples, withEngineStt } from "./localStt";
 import { trackLocale } from "./subtitles";
 import { ANIM_STYLE_IDS, animStyleOfTransition, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionStyleOfAnim } from "./types";
+import { liftMoveTracks } from "./textMotion";
 import { readTextStyle } from "./textStyle";
 import { loadUiState, saveUiState, type ProjectUiState } from "./uiState";
 import { captureTimelineFrames } from "./visualFrames";
@@ -183,6 +184,18 @@ function placedState(
 
 export const TIMELINE_H_DEFAULT = 272;
 export const TIMELINE_H_MIN = 194;
+/**
+ * Timeline zoom bounds, in px per second of media. The low end is a sanity
+ * floor only: how far out a project may zoom depends on how wide the timeline
+ * is on screen, which the store cannot see, so the real floor is the
+ * viewport-aware one the timeline computes (`zoomFloor`). A long project needs
+ * to reach well under a px/s for its whole strip to fit, so anything higher
+ * here silently overrides that and puts the end of the project out of reach.
+ */
+export const PPS_MIN = 0.01;
+export const PPS_MAX = 800;
+const clampPps = (v: number) =>
+  Number.isFinite(v) ? Math.max(PPS_MIN, Math.min(PPS_MAX, v)) : 60;
 /** Tallest the timeline may grow: the window height less room for the top bar
  * and a usable preview. The constant covers code running without a window. */
 export const timelineHMax = () =>
@@ -1725,9 +1738,11 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       // back when a look was a clip property gets that grade as an element
       // over it — so a project made before either rule reads like a new one.
       // The behind-speaker boolean becomes an inverted subject mask on load,
-      // so one mask model covers it everywhere in memory and on save.
-      const stamped = normalizeElementLanes(
-        migrateBehindSubject(stampOverlayKinds(doc.overlays ?? []))
+      // so one mask model covers it everywhere in memory and on save. Key
+      // tracks written by the retired move picker lift into the move slot,
+      // leaving `kf` to the keys users set themselves.
+      const stamped = liftMoveTracks(
+        normalizeElementLanes(migrateBehindSubject(stampOverlayKinds(doc.overlays ?? [])))
       );
       const subtitles = doc.subtitles ?? emptySubtitles();
       // Docs saved when edge transition styles existed convert them into the
@@ -1768,7 +1783,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           background: projectBackground(doc.background),
           // View state lives in IndexedDB; doc.ui covers projects saved
           // before the move.
-          pxPerSec: Math.max(12, Math.min(800, ui.pxPerSec ?? doc.ui?.pxPerSec ?? 60)),
+          pxPerSec: clampPps(ui.pxPerSec ?? doc.ui?.pxPerSec ?? 60),
           timelineH: Math.max(
             TIMELINE_H_MIN,
             Math.min(timelineHMax(), ui.timelineH ?? TIMELINE_H_DEFAULT)
@@ -3494,13 +3509,15 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           ...(a.duck !== undefined && a.duck < 1 ? { duck: a.duck } : {}),
           ...(a.lane ? { lane: a.lane } : {}),
         }));
-      // Templates saved before the union carry bare titles — same stamp and
-      // behind-speaker migration as the doc loader, so every in-memory
-      // element has its discriminant and one mask model. Groups are remapped
-      // per application, so adding the same template twice gives two
-      // independent groups.
+      // Templates saved before the union carry bare titles — same stamp,
+      // behind-speaker migration, and move-track lift as the doc loader, so
+      // every in-memory element has its discriminant, one mask model, and its
+      // move in the slot. Groups are remapped per application, so adding the
+      // same template twice gives two independent groups.
       const regroup = groupRemap(uid);
-      const newTexts: Overlay[] = migrateBehindSubject(stampOverlayKinds(template.texts)).map((o) => ({
+      const newTexts: Overlay[] = liftMoveTracks(
+        migrateBehindSubject(stampOverlayKinds(template.texts))
+      ).map((o) => ({
         ...o,
         id: uid(),
         start: o.start + shift,
@@ -4279,7 +4296,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         },
       })),
     setPxPerSec: (v) => {
-      const pxPerSec = Math.max(12, Math.min(800, v));
+      const pxPerSec = clampPps(v);
       set({ pxPerSec });
       const id = get().projectId;
       if (id) saveUiState(id, { pxPerSec: Math.round(pxPerSec * 100) / 100 });

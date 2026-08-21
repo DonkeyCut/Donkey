@@ -108,10 +108,21 @@ export interface OverlayLoop {
   preset?: MotionPreset;
 }
 
+/** What the element does while it holds — the push that never stops, the
+ * drift across the frame. A hold-catalog id evaluated across the element's
+ * whole span; `strength` scales every offset from rest and leaves the timing
+ * alone. The keyframe pose track stays the user's own tier: a move never
+ * writes keys. */
+export interface OverlayMove {
+  style: string;
+  strength: number;
+}
+
 export interface OverlayAnim {
   in?: OverlayEdge;
   out?: OverlayEdge;
   loop?: OverlayLoop;
+  move?: OverlayMove;
 }
 
 /** The motion a slot plays: the one it carries, or the catalog entry it
@@ -121,6 +132,9 @@ export const edgeMotion = (slot: OverlayEdge | undefined): MotionPreset | undefi
 
 export const loopMotion = (slot: OverlayLoop | undefined): MotionPreset | undefined =>
   slot ? (slot.preset ?? loopPreset(slot.style)) : undefined;
+
+export const moveMotion = (slot: OverlayMove | undefined): MotionPreset | undefined =>
+  slot ? holdPreset(slot.style) : undefined;
 
 // ── the registries, read from the catalog ─────────────────────────────────
 // A preset added to the motion catalog appears in every menu, tool enum and prompt
@@ -186,6 +200,23 @@ export function loopExtent(slot: OverlayLoop | undefined): {
 } {
   const preset = loopMotion(slot);
   return preset ? presetExtent(preset) : { travel: 0, rotates: false };
+}
+
+/** How far a move strays from rest at its strength — travel in design px,
+ * whether it turns, and the largest scale it reaches. The frame sampler pads
+ * its crop by all three. */
+export function moveExtent(slot: OverlayMove | undefined): {
+  travel: number;
+  rotates: boolean;
+  scale: number;
+} {
+  const preset = moveMotion(slot);
+  if (!preset || !slot) return { travel: 0, rotates: false, scale: 1 };
+  const k = slot.strength > 0 ? slot.strength : 1;
+  const base = presetExtent(preset);
+  let s = 1;
+  for (const key of preset.animate.scale ?? []) s = Math.max(s, key.v[0], key.v[1]);
+  return { travel: base.travel * k, rotates: base.rotates, scale: 1 + (s - 1) * k };
 }
 
 /** Where a per-glyph ramp stands. Renderers walk the element's characters and
@@ -392,7 +423,23 @@ export function evalOverlayAnim(
     const period = loopPeriod(anim) ?? 1;
     applyLoop(state, anim.loop, wrap01(tLocal / period), isText);
   }
+  if (anim.move) applyMove(state, anim.move, tLocal, dur);
   return state;
+}
+
+/** The move's contribution at `tLocal`: the hold preset sampled across the
+ * element's whole [0, dur] span, every offset from rest scaled by strength,
+ * folded onto the state the ramps and the loop left. */
+function applyMove(state: OverlayAnimState, slot: OverlayMove, tLocal: number, dur: number): void {
+  const preset = moveMotion(slot);
+  if (!preset || dur <= 0) return;
+  const k = slot.strength > 0 ? slot.strength : 1;
+  const pose = sampleProperties(preset.animate, tLocal / dur, dur);
+  state.dx += pose.dx * k;
+  state.dy += pose.dy * k;
+  state.rotate += pose.rotate * k;
+  state.scale *= 1 + ((pose.sx + pose.sy) / 2 - 1) * k;
+  state.alpha *= 1 + (pose.alpha - 1) * k;
 }
 
 /** The loop's exact cycle length in seconds (frame sequences render one cycle
@@ -406,14 +453,14 @@ export function loopPeriod(anim: OverlayAnim | undefined): number | null {
 
 /** Whether any slot is set (an element with an empty anim object is static). */
 export function hasOverlayAnim(anim: OverlayAnim | undefined): boolean {
-  return !!anim && (!!anim.in || !!anim.out || !!anim.loop);
+  return !!anim && (!!anim.in || !!anim.out || !!anim.loop || !!anim.move);
 }
 
 /**
- * A hold move as the element's own pose track: absolute poses at seconds from
- * its start, ready to write onto `kf`. A move is the same keyframe data every
- * other animation is — sampled against the element's resting pose so a preset
- * entrance still composes over it.
+ * A hold move sampled into an element pose track: absolute poses at seconds
+ * from its start. Moves used to ship this way — written onto `kf` — and docs
+ * saved then still carry these tracks; the loader regenerates them through
+ * here to recognize which move wrote one and lift it into `anim.move`.
  */
 export function holdMoveKeys(
   id: string,

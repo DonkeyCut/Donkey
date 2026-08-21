@@ -1,6 +1,6 @@
-import type { OverlayAnim, OverlayAnimStyle, OverlayKey } from "@donkeycut/effects-kit";
+import type { OverlayAnim, OverlayAnimStyle } from "@donkeycut/effects-kit";
 import type { TextLook } from "./textLooks";
-import { type TextMoveId, textMoveKeys } from "./textMotion";
+import type { TextMoveId } from "./textMotion";
 import type { FontId } from "./types";
 
 /**
@@ -172,7 +172,7 @@ export interface TextEnsemble {
   /** Entrances, walked one per line. */
   motion: OverlayAnimStyle[];
   layout: TextLayout;
-  /** Keyframe moves the run walks while each line HOLDS — see textMotion.ts.
+  /** Moves the run walks while each line HOLDS — see textMotion.ts.
    * Entrances say how a line arrives; these say what it does after. */
   moves: TextMoveId[];
   /** The move a hero line takes regardless of where the rota is. */
@@ -197,7 +197,7 @@ export interface ComposeLine {
   y?: number;
   rotation?: number;
   inStyle?: OverlayAnimStyle;
-  /** A named keyframe move for this line, overriding the look's rota. */
+  /** A named move for this line, overriding the look's rota. */
   move?: TextMoveId;
 }
 
@@ -215,7 +215,6 @@ export interface ComposedLine {
   color: string;
   anim: OverlayAnim;
   move: TextMoveId | string;
-  kf?: OverlayKey[];
   /** Which of the look's cards sits behind this line. */
   cardIndex: number;
 }
@@ -364,24 +363,23 @@ export function composeTextRun(
 
     const inStyle = line.inStyle ?? step(motions, i + sec);
     const inSeconds = Math.min(look.motion.in?.seconds ?? 0.35, Math.max(0.12, (line.end - line.start) * 0.4));
-    const anim: OverlayAnim = {
-      in: { style: inStyle, seconds: round2(inSeconds) },
-      ...(look.motion.out ? { out: look.motion.out } : {}),
-      ...(look.motion.loop
-        ? { loop: { style: look.motion.loop.style, speed: look.motion.loop.speed ?? 1 } }
-        : {}),
-    };
 
     const cardIndex = cardCount > 0 ? i % cardCount : -1;
     const onCard = cardIndex >= 0 && onCards.length > 0 ? step(onCards, cardIndex) : undefined;
 
     // What the line does while it holds. A hero line takes the look's hero
     // move; everything else walks the rota, so no two neighbours move alike.
-    const dur = line.end - line.start;
     const moveId =
       line.move ??
       (emphasis === "hero" ? ens?.heroMove ?? step(moves, i + sec) : step(moves, i + sec));
-    const kf = textMoveKeys(moveId, { x, y, rotation: tilt }, dur);
+    const anim: OverlayAnim = {
+      in: { style: inStyle, seconds: round2(inSeconds) },
+      ...(look.motion.out ? { out: look.motion.out } : {}),
+      ...(look.motion.loop
+        ? { loop: { style: look.motion.loop.style, speed: look.motion.loop.speed ?? 1 } }
+        : {}),
+      ...(moveId && moveId !== "none" ? { move: { style: moveId, strength: 1 } } : {}),
+    };
 
     return {
       text: fit.text,
@@ -397,7 +395,6 @@ export function composeTextRun(
       color: line.color ?? onCard ?? step(palette, i + sec),
       anim,
       move: moveId,
-      ...(kf ? { kf } : {}),
       cardIndex,
     };
   });

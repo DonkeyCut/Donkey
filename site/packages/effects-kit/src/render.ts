@@ -12,6 +12,7 @@ import {
   hasGlyphMotion,
   loopExtent,
   loopPeriod,
+  moveExtent,
   type GlyphLoopPhase,
   type GlyphPhase,
   type OverlayAnim,
@@ -793,15 +794,17 @@ export async function renderOverlayFrames(
   // A per-glyph ramp hands each character its share of the same tracks, so
   // the preset's own reach already covers where the glyphs get to.
   const loop = loopExtent(anim?.loop);
-  const travel = (edgeTravel + loop.travel) * scale;
+  const move = moveExtent(anim?.move);
+  const travel = (edgeTravel + loop.travel + move.travel) * scale;
   // A keyframed element carries its own travel and its own zoom: the region
   // spans every pose the track visits, at the largest scale it reaches.
   const keyed = hasOverlayKeys(overlay);
   const extent = poseExtent(overlay);
-  const maxScale = 1.15 * extent.scale;
+  const maxScale = 1.15 * extent.scale * move.scale;
   const rotates =
     !!overlay.rotation ||
     loop.rotates ||
+    move.rotates ||
     (keyed && sortedKeys(overlay.kf!).some((k) => !!k.rotation));
   let halfW = (base.w * maxScale) / 2 + travel + 4;
   let halfH = (base.h * maxScale) / 2 + travel + 4;
@@ -877,10 +880,10 @@ export async function renderOverlayFrames(
   };
 
   const step = 1 / fps;
-  // A keyframed pose (or a keyframed mask) changes on its own schedule, so
-  // there is no still middle and no cycle to repeat: sample the whole element
-  // frame by frame.
-  if (keyed || isMaskAnimated(overlay.mask)) {
+  // A keyframed pose, a move, or a keyframed mask changes on its own schedule
+  // across the whole element, so there is no still middle and no cycle to
+  // repeat: sample the element frame by frame.
+  if (keyed || anim?.move || isMaskAnimated(overlay.mask)) {
     const n = Math.max(1, Math.round(dur * fps));
     for (let i = 0; i < n; i++) {
       await push(i * step, i === n - 1 ? dur - (n - 1) * step : step);

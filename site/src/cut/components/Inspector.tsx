@@ -92,11 +92,9 @@ import {
 } from "@/cut/lib/types";
 import { GRADE_PRESETS, isNeutralGrade } from "@donkeycut/effects-kit";
 import {
-  matchTextMove,
   MOVE_STRENGTH_MAX,
   MOVE_STRENGTH_MIN,
   MOVE_STRENGTH_STEP,
-  textMoveKeys,
 } from "@/cut/lib/textMotion";
 import { getPreviewCanvas } from "@/cut/lib/previewCanvas";
 import { cn } from "@/lib/utils";
@@ -1465,7 +1463,8 @@ function writeOverlayAnim(o: Overlay, anim: OverlayAnim, patch: Partial<OverlayA
   if (!next.in) delete next.in;
   if (!next.out) delete next.out;
   if (!next.loop) delete next.loop;
-  const value = next.in || next.out || next.loop ? next : undefined;
+  if (!next.move) delete next.move;
+  const value = next.in || next.out || next.loop || next.move ? next : undefined;
   const st = useEditor.getState();
   const peers = o.groupId ? st.overlays.filter((x) => x.groupId === o.groupId) : [];
   const ids = peers.length > 1 ? peers.map((p) => p.id) : [o.id];
@@ -1573,7 +1572,7 @@ function AnimationSection({
           className="anim-open flex h-8 items-center gap-1 rounded-md border border-input px-2.5 text-[11.5px] font-medium text-muted-foreground transition-colors hover:text-foreground"
           onClick={onOpen}
         >
-          {slots.length ? "Change" : "None"}
+          {slots.length || anim.move ? "Change" : "None"}
           <ChevronRight className="size-3.5 shrink-0" />
         </button>
       }
@@ -1604,29 +1603,17 @@ function AnimationSection({
   );
 }
 
-/** The move's strength: how hard the hold pushes, rewritten into the pose
- * track on every step. The slider sits in two places — the collapsed
- * section, and the animation panel's Move tab — so it is one component. */
-function MoveStrengthSlider({
-  overlay: o,
-  move,
-  label,
-}: {
-  overlay: Overlay;
-  move?: { id: string; strength: number };
-  label: string;
-}) {
+/** The move's strength: how hard the hold pushes. The slider sits in two
+ * places — the collapsed section, and the animation panel's Move tab — so it
+ * is one component. */
+function MoveStrengthSlider({ overlay: o, label }: { overlay: Overlay; label: string }) {
   const ck = useSliderCheckpoint();
+  const anim = o.anim ?? {};
+  const move = anim.move;
   const write = (strength: number) => {
     if (!move) return;
     ck.begin();
-    const keys = textMoveKeys(
-      move.id,
-      { x: o.x, y: o.y, rotation: o.rotation ?? 0 },
-      o.end - o.start,
-      strength
-    );
-    useEditor.getState().updateOverlay(o.id, { kf: keys ?? [] });
+    writeOverlayAnim(o, anim, { move: { ...move, strength } });
   };
   return (
     <Row label={label}>
@@ -1653,15 +1640,11 @@ function MoveStrengthSlider({
 }
 
 /** The strength row in the collapsed section, there only once a move is on
- * the element — a move lives on the pose track rather than in an animation
- * slot, so there is no card above it to explain an empty slider. */
+ * the element — an empty slider with no move to scale would explain
+ * nothing. */
 function MoveStrengthRow({ overlay: o }: { overlay: Overlay }) {
-  const move = useMemo(
-    () => matchTextMove(o.kf, { x: o.x, y: o.y, rotation: o.rotation ?? 0 }, o.end - o.start),
-    [o.kf, o.x, o.y, o.rotation, o.start, o.end]
-  );
-  if (!move) return null;
-  return <MoveStrengthSlider overlay={o} move={move} label="Move strength" />;
+  if (!o.anim?.move) return null;
+  return <MoveStrengthSlider overlay={o} label="Move strength" />;
 }
 
 /** The animation subview an overlay panel pushes into: In / Out / Loop tabs
@@ -1674,34 +1657,19 @@ function AnimationPanel({ overlay: o, onBack }: { overlay: Overlay; onBack: () =
   const active = slot === "move" ? undefined : anim[slot];
   const seconds =
     slot === "loop" || slot === "move" ? undefined : (anim[slot] as OverlayAnim["in"])?.seconds;
-  // Which move wrote the element's keys, and how hard. Nothing is stored on
-  // the element: the match is recomputed, so keys the user has since dragged
-  // stop matching and the tab simply shows none selected.
-  const activeMove = useMemo(
-    () => matchTextMove(o.kf, { x: o.x, y: o.y, rotation: o.rotation ?? 0 }, o.end - o.start),
-    [o.kf, o.x, o.y, o.rotation, o.start, o.end]
-  );
+  const activeMove = anim.move;
   const pick = (style: string | null) => {
     if (slot === "move") {
-      // Nothing here wrote this track — the user keyed it by hand — so "None"
-      // has no move to take off and those keys stay put.
       if (!style && !activeMove) return;
       useEditor.getState().pushHistory();
-      // A move is not a fourth animation slot: it writes the same pose track
-      // the keyframe diamond writes, so the keys stay the user's to drag.
       // A newly picked move starts at full strength; switching moves keeps
       // whatever strength the last one was set to.
-      const keys = style
-        ? textMoveKeys(
-            style,
-            { x: o.x, y: o.y, rotation: o.rotation ?? 0 },
-            o.end - o.start,
-            activeMove?.strength ?? 1
-          )
-        : undefined;
-      useEditor.getState().updateOverlay(o.id, { kf: keys ?? [] });
+      const patch: Partial<OverlayAnim> = {
+        move: style ? { style, strength: activeMove?.strength ?? 1 } : undefined,
+      };
+      writeOverlayAnim(o, anim, patch);
       // The pick plays itself on the stage, the same as any other slot.
-      if (keys) playAnimPreview(o, "move");
+      if (style) playAnimPreview({ ...o, anim: { ...anim, ...patch } }, "move");
       else stopAnimPreview();
       return;
     }
@@ -1780,7 +1748,7 @@ function AnimationPanel({ overlay: o, onBack }: { overlay: Overlay; onBack: () =
           // A slot carrying its own preset is playing something no tile here
           // names, so the grid shows nothing selected rather than the catalog
           // entry the id happens to hold.
-          value={active?.preset ? undefined : slot === "move" ? activeMove?.id : active?.style}
+          value={active?.preset ? undefined : slot === "move" ? activeMove?.style : active?.style}
           custom={!!active?.preset}
           isText={isTextOverlay(o)}
           seconds={seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS}
@@ -1788,7 +1756,7 @@ function AnimationPanel({ overlay: o, onBack }: { overlay: Overlay; onBack: () =
           onPick={pick}
         />
       </ScrollArea>
-      <AnimationToolbar overlay={o} slot={slot} move={activeMove} />
+      <AnimationToolbar overlay={o} slot={slot} />
     </div>
   );
 }
@@ -1802,11 +1770,9 @@ function AnimationPanel({ overlay: o, onBack }: { overlay: Overlay; onBack: () =
 function AnimationToolbar({
   overlay: o,
   slot,
-  move,
 }: {
   overlay: Overlay;
   slot: "in" | "out" | "loop" | "move";
-  move?: { id: string; strength: number };
 }) {
   const ck = useSliderCheckpoint();
   const anim = o.anim ?? {};
@@ -1817,8 +1783,7 @@ function AnimationToolbar({
     <div className="shrink-0 border-t border-border bg-card px-3.5 py-0.5">{children}</div>
   );
 
-  if (slot === "move")
-    return bar(<MoveStrengthSlider overlay={o} move={move} label="Strength" />);
+  if (slot === "move") return bar(<MoveStrengthSlider overlay={o} label="Strength" />);
 
   if (slot === "loop") {
     const write = (speed: number) => {

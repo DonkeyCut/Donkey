@@ -105,8 +105,8 @@ function demoStateAt(
   speed: number
 ) {
   if (slot === "move") {
-    // A move is a pose track, not a preset slot: sample it straight and hand
-    // back the same shape the ramps produce, so the tile draws it the same way.
+    // A move plays over the element's whole span; the tile sweeps one demo
+    // window through it and hands back the same shape the ramps produce.
     const preset = MOTION.holds[style];
     if (!preset) return { dx: 0, dy: 0, scale: 1, rotate: 0, alpha: 1 };
     const pose = sampleProperties(

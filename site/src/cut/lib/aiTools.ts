@@ -107,7 +107,6 @@ import {
   MOVE_STRENGTH_MAX,
   MOVE_STRENGTH_MIN,
   TEXT_MOVE_IDS,
-  textMoveKeys,
   type TextMoveId,
 } from "./textMotion";
 import { queueWatchSweep, withSweepPaused } from "./watch/sweep";
@@ -436,28 +435,21 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     };
     edge("in", "in_style", "in_seconds");
     edge("out", "out_style", "out_seconds");
-    // A move is not a fourth slot on the element: it writes the pose track
-    // the inspector's diamond writes, so the user can drag the keys after.
     if (typeof input.move === "string") {
-      if (input.move === "none") s.updateOverlay(o.id, { kf: [] });
+      if (input.move === "none") delete anim.move;
       else {
         if (!TEXT_MOVE_IDS.includes(input.move))
           throw new ToolError(`Unknown move: ${input.move}. Use one of: ${TEXT_MOVE_IDS.join(", ")}.`);
         const strength = isNum(input.move_strength)
           ? clamp(input.move_strength, MOVE_STRENGTH_MIN, MOVE_STRENGTH_MAX)
-          : 1;
-        const keys = textMoveKeys(
-          input.move,
-          { x: o.x, y: o.y, rotation: o.rotation ?? 0 },
-          o.end - o.start,
-          strength
-        );
-        if (!keys)
-          throw new ToolError(
-            `This element is too short for a move to read (${round2(o.end - o.start)}s).`
-          );
-        s.updateOverlay(o.id, { kf: keys });
+          : (anim.move?.strength ?? 1);
+        anim.move = { style: input.move, strength };
       }
+    } else if (isNum(input.move_strength) && anim.move) {
+      anim.move = {
+        ...anim.move,
+        strength: clamp(input.move_strength, MOVE_STRENGTH_MIN, MOVE_STRENGTH_MAX),
+      };
     }
     const rawLoop = input.loop_style;
     const speed = isNum(input.loop_speed) ? clamp(input.loop_speed, 0.25, 4) : undefined;
@@ -469,7 +461,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     } else if (speed !== undefined && anim.loop) {
       anim.loop = { ...anim.loop, speed };
     }
-    s.updateOverlay(o.id, { anim: anim.in || anim.out || anim.loop ? anim : undefined });
+    s.updateOverlay(o.id, {
+      anim: anim.in || anim.out || anim.loop || anim.move ? anim : undefined,
+    });
     const next = useEditor.getState().overlays.find((x) => x.id === o.id)!;
     return { id: next.id, anim: next.anim ?? null };
   },
@@ -1529,10 +1523,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           shadow: look.text.shadow ?? false,
           align: "center",
         });
-        useEditor.getState().updateOverlay(sel.id, {
-          anim: line.anim,
-          ...(line.kf ? { kf: line.kf } : {}),
-        });
+        useEditor.getState().updateOverlay(sel.id, { anim: line.anim });
         const o = useEditor.getState().overlays.find((x) => x.id === sel.id);
         if (o) made.push({ id: o.id, start: round2(o.start), end: round2(o.end), text: line.text });
       });

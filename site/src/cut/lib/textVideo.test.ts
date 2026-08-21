@@ -3,7 +3,8 @@ import { runAiTool } from "./aiTools";
 import { useEditor } from "./store";
 import { composeTextRun, TEXT_LAYOUT_IDS, TEXT_LAYOUT_NOTES } from "./textCompose";
 import { TEXT_LOOKS, textLookCatalog } from "./textLooks";
-import { matchTextMove, TEXT_MOVE_IDS, TEXT_MOVE_NOTES, textMoveKeys } from "./textMotion";
+import { evalOverlayFrame } from "@donkeycut/effects-kit";
+import { liftMoveTracks, matchTextMove, TEXT_MOVE_IDS, TEXT_MOVE_NOTES, textMoveKeys } from "./textMotion";
 import { emptySubtitles, frameOf, isTextOverlay, isShapeOverlay, type SubtitleCue } from "./types";
 
 /**
@@ -65,13 +66,13 @@ describe("add_text_sequence", () => {
     const words = overlays().filter(isTextOverlay);
     expect(overlays().filter(isShapeOverlay)).toHaveLength(0);
     expect(words).toHaveLength(3);
-    // One face, one place, one entrance, no keyframe moves, no tilt.
+    // One face, one place, one entrance, no moves, no tilt.
     expect(new Set(words.map((w) => w.font)).size).toBe(1);
     expect(new Set(words.map((w) => w.y)).size).toBe(1);
     expect(new Set(words.map((w) => w.x)).size).toBe(1);
     expect(new Set(words.map((w) => w.color)).size).toBe(1);
     expect(words.every((w) => (w.rotation ?? 0) === 0)).toBe(true);
-    expect(words.every((w) => !w.kf || w.kf.length === 0)).toBe(true);
+    expect(words.every((w) => !w.anim?.move)).toBe(true);
     expect(words.every((w) => w.anim?.in?.style === "fade")).toBe(true);
     // The frame color is the user's, not the look's.
     expect(useEditor.getState().background).toBe("#123456");
@@ -242,7 +243,7 @@ describe("composing a run", () => {
     const words = await runOf();
     expect(new Set(words.map((w) => w.font)).size).toBeGreaterThan(1);
     expect(new Set(words.map((w) => w.anim?.in?.style)).size).toBeGreaterThan(1);
-    expect(words.filter((w) => (w.kf?.length ?? 0) > 1).length).toBeGreaterThan(0);
+    expect(words.filter((w) => !!w.anim?.move).length).toBeGreaterThan(0);
   });
 
   test('variation "none" lays the run exactly as the look describes it', async () => {
@@ -250,7 +251,7 @@ describe("composing a run", () => {
     const words = await runOf({ variation: "none" });
     expect(new Set(words.map((w) => `${w.x},${w.y}`)).size).toBe(1);
     expect(new Set(words.map((w) => w.font))).toEqual(new Set([look.text.font]));
-    expect(words.every((w) => (w.kf?.length ?? 0) === 0)).toBe(true);
+    expect(words.every((w) => !w.anim?.move)).toBe(true);
   });
 
   test("a named layout overrides the look's own", async () => {
@@ -313,7 +314,7 @@ describe("composing a run", () => {
     expect(b.y).toBeCloseTo(0.8, 2);
     expect(b.rotation).toBe(12);
     expect(b.anim?.in?.style).toBe("wipe");
-    expect(b.kf!.length).toBeGreaterThan(2);
+    expect(b.anim?.move?.style).toBe("orbit");
   });
 
   test("a line placed off-axis is broken to the room it actually has", async () => {
@@ -338,7 +339,7 @@ describe("composing a run", () => {
   });
 });
 
-describe("keyframe moves", () => {
+describe("legacy move tracks", () => {
   test("every id has a note and a track, and none outlives its element", () => {
     for (const id of TEXT_MOVE_IDS) {
       expect(TEXT_MOVE_NOTES[id].length).toBeGreaterThan(0);
@@ -412,26 +413,27 @@ describe("moves on an existing element", () => {
     return overlays().filter(isTextOverlay)[0];
   };
 
-  test("a named move writes the element's own pose track", async () => {
+  test("a named move lands in the slot and leaves the keyframe track alone", async () => {
     const o = await aTitle();
     await runAiTool("set_overlay_animation", { id: o.id, move: "push" });
     const after = overlays().filter(isTextOverlay)[0];
-    expect(after.kf!.length).toBeGreaterThan(1);
+    expect(after.anim?.move).toEqual({ style: "push", strength: 1 });
+    expect(after.kf ?? []).toHaveLength(0);
     // A push grows across the hold and never leaves its resting spot.
-    expect(after.kf![after.kf!.length - 1].scale).toBeGreaterThan(after.kf![0].scale);
-    for (const key of after.kf!) {
-      expect(key.x).toBeCloseTo(after.x, 3);
-      expect(key.t).toBeGreaterThanOrEqual(0);
-      expect(key.t).toBeLessThanOrEqual(after.end - after.start + 1e-6);
-    }
+    const dur = after.end - after.start;
+    const early = evalOverlayFrame(after, 0.1);
+    const late = evalOverlayFrame(after, dur - 0.1);
+    expect(late.scale).toBeGreaterThan(early.scale);
+    expect(late.x).toBeCloseTo(after.x, 3);
+    expect(late.dx).toBeCloseTo(0, 3);
   });
 
-  test('move "none" clears the track', async () => {
+  test('move "none" clears the slot', async () => {
     const o = await aTitle();
     await runAiTool("set_overlay_animation", { id: o.id, move: "swing" });
-    expect(overlays().filter(isTextOverlay)[0].kf!.length).toBeGreaterThan(1);
+    expect(overlays().filter(isTextOverlay)[0].anim?.move?.style).toBe("swing");
     await runAiTool("set_overlay_animation", { id: o.id, move: "none" });
-    expect(overlays().filter(isTextOverlay)[0].kf ?? []).toHaveLength(0);
+    expect(overlays().filter(isTextOverlay)[0].anim?.move).toBeUndefined();
   });
 
   test("an unknown move is refused", async () => {
@@ -450,29 +452,75 @@ describe("moves on an existing element", () => {
     await runAiTool("set_overlay_animation", { id: o.id, in_style: "rise", move: "float" });
     const after = overlays().filter(isTextOverlay)[0];
     expect(after.anim?.in?.style).toBe("rise");
-    expect(after.kf!.length).toBeGreaterThan(1);
+    expect(after.anim?.move?.style).toBe("float");
   });
 });
 
 describe("every move is real motion", () => {
-  test("each id moves the element somewhere", () => {
+  test("each id moves the element somewhere, straight from its slot", () => {
     for (const id of TEXT_MOVE_IDS) {
-      const keys = textMoveKeys(id, { x: 0.5, y: 0.5, rotation: 0 }, 2.5);
-      if (id === "none") {
-        expect(keys).toBeUndefined();
-        continue;
-      }
-      expect(keys!.length).toBeGreaterThan(1);
-      const moves = keys!.some(
-        (k) =>
-          Math.abs(k.x - keys![0].x) > 1e-4 ||
-          Math.abs(k.y - keys![0].y) > 1e-4 ||
-          Math.abs(k.scale - keys![0].scale) > 1e-3 ||
-          Math.abs(k.rotation - keys![0].rotation) > 1e-3 ||
-          Math.abs(k.opacity - keys![0].opacity) > 1e-3
-      );
+      if (id === "none") continue;
+      const o = {
+        start: 0,
+        end: 2.5,
+        x: 0.5,
+        y: 0.5,
+        anim: { move: { style: id, strength: 1 } },
+      };
+      const rest = evalOverlayFrame(o, 0);
+      const moves = [0.4, 1.1, 1.9, 2.5].some((t) => {
+        const f = evalOverlayFrame(o, t);
+        return (
+          Math.abs(f.dx - rest.dx) > 0.1 ||
+          Math.abs(f.dy - rest.dy) > 0.1 ||
+          Math.abs(f.scale - rest.scale) > 1e-3 ||
+          Math.abs(f.rotation - rest.rotation) > 1e-3 ||
+          Math.abs(f.opacity - rest.opacity) > 1e-3
+        );
+      });
       expect(moves).toBe(true);
     }
+  });
+
+  test("strength scales the offsets and leaves the timing alone", () => {
+    const at = (strength: number, t: number) =>
+      evalOverlayFrame(
+        { start: 0, end: 3, x: 0.5, y: 0.5, anim: { move: { style: "push", strength } } },
+        t
+      );
+    const full = at(1, 2);
+    const half = at(0.5, 2);
+    expect(half.scale - 1).toBeCloseTo((full.scale - 1) / 2, 5);
+  });
+});
+
+describe("lifting legacy move tracks", () => {
+  const rest = { x: 0.5, y: 0.5, rotation: 0 };
+  const el = (
+    kf?: ReturnType<typeof textMoveKeys>
+  ): Parameters<typeof liftMoveTracks>[0][number] => ({
+    start: 0,
+    end: 2.5,
+    x: rest.x,
+    y: rest.y,
+    rotation: rest.rotation,
+    ...(kf ? { kf } : {}),
+  });
+
+  test("a track a move wrote becomes the move's slot and drops its keys", () => {
+    const [lifted] = liftMoveTracks([el(textMoveKeys("orbit", rest, 2.5, 0.5))]);
+    expect(lifted.anim?.move).toEqual({ style: "orbit", strength: 0.5 });
+    expect(lifted.kf).toBeUndefined();
+  });
+
+  test("keys the user set stay theirs", () => {
+    const keys = textMoveKeys("swing", rest, 2.5, 1)!;
+    keys[1] = { ...keys[1], x: keys[1].x + 0.2 };
+    const [kept] = liftMoveTracks([el(keys)]);
+    expect(kept.anim?.move).toBeUndefined();
+    expect(kept.kf).toEqual(keys);
+    const [plain] = liftMoveTracks([el()]);
+    expect(plain.anim?.move).toBeUndefined();
   });
 });
 
@@ -513,8 +561,6 @@ describe("move strength", () => {
     const o = overlays().filter(isTextOverlay)[0];
     await runAiTool("set_overlay_animation", { id: o.id, move: "push", move_strength: 0.5 });
     const after = overlays().filter(isTextOverlay)[0];
-    expect(
-      matchTextMove(after.kf, { x: after.x, y: after.y, rotation: after.rotation ?? 0 }, 3)
-    ).toEqual({ id: "push", strength: 0.5 });
+    expect(after.anim?.move).toEqual({ style: "push", strength: 0.5 });
   });
 });

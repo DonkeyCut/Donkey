@@ -1,17 +1,19 @@
 import { holdMoveKeys, HOLD_IDS, MOTION } from "@donkeycut/effects-kit";
-import type { OverlayKey } from "@donkeycut/effects-kit";
+import type { OverlayAnim, OverlayKey } from "@donkeycut/effects-kit";
 
 /**
- * Named keyframe moves for text.
+ * Named moves for text.
  *
  * Preset In/Out ramps decide how a line ARRIVES. These decide what it does
  * while it holds — the push-in that never stops, the drift across the frame,
  * the swing that overshoots and settles. That is the difference between text
  * that appears and text that is alive.
  *
- * A move is not a special mechanism: it is an entry in the same motion
- * catalog every entrance and loop lives in, sampled against the element's
- * resting pose into the ordinary `kf` track a user could have keyed by hand.
+ * A move lives in the element's `anim.move` slot beside In/Out/Loop and is
+ * evaluated internally with them. The keyframe pose track stays the user's
+ * own tier: picking a move never writes keys. Docs saved when moves shipped
+ * as sampled key tracks still carry those keys; `liftMoveTracks` recognizes
+ * them on load and lifts each into the slot.
  */
 
 export type TextMoveId = string;
@@ -35,9 +37,9 @@ export const MOVE_STRENGTHS: number[] = Array.from(
   (_, i) => Math.round((MOVE_STRENGTH_MIN + i * MOVE_STRENGTH_STEP) * 100) / 100
 );
 
-/** The pose track for a named move on an element resting at `rest` for
- * `dur` seconds, scaled by `strength`. An unknown id, "none", or a duration
- * too short to read gives back no track at all. */
+/** The legacy pose track for a named move on an element resting at `rest`
+ * for `dur` seconds, scaled by `strength` — the shape moves were saved in
+ * when they wrote keys. Regenerated only to recognize old tracks on load. */
 export function textMoveKeys(
   id: string | undefined,
   rest: { x: number; y: number; rotation: number },
@@ -48,9 +50,9 @@ export function textMoveKeys(
   return holdMoveKeys(id, rest, dur, strength);
 }
 
-/** Which move wrote a pose track, and at what strength. Nothing is stored on
- * the element: the answer is found by regenerating each move and seeing which
- * one matches, so keys the user has since dragged simply stop matching. */
+/** Which move wrote a legacy pose track, and at what strength. The answer is
+ * found by regenerating each move and seeing which one matches, so keys the
+ * user has since dragged simply stop matching and stay theirs. */
 export function matchTextMove(
   kf: OverlayKey[] | undefined,
   rest: { x: number; y: number; rotation: number },
@@ -99,3 +101,33 @@ export function matchTextMove(
 /** The moves as prompt text: one line per id. */
 export const textMoveCatalog = (): string =>
   HOLD_IDS.map((id) => `- ${id}: ${TEXT_MOVE_NOTES[id]}`).join("\n");
+
+/**
+ * Lift legacy move key tracks into the `anim.move` slot on load. An element
+ * whose `kf` regenerates exactly from one named move at one strength was
+ * written by the old move picker, so it drops the keys and carries the move
+ * in its slot; any other track is the user's own and is left alone.
+ */
+export function liftMoveTracks<
+  T extends {
+    kf?: OverlayKey[];
+    anim?: OverlayAnim;
+    x: number;
+    y: number;
+    rotation?: number;
+    start: number;
+    end: number;
+  },
+>(overlays: T[]): T[] {
+  if (!overlays.some((o) => o.kf && o.kf.length > 0 && !o.anim?.move)) return overlays;
+  return overlays.map((o) => {
+    if (!o.kf || o.kf.length === 0 || o.anim?.move) return o;
+    const m = matchTextMove(o.kf, { x: o.x, y: o.y, rotation: o.rotation ?? 0 }, o.end - o.start);
+    if (!m) return o;
+    return {
+      ...o,
+      kf: undefined,
+      anim: { ...(o.anim ?? {}), move: { style: m.id, strength: m.strength } },
+    };
+  });
+}
