@@ -4115,14 +4115,16 @@ function Filmstrip({
   if (!frames.length) {
     if (failed) {
       return (
-        <div className="tl-filmstrip-failed pointer-events-none absolute inset-0 bg-accent" />
+        <div className="tl-filmstrip-failed pointer-events-none absolute inset-0 bg-white/10" />
       );
     }
-    // The clip box under the strip is black; a backdrop in the page color
-    // keeps the pulse between accent and background, the stock skeleton look.
+    // Both states paint straight onto the clip box's black, in white alphas
+    // that read the same in either theme. The page-colored tones the stock
+    // skeleton uses are near-white in the light theme, which covered the box
+    // in a flat white slab and left the pulse invisible.
     return (
-      <div className="tl-filmstrip-skeleton pointer-events-none absolute inset-0 bg-background">
-        <Skeleton className="size-full rounded-none" />
+      <div className="tl-filmstrip-skeleton pointer-events-none absolute inset-0">
+        <Skeleton className="size-full rounded-none bg-white/20" />
       </div>
     );
   }
