@@ -30,7 +30,7 @@
 import type React from "react";
 import { refFromAsset, startPointerRefDrag } from "./assetRef";
 import { startDrag } from "./drag";
-import { track0Clips, clipLen, getClipSpans, moveOverlayGroup, overlayLaneOrder, overlayLayers, projectDuration, useEditor } from "./store";
+import { track0Clips, clipLen, getClipSpans, moveOverlayGroup, nextFreeStart, overlayLaneOrder, overlayLayers, projectDuration, useEditor } from "./store";
 import { playheadAt } from "./playhead";
 import type {
   AudioClip,
@@ -52,6 +52,13 @@ export type LaneKind = "clip" | "audio" | "overlay" | "overlayClip" | "cue";
  * as `"clip"` — a video clip is a video clip whatever track it sits on. */
 const laneSelectionKind = (kind: LaneKind): NonNullable<Selection>["kind"] =>
   kind === "overlayClip" ? "clip" : kind;
+
+/** The doc structure behind a lane kind. Track 0 and the layer tracks are two
+ * lane kinds over one clip list, so collision and identity both key on the
+ * structure, never the adapter. */
+type LaneStructure = "video" | "audio" | "overlay" | "cue";
+const structureOf = (kind: LaneKind): LaneStructure =>
+  kind === "clip" || kind === "overlayClip" ? "video" : kind;
 
 /** Visual gutter between adjacent clips; time math stays exact. */
 export const CLIP_GAP = 4;
@@ -255,6 +262,12 @@ const ADAPTERS: Record<LaneKind, LaneAdapter<LaneRaw>> = {
  * cut points and end, the playhead, and every other lane item's edges across
  * all track kinds — a title can align to a music hit and vice versa. */
 function snapTargets(s: S, kind: LaneKind, selfId: string): number[] {
+  return snapTargetsExcluding(s, new Set([`${structureOf(kind)}:${selfId}`]));
+}
+
+/** Snap targets with a whole set of items excluded — a group drag must not
+ * snap the moving set against its own edges. Keys are `structure:id`. */
+function snapTargetsExcluding(s: S, excluded: ReadonlySet<string>): number[] {
   const pts = new Set<number>([0]);
   for (const sp of getClipSpans(s.clips, s.assets)) {
     // The joint: every pair meets at the footprint end — a transition is a
@@ -266,7 +279,7 @@ function snapTargets(s: S, kind: LaneKind, selfId: string): number[] {
   for (const k of Object.keys(ADAPTERS) as LaneKind[]) {
     for (const raw of ADAPTERS[k].raws(s)) {
       const v = ADAPTERS[k].view(raw);
-      if (k === kind && v.id === selfId) continue;
+      if (excluded.has(`${structureOf(k)}:${v.id}`)) continue;
       pts.add(v.start);
       pts.add(v.start + v.len);
     }
@@ -370,6 +383,302 @@ export interface LaneMoveUI<V = unknown> {
   };
 }
 
+// ── Group move ──────────────────────────────────────────────────────────────
+
+/** One item of a multi-selection drag, resolved to its structure. */
+interface GroupMember {
+  kind: LaneKind;
+  raw: LaneRaw;
+  id: string;
+  start: number;
+  len: number;
+  /** Structure lane: a video clip's track, everything else's lane. */
+  lane: number;
+}
+
+const memberOf = (s: S, sel: NonNullable<Selection>): GroupMember | null => {
+  if (sel.kind === "clip") {
+    const c = s.clips.find((x) => x.id === sel.id);
+    if (!c) return null;
+    return { kind: c.track === 0 ? "clip" : "overlayClip", raw: c, id: c.id, start: c.start, len: clipLen(c), lane: c.track };
+  }
+  if (sel.kind === "audio") {
+    const a = s.audioClips.find((x) => x.id === sel.id);
+    return a ? { kind: "audio", raw: a, id: a.id, start: a.start, len: clipLen(a), lane: a.lane ?? 0 } : null;
+  }
+  if (sel.kind === "overlay") {
+    const o = s.overlays.find((x) => x.id === sel.id);
+    return o ? { kind: "overlay", raw: o, id: o.id, start: o.start, len: o.end - o.start, lane: o.lane ?? 0 } : null;
+  }
+  if (sel.kind === "cue") {
+    const c = s.subtitles.cues.find((x) => x.id === sel.id);
+    return c ? { kind: "cue", raw: c, id: c.id, start: c.start, len: c.end - c.start, lane: c.lane ?? 0 } : null;
+  }
+  return null;
+};
+
+/**
+ * Drag a whole multi-selection as one rigid set: every member shifts by the
+ * same delta, so the arrangement — a title over its clip, a sound effect on
+ * its beat — survives the move intact. Unselected items on every touched lane
+ * slide right out of the way (the same first-free-slot rule every placement
+ * uses) and flow back as the set retreats, so the doc stays overlap-free at
+ * every instant. When the whole selection is one multi-lane kind, vertical
+ * drag retracks all of it together, one row past either end opening a fresh
+ * track; a mixed selection rides horizontally and every item keeps its row.
+ */
+function startGroupMove(
+  e: React.PointerEvent,
+  grabbed: GroupMember,
+  members: GroupMember[],
+  ui: LaneMoveUI<unknown>
+) {
+  const s = useEditor.getState();
+  // The grab keeps the multi-selection and makes the grabbed item primary —
+  // collapsing to one item here would end the very gesture being started.
+  useEditor.setState({
+    selection: { kind: laneSelectionKind(grabbed.kind), id: grabbed.id },
+    selectedKey: null,
+  });
+  if (s.playing) s.setPlaying(false);
+  const grabTime =
+    (ui.visStart ?? grabbed.start) +
+    (e.clientX - e.currentTarget.getBoundingClientRect().left) / ui.pps;
+  s.seek(grabTime);
+  if (s.readOnly) return;
+  s.pushHistory();
+
+  const memberKeys = new Set(members.map((m) => `${structureOf(m.kind)}:${m.id}`));
+  const targets = snapTargetsExcluding(s, memberKeys);
+  const tol = SNAP_PX / ui.pps;
+  // The set is rigid, so the earliest member is the whole group's floor.
+  const minStart = Math.min(...members.map((m) => m.start));
+
+  // Everyone else's resting spot on the lanes the group touches, grouped by
+  // structure lane. Each frame re-lays these from rest, so a retreating drag
+  // lets parted neighbors flow back.
+  const laneKey = (m: { kind: LaneKind; lane: number }) => `${structureOf(m.kind)}:${m.lane}`;
+  const lanesTouched = new Set(members.map(laneKey));
+  const restOf = (kind: LaneKind) =>
+    ADAPTERS[kind]
+      .raws(s)
+      .map((raw) => ({ kind, raw, view: ADAPTERS[kind].view(raw) }))
+      .filter((x) => !memberKeys.has(`${structureOf(kind)}:${x.view.id}`));
+  const rest = (
+    [
+      ...restOf("clip"),
+      ...restOf("overlayClip"),
+      ...restOf("audio"),
+      ...restOf("overlay"),
+      ...restOf("cue"),
+    ] as { kind: LaneKind; raw: LaneRaw; view: LaneItem }[]
+  ).filter((x) =>
+    lanesTouched.has(
+      `${structureOf(x.kind)}:${structureOf(x.kind) === "video" ? (x.raw as VideoClip).track : x.view.lane}`
+    )
+  );
+
+  // Vertical retracking, only when the whole selection is one multi-lane kind.
+  const oneKind = members.every((m) => m.kind === grabbed.kind);
+  const vertical = oneKind && ADAPTERS[grabbed.kind].multiLane && !ui.vertical;
+  const usedLanes = vertical
+    ? laneOrder(grabbed.kind, s, [...ADAPTERS[grabbed.kind].raws(s).map((r) => ADAPTERS[grabbed.kind].view(r).lane)])
+    : [];
+  const rowOf = (lane: number) => usedLanes.indexOf(lane);
+  // A row past either end opens a brand-new track, and a selection that holds
+  // an outermost row by itself has nothing to open on that side: the row it
+  // leaves collapses behind it and the fresh one renumbers straight back to
+  // where the picture already was — see `startLaneMove`, which draws the same
+  // line for a single item.
+  const rowsHeld = new Set(members.map((m) => rowOf(m.lane)));
+  const heldIds = new Set(members.map((m) => m.id));
+  const others = vertical
+    ? ADAPTERS[grabbed.kind]
+        .raws(s)
+        .map((r) => ADAPTERS[grabbed.kind].view(r))
+        .filter((v) => !heldIds.has(v.id))
+    : [];
+  const holdsRowAlone = (row: number) =>
+    rowsHeld.has(row) && !others.some((v) => rowOf(v.lane) === row);
+  const rowLo = vertical
+    ? (ui.topInsert && !holdsRowAlone(0) ? -1 : 0) - Math.min(...rowsHeld)
+    : 0;
+  const rowHi = vertical
+    ? ui.laneCount - (holdsRowAlone(ui.laneCount - 1) ? 1 : 0) - Math.max(...rowsHeld)
+    : 0;
+  const homeRow = vertical ? rowOf(grabbed.lane) : ui.homeRow;
+
+  const scroller = (e.currentTarget as HTMLElement).closest<HTMLElement>("[data-tl-scroll]");
+  const sc0 = scroller?.scrollLeft ?? 0;
+  const rowEl = (e.currentTarget as HTMLElement).parentElement;
+  const rowTop0 = rowEl?.getBoundingClientRect().top ?? 0;
+
+  let live = false;
+  let dt = 0;
+  let rowDelta = 0;
+  // Where every item sat when last applied, so a frame patches only what
+  // actually moves — a fifty-item drag must not rebuild the doc per pixel.
+  const at = new Map<string, number>();
+  const patchTo = (
+    buckets: Map<LaneKind, Patch<LaneRaw>[]>,
+    kind: LaneKind,
+    raw: LaneRaw,
+    id: string,
+    restStart: number,
+    want: number
+  ) => {
+    const cur = at.get(`${structureOf(kind)}:${id}`) ?? restStart;
+    if (Math.abs(want - cur) <= 1e-9) return;
+    const list = buckets.get(kind) ?? [];
+    list.push(ADAPTERS[kind].movePatch(raw, want));
+    buckets.set(kind, list);
+    at.set(`${structureOf(kind)}:${id}`, want);
+  };
+  const layout = (delta: number) => {
+    const buckets = new Map<LaneKind, Patch<LaneRaw>[]>();
+    for (const m of members) patchTo(buckets, m.kind, m.raw, m.id, m.start, m.start + delta);
+    // Per touched lane: unselected items take the first free spot at or after
+    // their resting start, clear of the moving blocks and of each other —
+    // shifts only grow rightward, so the parted keep their order and spacing.
+    for (const key of lanesTouched) {
+      const blocks = members
+        .filter((m) => laneKey(m) === key)
+        .map((m) => ({ start: m.start + delta, end: m.start + delta + m.len }));
+      const others = rest
+        .filter(
+          (x) =>
+            `${structureOf(x.kind)}:${structureOf(x.kind) === "video" ? (x.raw as VideoClip).track : x.view.lane}` === key
+        )
+        .sort((a, b) => a.view.start - b.view.start);
+      let floor = -Infinity;
+      for (const o of others) {
+        const start = nextFreeStart(blocks, Math.max(o.view.start, floor), o.view.len);
+        floor = start + o.view.len;
+        patchTo(buckets, o.kind, o.raw, o.view.id, o.view.start, start);
+      }
+    }
+    for (const [kind, patches] of buckets) if (patches.length) ADAPTERS[kind].apply(patches);
+  };
+
+  startDrag(e, {
+    onMove: (dx, dy, ev) => {
+      if (!live && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+      live = true;
+      if (scroller) {
+        const r = scroller.getBoundingClientRect();
+        if (ev.clientX > r.right - 36) scroller.scrollLeft += 14;
+        else if (ev.clientX < r.left + 36) scroller.scrollLeft -= 14;
+      }
+      const effDx = dx + ((scroller?.scrollLeft ?? sc0) - sc0);
+      dt = Math.max(-minStart, effDx / ui.pps);
+      // Snap the grabbed item's edges; the whole set follows its delta.
+      let guide: number | null = null;
+      if (!ev.metaKey) {
+        const start = grabbed.start + dt;
+        const end = start + grabbed.len;
+        let best = { d: tol, dt, px: null as number | null };
+        for (const T of targets) {
+          if (Math.abs(start - T) < best.d)
+            best = { d: Math.abs(start - T), dt: T - grabbed.start, px: leftGuide(T, ui.pps) };
+          if (Math.abs(end - T) < best.d)
+            best = { d: Math.abs(end - T), dt: T - grabbed.len - grabbed.start, px: rightGuide(T, ui.pps) };
+        }
+        if (best.px !== null && best.dt >= -minStart) {
+          dt = best.dt;
+          guide = best.px;
+        }
+      }
+      rowDelta = vertical ? Math.min(rowHi, Math.max(rowLo, Math.round(dy / ui.rowH))) : 0;
+      ui.onSnap(guide);
+      layout(dt);
+      ui.onDrag({
+        kind: grabbed.kind,
+        id: grabbed.id,
+        targetRow: homeRow + rowDelta,
+        minRow: homeRow + rowLo,
+        maxRow: homeRow + rowHi,
+        ghostX: Math.max(0, grabbed.start + (effDx / ui.pps)) * ui.pps,
+        ghostY: dy - (rowEl ? rowEl.getBoundingClientRect().top - rowTop0 : 0),
+        slotStart: grabbed.start + dt,
+        len: grabbed.len,
+      });
+    },
+    onUp: (_dx, _dy, moved) => {
+      ui.onSnap(null);
+      ui.onDrag(null);
+      if (!live || !moved) {
+        // A plain click on a member: the selection narrows to it, like any
+        // other click that isn't additive.
+        useEditor.getState().select({ kind: laneSelectionKind(grabbed.kind), id: grabbed.id });
+        return;
+      }
+      if (rowDelta !== 0) {
+        // The set is leaving its rows: parted neighbors on the vacated lanes
+        // flow back to rest, the members take their new lanes, and whatever
+        // already lives there parts around them — same rule, new row.
+        const buckets = new Map<LaneKind, Patch<LaneRaw>[]>();
+        for (const o of rest) patchTo(buckets, o.kind, o.raw, o.view.id, o.view.start, o.view.start);
+        for (const [k, patches] of buckets) if (patches.length) ADAPTERS[k].apply(patches);
+        commitGroupRows(grabbed.kind, members, rowDelta);
+        partClearOfMembers(grabbed.kind, new Set(members.map((m) => m.id)));
+      }
+      const structures = new Set(members.map((m) => structureOf(m.kind)));
+      if (structures.has("video")) useEditor.getState().sortClips();
+      if (structures.has("cue")) useEditor.getState().sortCues();
+    },
+  });
+}
+
+/** Slide everything that is not in `ids` clear of it, lane by lane: each
+ * unselected item takes the first free spot at or after its own start, never
+ * before the one ahead of it. Runs after a vertical group commit so the rows
+ * the set landed on hold no overlaps. */
+function partClearOfMembers(kind: LaneKind, ids: ReadonlySet<string>) {
+  const s = useEditor.getState();
+  const ad = ADAPTERS[kind];
+  const all = ad.raws(s).map((raw) => ({ raw, view: ad.view(raw) }));
+  const moved = all.filter((x) => ids.has(x.view.id));
+  const patches: Patch<LaneRaw>[] = [];
+  for (const lane of new Set(moved.map((x) => x.view.lane))) {
+    const blocks = moved
+      .filter((x) => x.view.lane === lane)
+      .map((x) => ({ start: x.view.start, end: x.view.start + x.view.len }));
+    const others = all
+      .filter((x) => !ids.has(x.view.id) && x.view.lane === lane)
+      .sort((a, b) => a.view.start - b.view.start);
+    let floor = -Infinity;
+    for (const o of others) {
+      const start = nextFreeStart(blocks, Math.max(o.view.start, floor), o.view.len);
+      floor = start + o.view.len;
+      if (Math.abs(start - o.view.start) > 1e-9) patches.push(ad.movePatch(o.raw, start));
+    }
+  }
+  if (patches.length) ad.apply(patches);
+}
+
+/** Land a vertical group drag: every member's display row shifts by the same
+ * amount, a row past either end becomes a brand-new lane, and lanes renumber
+ * contiguous so emptied ones collapse — the group form of `commitRow`. */
+function commitGroupRows(kind: LaneKind, members: GroupMember[], rowDelta: number) {
+  const s = useEditor.getState();
+  const ad = ADAPTERS[kind];
+  if (!ad.multiLane || !ad.lanePatch) return;
+  const raws = ad.raws(s);
+  const views = raws.map((r) => ad.view(r));
+  const used = laneOrder(kind, s, views.map((v) => v.lane));
+  const minUsed = Math.min(0, ...used);
+  const maxUsed = Math.max(-1, ...used);
+  const memberIds = new Set(members.map((m) => m.id));
+  const laneFor = (row: number) =>
+    row < 0 ? minUsed - 1 + (row + 1) : row < used.length ? used[row] : maxUsed + 1 + (row - used.length);
+  const moved = views.map((v) =>
+    memberIds.has(v.id) ? laneFor(used.indexOf(v.lane) + rowDelta) : v.lane
+  );
+  const usedNext = [...new Set(moved)].sort((a, b) => a - b);
+  const remap = new Map(usedNext.map((l, i) => [l, i]));
+  ad.apply(raws.map((r, i) => ad.lanePatch!(r, remap.get(moved[i]) ?? 0)));
+}
+
 /** Grab an item: select (or cmd/shift-toggle) it, then drag to move it along
  * and across lanes with parting, snapping, and lane retracking. */
 export function startLaneMove<V = unknown>(
@@ -396,6 +705,36 @@ export function startLaneMove<V = unknown>(
   if (e.metaKey || e.shiftKey) {
     s.toggleSelect({ kind: laneSelectionKind(kind), id });
     return;
+  }
+  // A grab on one member of a multi-selection drags the whole selection as a
+  // rigid set. Grouped overlays ride too: unselected peers sharing a groupId
+  // join the set, so a group never tears apart under a multi-drag.
+  const selKind = laneSelectionKind(kind);
+  if (
+    s.multiSelection.length > 1 &&
+    s.multiSelection.some((m) => m?.kind === selKind && m.id === id)
+  ) {
+    const seen = new Set<string>();
+    const members: GroupMember[] = [];
+    const admit = (m: GroupMember | null) => {
+      if (!m) return;
+      const key = `${structureOf(m.kind)}:${m.id}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      members.push(m);
+    };
+    for (const sel of s.multiSelection) if (sel) admit(memberOf(s, sel));
+    for (const m of [...members]) {
+      const gid = structureOf(m.kind) === "overlay" ? (m.raw as Overlay).groupId : undefined;
+      if (!gid) continue;
+      for (const peer of s.overlays.filter((o) => o.groupId === gid))
+        admit(memberOf(s, { kind: "overlay", id: peer.id }));
+    }
+    const grabbed = members.find((m) => m.kind === kind && m.id === id) ?? members.find((m) => m.id === id);
+    if (grabbed && members.length > 1) {
+      startGroupMove(e, grabbed, members, ui as LaneMoveUI<unknown>);
+      return;
+    }
   }
   const ad = ADAPTERS[kind];
   const raw0 = ad.raws(s).find((r) => ad.view(r).id === id);
