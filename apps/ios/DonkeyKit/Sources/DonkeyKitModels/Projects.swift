@@ -27,18 +27,149 @@ nonisolated public struct Project: Identifiable, Equatable, Sendable {
     }
 }
 
+/// A render the phone asked the cloud for, from the ask to the file landing on
+/// this device. The photo library is the UI layer's to write, so the run stops
+/// at `ready` and the screen reports back what the library said.
+nonisolated public enum ProjectExportState: Equatable, Sendable {
+    case queued
+    /// Rendering, 0…1.
+    case rendering(Double)
+    case downloading
+    /// The finished render, on this device.
+    case ready(URL)
+    case saved
+    case failed(String)
+}
+
+/// The sizes the phone offers, named as the editor's export dialog names them.
+/// The ids are the dialog's own — the worker builds the render spec from them.
+nonisolated public struct ProjectExportSize: Identifiable, Equatable, Sendable {
+    public var id: String
+    public var label: String
+    public var note: String
+
+    public init(id: String, label: String, note: String) {
+        self.id = id
+        self.label = label
+        self.note = note
+    }
+
+    public static let all: [ProjectExportSize] = [
+        ProjectExportSize(id: "original", label: "Original · matches source", note: "H.264 · best quality"),
+        ProjectExportSize(id: "tiktok", label: "Best · 1080p", note: "smaller file"),
+        ProjectExportSize(id: "light", label: "Draft · 720p", note: "fastest render"),
+    ]
+}
+
 @Observable
 public final class ProjectsModel {
     public private(set) var projects: [Project] = []
     public private(set) var isLoading = false
+    /// Renders in flight, by project id. A run outlives the screen that asked
+    /// for it, so closing the player and coming back finds it where it was.
+    public private(set) var exportRuns: [String: ProjectExportState] = [:]
 
     private var summaries: [String: RemoteProject] = [:]
     private var latestExports: [String: RemoteExport] = [:]
     private var thumbnails: [String: URL] = [:]
+    private var exportTasks: [String: Task<Void, Never>] = [:]
     private let service: (any CloudProjectsServicing)?
 
     public init(service: (any CloudProjectsServicing)? = nil) {
         self.service = service
+    }
+
+    // MARK: Exporting
+
+    /// Render this project's whole timeline in the cloud and bring the file
+    /// down. The cut is composited from the stored document, so what lands is
+    /// the same file the editor's own export produces — overlays, captions,
+    /// soundtrack and all.
+    public func export(_ project: Project, size: ProjectExportSize) {
+        guard let service, exportTasks[project.id] == nil else { return }
+        exportRuns[project.id] = .queued
+        let id = project.id
+        exportTasks[id] = Task { [weak self] in
+            do {
+                let jobId = try await service.startExport(projectId: id, preset: size.id)
+                try await self?.followExport(jobId: jobId, project: id, service: service)
+            } catch is CancellationError {
+                self?.exportRuns[id] = nil
+            } catch {
+                self?.exportRuns[id] = .failed(Self.message(for: error))
+            }
+            self?.exportTasks[id] = nil
+        }
+    }
+
+    private func followExport(
+        jobId: String,
+        project id: String,
+        service: any CloudProjectsServicing
+    ) async throws {
+        while true {
+            try await Task.sleep(for: .seconds(1.5))
+            switch try await service.exportProgress(jobId: jobId) {
+            case .queued:
+                exportRuns[id] = .queued
+            case .running(let ratio):
+                exportRuns[id] = .rendering(ratio)
+            case .failed(let message):
+                exportRuns[id] = .failed(message)
+                return
+            case .done:
+                exportRuns[id] = .downloading
+                let url = try await service.exportFile(jobId: jobId)
+                exportRuns[id] = .ready(try await Self.downloadedCopy(of: url))
+                // The finished render is a new export on the project, so the
+                // card stops offering the preview the moment it lands.
+                await refresh()
+                return
+            }
+        }
+    }
+
+    /// What the photo library said about the file this run produced. The
+    /// screen writes it there; the run ends here either way, and the temporary
+    /// copy goes with it.
+    public func finishExport(_ id: String, error: String?) {
+        if case .ready(let file) = exportRuns[id] {
+            try? FileManager.default.removeItem(at: file)
+        }
+        exportRuns[id] = error.map { .failed($0) } ?? .saved
+    }
+
+    public func clearExport(_ id: String) {
+        if case .ready(let file) = exportRuns[id] {
+            try? FileManager.default.removeItem(at: file)
+        }
+        exportTasks[id]?.cancel()
+        exportTasks[id] = nil
+        exportRuns[id] = nil
+    }
+
+    /// The render on disk, named with an extension Photos recognizes — the
+    /// download's own temp file has none, and the library reads the container
+    /// from the name.
+    private static func downloadedCopy(of url: URL) async throws -> URL {
+        let (temp, response) = try await URLSession.shared.download(from: url)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            try? FileManager.default.removeItem(at: temp)
+            throw CloudSyncError.transport
+        }
+        let file = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).mp4")
+        try? FileManager.default.removeItem(at: file)
+        try FileManager.default.moveItem(at: temp, to: file)
+        return file
+    }
+
+    private static func message(for error: any Error) -> String {
+        switch error {
+        case CloudSyncError.refused(let message): message
+        case CloudSyncError.storageFull: "Your cloud storage is full — free some space and try again."
+        case CloudSyncError.unauthorized: "Sign in again to export this project."
+        default: "Couldn't export this project."
+        }
     }
 
     /// Pull the listing and per-project latest exports, then fill thumbnails

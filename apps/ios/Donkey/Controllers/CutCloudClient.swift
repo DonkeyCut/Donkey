@@ -55,6 +55,23 @@ final class CutCloudClient: NSObject {
         }
     }
 
+    /// A send whose 4xx body is worth reading back to the user: the render cap
+    /// and the storage quota both answer with a sentence written for a person.
+    private func sendReadingRefusal(_ request: URLRequest) async throws -> Data {
+        struct Refusal: Decodable { var error: String? }
+        do {
+            return try await send(request)
+        } catch let error as CloudSyncError {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse,
+                  (400..<500).contains(http.statusCode),
+                  let message = (try? JSONDecoder().decode(Refusal.self, from: data))?.error,
+                  !message.isEmpty
+            else { throw error }
+            throw CloudSyncError.refused(message)
+        }
+    }
+
     private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
         guard let value = try? JSONDecoder().decode(type, from: data) else {
             throw CloudSyncError.transport
@@ -449,6 +466,34 @@ extension CutCloudClient: CloudProjectsServicing {
         return try decode([ExportDTO].self, from: data).map {
             RemoteExport(file: $0.file, modifiedAt: Date(timeIntervalSince1970: $0.mtime / 1000))
         }
+    }
+
+    func startExport(projectId: String, preset: String) async throws -> String {
+        struct QueuedExport: Decodable { var id: String }
+        let data = try await sendReadingRefusal(
+            try request("POST", "/api/cut-cloud/projects/\(projectId)/export", body: ["preset": preset])
+        )
+        return try decode(QueuedExport.self, from: data).id
+    }
+
+    func exportProgress(jobId: String) async throws -> RenderProgress {
+        struct ExportStatus: Decodable {
+            var status: String
+            var progress: Double?
+            var error: String?
+        }
+        let data = try await send(try request("GET", "/api/cut-cloud/export/\(jobId)"))
+        let status = try decode(ExportStatus.self, from: data)
+        switch status.status {
+        case "queued": return .queued
+        case "running": return .running(min(1, max(0, status.progress ?? 0)))
+        case "done": return .done
+        default: return .failed(status.error ?? "The render didn't finish.")
+        }
+    }
+
+    func exportFile(jobId: String) async throws -> URL {
+        try await resolveRedirect("/api/cut-cloud/export/\(jobId)/file")
     }
 
     func streamURL(project: RemoteProject, export: RemoteExport?) async throws -> URL {

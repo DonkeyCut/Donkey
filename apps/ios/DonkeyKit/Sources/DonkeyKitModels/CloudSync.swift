@@ -173,6 +173,16 @@ nonisolated public struct ImportedLink: Equatable, Sendable {
 }
 
 /// Where a queued cloud job stands.
+/// Where a queued cloud render stands, as the phone polls it.
+nonisolated public enum RenderProgress: Equatable, Sendable {
+    /// Waiting for a worker to claim it.
+    case queued
+    /// Rendering, 0…1.
+    case running(Double)
+    case done
+    case failed(String)
+}
+
 nonisolated public enum JobOutcome<Value: Sendable>: Sendable {
     case running
     case done(Value)
@@ -180,6 +190,9 @@ nonisolated public enum JobOutcome<Value: Sendable>: Sendable {
 }
 
 nonisolated public enum CloudSyncError: Error, Equatable {
+    /// The server refused with a reason worth reading out loud — out of
+    /// renders for the day, out of room. The message is the server's own.
+    case refused(String)
     /// The account is out of cloud storage: uploads pause, the Library shows
     /// its banner, and nothing retries until space frees up.
     case storageFull
@@ -269,6 +282,14 @@ nonisolated public struct RemoteExport: Equatable, Sendable {
 public protocol CloudProjectsServicing: AnyObject, Sendable {
     func fetchProjects() async throws -> [RemoteProject]
     func fetchExports(projectId: String) async throws -> [RemoteExport]
+    /// Queue a render of the project's whole timeline and hand back the job id.
+    /// The cut is composited in the cloud from the stored document, so the
+    /// phone gets the same file the editor's own export produces.
+    func startExport(projectId: String, preset: String) async throws -> String
+    /// Where a queued render stands. Progress runs 0…1 while it works.
+    func exportProgress(jobId: String) async throws -> RenderProgress
+    /// CDN URL behind the API's redirect for a finished render's file.
+    func exportFile(jobId: String) async throws -> URL
     /// CDN URL behind the API's redirect for the latest render of a project:
     /// its newest export, or the composited preview proxy.
     func streamURL(project: RemoteProject, export: RemoteExport?) async throws -> URL

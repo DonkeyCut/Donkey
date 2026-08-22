@@ -144,11 +144,11 @@ struct ProjectTag: View {
 /// the project is read again on the way in so an edit made at the desk is what
 /// plays.
 ///
-/// The video can be kept: a save control beside the player's own sound button
-/// opens the export sheet — the same choices the editor offers on the web,
-/// sized off the render itself — and the sheet's Save to Photos button is what
-/// commits it. It rides with the player's controls, appearing and fading on a
-/// tap the way the sound button does.
+/// The cut can be kept: an export control under the player's own sound button
+/// opens a sheet of sizes, and picking one renders the whole timeline in the
+/// cloud — the same render the editor's export produces — then puts the
+/// finished file in the photo library. The render outlives this screen, so
+/// closing the player and coming back finds it where it was.
 struct ProjectPlayerView: View {
     let project: Project
     var projects: ProjectsModel
@@ -157,32 +157,52 @@ struct ProjectPlayerView: View {
     @State private var streamed: URL?
     @State private var failed = false
     @State private var showingExport = false
-    @State private var source: SourceVideo?
-    @State private var choice = ExportChoice.original.id
-    @State private var save: SaveState = .idle
+    @State private var choice = ProjectExportSize.all[0].id
+    /// What the direct save of an existing render is doing. A cloud render
+    /// reports through the model instead, so it survives this screen.
+    @State private var local: ExportPhase = .idle
     @State private var chromeShown = true
     /// Bumped on every tap, so the fade-out timer starts over.
     @State private var chromeTick = 0
     @Environment(\.dismiss) private var dismiss
 
-    private enum SaveState: Equatable {
+    /// The row of choices the sheet shows, plus how the export control reads.
+    private enum ExportPhase: Equatable {
         case idle
-        /// Working, with the step it is on — the download, the resize, the file
-        /// going into the library.
-        case working(String)
+        /// Working, with the step it is on and how far along, when that is known.
+        case working(String, Double?)
         case saved
         case failed(String)
     }
+
+    /// The choice that saves the render the project already has, without
+    /// spending a new one. Offered only when what streams is a real export.
+    private static let latestId = "latest"
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             Color.black.ignoresSafeArea()
             video
             chrome
+            exportControl
         }
         .task { await load() }
         .onDisappear { player?.pause() }
         .sheet(isPresented: $showingExport) { exportSheet }
+        // A render that finished while this screen was away lands here: the
+        // file is on the device, and the photo library is this layer's to write.
+        .task(id: readyFile) {
+            guard let readyFile else { return }
+            await commit(readyFile)
+        }
+        // What a finished export says clears itself, so the control goes back
+        // to offering the next one instead of wearing its last answer.
+        .task(id: phase) {
+            guard settled else { return }
+            try? await Task.sleep(for: .seconds(2.5))
+            projects.clearExport(project.id)
+            local = .idle
+        }
     }
 
     @ViewBuilder
@@ -217,9 +237,9 @@ struct ProjectPlayerView: View {
         }
     }
 
-    /// The close button, the project's name, and the save control, on one row
-    /// with the player's sound button — which owns the corner, so the row
-    /// stops short of it.
+    /// The close button and the project's name, on the same row as the
+    /// player's own controls — which own the corner, so the row stops short
+    /// of it.
     private var chrome: some View {
         HStack(alignment: .top, spacing: 12) {
             Button {
@@ -231,23 +251,20 @@ struct ProjectPlayerView: View {
                     .frame(width: 40, height: 40)
             }
             .glassEffect(.regular.interactive())
-            Text(project.name)
+            Text(live.name)
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
             Spacer(minLength: 8)
-            if player != nil {
-                saveControl
-            }
         }
         .padding(16)
         .padding(.trailing, 52)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .opacity(visible ? 1 : 0)
-        .allowsHitTesting(visible)
-        .animation(.easeInOut(duration: 0.2), value: visible)
+        .opacity(chromeShown ? 1 : 0)
+        .allowsHitTesting(chromeShown)
+        .animation(.easeInOut(duration: 0.2), value: chromeShown)
         // Fades out the way the player's controls do, and stays while the
-        // video is paused or a save is running.
+        // video is paused.
         .task(id: chromeTick) {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(4))
@@ -259,37 +276,32 @@ struct ProjectPlayerView: View {
         }
     }
 
-    /// Whether the chrome is on screen: what the tap says, and always while a
-    /// save is telling the user where it is.
-    private var visible: Bool {
-        chromeShown || save != .idle
-    }
-
-    private func load() async {
-        guard let url = await projects.streamURL(for: project) else {
-            failed = true
-            return
-        }
-        streamed = url
-        let player = AVPlayer(url: url)
-        self.player = player
-        player.play()
-        chromeShown = true
-        chromeTick += 1
-        source = await SourceVideo.read(url)
-    }
-
-    private var saveControl: some View {
+    /// The export control, directly under the player's sound button and lined
+    /// up with it: same corner, same inset, same round glass, and on screen
+    /// exactly when the sound button is. A render in flight shows its progress
+    /// on the button itself, so what it is doing reads without a second panel.
+    private var exportControl: some View {
         VStack(alignment: .trailing, spacing: 8) {
+            // The player's own top row owns this much of the corner; the
+            // control sits under it.
+            Color.clear.frame(width: 40, height: 40)
             Button {
                 showingExport = true
             } label: {
                 Group {
-                    switch save {
-                    case .idle: Image(systemName: "square.and.arrow.down")
-                    case .working: ProgressView().tint(.white)
-                    case .saved: Image(systemName: "checkmark")
-                    case .failed: Image(systemName: "exclamationmark.triangle")
+                    switch phase {
+                    case .idle:
+                        Image(systemName: "square.and.arrow.down")
+                    case .working(_, let ratio):
+                        if let ratio {
+                            ProgressRing(ratio: ratio)
+                        } else {
+                            ProgressView().tint(.white)
+                        }
+                    case .saved:
+                        Image(systemName: "checkmark")
+                    case .failed:
+                        Image(systemName: "exclamationmark.triangle")
                     }
                 }
                 .font(.title3.weight(.bold))
@@ -299,7 +311,7 @@ struct ProjectPlayerView: View {
             .glassEffect(.regular.interactive())
             .disabled(working)
             .accessibilityLabel("Export video")
-            if let note = saveNote {
+            if let note {
                 Text(note)
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.white)
@@ -310,25 +322,22 @@ struct ProjectPlayerView: View {
                     .frame(maxWidth: 190, alignment: .trailing)
             }
         }
-        .animation(.snappy, value: save)
-        // What a finished save says clears itself, so the control goes back to
-        // offering the export instead of wearing its last answer.
-        .task(id: save) {
-            guard settled else { return }
-            try? await Task.sleep(for: .seconds(2.5))
-            save = .idle
-        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        .opacity(chromeShown && player != nil ? 1 : 0)
+        .allowsHitTesting(chromeShown && player != nil)
+        .animation(.easeInOut(duration: 0.2), value: chromeShown)
+        .animation(.snappy, value: phase)
     }
 
-    /// The export sheet: the choices the web dialog offers, measured against
-    /// this render. Original is always the largest, and a size is offered only
-    /// while it is smaller than the render itself — resizing up would cost
-    /// bytes and quality for nothing.
+    /// The export sheet: the sizes the editor's own dialog offers. Picking one
+    /// renders the whole timeline in the cloud, so what saves is the cut as it
+    /// stands rather than whatever happens to be streaming.
     private var exportSheet: some View {
         NavigationStack {
             VStack(spacing: 16) {
                 VStack(spacing: 8) {
-                    ForEach(choices) { option in
+                    ForEach(choices, id: \.id) { option in
                         Button { choice = option.id } label: { choiceRow(option) }
                             .buttonStyle(.plain)
                             .accessibilityAddTraits(choice == option.id ? [.isSelected] : [])
@@ -336,20 +345,19 @@ struct ProjectPlayerView: View {
                 }
                 Spacer(minLength: 0)
                 Button {
-                    let picked = choices.first { $0.id == choice } ?? choices[0]
                     showingExport = false
-                    Task { await saveToPhotos(picked) }
+                    Task { await start() }
                 } label: {
-                    Text("Save to Photos")
+                    Text(choice == Self.latestId ? "Save to Photos" : "Export & Save to Photos")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 Text(
-                    playingPreview
-                        ? "This project has no export yet, so what saves is the preview the editor renders for itself. Export it in Donkey Cut for a full-quality file."
-                        : "The video downloads to this device and lands in your photo library."
+                    choice == Self.latestId
+                        ? "The render this project already has downloads to this device and lands in your photo library."
+                        : "The cut renders in the cloud at full quality, then lands in your photo library. It keeps going if you leave this screen."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -367,21 +375,16 @@ struct ProjectPlayerView: View {
         .presentationDetents([.medium])
     }
 
-    private func choiceRow(_ option: ExportChoice) -> some View {
+    private func choiceRow(_ option: ProjectExportSize) -> some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(option.label)
                     .font(.subheadline.weight(.medium))
-                Text(option.detail(for: source))
+                Text(option.note)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
-            if let size = option.sizeText(for: source) {
-                Text(size)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -396,79 +399,153 @@ struct ProjectPlayerView: View {
         }
     }
 
-    private var choices: [ExportChoice] {
-        ExportChoice.all(for: source, isPreview: playingPreview)
+    /// The project as the listing has it now — a render that just finished is
+    /// an export the moment the refresh lands, so the sheet offers it.
+    private var live: Project {
+        projects.projects.first { $0.id == project.id } ?? project
     }
 
-    /// Whether what is streaming is the editor's own composited proxy rather
-    /// than a render someone exported.
-    private var playingPreview: Bool {
-        if case .ready(_, let isPreview) = project.export { return isPreview }
+    /// A finished render is worth keeping without spending another one, so it
+    /// leads the list when the project has one.
+    private var choices: [ProjectExportSize] {
+        let sizes = ProjectExportSize.all
+        guard hasExport else { return sizes }
+        return [
+            ProjectExportSize(
+                id: Self.latestId,
+                label: "Latest export",
+                note: "already rendered · saves right away"
+            )
+        ] + sizes
+    }
+
+    /// Whether what streams is a render someone exported, rather than the
+    /// editor's own composited proxy.
+    private var hasExport: Bool {
+        if case .ready(_, let isPreview) = live.export { return !isPreview }
         return false
+    }
+
+    // MARK: Export state
+
+    /// Where the export stands: the cloud render when one is running, and the
+    /// direct save of an existing render otherwise.
+    private var phase: ExportPhase {
+        switch projects.exportRuns[project.id] {
+        case .queued: .working("Queued…", nil)
+        case .rendering(let ratio): .working("Rendering… \(Int((ratio * 100).rounded()))%", ratio)
+        case .downloading: .working("Downloading…", nil)
+        case .ready: .working("Saving…", nil)
+        case .saved: .saved
+        case .failed(let message): .failed(message)
+        case nil: local
+        }
+    }
+
+    /// The rendered file waiting to go into the photo library.
+    private var readyFile: URL? {
+        if case .ready(let file) = projects.exportRuns[project.id] { return file }
+        return nil
     }
 
     private var working: Bool {
-        if case .working = save { return true }
+        if case .working = phase { return true }
         return false
     }
 
-    /// A save that has finished, one way or the other.
+    /// An export that has finished, one way or the other.
     private var settled: Bool {
-        switch save {
+        switch phase {
         case .idle, .working: false
         case .saved, .failed: true
         }
     }
 
-    private var saveNote: String? {
-        switch save {
+    private var note: String? {
+        switch phase {
         case .idle: nil
-        case .working(let step): step
+        case .working(let step, _): step
         case .saved: "Saved to Photos"
         case .failed(let message): message
         }
     }
 
-    /// Download the render, resize it when a smaller size was picked, and add
-    /// it to the photo library. The stream URL is resolved again rather than
-    /// reused: a CDN link minted when the view opened can expire while the
-    /// video plays.
-    private func saveToPhotos(_ option: ExportChoice) async {
-        save = .working("Saving…")
-        switch await PHPhotoLibrary.requestAuthorization(for: .addOnly) {
-        case .authorized, .limited: break
-        default:
-            save = .failed("Allow photo access in Settings to save videos.")
+    // MARK: Work
+
+    private func load() async {
+        guard let url = await projects.streamURL(for: project) else {
+            failed = true
             return
         }
+        streamed = url
+        let player = AVPlayer(url: url)
+        self.player = player
+        player.play()
+        chromeShown = true
+        chromeTick += 1
+    }
+
+    /// Ask for the photo library first — a render refused at the end would
+    /// have spent minutes of encoding for nothing — then either queue the
+    /// cloud render or download the render the project already has.
+    private func start() async {
+        guard await photosAllowed() else {
+            local = .failed("Allow photo access in Settings to save videos.")
+            return
+        }
+        if choice == Self.latestId {
+            await saveLatest()
+            return
+        }
+        guard let size = ProjectExportSize.all.first(where: { $0.id == choice }) else { return }
+        projects.export(project, size: size)
+    }
+
+    private func photosAllowed() async -> Bool {
+        switch await PHPhotoLibrary.requestAuthorization(for: .addOnly) {
+        case .authorized, .limited: true
+        default: false
+        }
+    }
+
+    /// Download the render the project already has and add it to the photo
+    /// library. The stream URL is resolved again rather than reused: a CDN
+    /// link minted when the view opened can expire while the video plays.
+    private func saveLatest() async {
+        local = .working("Downloading…", nil)
         guard let url = await projects.streamURL(for: project) ?? streamed else {
-            save = .failed("Couldn't reach this project's video.")
+            local = .failed("Couldn't reach this project's video.")
             return
         }
         do {
-            save = .working("Downloading…")
-            let downloaded = try await downloadedCopy(of: url)
-            var file = downloaded
-            if let preset = option.preset {
-                save = .working("Resizing…")
-                do {
-                    file = try await resized(downloaded, preset: preset)
-                    try? FileManager.default.removeItem(at: downloaded)
-                } catch {
-                    // The render is in hand and the library takes it as it is,
-                    // so a resize that fails saves the original instead of
-                    // costing the whole export.
-                    file = downloaded
-                }
-            }
+            let file = try await downloadedCopy(of: url)
             defer { try? FileManager.default.removeItem(at: file) }
-            save = .working("Saving…")
-            try await PHPhotoLibrary.shared().performChanges {
-                PHAssetCreationRequest.forAsset().addResource(with: .video, fileURL: file, options: nil)
-            }
-            save = .saved
+            local = .working("Saving…", nil)
+            try await addToLibrary(file)
+            local = .saved
         } catch {
-            save = .failed("Couldn't save this video.")
+            local = .failed("Couldn't save this video.")
+        }
+    }
+
+    /// Put a finished cloud render in the photo library and tell the model how
+    /// it went, so the run ends and its temporary copy goes with it.
+    private func commit(_ file: URL) async {
+        guard await photosAllowed() else {
+            projects.finishExport(project.id, error: "Allow photo access in Settings to save videos.")
+            return
+        }
+        do {
+            try await addToLibrary(file)
+            projects.finishExport(project.id, error: nil)
+        } catch {
+            projects.finishExport(project.id, error: "Couldn't save this video.")
+        }
+    }
+
+    private func addToLibrary(_ file: URL) async throws {
+        try await PHPhotoLibrary.shared().performChanges {
+            PHAssetCreationRequest.forAsset().addResource(with: .video, fileURL: file, options: nil)
         }
     }
 
@@ -487,140 +564,24 @@ struct ProjectPlayerView: View {
         try FileManager.default.moveItem(at: temp, to: file)
         return file
     }
-
-    /// The same picture inside a smaller box. AVFoundation fits the frame to
-    /// the preset and keeps the aspect, so a portrait cut stays portrait.
-    private func resized(_ file: URL, preset: String) async throws -> URL {
-        guard let session = AVAssetExportSession(asset: AVURLAsset(url: file), presetName: preset) else {
-            throw CloudSyncError.transport
-        }
-        let out = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).mp4")
-        try? FileManager.default.removeItem(at: out)
-        try await session.export(to: out, as: .mp4)
-        return out
-    }
 }
 
-/// What the render on the other end of the stream is: its frame, its length,
-/// and how many bytes it holds. The export sheet is measured from this, so the
-/// choices describe the video the phone would actually save.
-struct SourceVideo: Equatable, Sendable {
-    var width: Int
-    var height: Int
-    var duration: TimeInterval
-    /// Bytes over the wire, or 0 when the host answered no HEAD.
-    var bytes: Int64
+/// How far a render has got, drawn on the export control itself — the ring the
+/// player's own buttons are the size of.
+private struct ProgressRing: View {
+    let ratio: Double
 
-    var shortSide: Int { min(width, height) }
-    var pixels: Int { max(1, width * height) }
-
-    static func read(_ url: URL) async -> SourceVideo? {
-        let asset = AVURLAsset(url: url)
-        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
-              let (size, transform) = try? await track.load(.naturalSize, .preferredTransform)
-        else { return nil }
-        let frame = size.applying(transform)
-        let seconds = (try? await asset.load(.duration))?.seconds ?? 0
-        var head = URLRequest(url: url)
-        head.httpMethod = "HEAD"
-        let response = try? await URLSession.shared.data(for: head).1
-        let bytes = response?.expectedContentLength ?? -1
-        return SourceVideo(
-            width: Int(abs(frame.width).rounded()),
-            height: Int(abs(frame.height).rounded()),
-            duration: seconds.isFinite ? seconds : 0,
-            bytes: bytes > 0 ? bytes : 0
-        )
-    }
-}
-
-/// One row of the export sheet. `preset` is the AVFoundation box the picture
-/// is fitted into; the original carries none, since it is saved as it came
-/// down.
-struct ExportChoice: Identifiable, Equatable, Sendable {
-    var id: String
-    var label: String
-    var note: String
-    var shortSide: Int?
-    var preset: String?
-
-    static let original = ExportChoice(
-        id: "original",
-        label: "Original · matches source",
-        note: "H.264 · best quality",
-        shortSide: nil,
-        preset: nil
-    )
-
-    /// What stands in for the original when the project has never been
-    /// exported: the proxy, named as one.
-    static let preview = ExportChoice(
-        id: "original",
-        label: "Preview · not an export",
-        note: "what the editor's grid plays",
-        shortSide: nil,
-        preset: nil
-    )
-
-    /// Original first, then every size smaller than the render — the same
-    /// order the editor's dialog lists, largest to smallest.
-    static func all(for source: SourceVideo?, isPreview: Bool = false) -> [ExportChoice] {
-        let full = isPreview ? preview : original
-        let steps = [
-            ExportChoice(
-                id: "hd",
-                label: "Best · 1080p",
-                note: "smaller file",
-                shortSide: 1080,
-                preset: AVAssetExportPreset1920x1080
-            ),
-            ExportChoice(
-                id: "sd",
-                label: "Draft · 720p",
-                note: "smallest file",
-                shortSide: 720,
-                preset: AVAssetExportPreset1280x720
-            ),
-        ]
-        guard let source else { return [full] }
-        return [full] + steps.filter { step in
-            guard let side = step.shortSide else { return false }
-            return source.shortSide > side
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(.white.opacity(0.3), lineWidth: 2.5)
+            Circle()
+                .trim(from: 0, to: max(0.02, min(1, ratio)))
+                .stroke(.white, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
         }
-    }
-
-    /// The frame this choice saves: the render's own, or its aspect fitted to
-    /// the short side.
-    func frame(for source: SourceVideo) -> (width: Int, height: Int) {
-        guard let side = shortSide, source.shortSide > side else {
-            return (source.width, source.height)
-        }
-        let scale = Double(side) / Double(source.shortSide)
-        let even = { (n: Int) in 2 * Int((Double(n) * scale / 2).rounded()) }
-        return (even(source.width), even(source.height))
-    }
-
-    func detail(for source: SourceVideo?) -> String {
-        guard let source, source.width > 0 else { return note }
-        let frame = frame(for: source)
-        return "\(frame.width) × \(frame.height) · \(note)"
-    }
-
-    /// What it costs to keep. The original's size is the one the host reported;
-    /// a resize is scaled by how much of the picture is left, which is what
-    /// changes the bitrate.
-    func sizeText(for source: SourceVideo?) -> String? {
-        guard let source, source.bytes > 0 else { return nil }
-        let frame = frame(for: source)
-        let share = Double(frame.width * frame.height) / Double(source.pixels)
-        return formattedSize(Double(source.bytes) * min(1, share))
-    }
-
-    private func formattedSize(_ bytes: Double) -> String {
-        let mb = bytes / (1024 * 1024)
-        if mb < 1 { return "~1 MB" }
-        if mb < 1000 { return mb < 10 ? String(format: "~%.1f MB", mb) : "~\(Int(mb.rounded())) MB" }
-        return String(format: "~%.1f GB", mb / 1024)
+        .frame(width: 22, height: 22)
+        .animation(.easeInOut(duration: 0.3), value: ratio)
     }
 }
 
