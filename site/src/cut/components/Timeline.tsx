@@ -57,6 +57,49 @@ import { isLottieAsset } from "@/cut/lib/lottieAssets";
 import { gradeCssApprox } from "@donkeycut/effects-kit";
 import { cn } from "@/lib/utils";
 
+/**
+ * Is this landing the one already on screen? Values one level deep, and
+ * element-wise inside a list of them, so a preview rebuilt from the same
+ * numbers compares equal.
+ */
+function sameLanding(a: unknown, b: unknown, depth = 2): boolean {
+  if (a === b) return true;
+  if (depth <= 0 || !a || !b || typeof a !== "object" || typeof b !== "object") return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((v, i) => sameLanding(v, b[i], depth - 1))
+    );
+  }
+  const ak = Object.keys(a);
+  const bk = Object.keys(b);
+  return (
+    ak.length === bk.length &&
+    ak.every((k) =>
+      sameLanding((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], depth - 1)
+    )
+  );
+}
+
+/**
+ * A drop preview that re-renders only when the landing actually moves.
+ *
+ * `dragover` fires many times a second, and most of those events report the
+ * landing already drawn — a still pointer keeps the events coming. Storing a
+ * fresh object for each one re-renders the whole timeline for no visible
+ * change, which is churn on its own and fuel for anything downstream that
+ * reacts to a render.
+ */
+function useDropPreview<T>(initial: T): [T, (next: T) => void] {
+  const [value, setValue] = useState<T>(initial);
+  const set = useCallback((next: T) => {
+    setValue((cur) => (sameLanding(cur, next) ? cur : next));
+  }, []);
+  return [value, set];
+}
+
 const TRANSITION_ICONS: Record<TransitionStyle, LucideIcon> = {
   crossfade: Blend,
   audiocross: AudioLines,
@@ -585,7 +628,7 @@ export function Timeline() {
   // clip would land, how long it runs, and what the source looks like, so the
   // preview reads as the segment itself sliding along the row rather than an
   // empty slot.
-  const [assetDrop, setAssetDrop] = useState<{
+  const [assetDrop, setAssetDrop] = useDropPreview<{
     t: number;
     len: number;
     ghost?: DropGhost;
@@ -599,7 +642,7 @@ export function Timeline() {
   // The pending drop preview: which track/gap, at what time, for how long —
   // and which resident clips slide right to open the room, so the row can
   // paint them parting ahead of the drop.
-  const [overlayDrop, setOverlayDrop] = useState<{
+  const [overlayDrop, setOverlayDrop] = useDropPreview<{
     target: TrackTarget;
     t: number;
     len: number;
@@ -855,7 +898,11 @@ export function Timeline() {
   // compact to contiguous display rows, so empty tracks disappear on their own.
   // Drop preview while an audio asset is dragged over the timeline: which row
   // (one past the end = new track), at what time, for how long.
-  const [audioDrop, setAudioDrop] = useState<{ row: number; t: number; len: number } | null>(null);
+  const [audioDrop, setAudioDrop] = useDropPreview<{
+    row: number;
+    t: number;
+    len: number;
+  } | null>(null);
   const audioRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const audioLanes = useMemo(() => {
@@ -1221,12 +1268,14 @@ export function Timeline() {
   // panel, drawn the way a bar drag is: the slot outline on the target row
   // where the drop lands, and the bar itself carried at the pointer (`y` is
   // the bar's top in band pixels).
-  const [elementDrop, setElementDrop] = useState<{ row: number; t: number; y: number } | null>(
-    null
-  );
+  const [elementDrop, setElementDrop] = useDropPreview<{
+    row: number;
+    t: number;
+    y: number;
+  } | null>(null);
   // The place a dragged transition would land on, marked with the footprint it
   // would take while it is in flight.
-  const [jointDrop, setJointDrop] = useState<Anchor | null>(null);
+  const [jointDrop, setJointDrop] = useDropPreview<Anchor | null>(null);
   // A transition tile from the panel is over the timeline: the row lights
   // every place a drop could play, the same as a bar drag does.
   const [xTileDrag, setXTileDrag] = useState(false);
