@@ -1,10 +1,12 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { buildDocExportSpec, isDocExportPreset } from "../lib/headless/docExport";
 import { runExport, type ExportSpec, type RenderHandle } from "../server/exportPipeline";
 import { storeCardArtifacts } from "./cardJob";
 import { prisma, registerObject, type ClaimedJob } from "./db";
 import { downloadToFile, exportKey, mediaKey, previewKey, uploadFile } from "./r2";
+import { runnerSession } from "./session";
 
 /** The stored spec of an export/preview CutRenderJob: the engine export spec
  * plus the R2 keys of the browser-rendered overlay PNGs (title/caption stills
@@ -12,6 +14,10 @@ import { downloadToFile, exportKey, mediaKey, previewKey, uploadFile } from "./r
  * and puts the already-deduped export name on the row's outName column. */
 export interface ExportJobSpec {
   spec: ExportSpec;
+  /** A render asked for by a client that cannot build a spec — the phone. The
+   * row carries the size and nothing else; the worker opens the project doc
+   * and builds the spec itself. */
+  fromDoc?: { preset?: string };
   overlays?: { name: string; key: string }[];
   /** HLS only: whether the client burned captions into this render, decided by
    * what the share grants. Recorded on the ladder so a share that later stops
@@ -103,20 +109,37 @@ export async function runExportJob(
   job: ClaimedJob,
   handle: RenderHandle
 ): Promise<{ outputKey: string; outName: string }> {
-  const body = job.spec as ExportJobSpec;
-  const spec = body.spec;
-  if (!spec || !Array.isArray(spec.clips)) throw new Error("Malformed export spec.");
-  const projectId = job.projectId ?? spec.projectId;
+  const stored = job.spec as ExportJobSpec;
+  const projectId = job.projectId ?? stored.spec?.projectId;
   if (!projectId) throw new Error("Export job has no project.");
-  const mode: "export" | "preview" | "card" =
-    job.kind === "preview" || spec.target === "preview"
-      ? "preview"
-      : job.kind === "card" || spec.target === "card"
-        ? "card"
-        : "export";
-  const preview = mode === "preview";
+  if (!stored.fromDoc && (!stored.spec || !Array.isArray(stored.spec.clips))) {
+    throw new Error("Malformed export spec.");
+  }
 
   return inWorkDir(async (work) => {
+    // The pipeline reads stills out of this dir; a doc-built spec paints its
+    // own straight into it, so it exists before the spec does.
+    handle.tmpDir = path.join(work, "overlays");
+    await mkdir(handle.tmpDir, { recursive: true });
+    const body: ExportJobSpec = stored.fromDoc
+      ? {
+          ...stored,
+          spec: (await buildDocExportSpec(
+            runnerSession(job),
+            projectId,
+            isDocExportPreset(stored.fromDoc.preset) ? stored.fromDoc.preset : "original",
+            handle.tmpDir
+          )) as ExportSpec,
+        }
+      : stored;
+    const spec = body.spec;
+    const mode: "export" | "preview" | "card" =
+      job.kind === "preview" || spec.target === "preview"
+        ? "preview"
+        : job.kind === "card" || spec.target === "card"
+          ? "card"
+          : "export";
+    const preview = mode === "preview";
     const mediaDir = await stageJobMedia(job, body, projectId, work, handle);
 
     const outName = mode === "export" ? job.outName?.trim() || "export.mp4" : `${mode}.mp4`;

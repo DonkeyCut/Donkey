@@ -190,7 +190,7 @@ export interface ExportDoc {
 /** The neutral built cut: the engine spec plus the browser-rendered overlay
  * PNGs. The local path serializes it to the engine's multipart form; the
  * cloud path presigns the PNGs to R2 and posts the spec as JSON. */
-interface ExportPayload {
+export interface ExportPayload {
   spec: object;
   pngs: { name: string; blob: Blob }[];
 }
@@ -409,7 +409,7 @@ function renderClipBorderPng(
 /** Build the export spec + overlay PNGs from the cut. Media already lives in
  * the project folder — the spec references it by file name; only overlay PNGs
  * travel with the request. Shared by full exports and the low-res hover proxy. */
-async function buildExportPayload(
+export async function buildExportPayload(
   projectId: string,
   doc: ExportDoc,
   settings: ExportSettings,

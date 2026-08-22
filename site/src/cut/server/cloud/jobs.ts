@@ -206,6 +206,42 @@ export const jobsCloud = {
     }
   },
 
+  /**
+   * Queue a whole-timeline export for a client that cannot build a render spec
+   * — the phone. The row carries the project and the size; the worker opens
+   * the project document and builds the spec itself, so what renders is the
+   * cut as it stands, overlays and captions and all, exactly as the web
+   * dialog would have rendered it.
+   */
+  async exportFromDoc(userId: string, projectId: string, req: Request) {
+    try {
+      const body = (await req.json().catch(() => ({}))) as { preset?: string };
+      const project = await getProject(userId, projectId);
+      if (!project) return err("Project not found.", 404);
+      const capped = await renderJobCheck(userId);
+      if (capped) return capped;
+      const over = await quotaCheck(userId, 0, EXPORT_QUOTA_MARGIN);
+      if (over) return over;
+      // The worker owns the size list (it builds the spec), and falls back to
+      // the source-matched original for anything it does not know.
+      const preset = typeof body.preset === "string" ? body.preset : "original";
+      const outName = await exportName(userId, projectId, project.name);
+      const row = await prisma.cutRenderJob.create({
+        data: {
+          userId,
+          projectId,
+          kind: "export",
+          spec: { fromDoc: { preset } } as unknown as Prisma.InputJsonValue,
+          outName,
+        },
+      });
+      wakeRenderWorker();
+      return Response.json({ id: row.id, outName });
+    } catch (e) {
+      return caught(e, "Export failed to start.");
+    }
+  },
+
   async exportStatus(userId: string, jobId: string) {
     const row = await findJob(userId, jobId);
     if (!row) return err("Unknown export.", 404);

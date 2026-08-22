@@ -46,6 +46,9 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "POST", path: "/api/cut-cloud/projects/:id/duplicate", handler: (_r, u, p) => copyJobs.requestDuplicate(u, p.id) },
   { method: "GET", path: "/api/cut-cloud/copy-jobs/:jobId", handler: (_r, u, p) => copyJobs.ownerStatus(u, p.jobId) },
   { method: "GET", path: "/api/cut-cloud/projects/:id/exports", handler: (_r, u, p) => projectsCloud.listExports(u, p.id) },
+  // A render asked for by id alone: the worker builds the spec from the stored
+  // document, for clients with no compositor of their own (the phone).
+  { method: "POST", path: "/api/cut-cloud/projects/:id/export", handler: (r, u, p) => jobsCloud.exportFromDoc(u, p.id, r) },
   { method: "GET", path: "/api/cut-cloud/projects/:id/exports/:file", handler: (r, u, p) => projectsCloud.serveExport(u, p.id, p.file, wantsDownload(r)) },
   { method: "DELETE", path: "/api/cut-cloud/projects/:id/exports/:file", handler: (_r, u, p) => projectsCloud.removeExport(u, p.id, p.file) },
   { method: "GET", path: "/api/cut-cloud/projects/:id/media/:file", handler: (r, u, p) => projectsCloud.serveMedia(u, p.id, p.file, wantsDownload(r)) },

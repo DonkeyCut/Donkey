@@ -47,6 +47,8 @@ Two facts decide whether a tab can carry a render, both probed per export: origi
 
 The worker also takes the renders the editor fires on its own — hover proxies, share cards, streaming ladders. Moving export to the Mac would be a third path and there is no longer much to win from it.
 
+A client with no compositor at all asks by project id instead. The phone sends the project and a size; the worker opens the stored document into the editor store, runs the same payload builder the export dialog runs, paints the overlay stills straight into the render's own scratch dir, and encodes. This is the headless runtime doing what it was built for — canvas, decoders, fonts standing in for the page — so the phone's export is the editor's export, not an approximation of it.
+
 ## Converting footage
 
 A camera writes what it likes. A phone's `.mov` is HEVC, a screen recorder's is ProRes, and a camera file often carries raw PCM sound — formats some browsers have no decoder for. Cut reads media through the browser's own decoders, so a file this browser cannot decode is a file it cannot preview, cut, or render, and the fix is to rewrite it as MP4 with H.264 picture and AAC sound.

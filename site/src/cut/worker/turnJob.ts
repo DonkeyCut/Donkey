@@ -1,12 +1,12 @@
 import type { UIMessage } from "ai";
 import { geminiModelRoles } from "@/lib/inference/gemini-models";
 import { openCloudProject, pushCloudProject } from "../lib/headless/docSession";
-import { CUT_HOSTED_ORIGIN } from "../lib/hosts";
 import { dropPiSession, streamCutChat } from "../lib/pi/cutAgent";
 import { headlessDeps, type HeadlessSession } from "../lib/pi/serverDeps";
 import type { RenderHandle } from "../server/exportPipeline";
 import type { AgentTurnSpec } from "../server/cloud/turns";
 import type { ClaimedJob } from "./db";
+import { runnerSession } from "./session";
 
 // An agent turn, executed where the tab used to be: open the project doc into
 // the editor store, run the production chat loop with the headless deps, push
@@ -15,7 +15,6 @@ import type { ClaimedJob } from "./db";
 // shared secret plus the job's user — so the turn spends that user's credits
 // and writes that user's project, exactly as the page would.
 
-const CLIENT_ID = "donkey-cut-runner";
 
 /** A stored thread as the AI panel keeps it; the runner appends whole
  * messages and touches nothing else in the payload. */
@@ -27,26 +26,6 @@ interface StoredThreadPayload {
   [key: string]: unknown;
 }
 
-function runnerSession(job: ClaimedJob): HeadlessSession {
-  const secret = process.env.CUT_RUNNER_SECRET;
-  if (secret)
-    return {
-      base: CUT_HOSTED_ORIGIN,
-      headers: {
-        "x-donkey-client-id": CLIENT_ID,
-        "x-donkey-runner-secret": secret,
-        "x-donkey-runner-user": job.userId,
-      },
-    };
-  if (process.env.NODE_ENV === "production")
-    throw new Error("CUT_RUNNER_SECRET is not set — the runner cannot call the hosted API.");
-  // A dev worker run by hand against the dev server: the bypass grant, the
-  // same one the eval scripts use.
-  return {
-    base: CUT_HOSTED_ORIGIN,
-    headers: { "x-donkey-client-id": CLIENT_ID, "x-donkey-dev-auth-bypass": "1" },
-  };
-}
 
 /** Record the finished exchange on the project's stored thread: the turn's
  * own messages plus the assistant reply, merged over whatever the thread
