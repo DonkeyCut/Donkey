@@ -35,6 +35,9 @@ import {
   ZOOM_RAMP_MAX,
   zoomRampOf,
   wordAccent,
+  wordDim,
+  wordEffect,
+  wordKnobs,
   WORD_ACCENT_DEFAULT,
   WORD_POP_SCALE,
   WORD_SWELL_MAX,
@@ -43,7 +46,7 @@ import {
   type OverlayAnim,
   type OverlayAnimStyle,
   type OverlayLoopStyle,
-  type WordAccentMode,
+  type WordEffectId,
 } from "@donkeycut/effects-kit";
 import { clipWindow, useEditor, type EditorState } from "@/cut/lib/store";
 import { usePreviewTime } from "@/cut/lib/playhead";
@@ -1618,6 +1621,7 @@ function AnimationSection({
               textColor={isTextOverlay(o) ? o.color : WORD_ACCENT_DEFAULT}
               accentColor={anim.words?.color}
               accentScale={anim.words?.scale}
+              accentDim={anim.words?.dim}
               onOpen={onOpen}
               onClear={() => clear(slot)}
             />
@@ -1628,7 +1632,7 @@ function AnimationSection({
       <AnimSlotSlider overlay={o} slot="out" label="Out duration" />
       <AnimSlotSlider overlay={o} slot="loop" label="Loop speed" />
       <MoveStrengthRow overlay={o} />
-      <WordSizeRow overlay={o} />
+      {anim.words && <WordSettings overlay={o} />}
     </Section>
     </div>
   );
@@ -1678,37 +1682,87 @@ function MoveStrengthRow({ overlay: o }: { overlay: Overlay }) {
   return <MoveStrengthSlider overlay={o} label="Move strength" />;
 }
 
-/** How far the emphasized word swells, in the collapsed section — there only
- * once the words slot is filled. */
-function WordSizeRow({ overlay: o }: { overlay: Overlay }) {
+/** The settings the picked word effect actually has: a swell has a size, a
+ * fade has a level, anything that speaks in color has an accent. A knob the
+ * effect does not use is left out — a slider with nothing to move explains
+ * nothing. With no effect picked the rows sit greyed, so the panel floor
+ * keeps its height while the reader scrolls the grid. */
+function WordSettings({ overlay: o }: { overlay: Overlay }) {
   const ck = useSliderCheckpoint();
   const anim = o.anim ?? {};
   const words = anim.words;
-  if (!words) return null;
-  const write = (v: number) => {
+  const knobs = wordKnobs(wordEffect(words?.style), words);
+  // The sliders check-point on the first frame of a drag and release on
+  // commit; the color field opens its own on pointer-down, so it writes
+  // straight through — borrowing the slider's would leave it open and swallow
+  // every checkpoint after it.
+  const write = (patch: { scale?: number; dim?: number }) => {
+    if (!words) return;
     ck.begin();
-    writeOverlayAnim(o, anim, { words: { ...words, scale: v } });
+    writeOverlayAnim(o, anim, { words: { ...words, ...patch } });
+  };
+  const setColor = (color: string) => {
+    if (!words) return;
+    writeOverlayAnim(o, anim, { words: { ...words, color } });
   };
   return (
-    <Row label="Word size">
-      <ValueSlider
-        label="Word size"
-        sliderClassName="data-horizontal:w-24"
-        valueClassName="w-9 text-muted-foreground"
-        value={wordSwell(words)}
-        min={WORD_SWELL_MIN}
-        max={WORD_SWELL_MAX}
-        step={0.02}
-        snap={[1, WORD_POP_SCALE]}
-        format={(v) => `${v.toFixed(2)}×`}
-        parse={parseSpeedInput}
-        onDraft={write}
-        onCommit={(v) => {
-          write(v);
-          ck.end();
-        }}
-      />
-    </Row>
+    <>
+      {knobs.size && (
+        <Row label="Word size">
+          <ValueSlider
+            label="Word size"
+            sliderClassName="data-horizontal:w-24"
+            valueClassName="w-9 text-muted-foreground"
+            value={wordSwell(words)}
+            min={WORD_SWELL_MIN}
+            max={WORD_SWELL_MAX}
+            step={0.02}
+            snap={[1, WORD_POP_SCALE]}
+            format={(v) => `${v.toFixed(2)}×`}
+            parse={parseSpeedInput}
+            disabled={!words}
+            onDraft={(v) => write({ scale: v })}
+            onCommit={(v) => {
+              write({ scale: v });
+              ck.end();
+            }}
+          />
+        </Row>
+      )}
+      {knobs.dim && (
+        <Row label="Faded to">
+          <ValueSlider
+            label="Faded to"
+            sliderClassName="data-horizontal:w-24"
+            valueClassName="w-9 text-muted-foreground"
+            value={wordDim(words)}
+            min={0}
+            max={1}
+            step={0.01}
+            snap={[wordDim({ style: words?.style })]}
+            format={(v) => `${Math.round(v * 100)}%`}
+            parse={parsePercentInput}
+            disabled={!words}
+            onDraft={(v) => write({ dim: v })}
+            onCommit={(v) => {
+              write({ dim: v });
+              ck.end();
+            }}
+          />
+        </Row>
+      )}
+      {knobs.color && (
+        <Row label="Word color">
+          <ColorField
+            value={wordAccent(words, isTextOverlay(o) ? o.color : WORD_ACCENT_DEFAULT)}
+            label="Word color"
+            onBegin={() => useEditor.getState().pushHistory()}
+            onLive={setColor}
+            onCommit={setColor}
+          />
+        </Row>
+      )}
+    </>
   );
 }
 
@@ -1742,9 +1796,10 @@ function AnimationPanel({ overlay: o, onBack }: { overlay: Overlay; onBack: () =
       const patch: Partial<OverlayAnim> = {
         words: style
           ? {
-              style: style as WordAccentMode,
+              style: style as WordEffectId,
               ...(anim.words?.color ? { color: anim.words.color } : {}),
               ...(anim.words?.scale !== undefined ? { scale: anim.words.scale } : {}),
+              ...(anim.words?.dim !== undefined ? { dim: anim.words.dim } : {}),
             }
           : undefined,
       };
@@ -1861,6 +1916,7 @@ function AnimationPanel({ overlay: o, onBack }: { overlay: Overlay; onBack: () =
           textColor={isTextOverlay(o) ? o.color : WORD_ACCENT_DEFAULT}
           accentColor={anim.words?.color}
           accentScale={anim.words?.scale}
+          accentDim={anim.words?.dim}
           onPick={pick}
         />
       </ScrollArea>
@@ -1887,49 +1943,7 @@ function AnimationToolbar({ overlay: o, slot }: { overlay: Overlay; slot: AnimSl
 
   if (slot === "move") return bar(<MoveStrengthSlider overlay={o} label="Strength" />);
 
-  if (slot === "words") {
-    // The words tab's two settings: how far the word swells while it is said,
-    // and the accent it wears.
-    const words = anim.words;
-    const size = (v: number) => {
-      if (!words) return;
-      ck.begin();
-      writeOverlayAnim(o, anim, { words: { ...words, scale: v } });
-    };
-    return bar(
-      <>
-        <Row label="Word size">
-          <ValueSlider
-            label="Word size"
-            sliderClassName="data-horizontal:w-24"
-            valueClassName="w-9 text-muted-foreground"
-            value={wordSwell(words)}
-            min={WORD_SWELL_MIN}
-            max={WORD_SWELL_MAX}
-            step={0.02}
-            snap={[1, WORD_POP_SCALE]}
-            format={(v) => `${v.toFixed(2)}×`}
-            parse={parseSpeedInput}
-            disabled={!words}
-            onDraft={size}
-            onCommit={(v) => {
-              size(v);
-              ck.end();
-            }}
-          />
-        </Row>
-        <Row label="Word color">
-          <ColorField
-            value={wordAccent(words, isTextOverlay(o) ? o.color : WORD_ACCENT_DEFAULT)}
-            label="Word color"
-            onBegin={() => useEditor.getState().pushHistory()}
-            onLive={(c) => words && writeOverlayAnim(o, anim, { words: { ...words, color: c } })}
-            onCommit={(c) => words && writeOverlayAnim(o, anim, { words: { ...words, color: c } })}
-          />
-        </Row>
-      </>
-    );
-  }
+  if (slot === "words") return bar(<WordSettings overlay={o} />);
 
   if (slot === "loop") {
     const write = (speed: number) => {

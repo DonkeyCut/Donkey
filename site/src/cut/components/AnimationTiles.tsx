@@ -16,17 +16,18 @@ import {
   OVERLAY_ANIM_STYLE_LABELS,
   OVERLAY_LOOP_STYLE_IDS,
   OVERLAY_LOOP_STYLE_LABELS,
-  contrastText,
-  wordAccent,
+  wordDrawsAt,
+  wordEffectIdsIn,
   WORD_ACCENT_DEFAULT,
-  WORD_ACCENT_LABELS,
-  WORD_ACCENT_MODE_IDS,
+  WORD_EFFECT_LABELS,
+  WORD_FAMILIES,
   type OverlayAnimStyle,
   type OverlayLoopStyle,
-  type WordAccentMode,
+  type OverlayWords,
 } from "@donkeycut/effects-kit";
 import { Tile } from "@/cut/components/PanelTile";
-import { wordAccentCss } from "@/cut/lib/textRender";
+import { SectionTitle } from "@/cut/components/SectionTitle";
+import { wordDrawCss } from "@/cut/lib/textRender";
 import { fontStack } from "@/cut/lib/types";
 
 /**
@@ -98,7 +99,7 @@ const MOVE_DEMO_SECONDS = 2.4;
 
 const labelOf = (slot: Slot, style: string) =>
   slot === "words"
-    ? (WORD_ACCENT_LABELS[style as WordAccentMode] ?? style)
+    ? (WORD_EFFECT_LABELS[style] ?? style)
     : slot === "move"
       ? (MOTION.holds[style]?.label ?? style)
       : slot === "loop"
@@ -291,73 +292,80 @@ function LiveName({
   );
 }
 
-/** One turn of a word-emphasis demo, and the share of it the accent holds —
- * long enough to read the treatment arriving and leaving again. */
-const WORD_DEMO_SECONDS = 1.7;
-const WORD_DEMO_ON = 0.5;
+/** One turn of a word-effect demo, and the beat after it: long enough to read
+ * an emphasis travelling off the line again and a build finishing and holding
+ * what it assembled. */
+const WORD_DEMO_SECONDS = 1.5;
+const WORD_DEMO_HOLD = 0.7;
 /** The accent reads on a light panel the way it reads over footage: with the
  * same shadow the caption previews give a bright caption color. */
 const WORD_DEMO_SHADOW = "0 0 2px rgba(0, 0, 0, 0.6)";
 
-/** A word-emphasis name: the label sits plain, then takes the accent the way
- * it will when that word is said. Written straight to the element, like every
- * other demo here. */
+/** A word-effect name, played by the engine on the name's own words — the
+ * same `wordDrawsAt` the preview and the burn-in read, so a tile can't promise
+ * a treatment the export won't draw. */
 function WordName({
   style,
   textColor,
   accentColor,
   scale,
+  dim,
   index = 0,
 }: {
   style: string;
-  /** The element's own text color — what a swell keeps. */
+  /** The element's own text color — where an effect that speaks in color
+   * starts from, and what one that speaks in size keeps. */
   textColor: string;
   /** The accent it was given, if any. */
   accentColor?: string;
   /** The element's own swell, so a tile shows the size it will apply. */
   scale?: number;
+  /** Its faded level, so a tile shows the transparency it will apply. */
+  dim?: number;
   index?: number;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
-  const phase = index * PHASE_STEP * WORD_DEMO_SECONDS;
+  const label = labelOf("words", style);
+  const cycle = WORD_DEMO_SECONDS + WORD_DEMO_HOLD;
+  const phase = index * PHASE_STEP * cycle;
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const mode = style as WordAccentMode;
-    const color = wordAccent({ style: mode, color: accentColor }, textColor);
-    const css = wordAccentCss({
-      mode,
-      color,
-      text: contrastText(color),
-      scale,
-      // The tile's name sits on one line of its own; the stage gives it room.
-      lineHeight: 1,
-    });
-    const props = el.style as unknown as Record<string, string>;
-    const rest = () => {
-      for (const k of Object.keys(css)) props[k] = "";
-      el.style.textShadow = "";
+    const words: OverlayWords = {
+      style,
+      ...(accentColor ? { color: accentColor } : {}),
+      ...(scale !== undefined ? { scale } : {}),
+      ...(dim !== undefined ? { dim } : {}),
     };
-    const accent = () => {
-      Object.assign(el.style, css);
-      if (mode !== "box") el.style.textShadow = WORD_DEMO_SHADOW;
+    const spans = Array.from(el.querySelectorAll<HTMLElement>("[data-word]"));
+    const rest = () => spans.forEach((sp) => (sp.style.cssText = "display:inline-block"));
+    const paint = (t: number) => {
+      const draws = wordDrawsAt(label, words, textColor, WORD_DEMO_SECONDS, t);
+      spans.forEach((sp, i) => {
+        const d = draws[i];
+        if (!d) return;
+        const css = wordDrawCss(d, 1) as Record<string, string | number>;
+        // A word still in the element's own color keeps the panel's foreground
+        // instead, which is what makes the name readable on a light card; one
+        // that has taken the accent wears it, with the shadow that carries a
+        // bright accent over any background.
+        const colored = d.color.toLowerCase() !== textColor.toLowerCase();
+        if (!colored) delete css.color;
+        sp.style.cssText = "display:inline-block";
+        Object.assign(sp.style, css);
+        if (colored && d.mark !== "box") sp.style.textShadow = WORD_DEMO_SHADOW;
+      });
     };
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
-      accent();
+      paint(WORD_DEMO_SECONDS);
       return rest;
     }
     let start = 0;
     let raf = 0;
-    let on: boolean | null = null;
     const tick = (now: number) => {
       if (!start) start = now;
-      const p = (((now - start) / 1000 + phase) % WORD_DEMO_SECONDS) / WORD_DEMO_SECONDS;
-      const next = p < WORD_DEMO_ON;
-      if (next !== on) {
-        on = next;
-        if (next) accent();
-        else rest();
-      }
+      const local = (((now - start) / 1000 + phase) % cycle + cycle) % cycle;
+      paint(Math.min(local, WORD_DEMO_SECONDS));
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -365,10 +373,17 @@ function WordName({
       cancelAnimationFrame(raf);
       rest();
     };
-  }, [style, textColor, accentColor, scale, phase]);
+  }, [style, label, textColor, accentColor, scale, dim, cycle, phase]);
   return (
     <span ref={ref} className={`${WORD} text-foreground`} style={wordStyle()}>
-      {labelOf("words", style)}
+      {label.split(" ").map((w, i) => (
+        <span key={i}>
+          {i > 0 && " "}
+          <span data-word style={{ display: "inline-block" }}>
+            {w}
+          </span>
+        </span>
+      ))}
     </span>
   );
 }
@@ -380,6 +395,7 @@ function AnimName({
   textColor,
   accentColor,
   accentScale,
+  accentDim,
   ...rest
 }: {
   slot: Slot;
@@ -395,6 +411,8 @@ function AnimName({
   accentColor?: string;
   /** Its swell, so the tiles show the size the pick will apply. */
   accentScale?: number;
+  /** Its faded level, so the tiles show the transparency the pick will apply. */
+  accentDim?: number;
 }) {
   if (!playing) return <FrozenName slot={rest.slot} style={rest.style} />;
   if (rest.slot === "words")
@@ -404,6 +422,7 @@ function AnimName({
         textColor={textColor ?? WORD_ACCENT_DEFAULT}
         accentColor={accentColor}
         scale={accentScale}
+        dim={accentDim}
         index={rest.index}
       />
     );
@@ -437,6 +456,7 @@ function AnimTile({
   textColor,
   accentColor,
   accentScale,
+  accentDim,
   onPick,
 }: {
   slot: Slot;
@@ -453,6 +473,8 @@ function AnimTile({
   accentColor?: string;
   /** Its swell, so a words tile shows the size the pick will apply. */
   accentScale?: number;
+  /** Its faded level, so a words tile shows the transparency it will apply. */
+  accentDim?: number;
   onPick: () => void;
 }) {
   const ref = useRef<HTMLButtonElement>(null);
@@ -476,6 +498,7 @@ function AnimTile({
           textColor={textColor}
           accentColor={accentColor}
           accentScale={accentScale}
+          accentDim={accentDim}
           playing={onScreen}
         />
       </span>
@@ -498,6 +521,7 @@ export function AnimationCard({
   textColor,
   accentColor,
   accentScale,
+  accentDim,
   onOpen,
   onClear,
 }: {
@@ -514,6 +538,8 @@ export function AnimationCard({
   accentColor?: string;
   /** Its swell, so the card shows the size the element is wearing. */
   accentScale?: number;
+  /** Its faded level, so the card shows the transparency it is wearing. */
+  accentDim?: number;
   onOpen: () => void;
   onClear: () => void;
 }) {
@@ -539,6 +565,7 @@ export function AnimationCard({
             textColor={textColor}
             accentColor={accentColor}
             accentScale={accentScale}
+            accentDim={accentDim}
             playing={onScreen}
           />
         </span>
@@ -569,6 +596,7 @@ export function AnimationTiles({
   textColor,
   accentColor,
   accentScale,
+  accentDim,
   onPick,
 }: {
   slot: Slot;
@@ -590,42 +618,68 @@ export function AnimationTiles({
   accentColor?: string;
   /** Its swell, so the tiles show the size a pick will apply. */
   accentScale?: number;
+  /** Its faded level, so the tiles show the transparency a pick will apply. */
+  accentDim?: number;
   onPick: (style: string | null) => void;
 }) {
+  const tile = (id: string, i: number) => (
+    <AnimTile
+      key={id}
+      slot={slot}
+      style={id}
+      isText={isText}
+      seconds={seconds}
+      speed={speed}
+      index={i}
+      textColor={textColor}
+      accentColor={accentColor}
+      accentScale={accentScale}
+      accentDim={accentDim}
+      selected={value === id}
+      onPick={() => onPick(id)}
+    />
+  );
+  const none = (
+    <Tile selected={!value && !custom} onClick={() => onPick(null)} title="None" className="p-1">
+      <span className={STAGE}>
+        <span className={`${WORD} text-muted-foreground/70`} style={wordStyle()}>
+          None
+        </span>
+      </span>
+    </Tile>
+  );
+
+  // The words grid runs long enough that one flat list stops reading as a
+  // choice: the effects fall into two kinds — a treatment that travels along
+  // the line, and a line that assembles itself — so each gets its own shelf.
+  if (slot === "words") {
+    let n = 0;
+    return (
+      <div className="flex flex-col gap-2">
+        <div className="grid grid-cols-2 gap-[9px]">{none}</div>
+        {WORD_FAMILIES.map((f) => (
+          <div key={f.id} className="flex flex-col gap-1.5">
+            <SectionTitle>{f.label}</SectionTitle>
+            <div className="grid grid-cols-2 gap-[9px]">
+              {wordEffectIdsIn(f.id).map((id) => tile(id, n++))}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   const ids: string[] =
-    slot === "words"
-      ? WORD_ACCENT_MODE_IDS
-      : slot === "move"
-        ? HOLD_IDS
-        : slot === "loop"
-          ? OVERLAY_LOOP_STYLE_IDS
-          : OVERLAY_ANIM_STYLE_IDS.filter((s) => s !== "typewriter" || isText);
+    slot === "move"
+      ? HOLD_IDS
+      : slot === "loop"
+        ? OVERLAY_LOOP_STYLE_IDS
+        : OVERLAY_ANIM_STYLE_IDS.filter((s) => s !== "typewriter" || isText);
 
   return (
     <div className="grid grid-cols-2 gap-[9px]">
-      <Tile selected={!value && !custom} onClick={() => onPick(null)} title="None" className="p-1">
-        <span className={STAGE}>
-          <span className={`${WORD} text-muted-foreground/70`} style={wordStyle()}>
-            None
-          </span>
-        </span>
-      </Tile>
-      {ids.map((id, i) => (
-        <AnimTile
-          key={id}
-          slot={slot}
-          style={id}
-          isText={isText}
-          seconds={seconds}
-          speed={speed}
-          index={i}
-          textColor={textColor}
-          accentColor={accentColor}
-          accentScale={accentScale}
-          selected={value === id}
-          onPick={() => onPick(id)}
-        />
-      ))}
+      {none}
+      {ids.map(tile)}
     </div>
   );
 }
