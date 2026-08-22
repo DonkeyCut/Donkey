@@ -79,10 +79,11 @@ import {
   makeStillFrame,
   renderAudioSpanWav,
   sampleWatchFrames,
+  scanSourceSpeech,
 } from "./media";
 import { convertAssetToMp4 } from "./mediaConvert";
 import { isLottieAsset } from "./lottieAssets";
-import { BREATH, REACH, refineEdge, type SilenceSpan } from "./cutRefine";
+import { AIR, MIN_AIR, placeEdge, REACH, settleJoint, type Pace, type PlacedEdge } from "./cutRefine";
 import { requestSidePanel } from "./panelRequest";
 import { blobToInlineAudio, refToInlineAudio, visualRefs, type InlineImage } from "./refMedia";
 import { characterPrompt, stockAspectDims, stockTitle } from "./stock";
@@ -1218,58 +1219,76 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (ids.length === 0)
         throw new ToolError("clip_ids is required — the recut clips whose edges are speech cuts.");
       const chosen = ids.map((id) => requireItem(s.clips, id, "video clip"));
+      const pace: Pace =
+        input.pace === "fast" || input.pace === "relaxed" ? input.pace : "natural";
 
       // Every trim is planned before anything is written, so the re-lay below
-      // can preserve the spacing the cut already has.
-      const plans = new Map<string, { in: number; out: number }>();
+      // can preserve the spacing the cut already has. A plan carries the word
+      // boundaries its edges were placed against: repairing a joint has to
+      // know where the words are too, or the repair clips one.
+      interface Plan { in: number; out: number; inBound: number; outBound: number }
+      const plans = new Map<string, Plan>();
       const flags = new Map<string, string[]>();
       const flag = (id: string, note: string) =>
         flags.set(id, [...(flags.get(id) ?? []), note]);
-      await Promise.all(
-        chosen.map(async (clip) => {
+      await eachScanned(chosen, async (clip) => {
           const asset = s.assets.find((a) => a.id === clip.assetId);
           if (!asset || asset.type === "image" || !(asset.duration > 0)) {
             flag(clip.id, "no audio-bearing source — skipped");
             return;
           }
-          // One scan spanning both edges when the clip is short, else one
-          // window around each. Fine pauses matter here, so the scan listens
-          // for stretches down to a single breath.
-          const win = REACH + 0.6;
-          const ranges: [number, number][] =
-            clip.out - clip.in <= 2 * win
-              ? [[clip.in - win, clip.out + win]]
-              : [
-                  [clip.in - win, clip.in + win],
-                  [clip.out - win, clip.out + win],
-                ];
-          const spans: SilenceSpan[] = (
-            await Promise.all(
-              ranges.map(([a, b]) =>
-                fetchSilences(projectId, asset, {
-                  from: clamp(a, 0, asset.duration),
-                  to: clamp(b, 0, asset.duration),
-                  thresholdDb: -30,
-                  minSilence: BREATH,
-                })
-              )
+          // The scan needs the reach an edge may travel plus enough room
+          // around it to measure the recording's own levels. One window
+          // spanning both edges when the clip is short, else one per edge.
+          const win = REACH + 1;
+          const short = clip.out - clip.in <= 2 * win;
+          const ranges: [number, number][] = short
+            ? [[clip.in - win, clip.out + win]]
+            : [
+                [clip.in - win, clip.in + win],
+                [clip.out - win, clip.out + win],
+              ];
+          const scans = await Promise.all(
+            ranges.map(([a, b]) =>
+              fetchSpeech(asset, clamp(a, 0, asset.duration), clamp(b, 0, asset.duration))
             )
-          ).flat();
-          const inEdge = refineEdge(spans, clip.in, "in");
-          const outEdge = refineEdge(spans, clip.out, "out");
-          if (!inEdge.pause)
-            flag(clip.id, "no pause within reach of the in edge — speech runs continuously; left alone");
-          if (!outEdge.pause)
-            flag(clip.id, "no pause within reach of the out edge — speech runs continuously; left alone");
+          ).catch((e: unknown) => {
+            flag(clip.id, e instanceof Error ? `${e.message} — left as cut` : "could not read the audio — left as cut");
+            return null;
+          });
+          if (!scans) return;
+          const inScan = scans[0];
+          const outScan = short ? scans[0] : scans[1];
+          if (inScan.segments.length === 0 && outScan.segments.length === 0) {
+            flag(clip.id, "no speech around either edge — left as cut");
+            return;
+          }
+          if (!inScan.separated || !outScan.separated)
+            flag(clip.id, "room tone sits close to the voice here — placed on the best read of it");
+          const inEdge = placeEdge(inScan.segments, clip.in, "in", pace, inScan);
+          const outEdge = placeEdge(outScan.segments, clip.out, "out", pace, outScan);
+          if (!inEdge.placed)
+            flag(clip.id, "no word within reach of the in edge — left alone");
+          if (!outEdge.placed)
+            flag(clip.id, "no word within reach of the out edge — left alone");
           const nextIn = clamp(inEdge.t, 0, asset.duration);
           const nextOut = clamp(outEdge.t, 0, asset.duration);
-          if (nextOut - nextIn >= 0.15) plans.set(clip.id, { in: nextIn, out: nextOut });
+          if (nextOut - nextIn >= 0.15)
+            plans.set(clip.id, {
+              in: nextIn,
+              out: nextOut,
+              inBound: clamp(inEdge.bound, 0, asset.duration),
+              outBound: clamp(outEdge.bound, 0, asset.duration),
+            });
           else flag(clip.id, "refining would collapse the clip — left as cut");
-        })
-      );
+      });
 
       // Two sides of one removed stretch never cross back into each other's
-      // material, so no word plays twice across a joint.
+      // material, so no word plays twice across a joint. Where the pace would
+      // push them past each other the pause between the words was shorter than
+      // the air both sides wanted, so both give ground and the joint sits
+      // inside that pause — reverting to the cut's own numbers is what put an
+      // edge back on top of a word.
       const spd = (c: VideoClip) => (c.speed && c.speed > 0 ? c.speed : 1);
       const rows = new Map<number, VideoClip[]>();
       for (const c of s.clips) rows.set(c.track, [...(rows.get(c.track) ?? []), c]);
@@ -1281,11 +1300,21 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           if (a.assetId !== b.assetId || a.out > b.in + 1e-3) continue;
           const pa = plans.get(a.id);
           const pb = plans.get(b.id);
-          if ((pa?.out ?? a.out) <= (pb?.in ?? b.in) + 1e-6) continue;
-          if (pa) pa.out = a.out;
-          if (pb) pb.in = b.in;
+          const left: PlacedEdge = { t: pa?.out ?? a.out, placed: true, bound: pa?.outBound ?? a.out };
+          const right: PlacedEdge = { t: pb?.in ?? b.in, placed: true, bound: pb?.inBound ?? b.in };
+          if (left.t <= right.t + 1e-6) continue;
+          const joint = settleJoint(left, right);
+          if (joint === null) {
+            if (pa) pa.out = a.out;
+            if (pb) pb.in = b.in;
+            for (const c of [a, b])
+              if (plans.has(c.id)) flag(c.id, "speech runs across this joint — that edge left as cut");
+            continue;
+          }
+          if (pa) pa.out = joint;
+          if (pb) pb.in = joint;
           for (const c of [a, b])
-            if (plans.has(c.id)) flag(c.id, "its joint's edges would cross the removed stretch — that edge left as cut");
+            if (plans.has(c.id)) flag(c.id, "the pause at this joint was short — the two edges meet inside it");
         }
       }
 
@@ -1326,6 +1355,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       }
 
       return {
+        pace,
         refined: chosen.map((clip) => {
           const plan = plans.get(clip.id);
           const notes = flags.get(clip.id);
@@ -1341,10 +1371,10 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
               ? { notes }
               : plan
                 ? {}
-                : { notes: ["edges already sit in their pauses"] }),
+                : { notes: ["edges already sit where the words leave them"] }),
           };
         }),
-        note: `Each moved edge sits ~${BREATH}s inside a real pause; clip spacing is preserved. Listen at any flagged edge.`,
+        note: `Every moved edge is measured from the word itself: ~${AIR[pace].out}s after the last one finishes, ~${AIR[pace].in}s before the next one starts, never under ${MIN_AIR.out}s/${MIN_AIR.in}s. Clip spacing is preserved. Listen at any flagged edge.`,
         ...tracksAfter(),
       };
   },
@@ -3599,6 +3629,30 @@ function resolveWatchRange(
   if (to !== undefined && to <= from)
     throw new ToolError("from/to describe an empty range of the source.");
   return { projectId, asset, clip, speed, from, to };
+}
+
+/** Scans, a few clips at a time. Each one opens a decoder over its own span of
+ * the source, and a recut hands this tool every clip it made. */
+async function eachScanned<T>(items: T[], run: (item: T) => Promise<void>) {
+  const width = 3;
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(width, items.length) }, async () => {
+      while (next < items.length) await run(items[next++]);
+    })
+  );
+}
+
+/** Where the words are in a source range, in source seconds. One reader for
+ * every residency: the page decodes its own media whether the engine or the
+ * cloud is serving it, and the headless runner installs the same decoders.
+ * This is what refine_speech_cuts places its edges against — a fixed dB
+ * threshold cannot answer it, because a quiet room and a loud one disagree
+ * about what silence is and a cut placed on the wrong answer lands in a word. */
+async function fetchSpeech(asset: MediaAsset, from: number, to: number) {
+  return scanSourceSpeech(asset.url, { from, to }).catch((e) => {
+    throw new ToolError(e instanceof Error ? e.message : "Could not read the audio.");
+  });
 }
 
 /** Silent stretches of a source range, in source seconds — the engine's

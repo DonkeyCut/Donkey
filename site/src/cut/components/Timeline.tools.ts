@@ -63,13 +63,19 @@ export const TIMELINE_TOOLS = [
   {
     name: "refine_speech_cuts",
     description:
-      "True up speech-cut edges mechanically: re-scans the audio around each clip's in/out and re-trims so every edge sits a ~0.25s breath inside a real pause — an edge that clips a word moves outward to the next pause, stray dead air trims off. Clip spacing survives: a tightened clip closes up, butted joints stay butted, and deliberate gaps keep their width. An edge with no pause within ~2s stays put and comes back flagged. Run it on every clip you recut for speech, after cutting and before listening; leave out clips whose edge you placed mid-speech on purpose.",
+      "True up speech-cut edges against the words themselves: re-reads the audio around each clip's in/out, measures that recording's own room tone and voice level, finds where the words actually start and finish — tails and soft attacks included — and re-trims so every edge sits a measured beat clear of one. An edge inside a word moves outward until the word is whole; stray dead air trims off. THIS IS WHERE PACE IS SET: `pace` fast|natural|relaxed chooses how much air is left (~0.14s/0.26s/0.45s after the last word, ~0.09s/0.16s/0.28s before the next), and even fast never cuts closer than 0.08s to a word. Cutting closer than the pace is not faster, it is clipped. Clip spacing survives: a tightened clip closes up, butted joints stay butted, deliberate gaps keep their width, and where a pause is too short for both sides' air the two edges meet inside it. An edge with no word within ~2s stays put and comes back flagged. Run it on every clip you recut for speech, after cutting and before listening; leave out clips whose edge you placed mid-speech on purpose.",
     inputSchema: obj(
       {
         clip_ids: {
           type: "array",
           items: { type: "string" },
           description: "Video clip ids whose in/out edges are speech cuts",
+        },
+        pace: {
+          type: "string",
+          enum: ["fast", "natural", "relaxed"],
+          description:
+            "How much air each edge keeps around the words — fast for a punchy recut, relaxed to let it breathe. Default natural.",
         },
       },
       ["clip_ids"]

@@ -1,6 +1,6 @@
 "use client";
 
-import { scanSilence, type PcmChunk } from "./audioScan";
+import { scanSilence, scanSpeech, type PcmChunk, type SpeechScan } from "./audioScan";
 import { apiFetch, apiJson, getBackend, type CutBackend } from "./backend";
 import { cloudBackend } from "./backend/cloud";
 import { pollCloudJob } from "./cloudJob";
@@ -1054,6 +1054,31 @@ export async function captureFreezeFrame(
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+/** Decoded audio for a span of a source, chunk by chunk, so scanning a long
+ * file costs one decoded chunk at a time rather than a decoded copy of the
+ * whole thing. Throws when the file carries no audio at all — whether it does
+ * is asked of the file, not of the span, so a range past the end of a
+ * perfectly good recording is an empty answer instead of an error. */
+async function* sourcePcm(
+  sourceUrl: string,
+  from: number,
+  to: number | undefined
+): AsyncGenerator<PcmChunk> {
+  const input = openMedia(sourceUrl);
+  const track = await audioTrackOf(input).finally(() => input.dispose());
+  if (!track) throw new Error("This file has no audio track.");
+  if (to !== undefined && !(to > from)) return;
+  for await (const { buffer, timestamp } of audioChunks(sourceUrl, from, to)) {
+    yield {
+      channels: Array.from({ length: buffer.numberOfChannels }, (_, c) =>
+        buffer.getChannelData(c)
+      ),
+      timestamp,
+      sampleRate: buffer.sampleRate,
+    };
+  }
+}
+
 /** Cloud twin of the engine's silence route (ffmpeg silencedetect): read the
  * source's audio and scan 20ms RMS windows against the same dB threshold and
  * minimum-duration rules. Times are absolute source seconds. */
@@ -1062,30 +1087,18 @@ export async function detectSilenceClientSide(
   opts: { from: number; to?: number; thresholdDb: number; minSilence: number }
 ): Promise<{ start: number; end: number; duration: number }[]> {
   const from = Math.max(0, opts.from);
-  const to = opts.to;
-  // Whether the file has sound is asked of the file, not of the span: a range
-  // past the end of a perfectly good recording is an empty answer, not a file
-  // with no audio in it.
-  const input = openMedia(sourceUrl);
-  const track = await audioTrackOf(input).finally(() => input.dispose());
-  if (!track) throw new Error("This file has no audio track.");
-  if (to !== undefined && !(to > from)) return [];
+  return scanSilence(sourcePcm(sourceUrl, from, opts.to), { ...opts, from });
+}
 
-  // The audio is folded into windows as it arrives, so scanning a long file
-  // costs one decoded chunk at a time rather than a decoded copy of the whole
-  // thing.
-  async function* pcm(): AsyncGenerator<PcmChunk> {
-    for await (const { buffer, timestamp } of audioChunks(sourceUrl, from, to)) {
-      yield {
-        channels: Array.from({ length: buffer.numberOfChannels }, (_, c) =>
-          buffer.getChannelData(c)
-        ),
-        timestamp,
-        sampleRate: buffer.sampleRate,
-      };
-    }
-  }
-  return scanSilence(pcm(), { ...opts, from });
+/** Where the words are in a span of a source. One implementation for every
+ * residency: the page reads its own media this way in local and cloud mode
+ * alike, and the headless runner installs the same decoders. */
+export async function scanSourceSpeech(
+  sourceUrl: string,
+  opts: { from: number; to?: number }
+): Promise<SpeechScan> {
+  const from = Math.max(0, opts.from);
+  return scanSpeech(sourcePcm(sourceUrl, from, opts.to), { ...opts, from });
 }
 
 /** Cloud twin of the engine's audio-extract route: render a span of the
