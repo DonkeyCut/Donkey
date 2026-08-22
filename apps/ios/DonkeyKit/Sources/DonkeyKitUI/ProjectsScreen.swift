@@ -55,7 +55,7 @@ struct ProjectCard: View {
     var body: some View {
         Group {
             switch project.export {
-            case .ready(let renderedOn):
+            case .ready(let renderedOn, _):
                 Button(action: onPlay) {
                     MediaTile(ratio: 9 / 13) {
                         if let thumbnail = project.thumbnail,
@@ -279,10 +279,14 @@ struct ProjectPlayerView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                Text("The video downloads to this device and lands in your photo library.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+                Text(
+                    playingPreview
+                        ? "This project has no export yet, so what saves is the preview the editor renders for itself. Export it in Donkey Cut for a full-quality file."
+                        : "The video downloads to this device and lands in your photo library."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
             }
             .padding(20)
             .navigationTitle("Export")
@@ -326,7 +330,14 @@ struct ProjectPlayerView: View {
     }
 
     private var choices: [ExportChoice] {
-        ExportChoice.all(for: source)
+        ExportChoice.all(for: source, isPreview: playingPreview)
+    }
+
+    /// Whether what is streaming is the editor's own composited proxy rather
+    /// than a render someone exported.
+    private var playingPreview: Bool {
+        if case .ready(_, let isPreview) = project.export { return isPreview }
+        return false
     }
 
     private var working: Bool {
@@ -474,9 +485,20 @@ struct ExportChoice: Identifiable, Equatable, Sendable {
         preset: nil
     )
 
+    /// What stands in for the original when the project has never been
+    /// exported: the proxy, named as one.
+    static let preview = ExportChoice(
+        id: "original",
+        label: "Preview · not an export",
+        note: "what the editor's grid plays",
+        shortSide: nil,
+        preset: nil
+    )
+
     /// Original first, then every size smaller than the render — the same
     /// order the editor's dialog lists, largest to smallest.
-    static func all(for source: SourceVideo?) -> [ExportChoice] {
+    static func all(for source: SourceVideo?, isPreview: Bool = false) -> [ExportChoice] {
+        let full = isPreview ? preview : original
         let steps = [
             ExportChoice(
                 id: "hd",
@@ -493,8 +515,8 @@ struct ExportChoice: Identifiable, Equatable, Sendable {
                 preset: AVAssetExportPreset1280x720
             ),
         ]
-        guard let source else { return [original] }
-        return [original] + steps.filter { step in
+        guard let source else { return [full] }
+        return [full] + steps.filter { step in
             guard let side = step.shortSide else { return false }
             return source.shortSide > side
         }

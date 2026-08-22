@@ -2,7 +2,10 @@ import Foundation
 
 nonisolated public enum ProjectExport: Equatable, Sendable {
     case none
-    case ready(renderedOn: String)
+    /// Something is there to play. `isPreview` marks the composited proxy the
+    /// editor renders for its own grid: it plays, but it is not the render an
+    /// export produces, so anything that hands the file to the user says so.
+    case ready(renderedOn: String, isPreview: Bool)
 }
 
 /// A cloud project as the phone shows it: name, duration, a cached thumbnail
@@ -94,9 +97,15 @@ public final class ProjectsModel {
     private func project(for summary: RemoteProject, latest: RemoteExport?, thumbnail: URL?) -> Project {
         let export: ProjectExport =
             if let latest {
-                .ready(renderedOn: latest.modifiedAt.formatted(date: .abbreviated, time: .omitted))
+                .ready(
+                    renderedOn: latest.modifiedAt.formatted(date: .abbreviated, time: .omitted),
+                    isPreview: false
+                )
             } else if summary.hasPreview {
-                .ready(renderedOn: summary.updatedAt.formatted(date: .abbreviated, time: .omitted))
+                .ready(
+                    renderedOn: summary.updatedAt.formatted(date: .abbreviated, time: .omitted),
+                    isPreview: true
+                )
             } else {
                 .none
             }
