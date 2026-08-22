@@ -11,7 +11,7 @@ import {
   useSkim,
 } from "@/cut/lib/playhead";
 import { getClipSpans, projectDuration, useEditor } from "@/cut/lib/store";
-import { copyStageFrame, stageHasFrame } from "@/cut/lib/stageFrame";
+import { copyStageFrame, primeStageFrame, stageHasFrame } from "@/cut/lib/stageFrame";
 import {
   capturePoster,
   capturePosterWhenReady,
@@ -335,6 +335,9 @@ export function Preview() {
     if (s.playing) s.setPlaying(false);
     setCopyState("idle");
     setFrameMenu({ x: e.clientX, y: e.clientY });
+    // The picture is drawn now, while the pointer travels to the item: the
+    // decode it costs is what stood between the click and "Copied".
+    primeStageFrame();
   };
 
   useEffect(() => {

@@ -354,11 +354,14 @@ export interface EditorState {
    * to that gain while it plays; `opts.lane` picks the audio track it lands
    * on (default: the first one). */
   addAudioFromAsset: (assetId: string, start?: number, opts?: { duck?: number; lane?: number }) => void;
-  /** The panel “+” add: the asset lands at the preview time (the skimmer while
-   * one is live, the playhead otherwise), on the lowest video track or audio
-   * lane with room for its whole length there. When every existing row is
-   * occupied at that moment it opens a new row above. */
-  addAssetAtPlayhead: (assetId: string) => void;
+  /** The panel “+” add, and every paste: the asset lands at `at` — by default
+   * the preview time (the skimmer while one is live, the playhead otherwise) —
+   * on the lowest video track or audio lane with room for its whole length
+   * there. When every existing row is occupied at that moment it opens a new
+   * row above. A paste passes the time of the keystroke, so the still lands
+   * where the indicator was rather than wherever it drifted while the import
+   * ran. */
+  addAssetAtPlayhead: (assetId: string, at?: number) => void;
   /** Set (or clear) the persisted brief-to-video run. Replaces the object by
    * reference so autosave detects the change. */
   setGenvideo: (project: VideoProject | undefined) => void;
@@ -2201,10 +2204,10 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       }));
     },
 
-    addAssetAtPlayhead: (assetId) => {
+    addAssetAtPlayhead: (assetId, at) => {
       const asset = get().assets.find((a) => a.id === assetId);
       if (!asset) return;
-      const t = Math.max(0, previewAt());
+      const t = Math.max(0, at ?? previewAt());
       // A row fits when `nextFreeStart` keeps the clip at the preview time
       // itself; the scan climbs until one does. A brand-new row always fits,
       // so the clip lands under the indicator no matter how full the stack is.

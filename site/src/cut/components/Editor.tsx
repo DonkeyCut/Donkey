@@ -23,7 +23,7 @@ import {
 import { fileZoneAt, hasRefDrag, selectionRefTokens } from "@/cut/lib/assetRef";
 import { startUpload } from "@/cut/lib/importQueue";
 import { enrichAsset, importFileToProject, prepareImport } from "@/cut/lib/media";
-import { clearCopiedFrame, hasCopiedFrame, pasteCopiedFrame } from "@/cut/lib/stageFrame";
+import { clearCopiedFrame, copiedFrameFile, hasCopiedFrame } from "@/cut/lib/stageFrame";
 // Side-effect import: registers the brief-to-video resume subscription, so a
 // persisted run resumes on project load even when the AI panel never mounts.
 import "@/cut/lib/genScene";
@@ -648,7 +648,18 @@ export function Editor({
   const importFiles = useCallback(
     async (
       files: FileList | File[],
-      opts?: { at?: number; origin?: MediaAsset["origin"]; mediaOnly?: boolean }
+      opts?: {
+        at?: number;
+        origin?: MediaAsset["origin"];
+        mediaOnly?: boolean;
+        /** Display name for the asset, when the file's own name is a storage
+         * detail (a copied frame). */
+        name?: string;
+        /** Land at `at` itself on the first row with room, opening a new row
+         * when every one of them is busy there — what a paste means by "here".
+         * Without it the file takes track 0's next free slot. */
+        atFirstFit?: boolean;
+      }
     ) => {
       const list = Array.from(files);
       setImporting((n) => n + list.length);
@@ -666,12 +677,21 @@ export function Editor({
           // Recordings are created media: tag them so they land on the timeline
           // but never in the Media panel (reserved for user imports).
           if (opts?.origin) asset.origin = opts.origin;
+          if (opts?.name) asset.name = opts.name;
           const s = useEditor.getState();
+          // Probing, naming and (for a pasted frame) rendering all outlive a
+          // project switch. The asset was prepared against `projectId` and its
+          // bytes live in that project's storage, so filing it into whatever
+          // document is open now would point the new project at the old one's
+          // media.
+          if (s.projectId !== projectId) continue;
           s.addAsset(asset);
           // mediaOnly stocks the Media panel and leaves the timeline alone
           // (drops that land outside the timeline); placement is up to the user.
           if (!opts?.mediaOnly) {
-            if (asset.type === "video" || asset.type === "image") {
+            if (opts?.atFirstFit) {
+              s.addAssetAtPlayhead(asset.id, opts.at);
+            } else if (asset.type === "video" || asset.type === "image") {
               // A drop on the timeline lands at the pointer (sliding to track
               // 0's next free slot); an upload appends at the end. A still
               // rides track 0 like footage.
@@ -809,7 +829,8 @@ export function Editor({
   // editor's own ⌘V claims the timeline clipboard and the copied frame before
   // this — both stop the keystroke, so no paste event follows them — and a
   // composer marks its own paste handled, so this only ever sees the pastes
-  // nobody else wanted. The picture lands at the preview time.
+  // nobody else wanted. The picture lands under the indicator, on the first
+  // row with room for it.
   useEffect(() => {
     if (viewer) return;
     const onPaste = (e: ClipboardEvent) => {
@@ -830,7 +851,7 @@ export function Editor({
         .filter((f): f is File => f !== null);
       if (files.length === 0) return;
       e.preventDefault();
-      void importFiles(files, { at: Math.max(0, previewAt()) });
+      void importFiles(files, { at: Math.max(0, previewAt()), atFirstFit: true });
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
@@ -895,11 +916,25 @@ export function Editor({
         }
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "v") {
         // The timeline clipboard first; a frame copied off the preview canvas
-        // lands as a still at the preview time.
+        // lands as a still under the indicator. Where it lands is read at the
+        // keystroke, so a still that waits on its draw or its upload still
+        // arrives where the paste was aimed.
         if (s.paste()) e.preventDefault();
         else if (hasCopiedFrame()) {
           e.preventDefault();
-          void pasteCopiedFrame().catch((err) => reportSwallowed("[cut] paste frame failed", err));
+          const at = Math.max(0, previewAt());
+          void copiedFrameFile()
+            .then((grab) => {
+              if (grab) {
+                return importFiles([grab.file], {
+                  at,
+                  atFirstFit: true,
+                  origin: "freeze",
+                  name: grab.name,
+                });
+              }
+            })
+            .catch((err) => reportSwallowed("[cut] paste frame failed", err));
         }
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "g") {
         // ⌘G groups the multi-selected elements, ⇧⌘G dissolves the primary's
@@ -939,7 +974,7 @@ export function Editor({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [importFiles]);
 
   // The project is here, on this Mac — it just can't be opened without the app
   // that holds it. The gate's banner sits above this with the recovery steps,
