@@ -72,16 +72,6 @@ struct ProjectCard: View {
                         .resizable()
                         .scaledToFill()
                 }
-                Circle()
-                    .fill(ready ? AnyShapeStyle(Color.accentBlue) : AnyShapeStyle(.black.opacity(0.35)))
-                    .frame(width: 46, height: 46)
-                    .overlay {
-                        Image(systemName: "play.fill")
-                            .font(.body.weight(.bold))
-                            .foregroundStyle(.white)
-                            .offset(x: 2)
-                    }
-                    .animation(.snappy(duration: 0.2), value: ready)
             }
             .overlay(alignment: .topLeading) {
                 ProjectTag(text: formattedDuration(project.duration))
@@ -94,14 +84,6 @@ struct ProjectCard: View {
         }
         .buttonStyle(PressableTile())
         .frame(maxWidth: .infinity)
-    }
-
-    /// The render this card plays is in hand. The play button is grey while
-    /// the listing is still resolving what a tap would stream and turns blue
-    /// once it has it.
-    private var ready: Bool {
-        if case .ready = project.export { return true }
-        return false
     }
 
     /// The card's name line. A project whose render the last listing did not
