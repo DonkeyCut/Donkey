@@ -7,7 +7,13 @@
  */
 
 import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
-import { CAPTION_STYLES, WORD_ACCENT_MODES } from "@/cut/lib/subtitles";
+import { CAPTION_STYLES } from "@/cut/lib/subtitles";
+import {
+  WORD_EFFECT_MENU,
+  WORD_POP_SCALE,
+  WORD_SWELL_MAX,
+  WORD_SWELL_MIN,
+} from "@donkeycut/effects-kit";
 
 export const SUBTITLES_TOOLS = [
   {
@@ -79,18 +85,24 @@ export const SUBTITLES_TOOLS = [
   {
     name: "set_caption_look",
     description:
-      "Style the caption track: a text-videos look id in `look` sets everything at once (preset, size, font, karaoke highlight, accent color, frame background), or set the pieces yourself. Restyling captions is a change the user asks for — leave the track as it is when they only asked for the words. Karaoke — word_highlight — keeps the whole line up and emphasizes each word as it is spoken or sung, in the preview and the export burn-in; it needs word timings, which transcription and sync_lyrics leave on the cues. Naming an accent_mode turns it on, so \"make the words pop as I say them\" is one call with accent_mode: pop.",
+      "Style the caption track: a text-videos look id in `look` sets everything at once (preset, size, font, word effect, accent color, frame background), or set the pieces yourself. Restyling captions is a change the user asks for — leave the track as it is when they only asked for the words. Word effects — word_highlight — play the caption word by word as it is spoken or sung, in the preview and the export burn-in; they need word timings, which transcription and sync_lyrics leave on the cues. An emphasis travels along a line that is fully up; a build assembles the line as it is spoken. Naming an accent_mode turns it on, so \"make the words pop as I say them\" is one call with accent_mode: pop, and \"have the caption appear word by word\" is accent_mode: build.",
     inputSchema: obj({
       look: str("Text-videos look id — sets the whole caption look"),
       style: str(`Caption preset: ${Object.keys(CAPTION_STYLES).join(", ")}`),
       size: num("Caption size in px at a 1080-wide frame"),
       font: str("Font id"),
-      word_highlight: bool("Emphasize each word as it lands (karaoke)"),
-      accent_color: str("Highlight color"),
+      word_highlight: bool("Play the caption word by word as it lands"),
+      accent_color: str("Word effect accent color"),
+      accent_scale: num(
+        `How far a word swells at its moment, ${WORD_SWELL_MIN}..${WORD_SWELL_MAX} (pop defaults to ${WORD_POP_SCALE}); the effects that do not resize ignore it`
+      ),
+      accent_dim: num(
+        "How opaque a word is off its moment, 0..1 — 0 means it is not there yet (build), a fraction leaves the caption faintly up (fill, spotlight); the effects that do not fade their words ignore it"
+      ),
       accent_mode: {
         type: "string",
-        enum: WORD_ACCENT_MODES.map((m) => m.id),
-        description: `How the spoken word is emphasized — ${WORD_ACCENT_MODES.map((m) => `${m.id}: ${m.hint}`).join("; ")}`,
+        enum: WORD_EFFECT_MENU.map((m) => m.id),
+        description: `What each word does as it is said — ${WORD_EFFECT_MENU.map((m) => `${m.id}: ${m.note}`).join("; ")}`,
       },
       x: num("Caption center x 0..1"),
       y: num("Caption center y 0..1"),

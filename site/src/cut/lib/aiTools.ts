@@ -23,7 +23,7 @@ import {
   OVERLAY_ANIM_STYLE_IDS,
   OVERLAY_LOOP_STYLE_IDS,
   hasOverlayAnim,
-  WORD_ACCENT_MODE_IDS,
+  WORD_EFFECT_IDS,
   WORD_SWELL_MAX,
   WORD_SWELL_MIN,
   type OverlayAnim,
@@ -96,7 +96,7 @@ import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
 import { buildAiContext } from "./aiContext";
 import { sampleClipFrameData } from "./previewCanvas";
-import { CAPTION_STYLES, laneCues, subtitleLaneCount, WORD_ACCENT_MODES } from "./subtitles";
+import { CAPTION_STYLES, laneCues, subtitleLaneCount } from "./subtitles";
 import { fuseTimeline, renderFusedTimeline } from "./watch/fuse";
 import { mergeWatch, mergeWatchNotes, uncoveredSeconds, unnotedSpans } from "./watch/merge";
 import { syncLines } from "./lyricSync";
@@ -152,7 +152,7 @@ import {
   type AnimStyle,
   type AssetWatch,
   type CaptionStyleId,
-  type WordAccentMode,
+  type WordEffectId,
   type AudioClip,
   type ClipShadow,
   type ColorGrade,
@@ -474,31 +474,35 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     const wordScale = isNum(input.words_scale)
       ? clamp(input.words_scale, WORD_SWELL_MIN, WORD_SWELL_MAX)
       : undefined;
+    const wordDim = isNum(input.words_dim) ? clamp(input.words_dim, 0, 1) : undefined;
     if (typeof rawWords === "string") {
       if (rawWords === "none") delete anim.words;
-      else if (!(WORD_ACCENT_MODE_IDS as string[]).includes(rawWords))
-        throw new ToolError(`Unknown word emphasis: ${rawWords}`);
+      else if (!(WORD_EFFECT_IDS as string[]).includes(rawWords))
+        throw new ToolError(`Unknown word effect: ${rawWords}`);
       else if ((o.kind ?? "text") !== "text")
-        throw new ToolError("Word emphasis lights up a title's words; it needs a title.");
+        throw new ToolError("Word effects play a title's words; they need a title.");
       else {
         const color = wordColor ?? anim.words?.color;
         const scale = wordScale ?? anim.words?.scale;
-        // The transcript is the clock the emphasis follows. It is read now,
+        const dim = wordDim ?? anim.words?.dim;
+        // The transcript is the clock the effect follows. It is read now,
         // against whatever the cut has been transcribed to say; with nothing
         // to read, the words share the element's own span.
         const times = isTextOverlay(o) ? wordTimesFor(o, s.subtitles.cues) : undefined;
         anim.words = {
-          style: rawWords as WordAccentMode,
+          style: rawWords as WordEffectId,
           ...(color ? { color } : {}),
           ...(scale !== undefined ? { scale } : {}),
+          ...(dim !== undefined ? { dim } : {}),
           ...(times ? { times } : {}),
         };
       }
-    } else if ((wordColor || wordScale !== undefined) && anim.words) {
+    } else if ((wordColor || wordScale !== undefined || wordDim !== undefined) && anim.words) {
       anim.words = {
         ...anim.words,
         ...(wordColor ? { color: wordColor } : {}),
         ...(wordScale !== undefined ? { scale: wordScale } : {}),
+        ...(wordDim !== undefined ? { dim: wordDim } : {}),
       };
     }
     s.updateOverlay(o.id, { anim: hasOverlayAnim(anim) ? anim : undefined });
@@ -1658,10 +1662,13 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         patch.font = input.font;
       if (typeof input.word_highlight === "boolean") patch.wordHighlight = input.word_highlight;
       if (typeof input.accent_color === "string") patch.accentColor = input.accent_color;
-      if (WORD_ACCENT_MODES.some((m) => m.id === input.accent_mode)) {
-        patch.accentMode = input.accent_mode as WordAccentMode;
-        // Naming a treatment is asking for the emphasis, so it comes on with
-        // the mode unless this same call turned it off.
+      if (isNum(input.accent_scale))
+        patch.accentScale = clamp(input.accent_scale, WORD_SWELL_MIN, WORD_SWELL_MAX);
+      if (isNum(input.accent_dim)) patch.accentDim = clamp(input.accent_dim, 0, 1);
+      if ((WORD_EFFECT_IDS as string[]).includes(input.accent_mode as string)) {
+        patch.accentMode = input.accent_mode as WordEffectId;
+        // Naming an effect is asking for it, so it comes on with the pick
+        // unless this same call turned it off.
         if (patch.wordHighlight === undefined && !s.subtitles.wordHighlight)
           patch.wordHighlight = true;
       }
@@ -1677,6 +1684,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         wordHighlight: cur.wordHighlight === true,
         accentColor: cur.accentColor,
         accentMode: cur.accentMode,
+        accentScale: cur.accentScale,
+        accentDim: cur.accentDim,
       };
   },
 
