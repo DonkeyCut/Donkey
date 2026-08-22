@@ -657,6 +657,68 @@ import Testing
 }
 
 @MainActor
+@Suite struct ProjectsListingTests {
+    final class FakeProjects: CloudProjectsServicing {
+        let remote: [RemoteProject]
+
+        init(remote: [RemoteProject] = []) { self.remote = remote }
+
+        func fetchProjects() async throws -> [RemoteProject] { remote }
+        func fetchExports(projectId: String) async throws -> [RemoteExport] { [] }
+        func startExport(projectId: String, preset: String) async throws -> String { "job" }
+        func exportProgress(jobId: String) async throws -> RenderProgress { .done }
+        func exportFile(jobId: String) async throws -> URL { URL(string: "https://example.com/e.mp4")! }
+        func streamURL(project: RemoteProject, export: RemoteExport?) async throws -> URL {
+            URL(string: "https://example.com/s.mp4")!
+        }
+        func thumbnailFile(for project: RemoteProject) async -> URL? { nil }
+    }
+
+    private func scratch() -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "projects-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    @Test func listingIsThereBeforeTheNetworkIs() async {
+        let directory = scratch()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = FakeProjects(remote: [
+            RemoteProject(
+                id: "p1",
+                name: "Marketing is the new moat",
+                duration: 26,
+                updatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                hasPreview: true
+            )
+        ])
+        let first = ProjectsModel(service: service, cacheDirectory: directory)
+        await first.refresh()
+        #expect(first.projects.count == 1)
+
+        // A fresh launch: the listing is on screen with nothing asked of the
+        // network yet.
+        let next = ProjectsModel(service: service, cacheDirectory: directory)
+        #expect(next.projects.map(\.id) == ["p1"])
+        #expect(next.projects.first?.name == "Marketing is the new moat")
+    }
+
+    @Test func signingOutLeavesNothingForTheNextAccount() async {
+        let directory = scratch()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = FakeProjects(remote: [
+            RemoteProject(id: "p1", name: "Mine", duration: 4, updatedAt: Date(), hasPreview: false)
+        ])
+        let model = ProjectsModel(service: service, cacheDirectory: directory)
+        await model.refresh()
+        model.forget()
+        #expect(model.projects.isEmpty)
+        #expect(ProjectsModel(service: service, cacheDirectory: directory).projects.isEmpty)
+    }
+}
+
+@MainActor
 @Suite struct AuthModelTests {
     final class FakeAuth: AuthServicing {
         var stored: StoredSession = .none

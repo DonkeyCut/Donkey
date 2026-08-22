@@ -57,7 +57,11 @@ clears once space frees up.
 
 Projects sync down as thumbnails only: the Projects tab lists cloud projects
 with cached poster images, and a tap streams the latest export — or the
-composited preview when none exists — straight from the CDN.
+composited preview when none exists — straight from the CDN. The listing is
+kept on disk, so the tab opens on what this device already knew and reads the
+cloud behind it, every time the app comes forward and whichever tab is
+showing. Signing out drops it, so the next account never opens on someone
+else's projects.
 
 The phone exports the whole cut. A control under the player's own sound
 button, on screen exactly when that button is, opens a sheet of the sizes the

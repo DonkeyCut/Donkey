@@ -78,6 +78,13 @@ public struct RootView<CameraPreview: View>: View {
             guard scenePhase == .active else { return }
             await media.sync?.beat()
         }
+        // Projects are edited at the desk, so the tab opens on the listing
+        // this device already had and the cloud is read behind it — every
+        // time the app comes forward, whichever tab is on screen.
+        .task(id: scenePhase) {
+            guard scenePhase == .active, auth.isSignedIn else { return }
+            await projects.refresh()
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active, auth.isSignedIn {
                 media.sync?.kick()
@@ -86,6 +93,8 @@ public struct RootView<CameraPreview: View>: View {
         .onChange(of: auth.isSignedIn) { _, signedIn in
             guard signedIn else {
                 app.showsAnalytics = false
+                // The listing on disk belongs to the account that just left.
+                projects.forget()
                 return
             }
             media.sync?.kick()

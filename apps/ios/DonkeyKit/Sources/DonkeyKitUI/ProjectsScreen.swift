@@ -10,7 +10,6 @@ struct ProjectsScreen: View {
     var auth: AuthModel
 
     @State private var playing: Project?
-    @Environment(\.scenePhase) private var scenePhase
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
@@ -41,16 +40,13 @@ struct ProjectsScreen: View {
             }
             .refreshable { await projects.refresh() }
         }
-        // Projects are edited at the desk, so the listing is read again every
-        // time this screen comes back into view — opening the tab, coming back
-        // to the app, closing a project.
+        // The listing paints from disk and is read again on the way in, so a
+        // project edited at the desk a moment ago corrects itself while its
+        // card is already on screen. Coming back to the app is the shell's to
+        // refresh, whichever tab is showing.
         .task { await projects.refresh() }
         .onChange(of: app.selectedTab) { _, tab in
             guard tab == .projects else { return }
-            Task { await projects.refresh() }
-        }
-        .onChange(of: scenePhase) { _, phase in
-            guard phase == .active, app.selectedTab == .projects else { return }
             Task { await projects.refresh() }
         }
         .fullScreenCover(item: $playing, onDismiss: { Task { await projects.refresh() } }) { project in

@@ -1,6 +1,6 @@
 import Foundation
 
-nonisolated public enum ProjectExport: Equatable, Sendable {
+nonisolated public enum ProjectExport: Equatable, Codable, Sendable {
     case none
     /// Something is there to play. `isPreview` marks the composited proxy the
     /// editor renders for its own grid: it plays, but it is not the render an
@@ -11,7 +11,7 @@ nonisolated public enum ProjectExport: Equatable, Sendable {
 /// A cloud project as the phone shows it: name, duration, a cached thumbnail
 /// file, and which render a tap streams. Only thumbnails sync down — the
 /// video stays in the cloud and streams on demand.
-nonisolated public struct Project: Identifiable, Equatable, Sendable {
+nonisolated public struct Project: Identifiable, Equatable, Codable, Sendable {
     public var id: String
     public var name: String
     public var duration: TimeInterval
@@ -61,9 +61,58 @@ nonisolated public struct ProjectExportSize: Identifiable, Equatable, Sendable {
     ]
 }
 
+/// The last listing this device saw, on disk. The Projects tab is a mirror of
+/// the cloud, so it opens on what it had and corrects itself in the
+/// background — nobody waits on the network to look at their own projects.
+///
+/// Application Support rather than Caches: a purged listing would put the
+/// spinner back on launch, which is the thing this exists to remove.
+struct ProjectListingCache {
+    private let file: URL?
+
+    init(directory: URL? = nil) {
+        let root = directory ?? (try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        ))
+        file = root?.appending(path: "ProjectListing.json")
+    }
+
+    /// A listing whose shape this build no longer reads is simply not there;
+    /// the refresh writes a fresh one.
+    func read() -> [Project] {
+        guard let file, let data = try? Data(contentsOf: file),
+              let projects = try? JSONDecoder().decode([Project].self, from: data)
+        else { return [] }
+        // Posters live in Caches, which the system may empty out from under a
+        // listing that survived. A card whose poster is gone paints without
+        // one and gets it back on the next refresh.
+        return projects.map { project in
+            var project = project
+            if let thumbnail = project.thumbnail,
+               !FileManager.default.fileExists(atPath: thumbnail.localPath) {
+                project.thumbnail = nil
+            }
+            return project
+        }
+    }
+
+    func write(_ projects: [Project]) {
+        guard let file, let data = try? JSONEncoder().encode(projects) else { return }
+        try? data.write(to: file, options: .atomic)
+    }
+
+    func clear() {
+        guard let file else { return }
+        try? FileManager.default.removeItem(at: file)
+    }
+}
+
 @Observable
 public final class ProjectsModel {
-    public private(set) var projects: [Project] = []
+    public private(set) var projects: [Project]
     public private(set) var isLoading = false
     /// Renders in flight, by project id. A run outlives the screen that asked
     /// for it, so closing the player and coming back finds it where it was.
@@ -74,9 +123,24 @@ public final class ProjectsModel {
     private var thumbnails: [String: URL] = [:]
     private var exportTasks: [String: Task<Void, Never>] = [:]
     private let service: (any CloudProjectsServicing)?
+    private let cache: ProjectListingCache
 
-    public init(service: (any CloudProjectsServicing)? = nil) {
+    /// `cacheDirectory` is for tests; the app takes Application Support.
+    public init(service: (any CloudProjectsServicing)? = nil, cacheDirectory: URL? = nil) {
         self.service = service
+        cache = ProjectListingCache(directory: cacheDirectory)
+        projects = cache.read()
+    }
+
+    /// Drop what this device knows about the account's projects. Sign-out
+    /// calls it, so the next account never opens on someone else's listing.
+    public func forget() {
+        for id in exportRuns.keys { clearExport(id) }
+        projects = []
+        summaries = [:]
+        latestExports = [:]
+        thumbnails = [:]
+        cache.clear()
     }
 
     // MARK: Exporting
@@ -184,6 +248,9 @@ public final class ProjectsModel {
         async let exports: Void = fillExports(remote, service: service)
         async let posters: Void = fillThumbnails(remote, service: service)
         _ = await (exports, posters)
+        // The whole pass landed — names, exports and posters — so this is the
+        // listing the next launch opens on.
+        cache.write(projects)
     }
 
     /// Take a listing as the current set of projects, dropping what is gone
