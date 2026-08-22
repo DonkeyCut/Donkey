@@ -139,15 +139,18 @@ const CARD_GHOST_MAX = 72;
  * ghost matches the card exactly — rounded corners, fills, labels. A card can
  * narrow the ghost to just its picture: the ghost clones the node marked
  * `data-drag-object` when one exists, and drops anything marked
- * `data-drag-omit` (badges riding on the picture). Live `<video>`/`<canvas>`
+ * `data-drag-omit` (badges riding on the picture, a name strip under a
+ * figure). Live `<video>`/`<canvas>`
  * content is baked into the clone (clones of those paint blank), and
  * hover-revealed controls drop out since the clone is not hovered. The clone
  * lives off-screen just long enough for the browser to snapshot it. */
 /** Ready a clone for ghost duty: drop `data-drag-omit` nodes (badges riding on
  * the picture) and bake live `<video>`/`<canvas>` frames into canvases, since
- * clones of those paint blank. */
-function bakeGhostClone(src: HTMLElement, clone: HTMLElement) {
-  clone.querySelectorAll("[data-drag-omit]").forEach((n) => n.remove());
+ * clones of those paint blank. Reports whether anything was dropped, which
+ * decides whether the ghost keeps the object's height or takes its own. */
+function bakeGhostClone(src: HTMLElement, clone: HTMLElement): { trimmed: boolean } {
+  const omitted = clone.querySelectorAll("[data-drag-omit]");
+  omitted.forEach((n) => n.remove());
   // Skip media inside omitted nodes so both lists pair up by index.
   const srcMedia = Array.from(src.querySelectorAll<HTMLElement>("video, canvas")).filter(
     (n) => !n.closest("[data-drag-omit]")
@@ -186,7 +189,7 @@ function bakeGhostClone(src: HTMLElement, clone: HTMLElement) {
       }
     }
     node.replaceWith(c);
-  });
+  });  return { trimmed: omitted.length > 0 };
 }
 
 export function setCardDragImage(e: React.DragEvent, host: HTMLElement) {
@@ -246,18 +249,16 @@ export function setObjectDragImage(e: React.DragEvent) {
   e.dataTransfer.setDragImage(blank, 0, 0);
   setTimeout(() => blank.remove(), 0);
 
-  // Hold the object where the pointer grabbed it; a grab outside the object
-  // (on the card around it) holds the nearest edge.
-  const ox = Math.min(Math.max(e.clientX - rect.left, 0), rect.width);
-  const oy = Math.min(Math.max(e.clientY - rect.top, 0), rect.height);
-
   const root = document.createElement("div");
   root.style.cssText =
     "position:fixed;left:0;top:0;z-index:1000;pointer-events:none;will-change:transform;";
   const object = el.cloneNode(true) as HTMLElement;
-  bakeGhostClone(el, object);
+  // A ghost that drops part of the object — a name strip under a figure, a
+  // badge on a picture — is shorter than what it was cloned from, so it
+  // measures itself instead of being held to the object's height.
+  const { trimmed } = bakeGhostClone(el, object);
   object.style.width = `${rect.width}px`;
-  object.style.height = `${rect.height}px`;
+  if (!trimmed) object.style.height = `${rect.height}px`;
   object.style.margin = "0";
   object.style.opacity = "0.85";
   // The ghost floats free of the page, so its edge is drawn at twice the
@@ -266,10 +267,17 @@ export function setObjectDragImage(e: React.DragEvent) {
   const edge = getComputedStyle(el).borderTopColor;
   if (edge) object.style.borderColor = `color-mix(in oklab, ${edge}, black 50%)`;
   object.style.transition = "opacity 150ms ease, transform 150ms ease";
-  object.style.transformOrigin = `${ox}px ${oy}px`;
-  object.style.transform = `scale(${fit})`;
   root.appendChild(object);
   document.body.appendChild(root);
+
+  // Hold the object where the pointer grabbed it; a grab outside the object
+  // (on the card around it, or on the part the ghost dropped) holds the
+  // nearest edge of what is actually floating.
+  const held = object.getBoundingClientRect().height || rect.height;
+  const ox = Math.min(Math.max(e.clientX - rect.left, 0), rect.width);
+  const oy = Math.min(Math.max(e.clientY - rect.top, 0), held);
+  object.style.transformOrigin = `${ox}px ${oy}px`;
+  object.style.transform = `scale(${fit})`;
 
   const position = (x: number, y: number) => {
     root.style.transform = `translate(${x - ox}px, ${y - oy}px)`;
