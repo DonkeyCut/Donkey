@@ -450,9 +450,42 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
         return true
     }
 
+    /// The cloud copy is gone with no tombstone behind it, so the item keeps
+    /// its files and stops counting as synced.
+    public func clearInspirationRemote(_ id: UUID) throws {
+        let descriptor = FetchDescriptor<InspirationRecord>(predicate: #Predicate { $0.id == id })
+        guard let record = try context.fetch(descriptor).first else { return }
+        record.remoteAssetId = nil
+        try context.save()
+    }
+
+    /// Drop an item the cloud deleted. The twin of deleteInspiration without
+    /// the tombstone: the delete came down, so nothing goes back up.
+    public func removeInspirationFromCloudDelete(id: UUID) throws {
+        let descriptor = FetchDescriptor<InspirationRecord>(predicate: #Predicate { $0.id == id })
+        guard let record = try context.fetch(descriptor).first else { return }
+        for fileName in [record.mediaFileName, record.fetchedFileName].compactMap({ $0 }) {
+            try? FileManager.default.removeItem(at: mediaDirectory.appending(path: fileName))
+        }
+        context.delete(record)
+        try context.save()
+    }
+
     public func inspirationRemoteAssetId(_ id: UUID) throws -> String? {
         let descriptor = FetchDescriptor<InspirationRecord>(predicate: #Predicate { $0.id == id })
         return try context.fetch(descriptor).first?.remoteAssetId
+    }
+
+    /// Drop a recording the cloud deleted. The twin of deleteRecording without
+    /// the tombstone: the delete came down, so nothing goes back up.
+    public func removeRecordingFromCloudDelete(id: UUID) throws {
+        let descriptor = FetchDescriptor<RecordingRecord>(predicate: #Predicate { $0.id == id })
+        guard let record = try context.fetch(descriptor).first else { return }
+        for fileName in [record.fileName, record.thumbnailFileName].compactMap({ $0 }) {
+            try? FileManager.default.removeItem(at: recordingsDirectory.appending(path: fileName))
+        }
+        context.delete(record)
+        try context.save()
     }
 
     public func isInspirationLinkSynced(_ id: UUID) throws -> Bool {

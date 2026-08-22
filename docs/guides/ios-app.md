@@ -32,8 +32,15 @@ with tombstones so a delete made offline on either side still lands on the
 other. The folders notes file into travel with them, under ids whichever
 device made them chose; a folder carries no tombstone, so a folder the cloud
 listing no longer names was deleted elsewhere and its notes come back to the
-top level. Deleting a synced recording on the phone deletes the cloud copy
-too.
+top level.
+
+Deletes on the shelf run both ways. A synced recording deleted on the phone
+takes the cloud copy with it, and a clip deleted at the desk — from the Camera
+Roll or the Library — leaves a tombstone the phone reads on its next pass and
+deletes the local movie for. What the shelf simply stops listing is a different
+thing: an asset the storage sweep reclaimed carries no tombstone, so the phone
+keeps the clip it shot, forgets the cloud copy, and sends it back up once there
+is room.
 
 Notes are written at the desk as well as here, so the phone pulls on a clock
 of its own while it is on screen, and pull to refresh runs the same pass at

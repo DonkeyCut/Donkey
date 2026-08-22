@@ -65,9 +65,17 @@ public protocol SyncJournalStoring: AnyObject {
     /// fresh cloud copy down with it.
     @discardableResult
     func setRecordingRemote(_ id: UUID, assetId: String?, claimedFileName: String?) throws -> Bool
+    /// Remove a recording the cloud deleted, movie and thumbnail with it. No
+    /// tombstone: the delete came down.
+    func removeRecordingFromCloudDelete(id: UUID) throws
 
     // Inspiration
     func inspirationRemoteAssetId(_ id: UUID) throws -> String?
+    /// Remove an inspiration item the cloud deleted, its files with it.
+    func removeInspirationFromCloudDelete(id: UUID) throws
+    /// Forget an item's cloud copy: the asset left without a tombstone, so the
+    /// item goes back to being unsynced.
+    func clearInspirationRemote(_ id: UUID) throws
     func isInspirationLinkSynced(_ id: UUID) throws -> Bool
     func markInspirationMediaSynced(_ id: UUID, remoteAssetId: String) throws
     /// A link handed to the cloud worker: the job that is fetching it.
@@ -219,6 +227,7 @@ public final class SyncEngine {
         // Link imports are small payloads, so they queue ahead of the media.
         await syncInspirationLinks()
         guard online else { return }
+        await syncLibrary()
         await refreshStorage()
         guard !storageFull else { return }
         await uploadPendingRecordings()
@@ -293,6 +302,58 @@ public final class SyncEngine {
                 // Transient; the tombstone stays for the next kick.
             }
         }
+    }
+
+    // MARK: The cloud shelf, mirrored down
+
+    /// The other half of a delete: what left the shelf at the desk leaves this
+    /// phone too. The listing carries every asset the shelf holds and every one
+    /// someone deleted, so a synced clip named among the tombstones goes here,
+    /// files and all.
+    ///
+    /// An id in neither set left by some other hand — the storage sweep
+    /// reclaiming a lapsed account. Nothing is deleted for that: the phone
+    /// forgets the cloud copy instead, so the clip reads as on-device again and
+    /// goes back up once there is room.
+    private func syncLibrary() async {
+        // The local side is read before the listing is asked for, so a clip
+        // that finishes uploading meanwhile is never judged by a listing that
+        // predates it.
+        let recordings: [(id: UUID, assetId: String)] = (media?.recordings ?? []).compactMap {
+            recording in
+            ((try? journal.recordingRemote(recording.id))?.assetId)
+                .map { (recording.id, $0) }
+        }
+        let inspiration: [(id: UUID, assetId: String)] = (ideas?.inspiration ?? []).compactMap {
+            item in
+            ((try? journal.inspirationRemoteAssetId(item.id)) ?? nil)
+                .map { (item.id, $0) }
+        }
+        guard !recordings.isEmpty || !inspiration.isEmpty else { return }
+        guard let shelf = try? await service.fetchLibrary() else { return }
+        var recordingsChanged = false
+        for (id, assetId) in recordings where !shelf.assetIds.contains(assetId) {
+            uploadStates[id] = nil
+            syncedIds.remove(id)
+            checkedIds.remove(id)
+            if shelf.deletedIds.contains(assetId) {
+                try? journal.removeRecordingFromCloudDelete(id: id)
+                recordingsChanged = true
+            } else {
+                _ = try? journal.setRecordingRemote(id, assetId: nil, claimedFileName: nil)
+            }
+        }
+        var inspirationChanged = false
+        for (id, assetId) in inspiration where !shelf.assetIds.contains(assetId) {
+            if shelf.deletedIds.contains(assetId) {
+                try? journal.removeInspirationFromCloudDelete(id: id)
+            } else {
+                try? journal.clearInspirationRemote(id)
+            }
+            inspirationChanged = true
+        }
+        if recordingsChanged { media?.reloadFromStore() }
+        if inspirationChanged { ideas?.reloadFromStore() }
     }
 
     // MARK: Notes (two-way, last writer wins)

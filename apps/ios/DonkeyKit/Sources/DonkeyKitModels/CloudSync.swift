@@ -67,6 +67,19 @@ nonisolated public struct LibraryUpload: Sendable {
     }
 }
 
+/// The cloud shelf as the phone needs to see it: the ids it holds, and the
+/// ids someone deleted. An id in neither left by some other hand — the storage
+/// sweep reclaiming a lapsed account — which is not a delete the phone mirrors.
+nonisolated public struct RemoteLibrary: Equatable, Sendable {
+    public var assetIds: Set<String>
+    public var deletedIds: Set<String>
+
+    public init(assetIds: Set<String>, deletedIds: Set<String>) {
+        self.assetIds = assetIds
+        self.deletedIds = deletedIds
+    }
+}
+
 nonisolated public struct RemoteAsset: Equatable, Sendable {
     public var id: String
     public var fileName: String
@@ -185,6 +198,9 @@ public protocol CloudSyncServicing: AnyObject {
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> RemoteAsset
     func deleteLibraryAsset(id: String) async throws
+    /// The shelf's asset ids and its tombstones, for the pass that mirrors
+    /// deletes made at the desk back onto this phone.
+    func fetchLibrary() async throws -> RemoteLibrary
     /// Queue a cloud-side import of an inspiration link (the render worker
     /// fetches the media into the Inspiration folder). Returns the job id the
     /// phone follows to bring the media down.

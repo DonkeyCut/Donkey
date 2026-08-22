@@ -131,6 +131,10 @@ import Testing
         var notes: [UUID: RemoteNote] = [:]
         var uploads: [String] = []
         var deletedAssets: [String] = []
+        /// The shelf itself: what an upload or an import put there, and the
+        /// tombstones deletes leave — the same two lists the API answers with.
+        var libraryAssets: Set<String> = []
+        var deletedLibraryIds: Set<String> = []
         var deletedNotes: [UUID] = []
         var links: [URL] = []
         var polled: [String] = []
@@ -156,10 +160,21 @@ import Testing
         ) async throws -> RemoteAsset {
             uploads.append(upload.fileName)
             onUpload?()
-            return try uploadResult.get()
+            let asset = try uploadResult.get()
+            libraryAssets.insert(asset.id)
+            deletedLibraryIds.remove(asset.id)
+            return asset
         }
 
-        func deleteLibraryAsset(id: String) async throws { deletedAssets.append(id) }
+        func deleteLibraryAsset(id: String) async throws {
+            deletedAssets.append(id)
+            libraryAssets.remove(id)
+            deletedLibraryIds.insert(id)
+        }
+
+        func fetchLibrary() async throws -> RemoteLibrary {
+            RemoteLibrary(assetIds: libraryAssets, deletedIds: deletedLibraryIds)
+        }
 
         func importInspirationLink(_ url: URL) async throws -> String {
             links.append(url)
@@ -168,6 +183,7 @@ import Testing
 
         func importedLink(jobId: String) async throws -> JobOutcome<ImportedLink> {
             polled.append(jobId)
+            if case .done(let link) = imported { libraryAssets.insert(link.assetId) }
             return imported
         }
 
@@ -309,6 +325,47 @@ import Testing
         rig.media.delete(recording)
         await rig.engine.run()
         #expect(rig.cloud.deletedAssets == ["asset-1"])
+        #expect(try rig.store.tombstones().isEmpty)
+    }
+
+    @Test func cloudDeleteTakesTheClipOffThePhone() async throws {
+        let rig = try makeRig()
+        let recording = try ingestClip(rig)
+        let movie = rig.media.movieURL(for: recording)
+        await rig.engine.run()
+        // Deleted at the desk: the shelf tombstones the asset.
+        try await rig.cloud.deleteLibraryAsset(id: "asset-1")
+        rig.cloud.deletedAssets.removeAll()
+        await rig.engine.run()
+        #expect(rig.media.recordings.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: movie.localPath))
+        // The delete came down, so nothing goes back up for it.
+        #expect(try rig.store.tombstones().isEmpty)
+        #expect(rig.cloud.deletedAssets.isEmpty)
+        #expect(rig.cloud.uploads.count == 1)
+    }
+
+    @Test func anAssetThatVanishedGoesBackUpInsteadOfLeaving() async throws {
+        let rig = try makeRig()
+        let recording = try ingestClip(rig)
+        await rig.engine.run()
+        // The storage sweep collected it: gone from the shelf with no
+        // tombstone, which is not a delete anyone made.
+        rig.cloud.libraryAssets.removeAll()
+        await rig.engine.run()
+        #expect(rig.media.recordings.map(\.id) == [recording.id])
+        // The same pass that noticed puts the clip back on the shelf.
+        #expect(rig.cloud.uploads.count == 2)
+        #expect(rig.engine.state(for: recording) == .synced)
+    }
+
+    @Test func cloudDeleteTakesTheInspirationItemToo() async throws {
+        let rig = try makeRig()
+        rig.ideas.addInspiration(mediaData: Data(repeating: 3, count: 64), isVideo: false)
+        await rig.engine.run()
+        try await rig.cloud.deleteLibraryAsset(id: "asset-1")
+        await rig.engine.run()
+        #expect(rig.ideas.inspiration.isEmpty)
         #expect(try rig.store.tombstones().isEmpty)
     }
 

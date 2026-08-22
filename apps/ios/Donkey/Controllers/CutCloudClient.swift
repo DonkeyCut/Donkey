@@ -19,10 +19,12 @@ final class CutCloudClient: NSObject {
     private func request(
         _ method: String,
         _ path: String,
+        query: [URLQueryItem] = [],
         body: [String: Any]? = nil
     ) throws -> URLRequest {
         guard let token else { throw CloudSyncError.unauthorized }
-        var request = URLRequest(url: base.appending(path: path))
+        let url = base.appending(path: path)
+        var request = URLRequest(url: query.isEmpty ? url : url.appending(queryItems: query))
         request.httpMethod = method
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("ios", forHTTPHeaderField: "x-donkey-cut-client")
@@ -210,6 +212,29 @@ extension CutCloudClient: CloudSyncServicing {
 
     func deleteLibraryAsset(id: String) async throws {
         _ = try await send(try request("DELETE", "/api/cut-cloud/library/\(id)"))
+    }
+
+    func fetchLibrary() async throws -> RemoteLibrary {
+        struct LibraryResponse: Decodable {
+            struct Asset: Decodable { var id: String }
+            var assets: [Asset]
+            var deletedAssetIds: [String]?
+        }
+        // `deleted=1` asks for the tombstoned ids: the phone mirrors the
+        // shelf onto the Camera Roll, so a delete made on the desktop has to
+        // reach it. No other client wants them.
+        let data = try await send(
+            try request(
+                "GET",
+                "/api/cut-cloud/library",
+                query: [URLQueryItem(name: "deleted", value: "1")]
+            )
+        )
+        let response = try decode(LibraryResponse.self, from: data)
+        return RemoteLibrary(
+            assetIds: Set(response.assets.map(\.id)),
+            deletedIds: Set(response.deletedAssetIds ?? [])
+        )
     }
 
     func importInspirationLink(_ url: URL) async throws -> String {

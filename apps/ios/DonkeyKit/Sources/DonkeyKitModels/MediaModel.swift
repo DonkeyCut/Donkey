@@ -44,6 +44,12 @@ public final class MediaModel {
 
     public init(store: any RecordingStoring) {
         self.store = store
+        reloadFromStore()
+    }
+
+    /// Re-read what the store holds — how a delete that came down from the
+    /// cloud lands on screen.
+    public func reloadFromStore() {
         recordings = (try? store.loadRecordings()) ?? []
     }
 
