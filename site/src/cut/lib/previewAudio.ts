@@ -19,9 +19,22 @@ interface PreviewAudioState {
 
 let el: HTMLAudioElement | null = null;
 
+/** Other players that have to go quiet when a preview starts. The effect
+ * auditions run on their own audio graph rather than this element, and two
+ * things playing at once teaches nothing about either. */
+const silencers = new Set<() => void>();
+
+export function registerPreviewSilencer(stop: () => void): () => void {
+  silencers.add(stop);
+  return () => {
+    silencers.delete(stop);
+  };
+}
+
 export const usePreviewAudio = create<PreviewAudioState>((set, get) => ({
   url: null,
   toggle: (url) => {
+    for (const stop of silencers) stop();
     const audio = (el ??= new Audio());
     if (get().url === url) {
       audio.pause();

@@ -2,6 +2,7 @@
 
 import {
   groupRemap,
+  isAudioEffect,
   KEY_EPSILON,
   keyAt,
   lineLikeShape,
@@ -2300,14 +2301,20 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     },
 
     addEffect: (effect, aim) => {
-      // An effect grades a stretch of the picture, and a clip is the stretch
-      // people mean: dropped anywhere over one, it opens covering that clip.
-      // Off the end of the cut it falls back to the standard length.
+      // A picture effect grades a stretch of the picture, and a clip is the
+      // stretch people mean: dropped anywhere over one, it opens covering that
+      // clip. Off the end of the cut it falls back to the standard length.
+      //
+      // A treatment on the sound is aimed at a moment — a line, a word, the
+      // bar the music turns on — so it opens at the standard length where it
+      // was dropped and is stretched from there.
       const s0 = get();
       const t = aim?.at ?? playheadAt();
-      const span = getClipSpans(s0.clips, s0.assets).find(
-        (sp) => t >= sp.start - 1e-6 && t < sp.start + sp.len
-      );
+      const span = isAudioEffect(effect)
+        ? undefined
+        : getClipSpans(s0.clips, s0.assets).find(
+            (sp) => t >= sp.start - 1e-6 && t < sp.start + sp.len
+          );
       const fit = span ? { at: span.start, len: span.len } : { at: aim?.at };
       addElement(
         "effect",

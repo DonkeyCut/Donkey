@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ALL_EFFECT_IDS,
+  AUDIO_EFFECT_IDS,
   audioFxBars,
   EFFECT_LABELS,
   effectPreviewState,
@@ -13,12 +14,15 @@ import {
   streakGradient,
   type EffectId,
 } from "@donkeycut/effects-kit";
+import { Pause, Play } from "lucide-react";
+import { PHASE_STEP } from "@/cut/components/AnimationTiles";
 import { PICKED_RING, pickGridNav, useAssetPick } from "@/cut/lib/assetPick";
+import { useFxAudition } from "@/cut/lib/audioFxAudition";
 import { clearElementDrag, setElementDragData, setObjectDragImage } from "@/cut/lib/assetDrag";
 import { SubTabs } from "@/cut/components/SubTabs";
 import { usePlayheadFrame } from "@/cut/components/usePlayheadFrame";
 import { useEditor } from "@/cut/lib/store";
-import { isEffectOverlay, type EffectOverlay } from "@/cut/lib/types";
+import { isEffectOverlay, TRANSITION_STYLE_LABELS, type EffectOverlay } from "@/cut/lib/types";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -29,14 +33,18 @@ import "./grain.css";
  * toggle splits the grid into three families: Moving, the effects that play
  * over their stretch of timeline (zoom, grain, VHS, glitch, light leak, flash,
  * shake), Filters, the still treatments and graded looks (blur, vignette,
- * vintage, noir, halation…), and Sound, the treatments over the audio under
- * the window (echo, reverb, muffle, telephone…). Drag one onto the timeline
+ * vintage, noir, halation…), and Sound, everything done to the audio — the
+ * treatments over the window (echo, reverb, muffle, telephone…) and the
+ * handover that dissolves the sound across a cut. Drag one onto the timeline
  * to place it; a click only picks the tile, the same as every other panel.
  *
  * The picture effects treat the footage and everything laid over it; the audio
  * ones treat everything audible under them — clip sound, upper tracks and the
- * soundtrack, mixed. A cut's own crossfade at a join stays where it belongs,
- * on the transition bar.
+ * soundtrack, mixed. The sound tiles are cards with a play control, because a
+ * treatment on the sound is picked by ear: pressing one plays a spoken line
+ * through it, and the dissolve plays two voices crossing at a cut. The sound
+ * dissolve is a transition, so it lands on a cut rather than over a stretch,
+ * and the styles that blend the picture stay in the Transitions tab.
  *
  * Select an effect on the timeline and the tab follows it: its family opens,
  * its tile is the marked one, and a click on another tile changes that
@@ -45,6 +53,10 @@ import "./grain.css";
  */
 
 type EffectGroup = "moving" | "filters" | "audio";
+
+/** The transition that hands over on the sound alone, picked from this shelf
+ * rather than the Transitions tab: what it does, it does to the sound. */
+const SOUND_DISSOLVE = "audiocross" as const;
 
 const GROUPS = [
   { id: "moving", label: "Moving" },
@@ -74,6 +86,9 @@ export function EffectsPanel() {
     if (liveEffect) setGroup(groupOf(liveEffect));
   }, [liveEffect, setGroup]);
   const frame = usePlayheadFrame();
+  // An audition belongs to the panel that started it; leaving the tab, or the
+  // panel, silences it.
+  useEffect(() => () => useFxAudition.getState().stop(), [group]);
   return (
     <>
       {/* PanelHead's height, so the side panel's floating close button lands
@@ -87,9 +102,21 @@ export function EffectsPanel() {
           cut off there. */}
       <ScrollArea className="min-h-0 flex-1" contentClassName="px-3.5 pt-1 pb-4">
         <div className="grid grid-cols-2 gap-2" onKeyDown={pickGridNav}>
-          {ALL_EFFECT_IDS.filter((id) => groupOf(id) === group).map((id) => (
-            <EffectTile key={id} id={id} live={live} frame={frame} />
-          ))}
+          {group === "audio" ? (
+            <>
+              {AUDIO_EFFECT_IDS.map((id, i) => (
+                <SoundTile key={id} id={id} live={live} index={i} />
+              ))}
+              {/* The handover on the sound sits with the treatments on the
+                  sound. It is a transition — it drags to a cut, where the
+                  picture keeps cutting and the sound crosses over. */}
+              <SoundDissolveTile index={AUDIO_EFFECT_IDS.length} />
+            </>
+          ) : (
+            ALL_EFFECT_IDS.filter((id) => groupOf(id) === group).map((id) => (
+              <EffectTile key={id} id={id} live={live} frame={frame} />
+            ))
+          )}
         </div>
       </ScrollArea>
     </>
@@ -126,7 +153,7 @@ function EffectTile({
     // Selecting an effect far down the list brings its tile into view.
     if (isLive) ref.current?.scrollIntoView({ block: "nearest" });
   }, [isLive]);
-  return (
+  const tile = (
     <button
       ref={ref}
       type="button"
@@ -151,22 +178,156 @@ function EffectTile({
       // ring is the focus indicator; the browser outline stays off.
       className="flex scroll-m-2 flex-col gap-1.5 text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:text-foreground"
     >
-      {isAudioEffect(id) ? (
-        <AudioSwatch
-          id={id}
-          t={t}
-          className={cn("w-full rounded-lg border border-border", marked && PICKED_RING)}
-        />
-      ) : (
-        <EffectSwatch
-          id={id}
-          t={t}
-          frame={frame}
-          className={cn("w-full rounded-lg border border-border", marked && PICKED_RING)}
-        />
-      )}
+      <EffectSwatch
+        id={id}
+        t={t}
+        frame={frame}
+        className={cn("w-full rounded-lg border border-border", marked && PICKED_RING)}
+      />
       <span className="leading-none">{EFFECT_LABELS[id]}</span>
     </button>
+  );
+  return tile;
+}
+
+/**
+ * One treatment on the sound, as the card the stock audio shelves use: the
+ * figure across the middle, the play control on it, the name on its own strip
+ * underneath. A sound tile is picked by ear, so it carries the same play
+ * affordance a music sample does; the card itself picks and drags like every
+ * other tile.
+ */
+function SoundTile({
+  id,
+  live,
+  index,
+}: {
+  id: EffectId;
+  live: EffectOverlay | null;
+  index: number;
+}) {
+  const { picked, pick } = useAssetPick(`effect:${id}`);
+  const t = useSoundClock(index);
+  const ref = useRef<HTMLDivElement>(null);
+  const isLive = live?.effect === id;
+  const marked = live ? isLive : picked;
+  useEffect(() => {
+    if (isLive) ref.current?.scrollIntoView({ block: "nearest" });
+  }, [isLive]);
+  const choose = () => {
+    if (!live) return pick();
+    if (!isLive) useEditor.getState().updateOverlay(live.id, { effect: id });
+  };
+  return (
+    <SoundCard
+      cardRef={ref}
+      pickId={`effect:${id}`}
+      label={EFFECT_LABELS[id]}
+      marked={marked}
+      onChoose={choose}
+      onDragStart={(e) => {
+        setElementDragData(e, { kind: "effect", effect: id });
+        setObjectDragImage(e);
+      }}
+      figure={<BarStrip bars={audioFxBars(id, t, STRIP_BARS, 0.9)} />}
+      audition={id}
+    />
+  );
+}
+
+/**
+ * The handover on the sound: the picture cuts and the sound crosses it.
+ *
+ * It is a transition rather than an effect element — it drags onto a cut, and
+ * the timeline marks the joint it would take — but it belongs on this shelf,
+ * because what it does is done to the sound.
+ */
+function SoundDissolveTile({ index }: { index: number }) {
+  const { picked, pick } = useAssetPick(`transition:${SOUND_DISSOLVE}`);
+  const t = useSoundClock(index);
+  return (
+    <SoundCard
+      pickId={`transition:${SOUND_DISSOLVE}`}
+      label={TRANSITION_STYLE_LABELS[SOUND_DISSOLVE]}
+      marked={picked}
+      onChoose={pick}
+      onDragStart={(e) => {
+        setElementDragData(e, { kind: "transition", style: SOUND_DISSOLVE });
+        setObjectDragImage(e);
+      }}
+      figure={<CrossStrip t={t} />}
+      audition={SOUND_DISSOLVE}
+    />
+  );
+}
+
+/** The card the sound shelf is built from: figure, play control, name. */
+function SoundCard({
+  cardRef,
+  pickId,
+  label,
+  marked,
+  onChoose,
+  onDragStart,
+  figure,
+  audition,
+}: {
+  cardRef?: React.RefObject<HTMLDivElement | null>;
+  pickId: string;
+  label: string;
+  marked: boolean;
+  onChoose: () => void;
+  onDragStart: (e: React.DragEvent) => void;
+  figure: React.ReactNode;
+  audition: string;
+}) {
+  const playing = useFxAudition((s) => s.effect === audition);
+  return (
+    // The play control sits over the card as a sibling rather than inside it:
+    // the card is what a drag carries, and the ghost of it is the boxed
+    // waveform with its name — pressing play is not part of what is dragged.
+    <span className="relative block">
+      <div
+        ref={cardRef}
+        data-pick-id={pickId}
+        data-drag-object
+        role="button"
+        tabIndex={0}
+        aria-pressed={marked}
+        draggable
+        onDragStart={onDragStart}
+        onDragEnd={clearElementDrag}
+        onClick={onChoose}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onChoose();
+          }
+        }}
+        className={cn(
+          "group flex scroll-m-2 cursor-grab flex-col overflow-hidden rounded-xl border border-border bg-muted/40 outline-none",
+          marked && PICKED_RING
+        )}
+      >
+        <div className="relative h-14">
+          <span className="absolute inset-x-2.5 top-1/2 block -translate-y-1/2">{figure}</span>
+        </div>
+        <div data-drag-omit className="border-t border-border px-2.5 py-1.5">
+          <span className="block truncate text-[11.5px] font-medium" title={label}>
+            {label}
+          </span>
+        </div>
+      </div>
+      <button
+        type="button"
+        title={playing ? "Stop" : "Play"}
+        aria-label={`${playing ? "Stop" : "Play"} ${label}`}
+        onClick={() => useFxAudition.getState().toggle(audition)}
+        className="absolute top-1.5 left-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground shadow-sm ring-1 ring-border transition-transform hover:scale-105"
+      >
+        {playing ? <Pause className="size-3" /> : <Play className="size-3 translate-x-px" />}
+      </button>
+    </span>
   );
 }
 
@@ -282,43 +443,91 @@ export function SwatchScene({
  *
  * The figure comes off the same recipe the mix is built from — a delay tap
  * shows as its repeat, a low pass rounds the bars off, a wobble swings them —
- * so a tile can only show what the effect actually does.
+ * so a tile can only show what the effect actually does. The geometry is the
+ * waveform strip the audio shelves draw, so a treatment and a piece of music
+ * read as the same kind of thing.
  */
-export function AudioSwatch({
-  id,
-  t = SWATCH_T,
+const STRIP_BARS = 40;
+
+function BarStrip({
+  bars,
+  alphaAt,
   className,
 }: {
-  id: EffectId;
-  t?: number;
+  bars: number[];
+  /** Per-bar opacity, for a figure that crosses rather than one that plays. */
+  alphaAt?: (i: number, n: number) => number;
   className?: string;
 }) {
-  const bars = audioFxBars(id, t, undefined, 0.9);
-  const w = 100 / (bars.length * 1.7);
   return (
-    <span
-      data-drag-object
-      className={cn(
-        "relative block aspect-square overflow-hidden rounded-md bg-neutral-900",
-        className
-      )}
+    <svg
+      viewBox={`0 0 ${bars.length * 2} 16`}
+      preserveAspectRatio="none"
+      aria-hidden
+      className={cn("block h-7 w-full text-muted-foreground/70", className)}
     >
-      <svg viewBox="0 0 100 100" aria-hidden className="absolute inset-0 size-full">
-        {bars.map((v, i) => {
-          const h = Math.max(w, v * 76);
-          return (
-            <rect
-              key={i}
-              x={((i + 0.5) / bars.length) * 100 - w / 2}
-              y={50 - h / 2}
-              width={w}
-              height={h}
-              rx={w / 2}
-              className="fill-white/85"
-            />
-          );
-        })}
-      </svg>
+      {bars.map((v, i) => {
+        const h = Math.max(1.5, Math.min(1, v) * 16);
+        return (
+          <rect
+            key={i}
+            x={i * 2}
+            y={(16 - h) / 2}
+            width={1.2}
+            height={h}
+            rx={0.6}
+            fill="currentColor"
+            fillOpacity={alphaAt ? alphaAt(i, bars.length) : undefined}
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
+/**
+ * The clock one sound tile's figure runs on.
+ *
+ * The figures roll rather than loop, so nothing on the shelf has to snap back
+ * to a start — and each tile is handed its own place in the roll and its own
+ * slightly different rate, a golden-ratio step by its position in the grid, so
+ * the shelf never moves in formation and never falls back into it.
+ */
+function useSoundClock(index: number): number {
+  const now = useSwatchClock(true, Infinity);
+  const phase = ((index * PHASE_STEP) % 1) * 4;
+  const rate = 0.8 + ((index * PHASE_STEP * 3) % 1) * 0.45;
+  return (now + phase) * rate;
+}
+
+/** The sound dissolve's figure: one sound going as the other arrives, with the
+ * cut standing where the picture changes.
+ *
+ * Each side is scaled by its own ramp rather than only faded, because that is
+ * what the effect does to it — the outgoing sound is smaller as it reaches the
+ * cut, the incoming one grows out of it — and a level is what reads at tile
+ * size. */
+function CrossStrip({ t }: { t: number }) {
+  // The two ramps meet at zero on the cut, which is where the sound really is
+  // at the middle of a dissolve — so the figure pinches there.
+  const ramp = (i: number, n: number) => Math.max(0, Math.min(1, i / (n - 1) - 0.5) * 2);
+  const scaled = (bars: number[], at: (i: number, n: number) => number) =>
+    bars.map((v, i) => v * at(i, bars.length));
+  const outgoing = audioFxBars(null, t, STRIP_BARS);
+  const incoming = audioFxBars(null, t + 1.7, STRIP_BARS);
+  return (
+    <span className="relative block h-7">
+      <BarStrip
+        bars={scaled(outgoing, (i, n) => 1 - Math.min(1, (i / (n - 1)) * 2))}
+        alphaAt={(i, n) => 0.35 + 0.65 * (1 - Math.min(1, (i / (n - 1)) * 2))}
+        className="absolute inset-0"
+      />
+      <BarStrip
+        bars={scaled(incoming, ramp)}
+        alphaAt={(i, n) => 0.35 + 0.65 * ramp(i, n)}
+        className="absolute inset-0"
+      />
+      <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-foreground/40" />
     </span>
   );
 }
