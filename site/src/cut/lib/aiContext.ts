@@ -354,6 +354,7 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
             start: r(t.start),
             seconds: r(t.seconds),
             style: t.style,
+            ...(t.hidden ? { hidden: true } : {}),
             ...(plays.length > 0
               ? { plays: plays.map((p) => ({ at: p.kind, clipId: p.clipId })) }
               : { parked: true }),

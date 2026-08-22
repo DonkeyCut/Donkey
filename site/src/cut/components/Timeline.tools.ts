@@ -89,12 +89,16 @@ export const TIMELINE_TOOLS = [
   {
     name: "set_track_hidden",
     description:
-      "Hide or show a whole timeline row at once — the track header's eye toggle. Applies to every item on that row: a hidden video track plays black and silent, a hidden soundtrack lane is silent, hidden text (title) lanes and subtitle tracks drop out of the picture. Items stay on the timeline, grayed.",
+      "Hide or show a whole timeline row at once — the row's eye toggle. Applies to every item on that row: a hidden video track plays black and silent, a hidden soundtrack lane is silent, hidden text (title) lanes and subtitle tracks drop out of the picture, and hidden transitions leave their cuts hard. Items stay on the timeline, grayed. The transitions row is the only one of its kind, so omit `track` for it.",
     inputSchema: obj({
-      kind: { type: "string", enum: ["video", "soundtrack", "text", "subtitles"], description: "Which row kind" },
-      track: num("Track/lane index, 0-based"),
+      kind: {
+        type: "string",
+        enum: ["video", "soundtrack", "text", "subtitles", "transitions"],
+        description: "Which row kind",
+      },
+      track: num("Track/lane index, 0-based; omit for transitions"),
       hidden: bool("true to hide"),
-    }, ["kind", "track", "hidden"]),
+    }, ["kind", "hidden"]),
   },
   {
     name: "set_track_muted",

@@ -7,7 +7,7 @@
  * renamed tool breaks the build until every side catches up.
  */
 
-import { num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
+import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 import { ANIM_STYLE_IDS, TRANSITION_STYLE_IDS } from "@/cut/lib/types";
 
 export const TRANSITIONS_TOOLS = [
@@ -32,6 +32,15 @@ export const TRANSITIONS_TOOLS = [
     inputSchema: obj({
       transitionId: str("Transition bar id, from editor_state `transitions`"),
     }, ["transitionId"]),
+  },
+  {
+    name: "set_transition_hidden",
+    description:
+      "Hide or show one transition bar by its own id. A hidden bar stays on the transitions row (grayed) and keeps the cut it sits on, so nothing else claims that boundary, but plays nothing — the cut renders hard in the preview and in every export. Use it to try a cut without its blend; remove_transition is for deleting one outright.",
+    inputSchema: obj({
+      transitionId: str("Transition bar id, from editor_state `transitions`"),
+      hidden: bool("true to hide"),
+    }, ["transitionId", "hidden"]),
   },
   {
     name: "set_animation",

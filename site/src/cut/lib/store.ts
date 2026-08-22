@@ -438,6 +438,8 @@ export interface EditorState {
   setAudioLaneHidden: (lane: number, hidden: boolean) => void;
   /** Hide or show every title on one title lane, in one undo step. */
   setTextLaneHidden: (lane: number, hidden: boolean) => void;
+  /** Hide or show every bar on the transitions row at once. */
+  setTransitionsHidden: (hidden: boolean) => void;
   /** Reorder the occupied video tracks: the track sitting at z-index `from`
    * (0 = the bottom track) lands at `to` and the rest close up around it.
    * Tracks renumber to 0..n-1, so whatever lands at 0 becomes the spine. */
@@ -2547,6 +2549,16 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       if (!ids.length) return;
       push();
       get().updateOverlaysTransient(ids.map((id) => ({ id, patch: { hidden } })));
+    },
+
+    setTransitionsHidden: (hidden) => {
+      if (!get().transitions.some((t) => !!t.hidden !== hidden)) return;
+      push();
+      set((s) => ({
+        transitions: s.transitions.map((t) =>
+          !!t.hidden === hidden ? t : { ...t, hidden: hidden || undefined }
+        ),
+      }));
     },
 
     moveVideoTrack: (from, to) => {
@@ -4782,7 +4794,9 @@ export function parkedTransitions(
 ): TimelineTransition[] {
   if (transitions.length === 0) return [];
   const roles = resolveTransitions(clips, transitions);
-  return transitions.filter((t) => !(roles.get(t.id) ?? []).length);
+  // A hidden bar plays nothing on purpose; only a bar that lost its boundary
+  // is debris.
+  return transitions.filter((t) => !t.hidden && !(roles.get(t.id) ?? []).length);
 }
 
 /**
@@ -4838,6 +4852,10 @@ export function deriveTransitionFields(
   const roles = resolveTransitions(clips, transitions);
   const byBoundary = new Map<string, TimelineTransition>();
   for (const t of transitions) {
+    // A hidden bar still holds its boundary — nothing else may claim it — and
+    // renders nothing, so the clip fields it would have written stay empty and
+    // the cut plays hard everywhere.
+    if (t.hidden) continue;
     for (const r of roles.get(t.id) ?? []) byBoundary.set(`${r.kind}:${r.clipId}`, t);
   }
   let changed = false;
@@ -4884,6 +4902,7 @@ function sanitizeTransitions(raw: TimelineTransition[] | undefined): TimelineTra
       start: t.start,
       seconds: clampBarSeconds(t.seconds),
       style: TRANSITION_STYLE_IDS.includes(t.style) ? t.style : "crossfade",
+      ...(t.hidden ? { hidden: true as const } : {}),
     }));
   return bars.filter(
     (t, i) =>

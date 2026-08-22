@@ -1008,6 +1008,56 @@ describe("bars and clip edges", () => {
     expect(parkedTransitions(s().clips, s().transitions)).toEqual([]);
   });
 
+  test("a hidden bar keeps its cut and renders nothing", () => {
+    const av = asset(8);
+    const a = vclip({ track: 0, start: 0, out: 4, assetId: av.id });
+    const b = vclip({ track: 0, start: 4, out: 4, assetId: av.id });
+    useEditor.setState({ assets: [av], clips: [a, b] });
+    s().setClipTransition(a.id, 0.8, "crossfade");
+    const bar = s().transitions[0];
+    s().updateTransition(bar.id, { hidden: true });
+    // The clip fields are what every renderer reads, so hiding has to clear
+    // them: the joint plays as a hard cut.
+    expect(s().clips[0].transition ?? 0).toBe(0);
+    expect(getClipSpans(s().clips, s().assets, 0)[0].transitionOut).toBe(0);
+    // It still owns the boundary, so nothing reports it as debris and no
+    // other bar can claim the same cut.
+    expect(s().transitions).toHaveLength(1);
+    expect(parkedTransitions(s().clips, s().transitions)).toEqual([]);
+    s().updateTransition(bar.id, { hidden: undefined });
+    expect(s().clips[0].transition).toBeCloseTo(0.8);
+  });
+
+  test("the transitions row hides and shows every bar at once", () => {
+    const av = asset(12);
+    const a = vclip({ track: 0, start: 0, out: 4, assetId: av.id });
+    const b = vclip({ track: 0, start: 4, out: 4, assetId: av.id });
+    const c = vclip({ track: 0, start: 8, out: 4, assetId: av.id });
+    useEditor.setState({ assets: [av], clips: [a, b, c] });
+    s().setClipTransition(a.id, 0.8, "crossfade");
+    s().setClipTransition(b.id, 0.8, "audiocross");
+    s().setTransitionsHidden(true);
+    expect(s().transitions.every((t) => t.hidden)).toBe(true);
+    const hidden = getClipSpans(s().clips, s().assets, 0);
+    expect(hidden[0].transitionOut).toBe(0);
+    expect(hidden[1].soundOut).toBe(0);
+    s().setTransitionsHidden(false);
+    const shown = getClipSpans(s().clips, s().assets, 0);
+    expect(shown[0].transitionOut).toBeCloseTo(0.8);
+    expect(shown[1].soundOut).toBeCloseTo(0.4);
+  });
+
+  test("a hidden bar survives a save", () => {
+    const av = asset(8);
+    const a = vclip({ track: 0, start: 0, out: 4, assetId: av.id });
+    const b = vclip({ track: 0, start: 4, out: 4, assetId: av.id });
+    useEditor.setState({ assets: [av], clips: [a, b] });
+    s().setClipTransition(a.id, 0.8, "crossfade");
+    s().updateTransition(s().transitions[0].id, { hidden: true });
+    const doc = serializeDoc(useEditor.getState());
+    expect(doc.transitions?.[0].hidden).toBe(true);
+  });
+
   test("a cross dissolve reaches into the media each clip was trimmed from", () => {
     const av = asset(8);
     // Both clips are cut out of the middle of an eight-second source, so each

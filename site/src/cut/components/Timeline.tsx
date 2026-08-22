@@ -561,7 +561,8 @@ export function Timeline() {
     audioTop: number | null;
     textTop: number | null;
     subTop: number | null;
-  }>({ video: [], audioTop: null, textTop: null, subTop: null });
+    xTop: number | null;
+  }>({ video: [], audioTop: null, textTop: null, subTop: null, xTop: null });
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -578,16 +579,18 @@ export function Timeline() {
     const audioTop = contentY("[data-tl-arows]");
     const textTop = contentY("[data-tl-trows]");
     const subTop = contentY("[data-tl-srows]");
+    const xTop = contentY("[data-tl-xrows]");
     setGutterYs((prev) =>
       prev.audioTop === audioTop &&
       prev.textTop === textTop &&
       prev.subTop === subTop &&
+      prev.xTop === xTop &&
       prev.video.length === video.length &&
       prev.video.every(
         (v, i) => v.track === video[i].track && v.y === video[i].y && v.h === video[i].h
       )
         ? prev
-        : { video, audioTop, textTop, subTop }
+        : { video, audioTop, textTop, subTop, xTop }
     );
   });
   // Measured width of the scroll viewport, so the ruler and tracks always draw
@@ -801,7 +804,7 @@ export function Timeline() {
   // Right-click on an element bar: a small popover to hide or show it — and,
   // when the click landed on a keyframe diamond, to remove that key.
   const [barMenu, setBarMenu] = useState<
-    { x: number; y: number; id: string; key?: number } | null
+    { x: number; y: number; id: string; key?: number; transition?: boolean } | null
   >(null);
   useEffect(() => {
     if (!barMenu) return;
@@ -2447,6 +2450,7 @@ export function Timeline() {
                       // A parked bar reads muted: it is on the row but playing
                       // nothing until a boundary lines up with it.
                       playing ? "bg-[#2B6FD4]" : "bg-muted-foreground/50",
+                      x.t.hidden && "opacity-40 grayscale",
                       selKeys.has(`transition:${x.t.id}`) && SELECTED_SHADOW,
                       // Mid-drag it rides over the zone it would land on, so
                       // the marked room stays readable underneath.
@@ -2460,9 +2464,23 @@ export function Timeline() {
                     }}
                     data-tl-sel={`transition:${x.t.id}`}
                     onPointerDown={(e) => moveTransition(e, x)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setBarMenu({ x: e.clientX, y: e.clientY, id: x.t.id, transition: true });
+                    }}
                   >
                     <Icon className="size-2.5 shrink-0" />
                     <span className="truncate">{x.label}</span>
+                    <HideChip
+                      hidden={!!x.t.hidden}
+                      small
+                      className="top-1/2 right-2 -translate-y-1/2"
+                      onToggle={() =>
+                        useEditor
+                          .getState()
+                          .updateTransition(x.t.id, { hidden: !x.t.hidden || undefined })
+                      }
+                    />
                     {/* Retiming pulls the loose end: an entrance runs forward
                         from the clip's head, everything else backward from the
                         boundary it sits on. */}
@@ -2917,6 +2935,18 @@ export function Timeline() {
                 />
               );
             })}
+          {gutterYs.xTop !== null && transitions.length > 0 && (
+            <GutterToggle
+              kind="hide"
+              off={transitions.every((x) => x.t.hidden)}
+              partial={transitions.some((x) => x.t.hidden)}
+              reveal={trackHover}
+              top={gutterYs.xTop + TEXT_H / 2 - 8}
+              onToggle={() =>
+                useEditor.getState().setTransitionsHidden(!transitions.every((x) => x.t.hidden))
+              }
+            />
+          )}
           {gutterYs.subTop !== null &&
             Array.from({ length: subtitleLaneCount(subtitles) }, (_, lane) => {
               const off = laneHidden(subtitles, lane);
@@ -2972,7 +3002,11 @@ export function Timeline() {
       )}
       {barMenu &&
         (() => {
-          const o = overlays.find((x) => x.id === barMenu.id);
+          // The same menu over either kind of bar: an element on the title
+          // rows, or a transition on its own row.
+          const o = barMenu.transition
+            ? (transitions.find((x) => x.t.id === barMenu.id)?.t ?? null)
+            : (overlays.find((x) => x.id === barMenu.id) ?? null);
           if (!o) return null;
           const item =
             "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground";
@@ -3006,7 +3040,10 @@ export function Timeline() {
                 <button
                   className={item}
                   onClick={() => {
-                    useEditor.getState().updateOverlay(barMenu.id, { hidden: !o.hidden });
+                    const s = useEditor.getState();
+                    const hidden = !o.hidden || undefined;
+                    if (barMenu.transition) s.updateTransition(barMenu.id, { hidden });
+                    else s.updateOverlay(barMenu.id, { hidden: hidden ?? false });
                     setBarMenu(null);
                   }}
                 >

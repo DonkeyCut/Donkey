@@ -642,6 +642,15 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     return { removed: id, ...tracksAfter() };
   },
 
+  set_transition_hidden: (s, input) => {
+    const id = String(input.transitionId ?? "");
+    const bar = s.transitions.find((t) => t.id === id);
+    if (!bar) throw new ToolError(`No transition bar with id ${id}.`);
+    const hidden = Boolean(input.hidden);
+    s.updateTransition(id, { hidden: hidden || undefined });
+    return { id, hidden, style: bar.style, seconds: bar.seconds };
+  },
+
   set_animation: (s, input) => {
     const clip = requireItem(s.clips, input.clipId, "video clip");
     const which = input.which === "in" || input.which === "out" ? input.which : null;
@@ -1352,9 +1361,11 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     },
 
   set_track_hidden: (s, input) => {
-      if (!isNum(input.track) || input.track < 0)
+      // The transitions row is the one row there is only one of, so it names
+      // no track.
+      if (input.kind !== "transitions" && (!isNum(input.track) || input.track < 0))
         throw new ToolError("track must be 0 or higher.");
-      const track = Math.round(input.track);
+      const track = isNum(input.track) ? Math.round(input.track) : 0;
       const hidden = Boolean(input.hidden);
       switch (input.kind) {
         case "video": {
@@ -1382,8 +1393,17 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           s.setSubtitleTrackMeta(track, { hidden: hidden ? true : undefined });
           return { kind: "subtitles", track, hidden, cues: laneCues(s.subtitles, track).length };
         }
+        case "transitions": {
+          // One row holds every bar, so the track index has nothing to pick.
+          const n = s.transitions.length;
+          if (!n) throw new ToolError("There are no transitions on the timeline.");
+          s.setTransitionsHidden(hidden);
+          return { kind: "transitions", hidden, transitions: n };
+        }
         default:
-          throw new ToolError('`kind` must be "video", "soundtrack", "text", or "subtitles".');
+          throw new ToolError(
+            '`kind` must be "video", "soundtrack", "text", "subtitles", or "transitions".'
+          );
       }
   },
 

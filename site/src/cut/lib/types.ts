@@ -582,6 +582,10 @@ export interface TimelineTransition {
   /** Blend length, 0.1..TRANSITION_MAX. */
   seconds: number;
   style: TransitionStyle;
+  /** Hidden bars stay on the row (grayed) and keep the boundary they line up
+   * with, so nothing else claims it, but play nothing — the cut renders hard
+   * in the preview and in every export. */
+  hidden?: boolean;
 }
 
 /** Effective whole-video fade length: the stored seconds, capped at half the
