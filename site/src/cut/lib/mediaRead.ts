@@ -33,6 +33,7 @@ import {
   CustomSource,
   EncodedPacketSink,
   Input,
+  UnsupportedInputFormatError,
   UrlSource,
   type InputAudioTrack,
   type InputVideoTrack,
@@ -131,11 +132,24 @@ export async function withMedia<T>(src: string | Blob, fn: (input: Input) => Pro
 // undecodable-import guard still refuses footage the page can't play.
 const headless = () => typeof document === "undefined";
 
+/** A file the container parser doesn't recognize reads back as this module's
+ * own error. mediabunny's own text names no file and reads like a bug report,
+ * and it reaches the user wherever a read runs — a caption run, an export, a
+ * chat tool. */
+async function tracked<T>(read: Promise<T>): Promise<T> {
+  try {
+    return await read;
+  } catch (err) {
+    if (err instanceof UnsupportedInputFormatError) throw new UnreadableMediaError();
+    throw err;
+  }
+}
+
 /** The primary video track, or null when the file has no readable one — either
  * no video at all, or video in a codec this browser can't decode. Callers that
  * need to tell those apart ask `hasUndecodableVideo`. */
 export async function videoTrackOf(input: Input): Promise<InputVideoTrack | null> {
-  const track = await input.getPrimaryVideoTrack();
+  const track = await tracked(input.getPrimaryVideoTrack());
   if (!track) return null;
   return headless() || (await track.canDecode()) ? track : null;
 }
@@ -148,13 +162,13 @@ export async function videoTrackOf(input: Input): Promise<InputVideoTrack | null
  * the timeline as a waveform with no explanation. */
 export async function hasUndecodableVideo(input: Input): Promise<boolean> {
   if (headless()) return false;
-  const track = await input.getPrimaryVideoTrack();
+  const track = await tracked(input.getPrimaryVideoTrack());
   return !!track && !(await track.canDecode());
 }
 
 /** The primary audio track, or null — same decodability rule as video. */
 export async function audioTrackOf(input: Input): Promise<InputAudioTrack | null> {
-  const track = await input.getPrimaryAudioTrack();
+  const track = await tracked(input.getPrimaryAudioTrack());
   if (!track) return null;
   return headless() || (await track.canDecode()) ? track : null;
 }
