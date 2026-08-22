@@ -16,10 +16,17 @@ import {
   OVERLAY_ANIM_STYLE_LABELS,
   OVERLAY_LOOP_STYLE_IDS,
   OVERLAY_LOOP_STYLE_LABELS,
+  contrastText,
+  wordAccent,
+  WORD_ACCENT_DEFAULT,
+  WORD_ACCENT_LABELS,
+  WORD_ACCENT_MODE_IDS,
   type OverlayAnimStyle,
   type OverlayLoopStyle,
+  type WordAccentMode,
 } from "@donkeycut/effects-kit";
 import { Tile } from "@/cut/components/PanelTile";
+import { wordAccentCss } from "@/cut/lib/textRender";
 import { fontStack } from "@/cut/lib/types";
 
 /**
@@ -83,18 +90,20 @@ const referencePx = (slot: Slot, style: string) =>
       ? LOOP_REFERENCE_PX
       : DEMO_REFERENCE_PX;
 
-type Slot = "in" | "out" | "loop" | "move";
+type Slot = "in" | "out" | "loop" | "move" | "words";
 
 /** A move runs the element's whole span, so the tile gives it one of its own
  * to play in — long enough to read a push, short enough to come round again. */
 const MOVE_DEMO_SECONDS = 2.4;
 
 const labelOf = (slot: Slot, style: string) =>
-  slot === "move"
-    ? (MOTION.holds[style]?.label ?? style)
-    : slot === "loop"
-      ? (OVERLAY_LOOP_STYLE_LABELS[style as OverlayLoopStyle] ?? style)
-      : (OVERLAY_ANIM_STYLE_LABELS[style as OverlayAnimStyle] ?? style);
+  slot === "words"
+    ? (WORD_ACCENT_LABELS[style as WordAccentMode] ?? style)
+    : slot === "move"
+      ? (MOTION.holds[style]?.label ?? style)
+      : slot === "loop"
+        ? (OVERLAY_LOOP_STYLE_LABELS[style as OverlayLoopStyle] ?? style)
+        : (OVERLAY_ANIM_STYLE_LABELS[style as OverlayAnimStyle] ?? style);
 
 function demoStateAt(
   slot: Slot,
@@ -282,10 +291,95 @@ function LiveName({
   );
 }
 
+/** One turn of a word-emphasis demo, and the share of it the accent holds —
+ * long enough to read the treatment arriving and leaving again. */
+const WORD_DEMO_SECONDS = 1.7;
+const WORD_DEMO_ON = 0.5;
+/** The accent reads on a light panel the way it reads over footage: with the
+ * same shadow the caption previews give a bright caption color. */
+const WORD_DEMO_SHADOW = "0 0 2px rgba(0, 0, 0, 0.6)";
+
+/** A word-emphasis name: the label sits plain, then takes the accent the way
+ * it will when that word is said. Written straight to the element, like every
+ * other demo here. */
+function WordName({
+  style,
+  textColor,
+  accentColor,
+  scale,
+  index = 0,
+}: {
+  style: string;
+  /** The element's own text color — what a swell keeps. */
+  textColor: string;
+  /** The accent it was given, if any. */
+  accentColor?: string;
+  /** The element's own swell, so a tile shows the size it will apply. */
+  scale?: number;
+  index?: number;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const phase = index * PHASE_STEP * WORD_DEMO_SECONDS;
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const mode = style as WordAccentMode;
+    const color = wordAccent({ style: mode, color: accentColor }, textColor);
+    const css = wordAccentCss({
+      mode,
+      color,
+      text: contrastText(color),
+      scale,
+      // The tile's name sits on one line of its own; the stage gives it room.
+      lineHeight: 1,
+    });
+    const props = el.style as unknown as Record<string, string>;
+    const rest = () => {
+      for (const k of Object.keys(css)) props[k] = "";
+      el.style.textShadow = "";
+    };
+    const accent = () => {
+      Object.assign(el.style, css);
+      if (mode !== "box") el.style.textShadow = WORD_DEMO_SHADOW;
+    };
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      accent();
+      return rest;
+    }
+    let start = 0;
+    let raf = 0;
+    let on: boolean | null = null;
+    const tick = (now: number) => {
+      if (!start) start = now;
+      const p = (((now - start) / 1000 + phase) % WORD_DEMO_SECONDS) / WORD_DEMO_SECONDS;
+      const next = p < WORD_DEMO_ON;
+      if (next !== on) {
+        on = next;
+        if (next) accent();
+        else rest();
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      rest();
+    };
+  }, [style, textColor, accentColor, scale, phase]);
+  return (
+    <span ref={ref} className={`${WORD} text-foreground`} style={wordStyle()}>
+      {labelOf("words", style)}
+    </span>
+  );
+}
+
 /** The name in its tile: the motion itself while the tile is playing, the
  * plain name when it is not. */
 function AnimName({
   playing,
+  textColor,
+  accentColor,
+  accentScale,
   ...rest
 }: {
   slot: Slot;
@@ -295,12 +389,25 @@ function AnimName({
   speed: number;
   playing: boolean;
   index?: number;
+  /** The element's own text color, for the words tiles. */
+  textColor?: string;
+  /** The accent it was given, if any. */
+  accentColor?: string;
+  /** Its swell, so the tiles show the size the pick will apply. */
+  accentScale?: number;
 }) {
-  return playing ? (
-    <LiveName {...rest} />
-  ) : (
-    <FrozenName slot={rest.slot} style={rest.style} />
-  );
+  if (!playing) return <FrozenName slot={rest.slot} style={rest.style} />;
+  if (rest.slot === "words")
+    return (
+      <WordName
+        style={rest.style}
+        textColor={textColor ?? WORD_ACCENT_DEFAULT}
+        accentColor={accentColor}
+        scale={accentScale}
+        index={rest.index}
+      />
+    );
+  return <LiveName {...rest} />;
 }
 
 /** Whether the element is on screen. A tile off the scroll's edge keeps its
@@ -327,6 +434,9 @@ function AnimTile({
   speed,
   index,
   selected,
+  textColor,
+  accentColor,
+  accentScale,
   onPick,
 }: {
   slot: Slot;
@@ -337,6 +447,12 @@ function AnimTile({
   /** Place in the grid, which sets this tile's beat in the cascade. */
   index: number;
   selected: boolean;
+  /** The element's own text color, for the words tiles. */
+  textColor?: string;
+  /** The accent it was given, if any. */
+  accentColor?: string;
+  /** Its swell, so a words tile shows the size the pick will apply. */
+  accentScale?: number;
   onPick: () => void;
 }) {
   const ref = useRef<HTMLButtonElement>(null);
@@ -357,6 +473,9 @@ function AnimTile({
           seconds={seconds}
           speed={speed}
           index={index}
+          textColor={textColor}
+          accentColor={accentColor}
+          accentScale={accentScale}
           playing={onScreen}
         />
       </span>
@@ -376,6 +495,9 @@ export function AnimationCard({
   seconds,
   speed,
   index = 0,
+  textColor,
+  accentColor,
+  accentScale,
   onOpen,
   onClear,
 }: {
@@ -386,6 +508,12 @@ export function AnimationCard({
   speed: number;
   /** Place in the row, which sets where in its cycle this card starts. */
   index?: number;
+  /** The element's own text color, for a words card. */
+  textColor?: string;
+  /** The accent it was given, if any. */
+  accentColor?: string;
+  /** Its swell, so the card shows the size the element is wearing. */
+  accentScale?: number;
   onOpen: () => void;
   onClear: () => void;
 }) {
@@ -408,6 +536,9 @@ export function AnimationCard({
             seconds={seconds}
             speed={speed}
             index={index}
+            textColor={textColor}
+            accentColor={accentColor}
+            accentScale={accentScale}
             playing={onScreen}
           />
         </span>
@@ -435,6 +566,9 @@ export function AnimationTiles({
   isText,
   seconds,
   speed,
+  textColor,
+  accentColor,
+  accentScale,
   onPick,
 }: {
   slot: Slot;
@@ -449,14 +583,23 @@ export function AnimationTiles({
   seconds: number;
   /** The loop speed the panel has set — the hover demo's cycle rate. */
   speed: number;
+  /** The element's own text color, so the words tiles demo the color each
+   * treatment will actually wear. */
+  textColor?: string;
+  /** The accent it was given, if any. */
+  accentColor?: string;
+  /** Its swell, so the tiles show the size a pick will apply. */
+  accentScale?: number;
   onPick: (style: string | null) => void;
 }) {
   const ids: string[] =
-    slot === "move"
-      ? HOLD_IDS
-      : slot === "loop"
-        ? OVERLAY_LOOP_STYLE_IDS
-        : OVERLAY_ANIM_STYLE_IDS.filter((s) => s !== "typewriter" || isText);
+    slot === "words"
+      ? WORD_ACCENT_MODE_IDS
+      : slot === "move"
+        ? HOLD_IDS
+        : slot === "loop"
+          ? OVERLAY_LOOP_STYLE_IDS
+          : OVERLAY_ANIM_STYLE_IDS.filter((s) => s !== "typewriter" || isText);
 
   return (
     <div className="grid grid-cols-2 gap-[9px]">
@@ -476,6 +619,9 @@ export function AnimationTiles({
           seconds={seconds}
           speed={speed}
           index={i}
+          textColor={textColor}
+          accentColor={accentColor}
+          accentScale={accentScale}
           selected={value === id}
           onPick={() => onPick(id)}
         />

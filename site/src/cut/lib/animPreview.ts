@@ -72,21 +72,22 @@ export function releaseAnimRest(id: string): void {
   notify();
 }
 
-/** The longest a move rehearsal takes. A move runs the element's whole span,
- * which can be half a minute; anything past this sweeps the same motion
- * through in this long instead, so the shape reads without the wait. */
-const MOVE_REHEARSAL_MAX = 2.4;
+/** The longest a whole-span rehearsal takes. A move and word emphasis both
+ * run the element's whole span, which can be half a minute; anything past
+ * this sweeps through in this long instead, so the shape reads without the
+ * wait. */
+const SPAN_REHEARSAL_MAX = 2.4;
 
 /**
  * Play `slot` on `o` from its own starting point: In sweeps the head of the
- * element, Out its tail, a loop runs one cycle, and a move runs the element's
- * whole span. The run carries that slot alone, so rehearsing one animation
- * never drags the element's others into the picture. Nothing plays when the
- * slot is empty.
+ * element, Out its tail, a loop runs one cycle, and a move or a run of word
+ * emphasis runs the element's whole span. The run carries that slot alone, so
+ * rehearsing one animation never drags the element's others into the picture.
+ * Nothing plays when the slot is empty.
  */
 export function playAnimPreview(
   o: { id: string; start: number; end: number; anim?: OverlayAnim },
-  slot: "in" | "out" | "loop" | "move"
+  slot: "in" | "out" | "loop" | "move" | "words"
 ): void {
   stopAnimPreview();
   const anim: OverlayAnim =
@@ -96,19 +97,23 @@ export function playAnimPreview(
         ? { out: o.anim?.out }
         : slot === "loop"
           ? { loop: o.anim?.loop }
-          : { move: o.anim?.move };
+          : slot === "move"
+            ? { move: o.anim?.move }
+            : { words: o.anim?.words };
+  const wholeSpan = slot === "move" || slot === "words";
   if (slot === "move" && !anim.move) return;
+  if (slot === "words" && !anim.words) return;
   const dur = Math.max(0.1, o.end - o.start);
-  const span =
-    slot === "move"
-      ? dur
-      : slot === "loop"
-        ? (loopPeriod(anim) ?? 0)
-        : Math.min((slot === "in" ? anim.in?.seconds : anim.out?.seconds) ?? 0, dur);
+  const span = wholeSpan
+    ? dur
+    : slot === "loop"
+      ? (loopPeriod(anim) ?? 0)
+      : Math.min((slot === "in" ? anim.in?.seconds : anim.out?.seconds) ?? 0, dur);
   if (span <= 0) return;
-  // How long the rehearsal takes on the wall clock. Every slot but a move
-  // plays at its own speed; a long move is compressed into the cap.
-  const window = slot === "move" ? Math.min(span, MOVE_REHEARSAL_MAX) : span;
+  // How long the rehearsal takes on the wall clock. A slot that plays at its
+  // own speed keeps it; one that runs the whole span is compressed into the
+  // cap.
+  const window = wholeSpan ? Math.min(span, SPAN_REHEARSAL_MAX) : span;
   // Where the slot lives inside the element: In, a loop and a move start at
   // its head, Out ends at its tail.
   const from = slot === "out" ? dur - span : 0;

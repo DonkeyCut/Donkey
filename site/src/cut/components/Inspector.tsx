@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   EFFECT_LABELS,
   hasMaskKeys,
+  hasOverlayAnim,
   hasOverlayKeys,
   KEY_EPSILON,
   keyIndexAt,
@@ -33,15 +34,23 @@ import {
   ZOOM_LEVELS,
   ZOOM_RAMP_MAX,
   zoomRampOf,
+  wordAccent,
+  WORD_ACCENT_DEFAULT,
+  WORD_POP_SCALE,
+  WORD_SWELL_MAX,
+  WORD_SWELL_MIN,
+  wordSwell,
   type OverlayAnim,
   type OverlayAnimStyle,
   type OverlayLoopStyle,
+  type WordAccentMode,
 } from "@donkeycut/effects-kit";
 import { clipWindow, useEditor, type EditorState } from "@/cut/lib/store";
 import { usePreviewTime } from "@/cut/lib/playhead";
 import { CLIP_MAX_ZOOM, clipKeyed, clipPoseAt, clipZoom, contentRect } from "@/cut/lib/types";
 import { AnimationCard, AnimationTiles } from "@/cut/components/AnimationTiles";
 import { ColorField } from "@/cut/components/ColorField";
+import { wordTimesFor } from "@/cut/lib/textWords";
 import { NumberField } from "@/cut/components/NumberField";
 import { playAnimPreview, stopAnimPreview } from "@/cut/lib/animPreview";
 import { GenerateSubtitlesAudio } from "@/cut/components/VoicePicker";
@@ -1464,11 +1473,27 @@ function writeOverlayAnim(o: Overlay, anim: OverlayAnim, patch: Partial<OverlayA
   if (!next.out) delete next.out;
   if (!next.loop) delete next.loop;
   if (!next.move) delete next.move;
-  const value = next.in || next.out || next.loop || next.move ? next : undefined;
+  if (!next.words) delete next.words;
+  const value = hasOverlayAnim(next) ? next : undefined;
   const st = useEditor.getState();
   const peers = o.groupId ? st.overlays.filter((x) => x.groupId === o.groupId) : [];
-  const ids = peers.length > 1 ? peers.map((p) => p.id) : [o.id];
-  st.updateOverlaysTransient(ids.map((id) => ({ id, patch: { anim: value } })));
+  const targets = peers.length > 1 ? peers : [o];
+  st.updateOverlaysTransient(
+    targets.map((el) => {
+      if (!value?.words || !isTextOverlay(el)) return { id: el.id, patch: { anim: value } };
+      // Word times are the element's own — each one's words are said at its
+      // own moment — so a grouped write times every member against the cut
+      // rather than copying one member's clock onto the rest. Times already
+      // measured ride through: the alignment runs when a slot is first filled,
+      // never on every frame of a slider drag.
+      const carried = el.id === o.id ? value.words.times : el.anim?.words?.times;
+      const times = carried ?? wordTimesFor(el, st.subtitles.cues);
+      return {
+        id: el.id,
+        patch: { anim: { ...value, words: { ...value.words, ...(times ? { times } : {}) } } },
+      };
+    })
+  );
 }
 
 /** The set slot's Length (In/Out) or Speed (Loop) slider. */
@@ -1556,8 +1581,8 @@ function AnimationSection({
     if (reveal) ref.current?.scrollIntoView({ block: "nearest" });
   }, [reveal]);
   const anim = o.anim ?? {};
-  const slots = (["in", "out", "loop"] as const).filter((s) => anim[s]);
-  const clear = (slot: "in" | "out" | "loop") => {
+  const slots = (["in", "out", "loop", "words"] as const).filter((s) => anim[s]);
+  const clear = (slot: "in" | "out" | "loop" | "words") => {
     stopAnimPreview();
     useEditor.getState().pushHistory();
     writeOverlayAnim(o, anim, { [slot]: undefined });
@@ -1584,10 +1609,15 @@ function AnimationSection({
               key={slot}
               slot={slot}
               index={i}
-              style={slot === "loop" ? anim.loop!.style : anim[slot]!.style}
+              style={anim[slot]!.style}
               isText={isTextOverlay(o)}
-              seconds={slot === "loop" ? OVERLAY_ANIM_DEFAULT_SECONDS : anim[slot]!.seconds}
+              seconds={
+                slot === "in" || slot === "out" ? anim[slot]!.seconds : OVERLAY_ANIM_DEFAULT_SECONDS
+              }
               speed={anim.loop?.speed ?? 1}
+              textColor={isTextOverlay(o) ? o.color : WORD_ACCENT_DEFAULT}
+              accentColor={anim.words?.color}
+              accentScale={anim.words?.scale}
               onOpen={onOpen}
               onClear={() => clear(slot)}
             />
@@ -1598,6 +1628,7 @@ function AnimationSection({
       <AnimSlotSlider overlay={o} slot="out" label="Out duration" />
       <AnimSlotSlider overlay={o} slot="loop" label="Loop speed" />
       <MoveStrengthRow overlay={o} />
+      <WordSizeRow overlay={o} />
     </Section>
     </div>
   );
@@ -1647,18 +1678,84 @@ function MoveStrengthRow({ overlay: o }: { overlay: Overlay }) {
   return <MoveStrengthSlider overlay={o} label="Move strength" />;
 }
 
-/** The animation subview an overlay panel pushes into: In / Out / Loop tabs
- * over the tile grid, the active slot's length or speed under it. The three
- * slots pick from the same grid, one at a time — the tiles are big enough to
- * read the motion, which three stacked grids would not be. */
+/** How far the emphasized word swells, in the collapsed section — there only
+ * once the words slot is filled. */
+function WordSizeRow({ overlay: o }: { overlay: Overlay }) {
+  const ck = useSliderCheckpoint();
+  const anim = o.anim ?? {};
+  const words = anim.words;
+  if (!words) return null;
+  const write = (v: number) => {
+    ck.begin();
+    writeOverlayAnim(o, anim, { words: { ...words, scale: v } });
+  };
+  return (
+    <Row label="Word size">
+      <ValueSlider
+        label="Word size"
+        sliderClassName="data-horizontal:w-24"
+        valueClassName="w-9 text-muted-foreground"
+        value={wordSwell(words)}
+        min={WORD_SWELL_MIN}
+        max={WORD_SWELL_MAX}
+        step={0.02}
+        snap={[1, WORD_POP_SCALE]}
+        format={(v) => `${v.toFixed(2)}×`}
+        parse={parseSpeedInput}
+        onDraft={write}
+        onCommit={(v) => {
+          write(v);
+          ck.end();
+        }}
+      />
+    </Row>
+  );
+}
+
+/** The slots the picker fills, in tab order. */
+type AnimSlot = "in" | "out" | "loop" | "move" | "words";
+
+/** The animation subview an overlay panel pushes into: a tab per slot over
+ * the tile grid, the active slot's own control under it. The slots pick from
+ * the same grid, one at a time — the tiles are big enough to read the motion,
+ * which a stack of grids would not be. */
 function AnimationPanel({ overlay: o, onBack }: { overlay: Overlay; onBack: () => void }) {
   const anim = o.anim ?? {};
-  const [slot, setSlot] = useState<"in" | "out" | "loop" | "move">("in");
-  const active = slot === "move" ? undefined : anim[slot];
-  const seconds =
-    slot === "loop" || slot === "move" ? undefined : (anim[slot] as OverlayAnim["in"])?.seconds;
+  const [picked, setSlot] = useState<AnimSlot>("in");
+  // Word emphasis is a title's slot; a shape or a sticker has no words, so
+  // selecting one hands the picker back to the entrance.
+  const tabs: AnimSlot[] = isTextOverlay(o)
+    ? ["in", "out", "loop", "move", "words"]
+    : ["in", "out", "loop", "move"];
+  const slot = tabs.includes(picked) ? picked : "in";
+  const active = slot === "move" || slot === "words" ? undefined : anim[slot];
+  const seconds = slot === "in" || slot === "out" ? anim[slot]?.seconds : undefined;
   const activeMove = anim.move;
   const pick = (style: string | null) => {
+    if (slot === "words") {
+      if (!style && !anim.words) return;
+      useEditor.getState().pushHistory();
+      // The transcript is the clock: the times land at apply, measured
+      // against whatever the cut has been transcribed to say. Nothing to
+      // measure against leaves them out, and the words share the element's
+      // span instead.
+      const patch: Partial<OverlayAnim> = {
+        words: style
+          ? {
+              style: style as WordAccentMode,
+              ...(anim.words?.color ? { color: anim.words.color } : {}),
+              ...(anim.words?.scale !== undefined ? { scale: anim.words.scale } : {}),
+            }
+          : undefined,
+      };
+      writeOverlayAnim(o, anim, patch);
+      // The pick sweeps itself along the line, the same as any other slot.
+      if (style) {
+        const el = useEditor.getState().overlays.find((x) => x.id === o.id) ?? o;
+        playAnimPreview(el, "words");
+      } else stopAnimPreview();
+      return;
+    }
     if (slot === "move") {
       if (!style && !activeMove) return;
       useEditor.getState().pushHistory();
@@ -1714,7 +1811,7 @@ function AnimationPanel({ overlay: o, onBack }: { overlay: Overlay; onBack: () =
           Animation
         </div>
         <div className="mx-3.5 flex shrink-0 rounded-lg bg-muted p-0.5 text-[11.5px] font-medium">
-          {(["in", "out", "loop", "move"] as const).map((id) => (
+          {tabs.map((id) => (
             <button
               key={id}
               type="button"
@@ -1748,11 +1845,22 @@ function AnimationPanel({ overlay: o, onBack }: { overlay: Overlay; onBack: () =
           // A slot carrying its own preset is playing something no tile here
           // names, so the grid shows nothing selected rather than the catalog
           // entry the id happens to hold.
-          value={active?.preset ? undefined : slot === "move" ? activeMove?.style : active?.style}
+          value={
+            active?.preset
+              ? undefined
+              : slot === "move"
+                ? activeMove?.style
+                : slot === "words"
+                  ? anim.words?.style
+                  : active?.style
+          }
           custom={!!active?.preset}
           isText={isTextOverlay(o)}
           seconds={seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS}
           speed={anim.loop?.speed ?? 1}
+          textColor={isTextOverlay(o) ? o.color : WORD_ACCENT_DEFAULT}
+          accentColor={anim.words?.color}
+          accentScale={anim.words?.scale}
           onPick={pick}
         />
       </ScrollArea>
@@ -1767,13 +1875,7 @@ function AnimationPanel({ overlay: o, onBack }: { overlay: Overlay; onBack: () =
  * pushes — so the bar shows the tab's own control and nothing else. It stays
  * put with the slot unset, greyed rather than gone, because a bar that comes
  * and goes moves the grid under the pointer. */
-function AnimationToolbar({
-  overlay: o,
-  slot,
-}: {
-  overlay: Overlay;
-  slot: "in" | "out" | "loop" | "move";
-}) {
+function AnimationToolbar({ overlay: o, slot }: { overlay: Overlay; slot: AnimSlot }) {
   const ck = useSliderCheckpoint();
   const anim = o.anim ?? {};
   const dur = Math.max(0.2, o.end - o.start);
@@ -1784,6 +1886,50 @@ function AnimationToolbar({
   );
 
   if (slot === "move") return bar(<MoveStrengthSlider overlay={o} label="Strength" />);
+
+  if (slot === "words") {
+    // The words tab's two settings: how far the word swells while it is said,
+    // and the accent it wears.
+    const words = anim.words;
+    const size = (v: number) => {
+      if (!words) return;
+      ck.begin();
+      writeOverlayAnim(o, anim, { words: { ...words, scale: v } });
+    };
+    return bar(
+      <>
+        <Row label="Word size">
+          <ValueSlider
+            label="Word size"
+            sliderClassName="data-horizontal:w-24"
+            valueClassName="w-9 text-muted-foreground"
+            value={wordSwell(words)}
+            min={WORD_SWELL_MIN}
+            max={WORD_SWELL_MAX}
+            step={0.02}
+            snap={[1, WORD_POP_SCALE]}
+            format={(v) => `${v.toFixed(2)}×`}
+            parse={parseSpeedInput}
+            disabled={!words}
+            onDraft={size}
+            onCommit={(v) => {
+              size(v);
+              ck.end();
+            }}
+          />
+        </Row>
+        <Row label="Word color">
+          <ColorField
+            value={wordAccent(words, isTextOverlay(o) ? o.color : WORD_ACCENT_DEFAULT)}
+            label="Word color"
+            onBegin={() => useEditor.getState().pushHistory()}
+            onLive={(c) => words && writeOverlayAnim(o, anim, { words: { ...words, color: c } })}
+            onCommit={(c) => words && writeOverlayAnim(o, anim, { words: { ...words, color: c } })}
+          />
+        </Row>
+      </>
+    );
+  }
 
   if (slot === "loop") {
     const write = (speed: number) => {

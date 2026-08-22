@@ -22,6 +22,10 @@ import {
   OVERLAY_ANIM_MIN_SECONDS,
   OVERLAY_ANIM_STYLE_IDS,
   OVERLAY_LOOP_STYLE_IDS,
+  hasOverlayAnim,
+  WORD_ACCENT_MODE_IDS,
+  WORD_SWELL_MAX,
+  WORD_SWELL_MIN,
   type OverlayAnim,
   type OverlayAnimStyle,
   type OverlayLoopStyle,
@@ -91,10 +95,11 @@ import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
 import { buildAiContext } from "./aiContext";
 import { sampleClipFrameData } from "./previewCanvas";
-import { CAPTION_STYLES, laneCues, subtitleLaneCount } from "./subtitles";
+import { CAPTION_STYLES, laneCues, subtitleLaneCount, WORD_ACCENT_MODES } from "./subtitles";
 import { fuseTimeline, renderFusedTimeline } from "./watch/fuse";
 import { mergeWatch, mergeWatchNotes, uncoveredSeconds, unnotedSpans } from "./watch/merge";
-import { syncLines, type TimedWord } from "./lyricSync";
+import { syncLines } from "./lyricSync";
+import { transcriptWords as cueWords, wordTimesFor } from "./textWords";
 import {
   composeTextRun,
   TEXT_LAYOUT_IDS,
@@ -146,6 +151,7 @@ import {
   type AnimStyle,
   type AssetWatch,
   type CaptionStyleId,
+  type WordAccentMode,
   type AudioClip,
   type ClipShadow,
   type ColorGrade,
@@ -462,9 +468,39 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     } else if (speed !== undefined && anim.loop) {
       anim.loop = { ...anim.loop, speed };
     }
-    s.updateOverlay(o.id, {
-      anim: anim.in || anim.out || anim.loop || anim.move ? anim : undefined,
-    });
+    const rawWords = input.words_style;
+    const wordColor = typeof input.words_color === "string" ? input.words_color : undefined;
+    const wordScale = isNum(input.words_scale)
+      ? clamp(input.words_scale, WORD_SWELL_MIN, WORD_SWELL_MAX)
+      : undefined;
+    if (typeof rawWords === "string") {
+      if (rawWords === "none") delete anim.words;
+      else if (!(WORD_ACCENT_MODE_IDS as string[]).includes(rawWords))
+        throw new ToolError(`Unknown word emphasis: ${rawWords}`);
+      else if ((o.kind ?? "text") !== "text")
+        throw new ToolError("Word emphasis lights up a title's words; it needs a title.");
+      else {
+        const color = wordColor ?? anim.words?.color;
+        const scale = wordScale ?? anim.words?.scale;
+        // The transcript is the clock the emphasis follows. It is read now,
+        // against whatever the cut has been transcribed to say; with nothing
+        // to read, the words share the element's own span.
+        const times = isTextOverlay(o) ? wordTimesFor(o, s.subtitles.cues) : undefined;
+        anim.words = {
+          style: rawWords as WordAccentMode,
+          ...(color ? { color } : {}),
+          ...(scale !== undefined ? { scale } : {}),
+          ...(times ? { times } : {}),
+        };
+      }
+    } else if ((wordColor || wordScale !== undefined) && anim.words) {
+      anim.words = {
+        ...anim.words,
+        ...(wordColor ? { color: wordColor } : {}),
+        ...(wordScale !== undefined ? { scale: wordScale } : {}),
+      };
+    }
+    s.updateOverlay(o.id, { anim: hasOverlayAnim(anim) ? anim : undefined });
     const next = useEditor.getState().overlays.find((x) => x.id === o.id)!;
     return { id: next.id, anim: next.anim ?? null };
   },
@@ -1592,8 +1628,13 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         patch.font = input.font;
       if (typeof input.word_highlight === "boolean") patch.wordHighlight = input.word_highlight;
       if (typeof input.accent_color === "string") patch.accentColor = input.accent_color;
-      if (input.accent_mode === "color" || input.accent_mode === "underline" || input.accent_mode === "box")
-        patch.accentMode = input.accent_mode;
+      if (WORD_ACCENT_MODES.some((m) => m.id === input.accent_mode)) {
+        patch.accentMode = input.accent_mode as WordAccentMode;
+        // Naming a treatment is asking for the emphasis, so it comes on with
+        // the mode unless this same call turned it off.
+        if (patch.wordHighlight === undefined && !s.subtitles.wordHighlight)
+          patch.wordHighlight = true;
+      }
       if (isNum(input.y)) patch.y = clamp(input.y, 0.02, 0.98);
       if (isNum(input.x)) patch.x = clamp(input.x, 0.02, 0.98);
       if (Object.keys(patch).length === 0) throw new ToolError("Nothing to change.");
@@ -3348,19 +3389,7 @@ async function synthesizeVoiceover(
 /** The words a caption track carries, on the timeline clock: the
  * transcriber's own word times where it left them, and an even split of each
  * cue's span where it did not. */
-function cueWords(cues: { start: number; end: number; text: string; words?: TimedWord[] }[]): TimedWord[] {
-  const out: TimedWord[] = [];
-  for (const c of cues) {
-    if (c.words && c.words.length > 0) {
-      out.push(...c.words);
-      continue;
-    }
-    const parts = c.text.split(/\s+/).filter((w) => w.length > 0);
-    const step = parts.length > 0 ? (c.end - c.start) / parts.length : 0;
-    parts.forEach((w, i) => out.push({ w, t0: c.start + step * i, t1: c.start + step * (i + 1) }));
-  }
-  return out;
-}
+
 
 /** An alignment pass as the model reads it. The audio declining to testify is
  * a result of its own, never a silent success: a caller told "0 moved" without

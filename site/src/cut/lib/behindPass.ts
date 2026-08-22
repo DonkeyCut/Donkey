@@ -9,7 +9,16 @@
  * behind effect degrades to the plain picture.
  */
 
-import { evalOverlayFrame, glyphStateAt, hasGlyphMotion, maskComposite } from "@donkeycut/effects-kit";
+import {
+  applyWordAccent,
+  evalOverlayFrame,
+  glyphStateAt,
+  hasGlyphMotion,
+  maskComposite,
+  overlayWords,
+  wordAccentIndex,
+  wordWindows,
+} from "@donkeycut/effects-kit";
 import { personSegmenter, segmentSubjectAlpha } from "./cutout";
 import { createRasterCanvas } from "./raster";
 import { renderElementPng } from "./textRender";
@@ -24,6 +33,18 @@ import {
 } from "./types";
 
 type Segmenter = import("@mediapipe/tasks-vision").ImageSegmenter;
+
+/** An element's own length, the span its word emphasis is timed across. */
+const spanOf = (o: Overlay): number => Math.max(0.1, o.end - o.start);
+
+/** The word indices an element needs a picture for: one per word while it
+ * lights them as they are said, and the plain picture (-1) otherwise. */
+function rasterWords(o: Overlay): number[] {
+  const words = overlayWords(o);
+  if (!words || !isTextOverlay(o)) return [-1];
+  const n = wordWindows(o.text, spanOf(o), words.times).length;
+  return n > 0 ? Array.from({ length: n }, (_, i) => i) : [-1];
+}
 
 /** Segmentation input width — small on purpose; this runs per frame. */
 const SEG_WIDTH = 256;
@@ -81,8 +102,11 @@ export class SubjectMaskCompositor {
 
   private segmenter: Segmenter | null = null;
   private segKicked = false;
-  private rasters = new WeakMap<Overlay, ImageBitmap>();
-  private pending = new WeakSet<Overlay>();
+  // One picture per element, and one per emphasized word when the element
+  // lights its words as they are said — keyed by the element object, so an
+  // edit hands back a fresh picture rather than a stale one.
+  private rasters = new WeakMap<Overlay, Map<number, ImageBitmap>>();
+  private pending = new WeakMap<Overlay, Set<number>>();
   private person: HTMLCanvasElement | null = null;
   private small: HTMLCanvasElement | null = null;
   private mask: { at: number; alpha: HTMLCanvasElement | null } = { at: -1e9, alpha: null };
@@ -100,19 +124,45 @@ export class SubjectMaskCompositor {
     });
   }
 
-  private rasterFor(o: Overlay, w: number, h: number, assets: MediaAsset[]): ImageBitmap | null {
-    const hit = this.rasters.get(o);
+  private rasterFor(
+    o: Overlay,
+    w: number,
+    h: number,
+    assets: MediaAsset[],
+    word: number
+  ): ImageBitmap | null {
+    const hit = this.rasters.get(o)?.get(word);
     if (hit) return hit;
-    if (!this.pending.has(o)) {
-      this.pending.add(o);
+    const inFlight = this.pending.get(o) ?? new Set<number>();
+    if (!inFlight.has(word)) {
+      inFlight.add(word);
+      this.pending.set(o, inFlight);
       // Neutral picture: position aside, the per-frame pose owns rotation and
       // opacity, so baking them here would apply each of them twice.
-      void renderElementPng({ ...o, rotation: undefined, opacity: undefined }, w, h, assets)
-        .then((png) => createImageBitmap(png))
-        .then((bmp) => this.rasters.set(o, bmp))
-        .catch(() => {});
+      void this.drawRaster(o, w, h, assets, word).catch(() => {});
     }
     return null;
+  }
+
+  /** One element picture, with the word it emphasizes at this moment baked
+   * in, kept under the element it came from. */
+  private async drawRaster(
+    o: Overlay,
+    w: number,
+    h: number,
+    assets: MediaAsset[],
+    word: number
+  ): Promise<void> {
+    const png = await renderElementPng(
+      applyWordAccent({ ...o, rotation: undefined, opacity: undefined }, word),
+      w,
+      h,
+      assets
+    );
+    const bmp = await createImageBitmap(png);
+    const byWord = this.rasters.get(o) ?? new Map<number, ImageBitmap>();
+    byWord.set(word, bmp);
+    this.rasters.set(o, byWord);
   }
 
   /** Export path: everything resident before the first frame draws. */
@@ -123,20 +173,18 @@ export class SubjectMaskCompositor {
     });
     const behind = overlays.filter((o) => behindSubjectOverlay(o) && drawable(o));
     await Promise.all(
-      behind.map(async (o) => {
-        if (this.rasters.get(o)) return;
-        try {
-          const png = await renderElementPng(
-            { ...o, rotation: undefined, opacity: undefined },
-            w,
-            h,
-            assets
-          );
-          this.rasters.set(o, await createImageBitmap(png));
-        } catch {
-          // The overlay just draws in front when its raster is missing.
-        }
-      })
+      behind.flatMap((o) =>
+        // An element that lights its words needs one picture per word, all of
+        // them resident before the first frame draws.
+        rasterWords(o).map(async (word) => {
+          if (this.rasters.get(o)?.has(word)) return;
+          try {
+            await this.drawRaster(o, w, h, assets, word);
+          } catch {
+            // The overlay just draws in front when its raster is missing.
+          }
+        })
+      )
     );
   }
 
@@ -304,9 +352,10 @@ export class SubjectMaskCompositor {
     // export's stamped layers.
     const scale = Math.min(W, H) / 1080;
     for (const o of active) {
-      const bmp = this.rasterFor(o, W, H, assets);
+      const tLocal = Math.max(0, t - o.start);
+      const bmp = this.rasterFor(o, W, H, assets, wordAccentIndex(o, tLocal, spanOf(o)));
       if (!bmp) continue;
-      const ev = evalOverlayFrame(o, Math.max(0, t - o.start));
+      const ev = evalOverlayFrame(o, tLocal);
       // One cached picture per element here, so a per-glyph ramp or loop runs
       // its motion over the whole box as a single letter would.
       const g = hasGlyphMotion(ev) ? glyphStateAt(ev, 0, 1) : null;

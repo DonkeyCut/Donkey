@@ -17,7 +17,7 @@ import {
   subtitleLaneCount,
   trackPos,
 } from "@/cut/lib/subtitles";
-import { evalOverlayFrame, glyphStateAt, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, maskFrameAt, paintMaskCoverage, resolveShadow, shapeMetrics, shapePathD, textStretch, type LottieHandle, type Mask, type MaskKey, type OverlayFrameState } from "@donkeycut/effects-kit";
+import { contrastText, evalOverlayFrame, glyphStateAt, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, maskFrameAt, overlayWords, paintMaskCoverage, resolveShadow, shapeMetrics, shapePathD, textStretch, WORD_ACCENT_DEFAULT, wordAccent, wordAccentIndex, type LottieHandle, type Mask, type MaskKey, type OverlayFrameState } from "@donkeycut/effects-kit";
 import {
   LINE_HEIGHT,
   PLATE_PAD_X,
@@ -25,6 +25,7 @@ import {
   PLATE_RADIUS,
   plateFill,
   SHADOW,
+  wordAccentCss,
 } from "@/cut/lib/textRender";
 import {
   behindSubjectOverlay,
@@ -347,6 +348,34 @@ export function OverlayLayer({
   );
 }
 
+/** Text with one word emphasized. The words are walked exactly the way the
+ * canvas painter walks them — line by line, single-spaced — so the index the
+ * preview lights is the index the burn-in lights. */
+function AccentedText({ text, index, css }: { text: string; index: number; css: CSSProperties }) {
+  let k = 0;
+  return (
+    <>
+      {text.split("\n").map((line, li) => (
+        <span key={li} className="block">
+          {line
+            .split(" ")
+            .filter(Boolean)
+            .map((w, wi) => {
+              const active = k === index;
+              k++;
+              return (
+                <span key={wi}>
+                  {wi > 0 && " "}
+                  <span style={active ? css : undefined}>{w}</span>
+                </span>
+              );
+            })}
+        </span>
+      ))}
+    </>
+  );
+}
+
 /** Every subtitle track's active cue, one caption per language. */
 function SubtitleCaptions(props: {
   stageWidth: number;
@@ -410,27 +439,12 @@ function SubtitleCaption({
   const wordIndex = subtitles.wordHighlight
     ? cueWordWindows(cue).findIndex((w) => t >= w.start && t < w.end)
     : -1;
-  // The spoken word's treatment follows the style (with user overrides): an
-  // accent box (drawn with box-shadow spread so the line never reflows), the
-  // accent color alone, or accent color + underline.
+  // The spoken word's treatment follows the style (with user overrides): a
+  // swell in the accent color, an accent box (drawn with box-shadow spread so
+  // the line never reflows), the accent color alone, or accent color +
+  // underline. The swell is a transform, so it too leaves the line alone.
   const look = karaokeLook(style, subtitles);
-  const activeStyle: CSSProperties =
-    look.mode === "box"
-      ? {
-          color: look.text,
-          background: look.color,
-          boxShadow: `0 0 0 0.12em ${look.color}`,
-          borderRadius: "0.18em",
-          textShadow: "none",
-        }
-      : look.mode === "color"
-        ? { color: look.color }
-        : {
-            color: look.color,
-            textDecoration: "underline",
-            textDecorationThickness: "0.07em",
-            textUnderlineOffset: "0.14em",
-          };
+  const activeStyle = wordAccentCss(look);
   const scale = stageWidth / frame.w;
   return (
     <div
@@ -470,25 +484,11 @@ function SubtitleCaption({
         borderRadius: ov.plate ? PLATE_RADIUS_EM : undefined,
       }}
     >
-      {wordIndex < 0
-        ? ov.text
-        : (() => {
-            let k = 0;
-            return ov.text.split("\n").map((line, li) => (
-              <span key={li} className="block">
-                {line.split(" ").map((w, wi) => {
-                  const active = k === wordIndex;
-                  k++;
-                  return (
-                    <span key={wi}>
-                      {wi > 0 && " "}
-                      <span style={active ? activeStyle : undefined}>{w}</span>
-                    </span>
-                  );
-                })}
-              </span>
-            ));
-          })()}
+      {wordIndex < 0 ? (
+        ov.text
+      ) : (
+        <AccentedText text={ov.text} index={wordIndex} css={activeStyle} />
+      )}
     </div>
   );
 }
@@ -584,6 +584,26 @@ function OverlayItem({
   // box from its left edge. Neither runs while the box is being edited.
   const glyphs = isText && !editing && live && hasGlyphMotion(live) ? live : null;
   const reveal = !editing ? live?.reveal : undefined;
+  // Word emphasis: the word being said wears the accent while the rest of the
+  // line stays as it is. Off while editing — the box is plain text then — and
+  // a per-glyph ramp takes the frame for itself while it runs.
+  const words = isText && !editing ? overlayWords(o) : undefined;
+  // A rehearsal from the inspector sweeps the emphasis along the line on its
+  // own clock; otherwise it follows the playhead, like everything else here.
+  const wordLocal = running ? running.tLocal : Math.max(0, t - o.start);
+  const wordIndex =
+    words && !glyphs ? wordAccentIndex(o, wordLocal, Math.max(0.1, o.end - o.start)) : -1;
+  const wordColor = wordAccent(words, isTextOverlay(o) ? o.color : WORD_ACCENT_DEFAULT);
+  const wordCss =
+    words && wordIndex >= 0
+      ? wordAccentCss({
+          mode: words.style,
+          color: wordColor,
+          text: contrastText(wordColor),
+          scale: words.scale,
+          lineHeight: (isTextOverlay(o) ? o.lineHeight : undefined) ?? LINE_HEIGHT,
+        })
+      : null;
   // Typewriter: the visible slice of the text (display only, never while
   // the box is being edited).
   const shownText =
@@ -1033,6 +1053,8 @@ function OverlayItem({
             </div>
           ) : glyphs ? (
             <GlyphText text={shownText} phase={glyphs} scale={scale} />
+          ) : wordCss ? (
+            <AccentedText text={shownText} index={wordIndex} css={wordCss} />
           ) : (
             <span>{shownText}</span>
           )

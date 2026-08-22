@@ -16,6 +16,11 @@ import {
   GLYPH_LOOP_STYLE_IDS,
   OVERLAY_ANIM_STYLE_IDS,
   OVERLAY_LOOP_STYLE_IDS,
+  WORD_ACCENT_MODE_IDS,
+  WORD_ACCENT_NOTES,
+  WORD_POP_SCALE,
+  WORD_SWELL_MAX,
+  WORD_SWELL_MIN,
 } from "@donkeycut/effects-kit";
 import { num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 import {
@@ -31,7 +36,7 @@ export const OVERLAY_ANIMATION_TOOLS = [
   {
     name: "set_overlay_animation",
     description:
-      `Animate an overlay element (title, shape, or sticker): preset In/Out ramps, a Loop that runs its whole duration, and a Move that says what the element does WHILE it holds. Omitted slots keep their setting; pass "none" to clear one. In/Out styles: ${OVERLAY_ANIM_STYLE_IDS.join(", ")} — slide names are the motion direction; typewriter animates titles only; ${GLYPH_ANIM_STYLE_IDS.join(", ")} move a title's letters one at a time, and move any other kind as one piece. Loop styles: ${OVERLAY_LOOP_STYLE_IDS.join(", ")} — ${GLYPH_LOOP_STYLE_IDS.join(", ")} carry a title's letters on their own delays, and carry any other kind as one piece. A move is a slot like the others and never touches the element's keyframe track; use set_overlay_keyframes when no named move fits, and both compose together.`,
+      `Animate an overlay element (title, shape, or sticker): preset In/Out ramps, a Loop that runs its whole duration, and a Move that says what the element does WHILE it holds. Omitted slots keep their setting; pass "none" to clear one. In/Out styles: ${OVERLAY_ANIM_STYLE_IDS.join(", ")} — slide names are the motion direction; typewriter animates titles only; ${GLYPH_ANIM_STYLE_IDS.join(", ")} move a title's letters one at a time, and move any other kind as one piece. Loop styles: ${OVERLAY_LOOP_STYLE_IDS.join(", ")} — ${GLYPH_LOOP_STYLE_IDS.join(", ")} carry a title's letters on their own delays, and carry any other kind as one piece. A move is a slot like the others and never touches the element's keyframe track; use set_overlay_keyframes when no named move fits, and both compose together. Word emphasis — words_style, titles only — keeps the whole line on screen and lights each word as it is said, timed against the cut's transcript when there is one and spread across the element's own span when there is not; it is the slot for "make each word pop as I say it".`,
     inputSchema: obj({
       id: str("Overlay element id"),
       move: {
@@ -60,6 +65,15 @@ export const OVERLAY_ANIMATION_TOOLS = [
         description: 'Loop style, or "none" to clear',
       },
       loop_speed: num("Loop rate multiplier 0.25..4 (default 1)"),
+      words_style: {
+        type: "string",
+        enum: [...WORD_ACCENT_MODE_IDS, "none"],
+        description: `How each word is emphasized as it is said, or "none" to clear — ${WORD_ACCENT_MODE_IDS.map((id) => `${id}: ${WORD_ACCENT_NOTES[id]}`).join("; ")}`,
+      },
+      words_color: str("Word emphasis accent color (hex)"),
+      words_scale: num(
+        `How far the emphasized word swells, ${WORD_SWELL_MIN}..${WORD_SWELL_MAX} (pop defaults to ${WORD_POP_SCALE}, the others to 1). The swollen word takes its new width in the line, so its neighbours move aside and settle back as the emphasis travels on.`
+      ),
     }, ["id"]),
   },
   {
