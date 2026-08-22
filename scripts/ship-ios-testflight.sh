@@ -5,7 +5,6 @@
 # number against App Store Connect so repeat uploads never collide.
 #
 #   scripts/ship-ios-testflight.sh [--ref <git-ref>] [--working-tree]
-#                                  [--no-distribute]
 #
 # A TestFlight build has to be reproducible, so the archive is cut from a
 # committed tree: the script checks the ref out into its own worktree under
@@ -13,16 +12,9 @@
 # of it. --working-tree archives the checkout as it stands instead, for trying
 # a build before committing it.
 #
-# Auth uses the Apple ID session stored by Xcode. To run unattended (CI),
-# provide an App Store Connect API key instead:
-#   DONKEY_ASC_KEY_P8_PATH=/path/AuthKey_XXXX.p8
-#   DONKEY_ASC_KEY_ID=XXXX
-#   DONKEY_ASC_ISSUER_ID=uuid
-#
-# With that key present the ship also hands the build to the external testers:
-# scripts/asc-distribute.mjs runs on after processing finishes, adds the build
-# to every external group, and submits it for beta review. --no-distribute
-# leaves the build for App Store Connect.
+# The upload lands the build in App Store Connect → TestFlight. Internal
+# testers get it once processing finishes; releasing it to external groups is
+# done in App Store Connect.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -34,13 +26,11 @@ LOCAL_INPUTS=(apps/ios/Config/Donkey.local.xcconfig)
 
 REF="HEAD"
 WORKING_TREE=0
-DISTRIBUTE=1
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --ref) REF="${2:?--ref needs a git ref}"; shift 2 ;;
     --working-tree) WORKING_TREE=1; shift ;;
-    --no-distribute) DISTRIBUTE=0; shift ;;
-    -h|--help) sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -94,15 +84,6 @@ cat > "$EXPORT_PLIST" <<'PLIST'
 </plist>
 PLIST
 
-AUTH_ARGS=()
-if [[ -n "${DONKEY_ASC_KEY_P8_PATH:-}" ]]; then
-  AUTH_ARGS=(
-    -authenticationKeyPath "$DONKEY_ASC_KEY_P8_PATH"
-    -authenticationKeyID "$DONKEY_ASC_KEY_ID"
-    -authenticationKeyIssuerID "$DONKEY_ASC_ISSUER_ID"
-  )
-fi
-
 echo "==> Archiving"
 rm -rf "$ARCHIVE"
 xcodebuild archive \
@@ -113,30 +94,12 @@ xcodebuild archive \
   -archivePath "$ARCHIVE" \
   -derivedDataPath "$DERIVED" \
   -allowProvisioningUpdates \
-  ${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"} \
   -quiet
 
 echo "==> Uploading to App Store Connect"
-UPLOAD_START="$(date +%s)"
 xcodebuild -exportArchive \
   -archivePath "$ARCHIVE" \
   -exportOptionsPlist "$EXPORT_PLIST" \
-  -allowProvisioningUpdates \
-  ${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"}
+  -allowProvisioningUpdates
 
 echo "==> Uploaded. The build appears in App Store Connect → TestFlight after processing."
-
-# Processing runs for minutes after the upload returns, so handing the build to
-# the testers happens on its own clock: the ship ends here and the distributor
-# keeps polling in the background.
-if (( DISTRIBUTE )); then
-  if [[ -n "${DONKEY_ASC_KEY_P8_PATH:-}" ]] || compgen -G "$HOME/.appstoreconnect/private_keys/AuthKey_*.p8" >/dev/null; then
-    DIST_LOG="$ROOT/dist/asc-distribute.log"
-    nohup node "$ROOT/scripts/asc-distribute.mjs" \
-      --uploaded-after "$UPLOAD_START" >"$DIST_LOG" 2>&1 &
-    echo "==> Handing the build to the external testers in the background ($DIST_LOG)"
-  else
-    echo "==> No App Store Connect API key; the build waits for a manual release." >&2
-    echo "    Add one (Users and Access → Integrations) to distribute every ship." >&2
-  fi
-fi
