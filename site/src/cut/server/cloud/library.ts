@@ -178,13 +178,20 @@ async function copyIntoLibrary(
 
 /** Delete a library asset with its media object, bytes, and R2 key. Returns
  * bytes freed, or null when the asset is not this user's. Shared by the delete
- * route and the storage-reclamation sweep (gc.ts). */
+ * route and the storage-reclamation sweep (gc.ts).
+ *
+ * `tombstone` keeps the asset row behind with `deletedAt` set. That row is how
+ * a delete made here reaches the iOS app, which mirrors the Camera Roll on the
+ * phone: the listing names it, and the phone takes the same clip off. The
+ * reclamation sweep passes nothing, so an asset it collects simply stops being
+ * listed and the phone keeps the copy it shot. */
 export async function deleteLibraryAssetCascade(
   userId: string,
   id: string,
+  opts?: { tombstone?: boolean },
 ): Promise<number | null> {
   const asset = await prisma.cutLibraryAsset.findFirst({
-    where: { id, userId },
+    where: { id, userId, deletedAt: null },
   });
   if (!asset) return null;
   const obj = await prisma.cutMediaObject.findFirst({
@@ -203,7 +210,14 @@ export async function deleteLibraryAssetCascade(
     .filter((o) => o.uploadState === "complete")
     .reduce((n, o) => n + Number(o.bytes), 0);
   await prisma.$transaction(async (tx) => {
-    await tx.cutLibraryAsset.delete({ where: { id } });
+    if (opts?.tombstone) {
+      await tx.cutLibraryAsset.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+    } else {
+      await tx.cutLibraryAsset.delete({ where: { id } });
+    }
     for (const o of objects)
       await tx.cutMediaObject.delete({ where: { id: o.id } });
     if (freed > 0) await addUsage(tx, userId, -freed);
@@ -257,12 +271,24 @@ async function deleteLibraryObject(userId: string, fileName: string) {
 }
 
 export const libraryCloud = {
-  async list(userId: string) {
-    const [assetRows, folderRows, templateRows] = await Promise.all([
+  /** The shelf. `?deleted=1` adds the tombstoned ids — the phone asks for
+   * them to mirror a delete made here onto its Camera Roll, and it is the
+   * only client that does. Every other listing skips the query and the rows
+   * it would carry: an account that has pruned its shelf for a season has
+   * thousands of them, and the editor reads none. */
+  async list(userId: string, req?: Request) {
+    const wantsDeleted = !!req && new URL(req.url).searchParams.get("deleted") === "1";
+    const [assetRows, deletedRows, folderRows, templateRows] = await Promise.all([
       prisma.cutLibraryAsset.findMany({
-        where: { userId },
+        where: { userId, deletedAt: null },
         orderBy: { createdAt: "desc" },
       }),
+      wantsDeleted
+        ? prisma.cutLibraryAsset.findMany({
+            where: { userId, deletedAt: { not: null } },
+            select: { id: true },
+          })
+        : Promise.resolve([]),
       prisma.cutFolder.findMany({
         where: { userId, scope: "library" },
         orderBy: { createdAt: "asc" },
@@ -289,7 +315,14 @@ export const libraryCloud = {
       createdAt: f.createdAt.getTime(),
     }));
     const templates = templateRows.map(templateView);
-    return Response.json({ assets, folders, templates });
+    // Assets someone deleted, for a client that holds its own copy of them:
+    // the iOS app deletes the matching clip on the phone.
+    return Response.json({
+      assets,
+      folders,
+      templates,
+      ...(wantsDeleted ? { deletedAssetIds: deletedRows.map((r) => r.id) } : {}),
+    });
   },
 
   /** Mint a presigned PUT for a direct-to-library upload. */
@@ -380,7 +413,7 @@ export const libraryCloud = {
       // A retried complete (the iOS app reconciling after an interrupted
       // sync) lands on the asset it already made instead of minting a twin.
       const already = await prisma.cutLibraryAsset.findFirst({
-        where: { userId, mediaObjectId: obj.id },
+        where: { userId, mediaObjectId: obj.id, deletedAt: null },
       });
       if (already) return Response.json(assetView(already, obj));
       const info = obj.uploadState === "complete" ? null : await head(key);
@@ -461,7 +494,7 @@ export const libraryCloud = {
         projectId: string;
       };
       const asset = await prisma.cutLibraryAsset.findFirst({
-        where: { id: assetId, userId },
+        where: { id: assetId, userId, deletedAt: null },
       });
       if (!asset) throw new Error("Library asset not found.");
       const obj = await prisma.cutMediaObject.findUnique({
@@ -537,7 +570,7 @@ export const libraryCloud = {
         if (!folder) throw new Error("Folder not found.");
       }
       const asset = await prisma.cutLibraryAsset.findFirst({
-        where: { id, userId },
+        where: { id, userId, deletedAt: null },
       });
       if (asset) {
         await prisma.cutLibraryAsset.update({
@@ -563,7 +596,7 @@ export const libraryCloud = {
     try {
       // Idempotent: a delete replayed from the iOS app's journal after the
       // asset already left reports done, so the tombstone clears.
-      await deleteLibraryAssetCascade(userId, id);
+      await deleteLibraryAssetCascade(userId, id, { tombstone: true });
       return Response.json({ ok: true });
     } catch (e) {
       return caught(e, "Could not delete.");

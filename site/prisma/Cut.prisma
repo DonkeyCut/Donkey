@@ -105,13 +105,17 @@ model CutChatThread {
 }
 
 model CutLibraryAsset {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   userId        String
   mediaObjectId String
   folderId      String?
   meta          Json?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  // Set when someone deleted this asset. The bytes leave at once; the row
+  // stays as a tombstone so the iOS app takes the same clip off the phone,
+  // and the nightly sweep drops it once every device has had time to see it.
+  deletedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   @@index([userId, createdAt])
 }

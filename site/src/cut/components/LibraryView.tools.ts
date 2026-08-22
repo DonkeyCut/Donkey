@@ -54,7 +54,7 @@ export const LIBRARY_TOOLS = [
   {
     name: "library_organize",
     description:
-      "Organize the shared Library: create_folder / rename_folder / delete_folder (a deleted folder's items drop to the root), move_asset files an asset or template into a folder (omit folder_id for the root), delete_asset / delete_template remove an item. Deletes are permanent — projects keep their own copies, but delete only what the user explicitly asked to remove.",
+      "Organize the shared Library: create_folder / rename_folder / delete_folder (a deleted folder's items drop to the root), move_asset files an asset or template into a folder (omit folder_id for the root), delete_asset / delete_template remove an item. Deletes are permanent — projects keep their own copies, but delete only what the user explicitly asked to remove. Deleting an asset with origin \"camera\" or \"inspiration\" takes it off the user's phone as well.",
     inputSchema: obj({
       action: {
         type: "string",

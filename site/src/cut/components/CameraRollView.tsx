@@ -98,8 +98,8 @@ export function CameraRollView() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete “{deleting?.name}”?</AlertDialogTitle>
             <AlertDialogDescription>
-              The clip leaves your cloud Camera Roll. Projects that already use it keep their own
-              copy, and a copy still on your phone stays there.
+              The clip leaves your cloud Camera Roll and the phone it was shot on. Projects that
+              already use it keep their own copy.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

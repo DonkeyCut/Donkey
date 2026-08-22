@@ -18,6 +18,10 @@ const PENDING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SCRATCH_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const ORPHAN_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const JOB_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+// A deleted library asset leaves a row behind so the iOS app can take the same
+// clip off the phone. A phone that has not synced in a season has a bigger
+// problem than a missed delete, so the row goes after that.
+const LIBRARY_TOMBSTONE_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 const TERMINAL_STATES = ["done", "error", "canceled"];
 // Reclamation converges over daily runs rather than risking one long one.
 const RECLAIM_SCAN_LIMIT = 500;
@@ -117,7 +121,7 @@ async function reclaimPlan(userId: string, target: number): Promise<ReclaimPlan>
   }
 
   const assets = await prisma.cutLibraryAsset.findMany({
-    where: { userId },
+    where: { userId, deletedAt: null },
     orderBy: { createdAt: "asc" },
     select: { id: true, mediaObjectId: true },
   });
@@ -332,6 +336,12 @@ export async function runGc(): Promise<Response> {
     return { projects: 0, versions: 0, objects: 0, failed: 1 };
   });
 
+  // Library tombstones past the window every client has had to see them in.
+  // Their bytes went with the delete; this is the empty row.
+  const tombstones = await prisma.cutLibraryAsset.deleteMany({
+    where: { deletedAt: { lt: new Date(Date.now() - LIBRARY_TOMBSTONE_MAX_AGE_MS) } },
+  });
+
   const reclaimed = await reclaimOverQuota();
 
   return Response.json({
@@ -339,6 +349,7 @@ export async function runGc(): Promise<Response> {
     orphanedMedia: orphans.length,
     inferenceScratch: scratch.length,
     renderJobs: jobs.count,
+    libraryTombstones: tombstones.count,
     staleLadderProjects: ladders.projects,
     staleLadderVersions: ladders.versions,
     staleLadderObjects: ladders.objects,
