@@ -142,6 +142,18 @@ const WAVE_H = 24;
  * play in the band (an image, a muted or silent video) drops the band and its
  * box stops at the filmstrip's edge. */
 const FILM_H = VIDEO_H - 4 - WAVE_H;
+/** Whether a clip has a sound band to draw: a video carrying audio of its own,
+ * playing unmuted. An image, a silent video, a muted or detached clip has
+ * nothing to show there. */
+const hasSoundBand = (clip: { muted?: boolean }, asset: MediaAsset) =>
+  asset.type === "video" && !clip.muted && !!asset.peaks?.length;
+/** A video row's height. Rows whose clips all play silent lose the sound
+ * band's worth, so the row ends where the filmstrips do. An empty row keeps
+ * the full height: it is a drop target for clips that do have sound. */
+const videoRowH = (list: ClipSpan[]) =>
+  list.length > 0 && !list.some((sp) => hasSoundBand(sp.clip, sp.asset))
+    ? VIDEO_H - WAVE_H
+    : VIDEO_H;
 /** The `mt-1.5` every row carries, so a row drag knows what one row's worth of
  * travel is. */
 const ROW_GAP = 6;
@@ -610,6 +622,7 @@ export function Timeline() {
   const railFor = (list: { clip: VideoClip }[]) =>
     list.some((sp) => sp.clip.mask?.kf?.length) ? KEYRAIL_EXTRA : 0;
   const rail0 = railFor(spans);
+  const rowH0 = videoRowH(spans);
   // Per-upper-track spans: each track carries its own transitions, so its row
   // needs the same overlap-aware geometry (insets, badges) as track 0's.
   const overlayTrackSpans = useMemo(() => {
@@ -920,15 +933,23 @@ export function Timeline() {
   // video track. Sound counts only clips whose source carries audio, so an
   // all-image track offers no speaker.
   const trackState = useMemo(() => {
-    const m = new Map<number, { total: number; hidden: number; sound: number; muted: number }>();
-    const typeById = new Map(assets.map((a) => [a.id, a.type]));
+    const m = new Map<
+      number,
+      { total: number; hidden: number; sound: number; muted: number; band: number }
+    >();
+    const byId = new Map(assets.map((a) => [a.id, a]));
     for (const c of clips) {
-      const t = m.get(c.track) ?? { total: 0, hidden: 0, sound: 0, muted: 0 };
+      const t = m.get(c.track) ?? { total: 0, hidden: 0, sound: 0, muted: 0, band: 0 };
       t.total++;
       if (c.hidden) t.hidden++;
-      if (typeById.get(c.assetId) === "video") {
+      const asset = byId.get(c.assetId);
+      // Sound the track actually carries — a video with no audio of its own
+      // has nothing to mute, so its row shows no speaker. `band` is the part
+      // of it drawn on the clips right now, which is what sets the row height.
+      if (asset && asset.type === "video" && !!asset.peaks?.length) {
         t.sound++;
         if (c.muted) t.muted++;
+        else t.band++;
       }
       m.set(c.track, t);
     }
@@ -2502,7 +2523,9 @@ export function Timeline() {
               grows in here and folds away when the drag comes back down. */}
           {newTrackRow(topInsertLevel)}
           {aboveTracks.map((track, row) => {
-            const railH = railFor(overlayTrackSpans.get(track) ?? []);
+            const trackSpans = overlayTrackSpans.get(track) ?? [];
+            const railH = railFor(trackSpans);
+            const rowH = videoRowH(trackSpans);
             const lifted = rowDrag?.band === "video" && rowDrag.from === row;
             return (
             <div
@@ -2513,7 +2536,7 @@ export function Timeline() {
                 lifted && "pointer-events-none z-20 opacity-90 drop-shadow-2xl"
               )}
               style={{
-                height: OVERLAY_H + railH,
+                height: rowH + railH,
                 transform: videoRowShift(row) ? `translateY(${videoRowShift(row)}px)` : undefined,
               }}
               data-tl-vrow={track}
@@ -2521,18 +2544,18 @@ export function Timeline() {
               onContextMenu={openGapMenu({ kind: "video", index: track })}
               {...overlayDropHandlers}
             >
-              {laneRail(OVERLAY_H - 2 + railH)}
-              {gapHighlight({ kind: "video", index: track }, OVERLAY_H - 4)}
+              {laneRail(rowH - 2 + railH)}
+              {gapHighlight({ kind: "video", index: track }, rowH - 4)}
               {draggedOverlayTrack === track && laneDrag && (
                 <LaneSlot
                   drag={laneDrag}
                   pps={pps}
-                  rowH={OVERLAY_H}
-                  barH={OVERLAY_H - 4}
-                  className="rounded-lg bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4)]"
+                  rowH={rowH}
+                  barH={rowH - 4}
+                  className="rounded-[5px] bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4)]"
                 />
               )}
-              {(overlayTrackSpans.get(track) ?? []).map((span) => (
+              {trackSpans.map((span) => (
                 <ClipView
                   key={span.clip.id}
                   span={span}
@@ -2552,7 +2575,7 @@ export function Timeline() {
                   onFrameMenu={openFrameMenu}
                 />
               ))}
-              {trackSlot({ kind: "track", track }, OVERLAY_H - 4)}
+              {trackSlot({ kind: "track", track }, rowH - 4)}
             </div>
             );
           })}
@@ -2576,7 +2599,7 @@ export function Timeline() {
                   : "transition-transform duration-150 ease-out")
             )}
             style={{
-              height: VIDEO_H + rail0,
+              height: rowH0 + rail0,
               transform: videoRowShift(aboveTracks.length)
                 ? `translateY(${videoRowShift(aboveTracks.length)}px)`
                 : undefined,
@@ -2585,20 +2608,20 @@ export function Timeline() {
             onPointerDown={deselectIfSelf}
             onContextMenu={openGapMenu({ kind: "video", index: 0 })}
           >
-            {spans.length > 0 && laneRail(VIDEO_H - 2 + rail0)}
-            {gapHighlight({ kind: "video", index: 0 }, VIDEO_H - 4)}
-            {trackSlot(TRACK_ZERO, VIDEO_H - 4)}
+            {spans.length > 0 && laneRail(rowH0 - 2 + rail0)}
+            {gapHighlight({ kind: "video", index: 0 }, rowH0 - 4)}
+            {trackSlot(TRACK_ZERO, rowH0 - 4)}
             {laneDrag?.kind === "clip" && !laneDrag.away && (
               <LaneSlot
                 drag={laneDrag}
                 pps={pps}
-                rowH={VIDEO_H}
-                barH={VIDEO_H - 4}
-                className="rounded-lg bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4),inset_0_2px_10px_rgba(10,60,140,0.08)]"
+                rowH={rowH0}
+                barH={rowH0 - 4}
+                className="rounded-[5px] bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4),inset_0_2px_10px_rgba(10,60,140,0.08)]"
               />
             )}
             {assetDrop &&
-              dropSegment(assetDrop.t, assetDrop.len, VIDEO_H - 4, assetDrop.ghost)}
+              dropSegment(assetDrop.t, assetDrop.len, rowH0 - 4, assetDrop.ghost)}
             {spans.map((span, i) => (
               <ClipView
                 key={span.clip.id}
@@ -2831,16 +2854,19 @@ export function Timeline() {
           {/* Each row's gutter cell is the handle for the row itself: press and
               carry it to another place in its own band. Drawn before the
               toggles so an eye or a speaker still takes its own press. */}
-          {gutterYs.video.map(({ track, y, h }, row) => (
-            <RowGrip
-              key={`vgrip-${track}`}
-              top={y}
-              height={h}
-              barH={VIDEO_H - 4}
-              enabled={gutterYs.video.length > 1}
-              onGrab={gripRow("video", row)}
-            />
-          ))}
+          {gutterYs.video.map(({ track, y, h }, row) => {
+            const t = trackState.get(track);
+            return (
+              <RowGrip
+                key={`vgrip-${track}`}
+                top={y}
+                height={h}
+                barH={(t && t.band === 0 ? VIDEO_H - WAVE_H : VIDEO_H) - 4}
+                enabled={gutterYs.video.length > 1}
+                onGrab={gripRow("video", row)}
+              />
+            );
+          })}
           {gutterYs.textTop !== null &&
             overlayLanes.used.map((lane, r) => (
               <RowGrip
@@ -2866,6 +2892,9 @@ export function Timeline() {
           {gutterYs.video.map(({ track, y }, row) => {
             const t = trackState.get(track);
             if (!t) return null;
+            // Centered on the clip band, which is shorter on a row that draws
+            // no sound.
+            const bandH = t.band > 0 ? VIDEO_H : VIDEO_H - WAVE_H;
             const rows: React.ReactNode[] = [
               <GutterToggle
                 key={`v-${track}-hide`}
@@ -2873,7 +2902,7 @@ export function Timeline() {
                 off={t.hidden === t.total}
                 partial={t.hidden > 0}
                 reveal={trackHover}
-                top={y + (t.sound > 0 ? VIDEO_H / 2 - 22 : VIDEO_H / 2 - 8)}
+                top={y + (t.sound > 0 ? bandH / 2 - 22 : bandH / 2 - 8)}
                 onGrab={gripRow("video", row)}
                 onToggle={() =>
                   useEditor.getState().setTrackHidden(track, t.hidden !== t.total)
@@ -2888,7 +2917,7 @@ export function Timeline() {
                   off={t.muted === t.sound}
                   partial={t.muted > 0}
                   reveal={trackHover}
-                  top={y + VIDEO_H / 2 + 6}
+                  top={y + bandH / 2 + 6}
                   onGrab={gripRow("video", row)}
                   onToggle={() =>
                     useEditor.getState().setTrackMuted(track, t.muted !== t.sound)
@@ -3639,7 +3668,7 @@ function ClipView({
   // The clip's own sound, drawn in the box's band under the picture. Muting —
   // detach included — takes the sound off the clip, so the band drops and the
   // box stops at the filmstrip (a detached copy draws on the soundtrack row).
-  const hasWave = asset.type === "video" && !clip.muted && !!asset.peaks?.length;
+  const hasWave = hasSoundBand(clip, asset);
   // Bumped as tile captures land, so the memo re-plans and picks them up.
   const [filmGen, onTileFrame] = useReducer((x: number) => x + 1, 0);
   const filmstrip = useMemo(
@@ -3793,7 +3822,15 @@ function ClipView({
         onPointerDown={(e) => startLaneTrim(e, lane, clip.id, "r", ui)}
       />
     </div>
-    <ClipMaskKeyStrip clip={clip} start={span.start} len={span.len} pps={pps} w={w} hidden={!!drag} />
+    <ClipMaskKeyStrip
+      clip={clip}
+      start={span.start}
+      len={span.len}
+      pps={pps}
+      w={w}
+      boxH={hasWave ? VIDEO_H - 4 : FILM_H}
+      hidden={!!drag}
+    />
     </>
   );
 }
@@ -3809,6 +3846,7 @@ function ClipMaskKeyStrip({
   len,
   pps,
   w,
+  boxH,
   hidden,
 }: {
   clip: VideoClip;
@@ -3816,6 +3854,9 @@ function ClipMaskKeyStrip({
   len: number;
   pps: number;
   w: number;
+  /** The clip box's height, which the rail hangs under — shorter on a clip
+   * with no sound band. */
+  boxH: number;
   hidden: boolean;
 }) {
   if (hidden || !clip.mask?.kf?.length) return null;
@@ -3826,7 +3867,7 @@ function ClipMaskKeyStrip({
         left: start * pps,
         // A hair below the bar's bottom edge, deep enough that the diamonds —
         // the picked one's ring included — never touch the clip's box.
-        top: VIDEO_H - 1,
+        top: boxH + 3,
         width: Math.max(10, w - CLIP_GAP),
         height: 16,
       }}
