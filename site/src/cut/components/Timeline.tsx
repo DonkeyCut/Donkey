@@ -2791,7 +2791,7 @@ export function Timeline() {
               pps={pps}
               hold={frameMenu !== null}
             />
-            <Playhead pps={pps} scrollRef={scrollRef} onScrub={scrub} />
+            <Playhead pps={pps} total={total} scrollRef={scrollRef} onScrub={scrub} />
           </div>
         </div>
       </div>
@@ -3479,10 +3479,12 @@ function Ruler({
 
 function Playhead({
   pps,
+  total,
   scrollRef,
   onScrub,
 }: {
   pps: number;
+  total: number;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   onScrub: (e: React.PointerEvent) => void;
 }) {
@@ -3524,14 +3526,22 @@ function Playhead({
       if (!scroller || !playing) return;
       if (performance.now() < manualUntil.current) return;
       const sx = x + PAD_SIDE; // playhead position in scroll coordinates
-      if (sx < scroller.scrollLeft + 24 || sx > scroller.scrollLeft + scroller.clientWidth - 80) {
-        scroller.scrollLeft = Math.max(0, sx - 80);
-        followWrote.current = scroller.scrollLeft; // read back: the browser clamps
+      const view = scroller.clientWidth;
+      // The trailing pad is room to drop clips into, so following stops once
+      // the last frame reaches the right edge: a project that fits the
+      // viewport never scrolls, and the end of a long one lands flush.
+      const maxFollow = Math.max(0, total * pps + PAD_SIDE * 2 - view);
+      if (sx < scroller.scrollLeft + 24 || sx > scroller.scrollLeft + view - 80) {
+        const want = Math.min(maxFollow, Math.max(0, sx - 80));
+        if (Math.abs(want - scroller.scrollLeft) > 0.5) {
+          scroller.scrollLeft = want;
+          followWrote.current = scroller.scrollLeft; // read back: the browser clamps
+        }
       }
     };
     move();
     return subscribePlayhead(move);
-  }, [pps, playing, scrollRef]);
+  }, [pps, total, playing, scrollRef]);
 
   return (
     <div
