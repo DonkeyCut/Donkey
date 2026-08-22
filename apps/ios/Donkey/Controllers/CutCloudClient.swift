@@ -26,6 +26,9 @@ final class CutCloudClient: NSObject {
         let url = base.appending(path: path)
         var request = URLRequest(url: query.isEmpty ? url : url.appending(queryItems: query))
         request.httpMethod = method
+        // Reads speak for the account as it is right now — a project edited at
+        // the desk a moment ago — so nothing answers them out of the URL cache.
+        if method == "GET" { request.cachePolicy = .reloadIgnoringLocalCacheData }
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("ios", forHTTPHeaderField: "x-donkey-cut-client")
         if let body {

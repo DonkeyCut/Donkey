@@ -10,25 +10,25 @@ struct ProjectsScreen: View {
     var auth: AuthModel
 
     @State private var playing: Project?
+    @Environment(\.scenePhase) private var scenePhase
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
     var body: some View {
         VStack(spacing: 0) {
             ScreenHeader(title: "Projects", app: app, auth: auth)
-            if projects.projects.isEmpty {
-                if projects.isLoading {
-                    ProgressView()
-                        .frame(maxHeight: .infinity)
+            ScrollView {
+                if projects.projects.isEmpty {
+                    if projects.isLoading {
+                        ProgressView()
+                            .padding(.top, 80)
+                    } else {
+                        EmptyState(
+                            title: "No projects yet",
+                            message: "Projects you create in Donkey Cut will show up here."
+                        )
+                    }
                 } else {
-                    EmptyState(
-                        title: "No projects yet",
-                        message: "Projects you create in Donkey Cut will show up here."
-                    )
-                    .frame(maxHeight: .infinity)
-                }
-            } else {
-                ScrollView {
                     LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(projects.projects) { project in
                             ProjectCard(project: project) { playing = project }
@@ -38,11 +38,22 @@ struct ProjectsScreen: View {
                     .padding(.top, 14)
                     .padding(.bottom, 24)
                 }
-                .refreshable { await projects.refresh() }
             }
+            .refreshable { await projects.refresh() }
         }
+        // Projects are edited at the desk, so the listing is read again every
+        // time this screen comes back into view — opening the tab, coming back
+        // to the app, closing a project.
         .task { await projects.refresh() }
-        .fullScreenCover(item: $playing) { project in
+        .onChange(of: app.selectedTab) { _, tab in
+            guard tab == .projects else { return }
+            Task { await projects.refresh() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active, app.selectedTab == .projects else { return }
+            Task { await projects.refresh() }
+        }
+        .fullScreenCover(item: $playing, onDismiss: { Task { await projects.refresh() } }) { project in
             ProjectPlayerView(project: project, projects: projects)
         }
     }
@@ -53,43 +64,64 @@ struct ProjectCard: View {
     let onPlay: () -> Void
 
     var body: some View {
-        Group {
-            switch project.export {
-            case .ready(let renderedOn, _):
-                Button(action: onPlay) {
-                    MediaTile(ratio: 9 / 13) {
-                        if let thumbnail = project.thumbnail,
-                           let image = UIImage(contentsOfFile: thumbnail.localPath) {
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFill()
-                        }
-                        Circle()
-                            .fill(.black.opacity(0.35))
-                            .frame(width: 46, height: 46)
-                            .overlay {
-                                Image(systemName: "play.fill")
-                                    .font(.body.weight(.bold))
-                                    .foregroundStyle(.white)
-                                    .offset(x: 2)
-                            }
-                    }
-                    .overlay(alignment: .topLeading) {
-                        ProjectTag(text: formattedDuration(project.duration))
-                            .padding(8)
-                    }
-                    .overlay(alignment: .bottomLeading) {
-                        ProjectTag(text: "\(project.name) · \(renderedOn)")
-                            .padding(8)
-                    }
+        Button(action: onPlay) {
+            MediaTile(ratio: 9 / 13) {
+                if let thumbnail = project.thumbnail,
+                   let image = UIImage(contentsOfFile: thumbnail.localPath) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
                 }
-                .buttonStyle(.plain)
-            case .none:
-                GhostCard(title: project.name, subtitle: "No export yet")
-                    .aspectRatio(9 / 13, contentMode: .fit)
+                Circle()
+                    .fill(ready ? AnyShapeStyle(Color.accentBlue) : AnyShapeStyle(.black.opacity(0.35)))
+                    .frame(width: 46, height: 46)
+                    .overlay {
+                        Image(systemName: "play.fill")
+                            .font(.body.weight(.bold))
+                            .foregroundStyle(.white)
+                            .offset(x: 2)
+                    }
+                    .animation(.snappy(duration: 0.2), value: ready)
+            }
+            .overlay(alignment: .topLeading) {
+                ProjectTag(text: formattedDuration(project.duration))
+                    .padding(8)
+            }
+            .overlay(alignment: .bottomLeading) {
+                ProjectTag(text: caption)
+                    .padding(8)
             }
         }
+        .buttonStyle(PressableTile())
         .frame(maxWidth: .infinity)
+    }
+
+    /// The render this card plays is in hand. The play button is grey while
+    /// the listing is still resolving what a tap would stream and turns blue
+    /// once it has it.
+    private var ready: Bool {
+        if case .ready = project.export { return true }
+        return false
+    }
+
+    /// The card's name line. A project whose render the last listing did not
+    /// see still opens: the player reads the project again on the way in.
+    private var caption: String {
+        switch project.export {
+        case .ready(let renderedOn, _): "\(project.name) · \(renderedOn)"
+        case .none: project.name
+        }
+    }
+}
+
+/// A tile that answers a touch the moment it lands, before whatever the tap
+/// opens has anything to show.
+struct PressableTile: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .opacity(configuration.isPressed ? 0.75 : 1)
+            .animation(.snappy(duration: 0.15), value: configuration.isPressed)
     }
 }
 
@@ -107,33 +139,16 @@ struct ProjectTag: View {
     }
 }
 
-struct GhostCard: View {
-    let title: String
-    let subtitle: String
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: 16)
-            .strokeBorder(.secondary.opacity(0.4), style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
-            .overlay {
-                VStack(spacing: 4) {
-                    Text(title)
-                    Text(subtitle)
-                }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 12)
-            }
-    }
-}
-
 /// Streams the project's latest export, or the composited preview when no
-/// export exists. The URL resolves at open time because CDN links expire.
+/// export exists. The URL resolves at open time because CDN links expire, and
+/// the project is read again on the way in so an edit made at the desk is what
+/// plays.
 ///
-/// The video can be kept: a save control under the player's own sound button
+/// The video can be kept: a save control beside the player's own sound button
 /// opens the export sheet — the same choices the editor offers on the web,
 /// sized off the render itself — and the sheet's Save to Photos button is what
-/// commits it.
+/// commits it. It rides with the player's controls, appearing and fading on a
+/// tap the way the sound button does.
 struct ProjectPlayerView: View {
     let project: Project
     var projects: ProjectsModel
@@ -145,6 +160,9 @@ struct ProjectPlayerView: View {
     @State private var source: SourceVideo?
     @State private var choice = ExportChoice.original.id
     @State private var save: SaveState = .idle
+    @State private var chromeShown = true
+    /// Bumped on every tap, so the fade-out timer starts over.
+    @State private var chromeTick = 0
     @Environment(\.dismiss) private var dismiss
 
     private enum SaveState: Equatable {
@@ -159,57 +177,106 @@ struct ProjectPlayerView: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             Color.black.ignoresSafeArea()
-            if let player {
-                VideoPlayer(player: player)
-                    .ignoresSafeArea()
-            } else if failed {
+            video
+            chrome
+        }
+        .task { await load() }
+        .onDisappear { player?.pause() }
+        .sheet(isPresented: $showingExport) { exportSheet }
+    }
+
+    @ViewBuilder
+    private var video: some View {
+        if let player {
+            VideoPlayer(player: player)
+                .ignoresSafeArea()
+                // The player's own controls answer the same tap; watching it
+                // alongside them keeps this chrome on their clock.
+                .simultaneousGesture(TapGesture().onEnded {
+                    chromeShown.toggle()
+                    chromeTick += 1
+                })
+        } else if failed {
+            VStack(spacing: 14) {
                 Text("Couldn't load this project's video")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.8))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ProgressView()
-                    .tint(.white)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            HStack(spacing: 12) {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.title3.weight(.bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 40, height: 40)
+                Button("Try again") {
+                    failed = false
+                    Task { await load() }
                 }
-                .glassEffect(.regular.interactive())
-                Text(project.name)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
+                .buttonStyle(.borderedProminent)
+                .tint(.white.opacity(0.2))
+                .foregroundStyle(.white)
             }
-            .padding(16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ProgressView()
+                .tint(.white)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// The close button, the project's name, and the save control, on one row
+    /// with the player's sound button — which owns the corner, so the row
+    /// stops short of it.
+    private var chrome: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+            }
+            .glassEffect(.regular.interactive())
+            Text(project.name)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+            Spacer(minLength: 8)
             if player != nil {
-                // Down the right edge, under the player's own sound button:
-                // the two controls share the inset, so this clears its height.
                 saveControl
-                    .padding(.top, 68)
-                    .padding(.trailing, 16)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             }
         }
-        .task {
-            guard let url = await projects.streamURL(for: project) else {
-                failed = true
+        .padding(16)
+        .padding(.trailing, 52)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .opacity(visible ? 1 : 0)
+        .allowsHitTesting(visible)
+        .animation(.easeInOut(duration: 0.2), value: visible)
+        // Fades out the way the player's controls do, and stays while the
+        // video is paused or a save is running.
+        .task(id: chromeTick) {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(4))
+                guard !Task.isCancelled else { return }
+                guard player?.timeControlStatus == .playing else { continue }
+                chromeShown = false
                 return
             }
-            streamed = url
-            let player = AVPlayer(url: url)
-            self.player = player
-            player.play()
-            source = await SourceVideo.read(url)
         }
-        .onDisappear { player?.pause() }
-        .sheet(isPresented: $showingExport) { exportSheet }
+    }
+
+    /// Whether the chrome is on screen: what the tap says, and always while a
+    /// save is telling the user where it is.
+    private var visible: Bool {
+        chromeShown || save != .idle
+    }
+
+    private func load() async {
+        guard let url = await projects.streamURL(for: project) else {
+            failed = true
+            return
+        }
+        streamed = url
+        let player = AVPlayer(url: url)
+        self.player = player
+        player.play()
+        chromeShown = true
+        chromeTick += 1
+        source = await SourceVideo.read(url)
     }
 
     private var saveControl: some View {

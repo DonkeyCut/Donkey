@@ -49,26 +49,34 @@ public final class ProjectsModel {
         isLoading = true
         defer { isLoading = false }
         guard let remote = try? await service.fetchProjects() else { return }
-        summaries = Dictionary(uniqueKeysWithValues: remote.map { ($0.id, $0) })
-        let live = Set(remote.map(\.id))
-        latestExports = latestExports.filter { live.contains($0.key) }
-        thumbnails = thumbnails.filter { live.contains($0.key) }
-        projects = remote.map { project(for: $0, latest: latestExports[$0.id], thumbnail: thumbnails[$0.id]) }
+        adopt(remote)
         async let exports: Void = fillExports(remote, service: service)
         async let posters: Void = fillThumbnails(remote, service: service)
         _ = await (exports, posters)
     }
 
+    /// Take a listing as the current set of projects, dropping what is gone
+    /// and keeping the posters and exports already in hand for what stayed.
+    private func adopt(_ remote: [RemoteProject]) {
+        summaries = Dictionary(uniqueKeysWithValues: remote.map { ($0.id, $0) })
+        let live = Set(remote.map(\.id))
+        latestExports = latestExports.filter { live.contains($0.key) }
+        thumbnails = thumbnails.filter { live.contains($0.key) }
+        projects = remote.map { project(for: $0, latest: latestExports[$0.id], thumbnail: thumbnails[$0.id]) }
+    }
+
     private func fillExports(_ remote: [RemoteProject], service: any CloudProjectsServicing) async {
-        await withTaskGroup(of: (String, RemoteExport?).self) { group in
+        await withTaskGroup(of: (String, [RemoteExport]?).self) { group in
             for summary in remote {
-                group.addTask { (summary.id, (try? await service.fetchExports(projectId: summary.id))?.first) }
+                group.addTask { (summary.id, try? await service.fetchExports(projectId: summary.id)) }
             }
-            for await (id, latest) in group {
-                latestExports[id] = latest
-                guard let summary = summaries[id],
-                      let index = projects.firstIndex(where: { $0.id == id }) else { continue }
-                projects[index] = project(for: summary, latest: latest, thumbnail: projects[index].thumbnail)
+            for await (id, exports) in group {
+                // A fetch that failed comes back nil and leaves the export the
+                // card already plays alone; only an answer from the server —
+                // a list, empty or not — changes what a card offers.
+                guard let exports else { continue }
+                latestExports[id] = exports.first
+                rebuild(id)
             }
         }
     }
@@ -88,10 +96,37 @@ public final class ProjectsModel {
     }
 
     /// The URL a tap streams: the newest export, or the composited preview
-    /// proxy. Resolved at tap time because the CDN links expire.
+    /// proxy. The listing and the project's exports are read again here, so
+    /// opening a project plays the edit that was made at the desk a moment
+    /// ago rather than whatever the last listing saw. Resolved at tap time
+    /// because the CDN links expire.
     public func streamURL(for project: Project) async -> URL? {
-        guard let service, let summary = summaries[project.id] else { return nil }
+        guard let service else { return nil }
+        async let listing = fetchListing(service)
+        async let exports = fetchExports(project.id, service)
+        let (remote, latest) = await (listing, exports)
+        if let remote { adopt(remote) }
+        if let latest {
+            latestExports[project.id] = latest.first
+            rebuild(project.id)
+        }
+        guard let summary = summaries[project.id] else { return nil }
         return try? await service.streamURL(project: summary, export: latestExports[project.id])
+    }
+
+    private func fetchListing(_ service: any CloudProjectsServicing) async -> [RemoteProject]? {
+        try? await service.fetchProjects()
+    }
+
+    private func fetchExports(_ id: String, _ service: any CloudProjectsServicing) async -> [RemoteExport]? {
+        try? await service.fetchExports(projectId: id)
+    }
+
+    /// Repaint one card from the summary, export, and poster now in hand.
+    private func rebuild(_ id: String) {
+        guard let summary = summaries[id],
+              let index = projects.firstIndex(where: { $0.id == id }) else { return }
+        projects[index] = project(for: summary, latest: latestExports[id], thumbnail: projects[index].thumbnail)
     }
 
     private func project(for summary: RemoteProject, latest: RemoteExport?, thumbnail: URL?) -> Project {
