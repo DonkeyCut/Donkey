@@ -33,6 +33,10 @@ export interface MixClip {
   volume?: number;
   /** Cross-dissolve overlap into the next clip, timeline seconds. */
   transition?: number;
+  /** Sound dissolve into the next clip, timeline seconds: this clip fades out
+   * over the window before the cut and the next one fades in over the window
+   * after it. Set instead of `transition` when the handover is on the sound. */
+  soundCross?: number;
 }
 
 /** A clip placed at an absolute time: an upper-track video's audio, a
@@ -94,6 +98,9 @@ const itemDur = (a: MixItem) => Math.max(0, (a.out - a.in) / speedOf(a.speed));
  * transition edges are. Clips abut — a transition claims no layout — and its
  * sound is the outgoing clip fading across the blend window while the next
  * enters clean at the cut, exactly like the engine's tail-fade + hard join.
+ *
+ * A sound dissolve is the same fade out with the next clip's fade in against
+ * it: the picture cuts and the sound crosses over the cut.
  */
 export function foldClips(clips: MixClip[]) {
   const geo = clips.map((clip) => ({ clip, at: 0, dur: clipDur(clip), fadeIn: 0, fadeOut: 0 }));
@@ -101,8 +108,15 @@ export function foldClips(clips: MixClip[]) {
   geo.forEach((g, j) => {
     g.at = acc;
     acc += g.dur;
-    const fade = geo[j + 1] ? Math.min(g.clip.transition ?? 0, g.dur * 0.9) : 0;
+    const next = geo[j + 1];
+    if (!next) return;
+    const fade = Math.min(g.clip.transition ?? 0, g.dur * 0.9);
     if (fade > 0.01) g.fadeOut = fade;
+    const cross = Math.min(g.clip.soundCross ?? 0, g.dur * 0.9, next.dur * 0.9);
+    if (cross > 0.01) {
+      g.fadeOut = Math.max(g.fadeOut, cross);
+      next.fadeIn = Math.max(next.fadeIn, cross);
+    }
   });
   return geo;
 }

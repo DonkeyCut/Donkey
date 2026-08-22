@@ -13,7 +13,7 @@ import { clipCovers, projectFadeSeconds, rectOf } from "@/cut/lib/types";
 import type { ClipSpan, MediaAsset, VideoClip } from "@/cut/lib/types";
 import { SubjectMaskCompositor } from "@/cut/lib/behindPass";
 import { FrameCompositor, MISSING_FRAME, PENDING_FRAME, type Frame } from "@/cut/lib/composite";
-import { duckGainAt, overlayPlan, trackZeroPlan } from "@/cut/lib/framePlan";
+import { duckGainAt, overlayPlan, soundCrossGain, trackZeroPlan } from "@/cut/lib/framePlan";
 import { type ClipFrameSource, FrameSourcePool, mappingKey, walkCostMs } from "@/cut/lib/frameSource";
 import { liveAudioFxAt } from "@/cut/lib/audioEffects";
 import { PreviewMixer, type Voice } from "@/cut/lib/previewMixer";
@@ -301,7 +301,8 @@ class Engine {
    *
    * The same ramps that dim the picture dim the sound: a clip fading out of a
    * dissolve takes its audio with it, an upper-track clip's transition carries
-   * its own, and a live voiceover ducks the rest.
+   * its own, and a live voiceover ducks the rest. A sound dissolve is the
+   * ramp on its own — the picture cuts and only these gains move.
    */
   private voicesAt(t: number, spans: ClipSpan[], master: ClipSpan | undefined): Voice[] {
     const s = useEditor.getState();
@@ -316,7 +317,7 @@ class Engine {
         in: master.clip.in,
         out: master.clip.out,
         speed: clipSpeed(master.clip),
-        gain: plan.gain * duck * (master.clip.volume ?? 1),
+        gain: plan.gain * soundCrossGain(spans, master, t) * duck * (master.clip.volume ?? 1),
       });
     }
     for (const { clip, asset, gain } of this.liveOverlays(t)) {
@@ -425,6 +426,7 @@ class Engine {
         start: clip.start,
         len: Math.max(0.1, (clip.out - clip.in) / clipSpeed(clip)),
         transitionOut: 0,
+        soundOut: 0,
       };
       const frame = this.frameFor(span, t, playing);
       if (frame.kind !== "ready") continue;

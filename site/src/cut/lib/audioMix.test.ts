@@ -34,6 +34,20 @@ describe("foldClips", () => {
     expect(geo[1].fadeIn).toBe(0);
   });
 
+  test("a sound dissolve crosses the cut: one clip out, the next one in", () => {
+    const geo = foldClips([clip({ soundCross: 1 }), clip()]);
+    expect(geo[0].fadeOut).toBe(1);
+    expect(geo[1].fadeIn).toBe(1);
+    // The picture cut claims no layout here either.
+    expect(geo[1].at).toBe(4);
+  });
+
+  test("a sound dissolve is clamped by both clips it crosses", () => {
+    const geo = foldClips([clip({ out: 1, soundCross: 3 }), clip({ out: 2 })]);
+    expect(geo[0].fadeOut).toBeCloseTo(0.9, 5);
+    expect(geo[1].fadeIn).toBeCloseTo(0.9, 5);
+  });
+
   test("scales a blend down so it cannot swallow its clip", () => {
     const geo = foldClips([clip({ out: 1, transition: 2 }), clip({ out: 1 })]);
     expect(geo[0].fadeOut).toBeLessThanOrEqual(0.9);

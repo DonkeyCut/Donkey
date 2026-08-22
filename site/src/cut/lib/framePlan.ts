@@ -67,6 +67,16 @@ export function overlayTransitionFx(
       zoom = 1 + (TRANSITION_ZOOM - 1) * p;
     }
   }
+  // A sound dissolve at either edge: the picture cuts and only the level
+  // moves, so the clip arrives at full opacity with its sound coming up.
+  if (prev && prev.soundOut > 0) {
+    const rel = t - span.start;
+    if (rel < prev.soundOut) gain = Math.min(gain, Math.max(0, rel / prev.soundOut));
+  }
+  if (next && span.soundOut > 0) {
+    const left = span.start + span.len - t;
+    if (left < span.soundOut) gain = Math.min(gain, Math.max(0, left / span.soundOut));
+  }
   // The clip's own entrance/exit animations. A transitioned joint owns its
   // edges: the transition plays there and the adjacent animation is held
   // (running both would fight over the same window).
@@ -191,6 +201,31 @@ export function duckGainAt(audioClips: AudioClip[], t: number): number {
     const speed = a.speed && a.speed > 0 ? a.speed : 1;
     const len = Math.max(0.1, (a.out - a.in) / speed);
     if (t >= a.start && t < a.start + len) g = Math.min(g, Math.max(0, a.duck));
+  }
+  return g;
+}
+
+/**
+ * The gain a sound dissolve puts on the clip playing at `t`.
+ *
+ * The picture cuts and the sound crosses it: the outgoing clip ramps down over
+ * the window before the cut, and the clip after it ramps up over the window
+ * after it. The preview reads this per frame; the offline fold schedules the
+ * same two ramps.
+ */
+export function soundCrossGain(spans: ClipSpan[], master: ClipSpan, t: number): number {
+  const i = spans.indexOf(master);
+  if (i < 0) return 1;
+  let g = 1;
+  const out = master.soundOut;
+  if (out > 0.01) {
+    const from = master.start + master.len - out;
+    if (t > from) g = Math.min(g, Math.max(0, (master.start + master.len - t) / out));
+  }
+  const prev = spans[i - 1];
+  const inc = prev?.soundOut ?? 0;
+  if (inc > 0.01 && t < master.start + inc) {
+    g = Math.min(g, Math.max(0, (t - master.start) / inc));
   }
   return g;
 }

@@ -604,7 +604,8 @@ export type TransitionStyle =
   | "circleopen"
   | "circleclose"
   | "splitopen"
-  | "splitclose";
+  | "splitclose"
+  | "audiocross";
 
 /** The ffmpeg xfade transition each style renders with on export. Doubles as
  * the sanitizing allowlist: the server looks the style up here and falls back
@@ -628,9 +629,23 @@ export const TRANSITION_XFADE: Record<TransitionStyle, string> = {
   circleclose: "circleclose",
   splitopen: "vertopen",
   splitclose: "vertclose",
+  // The sound dissolve never reaches xfade — the picture cuts and the renders
+  // branch before this map. The entry keeps the record total.
+  audiocross: "fade",
 };
 
-/** Picker layout: styles grouped by family, in display order. */
+/** The styles that hand over on the sound alone: the picture cuts, and the
+ * outgoing fades out into the cut while the incoming fades in out of it. They
+ * take no picture blend, so a clip's own entrance and exit animations still
+ * play across a cut one of them sits on. */
+export const AUDIO_TRANSITION_STYLES: TransitionStyle[] = ["audiocross"];
+
+export const isAudioTransition = (style: string | undefined): boolean =>
+  !!style && (AUDIO_TRANSITION_STYLES as string[]).includes(style);
+
+/** Picker layout for the Transitions tab: the styles that blend the picture,
+ * grouped by family, in display order. The sound styles are picked from the
+ * Effects tab's Sound family, beside the other treatments on the sound. */
 export const TRANSITION_STYLE_GROUPS: { label: string; ids: TransitionStyle[] }[] = [
   { label: "Fade", ids: ["crossfade", "dipblack", "dipwhite", "blur"] },
   { label: "Zoom", ids: ["crosszoom"] },
@@ -639,9 +654,11 @@ export const TRANSITION_STYLE_GROUPS: { label: string; ids: TransitionStyle[] }[
   { label: "Shape", ids: ["circleopen", "circleclose", "splitopen", "splitclose"] },
 ];
 
-export const TRANSITION_STYLE_IDS: TransitionStyle[] = TRANSITION_STYLE_GROUPS.flatMap(
-  (g) => g.ids
-);
+/** Every style a bar can carry, whichever tab picks it. */
+export const TRANSITION_STYLE_IDS: TransitionStyle[] = [
+  ...TRANSITION_STYLE_GROUPS.flatMap((g) => g.ids),
+  ...AUDIO_TRANSITION_STYLES,
+];
 
 export const TRANSITION_STYLE_LABELS: Record<TransitionStyle, string> = {
   crossfade: "Cross fade",
@@ -661,6 +678,7 @@ export const TRANSITION_STYLE_LABELS: Record<TransitionStyle, string> = {
   circleclose: "Circle close",
   splitopen: "Split open",
   splitclose: "Split close",
+  audiocross: "Sound dissolve",
 };
 
 /** Peak scale the zoom transitions push into (preview and export). */
@@ -723,9 +741,10 @@ export function overlayAnimStyle(style: AnimStyle): "fade" | "zoom" {
  * against it, so the same drag reads as the clip arriving or leaving. The
  * directional styles keep their direction, the zooms keep their push, and the
  * shaped wipes — which need a second picture to reveal — come through as the
- * ramp closest to them.
+ * ramp closest to them. A sound style becomes nothing: it hands one clip's
+ * sound to the next one's, and an open edge has no next one.
  */
-const EDGE_ANIM: Record<TransitionStyle, AnimStyle> = {
+const EDGE_ANIM: Record<TransitionStyle, AnimStyle | null> = {
   crossfade: "fade",
   dipblack: "fade",
   dipwhite: "fade",
@@ -743,6 +762,7 @@ const EDGE_ANIM: Record<TransitionStyle, AnimStyle> = {
   wiperight: "slideright",
   wipeup: "slideup",
   wipedown: "slidedown",
+  audiocross: null,
 };
 
 const ANIM_TRANSITION: Record<AnimStyle, TransitionStyle> = {
@@ -755,7 +775,8 @@ const ANIM_TRANSITION: Record<AnimStyle, TransitionStyle> = {
   slidedown: "pushdown",
 };
 
-export const animStyleOfTransition = (style: TransitionStyle): AnimStyle => EDGE_ANIM[style];
+export const animStyleOfTransition = (style: TransitionStyle): AnimStyle | null =>
+  EDGE_ANIM[style];
 
 export const transitionStyleOfAnim = (style: AnimStyle): TransitionStyle =>
   ANIM_TRANSITION[style] ?? "crossfade";
@@ -1165,6 +1186,13 @@ export interface ClipSpan {
    * over this clip's live tail. Spans never intersect — the next one starts
    * exactly at this one's end, and plays from its head there. */
   transitionOut: number;
+  /** Sound dissolve into the next span, in timeline seconds: this clip's
+   * audio fades out over the window before the cut and the next clip's fades
+   * in over the window after it, while the picture cuts. Zero unless the
+   * transition at the cut is one of the sound styles, and never set at the
+   * same time as `transitionOut` — a handover blends the picture or the
+   * sound. */
+  soundOut: number;
 }
 
 /** The document persisted as project.json inside each project folder. */

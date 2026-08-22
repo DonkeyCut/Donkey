@@ -455,6 +455,30 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       },
     },
     {
+      // "Only the audio" at a cut is a transition style, not an effect and not
+      // per-clip fades: audiocross leaves the picture a hard cut and dissolves
+      // the sound across it.
+      name: "sound-dissolve-single-tool",
+      bucket: "single-tool",
+      input: () => [
+        userTurn("keep the cut between the two clips but cross dissolve just the audio", {
+          state: TWO_CLIP_STATE,
+        }),
+      ],
+      reply: /audio|sound|dissolve/i,
+      requiredTools: ["set_transition"],
+      maxToolCalls: 3,
+      state: TWO_CLIP_STATE,
+      simulate: () => (name, args) => {
+        if (name !== "set_transition") return undefined;
+        if (args.style !== "audiocross")
+          throw new Error(`style ${args.style} — expected audiocross`);
+        const seconds = Number(args.seconds ?? 0);
+        if (!(seconds > 0)) throw new Error(`seconds ${seconds} — a dissolve needs a window`);
+        return { clipId: String(args.clipId), seconds, style: "audiocross" };
+      },
+    },
+    {
       // Last pick wins per edge: swapping a crossfading joint for an entrance
       // animation is a set_animation — the override clears the transition
       // itself (an explicit set_transition 0 first is fine, not required).

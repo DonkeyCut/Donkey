@@ -452,6 +452,11 @@ function overlayRamps(spans: ClipSpan[]): { head: number; tail: number }[] {
       ramps[i].tail = Math.max(ramps[i].tail, sp.transitionOut);
       ramps[i + 1].head = Math.max(ramps[i + 1].head, sp.transitionOut);
     }
+    // A sound dissolve is these ramps and nothing else: the picture cuts.
+    if (sp.soundOut > 0 && spans[i + 1]) {
+      ramps[i].tail = Math.max(ramps[i].tail, sp.soundOut);
+      ramps[i + 1].head = Math.max(ramps[i + 1].head, sp.soundOut);
+    }
   });
   return ramps;
 }
@@ -522,6 +527,7 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
             speed: sp.clip.speed,
             volume: sp.clip.volume,
             transition: sp.transitionOut,
+            soundCross: sp.soundOut,
           },
         ]);
 

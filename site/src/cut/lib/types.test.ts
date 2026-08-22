@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { clipCovers, contentRect, migrateLegacyTransitions, normalizeAspect, TRANSITION_STYLE_IDS, type VideoClip } from "./types";
+import { animStyleOfTransition, AUDIO_TRANSITION_STYLES, clipCovers, contentRect, migrateLegacyTransitions, normalizeAspect, TRANSITION_STYLE_GROUPS, TRANSITION_STYLE_IDS, TRANSITION_STYLE_LABELS, type VideoClip } from "./types";
 
 /** A minimal track-0 clip; legacy docs carry retired transitionStyle strings. */
 function clip(
@@ -87,6 +87,20 @@ describe("migrateLegacyTransitions", () => {
     expect(out[0].transition).toBeUndefined();
     expect(out[0].transitionStyle).toBeUndefined();
     expect(out[0].animOut).toBeUndefined();
+  });
+
+  test("every style a bar can carry is a style the tools can name", () => {
+    // The picker groups are the Transitions tab's layout, and the sound
+    // styles are picked elsewhere — so the id list is the groups plus them,
+    // never the groups alone (the tool enum and the doc validator read it).
+    for (const id of AUDIO_TRANSITION_STYLES) {
+      expect(TRANSITION_STYLE_IDS).toContain(id);
+      expect(TRANSITION_STYLE_GROUPS.flatMap((g) => g.ids)).not.toContain(id);
+      expect(TRANSITION_STYLE_LABELS[id]).toBeTruthy();
+      // A sound handover has no picture blend to fall back to on an open edge.
+      expect(animStyleOfTransition(id)).toBeNull();
+    }
+    expect(new Set(TRANSITION_STYLE_IDS).size).toBe(TRANSITION_STYLE_IDS.length);
   });
 
   test("current style ids are never treated as legacy", () => {

@@ -186,6 +186,52 @@ describe("export filtergraph timebases", () => {
     expect(xfadeMismatches(g)).toEqual([]);
   });
 
+  test("a sound dissolve cuts the picture and crosses the sound", async () => {
+    const g = await graphFor({
+      clips: [
+        clip("a.mp4", { soundCross: 0.5, transitionStyle: "audiocross" }),
+        clip("b.mp4"),
+      ],
+    });
+    const graph = g.join(";");
+    // No blend on the picture at all — the join is a plain concat.
+    expect(graph).not.toContain("xfade=");
+    expect(graph).not.toContain("tpad=start_duration");
+    // The outgoing clip's sound fades into the cut, the incoming clip's out
+    // of it, and the pieces concat back to the same length.
+    expect(g).toContain("[a0]afade=t=out:st=3.500:d=0.500[ah1]");
+    expect(g).toContain("[a1]afade=t=in:st=0:d=0.500[ai1]");
+    expect(g).toContain("[ah1][ai1]concat=n=2:v=0:a=1[aj1]");
+  });
+
+  test("a sound dissolve joined into a picture transition keeps the streams matched", async () => {
+    const g = await graphFor({
+      clips: [
+        clip("a.mp4", { soundCross: 0.5, transitionStyle: "audiocross" }),
+        clip("b.mp4", { transition: 0.5, transitionStyle: "crossfade" }),
+        clip("c.mp4"),
+      ],
+    });
+    expect(xfadeMismatches(g)).toEqual([]);
+  });
+
+  test("an upper-track sound dissolve ramps the sound and never the picture", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { out: 8 })],
+      overlayVideos: [
+        { file: "u1.mp4", in: 0, out: 4, start: 0, track: 1, muted: false, tailSound: 0.5 },
+        { file: "u2.mp4", in: 0, out: 4, start: 4, track: 1, muted: false, headSound: 0.5 },
+      ],
+    });
+    const graph = g.join(";");
+    // The sound crosses at the cut between the two upper-track clips…
+    expect(graph).toContain("afade=t=out:st=3.500:d=0.500");
+    expect(graph).toContain("afade=t=in:st=0:d=0.500");
+    // …and the picture keeps its opacity throughout: no alpha ramp anywhere.
+    expect(graph).not.toContain("fade=t=in:st=0:d=0.500:alpha=1");
+    expect(graph).not.toContain("alpha=1");
+  });
+
   test("every join transitioned, styles mixed", async () => {
     const g = await graphFor({
       clips: [

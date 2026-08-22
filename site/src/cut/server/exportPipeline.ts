@@ -50,6 +50,12 @@ export interface ExportSpec {
     speed?: number; // playback rate, default 1
     /** Transition into the next clip, in timeline seconds (overlap). */
     transition?: number;
+    /** Sound dissolve into the next clip, in timeline seconds. The picture
+     * cuts; this clip's sound fades out over the window before the cut and
+     * the next clip's fades in over the window after it. Carried apart from
+     * `transition` so a join that blends only the sound is not read as a
+     * picture blend anywhere. */
+    soundCross?: number;
     /** Transition look id, resolved to an xfade name through the
      * TRANSITION_XFADE allowlist (unknown ids render as a plain fade). Cross
      * zoom renders as the fade plus zoom ramps on both segments' overlap
@@ -127,6 +133,10 @@ export interface ExportSpec {
     tailFade?: number;
     headZoom?: number;
     tailZoom?: number;
+    /** Sound dissolve ramps, timeline seconds from this overlay's head/tail:
+     * the level crosses at the cut and the picture is left alone. */
+    headSound?: number;
+    tailSound?: number;
     /** A still image: looped for the clip's length instead of trimmed. */
     image?: boolean;
     /** Manual color adjustments, baked into this overlay's segment. */
@@ -1274,8 +1284,10 @@ export async function runExport(
   // incoming segment's head with its cloned first frame and runs the xfade
   // across the outgoing clip's last blend-window seconds: the held frame
   // arrives over the live tail, and the real segment starts exactly at the
-  // cut. Its sound is a tail fade on the outgoing side and a hard join. The
-  // rest hard-cut (concat). Fold left so mixed sequences chain correctly.
+  // cut. Its sound is a tail fade on the outgoing side and a hard join. A
+  // sound dissolve cuts the picture and crosses the sound instead — a tail
+  // fade against the incoming clip's head fade. The rest hard-cut (concat).
+  // Fold left so mixed sequences chain correctly.
   let vAcc = segLabel[0];
   let aAcc = "a0";
   let acc = clipDur(spec.clips[0]); // running timeline length of the accumulator
@@ -1284,9 +1296,19 @@ export async function runExport(
     const durJ = clipDur(spec.clips[j]);
     // The blend can't exceed most of either clip, matching the editor clamp.
     const d = Math.min(prev.transition ?? 0, acc * 0.9, durJ * 0.9);
+    const cross = Math.min(prev.soundCross ?? 0, acc * 0.9, durJ * 0.9);
     const vOut = `vj${j}`;
     const aOut = `aj${j}`;
-    if (d > 0.01) {
+    if (cross > 0.01) {
+      // The picture cuts: concat, re-stamped for a later xfade the same way
+      // a plain join is. The sound crosses the cut.
+      filters.push(`[${vAcc}][${segLabel[j]}]concat=n=2:v=1:a=0,fps=${fps}[${vOut}]`);
+      filters.push(
+        `[${aAcc}]afade=t=out:st=${num(Math.max(0, acc - cross))}:d=${num(cross)}[ah${j}]`
+      );
+      filters.push(`[a${j}]afade=t=in:st=0:d=${num(cross)}[ai${j}]`);
+      filters.push(`[ah${j}][ai${j}]concat=n=2:v=0:a=1[${aOut}]`);
+    } else if (d > 0.01) {
       const offset = Math.max(0, acc - d);
       // The style id resolves through the allowlist map; anything unknown
       // (or an old spec without a style) renders as a plain fade.
@@ -1331,6 +1353,10 @@ export async function runExport(
     const tz = Math.max(0, Math.min(oc.tailZoom ?? 0, olen - hz));
     const hf = Math.max(0, Math.min(oc.headFade ?? 0, olen));
     const tf = Math.max(0, Math.min(oc.tailFade ?? 0, olen - hf));
+    // A sound dissolve's own ramps: the sound crosses at the cut, the picture
+    // cuts with it.
+    const hs = Math.max(0, Math.min(oc.headSound ?? 0, olen));
+    const ts = Math.max(0, Math.min(oc.tailSound ?? 0, olen - hs));
     const ramped = hz > 0.01 || tz > 0.01;
     const maskIdx = overlayMaskInput.get(oc);
     const subjMask = subjectActive && matteConsumers > 0 ? oc.mask?.subject : undefined;
@@ -1493,9 +1519,12 @@ export async function runExport(
       const tempo = ospeed !== 1 ? `${atempoChain(ospeed)},` : "";
       const vol = (oc.volume ?? 1) !== 1 ? `volume=${num(oc.volume ?? 1)},` : "";
       // The picture's fade edges carry the sound with them; zoom edges don't.
+      // A sound dissolve's ramps are here and nowhere else.
       const afades =
         (hf > 0.01 ? `afade=t=in:st=0:d=${num(hf)},` : "") +
-        (tf > 0.01 ? `afade=t=out:st=${num(Math.max(0, olen - tf))}:d=${num(tf)},` : "");
+        (tf > 0.01 ? `afade=t=out:st=${num(Math.max(0, olen - tf))}:d=${num(tf)},` : "") +
+        (hs > 0.01 ? `afade=t=in:st=0:d=${num(hs)},` : "") +
+        (ts > 0.01 ? `afade=t=out:st=${num(Math.max(0, olen - ts))}:d=${num(ts)},` : "");
       const delayMs = Math.max(0, Math.round(oc.start * 1000));
       const lab = `ovs${k}`;
       filters.push(

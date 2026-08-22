@@ -974,6 +974,36 @@ describe("bars and clip edges", () => {
     expect(clipById(b.id).start).toBeCloseTo(4);
   });
 
+  test("a sound dissolve hands over on the audio and leaves the picture cut", () => {
+    const av = asset(4);
+    const a = vclip({ track: 0, start: 0, out: 4, assetId: av.id });
+    const b = vclip({ track: 0, start: 4, out: 4, assetId: av.id });
+    useEditor.setState({ assets: [av], clips: [a, b] });
+    s().setClipTransition(a.id, 0.8, "audiocross");
+    const spans = getClipSpans(s().clips, s().assets, 0);
+    // The window rides the sound field; every reader of the picture blend
+    // sees a plain cut.
+    expect(spans[0].transitionOut).toBe(0);
+    expect(spans[0].soundOut).toBeCloseTo(0.8);
+    // Switching the same bar to a picture style moves the window back.
+    s().setClipTransition(a.id, 0.8, "crossfade");
+    const after = getClipSpans(s().clips, s().assets, 0);
+    expect(after[0].transitionOut).toBeCloseTo(0.8);
+    expect(after[0].soundOut).toBe(0);
+  });
+
+  test("a sound dissolve on an open edge plays nothing", () => {
+    const av = asset(4);
+    const a = vclip({ track: 0, start: 0, out: 4, assetId: av.id });
+    useEditor.setState({ assets: [av], clips: [a] });
+    // Dropped on a clip's head there is no next clip's sound to cross into,
+    // so it becomes no entrance animation at all.
+    const bar = s().addTransition({ start: 0, seconds: 0.6, style: "audiocross" });
+    expect(bar).toBeTruthy();
+    expect(clipById(a.id).animIn).toBeUndefined();
+    expect(clipById(a.id).animOut).toBeUndefined();
+  });
+
   test("a pre-bar doc's clip fields become bars once, and derive back unchanged", () => {
     const av = asset(4);
     const a = vclip({
@@ -1087,6 +1117,35 @@ describe("bars and clip edges", () => {
     expect(s().transitions[0].start).toBeCloseTo(4.2);
     expect(parkedTransitions(s().clips, s().transitions)).toEqual([]);
     expect(clipById(a.id).animOut).toEqual({ style: "fade", seconds: 0.8 });
+  });
+
+  test("a sound dissolve on an open edge reads as parked, not as a live bar", () => {
+    const av = asset(8);
+    const a = vclip({ track: 0, start: 0, out: 4, assetId: av.id });
+    const b = vclip({ track: 0, start: 6, out: 4, assetId: av.id });
+    useEditor.setState({ assets: [av], clips: [a, b] });
+    // A sound dissolve dropped on a's open tail. It has no picture ramp and
+    // nothing to blend into, so it plays nothing and has to say so.
+    const id = s().addTransition({ start: 3.2, seconds: 0.8, style: "audiocross" });
+    expect(parkedTransitions(s().clips, s().transitions).map((t) => t.id)).toEqual([id]);
+    expect(clipById(a.id).animOut).toBeUndefined();
+    // The same bar on a real cut plays it, and stops reading as parked:
+    // pulling b up to a's tail turns that open edge into a handover.
+    s().updateClip(b.id, { start: 4 });
+    expect(parkedTransitions(s().clips, s().transitions)).toEqual([]);
+    expect(clipById(a.id).transition).toBeCloseTo(0.8);
+    expect(clipById(a.id).transitionStyle).toBe("audiocross");
+  });
+
+  test("a sound dissolve on an open edge leaves the boundary for a bar that plays it", () => {
+    const av = asset(8);
+    const a = vclip({ track: 0, start: 0, out: 4, assetId: av.id });
+    useEditor.setState({ assets: [av], clips: [a] });
+    const sound = s().addTransition({ start: 3.2, seconds: 0.8, style: "audiocross" });
+    // A picture bar on the same tail takes the edge the sound bar cannot.
+    s().addTransition({ start: 3.2, seconds: 0.8, style: "crossfade" });
+    expect(clipById(a.id).animOut).toEqual({ style: "fade", seconds: 0.8 });
+    expect(parkedTransitions(s().clips, s().transitions).map((t) => t.id)).toEqual([sound]);
   });
 
   test("a copied bar pastes onto the cut nearest the playhead", () => {

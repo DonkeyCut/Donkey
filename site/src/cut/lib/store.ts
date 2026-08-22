@@ -60,7 +60,7 @@ import { useGenNotify } from "./genNotify";
 import { clampPlayhead, playheadAt, previewAt, setPlayhead, setSkim } from "./playhead";
 import { engineTranscribeSamples, withEngineStt } from "./localStt";
 import { trackLocale } from "./subtitles";
-import { ANIM_STYLE_IDS, animStyleOfTransition, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionStyleOfAnim } from "./types";
+import { ANIM_STYLE_IDS, animStyleOfTransition, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isAudioTransition, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionStyleOfAnim } from "./types";
 import { liftMoveTracks } from "./textMotion";
 import { readTextStyle } from "./textStyle";
 import { loadUiState, saveUiState, type ProjectUiState } from "./uiState";
@@ -4698,6 +4698,15 @@ function transitionBoundaries(clips: VideoClip[]): TransitionBoundary[] {
   return out;
 }
 
+/** Whether a bar's style has anything to play at this kind of boundary. A
+ * cut hands one clip's sound and picture to the next, so every style plays
+ * one. An open head or tail has only the single clip's edge to ramp, which is
+ * a picture ramp — a sound dissolve has nothing to blend there, so it never
+ * claims the boundary: it reads as parked, which is what it is, and the AI's
+ * debris report names it. */
+const playsBoundary = (style: TransitionStyle, kind: TransitionRole["kind"]): boolean =>
+  kind === "cut" || animStyleOfTransition(style) !== null;
+
 /**
  * Match each transition bar to the boundaries it lines up with, by time
  * alone: a bar plays every cut or open tail its end sits on and every open
@@ -4723,6 +4732,7 @@ export function resolveTransitions(
       .filter(
         (b) =>
           !taken.has(b) &&
+          playsBoundary(t.style, b.kind) &&
           Math.abs((b.kind === "in" ? t.start : t.start + t.seconds) - b.at) <= TOUCH_EPS
       )
       .sort((a, b) => rank[a.kind] - rank[b.kind]);
@@ -4813,7 +4823,9 @@ export function deriveTransitionFields(
     const transitionStyle = cut && cut.style !== "crossfade" ? cut.style : undefined;
     const animOf = (t: TimelineTransition | undefined): ClipAnim | undefined => {
       if (!t) return undefined;
-      const style = animStyleOfTransition(t.style);
+      // Only a style with an edge ramp reaches an open edge — a sound
+      // dissolve never takes one (`playsBoundary`).
+      const style = animStyleOfTransition(t.style)!;
       return {
         // Upper tracks composite through alpha, so their edges render the
         // ramps alpha can express.
@@ -5049,13 +5061,18 @@ function buildClipSpans(clips: VideoClip[], assets: MediaAsset[], track: number)
     const len = clipLen(clip);
     const next = present[i + 1]?.clip;
     // The blend into the next clip, live only at a cut the pair actually
-    // makes; clips dragged apart dissolve into nothing.
+    // makes; clips dragged apart dissolve into nothing. A sound style hands
+    // over on the audio alone, so its window lands on the other field and
+    // every reader of the picture blend sees a plain cut.
+    const overlap = transitionOverlap(clip, next);
+    const onSound = isAudioTransition(clip.transitionStyle);
     spans.push({
       clip,
       asset,
       start: clip.start,
       len,
-      transitionOut: transitionOverlap(clip, next),
+      transitionOut: onSound ? 0 : overlap,
+      soundOut: onSound ? overlap : 0,
     });
   }
   return spans;

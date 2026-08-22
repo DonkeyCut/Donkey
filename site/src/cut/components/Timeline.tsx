@@ -59,6 +59,7 @@ import { cn } from "@/lib/utils";
 
 const TRANSITION_ICONS: Record<TransitionStyle, LucideIcon> = {
   crossfade: Blend,
+  audiocross: AudioLines,
   crosszoom: Expand,
   dipblack: Moon,
   dipwhite: Sun,

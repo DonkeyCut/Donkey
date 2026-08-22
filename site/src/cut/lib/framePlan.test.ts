@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { clipAnimFx, duckGainAt, prerollLead, PREROLL_LEAD_S, trackZeroPlan } from "./framePlan";
+import {
+  clipAnimFx,
+  duckGainAt,
+  overlayTransitionFx,
+  prerollLead,
+  PREROLL_LEAD_S,
+  soundCrossGain,
+  trackZeroPlan,
+} from "./framePlan";
 import { TRANSITION_ZOOM } from "./types";
 import type { AudioClip, ClipSpan, MediaAsset, VideoClip } from "./types";
 
@@ -36,11 +44,58 @@ function spansOf(count: number, len = 4, transitions: number[] = []): ClipSpan[]
       start: at,
       len,
       transitionOut,
+      soundOut: 0,
     });
     at += len; // clips abut — a transition is a blend at the cut, never overlap
   }
   return spans;
 }
+
+/** The same run, handing over on the sound: the picture cuts, the window
+ * lands on `soundOut`. */
+function soundSpansOf(count: number, len = 4, crosses: number[] = []): ClipSpan[] {
+  const spans = spansOf(count, len);
+  return spans.map((sp, i) => ({ ...sp, soundOut: crosses[i] ?? 0 }));
+}
+
+describe("soundCrossGain", () => {
+  test("crosses the level over the cut while the picture stays a cut", () => {
+    const spans = soundSpansOf(2, 4, [2]);
+    const cut = spans[1].start;
+    // Nothing moves until the window opens.
+    expect(soundCrossGain(spans, spans[0], cut - 2.5)).toBeCloseTo(1, 5);
+    // The outgoing clip ramps down into the cut…
+    expect(soundCrossGain(spans, spans[0], cut - 1)).toBeCloseTo(0.5, 5);
+    expect(soundCrossGain(spans, spans[0], cut - 0.001)).toBeCloseTo(0, 2);
+    // …and the incoming one ramps up out of it.
+    expect(soundCrossGain(spans, spans[1], cut)).toBeCloseTo(0, 5);
+    expect(soundCrossGain(spans, spans[1], cut + 1)).toBeCloseTo(0.5, 5);
+    expect(soundCrossGain(spans, spans[1], cut + 2)).toBeCloseTo(1, 5);
+    // The picture never blends: no overlap, no incoming picture.
+    expect(trackZeroPlan(spans[0], spans, cut - 1).p).toBe(0);
+    expect(trackZeroPlan(spans[0], spans, cut - 1).incoming).toBe(null);
+    expect(trackZeroPlan(spans[0], spans, cut - 1).masterAlpha).toBe(1);
+  });
+
+  test("leaves a run with no sound dissolve at full level", () => {
+    const spans = soundSpansOf(2, 4);
+    expect(soundCrossGain(spans, spans[0], 3.9)).toBe(1);
+    expect(soundCrossGain(spans, spans[1], 4.1)).toBe(1);
+  });
+});
+
+describe("overlayTransitionFx", () => {
+  test("an upper-track sound dissolve moves the level and not the picture", () => {
+    const spans = soundSpansOf(2, 4, [2]);
+    const cut = spans[1].start;
+    const out = overlayTransitionFx(spans[0], undefined, spans[1], cut - 1);
+    expect(out.gain).toBeCloseTo(0.5, 5);
+    expect(out.alpha).toBe(1);
+    const inc = overlayTransitionFx(spans[1], spans[0], undefined, cut + 1);
+    expect(inc.gain).toBeCloseTo(0.5, 5);
+    expect(inc.alpha).toBe(1);
+  });
+});
 
 describe("trackZeroPlan", () => {
   test("reports no transition in the middle of a clip", () => {

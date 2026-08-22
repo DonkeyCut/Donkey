@@ -491,6 +491,9 @@ async function buildExportPayload(
     frame: sp.clip.frame,
     speed: clipSpeed(sp.clip),
     transition: sp.transitionOut,
+    // A sound dissolve carries its own window: the picture cuts, so the
+    // server's blend must not see one.
+    soundCross: sp.soundOut,
     // The style rides along with the overlap; the server resolves it to an
     // xfade name (and the cross-zoom ramps) itself, so the spec carries only
     // the id.
@@ -598,7 +601,16 @@ async function buildExportPayload(
   const overlayClipOf = new Map<object, VideoClip>();
   const overlayVideos = overlayTracks.flatMap((track) => {
     const trackSpans = getClipSpans(doc.clips, doc.assets, track);
-    const ramps = trackSpans.map(() => ({ headFade: 0, tailFade: 0, headZoom: 0, tailZoom: 0 }));
+    const ramps = trackSpans.map(() => ({
+      headFade: 0,
+      tailFade: 0,
+      headZoom: 0,
+      tailZoom: 0,
+      // Sound-only ramps: a dissolve on the sound leaves the picture alone,
+      // so its windows ride apart from the alpha fades.
+      headSound: 0,
+      tailSound: 0,
+    }));
     trackSpans.forEach((sp, i) => {
       const r = ramps[i];
       const applyAnim = (a: ClipAnim | undefined, side: "head" | "tail") => {
@@ -621,6 +633,10 @@ async function buildExportPayload(
           r.tailZoom = Math.max(r.tailZoom, sp.transitionOut);
           nr.headZoom = Math.max(nr.headZoom, sp.transitionOut);
         }
+      }
+      if (sp.soundOut > 0 && trackSpans[i + 1]) {
+        r.tailSound = Math.max(r.tailSound, sp.soundOut);
+        ramps[i + 1].headSound = Math.max(ramps[i + 1].headSound, sp.soundOut);
       }
     });
     return trackSpans
