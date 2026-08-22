@@ -67,15 +67,11 @@ export function overlayTransitionFx(
       zoom = 1 + (TRANSITION_ZOOM - 1) * p;
     }
   }
-  // A sound dissolve at either edge: the picture cuts and only the level
+  // A cross dissolve at either edge: the picture cuts and only the level
   // moves, so the clip arrives at full opacity with its sound coming up.
-  if (prev && prev.soundOut > 0) {
-    const rel = t - span.start;
-    if (rel < prev.soundOut) gain = Math.min(gain, Math.max(0, rel / prev.soundOut));
-  }
+  if (prev && prev.soundOut > 0) gain = Math.min(gain, crossIn(t, span.start, prev.soundOut));
   if (next && span.soundOut > 0) {
-    const left = span.start + span.len - t;
-    if (left < span.soundOut) gain = Math.min(gain, Math.max(0, left / span.soundOut));
+    gain = Math.min(gain, crossOut(t, span.start + span.len, span.soundOut));
   }
   // The clip's own entrance/exit animations. A transitioned joint owns its
   // edges: the transition plays there and the adjacent animation is held
@@ -206,28 +202,72 @@ export function duckGainAt(audioClips: AudioClip[], t: number): number {
 }
 
 /**
- * The gain a sound dissolve puts on the clip playing at `t`.
+ * How far a cross dissolve at `cut` has travelled at `t`, 0 before it starts
+ * and 1 when it is done. The handover runs `half` seconds either side of the
+ * cut, so the crossing point — where both clips are equally loud — is the cut
+ * itself.
+ */
+const crossP = (t: number, cut: number, half: number) =>
+  Math.max(0, Math.min(1, (t - (cut - half)) / (2 * half)));
+
+/**
+ * The two sides of a cross dissolve, as equal-power gains.
  *
- * The picture cuts and the sound crosses it: the outgoing clip ramps down over
- * the window before the cut, and the clip after it ramps up over the window
- * after it. The preview reads this per frame; the offline fold schedules the
- * same two ramps.
+ * Sine and cosine rather than straight lines: two ramps that meet at half
+ * level sum to constant power, so the mix holds its loudness through the join.
+ * Linear ramps would cross at half amplitude, which is 3 dB down — an audible
+ * scoop in the middle of every dissolve.
+ */
+const crossOut = (t: number, cut: number, half: number) =>
+  Math.cos((crossP(t, cut, half) * Math.PI) / 2);
+const crossIn = (t: number, cut: number, half: number) =>
+  Math.sin((crossP(t, cut, half) * Math.PI) / 2);
+
+/**
+ * The gain a cross dissolve puts on a clip at `t`.
+ *
+ * The picture cuts and the sound crosses it: the outgoing clip ramps down
+ * across the cut while the clip after it ramps up across the same window, both
+ * equal-power, so the two are audible together and the level never dips. Each
+ * side reaches past its own footprint by the handle it has (`soundAhead` and
+ * `soundBack`), which is what gives the crossing two real signals; where a
+ * clip has no handle its side simply stops at the cut. The preview reads this
+ * per frame, the offline fold schedules the same curves, and the ffmpeg graph
+ * writes them as volume expressions.
  */
 export function soundCrossGain(spans: ClipSpan[], master: ClipSpan, t: number): number {
   const i = spans.indexOf(master);
   if (i < 0) return 1;
   let g = 1;
-  const out = master.soundOut;
-  if (out > 0.01) {
-    const from = master.start + master.len - out;
-    if (t > from) g = Math.min(g, Math.max(0, (master.start + master.len - t) / out));
+  if (master.soundOut > 0.01) {
+    g = Math.min(g, crossOut(t, master.start + master.len, master.soundOut));
   }
-  const prev = spans[i - 1];
-  const inc = prev?.soundOut ?? 0;
-  if (inc > 0.01 && t < master.start + inc) {
-    g = Math.min(g, Math.max(0, (t - master.start) / inc));
-  }
+  const inc = spans[i - 1]?.soundOut ?? 0;
+  if (inc > 0.01) g = Math.min(g, crossIn(t, master.start, inc));
   return g;
+}
+
+/**
+ * The clips whose sound is live at `t` past their own footprint: a neighbour
+ * still crossing a cut on its handle.
+ *
+ * A cross dissolve needs both clips audible over a cut their pictures hard-
+ * join, so for the length of the handover each side plays into the other's
+ * time — the outgoing clip past its out point, the incoming one before its in
+ * point. Those stretches are outside the clip's footprint, so nothing else on
+ * the timeline reaches them and only the cross ramp shapes them.
+ */
+export function crossHandles(spans: ClipSpan[], t: number): { span: ClipSpan; gain: number }[] {
+  const out: { span: ClipSpan; gain: number }[] = [];
+  for (const sp of spans) {
+    if (sp.clip.hidden || sp.clip.muted) continue;
+    if (t >= sp.start && t < sp.start + sp.len) continue;
+    const from = sp.start - sp.soundBack;
+    const to = sp.start + sp.len + sp.soundAhead;
+    if (t < from || t >= to) continue;
+    out.push({ span: sp, gain: soundCrossGain(spans, sp, t) });
+  }
+  return out;
 }
 
 /** How much of a clip's animation window is still running at `rel`, for the
@@ -371,6 +411,7 @@ export function trackZeroPlan(master: ClipSpan, spans: ClipSpan[], t: number): T
 
 /** One upper-track clip on screen, with its ramps resolved. */
 export interface OverlayPlanItem {
+  span: ClipSpan;
   clip: VideoClip;
   asset: MediaAsset;
   alpha: number;
@@ -399,6 +440,7 @@ export function overlayPlan(
       if (sp.clip.hidden) continue;
       if (t < sp.start || t >= sp.start + sp.len) continue;
       live.push({
+        span: sp,
         clip: sp.clip,
         asset: sp.asset,
         ...overlayTransitionFx(sp, spans[i - 1], spans[i + 1], t),

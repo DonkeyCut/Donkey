@@ -33,10 +33,16 @@ export interface MixClip {
   volume?: number;
   /** Cross-dissolve overlap into the next clip, timeline seconds. */
   transition?: number;
-  /** Sound dissolve into the next clip, timeline seconds: this clip fades out
-   * over the window before the cut and the next one fades in over the window
-   * after it. Set instead of `transition` when the handover is on the sound. */
+  /** Half the cross dissolve into the next clip, timeline seconds: the two
+   * clips ramp equal-power past each other over that long either side of the
+   * cut. Set instead of `transition` when the handover is on the sound. */
   soundCross?: number;
+  /** Source seconds past `out` this clip keeps sounding, into the crossing at
+   * its tail, and source seconds before `in` it starts sounding, for the
+   * crossing at its head. Both are handle — media the trim left behind — and
+   * are what make the two clips audible at once over a hard picture cut. */
+  soundAhead?: number;
+  soundBack?: number;
 }
 
 /** A clip placed at an absolute time: an upper-track video's audio, a
@@ -48,6 +54,13 @@ export interface MixItem {
   start: number;
   volume: number;
   speed?: number;
+  /** Half the cross dissolve at this item's head and tail, with the handle
+   * each side reaches into — an upper-track cut crosses the same way track
+   * 0's does. */
+  crossIn?: number;
+  crossOut?: number;
+  soundAhead?: number;
+  soundBack?: number;
   muted?: boolean;
   fadeIn?: number;
   fadeOut?: number;
@@ -99,11 +112,21 @@ const itemDur = (a: MixItem) => Math.max(0, (a.out - a.in) / speedOf(a.speed));
  * sound is the outgoing clip fading across the blend window while the next
  * enters clean at the cut, exactly like the engine's tail-fade + hard join.
  *
- * A sound dissolve is the same fade out with the next clip's fade in against
- * it: the picture cuts and the sound crosses over the cut.
+ * A cross dissolve is the other shape: the two clips ramp past each other
+ * across the cut, each reaching into its handle so both are really sounding
+ * while the picture hard-joins. Those ramps are equal-power and are kept apart
+ * from the fades, which are linear and end at silence.
  */
 export function foldClips(clips: MixClip[]) {
-  const geo = clips.map((clip) => ({ clip, at: 0, dur: clipDur(clip), fadeIn: 0, fadeOut: 0 }));
+  const geo = clips.map((clip) => ({
+    clip,
+    at: 0,
+    dur: clipDur(clip),
+    fadeIn: 0,
+    fadeOut: 0,
+    crossIn: 0,
+    crossOut: 0,
+  }));
   let acc = 0;
   geo.forEach((g, j) => {
     g.at = acc;
@@ -114,12 +137,32 @@ export function foldClips(clips: MixClip[]) {
     if (fade > 0.01) g.fadeOut = fade;
     const cross = Math.min(g.clip.soundCross ?? 0, g.dur * 0.9, next.dur * 0.9);
     if (cross > 0.01) {
-      g.fadeOut = Math.max(g.fadeOut, cross);
-      next.fadeIn = Math.max(next.fadeIn, cross);
+      g.crossOut = cross;
+      next.crossIn = cross;
     }
   });
   return geo;
 }
+
+/** How far each side of a clip reaches into its handle for a crossing, capped
+ * by the ramp that crossing actually got. */
+const handles = (g: { clip: MixClip; crossIn: number; crossOut: number }) => ({
+  // Never past the head of the source: a handle is what the trim left behind.
+  back: Math.min(g.clip.soundBack ?? 0, g.crossIn, g.clip.in / speedOf(g.clip.speed)),
+  ahead: Math.min(g.clip.soundAhead ?? 0, g.crossOut),
+});
+
+/** The source span an entry decodes: its own trim, widened by the handle each
+ * crossing at its edges reaches into. Timeline seconds scale by speed on the
+ * way into the source. */
+const crossSpan = (
+  c: { file: string; in: number; out: number; speed?: number },
+  back = 0,
+  ahead = 0
+) => {
+  const speed = speedOf(c.speed);
+  return { file: c.file, in: c.in - back * speed, out: c.out + ahead * speed };
+};
 
 /**
  * The windows during which a ducking item is audible, merged into a single
@@ -147,6 +190,34 @@ export function duckWindows(items: MixItem[]): { start: number; end: number; gai
     }
   }
   return merged;
+}
+
+/**
+ * Schedule one side of a cross dissolve: an equal-power ramp between silence
+ * and `level` across `[from, to]`, rising for the incoming clip and falling
+ * for the outgoing one. The two meet at 0.707 in the middle of the window —
+ * the cut — which is what keeps the mix at one loudness through the join.
+ *
+ * Written as short linear steps rather than `setValueCurveAtTime`, which is
+ * not carried by every context this fold runs in (the headless renderer's
+ * among them).
+ */
+const CROSS_STEPS = 24;
+
+export function scheduleCross(
+  param: AudioParam,
+  level: number,
+  from: number,
+  to: number,
+  rising: boolean
+) {
+  for (let i = 0; i <= CROSS_STEPS; i++) {
+    const p = i / CROSS_STEPS;
+    const v = level * (rising ? Math.sin((p * Math.PI) / 2) : Math.cos((p * Math.PI) / 2));
+    const at = Math.max(0, from + (to - from) * p);
+    if (i === 0) param.setValueAtTime(v, at);
+    else param.linearRampToValueAtTime(v, at);
+  }
 }
 
 /** Schedule a duck envelope onto a gain node: 1 everywhere except inside the
@@ -181,16 +252,25 @@ export async function renderMix(spec: MixSpec, opts: MixOptions): Promise<AudioB
   // ten-second trim of a ninety-minute recording pulling the entire recording
   // into memory — around 1.4 GB an hour at 48 kHz stereo — and several of them
   // at once.
+  // The track-0 fold, with the source span each clip really decodes: a
+  // crossing at either edge widens it into the handle it reaches for.
+  const folded = foldClips(spec.clips).map((g) => {
+    const { back, ahead } = handles(g);
+    return { ...g, back, ahead, span: crossSpan(g.clip, back, ahead) };
+  });
+
   const wanted = new Map<string, { file: string; from: number; to: number }>();
   const spanKey = (c: { file: string; in: number; out: number }) =>
     `${c.file}|${c.in.toFixed(3)}|${c.out.toFixed(3)}`;
-  for (const c of spec.clips) {
-    if (!c.file || c.muted) continue;
-    wanted.set(spanKey(c), { file: c.file, from: Math.max(0, c.in), to: c.out });
+  for (const c of folded) {
+    if (!c.clip.file || c.clip.muted) continue;
+    const span = c.span;
+    wanted.set(spanKey(span), { file: span.file, from: Math.max(0, span.in), to: span.out });
   }
   for (const a of spec.items) {
     if (!a.file || a.muted) continue;
-    wanted.set(spanKey(a), { file: a.file, from: Math.max(0, a.in), to: a.out });
+    const span = crossSpan(a, a.soundBack, a.soundAhead);
+    wanted.set(spanKey(span), { file: span.file, from: Math.max(0, span.in), to: span.out });
   }
 
   const buffers = new Map<string, AudioBuffer>();
@@ -313,43 +393,60 @@ export async function renderMix(spec: MixSpec, opts: MixOptions): Promise<AudioB
     src.start(Math.max(0, at), 0, Math.max(0, duration));
   };
 
-  for (const g of foldClips(spec.clips)) {
+  for (const g of folded) {
     const c = g.clip;
-    const buf = !c.muted && c.file ? buffers.get(spanKey(c)) : undefined;
+    const key = spanKey(g.span);
+    const buf = !c.muted && c.file ? buffers.get(key) : undefined;
     if (!buf) continue; // muted, silent, or a gap spacer: only shapes time
-    play(fitted(spanKey(c), buf, speedOf(c.speed)), g.at, g.dur, ducked, (gain) => {
+    const from = g.at - g.back;
+    const end = g.at + g.dur;
+    play(fitted(key, buf, speedOf(c.speed)), from, g.dur + g.back + g.ahead, ducked, (gain) => {
       const level = Math.max(0, c.volume ?? 1);
       gain.gain.value = level;
-      if (g.fadeIn > 0) {
+      // A crossing and a fade never share an edge — the cut carries one
+      // handover — so each side takes whichever it has.
+      if (g.crossIn > 0) {
+        scheduleCross(gain.gain, level, g.at - g.crossIn, g.at + g.crossIn, true);
+      } else if (g.fadeIn > 0) {
         gain.gain.setValueAtTime(0, g.at);
         gain.gain.linearRampToValueAtTime(level, g.at + g.fadeIn);
       }
-      if (g.fadeOut > 0) {
-        gain.gain.setValueAtTime(level, g.at + g.dur - g.fadeOut);
-        gain.gain.linearRampToValueAtTime(0, g.at + g.dur);
+      if (g.crossOut > 0) {
+        scheduleCross(gain.gain, level, end - g.crossOut, end + g.crossOut, false);
+      } else if (g.fadeOut > 0) {
+        gain.gain.setValueAtTime(level, end - g.fadeOut);
+        gain.gain.linearRampToValueAtTime(0, end);
       }
     });
   }
 
   for (const a of spec.items) {
-    const buf = a.muted ? undefined : buffers.get(spanKey(a));
+    const back = Math.min(a.soundBack ?? 0, a.crossIn ?? 0);
+    const ahead = Math.min(a.soundAhead ?? 0, a.crossOut ?? 0);
+    const key = spanKey(crossSpan(a, back, ahead));
+    const buf = a.muted ? undefined : buffers.get(key);
     if (!buf) continue;
     const dur = itemDur(a);
+    const end = a.start + dur;
     // A voiceover that ducks everything else is not itself ducked; it still
     // lands on the bus, so the effect elements treat it with the rest.
     const into = a.duck !== undefined && a.duck < 1 ? bus : ducked;
-    play(fitted(spanKey(a), buf, speedOf(a.speed)), a.start, dur, into, (gain) => {
+    play(fitted(key, buf, speedOf(a.speed)), a.start - back, dur + back + ahead, into, (gain) => {
       const level = Math.max(0, a.volume);
       gain.gain.value = level;
       const fIn = Math.min(a.fadeIn ?? 0, dur);
       const fOut = Math.min(a.fadeOut ?? 0, dur);
-      if (fIn > 0) {
+      if (a.crossIn) {
+        scheduleCross(gain.gain, level, a.start - a.crossIn, a.start + a.crossIn, true);
+      } else if (fIn > 0) {
         gain.gain.setValueAtTime(0, a.start);
         gain.gain.linearRampToValueAtTime(level, a.start + fIn);
       }
-      if (fOut > 0) {
-        gain.gain.setValueAtTime(level, a.start + dur - fOut);
-        gain.gain.linearRampToValueAtTime(0, a.start + dur);
+      if (a.crossOut) {
+        scheduleCross(gain.gain, level, end - a.crossOut, end + a.crossOut, false);
+      } else if (fOut > 0) {
+        gain.gain.setValueAtTime(level, end - fOut);
+        gain.gain.linearRampToValueAtTime(0, end);
       }
     });
   }

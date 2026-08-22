@@ -51,7 +51,7 @@ import { playheadAt, setSkim, skimAt, subscribePlayhead, usePlayhead, useSkim } 
 import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
 import { EFFECT_LABELS, isAudioEffect, type EffectId } from "@donkeycut/effects-kit";
-import { emptySubtitles, IMAGE_CLIP_SECONDS, SHAPE_LABELS, TRANSITION_DEFAULT_SECONDS, TRANSITION_MAX, TRANSITION_STYLE_LABELS, type ShapeKind } from "@/cut/lib/types";
+import { emptySubtitles, IMAGE_CLIP_SECONDS, isAudioTransition, SHAPE_LABELS, TRANSITION_MAX, TRANSITION_STYLE_LABELS, transitionBarStart, transitionDefaultSeconds, type ShapeKind } from "@/cut/lib/types";
 import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, Selection, StickerOverlay, SubtitleCue, TimelineTransition, TransitionStyle, VideoClip } from "@/cut/lib/types";
 import { isLottieAsset } from "@/cut/lib/lottieAssets";
 import { gradeCssApprox } from "@donkeycut/effects-kit";
@@ -257,6 +257,9 @@ type OverlayFamily = "text" | "element" | "effect";
  * `at` is the boundary itself (the cut, the head, the tail) and `len` the room
  * a transition takes there.
  */
+/** `len` is what already plays at this boundary, 0 when nothing does — the
+ * length a landing bar takes is that or the dropped style's own default
+ * (`anchorLen`), since a cross dissolve wants a shorter one than a blend. */
 type Anchor = { kind: "cut" | "in" | "out"; clipId: string; at: number; len: number };
 
 /** One transition bar drawn on the row: the store object itself, the place it
@@ -1109,7 +1112,7 @@ export function Timeline() {
             kind: "in",
             clipId: sp.clip.id,
             at: sp.start,
-            len: sp.clip.animIn?.seconds || TRANSITION_DEFAULT_SECONDS,
+            len: sp.clip.animIn?.seconds ?? 0,
           });
         }
         if (touchesNext) {
@@ -1117,14 +1120,14 @@ export function Timeline() {
             kind: "cut",
             clipId: sp.clip.id,
             at: end,
-            len: sp.clip.transition || TRANSITION_DEFAULT_SECONDS,
+            len: sp.clip.transition ?? 0,
           });
         } else {
           out.push({
             kind: "out",
             clipId: sp.clip.id,
             at: end,
-            len: sp.clip.animOut?.seconds || TRANSITION_DEFAULT_SECONDS,
+            len: sp.clip.animOut?.seconds ?? 0,
           });
         }
       });
@@ -1164,9 +1167,16 @@ export function Timeline() {
     [bars, barRoles]
   );
 
+  /** The room a bar of `style` takes at this anchor: whatever already plays
+   * there, or that style's own default length. */
+  const anchorLen = (a: Anchor, style: TransitionStyle) =>
+    a.len || transitionDefaultSeconds(style);
+
   /** Where a bar of `len` seconds sits when it lands on this anchor: an
-   * entrance starts at the clip's head, everything else ends on its edge. */
-  const anchorBarStart = (a: Anchor, len: number) => (a.kind === "in" ? a.at : a.at - len);
+   * entrance starts at the clip's head, a cross dissolve straddles the cut,
+   * everything else ends on the boundary. */
+  const anchorBarStart = (a: Anchor, len: number, style: TransitionStyle) =>
+    transitionBarStart(style, a.kind, a.at, len);
 
   /** The bar already playing this anchor's boundary, if any — through any of
    * its roles, so a bar serving several same-instant boundaries is the
@@ -1182,12 +1192,12 @@ export function Timeline() {
     const st = useEditor.getState();
     if (st.readOnly) return;
     const a = nearestAnchor(time);
-    const len = a?.len ?? TRANSITION_DEFAULT_SECONDS;
+    const len = a ? anchorLen(a, style) : transitionDefaultSeconds(style);
     st.beginHistoryBatch();
     const incumbent = a ? barAt(a) : null;
     if (incumbent) st.removeTransition(incumbent.id);
     const id = st.addTransition({
-      start: a ? anchorBarStart(a, len) : time,
+      start: a ? anchorBarStart(a, len, style) : time,
       seconds: len,
       style,
     });
@@ -1211,12 +1221,12 @@ export function Timeline() {
       onMove: (dx) => {
         const free = Math.max(-x.t.seconds + 0.1, x.t.start + dx / pps);
         const near = anchors.reduce<{ a: Anchor; gap: number } | null>((best, a) => {
-          const gap = Math.abs(anchorBarStart(a, x.t.seconds) - free);
+          const gap = Math.abs(anchorBarStart(a, x.t.seconds, x.t.style) - free);
           return !best || gap < best.gap ? { a, gap } : best;
         }, null);
         const snapped = near && near.gap <= XBAR_MAGNET_PX / pps ? near.a : null;
         landing = snapped
-          ? { start: anchorBarStart(snapped, x.t.seconds), anchor: snapped }
+          ? { start: anchorBarStart(snapped, x.t.seconds, x.t.style), anchor: snapped }
           : { start: free, anchor: null };
         setSnapX(snapped ? snapped.at * pps : null);
         setJointDrop(snapped ? { ...snapped, len: x.t.seconds } : null);
@@ -1249,15 +1259,23 @@ export function Timeline() {
     const st0 = useEditor.getState();
     if (st0.readOnly) return;
     const growsForward = x.role?.kind === "in";
-    const fixed = growsForward ? x.t.start : x.t.start + x.t.seconds;
+    // A cross dissolve sits across its cut, so retiming holds the middle and
+    // both halves grow together; every other bar holds the boundary end.
+    const straddles = isAudioTransition(x.t.style);
+    const fixed = growsForward
+      ? x.t.start
+      : straddles
+        ? x.t.start + x.t.seconds / 2
+        : x.t.start + x.t.seconds;
     st0.beginHistoryBatch();
     startDrag(e, {
       onMove: (dx) => {
         const loose = (growsForward ? x.t.start + x.t.seconds : x.t.start) + dx / pps;
-        const seconds = Math.max(0.1, Math.min(TRANSITION_MAX, Math.abs(loose - fixed)));
+        const reach = Math.abs(loose - fixed) * (straddles ? 2 : 1);
+        const seconds = Math.max(0.1, Math.min(TRANSITION_MAX, reach));
         useEditor.getState().updateTransitionTransient(x.t.id, {
           seconds,
-          start: growsForward ? fixed : fixed - seconds,
+          start: growsForward ? fixed : fixed - (straddles ? seconds / 2 : seconds),
         });
       },
       onUp: () => useEditor.getState().endHistoryBatch(),
@@ -1276,9 +1294,10 @@ export function Timeline() {
   // The place a dragged transition would land on, marked with the footprint it
   // would take while it is in flight.
   const [jointDrop, setJointDrop] = useDropPreview<Anchor | null>(null);
-  // A transition tile from the panel is over the timeline: the row lights
-  // every place a drop could play, the same as a bar drag does.
-  const [xTileDrag, setXTileDrag] = useState(false);
+  // A transition tile from the panel is over the timeline, and which style it
+  // carries: the row lights every place a drop could play, the same as a bar
+  // drag does, each zone sized and placed the way that style lands.
+  const [xTileDrag, setXTileDrag] = useState<TransitionStyle | null>(null);
   // A transition bar mid-drag, drawn where the pointer has it.
   const [transitionDrag, setTransitionDrag] = useState<XBar | null>(null);
   // A drag past the top edge opens a row there, pushing the stack down by one
@@ -1812,7 +1831,7 @@ export function Timeline() {
                 }
               : null
           );
-          setXTileDrag(element?.kind === "transition");
+          setXTileDrag(element?.kind === "transition" ? element.style : null);
           setJointDrop(
             element?.kind === "transition"
               ? nearestAnchor(Math.max(0, timeAt(e.clientX)))
@@ -1822,7 +1841,7 @@ export function Timeline() {
         }
         setElementDrop(null);
         setJointDrop(null);
-        setXTileDrag(false);
+        setXTileDrag(null);
         // Preview where a video would land; audio drops free-form. Library and
         // stock drags carry their own shape since they aren't in the project yet.
         let type: "video" | "audio" | "image" | undefined;
@@ -1893,7 +1912,7 @@ export function Timeline() {
           setDropType(null);
           setElementDrop(null);
           setJointDrop(null);
-          setXTileDrag(false);
+          setXTileDrag(null);
         }
       }}
       onDrop={(e) => {
@@ -1902,7 +1921,7 @@ export function Timeline() {
         const elementLane = overlayLaneAt(e.clientY);
         setElementDrop(null);
         setJointDrop(null);
-        setXTileDrag(false);
+        setXTileDrag(null);
         const videoPlace = resolveDropTrack(e.clientX, e.clientY);
         setAssetDrop(null);
         endCrossDrag();
@@ -2381,13 +2400,14 @@ export function Timeline() {
                 // per cut and open edge, each the size the bar would take
                 // there.
                 anchors.map((a) => {
-                  const len = transitionDrag ? transitionDrag.t.seconds : a.len;
+                  const style = transitionDrag?.t.style ?? xTileDrag ?? "crossfade";
+                  const len = transitionDrag ? transitionDrag.t.seconds : anchorLen(a, style);
                   return (
                     <div
                       key={`xzone-${a.kind}-${a.clipId}`}
                       className="pointer-events-none absolute rounded-md bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4)]"
                       style={{
-                        left: anchorBarStart(a, len) * pps,
+                        left: anchorBarStart(a, len, style) * pps,
                         top: 2,
                         width: Math.max(14, len * pps - CLIP_GAP),
                         height: TEXT_H - 6,
@@ -2395,18 +2415,23 @@ export function Timeline() {
                     />
                   );
                 })}
-              {jointDrop && (
-                // The zone the drop is aimed at burns brighter than the rest.
-                <div
-                  className="pointer-events-none absolute rounded-md bg-[#0a84ff]/25 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.85)]"
-                  style={{
-                    left: anchorBarStart(jointDrop, jointDrop.len) * pps,
-                    top: 2,
-                    width: Math.max(14, jointDrop.len * pps - CLIP_GAP),
-                    height: TEXT_H - 6,
-                  }}
-                />
-              )}
+              {jointDrop &&
+                (() => {
+                  // The zone the drop is aimed at burns brighter than the rest.
+                  const style = transitionDrag?.t.style ?? xTileDrag ?? "crossfade";
+                  const len = anchorLen(jointDrop, style);
+                  return (
+                    <div
+                      className="pointer-events-none absolute rounded-md bg-[#0a84ff]/25 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.85)]"
+                      style={{
+                        left: anchorBarStart(jointDrop, len, style) * pps,
+                        top: 2,
+                        width: Math.max(14, len * pps - CLIP_GAP),
+                        height: TEXT_H - 6,
+                      }}
+                    />
+                  );
+                })()}
               {transitions.map((live) => {
                 const x = transitionDrag?.t.id === live.t.id ? transitionDrag : live;
                 const Icon = TRANSITION_ICONS[x.t.style];

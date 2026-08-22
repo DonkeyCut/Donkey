@@ -61,7 +61,7 @@ import { useGenNotify } from "./genNotify";
 import { clampPlayhead, playheadAt, previewAt, setPlayhead, setSkim } from "./playhead";
 import { engineTranscribeSamples, withEngineStt } from "./localStt";
 import { trackLocale } from "./subtitles";
-import { ANIM_STYLE_IDS, animStyleOfTransition, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isAudioTransition, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionStyleOfAnim } from "./types";
+import { ANIM_STYLE_IDS, animStyleOfTransition, assetIsSilent, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isAudioTransition, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionBarAt, transitionBarStart, transitionStyleOfAnim, type TransitionBoundaryKind } from "./types";
 import { liftMoveTracks } from "./textMotion";
 import { readTextStyle } from "./textStyle";
 import { loadUiState, saveUiState, type ProjectUiState } from "./uiState";
@@ -1189,7 +1189,7 @@ function normalizeWrite(prev: EditorState, incoming: Partial<EditorState>): Part
  * always checked against the same audio it was written from. Null when the
  * timeline has nothing audible.
  */
-function cutTranscribeSpec(
+export function cutTranscribeSpec(
   s: Pick<EditorState, "clips" | "assets" | "audioClips" | "overlays">,
   locale?: string
 ): CloudTranscribeSpec | null {
@@ -1197,7 +1197,13 @@ function cutTranscribeSpec(
   const duration = projectDuration(s);
   const assetById = new Map(s.assets.map((a) => [a.id, a]));
   const audio = s.audioClips
-    .filter((a) => !a.hidden && a.start < duration && assetById.has(a.assetId))
+    .filter(
+      (a) =>
+        !a.hidden &&
+        a.start < duration &&
+        assetById.has(a.assetId) &&
+        !assetIsSilent(assetById.get(a.assetId)!)
+    )
     .map((a) => ({
       file: assetById.get(a.assetId)!.fileName,
       in: a.in,
@@ -1208,7 +1214,14 @@ function cutTranscribeSpec(
     }))
     .concat(
       overlayLayers(s.clips)
-        .filter((c) => !c.hidden && !c.muted && c.start < duration && assetById.has(c.assetId))
+        .filter(
+          (c) =>
+            !c.hidden &&
+            !c.muted &&
+            c.start < duration &&
+            assetById.has(c.assetId) &&
+            !assetIsSilent(assetById.get(c.assetId)!)
+        )
         .map((c) => ({
           file: assetById.get(c.assetId)!.fileName,
           in: c.in,
@@ -1235,7 +1248,7 @@ function cutTranscribeSpec(
               file: sp.asset.fileName,
               in: sp.clip.in,
               out: sp.clip.out,
-              muted: sp.clip.muted,
+              muted: sp.clip.muted || assetIsSilent(sp.asset),
               speed: clipSpeed(sp.clip),
               // The clamped cross-dissolve overlap, so the mix overlaps clip
               // audio the same way the timeline does and cues stay in sync.
@@ -2380,17 +2393,18 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           (roles.get(t.id) ?? []).some((r) => r.kind !== "in" && r.clipId === id)
         ) ??
         s.transitions.find(
-          (t) => !roles.has(t.id) && Math.abs(t.start + t.seconds - tail) <= TOUCH_EPS
+          (t) => !roles.has(t.id) && Math.abs(transitionBarAt(t, "cut") - tail) <= TOUCH_EPS
         );
       const value = Math.max(0, Math.min(TRANSITION_MAX, seconds));
       if (value <= 0) {
         if (existing) get().removeTransition(existing.id);
         return;
       }
+      const barStyle = style ?? existing?.style ?? "crossfade";
       const bar = {
-        start: tail - value,
+        start: transitionBarStart(barStyle, "cut", tail, value),
         seconds: value,
-        style: style ?? existing?.style ?? "crossfade",
+        style: barStyle,
       };
       push();
       set((s2) => ({
@@ -2418,17 +2432,18 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         s.transitions.find(
           (t) =>
             !roles.has(t.id) &&
-            Math.abs((which === "in" ? t.start : t.start + t.seconds) - edgeAt) <= TOUCH_EPS
+            Math.abs(transitionBarAt(t, which === "in" ? "in" : "cut") - edgeAt) <= TOUCH_EPS
         );
       if (!anim || !ANIM_STYLE_IDS.includes(anim.style)) {
         if (existing) get().removeTransition(existing.id);
         return;
       }
       const seconds = Math.max(0.1, Math.min(TRANSITION_MAX, anim.seconds));
+      const animStyle = transitionStyleOfAnim(anim.style);
       const bar = {
-        start: which === "in" ? edgeAt : edgeAt - seconds,
+        start: transitionBarStart(animStyle, which === "in" ? "in" : "cut", edgeAt, seconds),
         seconds,
-        style: transitionStyleOfAnim(anim.style),
+        style: animStyle,
       };
       push();
       set((s2) => ({
@@ -3005,7 +3020,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const clip = clips.find((c) => c.id === selection.id);
       if (!clip || clip.muted) return; // no sound to detach
       const span = clipWindow(clips, assets, clip.id);
-      if (!span) return;
+      if (!span || assetIsSilent(span.asset)) return; // a still has none either
       push();
       const audio: AudioClip = {
         id: uid(),
@@ -3249,7 +3264,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           if (barIds.has(t.id)) return true;
           const rs = roles.get(t.id);
           if (rs && rs.length > 0) return rs.every((r) => clipIds.has(r.clipId));
-          return onEdge(t.start) || onEdge(t.start + t.seconds);
+          return onEdge(t.start) || onEdge(transitionBarAt(t, "cut"));
         };
         const kept = s.transitions.some(dropped)
           ? s.transitions.filter((t) => !dropped(t))
@@ -3708,6 +3723,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const projectId = s.projectId;
       const sp = clipWindow(s.clips, s.assets, clipId);
       if (!sp) throw new Error("The clip is no longer on the timeline.");
+      if (assetIsSilent(sp.asset)) throw new Error("This clip is a still — it has no sound.");
       const lane = s.subtitleLane;
       const epoch = laneEpoch;
       // The clip's own sound, deliberately unmuted: this transcribes what the
@@ -4452,7 +4468,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             );
             if (near && Math.abs(near.at - t) <= BAR_PASTE_REACH) {
               delta =
-                (near.kind === "in" ? near.at : near.at - first.seconds) - first.start;
+                transitionBarStart(first.style, near.kind, near.at, first.seconds) -
+                first.start;
               // The landed bar takes over the boundary; the bar that played
               // it leaves with it, the way a drop replaces the incumbent.
               const roles = resolveTransitions(clips, transitions);
@@ -4680,7 +4697,7 @@ const clampBarSeconds = (s: number) => Math.max(0.1, Math.min(TRANSITION_MAX, s)
 
 /** The place a transition bar is playing at: the cut it ends on (`clipId` is
  * the outgoing clip), or the open head/tail it rides. */
-export type TransitionRole = { kind: "cut" | "in" | "out"; clipId: string };
+export type TransitionRole = { kind: TransitionBoundaryKind; clipId: string };
 
 type TransitionBoundary = TransitionRole & { at: number };
 
@@ -4708,7 +4725,7 @@ function transitionBoundaries(clips: VideoClip[]): TransitionBoundary[] {
 /** Whether a bar's style has anything to play at this kind of boundary. A
  * cut hands one clip's sound and picture to the next, so every style plays
  * one. An open head or tail has only the single clip's edge to ramp, which is
- * a picture ramp — a sound dissolve has nothing to blend there, so it never
+ * a picture ramp — a cross dissolve has nothing to blend there, so it never
  * claims the boundary: it reads as parked, which is what it is, and the AI's
  * debris report names it. */
 const playsBoundary = (style: TransitionStyle, kind: TransitionRole["kind"]): boolean =>
@@ -4740,7 +4757,7 @@ export function resolveTransitions(
         (b) =>
           !taken.has(b) &&
           playsBoundary(t.style, b.kind) &&
-          Math.abs((b.kind === "in" ? t.start : t.start + t.seconds) - b.at) <= TOUCH_EPS
+          Math.abs(transitionBarAt(t, b.kind) - b.at) <= TOUCH_EPS
       )
       .sort((a, b) => rank[a.kind] - rank[b.kind]);
     if (fits.length === 0) continue;
@@ -4796,7 +4813,7 @@ export function reanchorTransitions(
     const clip = role && byId.get(role.clipId);
     if (!clip) return t;
     const at = role.kind === "in" ? clip.start : clip.start + clipLen(clip);
-    const start = role.kind === "in" ? at : at - t.seconds;
+    const start = transitionBarStart(t.style, role.kind, at, t.seconds);
     if (Math.abs(start - t.start) <= TOUCH_EPS) return t;
     changed = true;
     return { ...t, start };
@@ -4914,19 +4931,22 @@ export function adoptTransitionFields(
     const d = Math.min(c.transition ?? 0, TRANSITION_MAX);
     const tailFree = !claimed.has(`cut:${c.id}`) && !claimed.has(`out:${c.id}`);
     if (d > 0 && tailFree) {
+      const style = TRANSITION_STYLE_IDS.includes(c.transitionStyle as TransitionStyle)
+        ? (c.transitionStyle as TransitionStyle)
+        : "crossfade";
+      const seconds = clampBarSeconds(d);
       add(`cut:${c.id}`, {
-        start: end - d,
-        seconds: clampBarSeconds(d),
-        style: TRANSITION_STYLE_IDS.includes(c.transitionStyle as TransitionStyle)
-          ? (c.transitionStyle as TransitionStyle)
-          : "crossfade",
+        start: transitionBarStart(style, "cut", end, seconds),
+        seconds,
+        style,
       });
     } else if (c.animOut && tailFree) {
       const seconds = clampBarSeconds(c.animOut.seconds);
+      const style = transitionStyleOfAnim(c.animOut.style);
       add(`cut:${c.id}`, {
-        start: end - seconds,
+        start: transitionBarStart(style, "cut", end, seconds),
         seconds,
-        style: transitionStyleOfAnim(c.animOut.style),
+        style,
       });
     }
   }
@@ -4940,7 +4960,11 @@ export function adoptTransitionFields(
     } else if (!claimed.has(`cut:${joint.id}`) && !claimed.has(`out:${joint.id}`)) {
       // The entrance played against the clip before it; at a joint that is the
       // blend at the cut, and it keeps the length and look it was saved with.
-      add(`cut:${joint.id}`, { start: c.start - seconds, seconds, style });
+      add(`cut:${joint.id}`, {
+        start: transitionBarStart(style, "cut", c.start, seconds),
+        seconds,
+        style,
+      });
     }
   }
   return out.length === transitions.length ? transitions : out;
@@ -5070,19 +5094,37 @@ function buildClipSpans(clips: VideoClip[], assets: MediaAsset[], track: number)
     // The blend into the next clip, live only at a cut the pair actually
     // makes; clips dragged apart dissolve into nothing. A sound style hands
     // over on the audio alone, so its window lands on the other field and
-    // every reader of the picture blend sees a plain cut.
+    // every reader of the picture blend sees a plain cut. It also crosses the
+    // cut instead of ending on it, so the declared handover splits in half:
+    // one half before the cut and one after.
     const overlap = transitionOverlap(clip, next);
     const onSound = isAudioTransition(clip.transitionStyle);
+    const soundOut = onSound ? overlap / 2 : 0;
+    // What each side can reach into to make that a real crossing: the source
+    // this clip still has past its out point, and the source the next clip
+    // has before its in point. Both are trimmed-away media — the handles —
+    // and they are what lets the two clips be audible at once over a cut
+    // their pictures hard-join.
+    const prevSound = spans[spans.length - 1]?.soundOut ?? 0;
     spans.push({
       clip,
       asset,
       start: clip.start,
       len,
       transitionOut: onSound ? 0 : overlap,
-      soundOut: onSound ? overlap : 0,
+      soundOut,
+      soundAhead: handleSeconds(soundOut, asset.duration - clip.out, clip),
+      soundBack: handleSeconds(prevSound, clip.in, clip),
     });
   }
   return spans;
+}
+
+/** How far a cross dissolve reaches into a clip's handle: the ramp half it
+ * wants, capped by the source seconds actually there, in timeline seconds. */
+function handleSeconds(want: number, sourceLeft: number, clip: VideoClip): number {
+  if (want <= 0.01) return 0;
+  return Math.max(0, Math.min(want, Math.max(0, sourceLeft) / clipSpeed(clip)));
 }
 
 /** One row of the timeline, whichever kind of thing sits on it. Video rows are

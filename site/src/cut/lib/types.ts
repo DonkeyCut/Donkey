@@ -192,6 +192,14 @@ export interface StoredAsset {
   chatId?: string;
 }
 
+/** True for an asset that carries no sound. Only video and audio files hold an
+ * audio track; a still (a freeze frame, an imported image) is not a media
+ * container at all, and handing its URL to the audio reader fails the read
+ * rather than returning silence. Every path that asks a source for audio —
+ * the mix, the transcribe spec, the preview's voices — asks this first. */
+export const assetIsSilent = (asset: Pick<StoredAsset, "type">): boolean =>
+  asset.type !== "video" && asset.type !== "audio";
+
 /** An import whose bytes are still on their way to storage. While this is set
  * the asset plays from a local object URL. Whether it may join the saved
  * document depends on where the bytes live: an upload holding only tab-scoped
@@ -543,12 +551,30 @@ export const SPEED_FLOOR = 0.05;
 export const TRANSITION_MAX = 2;
 /** What a transition runs for when one is placed on a bare cut. */
 export const TRANSITION_DEFAULT_SECONDS = 0.5;
+/**
+ * What a cross dissolve runs for instead — shorter, because the ear is less
+ * forgiving than the eye.
+ *
+ * The crossing is centered on the cut, so both clips are speaking for its
+ * whole length. Long enough and the outgoing line is still audible under the
+ * incoming one, which reads as a mistake; this is the length that covers the
+ * jump in room tone at a cut without letting two voices be heard at once. It
+ * also asks less of the handles either side, so the handover is a real
+ * crossing more often.
+ */
+export const CROSS_DISSOLVE_DEFAULT_SECONDS = 0.3;
+
+/** How long a bar of this style runs when it lands on a bare cut. */
+export const transitionDefaultSeconds = (style: TransitionStyle): number =>
+  isAudioTransition(style) ? CROSS_DISSOLVE_DEFAULT_SECONDS : TRANSITION_DEFAULT_SECONDS;
 
 /** A transition as a timeline object of its own: a bar on the transitions row
  * at an absolute time, belonging to no clip. It plays when its window lines up
  * with a place that has a handover to make — a cut it ends on, an open head it
- * starts on, an open tail it ends on — and sits inert anywhere else. Clips
- * moving or deleting leave it exactly where it is. */
+ * starts on, an open tail it ends on, a cut it straddles when it hands over on
+ * the sound — and sits inert anywhere else. Clips moving or deleting leave it
+ * exactly where it is. `transitionBarStart` is where the window falls against
+ * the boundary. */
 export interface TimelineTransition {
   id: string;
   /** Bar start on the timeline, seconds; the window is [start, start+seconds]. */
@@ -629,19 +655,52 @@ export const TRANSITION_XFADE: Record<TransitionStyle, string> = {
   circleclose: "circleclose",
   splitopen: "vertopen",
   splitclose: "vertclose",
-  // The sound dissolve never reaches xfade — the picture cuts and the renders
+  // The cross dissolve never reaches xfade — the picture cuts and the renders
   // branch before this map. The entry keeps the record total.
   audiocross: "fade",
 };
 
-/** The styles that hand over on the sound alone: the picture cuts, and the
- * outgoing fades out into the cut while the incoming fades in out of it. They
+/** The styles that hand over on the sound alone: the picture cuts while the
+ * two clips ramp equal-power past each other across it, each reaching into
+ * the media its trim left behind so both are audible through the join. They
  * take no picture blend, so a clip's own entrance and exit animations still
  * play across a cut one of them sits on. */
 export const AUDIO_TRANSITION_STYLES: TransitionStyle[] = ["audiocross"];
 
 export const isAudioTransition = (style: string | undefined): boolean =>
   !!style && (AUDIO_TRANSITION_STYLES as string[]).includes(style);
+
+/** The kinds of place a bar can play: an open head, a cut, an open tail. */
+export type TransitionBoundaryKind = "in" | "cut" | "out";
+
+/**
+ * Where a bar's window falls against the boundary at `at`.
+ *
+ * A picture blend runs across the outgoing clip's last seconds and hands over
+ * at the cut, so the bar ends on the boundary; an entrance runs forward from
+ * the clip's head. A cross dissolve crosses the cut itself — the outgoing
+ * sound fades out into it while the incoming fades in out of it — so its bar
+ * straddles the boundary, half its length either side.
+ */
+export const transitionBarStart = (
+  style: TransitionStyle,
+  kind: TransitionBoundaryKind,
+  at: number,
+  seconds: number
+): number =>
+  kind === "in" ? at : isAudioTransition(style) ? at - seconds / 2 : at - seconds;
+
+/** The instant a bar claims for `kind` — the inverse of `transitionBarStart`,
+ * and what every alignment test measures against a boundary. */
+export const transitionBarAt = (
+  t: Pick<TimelineTransition, "start" | "seconds" | "style">,
+  kind: TransitionBoundaryKind
+): number =>
+  kind === "in"
+    ? t.start
+    : isAudioTransition(t.style)
+      ? t.start + t.seconds / 2
+      : t.start + t.seconds;
 
 /** Picker layout for the Transitions tab: the styles that blend the picture,
  * grouped by family, in display order. The sound styles are picked from the
@@ -678,7 +737,7 @@ export const TRANSITION_STYLE_LABELS: Record<TransitionStyle, string> = {
   circleclose: "Circle close",
   splitopen: "Split open",
   splitclose: "Split close",
-  audiocross: "Sound dissolve",
+  audiocross: "Cross dissolve",
 };
 
 /** Peak scale the zoom transitions push into (preview and export). */
@@ -1186,13 +1245,22 @@ export interface ClipSpan {
    * over this clip's live tail. Spans never intersect — the next one starts
    * exactly at this one's end, and plays from its head there. */
   transitionOut: number;
-  /** Sound dissolve into the next span, in timeline seconds: this clip's
-   * audio fades out over the window before the cut and the next clip's fades
-   * in over the window after it, while the picture cuts. Zero unless the
-   * transition at the cut is one of the sound styles, and never set at the
-   * same time as `transitionOut` — a handover blends the picture or the
-   * sound. */
+  /** Half the cross dissolve at this span's tail, in timeline seconds: the
+   * handover runs this long either side of the cut, ramping equal-power from
+   * this clip to the next while the picture cuts. Zero unless the transition
+   * at the cut is one of the sound styles, and never set at the same time as
+   * `transitionOut` — a handover blends the picture or the sound. */
   soundOut: number;
+  /** Seconds of source past this span's out point that its sound keeps
+   * playing, so the outgoing half of the cross dissolve at its tail has
+   * something to cross with. Zero when the clip is trimmed to the end of its
+   * source: with no handle to reach into, its side of the handover simply
+   * stops at the cut. */
+  soundAhead: number;
+  /** Seconds of source before this span's in point that its sound starts, for
+   * the incoming half of the cross dissolve at the cut behind it. Zero when
+   * the clip starts at its source's head. */
+  soundBack: number;
 }
 
 /** The document persisted as project.json inside each project folder. */

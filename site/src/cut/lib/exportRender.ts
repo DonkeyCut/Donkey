@@ -38,7 +38,7 @@ import { applyEffectToCanvas, evalOverlayFrame, grainTile, isAudioEffect, isMask
 import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
 import { createRasterCanvas, type RasterSurface } from "./raster";
 import { renderElementPng } from "./textRender";
-import { behindSubjectOverlay, clipCovers, frameOf, frontSubjectOverlay, isEffectOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, projectFadeSeconds, rectOf } from "./types";
+import { assetIsSilent, behindSubjectOverlay, clipCovers, frameOf, frontSubjectOverlay, isEffectOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, projectFadeSeconds, rectOf } from "./types";
 import type { ClipSpan, EffectOverlay, MediaAsset, Overlay, StickerOverlay } from "./types";
 import type { ExportDoc, ExportSettings } from "./exportClient";
 
@@ -436,8 +436,10 @@ class StampCache {
  * animation, or the transition that owns that edge. Mirrors the ramps the
  * export spec carries and the gain the preview applies, so a picture that
  * fades up takes its sound with it. */
-function overlayRamps(spans: ClipSpan[]): { head: number; tail: number }[] {
-  const ramps = spans.map(() => ({ head: 0, tail: 0 }));
+function overlayRamps(
+  spans: ClipSpan[]
+): { head: number; tail: number; crossIn: number; crossOut: number }[] {
+  const ramps = spans.map(() => ({ head: 0, tail: 0, crossIn: 0, crossOut: 0 }));
   spans.forEach((sp, i) => {
     const apply = (anim: typeof sp.clip.animIn, side: "head" | "tail") => {
       if (!anim) return;
@@ -452,10 +454,12 @@ function overlayRamps(spans: ClipSpan[]): { head: number; tail: number }[] {
       ramps[i].tail = Math.max(ramps[i].tail, sp.transitionOut);
       ramps[i + 1].head = Math.max(ramps[i + 1].head, sp.transitionOut);
     }
-    // A sound dissolve is these ramps and nothing else: the picture cuts.
+    // A cross dissolve is these ramps and nothing else: the picture cuts.
+    // They stay off `head`/`tail` — a fade ends at silence, a crossing ramps
+    // equal-power past the clip on the other side of the cut.
     if (sp.soundOut > 0 && spans[i + 1]) {
-      ramps[i].tail = Math.max(ramps[i].tail, sp.soundOut);
-      ramps[i + 1].head = Math.max(ramps[i + 1].head, sp.soundOut);
+      ramps[i].crossOut = sp.soundOut;
+      ramps[i + 1].crossIn = sp.soundOut;
     }
   });
   return ramps;
@@ -474,10 +478,6 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
   const duration = projectDuration(doc);
   const spans = getClipSpans(doc.clips, doc.assets, 0);
   const byId = new Map(doc.assets.map((a) => [a.id, a]));
-  // A still has no sound, and handing its URL to the audio reader would fail on
-  // a file that is not a media container at all.
-  const silent = (asset: MediaAsset) => asset.type === "image";
-
   const items: MixItem[] = [];
   for (const track of new Set(overlayLayers(doc.clips).map((c) => c.track))) {
     const trackSpans = getClipSpans(doc.clips, doc.assets, track);
@@ -491,15 +491,19 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
         start: sp.start,
         volume: sp.clip.volume ?? 1,
         speed: sp.clip.speed,
-        muted: sp.clip.muted || silent(sp.asset),
+        muted: sp.clip.muted || assetIsSilent(sp.asset),
         fadeIn: ramps[i].head,
         fadeOut: ramps[i].tail,
+        crossIn: ramps[i].crossIn,
+        crossOut: ramps[i].crossOut,
+        soundBack: sp.soundBack,
+        soundAhead: sp.soundAhead,
       });
     });
   }
   for (const a of doc.audioClips) {
     const asset = byId.get(a.assetId);
-    if (!asset || a.hidden || a.start >= duration) continue;
+    if (!asset || a.hidden || a.start >= duration || assetIsSilent(asset)) continue;
     items.push({
       file: resolve(asset),
       in: a.in,
@@ -523,11 +527,13 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
             file: resolve(sp.asset),
             in: sp.clip.in,
             out: sp.clip.out,
-            muted: sp.clip.muted || !!sp.clip.hidden || silent(sp.asset),
+            muted: sp.clip.muted || !!sp.clip.hidden || assetIsSilent(sp.asset),
             speed: sp.clip.speed,
             volume: sp.clip.volume,
             transition: sp.transitionOut,
             soundCross: sp.soundOut,
+            soundBack: sp.soundBack,
+            soundAhead: sp.soundAhead,
           },
         ]);
 

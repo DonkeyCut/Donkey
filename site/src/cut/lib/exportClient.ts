@@ -491,9 +491,12 @@ async function buildExportPayload(
     frame: sp.clip.frame,
     speed: clipSpeed(sp.clip),
     transition: sp.transitionOut,
-    // A sound dissolve carries its own window: the picture cuts, so the
-    // server's blend must not see one.
+    // A cross dissolve carries its own window: the picture cuts, so the
+    // server's blend must not see one. The handles are what the crossing
+    // reaches into so both clips are audible over that cut.
     soundCross: sp.soundOut,
+    soundAhead: sp.soundAhead,
+    soundBack: sp.soundBack,
     // The style rides along with the overlap; the server resolves it to an
     // xfade name (and the cross-zoom ramps) itself, so the spec carries only
     // the id.
@@ -610,6 +613,8 @@ async function buildExportPayload(
       // so its windows ride apart from the alpha fades.
       headSound: 0,
       tailSound: 0,
+      soundAhead: 0,
+      soundBack: 0,
     }));
     trackSpans.forEach((sp, i) => {
       const r = ramps[i];
@@ -638,6 +643,8 @@ async function buildExportPayload(
         r.tailSound = Math.max(r.tailSound, sp.soundOut);
         ramps[i + 1].headSound = Math.max(ramps[i + 1].headSound, sp.soundOut);
       }
+      r.soundAhead = sp.soundAhead;
+      r.soundBack = sp.soundBack;
     });
     return trackSpans
       .map((sp, i) => ({ c: sp.clip, ramp: ramps[i] }))

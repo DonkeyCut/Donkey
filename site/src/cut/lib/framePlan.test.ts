@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   clipAnimFx,
+  crossHandles,
   duckGainAt,
   overlayTransitionFx,
   prerollLead,
@@ -45,39 +46,86 @@ function spansOf(count: number, len = 4, transitions: number[] = []): ClipSpan[]
       len,
       transitionOut,
       soundOut: 0,
+      soundAhead: 0,
+      soundBack: 0,
     });
     at += len; // clips abut — a transition is a blend at the cut, never overlap
   }
   return spans;
 }
 
-/** The same run, handing over on the sound: the picture cuts, the window
- * lands on `soundOut`. */
+/** The same run, handing over on the sound: the picture cuts, and each cut's
+ * crossing runs `crosses[i]` either side of it. Both clips are trimmed out of
+ * a longer source, so each has the handle its side of a crossing reaches
+ * into. */
 function soundSpansOf(count: number, len = 4, crosses: number[] = []): ClipSpan[] {
   const spans = spansOf(count, len);
-  return spans.map((sp, i) => ({ ...sp, soundOut: crosses[i] ?? 0 }));
+  return spans.map((sp, i) => ({
+    ...sp,
+    soundOut: crosses[i] ?? 0,
+    soundAhead: crosses[i] ?? 0,
+    soundBack: crosses[i - 1] ?? 0,
+  }));
 }
 
 describe("soundCrossGain", () => {
   test("crosses the level over the cut while the picture stays a cut", () => {
     const spans = soundSpansOf(2, 4, [2]);
     const cut = spans[1].start;
-    // Nothing moves until the window opens.
+    // Nothing moves until the window opens, and it is done when it closes.
     expect(soundCrossGain(spans, spans[0], cut - 2.5)).toBeCloseTo(1, 5);
-    // The outgoing clip ramps down into the cut…
-    expect(soundCrossGain(spans, spans[0], cut - 1)).toBeCloseTo(0.5, 5);
-    expect(soundCrossGain(spans, spans[0], cut - 0.001)).toBeCloseTo(0, 2);
-    // …and the incoming one ramps up out of it.
-    expect(soundCrossGain(spans, spans[1], cut)).toBeCloseTo(0, 5);
-    expect(soundCrossGain(spans, spans[1], cut + 1)).toBeCloseTo(0.5, 5);
-    expect(soundCrossGain(spans, spans[1], cut + 2)).toBeCloseTo(1, 5);
+    expect(soundCrossGain(spans, spans[1], cut - 2)).toBeCloseTo(0, 5);
+    expect(soundCrossGain(spans, spans[0], cut + 2)).toBeCloseTo(0, 5);
+    expect(soundCrossGain(spans, spans[1], cut + 2.5)).toBeCloseTo(1, 5);
+    // The two sides meet on the cut itself, each at equal power's half.
+    expect(soundCrossGain(spans, spans[0], cut)).toBeCloseTo(Math.SQRT1_2, 5);
+    expect(soundCrossGain(spans, spans[1], cut)).toBeCloseTo(Math.SQRT1_2, 5);
     // The picture never blends: no overlap, no incoming picture.
     expect(trackZeroPlan(spans[0], spans, cut - 1).p).toBe(0);
     expect(trackZeroPlan(spans[0], spans, cut - 1).incoming).toBe(null);
     expect(trackZeroPlan(spans[0], spans, cut - 1).masterAlpha).toBe(1);
   });
 
-  test("leaves a run with no sound dissolve at full level", () => {
+  test("holds one loudness across the crossing", () => {
+    const spans = soundSpansOf(2, 4, [2]);
+    const cut = spans[1].start;
+    // Equal power: the two gains square to one everywhere in the window, so
+    // the mix neither dips nor swells through the join.
+    for (const t of [cut - 2, cut - 1.3, cut - 0.4, cut, cut + 0.6, cut + 1.7, cut + 2]) {
+      const going = soundCrossGain(spans, spans[0], t);
+      const coming = soundCrossGain(spans, spans[1], t);
+      expect(going * going + coming * coming).toBeCloseTo(1, 5);
+    }
+  });
+
+  test("both sides of a crossing sound past their own footprint", () => {
+    const spans = soundSpansOf(2, 4, [2]);
+    const cut = spans[1].start;
+    // The outgoing clip is still playing — on its handle — after the picture
+    // has cut, and the incoming one before it.
+    const after = crossHandles(spans, cut + 1);
+    expect(after.map((h) => h.span.clip.id)).toEqual([spans[0].clip.id]);
+    expect(after[0].gain).toBeCloseTo(Math.cos((0.75 * Math.PI) / 2), 5);
+    const before = crossHandles(spans, cut - 1);
+    expect(before.map((h) => h.span.clip.id)).toEqual([spans[1].clip.id]);
+    expect(before[0].gain).toBeCloseTo(Math.sin((0.25 * Math.PI) / 2), 5);
+    // Outside the crossing nothing sounds past its own footprint.
+    expect(crossHandles(spans, cut + 2.5)).toEqual([]);
+  });
+
+  test("a clip with no handle keeps its side of the crossing inside itself", () => {
+    // Both clips run to the ends of their sources: nothing to reach into, so
+    // the ramps stay put and only the ramps play.
+    const spans = soundSpansOf(2, 4, [2]).map((sp) => ({
+      ...sp,
+      soundAhead: 0,
+      soundBack: 0,
+    }));
+    expect(crossHandles(spans, spans[1].start + 1)).toEqual([]);
+    expect(soundCrossGain(spans, spans[0], spans[1].start)).toBeCloseTo(Math.SQRT1_2, 5);
+  });
+
+  test("leaves a run with no cross dissolve at full level", () => {
     const spans = soundSpansOf(2, 4);
     expect(soundCrossGain(spans, spans[0], 3.9)).toBe(1);
     expect(soundCrossGain(spans, spans[1], 4.1)).toBe(1);
@@ -85,14 +133,14 @@ describe("soundCrossGain", () => {
 });
 
 describe("overlayTransitionFx", () => {
-  test("an upper-track sound dissolve moves the level and not the picture", () => {
+  test("an upper-track cross dissolve moves the level and not the picture", () => {
     const spans = soundSpansOf(2, 4, [2]);
     const cut = spans[1].start;
     const out = overlayTransitionFx(spans[0], undefined, spans[1], cut - 1);
-    expect(out.gain).toBeCloseTo(0.5, 5);
+    expect(out.gain).toBeCloseTo(Math.cos((0.25 * Math.PI) / 2), 5);
     expect(out.alpha).toBe(1);
     const inc = overlayTransitionFx(spans[1], spans[0], undefined, cut + 1);
-    expect(inc.gain).toBeCloseTo(0.5, 5);
+    expect(inc.gain).toBeCloseTo(Math.sin((0.75 * Math.PI) / 2), 5);
     expect(inc.alpha).toBe(1);
   });
 });

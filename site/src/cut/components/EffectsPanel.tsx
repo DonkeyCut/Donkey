@@ -56,7 +56,7 @@ type EffectGroup = "moving" | "filters" | "audio";
 
 /** The transition that hands over on the sound alone, picked from this shelf
  * rather than the Transitions tab: what it does, it does to the sound. */
-const SOUND_DISSOLVE = "audiocross" as const;
+const CROSS_DISSOLVE = "audiocross" as const;
 
 const GROUPS = [
   { id: "moving", label: "Moving" },
@@ -110,7 +110,7 @@ export function EffectsPanel() {
               {/* The handover on the sound sits with the treatments on the
                   sound. It is a transition — it drags to a cut, where the
                   picture keeps cutting and the sound crosses over. */}
-              <SoundDissolveTile index={AUDIO_EFFECT_IDS.length} />
+              <CrossDissolveTile index={AUDIO_EFFECT_IDS.length} />
             </>
           ) : (
             ALL_EFFECT_IDS.filter((id) => groupOf(id) === group).map((id) => (
@@ -242,21 +242,21 @@ function SoundTile({
  * the timeline marks the joint it would take — but it belongs on this shelf,
  * because what it does is done to the sound.
  */
-function SoundDissolveTile({ index }: { index: number }) {
-  const { picked, pick } = useAssetPick(`transition:${SOUND_DISSOLVE}`);
+function CrossDissolveTile({ index }: { index: number }) {
+  const { picked, pick } = useAssetPick(`transition:${CROSS_DISSOLVE}`);
   const t = useSoundClock(index);
   return (
     <SoundCard
-      pickId={`transition:${SOUND_DISSOLVE}`}
-      label={TRANSITION_STYLE_LABELS[SOUND_DISSOLVE]}
+      pickId={`transition:${CROSS_DISSOLVE}`}
+      label={TRANSITION_STYLE_LABELS[CROSS_DISSOLVE]}
       marked={picked}
       onChoose={pick}
       onDragStart={(e) => {
-        setElementDragData(e, { kind: "transition", style: SOUND_DISSOLVE });
+        setElementDragData(e, { kind: "transition", style: CROSS_DISSOLVE });
         setObjectDragImage(e);
       }}
       figure={<CrossStrip t={t} />}
-      audition={SOUND_DISSOLVE}
+      audition={CROSS_DISSOLVE}
     />
   );
 }
@@ -500,7 +500,7 @@ function useSoundClock(index: number): number {
   return (now + phase) * rate;
 }
 
-/** The sound dissolve's figure: one sound going as the other arrives, with the
+/** The cross dissolve's figure: one sound going as the other arrives, with the
  * cut standing where the picture changes.
  *
  * Each side is scaled by its own ramp rather than only faded, because that is
@@ -508,9 +508,11 @@ function useSoundClock(index: number): number {
  * cut, the incoming one grows out of it — and a level is what reads at tile
  * size. */
 function CrossStrip({ t }: { t: number }) {
-  // The two ramps meet at zero on the cut, which is where the sound really is
-  // at the middle of a dissolve — so the figure pinches there.
-  const ramp = (i: number, n: number) => Math.max(0, Math.min(1, i / (n - 1) - 0.5) * 2);
+  // The ramps are the equal-power pair the crossing really uses: both sides
+  // are still up at the cut, each at about seven tenths, so the figure crosses
+  // in the middle rather than pinching to nothing there.
+  const going = (i: number, n: number) => Math.cos(((i / (n - 1)) * Math.PI) / 2);
+  const coming = (i: number, n: number) => Math.sin(((i / (n - 1)) * Math.PI) / 2);
   const scaled = (bars: number[], at: (i: number, n: number) => number) =>
     bars.map((v, i) => v * at(i, bars.length));
   const outgoing = audioFxBars(null, t, STRIP_BARS);
@@ -518,13 +520,13 @@ function CrossStrip({ t }: { t: number }) {
   return (
     <span className="relative block h-7">
       <BarStrip
-        bars={scaled(outgoing, (i, n) => 1 - Math.min(1, (i / (n - 1)) * 2))}
-        alphaAt={(i, n) => 0.35 + 0.65 * (1 - Math.min(1, (i / (n - 1)) * 2))}
+        bars={scaled(outgoing, going)}
+        alphaAt={(i, n) => 0.35 + 0.65 * going(i, n)}
         className="absolute inset-0"
       />
       <BarStrip
-        bars={scaled(incoming, ramp)}
-        alphaAt={(i, n) => 0.35 + 0.65 * ramp(i, n)}
+        bars={scaled(incoming, coming)}
+        alphaAt={(i, n) => 0.35 + 0.65 * coming(i, n)}
         className="absolute inset-0"
       />
       <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-foreground/40" />

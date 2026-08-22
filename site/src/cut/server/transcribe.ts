@@ -363,7 +363,7 @@ async function runTranscribe(job: TranscribeJob, spec: TranscribeSpec) {
     // transition fades the outgoing clip's tail while the next enters clean at
     // the cut, so the chain is a flat concat with tail fades — the mix runs
     // exactly the timeline's length and every cue lands where it plays. A
-    // sound dissolve's own fades stay out of it: they change no cue's time,
+    // cross dissolve's own fades stay out of it: they change no cue's time,
     // and words are transcribed best at the level they were spoken.
     // Skipped entirely for an audio-only cut (no clips) — there is no clip-audio
     // chain to build, only the soundtrack, mixed below. (`spec.clips[0]` would be

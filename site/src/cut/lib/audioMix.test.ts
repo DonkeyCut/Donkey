@@ -34,18 +34,22 @@ describe("foldClips", () => {
     expect(geo[1].fadeIn).toBe(0);
   });
 
-  test("a sound dissolve crosses the cut: one clip out, the next one in", () => {
+  test("a cross dissolve crosses the cut: one clip out, the next one in", () => {
     const geo = foldClips([clip({ soundCross: 1 }), clip()]);
-    expect(geo[0].fadeOut).toBe(1);
-    expect(geo[1].fadeIn).toBe(1);
+    // A crossing is not a fade — it rides its own pair of ramps, which reach
+    // half level on the cut instead of silence.
+    expect(geo[0].crossOut).toBe(1);
+    expect(geo[1].crossIn).toBe(1);
+    expect(geo[0].fadeOut).toBe(0);
+    expect(geo[1].fadeIn).toBe(0);
     // The picture cut claims no layout here either.
     expect(geo[1].at).toBe(4);
   });
 
-  test("a sound dissolve is clamped by both clips it crosses", () => {
+  test("a cross dissolve is clamped by both clips it crosses", () => {
     const geo = foldClips([clip({ out: 1, soundCross: 3 }), clip({ out: 2 })]);
-    expect(geo[0].fadeOut).toBeCloseTo(0.9, 5);
-    expect(geo[1].fadeIn).toBeCloseTo(0.9, 5);
+    expect(geo[0].crossOut).toBeCloseTo(0.9, 5);
+    expect(geo[1].crossIn).toBeCloseTo(0.9, 5);
   });
 
   test("scales a blend down so it cannot swallow its clip", () => {

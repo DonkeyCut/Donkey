@@ -10,8 +10,9 @@
  * with the site, so the tiles play the same way in a project with no footage
  * in it yet — a picker is used before there is anything to use it on.
  *
- * The sound dissolve auditions as what it is: a man's line handing over to a
- * woman's across a cut, with the ramps the render would apply.
+ * The cross dissolve auditions as what it is: a man's line handing over to a
+ * woman's across a cut — both speaking through the join, on the equal-power
+ * ramps the render applies.
  *
  * A clip is fetched once and kept decoded for the session, so the first press
  * loads it and every press after plays it straight away. One audition at a
@@ -21,11 +22,12 @@
 
 import { audioFxRecipe, buildAudioFx, type AudioFxNodes } from "@donkeycut/effects-kit";
 import { create } from "zustand";
+import { scheduleCross } from "./audioMix";
 import { registerPreviewSilencer, usePreviewAudio } from "./previewAudio";
 import { voiceSampleUrl } from "./voices";
 
 /** The id of the sound handover, auditioned as the handover itself. */
-export const SOUND_DISSOLVE_AUDITION = "audiocross";
+export const CROSS_DISSOLVE_AUDITION = "audiocross";
 
 /**
  * The two lines the shelf plays.
@@ -46,7 +48,8 @@ const LINES = {
 /** Where the sentences sit in those clips, from the silence between them. */
 const FIRST_SENTENCE = { at: 0.2, len: 1.55 };
 const SECOND_SENTENCE = { at: 2.0, len: 2.5 };
-/** How much of the handover's two sides cross over. */
+/** Half the handover: the two lines overlap for twice this, with the cut in
+ * the middle of it. */
 const CROSS_WINDOW = 0.6;
 
 interface AuditionState {
@@ -130,17 +133,13 @@ export const useFxAudition = create<AuditionState>((set, get) => ({
       part: { at: number; len: number },
       when: number,
       into: AudioNode,
-      fade?: "in" | "out"
+      cross?: { from: number; rising: boolean }
     ) => {
       const node = target.createBufferSource();
       node.buffer = buffer;
       const gain = target.createGain();
-      if (fade === "in") {
-        gain.gain.setValueAtTime(0, when);
-        gain.gain.linearRampToValueAtTime(1, when + CROSS_WINDOW);
-      } else if (fade === "out") {
-        gain.gain.setValueAtTime(1, when + Math.max(0, part.len - CROSS_WINDOW));
-        gain.gain.linearRampToValueAtTime(0, when + part.len);
+      if (cross) {
+        scheduleCross(gain.gain, 1, cross.from, cross.from + 2 * CROSS_WINDOW, cross.rising);
       }
       node.connect(gain);
       gain.connect(into);
@@ -149,22 +148,20 @@ export const useFxAudition = create<AuditionState>((set, get) => ({
       return node;
     };
 
-    if (effect === SOUND_DISSOLVE_AUDITION) {
+    if (effect === CROSS_DISSOLVE_AUDITION) {
       void Promise.all([clip(target, LINES.man), clip(target, LINES.woman)])
         .then(([man, woman]) => {
           if (token !== mine) return;
           const at = target.currentTime + 0.05;
-          // What the render does: the outgoing line ramps down into the cut,
-          // the incoming one ramps up out of it, and the picture cuts where
-          // the two meet.
-          play(man, FIRST_SENTENCE, at, target.destination, "out");
-          const second = play(
-            woman,
-            SECOND_SENTENCE,
-            at + FIRST_SENTENCE.len,
-            target.destination,
-            "in"
-          );
+          // What the render does: both lines are speaking across the join,
+          // ramping past each other equal-power, with the picture's cut in
+          // the middle of the window where they are equally loud.
+          const from = at + FIRST_SENTENCE.len - 2 * CROSS_WINDOW;
+          play(man, FIRST_SENTENCE, at, target.destination, { from, rising: false });
+          const second = play(woman, SECOND_SENTENCE, from, target.destination, {
+            from,
+            rising: true,
+          });
           second.onended = done;
         })
         .catch(done);

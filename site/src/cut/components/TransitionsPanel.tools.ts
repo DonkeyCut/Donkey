@@ -14,7 +14,7 @@ export const TRANSITIONS_TOOLS = [
   {
     name: "set_transition",
     description:
-      "Set the transition from this clip into the next clip on its track (any video track), in seconds (0 clears it, max 2). A transition is a blend across the cut — it never moves, trims or overlaps clips, and it plays only while the pair touches. On upper tracks every style blends as an alpha dissolve (the tracks beneath show through). Only valid when a next same-track clip exists. Each edge holds one effect: setting a transition clears the animations adjacent to its joint (and set_animation on that edge replaces the transition). Read the transitions-and-fades skill before styling cuts.",
+      "Set the transition from this clip into the next clip on its track (any video track), in seconds (0 clears it, max 2). 0.5s suits a blend on the picture; the cross dissolve (audiocross) wants about 0.3s, since it is centered on the cut and both clips sound through it. A transition is a blend across the cut — it never moves, trims or overlaps clips, and it plays only while the pair touches. On upper tracks every style blends as an alpha dissolve (the tracks beneath show through). Only valid when a next same-track clip exists. Each edge holds one effect: setting a transition clears the animations adjacent to its joint (and set_animation on that edge replaces the transition). Read the transitions-and-fades skill before styling cuts.",
     inputSchema: obj({
       clipId: str("Video clip id (the clip the transition starts from)"),
       seconds: num("Transition length in seconds, 0–2 (0 = hard cut)"),

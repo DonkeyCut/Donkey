@@ -9,11 +9,11 @@ import {
   useEditor,
 } from "@/cut/lib/store";
 import { playheadAt, previewAt, setPlayhead, subscribePlayhead } from "@/cut/lib/playhead";
-import { clipCovers, projectFadeSeconds, rectOf } from "@/cut/lib/types";
+import { assetIsSilent, clipCovers, projectFadeSeconds, rectOf } from "@/cut/lib/types";
 import type { ClipSpan, MediaAsset, VideoClip } from "@/cut/lib/types";
 import { SubjectMaskCompositor } from "@/cut/lib/behindPass";
 import { FrameCompositor, MISSING_FRAME, PENDING_FRAME, type Frame } from "@/cut/lib/composite";
-import { duckGainAt, overlayPlan, soundCrossGain, trackZeroPlan } from "@/cut/lib/framePlan";
+import { crossHandles, duckGainAt, overlayPlan, soundCrossGain, trackZeroPlan } from "@/cut/lib/framePlan";
 import { type ClipFrameSource, FrameSourcePool, mappingKey, walkCostMs } from "@/cut/lib/frameSource";
 import { liveAudioFxAt } from "@/cut/lib/audioEffects";
 import { PreviewMixer, type Voice } from "@/cut/lib/previewMixer";
@@ -87,6 +87,27 @@ export function engineLog(msg: string): void {
   log.push({ at: Math.round(performance.now()), msg });
   if (log.length > 500) log.splice(0, log.length - 500);
 }
+
+/**
+ * The source span a clip's voice plays, and where it lands.
+ *
+ * A clip normally plays exactly what it is trimmed to. A cross dissolve widens
+ * that: the clip reaches into the handle on either side — source it was
+ * trimmed away from — so it is still sounding after the picture has cut, or
+ * already sounding before it. The widened span rides the voice for the clip's
+ * whole life rather than only inside the handover, so the mixer decodes and
+ * schedules one stable voice and the frame-by-frame gain is all that moves.
+ */
+const voiceSpan = (sp: ClipSpan) => {
+  const speed = clipSpeed(sp.clip);
+  return {
+    url: sp.asset.url,
+    start: sp.start - sp.soundBack,
+    in: sp.clip.in - sp.soundBack * speed,
+    out: sp.clip.out + sp.soundAhead * speed,
+    speed,
+  };
+};
 
 class Engine {
   /** Which engine this is, for the perf eval's pool dump. */
@@ -284,6 +305,15 @@ class Engine {
     );
   }
 
+  /** Each upper track's spans, for the sound side — a cross dissolve up there
+   * crosses the same way track 0's does. */
+  private overlaySpans(): ClipSpan[][] {
+    const s = useEditor.getState();
+    return [...new Set(overlayLayers(s.clips).map((c) => c.track))].map((track) =>
+      getClipSpans(s.clips, s.assets, track)
+    );
+  }
+
   /** Whole-video fade gain at `t`: ramps 0→1 over the project fade-in and 1→0
    * over the fade-out at the end of the cut. */
   private projectFadeGain(t: number, total: number) {
@@ -301,40 +331,49 @@ class Engine {
    *
    * The same ramps that dim the picture dim the sound: a clip fading out of a
    * dissolve takes its audio with it, an upper-track clip's transition carries
-   * its own, and a live voiceover ducks the rest. A sound dissolve is the
-   * ramp on its own — the picture cuts and only these gains move.
+   * its own, and a live voiceover ducks the rest. A cross dissolve is the
+   * ramp on its own — the picture cuts and only these gains move — and it is
+   * the one thing here that makes a clip audible outside its own footprint,
+   * so both sides of the crossing are really playing at once.
    */
   private voicesAt(t: number, spans: ClipSpan[], master: ClipSpan | undefined): Voice[] {
     const s = useEditor.getState();
     const out: Voice[] = [];
     const duck = duckGainAt(s.audioClips, t);
-    if (master && !master.clip.muted && !master.clip.hidden) {
+    if (master && !master.clip.muted && !master.clip.hidden && !assetIsSilent(master.asset)) {
       const plan = trackZeroPlan(master, spans, t);
       out.push({
         id: master.clip.id,
-        url: master.asset.url,
-        start: master.start,
-        in: master.clip.in,
-        out: master.clip.out,
-        speed: clipSpeed(master.clip),
+        ...voiceSpan(master),
         gain: plan.gain * soundCrossGain(spans, master, t) * duck * (master.clip.volume ?? 1),
       });
     }
-    for (const { clip, asset, gain } of this.liveOverlays(t)) {
-      if (clip.muted || clip.hidden || asset.type === "image") continue;
+    // The other half of a crossing: a neighbour playing into its handle, past
+    // its own footprint, carried by the cross ramp alone.
+    for (const spans0 of [spans, ...this.overlaySpans()]) {
+      for (const { span, gain } of crossHandles(spans0, t)) {
+        if (assetIsSilent(span.asset)) continue;
+        // The clip's own id, not a second voice: the handle is the same voice
+        // carrying on past the cut, and a new id would stop and re-open it
+        // there — a decode gap in the middle of the crossing.
+        out.push({
+          id: span.clip.id,
+          ...voiceSpan(span),
+          gain: gain * (span.clip.volume ?? 1) * duck,
+        });
+      }
+    }
+    for (const { span, clip, asset, gain } of this.liveOverlays(t)) {
+      if (clip.muted || clip.hidden || assetIsSilent(asset)) continue;
       out.push({
         id: clip.id,
-        url: asset.url,
-        start: clip.start,
-        in: clip.in,
-        out: clip.out,
-        speed: clipSpeed(clip),
+        ...voiceSpan(span),
         gain: gain * (clip.volume ?? 1) * duck,
       });
     }
     for (const a of s.audioClips) {
       const asset = s.assets.find((x) => x.id === a.assetId);
-      if (!asset || a.hidden) continue;
+      if (!asset || a.hidden || assetIsSilent(asset)) continue;
       const speed = a.speed && a.speed > 0 ? a.speed : 1;
       const len = Math.max(0.1, (a.out - a.in) / speed);
       if (t < a.start || t >= a.start + len) continue;
@@ -419,15 +458,7 @@ class Engine {
 
   /** Draw the overlay tracks over track 0, further-back first. */
   private drawOverlays(t: number, playing: boolean) {
-    for (const { clip, asset, alpha, zoom } of this.liveOverlays(t)) {
-      const span: ClipSpan = {
-        clip,
-        asset,
-        start: clip.start,
-        len: Math.max(0.1, (clip.out - clip.in) / clipSpeed(clip)),
-        transitionOut: 0,
-        soundOut: 0,
-      };
+    for (const { span, clip, alpha, zoom } of this.liveOverlays(t)) {
       const frame = this.frameFor(span, t, playing);
       if (frame.kind !== "ready") continue;
       this.comp.drawIntoRect(frame, rectOf(clip), clipCovers(clip), alpha, t, zoom, clip);

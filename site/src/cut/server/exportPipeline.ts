@@ -10,6 +10,36 @@ import { audioFxFilters, buildGradeLut, effectFilterLines, gradeKey, gradeNeedsL
 // engine's job registry (jobs.ts) and the cloud render worker, which stage
 // media differently but must produce byte-identical renders.
 
+/**
+ * One side of a cross dissolve as a volume expression in a stream's own time.
+ *
+ * The crossing's middle sits on the cut, `half` seconds either side, and the
+ * two sides are sine and cosine of the same travel: they meet at 0.707 on the
+ * cut, which is where equal power puts a handover that must not dip. Outside
+ * the window the expression is 1, so it can ride a stream that is doing other
+ * things at its far end. Empty when there is no crossing there.
+ */
+function crossExpr(cut: number, half: number, rising: boolean): string {
+  if (!(half > 0.01)) return "";
+  // Parenthesized: a crossing that opens before its stream starts puts a
+  // negative number here, and `t--0.5` is not something to hand a parser.
+  const p = `clip((t-(${num(cut - half)}))/${num(2 * half)},0,1)`;
+  return `${rising ? "sin" : "cos"}(${p}*PI/2)`;
+}
+
+/** The expressions folded into one `volume` filter, quoted so the graph
+ * parser carries their commas whole.
+ *
+ * `volume` re-evaluates once a frame, and a default frame is 23 ms — coarse
+ * enough for a half-second ramp to move in audible steps. Short frames first
+ * (unpadded, so the stream keeps its exact length) put the steps under 6 ms,
+ * where the ramp reads as a ramp. */
+function crossFilters(exprs: string[]): string {
+  const live = exprs.filter(Boolean);
+  if (live.length === 0) return "";
+  return `,asetnsamples=n=256:p=0,volume=volume=${fexpr(live.join("*"))}:eval=frame`;
+}
+
 export interface ExportSpec {
   projectId: string;
   /** Where the render lands instead of a stamped file in exports/: "hls" is the
@@ -50,12 +80,17 @@ export interface ExportSpec {
     speed?: number; // playback rate, default 1
     /** Transition into the next clip, in timeline seconds (overlap). */
     transition?: number;
-    /** Sound dissolve into the next clip, in timeline seconds. The picture
-     * cuts; this clip's sound fades out over the window before the cut and
-     * the next clip's fades in over the window after it. Carried apart from
-     * `transition` so a join that blends only the sound is not read as a
-     * picture blend anywhere. */
+    /** Half the cross dissolve into the next clip, in timeline seconds: the
+     * picture cuts while the two clips ramp equal-power past each other over
+     * that long either side of it. Carried apart from `transition` so a join
+     * that blends only the sound is not read as a picture blend anywhere. */
     soundCross?: number;
+    /** Source seconds past `out` this clip keeps sounding into the crossing
+     * at its tail, and source seconds before `in` it starts sounding for the
+     * crossing at its head — the handles that let both clips be audible over
+     * a cut their pictures hard-join. */
+    soundAhead?: number;
+    soundBack?: number;
     /** Transition look id, resolved to an xfade name through the
      * TRANSITION_XFADE allowlist (unknown ids render as a plain fade). Cross
      * zoom renders as the fade plus zoom ramps on both segments' overlap
@@ -133,10 +168,14 @@ export interface ExportSpec {
     tailFade?: number;
     headZoom?: number;
     tailZoom?: number;
-    /** Sound dissolve ramps, timeline seconds from this overlay's head/tail:
-     * the level crosses at the cut and the picture is left alone. */
+    /** Half the cross dissolve at this overlay's head/tail, timeline seconds:
+     * the level crosses equal-power at the cut and the picture is left alone.
+     * `soundBack`/`soundAhead` are the handle each side reaches into so both
+     * clips are really sounding through the crossing. */
     headSound?: number;
     tailSound?: number;
+    soundBack?: number;
+    soundAhead?: number;
     /** A still image: looped for the clip's length instead of trimmed. */
     image?: boolean;
     /** Manual color adjustments, baked into this overlay's segment. */
@@ -993,6 +1032,23 @@ export async function runExport(
   const needFirstFreeze = spec.clips.map((_, j) => j > 0 && tailBd[j - 1]);
   const needLastFreeze = spec.clips.map((_, j) => j < spec.clips.length - 1 && headBd[j + 1]);
 
+  // Where every clip starts on the timeline. Clips abut and a transition
+  // claims no layout, so the running sum is the cut each join happens at.
+  const clipAt: number[] = [];
+  spec.clips.reduce((acc, c, j) => {
+    clipAt[j] = acc;
+    return acc + clipDur(c);
+  }, 0);
+  // Half the cross dissolve at each cut, clamped the way the join clamps its
+  // overlap: index j is the crossing between clip j-1 and clip j.
+  const crossHalf: number[] = spec.clips.map((_, j) => {
+    const prevC = spec.clips[j - 1];
+    if (!prevC) return 0;
+    const want = prevC.soundCross ?? 0;
+    if (want <= 0.01) return 0;
+    return Math.min(want, clipAt[j] * 0.9, clipDur(spec.clips[j]) * 0.9);
+  });
+
   // Per-clip normalized video + audio segments for the join below.
   spec.clips.forEach((c, j) => {
     const idx = c.image ? imageClipInput.get(j)! : inputIndex.get(c.file)!;
@@ -1194,7 +1250,14 @@ export async function runExport(
       // The picture's fade edges carry the sound with them; zoom edges don't.
       const afades =
         (ahf > 0.01 ? `,afade=t=in:st=0:d=${num(ahf)}` : "") +
-        (atf > 0.01 ? `,afade=t=out:st=${num(Math.max(0, dur - atf))}:d=${num(atf)}` : "");
+        (atf > 0.01 ? `,afade=t=out:st=${num(Math.max(0, dur - atf))}:d=${num(atf)}` : "") +
+        // A cross dissolve is not a fade: it ramps equal-power past the clip
+        // on the other side of the cut, reaching half level there rather than
+        // silence, which is why it is a volume expression and not afade.
+        crossFilters([
+          crossExpr(0, crossHalf[j], true),
+          crossExpr(dur, crossHalf[j + 1] ?? 0, false),
+        ]);
       filters.push(
         `[${idx}:a]atrim=${num(c.in)}:${num(c.out)},asetpts=PTS-STARTPTS,${tempo}` +
           `aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,${vol}` +
@@ -1279,13 +1342,56 @@ export async function runExport(
     }
   });
 
+  // The handles a cross dissolve reaches into. A concat cannot have two
+  // segments sounding at once, and the whole point of a crossing is that they
+  // do: so the stretch each clip plays past its own footprint — the outgoing
+  // one after the cut, the incoming one before it — is lifted out as its own
+  // delayed stream and mixed in beside the joined clip audio. Its ramp
+  // carries on from where the segment's left off, at half level on the cut.
+  const crossHandleLabels: string[] = [];
+  const handleStream = (
+    src: (typeof spec.clips)[number],
+    key: string,
+    from: number,
+    seconds: number,
+    at: number,
+    expr: string
+  ) => {
+    if (seconds <= 0.01 || src.muted || src.hidden || src.image) return;
+    if (!audioPresence.get(src.file)) return;
+    const rate = clipRate(src);
+    const lab = `xh${key}`;
+    filters.push(
+      `[${inputIndex.get(src.file)!}:a]atrim=${num(from)}:${num(from + seconds * rate)},` +
+        `asetpts=PTS-STARTPTS,${rate !== 1 ? `${atempoChain(rate)},` : ""}` +
+        `aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo` +
+        `${(src.volume ?? 1) !== 1 ? `,volume=${num(src.volume ?? 1)}` : ""}${crossFilters([expr])},` +
+        `adelay=${Math.max(0, Math.round(at * 1000))}:all=1[${lab}]`
+    );
+    crossHandleLabels.push(lab);
+  };
+  spec.clips.forEach((c, j) => {
+    const half = crossHalf[j];
+    const prevC = spec.clips[j - 1];
+    if (half <= 0.01 || !prevC) return;
+    const cut = clipAt[j];
+    const ahead = Math.min(prevC.soundAhead ?? 0, half);
+    // Never reach past the head of the source: a handle is what the trim left
+    // behind, and there is none before zero.
+    const back = Math.min(c.soundBack ?? 0, half, c.in / clipRate(c));
+    // The outgoing clip, still sounding past its out point.
+    handleStream(prevC, `a${j}`, prevC.out, ahead, cut, crossExpr(0, half, false));
+    // The incoming clip, already sounding before its in point.
+    handleStream(c, `b${j}`, c.in - back * clipRate(c), back, cut - back, crossExpr(back, half, true));
+  });
+
   // Join the segments. Clips abut — a transition claims no layout — so every
   // join keeps the accumulator's full length. A transitioned join pads the
   // incoming segment's head with its cloned first frame and runs the xfade
   // across the outgoing clip's last blend-window seconds: the held frame
   // arrives over the live tail, and the real segment starts exactly at the
   // cut. Its sound is a tail fade on the outgoing side and a hard join. A
-  // sound dissolve cuts the picture and crosses the sound instead — a tail
+  // cross dissolve cuts the picture and crosses the sound instead — a tail
   // fade against the incoming clip's head fade. The rest hard-cut (concat).
   // Fold left so mixed sequences chain correctly.
   let vAcc = segLabel[0];
@@ -1301,13 +1407,11 @@ export async function runExport(
     const aOut = `aj${j}`;
     if (cross > 0.01) {
       // The picture cuts: concat, re-stamped for a later xfade the same way
-      // a plain join is. The sound crosses the cut.
+      // a plain join is. The sound crosses the cut — its ramps are already on
+      // the two segments, and the halves that reach past the cut ride their
+      // own streams into the mix, so the join here is a plain one.
       filters.push(`[${vAcc}][${segLabel[j]}]concat=n=2:v=1:a=0,fps=${fps}[${vOut}]`);
-      filters.push(
-        `[${aAcc}]afade=t=out:st=${num(Math.max(0, acc - cross))}:d=${num(cross)}[ah${j}]`
-      );
-      filters.push(`[a${j}]afade=t=in:st=0:d=${num(cross)}[ai${j}]`);
-      filters.push(`[ah${j}][ai${j}]concat=n=2:v=0:a=1[${aOut}]`);
+      filters.push(`[${aAcc}][a${j}]concat=n=2:v=0:a=1[${aOut}]`);
     } else if (d > 0.01) {
       const offset = Math.max(0, acc - d);
       // The style id resolves through the allowlist map; anything unknown
@@ -1353,7 +1457,7 @@ export async function runExport(
     const tz = Math.max(0, Math.min(oc.tailZoom ?? 0, olen - hz));
     const hf = Math.max(0, Math.min(oc.headFade ?? 0, olen));
     const tf = Math.max(0, Math.min(oc.tailFade ?? 0, olen - hf));
-    // A sound dissolve's own ramps: the sound crosses at the cut, the picture
+    // A cross dissolve's own ramps: the sound crosses at the cut, the picture
     // cuts with it.
     const hs = Math.max(0, Math.min(oc.headSound ?? 0, olen));
     const ts = Math.max(0, Math.min(oc.tailSound ?? 0, olen - hs));
@@ -1518,18 +1622,30 @@ export async function runExport(
     if (!oc.muted && audioPresence.get(oc.file)) {
       const tempo = ospeed !== 1 ? `${atempoChain(ospeed)},` : "";
       const vol = (oc.volume ?? 1) !== 1 ? `volume=${num(oc.volume ?? 1)},` : "";
+      // A cross dissolve reaches into the handle either side of its cut, so
+      // this stream starts before the clip's own head and runs past its tail;
+      // everything timed inside it shifts by that head reach.
+      const back = Math.min(oc.soundBack ?? 0, hs, oc.in / ospeed);
+      const ahead = Math.min(oc.soundAhead ?? 0, ts);
       // The picture's fade edges carry the sound with them; zoom edges don't.
-      // A sound dissolve's ramps are here and nowhere else.
+      // A cross dissolve's ramps are equal-power and reach half level on the
+      // cut, so they are a volume expression rather than a fade to silence.
       const afades =
-        (hf > 0.01 ? `afade=t=in:st=0:d=${num(hf)},` : "") +
-        (tf > 0.01 ? `afade=t=out:st=${num(Math.max(0, olen - tf))}:d=${num(tf)},` : "") +
-        (hs > 0.01 ? `afade=t=in:st=0:d=${num(hs)},` : "") +
-        (ts > 0.01 ? `afade=t=out:st=${num(Math.max(0, olen - ts))}:d=${num(ts)},` : "");
-      const delayMs = Math.max(0, Math.round(oc.start * 1000));
+        (hf > 0.01 ? `afade=t=in:st=${num(back)}:d=${num(hf)},` : "") +
+        (tf > 0.01
+          ? `afade=t=out:st=${num(Math.max(0, back + olen - tf))}:d=${num(tf)},`
+          : "");
+      const crosses = crossFilters([
+        crossExpr(back, hs, true),
+        crossExpr(back + olen, ts, false),
+      ]);
+      const delayMs = Math.max(0, Math.round((oc.start - back) * 1000));
       const lab = `ovs${k}`;
       filters.push(
-        `[${idx}:a]atrim=${num(oc.in)}:${num(oc.out)},asetpts=PTS-STARTPTS,${tempo}${vol}${afades}` +
-          `aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${delayMs}:all=1[${lab}]`
+        `[${idx}:a]atrim=${num(oc.in - back * ospeed)}:${num(oc.out + ahead * ospeed)},` +
+          `asetpts=PTS-STARTPTS,${tempo}${vol}${afades}` +
+          `aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo` +
+          `${crosses},adelay=${delayMs}:all=1[${lab}]`
       );
       overlaySoundLabels.push(lab);
     }
@@ -1702,7 +1818,11 @@ export async function runExport(
 
   // The joined clip audio and overlay-video audio duck too.
   let aLabel = duckOthers(aAcc);
-  const extraSound = [...soundLabels, ...overlaySoundLabels.map(duckOthers)];
+  const extraSound = [
+    ...soundLabels,
+    ...overlaySoundLabels.map(duckOthers),
+    ...crossHandleLabels.map(duckOthers),
+  ];
   if (extraSound.length > 0) {
     const mixIn = [aLabel, ...extraSound].map((l) => `[${l}]`).join("");
     filters.push(
