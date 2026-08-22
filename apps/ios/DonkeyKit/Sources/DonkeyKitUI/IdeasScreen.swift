@@ -1,5 +1,6 @@
 #if os(iOS)
 import AVKit
+import Photos
 import PhotosUI
 import SwiftUI
 import DonkeyKitModels
@@ -64,7 +65,8 @@ struct IdeasScreen: View {
         .photosPicker(
             isPresented: $showsPhotoPicker,
             selection: $pickerItems,
-            matching: .any(of: [.images, .videos])
+            matching: .any(of: [.images, .videos]),
+            photoLibrary: .shared()
         )
         .onChange(of: pickerItems) { _, items in
             guard !items.isEmpty else { return }
@@ -88,7 +90,7 @@ struct IdeasScreen: View {
     private var addMenu: some View {
         Menu {
             Button("Paste link", systemImage: "link") { showsLinkSheet = true }
-            Button("Camera roll", systemImage: "photo") { showsPhotoPicker = true }
+            Button("Camera roll", systemImage: "photo") { openCameraRoll() }
             Button("New note", systemImage: "note.text") { ideas.openEditor() }
             Button("New folder", systemImage: "folder.badge.plus") { folderPrompt = .create }
         } label: {
@@ -100,6 +102,21 @@ struct IdeasScreen: View {
         .padding(.trailing, 20)
         .padding(.bottom, 20)
         .accessibilityLabel("Add")
+    }
+
+    /// The camera roll reads the library, so the import asks for access
+    /// before it opens. Full access shows everything; a limited grant shows
+    /// the items the user hands over, with Manage inside the picker to add
+    /// more. Either choice is changeable later in Settings.
+    private func openCameraRoll() {
+        Task {
+            switch await PHPhotoLibrary.requestAuthorization(for: .readWrite) {
+            case .authorized, .limited:
+                showsPhotoPicker = true
+            default:
+                app.show(toast: "Allow photo access in Settings to import from your camera roll.")
+            }
+        }
     }
 
     private var filterChips: some View {

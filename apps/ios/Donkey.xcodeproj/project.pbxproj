@@ -228,6 +228,7 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "Donkey Cut uses the camera to record your videos.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Donkey Cut uses the microphone to record audio with your videos.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Donkey saves videos you choose to your photo library.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Donkey Cut imports photos and videos from your library into your projects.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -265,6 +266,7 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "Donkey Cut uses the camera to record your videos.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Donkey Cut uses the microphone to record audio with your videos.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Donkey saves videos you choose to your photo library.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Donkey Cut imports photos and videos from your library into your projects.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
