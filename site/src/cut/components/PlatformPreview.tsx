@@ -10,8 +10,6 @@ import {
   MessageCircle,
   MoreHorizontal,
   Music2,
-  Pause,
-  Play,
   Search,
   Send,
   Share2,
@@ -23,7 +21,7 @@ import {
 } from "lucide-react";
 import { normalizeTags } from "@/cut/lib/publish";
 import { useEditor } from "@/cut/lib/store";
-import { formatElapsed } from "@/cut/lib/time";
+import { MediaTransport } from "@/cut/components/MediaTransport";
 import { parseRatio } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -184,7 +182,7 @@ export function PlatformPreviewDialog({
           </button>
 
           {original && (
-            <Transport
+            <MediaTransport
               playing={playing}
               time={time}
               duration={duration}
@@ -209,89 +207,6 @@ export function PlatformPreviewDialog({
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-/** Hover transport for the Original view: play/pause, a draggable scrub bar,
- * and the clock. It stays up while a drag is in flight so the bar never slips
- * out from under the pointer. */
-function Transport({
-  playing,
-  time,
-  duration,
-  onToggle,
-  onSeek,
-}: {
-  playing: boolean;
-  time: number;
-  duration: number;
-  onToggle: () => void;
-  onSeek: (t: number) => void;
-}) {
-  const barRef = useRef<HTMLDivElement>(null);
-  const [scrubbing, setScrubbing] = useState(false);
-  const pct = duration > 0 ? Math.min(1, Math.max(0, time / duration)) * 100 : 0;
-
-  const seekFrom = (clientX: number) => {
-    const el = barRef.current;
-    if (!el || duration <= 0) return;
-    const r = el.getBoundingClientRect();
-    onSeek(Math.min(1, Math.max(0, (clientX - r.left) / r.width)) * duration);
-  };
-
-  return (
-    <div
-      className={cn(
-        "absolute inset-x-0 bottom-0 z-20 flex items-center gap-3 bg-gradient-to-t from-black/75 via-black/45 to-transparent px-4 pt-10 pb-3.5 opacity-0 transition-opacity duration-150",
-        "group-hover:opacity-100 focus-within:opacity-100",
-        scrubbing && "opacity-100"
-      )}
-    >
-      <button
-        className="grid size-8 shrink-0 place-items-center rounded-full bg-white/15 text-white backdrop-blur-sm transition-colors hover:bg-white/25"
-        aria-label={playing ? "Pause" : "Play"}
-        onClick={onToggle}
-      >
-        {playing ? <Pause className="size-4 fill-white" /> : <Play className="size-4 fill-white" />}
-      </button>
-
-      <div
-        ref={barRef}
-        className="relative h-4 flex-1 cursor-pointer touch-none"
-        role="slider"
-        tabIndex={0}
-        aria-label="Seek"
-        aria-valuemin={0}
-        aria-valuemax={Math.max(0, duration)}
-        aria-valuenow={time}
-        onPointerDown={(e) => {
-          e.currentTarget.setPointerCapture(e.pointerId);
-          setScrubbing(true);
-          seekFrom(e.clientX);
-        }}
-        onPointerMove={(e) => scrubbing && seekFrom(e.clientX)}
-        onPointerUp={() => setScrubbing(false)}
-        onPointerCancel={() => setScrubbing(false)}
-        onKeyDown={(e) => {
-          if (e.key === "ArrowLeft") onSeek(Math.max(0, time - 1));
-          else if (e.key === "ArrowRight") onSeek(Math.min(duration, time + 1));
-          else return;
-          e.preventDefault();
-        }}
-      >
-        <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 overflow-hidden rounded-full bg-white/30">
-          <div className="h-full rounded-full bg-white" style={{ width: `${pct}%` }} />
-        </div>
-        <span
-          className="pointer-events-none absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_1px_4px_rgba(0,0,0,0.5)]"
-          style={{ left: `${pct}%` }}
-        />
-      </div>
-
-      <span className="shrink-0 text-[11px] font-medium text-white/90 tabular-nums">
-        {formatElapsed(time * 1000)} / {formatElapsed(duration * 1000)}
-      </span>
     </div>
   );
 }

@@ -17,6 +17,8 @@ import {
   SPECIMEN_INK,
 } from "@/cut/lib/fontSpecimen";
 import { PeakStrip } from "./AudioPanel";
+import { MediaTransport } from "./MediaTransport";
+import { cn } from "@/lib/utils";
 
 // The asset lightbox: the big version of a stock, generated, or chat asset
 // floating straight on the backdrop — media on top, name and prompt below,
@@ -206,19 +208,7 @@ function LightboxMedia({
   const mediaStyle = ratio ? { aspectRatio: ratio } : undefined;
 
   if (item.kind === "video") {
-    return (
-      <video
-        crossOrigin={MEDIA_CORS}
-        controls
-        autoPlay
-        loop
-        playsInline
-        poster={item.poster}
-        src={item.src}
-        className={mediaClass}
-        style={mediaStyle}
-      />
-    );
+    return <VideoBody item={item} ratio={ratio} style={mediaStyle} />;
   }
   return (
     // eslint-disable-next-line @next/next/no-img-element -- static/project image, client-only page
@@ -232,11 +222,91 @@ function LightboxMedia({
   );
 }
 
+/** The big video: the picture with the app's own transport floating on it,
+ * revealed on hover and held up while it is paused. */
+function VideoBody({
+  item,
+  ratio,
+  style,
+}: {
+  item: LightboxItem;
+  ratio?: number;
+  style?: { aspectRatio: number };
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  // Playing is what the element reports, never what was asked of it: an
+  // autoplay the browser blocks fires no `pause`, and a transport that
+  // assumed it started would hide itself behind a Pause icon over a still
+  // picture. The `play` event turns it on.
+  const [playing, setPlaying] = useState(false);
+  const [time, setTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [muted, setMuted] = useState(false);
+
+  const toggle = () => {
+    const el = videoRef.current;
+    if (!el) return;
+    if (el.paused) void el.play();
+    else el.pause();
+  };
+
+  return (
+    <div
+      className={cn(
+        "group relative overflow-hidden rounded-2xl bg-black shadow-2xl",
+        ratio ? "w-full" : "max-h-[68vh] w-full"
+      )}
+      style={style}
+    >
+      <video
+        ref={videoRef}
+        crossOrigin={MEDIA_CORS}
+        autoPlay
+        loop
+        playsInline
+        muted={muted}
+        // The browser's own control bar carries chrome of its own — download,
+        // playback speed, picture-in-picture — so the lightbox draws the
+        // transport itself and keeps picture-in-picture out of the context menu.
+        disablePictureInPicture
+        poster={item.poster}
+        src={item.src}
+        className={cn(
+          "block w-full",
+          ratio ? "size-full object-cover" : "max-h-[68vh] object-contain"
+        )}
+        onClick={toggle}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
+        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
+      />
+      <MediaTransport
+        playing={playing}
+        time={time}
+        duration={duration}
+        muted={muted}
+        onToggle={toggle}
+        onSeek={(t) => {
+          const el = videoRef.current;
+          if (!el) return;
+          el.currentTime = t;
+          setTime(t);
+        }}
+        onToggleMute={() => setMuted((m) => !m)}
+      />
+    </div>
+  );
+}
+
 function AudioBody({ item }: { item: LightboxItem }) {
   const asset = useEditor((s) =>
     item.assetId ? s.assets.find((a) => a.id === item.assetId) : undefined,
   );
   const audioEl = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [time, setTime] = useState(0);
+  const [duration, setDuration] = useState(0);
   // The big player takes over from any row/card preview, and closing the
   // lightbox stops it — a detached media element can keep playing otherwise.
   // The element renders with the body, so it exists by the time this runs.
@@ -253,10 +323,32 @@ function AudioBody({ item }: { item: LightboxItem }) {
       )}
       <audio
         ref={audioEl}
-        controls
         autoPlay
         src={item.src}
-        className="w-full"
+        className="hidden"
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
+        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
+        onEnded={() => setPlaying(false)}
+      />
+      <MediaTransport
+        variant="inline"
+        playing={playing}
+        time={time}
+        duration={duration}
+        onToggle={() => {
+          const el = audioEl.current;
+          if (!el) return;
+          if (el.paused) void el.play();
+          else el.pause();
+        }}
+        onSeek={(t) => {
+          const el = audioEl.current;
+          if (!el) return;
+          el.currentTime = t;
+          setTime(t);
+        }}
       />
     </div>
   );
