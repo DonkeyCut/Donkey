@@ -36,6 +36,7 @@ import {
   addTemplateToProject,
   importLibraryAsset,
   libraryMediaUrl,
+  libraryPosterUrl,
   saveAssetToLibrary,
 } from "@/cut/lib/library";
 import { originalSettings, type ExportDoc } from "@/cut/lib/exportClient";
@@ -1577,6 +1578,10 @@ export function Timeline() {
           url: libraryMediaUrl(lib.fileName, lib.residency),
           kind: lib.type,
           aspect: lib.width && lib.height ? lib.width / lib.height : undefined,
+          // The card's cover is already painted and cached, so the segment
+          // has a frame of the video in it from the first move — true frames
+          // replace it tile by tile as the reads land.
+          poster: libraryPosterUrl(lib),
         },
       };
     }
@@ -1704,17 +1709,20 @@ export function Timeline() {
     });
   };
 
-  // The dragged media as a floating segment: its filmstrip fills it at true
-  // length and it rides above the row's clips (z-20), so the drag reads as a
-  // placed segment sliding to its landing spot.
+  // The dragged media as a floating segment: its filmstrip fills it edge to
+  // edge at true length and it rides above the row's clips (z-20), so the drag
+  // reads as a placed segment sliding to its landing spot. The picture is the
+  // whole segment — the sound band belongs to a clip, and a dragged one has no
+  // waveform to draw there — and the slot wash sits under it, so a moment with
+  // no frames yet reads as a landing spot rather than a black bar.
   const dropSegment = (t: number, len: number, h: number, ghost?: DropGhost) => (
     <div
-      className="tl-asset-drop-slot pointer-events-none absolute top-0.5 z-20 overflow-hidden rounded-lg bg-black opacity-90 shadow-2xl ring-[1.5px] ring-[#0a84ff]/70 transition-[left] duration-100 ease-out"
+      className="tl-asset-drop-slot pointer-events-none absolute top-0.5 z-20 overflow-hidden rounded-[5px] bg-[#0a84ff]/10 opacity-90 shadow-2xl ring-[1.5px] ring-[#0a84ff]/70 transition-[left] duration-100 ease-out"
       style={{ left: t * pps, width: Math.max(10, len * pps - CLIP_GAP), height: h }}
     >
       {ghost && (
-        <div className="pointer-events-none absolute inset-x-0 top-0" style={{ height: h - WAVE_H }}>
-          <DropGhostFilm ghost={ghost} w={Math.max(10, len * pps - CLIP_GAP)} h={h - WAVE_H} pps={pps} />
+        <div className="pointer-events-none absolute inset-0">
+          <DropGhostFilm ghost={ghost} w={Math.max(10, len * pps - CLIP_GAP)} h={h} pps={pps} />
         </div>
       )}
       <span className="absolute top-1 left-1 rounded-[5px] bg-black/65 px-1.5 py-px font-mono text-[10px] tabular-nums text-white">
@@ -4092,13 +4100,25 @@ function DropGhostFilm({
               src={tile.src}
               alt=""
               draggable={false}
-              className="absolute top-0 h-full object-cover"
+              className="absolute top-0 h-full max-w-none object-cover"
               style={{ left: tile.left, width: imgW }}
             />
           )
       )}
     </div>
   );
+}
+
+/** The one frame a clip has before its strip is sampled: the capture taken for
+ * its left edge, or any frame already read off this source. */
+function seedThumb(
+  asset: MediaAsset,
+  filmIn: number,
+  edges?: { start: string | null; end: string | null }
+): string[] {
+  if (asset.type !== "video") return [];
+  const seed = edges?.start ?? peekEdgeFrame(asset.url, filmIn);
+  return seed ? [seed] : [];
 }
 
 /** Sample a clip's filmstrip tiles across its drawn width. Tiles sit on a
@@ -4120,10 +4140,20 @@ function filmstripFrames(
   minTileW: number,
   edges?: { start: string | null; end: string | null }
 ): FilmTile[] {
-  if (!asset?.thumbs?.length || !asset.thumbStep) return [];
+  if (!asset) return [];
+  // Before the pre-sampled strip exists — a fresh import, a library clip
+  // dropped a moment ago — the clip still has a frame in hand: the one read
+  // for its left edge. Standing that in as a one-thumb strip paints the whole
+  // box with the picture at once, and every tile asks for its own true frame,
+  // so the strip sharpens in place instead of sitting black until the sheet
+  // lands.
+  const thumbs = asset.thumbs?.length && asset.thumbStep ? asset.thumbs : seedThumb(asset, filmIn, edges);
+  if (!thumbs.length) return [];
+  const thumbStep =
+    asset.thumbs?.length && asset.thumbStep ? asset.thumbStep : Math.max(asset.duration, 1);
   const frames = planFilmstrip({
-    thumbs: asset.thumbs,
-    thumbStep: asset.thumbStep,
+    thumbs,
+    thumbStep,
     duration: asset.duration,
     aspect: (asset.width ?? 16) / Math.max(1, asset.height ?? 9),
     filmIn,
@@ -4292,13 +4322,17 @@ function Filmstrip({
       style={{ filter: filter || undefined }}
     >
       {frames.map((f, k) => (
+        // A tile keeps the width the plan gave it: the strip's grid is wider
+        // than a short clip's box, and the base stylesheet's `max-width: 100%`
+        // would squeeze that tile down to the box and leave the clip's black
+        // showing beside it.
         // eslint-disable-next-line @next/next/no-img-element
         <img
           key={k}
           src={f.src}
           alt=""
           draggable={false}
-          className="absolute top-0 h-full object-cover"
+          className="absolute top-0 h-full max-w-none object-cover"
           style={{ left: f.left, width: f.width }}
         />
       ))}
