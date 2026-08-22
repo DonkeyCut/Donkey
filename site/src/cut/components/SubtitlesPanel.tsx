@@ -17,6 +17,7 @@ import {
   laneCues,
   subtitleLaneCount,
   trackLocale,
+  WORD_ACCENT_MODES,
 } from "@/cut/lib/subtitles";
 import { useElapsed } from "@/cut/hooks/useElapsed";
 import { useCutCaps } from "@/cut/lib/backend/hooks";
@@ -28,7 +29,6 @@ import {
   type FontId,
   type SubtitleCue,
   type SubtitlesBlock,
-  type WordAccentMode,
 } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -183,12 +183,6 @@ export function SubtitlesPanel() {
   );
 }
 
-const ACCENT_MODES: { id: WordAccentMode; label: string }[] = [
-  { id: "color", label: "Color" },
-  { id: "underline", label: "Underline" },
-  { id: "box", label: "Highlight" },
-];
-
 /** The Options tab: caption visibility, the karaoke word highlight with its
  * treatment and color, position reset for a dragged caption, and the
  * subtitle-voiceover generator. */
@@ -201,6 +195,7 @@ function OptionsTab() {
   // Effective word treatment: the caption style's defaults with the user's
   // overrides on top, so the controls always show what's on the video.
   const look = karaokeLook(captionStyle(subtitles.style), subtitles);
+  const on = !!subtitles.wordHighlight;
 
   return (
     <ScrollArea
@@ -249,51 +244,51 @@ function OptionsTab() {
           />
         </div>
       </div>
-      <label className="flex min-h-8 items-center justify-between text-xs font-medium">
-        Highlight spoken word
-        <Switch
-          className="sub-word-highlight"
-          checked={!!subtitles.wordHighlight}
-          onCheckedChange={(v) =>
-            useEditor.getState().setSubtitlesView({ wordHighlight: v || undefined })
-          }
-        />
-      </label>
-      {subtitles.wordHighlight && (
-        <>
-          <div className="flex min-h-8 items-center justify-between text-xs font-medium">
-            Word style
-            <div className="sub-accent-mode flex rounded-lg border border-input p-0.5">
-              {ACCENT_MODES.map((m) => (
-                <button
-                  key={m.id}
-                  className={cn(
-                    "rounded-md px-2 py-1 text-[11.5px] font-medium transition-colors",
-                    look.mode === m.id
-                      ? "bg-neutral-900 text-white"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                  aria-pressed={look.mode === m.id}
-                  onClick={() => useEditor.getState().setSubtitlesView({ accentMode: m.id })}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
+      <div className="flex flex-col gap-1.5 text-xs font-medium">
+        Emphasize the spoken word
+        <div className="sub-word-highlight flex rounded-lg border border-input p-0.5">
+          <button
+            className={cn(
+              "flex-1 rounded-md px-1.5 py-1 text-[11.5px] font-medium transition-colors",
+              on ? "text-muted-foreground hover:text-foreground" : "bg-neutral-900 text-white"
+            )}
+            aria-pressed={!on}
+            onClick={() => useEditor.getState().setSubtitlesView({ wordHighlight: undefined })}
+          >
+            Off
+          </button>
+          {WORD_ACCENT_MODES.map((m) => (
+            <button
+              key={m.id}
+              className={cn(
+                "sub-accent-mode flex-1 rounded-md px-1.5 py-1 text-[11.5px] font-medium transition-colors",
+                on && look.mode === m.id
+                  ? "bg-neutral-900 text-white"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              aria-pressed={on && look.mode === m.id}
+              onClick={() =>
+                useEditor.getState().setSubtitlesView({ wordHighlight: true, accentMode: m.id })
+              }
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {on && (
+        <div className="flex min-h-8 items-center justify-between text-xs font-medium">
+          Word color
+          <div className="sub-accent-color flex items-center">
+            <ColorField
+              value={look.color}
+              label="Word color"
+              onBegin={() => useEditor.getState().pushHistory()}
+              onLive={(c) => useEditor.getState().setSubtitlesView({ accentColor: c })}
+              onCommit={(c) => useEditor.getState().setSubtitlesView({ accentColor: c })}
+            />
           </div>
-          <div className="flex min-h-8 items-center justify-between text-xs font-medium">
-            Word color
-            <div className="sub-accent-color flex items-center">
-              <ColorField
-                value={look.color}
-                label="Word color"
-                onBegin={() => useEditor.getState().pushHistory()}
-                onLive={(c) => useEditor.getState().setSubtitlesView({ accentColor: c })}
-                onCommit={(c) => useEditor.getState().setSubtitlesView({ accentColor: c })}
-              />
-            </div>
-          </div>
-        </>
+        </div>
       )}
       <div className="flex min-h-8 items-center justify-between text-xs font-medium">
         Position

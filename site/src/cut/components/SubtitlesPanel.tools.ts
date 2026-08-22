@@ -7,6 +7,7 @@
  */
 
 import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
+import { CAPTION_STYLES, WORD_ACCENT_MODES } from "@/cut/lib/subtitles";
 
 export const SUBTITLES_TOOLS = [
   {
@@ -78,15 +79,19 @@ export const SUBTITLES_TOOLS = [
   {
     name: "set_caption_look",
     description:
-      "Style the caption track: a text-videos look id in `look` sets everything at once (preset, size, font, karaoke highlight, accent color, frame background), or set the pieces yourself. Restyling captions is a change the user asks for — leave the track as it is when they only asked for the words. Karaoke — word_highlight — lights each word as it is spoken or sung, in the preview and the export burn-in; it needs word timings, which transcription and sync_lyrics leave on the cues.",
+      "Style the caption track: a text-videos look id in `look` sets everything at once (preset, size, font, karaoke highlight, accent color, frame background), or set the pieces yourself. Restyling captions is a change the user asks for — leave the track as it is when they only asked for the words. Karaoke — word_highlight — keeps the whole line up and emphasizes each word as it is spoken or sung, in the preview and the export burn-in; it needs word timings, which transcription and sync_lyrics leave on the cues. Naming an accent_mode turns it on, so \"make the words pop as I say them\" is one call with accent_mode: pop.",
     inputSchema: obj({
       look: str("Text-videos look id — sets the whole caption look"),
-      style: str("Caption preset: clean, hook, punchy, minimal, editorial, typewriter, block, highlight, bubble, neon"),
+      style: str(`Caption preset: ${Object.keys(CAPTION_STYLES).join(", ")}`),
       size: num("Caption size in px at a 1080-wide frame"),
       font: str("Font id"),
-      word_highlight: bool("Light each word as it lands (karaoke)"),
+      word_highlight: bool("Emphasize each word as it lands (karaoke)"),
       accent_color: str("Highlight color"),
-      accent_mode: { type: "string", enum: ["color", "underline", "box"], description: "How the word lights up" },
+      accent_mode: {
+        type: "string",
+        enum: WORD_ACCENT_MODES.map((m) => m.id),
+        description: `How the spoken word is emphasized — ${WORD_ACCENT_MODES.map((m) => `${m.id}: ${m.hint}`).join("; ")}`,
+      },
       x: num("Caption center x 0..1"),
       y: num("Caption center y 0..1"),
       background: bool("With `look`, also set the project background (default: whatever the look does — the designed looks paint it, plain and over-footage leave it alone)"),

@@ -1,3 +1,11 @@
+import {
+  contrastText as kitContrastText,
+  WORD_ACCENT_DEFAULT,
+  WORD_ACCENT_LABELS,
+  WORD_ACCENT_MODE_IDS,
+  WORD_ACCENT_NOTES,
+  wordWindows,
+} from "@donkeycut/effects-kit";
 import { formatTime } from "./time";
 import type {
   CaptionStyleId,
@@ -99,27 +107,36 @@ export interface CaptionStyle {
 }
 
 /** Spoken-word accent for styles that don't pick their own. */
-export const DEFAULT_ACCENT = "#FFE94A";
+export const DEFAULT_ACCENT = WORD_ACCENT_DEFAULT;
+
+/** The word emphasis treatments, in the order every picker offers them —
+ * the caption panel, the element animation grid, and the assistant's tool
+ * enums all read this one list, so a new treatment reaches all of them. */
+export const WORD_ACCENT_MODES: { id: WordAccentMode; label: string; hint: string }[] =
+  WORD_ACCENT_MODE_IDS.map((id) => ({
+    id,
+    label: WORD_ACCENT_LABELS[id],
+    hint: WORD_ACCENT_NOTES[id],
+  }));
 
 /** Black or white, whichever reads on the given hex fill. */
-export function contrastText(hex: string): string {
-  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex.trim());
-  if (!m) return "#111114";
-  const n = parseInt(m[1], 16);
-  const lum = 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
-  return lum > 150 ? "#111114" : "#FFFFFF";
-}
+export const contrastText = kitContrastText;
 
 /** The effective karaoke treatment for the spoken word: user overrides on the
- * subtitles block win over the caption style's defaults, and a custom color
- * picks its own contrast text for the box treatment. */
+ * subtitles block win over the caption style's defaults, a swell with no
+ * accent named keeps the caption's own color, and a custom color picks its
+ * own contrast text for the box treatment. */
 export function karaokeLook(
   style: CaptionStyle,
   subs?: { accentMode?: WordAccentMode; accentColor?: string }
 ): { mode: WordAccentMode; color: string; text: string } {
-  const color = subs?.accentColor ?? style.accent ?? DEFAULT_ACCENT;
+  const mode = subs?.accentMode ?? style.accentMode ?? "underline";
+  // A swell says it with size, so with nobody naming an accent it keeps the
+  // color the rest of the caption is written in.
+  const color =
+    subs?.accentColor ?? style.accent ?? (mode === "pop" ? style.color : DEFAULT_ACCENT);
   return {
-    mode: subs?.accentMode ?? style.accentMode ?? "underline",
+    mode,
     color,
     text: subs?.accentColor ? contrastText(color) : style.accentText ?? contrastText(color),
   };
@@ -320,25 +337,12 @@ export function wrapCaptionForSize(text: string, size: number, frameW: number): 
  * otherwise (hand edits, social rewrites) splits proportionally by word length.
  */
 export function cueWordWindows(cue: SubtitleCue): { start: number; end: number }[] {
-  const words = cue.text.trim().split(/\s+/).filter(Boolean);
-  const n = words.length;
-  if (n === 0) return [];
-  const starts: number[] = [];
-  if (cue.words && cue.words.length === n) {
-    for (let i = 0; i < n; i++) {
-      const t = i === 0 ? cue.start : Math.min(Math.max(cue.words[i].t0, cue.start), cue.end);
-      starts.push(i > 0 && t < starts[i - 1] ? starts[i - 1] : t);
-    }
-  } else {
-    const weights = words.map((w) => w.length + 1);
-    const total = weights.reduce((a, b) => a + b, 0);
-    let acc = 0;
-    for (const w of weights) {
-      starts.push(cue.start + ((cue.end - cue.start) * acc) / total);
-      acc += w;
-    }
-  }
-  return starts.map((start, i) => ({ start, end: i === n - 1 ? cue.end : starts[i + 1] }));
+  const dur = Math.max(0, cue.end - cue.start);
+  return wordWindows(
+    cue.text,
+    dur,
+    cue.words?.map((w) => w.t0 - cue.start)
+  ).map((w) => ({ start: cue.start + w.start, end: cue.start + w.end }));
 }
 
 /** A cue as a synthetic overlay, so captions ride the title pipeline. The style
