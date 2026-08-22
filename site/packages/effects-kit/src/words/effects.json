@@ -1,0 +1,122 @@
+{
+  "color": {
+    "label": "Color",
+    "note": "the word being said takes the accent color and hands it on",
+    "family": "emphasis",
+    "before": {},
+    "active": { "accent": 1 },
+    "after": {},
+    "attack": 0,
+    "release": 0
+  },
+  "pop": {
+    "label": "Pop",
+    "note": "the word swells and the line makes room for it, in the text's own color unless an accent is set",
+    "family": "emphasis",
+    "before": {},
+    "active": { "accent": 1, "scale": 1.24 },
+    "after": {},
+    "attack": 0,
+    "release": 0,
+    "accentDefault": "text"
+  },
+  "underline": {
+    "label": "Underline",
+    "note": "accent color with a rule under the word",
+    "family": "emphasis",
+    "before": {},
+    "active": { "accent": 1, "mark": 1 },
+    "after": {},
+    "attack": 0,
+    "release": 0,
+    "mark": "underline"
+  },
+  "box": {
+    "label": "Highlight",
+    "note": "an accent box behind the word",
+    "family": "emphasis",
+    "before": {},
+    "active": { "accent": 1, "mark": 1 },
+    "after": {},
+    "attack": 0,
+    "release": 0,
+    "mark": "box"
+  },
+  "spotlight": {
+    "label": "Spotlight",
+    "note": "the line sits faded and only the word being said is at full strength",
+    "family": "emphasis",
+    "before": { "opacity": 0.35 },
+    "active": { "opacity": 1 },
+    "after": { "opacity": 0.35 },
+    "attack": 0.1,
+    "release": 0.18,
+    "ease": [0.33, 0, 0.67, 1]
+  },
+  "build": {
+    "label": "Build up",
+    "note": "the line starts empty and each word appears as it is said, completing the sentence",
+    "family": "build",
+    "before": { "opacity": 0 },
+    "active": { "opacity": 1 },
+    "after": { "opacity": 1 },
+    "attack": 0.14,
+    "release": 0,
+    "ease": [0.33, 0, 0.67, 1]
+  },
+  "fill": {
+    "label": "Fill in",
+    "note": "the whole line is up but faint, and each word goes solid as it is said until the sentence is fully opaque",
+    "family": "build",
+    "before": { "opacity": 0.3 },
+    "active": { "opacity": 1 },
+    "after": { "opacity": 1 },
+    "attack": 0.2,
+    "release": 0,
+    "ease": [0.33, 0, 0.67, 1]
+  },
+  "rise": {
+    "label": "Rise up",
+    "note": "each word lifts into its place as it is said and stays",
+    "family": "build",
+    "before": { "opacity": 0, "dy": 0.45 },
+    "active": { "opacity": 1, "dy": 0 },
+    "after": { "opacity": 1, "dy": 0 },
+    "attack": 0.26,
+    "release": 0,
+    "ease": [0.16, 1, 0.3, 1]
+  },
+  "bloom": {
+    "label": "Bloom",
+    "note": "each word grows out of nothing into its size as it is said and stays",
+    "family": "build",
+    "before": { "opacity": 0, "scale": 0.4 },
+    "active": { "opacity": 1, "scale": 1 },
+    "after": { "opacity": 1, "scale": 1 },
+    "attack": 0.24,
+    "release": 0,
+    "ease": [0.34, 1.56, 0.64, 1]
+  },
+  "swing": {
+    "label": "Swing in",
+    "note": "each word drops in leaning and rights itself as it is said",
+    "family": "build",
+    "before": { "opacity": 0, "rotate": -14, "dy": -0.3 },
+    "active": { "opacity": 1, "rotate": 0, "dy": 0 },
+    "after": { "opacity": 1, "rotate": 0, "dy": 0 },
+    "attack": 0.3,
+    "release": 0,
+    "ease": [0.34, 1.56, 0.64, 1]
+  },
+  "paint": {
+    "label": "Paint on",
+    "note": "the line is written in its own color and each word takes the accent as it is said, keeping it",
+    "family": "build",
+    "before": {},
+    "active": { "accent": 1 },
+    "after": { "accent": 1 },
+    "attack": 0.12,
+    "release": 0,
+    "ease": [0.33, 0, 0.67, 1]
+  }
+}

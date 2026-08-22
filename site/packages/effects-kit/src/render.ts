@@ -34,13 +34,14 @@ import {
   type TextShadowSpec,
 } from "./types";
 import {
-  applyWordAccent,
-  highlightSwell,
+  applyWordDraw,
   overlayWords,
+  REST_WORD,
   WORD_ACCENT_DEFAULT,
-  wordAccentIndex,
+  WORD_BASELINE_DROP,
+  wordReach,
+  wordSampleWindows,
   wordSwell,
-  wordWindows,
 } from "./words";
 
 // Text metrics shared by DOM preview and canvas burn-in.
@@ -382,43 +383,71 @@ async function paintText(
   const cx = overlay.x * width;
   const cy = overlay.y * frame.height;
 
-  // Karaoke lays its words out first. The emphasized word may be swollen, and
-  // it takes that width in the line — its neighbours move out of its way — so
-  // the plate, the alignment and the draw all have to read one layout.
-  const swell = overlay.highlightWord === undefined ? 1 : highlightSwell(overlay);
-  const bigFont = swell !== 1 ? textCssFont(overlay, fpx * swell, env) : cssFont;
-  if (swell !== 1) await ensureFontLoaded(bigFont, overlay.text);
-  /** Draw and measure at the swollen word's size, or back at the line's.
-   * Tracking is em of the size in play, so a swollen word is spaced like the
-   * words beside it. */
-  const setSize = (big: boolean) => {
-    ctx.font = big ? bigFont : cssFont;
-    if ("letterSpacing" in ctx)
-      ctx.letterSpacing = `${(overlay.letterSpacing ?? 0) * (big ? fpx * swell : fpx)}px`;
+  // A word effect lays its words out first. A word may draw at its own size,
+  // and it takes that width in the line — its neighbours move out of its way —
+  // so the plate, the alignment and the draw all have to read one layout.
+  const draws = overlay.wordDraw?.length ? overlay.wordDraw : null;
+  const fonts = new Map<number, string>();
+  const sizeKey = (mult: number) => Math.round(mult * 1000) / 1000;
+  const fontFor = (mult: number) => {
+    const key = sizeKey(mult);
+    let f = fonts.get(key);
+    if (!f) {
+      f = key === 1 ? cssFont : textCssFont(overlay, fpx * key, env);
+      fonts.set(key, f);
+    }
+    return f;
   };
-  const runs =
-    overlay.highlightWord === undefined
-      ? null
-      : (() => {
-          const spaceW = ctx.measureText(" ").width;
-          let k = 0;
-          return lines.map((line) => {
-            const words = line.split(" ").filter(Boolean);
-            const widths = words.map((w) => {
-              const big = k++ === overlay.highlightWord && swell !== 1;
-              if (big) setSize(true);
-              const ww = ctx.measureText(w).width;
-              if (big) setSize(false);
-              return ww;
-            });
-            return {
-              words,
-              widths,
-              spaceW,
-              lineW: widths.reduce((a, b) => a + b, 0) + spaceW * Math.max(0, words.length - 1),
-            };
-          });
-        })();
+  // Every size in play has to be resident before measureText, or the layout is
+  // measured against a fallback face and the burn-in drifts off the preview.
+  if (draws) {
+    const sizes = new Set(draws.flatMap((d) => [sizeKey(d.scale), sizeKey(d.layoutScale)]));
+    for (const key of sizes) {
+      if (key !== 1) await ensureFontLoaded(fontFor(key), overlay.text);
+    }
+  }
+  /** Draw and measure at a word's own size, or back at the line's. Tracking is
+   * em of the size in play, so a resized word is spaced like the words beside
+   * it. */
+  // The size the next draw happens at. A font string carries the weight in
+  // front of it, so reading the size back out of `ctx.font` returns the weight
+  // on any bold face; this is the size, tracked where it is set.
+  let drawSize = fpx;
+  const setSize = (mult: number) => {
+    ctx.font = fontFor(mult);
+    drawSize = fpx * sizeKey(mult);
+    if ("letterSpacing" in ctx) ctx.letterSpacing = `${(overlay.letterSpacing ?? 0) * drawSize}px`;
+  };
+  const runs = !draws
+    ? null
+    : (() => {
+        const spaceW = ctx.measureText(" ").width;
+        let k = 0;
+        const at = (w: string, mult: number) => {
+          if (mult === 1) return ctx.measureText(w).width;
+          setSize(mult);
+          const ww = ctx.measureText(w).width;
+          setSize(1);
+          return ww;
+        };
+        return lines.map((line) => {
+          const words = line.split(" ").filter(Boolean);
+          // Two widths per word: the room it takes in the line, and the width
+          // it actually draws at. They differ only while a word is growing
+          // into its place, and it draws centered in the room it will fill.
+          const from = k;
+          k += words.length;
+          const widths = words.map((w, j) => at(w, sizeKey(draws[from + j]?.layoutScale ?? 1)));
+          const drawn = words.map((w, j) => at(w, sizeKey(draws[from + j]?.scale ?? 1)));
+          return {
+            words,
+            widths,
+            drawn,
+            spaceW,
+            lineW: widths.reduce((a, b) => a + b, 0) + spaceW * Math.max(0, words.length - 1),
+          };
+        });
+      })();
   const widthsOf = runs ? runs.map((r) => r.lineW) : lines.map((l) => ctx.measureText(l).width);
   const maxW = Math.max(...widthsOf, 1);
 
@@ -447,10 +476,9 @@ async function paintText(
   const drawText = (text: string, x: number, y: number, fill: string = overlay.color) => {
     if (overlay.stroke && strokeW > 0) {
       ctx.lineJoin = "round";
-      // In em of whatever size is set, so a swollen word wears the same
+      // In em of whatever size is set, so a resized word wears the same
       // outline weight as the words beside it.
-      const em = parseFloat(ctx.font) || fpx;
-      ctx.lineWidth = (strokeW / fpx) * em * 2; // half of a centered stroke shows behind the fill
+      ctx.lineWidth = (strokeW / fpx) * drawSize * 2; // half of a centered stroke shows behind the fill
       ctx.strokeStyle = overlay.stroke.color;
       ctx.strokeText(text, x, y);
     }
@@ -503,68 +531,100 @@ async function paintText(
     return;
   }
 
-  // Karaoke: draw word by word so the spoken word takes its accent treatment —
-  // color, underline, a box, or a swell; the word index counts across all
-  // lines. The words sit in the layout measured above, so a swollen one has
-  // already pushed its neighbours aside and they close back up as the
-  // emphasis moves on.
-  if (!runs) {
+  // A word effect draws word by word, each word at the color, opacity and pose
+  // the engine resolved for it; the word index counts across all lines. The
+  // words sit in the layout measured above, so one drawn bigger has already
+  // pushed its neighbours aside and they close back up as it shrinks.
+  if (!runs || !draws) {
     lines.forEach((line, i) => drawText(line, lineX(i), cy - totalH / 2 + lineH * (i + 0.5)));
     return;
   }
-  // A word drawn at another size shares the baseline with the words beside
-  // it, so where that baseline sits has to be read off the face: the middle
-  // this painter draws from is half the type's own height above it.
-  const fm = ctx.measureText("Hg");
-  const asc = fm.fontBoundingBoxAscent ?? fpx * 0.8;
-  const desc = fm.fontBoundingBoxDescent ?? fpx * 0.2;
-  const midOf = (size: number) => ((asc - desc) / 2) * (size / fpx);
+  // A word drawn at another size shares the baseline with the words beside it,
+  // so where that baseline sits under the middle this painter draws from has to
+  // be read off the face. Measuring the same string against both alignments
+  // gives the gap exactly, in whatever engine is drawing: the ascent is
+  // reported from the alignment point, so the difference between the two is the
+  // distance between them.
+  const ascentAt = (baseline: CanvasTextBaseline) => {
+    ctx.textBaseline = baseline;
+    return ctx.measureText("Hg").actualBoundingBoxAscent;
+  };
+  const alphabetic = ascentAt("alphabetic");
+  const middle = ascentAt("middle");
+  const drop =
+    Number.isFinite(alphabetic) && Number.isFinite(middle) && alphabetic > middle
+      ? alphabetic - middle
+      : fpx * WORD_BASELINE_DROP;
+  ctx.textBaseline = "middle";
+  const alpha0 = ctx.globalAlpha;
   let k = 0;
   ctx.textAlign = "left";
   runs.forEach((run, i) => {
     const y = cy - totalH / 2 + lineH * (i + 0.5);
     let x = cx - run.lineW / 2;
     run.words.forEach((w, wi) => {
-      const active = k === overlay.highlightWord;
-      const big = active && swell !== 1;
-      // A word at the line's own size draws from the middle, exactly as it
-      // always has; a swollen one hangs off the shared baseline instead, and
-      // its own middle follows from there.
-      const size = big ? fpx * swell : fpx;
-      const drawY = big ? y + midOf(fpx) : y;
-      const mid = big ? y + midOf(fpx) - midOf(size) : y;
-      if (big) {
-        setSize(true);
-        ctx.textBaseline = "alphabetic";
-      }
-      if (active && overlay.highlightMode === "box") {
-        // Accent box behind the word, contrast text on top — drawn with the
-        // shadow off so the box and its word stay crisp.
-        const pad = 0.12 * size;
-        const prevShadow = ctx.shadowColor;
-        ctx.shadowColor = "transparent";
-        ctx.fillStyle = overlay.highlightColor ?? WORD_ACCENT_DEFAULT;
-        ctx.beginPath();
-        ctx.roundRect(x - pad, mid - size * 0.5 - pad, run.widths[wi] + pad * 2, size + pad * 2, 0.18 * size);
-        ctx.fill();
-        drawText(w, x, drawY, overlay.highlightText ?? "#111114");
-        ctx.shadowColor = prevShadow;
-      } else if (active) {
-        drawText(w, x, drawY, overlay.highlightColor ?? WORD_ACCENT_DEFAULT);
-        if (overlay.highlightMode === "underline") {
-          ctx.fillRect(x, mid + size * 0.42, run.widths[wi], Math.max(2 * scale, size * 0.07));
+      const d = draws[k] ?? { ...REST_WORD, color: overlay.color };
+      const mult = sizeKey(d.scale);
+      const width = run.widths[wi];
+      const alpha = alpha0 * Math.min(1, Math.max(0, d.opacity));
+      // A word its effect has not brought in yet has no pixels; it still holds
+      // its place, so the words beside it stay where they will be.
+      if (alpha > 0.001) {
+        // Every word draws from its own middle; a resized one has that middle
+        // lifted or dropped by exactly as much as sharing the line's baseline
+        // asks for.
+        const size = fpx * mult;
+        const mid = y + drop * (1 - mult);
+        const drawY = mid;
+        // Centered in the room the layout left it.
+        const drawX = x + (width - run.drawn[wi]) / 2;
+        // Everything below rides one saved state, so nothing set for this word
+        // reaches the next.
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        // Offsets are em of the word's own size, and it turns about its center.
+        if (d.dx || d.dy || d.rotate) {
+          const wx = drawX + run.drawn[wi] / 2;
+          ctx.translate(wx + d.dx * size, mid + d.dy * size);
+          if (d.rotate) ctx.rotate((d.rotate * Math.PI) / 180);
+          ctx.translate(-wx, -mid);
         }
-      } else {
-        drawText(w, x, drawY);
+        setSize(mult);
+        const boxed = d.mark === "box" && !!d.markAlpha;
+        if (boxed) {
+          // Accent box behind the word, and the word on top of it — both drawn
+          // with the shadow off so the box and its word stay crisp.
+          const pad = 0.12 * size;
+          ctx.shadowColor = "transparent";
+          ctx.globalAlpha = alpha * d.markAlpha!;
+          ctx.fillStyle = d.markColor ?? WORD_ACCENT_DEFAULT;
+          ctx.beginPath();
+          ctx.roundRect(
+            drawX - pad,
+            mid - size * 0.5 - pad,
+            run.drawn[wi] + pad * 2,
+            size + pad * 2,
+            0.18 * size
+          );
+          ctx.fill();
+          ctx.globalAlpha = alpha;
+        }
+        drawText(w, drawX, drawY, d.color);
+        if (d.mark === "underline" && d.markAlpha) {
+          ctx.globalAlpha = alpha * d.markAlpha;
+          ctx.fillStyle = d.color;
+          ctx.fillRect(drawX, mid + size * 0.42, run.drawn[wi], Math.max(2 * scale, size * 0.07));
+        }
+        ctx.restore();
+        // `restore` puts the canvas back at the line's own size; the size this
+        // painter tracks goes back with it.
+        drawSize = fpx;
       }
-      if (big) {
-        setSize(false);
-        ctx.textBaseline = "middle";
-      }
-      x += run.widths[wi] + run.spaceW;
+      x += width + run.spaceW;
       k++;
     });
   });
+  ctx.globalAlpha = alpha0;
   ctx.textAlign = "center";
 }
 
@@ -797,10 +857,12 @@ export function planAnimatedLayers(o: Overlay, end: number): AnimatedLayer[] {
         phase,
       });
     if (words) {
-      wordWindows((o as TextOverlay).text, dur, words.times).forEach((w, i) => {
+      wordSampleWindows((o as TextOverlay).text, words, dur).forEach((w) => {
         const a = Math.max(start, o.start + w.start);
         const b = Math.min(stop, o.start + w.end);
-        if (b - a >= 1e-3) add(applyWordAccent(overlay, i), a, b);
+        // Drawn at the middle of the span it stands for, which is where the
+        // picture it caches actually sits.
+        if (b - a >= 1e-3) add(applyWordDraw(overlay, (w.start + w.end) / 2, dur), a, b);
       });
       return;
     }
@@ -906,14 +968,20 @@ export async function renderOverlayFrames(
   // the preset's own reach already covers where the glyphs get to.
   const loop = loopExtent(anim?.loop);
   const move = moveExtent(anim?.move);
-  const travel = (edgeTravel + loop.travel + move.travel) * scale;
+  // A word effect can lift, shift or turn a word out of the resting line, in
+  // em of the type's own size, so the region carries that reach as well.
+  const accent = overlayWords(overlay);
+  const wordTravel =
+    accent && (overlay.kind ?? "text") === "text"
+      ? wordReach(accent) * (overlay as TextOverlay).size * scale
+      : 0;
+  const travel = (edgeTravel + loop.travel + move.travel) * scale + wordTravel;
   // A keyframed element carries its own travel and its own zoom: the region
   // spans every pose the track visits, at the largest scale it reaches.
   const keyed = hasOverlayKeys(overlay);
   const extent = poseExtent(overlay);
   // A swollen word grows the line past the resting box, so the region carries
   // it — width from the swell, and the type's own extra height with it.
-  const accent = overlayWords(overlay);
   const maxScale = 1.15 * extent.scale * move.scale * wordSwell(accent);
   const rotates =
     !!overlay.rotation ||
@@ -952,9 +1020,10 @@ export async function renderOverlayFrames(
     // Back to the origin the painters draw around, so they stay unaware of
     // any of this.
     ctx.translate(-overlay.x * width, -overlay.y * height);
-    let el: Overlay = applyWordAccent(
+    let el: Overlay = applyWordDraw(
       { ...overlay, rotation: undefined, opacity: undefined },
-      wordAccentIndex(overlay, tLocal, dur)
+      tLocal,
+      dur
     );
     if (ev.textProgress !== undefined && (overlay.kind ?? "text") === "text") {
       const text = (overlay as TextOverlay).text;
@@ -1021,10 +1090,11 @@ export async function renderOverlayFrames(
   if (middle > 1e-3) {
     const period = loopPeriod(anim) ?? lottieDur;
     if (accent) {
-      // The picture changes as the emphasis moves on, and nowhere else: one
-      // frame per word covers the middle however long it runs. The last one
-      // absorbs the rounding, so the pieces sum to the middle exactly.
-      const spans = wordWindows((overlay as TextOverlay).text, dur, accent.times)
+      // The picture changes as the effect walks the line, and nowhere else:
+      // one frame per span the engine says holds still covers the middle
+      // however long it runs. The last one absorbs the rounding, so the
+      // pieces sum to the middle exactly.
+      const spans = wordSampleWindows((overlay as TextOverlay).text, accent, dur, fps)
         .map((w) => ({ a: Math.max(inS, w.start), b: Math.min(dur - outS, w.end) }))
         .filter((w) => w.b - w.a > 1e-3);
       if (spans.length > 0) spans[spans.length - 1].b = dur - outS;

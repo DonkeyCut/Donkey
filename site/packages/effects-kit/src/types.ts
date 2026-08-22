@@ -9,6 +9,7 @@ import type { OverlayAnim } from "./anim";
 import type { EffectOverlay } from "./effects";
 import type { OverlayKey } from "./keys";
 import type { Mask } from "./mask";
+import type { WordDraw } from "./words/types";
 
 /** Fields every overlay element carries, whatever its kind. */
 export interface OverlayBase {
@@ -38,13 +39,6 @@ export interface OverlayBase {
    * the shot (see mask.ts); absent = the whole element shows. */
   mask?: Mask;
 }
-
-/** How a highlighted word lights up in karaoke text: accent color only,
- * accent color plus underline, an accent box behind the word, or the word
- * swelling at the accent color. A swollen word takes its new width in the
- * line, so its neighbours move out of its way and settle back as the
- * emphasis travels on. */
-export type WordAccentMode = "color" | "underline" | "box" | "pop";
 
 /** A custom drop shadow. Every field is optional — absent ones take the
  * legacy defaults, so `shadow: true` and `shadow: {}` render identically. */
@@ -90,14 +84,10 @@ export interface TextOverlay extends OverlayBase {
   plateRadius?: number; // plate corner radius in em
   plateColor?: string; // plate fill color
   plateOpacity?: number; // plate fill opacity 0..1
-  /** Karaoke burn-in: index of the display word (whitespace-split across all
-   * lines) drawn per the accent treatment. */
-  highlightWord?: number;
-  highlightColor?: string;
-  highlightMode?: WordAccentMode;
-  highlightText?: string;
-  /** How far the highlighted word swells; absent = the mode's own default. */
-  highlightScale?: number;
+  /** Word burn-in: one entry per display word (whitespace-split across all
+   * lines), each resolved to the color, opacity and pose it draws at. Stamped
+   * by the word engine at paint time; absent = the line draws as one piece. */
+  wordDraw?: WordDraw[];
 }
 
 export type ShapeKind =
