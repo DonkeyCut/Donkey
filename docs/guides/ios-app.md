@@ -57,7 +57,13 @@ clears once space frees up.
 
 Projects sync down as thumbnails only: the Projects tab lists cloud projects
 with cached poster images, and a tap streams the latest export — or the
-composited preview when none exists — straight from the CDN.
+composited preview when none exists — straight from the CDN. The video playing
+can be kept: a control under the player's own sound button opens an export
+sheet carrying the choices the editor offers on the web — the original, and
+each smaller size the render is actually bigger than, with the frame and an
+estimated file size on every row — and its Save to Photos button downloads
+that render, fits it to the chosen box on the device, and adds it to the photo
+library, which is the phone's route to anywhere a video gets posted.
 
 Every request carries an `x-donkey-cut-client: ios` header. The server
 remembers accounts it has seen it from, and the desktop shows its phone
