@@ -9,11 +9,16 @@
 import type { GradeLut } from "@donkeycut/effects-kit";
 import { createRasterCanvas, type RasterSurface } from "./raster";
 
+// The V axis is inverted here rather than at upload: `UNPACK_FLIP_Y_WEBGL` is
+// ignored for an ImageBitmap source (a still's frame), so a pass that leaned on
+// it graded stills upside down while video frames came out upright. Sampling
+// the texture top-down puts every source kind — bitmap, canvas, video frame —
+// the same way up.
 const VERT = `#version 300 es
 in vec2 aPos;
 out vec2 vUv;
 void main() {
-  vUv = aPos * 0.5 + 0.5;
+  vUv = vec2(aPos.x * 0.5 + 0.5, 0.5 - aPos.y * 0.5);
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`;
 
@@ -183,9 +188,7 @@ export function applyLutGpu(
     gl.viewport(0, 0, w, h);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, s.srcTex);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source as TexImageSource);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.uniform1f(s.sizeLoc, lut.size);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     return s.canvas;
