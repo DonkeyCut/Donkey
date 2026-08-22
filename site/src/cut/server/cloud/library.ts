@@ -14,7 +14,7 @@ import type {
 import type { StoredAsset } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl } from "./mediaCdn";
+import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl, mediaUrlLifetime } from "./mediaCdn";
 import { getProject, takenMediaNames } from "./projects";
 import { copy, del, head, libraryKey, presignPut, projectMediaKey } from "./r2";
 import { addUsage, quotaCheck } from "./usage";
@@ -28,6 +28,9 @@ import {
   safeFileName,
   typeOf,
 } from "./util";
+
+/** Cap on one signed-URL batch, matching the project media batch. */
+const PRESIGN_GET_BATCH_MAX = 500;
 
 /** Descriptive fields the engine derives with ffprobe; the cloud stores them on
  * the row, supplied by the client (which probed in the browser) or copied from
@@ -564,6 +567,50 @@ export const libraryCloud = {
       return Response.json({ ok: true });
     } catch (e) {
       return caught(e, "Could not delete.");
+    }
+  },
+
+  /** Signed edge URLs for library files, the library's twin of the project
+   * media batch (media.ts presignGetBatch). Everything that reads bytes to
+   * decode them — a card's frames, a clip dragged onto the timeline — reads
+   * the object directly instead of through serveMedia's redirect, which is
+   * what puts those reads on the chunk cache and the edge cache. Library files
+   * are written once, so the URLs carry no version.
+   *
+   * A name with no completed object is left out; the client falls back to the
+   * route for it. */
+  async presignGetBatch(userId: string, req: Request) {
+    try {
+      const { files } = (await req.json()) as { files?: string[] };
+      if (!Array.isArray(files)) return err("files is required.", 400);
+      if (files.length > PRESIGN_GET_BATCH_MAX) return err("Too many files.", 400);
+      const wanted = [
+        ...new Set(
+          files
+            .filter((f): f is string => typeof f === "string")
+            .map((f) => safeFileName(f)),
+        ),
+      ];
+      const rows = wanted.length
+        ? await prisma.cutMediaObject.findMany({
+            where: {
+              userId,
+              kind: "library",
+              uploadState: "complete",
+              fileName: { in: wanted },
+            },
+            select: { fileName: true },
+          })
+        : [];
+      return Response.json({
+        urls: rows.map((r) => ({
+          fileName: r.fileName,
+          url: mediaObjectUrl(libraryKey(userId, r.fileName)),
+        })),
+        expiresIn: mediaUrlLifetime(),
+      });
+    } catch (e) {
+      return caught(e, "Could not sign the library URLs.");
     }
   },
 

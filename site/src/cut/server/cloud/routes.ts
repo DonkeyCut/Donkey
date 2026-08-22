@@ -67,6 +67,7 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "GET", path: "/api/cut-cloud/library", handler: (_r, u) => libraryCloud.list(u) },
   { method: "POST", path: "/api/cut-cloud/library/presign", handler: (r, u) => libraryCloud.presign(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/complete", handler: (r, u) => libraryCloud.complete(u, r) },
+  { method: "POST", path: "/api/cut-cloud/library/presign-get", handler: (r, u) => libraryCloud.presignGetBatch(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/use", handler: (r, u) => libraryCloud.use(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/save", handler: (r, u) => libraryCloud.save(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/move", handler: (r, u) => libraryCloud.move(u, r) },

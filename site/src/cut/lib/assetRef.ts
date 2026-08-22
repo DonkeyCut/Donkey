@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
-import { fetchLibrary, libraryMediaUrl, libraryPosterUrl, type LibraryAsset } from "./library";
+import { fetchLibrary, libraryRouteUrl, type LibraryAsset } from "./library";
 import { stockAspectDims, stockTitle, type StockImage, type StockMusic, type StockVideo } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
@@ -111,11 +111,14 @@ export const refFromLibrary = (a: LibraryAsset): AssetRef => ({
   name: a.name,
   // A font is not media to point a tool at; the mapping only stays total.
   kind: a.type === "font" ? "text" : a.type,
-  url: libraryMediaUrl(a.fileName, a.residency),
+  // A ref outlives the session it was made in — it is saved with the chat
+  // thread — so it carries the shelf route rather than a minted URL that
+  // expires inside the hour.
+  url: libraryRouteUrl(a.fileName, a.residency),
   duration: a.duration,
   ...(a.width !== undefined ? { width: a.width } : {}),
   ...(a.height !== undefined ? { height: a.height } : {}),
-  ...(libraryPosterUrl(a) ? { thumb: libraryPosterUrl(a) } : {}),
+  ...(a.posterFile ? { thumb: libraryRouteUrl(a.posterFile, a.residency) } : {}),
 });
 
 export const refFromStock = (i: StockImage): AssetRef => ({

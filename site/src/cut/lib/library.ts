@@ -84,10 +84,86 @@ export interface LibraryData {
   templates: LibraryTemplateItem[];
 }
 
-export const libraryMediaUrl = (fileName: string, residency: Residency) =>
+/** Signed edge URLs for the cloud shelf's files, minted with its listing.
+ *
+ * The route that serves a library file answers with a redirect to the same
+ * object, so it works — but a relative route path is not media-origin, and
+ * that costs every read: two connections instead of eight, no chunk cache
+ * (chunkCache.ts keys on the media origin), and a hop through the deployment
+ * ahead of each range. A 55MB phone clip dragged onto the timeline reads its
+ * container through that, which is the difference between a segment that
+ * paints frames and one that sits black. The URL a card, a ghost and an
+ * imported asset all read is this one, so a frame captured for any of them
+ * serves the others.
+ *
+ * Tokens outlive their mint by at least an hour; the map is dropped well
+ * inside that and the next listing mints again. Anything unminted — a shelf
+ * listed before the mint answered, a file uploaded since — falls back to the
+ * route, which serves the same bytes. */
+const MINT_TTL_MS = 30 * 60 * 1000;
+const MINT_BATCH = 500;
+const cloudMedia = { urls: new Map<string, string>(), at: 0 };
+
+/** The shelf route for a file: stable, self-healing, and the only form worth
+ * persisting — a ref saved in a chat thread outlives any signed URL. */
+export const libraryRouteUrl = (fileName: string, residency: Residency) =>
   backendFor(residency).url(
     `/api/cut/library/media/${encodeURIComponent(fileName)}`,
   );
+
+/** How a live surface reads a library file: the minted edge URL while one is
+ * in hand, the route otherwise. */
+export const libraryMediaUrl = (fileName: string, residency: Residency) => {
+  if (residency === "cloud" && Date.now() - cloudMedia.at < MINT_TTL_MS) {
+    const direct = cloudMedia.urls.get(fileName);
+    if (direct) return direct;
+  }
+  return libraryRouteUrl(fileName, residency);
+};
+
+/** Mint edge URLs for everything a cloud listing names — media, covers, and
+ * the files templates draw from. Best-effort: a shelf reads through the route
+ * when this fails. */
+async function mintCloudMediaUrls(shelf: LibraryData): Promise<void> {
+  const files = [
+    ...new Set(
+      [
+        ...shelf.assets.flatMap((a) => [a.fileName, a.posterFile]),
+        ...shelf.templates.flatMap((t) => t.media.map((m) => m.fileName)),
+      ].filter((f): f is string => !!f),
+    ),
+  ];
+  if (!files.length) return;
+  const batches: string[][] = [];
+  for (let i = 0; i < files.length; i += MINT_BATCH) batches.push(files.slice(i, i + MINT_BATCH));
+  const minted = new Map<string, string>();
+  // The batches go out together rather than one after the next, and each
+  // keeps what it got: a batch that fails costs its own files the edge URL,
+  // and the rest of the shelf still reads from the edge.
+  await Promise.all(
+    batches.map(async (batch) => {
+      try {
+        const res = await cloudBackend.fetch("/api/cut/library/presign-get", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ files: batch }),
+        });
+        if (!res.ok) return;
+        const body = (await res.json()) as {
+          urls?: { fileName: string; url: string }[];
+        };
+        for (const u of body.urls ?? []) minted.set(u.fileName, u.url);
+      } catch {
+        // The route is the fallback for these files, same as an unminted one.
+      }
+    })
+  );
+  // Nothing came back: leave whatever the last listing minted standing rather
+  // than replacing a live map with an empty one.
+  if (minted.size === 0) return;
+  cloudMedia.urls = minted;
+  cloudMedia.at = Date.now();
+}
 
 /** The asset's cover image, when the import brought one back. */
 export const libraryPosterUrl = (
@@ -114,6 +190,9 @@ async function fetchLibraryFrom(r: Residency): Promise<LibraryData> {
   // Each half is stored on its own, so one can be recalled while the other is
   // re-read: that is what keeps the Mac's shelf listed with the app closed.
   writeSnapshot(libraryShelfKey(r), shelf);
+  // Signed URLs expire, so they stay out of the snapshot and are minted with
+  // the live listing instead.
+  if (r === "cloud") await mintCloudMediaUrls(shelf).catch(() => {});
   return shelf;
 }
 
