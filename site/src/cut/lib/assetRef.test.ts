@@ -72,7 +72,7 @@ describe("entityRefs", () => {
       "Snap Test",
       "VHS",
       "Sticker",
-      "transition 1",
+      "Cross fade",
       "cue 1",
     ]);
     // A sticker names by kind — its prompt-shaped asset name stays out of the
@@ -89,6 +89,27 @@ describe("entityRefs", () => {
     const rect = refs.find((r) => r.name === "Rectangle")!;
     expect(rect.entityKind).toBe("shape");
     expect(rect.shapeKind).toBe("rect");
+    // A bar reads the way its own label on the row reads, and carries the
+    // style so its pill wears the icon the bar wears.
+    const bar = refs.find((r) => r.name === "Cross fade")!;
+    expect(bar.entityKind).toBe("transition");
+    expect(bar.transitionStyle).toBe("crossfade");
+    // An effect carries its treatment, which is what splits the waveform from
+    // the sparkles.
+    expect(refs.find((r) => r.name === "VHS")!.effectId).toBe("vhs");
+  });
+
+  test("two bars of one style number, one of a kind does not", () => {
+    const refs = entityRefs(
+      sources({
+        transitions: [
+          { id: "tr-1", start: 1, seconds: 0.5, style: "audiocross" },
+          { id: "tr-3", start: 5, seconds: 0.5, style: "audiocross" },
+          { id: "tr-2", start: 3, seconds: 0.5, style: "dipblack" },
+        ],
+      })
+    );
+    expect(refs.map((r) => r.name)).toEqual(["Cross dissolve 1", "Dip to black", "Cross dissolve 2"]);
   });
 
   test("names number in timeline order only on collision", () => {
@@ -166,7 +187,7 @@ describe("selectionRefTokens", () => {
         { kind: "cue", id: "cue-1" },
       ],
     });
-    expect(token).toBe('@c1 @"Hello" @"transition 1" @"cue 1"');
+    expect(token).toBe('@c1 @"Hello" @"Cross fade" @"cue 1"');
   });
 
   test("nothing resolvable yields null", () => {

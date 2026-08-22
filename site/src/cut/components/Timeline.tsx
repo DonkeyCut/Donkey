@@ -1,8 +1,8 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { ArrowDown, ArrowDownToLine, ArrowLeft, ArrowLeftToLine, ArrowRight, ArrowRightToLine, ArrowUp, ArrowUpToLine, AudioLines, Blend, Check, Circle, Clapperboard, Copy, Diamond, Download, Droplets, EllipsisVertical, Expand, Eye, EyeOff, FolderOpen, FolderPlus, FoldHorizontal, Fullscreen, Loader2, Moon, MoreHorizontal, Pause, Play, Scissors, SkipBack, Sparkles, Sticker, Sun, Target, Trash2, Type, UnfoldHorizontal, Volume2, VolumeX, type LucideIcon } from "lucide-react";
-import { SHAPE_CHIP_ICONS } from "@/cut/components/entityIcons";
+import { ArrowDownToLine, AudioLines, Check, Clapperboard, Copy, Diamond, Download, EllipsisVertical, Eye, EyeOff, FolderOpen, FolderPlus, Fullscreen, Loader2, MoreHorizontal, Pause, Play, Scissors, SkipBack, Sticker, Trash2, Type, Volume2, VolumeX } from "lucide-react";
+import { EFFECT_CHIP_ICONS, effectIconKind, SHAPE_CHIP_ICONS, TRANSITION_ICONS } from "@/cut/components/entityIcons";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -51,7 +51,7 @@ import type { VideoTrackPlacement } from "@/cut/lib/store";
 import { playheadAt, setSkim, skimAt, subscribePlayhead, usePlayhead, useSkim } from "@/cut/lib/playhead";
 import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
-import { EFFECT_LABELS, isAudioEffect, type EffectId } from "@donkeycut/effects-kit";
+import { EFFECT_LABELS, type EffectId } from "@donkeycut/effects-kit";
 import { emptySubtitles, IMAGE_CLIP_SECONDS, isAudioTransition, SHAPE_LABELS, TRANSITION_MAX, TRANSITION_STYLE_LABELS, transitionBarStart, transitionDefaultSeconds, type ShapeKind } from "@/cut/lib/types";
 import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, Selection, StickerOverlay, SubtitleCue, TimelineTransition, TransitionStyle, VideoClip } from "@/cut/lib/types";
 import { isLottieAsset } from "@/cut/lib/lottieAssets";
@@ -101,26 +101,6 @@ function useDropPreview<T>(initial: T): [T, (next: T) => void] {
   return [value, set];
 }
 
-const TRANSITION_ICONS: Record<TransitionStyle, LucideIcon> = {
-  crossfade: Blend,
-  audiocross: AudioLines,
-  crosszoom: Expand,
-  dipblack: Moon,
-  dipwhite: Sun,
-  blur: Droplets,
-  pushleft: ArrowLeft,
-  pushright: ArrowRight,
-  pushup: ArrowUp,
-  pushdown: ArrowDown,
-  wipeleft: ArrowLeftToLine,
-  wiperight: ArrowRightToLine,
-  wipeup: ArrowUpToLine,
-  wipedown: ArrowDownToLine,
-  circleopen: Circle,
-  circleclose: Target,
-  splitopen: UnfoldHorizontal,
-  splitclose: FoldHorizontal,
-};
 
 /** Video row height: the picture band plus the sound band under it. */
 const VIDEO_H = 88;
@@ -294,7 +274,7 @@ const overlayFamily = (o: Overlay): OverlayFamily =>
 /** The glyph on an effect's bar: a waveform for the treatments that work on
  * the sound, sparkles for the ones that work on the picture. */
 function EffectChipIcon({ effect }: { effect: EffectId }) {
-  const Icon = isAudioEffect(effect) ? AudioLines : Sparkles;
+  const Icon = EFFECT_CHIP_ICONS[effectIconKind(effect)];
   return <Icon className="mr-1 size-2.5 shrink-0" />;
 }
 

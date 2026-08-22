@@ -6,7 +6,7 @@ import { fetchLibrary, libraryRouteUrl, type LibraryAsset } from "./library";
 import { stockAspectDims, stockTitle, type StockImage, type StockMusic, type StockVideo } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
-import { EFFECT_LABELS } from "@donkeycut/effects-kit";
+import { EFFECT_LABELS, type EffectId } from "@donkeycut/effects-kit";
 import { clipLen, getClipSpans, useEditor } from "./store";
 import {
   isEffectOverlay,
@@ -14,7 +14,9 @@ import {
   isStickerOverlay,
   isTextOverlay,
   SHAPE_LABELS,
+  TRANSITION_STYLE_LABELS,
   type ShapeKind,
+  type TransitionStyle,
 } from "./types";
 import type {
   AudioClip,
@@ -87,6 +89,11 @@ export interface AssetRef {
   entityKind?: "title" | "shape" | "sticker" | "effect" | "transition" | "cue" | "keyframe";
   /** The shape element's kind, for the pill's per-shape icon. */
   shapeKind?: ShapeKind;
+  /** The transition bar's style, so its pill wears the icon its bar wears. */
+  transitionStyle?: TransitionStyle;
+  /** The effect element's treatment, same reason: the sound treatments carry
+   * a waveform, the picture ones sparkles. */
+  effectId?: EffectId;
   /** Which track a keyframe ref rides — mask keys color their pill amber to
    * match the timeline's diamonds. */
   keyTrack?: "pose" | "mask";
@@ -564,8 +571,9 @@ function overlayBaseName(o: Overlay, fallback: string): string {
  * elements, transition bars, subtitle cues, and every keyframe on a track-0
  * clip's or element's pose and mask tracks. Elements name by their content
  * ("Snap Test", "Rectangle"), numbered in timeline order only when two share
- * a name ("Rectangle 1", "Rectangle 2"); transitions, cues, and keyframes
- * stay ordinal. Names re-derive from the current timeline, so a pasted
+ * a name ("Rectangle 1", "Rectangle 2"); a transition bar names by its
+ * style ("Cross dissolve"), numbered the same way; cues and keyframes stay
+ * ordinal. Names re-derive from the current timeline, so a pasted
  * mention resolves to whatever holds that name now; the internal ids ride in
  * the ref, never in the prompt text. */
 export function entityRefs(src: EntitySources): AssetRef[] {
@@ -612,6 +620,7 @@ export function entityRefs(src: EntitySources): AssetRef[] {
         {
           entityKind: label as AssetRef["entityKind"],
           shapeKind: isShapeOverlay(o) ? o.shape : undefined,
+          effectId: isEffectOverlay(o) ? o.effect : undefined,
           preview: stickerAsset?.url,
         }
       )
@@ -627,15 +636,33 @@ export function entityRefs(src: EntitySources): AssetRef[] {
     out.push(...keyRefs("clip", sp.clip.id, parent, sp.start, sp.clip.mask?.kf, "mask"));
   });
 
-  [...src.transitions].sort((a, b) => a.start - b.start).forEach((t, i) => {
-    const name = `transition ${i + 1}`;
+  // A bar names by its style, the way its own label on the row reads, and
+  // takes a number only when the timeline holds more than one of that style.
+  const bars = [...src.transitions].sort((a, b) => a.start - b.start);
+  const barCount = new Map<string, number>();
+  for (const t of bars) barCount.set(t.style, (barCount.get(t.style) ?? 0) + 1);
+  const barNth = new Map<string, number>();
+  bars.forEach((t) => {
+    const base = TRANSITION_STYLE_LABELS[t.style];
+    const n = (barNth.get(t.style) ?? 0) + 1;
+    barNth.set(t.style, n);
+    let name = (barCount.get(t.style) ?? 0) > 1 ? `${base} ${n}` : base;
+    // An element already carrying that name — a title reading "Cross dissolve"
+    // — keeps it; the bar counts on past it.
+    let bump = n;
+    while (taken.has(name.toLowerCase())) {
+      bump += 1;
+      barNth.set(t.style, bump);
+      name = `${base} ${bump}`;
+    }
+    taken.add(name.toLowerCase());
     out.push(
       entityRef(
         `transition:${t.id}`,
         name,
         `${name} — a transition bar on the timeline. id ${t.id}, style ${t.style}, ` +
           `window ${sec(t.start)}–${sec(t.start + t.seconds)}.`,
-        { entityKind: "transition" }
+        { entityKind: "transition", transitionStyle: t.style }
       )
     );
   });
