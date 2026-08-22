@@ -1,0 +1,267 @@
+{
+  "cases": [
+    {
+      "name": "fast/tight-cuts",
+      "what": "The reported bug: a fast-paced recut planned right on the cue boundaries, in a quiet room. Cue times run short of the audio, so half these edges start out inside a word.",
+      "pace": "fast",
+      "before": {
+        "edges": 12,
+        "worstClipped": 0.169,
+        "clippedEdges": 8,
+        "medianAir": -0.043,
+        "tightestAir": -0.169,
+        "widestAir": 0.057
+      },
+      "after": {
+        "edges": 12,
+        "worstClipped": 0,
+        "clippedEdges": 0,
+        "medianAir": 0.137,
+        "tightestAir": 0.089,
+        "widestAir": 0.142
+      },
+      "budget": {
+        "clipped": 0,
+        "minAir": 0.06,
+        "maxAir": 0.34
+      },
+      "breaches": []
+    },
+    {
+      "name": "fast/loud-room",
+      "what": "The same tight plan over a room 22dB louder — a floor close enough to the voice that a fixed threshold reads the pauses as speech.",
+      "pace": "fast",
+      "before": {
+        "edges": 12,
+        "worstClipped": 0.163,
+        "clippedEdges": 10,
+        "medianAir": -0.053,
+        "tightestAir": -0.163,
+        "widestAir": 0.031
+      },
+      "after": {
+        "edges": 12,
+        "worstClipped": 0,
+        "clippedEdges": 0,
+        "medianAir": 0.13,
+        "tightestAir": 0.087,
+        "widestAir": 0.139
+      },
+      "budget": {
+        "clipped": 0,
+        "minAir": 0.06,
+        "maxAir": 0.34
+      },
+      "breaches": []
+    },
+    {
+      "name": "fast/unnormalized",
+      "what": "A recording nobody levelled: the voice sits at -37dBFS, under any fixed silence threshold worth using on a normal file.",
+      "pace": "fast",
+      "before": {
+        "edges": 12,
+        "worstClipped": 0.175,
+        "clippedEdges": 9,
+        "medianAir": -0.077,
+        "tightestAir": -0.175,
+        "widestAir": 0.027
+      },
+      "after": {
+        "edges": 12,
+        "worstClipped": 0,
+        "clippedEdges": 0,
+        "medianAir": 0.138,
+        "tightestAir": 0.088,
+        "widestAir": 0.145
+      },
+      "budget": {
+        "clipped": 0,
+        "minAir": 0.06,
+        "maxAir": 0.34
+      },
+      "breaches": []
+    },
+    {
+      "name": "fast/music-bed",
+      "what": "A steady bed under the whole take: nothing is ever truly quiet, and the gaps between sentences are the only readable edges.",
+      "pace": "fast",
+      "before": {
+        "edges": 12,
+        "worstClipped": 0.152,
+        "clippedEdges": 10,
+        "medianAir": -0.057,
+        "tightestAir": -0.152,
+        "widestAir": 0.058
+      },
+      "after": {
+        "edges": 12,
+        "worstClipped": 0,
+        "clippedEdges": 0,
+        "medianAir": 0.132,
+        "tightestAir": 0.083,
+        "widestAir": 0.139
+      },
+      "budget": {
+        "clipped": 0,
+        "minAir": 0.06,
+        "maxAir": 0.4
+      },
+      "breaches": []
+    },
+    {
+      "name": "fast/rapid-cadence",
+      "what": "Sentences a quarter second apart, cut fast: the pause cannot hold the full air, so both sides take what there is and no word is touched.",
+      "pace": "fast",
+      "before": {
+        "edges": 14,
+        "worstClipped": 0.169,
+        "clippedEdges": 10,
+        "medianAir": -0.061,
+        "tightestAir": -0.169,
+        "widestAir": 0.057
+      },
+      "after": {
+        "edges": 14,
+        "worstClipped": 0,
+        "clippedEdges": 0,
+        "medianAir": 0.138,
+        "tightestAir": 0.089,
+        "widestAir": 0.147
+      },
+      "budget": {
+        "clipped": 0,
+        "minAir": 0.05,
+        "maxAir": 0.34
+      },
+      "breaches": []
+    },
+    {
+      "name": "fast/loose-plan",
+      "what": "The skill's own instruction followed — cut loose, refine after. The air comes back to the pace from the other direction.",
+      "pace": "fast",
+      "before": {
+        "edges": 12,
+        "worstClipped": 0,
+        "clippedEdges": 0,
+        "medianAir": 0.307,
+        "tightestAir": 0.181,
+        "widestAir": 0.407
+      },
+      "after": {
+        "edges": 12,
+        "worstClipped": 0,
+        "clippedEdges": 0,
+        "medianAir": 0.137,
+        "tightestAir": 0.089,
+        "widestAir": 0.142
+      },
+      "budget": {
+        "clipped": 0,
+        "minAir": 0.06,
+        "maxAir": 0.34
+      },
+      "breaches": []
+    },
+    {
+      "name": "fast/wide-plan",
+      "what": "Sentences held two and a half seconds apart and a second of spare air either side, from a model working off a coarse look. Dead air is the failure here, not clipping.",
+      "pace": "fast",
+      "before": {
+        "edges": 10,
+        "worstClipped": 0,
+        "clippedEdges": 0,
+        "medianAir": 0.968,
+        "tightestAir": 0.831,
+        "widestAir": 1.057
+      },
+      "after": {
+        "edges": 10,
+        "worstClipped": 0,
+        "clippedEdges": 0,
+        "medianAir": 0.137,
+        "tightestAir": 0.089,
+        "widestAir": 0.142
+      },
+      "budget": {
+        "clipped": 0,
+        "minAir": 0.06,
+        "maxAir": 0.34
+      },
+      "breaches": []
+    },
+    {
+      "name": "natural/tight-cuts",
+      "what": "The default pace over the same tight plan — every edge a quarter second clear of the word.",
+      "pace": "natural",
+      "before": {
+        "edges": 12,
+        "worstClipped": 0.169,
+        "clippedEdges": 8,
+        "medianAir": -0.043,
+        "tightestAir": -0.169,
+        "widestAir": 0.057
+      },
+      "after": {
+        "edges": 12,
+        "worstClipped": 0,
+        "clippedEdges": 0,
+        "medianAir": 0.257,
+        "tightestAir": 0.159,
+        "widestAir": 0.262
+      },
+      "budget": {
+        "clipped": 0,
+        "minAir": 0.1,
+        "maxAir": 0.45
+      },
+      "breaches": []
+    },
+    {
+      "name": "relaxed/tight-cuts",
+      "what": "The slowest pace: the piece breathes, and the same edges sit further out without running into the next sentence.",
+      "pace": "relaxed",
+      "before": {
+        "edges": 12,
+        "worstClipped": 0.169,
+        "clippedEdges": 8,
+        "medianAir": -0.043,
+        "tightestAir": -0.169,
+        "widestAir": 0.057
+      },
+      "after": {
+        "edges": 12,
+        "worstClipped": 0,
+        "clippedEdges": 0,
+        "medianAir": 0.447,
+        "tightestAir": 0.279,
+        "widestAir": 0.452
+      },
+      "budget": {
+        "clipped": 0,
+        "minAir": 0.12,
+        "maxAir": 0.7
+      },
+      "breaches": []
+    }
+  ],
+  "joint": [
+    {
+      "pace": "fast",
+      "crossed": 0.05,
+      "settled": true,
+      "replay": 0,
+      "outAir": 0.113,
+      "inAir": 0.067
+    },
+    {
+      "pace": "natural",
+      "crossed": 0.14,
+      "settled": true,
+      "replay": 0,
+      "outAir": 0.088,
+      "inAir": 0.092
+    }
+  ],
+  "jointBreaches": [],
+  "failed": []
+}
