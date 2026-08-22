@@ -14,7 +14,7 @@ import { renderProjectToMp4 } from "./exportRender";
 import { putSigned } from "./media";
 import { createRasterCanvas, rasterCanvasToPng } from "./raster";
 import { clipSpeed, getClipSpans, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
-import { captionStyle, cueOverlay, cueWordWindows, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
+import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
 import { isMaskAnimated, isOverlayAnimated, normalizeGrade, paintMaskLuma } from "@donkeycut/effects-kit";
 import { renderElementFrames, renderElementPng } from "./textRender";
 import { clipCovers, clipKeyed, clipPosed, clipPoseAt, clipZoom, contentRect, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, regionPx, shadowInk, subjectMasked } from "./types";
@@ -838,10 +838,10 @@ export async function buildExportPayload(
       for (let i = 0; i < cues.length; i++) {
         const cue = cues[i];
         if (cue.start >= duration || !cue.text.trim()) continue;
-        // Karaoke burns one frame per word window (the spoken word accented);
+        // A word effect burns one frame per span its picture holds still for;
         // otherwise the whole cue is a single still.
         const windows = doc.subtitles.wordHighlight
-          ? cueWordWindows(cue)
+          ? cueWordFrames(cue, capStyle, doc.subtitles)
           : [{ start: cue.start, end: cue.end }];
         for (let wi = 0; wi < windows.length; wi++) {
           const win = windows[wi];
@@ -852,7 +852,7 @@ export async function buildExportPayload(
               capStyle,
               i === 0,
               pos,
-              doc.subtitles.wordHighlight ? wi : undefined,
+              doc.subtitles.wordHighlight ? (win.start + win.end) / 2 : undefined,
               // Wrap in design space (1080 short side) from the project ratio —
               // the same width the preview passes, whatever the render size.
               frameOf(doc.aspect).w

@@ -579,7 +579,7 @@ export interface EditorState {
    * track's language. Timings copy over; word timings don't survive
    * translation, so the new cues carry none. */
   translateSubtitleTrack: (fromLane: number) => Promise<void>;
-  setSubtitlesView: (patch: Partial<Pick<SubtitlesBlock, "showOnVideo" | "showOnTimeline" | "locale" | "style" | "size" | "font" | "x" | "y" | "wordHighlight" | "accentMode" | "accentColor">>) => void;
+  setSubtitlesView: (patch: Partial<Pick<SubtitlesBlock, "showOnVideo" | "showOnTimeline" | "locale" | "style" | "size" | "font" | "x" | "y" | "wordHighlight" | "accentMode" | "accentColor" | "accentScale" | "accentDim">>) => void;
   /** The subtitle track (row) the panel edits and generation writes to. */
   subtitleLane: number;
   setSubtitleLane: (lane: number) => void;

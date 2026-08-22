@@ -1,10 +1,10 @@
 import {
   contrastText as kitContrastText,
+  wordDrawsAt,
   WORD_ACCENT_DEFAULT,
-  WORD_ACCENT_LABELS,
-  WORD_ACCENT_MODE_IDS,
-  WORD_ACCENT_NOTES,
-  wordWindows,
+  wordEffect,
+  wordSampleWindows,
+  type OverlayWords,
 } from "@donkeycut/effects-kit";
 import { formatTime } from "./time";
 import type {
@@ -13,7 +13,7 @@ import type {
   SubtitleCue,
   SubtitlesBlock,
   TextOverlay,
-  WordAccentMode,
+  WordEffectId,
 } from "./types";
 
 export type { CaptionStyleId } from "./types";
@@ -46,16 +46,33 @@ export function trackLocale(subs: SubtitlesBlock, lane: number): string {
   return subs.tracks?.[lane]?.locale ?? (lane === 0 ? subs.locale : undefined) ?? "en-US";
 }
 
-/** A track's effective caption anchor plus the block's look overrides
- * (karaoke accent, font size) — the `pos` argument `cueOverlay` takes. The
- * track's own dragged spot wins, then the block-level legacy spot (first
- * track only), then the style's default stacked upward per track so
- * simultaneous languages never overlap. */
+/** The block-level word-effect overrides a caption track carries: which
+ * effect, and the two settings an effect may have. Absent = the caption
+ * style's own. */
+export interface CaptionWordOverrides {
+  accentMode?: WordEffectId;
+  accentColor?: string;
+  accentScale?: number;
+  accentDim?: number;
+}
+
+/** A track's effective caption anchor plus the block's look overrides — what
+ * `cueOverlay` reads to place and dress one cue. */
+export interface CaptionPos extends CaptionWordOverrides {
+  x: number;
+  y: number;
+  size?: number;
+  font?: FontId;
+}
+
+/** One track's anchor, filled in: the track's own dragged spot wins, then the
+ * block-level legacy spot (first track only), then the style's default
+ * stacked upward per track so simultaneous languages never overlap. */
 export function trackPos(
   subs: SubtitlesBlock,
   style: CaptionStyle,
   lane: number
-): { x: number; y: number; size?: number; font?: FontId; accentMode?: WordAccentMode; accentColor?: string } {
+): CaptionPos {
   const meta = subs.tracks?.[lane];
   return {
     x: meta?.x ?? (lane === 0 ? subs.x : undefined) ?? style.x,
@@ -64,6 +81,8 @@ export function trackPos(
     font: subs.font,
     accentMode: subs.accentMode,
     accentColor: subs.accentColor,
+    accentScale: subs.accentScale,
+    accentDim: subs.accentDim,
   };
 }
 
@@ -97,48 +116,35 @@ export interface CaptionStyle {
   plateOpacity?: number;
   /** Multiply the opening cue's size, so the hook lands bigger. */
   openerScale?: number;
-  /** Karaoke accent for the spoken word; absent = DEFAULT_ACCENT. */
+  /** Accent color for the word effect; absent = DEFAULT_ACCENT. */
   accent?: string;
-  /** How the spoken word lights up: an accent box behind it (plate styles) or
-   * the accent color plus underline (open text). Absent = underline. */
-  accentMode?: WordAccentMode;
-  /** Word color on an accent box; absent = auto contrast. */
-  accentText?: string;
+  /** Which word effect the style's captions run: an accent box behind the
+   * spoken word (plate styles), a line building itself up, and so on. Absent
+   * = underline. */
+  accentMode?: WordEffectId;
 }
 
 /** Spoken-word accent for styles that don't pick their own. */
 export const DEFAULT_ACCENT = WORD_ACCENT_DEFAULT;
 
-/** The word emphasis treatments, in the order every picker offers them —
- * the caption panel, the element animation grid, and the assistant's tool
- * enums all read this one list, so a new treatment reaches all of them. */
-export const WORD_ACCENT_MODES: { id: WordAccentMode; label: string; hint: string }[] =
-  WORD_ACCENT_MODE_IDS.map((id) => ({
-    id,
-    label: WORD_ACCENT_LABELS[id],
-    hint: WORD_ACCENT_NOTES[id],
-  }));
-
 /** Black or white, whichever reads on the given hex fill. */
 export const contrastText = kitContrastText;
 
-/** The effective karaoke treatment for the spoken word: user overrides on the
- * subtitles block win over the caption style's defaults, a swell with no
- * accent named keeps the caption's own color, and a custom color picks its
- * own contrast text for the box treatment. */
-export function karaokeLook(
-  style: CaptionStyle,
-  subs?: { accentMode?: WordAccentMode; accentColor?: string }
-): { mode: WordAccentMode; color: string; text: string } {
-  const mode = subs?.accentMode ?? style.accentMode ?? "underline";
-  // A swell says it with size, so with nobody naming an accent it keeps the
-  // color the rest of the caption is written in.
+/** The word effect a caption track runs, as the element model carries it:
+ * user overrides on the subtitles block win over the caption style's
+ * defaults, and an effect that says everything with size keeps the color the
+ * rest of the caption is written in when nobody named an accent. */
+export function captionWords(style: CaptionStyle, subs?: CaptionWordOverrides): OverlayWords {
+  const id = subs?.accentMode ?? style.accentMode ?? "underline";
   const color =
-    subs?.accentColor ?? style.accent ?? (mode === "pop" ? style.color : DEFAULT_ACCENT);
+    subs?.accentColor ??
+    style.accent ??
+    (wordEffect(id).accentDefault === "text" ? style.color : DEFAULT_ACCENT);
   return {
-    mode,
+    style: id,
     color,
-    text: subs?.accentColor ? contrastText(color) : style.accentText ?? contrastText(color),
+    ...(subs?.accentScale !== undefined ? { scale: subs.accentScale } : {}),
+    ...(subs?.accentDim !== undefined ? { dim: subs.accentDim } : {}),
   };
 }
 
@@ -253,7 +259,6 @@ export const CAPTION_STYLES: Record<CaptionStyleId, CaptionStyle> = {
     plateOpacity: 0.95,
     accent: "#FF375F",
     accentMode: "box",
-    accentText: "#FFFFFF",
   },
   bubble: {
     id: "bubble",
@@ -330,41 +335,27 @@ export function wrapCaptionForSize(text: string, size: number, frameW: number): 
   return lines.join("\n");
 }
 
-/**
- * Per-display-word timeline windows for a cue, partitioning [start, end] with
- * no gaps so the karaoke highlight never blinks off between words. Uses the
- * transcriber's word timings while they still match the text one-to-one;
- * otherwise (hand edits, social rewrites) splits proportionally by word length.
- */
-export function cueWordWindows(cue: SubtitleCue): { start: number; end: number }[] {
-  const dur = Math.max(0, cue.end - cue.start);
-  return wordWindows(
-    cue.text,
-    dur,
-    cue.words?.map((w) => w.t0 - cue.start)
-  ).map((w) => ({ start: cue.start + w.start, end: cue.start + w.end }));
-}
-
 /** A cue as a synthetic overlay, so captions ride the title pipeline. The style
  * preset drives the look; a user font or font size overrides the preset's
  * (the opener emphasis still multiplies the size); a dragged caption position
- * (frame fractions) overrides the preset's spot; a word index marks that word
- * for the karaoke accent. */
+ * (frame fractions) overrides the preset's spot; `at` resolves the track's
+ * word effect at that moment on the timeline. */
 export function cueOverlay(
   cue: SubtitleCue,
   style: CaptionStyle = CAPTION_STYLES.clean,
   isOpener = false,
-  pos: { x?: number; y?: number; size?: number; font?: FontId; accentMode?: WordAccentMode; accentColor?: string } | undefined,
-  wordIndex: number | undefined,
+  pos: Partial<CaptionPos> | undefined,
+  at: number | undefined,
   frameW: number
 ): TextOverlay {
-  const kl = wordIndex !== undefined ? karaokeLook(style, pos) : null;
+  const words = at !== undefined ? cueWords(cue, style, pos) : null;
   const size = Math.round(
     (pos?.size ?? style.size) * (isOpener && style.openerScale ? style.openerScale : 1)
   );
+  const text = wrapCaptionForSize(cue.text, size, frameW);
   return {
     id: `sub-${cue.id}`,
-    text: wrapCaptionForSize(cue.text, size, frameW),
+    text,
     start: cue.start,
     end: cue.end,
     x: pos?.x ?? style.x,
@@ -377,15 +368,61 @@ export function cueOverlay(
     plate: style.plate,
     ...(style.plateColor ? { plateColor: style.plateColor } : {}),
     ...(style.plateOpacity !== undefined ? { plateOpacity: style.plateOpacity } : {}),
-    ...(kl && wordIndex !== undefined
+    ...(words && at !== undefined
       ? {
-          highlightWord: wordIndex,
-          highlightColor: kl.color,
-          highlightMode: kl.mode,
-          highlightText: kl.text,
+          wordDraw: wordDrawsAt(
+            text,
+            words,
+            style.color,
+            Math.max(0, cue.end - cue.start),
+            at - cue.start
+          ),
         }
       : {}),
   };
+}
+
+/** A caption's pictures are full frames, one per span, and a cut carries one
+ * of them for every word of speech in it. A ramp is sampled at this rate, and
+ * never at more than this many steps however long the ramp runs, which is
+ * enough to read an arrival while holding a subtitled export to a few
+ * pictures per word. */
+const CAPTION_WORD_FPS = 12;
+const CAPTION_WORD_SLICES = 2;
+
+/**
+ * One cue's word effect with the transcriber's own onsets on it. The clock is
+ * the measured speech wherever there is any, so the effect walks the line at
+ * the pace it is actually said; a cue with no timings shares its span by word
+ * length instead. Everything that draws or samples a cue reads this one
+ * function, so the picture a burn-in span stands for is resolved against the
+ * same windows the span was cut from.
+ */
+export function cueWords(
+  cue: SubtitleCue,
+  style: CaptionStyle,
+  subs?: CaptionWordOverrides
+): OverlayWords {
+  const times = cue.words?.map((w) => w.t0 - cue.start);
+  return { ...captionWords(style, subs), ...(times ? { times } : {}) };
+}
+
+/**
+ * The moments a cue has to be drawn at to carry its word effect: one span per
+ * stretch the picture holds still. An effect that lands on the beat comes
+ * back as one span per word, which is what the caption burn-in has always
+ * written; one that ramps is cut finer inside a word's window.
+ */
+export function cueWordFrames(
+  cue: SubtitleCue,
+  style: CaptionStyle,
+  subs?: CaptionWordOverrides
+): { start: number; end: number }[] {
+  const dur = Math.max(0, cue.end - cue.start);
+  return wordSampleWindows(cue.text, cueWords(cue, style, subs), dur, CAPTION_WORD_FPS, CAPTION_WORD_SLICES).map((w) => ({
+    start: cue.start + w.start,
+    end: cue.start + w.end,
+  }));
 }
 
 /** The cue under a given time, if any. */

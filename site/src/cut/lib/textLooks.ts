@@ -1,4 +1,4 @@
-import type { OverlayAnimStyle, OverlayLoopStyle, WordAccentMode } from "@donkeycut/effects-kit";
+import type { OverlayAnimStyle, OverlayLoopStyle, WordEffectId } from "@donkeycut/effects-kit";
 import type { TextEnsemble, TextVariation } from "./textCompose";
 import type { CaptionStyleId, FontId } from "./types";
 
@@ -78,7 +78,7 @@ export interface TextLook {
     size?: number;
     font?: FontId;
     accentColor?: string;
-    accentMode?: WordAccentMode;
+    accentMode?: WordEffectId;
   };
 }
 

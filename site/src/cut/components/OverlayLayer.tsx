@@ -10,14 +10,12 @@ import {
   captionStyle,
   cueAt,
   cueOverlay,
-  cueWordWindows,
-  karaokeLook,
   laneCues,
   laneHidden,
   subtitleLaneCount,
   trackPos,
 } from "@/cut/lib/subtitles";
-import { contrastText, evalOverlayFrame, glyphStateAt, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, maskFrameAt, overlayWords, paintMaskCoverage, resolveShadow, shapeMetrics, shapePathD, textStretch, WORD_ACCENT_DEFAULT, wordAccent, wordAccentIndex, type LottieHandle, type Mask, type MaskKey, type OverlayFrameState } from "@donkeycut/effects-kit";
+import { evalOverlayFrame, glyphStateAt, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, maskFrameAt, overlayWords, paintMaskCoverage, resolveShadow, shapeMetrics, shapePathD, textStretch, WORD_ACCENT_DEFAULT, wordDrawsAt, type LottieHandle, type Mask, type MaskKey, type OverlayFrameState, type WordDraw } from "@donkeycut/effects-kit";
 import {
   LINE_HEIGHT,
   PLATE_PAD_X,
@@ -25,7 +23,7 @@ import {
   PLATE_RADIUS,
   plateFill,
   SHADOW,
-  wordAccentCss,
+  wordDrawCss,
 } from "@/cut/lib/textRender";
 import {
   behindSubjectOverlay,
@@ -348,10 +346,19 @@ export function OverlayLayer({
   );
 }
 
-/** Text with one word emphasized. The words are walked exactly the way the
- * canvas painter walks them — line by line, single-spaced — so the index the
- * preview lights is the index the burn-in lights. */
-function AccentedText({ text, index, css }: { text: string; index: number; css: CSSProperties }) {
+/** Text drawn word by word, each word wearing what the word engine resolved
+ * for it. The words are walked exactly the way the canvas painter walks them
+ * — line by line, single-spaced — so the word the preview lights is the word
+ * the burn-in lights. */
+function WordText({
+  text,
+  draws,
+  lineHeight,
+}: {
+  text: string;
+  draws: WordDraw[];
+  lineHeight?: number;
+}) {
   let k = 0;
   return (
     <>
@@ -361,12 +368,11 @@ function AccentedText({ text, index, css }: { text: string; index: number; css: 
             .split(" ")
             .filter(Boolean)
             .map((w, wi) => {
-              const active = k === index;
-              k++;
+              const d = draws[k++];
               return (
                 <span key={wi}>
                   {wi > 0 && " "}
-                  <span style={active ? css : undefined}>{w}</span>
+                  <span style={d ? wordDrawCss(d, lineHeight) : undefined}>{w}</span>
                 </span>
               );
             })}
@@ -427,24 +433,16 @@ function SubtitleCaption({
   // Captions ride the same style/opener/anchor logic as the export burn-in,
   // so the preview and the rendered file match exactly.
   const style = captionStyle(subtitles.style);
+  // The track's word effect plays on the playhead: the cue resolves its words
+  // at this moment exactly as the export burn-in resolves them at that frame.
   const ov = cueOverlay(
     cue,
     style,
     cue.id === cues[0]?.id,
     trackPos(subtitles, style, lane),
-    undefined,
+    subtitles.wordHighlight ? t : undefined,
     frame.w
   );
-  // Karaoke: the word under the playhead lights up as it is spoken.
-  const wordIndex = subtitles.wordHighlight
-    ? cueWordWindows(cue).findIndex((w) => t >= w.start && t < w.end)
-    : -1;
-  // The spoken word's treatment follows the style (with user overrides): a
-  // swell in the accent color, an accent box (drawn with box-shadow spread so
-  // the line never reflows), the accent color alone, or accent color +
-  // underline. The swell is a transform, so it too leaves the line alone.
-  const look = karaokeLook(style, subtitles);
-  const activeStyle = wordAccentCss(look);
   const scale = stageWidth / frame.w;
   return (
     <div
@@ -484,11 +482,7 @@ function SubtitleCaption({
         borderRadius: ov.plate ? PLATE_RADIUS_EM : undefined,
       }}
     >
-      {wordIndex < 0 ? (
-        ov.text
-      ) : (
-        <AccentedText text={ov.text} index={wordIndex} css={activeStyle} />
-      )}
+      {ov.wordDraw ? <WordText text={ov.text} draws={ov.wordDraw} /> : ov.text}
     </div>
   );
 }
@@ -584,25 +578,22 @@ function OverlayItem({
   // box from its left edge. Neither runs while the box is being edited.
   const glyphs = isText && !editing && live && hasGlyphMotion(live) ? live : null;
   const reveal = !editing ? live?.reveal : undefined;
-  // Word emphasis: the word being said wears the accent while the rest of the
-  // line stays as it is. Off while editing — the box is plain text then — and
-  // a per-glyph ramp takes the frame for itself while it runs.
+  // Word effects: the line plays word by word on its own clock. Off while
+  // editing — the box is plain text then — and a per-glyph ramp takes the
+  // frame for itself while it runs.
   const words = isText && !editing ? overlayWords(o) : undefined;
-  // A rehearsal from the inspector sweeps the emphasis along the line on its
-  // own clock; otherwise it follows the playhead, like everything else here.
+  // A rehearsal from the inspector sweeps the effect along the line on its own
+  // clock; otherwise it follows the playhead, like everything else here.
   const wordLocal = running ? running.tLocal : Math.max(0, t - o.start);
-  const wordIndex =
-    words && !glyphs ? wordAccentIndex(o, wordLocal, Math.max(0.1, o.end - o.start)) : -1;
-  const wordColor = wordAccent(words, isTextOverlay(o) ? o.color : WORD_ACCENT_DEFAULT);
-  const wordCss =
-    words && wordIndex >= 0
-      ? wordAccentCss({
-          mode: words.style,
-          color: wordColor,
-          text: contrastText(wordColor),
-          scale: words.scale,
-          lineHeight: (isTextOverlay(o) ? o.lineHeight : undefined) ?? LINE_HEIGHT,
-        })
+  const wordDraw =
+    words && !glyphs && isTextOverlay(o)
+      ? wordDrawsAt(
+          o.text,
+          words,
+          o.color ?? WORD_ACCENT_DEFAULT,
+          Math.max(0.1, o.end - o.start),
+          wordLocal
+        )
       : null;
   // Typewriter: the visible slice of the text (display only, never while
   // the box is being edited).
@@ -1053,8 +1044,12 @@ function OverlayItem({
             </div>
           ) : glyphs ? (
             <GlyphText text={shownText} phase={glyphs} scale={scale} />
-          ) : wordCss ? (
-            <AccentedText text={shownText} index={wordIndex} css={wordCss} />
+          ) : wordDraw ? (
+            <WordText
+              text={shownText}
+              draws={wordDraw}
+              lineHeight={(isTextOverlay(o) ? o.lineHeight : undefined) ?? LINE_HEIGHT}
+            />
           ) : (
             <span>{shownText}</span>
           )

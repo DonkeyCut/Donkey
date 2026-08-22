@@ -10,14 +10,13 @@
  */
 
 import {
-  applyWordAccent,
+  applyWordDraw,
   evalOverlayFrame,
   glyphStateAt,
   hasGlyphMotion,
   maskComposite,
   overlayWords,
-  wordAccentIndex,
-  wordWindows,
+  wordSampleWindows,
 } from "@donkeycut/effects-kit";
 import { personSegmenter, segmentSubjectAlpha } from "./cutout";
 import { createRasterCanvas } from "./raster";
@@ -37,13 +36,33 @@ type Segmenter = import("@mediapipe/tasks-vision").ImageSegmenter;
 /** An element's own length, the span its word emphasis is timed across. */
 const spanOf = (o: Overlay): number => Math.max(0.1, o.end - o.start);
 
-/** The word indices an element needs a picture for: one per word while it
- * lights them as they are said, and the plain picture (-1) otherwise. */
-function rasterWords(o: Overlay): number[] {
+/** Pictures here are full-frame, so a word effect that ramps is sampled
+ * coarsely: enough slices that an arrival reads, few enough that a behind-
+ * subject line does not hold a hundred frames of pixels resident. */
+const BEHIND_WORD_FPS = 8;
+
+/** The spans an element's word effect holds still for — one picture each.
+ * Nothing here means the element draws as one piece. */
+function rasterSpans(o: Overlay): { start: number; end: number }[] | null {
   const words = overlayWords(o);
-  if (!words || !isTextOverlay(o)) return [-1];
-  const n = wordWindows(o.text, spanOf(o), words.times).length;
-  return n > 0 ? Array.from({ length: n }, (_, i) => i) : [-1];
+  if (!words || !isTextOverlay(o)) return null;
+  const spans = wordSampleWindows(o.text, words, spanOf(o), BEHIND_WORD_FPS);
+  return spans.length > 0 ? spans : null;
+}
+
+/** The picture indices an element needs: one per span while a word effect
+ * walks it, and the plain picture (-1) otherwise. */
+function rasterSlices(o: Overlay): number[] {
+  const spans = rasterSpans(o);
+  return spans ? spans.map((_, i) => i) : [-1];
+}
+
+/** Which picture stands for `tLocal`, or -1 for the plain one. */
+function rasterSliceAt(o: Overlay, tLocal: number): number {
+  const spans = rasterSpans(o);
+  if (!spans) return -1;
+  const i = spans.findIndex((s) => tLocal >= s.start && tLocal < s.end);
+  return i < 0 ? spans.length - 1 : i;
 }
 
 /** Segmentation input width — small on purpose; this runs per frame. */
@@ -144,8 +163,8 @@ export class SubjectMaskCompositor {
     return null;
   }
 
-  /** One element picture, with the word it emphasizes at this moment baked
-   * in, kept under the element it came from. */
+  /** One element picture, with its words drawn as they stand across the span
+   * it covers, kept under the element it came from. */
   private async drawRaster(
     o: Overlay,
     w: number,
@@ -153,8 +172,11 @@ export class SubjectMaskCompositor {
     assets: MediaAsset[],
     word: number
   ): Promise<void> {
+    const spans = rasterSpans(o);
+    const span = word >= 0 ? spans?.[word] : undefined;
+    const at = span ? (span.start + span.end) / 2 : 0;
     const png = await renderElementPng(
-      applyWordAccent({ ...o, rotation: undefined, opacity: undefined }, word),
+      applyWordDraw({ ...o, rotation: undefined, opacity: undefined }, at, spanOf(o)),
       w,
       h,
       assets
@@ -176,7 +198,7 @@ export class SubjectMaskCompositor {
       behind.flatMap((o) =>
         // An element that lights its words needs one picture per word, all of
         // them resident before the first frame draws.
-        rasterWords(o).map(async (word) => {
+        rasterSlices(o).map(async (word) => {
           if (this.rasters.get(o)?.has(word)) return;
           try {
             await this.drawRaster(o, w, h, assets, word);
@@ -353,7 +375,7 @@ export class SubjectMaskCompositor {
     const scale = Math.min(W, H) / 1080;
     for (const o of active) {
       const tLocal = Math.max(0, t - o.start);
-      const bmp = this.rasterFor(o, W, H, assets, wordAccentIndex(o, tLocal, spanOf(o)));
+      const bmp = this.rasterFor(o, W, H, assets, rasterSliceAt(o, tLocal));
       if (!bmp) continue;
       const ev = evalOverlayFrame(o, tLocal);
       // One cached picture per element here, so a per-glyph ramp or loop runs

@@ -16,7 +16,7 @@ import {
   type ShapeOverlay,
   type StickerOverlay,
   type TextOverlay as KitTextOverlay,
-  type WordAccentMode,
+  type WordEffectId,
 } from "@donkeycut/effects-kit";
 import { getBackend, type CutBackend } from "./backend";
 import type { VideoProject } from "./genvideo/types";
@@ -1142,7 +1142,7 @@ export type {
   ShapeKind,
   ShapeOverlay,
   StickerOverlay,
-  WordAccentMode,
+  WordEffectId,
 };
 
 /** One subtitle caption, timed against the timeline (not the source files). */
@@ -1217,12 +1217,17 @@ export interface SubtitlesBlock {
    * per-track anchor in `tracks`. Read as the lane-0 fallback. */
   x?: number;
   y?: number;
-  /** Karaoke mode: each word lights up as it is spoken, in the preview and
-   * the export burn-in. */
+  /** Word effects on: the caption plays word by word as it is spoken, in the
+   * preview and the export burn-in. */
   wordHighlight?: boolean;
-  /** Word treatment overrides; absent = the caption style's defaults. */
-  accentMode?: WordAccentMode;
+  /** Which word effect, overriding the caption style's own; absent = the
+   * style's default. */
+  accentMode?: WordEffectId;
   accentColor?: string;
+  /** How far a word swells at its moment; absent = the effect's own. */
+  accentScale?: number;
+  /** The opacity a word wears off its moment; absent = the effect's own. */
+  accentDim?: number;
 }
 
 export const emptySubtitles = (): SubtitlesBlock => ({

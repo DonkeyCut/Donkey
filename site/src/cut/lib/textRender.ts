@@ -1,18 +1,20 @@
 "use client";
 
 import {
+  hexAlpha,
+  WORD_BASELINE_DROP,
   renderElementPng as kitRenderElementPng,
   renderOverlayFrames as kitRenderOverlayFrames,
   LINE_HEIGHT,
-  wordSwell,
   type OverlayFrameSet,
   type PaintPhase,
   type RenderEnv,
   type StickerImage,
+  type WordDraw,
 } from "@donkeycut/effects-kit";
 import type { CSSProperties } from "react";
 import { createRasterCanvas, decodeRasterImage, rasterCanvasToPng } from "./raster";
-import { fontStack, type MediaAsset, type Overlay, type WordAccentMode } from "./types";
+import { fontStack, type MediaAsset, type Overlay } from "./types";
 
 // The shared text metrics and painters live in the effects kit; these
 // re-exports keep the app's preview components on the same constants.
@@ -26,49 +28,51 @@ export {
   PLATE_RADIUS,
   plateFill,
   SHADOW,
-  WORD_ACCENT_DEFAULT,
-  WORD_ACCENT_LABELS,
-  WORD_ACCENT_MODE_IDS,
-  WORD_POP_SCALE,
 } from "@donkeycut/effects-kit";
 
-/** The css one emphasized word wears — the DOM twin of what the canvas
- * painter draws for `highlightMode`. A swell is real type size, so the line
- * reflows around it: the words beside it move out of its way and settle back
- * as the emphasis travels on, which is what the burn-in lays out too. The
- * word keeps the line's own leading, so a bigger word never opens the line
- * box up. A box is box-shadow spread, which stays clear of the layout. */
-export function wordAccentCss(look: {
-  mode: WordAccentMode;
-  color: string;
-  text: string;
-  /** How far the word swells; absent = the mode's default. */
-  scale?: number;
-  /** The block's line height, so the swollen word can hold it. */
-  lineHeight?: number;
-}): CSSProperties {
-  const swell = wordSwell({ style: look.mode, scale: look.scale });
-  const lh = look.lineHeight ?? LINE_HEIGHT;
-  const size: CSSProperties =
-    swell === 1 ? {} : { fontSize: `${swell}em`, lineHeight: lh / swell };
-  const treatment: CSSProperties =
-    look.mode === "box"
-      ? {
-          color: look.text,
-          background: look.color,
-          boxShadow: `0 0 0 0.12em ${look.color}`,
-          borderRadius: "0.18em",
-          textShadow: "none",
-        }
-      : look.mode === "color" || look.mode === "pop"
-        ? { color: look.color }
-        : {
-            color: look.color,
-            textDecoration: "underline",
-            textDecorationThickness: "0.07em",
-            textUnderlineOffset: "0.14em",
-          };
-  return { ...treatment, ...size };
+/** The css one word wears — the DOM twin of what the canvas painter draws for
+ * a resolved `WordDraw`. A resize is real type size, so the line reflows
+ * around it, which is what the burn-in lays out too; the word keeps the
+ * line's own leading, so a bigger word never opens the line box up. A box is
+ * box-shadow spread, which stays clear of the layout. */
+export function wordDrawCss(d: WordDraw, lineHeight = LINE_HEIGHT): CSSProperties {
+  const css: CSSProperties = { color: d.color };
+  if (d.opacity < 0.999) css.opacity = d.opacity;
+  // The word takes its room at the layout size and draws at its own, which
+  // differ only while it is growing into its place: real type size for the
+  // room, so the line reflows around a swollen word exactly as the burn-in
+  // lays it out, and a transform for the rest, which leaves the layout alone.
+  if (d.layoutScale !== 1) {
+    css.fontSize = `${d.layoutScale}em`;
+    css.lineHeight = lineHeight / d.layoutScale;
+  }
+  const shrink = d.scale / d.layoutScale;
+  // A word drawn smaller than the room it holds shares the line's baseline, so
+  // it hangs lower in its box than a scale about the box center would leave
+  // it; the drop makes up the difference. Offsets are em of the size the word
+  // draws at and the box is em of the size it takes room at, so they convert
+  // by the ratio between the two.
+  const sit = (WORD_BASELINE_DROP * (d.layoutScale - d.scale)) / d.layoutScale;
+  if (shrink !== 1 || d.dx || d.dy || d.rotate) {
+    css.display = "inline-block";
+    css.transform =
+      `translate(${d.dx * shrink}em, ${d.dy * shrink + sit}em) rotate(${d.rotate}deg)` +
+      (shrink !== 1 ? ` scale(${shrink})` : "");
+  }
+  const mark = d.markAlpha ?? 0;
+  if (d.mark === "box" && mark > 0.001) {
+    const fill = hexAlpha(d.markColor ?? "#000000", mark);
+    css.background = fill;
+    css.boxShadow = `0 0 0 0.12em ${fill}`;
+    css.borderRadius = "0.18em";
+    css.textShadow = "none";
+  } else if (d.mark === "underline" && mark > 0.001) {
+    css.textDecoration = "underline";
+    css.textDecorationColor = hexAlpha(d.color, mark);
+    css.textDecorationThickness = "0.07em";
+    css.textUnderlineOffset = "0.14em";
+  }
+  return css;
 }
 
 /** Decoded sticker images by asset id, shared across one page's renders. An

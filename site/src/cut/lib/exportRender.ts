@@ -33,7 +33,7 @@ import { FrameCompositor, MISSING_FRAME, type Frame } from "./composite";
 import { overlayPlan, trackZeroPlan } from "./framePlan";
 import { frameSink, openMedia, videoTrackOf } from "./mediaRead";
 import { getClipSpans, overlayLayers, projectDuration, spanSequence } from "./store";
-import { captionStyle, cueOverlay, cueWordWindows, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
+import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
 import { applyEffectToCanvas, evalOverlayFrame, grainTile, isAudioEffect, isMaskAnimated, isOverlayAnimated, maskFrameAt, planAnimatedLayers, type LottieHandle, type OverlayAnim, type PaintPhase } from "@donkeycut/effects-kit";
 import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
 import { createRasterCanvas, type RasterSurface } from "./raster";
@@ -331,7 +331,7 @@ async function stampText(doc: ExportDoc): Promise<StampedLayer[]> {
         const cue = cues[i];
         if (cue.start >= duration || !cue.text.trim()) continue;
         const windows = doc.subtitles.wordHighlight
-          ? cueWordWindows(cue)
+          ? cueWordFrames(cue, capStyle, doc.subtitles)
           : [{ start: cue.start, end: cue.end }];
         for (let wi = 0; wi < windows.length; wi++) {
           const win = windows[wi];
@@ -342,7 +342,7 @@ async function stampText(doc: ExportDoc): Promise<StampedLayer[]> {
               capStyle,
               i === 0,
               pos,
-              doc.subtitles.wordHighlight ? wi : undefined,
+              doc.subtitles.wordHighlight ? (win.start + win.end) / 2 : undefined,
               designWidth
             ),
             start: win.start,
