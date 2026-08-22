@@ -65,26 +65,33 @@ final class AuthController: NSObject, AuthServicing {
         return profile
     }
 
-    func restoreSession() async -> UserProfile? {
+    /// Keychain only — this runs while the first frame is being built.
+    func storedSession() -> StoredSession {
+        guard KeychainStore.read(Self.tokenKey) != nil else { return .none }
+        guard let profile = KeychainStore.read(Self.profileKey)
+            .flatMap({ try? JSONDecoder().decode(UserProfile.self, from: $0) })
+        else { return .unknown }
+        return .cached(profile)
+    }
+
+    func checkSession() async -> SessionCheck {
         guard let tokenData = KeychainStore.read(Self.tokenKey),
-              let token = String(data: tokenData, encoding: .utf8) else { return nil }
-        let cached = KeychainStore.read(Self.profileKey)
-            .flatMap { try? JSONDecoder().decode(UserProfile.self, from: $0) }
+              let token = String(data: tokenData, encoding: .utf8) else { return .rejected }
         do {
             let profile = try await fetchProfile(token: token)
             if let data = try? JSONEncoder().encode(profile) {
                 KeychainStore.save(data, for: Self.profileKey)
             }
-            return profile
+            return .valid(profile)
         } catch AuthError.server {
             // The backend rejected the session: signed out for real.
             KeychainStore.delete(Self.tokenKey)
             KeychainStore.delete(Self.profileKey)
-            return nil
+            return .rejected
         } catch {
-            // Offline: recording and viewing are local, so the cached
-            // profile keeps the app usable.
-            return cached
+            // Offline: recording and viewing are local, so the session the
+            // app opened on keeps standing.
+            return .unreachable
         }
     }
 

@@ -72,6 +72,12 @@ rather than to the screen, so leaving the player and coming back finds it
 where it was, and a project that already carries a render offers it as a
 choice that saves right away without spending another.
 
+The app opens on the session already on the device: the keychain is read while
+the first frame is built, and the server check that follows only corrects it —
+a rejection signs out, a server that cannot be reached leaves the session
+standing, since recording and viewing are local. Nothing waits on the network
+to draw.
+
 Every request carries an `x-donkey-cut-client: ios` header. The server
 remembers accounts it has seen it from, and the desktop shows its phone
 surfaces (Camera Roll and Notes tabs) only to those accounts.

@@ -659,19 +659,64 @@ import Testing
 @MainActor
 @Suite struct AuthModelTests {
     final class FakeAuth: AuthServicing {
-        var stored: UserProfile?
+        var stored: StoredSession = .none
+        var check: SessionCheck = .rejected
         var result: Result<UserProfile, any Error> = .failure(CancellationError())
+        var checked = false
 
         func signIn(with provider: AuthProvider) async throws -> UserProfile {
             try result.get()
         }
 
-        func restoreSession() async -> UserProfile? { stored }
-        func signOut() async { stored = nil }
+        func storedSession() -> StoredSession { stored }
+        func checkSession() async -> SessionCheck {
+            checked = true
+            return check
+        }
+        func signOut() async { stored = .none }
     }
 
     @Test func restoreWithoutSessionSignsOut() async {
         let model = AuthModel(service: FakeAuth())
+        await model.restore()
+        #expect(model.state == .signedOut)
+    }
+
+    @Test func cachedSessionIsSignedInBeforeAnythingIsChecked() {
+        let service = FakeAuth()
+        let profile = UserProfile(id: "1", name: "David", email: "d@example.com")
+        service.stored = .cached(profile)
+        let model = AuthModel(service: service)
+        #expect(model.state == .signedIn(profile))
+        #expect(service.checked == false)
+    }
+
+    @Test func sessionWithNoCachedProfileWaitsOnTheCheck() async {
+        let service = FakeAuth()
+        service.stored = .unknown
+        let profile = UserProfile(id: "1", name: "David", email: "d@example.com")
+        service.check = .valid(profile)
+        let model = AuthModel(service: service)
+        #expect(model.state == .restoring)
+        await model.restore()
+        #expect(model.state == .signedIn(profile))
+    }
+
+    @Test func unreachableServerKeepsTheCachedSession() async {
+        let service = FakeAuth()
+        let profile = UserProfile(id: "1", name: "David", email: "d@example.com")
+        service.stored = .cached(profile)
+        service.check = .unreachable
+        let model = AuthModel(service: service)
+        await model.restore()
+        #expect(model.state == .signedIn(profile))
+    }
+
+    @Test func rejectedSessionSignsOut() async {
+        let service = FakeAuth()
+        service.stored = .cached(UserProfile(id: "1", name: "David", email: "d@example.com"))
+        service.check = .rejected
+        let model = AuthModel(service: service)
         await model.restore()
         #expect(model.state == .signedOut)
     }
