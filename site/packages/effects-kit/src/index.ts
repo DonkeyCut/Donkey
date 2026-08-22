@@ -1,5 +1,6 @@
 export * from "./types";
 export * from "./anim";
+export * from "./words";
 export * from "./motion/types";
 export * from "./motion/evaluate";
 export * from "./motion/catalog";

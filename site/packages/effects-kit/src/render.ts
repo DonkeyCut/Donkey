@@ -33,6 +33,15 @@ import {
   type TextOverlay,
   type TextShadowSpec,
 } from "./types";
+import {
+  applyWordAccent,
+  highlightSwell,
+  overlayWords,
+  WORD_ACCENT_DEFAULT,
+  wordAccentIndex,
+  wordSwell,
+  wordWindows,
+} from "./words";
 
 // Text metrics shared by DOM preview and canvas burn-in.
 export const LINE_HEIGHT = 1.25;
@@ -372,7 +381,45 @@ async function paintText(
   const totalH = lines.length * lineH;
   const cx = overlay.x * width;
   const cy = overlay.y * frame.height;
-  const widthsOf = lines.map((l) => ctx.measureText(l).width);
+
+  // Karaoke lays its words out first. The emphasized word may be swollen, and
+  // it takes that width in the line — its neighbours move out of its way — so
+  // the plate, the alignment and the draw all have to read one layout.
+  const swell = overlay.highlightWord === undefined ? 1 : highlightSwell(overlay);
+  const bigFont = swell !== 1 ? textCssFont(overlay, fpx * swell, env) : cssFont;
+  if (swell !== 1) await ensureFontLoaded(bigFont, overlay.text);
+  /** Draw and measure at the swollen word's size, or back at the line's.
+   * Tracking is em of the size in play, so a swollen word is spaced like the
+   * words beside it. */
+  const setSize = (big: boolean) => {
+    ctx.font = big ? bigFont : cssFont;
+    if ("letterSpacing" in ctx)
+      ctx.letterSpacing = `${(overlay.letterSpacing ?? 0) * (big ? fpx * swell : fpx)}px`;
+  };
+  const runs =
+    overlay.highlightWord === undefined
+      ? null
+      : (() => {
+          const spaceW = ctx.measureText(" ").width;
+          let k = 0;
+          return lines.map((line) => {
+            const words = line.split(" ").filter(Boolean);
+            const widths = words.map((w) => {
+              const big = k++ === overlay.highlightWord && swell !== 1;
+              if (big) setSize(true);
+              const ww = ctx.measureText(w).width;
+              if (big) setSize(false);
+              return ww;
+            });
+            return {
+              words,
+              widths,
+              spaceW,
+              lineW: widths.reduce((a, b) => a + b, 0) + spaceW * Math.max(0, words.length - 1),
+            };
+          });
+        })();
+  const widthsOf = runs ? runs.map((r) => r.lineW) : lines.map((l) => ctx.measureText(l).width);
   const maxW = Math.max(...widthsOf, 1);
 
   if (overlay.plate) {
@@ -400,7 +447,10 @@ async function paintText(
   const drawText = (text: string, x: number, y: number, fill: string = overlay.color) => {
     if (overlay.stroke && strokeW > 0) {
       ctx.lineJoin = "round";
-      ctx.lineWidth = strokeW * 2; // half of a centered stroke shows behind the fill
+      // In em of whatever size is set, so a swollen word wears the same
+      // outline weight as the words beside it.
+      const em = parseFloat(ctx.font) || fpx;
+      ctx.lineWidth = (strokeW / fpx) * em * 2; // half of a centered stroke shows behind the fill
       ctx.strokeStyle = overlay.stroke.color;
       ctx.strokeText(text, x, y);
     }
@@ -453,48 +503,69 @@ async function paintText(
     return;
   }
 
-  // Karaoke: draw word by word so the spoken word gets the accent color and an
-  // underline; the word index counts across all lines.
+  // Karaoke: draw word by word so the spoken word takes its accent treatment —
+  // color, underline, a box, or a swell; the word index counts across all
+  // lines. The words sit in the layout measured above, so a swollen one has
+  // already pushed its neighbours aside and they close back up as the
+  // emphasis moves on.
+  if (!runs) {
+    lines.forEach((line, i) => drawText(line, lineX(i), cy - totalH / 2 + lineH * (i + 0.5)));
+    return;
+  }
+  // A word drawn at another size shares the baseline with the words beside
+  // it, so where that baseline sits has to be read off the face: the middle
+  // this painter draws from is half the type's own height above it.
+  const fm = ctx.measureText("Hg");
+  const asc = fm.fontBoundingBoxAscent ?? fpx * 0.8;
+  const desc = fm.fontBoundingBoxDescent ?? fpx * 0.2;
+  const midOf = (size: number) => ((asc - desc) / 2) * (size / fpx);
   let k = 0;
-  lines.forEach((line, i) => {
+  ctx.textAlign = "left";
+  runs.forEach((run, i) => {
     const y = cy - totalH / 2 + lineH * (i + 0.5);
-    if (overlay.highlightWord === undefined) {
-      drawText(line, lineX(i), y);
-      return;
-    }
-    const words = line.split(" ").filter(Boolean);
-    const spaceW = ctx.measureText(" ").width;
-    const widths = words.map((w) => ctx.measureText(w).width);
-    const lineW = widths.reduce((a, b) => a + b, 0) + spaceW * (words.length - 1);
-    let x = cx - lineW / 2;
-    ctx.textAlign = "left";
-    words.forEach((w, wi) => {
+    let x = cx - run.lineW / 2;
+    run.words.forEach((w, wi) => {
       const active = k === overlay.highlightWord;
+      const big = active && swell !== 1;
+      // A word at the line's own size draws from the middle, exactly as it
+      // always has; a swollen one hangs off the shared baseline instead, and
+      // its own middle follows from there.
+      const size = big ? fpx * swell : fpx;
+      const drawY = big ? y + midOf(fpx) : y;
+      const mid = big ? y + midOf(fpx) - midOf(size) : y;
+      if (big) {
+        setSize(true);
+        ctx.textBaseline = "alphabetic";
+      }
       if (active && overlay.highlightMode === "box") {
         // Accent box behind the word, contrast text on top — drawn with the
         // shadow off so the box and its word stay crisp.
-        const pad = 0.12 * fpx;
+        const pad = 0.12 * size;
         const prevShadow = ctx.shadowColor;
         ctx.shadowColor = "transparent";
-        ctx.fillStyle = overlay.highlightColor ?? "#FFE94A";
+        ctx.fillStyle = overlay.highlightColor ?? WORD_ACCENT_DEFAULT;
         ctx.beginPath();
-        ctx.roundRect(x - pad, y - fpx * 0.5 - pad, widths[wi] + pad * 2, fpx + pad * 2, 0.18 * fpx);
+        ctx.roundRect(x - pad, mid - size * 0.5 - pad, run.widths[wi] + pad * 2, size + pad * 2, 0.18 * size);
         ctx.fill();
-        drawText(w, x, y, overlay.highlightText ?? "#111114");
+        drawText(w, x, drawY, overlay.highlightText ?? "#111114");
         ctx.shadowColor = prevShadow;
       } else if (active) {
-        drawText(w, x, y, overlay.highlightColor ?? "#FFE94A");
-        if (overlay.highlightMode !== "color") {
-          ctx.fillRect(x, y + fpx * 0.42, widths[wi], Math.max(2 * scale, fpx * 0.07));
+        drawText(w, x, drawY, overlay.highlightColor ?? WORD_ACCENT_DEFAULT);
+        if (overlay.highlightMode === "underline") {
+          ctx.fillRect(x, mid + size * 0.42, run.widths[wi], Math.max(2 * scale, size * 0.07));
         }
       } else {
-        drawText(w, x, y);
+        drawText(w, x, drawY);
       }
-      x += widths[wi] + spaceW;
+      if (big) {
+        setSize(false);
+        ctx.textBaseline = "middle";
+      }
+      x += run.widths[wi] + run.spaceW;
       k++;
     });
-    ctx.textAlign = "center";
   });
+  ctx.textAlign = "center";
 }
 
 /** Paint one element in frame coordinates with no element-level transform —
@@ -702,6 +773,11 @@ export function planAnimatedLayers(o: Overlay, end: number): AnimatedLayer[] {
   const inS = anim.in ? Math.min(anim.in.seconds, dur) : 0;
   const outS = anim.out ? Math.min(anim.out.seconds, Math.max(0, dur - inS)) : 0;
   const out: AnimatedLayer[] = [];
+  // Word emphasis walks the line on the element's own clock, so every window
+  // below is cut at the word boundaries inside it and each piece stamped with
+  // the word it emphasizes — the same one-picture-per-word the caption
+  // burn-in has always used.
+  const words = overlayWords(o);
   const push = (
     overlay: Overlay,
     from: number,
@@ -712,13 +788,23 @@ export function planAnimatedLayers(o: Overlay, end: number): AnimatedLayer[] {
     const start = Math.max(o.start, from);
     const stop = Math.min(end, to);
     if (stop - start < 1e-3) return;
-    out.push({
-      overlay: { ...overlay, rotation: undefined, opacity: undefined } as Overlay,
-      start,
-      end: stop,
-      anim: animPart,
-      phase,
-    });
+    const add = (el: Overlay, a: number, b: number) =>
+      out.push({
+        overlay: { ...el, rotation: undefined, opacity: undefined } as Overlay,
+        start: a,
+        end: b,
+        anim: animPart,
+        phase,
+      });
+    if (words) {
+      wordWindows((o as TextOverlay).text, dur, words.times).forEach((w, i) => {
+        const a = Math.max(start, o.start + w.start);
+        const b = Math.min(stop, o.start + w.end);
+        if (b - a >= 1e-3) add(applyWordAccent(overlay, i), a, b);
+      });
+      return;
+    }
+    add(overlay, start, stop);
   };
   /** One window per slice, each drawn at the ramp's position mid-window. The
    * slot leaves the window's anim: its motion is in the picture already. */
@@ -825,7 +911,10 @@ export async function renderOverlayFrames(
   // spans every pose the track visits, at the largest scale it reaches.
   const keyed = hasOverlayKeys(overlay);
   const extent = poseExtent(overlay);
-  const maxScale = 1.15 * extent.scale * move.scale;
+  // A swollen word grows the line past the resting box, so the region carries
+  // it — width from the swell, and the type's own extra height with it.
+  const accent = overlayWords(overlay);
+  const maxScale = 1.15 * extent.scale * move.scale * wordSwell(accent);
   const rotates =
     !!overlay.rotation ||
     loop.rotates ||
@@ -863,7 +952,10 @@ export async function renderOverlayFrames(
     // Back to the origin the painters draw around, so they stay unaware of
     // any of this.
     ctx.translate(-overlay.x * width, -overlay.y * height);
-    let el: Overlay = { ...overlay, rotation: undefined, opacity: undefined };
+    let el: Overlay = applyWordAccent(
+      { ...overlay, rotation: undefined, opacity: undefined },
+      wordAccentIndex(overlay, tLocal, dur)
+    );
     if (ev.textProgress !== undefined && (overlay.kind ?? "text") === "text") {
       const text = (overlay as TextOverlay).text;
       const chars = Math.max(0, Math.min(text.length, Math.ceil(ev.textProgress * text.length)));
@@ -908,7 +1000,7 @@ export async function renderOverlayFrames(
   // A keyframed pose, a move, or a keyframed mask changes on its own schedule
   // across the whole element, so there is no still middle and no cycle to
   // repeat: sample the element frame by frame.
-  if (keyed || anim?.move || isMaskAnimated(overlay.mask)) {
+  if (keyed || anim?.move || isMaskAnimated(overlay.mask) || (accent && anim?.loop)) {
     const n = Math.max(1, Math.round(dur * fps));
     for (let i = 0; i < n; i++) {
       await push(i * step, i === n - 1 ? dur - (n - 1) * step : step);
@@ -928,7 +1020,17 @@ export async function renderOverlayFrames(
   const middle = dur - inS - outS;
   if (middle > 1e-3) {
     const period = loopPeriod(anim) ?? lottieDur;
-    if (period) {
+    if (accent) {
+      // The picture changes as the emphasis moves on, and nowhere else: one
+      // frame per word covers the middle however long it runs. The last one
+      // absorbs the rounding, so the pieces sum to the middle exactly.
+      const spans = wordWindows((overlay as TextOverlay).text, dur, accent.times)
+        .map((w) => ({ a: Math.max(inS, w.start), b: Math.min(dur - outS, w.end) }))
+        .filter((w) => w.b - w.a > 1e-3);
+      if (spans.length > 0) spans[spans.length - 1].b = dur - outS;
+      for (const w of spans) await push((w.a + w.b) / 2, w.b - w.a);
+      if (spans.length === 0) await push(inS + middle / 2, middle);
+    } else if (period) {
       // One cycle of pictures, repeated by reference to cover the middle.
       const n = Math.max(2, Math.min(Math.round(period * fps), 180));
       const cycleStep = period / n;

@@ -24,6 +24,7 @@ import {
 } from "./motion/catalog";
 import { evalPreset, evalWhole, presetExtent, sampleProperties } from "./motion/evaluate";
 import type { MotionPose, MotionPreset } from "./motion/types";
+import type { OverlayWords } from "./words";
 
 export type OverlayAnimStyle =
   | "fade"
@@ -123,6 +124,9 @@ export interface OverlayAnim {
   out?: OverlayEdge;
   loop?: OverlayLoop;
   move?: OverlayMove;
+  /** Word-by-word emphasis (see words.ts). Text only: every other kind
+   * ignores it, the way typewriter is offered on titles alone. */
+  words?: OverlayWords;
 }
 
 /** The motion a slot plays: the one it carries, or the catalog entry it
@@ -453,7 +457,7 @@ export function loopPeriod(anim: OverlayAnim | undefined): number | null {
 
 /** Whether any slot is set (an element with an empty anim object is static). */
 export function hasOverlayAnim(anim: OverlayAnim | undefined): boolean {
-  return !!anim && (!!anim.in || !!anim.out || !!anim.loop || !!anim.move);
+  return !!anim && (!!anim.in || !!anim.out || !!anim.loop || !!anim.move || !!anim.words);
 }
 
 /**

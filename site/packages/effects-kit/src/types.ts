@@ -40,8 +40,11 @@ export interface OverlayBase {
 }
 
 /** How a highlighted word lights up in karaoke text: accent color only,
- * accent color plus underline, or an accent box behind the word. */
-export type WordAccentMode = "color" | "underline" | "box";
+ * accent color plus underline, an accent box behind the word, or the word
+ * swelling at the accent color. A swollen word takes its new width in the
+ * line, so its neighbours move out of its way and settle back as the
+ * emphasis travels on. */
+export type WordAccentMode = "color" | "underline" | "box" | "pop";
 
 /** A custom drop shadow. Every field is optional — absent ones take the
  * legacy defaults, so `shadow: true` and `shadow: {}` render identically. */
@@ -93,6 +96,8 @@ export interface TextOverlay extends OverlayBase {
   highlightColor?: string;
   highlightMode?: WordAccentMode;
   highlightText?: string;
+  /** How far the highlighted word swells; absent = the mode's own default. */
+  highlightScale?: number;
 }
 
 export type ShapeKind =
