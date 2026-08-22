@@ -16,11 +16,8 @@ import { authClient } from "@/lib/auth-client";
 // navigation to an app URL the same way, sending the visitor to sign-in with
 // the URL they wanted as the post-auth callback.
 //
-// It binds the account id and never holds the tree: the chrome around the
-// content — the surface, the sidebar, the connect banner — is worth painting
-// before a session exists, and it is what a cold load shows. What must wait is
-// anything that reads the engine, because every engine URL carries the id, and
-// SessionGate is where each surface waits for it.
+// It binds the account id; SessionGate, one level in, is what holds the app
+// until the id lands, because every engine URL carries it.
 export function RequireSession({ children }: { children: ReactNode }) {
   const { data: session, isPending } = authClient.useSession();
 

@@ -1,37 +1,44 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { Loader2 } from "lucide-react";
 
-import { Skeleton } from "@/components/ui/skeleton";
 import { useEngineUser } from "@/cut/lib/backend/hooks";
 
-// The line between the app's chrome and its contents. The sidebar, the surface,
-// and the banner render from the first byte; everything that reads the engine
-// waits behind this, because every engine URL carries the account id (the `u`
-// param) and the id only exists once the browser has read the session cookie.
+// The line between the app's chrome and its contents. Every engine URL carries
+// the account id (the `u` param), and the id only exists once the browser has
+// read the session cookie, so everything that reads the engine waits here.
 //
-// Holding the surface here — rather than above the sidebar — is what lets the
-// app paint before the session resolves: the shell a visitor sees on a cold
-// load is the real navigation with a skeleton where the content will land.
+// Nothing behind it is worth showing half-drawn, so the wait is not a skeleton
+// per pane: AppLoadingOverlay covers the whole window until the id lands, and
+// the shell — sidebar, banner, content — arrives whole underneath it.
 export function SessionGate({
   children,
-  fallback,
+  fallback = null,
 }: {
   children: ReactNode;
-  /** Shown while the session resolves. Defaults to a page-sized skeleton. */
+  /** Shown while the session resolves. Nothing, by default: the overlay is
+   *  what a visitor sees during the wait. */
   fallback?: ReactNode;
 }) {
   const user = useEngineUser();
-  if (user) return <>{children}</>;
-  return <>{fallback ?? <SessionSkeleton />}</>;
+  return <>{user ? children : fallback}</>;
 }
 
-/** The shape of a loading app surface: the title line alone, so the wait reads
- * as a pane about to fill rather than a slab of gray. */
-export function SessionSkeleton() {
+/** What a loading app looks like: a spinner centered on an opaque surface.
+ * Fixed, so it centers on the viewport wherever it is mounted. */
+export function AppLoading() {
   return (
-    <div className="h-full w-full p-10">
-      <Skeleton className="h-8 w-48" />
+    <div className="fixed inset-0 z-50 grid place-items-center bg-background">
+      <Loader2 className="size-6 animate-spin text-muted-foreground" />
     </div>
   );
+}
+
+/** The cold-load cover, mounted once in the app shell: the app is a spinner in
+ * the middle of the window until the account id lands. */
+export function AppLoadingOverlay() {
+  const user = useEngineUser();
+  if (user) return null;
+  return <AppLoading />;
 }

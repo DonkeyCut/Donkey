@@ -39,14 +39,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    // The /app subtree adds its surface class to html from an inline script so
-    // the first painted frame is already white (AppSurfaceBackground). The
-    // served markup and the DOM React hydrates differ by that class on
-    // purpose, and this is the element it lands on.
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-      suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col">
         <PostHogProvider>

@@ -147,14 +147,17 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
-/* App theme: the signed-in /app surface renders on white instead of the cream
-   landing background. Defined unlayered (like :root, the landing theme) so it
-   wins the cascade — an @layer base rule would lose to the unlayered :root no
-   matter its specificity. Repointing this one token flows everywhere keyed to
-   bg-background: the html/overscroll area, body, and every shadcn component
-   (e.g. the outline button variant). CSS variables inherit from html, so
-   portaled dialogs pick it up too. */
-html.app-surface {
+/* App theme: the signed-in /app surface renders on white; the cream is the
+   landing theme. The app layout marks its wrapper `.app-surface`, and this rule
+   repoints the token on the document as soon as that element parses — no script,
+   so the first painted frame is already the product surface and a session replay
+   shows the same colors the visitor saw. Defined unlayered (like :root, the
+   landing theme) so it wins the cascade — an @layer base rule would lose to the
+   unlayered :root no matter its specificity. This one token flows everywhere
+   keyed to bg-background: the html/overscroll area, body, and every shadcn
+   component (e.g. the outline button variant). CSS variables inherit from html,
+   so portaled dialogs pick it up too. */
+html:has(.app-surface) {
   --background: oklch(1 0 0);
 }
 
