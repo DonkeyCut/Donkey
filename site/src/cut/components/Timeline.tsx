@@ -1740,7 +1740,7 @@ export function Timeline() {
         dropSegment(overlayDrop!.t, overlayDrop!.len, h, overlayDrop!.ghost)
       ) : (
         <div
-          className="pointer-events-none absolute top-0.5 rounded-lg bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4)] transition-[left] duration-150 ease-out"
+          className="pointer-events-none absolute top-0.5 rounded-[5px] bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4)] transition-[left] duration-150 ease-out"
           style={{
             left: overlayDrop!.t * pps,
             width: Math.max(10, overlayDrop!.len * pps - CLIP_GAP),
@@ -1775,7 +1775,7 @@ export function Timeline() {
   const gapHighlight = (lane: LaneRef, h: number, top = 0) =>
     gapMenu && sameLane(gapMenu.lane, lane) ? (
       <div
-        className="pointer-events-none absolute z-10 rounded-lg bg-red-500/15"
+        className="pointer-events-none absolute z-10 rounded-[5px] bg-red-500/15"
         style={{
           left: gapMenu.gap.start * pps,
           width: Math.max(2, gapMenu.gap.len * pps - CLIP_GAP),
@@ -2693,7 +2693,7 @@ export function Timeline() {
                   <div
                     key={r}
                     className={cn(
-                      "pointer-events-none absolute inset-x-0 rounded-[7px] border border-dashed transition-colors",
+                      "pointer-events-none absolute inset-x-0 rounded-[5px] border border-dashed transition-colors",
                       r === laneDrag.targetRow
                         ? "border-emerald-500/70 bg-emerald-500/5"
                         : "border-emerald-500/25"
@@ -2703,7 +2703,7 @@ export function Timeline() {
                 ))}
               {audioDrop && (
                 <div
-                  className="tl-audio-drop-slot pointer-events-none absolute rounded-[7px] border-[1.5px] border-dashed border-emerald-500/80 bg-emerald-500/10 transition-[left] duration-150 ease-out"
+                  className="tl-audio-drop-slot pointer-events-none absolute rounded-[5px] border-[1.5px] border-dashed border-emerald-500/80 bg-emerald-500/10 transition-[left] duration-150 ease-out"
                   style={{
                     left: audioDrop.t * pps,
                     top: audioDrop.row * AUDIO_H + 2,
@@ -2718,7 +2718,7 @@ export function Timeline() {
                   pps={pps}
                   rowH={AUDIO_H}
                   barH={AUDIO_H - 4}
-                  className="rounded-[7px] bg-emerald-500/10 shadow-[inset_0_0_0_1.5px_rgba(16,185,129,0.5)]"
+                  className="rounded-[5px] bg-emerald-500/10 shadow-[inset_0_0_0_1.5px_rgba(16,185,129,0.5)]"
                 />
               )}
               {audioClips.map((a) => {
@@ -3715,7 +3715,7 @@ function ClipView({
     <>
     <div
       className={cn(
-        "tl-clip group absolute top-0.5 cursor-grab overflow-hidden rounded-lg bg-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
+        "tl-clip group absolute top-0.5 cursor-grab overflow-hidden rounded-[5px] bg-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
         selected && SELECTED_SHADOW,
         clip.hidden && "opacity-40 grayscale",
         drag
@@ -4634,7 +4634,7 @@ function AudioView({
   return (
     <div
       className={cn(
-        "tl-audio-clip group absolute cursor-grab overflow-hidden rounded-[7px] bg-gradient-to-b from-emerald-500 to-emerald-600 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
+        "tl-audio-clip group absolute cursor-grab overflow-hidden rounded-[5px] bg-gradient-to-b from-emerald-500 to-emerald-600 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
         selected && SELECTED_SHADOW,
         clip.hidden && "opacity-40 grayscale",
         drag
