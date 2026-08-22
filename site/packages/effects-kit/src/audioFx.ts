@@ -95,9 +95,11 @@ export const AUDIO_FX_RAMP = 0.04;
 const clampAmount = (k: number | undefined) => Math.max(0.05, Math.min(1, k ?? 0.5));
 const fmt = (n: number) => (Math.round(n * 1000) / 1000).toString();
 
-/** The delays a reverb's early reflections arrive at, in milliseconds. They
- * are mutually prime so the copies never stack into a single flutter. */
-const ROOM_TAPS = [23, 41, 59, 79, 101, 127, 151, 181];
+/** The delays a reverb's reflections arrive at, in milliseconds. They are
+ * mutually prime so the copies never stack into a single flutter, and they run
+ * out past two thirds of a second: a handful of early reflections alone reads
+ * as a thickening, and what makes a room audible is the tail behind them. */
+const ROOM_TAPS = [29, 43, 67, 89, 113, 149, 191, 239, 307, 383, 467, 571, 683];
 
 /**
  * The recipe for one effect at strength `amount` (0.05..1).
@@ -114,32 +116,37 @@ export function audioFxRecipe(effect: string, amount?: number): AudioFxRecipe | 
       return {
         dry: 1,
         taps: [
-          { ms: 250, gain: 0.6 * k },
-          { ms: 500, gain: 0.36 * k },
-          { ms: 750, gain: 0.2 * k },
+          { ms: 250, gain: 0.75 * k },
+          { ms: 500, gain: 0.5 * k },
+          { ms: 750, gain: 0.3 * k },
         ],
         bands: [],
       };
     case "reverb":
-      // A room, built from its early reflections: dense taps inside a fifth of
-      // a second, decaying, with the top rolled off so the tail sits behind
-      // the voice rather than beside it.
+      // A room, built from its reflections: dense taps decaying across three
+      // quarters of a second, with the top rolled off so the tail sits behind
+      // the voice. The decay is slow enough that the tail is still there after
+      // the word that made it, which is the part that is heard as a room.
       return {
         dry: 1,
-        taps: ROOM_TAPS.map((ms, i) => ({ ms, gain: 0.5 * k * Math.exp(-0.45 * i) })),
-        bands: [{ type: "lowpass", hz: 6000 }],
-        gain: 0.9,
+        taps: ROOM_TAPS.map((ms, i) => ({ ms, gain: 0.55 * k * Math.exp(-0.22 * i) })),
+        bands: [{ type: "lowpass", hz: 5000 }],
+        gain: 0.8,
       };
     case "muffle":
-      // Heard through a wall: two passes, so the top goes rather than dims.
+      // Heard through a wall: two passes take the top off at twenty-four
+      // decibels an octave, and a shelf pulls down what leaks past them, so
+      // the consonants go and the body stays. Makeup gain keeps the window at
+      // the level of the mix around it.
       return {
         dry: 1,
         taps: [],
         bands: [
-          { type: "lowpass", hz: 3200 - 2400 * k },
-          { type: "lowpass", hz: 3200 - 2400 * k },
+          { type: "lowpass", hz: 2000 - 1500 * k },
+          { type: "lowpass", hz: 2000 - 1500 * k },
+          { type: "highshelf", hz: 3000, db: -(6 + 12 * k) },
         ],
-        gain: 1 + 0.4 * k,
+        gain: 1 + 0.8 * k,
       };
     case "telephone":
       // The band a phone line passes, with the middle pushed up so speech
@@ -148,36 +155,55 @@ export function audioFxRecipe(effect: string, amount?: number): AudioFxRecipe | 
         dry: 1,
         taps: [],
         bands: [
-          { type: "highpass", hz: 400 + 200 * k },
-          { type: "lowpass", hz: 3400 - 800 * k },
-          { type: "peaking", hz: 1800, q: 1.2, db: 6 * k },
+          { type: "highpass", hz: 500 + 300 * k },
+          { type: "highpass", hz: 500 + 300 * k },
+          { type: "lowpass", hz: 3200 - 1000 * k },
+          { type: "peaking", hz: 1800, q: 1.2, db: 4 + 6 * k },
         ],
-        gain: 1.2,
+        gain: 1.3,
       };
     case "deep":
+      // Bigger and lower. The lift sits at 180 Hz, inside what a laptop
+      // speaker and a phone can actually reproduce, and the top comes down
+      // with it — a voice reads as deep by what it loses as much as by what it
+      // gains, and the loss is what carries on small speakers.
       return {
         dry: 1,
         taps: [],
-        bands: [{ type: "lowshelf", hz: 110, db: 4 + 8 * k }],
-        gain: 0.85,
-      };
-    case "bright":
-      return {
-        dry: 1,
-        taps: [],
-        bands: [{ type: "highshelf", hz: 4000, db: 3 + 7 * k }],
+        bands: [
+          { type: "lowshelf", hz: 180, db: 6 + 10 * k },
+          { type: "highshelf", hz: 2600, db: -(5 + 9 * k) },
+        ],
         gain: 0.9,
       };
+    case "bright":
+      // Thin and forward: the bottom comes off, a presence peak pushes the
+      // consonants out, and the shelf above it opens the air.
+      return {
+        dry: 1,
+        taps: [],
+        bands: [
+          { type: "lowshelf", hz: 220, db: -(4 + 8 * k) },
+          { type: "peaking", hz: 4500, q: 0.9, db: 4 + 7 * k },
+          { type: "highshelf", hz: 8000, db: 4 + 8 * k },
+        ],
+        gain: 0.95,
+      };
     case "wobble":
-      return { dry: 1, taps: [], bands: [], tremolo: { hz: 5, depth: 0.85 * k } };
+      // Six swings a second, and the shallowest of them still drops the level
+      // by a third — a tremolo that only grazes the signal is heard as nothing
+      // at all.
+      return { dry: 1, taps: [], bands: [], tremolo: { hz: 6, depth: 0.35 + 0.65 * k } };
     case "crush":
-      // Down to four bits at the top of the slider, mixed in over the clean
-      // signal so the words survive the grit.
+      // Down to three bits at the top of the slider, mixed in over the clean
+      // signal so the words survive the grit. Eight bits and up is a change a
+      // meter sees and an ear does not, so even the low end of the slider
+      // quantizes hard enough to hear.
       return {
         dry: 1,
         taps: [],
         bands: [],
-        crush: { bits: Math.max(4, Math.round(12 - 8 * k)), mix: 0.4 + 0.6 * k },
+        crush: { bits: Math.max(3, Math.round(7 - 4 * k)), mix: 0.5 + 0.5 * k },
         gain: 0.9,
       };
     default:
@@ -412,20 +438,36 @@ export function audioFxBars(
       }
       bars = withTaps;
     }
+    // The passes are read as a pair of edges rather than one at a time: two
+    // sections at the same cutoff are one steeper filter, and blurring the
+    // figure twice for them leaves a bar with no shape in it at all.
+    let lowest = Infinity;
+    let highest = 0;
     for (const b of recipe.bands) {
-      if (b.type === "lowpass") bars = smooth(bars, Math.min(4, 2400 / Math.max(200, b.hz)));
+      if (b.type === "lowpass") {
+        lowest = Math.min(lowest, b.hz);
+        continue;
+      }
       if (b.type === "highpass") {
-        const body = smooth(bars, 3);
-        bars = bars.map((v, i) => Math.max(0, v - body[i] * Math.min(0.9, b.hz / 1200)));
+        highest = Math.max(highest, b.hz);
+        continue;
       }
-      if (b.type === "lowshelf" || b.type === "highshelf" || b.type === "peaking") {
-        const body = smooth(bars, 3);
-        const lift = (b.db ?? 0) / 24;
-        bars =
-          b.type === "highshelf"
-            ? bars.map((v, i) => v + Math.max(0, v - body[i]) * lift * 3)
-            : bars.map((v, i) => v + body[i] * lift);
-      }
+      const body = smooth(bars, 3);
+      const lift = (b.db ?? 0) / 24;
+      bars =
+        b.type === "highshelf"
+          ? bars.map((v, i) => v + Math.max(0, v - body[i]) * lift * 3)
+          : bars.map((v, i) => v + body[i] * lift);
+    }
+    if (lowest < Infinity) {
+      // Rounded off and smaller: what the pass takes off the top is gone from
+      // the figure the same way it is gone from the sound.
+      const keep = Math.max(0.45, Math.min(1, lowest / 3500));
+      bars = smooth(bars, Math.min(3, 2400 / Math.max(200, lowest))).map((v) => v * keep);
+    }
+    if (highest > 0) {
+      const body = smooth(bars, 3);
+      bars = bars.map((v, i) => Math.max(0, v - body[i] * Math.min(0.9, highest / 1200)));
     }
     if (recipe.tremolo) {
       const { hz, depth } = recipe.tremolo;
@@ -442,8 +484,12 @@ export function audioFxBars(
   }
   // Louder than the tile is tall: the figure is scaled back to fit rather than
   // flattened against the top, so an effect that adds level keeps its shape.
+  // A figure a filter has taken most of the level out of is scaled the other
+  // way for the same reason — pressed against the floor it has no shape left
+  // to read either.
   const peak = Math.max(...bars);
   if (peak > 1) bars = bars.map((v) => v / peak);
+  else if (peak > 0.01 && peak < 0.55) bars = bars.map((v) => (v * 0.55) / peak);
   // A floor keeps every bar visible: the figure shows the shape of the effect,
   // and a bar at zero reads as a gap in the tile.
   return bars.map((v) => Math.max(0.1, Math.min(1, v)));

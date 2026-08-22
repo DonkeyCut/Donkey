@@ -49,7 +49,9 @@ const fold = async (effects: { effect: string; amount?: number; start: number; e
     { sampleRate: RATE, channels: 1, resolve: (f) => f }
   );
   expect(buffer).not.toBeNull();
-  return buffer!.getChannelData(0);
+  // Copied out: the fold's channel data is a view the next fold may write
+  // over, and a comparison between two folds has to hold both.
+  return Float32Array.from(buffer!.getChannelData(0));
 };
 
 describe("audio effects in the offline fold", () => {
