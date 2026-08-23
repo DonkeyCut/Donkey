@@ -41,6 +41,7 @@ import {
   type WrappedAudioBuffer,
   type WrappedCanvas,
 } from "mediabunny";
+import { confirmEngine, engineConnected, isEngineUrl } from "./api";
 import { resolveRegisteredBlob } from "./backend/browser/registry";
 import { chunkSourceOptions } from "./chunkCache";
 
@@ -95,6 +96,81 @@ function urlParallelism(url: string): number {
   return 8;
 }
 
+/** Backoff, in seconds, for a URL read whose request failed outright. The
+ * list ends, so a URL that is genuinely gone still fails — the preview's
+ * outage recovery (frameSource.ts) re-opens on its own cadence, and a read
+ * that hung on retries forever would never let it.
+ *
+ * The library's own policy reads a rejected cross-origin fetch as a CORS
+ * refusal and gives up without a single retry. Every URL Cut opens is
+ * cross-origin — signed cloud media on its own host, the engine on 127.0.0.1 —
+ * and each answers this page's requests by configuration, so a rejection is
+ * the connection dropping, not the browser refusing. Left to the default, one
+ * flaky minute turned into hard read failures with no retry behind them. */
+const URL_RETRY_DELAYS_S = [0.5, 1.5, 4, 10];
+/** A refused connection to this Mac is an answer rather than weather: the
+ * engine's port is listening or it is not. Two quick tries ride out the
+ * seconds an app update takes to put a new engine on the port, and nothing
+ * waits longer than that for a machine that is right here. */
+const LOCAL_RETRY_DELAYS_S = [0.5, 1.5];
+
+const urlRetryDelay = (
+  previousAttempts: number,
+  _error: unknown,
+  src: string | URL | Request
+): number | null => {
+  // Headless has nothing to hand a giving-up read back to: the engine and the
+  // render worker open a file once, and a read that quits fails the job. They
+  // keep waiting, on a widening backoff, until the job's own cancellation
+  // ends it.
+  if (headless()) return Math.min(2 ** (previousAttempts - 2), 16);
+  const url = typeof src === "string" ? src : src instanceof URL ? src.href : src.url;
+  if (isEngineUrl(url)) {
+    // Nothing to wait for once the app is gone; the refusal stands until the
+    // gate connects an engine again.
+    return engineConnected() ? LOCAL_RETRY_DELAYS_S[previousAttempts - 1] ?? null : null;
+  }
+  return URL_RETRY_DELAYS_S[previousAttempts - 1] ?? null;
+};
+
+/** A read this module issued that never reached the file. The name is what
+ * error tracking matches on (instrumentation-client.ts) and what keeps a
+ * caller's own report of it worded as weather (report.ts). */
+class MediaFetchError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message, { cause });
+    this.name = "MediaFetchError";
+  }
+}
+
+const aborted = (err: unknown): boolean =>
+  err instanceof DOMException && err.name === "AbortError";
+
+/**
+ * Wrap a source's own reads: a read of this Mac's media is refused outright
+ * once the app that serves it is gone, and any other failure comes back named.
+ *
+ * A closed app is a fact the page already holds — the ConnectGate has its
+ * connect modal up and no engine origin resolved — so a source that keeps
+ * asking is asking a port nothing is listening on. The first failure is what
+ * establishes it: it asks the engine's health endpoint, and an app that quit
+ * mid-session drops the connection there, which turns every later read into
+ * this refusal instead of another request.
+ */
+function trackedFetch(url: string): typeof fetch {
+  const engine = !headless() && isEngineUrl(url);
+  return (input, init) => {
+    if (engine && !engineConnected()) {
+      return Promise.reject(new MediaFetchError("The Donkey app isn't running."));
+    }
+    return fetch(input, init).catch((err: unknown) => {
+      if (aborted(err)) throw err;
+      if (engine) void confirmEngine();
+      throw new MediaFetchError("Cut couldn't read this media over the network.", err);
+    });
+  };
+}
+
 /** Open a file for reading. The caller owns it and must `dispose()` it. A URL
  * the browser store minted resolves to its backing File and reads as a blob —
  * ranged fetches of blob URLs are unreliable across browsers. Signed cloud
@@ -107,7 +183,11 @@ export function openMedia(src: string | Blob): Input {
     const chunked = chunkSourceOptions(blob);
     source = chunked
       ? new CustomSource({ ...chunked, prefetchProfile: "network", maxCacheSize: 64 * 2 ** 20 })
-      : new UrlSource(blob, { parallelism: urlParallelism(blob) });
+      : new UrlSource(blob, {
+          parallelism: urlParallelism(blob),
+          getRetryDelay: urlRetryDelay,
+          fetchFn: trackedFetch(blob),
+        });
   } else {
     source = new BlobSource(blob);
   }

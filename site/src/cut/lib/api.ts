@@ -67,6 +67,48 @@ export function engineLost() {
   window.dispatchEvent(new Event(ENGINE_LOST_EVENT));
 }
 
+/** Whether an engine is connected right now. Reads that would otherwise fire
+ * at this Mac ask first, so a closed app costs no request. */
+export const engineConnected = () => servedFromEngine() || resolvedOrigin !== null;
+
+/** Whether this URL is served by the engine on this Mac. Loopback is the test
+ * rather than the resolved origin, because the question is asked after the
+ * connection is dropped, when there is no origin left to compare against. */
+export function isEngineUrl(url: string): boolean {
+  try {
+    return isLocalHost(
+      new URL(url, typeof window === "undefined" ? undefined : window.location.href).hostname
+    );
+  } catch {
+    return false;
+  }
+}
+
+let confirming: Promise<boolean> | null = null;
+
+/**
+ * Ask whether the engine is still there, and drop the connection when it is
+ * not.
+ *
+ * A request that failed at the transport layer can't tell an app that quit
+ * from one request that lost its way — the browser reports both as a fetch
+ * that never landed. So the failure asks the health endpoint instead of
+ * guessing, and one answer settles it for every caller waiting on the same
+ * question.
+ */
+export function confirmEngine(): Promise<boolean> {
+  if (!engineConnected()) return Promise.resolve(false);
+  confirming ??= probe(resolvedOrigin ?? "")
+    .then((ok) => {
+      if (!ok) engineLost();
+      return ok;
+    })
+    .finally(() => {
+      confirming = null;
+    });
+  return confirming;
+}
+
 async function probe(origin: string, timeoutMs = PROBE_TIMEOUT_MS): Promise<boolean> {
   try {
     const res = await fetch(`${origin}/api/cut/engine/health`, {
