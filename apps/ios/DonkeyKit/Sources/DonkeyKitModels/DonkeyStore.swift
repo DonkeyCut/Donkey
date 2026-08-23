@@ -83,12 +83,20 @@ final class InspirationRecord {
     var linkSyncedAt: Date?
     /// The import job the worker is running for this link, while it runs.
     var importJobId: String?
-    /// The media the cloud brought back for this link, downloaded here.
-    var fetchedFileName: String?
-    var fetchedIsVideo: Bool?
-    /// The source had no media to bring back, or the fetch failed. The card
-    /// stays a link and nothing retries.
-    var importFailed: Bool?
+    /// The media the cloud fetched for this link, on the account's shelf. The
+    /// bytes stay there and the card streams them.
+    var cloudFileName: String?
+    var cloudIsVideo: Bool?
+    /// The source's cover, downloaded here so the card paints without the
+    /// network.
+    var posterFileName: String?
+    /// The source's own words, shown on the card.
+    var sourceText: String?
+    /// The source was only words: there is no media to stream and nothing to
+    /// retry.
+    var noMedia: Bool?
+    /// Why the last attempt failed. Set while the card offers another try.
+    var importError: String?
 
     init(id: UUID, linkURL: String?, mediaFileName: String?, isVideo: Bool, createdAt: Date) {
         self.id = id
@@ -100,20 +108,47 @@ final class InspirationRecord {
 
     var item: InspirationItem? {
         if let linkURL, let url = URL(string: linkURL) {
+            let cloud = cloudFileName.map {
+                InspirationCloudMedia(
+                    assetId: remoteAssetId ?? "",
+                    fileName: $0,
+                    isVideo: cloudIsVideo ?? false,
+                    posterFileName: posterFileName
+                )
+            }
+            // Only a live job is fetching. A link the cloud took whose job
+            // is gone — an import from a build that landed media differently,
+            // a job that outlived its row — has nothing working on it, and the
+            // card says so.
+            let state: InspirationImport = if let importError {
+                .failed(importError)
+            } else if cloud != nil {
+                .ready
+            } else if noMedia == true {
+                .noMedia
+            } else if linkSyncedAt == nil {
+                .queued
+            } else if importJobId != nil {
+                .fetching
+            } else {
+                .failed("The fetch didn't finish.")
+            }
             return InspirationItem(
                 id: id,
                 kind: .link(url),
                 createdAt: createdAt,
-                fetched: fetchedFileName.map {
-                    InspirationMedia(fileName: $0, isVideo: fetchedIsVideo ?? false)
-                },
-                importState: importFailed == true
-                    ? .failed
-                    : (linkSyncedAt == nil ? .waiting : .fetching)
+                cloud: cloud,
+                sourceText: sourceText,
+                importState: state
             )
         }
         if let mediaFileName {
-            return InspirationItem(id: id, kind: .media(fileName: mediaFileName, isVideo: isVideo), createdAt: createdAt)
+            return InspirationItem(
+                id: id,
+                kind: .media(fileName: mediaFileName, isVideo: isVideo),
+                createdAt: createdAt,
+                importState: .ready
+            )
         }
         return nil
     }
@@ -284,9 +319,7 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
     public func deleteInspiration(id: UUID) throws {
         let descriptor = FetchDescriptor<InspirationRecord>(predicate: #Predicate { $0.id == id })
         if let record = try context.fetch(descriptor).first {
-            for fileName in [record.mediaFileName, record.fetchedFileName].compactMap({ $0 }) {
-                try? FileManager.default.removeItem(at: mediaDirectory.appending(path: fileName))
-            }
+            removeFiles(of: record)
             if let remote = record.remoteAssetId {
                 context.insert(TombstoneRecord(kind: SyncTombstone.Kind.libraryAsset.rawValue, remoteId: remote, stamp: .now))
             }
@@ -464,9 +497,7 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
     public func removeInspirationFromCloudDelete(id: UUID) throws {
         let descriptor = FetchDescriptor<InspirationRecord>(predicate: #Predicate { $0.id == id })
         guard let record = try context.fetch(descriptor).first else { return }
-        for fileName in [record.mediaFileName, record.fetchedFileName].compactMap({ $0 }) {
-            try? FileManager.default.removeItem(at: mediaDirectory.appending(path: fileName))
-        }
+        removeFiles(of: record)
         context.delete(record)
         try context.save()
     }
@@ -505,6 +536,7 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
         guard let record = try context.fetch(descriptor).first else { return }
         record.linkSyncedAt = .now
         record.importJobId = jobId
+        record.importError = nil
         try context.save()
     }
 
@@ -513,35 +545,81 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
         return try context.fetch(descriptor).first?.importJobId
     }
 
-    /// Where a link's fetched media is written. The name is the item's, so a
-    /// repeated fetch overwrites rather than piling up files.
-    public func fetchedMediaDestination(_ id: UUID, isVideo: Bool) -> URL {
-        mediaDirectory.appending(path: id.uuidString + "-source" + (isVideo ? ".mp4" : ".jpg"))
+    /// Every file this item owns on the phone: what it holds now, and anything
+    /// else written under its id — media an earlier build brought down before
+    /// links started streaming.
+    private func removeFiles(of record: InspirationRecord) {
+        for fileName in [record.mediaFileName, record.posterFileName].compactMap({ $0 }) {
+            try? FileManager.default.removeItem(at: mediaDirectory.appending(path: fileName))
+        }
+        let prefix = record.id.uuidString
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: mediaDirectory.localPath)) ?? []
+        for name in names where name.hasPrefix(prefix) {
+            try? FileManager.default.removeItem(at: mediaDirectory.appending(path: name))
+        }
     }
 
+    /// Where a link's poster is written. The name is the item's, so a repeated
+    /// fetch overwrites rather than piling up files.
+    public func posterDestination(_ id: UUID) -> URL {
+        mediaDirectory.appending(path: id.uuidString + "-poster.jpg")
+    }
+
+    /// The cloud holds this link's media. Only the poster is here; the video
+    /// or photo streams from the account's shelf.
     public func markInspirationFetched(
         _ id: UUID,
         fileName: String,
         isVideo: Bool,
+        posterFileName: String?,
+        sourceText: String?,
         remoteAssetId: String
     ) throws {
         let descriptor = FetchDescriptor<InspirationRecord>(predicate: #Predicate { $0.id == id })
         guard let record = try context.fetch(descriptor).first else { return }
-        record.fetchedFileName = fileName
-        record.fetchedIsVideo = isVideo
+        record.cloudFileName = fileName
+        record.cloudIsVideo = isVideo
+        record.posterFileName = posterFileName
+        record.sourceText = sourceText ?? record.sourceText
         record.remoteAssetId = remoteAssetId
         record.importJobId = nil
-        record.importFailed = nil
+        record.noMedia = nil
+        record.importError = nil
         try context.save()
     }
 
-    /// The cloud brought nothing back. The card stays a link and the job is
-    /// not asked about again.
-    public func markInspirationImportFailed(_ id: UUID) throws {
+    /// The source was only words. The card keeps them and stays a link; there
+    /// is nothing to retry.
+    public func markInspirationNoMedia(_ id: UUID, sourceText: String?) throws {
         let descriptor = FetchDescriptor<InspirationRecord>(predicate: #Predicate { $0.id == id })
         guard let record = try context.fetch(descriptor).first else { return }
         record.importJobId = nil
-        record.importFailed = true
+        record.noMedia = true
+        record.sourceText = sourceText
+        record.importError = nil
+        try context.save()
+    }
+
+    /// The attempt failed, in the words the card shows. A job that came back
+    /// with the failure is finished with: it is dropped, and the item waits
+    /// for the retry.
+    public func markInspirationImportFailed(_ id: UUID, message: String, clearJob: Bool) throws {
+        let descriptor = FetchDescriptor<InspirationRecord>(predicate: #Predicate { $0.id == id })
+        guard let record = try context.fetch(descriptor).first else { return }
+        if clearJob { record.importJobId = nil }
+        record.importError = message
+        try context.save()
+    }
+
+    /// Back in the queue: the failure clears and the next pass hands the link
+    /// over again.
+    public func retryInspirationImport(id: UUID) throws {
+        let descriptor = FetchDescriptor<InspirationRecord>(predicate: #Predicate { $0.id == id })
+        guard let record = try context.fetch(descriptor).first else { return }
+        record.importError = nil
+        record.importJobId = nil
+        record.linkSyncedAt = nil
+        record.noMedia = nil
         try context.save()
     }
 

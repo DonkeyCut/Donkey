@@ -157,22 +157,47 @@ nonisolated public struct RemoteNotes: Equatable, Sendable {
 }
 
 /// What the cloud brought back for a saved link, once its import job is done.
+/// The media stays on the account's shelf; the phone keeps these references
+/// and streams from them.
 nonisolated public struct ImportedLink: Equatable, Sendable {
     /// The library asset the worker registered, so a delete here takes the
     /// cloud copy with it.
     public var assetId: String
-    /// The media's name on the cloud shelf, for the download.
+    /// The media's name on the cloud shelf, for the stream URL.
     public var fileName: String
     public var isVideo: Bool
+    /// The source's cover, stored beside the media under the same prefix.
+    public var posterFile: String?
+    /// The source's own words, when it had any.
+    public var text: String?
 
-    public init(assetId: String, fileName: String, isVideo: Bool) {
+    public init(
+        assetId: String,
+        fileName: String,
+        isVideo: Bool,
+        posterFile: String? = nil,
+        text: String? = nil
+    ) {
         self.assetId = assetId
         self.fileName = fileName
         self.isVideo = isVideo
+        self.posterFile = posterFile
+        self.text = text
     }
 }
 
-/// Where a queued cloud job stands.
+/// How a link's import job stands, as the phone polls it.
+nonisolated public enum LinkImport: Equatable, Sendable {
+    /// Queued or running.
+    case running
+    /// The worker landed media on the account's shelf.
+    case ready(ImportedLink)
+    /// The source was only words. Whatever it said comes back with it.
+    case noMedia(text: String?)
+    /// The fetch failed, in the worker's own words.
+    case failed(String)
+}
+
 /// Where a queued cloud render stands, as the phone polls it.
 nonisolated public enum RenderProgress: Equatable, Sendable {
     /// Waiting for a worker to claim it.
@@ -181,12 +206,6 @@ nonisolated public enum RenderProgress: Equatable, Sendable {
     case running(Double)
     case done
     case failed(String)
-}
-
-nonisolated public enum JobOutcome<Value: Sendable>: Sendable {
-    case running
-    case done(Value)
-    case failed
 }
 
 nonisolated public enum CloudSyncError: Error, Equatable {
@@ -218,10 +237,10 @@ public protocol CloudSyncServicing: AnyObject {
     /// fetches the media into the Inspiration folder). Returns the job id the
     /// phone follows to bring the media down.
     func importInspirationLink(_ url: URL) async throws -> String
-    /// Where an import job stands. `done` carries the first piece of media
-    /// the source yielded; a source that was only words comes back `failed`.
-    func importedLink(jobId: String) async throws -> JobOutcome<ImportedLink>
-    /// Download one library media file to a local URL.
+    /// Where an import job stands.
+    func importedLink(jobId: String) async throws -> LinkImport
+    /// Download one library media file to a local URL. Posters only: a link's
+    /// video stays in the cloud and streams.
     func downloadLibraryMedia(fileName: String, to destination: URL) async throws
     func fetchUsage() async throws -> StorageUsage
     func fetchNotes() async throws -> RemoteNotes

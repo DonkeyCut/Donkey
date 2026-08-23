@@ -103,50 +103,77 @@ nonisolated public struct InspirationMedia: Equatable, Sendable {
     }
 }
 
+/// What the cloud fetched for a saved link. The media lives on the account's
+/// library shelf — the same shelf the web Library shows — and the phone
+/// streams it from there; only the poster comes down.
+nonisolated public struct InspirationCloudMedia: Equatable, Sendable {
+    /// The library asset, so a delete here takes the cloud copy with it.
+    public var assetId: String
+    /// The media's name on the shelf, for the stream URL.
+    public var fileName: String
+    public var isVideo: Bool
+    /// The poster this phone downloaded beside it, if the source had one.
+    public var posterFileName: String?
+
+    public init(assetId: String, fileName: String, isVideo: Bool, posterFileName: String? = nil) {
+        self.assetId = assetId
+        self.fileName = fileName
+        self.isVideo = isVideo
+        self.posterFileName = posterFileName
+    }
+}
+
 /// Where a saved link stands with the cloud fetch that turns it into media.
 nonisolated public enum InspirationImport: Equatable, Sendable {
-    /// Nothing has been asked of the cloud yet — the item was just saved, or
-    /// the phone is offline.
-    case waiting
-    /// The worker is fetching the source.
+    /// Saved here; the cloud has not taken the job yet.
+    case queued
+    /// A worker is fetching the source.
     case fetching
-    /// The source had no media to bring back, or the fetch failed. The card
-    /// stays a link.
-    case failed
+    /// The cloud holds media for this link.
+    case ready
+    /// The source was only words. The card stays a link and carries its text.
+    case noMedia
+    /// The last attempt failed, and says why. The card offers another try.
+    case failed(String)
 }
 
 nonisolated public struct InspirationItem: Identifiable, Equatable, Sendable {
     public var id: UUID
     public var kind: InspirationKind
     public var createdAt: Date
-    /// A saved link whose media the cloud fetched and this phone downloaded.
-    /// The card plays it in place, the way a photo-library import plays.
-    public var fetched: InspirationMedia?
+    /// What the cloud fetched for a saved link. The bytes stay in the account,
+    /// and the card streams them.
+    public var cloud: InspirationCloudMedia?
+    /// The source's own words — a tweet's text, a video's title and
+    /// description — quoted on the card beside its media.
+    public var sourceText: String?
     /// Where the fetch of a link stands. Media saved from the photo library
-    /// has nothing to fetch and reads as `.waiting`.
+    /// has nothing to fetch and reads as `.ready`.
     public var importState: InspirationImport
 
     public init(
         id: UUID = UUID(),
         kind: InspirationKind,
         createdAt: Date = .now,
-        fetched: InspirationMedia? = nil,
-        importState: InspirationImport = .waiting
+        cloud: InspirationCloudMedia? = nil,
+        sourceText: String? = nil,
+        importState: InspirationImport = .queued
     ) {
         self.id = id
         self.kind = kind
         self.createdAt = createdAt
-        self.fetched = fetched
+        self.cloud = cloud
+        self.sourceText = sourceText
         self.importState = importState
     }
 
-    /// The media this card shows: what the phone imported, or what the cloud
-    /// brought back for a link.
-    public var media: InspirationMedia? {
+    /// Media on this phone: a photo-library import. A link's media is the
+    /// cloud's and streams from there.
+    public var localMedia: InspirationMedia? {
         if case .media(let fileName, let isVideo) = kind {
             return InspirationMedia(fileName: fileName, isVideo: isVideo)
         }
-        return fetched
+        return nil
     }
 
     /// The source link, for a saved link.
@@ -180,8 +207,17 @@ public protocol IdeasStoring: AnyObject {
     func addLink(_ url: URL) throws -> InspirationItem
     func addMedia(data: Data, isVideo: Bool) throws -> InspirationItem
     func deleteInspiration(id: UUID) throws
+    /// Put a link's import back in the queue after a failure.
+    func retryInspirationImport(id: UUID) throws
     /// Absolute location of a stored media file.
     func mediaURL(fileName: String) -> URL
+}
+
+/// The account's cloud shelf, as an inspiration card needs it: one signed URL
+/// per file, minted on demand. The bytes stay in the cloud; the card streams
+/// them.
+public protocol InspirationStreaming: AnyObject, Sendable {
+    func libraryMediaURL(fileName: String) async throws -> URL
 }
 
 nonisolated public enum IdeasFilter: String, CaseIterable, Sendable {
@@ -203,6 +239,10 @@ public final class IdeasModel {
     public var onLocalChange: (() -> Void)?
 
     private let store: any IdeasStoring
+
+    /// The cloud, for streaming a link's fetched media. Wired by the app
+    /// entry; nil in tests, where cards paint from what the store holds.
+    public weak var cloud: (any InspirationStreaming)?
 
     public init(store: any IdeasStoring) {
         self.store = store
@@ -360,6 +400,19 @@ public final class IdeasModel {
         try? store.deleteInspiration(id: id)
         inspiration.removeAll { $0.id == id }
         onLocalChange?()
+    }
+
+    /// Ask the cloud for this link again. The failure clears, the item goes
+    /// back in the queue, and the next sync pass hands it over.
+    public func retryInspiration(id: UUID) {
+        try? store.retryInspirationImport(id: id)
+        reloadFromStore()
+        onLocalChange?()
+    }
+
+    /// Where this card streams from: a signed URL for the account's own copy.
+    public func streamURL(for media: InspirationCloudMedia) async -> URL? {
+        try? await cloud?.libraryMediaURL(fileName: media.fileName)
     }
 
     public func mediaURL(fileName: String) -> URL { store.mediaURL(fileName: fileName) }

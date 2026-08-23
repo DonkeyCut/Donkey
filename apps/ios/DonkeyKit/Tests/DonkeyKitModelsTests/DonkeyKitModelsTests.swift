@@ -145,8 +145,14 @@ import Testing
         /// predates folders answers without one.
         var reportsFolders = true
         /// What an import job answers with once it is asked about.
-        var imported: JobOutcome<ImportedLink> = .done(
-            ImportedLink(assetId: "asset-link", fileName: "source.mp4", isVideo: true)
+        var imported: LinkImport = .ready(
+            ImportedLink(
+                assetId: "asset-link",
+                fileName: "source.mp4",
+                isVideo: true,
+                posterFile: "source.mp4.poster.jpg",
+                text: "What the source said"
+            )
         )
         var usage = StorageUsage(bytes: 0, quotaBytes: 1_000_000)
         var uploadResult: Result<RemoteAsset, CloudSyncError> =
@@ -176,14 +182,19 @@ import Testing
             RemoteLibrary(assetIds: libraryAssets, deletedIds: deletedLibraryIds)
         }
 
+        /// Set to make the queue call fail the way a phone with no route out
+        /// does.
+        var importFailure: CloudSyncError?
+
         func importInspirationLink(_ url: URL) async throws -> String {
+            if let importFailure { throw importFailure }
             links.append(url)
             return "job-\(links.count)"
         }
 
-        func importedLink(jobId: String) async throws -> JobOutcome<ImportedLink> {
+        func importedLink(jobId: String) async throws -> LinkImport {
             polled.append(jobId)
-            if case .done(let link) = imported { libraryAssets.insert(link.assetId) }
+            if case .ready(let link) = imported { libraryAssets.insert(link.assetId) }
             return imported
         }
 
@@ -421,33 +432,75 @@ import Testing
         #expect(rig.ideas.notes.isEmpty)
     }
 
-    @Test func inspirationLinkImportsOnceAndLandsItsMedia() async throws {
+    @Test func inspirationLinkImportsOnceAndStreamsFromTheCloud() async throws {
         let rig = try makeRig()
         #expect(rig.ideas.addInspiration(urlText: "youtube.com/watch?v=9"))
         await rig.engine.run()
         #expect(rig.cloud.links.map(\.host) == ["youtube.com"])
         // The queue pass only hands the link over; the next pass follows the
-        // job and brings the media down.
+        // job to what the cloud landed.
         await rig.engine.run()
         #expect(rig.cloud.links.count == 1)
-        #expect(rig.cloud.downloads == ["source.mp4"])
+        // Only the poster comes down: the media itself stays on the shelf.
+        #expect(rig.cloud.downloads == ["source.mp4.poster.jpg"])
         let item = try #require(rig.ideas.inspiration.first)
-        #expect(item.media?.isVideo == true)
-        // Nothing is asked of the job again once its media is here.
+        #expect(item.cloud?.fileName == "source.mp4")
+        #expect(item.cloud?.isVideo == true)
+        #expect(item.cloud?.posterFileName != nil)
+        #expect(item.sourceText == "What the source said")
+        #expect(item.importState == .ready)
+        // Nothing is asked of the job again once the media is on the shelf.
         await rig.engine.run()
         #expect(rig.cloud.downloads.count == 1)
     }
 
-    @Test func inspirationLinkWithNoMediaStaysALink() async throws {
+    @Test func inspirationLinkWithNoMediaKeepsWhatTheSourceSaid() async throws {
         let rig = try makeRig()
-        rig.cloud.imported = .failed
+        rig.cloud.imported = .noMedia(text: "An article, all words")
         #expect(rig.ideas.addInspiration(urlText: "example.com/article"))
         await rig.engine.run()
         await rig.engine.run()
         let item = try #require(rig.ideas.inspiration.first)
-        #expect(item.media == nil)
-        #expect(item.importState == .failed)
+        #expect(item.cloud == nil)
+        #expect(item.importState == .noMedia)
+        #expect(item.sourceText == "An article, all words")
         #expect(rig.cloud.downloads.isEmpty)
+    }
+
+    @Test func inspirationLinkSaysWhyItFailedAndRetriesOnAsk() async throws {
+        let rig = try makeRig()
+        rig.cloud.imported = .failed("yt-dlp came back empty.")
+        #expect(rig.ideas.addInspiration(urlText: "instagram.com/reel/9"))
+        await rig.engine.run()
+        await rig.engine.run()
+        let item = try #require(rig.ideas.inspiration.first)
+        #expect(item.importState == .failed("yt-dlp came back empty."))
+        // A failed fetch is not asked after again on its own.
+        await rig.engine.run()
+        #expect(rig.cloud.links.count == 1)
+        // The card's retry queues a fresh job.
+        rig.cloud.imported = .ready(
+            ImportedLink(assetId: "asset-link", fileName: "reel.mp4", isVideo: true)
+        )
+        rig.ideas.retryInspiration(id: item.id)
+        await rig.engine.run()
+        await rig.engine.run()
+        #expect(rig.cloud.links.count == 2)
+        #expect(try #require(rig.ideas.inspiration.first).cloud?.fileName == "reel.mp4")
+    }
+
+    @Test func inspirationLinkTheCloudNeverTookSaysSo() async throws {
+        let rig = try makeRig()
+        rig.cloud.importFailure = CloudSyncError.transport
+        #expect(rig.ideas.addInspiration(urlText: "instagram.com/reel/7"))
+        await rig.engine.run()
+        let item = try #require(rig.ideas.inspiration.first)
+        #expect(item.importState == .failed("Couldn't reach the cloud. Trying again."))
+        // It keeps its place in the queue: the next pass hands it over.
+        rig.cloud.importFailure = nil
+        await rig.engine.run()
+        #expect(rig.cloud.links.count == 1)
+        #expect(try #require(rig.ideas.inspiration.first).importState == .fetching)
     }
 
     @Test func folderPushesAheadOfTheNoteFiledInIt() async throws {

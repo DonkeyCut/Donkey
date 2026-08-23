@@ -38,6 +38,12 @@ final class CutCloudClient: NSObject {
         return request
     }
 
+    fileprivate func libraryMediaPath(_ fileName: String) -> String {
+        "/api/cut-cloud/library/media/" + (fileName.addingPercentEncoding(
+            withAllowedCharacters: .urlPathAllowed
+        ) ?? fileName)
+    }
+
     private func send(_ request: URLRequest) async throws -> Data {
         let data: Data
         let response: URLResponse
@@ -100,6 +106,14 @@ final class CutCloudClient: NSObject {
 }
 
 // MARK: - Media up-sync
+
+extension CutCloudClient: InspirationStreaming {
+    /// The account's own copy, behind the API's redirect: an inspiration card
+    /// streams the CDN directly and nothing is stored on the phone.
+    func libraryMediaURL(fileName: String) async throws -> URL {
+        try await resolveRedirect(libraryMediaPath(fileName))
+    }
+}
 
 extension CutCloudClient: CloudSyncServicing {
     private struct PresignResponse: Decodable {
@@ -269,18 +283,21 @@ extension CutCloudClient: CloudSyncServicing {
         return try decode(QueuedJob.self, from: data).jobId
     }
 
-    func importedLink(jobId: String) async throws -> JobOutcome<ImportedLink> {
+    func importedLink(jobId: String) async throws -> LinkImport {
         struct JobStatus: Decodable {
             struct Result: Decodable {
                 struct Asset: Decodable {
                     var id: String
                     var fileName: String
                     var type: String
+                    var posterFile: String?
                 }
                 var assets: [Asset]?
+                var text: String?
             }
             var state: String
             var result: Result?
+            var error: String?
         }
         let data = try await send(try request("GET", "/api/cut-cloud/jobs/\(jobId)"))
         let status = try decode(JobStatus.self, from: data)
@@ -289,25 +306,26 @@ extension CutCloudClient: CloudSyncServicing {
             return .running
         case "done":
             // A source that was only words brings back no media; the card
-            // stays the link it was saved as.
-            guard let asset = status.result?.assets?.first else { return .failed }
-            return .done(
+            // stays the link it was saved as, carrying what the source said.
+            guard let asset = status.result?.assets?.first else {
+                return .noMedia(text: status.result?.text)
+            }
+            return .ready(
                 ImportedLink(
                     assetId: asset.id,
                     fileName: asset.fileName,
-                    isVideo: asset.type == "video"
+                    isVideo: asset.type == "video",
+                    posterFile: asset.posterFile,
+                    text: status.result?.text
                 )
             )
         default:
-            return .failed
+            return .failed(status.error ?? "The fetch failed.")
         }
     }
 
     func downloadLibraryMedia(fileName: String, to destination: URL) async throws {
-        let path = "/api/cut-cloud/library/media/" + (fileName.addingPercentEncoding(
-            withAllowedCharacters: .urlPathAllowed
-        ) ?? fileName)
-        let url = try await resolveRedirect(path)
+        let url = try await resolveRedirect(libraryMediaPath(fileName))
         let temporary: URL
         do {
             (temporary, _) = try await URLSession.shared.download(from: url)

@@ -82,15 +82,18 @@ public protocol SyncJournalStoring: AnyObject {
     func markInspirationLinkSynced(_ id: UUID, jobId: String) throws
     /// The job still fetching this link, if one is.
     func inspirationImportJobId(_ id: UUID) throws -> String?
-    /// Where the fetched media is written on this phone.
-    func fetchedMediaDestination(_ id: UUID, isVideo: Bool) -> URL
+    /// Where the source's poster is written on this phone.
+    func posterDestination(_ id: UUID) -> URL
     func markInspirationFetched(
         _ id: UUID,
         fileName: String,
         isVideo: Bool,
+        posterFileName: String?,
+        sourceText: String?,
         remoteAssetId: String
     ) throws
-    func markInspirationImportFailed(_ id: UUID) throws
+    func markInspirationNoMedia(_ id: UUID, sourceText: String?) throws
+    func markInspirationImportFailed(_ id: UUID, message: String, clearJob: Bool) throws
 
     // Tombstones
     func tombstones() throws -> [SyncTombstone]
@@ -550,9 +553,12 @@ public final class SyncEngine {
     // MARK: Inspiration
 
     /// Saved links, both halves of the round trip: a link the cloud has not
-    /// been told about is queued, and a link it is fetching is followed until
-    /// the media can come down onto this phone. A card shows the spinner from
-    /// the moment the link is saved and the video itself the moment it lands.
+    /// been told about is handed over, and a link it is fetching is followed
+    /// until the media lands on the account's shelf. The media stays there —
+    /// the card streams it — so only the poster comes down.
+    ///
+    /// Every attempt that fails writes why on the item, so a card can never
+    /// spin on a request that is no longer being made.
     private func syncInspirationLinks() async {
         var landed = false
         for item in ideas?.inspiration ?? [] {
@@ -564,9 +570,12 @@ public final class SyncEngine {
                     try? journal.markInspirationLinkSynced(item.id, jobId: jobId)
                     landed = true
                 } catch CloudSyncError.unauthorized {
+                    note(item.id, "Sign in again to fetch this link.", &landed)
                     return
+                } catch CloudSyncError.refused(let message) {
+                    note(item.id, message, &landed)
                 } catch {
-                    // Transient or capped for the day; the next kick retries.
+                    note(item.id, "Couldn't reach the cloud. Trying again.", &landed)
                 }
                 continue
             }
@@ -575,30 +584,49 @@ public final class SyncEngine {
                 switch try await service.importedLink(jobId: job) {
                 case .running:
                     continue
-                case .failed:
-                    try? journal.markInspirationImportFailed(item.id)
+                case .noMedia(let text):
+                    try? journal.markInspirationNoMedia(item.id, sourceText: text)
                     landed = true
-                case .done(let imported):
-                    let destination = journal.fetchedMediaDestination(item.id, isVideo: imported.isVideo)
-                    try await service.downloadLibraryMedia(
-                        fileName: imported.fileName,
-                        to: destination
-                    )
+                case .failed(let message):
+                    try? journal.markInspirationImportFailed(item.id, message: message, clearJob: true)
+                    landed = true
+                case .ready(let imported):
                     try? journal.markInspirationFetched(
                         item.id,
-                        fileName: destination.lastPathComponent,
+                        fileName: imported.fileName,
                         isVideo: imported.isVideo,
+                        posterFileName: await poster(imported, for: item.id),
+                        sourceText: imported.text,
                         remoteAssetId: imported.assetId
                     )
                     landed = true
                 }
             } catch CloudSyncError.unauthorized {
+                note(item.id, "Sign in again to fetch this link.", &landed)
                 return
             } catch {
-                // Transient; the next pass asks after the job again.
+                note(item.id, "Couldn't reach the cloud. Trying again.", &landed)
             }
         }
         if landed { ideas?.reloadFromStore() }
+    }
+
+    /// Say on the card why the last attempt failed. The link keeps its place
+    /// in the queue, so the next pass tries again on its own.
+    private func note(_ id: UUID, _ message: String, _ landed: inout Bool) {
+        try? journal.markInspirationImportFailed(id, message: message, clearJob: false)
+        landed = true
+    }
+
+    /// The source's cover, brought down beside the item so its card paints
+    /// without the network. The media itself stays in the cloud.
+    private func poster(_ imported: ImportedLink, for id: UUID) async -> String? {
+        guard let posterFile = imported.posterFile else { return nil }
+        let destination = journal.posterDestination(id)
+        guard (try? await service.downloadLibraryMedia(fileName: posterFile, to: destination)) != nil else {
+            return nil
+        }
+        return destination.lastPathComponent
     }
 
     private func uploadPendingInspirationMedia() async {

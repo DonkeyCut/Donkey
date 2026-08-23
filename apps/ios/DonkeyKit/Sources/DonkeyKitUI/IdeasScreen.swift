@@ -483,13 +483,13 @@ struct InspirationCard: View {
     var ideas: IdeasModel
 
     var body: some View {
-        // A saved link becomes its media: the cloud fetches the source and the
-        // phone brings the video or photo down, so the card plays what the
-        // link pointed at. Until it lands the card holds the source's name.
-        if let media = item.media {
-            let url = ideas.mediaURL(fileName: media.fileName)
+        // A photo-library import plays off this phone. A saved link's media is
+        // the cloud's: the worker fetched it into the account's library — the
+        // same shelf the web shows — and the card streams it from there.
+        if let local = item.localMedia {
+            let url = ideas.mediaURL(fileName: local.fileName)
             MediaTile(ratio: 3 / 4) {
-                if media.isVideo {
+                if local.isVideo {
                     VideoPlayer(player: AVPlayer(url: url))
                 } else if let image = UIImage(contentsOfFile: url.localPath) {
                     Image(uiImage: image)
@@ -497,46 +497,115 @@ struct InspirationCard: View {
                         .scaledToFill()
                 }
             }
+        } else if let cloud = item.cloud {
+            CloudMediaCard(media: cloud, text: item.sourceText, ideas: ideas)
         } else if let link = item.link {
-            LinkCard(url: link, state: item.importState)
+            LinkCard(url: link, state: item.importState, text: item.sourceText) {
+                ideas.retryInspiration(id: item.id)
+            }
         }
     }
 }
 
-/// A saved link with no media yet: fetching, or a source that had none.
+/// A link's media, streamed from the account. The poster came down with the
+/// fetch, so the card paints before the stream resolves and still paints with
+/// no network at all.
+struct CloudMediaCard: View {
+    let media: InspirationCloudMedia
+    let text: String?
+    var ideas: IdeasModel
+
+    @State private var player: AVPlayer?
+    @State private var streamed: URL?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            MediaTile(ratio: 3 / 4) {
+                if media.isVideo, let player {
+                    VideoPlayer(player: player)
+                } else if let poster {
+                    Image(uiImage: poster)
+                        .resizable()
+                        .scaledToFill()
+                } else if let streamed, !media.isVideo {
+                    AsyncImage(url: streamed) { image in
+                        image.resizable().scaledToFill()
+                    } placeholder: {
+                        ProgressView()
+                    }
+                } else {
+                    ProgressView()
+                }
+            }
+            if let text, !text.isEmpty {
+                Text(text)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
+        }
+        .task(id: media.fileName) {
+            guard streamed == nil else { return }
+            guard let url = await ideas.streamURL(for: media) else { return }
+            streamed = url
+            if media.isVideo { player = AVPlayer(url: url) }
+        }
+    }
+
+    private var poster: UIImage? {
+        guard let name = media.posterFileName else { return nil }
+        return UIImage(contentsOfFile: ideas.mediaURL(fileName: name).localPath)
+    }
+}
+
+/// A saved link with no media of its own: on its way, a source that was only
+/// words, or an attempt that failed and says why.
 struct LinkCard: View {
     let url: URL
     let state: InspirationImport
+    let text: String?
+    let onRetry: () -> Void
 
     var body: some View {
         let host = url.host()?.replacingOccurrences(of: "www.", with: "") ?? "link"
-        Link(destination: url) {
-            VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
+            Link(destination: url) {
                 Label(host, systemImage: "link")
                     .font(.footnote.weight(.bold))
                     .lineLimit(1)
-                if state == .failed {
-                    Text(url.absoluteString)
+            }
+            .buttonStyle(.plain)
+
+            switch state {
+            case .queued, .fetching, .ready:
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text(state == .queued ? "Waiting to fetch…" : "Fetching…")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(4)
-                        .multilineTextAlignment(.leading)
-                } else {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                        Text("Fetching…")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
                 }
-                Spacer(minLength: 0)
+            case .noMedia:
+                Text(text ?? url.absoluteString)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(6)
+                    .multilineTextAlignment(.leading)
+            case .failed(let message):
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(4)
+                    .multilineTextAlignment(.leading)
+                Button("Try again", action: onRetry)
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.borderless)
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
-            .background(.fill.tertiary)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+            Spacer(minLength: 0)
         }
-        .buttonStyle(.plain)
+        .padding(14)
+        .frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
+        .background(.fill.tertiary)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 

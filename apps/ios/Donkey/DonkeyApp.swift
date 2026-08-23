@@ -62,6 +62,7 @@ final class AppWiring {
         sync.ideas = ideas
         media.sync = sync
         ideas.onLocalChange = { sync.kick() }
+        ideas.cloud = cloud
 
         self.app = app
         self.ideas = ideas
