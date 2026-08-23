@@ -4,6 +4,7 @@ import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Defuddle } from "defuddle/node";
 import { parseHTML } from "linkedom";
+import { convertToMp4, fitsAlready, streamCodecs } from "./convert";
 import type { LibrarySource } from "./library";
 
 // Bring back whatever a URL points at. yt-dlp, resolved from PATH, pulls
@@ -149,12 +150,12 @@ async function downloadMedia(url: string, tmp: string): Promise<Downloaded> {
   const sized = await Promise.all(
     names.map(async (n) => ({ n, size: (await stat(path.join(out, n))).size }))
   );
-  const file = sized.sort((a, b) => b.size - a.size)[0].n;
+  const file = await playableMedia(path.join(out, sized.sort((a, b) => b.size - a.size)[0].n));
   // The site's own cover for this video, so a card and the viewer have a first
   // frame to show before a byte of the video is decoded.
   const poster = await savePoster(meta.thumbnail, out, path.parse(file).name);
   const clip = {
-    file: path.join(out, file),
+    file,
     title: (meta.title || "Imported clip").slice(0, 120),
     ...(poster ? { poster } : {}),
   };
@@ -179,6 +180,26 @@ async function downloadMedia(url: string, tmp: string): Promise<Downloaded> {
 const PAGE_EXTRACTORS = new Set(["generic", "html5"]);
 
 const IMAGE_URL_RE = /\.(png|jpe?g|webp|gif|avif|bmp)(?:$|\?)/i;
+
+/** What comes back has to play where the import is going — the phone's viewer,
+ * the Mac's player, a browser — and a site's best stream is often VP9 or AV1,
+ * which Apple decodes nowhere. A file whose picture is already H.264 is handed
+ * back untouched; anything else is re-encoded into one that plays. A
+ * conversion that fails leaves the original: a file that plays in fewer places
+ * beats no import at all. */
+async function playableMedia(file: string): Promise<string> {
+  const codecs = await streamCodecs(file);
+  // Sound alone decodes everywhere the import goes.
+  if (!codecs.video) return file;
+  if (fitsAlready(file, codecs, { shrink: false, sdr: false })) return file;
+  const out = path.join(path.dirname(file), `${path.parse(file).name}.h264.mp4`);
+  try {
+    await convertToMp4({ log: [], outPath: out, progress: 0, tmpDir: path.dirname(file) }, file, out);
+    return out;
+  } catch {
+    return file;
+  }
+}
 
 /** Save the source's cover image beside the media it belongs to. A cover that
  * won't download is no reason to fail an import, so this answers nothing and
@@ -722,10 +743,15 @@ function ytDlp(
     // Take the best video and the best audio and put them together. Asking for
     // a ready-made mp4 first would land whatever single file the site keeps
     // around for compatibility — on YouTube that is 360p next to a 4K original.
-    // Codec preference is a sort, never a filter, so an mp4-friendly stream
-    // wins ties without a resolution ever being traded for it.
+    //
+    // Codec leads the sort. Apple decodes H.264 and HEVC and nothing else, so
+    // a taller VP9 or AV1 stream is a file that plays nowhere the import is
+    // going: the phone's viewer, the Mac's own player, Safari. Instagram
+    // serves 1440p VP9 beside 1080p H.264, and the 1080p file is the one worth
+    // having. A source with no H.264 at all still comes down, and the
+    // conversion below makes it playable.
     "-f", "bestvideo*+bestaudio/best",
-    "-S", "res,fps,hdr:sdr,vcodec:h264,acodec:aac",
+    "-S", "vcodec:h264,acodec:aac,res,fps,hdr:sdr",
     "--merge-output-format", "mp4",
     "-o", path.join(dir, "%(id)s.%(ext)s"),
     "--print-json",
