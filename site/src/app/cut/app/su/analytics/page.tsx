@@ -201,6 +201,24 @@ function NonZeroTooltipContent(props: React.ComponentProps<typeof ChartTooltipCo
   );
 }
 
+// A day's "other" answers run to dozens, and the same place is typed over and
+// over. The list is grouped by what was written and bounded to the rows that
+// fit inside the chart's own box; the rest is counted.
+const OTHER_ANSWERS_SHOWN = 6;
+
+function groupOtherAnswers(answers: string[]): { label: string; count: number }[] {
+  const groups = new Map<string, { label: string; count: number }>();
+  for (const answer of answers) {
+    const label = answer.trim();
+    if (!label) continue;
+    const key = label.toLowerCase();
+    const group = groups.get(key);
+    if (group) group.count++;
+    else groups.set(key, { count: 1, label });
+  }
+  return [...groups.values()].sort((a, b) => b.count - a.count);
+}
+
 /** The sources tooltip, which carries what "Other" meant: the day's free-text
  * answers hang under that row as an indented bulleted list. */
 function SourcesTooltipContent({
@@ -212,7 +230,9 @@ function SourcesTooltipContent({
       {...props}
       formatter={(value, name, item) => {
         const id = String(name);
-        const answers = (item.payload as { otherAnswers?: string[] } | undefined)?.otherAnswers;
+        const answers = groupOtherAnswers(
+          (item.payload as { otherAnswers?: string[] } | undefined)?.otherAnswers ?? [],
+        );
         return (
           <>
             <div
@@ -225,13 +245,21 @@ function SourcesTooltipContent({
                 {typeof value === "number" ? value.toLocaleString() : String(value)}
               </span>
             </div>
-            {id === "other" && answers?.length ? (
+            {id === "other" && answers.length ? (
               <ul className="-mt-1 ml-[1.125rem] w-full list-disc space-y-0.5 pl-3 text-muted-foreground marker:text-muted-foreground/60">
-                {answers.map((answer, i) => (
-                  <li key={`${answer}-${i}`} className="break-words">
-                    {answer}
+                {answers.slice(0, OTHER_ANSWERS_SHOWN).map((answer) => (
+                  <li key={answer.label} className="break-words">
+                    {answer.label}
+                    {answer.count > 1 ? (
+                      <span className="text-muted-foreground/70"> ×{answer.count}</span>
+                    ) : null}
                   </li>
                 ))}
+                {answers.length > OTHER_ANSWERS_SHOWN ? (
+                  <li className="list-none text-muted-foreground/70">
+                    +{answers.length - OTHER_ANSWERS_SHOWN} more
+                  </li>
+                ) : null}
               </ul>
             ) : null}
           </>
