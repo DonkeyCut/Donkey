@@ -853,69 +853,104 @@ import Testing
 }
 
 @Suite struct AnalyticsSummaryTests {
-    // Three days over two sources (one DB, one posthog); day two never got
-    // extracted. User A signed up before the window and works daily; user B
-    // signed up on day two and only opened the app on day three.
-    func rollup(billing: AnalyticsRollup.Billing? = nil) -> AnalyticsRollup {
-        AnalyticsRollup(
-            generatedAt: "2026-08-21T04:00:00.000Z",
-            days: ["2026-08-18", "2026-08-19", "2026-08-20"],
-            sources: ["renders", "posthog"],
-            missing: [.init(day: "2026-08-19")],
-            billing: billing,
-            users: [
-                .init(registeredAt: "2026-08-01T10:00:00.000Z", balanceMicros: "3000000", activity: [1, 0, 3]),
-                .init(registeredAt: "2026-08-19T12:00:00.000Z", balanceMicros: "500000", activity: [0, 0, 2]),
-            ]
-        )
+    // What /api/analytics/summary answers: three days, the middle one never
+    // extracted, with billing folded in.
+    let json = """
+    {
+      "generatedAt": "2026-08-21T04:00:00.000Z",
+      "points": [
+        {"day": "2026-08-18", "active": 1, "working": 1, "signups": 0, "totalRegistered": 1, "proDollars": 10, "topupDollars": 0},
+        {"day": "2026-08-19", "active": null, "working": null, "signups": 1, "totalRegistered": 2, "proDollars": 0, "topupDollars": 5},
+        {"day": "2026-08-20", "active": 2, "working": 1, "signups": 0, "totalRegistered": 2, "proDollars": 0, "topupDollars": 0}
+      ],
+      "registered": 2,
+      "signups7d": 1,
+      "signupsWindow": 1,
+      "activeYesterday": 2,
+      "active7d": 2,
+      "weekDeltaPercent": null,
+      "subscribers": 4,
+      "canceling": 1,
+      "funded": 6,
+      "fundedDollars": 120,
+      "revenueDollars": 15,
+      "missingDayCount": 1
+    }
+    """
+
+    func decoded() throws -> AnalyticsSummary {
+        try JSONDecoder().decode(AnalyticsSummary.self, from: Data(json.utf8))
     }
 
-    @Test func derivesCountsAndSkipsMissingDays() {
-        let summary = AnalyticsSummary(rollup: rollup())
-        #expect(summary.registered == 2)
+    @Test func decodesTheDaySeries() throws {
+        let summary = try decoded()
         #expect(summary.points.count == 3)
-        #expect(summary.points[0].active == 1)
-        #expect(summary.points[0].working == 1)
-        #expect(summary.points[1].active == nil)
-        #expect(summary.points[2].active == 2)
-        #expect(summary.points[2].working == 1)
-        #expect(summary.missingDayCount == 1)
-        #expect(summary.activeYesterday == 2)
-        #expect(summary.active7d == 2)
-    }
-
-    @Test func signupsAndTotalsCarryThePreWindowBase() {
-        let summary = AnalyticsSummary(rollup: rollup())
-        #expect(summary.points.map(\.signups) == [0, 1, 0])
+        #expect(summary.points.map(\.active) == [1, nil, 2])
+        #expect(summary.points.map(\.working) == [1, nil, 1])
         #expect(summary.points.map(\.totalRegistered) == [1, 2, 2])
-        #expect(summary.signups7d == 1)
-        #expect(summary.balanceDollars == 3.5)
+        #expect(summary.points[1].revenueDollars == 5)
     }
 
-    @Test func billingRidesIntoRevenue() {
-        let billing = AnalyticsRollup.Billing(
-            subscribers: 4,
-            canceling: 1,
-            funded: 6,
-            fundedMicros: "120000000",
-            revenue: [
-                .init(proMicros: "10000000", topupMicros: "0"),
-                .init(proMicros: "0", topupMicros: "5000000"),
-                .init(proMicros: "0", topupMicros: "0"),
-            ]
-        )
-        let summary = AnalyticsSummary(rollup: rollup(billing: billing))
+    @Test func daysDecodeAsMidnightUTC() throws {
+        let summary = try decoded()
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 8
+        components.day = 18
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        #expect(summary.points[0].day == calendar.date(from: components))
+    }
+
+    @Test func carriesTheHeadlineNumbers() throws {
+        let summary = try decoded()
+        #expect(summary.registered == 2)
+        #expect(summary.active7d == 2)
+        #expect(summary.weekDeltaPercent == nil)
+        #expect(summary.missingDayCount == 1)
         #expect(summary.subscribers == 4)
         #expect(summary.fundedDollars == 120)
         #expect(summary.revenueDollars == 15)
-        #expect(summary.points[0].proDollars == 10)
-        #expect(summary.points[1].topupDollars == 5)
+        #expect(summary.generatedAt != nil)
     }
 
-    @Test func billinglessRollupLeavesRevenueUnknown() {
-        let summary = AnalyticsSummary(rollup: rollup())
-        #expect(summary.revenueDollars == nil)
+    @Test func aSummaryWithoutBillingLeavesRevenueUnknown() throws {
+        let stripped = json
+            .replacingOccurrences(of: "\"subscribers\": 4,", with: "")
+            .replacingOccurrences(of: "\"canceling\": 1,", with: "")
+            .replacingOccurrences(of: "\"funded\": 6,", with: "")
+            .replacingOccurrences(of: "\"fundedDollars\": 120,", with: "")
+            .replacingOccurrences(of: "\"revenueDollars\": 15,", with: "")
+        let summary = try JSONDecoder().decode(AnalyticsSummary.self, from: Data(stripped.utf8))
         #expect(summary.subscribers == nil)
+        #expect(summary.revenueDollars == nil)
+    }
+}
+
+@Suite struct AnalyticsModelTests {
+    final class Refusing: AnalyticsServicing, @unchecked Sendable {
+        let error: AnalyticsError
+        init(_ error: AnalyticsError) { self.error = error }
+        func fetchAnalyticsSummary() async throws -> AnalyticsSummary { throw error }
+    }
+
+    @Test func aRefusedRoleIsNotACallForTheConnection() async {
+        let model = AnalyticsModel(service: Refusing(.notSuperUser))
+        await model.refresh()
+        guard case .failed(let error) = model.state else {
+            Issue.record("expected a failure")
+            return
+        }
+        #expect(error == .notSuperUser)
+    }
+
+    @Test func aMissingRollupReadsAsEmpty() async {
+        let model = AnalyticsModel(service: Refusing(.noRollup))
+        await model.refresh()
+        guard case .empty = model.state else {
+            Issue.record("expected empty")
+            return
+        }
     }
 }
 

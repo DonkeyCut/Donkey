@@ -25,10 +25,10 @@ public struct AnalyticsScreen: View {
                         title: "No data yet",
                         message: "The nightly analytics job hasn't produced a rollup."
                     )
-                case .failed:
+                case .failed(let error):
                     EmptyState(
-                        title: "Couldn't load analytics",
-                        message: "Check your connection and try again.",
+                        title: Self.title(for: error),
+                        message: Self.message(for: error),
                         actionTitle: "Retry"
                     ) {
                         Task { await analytics.refresh() }
@@ -48,6 +48,28 @@ public struct AnalyticsScreen: View {
             }
         }
         .task { await analytics.refresh() }
+    }
+
+    /// One line per reason the dashboard came back empty-handed, so the screen
+    /// names the one that happened and the reader knows what to do about it.
+    private static func title(for error: AnalyticsError) -> String {
+        switch error {
+        case .offline: "Couldn't reach donkeycut.com"
+        case .signedOut: "Signed out"
+        case .notSuperUser: "Not this account"
+        case .server: "The server couldn't serve it"
+        case .malformed, .noRollup: "Couldn't read the analytics"
+        }
+    }
+
+    private static func message(for error: AnalyticsError) -> String {
+        switch error {
+        case .offline: "The request never got an answer. Check your connection and try again."
+        case .signedOut: "This session isn't good any more. Sign out and back in."
+        case .notSuperUser: "The dashboard is for super users, and this account isn't one."
+        case .server(let status): "donkeycut.com answered \(status). Give it a moment and retry."
+        case .malformed, .noRollup: "The answer wasn't in a shape this build reads. Update the app."
+        }
     }
 }
 
