@@ -42,10 +42,10 @@ struct CameraScreen<CameraPreview: View>: View {
             if camera.isFillLightOn, camera.availability == .running {
                 FillLightOverlay()
             }
-            // Closing the card hands the screen to the prompter, recording or
-            // not: the script runs on a loop so the speed and size a person
-            // just set are something they can watch before the take.
-            if camera.teleprompter.hasScript, camera.isRecording || !camera.teleprompter.isCardShown {
+            // Play hands the screen to the prompter, recording or not: the
+            // script runs on a loop so the speed and size a person just set
+            // are something they can watch before the take.
+            if camera.teleprompter.hasScript, camera.teleprompter.isRunning {
                 TeleprompterOverlay(camera: camera)
             }
             controls
@@ -201,12 +201,19 @@ struct CameraScreen<CameraPreview: View>: View {
                 }
 
                 Button {
-                    camera.teleprompter.isCardShown.toggle()
+                    if camera.teleprompter.isCardShown {
+                        camera.dismissTeleprompter()
+                    } else {
+                        // A running script comes back to the card to be
+                        // edited; the picture is clear while it is open.
+                        camera.teleprompter.isRunning = false
+                        camera.teleprompter.isCardShown = true
+                    }
                 } label: {
                     Image(systemName: "text.viewfinder")
                         .frame(width: 40, height: 40)
                 }
-                .glassEffect(camera.teleprompter.isCardShown ? .regular.tint(.white.opacity(0.25)).interactive() : .regular.interactive())
+                .glassEffect(camera.teleprompter.isCardShown || camera.teleprompter.isRunning ? .regular.tint(.white.opacity(0.25)).interactive() : .regular.interactive())
 
                 Spacer().frame(height: 10)
 
@@ -440,14 +447,14 @@ struct TeleprompterCard: View {
                 // A run of the script at the current pace, without spending a
                 // take on finding out whether it reads right.
                 Button {
-                    camera.startTeleprompterTest()
+                    camera.startTeleprompter()
                 } label: {
                     Image(systemName: "play.fill")
                 }
                 .disabled(!camera.teleprompter.hasScript)
                 Spacer()
                 Button {
-                    camera.teleprompter.isCardShown = false
+                    camera.dismissTeleprompter()
                 } label: {
                     Image(systemName: "xmark")
                         .font(.subheadline.weight(.bold))
@@ -504,9 +511,6 @@ struct TeleprompterOverlay: View {
     /// Rendered height of the paced script, measured off the Text itself so
     /// the scroll rate can pace the exact copy on screen.
     @State private var textHeight: Double = 0
-    /// Where the idle loop counts from, so a preview runs the script the same
-    /// way a take does.
-    @State private var previewStart = Date.now
     /// How far the reader has dragged the script from where the pacing puts
     /// it. It rides along with the scroll rather than replacing it, so a nudge
     /// mid-take moves the words and the pace carries on.
@@ -582,18 +586,15 @@ struct TeleprompterOverlay: View {
         }
         .ignoresSafeArea()
         // A fresh run puts the script back where the pacing wants it.
-        .onChange(of: camera.recordingStartedAt) { dragged = 0 }
-        .onChange(of: camera.teleprompter.testStartedAt) { dragged = 0 }
+        .onChange(of: camera.teleprompter.runStartedAt) { dragged = 0 }
     }
 
-    /// Seconds into the script. A take counts from the moment recording
-    /// started; idle, from when the prompter came up, or from the last press
-    /// of the test button. The loop itself lives in the offset.
+    /// Seconds into the script, counted from the press of play — or from the
+    /// top of a take that began while the prompter was up. The loop itself
+    /// lives in the offset.
     private func elapsed(at now: Date) -> TimeInterval {
-        if let startedAt = camera.recordingStartedAt {
-            return now.timeIntervalSince(startedAt)
-        }
-        return now.timeIntervalSince(camera.teleprompter.testStartedAt ?? previewStart)
+        guard let startedAt = camera.teleprompter.runStartedAt else { return 0 }
+        return now.timeIntervalSince(startedAt)
     }
 }
 

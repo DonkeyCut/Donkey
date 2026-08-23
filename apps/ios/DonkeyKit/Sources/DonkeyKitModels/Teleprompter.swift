@@ -60,9 +60,12 @@ nonisolated public func readDuration(of script: String, wordsPerMinute: Double) 
 nonisolated public struct TeleprompterState: Equatable, Sendable {
     public var script: String = ""
     public var isCardShown = false
+    /// True while the script runs on screen. Play starts it, closing the
+    /// prompter ends it: the words are on the picture only when asked for.
+    public var isRunning = false
     public var settings = TeleprompterSettings()
-    /// When a test run was asked for, so the script starts from the top.
-    public var testStartedAt: Date?
+    /// When the run was asked for, so the script starts from the top.
+    public var runStartedAt: Date?
 
     public init() {}
 

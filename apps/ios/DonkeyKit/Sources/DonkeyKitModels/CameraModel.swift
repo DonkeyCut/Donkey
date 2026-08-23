@@ -119,9 +119,19 @@ public final class CameraModel {
     }
 
     /// Clears the card and runs the script from the top at the set pace.
-    public func startTeleprompterTest() {
+    public func startTeleprompter() {
+        guard teleprompter.hasScript else { return }
         teleprompter.isCardShown = false
-        teleprompter.testStartedAt = .now
+        teleprompter.isRunning = true
+        teleprompter.runStartedAt = .now
+    }
+
+    /// Takes the prompter off the picture: the card and the running script
+    /// both go.
+    public func dismissTeleprompter() {
+        teleprompter.isCardShown = false
+        teleprompter.isRunning = false
+        teleprompter.runStartedAt = nil
     }
 
     // MARK: Controller events
@@ -139,6 +149,12 @@ public final class CameraModel {
 
     public func recordingDidStart() {
         recordingStartedAt = .now
+        // A take starts the script from the top. The card is off screen while
+        // recording, so an open card hands its script to the prompter; a
+        // dismissed prompter stays dismissed.
+        if teleprompter.isRunning || (teleprompter.isCardShown && teleprompter.hasScript) {
+            startTeleprompter()
+        }
     }
 
     public func recordingDidFinish() {
