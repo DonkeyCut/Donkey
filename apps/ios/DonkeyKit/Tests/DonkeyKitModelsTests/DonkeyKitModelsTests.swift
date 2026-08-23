@@ -148,6 +148,8 @@ import Testing
         var imported: JobOutcome<ImportedLink> = .done(
             ImportedLink(assetId: "asset-link", fileName: "source.mp4", isVideo: true)
         )
+        /// Thrown by the job poll when set: the answers that arrive as errors.
+        var importedError: CloudSyncError?
         var usage = StorageUsage(bytes: 0, quotaBytes: 1_000_000)
         var uploadResult: Result<RemoteAsset, CloudSyncError> =
             .success(RemoteAsset(id: "asset-1", fileName: "clip.mov"))
@@ -183,6 +185,7 @@ import Testing
 
         func importedLink(jobId: String) async throws -> JobOutcome<ImportedLink> {
             polled.append(jobId)
+            if let importedError { throw importedError }
             if case .done(let link) = imported { libraryAssets.insert(link.assetId) }
             return imported
         }
@@ -448,6 +451,35 @@ import Testing
         #expect(item.media == nil)
         #expect(item.importState == .failed)
         #expect(rig.cloud.downloads.isEmpty)
+    }
+
+    @Test func aSettledLinkGoesBackToTheCloudOnRetry() async throws {
+        let rig = try makeRig()
+        rig.cloud.imported = .failed
+        #expect(rig.ideas.addInspiration(urlText: "example.com/article"))
+        await rig.engine.run()
+        await rig.engine.run()
+        let id = try #require(rig.ideas.inspiration.first).id
+        #expect(rig.cloud.links.count == 1)
+
+        rig.cloud.imported = .done(
+            ImportedLink(assetId: "asset-retry", fileName: "source.mp4", isVideo: true)
+        )
+        rig.ideas.retryInspirationImport(id: id)
+        #expect(rig.ideas.inspiration.first?.importState == .waiting)
+        await rig.engine.run()
+        #expect(rig.cloud.links.count == 2)
+        await rig.engine.run()
+        #expect(rig.ideas.inspiration.first?.media?.isVideo == true)
+    }
+
+    @Test func aJobTheCloudHasForgottenSettlesTheCard() async throws {
+        let rig = try makeRig()
+        rig.cloud.importedError = CloudSyncError.notFound
+        #expect(rig.ideas.addInspiration(urlText: "example.com/gone"))
+        await rig.engine.run()
+        await rig.engine.run()
+        #expect(rig.ideas.inspiration.first?.importState == .failed)
     }
 
     @Test func folderPushesAheadOfTheNoteFiledInIt() async throws {

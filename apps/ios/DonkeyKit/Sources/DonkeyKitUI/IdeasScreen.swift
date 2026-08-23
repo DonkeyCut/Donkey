@@ -188,6 +188,11 @@ struct IdeasScreen: View {
             ForEach(ideas.inspiration) { item in
                 InspirationCard(item: item, ideas: ideas)
                     .contextMenu {
+                        if item.importState == .failed {
+                            Button("Try Again", systemImage: "arrow.clockwise") {
+                                ideas.retryInspirationImport(id: item.id)
+                            }
+                        }
                         Button("Delete", systemImage: "trash", role: .destructive) {
                             ideas.deleteInspiration(id: item.id)
                         }
@@ -519,8 +524,12 @@ struct LinkCard: View {
                     Text(url.absoluteString)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(4)
+                        .lineLimit(3)
                         .multilineTextAlignment(.leading)
+                    Text("Nothing came back. Long press to try again.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
                 } else {
                     HStack(spacing: 8) {
                         ProgressView()

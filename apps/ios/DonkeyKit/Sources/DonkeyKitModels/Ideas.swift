@@ -180,6 +180,8 @@ public protocol IdeasStoring: AnyObject {
     func addLink(_ url: URL) throws -> InspirationItem
     func addMedia(data: Data, isVideo: Bool) throws -> InspirationItem
     func deleteInspiration(id: UUID) throws
+    /// Put a settled link back in the queue for another cloud fetch.
+    func retryInspirationImport(id: UUID) throws
     /// Absolute location of a stored media file.
     func mediaURL(fileName: String) -> URL
 }
@@ -359,6 +361,14 @@ public final class IdeasModel {
     public func deleteInspiration(id: UUID) {
         try? store.deleteInspiration(id: id)
         inspiration.removeAll { $0.id == id }
+        onLocalChange?()
+    }
+
+    /// Ask the cloud for this link again. The card goes back to fetching and
+    /// the next sync pass queues a fresh import job.
+    public func retryInspirationImport(id: UUID) {
+        try? store.retryInspirationImport(id: id)
+        reloadFromStore()
         onLocalChange?()
     }
 

@@ -27,9 +27,11 @@ media lands in the Inspiration folder, and a saved inspiration link queues a
 cloud-side import: the worker fetches the source, the phone follows the job,
 and the media comes back down onto the phone, so the card that was a link
 plays the video the link pointed at. A source that turns out to be only words
-stays a link. Notes merge both ways by last-writer-wins on the edit stamp,
-with tombstones so a delete made offline on either side still lands on the
-other. The folders notes file into travel with them, under ids whichever
+stays a link, as does one whose job the cloud has forgotten or has left running
+long past the point where an answer is coming — a card's spinner always ends,
+and a long press offers the fetch again. Notes merge both ways by
+last-writer-wins on the edit stamp, with tombstones so a delete made offline on
+either side still lands on the other. The folders notes file into travel with them, under ids whichever
 device made them chose; a folder carries no tombstone, so a folder the cloud
 listing no longer names was deleted elsewhere and its notes come back to the
 top level.

@@ -50,6 +50,7 @@ final class CutCloudClient: NSObject {
         switch http.statusCode {
         case 200..<300: return data
         case 401, 403: throw CloudSyncError.unauthorized
+        case 404: throw CloudSyncError.notFound
         case 413: throw CloudSyncError.storageFull
         default: throw CloudSyncError.transport
         }

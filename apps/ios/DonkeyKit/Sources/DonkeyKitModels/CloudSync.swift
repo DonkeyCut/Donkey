@@ -198,6 +198,10 @@ nonisolated public enum CloudSyncError: Error, Equatable {
     case storageFull
     /// The session is gone; syncing waits for the next sign-in.
     case unauthorized
+    /// The thing asked about is not there — a job the server has forgotten, a
+    /// file already swept. Retrying asks the same question again, so a caller
+    /// that can settle on this answer should.
+    case notFound
     /// Anything transient: network, 5xx. The item stays queued.
     case transport
 }

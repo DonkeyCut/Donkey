@@ -488,9 +488,9 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
         try context.save()
     }
 
-    public func isInspirationLinkSynced(_ id: UUID) throws -> Bool {
+    public func inspirationLinkQueuedAt(_ id: UUID) throws -> Date? {
         let descriptor = FetchDescriptor<InspirationRecord>(predicate: #Predicate { $0.id == id })
-        return try context.fetch(descriptor).first?.linkSyncedAt != nil
+        return try context.fetch(descriptor).first?.linkSyncedAt
     }
 
     public func markInspirationMediaSynced(_ id: UUID, remoteAssetId: String) throws {
@@ -542,6 +542,17 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
         guard let record = try context.fetch(descriptor).first else { return }
         record.importJobId = nil
         record.importFailed = true
+        try context.save()
+    }
+
+    /// Hand the link back to the cloud: the next sync pass queues a fresh
+    /// import job for it, as though it had just been saved.
+    public func retryInspirationImport(id: UUID) throws {
+        let descriptor = FetchDescriptor<InspirationRecord>(predicate: #Predicate { $0.id == id })
+        guard let record = try context.fetch(descriptor).first, record.linkURL != nil else { return }
+        record.importFailed = nil
+        record.importJobId = nil
+        record.linkSyncedAt = nil
         try context.save()
     }
 

@@ -76,7 +76,8 @@ public protocol SyncJournalStoring: AnyObject {
     /// Forget an item's cloud copy: the asset left without a tombstone, so the
     /// item goes back to being unsynced.
     func clearInspirationRemote(_ id: UUID) throws
-    func isInspirationLinkSynced(_ id: UUID) throws -> Bool
+    /// When this link's import was handed to the cloud; nil while it never was.
+    func inspirationLinkQueuedAt(_ id: UUID) throws -> Date?
     func markInspirationMediaSynced(_ id: UUID, remoteAssetId: String) throws
     /// A link handed to the cloud worker: the job that is fetching it.
     func markInspirationLinkSynced(_ id: UUID, jobId: String) throws
@@ -136,6 +137,10 @@ public final class SyncEngine {
     @ObservationIgnored private var unreadable: Set<UUID> = []
     private static let firstRetry: Duration = .seconds(15)
     private static let retryCeiling: Duration = .seconds(300)
+    /// How long a saved link may sit on its spinner. The cloud fetch spends
+    /// minutes on the worst source it can reach, and the API settles a job
+    /// nothing is working on, so this is the phone's own backstop.
+    private static let importDeadline: TimeInterval = 20 * 60
 
     public init(
         journal: any SyncJournalStoring,
@@ -264,7 +269,7 @@ public final class SyncEngine {
         return (ideas?.inspiration ?? []).contains { item in
             switch item.kind {
             case .link:
-                ((try? journal.isInspirationLinkSynced(item.id)) ?? true) == false
+                ((try? journal.inspirationLinkQueuedAt(item.id)) ?? nil) == nil
                     || ((try? journal.inspirationImportJobId(item.id)) ?? nil) != nil
             case .media:
                 ((try? journal.inspirationRemoteAssetId(item.id)) ?? nil) == nil
@@ -558,7 +563,10 @@ public final class SyncEngine {
         for item in ideas?.inspiration ?? [] {
             guard case .link(let url) = item.kind else { continue }
             guard online else { continue }
-            if ((try? journal.isInspirationLinkSynced(item.id)) ?? true) == false {
+            // An unreadable journal waits for the next pass: read as "never
+            // queued" it would hand the cloud a second job for this link.
+            guard let queued = try? journal.inspirationLinkQueuedAt(item.id) else { continue }
+            guard let queuedAt = queued else {
                 do {
                     let jobId = try await service.importInspirationLink(url)
                     try? journal.markInspirationLinkSynced(item.id, jobId: jobId)
@@ -574,7 +582,12 @@ public final class SyncEngine {
             do {
                 switch try await service.importedLink(jobId: job) {
                 case .running:
-                    continue
+                    // A spinner has to end. The cloud fetch spends minutes on
+                    // the worst source it can reach, so a job still running
+                    // this long has lost whatever was working on it.
+                    guard Date.now.timeIntervalSince(queuedAt) > Self.importDeadline else { continue }
+                    try? journal.markInspirationImportFailed(item.id)
+                    landed = true
                 case .failed:
                     try? journal.markInspirationImportFailed(item.id)
                     landed = true
@@ -594,6 +607,11 @@ public final class SyncEngine {
                 }
             } catch CloudSyncError.unauthorized {
                 return
+            } catch CloudSyncError.notFound {
+                // The cloud has no such job any more, so asking again brings
+                // back the same nothing. The card settles.
+                try? journal.markInspirationImportFailed(item.id)
+                landed = true
             } catch {
                 // Transient; the next pass asks after the job again.
             }
