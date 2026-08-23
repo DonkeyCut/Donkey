@@ -34,6 +34,13 @@
  * browser words it differently.
  */
 function transient(err: unknown): boolean {
+  // A read layer that names its own failures (mediaRead.ts wraps a refused
+  // network read) carries the original underneath, and that is the shape which
+  // decides.
+  return shape(err) || (err instanceof Error && err.cause != null && shape(err.cause));
+}
+
+function shape(err: unknown): boolean {
   if (err instanceof DOMException) {
     return (
       // The read was torn down: a scrub superseded it, a clip closed, the tab

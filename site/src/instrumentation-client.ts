@@ -28,6 +28,19 @@ const fromInjectedScript = (item: { stacktrace?: { frames?: { filename?: string 
   return Array.isArray(frames) && frames.length > 0 && frames.every((f) => !f?.filename);
 };
 
+/**
+ * Whether this exception is a media read that never reached the file.
+ *
+ * A media source reads ahead of what anyone asked for, and mediabunny rethrows
+ * a failed readahead so it isn't swallowed — with nothing awaiting those bytes
+ * it reaches the page as an unhandled rejection with no failure behind it: the
+ * next read of that range fetches it again, and reads someone is waiting on
+ * reject into callers that retry. The read layer (cut/lib/mediaRead.ts) names
+ * these, including the ones it refuses outright because the Donkey app is
+ * closed, which the connect gate is already saying on screen.
+ */
+const recoveredMediaRead = (item: { type?: string }) => item?.type === "MediaFetchError";
+
 // Production builds only: a dev server on localhost sends HMR build overlays
 // and half-saved-file errors straight into production error tracking.
 if (process.env.NEXT_PUBLIC_POSTHOG_KEY && process.env.NODE_ENV === "production") {
@@ -50,7 +63,9 @@ if (process.env.NEXT_PUBLIC_POSTHOG_KEY && process.env.NODE_ENV === "production"
       if (event?.event === "$exception") {
         const list = event.properties?.$exception_list;
         if (Array.isArray(list)) {
-          if (list.some(fromInjectedScript)) return null;
+          // Only as the exception itself: a report worded around one (its
+          // cause, further down the list) is a failure that outlived retries.
+          if (list.some(fromInjectedScript) || recoveredMediaRead(list[0])) return null;
           for (const item of list) {
             if (typeof item?.value === "string") item.value = scrubUrls(item.value);
           }
