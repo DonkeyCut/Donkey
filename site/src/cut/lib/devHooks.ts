@@ -12,6 +12,7 @@ import { useGenerate } from "./generate";
 import { useGenScene } from "./genScene";
 import { edgeFramesPending, enrichAsset, importFileToProject } from "./media";
 import { awaitingFrame, startTrace, stopTrace, traceReport } from "./perfTrace";
+import { prefetchCloudMedia } from "./mediaSync";
 import { playheadAt } from "./playhead";
 import { projectDuration, useEditor } from "./store";
 
@@ -27,6 +28,11 @@ export function installDevHooks(): void {
     // strip's tiles back out of the DOM.
     edgeFramesPending,
     playheadAt,
+    // The perf eval starts the background walk that fills the chunk cache, so
+    // its cloud-media cases play against the same competition for the link a
+    // real project has: the file streaming in behind the editor while the
+    // playing walk reads the chunks under the playhead.
+    prefetchCloudMedia,
     // The export eval renders a doc through the tab's own pipeline and reads
     // the bytes back out.
     renderProjectToMp4,

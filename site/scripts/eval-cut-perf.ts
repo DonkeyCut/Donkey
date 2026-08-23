@@ -36,13 +36,15 @@
  *   npm run eval:cut-perf [--only <case>] [--runs N] [--out path]
  *                         [--enforce-budgets] [--headed]
  *                         [--machine desktop|laptop|ryzen-5500u|potato] [--cpu N]
+ *                         [--net <kbps>] [--rtt <ms>]
  */
 
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type Page, type Request, type Route } from "playwright";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { CUT_MEDIA_ORIGIN } from "../src/cut/lib/hosts";
 
 const SITE = path.resolve(import.meta.dir, "..");
 const OUT = path.resolve(SITE, "..", "dist", "cut-perf");
@@ -120,36 +122,58 @@ interface Machine {
    * and a Bluetooth output more again. Zero leaves the device alone.
    */
   outputLatencyS: number;
+  /**
+   * What this machine's link to the media host gives it.
+   *
+   * Cloud media is read as ranged requests over the wire and cached as it
+   * arrives (chunkCache.ts), so a walk can be starved of bytes exactly the way
+   * it is starved of decode — the picture falls behind, the walk re-anchors,
+   * and the seek that ends the lag lands nothing while it runs. Serving every
+   * fixture instantly off disk left that half of the picture unmeasured. Zero
+   * leaves the route alone, which is what keeps the desktop baseline still.
+   */
+  netKbps: number;
+  /** Round trip to the media host, charged to every ranged request. A chunk
+   * read is a request, so this is paid per 2MB rather than once. */
+  rttMs: number;
 }
 
 const MACHINES: Machine[] = [
   // The machine this is being written on: nothing binds, and the numbers are
   // held to the tightest budget in the file.
-  { name: "desktop", cpu: 1, slots: 0, softwareMs: 0, outputLatencyS: 0, lagP95S: 0.05, stallShare: 0.002, lateShare: 0.02, decayFloor: 0.02 },
+  { name: "desktop", cpu: 1, slots: 0, softwareMs: 0, outputLatencyS: 0, netKbps: 0, rttMs: 0, lagP95S: 0.05, stallShare: 0.002, lateShare: 0.02, decayFloor: 0.02 },
   // A mainstream laptop with an integrated GPU.
-  { name: "laptop", cpu: 4, slots: 6, softwareMs: 6, outputLatencyS: 0.12, lagP95S: 0.06, stallShare: 0.04, lateShare: 0.1, decayFloor: 0.1 },
+  { name: "laptop", cpu: 4, slots: 6, softwareMs: 6, outputLatencyS: 0.12, netKbps: 25_000, rttMs: 40, lagP95S: 0.06, stallShare: 0.04, lateShare: 0.1, decayFloor: 0.1 },
   // The one people report from: a 15W six-core with Vega graphics, running a
   // browser that is also drawing the editor.
-  { name: "ryzen-5500u", cpu: 10, slots: 4, softwareMs: 8, outputLatencyS: 0.12, lagP95S: 0.06, stallShare: 0.03, lateShare: 0.05, decayFloor: 0.08 },
+  { name: "ryzen-5500u", cpu: 10, slots: 4, softwareMs: 8, outputLatencyS: 0.12, netKbps: 12_000, rttMs: 60, lagP95S: 0.06, stallShare: 0.03, lateShare: 0.05, decayFloor: 0.08 },
   // Worse than anything anyone has reported, which is the point: what holds
   // here holds on the machines that have not written in yet.
-  { name: "potato", cpu: 20, slots: 2, softwareMs: 12, outputLatencyS: 0.2, lagP95S: 0.1, stallShare: 0.06, lateShare: 0.2, decayFloor: 0.15 },
+  { name: "potato", cpu: 20, slots: 2, softwareMs: 12, outputLatencyS: 0.2, netKbps: 6_000, rttMs: 120, lagP95S: 0.1, stallShare: 0.06, lateShare: 0.2, decayFloor: 0.15 },
   // No hardware video decode at all. This is not an exotic machine — a
   // blocklisted driver, a codec the GPU does not carry, a browser started with
   // acceleration off, and every stream is on the CPU. A software decoder is
   // slower than a hardware one; it is not broken, and neither is an editor
   // running on top of one. This profile is held to the same standard a laptop
   // is, because that is the claim.
-  { name: "software-decode", cpu: 4, slots: 0, softwareMs: 8, outputLatencyS: 0.12, lagP95S: 0.06, stallShare: 0.04, lateShare: 0.1, decayFloor: 0.1 },
+  { name: "software-decode", cpu: 4, slots: 0, softwareMs: 8, outputLatencyS: 0.12, netKbps: 25_000, rttMs: 40, lagP95S: 0.06, stallShare: 0.04, lateShare: 0.1, decayFloor: 0.1 },
 ];
 
 const MACHINE_NAME = arg("--machine") ?? "desktop";
 const MACHINE = ((): Machine => {
   const m = MACHINES.find((x) => x.name === MACHINE_NAME);
   if (!m) throw new Error(`unknown --machine ${MACHINE_NAME}; try ${MACHINES.map((x) => x.name).join(", ")}`);
-  // `--cpu` overrides the profile's throttle, for finding where a machine
-  // actually breaks.
-  return { ...m, cpu: Number(arg("--cpu") ?? m.cpu) };
+  // `--cpu`, `--net` and `--rtt` override the profile, for finding where a
+  // machine actually breaks — and, between them, for telling the two kinds of
+  // starvation apart. A case that fails on the profile and passes with the
+  // link opened up was starved of bytes; one that fails either way was starved
+  // of decode.
+  return {
+    ...m,
+    cpu: Number(arg("--cpu") ?? m.cpu),
+    netKbps: Number(arg("--net") ?? m.netKbps),
+    rttMs: Number(arg("--rtt") ?? m.rttMs),
+  };
 })();
 /** The dev-only account the API bypass authenticates as. */
 const DEV_USER = "donkey-dev-auth-bypass";
@@ -459,6 +483,107 @@ const seedMontage = (dressed = false) => async (page: Page): Promise<Fixture> =>
 /** Where the scene-cut fixture changes scene: every three seconds. */
 const CUT_SEG_S = 3;
 const FIXTURE_CUTS = Array.from({ length: RAMP_S / CUT_SEG_S - 1 }, (_, i) => (i + 1) * CUT_SEG_S);
+
+// ── The one-long-clip fixture ───────────────────────────────────────────────
+//
+// Most projects are not a montage. One file on the timeline is one continuous
+// walk, and a walk is where the lag tolerances in frameSource.ts actually bind:
+// a montage re-anchors at every cut, about once a second, and never gives a
+// walk the room to fall two seconds behind. This fixture is the other shape,
+// and it is read the way a cloud project reads — off the media host, in ranged
+// chunks, through the chunk cache.
+
+/** The long clip's length. Played more than once, so the decay measure gets
+ * the same span of playback the montage cases get from a shorter fixture. */
+const LONG_S = 30;
+/** The long clip's bitrate. A music video is denser than stock footage, and
+ * density is what decides whether the bytes or the decoder binds first — the
+ * reported project was about 14 Mbps. */
+const LONG_KBPS = 12_000;
+
+/**
+ * One long clip with sound, at `fps`, with keyframes two seconds apart.
+ *
+ * The keyframe cadence is the load-bearing part. A walk that re-anchors decodes
+ * from the keyframe before the ask, so how far back that keyframe sits is what
+ * the re-anchor costs — and it is what `FIRST_FRAME_S` is a tolerance for.
+ */
+async function buildLongClip(fps: number): Promise<void> {
+  const dst = path.join(OUT, `long-${fps}.mp4`);
+  if (existsSync(dst)) return;
+  const src = path.join(STOCK, "animal-dog-sprint.mp4");
+  await run("ffmpeg", [
+    "-y", "-loglevel", "error",
+    "-stream_loop", "-1", "-i", src,
+    "-f", "lavfi", "-i", "sine=frequency=330:sample_rate=48000",
+    "-t", String(LONG_S),
+    "-map", "0:v:0", "-map", "1:a:0",
+    "-c:v", "libx264", "-preset", "veryfast",
+    "-g", String(fps * 2), "-keyint_min", String(fps * 2),
+    "-b:v", `${LONG_KBPS}k`, "-maxrate", `${LONG_KBPS}k`, "-bufsize", `${LONG_KBPS * 2}k`,
+    "-r", String(fps), "-vf", "scale=1280:-2", "-pix_fmt", "yuv420p",
+    "-c:a", "aac", "-b:a", "128k",
+    "-shortest",
+    dst,
+  ]);
+}
+
+/**
+ * A fixture file addressed as cloud media.
+ *
+ * `chunkIdentity` only claims URLs on the media host (chunkCache.ts), so a
+ * fixture served from the page's own origin bypasses the chunk cache entirely
+ * — the whole ranged-read path that every cloud project plays through went
+ * unmeasured here. Addressing the fixture the way the Worker addresses R2
+ * puts it back: a key under `/cut/...`, a `v` cache-version, and reads that
+ * arrive as 2MB chunks. The route in `launch()` answers them.
+ */
+const mediaUrl = (name: string) =>
+  `${CUT_MEDIA_ORIGIN}/cut/perf/projects/eval/media/${name}?v=1`;
+
+/** Seed one long clip, read as cloud media. `prefetch` starts the background
+ * walk that fills the chunk cache behind the editor, which in a real project
+ * is racing the playing walk for the same link — see `prefetchCloudMedia`. */
+const seedLongClip = (fps: number, prefetch: boolean) => async (page: Page): Promise<Fixture> =>
+  page.evaluate(
+    async ({ url, duration, prefetch }) => {
+      const dev = (window as unknown as {
+        __cutDev: {
+          useEditor: { getState(): Record<string, unknown>; setState(p: unknown): void };
+          prefetchCloudMedia?: (
+            projectId: string,
+            files: { fileName: string; url: string; type?: string }[]
+          ) => void;
+        };
+      }).__cutDev;
+      const name = url.split("/").pop()!.split("?")[0];
+      dev.useEditor.setState({
+        assets: [
+          {
+            id: "long",
+            name,
+            fileName: name,
+            type: "video",
+            url,
+            duration,
+            width: 1280,
+            height: 720,
+          },
+        ],
+        clips: [{ id: "c-long", assetId: "long", track: 0, start: 0, in: 0, out: duration }],
+        audioClips: [],
+        overlays: [],
+        transitions: [],
+        loaded: true,
+      });
+      await new Promise((r) => setTimeout(r, 200));
+      if (prefetch) {
+        dev.prefetchCloudMedia?.("perf-eval", [{ fileName: name, url, type: "video" }]);
+      }
+      return { cuts: [], duration };
+    },
+    { url: mediaUrl(`long-${fps}.mp4`), duration: LONG_S, prefetch }
+  );
 
 /** The ramp with a hard scene cut every three seconds: the color circle jumps
  * phase at each segment, and blue names the segment so no two moments across
@@ -857,6 +982,193 @@ const playbackCase = (name: string, transitions: boolean): EvalCase => ({
 });
 
 /**
+ * The pool and the engine log between passes, when `--detail` asks for them.
+ */
+async function dumpDetail(page: Page, pass: number): Promise<void> {
+  const state = await page.evaluate(() => {
+    const w = window as unknown as {
+      __cutDevEngine?: { poolState(): Record<string, unknown>[] };
+      __cutDev: { useEditor: { getState(): { clips: unknown[]; playing: boolean } } };
+    };
+    const s = w.__cutDev.useEditor.getState();
+    return { pool: w.__cutDevEngine?.poolState() ?? [], clips: s.clips.length, playing: s.playing };
+  });
+  const res = await page.evaluate(
+    () => (window as unknown as { __resourceStats?: unknown }).__resourceStats ?? null
+  );
+  console.log(
+    `[pool] pass ${pass + 1}: clips=${state.clips} playing=${state.playing} res=${JSON.stringify(res)}`
+  );
+  for (const s of state.pool) console.log(`[pool]   ${JSON.stringify(s)}`);
+  const log = (await page.evaluate(() => {
+    const w = window as unknown as { __cutEngineLog?: { at: number; msg: string }[] };
+    const out = w.__cutEngineLog ?? [];
+    w.__cutEngineLog = [];
+    return out;
+  })) as { at: number; msg: string }[];
+  for (const e of log) console.log(`[elog] ${(e.at / 1000).toFixed(1)}s ${e.msg}`);
+}
+
+/** Play the cut through from the start, `passes` times over. */
+async function playPasses(page: Page, fx: Fixture, passes: number): Promise<void> {
+  for (let i = 0; i < passes; i++) {
+    await seek(page, 0);
+    await playThrough(page, fx.duration);
+    if (has("--detail")) await dumpDetail(page, i);
+    await setPlaying(page, false);
+  }
+}
+
+/**
+ * Judge a play: how far the picture sat behind the clock, which clock it was
+ * drawn against, whether it decayed across the passes, and what the pool held.
+ *
+ * `steady` says which presented frames belong to playing rather than to
+ * opening a decoder — a montage excludes the moments either side of every cut,
+ * one long clip excludes only its own head and tail.
+ */
+async function judgePlay(
+  page: Page,
+  name: string,
+  passes: number,
+  steady: (p: PresentRecord) => boolean
+): Promise<CaseResult> {
+  const trace = await stopTrace(page);
+  const notes: string[] = [];
+  if (!trace) return { name, bucket: "playback", pass: false, notes: ["no trace"] };
+  const decoders = await page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          __cutDecoders?: {
+            peak: number;
+            software: number;
+            softwarePeak: number;
+            busyPeak: number;
+          };
+        }
+      ).__cutDecoders ?? null
+  );
+
+  const played = trace.presents.filter(steady);
+  if (played.length < 60) {
+    return { name, bucket: "playback", pass: false, notes: [`only ${played.length} frames`] };
+  }
+  const lag = agg(
+    played
+      .filter((p) => p.srcTs !== null && p.wantSrc !== null)
+      .map((p) => Math.max(0, +(p.wantSrc! - p.srcTs!).toFixed(4)))
+  );
+  const late = played.filter((p) => !p.exact || p.stale);
+  const share = (xs: PresentRecord[]) =>
+    xs.length ? +(xs.filter((p) => !p.exact || p.stale).length / xs.length).toFixed(3) : 0;
+  const third = Math.floor(played.length / 3);
+  const decay = { first: share(played.slice(0, third)), last: share(played.slice(-third)) };
+  if (has("--detail")) {
+    const span = (trace.presents.at(-1)!.at - trace.presents[0].at) / 1000;
+    console.log(
+      `[detail] presents=${trace.presents.length} over ${span.toFixed(1)}s (${(
+        trace.presents.length / span
+      ).toFixed(1)}/s) stale=${played.filter((p) => p.stale).length} notExact=${
+        played.filter((p) => !p.exact && !p.stale).length
+      } sources p50=${agg(trace.liveSources).p50} max=${agg(trace.liveSources).max} held p50=${
+        agg(trace.liveSamples).p50
+      } max=${agg(trace.liveSamples).max}`
+    );
+    for (let i = 0; i < passes; i++) {
+      const from = (i * played.length) / passes;
+      const slice = played.slice(Math.floor(from), Math.floor(from + played.length / passes));
+      const gaps = slice.slice(1).map((p, j) => p.at - slice[j].at);
+      console.log(
+        `[detail] pass ${i + 1}: late=${share(slice)} lagP95=${
+          agg(slice.filter((p) => p.srcTs !== null).map((p) => Math.max(0, p.wantSrc! - p.srcTs!)))
+            .p95
+        }s frameGapP95=${agg(gaps).p95}ms n=${slice.length}`
+      );
+      // Which clips went dark, and for how long at a stretch.
+      const byClip = new Map<string, { n: number; stale: number; worst: number }>();
+      let streak = 0;
+      for (let j = 0; j < slice.length; j++) {
+        const p = slice[j];
+        const key = p.clipId ?? "none";
+        const row = byClip.get(key) ?? { n: 0, stale: 0, worst: 0 };
+        row.n++;
+        if (p.stale) {
+          row.stale++;
+          streak = streak + (j > 0 ? p.at - slice[j - 1].at : 0);
+          row.worst = Math.max(row.worst, streak);
+        } else {
+          streak = 0;
+        }
+        byClip.set(key, row);
+      }
+      const dark = [...byClip.entries()]
+        .filter(([, r]) => r.stale > 0)
+        .sort((a, b) => b[1].stale / b[1].n - a[1].stale / a[1].n)
+        .map(([id, r]) => `${id}:${Math.round((100 * r.stale) / r.n)}%/${Math.round(r.worst)}ms`);
+      if (dark.length) console.log(`[detail]   dark ${dark.join(" ")}`);
+    }
+  }
+
+  // The plainest question this case asks, and the one a viewer would ask:
+  // did the frames arrive. A run where nothing decoded at all used to score
+  // a clean sheet here — every frame stale, no lag to measure, because there
+  // was never a picture to be behind.
+  const lateShare = +(late.length / played.length).toFixed(3);
+  if (lateShare > GATE.lateShare) {
+    notes.push(`${Math.round(lateShare * 100)}% of frames did not arrive on time`);
+  }
+  if (decoders && decoders.peak === 0) notes.push("nothing decoded at all");
+  if (lag.p95 > GATE.lagP95S) notes.push(`picture ${lag.p95}s behind the clock at p95`);
+  // Which clock the picture is drawn against, which the lag above cannot ask:
+  // a picture drawn against the rendered clock is exactly on time against it
+  // and a tenth of a second early against the speakers. The device's own
+  // answer is the reference, capped where the preview caps it so a driver
+  // claiming something absurd cannot fail a run on its own.
+  const lead = agg(trace.audioLead ?? []);
+  const reported = agg(trace.audioLatency ?? []);
+  const owed = Math.min(CLOCK_CAP_S, reported.p50);
+  if (reported.n > 0 && Math.abs(lead.p50 - owed) > CLOCK_SLACK_S) {
+    notes.push(
+      `picture drawn ${Math.round((owed - lead.p50) * 1000)}ms ahead of the sound: ` +
+        `the output holds ${Math.round(owed * 1000)}ms and the clock gives back ${Math.round(lead.p50 * 1000)}ms`
+    );
+  }
+  const behind = played.filter((p) => p.srcTs !== null && p.wantSrc! - p.srcTs! > STALL_S);
+  const stallShare = +(behind.length / played.length).toFixed(4);
+  if (stallShare > GATE.stallShare) {
+    notes.push(`picture hitched a quarter second behind on ${(stallShare * 100).toFixed(1)}% of frames`);
+  }
+  if (passes > 1 && decay.last > Math.max(GATE.decayFloor, decay.first * GATE.decayRatio)) {
+    notes.push(`late frames rose ${decay.first} → ${decay.last} over the play`);
+  }
+  const warmMb = Math.max(0, ...trace.warmMb);
+  if (warmMb > GATE.warmMb) notes.push(`warm shelf holding ${warmMb}MB of canvas`);
+  // Long tasks are reported, not gated: this case judges sync, decay and
+  // memory, and the stray dev-build hiccup that leaves every frame exact is
+  // not a fail.
+  return {
+    name,
+    bucket: "playback",
+    pass: notes.length === 0,
+    notes,
+    drops: late.length,
+    presented: played.length,
+    lag,
+    stallShare,
+    decay,
+    clock: { lead: lead.p50, reported: +reported.p50.toFixed(3) },
+    longTasks: agg(trace.longTasks.map((l) => l.ms)),
+    liveSamples: Math.max(0, ...trace.liveSamples),
+    liveSources: Math.max(0, ...trace.liveSources),
+    keptSources: Math.max(0, ...trace.keptSources),
+    warmMb,
+    decoders: decoders ?? undefined,
+    machine: MACHINE.name,
+  };
+}
+
+/**
  * A montage played straight through, `passes` times over, with the sound on.
  *
  * What it measures is drift: how far the picture sits behind the moment the
@@ -878,176 +1190,72 @@ const montageCase = (name: string, passes: number, dressed = false): EvalCase =>
     await rewind(page);
     await settle(page);
     await startTrace(page);
-    for (let i = 0; i < passes; i++) {
-      await seek(page, 0);
-      await playThrough(page, fx.duration);
-      if (has("--detail")) {
-        const state = await page.evaluate(() => {
-          const w = window as unknown as {
-            __cutDevEngine?: { poolState(): Record<string, unknown>[] };
-            __cutDev: { useEditor: { getState(): { clips: unknown[]; playing: boolean } } };
-          };
-          const s = w.__cutDev.useEditor.getState();
-          return { pool: w.__cutDevEngine?.poolState() ?? [], clips: s.clips.length, playing: s.playing };
-        });
-        const res = await page.evaluate(
-          () => (window as unknown as { __resourceStats?: unknown }).__resourceStats ?? null
-        );
-        console.log(
-          `[pool] pass ${i + 1}: clips=${state.clips} playing=${state.playing} res=${JSON.stringify(res)}`
-        );
-        for (const s of state.pool) console.log(`[pool]   ${JSON.stringify(s)}`);
-        const log = (await page.evaluate(() => {
-          const w = window as unknown as { __cutEngineLog?: { at: number; msg: string }[] };
-          const out = w.__cutEngineLog ?? [];
-          w.__cutEngineLog = [];
-          return out;
-        })) as { at: number; msg: string }[];
-        for (const e of log) console.log(`[elog] ${(e.at / 1000).toFixed(1)}s ${e.msg}`);
-      }
-      await setPlaying(page, false);
-    }
-    const trace = await stopTrace(page);
-    const notes: string[] = [];
-    if (!trace) return { name, bucket: "playback", pass: false, notes: ["no trace"] };
-    const decoders = await page.evaluate(
-      () =>
-        (
-          window as unknown as {
-            __cutDecoders?: {
-              peak: number;
-              software: number;
-              softwarePeak: number;
-              busyPeak: number;
-            };
-          }
-        ).__cutDecoders ?? null
-    );
-
+    await playPasses(page, fx, passes);
     // The moments a clip's decoder is being opened for the first time in a pass
     // belong to the open, so the measure starts a beat inside every clip and
     // ends a beat before the cut.
-    const played = trace.presents.filter((p) => {
+    return judgePlay(page, name, passes, (p) => {
       const into = p.t % SHOT_S;
       return p.t > 0.4 && p.t < fx.duration - 0.3 && into > 0.15 && into < SHOT_S - 0.05;
     });
-    if (played.length < 60) {
-      return { name, bucket: "playback", pass: false, notes: [`only ${played.length} frames`] };
-    }
-    const lag = agg(
-      played
-        .filter((p) => p.srcTs !== null && p.wantSrc !== null)
-        .map((p) => Math.max(0, +(p.wantSrc! - p.srcTs!).toFixed(4)))
-    );
-    const late = played.filter((p) => !p.exact || p.stale);
-    const share = (xs: PresentRecord[]) =>
-      xs.length ? +(xs.filter((p) => !p.exact || p.stale).length / xs.length).toFixed(3) : 0;
-    const third = Math.floor(played.length / 3);
-    const decay = { first: share(played.slice(0, third)), last: share(played.slice(-third)) };
-    if (has("--detail")) {
-      const span = (trace.presents.at(-1)!.at - trace.presents[0].at) / 1000;
-      console.log(
-        `[detail] presents=${trace.presents.length} over ${span.toFixed(1)}s (${(
-          trace.presents.length / span
-        ).toFixed(1)}/s) stale=${played.filter((p) => p.stale).length} notExact=${
-          played.filter((p) => !p.exact && !p.stale).length
-        } sources p50=${agg(trace.liveSources).p50} max=${agg(trace.liveSources).max} held p50=${
-          agg(trace.liveSamples).p50
-        } max=${agg(trace.liveSamples).max}`
-      );
-      for (let i = 0; i < passes; i++) {
-        const from = (i * played.length) / passes;
-        const slice = played.slice(Math.floor(from), Math.floor(from + played.length / passes));
-        const gaps = slice.slice(1).map((p, j) => p.at - slice[j].at);
-        console.log(
-          `[detail] pass ${i + 1}: late=${share(slice)} lagP95=${
-            agg(slice.filter((p) => p.srcTs !== null).map((p) => Math.max(0, p.wantSrc! - p.srcTs!)))
-              .p95
-          }s frameGapP95=${agg(gaps).p95}ms n=${slice.length}`
-        );
-        // Which clips went dark, and for how long at a stretch.
-        const byClip = new Map<string, { n: number; stale: number; worst: number }>();
-        let streak = 0;
-        for (let j = 0; j < slice.length; j++) {
-          const p = slice[j];
-          const key = p.clipId ?? "none";
-          const row = byClip.get(key) ?? { n: 0, stale: 0, worst: 0 };
-          row.n++;
-          if (p.stale) {
-            row.stale++;
-            streak = streak + (j > 0 ? p.at - slice[j - 1].at : 0);
-            row.worst = Math.max(row.worst, streak);
-          } else {
-            streak = 0;
-          }
-          byClip.set(key, row);
-        }
-        const dark = [...byClip.entries()]
-          .filter(([, r]) => r.stale > 0)
-          .sort((a, b) => b[1].stale / b[1].n - a[1].stale / a[1].n)
-          .map(([id, r]) => `${id}:${Math.round((100 * r.stale) / r.n)}%/${Math.round(r.worst)}ms`);
-        if (dark.length) console.log(`[detail]   dark ${dark.join(" ")}`);
-      }
-    }
-
-    // The plainest question this case asks, and the one a viewer would ask:
-    // did the frames arrive. A run where nothing decoded at all used to score
-    // a clean sheet here — every frame stale, no lag to measure, because there
-    // was never a picture to be behind.
-    const lateShare = +(late.length / played.length).toFixed(3);
-    if (lateShare > GATE.lateShare) {
-      notes.push(`${Math.round(lateShare * 100)}% of frames did not arrive on time`);
-    }
-    if (decoders && decoders.peak === 0) notes.push("nothing decoded at all");
-    if (lag.p95 > GATE.lagP95S) notes.push(`picture ${lag.p95}s behind the clock at p95`);
-    // Which clock the picture is drawn against, which the lag above cannot ask:
-    // a picture drawn against the rendered clock is exactly on time against it
-    // and a tenth of a second early against the speakers. The device's own
-    // answer is the reference, capped where the preview caps it so a driver
-    // claiming something absurd cannot fail a run on its own.
-    const lead = agg(trace.audioLead ?? []);
-    const reported = agg(trace.audioLatency ?? []);
-    const owed = Math.min(CLOCK_CAP_S, reported.p50);
-    if (reported.n > 0 && Math.abs(lead.p50 - owed) > CLOCK_SLACK_S) {
-      notes.push(
-        `picture drawn ${Math.round((owed - lead.p50) * 1000)}ms ahead of the sound: ` +
-          `the output holds ${Math.round(owed * 1000)}ms and the clock gives back ${Math.round(lead.p50 * 1000)}ms`
-      );
-    }
-    const behind = played.filter((p) => p.srcTs !== null && p.wantSrc! - p.srcTs! > STALL_S);
-    const stallShare = +(behind.length / played.length).toFixed(4);
-    if (stallShare > GATE.stallShare) {
-      notes.push(`picture hitched a quarter second behind on ${(stallShare * 100).toFixed(1)}% of frames`);
-    }
-    if (passes > 1 && decay.last > Math.max(GATE.decayFloor, decay.first * GATE.decayRatio)) {
-      notes.push(`late frames rose ${decay.first} → ${decay.last} over the play`);
-    }
-    const warmMb = Math.max(0, ...trace.warmMb);
-    if (warmMb > GATE.warmMb) notes.push(`warm shelf holding ${warmMb}MB of canvas`);
-    // Long tasks are reported, not gated: this case judges sync, decay and
-    // memory, and the stray dev-build hiccup that leaves every frame exact is
-    // not a fail.
-    return {
-      name,
-      bucket: "playback",
-      pass: notes.length === 0,
-      notes,
-      drops: late.length,
-      presented: played.length,
-      lag,
-      stallShare,
-      decay,
-      clock: { lead: lead.p50, reported: +reported.p50.toFixed(3) },
-      longTasks: agg(trace.longTasks.map((l) => l.ms)),
-      liveSamples: Math.max(0, ...trace.liveSamples),
-      liveSources: Math.max(0, ...trace.liveSources),
-      keptSources: Math.max(0, ...trace.keptSources),
-      warmMb,
-      decoders: decoders ?? undefined,
-      machine: MACHINE.name,
-    };
   },
 });
+
+/**
+ * One long clip, played straight through more than once.
+ *
+ * Three things this shape measures that a montage cannot. A single walk runs
+ * long enough to fall behind, which is where `LAG_HOP_S` and `FIRST_FRAME_S`
+ * bind and where the sawtooth people report as choppiness lives. The bytes
+ * arrive over the media host through the chunk cache, so a walk starved of
+ * bytes is distinguishable from one starved of decode. And `cold` traces the
+ * very first play, before anything is resident — the state every editor opens
+ * in, and the one the reports cluster in.
+ *
+ * `remount` is the other half of that report: the editor is closed and
+ * reopened between the warm pass and the traced one, so the play being judged
+ * is the one after coming back. Every decoder, every parsed file, and every
+ * ranged request in the air goes with the old engine (`pool.closeAll`), and
+ * the second play has to meet the same gate as the first anyway.
+ */
+const longClipCase = (
+  name: string,
+  opts: { fps: number; passes?: number; cold?: boolean; remount?: boolean }
+): EvalCase => {
+  const passes = opts.passes ?? 2;
+  const seed = seedLongClip(opts.fps, true);
+  return {
+    name,
+    bucket: "playback",
+    transitions: false,
+    seed,
+    run: async (page, fx) => {
+      if (!opts.cold) {
+        // A pass before the trace, so what follows measures playing rather
+        // than opening the file for the first time. The cold case skips it on
+        // purpose: opening the file for the first time is what it measures.
+        await rewind(page);
+        await setPlaying(page, true);
+        await page.waitForTimeout(WARM_PLAY_S * 1000);
+        await rewind(page);
+        await settle(page);
+      }
+      if (opts.remount) {
+        await setPlaying(page, false);
+        await open(page, currentProjectId(page.url()));
+        await seed(page);
+        await settle(page);
+      }
+      await startTrace(page);
+      await playPasses(page, fx, passes);
+      // One clip, so only its own head and tail belong to the open.
+      return judgePlay(page, name, passes, (p) => p.t > 1 && p.t < fx.duration - 0.3);
+    },
+  };
+};
+
+/** The project id out of the editor's own URL, for a case that reopens it. */
+const currentProjectId = (url: string) => url.split("/p/")[1]?.split(/[?#]/)[0] ?? "";
 
 /** A paused editor with nothing changing must schedule no frames at all. */
 const idleCase: EvalCase = {
@@ -1393,6 +1601,18 @@ const CASES: EvalCase[] = [
   playbackCase("play-with-transitions", true),
   montageCase("play-fast-cuts", 1),
   montageCase("play-fast-cuts-long", 4),
+  // One file on the timeline, which is what most projects are. Warm first, so
+  // this one is about decode alone.
+  longClipCase("play-one-long-clip", { fps: 30 }),
+  // The same clip at sixty. `DECODE_AHEAD_S` asks for 0.3s of lookahead and
+  // the ring holds ten frames, so above thirty a second the frame count binds
+  // first and the buffered span silently halves.
+  longClipCase("play-one-long-clip-60fps", { fps: 60 }),
+  // Traced from the very first play, with nothing resident: the bytes arrive
+  // over the link while the walk is already reading.
+  longClipCase("play-cold-bytes", { fps: 30, cold: true }),
+  // The editor closed and reopened between the warm pass and the traced one.
+  longClipCase("play-after-remount", { fps: 30, remount: true }),
   // The same montage graded and looked, which is what the cost of a real
   // project's frame looks like on a machine that has none to spare.
   montageCase("play-fast-cuts-graded", 2, true),
@@ -1402,6 +1622,53 @@ const CASES: EvalCase[] = [
 ];
 
 // ── Run ─────────────────────────────────────────────────────────────────────
+
+/** Pause for the profile's round trip, then for as long as the profile's link
+ * takes to carry `bytes`. Zero on either leaves the response alone, which is
+ * what keeps the desktop baseline still. */
+const charge = (bytes: number): Promise<void> => {
+  const ms = MACHINE.rttMs + (MACHINE.netKbps > 0 ? (bytes * 8) / MACHINE.netKbps : 0);
+  return ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve();
+};
+
+/** Headers a cross-origin media read needs back. The chunk cache reads
+ * `Content-Range` to learn the object's size, and a browser hides it from a
+ * cross-origin response unless it is named here. */
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "Range, Content-Type",
+  "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
+};
+
+/** One fixture file, over the profile's link. A `Range` header is not a simple
+ * header, so a cross-origin read preflights and that is answered here too. */
+async function serveFixture(route: Route, request: Request): Promise<void> {
+  if (request.method() === "OPTIONS") {
+    await route.fulfill({ status: 204, headers: CORS });
+    return;
+  }
+  const name = path.basename(new URL(request.url()).pathname);
+  const body = await readFile(path.join(OUT, name));
+  const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers()["range"] ?? "");
+  const from = range ? Number(range[1]) : 0;
+  const to = range
+    ? range[2]
+      ? Math.min(Number(range[2]), body.length - 1)
+      : body.length - 1
+    : body.length - 1;
+  const slice = body.subarray(from, to + 1);
+  await charge(slice.length);
+  await route.fulfill({
+    status: range ? 206 : 200,
+    body: slice,
+    headers: {
+      ...CORS,
+      "Content-Type": "video/mp4",
+      "Accept-Ranges": "bytes",
+      ...(range ? { "Content-Range": `bytes ${from}-${to}/${body.length}` } : {}),
+    },
+  });
+}
 
 /** A browser with the fixture media served from disk and the session answered. */
 /**
@@ -1652,35 +1919,20 @@ async function launch(): Promise<{ browser: Browser; page: Page }> {
       }),
     });
   });
-  // Serve the fixture clips from disk, so no upload or network variance sits
-  // between the eval and the decoder. Range requests get real 206 slices: a
+  // Serve the fixture clips from disk. Range requests get real 206 slices: a
   // <video> element treats a source without them as unseekable and clamps
   // every seek to zero, which the filmstrip case's ground-truth probe relies
   // on being wrong about.
-  await context.route("**/__cutperf/*", async (route, request) => {
-    const name = path.basename(new URL(request.url()).pathname);
-    const body = await readFile(path.join(OUT, name));
-    const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers()["range"] ?? "");
-    if (range) {
-      const from = Number(range[1]);
-      const to = range[2] ? Math.min(Number(range[2]), body.length - 1) : body.length - 1;
-      await route.fulfill({
-        status: 206,
-        body: body.subarray(from, to + 1),
-        headers: {
-          "Content-Type": "video/mp4",
-          "Accept-Ranges": "bytes",
-          "Content-Range": `bytes ${from}-${to}/${body.length}`,
-        },
-      });
-      return;
-    }
-    await route.fulfill({
-      status: 200,
-      body,
-      headers: { "Content-Type": "video/mp4", "Accept-Ranges": "bytes" },
-    });
-  });
+  //
+  // The profile's link is charged here rather than through CDP's network
+  // emulation, which throttles the whole context: the page, the dev build's
+  // module graph and the API all have to arrive at their usual speed, or every
+  // case measures Next's first load. Only the media is paced.
+  await context.route("**/__cutperf/*", (route, request) => serveFixture(route, request));
+  // The same files addressed as cloud media, which is the path a cloud project
+  // actually plays: `chunkIdentity` claims this origin, so reads arrive as 2MB
+  // ranged chunks through the chunk cache and land in OPFS as they do.
+  await context.route(`${CUT_MEDIA_ORIGIN}/**`, (route, request) => serveFixture(route, request));
   const page = await context.newPage();
   if (MACHINE.cpu > 1 || MACHINE.softwareMs > 0) {
     if (MACHINE.cpu > 1) {
@@ -1748,6 +2000,8 @@ async function fanOut(names: string[]): Promise<CaseResult[]> {
       String(RUNS),
       ...(has("--headed") ? ["--headed"] : []),
       ...(arg("--cpu") ? ["--cpu", String(MACHINE.cpu)] : []),
+      ...(arg("--net") ? ["--net", String(MACHINE.netKbps)] : []),
+      ...(arg("--rtt") ? ["--rtt", String(MACHINE.rttMs)] : []),
     ];
     await run(process.execPath, [
       import.meta.path,
@@ -1783,7 +2037,9 @@ async function main(): Promise<void> {
   await buildRamp();
   await buildCutsClip();
   await buildMontageSource();
-  console.log(`[fixtures] ${files.length} clips + ramp + cuts in ${OUT}`);
+  await buildLongClip(30);
+  await buildLongClip(60);
+  console.log(`[fixtures] ${files.length} clips + ramp + cuts + long 30/60 in ${OUT}`);
 
   const cases = CASES.filter(
     (c) => (!ONLY || c.name === ONLY) && (!BUCKET || c.bucket === BUCKET)
