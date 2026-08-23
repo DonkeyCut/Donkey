@@ -181,6 +181,11 @@ nonisolated public struct InspirationItem: Identifiable, Equatable, Sendable {
         if case .link(let url) = kind { return url }
         return nil
     }
+
+    /// Whether this item's media plays, wherever it lives.
+    public var isVideo: Bool {
+        localMedia?.isVideo ?? cloud?.isVideo ?? false
+    }
 }
 
 /// Normalizes user-typed inspiration input into a URL, defaulting to https.

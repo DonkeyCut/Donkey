@@ -30,10 +30,12 @@ only the poster comes down, so a card paints with no network and the video
 itself never takes up room on the phone. A source that turns out to be only
 words stays a link and keeps what it said.
 
-A card always says where its link stands: waiting to be handed over, fetching,
-or failed with the reason and a way to try again. Every attempt that fails
-writes that reason on the item, so a card can never spin on a request nothing
-is making any more. Notes merge both ways by last-writer-wins on the edit stamp,
+An inspiration card is the media itself, the way a Library clip and a project
+card are: a poster tile that opens full screen on a tap, with the source's own
+words alongside it there. A card always says where its link stands: waiting to be handed over,
+fetching, or failed with the reason and a way to try again. Every attempt that
+fails writes that reason on the item, so a card can never spin on a request
+nothing is making any more. Notes merge both ways by last-writer-wins on the edit stamp,
 with tombstones so a delete made offline on either side still lands on the
 other. The folders notes file into travel with them, under ids whichever
 device made them chose; a folder carries no tombstone, so a folder the cloud

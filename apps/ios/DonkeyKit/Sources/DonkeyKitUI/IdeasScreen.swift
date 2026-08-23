@@ -1,4 +1,5 @@
 #if os(iOS)
+import AVFoundation
 import AVKit
 import Photos
 import PhotosUI
@@ -17,6 +18,9 @@ struct IdeasScreen: View {
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var folderPrompt: FolderPrompt?
     @State private var moving: Note?
+    /// The inspiration item open full screen. A card is a tile; the media
+    /// plays in the viewer, the way a Library clip does.
+    @State private var viewing: InspirationItem?
     @State private var path: [NoteFolder] = []
 
     var body: some View {
@@ -60,6 +64,9 @@ struct IdeasScreen: View {
         }
         .sheet(item: $moving) { note in
             MoveToFolderSheet(ideas: ideas, note: note)
+        }
+        .fullScreenCover(item: $viewing) { item in
+            InspirationViewer(item: item, ideas: ideas)
         }
         .folderPrompt($folderPrompt, ideas: ideas)
         .photosPicker(
@@ -186,7 +193,7 @@ struct IdeasScreen: View {
     private var inspirationGrid: some View {
         LazyVGrid(columns: ideaColumns, spacing: 14) {
             ForEach(ideas.inspiration) { item in
-                InspirationCard(item: item, ideas: ideas)
+                InspirationCard(item: item, ideas: ideas) { viewing = item }
                     .contextMenu {
                         Button("Delete", systemImage: "trash", role: .destructive) {
                             ideas.deleteInspiration(id: item.id)
@@ -481,24 +488,15 @@ struct FoldCorner: Shape {
 struct InspirationCard: View {
     let item: InspirationItem
     var ideas: IdeasModel
+    let onOpen: () -> Void
 
     var body: some View {
-        // A photo-library import plays off this phone. A saved link's media is
-        // the cloud's: the worker fetched it into the account's library — the
-        // same shelf the web shows — and the card streams it from there.
-        if let local = item.localMedia {
-            let url = ideas.mediaURL(fileName: local.fileName)
-            MediaTile(ratio: 3 / 4) {
-                if local.isVideo {
-                    VideoPlayer(player: AVPlayer(url: url))
-                } else if let image = UIImage(contentsOfFile: url.localPath) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                }
-            }
-        } else if let cloud = item.cloud {
-            CloudMediaCard(media: cloud, text: item.sourceText, ideas: ideas)
+        // A card is the media itself, the way a Library clip and a project
+        // card are. What the source said rides along in the viewer.
+        if item.localMedia != nil || item.cloud != nil {
+            InspirationPoster(item: item, ideas: ideas)
+                .contentShape(.rect)
+                .onTapGesture(perform: onOpen)
         } else if let link = item.link {
             LinkCard(url: link, state: item.importState, text: item.sourceText) {
                 ideas.retryInspiration(id: item.id)
@@ -507,54 +505,151 @@ struct InspirationCard: View {
     }
 }
 
-/// A link's media, streamed from the account. The poster came down with the
-/// fetch, so the card paints before the stream resolves and still paints with
-/// no network at all.
-struct CloudMediaCard: View {
-    let media: InspirationCloudMedia
-    let text: String?
+/// The tile itself: a photo-library import off this phone, or the poster the
+/// cloud fetched beside a link's media. A cloud image with no poster paints
+/// from the stream.
+struct InspirationPoster: View {
+    let item: InspirationItem
     var ideas: IdeasModel
 
-    @State private var player: AVPlayer?
     @State private var streamed: URL?
+    /// The first frame of a video imported from the photo library, which
+    /// arrives as bytes with no still of its own.
+    @State private var frame: UIImage?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            MediaTile(ratio: 3 / 4) {
-                if media.isVideo, let player {
-                    VideoPlayer(player: player)
-                } else if let poster {
-                    Image(uiImage: poster)
-                        .resizable()
-                        .scaledToFill()
-                } else if let streamed, !media.isVideo {
-                    AsyncImage(url: streamed) { image in
-                        image.resizable().scaledToFill()
-                    } placeholder: {
-                        ProgressView()
-                    }
-                } else {
+        MediaTile(ratio: 9 / 14) {
+            if let image = localImage ?? frame {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else if let streamed, item.cloud?.isVideo == false {
+                AsyncImage(url: streamed) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
                     ProgressView()
                 }
-            }
-            if let text, !text.isEmpty {
-                Text(text)
-                    .font(.caption)
+            } else {
+                Image(systemName: item.isVideo ? "play.fill" : "photo")
                     .foregroundStyle(.secondary)
-                    .lineLimit(3)
             }
         }
-        .task(id: media.fileName) {
-            guard streamed == nil else { return }
-            guard let url = await ideas.streamURL(for: media) else { return }
+        .task(id: item.id) {
+            guard localImage == nil else { return }
+            if let local = item.localMedia, local.isVideo {
+                frame = await firstFrame(of: ideas.mediaURL(fileName: local.fileName))
+                return
+            }
+            guard streamed == nil, let cloud = item.cloud else { return }
+            let url = await ideas.streamURL(for: cloud)
             streamed = url
-            if media.isVideo { player = AVPlayer(url: url) }
+            // A source that came back without a cover still gets a tile: the
+            // frame is read off the stream itself.
+            if let url, cloud.isVideo, cloud.posterFileName == nil {
+                frame = await firstFrame(of: url)
+            }
         }
     }
 
-    private var poster: UIImage? {
-        guard let name = media.posterFileName else { return nil }
-        return UIImage(contentsOfFile: ideas.mediaURL(fileName: name).localPath)
+    private func firstFrame(of url: URL) async -> UIImage? {
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 480, height: 480)
+        generator.requestedTimeToleranceAfter = CMTime(seconds: 1, preferredTimescale: 600)
+        guard let image = try? await generator.image(at: .zero).image else { return nil }
+        return UIImage(cgImage: image)
+    }
+
+    /// The still this phone holds: an imported photo, or a fetched link's
+    /// poster.
+    private var localImage: UIImage? {
+        if let local = item.localMedia, !local.isVideo {
+            return UIImage(contentsOfFile: ideas.mediaURL(fileName: local.fileName).localPath)
+        }
+        guard let poster = item.cloud?.posterFileName else { return nil }
+        return UIImage(contentsOfFile: ideas.mediaURL(fileName: poster).localPath)
+    }
+}
+
+/// One inspiration item full screen: the video plays, a photo fills the
+/// screen, and the close and share controls ride the same glass chrome the
+/// Library player wears.
+struct InspirationViewer: View {
+    let item: InspirationItem
+    var ideas: IdeasModel
+
+    @State private var player: AVPlayer?
+    @State private var url: URL?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.black.ignoresSafeArea()
+            if let player {
+                VideoPlayer(player: player)
+                    .ignoresSafeArea()
+            } else if let url, !item.isVideo {
+                AsyncImage(url: url) { image in
+                    image.resizable().scaledToFit()
+                } placeholder: {
+                    ProgressView().tint(.white)
+                }
+                .ignoresSafeArea()
+            } else {
+                ProgressView().tint(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            if let text = item.sourceText, !text.isEmpty {
+                ScrollView {
+                    Text(text)
+                        .font(.footnote)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                }
+                .frame(maxWidth: .infinity, maxHeight: 160, alignment: .bottom)
+                .background(.black.opacity(0.55))
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                .ignoresSafeArea(edges: .horizontal)
+            }
+            GlassEffectContainer {
+                HStack(spacing: 10) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.title3.weight(.bold))
+                            .frame(width: 40, height: 40)
+                    }
+                    .glassEffect(.regular.interactive())
+                    Spacer()
+                    if let shared = item.link ?? url {
+                        ShareLink(item: shared) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.title3.weight(.bold))
+                                .frame(width: 40, height: 40)
+                        }
+                        .glassEffect(.regular.interactive())
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .task {
+            guard let url = await source() else { return }
+            self.url = url
+            guard item.isVideo else { return }
+            let player = AVPlayer(url: url)
+            self.player = player
+            player.play()
+        }
+        .onDisappear { player?.pause() }
+    }
+
+    /// Where the bytes are: on this phone for an import, on the account's
+    /// shelf for a link the cloud fetched.
+    private func source() async -> URL? {
+        if let local = item.localMedia { return ideas.mediaURL(fileName: local.fileName) }
+        guard let cloud = item.cloud else { return nil }
+        return await ideas.streamURL(for: cloud)
     }
 }
 
