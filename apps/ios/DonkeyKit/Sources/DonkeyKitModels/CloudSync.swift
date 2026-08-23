@@ -168,6 +168,11 @@ nonisolated public struct ImportedLink: Equatable, Sendable {
     public var isVideo: Bool
     /// The source's cover, stored beside the media under the same prefix.
     public var posterFile: String?
+    /// The media's pixel size, as the worker probed it. The card takes its
+    /// shape from this, so a portrait reel and a landscape clip sit in the
+    /// grid as themselves.
+    public var width: Int?
+    public var height: Int?
     /// The source's own words, when it had any.
     public var text: String?
 
@@ -176,12 +181,16 @@ nonisolated public struct ImportedLink: Equatable, Sendable {
         fileName: String,
         isVideo: Bool,
         posterFile: String? = nil,
+        width: Int? = nil,
+        height: Int? = nil,
         text: String? = nil
     ) {
         self.assetId = assetId
         self.fileName = fileName
         self.isVideo = isVideo
         self.posterFile = posterFile
+        self.width = width
+        self.height = height
         self.text = text
     }
 }

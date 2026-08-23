@@ -89,6 +89,8 @@ public protocol SyncJournalStoring: AnyObject {
         fileName: String,
         isVideo: Bool,
         posterFileName: String?,
+        width: Int?,
+        height: Int?,
         sourceText: String?,
         remoteAssetId: String
     ) throws
@@ -596,6 +598,8 @@ public final class SyncEngine {
                         fileName: imported.fileName,
                         isVideo: imported.isVideo,
                         posterFileName: await poster(imported, for: item.id),
+                        width: imported.width,
+                        height: imported.height,
                         sourceText: imported.text,
                         remoteAssetId: imported.assetId
                     )

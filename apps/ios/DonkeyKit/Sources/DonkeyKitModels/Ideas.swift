@@ -114,12 +114,24 @@ nonisolated public struct InspirationCloudMedia: Equatable, Sendable {
     public var isVideo: Bool
     /// The poster this phone downloaded beside it, if the source had one.
     public var posterFileName: String?
+    /// The pixel size the worker probed, which the card's shape comes from.
+    public var width: Int?
+    public var height: Int?
 
-    public init(assetId: String, fileName: String, isVideo: Bool, posterFileName: String? = nil) {
+    public init(
+        assetId: String,
+        fileName: String,
+        isVideo: Bool,
+        posterFileName: String? = nil,
+        width: Int? = nil,
+        height: Int? = nil
+    ) {
         self.assetId = assetId
         self.fileName = fileName
         self.isVideo = isVideo
         self.posterFileName = posterFileName
+        self.width = width
+        self.height = height
     }
 }
 
@@ -150,6 +162,9 @@ nonisolated public struct InspirationItem: Identifiable, Equatable, Sendable {
     /// Where the fetch of a link stands. Media saved from the photo library
     /// has nothing to fetch and reads as `.ready`.
     public var importState: InspirationImport
+    /// The pixel size of media held on this phone, measured when it landed.
+    public var localWidth: Int?
+    public var localHeight: Int?
 
     public init(
         id: UUID = UUID(),
@@ -157,7 +172,9 @@ nonisolated public struct InspirationItem: Identifiable, Equatable, Sendable {
         createdAt: Date = .now,
         cloud: InspirationCloudMedia? = nil,
         sourceText: String? = nil,
-        importState: InspirationImport = .queued
+        importState: InspirationImport = .queued,
+        localWidth: Int? = nil,
+        localHeight: Int? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -165,6 +182,8 @@ nonisolated public struct InspirationItem: Identifiable, Equatable, Sendable {
         self.cloud = cloud
         self.sourceText = sourceText
         self.importState = importState
+        self.localWidth = localWidth
+        self.localHeight = localHeight
     }
 
     /// Media on this phone: a photo-library import. A link's media is the
@@ -185,6 +204,27 @@ nonisolated public struct InspirationItem: Identifiable, Equatable, Sendable {
     /// Whether this item's media plays, wherever it lives.
     public var isVideo: Bool {
         localMedia?.isVideo ?? cloud?.isVideo ?? false
+    }
+
+    /// The media's own width over height: the cloud's probe for a fetched
+    /// link, this phone's for an import. Nil until something has measured it,
+    /// and clamped so one panorama or one very tall reel still sits in a grid
+    /// beside the others.
+    public var aspectRatio: Double? {
+        guard let width = pixelSize?.width, let height = pixelSize?.height,
+              width > 0, height > 0 else { return nil }
+        return min(max(Double(width) / Double(height), Self.narrowest), Self.widest)
+    }
+
+    /// The widest and narrowest shapes a card takes: a 2:1 landscape, and a
+    /// touch taller than a 9:16 reel.
+    static let widest = 2.0
+    static let narrowest = 0.5
+
+    var pixelSize: (width: Int, height: Int)? {
+        if let width = localWidth, let height = localHeight { return (width, height) }
+        if let width = cloud?.width, let height = cloud?.height { return (width, height) }
+        return nil
     }
 }
 
@@ -214,6 +254,8 @@ public protocol IdeasStoring: AnyObject {
     func deleteInspiration(id: UUID) throws
     /// Put a link's import back in the queue after a failure.
     func retryInspirationImport(id: UUID) throws
+    /// The pixel size of media stored on this phone, measured after it landed.
+    func setInspirationSize(id: UUID, width: Int, height: Int) throws
     /// Absolute location of a stored media file.
     func mediaURL(fileName: String) -> URL
 }
@@ -395,10 +437,12 @@ public final class IdeasModel {
         return true
     }
 
-    public func addInspiration(mediaData: Data, isVideo: Bool) {
-        guard let item = try? store.addMedia(data: mediaData, isVideo: isVideo) else { return }
+    @discardableResult
+    public func addInspiration(mediaData: Data, isVideo: Bool) -> InspirationItem? {
+        guard let item = try? store.addMedia(data: mediaData, isVideo: isVideo) else { return nil }
         inspiration.insert(item, at: 0)
         onLocalChange?()
+        return item
     }
 
     public func deleteInspiration(id: UUID) {
@@ -413,6 +457,14 @@ public final class IdeasModel {
         try? store.retryInspirationImport(id: id)
         reloadFromStore()
         onLocalChange?()
+    }
+
+    /// Record what an imported photo or video measures, so its card takes the
+    /// media's own shape. The cloud reports this for a fetched link.
+    public func recordSize(id: UUID, width: Int, height: Int) {
+        guard width > 0, height > 0 else { return }
+        try? store.setInspirationSize(id: id, width: width, height: height)
+        reloadFromStore()
     }
 
     /// Where this card streams from: a signed URL for the account's own copy.

@@ -81,7 +81,16 @@ struct IdeasScreen: View {
                 for item in items {
                     guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
                     let isVideo = item.supportedContentTypes.contains { $0.conforms(to: .movie) }
-                    ideas.addInspiration(mediaData: data, isVideo: isVideo)
+                    guard let saved = ideas.addInspiration(mediaData: data, isVideo: isVideo),
+                          let media = saved.localMedia else { continue }
+                    // The card takes the media's own shape, so what landed is
+                    // measured here the way the cloud measures what it fetches.
+                    if let size = await mediaPixelSize(
+                        at: ideas.mediaURL(fileName: media.fileName),
+                        isVideo: isVideo
+                    ) {
+                        ideas.recordSize(id: saved.id, width: size.width, height: size.height)
+                    }
                 }
                 pickerItems = []
                 app.show(toast: "Saved to Inspiration")
@@ -190,22 +199,60 @@ struct IdeasScreen: View {
             .foregroundStyle(.secondary)
     }
 
+    // Cards keep their media's shape, so the two columns run at their own
+    // heights and each item is placed in whichever column is shorter.
     private var inspirationGrid: some View {
-        LazyVGrid(columns: ideaColumns, spacing: 14) {
-            ForEach(ideas.inspiration) { item in
-                InspirationCard(item: item, ideas: ideas) { viewing = item }
-                    .contextMenu {
-                        Button("Delete", systemImage: "trash", role: .destructive) {
-                            ideas.deleteInspiration(id: item.id)
-                        }
-                        .tint(.red)
+        HStack(alignment: .top, spacing: 14) {
+            ForEach(Array(inspirationColumns.enumerated()), id: \.offset) { _, column in
+                VStack(spacing: 14) {
+                    ForEach(column) { item in
+                        InspirationCard(item: item, ideas: ideas) { viewing = item }
+                            .contextMenu {
+                                Button("Delete", systemImage: "trash", role: .destructive) {
+                                    ideas.deleteInspiration(id: item.id)
+                                }
+                                .tint(.red)
+                            }
                     }
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity)
             }
         }
+    }
+
+    /// The items dealt into columns by the height each one will take at a
+    /// column's width: the next card goes to whichever column is shorter, so
+    /// the two ends stay level however the shapes fall.
+    private var inspirationColumns: [[InspirationItem]] {
+        var columns: [[InspirationItem]] = [[], []]
+        var heights = [0.0, 0.0]
+        for item in ideas.inspiration {
+            let target = heights[0] <= heights[1] ? 0 : 1
+            columns[target].append(item)
+            heights[target] += 1 / (item.aspectRatio ?? InspirationCard.defaultRatio)
+        }
+        return columns
     }
 }
 
 let ideaColumns = [GridItem(.adaptive(minimum: 160, maximum: 260), spacing: 14)]
+
+/// What a photo or a video imported from the photo library measures, in
+/// pixels, read off the file the store just wrote.
+func mediaPixelSize(at url: URL, isVideo: Bool) async -> (width: Int, height: Int)? {
+    if !isVideo {
+        guard let image = UIImage(contentsOfFile: url.localPath) else { return nil }
+        let size = CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
+        return (Int(size.width.rounded()), Int(size.height.rounded()))
+    }
+    let asset = AVURLAsset(url: url)
+    guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+          let (natural, transform) = try? await track.load(.naturalSize, .preferredTransform)
+    else { return nil }
+    let rect = CGRect(origin: .zero, size: natural).applying(transform)
+    return (Int(abs(rect.width).rounded()), Int(abs(rect.height).rounded()))
+}
 
 /// One folder's notes, pushed from the Ideas screen.
 struct NoteFolderScreen: View {
@@ -490,6 +537,9 @@ struct InspirationCard: View {
     var ideas: IdeasModel
     let onOpen: () -> Void
 
+    /// The shape a card holds while nothing has measured its media yet.
+    static let defaultRatio = 9.0 / 14
+
     var body: some View {
         // A card is the media itself, the way a Library clip and a project
         // card are. What the source said rides along in the viewer.
@@ -518,7 +568,7 @@ struct InspirationPoster: View {
     @State private var frame: UIImage?
 
     var body: some View {
-        MediaTile(ratio: 9 / 14) {
+        MediaTile(ratio: item.aspectRatio ?? InspirationCard.defaultRatio) {
             if let image = localImage ?? frame {
                 Image(uiImage: image)
                     .resizable()

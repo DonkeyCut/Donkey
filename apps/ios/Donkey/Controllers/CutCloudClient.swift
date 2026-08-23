@@ -291,6 +291,10 @@ extension CutCloudClient: CloudSyncServicing {
                     var fileName: String
                     var type: String
                     var posterFile: String?
+                    // The worker probes the media it fetched; the card takes
+                    // its shape from this.
+                    var width: Int?
+                    var height: Int?
                 }
                 var assets: [Asset]?
                 var text: String?
@@ -316,6 +320,8 @@ extension CutCloudClient: CloudSyncServicing {
                     fileName: asset.fileName,
                     isVideo: asset.type == "video",
                     posterFile: asset.posterFile,
+                    width: asset.width,
+                    height: asset.height,
                     text: status.result?.text
                 )
             )

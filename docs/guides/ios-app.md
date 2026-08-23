@@ -32,7 +32,10 @@ words stays a link and keeps what it said.
 
 An inspiration card is the media itself, the way a Library clip and a project
 card are: a poster tile that opens full screen on a tap, with the source's own
-words alongside it there. A card always says where its link stands: waiting to be handed over,
+words alongside it there. A card wears its media's own shape — the worker
+probes what it fetched and sends the pixel size along, an import is measured
+as it lands — so a reel stands tall beside a landscape clip, and the grid
+deals cards into whichever of its two columns is shorter. A card always says where its link stands: waiting to be handed over,
 fetching, or failed with the reason and a way to try again. Every attempt that
 fails writes that reason on the item, so a card can never spin on a request
 nothing is making any more. Notes merge both ways by last-writer-wins on the edit stamp,

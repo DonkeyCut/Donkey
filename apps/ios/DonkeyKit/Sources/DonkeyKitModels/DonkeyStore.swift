@@ -97,6 +97,10 @@ final class InspirationRecord {
     var noMedia: Bool?
     /// Why the last attempt failed. Set while the card offers another try.
     var importError: String?
+    /// The media's pixel size: the worker's probe for a fetched link, this
+    /// phone's measurement for an import. The card's shape comes from it.
+    var mediaWidth: Int?
+    var mediaHeight: Int?
 
     init(id: UUID, linkURL: String?, mediaFileName: String?, isVideo: Bool, createdAt: Date) {
         self.id = id
@@ -113,7 +117,9 @@ final class InspirationRecord {
                     assetId: remoteAssetId ?? "",
                     fileName: $0,
                     isVideo: cloudIsVideo ?? false,
-                    posterFileName: posterFileName
+                    posterFileName: posterFileName,
+                    width: mediaWidth,
+                    height: mediaHeight
                 )
             }
             // Only a live job is fetching. A link the cloud took whose job
@@ -147,7 +153,9 @@ final class InspirationRecord {
                 id: id,
                 kind: .media(fileName: mediaFileName, isVideo: isVideo),
                 createdAt: createdAt,
-                importState: .ready
+                importState: .ready,
+                localWidth: mediaWidth,
+                localHeight: mediaHeight
             )
         }
         return nil
@@ -572,6 +580,8 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
         fileName: String,
         isVideo: Bool,
         posterFileName: String?,
+        width: Int?,
+        height: Int?,
         sourceText: String?,
         remoteAssetId: String
     ) throws {
@@ -580,6 +590,8 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
         record.cloudFileName = fileName
         record.cloudIsVideo = isVideo
         record.posterFileName = posterFileName
+        record.mediaWidth = width
+        record.mediaHeight = height
         record.sourceText = sourceText ?? record.sourceText
         record.remoteAssetId = remoteAssetId
         record.importJobId = nil
@@ -608,6 +620,14 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
         guard let record = try context.fetch(descriptor).first else { return }
         if clearJob { record.importJobId = nil }
         record.importError = message
+        try context.save()
+    }
+
+    public func setInspirationSize(id: UUID, width: Int, height: Int) throws {
+        let descriptor = FetchDescriptor<InspirationRecord>(predicate: #Predicate { $0.id == id })
+        guard let record = try context.fetch(descriptor).first else { return }
+        record.mediaWidth = width
+        record.mediaHeight = height
         try context.save()
     }
 

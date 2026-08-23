@@ -151,6 +151,8 @@ import Testing
                 fileName: "source.mp4",
                 isVideo: true,
                 posterFile: "source.mp4.poster.jpg",
+                width: 1080,
+                height: 1920,
                 text: "What the source said"
             )
         )
@@ -449,9 +451,30 @@ import Testing
         #expect(item.cloud?.posterFileName != nil)
         #expect(item.sourceText == "What the source said")
         #expect(item.importState == .ready)
+        // The card takes its shape from what the worker measured.
+        #expect(item.aspectRatio == 1080.0 / 1920)
         // Nothing is asked of the job again once the media is on the shelf.
         await rig.engine.run()
         #expect(rig.cloud.downloads.count == 1)
+    }
+
+    @Test func aCardsShapeIsClampedToWhatAGridCanHold() async throws {
+        let rig = try makeRig()
+        rig.cloud.imported = .ready(
+            ImportedLink(assetId: "a", fileName: "wide.mp4", isVideo: true, width: 4000, height: 500)
+        )
+        #expect(rig.ideas.addInspiration(urlText: "example.com/pano"))
+        await rig.engine.run()
+        await rig.engine.run()
+        #expect(try #require(rig.ideas.inspiration.first).aspectRatio == 2)
+    }
+
+    @Test func anImportKeepsTheSizeItWasMeasuredAt() throws {
+        let rig = try makeRig()
+        let item = try #require(rig.ideas.addInspiration(mediaData: Data(repeating: 1, count: 8), isVideo: false))
+        #expect(item.aspectRatio == nil)
+        rig.ideas.recordSize(id: item.id, width: 1600, height: 1200)
+        #expect(try #require(rig.ideas.inspiration.first).aspectRatio == 4.0 / 3)
     }
 
     @Test func inspirationLinkWithNoMediaKeepsWhatTheSourceSaid() async throws {
