@@ -277,8 +277,15 @@ struct RecordingPlayerView: View {
         ZStack(alignment: .topLeading) {
             Color.black.ignoresSafeArea()
             if let player {
-                VideoPlayer(player: player)
+                PlayerSurface(player: player)
                     .ignoresSafeArea()
+                    .onTapGesture {
+                        if player.timeControlStatus == .paused { player.play() } else { player.pause() }
+                    }
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    PlaybackBar(player: player)
+                }
             }
             GlassEffectContainer {
                 HStack(spacing: 10) {

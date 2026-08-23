@@ -32,7 +32,9 @@ words stays a link and keeps what it said.
 
 An inspiration card is the media itself, the way a Library clip and a project
 card are: a poster tile that opens full screen on a tap, with the source's own
-words alongside it there. A card wears its media's own shape — the worker
+words alongside it there. The same actions sit under a long press on the card
+and behind the viewer's menu — share it, open the original where it came from,
+or delete it from the phone and the cloud shelf together. A card wears its media's own shape — the worker
 probes what it fetched and sends the pixel size along, an import is measured
 as it lands — so a reel stands tall beside a landscape clip, and the grid
 deals cards into whichever of its two columns is shorter. A card always says where its link stands: waiting to be handed over,
@@ -74,9 +76,13 @@ cloud behind it, every time the app comes forward and whichever tab is
 showing. Signing out drops it, so the next account never opens on someone
 else's projects.
 
-The phone exports the whole cut. A control under the player's own sound
-button, on screen exactly when that button is, opens a sheet of the sizes the
-editor's export dialog offers. Picking one queues a cloud render of the
+Every full-screen player in the app draws its own controls: the picture rides
+a plain player layer, and each screen puts its close button, its actions and
+its transport bar where it wants them. The system player places buttons in
+those same corners itself, which is why none of these screens use one.
+
+The phone exports the whole cut. A control in the player's top row opens a
+sheet of the sizes the editor's export dialog offers. Picking one queues a cloud render of the
 project's timeline: the worker opens the stored document and builds the render
 spec itself, so what comes back is the file the editor's own export produces —
 overlays, captions, soundtrack and all — rather than whatever happened to be

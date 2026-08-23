@@ -162,7 +162,6 @@ struct ProjectPlayerView: View {
             Color.black.ignoresSafeArea()
             video
             chrome
-            exportControl
         }
         .task { await load() }
         .onDisappear { player?.pause() }
@@ -186,14 +185,12 @@ struct ProjectPlayerView: View {
     @ViewBuilder
     private var video: some View {
         if let player {
-            VideoPlayer(player: player)
+            PlayerSurface(player: player)
                 .ignoresSafeArea()
-                // The player's own controls answer the same tap; watching it
-                // alongside them keeps this chrome on their clock.
-                .simultaneousGesture(TapGesture().onEnded {
+                .onTapGesture {
                     chromeShown.toggle()
                     chromeTick += 1
-                })
+                }
         } else if failed {
             VStack(spacing: 14) {
                 Text("Couldn't load this project's video")
@@ -215,10 +212,34 @@ struct ProjectPlayerView: View {
         }
     }
 
-    /// The close button and the project's name, on the same row as the
-    /// player's own controls — which own the corner, so the row stops short
-    /// of it.
+    /// Every control the player has: the close button and the project's name
+    /// on top, the export control beside them, and the transport along the
+    /// bottom. They fade together.
     private var chrome: some View {
+        VStack(spacing: 0) {
+            topRow
+            Spacer(minLength: 0)
+            if let player {
+                PlaybackBar(player: player)
+            }
+        }
+        .opacity(chromeShown ? 1 : 0)
+        .allowsHitTesting(chromeShown)
+        .animation(.easeInOut(duration: 0.2), value: chromeShown)
+        // Fades out the way a video player's controls do, and stays while the
+        // video is paused.
+        .task(id: chromeTick) {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(4))
+                guard !Task.isCancelled else { return }
+                guard player?.timeControlStatus == .playing else { continue }
+                chromeShown = false
+                return
+            }
+        }
+    }
+
+    private var topRow: some View {
         HStack(alignment: .top, spacing: 12) {
             Button {
                 dismiss()
@@ -234,35 +255,16 @@ struct ProjectPlayerView: View {
                 .foregroundStyle(.white)
                 .lineLimit(1)
             Spacer(minLength: 8)
+            exportControl
         }
         .padding(16)
-        .padding(.trailing, 52)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .opacity(chromeShown ? 1 : 0)
-        .allowsHitTesting(chromeShown)
-        .animation(.easeInOut(duration: 0.2), value: chromeShown)
-        // Fades out the way the player's controls do, and stays while the
-        // video is paused.
-        .task(id: chromeTick) {
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(4))
-                guard !Task.isCancelled else { return }
-                guard player?.timeControlStatus == .playing else { continue }
-                chromeShown = false
-                return
-            }
-        }
     }
 
-    /// The export control, directly under the player's sound button and lined
-    /// up with it: same corner, same inset, same round glass, and on screen
-    /// exactly when the sound button is. A render in flight shows its progress
-    /// on the button itself, so what it is doing reads without a second panel.
+    /// The export control, in the top row's trailing corner. A render in
+    /// flight shows its progress on the button itself, so what it is doing
+    /// reads without a second panel.
     private var exportControl: some View {
         VStack(alignment: .trailing, spacing: 8) {
-            // The player's own top row owns this much of the corner; the
-            // control sits under it.
-            Color.clear.frame(width: 40, height: 40)
             Button {
                 showingExport = true
             } label: {
@@ -300,11 +302,8 @@ struct ProjectPlayerView: View {
                     .frame(maxWidth: 190, alignment: .trailing)
             }
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-        .opacity(chromeShown && player != nil ? 1 : 0)
-        .allowsHitTesting(chromeShown && player != nil)
-        .animation(.easeInOut(duration: 0.2), value: chromeShown)
+        .opacity(player == nil ? 0 : 1)
+        .allowsHitTesting(player != nil)
         .animation(.snappy, value: phase)
     }
 

@@ -538,6 +538,8 @@ struct InspirationCard: View {
     var ideas: IdeasModel
     let onOpen: () -> Void
 
+    @State private var confirmingDelete = false
+
     /// The shape a card holds while nothing has measured its media yet.
     static let defaultRatio = 9.0 / 14
 
@@ -548,6 +550,18 @@ struct InspirationCard: View {
             InspirationPoster(item: item, ideas: ideas)
                 .contentShape(.rect)
                 .onTapGesture(perform: onOpen)
+                .contextMenu {
+                    InspirationActions(item: item, shareURL: item.link) { confirmingDelete = true }
+                }
+                .confirmationDialog(
+                    "Delete this?",
+                    isPresented: $confirmingDelete,
+                    titleVisibility: .visible
+                ) {
+                    Button("Delete", role: .destructive) { ideas.deleteInspiration(id: item.id) }
+                } message: {
+                    Text("It goes from this phone and from your cloud library.")
+                }
         } else if let link = item.link {
             LinkCard(url: link, state: item.importState, text: item.sourceText) {
                 ideas.retryInspiration(id: item.id)
@@ -622,9 +636,30 @@ struct InspirationPoster: View {
     }
 }
 
-/// One inspiration item full screen: the video plays, a photo fills the
-/// screen, and the close and share controls ride the same glass chrome the
-/// Library player wears.
+/// The actions an item carries wherever it shows: the card's long press and
+/// the viewer's menu offer the same ones.
+struct InspirationActions: View {
+    let item: InspirationItem
+    let shareURL: URL?
+    let onDelete: () -> Void
+
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        if let shared = shareURL {
+            ShareLink(item: shared) { Label("Share", systemImage: "square.and.arrow.up") }
+        }
+        if let link = item.link {
+            Button { openURL(link) } label: { Label("Open original", systemImage: "safari") }
+        }
+        Divider()
+        Button(role: .destructive, action: onDelete) { Label("Delete", systemImage: "trash") }
+    }
+}
+
+/// One inspiration item full screen: the video plays under chrome this view
+/// draws itself, a photo fills the screen, and close, share, open and delete
+/// ride the same glass the Library player wears.
 struct InspirationViewer: View {
     let item: InspirationItem
     var ideas: IdeasModel
@@ -632,65 +667,23 @@ struct InspirationViewer: View {
     @State private var player: AVPlayer?
     @State private var url: URL?
     @State private var unplayable = false
+    @State private var confirmingDelete = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        ZStack {
             Color.black.ignoresSafeArea()
-            if unplayable {
-                Text("This one's format won't play on iPhone. Delete the card and paste the link again.")
-                    .font(.callout)
-                    .foregroundStyle(.white.opacity(0.8))
-                    .multilineTextAlignment(.center)
-                    .padding(32)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let player {
-                VideoPlayer(player: player)
-                    .ignoresSafeArea()
-            } else if let url, !item.isVideo {
-                AsyncImage(url: url) { image in
-                    image.resizable().scaledToFit()
-                } placeholder: {
-                    ProgressView().tint(.white)
-                }
-                .ignoresSafeArea()
-            } else {
-                ProgressView().tint(.white)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            media
+            chrome
+        }
+        .statusBarHidden()
+        .confirmationDialog("Delete this?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                ideas.deleteInspiration(id: item.id)
+                dismiss()
             }
-            if let text = item.sourceText, !text.isEmpty {
-                ScrollView {
-                    Text(text)
-                        .font(.footnote)
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
-                }
-                .frame(maxWidth: .infinity, maxHeight: 160, alignment: .bottom)
-                .background(.black.opacity(0.55))
-                .frame(maxHeight: .infinity, alignment: .bottom)
-                .ignoresSafeArea(edges: .horizontal)
-            }
-            GlassEffectContainer {
-                HStack(spacing: 10) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                            .font(.title3.weight(.bold))
-                            .frame(width: 40, height: 40)
-                    }
-                    .glassEffect(.regular.interactive())
-                    Spacer()
-                    if let shared = item.link ?? url {
-                        ShareLink(item: shared) {
-                            Image(systemName: "square.and.arrow.up")
-                                .font(.title3.weight(.bold))
-                                .frame(width: 40, height: 40)
-                        }
-                        .glassEffect(.regular.interactive())
-                    }
-                }
-            }
-            .padding(16)
+        } message: {
+            Text("It goes from this phone and from your cloud library.")
         }
         .task {
             guard let url = await source() else { return }
@@ -711,6 +704,75 @@ struct InspirationViewer: View {
             }
         }
         .onDisappear { player?.pause() }
+    }
+
+    @ViewBuilder private var media: some View {
+        if unplayable {
+            Text("This one's format won't play on iPhone. Delete the card and paste the link again.")
+                .font(.callout)
+                .foregroundStyle(.white.opacity(0.8))
+                .multilineTextAlignment(.center)
+                .padding(32)
+        } else if let player {
+            PlayerSurface(player: player)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    if player.timeControlStatus == .paused { player.play() } else { player.pause() }
+                }
+        } else if let url, !item.isVideo {
+            AsyncImage(url: url) { image in
+                image.resizable().scaledToFit()
+            } placeholder: {
+                ProgressView().tint(.white)
+            }
+            .ignoresSafeArea()
+        } else {
+            ProgressView().tint(.white)
+        }
+    }
+
+    private var chrome: some View {
+        VStack(spacing: 0) {
+            GlassEffectContainer {
+                HStack(spacing: 10) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.title3.weight(.bold))
+                            .frame(width: 40, height: 40)
+                    }
+                    .glassEffect(.regular.interactive())
+                    Spacer()
+                    Menu {
+                        InspirationActions(item: item, shareURL: item.link ?? url) {
+                            confirmingDelete = true
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.title3.weight(.bold))
+                            .frame(width: 40, height: 40)
+                    }
+                    .glassEffect(.regular.interactive())
+                }
+            }
+            .padding(16)
+
+            Spacer(minLength: 0)
+
+            if let text = item.sourceText, !text.isEmpty {
+                ScrollView {
+                    Text(text)
+                        .font(.footnote)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                }
+                .frame(maxHeight: 160)
+                .background(.black.opacity(0.55))
+            }
+            if let player {
+                PlaybackBar(player: player)
+            }
+        }
     }
 
     /// Where the bytes are: on this phone for an import, on the account's
