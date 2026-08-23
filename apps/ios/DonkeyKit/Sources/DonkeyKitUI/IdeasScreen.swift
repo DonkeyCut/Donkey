@@ -1,6 +1,7 @@
 #if os(iOS)
 import AVFoundation
 import AVKit
+import Combine
 import Photos
 import PhotosUI
 import SwiftUI
@@ -630,12 +631,20 @@ struct InspirationViewer: View {
 
     @State private var player: AVPlayer?
     @State private var url: URL?
+    @State private var unplayable = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             Color.black.ignoresSafeArea()
-            if let player {
+            if unplayable {
+                Text("This one's format won't play on iPhone. Delete the card and paste the link again.")
+                    .font(.callout)
+                    .foregroundStyle(.white.opacity(0.8))
+                    .multilineTextAlignment(.center)
+                    .padding(32)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let player {
                 VideoPlayer(player: player)
                     .ignoresSafeArea()
             } else if let url, !item.isVideo {
@@ -687,9 +696,19 @@ struct InspirationViewer: View {
             guard let url = await source() else { return }
             self.url = url
             guard item.isVideo else { return }
-            let player = AVPlayer(url: url)
+            let asset = AVPlayerItem(url: url)
+            let player = AVPlayer(playerItem: asset)
             self.player = player
             player.play()
+            // A file iOS can't decode stalls on a black screen otherwise; the
+            // item reports it, so say it in words the reader can act on.
+            for await status in asset.publisher(for: \.status).values {
+                if status == .failed {
+                    self.player = nil
+                    unplayable = true
+                }
+                if status != .unknown { return }
+            }
         }
         .onDisappear { player?.pause() }
     }
