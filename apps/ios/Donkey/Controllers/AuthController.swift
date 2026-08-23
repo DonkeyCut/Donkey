@@ -137,6 +137,8 @@ final class AuthController: NSObject, AuthServicing {
 
     private func fetchProfile(token: String) async throws -> UserProfile {
         async let superUser = fetchSuperUser(token: token)
+        let cached = KeychainStore.read(Self.profileKey)
+            .flatMap { try? JSONDecoder().decode(UserProfile.self, from: $0) }
         var request = URLRequest(url: AuthBackend.baseURL.appending(path: "/api/auth/get-session"))
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -160,20 +162,21 @@ final class AuthController: NSObject, AuthServicing {
             id: user.id,
             name: user.name ?? "",
             email: user.email,
-            superUser: await superUser,
+            // An unanswered account read says nothing about the account, so
+            // the flag this device already holds stands.
+            superUser: await superUser ?? (cached?.id == user.id && cached?.superUser == true),
             imageURL: user.image.flatMap(URL.init(string:))
         )
     }
 
     /// The session payload carries identity only; /api/account/me carries the
-    /// super-user bit. Best-effort: a failed read means a regular account
-    /// until the next restore.
-    private func fetchSuperUser(token: String) async -> Bool {
+    /// super-user bit. nil when the read did not come back.
+    private func fetchSuperUser(token: String) async -> Bool? {
         var request = URLRequest(url: AuthBackend.baseURL.appending(path: "/api/account/me"))
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               let http = response as? HTTPURLResponse,
-              (200..<300).contains(http.statusCode) else { return false }
+              (200..<300).contains(http.statusCode) else { return nil }
         struct MeResponse: Decodable { var superUser: Bool? }
         return (try? JSONDecoder().decode(MeResponse.self, from: data))?.superUser == true
     }
