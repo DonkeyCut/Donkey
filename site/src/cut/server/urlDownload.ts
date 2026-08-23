@@ -50,12 +50,12 @@ const MAX_PAGE_TEXT = 8000;
 function sourceTextFromMeta(meta: YtMeta): string | undefined {
   const title = (meta.title || "").trim();
   const desc = (meta.description || "").trim();
-  const body =
-    desc && desc !== title && !desc.startsWith(title)
-      ? title
-        ? `${title}\n\n${desc}`
-        : desc
-      : title || desc;
+  // A caption-only site has no title of its own, so yt-dlp cuts one out of the
+  // caption at a word and ends it with an ellipsis. The prefix test compares
+  // what survives that cut, so the same sentence doesn't land twice.
+  const stem = title.replace(/[.\u2026\s]+$/, "");
+  const restates = !desc || desc === title || (stem.length > 0 && desc.startsWith(stem));
+  const body = restates ? desc || title : title ? `${title}\n\n${desc}` : desc;
   return clamp(body, MAX_SOURCE_TEXT) || undefined;
 }
 
