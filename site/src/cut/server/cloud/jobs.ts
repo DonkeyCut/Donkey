@@ -32,7 +32,38 @@ type JobRow = {
   error: string | null;
   claimedAt: Date | null;
   createdAt: Date;
+  updatedAt: Date;
 };
+
+/** How long a job may go untouched before the poll calls it abandoned.
+ *
+ * A running job writes its progress to the row every second, and a live worker
+ * requeues one whose heartbeat has been quiet for a minute, so fifteen minutes
+ * of silence means the worker is gone and no other is coming for it. A queued
+ * row is claimed as soon as a worker is free, so the queued window is set past
+ * any backlog a person could put in front of their own job: reaching it means
+ * no worker ran at all. A client is watching a spinner nothing will ever
+ * settle, so the poll settles it. */
+const DEAD_RUNNING_MS = 15 * 60 * 1000;
+const NEVER_CLAIMED_MS = 2 * 60 * 60 * 1000;
+
+/** Flip an abandoned job to `error`, and answer with what it now says. The
+ * update is a compare-and-set on the state and heartbeat this read saw, so a
+ * worker that claimed the row in the meantime keeps it. */
+async function settleAbandoned(row: JobRow): Promise<JobRow> {
+  if (row.state !== "queued" && row.state !== "running") return row;
+  const limit = row.state === "running" ? DEAD_RUNNING_MS : NEVER_CLAIMED_MS;
+  if (Date.now() - row.updatedAt.getTime() < limit) return row;
+  const error =
+    row.state === "running"
+      ? "The worker stopped before it finished. Try again."
+      : "Nothing picked this job up. Try again.";
+  const { count } = await prisma.cutRenderJob.updateMany({
+    where: { id: row.id, state: row.state, updatedAt: row.updatedAt },
+    data: { state: "error", error },
+  });
+  return count === 1 ? { ...row, state: "error", error } : row;
+}
 
 /** Engine job status ("queued" | "running" | "done" | "error") from a row's
  * state; a canceled row reads as the engine's canceled-export error. */
@@ -243,8 +274,9 @@ export const jobsCloud = {
   },
 
   async exportStatus(userId: string, jobId: string) {
-    const row = await findJob(userId, jobId);
-    if (!row) return err("Unknown export.", 404);
+    const found = await findJob(userId, jobId);
+    if (!found) return err("Unknown export.", 404);
+    const row = await settleAbandoned(found);
     // "running" wakes too: if the worker died mid-job, the woken replacement
     // sweeps the stale row back to queued and picks it up.
     if (row.state === "queued" || row.state === "running") wakeRenderWorker();
@@ -551,8 +583,9 @@ export const jobsCloud = {
 
   /** Generic job poll for non-export kinds (import_url, convert). */
   async status(userId: string, jobId: string) {
-    const row = await findJob(userId, jobId);
-    if (!row) return err("Unknown job.", 404);
+    const found = await findJob(userId, jobId);
+    if (!found) return err("Unknown job.", 404);
+    const row = await settleAbandoned(found);
     if (row.state === "queued" || row.state === "running") wakeRenderWorker();
     return Response.json({
       id: row.id,
