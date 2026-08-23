@@ -25,10 +25,10 @@ public struct AnalyticsScreen: View {
                         title: "No data yet",
                         message: "The nightly analytics job hasn't produced a rollup."
                     )
-                case .failed:
+                case .failed(let reason):
                     EmptyState(
                         title: "Couldn't load analytics",
-                        message: "Check your connection and try again.",
+                        message: reason,
                         actionTitle: "Retry"
                     ) {
                         Task { await analytics.refresh() }

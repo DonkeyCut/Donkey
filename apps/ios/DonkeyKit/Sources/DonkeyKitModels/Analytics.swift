@@ -246,6 +246,8 @@ nonisolated public struct AnalyticsSummary: Sendable, Equatable {
 nonisolated public enum AnalyticsError: Error, Equatable {
     /// The nightly job hasn't written a rollup yet.
     case noRollup
+    /// The answer came back, and it was not a rollup this build can read.
+    case unreadable
 }
 
 /// What the app target's CutCloudClient does for the analytics dashboard.
@@ -260,7 +262,8 @@ public final class AnalyticsModel {
         case loaded(AnalyticsSummary)
         /// The API answered but no rollup exists yet.
         case empty
-        case failed
+        /// The load failed, in words that name the cause.
+        case failed(String)
     }
 
     public private(set) var state: State = .loading
@@ -272,7 +275,9 @@ public final class AnalyticsModel {
     }
 
     /// Fetches the rollup. A refresh over loaded data keeps the charts up
-    /// while it runs and on failure; a first load surfaces the error.
+    /// while it runs and on failure; a first load surfaces the error, saying
+    /// which one it was — a failure that only reads "try again" tells nobody
+    /// whether the phone, the session, or the server is at fault.
     public func refresh() async {
         do {
             let rollup = try await service.fetchAnalyticsRollup()
@@ -281,7 +286,20 @@ public final class AnalyticsModel {
             state = .empty
         } catch {
             if case .loaded = state { return }
-            state = .failed
+            state = .failed(Self.reason(for: error))
+        }
+    }
+
+    private static func reason(for error: any Error) -> String {
+        switch error {
+        case CloudSyncError.unauthorized:
+            "This account can't read analytics. Sign out and back in."
+        case CloudSyncError.refused(let message):
+            message
+        case AnalyticsError.unreadable:
+            "The rollup came back in a shape this build doesn't read."
+        default:
+            "Couldn't reach donkeycut.com. Check your connection."
         }
     }
 }

@@ -588,9 +588,12 @@ extension CutCloudClient: AnalyticsServicing {
         case 200..<300: break
         case 404: throw AnalyticsError.noRollup
         case 401, 403: throw CloudSyncError.unauthorized
-        default: throw CloudSyncError.transport
+        default: throw CloudSyncError.refused("The server answered \(http.statusCode).")
         }
-        return try decode(AnalyticsRollup.self, from: data)
+        guard let rollup = try? JSONDecoder().decode(AnalyticsRollup.self, from: data) else {
+            throw AnalyticsError.unreadable
+        }
+        return rollup
     }
 }
 
