@@ -187,7 +187,7 @@ const IMAGE_URL_RE = /\.(png|jpe?g|webp|gif|avif|bmp)(?:$|\?)/i;
  * back untouched; anything else is re-encoded into one that plays. A
  * conversion that fails leaves the original: a file that plays in fewer places
  * beats no import at all. */
-async function playableMedia(file: string): Promise<string> {
+export async function playableMedia(file: string): Promise<string> {
   const codecs = await streamCodecs(file);
   // Sound alone decodes everywhere the import goes.
   if (!codecs.video) return file;
@@ -744,14 +744,17 @@ function ytDlp(
     // a ready-made mp4 first would land whatever single file the site keeps
     // around for compatibility — on YouTube that is 360p next to a 4K original.
     //
-    // Codec leads the sort. Apple decodes H.264 and HEVC and nothing else, so
-    // a taller VP9 or AV1 stream is a file that plays nowhere the import is
-    // going: the phone's viewer, the Mac's own player, Safari. Instagram
-    // serves 1440p VP9 beside 1080p H.264, and the 1080p file is the one worth
-    // having. A source with no H.264 at all still comes down, and the
+    // Codec leads the sort, resolution follows it. Apple decodes H.264 and
+    // HEVC and nothing else, so a taller VP9 or AV1 stream is a file that
+    // plays nowhere the import is going: the phone's viewer, the Mac's own
+    // player, Safari. Instagram serves 1440p VP9 beside a 1080p-class H.264
+    // file, and the H.264 one is worth having. Sound is compared last, after
+    // the picture: judged any earlier it would rank YouTube's 360p
+    // sound-and-picture file over the 1080p stream that carries no sound of
+    // its own. A source with no H.264 at all still comes down, and the
     // conversion below makes it playable.
     "-f", "bestvideo*+bestaudio/best",
-    "-S", "vcodec:h264,acodec:aac,res,fps,hdr:sdr",
+    "-S", "vcodec:h264,res,fps,hdr:sdr,acodec:aac",
     "--merge-output-format", "mp4",
     "-o", path.join(dir, "%(id)s.%(ext)s"),
     "--print-json",
