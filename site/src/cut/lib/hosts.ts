@@ -16,6 +16,12 @@ export const DONKEYCUT_CANONICAL = "https://donkeycut.com";
 export const CUT_MEDIA_HOST = "media.donkeycut.com";
 export const CUT_MEDIA_ORIGIN = `https://${CUT_MEDIA_HOST}`;
 
+// Founder outreach replies land here: Resend receives mail for this subdomain
+// and posts it to /api/email/resend-webhook. It is deliberately a subdomain —
+// the MX record belongs to Resend, and the apex keeps whatever routes its mail
+// today (src/lib/marketing/replyAddress.ts).
+export const OUTREACH_REPLY_HOST = "reply.donkeycut.com";
+
 // The Cut Worker's control plane — the /wake the hosted API posts to when it
 // queues a render. Its own custom domain, claimed in wrangler.jsonc beside the
 // media route, so it cannot be revoked by a deploy default the way the
