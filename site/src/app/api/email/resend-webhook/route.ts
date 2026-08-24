@@ -4,18 +4,32 @@ import { z } from "zod";
 
 import { unauthorizedResponse } from "@/lib/donkey-api-auth";
 import { setMarketingUnsubscribed } from "@/lib/email/unsubscribe";
+import { forwardOutreachReply } from "@/lib/marketing/forward-reply";
 import { prisma } from "@/lib/prisma";
 
-// The one event this app consumes: an unsubscribe (or resubscribe) made on
+// Two events this app consumes. An unsubscribe (or resubscribe) made on
 // Resend's side — a broadcast footer link or a dashboard edit — flows back
-// into the account's own preference row. Everything else acknowledges as a
-// no-op so enabling more events in the dashboard never errors.
+// into the account's own preference row. A received email is a reply to an
+// outreach note, which files itself against its row and forwards on.
+// Everything else acknowledges as a no-op so enabling more events in the
+// dashboard never errors.
 const contactUpdatedSchema = z.object({
   data: z.object({
     email: z.string().email(),
     unsubscribed: z.boolean(),
   }),
   type: z.literal("contact.updated"),
+});
+
+const emailReceivedSchema = z.object({
+  data: z.object({
+    email_id: z.string(),
+    from: z.string(),
+    received_for: z.array(z.string()).default([]),
+    subject: z.string().default(""),
+    to: z.array(z.string()).default([]),
+  }),
+  type: z.literal("email.received"),
 });
 
 // Public exception to withDonkeyAuth (docs/guides/backend-apis.md): Resend
@@ -37,6 +51,12 @@ export async function POST(request: NextRequest) {
     });
   } catch {
     return unauthorizedResponse();
+  }
+
+  const received = emailReceivedSchema.safeParse(event);
+  if (received.success) {
+    await forwardOutreachReply(received.data.data);
+    return NextResponse.json({ ok: true });
   }
 
   const parsed = contactUpdatedSchema.safeParse(event);
