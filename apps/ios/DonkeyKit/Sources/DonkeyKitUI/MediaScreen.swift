@@ -297,6 +297,7 @@ struct RecordingPlayerView: View {
                                 Text("Library")
                                     .font(.subheadline.weight(.semibold))
                             }
+                            .foregroundStyle(.white)
                             .padding(.horizontal, 14)
                             .frame(height: 40)
                         }
@@ -308,6 +309,7 @@ struct RecordingPlayerView: View {
                     ShareLink(item: url) {
                         Image(systemName: "square.and.arrow.up")
                             .font(.title3.weight(.bold))
+                            .foregroundStyle(.white)
                             .frame(width: 40, height: 40)
                     }
                     .glassEffect(.regular.interactive())
@@ -332,6 +334,7 @@ struct RecordingPlayerView: View {
         } label: {
             Image(systemName: "xmark")
                 .font(.title3.weight(.bold))
+                .foregroundStyle(.white)
                 .frame(width: 40, height: 40)
         }
         .glassEffect(.regular.interactive())

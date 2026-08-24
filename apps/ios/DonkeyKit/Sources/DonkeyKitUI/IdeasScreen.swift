@@ -738,6 +738,7 @@ struct InspirationViewer: View {
                     Button { dismiss() } label: {
                         Image(systemName: "xmark")
                             .font(.title3.weight(.bold))
+                            .foregroundStyle(.white)
                             .frame(width: 40, height: 40)
                     }
                     .glassEffect(.regular.interactive())
@@ -749,6 +750,7 @@ struct InspirationViewer: View {
                     } label: {
                         Image(systemName: "ellipsis")
                             .font(.title3.weight(.bold))
+                            .foregroundStyle(.white)
                             .frame(width: 40, height: 40)
                     }
                     .glassEffect(.regular.interactive())
