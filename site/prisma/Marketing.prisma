@@ -1,0 +1,53 @@
+// Founder outreach: one row per account per campaign, seeded by the nightly
+// outreach-scan job (src/lib/jobs/outreach-scan.ts) and worked by hand from
+// /app/su/outreach. The row is a marker, not a mailbox — it carries status,
+// timestamps, and the scan's credit snapshot, never a subject or a message
+// body. The conversation itself lives in the operator's inbox.
+
+model UserOutreach {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Campaign ids live in code (src/lib/marketing/campaigns.ts).
+  campaign     String
+  // "todo" | "sent" | "replied" | "ignored". The scan creates and retires
+  // "todo" rows; every other status is set by a person or by an inbound reply.
+  status       String   @default("todo")
+  sentCount    Int      @default(0)
+  firstSentAt  DateTime?
+  lastSentAt   DateTime?
+  repliedAt    DateTime?
+  ignoredAt    DateTime?
+  // The super user whose click sent or filed the row.
+  actorUserId  String?
+  // The scan's snapshot, so the list renders from this table alone.
+  spentMicros  BigInt   @default(0)
+  balanceMicros BigInt  @default(0)
+  lastActiveAt DateTime?
+  // When the balance last reached zero; null for an account still in credit.
+  ranOutAt     DateTime?
+  scannedAt    DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, campaign])
+  @@index([campaign, status, lastActiveAt])
+}
+
+// A saved outreach template: the words the operator wrote, kept so the next
+// note can start from them. Templates live here rather than in the repo, so
+// writing one never needs a deploy. Sending still sends whatever is in the
+// dialog at the time — a template is a starting point, not a contract.
+
+model OutreachTemplate {
+  id        String   @id @default(cuid())
+  // What the send dialog calls it. Unique, so saving under an existing name
+  // updates that template instead of leaving two the operator can't tell apart.
+  name      String   @unique
+  subject   String
+  body      String
+  // The super user who last saved it.
+  actorUserId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

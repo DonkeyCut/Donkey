@@ -26,6 +26,7 @@ model User {
   avatar        UserAvatar?
   onboarding    UserOnboarding?
   emailSettings UserEmailSettings?
+  outreach      UserOutreach[]
 
   @@map("user")
 }
