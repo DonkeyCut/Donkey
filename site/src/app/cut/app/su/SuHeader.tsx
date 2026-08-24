@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import type { ComponentType } from "react";
 
 import { RunAnalyticsButton } from "@/app/cut/app/su/analytics/RunAnalyticsButton";
+import { ScanOutreachButton } from "@/app/cut/app/su/outreach/ScanOutreachButton";
 
 // Every surface owns a path, so the match is exact; the rail's order is the
 // order here, and its first entry is what the section root opens.
@@ -28,6 +29,12 @@ const SECTIONS: {
     suffix: "/su/credits",
     title: "Credits",
     description: "Grant credits to a user.",
+  },
+  {
+    suffix: "/su/outreach",
+    title: "Outreach",
+    description: "Free accounts spending credits, and where each conversation stands.",
+    Action: ScanOutreachButton,
   },
 ];
 
