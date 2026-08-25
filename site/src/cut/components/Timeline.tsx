@@ -1613,17 +1613,16 @@ export function Timeline() {
     only?: (asset: MediaAsset) => boolean
   ) => {
     const next = runCursor(t, atElement);
-    // Each item is copied into the project before it can be placed, so a drop
-    // of several starts every copy at once and lays them out in the order they
-    // were dragged. A copy that fails leaves the rest of the run alone.
-    const copied = await Promise.all(
-      items.map((item) => importLibraryAsset(projectId, item).catch(() => null))
-    );
-    for (const asset of copied) {
-      if (!asset || asset.type === "font") continue;
-      if (only && !only(asset)) continue;
-      const sticker = !!stickerOf(asset);
-      placeAssetAt(asset.id, asset.type, next(asset, sticker), audioRow, place);
+    for (const item of items) {
+      try {
+        const asset = await importLibraryAsset(projectId, item);
+        if (asset.type === "font") continue;
+        if (only && !only(asset)) continue;
+        const sticker = !!stickerOf(asset);
+        placeAssetAt(asset.id, asset.type, next(asset, sticker), audioRow, place);
+      } catch {
+        // A copy that fails leaves the rest of the run alone.
+      }
     }
   };
 

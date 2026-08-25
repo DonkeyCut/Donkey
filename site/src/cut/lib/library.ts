@@ -16,11 +16,8 @@ import {
   MAX_FONT_BYTES,
   presignedUpload,
   probeFileMeta,
-  registerStoredMedia,
-  withRetries,
   uploadProjectMediaTo,
 } from "./media";
-import { localMediaUrl } from "./mediaSync";
 import {
   activeResidency,
   availableResidencies,
@@ -684,57 +681,17 @@ async function copyLibraryFileToProject(
   );
 }
 
-/**
- * Register a library asset in the open project's media, without placing it on
- * the timeline. Callers choose where it lands.
- *
- * On the asset's own shelf the copy is the server's to make and no byte passes
- * through this tab, so the asset waits for it and arrives whole: the stored
- * name, the stored URL, in the saved document from the first frame. Nothing
- * about it moves afterwards, which is what a play across it needs — an asset
- * that changes address mid-play makes every reader open its file again.
- *
- * A carry between shelves is the bytes coming down here and going back up,
- * which is minutes on a phone recording and far too long to hold a drop for.
- * That one lands on the library's own URL and moves to the stored file when
- * the copy finishes.
- */
+/** Register a library asset in the open project's media, without placing it on
+ * the timeline. Callers choose where it lands. Usable immediately: it plays
+ * from the library's own route while the copy into the project runs behind
+ * the editor (server-side on the asset's own shelf, download-and-upload
+ * across residencies). */
 export async function importLibraryAsset(
   projectId: string,
   lib: LibraryAsset,
 ): Promise<MediaAsset> {
   if (lib.type === "font")
     throw new Error("Fonts are used from the font menu, not the timeline.");
-  const assetId = lib.id;
-  if (assetId && lib.residency === getBackend().kind) {
-    const fileName = await withRetries((opts) =>
-      copyLibraryFileToProject(
-        projectId,
-        lib.residency,
-        lib.fileName,
-        assetId,
-        opts,
-      ),
-    );
-    const url =
-      (await localMediaUrl(projectId, fileName)) ?? mediaUrl(projectId, fileName);
-    const asset = registerStoredMedia(projectId, {
-      fileName,
-      url,
-      name: lib.name,
-      type: lib.type,
-      duration: lib.duration,
-      width: lib.width,
-      height: lib.height,
-    });
-    // A stored file's route URL re-signs and redirects on every range read and
-    // is on no origin the chunk cache keeps. The mint moves it onto the media
-    // origin before anything plays it.
-    void import("./mediaLinks")
-      .then((m) => m.refreshSignedUrls(true))
-      .catch(() => {});
-    return asset;
-  }
   return importRemote(
     projectId,
     {

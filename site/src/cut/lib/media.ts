@@ -693,7 +693,7 @@ type RemoteImportInit = {
 
 /** Copy attempts ride out transient blips before the queue marks the asset
  * failed; an abort (asset deleted, project left) stops immediately. */
-export async function withRetries(
+async function withRetries(
   copy: (opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }) => Promise<string>,
   opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }
 ): Promise<string> {
@@ -766,56 +766,6 @@ export function importRemote(
     localUrl: init.url,
     send: (opts) => withRetries(copy ?? download, opts),
   });
-  return asset;
-}
-
-/**
- * Register media the project already holds as an asset that is final the
- * moment it appears: its own stored name, its own URL, in the saved document,
- * and nothing to repoint out from under a play.
- *
- * The library's own shelf copies a file across server-side, without a byte
- * passing through this tab, so the asset can wait for it and arrive whole
- * rather than arriving on the library's URL and moving to the stored one
- * mid-play.
- */
-export function registerStoredMedia(
-  projectId: string,
-  init: {
-    fileName: string;
-    url: string;
-    name: string;
-    type: AssetType;
-    duration: number;
-    width?: number;
-    height?: number;
-    origin?: StoredAsset["origin"];
-  }
-): MediaAsset {
-  const asset: MediaAsset = {
-    id: uid(),
-    fileName: init.fileName,
-    name: init.name,
-    type: init.type,
-    duration: init.duration,
-    ...(init.width !== undefined ? { width: init.width } : {}),
-    ...(init.height !== undefined ? { height: init.height } : {}),
-    ...(init.origin ? { origin: init.origin } : {}),
-    url: init.url,
-  };
-  useEditor.getState().addAsset(asset);
-  void enrichAsset(asset);
-  // Catalog dimensions are nominal (an aspect, not the file's pixels): read
-  // the real ones behind the placement so the doc stores the truth.
-  if (init.type === "video") {
-    void probeMediaFile(init.url)
-      .then((m) => {
-        if (m.hasVideo) {
-          useEditor.getState().updateAsset(asset.id, { width: m.width, height: m.height });
-        }
-      })
-      .catch(() => {});
-  }
   return asset;
 }
 
