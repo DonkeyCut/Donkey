@@ -105,23 +105,49 @@ import Testing
         #expect(readDuration(of: "", wordsPerMinute: 150) == 0)
     }
 
+    /// A stand-in face: every character ten points wide, spaces included.
+    /// Enough to pin down where a line ends without a screen.
+    func measure(_ line: String) -> Double { Double(line.count) * 10 }
+
     @Test func pacingRespectsUserNewlines() {
-        let paced = pacedScript("First thought\nSecond thought")
+        let paced = pacedScript("First thought\nSecond thought", room: 1000, measure: measure)
         #expect(paced == "First thought\n\nSecond thought")
     }
 
     @Test func pacingCollapsesSpaceRuns() {
-        #expect(pacedScript("hello    there   friend") == "hello there friend")
+        #expect(pacedScript("hello    there   friend", room: 1000, measure: measure) == "hello there friend")
     }
 
-    @Test func pacingWrapsLongParagraphsAtClauses() {
-        let paced = pacedScript("Hey everyone, welcome back to the channel where we talk about editing")
+    @Test func wordsShareALineWhileThePictureHasRoom() {
+        let script = "Hey everyone, welcome back"
+        // 26 characters at ten points each, with room to spare.
+        #expect(pacedScript(script, room: 400, measure: measure) == script)
+    }
+
+    @Test func aLineEndsWhereTheNextWordWouldRunOff() {
+        let paced = pacedScript(
+            "Hey everyone, welcome back to the channel where we talk about editing",
+            room: 200,
+            measure: measure
+        )
         let lines = paced.split(separator: "\n").map(String.init)
-        // The clause end takes the first break; no line outruns the word cap.
-        #expect(lines.first == "Hey everyone,")
-        #expect(lines.allSatisfy { $0.split(separator: " ").count <= 6 })
+        #expect(lines.allSatisfy { measure($0) <= 200 })
+        // Each line is full: the first word of the next one would not have fit.
+        for (line, next) in zip(lines, lines.dropFirst()) {
+            let word = next.split(separator: " ").first.map(String.init) ?? ""
+            #expect(measure("\(line) \(word)") > 200)
+        }
         // Every word survives the wrap.
         #expect(paced.split(whereSeparator: { $0.isWhitespace }).count == 12)
+    }
+
+    @Test func aWordWiderThanTheRoomKeepsItsOwnLine() {
+        let paced = pacedScript("a supercalifragilistic b", room: 60, measure: measure)
+        #expect(paced == "a\nsupercalifragilistic\nb")
+    }
+
+    @Test func noRoomToSpeakOfLeavesTheParagraphWhole() {
+        #expect(pacedScript("keep me together", room: 0, measure: measure) == "keep me together")
     }
 }
 

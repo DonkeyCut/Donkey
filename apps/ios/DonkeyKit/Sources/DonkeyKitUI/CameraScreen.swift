@@ -586,11 +586,30 @@ struct TeleprompterOverlay: View {
     /// Breathing room between one pass of the script and the next, as a share
     /// of the prompter's height.
     private static var gapShare: Double { 0.3 }
-    /// Room kept at the foot of the screen for the record button and the tabs.
-    private static var controlsInset: Double { 190 }
+    /// Room kept at the foot of the screen, clear of the home indicator. The
+    /// script only ever runs on a clear stage, so it takes the screen; the
+    /// controls a tap brings back float over the words for their few seconds.
+    private static var footRoom: Double { 40 }
+    /// Margin each side of the script.
+    private static var sidePadding: Double { 24 }
 
-    private var scriptText: some View {
-        Text(camera.teleprompter.displayScript)
+    /// The script broken to the width it is drawn in, measured on the very
+    /// face and size it will be drawn in. A line holds as many words as the
+    /// picture has room for, so a short clause reads on one line with what
+    /// follows it. The last point of the width is left to the layout, so a
+    /// line measured here as fitting is never broken again as it draws.
+    private func script(room: Double) -> String {
+        let font = UIFont.systemFont(
+            ofSize: camera.teleprompter.settings.textSize,
+            weight: .heavy
+        )
+        return camera.teleprompter.displayScript(room: room - 1) { line in
+            (line as NSString).size(withAttributes: [.font: font]).width
+        }
+    }
+
+    private func scriptText(_ text: String) -> some View {
+        Text(text)
             .font(.system(size: camera.teleprompter.settings.textSize, weight: .heavy))
             .foregroundStyle(.white)
             .lineSpacing(4)
@@ -606,16 +625,17 @@ struct TeleprompterOverlay: View {
     var body: some View {
         GeometryReader { geometry in
             // The script gets the screen, stopping short of the controls.
-            let height = max(geometry.size.height - Self.controlsInset, 0)
+            let height = max(geometry.size.height - Self.footRoom, 0)
             let gap = height * Self.gapShare
+            let lines = script(room: geometry.size.width - Self.sidePadding * 2)
             TimelineView(.animation) { context in
                 let elapsed = elapsed(at: context.date)
                 // Two passes, one behind the other: the script runs without
                 // ever leaving the screen empty, in a take as in a preview.
                 VStack(alignment: .leading, spacing: gap) {
-                    scriptText
+                    scriptText(lines)
                         .onGeometryChange(for: Double.self, of: { $0.size.height }) { textHeight = $0 }
-                    scriptText
+                    scriptText(lines)
                 }
                 .offset(
                     y: camera.teleprompter.scrollOffset(
@@ -625,7 +645,7 @@ struct TeleprompterOverlay: View {
                         gap: gap
                     ) + dragged + dragging
                 )
-                .padding(.horizontal, 24)
+                .padding(.horizontal, Self.sidePadding)
             }
             .frame(height: height, alignment: .top)
             .clipped()

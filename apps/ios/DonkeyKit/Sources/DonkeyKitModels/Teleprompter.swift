@@ -16,37 +16,53 @@ nonisolated public struct TeleprompterSettings: Equatable, Codable, Sendable {
     }
 }
 
-/// Prompter copy from a raw note. Spacing is the prompter's job: runs of
-/// spaces collapse, the writer's own line breaks hold as paragraph breaks,
-/// and a long unbroken paragraph wraps into short lines at clause boundaries
-/// so the eye has a rhythm to follow. Nobody has to format a note to read it.
-nonisolated public func pacedScript(_ raw: String) -> String {
+/// Prompter copy from a raw note, broken into the lines the screen draws.
+///
+/// Spacing is the prompter's job: runs of spaces collapse and the writer's
+/// own line breaks hold as paragraph breaks, so nobody has to format a note
+/// to read it. Inside a paragraph, words stay together while they fit — a
+/// line ends where the next word would run off the picture, and a short
+/// clause shares its line with what follows it.
+///
+/// The measurer belongs to the caller, so the words are measured on the face
+/// and the size they will be drawn in. `room` is the width they are drawn in,
+/// in whatever unit that measurer answers in.
+nonisolated public func pacedScript(
+    _ raw: String,
+    room: Double,
+    measure: (String) -> Double
+) -> String {
     let paragraphs = raw
         .trimmingCharacters(in: .whitespacesAndNewlines)
         .split(separator: "\n", omittingEmptySubsequences: true)
-        .map { pacedParagraph(String($0)) }
+        .map { pacedParagraph(String($0), room: room, measure: measure) }
         .filter { !$0.isEmpty }
     return paragraphs.joined(separator: "\n\n")
 }
 
-/// Words a line holds before it breaks anyway.
-private nonisolated let lineWordCap = 6
-/// Words after which a clause end (comma, period, dash…) takes the break.
-private nonisolated let clauseBreakMin = 2
-
-private nonisolated func pacedParagraph(_ text: String) -> String {
+private nonisolated func pacedParagraph(
+    _ text: String,
+    room: Double,
+    measure: (String) -> Double
+) -> String {
     let words = text.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+    // No room to speak of: the paragraph is one line and the screen decides
+    // where it falls.
+    guard room > 0 else { return words.joined(separator: " ") }
     var lines: [String] = []
-    var line: [String] = []
+    var line = ""
     for word in words {
-        line.append(word)
-        let clauseEnd = word.last.map { ",.;:!?—".contains($0) } ?? false
-        if line.count >= lineWordCap || (clauseEnd && line.count >= clauseBreakMin) {
-            lines.append(line.joined(separator: " "))
-            line = []
+        let candidate = line.isEmpty ? word : "\(line) \(word)"
+        // A word wider than the room takes its own line whole; breaking it
+        // would leave the reader with half a word.
+        if !line.isEmpty, measure(candidate) > room {
+            lines.append(line)
+            line = word
+        } else {
+            line = candidate
         }
     }
-    if !line.isEmpty { lines.append(line.joined(separator: " ")) }
+    if !line.isEmpty { lines.append(line) }
     return lines.joined(separator: "\n")
 }
 
@@ -73,8 +89,11 @@ nonisolated public struct TeleprompterState: Equatable, Sendable {
         !script.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// The text the overlay renders: the raw script, paced.
-    public var displayScript: String { pacedScript(script) }
+    /// The text the overlay renders: the raw script, broken to the room the
+    /// screen gives it.
+    public func displayScript(room: Double, measure: (String) -> Double) -> String {
+        pacedScript(script, room: room, measure: measure)
+    }
 
     /// Seconds the whole script takes at the set pace.
     public var duration: TimeInterval { readDuration(of: script, wordsPerMinute: settings.wordsPerMinute) }
