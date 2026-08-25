@@ -439,15 +439,28 @@ export async function decodeAudioSpan(
 ): Promise<AudioBuffer | null> {
   const chunks: WrappedAudioBuffer[] = [];
   for await (const chunk of audioChunks(src, from, to)) chunks.push(chunk);
+  return assembleAudio(chunks, from, to);
+}
+
+/**
+ * Lay decoded chunks into one buffer covering `[from, to)`, or null when there
+ * are none.
+ *
+ * The buffer begins exactly at `from`, which is what callers assume when they
+ * play it from 0. Decoding lands on packet boundaries, so the first chunk
+ * usually starts a little earlier; that head is trimmed rather than being
+ * allowed to shift the whole span early.
+ */
+export function assembleAudio(
+  chunks: WrappedAudioBuffer[],
+  from: number,
+  to?: number
+): AudioBuffer | null {
   if (chunks.length === 0) return null;
 
   const sampleRate = chunks[0].buffer.sampleRate;
   const numberOfChannels = Math.max(...chunks.map((c) => c.buffer.numberOfChannels));
   const last = chunks[chunks.length - 1];
-  // The buffer begins exactly at `from`, which is what callers assume when they
-  // play it from 0. Decoding lands on packet boundaries, so the first chunk
-  // usually starts a little earlier; that head is trimmed below rather than
-  // being allowed to shift the whole span early.
   const start = from;
   const end = Math.min(to ?? Infinity, last.timestamp + last.duration);
   const length = Math.max(1, Math.round((end - start) * sampleRate));
@@ -467,6 +480,61 @@ export async function decodeAudioSpan(
     }
   }
   return out;
+}
+
+/** A reader part-way through one file's audio: `next` hands back the buffers
+ * in the order they play and answers null at the end of the span, and `close`
+ * gives up the file however far it got. */
+export interface AudioWalk {
+  next(): Promise<WrappedAudioBuffer | null>;
+  close(): void;
+}
+
+/**
+ * Walk a file's audio forward from `from`, a buffer at a time.
+ *
+ * Asking for a span at a time is what a caller reaches for first, and over a
+ * network it is the wrong shape: audio packets are interleaved with the
+ * picture through the whole file, so twenty seconds of sound is scattered
+ * across twenty seconds of *everything* — a hundred megabytes of a phone
+ * recording to fill a few hundred kilobytes of samples. A reader asking that
+ * far ahead is asking for bytes the link has not reached yet, and it goes on
+ * asking for them for as long as it plays, which is a sound that arrives after
+ * the moment it was for.
+ *
+ * A walk reads the file once, in order, at the pace the caller pulls, so the
+ * sound is exactly as far into the file as the picture is. It is the same
+ * shape the frame readers hold, and it is what lets one open file, one
+ * container parse and one decoder serve a whole clip.
+ */
+export function openAudioWalk(src: string | Blob, from = 0, to?: number): AudioWalk {
+  const input = openMedia(src);
+  let closed = false;
+  let opening: Promise<AsyncGenerator<WrappedAudioBuffer, void, unknown> | null> | null = null;
+  const open = () =>
+    (opening ??= (async () => {
+      const track = await audioTrackOf(input);
+      return track ? new AudioBufferSink(track).buffers(from, to) : null;
+    })());
+  return {
+    async next() {
+      if (closed) return null;
+      const gen = await open();
+      if (!gen || closed) return null;
+      const step = await gen.next();
+      return step.done ? null : step.value;
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      // The generator is told it is over, which is where the decoder it holds
+      // is released, and the file goes at once behind it: disposing is what
+      // cancels a read still in the air, and a walk being closed because it
+      // stopped answering is waiting on exactly one of those.
+      void opening?.then((gen) => gen?.return()).catch(() => {});
+      input.dispose();
+    },
+  };
 }
 
 /**

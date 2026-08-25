@@ -12,10 +12,18 @@
  * Here every audible thing is a buffer scheduled on one `AudioContext`. The
  * context's own clock is what the preview runs on — it advances in real time,
  * never backward, and is sample-accurate — so the picture follows the sound
- * rather than the other way round. Clips are scheduled a window at a time so
- * starting playback costs one short decode instead of the whole timeline, and a
- * clip playing at a speed other than 1 is time-stretched rather than resampled,
- * which is what keeps its pitch and matches what the export writes.
+ * rather than the other way round.
+ *
+ * Every voice holds a reader walking its own file forward and hands the context
+ * about a second of sound at a time. Reading in order is the part that matters:
+ * a voice asking for a long span at once is asking for the whole interleaved
+ * stretch of file that span is scattered through, which over a network is
+ * minutes of bytes for seconds of sound and a voice permanently behind its own
+ * playhead. Walking keeps the sound exactly as far into the file as the picture
+ * is. A clip playing at a speed other than 1 is time-stretched rather than
+ * resampled, which is what keeps its pitch and matches what the export writes;
+ * a stretch needs its span in hand, so those voices read a short window instead
+ * of walking.
  *
  * Gains are the only thing touched per frame, and only their value: the clip's
  * own volume, its fades, the duck under a live voiceover, the whole-project
@@ -28,15 +36,23 @@
  */
 
 import { audioFxRecipe, buildAudioFx, type AudioFxNodes } from "@donkeycut/effects-kit";
-import { decodeAudioSpan } from "./mediaRead";
+import type { WrappedAudioBuffer } from "mediabunny";
+import { assembleAudio, decodeAudioSpan, openAudioWalk, type AudioWalk } from "./mediaRead";
 import { timeStretch } from "./timeStretch";
 
-/** How much of a voice is decoded and scheduled at once, in timeline seconds. */
-const WINDOW_S = 20;
+/** How much of a voice is pulled off its walk and scheduled at once, in source
+ * seconds. Long enough that a stretch of sound is one scheduling decision;
+ * short enough that the bytes it waits on are the ones the picture is reading
+ * anyway. */
+const GROUP_S = 1;
+/** Most reads one group is assembled from. A packet of compressed audio holds
+ * a fraction of a second, so a group is tens of reads, and this is the ceiling
+ * over them. */
+const GROUP_PULLS = 128;
 /** A stretched window is resynthesised on the main thread, so it is kept short
  * enough that the work lands inside a frame or two. */
 const WINDOW_STRETCHED_S = 4;
-/** Schedule the next window once the playhead is this close to running out. */
+/** Schedule more of a voice once the playhead is this close to running out. */
 const AHEAD_S = 2;
 /** Most the picture will be held back for the output device, whatever the
  * device claims. Well past a Bluetooth headset, and short of anything that
@@ -75,26 +91,41 @@ interface LiveVoice {
   windows: Scheduled[];
   /** Timeline time everything scheduled so far runs out at. */
   scheduled: number;
-  /** A decode in flight, so a slow read doesn't start a second one. */
+  /** The reader walking this voice's source, open from where it last read to.
+   * A walk is a position and nothing more, so anything that moves the voice —
+   * a seek, a clock jump, a read that failed — drops it. */
+  walk: AudioWalk | null;
+  /** A read in flight, so a slow one doesn't start a second one, and when it
+   * started, so one that has stopped answering can be disowned. */
   filling: boolean;
-  /** Set when the voice has run off the end of its source, or its source has
-   * refused enough times to stop asking. */
-  dead: boolean;
-  /** Consecutive failed reads. A file that has just been imported is often
-   * unreadable for a moment — the bytes are still going to storage, the
-   * signed URL has not been minted — and a voice that gave up on the first
-   * miss stayed silent for the life of the page. */
-  misses: number;
-  /** Wall time (performance.now) the next read may be attempted at. */
+  fillAt: number;
+  /** Bumped by everything that moves the voice. A read carries the number it
+   * started under and acts on what it got only while that still stands. */
+  gen: number;
+  /** Set when the voice has read to the end of its source. A position rather
+   * than a verdict: anything that moves the voice clears it, so a seek back
+   * into the clip plays again. */
+  ended: boolean;
+  /** Consecutive failed reads, and the wall time (performance.now) the next
+   * one may be tried at. */
+  attempts: number;
   retryAt: number;
 }
 
-/** How many times a voice re-reads a source that will not answer before it
- * gives up, and the backoff between tries. Six tries spans about half a
- * minute, which covers an import landing behind the playhead. */
-const READ_RETRIES = 6;
-const RETRY_BASE_MS = 400;
-const RETRY_MAX_MS = 8_000;
+/** A read that has not answered in this long has stopped being a read — a
+ * request left hanging by a link that went away. The voice disowns it and asks
+ * again; waiting it out would cost the rest of the play. */
+const FILL_STALL_MS = 15_000;
+/** A failed read is asked again quickly a few times, then on a slow cadence for
+ * as long as the failure holds. Nothing here is ever terminal, and that is the
+ * point: a source that cannot be read this second — bytes still landing, a
+ * token a moment past its window, a link that dropped — is nearly always
+ * readable shortly, the picture's own readers wait it out exactly this way
+ * (frameSource.ts), and a voice that stopped asking was silent for the life of
+ * the page while the picture beside it healed. */
+const READ_RETRY_MS = 1_000;
+const READ_RETRIES = 3;
+const READ_RECHECK_MS = 10_000;
 
 /** One audio effect element the graph is carrying: its recipe's chain, and
  * the pair of gains that cross the mix between treated and untreated. */
@@ -250,20 +281,43 @@ export class PreviewMixer {
     return { lead: Math.max(0, graph - this.heard(graph)), reported };
   }
 
-  /** Stop every scheduled window and mark each voice to refill at `timeline`. */
+  /** Stop every scheduled window and re-aim each voice at `timeline`. */
   private restart(timeline: number): void {
     for (const live of this.voices.values()) {
-      for (const w of live.windows) {
-        try {
-          w.node.stop();
-        } catch {
-          // Already finished; stopping a spent node throws and means nothing.
-        }
-        w.node.disconnect();
-      }
-      live.windows = [];
+      this.stopWindows(live);
+      this.moved(live);
       live.scheduled = Math.max(live.start, timeline);
     }
+  }
+
+  /** Stop and drop every window a voice has handed to the context. */
+  private stopWindows(live: LiveVoice): void {
+    for (const w of live.windows) {
+      try {
+        w.node.stop();
+      } catch {
+        // Already finished; stopping a spent node throws and means nothing.
+      }
+      w.node.disconnect();
+    }
+    live.windows = [];
+  }
+
+  /**
+   * The voice is no longer reading where it was.
+   *
+   * A seek, a clock jump, a read that failed or stopped answering — each of
+   * them leaves the walk pointing at a moment nobody is waiting for, and a walk
+   * is only a position, so it goes. The read still in flight against it is
+   * disowned in the same breath: it carries the old number and everything it
+   * comes back with is ignored.
+   */
+  private moved(live: LiveVoice): void {
+    live.gen++;
+    live.filling = false;
+    live.ended = false;
+    live.walk?.close();
+    live.walk = null;
   }
 
   /**
@@ -377,6 +431,12 @@ export class PreviewMixer {
    */
   update(t: number, voices: Voice[]): void {
     if (!this.anchor || !this.ctx) return;
+    // A context that stops running stops the sound and leaves the picture
+    // playing on wall time — an output device taken away, a page the browser
+    // put to sleep. Nothing else asks it back, since `start` is the only other
+    // resume, so a play that lost its context stayed silent to the end of the
+    // cut.
+    if (this.ctx.state !== "running") void this.ctx.resume().catch(() => {});
     const seen = new Set<string>();
     for (const v of voices) {
       seen.add(v.id);
@@ -400,8 +460,12 @@ export class PreviewMixer {
       const live = this.voices.get(v.id) ?? this.open(v, t);
       if (!live) continue;
       live.gain.gain.value = Math.max(0, Math.min(1.5, v.gain));
+      // A read that hangs holds the voice as surely as one that fails, and it
+      // holds it quietly: nothing else would ever notice, and the voice would
+      // wait on it for the rest of the play.
+      if (live.filling && performance.now() - live.fillAt > FILL_STALL_MS) this.miss(live);
       if (
-        !live.dead &&
+        !live.ended &&
         !live.filling &&
         live.scheduled < t + AHEAD_S &&
         performance.now() >= live.retryAt
@@ -453,9 +517,12 @@ export class PreviewMixer {
       // playback started inside it, or the clip edited while audible — decodes
       // from the moment it is heard, not from a head nobody will hear.
       scheduled: Math.max(v.start, t),
+      walk: null,
       filling: false,
-      dead: false,
-      misses: 0,
+      fillAt: 0,
+      gen: 0,
+      ended: false,
+      attempts: 0,
       retryAt: 0,
     };
     this.voices.set(v.id, live);
@@ -463,15 +530,8 @@ export class PreviewMixer {
   }
 
   private release(live: LiveVoice): void {
-    for (const w of live.windows) {
-      try {
-        w.node.stop();
-      } catch {
-        // Already finished; stopping a spent node throws and means nothing.
-      }
-      w.node.disconnect();
-    }
-    live.windows = [];
+    this.stopWindows(live);
+    this.moved(live);
     live.gain.disconnect();
   }
 
@@ -481,52 +541,65 @@ export class PreviewMixer {
   }
 
   /**
-   * Decode and schedule the next window of one voice.
+   * Carry one voice a little further ahead of the playhead.
    *
-   * The window is measured in timeline seconds and the source span behind it
-   * scales with the clip's speed, so a clip at 2× reads twice as much file to
-   * fill the same stretch of timeline.
+   * The voice's walk hands back the sound in the order it plays, and a group of
+   * it is scheduled as one, placed by the source timestamps the buffers carry.
+   * A stretch of file with no audio in it therefore moves the sound to where it
+   * belongs and everything after it keeps its own time.
+   *
+   * Nothing here is terminal. A read that fails or stops answering leaves the
+   * voice waiting a moment and asking again, for as long as the play lasts,
+   * because every reason a source stops answering mid-play is a reason it
+   * starts again.
    */
   private async fill(id: string, live: LiveVoice): Promise<void> {
     if (!this.ctx || !this.anchor) return;
+    const gen = ++live.gen;
     live.filling = true;
+    live.fillAt = performance.now();
+    // The voice can be moved out from under this read while it runs — a seek,
+    // a clock jump, this very read disowned as stalled — and only the read that
+    // still stands may act on what it got.
+    const current = () => this.voices.get(id) === live && live.gen === gen;
     try {
-      const stretched = Math.abs(live.speed - 1) > 1e-3;
-      const span = stretched ? WINDOW_STRETCHED_S : WINDOW_S;
       const from = live.scheduled;
       const sourceFrom = live.in + (from - live.start) * live.speed;
       if (sourceFrom >= live.out - 1e-3) {
-        live.dead = true;
+        live.ended = true;
         return;
       }
-      const sourceTo = Math.min(live.out, sourceFrom + span * live.speed);
-      const key = `${live.url}|${sourceFrom.toFixed(3)}|${sourceTo.toFixed(3)}|${live.speed}`;
-      let buffer = this.decoded.get(key) ?? null;
-      if (!buffer) {
+      let buffer: AudioBuffer | null;
+      try {
+        buffer =
+          Math.abs(live.speed - 1) > 1e-3
+            ? await this.stretchedWindow(live, sourceFrom)
+            : await this.walkGroup(live, sourceFrom, current);
+      } catch {
         // The read is the only part of this that says anything about the
-        // source, so it is the only part a miss is spent on.
-        const raw = await decodeAudioSpan(live.url, sourceFrom, sourceTo).catch(() => null);
-        if (!raw) {
-          this.miss(live);
-          return;
-        }
-        buffer = stretched ? this.stretch(raw, 1 / live.speed) : raw;
-        // A handful of windows is all that's worth keeping — stepping back over
-        // a cut replays them, and everything older is a full decode away anyway.
-        if (this.decoded.size > 24) this.decoded.clear();
-        this.decoded.set(key, buffer);
+        // source, so it is the only part a failure is spent on.
+        if (current()) this.miss(live);
+        return;
       }
-      // The mixer may have been stopped, or the voice dropped, while decoding.
-      if (this.voices.get(id) !== live || !this.anchor || !this.ctx) return;
-      // Reading the clock can restart the voices (`restart`), so it happens
-      // before the placement below is computed — and a restarted voice, moved
-      // to a different position while this window decoded, abandons it.
+      if (!current()) return;
+      if (!buffer) {
+        // The reader answered with nothing left to play. A track can stop
+        // before the picture does, and a clip whose file carries no sound at
+        // all answers this way from the first ask.
+        live.ended = true;
+        return;
+      }
+      // Reading the clock can re-aim the voices (`restart`), so it happens
+      // before the placement below is computed.
       const tNow = this.now();
-      if (live.scheduled !== from) return;
+      if (!current() || live.scheduled !== from) return;
       const until = from + buffer.duration;
       if (until <= tNow) {
-        // The decode outlived the window it was for — a long read, or a tab
-        // that was in the background. Skip it and let the next fill catch up.
+        // The read outlived the moment it was for — a long wait on bytes, a
+        // tab in the background. Where it left the walk is behind the clock
+        // now, so the voice re-aims at the clock and gives up the stretch in
+        // between; that stretch was going by either way.
+        this.moved(live);
         live.scheduled = Math.max(live.scheduled, tNow);
         return;
       }
@@ -544,33 +617,86 @@ export class PreviewMixer {
       }
       live.windows.push({ node, until });
       live.scheduled = until;
-      live.misses = 0;
+      live.attempts = 0;
     } catch {
       // Past the read, everything is scheduling: a context closed or swapped
-      // under the voice while this window decoded. The source is fine, so the
-      // voice spaces out its next attempt and keeps every one of its reads.
-      this.backOff(live, live.misses + 1);
+      // under the voice while this group decoded. The source is fine, so the
+      // voice spaces out its next attempt and keeps every one of its tries.
+      this.backOff(live, 1);
     } finally {
-      live.filling = false;
+      if (live.gen === gen) live.filling = false;
     }
   }
 
-  /** A read that came back empty or threw. The source may simply not be there
-   * yet — a just-imported file still on its way to storage — so the voice
-   * waits and asks again, and stays silent only once its tries are spent. */
+  /**
+   * The next `GROUP_S` of a voice's sound, pulled off its walk.
+   *
+   * The walk is opened where the voice stands when it hasn't got one — the
+   * first ask, or the first after something moved it — and kept open after
+   * that, so a clip is one open file, one container parse and one decoder for
+   * as long as it plays.
+   */
+  private async walkGroup(
+    live: LiveVoice,
+    sourceFrom: number,
+    current: () => boolean
+  ): Promise<AudioBuffer | null> {
+    const walk = (live.walk ??= openAudioWalk(live.url, sourceFrom, live.out));
+    const parts: WrappedAudioBuffer[] = [];
+    let end = sourceFrom;
+    // Bounded by the sound it holds and by the reads that go into it: a track
+    // answering with buffers that carry no time would otherwise be pulled for
+    // as long as the frame lasted.
+    for (let pulls = 0; end - sourceFrom < GROUP_S && pulls < GROUP_PULLS; pulls++) {
+      const part = await walk.next();
+      if (!current()) return null;
+      if (!part) break;
+      parts.push(part);
+      end = part.timestamp + part.duration;
+    }
+    return assembleAudio(parts, sourceFrom, live.out);
+  }
+
+  /**
+   * A window of a voice playing at a speed other than 1, re-laid at the length
+   * the timeline gives it.
+   *
+   * Held briefly, because stepping back over a cut replays the same window and
+   * everything older is a full decode away anyway.
+   */
+  private async stretchedWindow(live: LiveVoice, sourceFrom: number): Promise<AudioBuffer | null> {
+    const sourceTo = Math.min(live.out, sourceFrom + WINDOW_STRETCHED_S * live.speed);
+    const key = `${live.url}|${sourceFrom.toFixed(3)}|${sourceTo.toFixed(3)}|${live.speed}`;
+    const held = this.decoded.get(key);
+    if (held) return held;
+    const raw = await decodeAudioSpan(live.url, sourceFrom, sourceTo);
+    if (!raw) return null;
+    const buffer = this.stretch(raw, 1 / live.speed);
+    if (this.decoded.size > 24) this.decoded.clear();
+    this.decoded.set(key, buffer);
+    return buffer;
+  }
+
+  /** A read that failed, came back empty, or stopped answering. The voice
+   * gives up where it was, waits, and asks again — and asks for as long as the
+   * play lasts. */
   private miss(live: LiveVoice): void {
-    live.misses += 1;
-    if (live.misses >= READ_RETRIES) {
-      live.dead = true;
-      return;
-    }
-    this.backOff(live, live.misses);
+    this.moved(live);
+    live.attempts += 1;
+    this.backOff(live, live.attempts);
+    // There is no element to reload and nothing else asks on the sound's
+    // behalf, so a signed URL past its window would stay past it. The picture's
+    // readers report their failed reads the same way; the re-mint that follows
+    // swaps the store's URLs and every voice reopens under the new one.
+    void import("./mediaLinks")
+      .then((m) => m.reportMediaUrlError(live.url))
+      .catch(() => {});
   }
 
-  /** Hold the voice off until the next attempt, `step` failures in. */
+  /** Hold the voice off until its next try, `step` failures in. */
   private backOff(live: LiveVoice, step: number): void {
     live.retryAt =
-      performance.now() + Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** Math.max(0, step - 1));
+      performance.now() + (step <= READ_RETRIES ? READ_RETRY_MS * step : READ_RECHECK_MS);
   }
 
   /** Re-lay a buffer at a different length, keeping its pitch. */
