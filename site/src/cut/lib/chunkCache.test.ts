@@ -3,8 +3,10 @@ import {
   CHUNK_SIZE,
   chunkIdentity,
   chunkRuns,
+  collect,
   decodeResident,
   encodeResident,
+  streamRun,
 } from "./chunkCache";
 
 const signed = (path: string, query = "e=123&s=abc") =>
@@ -98,4 +100,125 @@ describe("resident bitmap", () => {
 test("chunk size divides the byte math cleanly", () => {
   expect(CHUNK_SIZE).toBe(2 * 1024 * 1024);
   expect(Number.isInteger(CHUNK_SIZE)).toBe(true);
+});
+
+const pattern = (from: number, len: number) => {
+  const out = new Uint8Array(len);
+  for (let i = 0; i < len; i++) out[i] = (from + i) % 251;
+  return out;
+};
+
+/** A response whose body arrives in `piece`-sized writes, so a reader sees the
+ * same partial deliveries a real link gives it. */
+const streamed = (bytes: Uint8Array, piece: number): Response =>
+  new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let at = 0; at < bytes.length; at += piece)
+          controller.enqueue(bytes.subarray(at, Math.min(at + piece, bytes.length)));
+        controller.close();
+      },
+    })
+  );
+
+/** A response with no body stream at all, the shape a cache or a polyfill hands
+ * back, which both readers fall back to `arrayBuffer()` for. */
+const whole = (bytes: Uint8Array): Response =>
+  ({ body: null, arrayBuffer: async () => bytes.slice().buffer }) as unknown as Response;
+
+/** The message a rejected read left behind, or "" when it resolved. */
+const failure = async (p: Promise<unknown>): Promise<string> => {
+  try {
+    await p;
+    return "";
+  } catch (err) {
+    return String(err);
+  }
+};
+
+describe("streamRun", () => {
+  const start = 2 * CHUNK_SIZE;
+  const total = 2 * CHUNK_SIZE + 1024;
+  const body = pattern(start, total);
+
+  const run = async (res: Response, fromZero = false) => {
+    const got: [number, Uint8Array][] = [];
+    await streamRun(res, start, start + total - 1, fromZero, (i, b) => got.push([i, b]));
+    return got;
+  };
+
+  test("hands each chunk over at its own boundary", async () => {
+    const got = await run(streamed(body, 300_000));
+    expect(got.map(([i, b]) => [i, b.length])).toEqual([
+      [2, CHUNK_SIZE],
+      [3, CHUNK_SIZE],
+      [4, 1024],
+    ]);
+    expect(got[0][1]).toEqual(pattern(start, CHUNK_SIZE));
+    expect(got[2][1]).toEqual(pattern(start + 2 * CHUNK_SIZE, 1024));
+  });
+
+  test("settles a chunk before the rest of the run arrives", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const res = new Response(
+      new ReadableStream<Uint8Array>({
+        async start(controller) {
+          controller.enqueue(body.subarray(0, CHUNK_SIZE));
+          await held;
+          controller.enqueue(body.subarray(CHUNK_SIZE));
+          controller.close();
+        },
+      })
+    );
+    const got: number[] = [];
+    const done = streamRun(res, start, start + total - 1, false, (i) => got.push(i));
+    while (!got.length) await new Promise((r) => setTimeout(r, 1));
+    expect(got).toEqual([2]);
+    release();
+    await done;
+    expect(got).toEqual([2, 3, 4]);
+  });
+
+  test("skips past the front when the server ignored the range", async () => {
+    const got = await run(streamed(pattern(0, start + total), 500_000), true);
+    expect(got.map(([i]) => i)).toEqual([2, 3, 4]);
+    expect(got[0][1]).toEqual(pattern(start, CHUNK_SIZE));
+  });
+
+  test("reads a bodyless response the same way", async () => {
+    const got = await run(whole(body));
+    expect(got.map(([i, b]) => [i, b.length])).toEqual([
+      [2, CHUNK_SIZE],
+      [3, CHUNK_SIZE],
+      [4, 1024],
+    ]);
+    expect(got[1][1]).toEqual(pattern(start + CHUNK_SIZE, CHUNK_SIZE));
+  });
+
+  test("throws when the body ends early", async () => {
+    expect(await failure(run(streamed(body.subarray(0, total - 10), 300_000)))).toContain(
+      "short range"
+    );
+    expect(await failure(run(whole(body.subarray(0, total - 10))))).toContain("short range");
+  });
+});
+
+describe("collect", () => {
+  test("holds only the bytes asked for", async () => {
+    const body = pattern(0, 3 * CHUNK_SIZE);
+    const out = await collect(streamed(body, 700_000), CHUNK_SIZE, 2 * CHUNK_SIZE - 1, true);
+    expect(out).toEqual(pattern(CHUNK_SIZE, CHUNK_SIZE));
+  });
+
+  test("reads a ranged body from its own start", async () => {
+    const out = await collect(streamed(pattern(1024, 4096), 1000), 1024, 1024 + 4095, false);
+    expect(out).toEqual(pattern(1024, 4096));
+  });
+
+  test("throws when the body ends early", async () => {
+    expect(await failure(collect(streamed(pattern(0, 100), 32), 0, 199, false))).toContain(
+      "short range"
+    );
+  });
 });

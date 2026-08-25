@@ -402,24 +402,29 @@ async function fetchRange(
   }
 }
 
-/** Read `[start, end]` out of a response body, holding only those bytes. When
- * `fromZero`, the body starts at byte 0 whatever was asked for, so the front
- * is streamed past and the rest is dropped without ever being buffered. */
-async function collect(
+/**
+ * Walk `[start, end]` out of a response body, handing over each stretch of
+ * wanted bytes as it arrives. When `fromZero`, the body starts at byte 0
+ * whatever was asked for, so the front is streamed past and the rest is
+ * dropped without ever being buffered. The bytes handed to `onBytes` are a
+ * view on the reader's own buffer, so a caller copies them there and then.
+ * Throws when the body ends before the range is covered.
+ */
+async function walkBody(
   res: Response,
   start: number,
   endInclusive: number,
-  fromZero: boolean
-): Promise<Uint8Array> {
+  fromZero: boolean,
+  onBytes: (bytes: Uint8Array) => void
+): Promise<void> {
   const want = endInclusive - start + 1;
-  const out = new Uint8Array(want);
   const reader = res.body?.getReader();
   if (!reader) {
     const all = new Uint8Array(await res.arrayBuffer());
     const from = fromZero ? start : 0;
     if (all.length < from + want) throw new Error("Cloud media returned a short range.");
-    out.set(all.subarray(from, from + want));
-    return out;
+    onBytes(all.subarray(from, from + want));
+    return;
   }
   let pos = fromZero ? 0 : start; // absolute position of the next byte read
   let filled = 0;
@@ -432,7 +437,7 @@ async function collect(
       const from = Math.max(start, chunkStart);
       const to = Math.min(endInclusive + 1, pos);
       if (to > from) {
-        out.set(value.subarray(from - chunkStart, to - chunkStart), from - start);
+        onBytes(value.subarray(from - chunkStart, to - chunkStart));
         filled += to - from;
       }
     }
@@ -440,7 +445,65 @@ async function collect(
     await reader.cancel().catch(() => {});
   }
   if (filled < want) throw new Error("Cloud media returned a short range.");
+}
+
+/** Read `[start, end]` out of a response body into one buffer. */
+export async function collect(
+  res: Response,
+  start: number,
+  endInclusive: number,
+  fromZero: boolean
+): Promise<Uint8Array> {
+  const out = new Uint8Array(endInclusive - start + 1);
+  let at = 0;
+  await walkBody(res, start, endInclusive, fromZero, (bytes) => {
+    out.set(bytes, at);
+    at += bytes.length;
+  });
   return out;
+}
+
+/**
+ * Read a run's body, handing each chunk over the moment its own bytes arrive.
+ *
+ * A run is up to `MAX_RUN` chunks in one request, which is the right shape for
+ * the network — one round trip carries eight chunks. It is the wrong shape for
+ * the reader waiting on the first of them, and that reader is usually the preview.
+ * Held until the last byte of the run lands, a read of two megabytes waits for
+ * sixteen: on a link with real headroom that is seconds of waiting for bytes
+ * that arrived at the start, and the picture sits behind the sound for every
+ * one of them. Settling at each chunk's own boundary keeps the round trip and
+ * gives the reader its bytes when they exist.
+ */
+export async function streamRun(
+  res: Response,
+  start: number,
+  endInclusive: number,
+  fromZero: boolean,
+  onChunk: (index: number, bytes: Uint8Array) => void
+): Promise<void> {
+  const first = Math.floor(start / CHUNK_SIZE);
+  const total = endInclusive - start + 1;
+  // The chunk being assembled, how much of it is filled, and how much of the
+  // run has already been handed over.
+  let chunk = new Uint8Array(Math.min(CHUNK_SIZE, total));
+  let filled = 0;
+  let done = 0;
+  await walkBody(res, start, endInclusive, fromZero, (bytes) => {
+    let at = 0;
+    while (at < bytes.length) {
+      const take = Math.min(chunk.length - filled, bytes.length - at);
+      chunk.set(bytes.subarray(at, at + take), filled);
+      filled += take;
+      at += take;
+      if (filled === chunk.length) {
+        onChunk(first + done / CHUNK_SIZE, chunk);
+        done += filled;
+        filled = 0;
+        chunk = new Uint8Array(Math.min(CHUNK_SIZE, total - done));
+      }
+    }
+  });
 }
 
 /** Fetch one missing run, resolving each chunk to every reader waiting on it
@@ -468,14 +531,14 @@ function startRun(state: ObjState, first: number, last: number): Promise<Uint8Ar
       const endB = Math.min(state.size, (last + 1) * CHUNK_SIZE) - 1;
       const res = await fetchRange(state.url, startB, endB, state.ac.signal);
       if (!res.ok) throw new Error(`Cloud media read failed (${res.status}).`);
-      const body = await collect(res, startB, endB, res.status !== 206);
-      for (let i = first; i <= last; i++) {
-        // A copy per chunk, so holding one chunk can't pin the whole run.
-        const bytes = body.slice((i - first) * CHUNK_SIZE, (i - first + 1) * CHUNK_SIZE);
+      // Each chunk is its own array, so holding one can't pin the whole run,
+      // and it settles the moment its own bytes are here.
+      await streamRun(res, startB, endB, res.status !== 206, (i, bytes) => {
         settles[i - first].resolve(bytes);
         void persistChunk(state, i, bytes);
-      }
+      });
     } catch (err) {
+      // A chunk already handed over ignores this; the rest of the run fails.
       for (const s of settles) s.reject(err);
     }
   })();
