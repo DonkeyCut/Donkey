@@ -286,6 +286,7 @@ export function createGeminiOmniVideoAssetProvider(
     configured,
     capabilities: ["video"],
     listModels,
+    assetModelFor: (request) => resolveModel(request.model),
     generateAsset,
     refreshAsset,
   };

@@ -66,6 +66,19 @@ export function createGeminiSpeechAssetProvider(
     ];
   }
 
+  function resolveModel(requested?: string): string {
+    const model = requested?.trim() || defaultModel;
+    // Fail before spending: a caller-supplied model may resolve to an id with no
+    // configured price — never run a generation we can't charge for.
+    if (!providerCreditPricing(providerID, model)) {
+      throw new InferenceProviderError(
+        "No credit price is configured for the selected speech model.",
+        { statusCode: 500, code: "speech_model_not_priced", details: { model } },
+      );
+    }
+    return model;
+  }
+
   async function generateAsset({
     generationId,
     request,
@@ -79,15 +92,7 @@ export function createGeminiSpeechAssetProvider(
       });
     }
 
-    const model = request.model?.trim() || defaultModel;
-    // Fail before spending: a caller-supplied model may resolve to an id with no
-    // configured price — never run a generation we can't charge for.
-    if (!providerCreditPricing(providerID, model)) {
-      throw new InferenceProviderError(
-        "No credit price is configured for the selected speech model.",
-        { statusCode: 500, code: "speech_model_not_priced", details: { model } },
-      );
-    }
+    const model = resolveModel(request.model);
 
     const prompt = request.prompt?.trim();
     if (!prompt) {
@@ -184,6 +189,7 @@ export function createGeminiSpeechAssetProvider(
     configured,
     capabilities: ["speech"],
     listModels,
+    assetModelFor: (request) => resolveModel(request.model),
     generateAsset,
     refreshAsset,
   };

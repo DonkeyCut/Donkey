@@ -135,6 +135,12 @@ export type InferenceProvider = {
   // The router requires it for media requests so media is routed by capability, not by elimination
   // (a provider that omits this is never handed a media request that it would silently drop).
   handlesResponseMedia?: (request: ResponseCreateRequest) => boolean;
+  // The model this provider will bill for a request. Asset adapters resolve a default from an
+  // omitted model — and music picks its model from the requested length — so a caller's
+  // `request.model` is rarely the id that gets charged. The route asks here before the preflight,
+  // which is what lets the preflight price the generation. Throws the same way generateAsset would
+  // for an unpriced model, only sooner.
+  assetModelFor?: (request: AssetGenerationRequest) => string;
   generateAsset?: (
     request: AssetGenerationProviderRequest,
   ) => Promise<AssetGenerationProviderResult>;

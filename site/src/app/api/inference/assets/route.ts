@@ -41,12 +41,15 @@ export const POST = withDonkeyAuth(async (request) => {
     return validationErrorResponse(parsed.error);
   }
 
-  // Select the provider before the preflight so credit limits and pricing are scoped to the real
-  // provider (not a model-neutral request). This also lets the preflight reject an unpriced
-  // caller-supplied model before the provider runs and bills upstream.
+  // Select the provider and settle the model it will bill before the preflight, so credit limits
+  // and pricing are scoped to what actually runs. Callers routinely omit the model and let the
+  // adapter pick one (music picks by requested length), so asking the provider is the only way the
+  // preflight sees the id that gets charged.
   let provider;
+  let model;
   try {
     provider = createProviderRegistry().assetProvider(parsed.data);
+    model = provider.assetModelFor?.(parsed.data) ?? parsed.data.model;
   } catch (error) {
     if (error instanceof InferenceProviderError) {
       return inferenceProviderErrorResponse(error);
@@ -55,12 +58,13 @@ export const POST = withDonkeyAuth(async (request) => {
   }
 
   const credits = await requireInferenceCredits({
-    model: parsed.data.model,
+    model,
     provider: provider.id,
     route: inferenceUsageRoutes.assets,
     userId: request.donkey.userId,
-    // Asset generation bills the requested model, so reject an unpriced one before the provider
-    // runs and bills upstream — never produce a generation we can't charge for.
+    // The billed model is known here, so the preflight holds the generation to it: an unpriced
+    // model never runs and bills upstream, and a flat-priced one never starts on a balance that
+    // can't cover it.
     enforceModelPrice: true,
   });
   if (!credits.ok) {
@@ -98,7 +102,7 @@ export const POST = withDonkeyAuth(async (request) => {
         metadata: {
           assetKind: parsed.data.kind,
         },
-        model: parsed.data.model ?? "default",
+        model: model ?? "default",
         provider: failedUsageProvider,
         requestKind: "asset_generation",
         route: inferenceUsageRoutes.assets,
@@ -172,7 +176,7 @@ export const POST = withDonkeyAuth(async (request) => {
       metadata: {
         assetKind: parsed.data.kind,
       },
-      model: parsed.data.model ?? "default",
+      model: model ?? "default",
       provider: failedUsageProvider,
       requestKind: "asset_generation",
       route: inferenceUsageRoutes.assets,

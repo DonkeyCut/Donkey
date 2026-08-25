@@ -233,6 +233,8 @@ export function createGeminiMusicAssetProvider(
     capabilities: ["music"],
     configured,
     listModels,
+    assetModelFor: (request) =>
+      resolveModel(request.model, toJsonObject(request.parameters ?? {})),
     generateAsset,
     refreshAsset,
   };

@@ -62,6 +62,19 @@ export function createGeminiImageAssetProvider(
     ];
   }
 
+  function resolveModel(requested?: string): string {
+    const model = requested?.trim() || defaultModel;
+    // Fail before spending: a caller-supplied model may resolve to an id with no configured price.
+    // The preflight catches that, but guard here too — never run a generation we can't price.
+    if (!providerCreditPricing(providerID, model)) {
+      throw new InferenceProviderError(
+        "No credit price is configured for the selected image model.",
+        { statusCode: 500, code: "image_model_not_priced", details: { model } },
+      );
+    }
+    return model;
+  }
+
   async function generateAsset({
     generationId,
     request,
@@ -75,15 +88,7 @@ export function createGeminiImageAssetProvider(
       });
     }
 
-    const model = request.model?.trim() || defaultModel;
-    // Fail before spending: a caller-supplied model may resolve to an id with no configured price.
-    // The preflight catches that, but guard here too — never run a generation we can't price.
-    if (!providerCreditPricing(providerID, model)) {
-      throw new InferenceProviderError(
-        "No credit price is configured for the selected image model.",
-        { statusCode: 500, code: "image_model_not_priced", details: { model } },
-      );
-    }
+    const model = resolveModel(request.model);
     const parts: JsonObject[] = [];
     const prompt = request.prompt?.trim();
     if (prompt) {
@@ -155,6 +160,7 @@ export function createGeminiImageAssetProvider(
     configured,
     capabilities: ["image"],
     listModels,
+    assetModelFor: (request) => resolveModel(request.model),
     generateAsset,
     refreshAsset,
   };

@@ -94,7 +94,13 @@ export type RecordedInferenceUsage = {
 };
 
 export class InsufficientCreditsError extends Error {
-  public constructor(public readonly balanceMicros: bigint) {
+  public constructor(
+    public readonly balanceMicros: bigint,
+    // The flat price the blocked generation would have charged. Set only when
+    // the balance was positive and short of it, so a caller can tell "empty"
+    // from "not enough for this one" and say which.
+    public readonly requiredMicros?: bigint,
+  ) {
     super("Insufficient credits");
     this.name = "InsufficientCreditsError";
   }
@@ -267,33 +273,39 @@ export async function assertCanUseInference(input: CreditPreflightInput) {
     },
   });
 
-  // Any positive balance clears the preflight, so a charge can overshoot what
-  // the account holds and the overshoot is written off (forgiveOverdraft).
-  // Sequentially that exposure is bounded by one charge: the write-off lands in
-  // the charge's own transaction, and the next preflight sees zero. The open
-  // window is concurrency — the scene-run pool submits up to 6 clips at once,
-  // and every submit can read the same small balance before the first flat
-  // charge (~$1.33/clip) lands, so one depleted account can cost up to ~6
-  // clips in write-offs. Accepted for now; the "writeoff" ledger rows total the
-  // real leakage. Closing it means holding a flat-priced charge at preflight
-  // (balance >= generationCostMicros), which would fail a run's last clip
-  // up front instead of letting it finish — a product call.
   if (account.balanceMicros <= zeroCreditMicros) {
     throw new InsufficientCreditsError(account.balanceMicros);
   }
 
   await assertWithinConfiguredLimits(input);
-  await assertModelIsPriceable(input);
+  // A flat-priced generation is held to its own price below, so a $1.33 clip
+  // can no longer start on $0.30. A token-metered call still clears on any
+  // positive balance — its cost isn't knowable until the model has run — and
+  // whatever it overshoots is written off (forgiveOverdraft). Concurrency
+  // stays open in both: the scene-run pool submits up to 6 clips at once and
+  // every submit reads the balance before the first charge lands, so a nearly
+  // empty account can still overshoot by the rest of the pool. The "writeoff"
+  // ledger rows total what that actually costs.
+  await assertModelIsAffordable(input, account.balanceMicros);
 
   return account;
 }
 
-// When the model that will be billed is already known at preflight, confirm it has a configured
-// price before the provider runs. This turns an unpriced model into a clean, pre-generation
-// failure instead of an upstream-billed generation that throws while recording usage. The billed
-// model isn't always known up front (some adapters resolve a default from an omitted model); those
-// cases still fail loudly post-generation via resolveCreditRate — never via a guessed fallback.
-async function assertModelIsPriceable(input: CreditPreflightInput) {
+// When the model that will be billed is already known at preflight, settle two things before the
+// provider runs: the model has a configured price, and the balance covers it.
+//
+// The price check turns an unpriced model into a clean, pre-generation failure instead of an
+// upstream-billed generation that throws while recording usage. The billed model isn't always
+// known up front (some adapters resolve a default from an omitted model); those cases still fail
+// loudly post-generation via resolveCreditRate — never via a guessed fallback.
+//
+// The balance check applies to models that bill a flat amount per generation (video, image,
+// music): the charge is the same whatever the model does, so it is knowable here. Without it a
+// $1.33 clip started on a $0.30 balance, ran, billed in full, and left $1.03 to write off.
+async function assertModelIsAffordable(
+  input: CreditPreflightInput,
+  balanceMicros: bigint,
+) {
   if (!input.enforceModelPrice) {
     return;
   }
@@ -304,8 +316,18 @@ async function assertModelIsPriceable(input: CreditPreflightInput) {
   }
 
   // Throws CreditRateNotConfiguredError when no code or DB price exists (and the route isn't
-  // flat-priced); the returned rate is discarded — recordInferenceUsage resolves it again in-tx.
-  await resolveCreditRate(prisma, input.route, provider, model);
+  // flat-priced); recordInferenceUsage resolves the rate again in-tx to do the charging.
+  const rate = await resolveCreditRate(prisma, input.route, provider, model);
+  // A DB rate override replaces the code pricing wholesale and carries no flat per-generation
+  // price, so an overridden model falls back to the positive-balance gate above.
+  const generationCostMicros =
+    rate.providerPricing?.generationCostMicros ?? zeroCreditMicros;
+  if (
+    generationCostMicros > zeroCreditMicros &&
+    balanceMicros < generationCostMicros
+  ) {
+    throw new InsufficientCreditsError(balanceMicros, generationCostMicros);
+  }
 }
 
 export async function requireInferenceCredits(input: CreditPreflightInput) {
@@ -649,11 +671,21 @@ export function creditUsageHeaders(recorded: RecordedInferenceUsage) {
 
 export function creditErrorResponse(error: unknown) {
   if (error instanceof InsufficientCreditsError) {
+    // One message, two codes. An empty balance stops everything hosted; a
+    // balance that is merely short of one flat-priced generation stops that
+    // generation while chat and the other metered calls keep working, so it
+    // carries its own code and the price it couldn't cover.
     return NextResponse.json(
       {
-        error: "insufficient_credits",
-        message: "You do not have enough credits to run hosted inference.",
+        error:
+          error.requiredMicros === undefined
+            ? "insufficient_credits"
+            : "insufficient_credits_for_generation",
+        message: "Insufficient credits",
         balance: creditMicrosToString(error.balanceMicros),
+        ...(error.requiredMicros === undefined
+          ? {}
+          : { required: creditMicrosToString(error.requiredMicros) }),
       },
       {
         status: 402,
