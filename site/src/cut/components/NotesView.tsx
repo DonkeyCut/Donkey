@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { FolderPlus, Loader2, Plus, StickyNote } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +26,68 @@ const NOTE_INK = "#201a0d";
 // home carry: a JSON array of ids under this page's own MIME type.
 const NOTES_MOVE_MIME = "application/x-donkey-notes";
 
+/** Write a note out. The list shows it the moment it is written, and the
+ * server's answer — this write, or a newer one from the phone — replaces it.
+ * False means the write was lost and the list has to be read again. A note
+ * with nothing in it, or one that comes back untouched, is left alone, so
+ * opening a note to read it keeps the list in the order it had.
+ *
+ * `settleFolder` waits on a folder's own write, so the server knows the folder
+ * by the time a note names it. */
+async function writeNote(
+  client: QueryClient,
+  d: NoteDraft,
+  settleFolder: (folderId: string | null) => Promise<void>,
+): Promise<boolean> {
+  const { id, title, body, colorIndex, folderId } = d;
+  if (!title.trim() && !body.trim()) return true;
+  if (!noteChanged(d)) return true;
+  const now = Date.now();
+  const optimistic: CutNote = {
+    id,
+    title: title.trim() || "Untitled",
+    body: body.trim(),
+    colorIndex,
+    folderId,
+    updatedAt: now,
+    deletedAt: null,
+    createdAt: now,
+  };
+  patchNotes(client, (prev) => {
+    const rest = prev.notes.filter((n) => n.id !== id);
+    const existing = prev.notes.find((n) => n.id === id);
+    return {
+      ...prev,
+      notes: [{ ...optimistic, createdAt: existing?.createdAt ?? now }, ...rest],
+    };
+  });
+  await settleFolder(folderId);
+  const saved = await saveNote({
+    id,
+    title: optimistic.title,
+    body: optimistic.body,
+    colorIndex,
+    folderId,
+  }).catch(() => null);
+  if (!saved) return false;
+  patchNotes(client, (prev) => ({
+    ...prev,
+    notes: prev.notes.map((n) => (n.id === id ? saved : n)),
+  }));
+  return true;
+}
+
+/** A stored note, opened for editing. */
+const draftOf = (n: CutNote): NoteDraft => ({
+  id: n.id,
+  title: n.title,
+  body: n.body,
+  colorIndex: n.colorIndex,
+  folderId: n.folderId ?? null,
+  isNew: false,
+  saved: { title: n.title, body: n.body, colorIndex: n.colorIndex },
+});
+
 /** Synced notes: written on the phone or here, merged by last writer wins.
  * The phone reads these into its teleprompter, so a script drafted at the
  * desk is on the camera by the time the phone is in hand. Notes file into
@@ -34,31 +96,64 @@ export function NotesView() {
   const client = useQueryClient();
   const base = useCutBase();
   const notes = useNotes();
-  const [draft, setDraft] = useState<NoteDraft | null>(null);
+  // The edits made to the note on screen, good only while the URL still names
+  // that note. The ref carries the same value where a browser event can reach
+  // it, so a back out of a note writes what was typed.
+  const [editing, setEditing] = useState<NoteDraft | null>(null);
+  const buffer = useRef<NoteDraft | null>(null);
+  const edit = (d: NoteDraft) => {
+    buffer.current = d;
+    setEditing(d);
+  };
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [folderCreating, setFolderCreating] = useState(false);
 
   const list = notes.data?.notes ?? [];
   const folders = notes.data?.folders ?? [];
-  // The open folder lives in the URL (?folder=…) so the browser's back button
-  // steps folder → root and the location survives reloads.
-  const openFolder = useSearchParams().get("folder");
+  // The open folder and the open note both live in the URL (?folder=…&note=…),
+  // so the browser's back button — the mouse's too — steps out of the note and
+  // then out of the folder, and the location survives a reload.
+  const params = useSearchParams();
+  const openFolder = params.get("folder");
+  const openNoteId = params.get("note");
   const openFolderName = folders.find((f) => f.id === openFolder)?.name;
   const shown = list.filter((n) => (n.folderId ?? null) === openFolder);
+  // What the composer shows: the buffer while it belongs to the note the URL
+  // names, and the stored note otherwise. A note nobody has typed into has no
+  // buffer, and one still being written has no stored note.
+  const stored = openNoteId ? list.find((n) => n.id === openNoteId) : undefined;
+  const draft =
+    editing && editing.id === openNoteId ? editing : stored ? draftOf(stored) : null;
 
   const reload = () => void client.invalidateQueries({ queryKey: notesKey });
-  // Opening a folder and stepping back out only change this page's query, so
-  // they go through the history API. This page is prefetched as a static
-  // shell, and a router push at the URL it is already on has nothing to fetch
-  // and stops there — the crumb out of a folder did nothing at all. A
-  // pushState reaches the router the same way and `useSearchParams` picks it
-  // up, so the back button still steps folder → root.
+  const notesHref = (folder: string | null, note?: string | null) => {
+    const q = new URLSearchParams();
+    if (folder) q.set("folder", folder);
+    if (note) q.set("note", note);
+    const query = q.toString();
+    return query ? `${homeHref(base, "notes")}?${query}` : homeHref(base, "notes");
+  };
+  // Opening a folder or a note only changes this page's query, so it goes
+  // through the history API. This page is prefetched as a static shell, and a
+  // router push at the URL it is already on has nothing to fetch and stops
+  // there — the crumb out of a folder did nothing at all. A pushState reaches
+  // the router the same way and `useSearchParams` picks it up, so the back
+  // button walks the trail.
   const gotoFolder = (id: string | null) =>
-    window.history.pushState(null, "", homeHref(base, "notes", id));
+    window.history.pushState(null, "", notesHref(id));
 
-  const openNew = () =>
-    setDraft({
-      id: crypto.randomUUID(),
+  /** Whether the open note's history entry is ours to take back off the stack.
+   * A note arrived at by a link or the forward button already had one. */
+  const pushedNote = useRef(false);
+  const openAt = (id: string) => {
+    window.history.pushState(null, "", notesHref(openFolder, id));
+    pushedNote.current = true;
+  };
+
+  const openNew = () => {
+    const id = crypto.randomUUID();
+    edit({
+      id,
       title: "",
       body: "",
       colorIndex: 0,
@@ -67,16 +162,9 @@ export function NotesView() {
       isNew: true,
       saved: { title: "", body: "", colorIndex: 0 },
     });
-  const openNote = (n: CutNote) =>
-    setDraft({
-      id: n.id,
-      title: n.title,
-      body: n.body,
-      colorIndex: n.colorIndex,
-      folderId: n.folderId ?? null,
-      isNew: false,
-      saved: { title: n.title, body: n.body, colorIndex: n.colorIndex },
-    });
+    openAt(id);
+  };
+  const openNote = (n: CutNote) => openAt(n.id);
 
   // A folder tile is on screen the moment it is made, so a note can be filed
   // into it while its own write is still in flight. The write is held here
@@ -87,61 +175,41 @@ export function NotesView() {
     if (folderId) await folderWrites.current.get(folderId);
   };
 
-  /** Save the draft and close the composer. A note that was only read closes
-   * untouched, so the list keeps the order it had. */
-  const commit = async (d: NoteDraft | null = draft) => {
-    if (!d) return;
-    const { id, title, body, colorIndex, folderId } = d;
-    setDraft(null);
-    if (!title.trim() && !body.trim()) return;
-    if (!noteChanged(d)) return;
-    const now = Date.now();
-    const optimistic: CutNote = {
-      id,
-      title: title.trim() || "Untitled",
-      body: body.trim(),
-      colorIndex,
-      folderId,
-      updatedAt: now,
-      deletedAt: null,
-      createdAt: now,
-    };
-    patchNotes(client, (prev) => {
-      const rest = prev.notes.filter((n) => n.id !== id);
-      const existing = prev.notes.find((n) => n.id === id);
-      return {
-        ...prev,
-        notes: [{ ...optimistic, createdAt: existing?.createdAt ?? now }, ...rest],
-      };
+  /** Write a note out and let go of it. */
+  const commit = (d: NoteDraft) => {
+    setEditing(null);
+    void writeNote(client, d, settleFolder).then((ok) => {
+      if (!ok) reload();
     });
-    await settleFolder(folderId);
-    const saved = await saveNote({
-      id,
-      title: optimistic.title,
-      body: optimistic.body,
-      colorIndex,
-      folderId,
-    }).catch(() => null);
-    // The server answers with the winning version — this write, or a newer
-    // one from the phone.
-    if (saved)
-      patchNotes(client, (prev) => ({
-        ...prev,
-        notes: prev.notes.map((n) => (n.id === id ? saved : n)),
-      }));
-    else reload();
   };
 
-  const remove = async () => {
-    if (!draft) return;
-    const { id, isNew } = draft;
-    setDraft(null);
-    if (isNew) return;
+  /** Take the note's entry back off the history stack. */
+  const popNote = () => {
+    if (pushedNote.current) {
+      pushedNote.current = false;
+      window.history.back();
+    } else if (openNoteId) {
+      window.history.replaceState(null, "", notesHref(openFolder));
+    }
+  };
+  /** Write whatever the composer holds and let go of it. */
+  const letGo = () => {
+    const d = buffer.current;
+    buffer.current = null;
+    setEditing(null);
+    if (d) commit(d);
+  };
+  const remove = () => {
+    const d = draft;
+    buffer.current = null;
+    setEditing(null);
+    popNote();
+    if (!d || d.isNew) return;
     patchNotes(client, (prev) => ({
       ...prev,
-      notes: prev.notes.filter((n) => n.id !== id),
+      notes: prev.notes.filter((n) => n.id !== d.id),
     }));
-    await deleteNote(id).catch(() => reload());
+    void deleteNote(d.id).catch(() => reload());
   };
 
   /** File a set of notes into a folder (or back to the top level). Each note
@@ -180,13 +248,42 @@ export function NotesView() {
     }));
   };
 
-  // Leaving the page (the sidebar, the back button) closes the composer the
-  // same way its own Done does, so an open draft is never dropped.
+  // The same write, reachable from the listeners below, which outlive any one
+  // render.
   const closing = useRef<() => void>(() => {});
   useEffect(() => {
-    closing.current = () => void commit(draft);
+    closing.current = letGo;
   });
+  /** Done, Escape, or the back arrow. */
+  const closeNote = () => {
+    letGo();
+    popNote();
+  };
+
+  // Leaving the page (the sidebar, another tab) writes the open note the same
+  // way its own Done does, so a draft is never dropped.
   useEffect(() => () => closing.current(), []);
+
+  // Back and forward are how a note closes, so the browser's own event is what
+  // writes it: a history move that leaves the note behind saves the buffer and
+  // lets go of it before the list comes back.
+  useEffect(() => {
+    const onPop = () => {
+      pushedNote.current = false;
+      const open = new URLSearchParams(window.location.search).get("note");
+      if (buffer.current && buffer.current.id !== open) closing.current();
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  // A note the URL names and nothing answers for — deleted from another
+  // device, or a reload of one never written — leaves the list behind.
+  const stale = !!openNoteId && !draft && !!notes.data;
+  const listHref = notesHref(openFolder);
+  useEffect(() => {
+    if (stale) window.history.replaceState(null, "", listHref);
+  }, [stale, listHref]);
 
   // Carry the selection (or just this card) as a folder-move payload, with a
   // ghost for a multi-note drag.
@@ -220,9 +317,9 @@ export function NotesView() {
           draft={draft}
           back={draftFolderName ?? "All notes"}
           from={pageRef}
-          onChange={setDraft}
-          onClose={() => void commit()}
-          onDelete={() => void remove()}
+          onChange={edit}
+          onClose={closeNote}
+          onDelete={remove}
         />
       )}
       <div className="mb-5 flex items-center justify-between gap-4">
