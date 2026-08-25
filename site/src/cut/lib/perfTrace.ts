@@ -353,6 +353,36 @@ export interface PerfSample {
    * second is a picture running that far ahead of its own audio. */
   audioLeadS: number;
   audioLatencyS: number;
+  /**
+   * Walks the preview started while playing, and the worst one's cost.
+   *
+   * A walk is a decoder reading forward from a keyframe, and holding on to one
+   * is what makes playback cheap. A window that started dozens of them is a
+   * reader that could not hold on to any — the picture then sits on whatever
+   * frame it last had while the sound runs on, which is the shape every report
+   * of choppy playback has turned out to be.
+   */
+  walks: number;
+  walkMs: number;
+  /**
+   * The worst and the average wait for one frame off a walk, in milliseconds.
+   *
+   * This is the number that says which kind of starvation it was. A decoder
+   * that is merely slow answers every pull in tens of milliseconds and falls
+   * behind gradually; a reader whose bytes have not arrived waits seconds on
+   * one pull and nothing at all on the next. From the outside the two look
+   * identical, and the fix for them is not the same.
+   */
+  pullMaxMs: number;
+  pullMeanMs: number;
+  /** The file behind the picture: what it really is, which `decodeHeight` —
+   * the height the preview asked for — cannot say. A frame rate above thirty
+   * halves what a fixed lookahead buys, and a size far above the stage says
+   * the decode is paying for pixels nothing shows. */
+  srcW: number;
+  srcH: number;
+  srcFps: number;
+  srcCodec: string;
   /** What the preview was holding open at its peak. */
   sources: number;
   heldFrames: number;
@@ -392,6 +422,15 @@ interface Meter {
   hitches: number;
   lagSum: number;
   lagMax: number;
+  walks: number;
+  walkMs: number;
+  pullMax: number;
+  pullSum: number;
+  pulls: number;
+  srcW: number;
+  srcH: number;
+  srcFps: number;
+  srcCodec: string;
   audioLead: number;
   audioLatency: number;
   sources: number;
@@ -419,6 +458,15 @@ const emptyMeter = (): Meter => ({
   hitches: 0,
   lagSum: 0,
   lagMax: 0,
+  walks: 0,
+  walkMs: 0,
+  pullMax: 0,
+  pullSum: 0,
+  pulls: 0,
+  srcW: 0,
+  srcH: 0,
+  srcFps: 0,
+  srcCodec: "",
   audioLead: 0,
   audioLatency: 0,
   sources: 0,
@@ -501,6 +549,39 @@ export function meterState(state: {
   meter.canvasHeight = state.canvasHeight;
 }
 
+/** A walk was anchored, and — once it lands — what reaching its first frame
+ * cost. Counted only while playing, since a scrub anchors walks by design. */
+export function meterWalk(costMs?: number): void {
+  if (!meter) return;
+  if (costMs === undefined) meter.walks++;
+  else meter.walkMs = Math.max(meter.walkMs, Math.round(costMs));
+}
+
+/** How long one pull waited for its frame. */
+export function meterPull(ms: number): void {
+  if (!meter) return;
+  meter.pulls++;
+  meter.pullSum += ms;
+  meter.pullMax = Math.max(meter.pullMax, ms);
+}
+
+/** The shape of the file a landed frame came from. */
+export function meterSource(
+  width: number,
+  height: number,
+  fps: number,
+  codec: string
+): void {
+  if (!meter || !(fps > 0)) return;
+  meter.srcW = Math.max(meter.srcW, Math.round(width));
+  meter.srcH = Math.max(meter.srcH, Math.round(height));
+  meter.srcFps = Math.max(meter.srcFps, Math.round(fps));
+  // A machine that decodes H.264 in hardware and refuses AV1 runs the same
+  // preview two entirely different ways, and the size and rate of the file
+  // cannot tell those apart. This is the field that does.
+  if (codec) meter.srcCodec = codec;
+}
+
 /** What the preview's clock is doing about the output device. */
 export function meterAudioClock(lead: number, reported: number): void {
   if (!meter) return;
@@ -535,6 +616,14 @@ export function flushMeter(): void {
     lagMaxS: round(m.lagMax),
     audioLeadS: round(m.audioLead),
     audioLatencyS: round(m.audioLatency),
+    walks: m.walks,
+    walkMs: m.walkMs,
+    pullMaxMs: Math.round(m.pullMax),
+    pullMeanMs: m.pulls ? Math.round(m.pullSum / m.pulls) : 0,
+    srcW: m.srcW,
+    srcH: m.srcH,
+    srcFps: m.srcFps,
+    srcCodec: m.srcCodec,
     sources: m.sources,
     heldFrames: m.held,
     warmMb: m.warmMb,

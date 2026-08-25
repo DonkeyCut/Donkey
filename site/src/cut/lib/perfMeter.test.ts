@@ -4,7 +4,10 @@ import {
   meterAudioClock,
   meterFrame,
   meterPerf,
+  meterPull,
+  meterSource,
   meterState,
+  meterWalk,
   metering,
   stopMeter,
   type PerfSample,
@@ -27,6 +30,14 @@ describe("preview diagnostics meter", () => {
       canvasHeight: 900,
     });
     meterAudioClock(0.16, 0.16);
+    // Two walks anchored, the worse of them 900ms to its first frame, and a
+    // pull that waited four seconds — the shape of a reader short of bytes.
+    meterWalk();
+    meterWalk();
+    meterWalk(900);
+    meterPull(20);
+    meterPull(4000);
+    meterSource(1920, 1080, 60, "av01");
     flushMeter();
 
     expect(out).toHaveLength(1);
@@ -42,6 +53,14 @@ describe("preview diagnostics meter", () => {
     expect(s.warmMb).toBe(354);
     expect(s.clips).toBe(20);
     expect(s.decodeHeight).toBe(540);
+    expect(s.walks).toBe(2);
+    expect(s.walkMs).toBe(900);
+    expect(s.pullMaxMs).toBe(4000);
+    expect(s.pullMeanMs).toBe(2010);
+    expect(s.srcW).toBe(1920);
+    expect(s.srcH).toBe(1080);
+    expect(s.srcFps).toBe(60);
+    expect(s.srcCodec).toBe("av01");
     stopMeter();
     expect(metering()).toBe(false);
   });
