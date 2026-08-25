@@ -127,8 +127,14 @@ export function SharedProjectView() {
   // Dynamic viewport units, not h-screen: on a phone the browser's own chrome
   // slides in and out, and 100vh measures the tallest state — so the bottom of
   // a fixed-height page sits under the toolbar for most of a visit.
+  //
+  // `app-surface` is what repoints --background to the product white for the
+  // whole document (see globals.css). A share mounts the editor, so it needs
+  // the same surface the app runs on: without it every bg-background control
+  // inside — the preview's zoom pill, the panel chrome — resolves against the
+  // cream landing token and the viewer sees a beige editor on a white page.
   return (
-    <div className="h-[100dvh] bg-white font-system text-foreground antialiased">
+    <div className="app-surface h-[100dvh] bg-white font-system text-foreground antialiased">
       <Suspense>
         <SharedProject />
       </Suspense>

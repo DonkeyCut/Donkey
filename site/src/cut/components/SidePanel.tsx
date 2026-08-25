@@ -168,8 +168,14 @@ export function SidePanel({
   const [tabPref, setTab] = useLocalPref<Tab | null>("cut-side-tab", "media", (v) =>
     v === null || TABS.some((t) => t.id === v)
   );
-  // The remembered tab may be hidden in this share; fall back to collapsed.
-  const tab = tabPref !== null && !visibleTabs.some((t) => t.id === tabPref) ? null : tabPref;
+  // The remembered tab may be hidden in this share — the viewer's own last tab
+  // in their own editor, which this share never offered. A share opens on what
+  // it does offer, so a link shared for its subtitles lands on the transcript
+  // with the rail open.
+  const tab =
+    tabPref !== null && !visibleTabs.some((t) => t.id === tabPref)
+      ? (visibleTabs[0]?.id ?? null)
+      : tabPref;
   // The Audio tab's Voice/Music sub-tab lives here so the Music sub-tab can lay
   // out as two columns — the generator plus the sample library — like Image/Video.
   const [audioSub, setAudioSub] = useLocalPref<"voice" | "music">(
