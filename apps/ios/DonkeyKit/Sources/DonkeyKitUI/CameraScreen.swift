@@ -32,16 +32,13 @@ struct CameraScreen<CameraPreview: View>: View {
     /// The well's rectangle in stage coordinates — the flight's landing spot.
     @State private var wellFrame: CGRect = .zero
     /// True while a tap is holding the chrome on a stage that would otherwise
-    /// be clear.
+    /// be clear. It stays until the next tap: a hand working the controls is
+    /// never raced by a clock.
     @State private var showsChrome = false
-    /// The wait that takes the chrome back down.
-    @State private var chromeHider: Task<Void, Never>?
 
     private static var stageSpace: String { "cameraStage" }
     private static var wellSide: CGFloat { 54 }
     private static var wellLifetime: Duration { .seconds(30) }
-    /// How long a tap keeps the chrome up.
-    private static var chromeLifetime: Duration { .seconds(5) }
 
     /// Whether the screen belongs to the picture alone.
     ///
@@ -63,7 +60,7 @@ struct CameraScreen<CameraPreview: View>: View {
             // script runs on a loop so the speed and size a person just set
             // are something they can watch before the take.
             if camera.teleprompter.hasScript, camera.teleprompter.isRunning {
-                TeleprompterOverlay(camera: camera)
+                TeleprompterOverlay(camera: camera, onTap: toggleChrome)
             }
             controls
             if isFlying, let poster = corner?.poster, wellFrame != .zero {
@@ -76,10 +73,10 @@ struct CameraScreen<CameraPreview: View>: View {
         // The tabs are chrome too: a run gets the whole screen, and they come
         // back with everything else.
         .toolbar(chromeShown ? .visible : .hidden, for: .tabBar)
-        // Alongside whatever was touched, so working the rail keeps the chrome
-        // up as surely as tapping the picture brings it back.
+        // A tap on the picture works the chrome. The words take their own taps
+        // and hand them here; a control takes its own and keeps the chrome up.
         .contentShape(Rectangle())
-        .simultaneousGesture(TapGesture().onEnded { revealChrome() })
+        .onTapGesture { toggleChrome() }
         .background(.black, ignoresSafeAreaEdges: .all)
         // The stage is live video: the chrome is dark whatever the app-wide
         // appearance says. Setting the environment (not a color-scheme
@@ -88,11 +85,7 @@ struct CameraScreen<CameraPreview: View>: View {
         .onChange(of: media.recordings.first?.id) { _, _ in dockLatestTake() }
         // A run begins on a clear stage, and the controls are back the moment
         // it ends.
-        .onChange(of: stageIsClear) { _, _ in
-            chromeHider?.cancel()
-            chromeHider = nil
-            showsChrome = false
-        }
+        .onChange(of: stageIsClear) { _, _ in showsChrome = false }
         // The docked clip keeps itself to one appearance: watching it or
         // waiting out the timer both retire it.
         .task(id: corner?.id) {
@@ -180,27 +173,12 @@ struct CameraScreen<CameraPreview: View>: View {
         .animation(.spring(duration: 0.3), value: chromeShown)
     }
 
-    /// A tap on a clear stage brings the controls back for a few seconds:
-    /// enough to stop the take, light the room, or turn the camera round.
-    /// Every tap re-arms the wait, so a hand working the rail keeps it up.
-    private func revealChrome() {
+    /// A tap on a clear stage works the controls: one brings them back —
+    /// enough to stop the take, light the room, or turn the camera round —
+    /// and the next puts them away, on the tap and not a moment later.
+    private func toggleChrome() {
         guard stageIsClear else { return }
-        showsChrome = true
-        armChromeHider()
-    }
-
-    private func armChromeHider() {
-        chromeHider?.cancel()
-        chromeHider = Task { @MainActor in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: Self.chromeLifetime)
-                if Task.isCancelled { return }
-                // A picker standing open is somebody mid-decision.
-                if showsZoomPicker || showsQualityPopover { continue }
-                showsChrome = false
-                return
-            }
-        }
+        showsChrome.toggle()
     }
 
     /// Where the take lands. The slot holds its place whether or not a clip
@@ -574,6 +552,9 @@ struct TeleprompterSettingsView: View {
 
 struct TeleprompterOverlay: View {
     var camera: CameraModel
+    /// What a tap on the words does. The script covers most of the screen, so
+    /// it answers for the picture underneath it.
+    var onTap: () -> Void
 
     /// Rendered height of the paced script, measured off the Text itself so
     /// the scroll rate can pace the exact copy on screen.
@@ -665,6 +646,7 @@ struct TeleprompterOverlay: View {
             // moves the script. The rail and the record button sit above this
             // in the stack, so they still take their own touches.
             .contentShape(Rectangle())
+            .onTapGesture { onTap() }
             .gesture(
                 DragGesture(minimumDistance: 6)
                     .updating($dragging) { value, state, _ in state = value.translation.height }
