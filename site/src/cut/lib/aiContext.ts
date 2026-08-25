@@ -5,6 +5,7 @@ import { chatOwner } from "./chatAssets";
 import { useGenerate } from "./generate";
 import { getClipSpans, overlayLayers, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt, skimAt } from "./playhead";
+import { cueWordCount } from "./cueChunk";
 import { laneCues, subtitleLaneCount } from "./subtitles";
 import { watchSweepActive } from "./watch/sweep";
 import { libraryFontId, listLibraryFonts } from "./linkedLibrary";
@@ -380,6 +381,9 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
         cues: laneCues(s.subtitles, i).length,
         ...(s.subtitles.tracks?.[i]?.hidden ? { hidden: true } : {}),
       })),
+      // How the captions READ: how many words one holds at a time. Changing it
+      // re-cuts every track (set_caption_look words_per_cue).
+      wordsPerCue: cueWordCount(s.subtitles),
       status: s.subtitleStatus,
       // A window of cues by default; when truncated the model calls get_state
       // for the whole transcript (e.g. "clean up all the captions").

@@ -18,6 +18,12 @@ import {
   subtitleLaneCount,
   trackLocale,
 } from "@/cut/lib/subtitles";
+import {
+  cueWordCount,
+  MAX_WORDS_PER_CUE,
+  MIN_WORDS_PER_CUE,
+  DEFAULT_WORDS_PER_CUE,
+} from "@/cut/lib/cueChunk";
 import { useElapsed } from "@/cut/hooks/useElapsed";
 import { useCutCaps } from "@/cut/lib/backend/hooks";
 import { useActiveWork, useGenNotify } from "@/cut/lib/genNotify";
@@ -268,6 +274,7 @@ function OptionsTab() {
           />
         </div>
       </div>
+      <WordsPerCueRow />
       <div className="flex min-h-8 items-center justify-between text-xs font-medium">
         Word effect
         <PillSelect
@@ -366,6 +373,49 @@ function OptionsTab() {
         Drag the caption on the video to reposition every subtitle.
       </p>
     </ScrollArea>
+  );
+}
+
+/** How many words a caption holds at a time. Committing re-cuts every track
+ * on its own words and measures the new captions against the cut's mix, which
+ * takes a moment on a long project — the slider shows the drag, the track is
+ * re-cut once on release. */
+function WordsPerCueRow() {
+  const subtitles = useEditor((s) => s.subtitles);
+  const [draft, setDraft] = useState<number | null>(null);
+  const [working, setWorking] = useState(false);
+  const value = draft ?? cueWordCount(subtitles);
+  return (
+    <div className="flex min-h-8 items-center justify-between text-xs font-medium">
+      Words at a time
+      <div className="sub-words-per-cue flex items-center gap-2">
+        {working && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
+        <ValueSlider
+          label="Words at a time"
+          sliderClassName="data-horizontal:w-24"
+          valueClassName="w-7 text-muted-foreground"
+          value={value}
+          min={MIN_WORDS_PER_CUE}
+          max={MAX_WORDS_PER_CUE}
+          step={1}
+          snap={[DEFAULT_WORDS_PER_CUE]}
+          format={(v) => String(Math.round(v))}
+          parse={parseNumberInput}
+          onDraft={(v) => setDraft(Math.round(v))}
+          onCommit={(v) => {
+            setDraft(Math.round(v));
+            setWorking(true);
+            void useEditor
+              .getState()
+              .setSubtitleWordsPerCue(v)
+              .finally(() => {
+                setWorking(false);
+                setDraft(null);
+              });
+          }}
+        />
+      </div>
+    </div>
   );
 }
 

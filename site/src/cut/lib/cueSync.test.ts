@@ -102,6 +102,82 @@ describe("syncToSpeech", () => {
   });
 });
 
+describe("words at a time", () => {
+  /** Six measured words a quarter-second apart, filling one speech span. */
+  const spoken = (id: string, from: number): SubtitleCue => {
+    const words = Array.from({ length: 6 }, (_, i) => ({
+      w: `w${id}${i}`,
+      t0: from + i * 0.25,
+      t1: from + i * 0.25 + 0.25,
+    }));
+    return {
+      id,
+      start: from,
+      end: from + 1.5,
+      text: words.map((w) => w.w).join(" "),
+      words,
+    };
+  };
+
+  const track = () => [spoken("a", 1), spoken("b", 4), spoken("c", 8)];
+
+  const openProject = (cues: SubtitleCue[]) =>
+    useEditor.setState({
+      projectId: "p1",
+      aspect: "9:16",
+      assets: [],
+      clips: [],
+      audioClips: [],
+      overlays: [],
+      subtitles: { ...emptySubtitles(), cues },
+      cutMixSamples: async () => ({ samples: audio(), sampleRate: RATE }),
+    });
+
+  test("re-cuts every track and keeps the wording word for word", async () => {
+    openProject(track());
+    const said = useEditor
+      .getState()
+      .subtitles.cues.flatMap((c) => c.text.split(" "));
+    await useEditor.getState().setSubtitleWordsPerCue(3);
+    const cues = useEditor.getState().subtitles.cues;
+    expect(cues).toHaveLength(6);
+    expect(cues.flatMap((c) => c.text.split(" "))).toEqual(said);
+    expect(useEditor.getState().subtitles.wordsPerCue).toBe(3);
+  });
+
+  test("the new captions land on the speech, and never on each other", async () => {
+    openProject(track());
+    await useEditor.getState().setSubtitleWordsPerCue(2);
+    const cues = useEditor.getState().subtitles.cues;
+    expect(cues[0].start).toBeCloseTo(1, 1);
+    expect(cues[cues.length - 1].end).toBeCloseTo(9.5, 1);
+    for (let i = 0; i + 1 < cues.length; i++) {
+      expect(cues[i].end).toBeLessThanOrEqual(cues[i + 1].start + 1e-6);
+      // Each caption still sits inside a run of speech in the mix.
+      expect(SPEECH.some(([f, t]) => cues[i].start >= f - 0.2 && cues[i].end <= t + 0.2)).toBe(true);
+    }
+  });
+
+  test("the re-cut and its alignment undo together", async () => {
+    openProject(track());
+    await useEditor.getState().setSubtitleWordsPerCue(3);
+    expect(useEditor.getState().subtitles.cues).toHaveLength(6);
+    useEditor.getState().undo();
+    const cues = useEditor.getState().subtitles.cues;
+    expect(cues).toHaveLength(3);
+    expect(cues.map((c) => c.id)).toEqual(["a", "b", "c"]);
+  });
+
+  test("a mix with nothing to read still re-cuts the captions", async () => {
+    openProject(track());
+    useEditor.setState({ cutMixSamples: async () => null });
+    await useEditor.getState().setSubtitleWordsPerCue(3);
+    // The cut is made on the words the transcriber measured; only the
+    // measurement against the mix is skipped.
+    expect(useEditor.getState().subtitles.cues).toHaveLength(6);
+  });
+});
+
 describe("align_to_audio", () => {
   const reset = (cues: SubtitleCue[], overlays: unknown[] = []) =>
     useEditor.setState({

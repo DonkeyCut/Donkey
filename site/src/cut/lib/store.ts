@@ -57,10 +57,18 @@ import {
 } from "./docCache";
 import { renderMix, transcribeSamples, type CloudTranscribeSpec } from "./cloudTranscribe";
 import { alignCues } from "./cueAlign";
+import {
+  chunkCues,
+  cueWordCount,
+  MAX_WORDS_PER_CUE,
+  MIN_WORDS_PER_CUE,
+  spreadWordsEvenly,
+} from "./cueChunk";
+import { syncToSpeech } from "./cueSync";
 import { useGenNotify } from "./genNotify";
 import { clampPlayhead, playheadAt, previewAt, setPlayhead, setSkim } from "./playhead";
 import { engineTranscribeSamples, withEngineStt } from "./localStt";
-import { trackLocale } from "./subtitles";
+import { laneCues, subtitleLaneCount, trackLocale } from "./subtitles";
 import { ANIM_STYLE_IDS, animStyleOfTransition, assetIsSilent, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isAudioTransition, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionBarAt, transitionBarStart, transitionStyleOfAnim, type TransitionBoundaryKind } from "./types";
 import { liftMoveTracks } from "./textMotion";
 import { readTextStyle } from "./textStyle";
@@ -584,6 +592,10 @@ export interface EditorState {
    * translation, so the new cues carry none. */
   translateSubtitleTrack: (fromLane: number) => Promise<void>;
   setSubtitlesView: (patch: Partial<Pick<SubtitlesBlock, "showOnVideo" | "showOnTimeline" | "locale" | "style" | "size" | "font" | "x" | "y" | "wordHighlight" | "accentMode" | "accentColor" | "accentScale" | "accentDim">>) => void;
+  /** How many words a caption holds at a time. Every track is re-cut on its
+   * own words and then measured against the cut's mix, so the new captions
+   * land on the speech instead of on arithmetic. One undo step. */
+  setSubtitleWordsPerCue: (n: number) => Promise<void>;
   /** The subtitle track (row) the panel edits and generation writes to. */
   subtitleLane: number;
   setSubtitleLane: (lane: number) => void;
@@ -3694,9 +3706,12 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const epoch = laneEpoch;
       set({ subtitleStatus: "running", subtitleError: null, subtitleStartedAt: Date.now() });
       try {
-        const cues = await runTranscription(projectId, spec);
-        if (cues === null) return; // switched projects mid-run
+        const heard = await runTranscription(projectId, spec);
+        if (heard === null) return; // switched projects mid-run
         if (laneEpoch !== epoch) return set(staleLaneError);
+        // The transcriber groups its own words its own way; the project says
+        // how many a caption holds, and the cut is made on the measured words.
+        const cues = chunkCues(heard, cueWordCount(get().subtitles));
         // Only the active track's cues are replaced; other languages stay.
         const tagged = cues.map((c) => ({ ...c, ...(lane > 0 ? { lane } : {}) }));
         if (cues.length === 0) {
@@ -3776,7 +3791,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         // word timings) onto the clip's timeline span. New cues replace any
         // on the active track that overlapped the clip; the rest of the
         // timeline — and every other track — keeps its cues.
-        const placed = cues.map((c) => ({
+        const placed = chunkCues(cues, cueWordCount(get().subtitles)).map((c) => ({
           ...c,
           start: c.start + sp.start,
           end: c.end + sp.start,
@@ -3841,13 +3856,10 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         }
         if (get().projectId !== projectId) return; // switched projects mid-run
         if (laneEpoch !== epoch) return set(staleLaneError);
-        const cues: SubtitleCue[] = body.cues.map((c) => ({
-          id: uid(),
-          start: c.start,
-          end: c.end,
-          text: c.text,
-          ...(lane > 0 ? { lane } : {}),
-        }));
+        const cues: SubtitleCue[] = chunkCues(
+          body.cues.map((c) => ({ id: uid(), start: c.start, end: c.end, text: c.text })),
+          cueWordCount(get().subtitles)
+        ).map((c) => ({ ...c, ...(lane > 0 ? { lane } : {}) }));
         push();
         set((cur) => ({
           subtitles: {
@@ -3910,19 +3922,31 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           // that reordered/split cues mid-request can't apply text by a stale
           // index onto the wrong cue.
           const byId = new Map(cues.map((c, i) => [c.id, body.texts![i]]));
-          set((cur) => ({
-            subtitles: {
-              ...cur.subtitles,
-              style,
-              // Rewriting the text drops per-word timings (they no longer match),
-              // but the cue's own start/end are untouched.
-              cues: cur.subtitles.cues.map((c) => {
-                const t = byId.get(c.id);
-                return t && t !== c.text ? { ...c, text: t, words: undefined } : c;
-              }),
-            },
-            subtitleStatus: "ready",
-          }));
+          set((cur) => {
+            // Rewriting the text drops per-word timings (they no longer match),
+            // but the cue's own start/end are untouched.
+            const written = cur.subtitles.cues.map((c) => {
+              const t = byId.get(c.id);
+              return t && t !== c.text ? { ...c, text: t, words: undefined } : c;
+            });
+            // A rewritten line still reads at the project's word count: one
+            // that came back long is cut, one that came back short is left as
+            // the model wrote it.
+            const recut = chunkCues(
+              written.filter((c) => laneOf(c) === lane),
+              cueWordCount(cur.subtitles)
+            );
+            return {
+              subtitles: {
+                ...cur.subtitles,
+                style,
+                cues: [...written.filter((c) => laneOf(c) !== lane), ...recut].sort(
+                  (a, b) => a.start - b.start
+                ),
+              },
+              subtitleStatus: "ready" as const,
+            };
+          });
         } else {
           // The style still applied; leave the text as-is.
           set({ subtitleStatus: "ready" });
@@ -3973,13 +3997,15 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             ...cur.subtitles,
             cues: [
               ...cur.subtitles.cues.filter((c) => laneOf(c) !== lane),
-              ...source.map((c, i) => ({
-                id: uid(),
-                start: c.start,
-                end: c.end,
-                text: texts[i],
-                ...(lane > 0 ? { lane } : {}),
-              })),
+              ...chunkCues(
+                source.map((c, i) => ({
+                  id: uid(),
+                  start: c.start,
+                  end: c.end,
+                  text: texts[i],
+                })),
+                cueWordCount(cur.subtitles)
+              ).map((c) => ({ ...c, ...(lane > 0 ? { lane } : {}) })),
             ].sort((a, b) => a.start - b.start),
             generatedAt: Date.now(),
           },
@@ -3996,6 +4022,58 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
 
     setSubtitlesView: (patch) =>
       set((s) => ({ subtitles: { ...s.subtitles, ...patch } })),
+
+    setSubtitleWordsPerCue: async (n) => {
+      const s = get();
+      const per = Math.min(MAX_WORDS_PER_CUE, Math.max(MIN_WORDS_PER_CUE, Math.round(n)));
+      if (s.subtitles.wordsPerCue === per) return;
+      const projectId = s.projectId;
+      const epoch = laneEpoch;
+      push();
+      set((cur) => {
+        const cues = chunkCues(cur.subtitles.cues, per);
+        // Re-cutting mints a cue where a caption opens mid-line, so a
+        // selection pointing at a cue that no longer exists is dropped.
+        const alive = new Set(cues.map((c) => c.id));
+        const kept = (sel: Selection) => !sel || sel.kind !== "cue" || alive.has(sel.id);
+        const multiSelection = cur.multiSelection.filter(kept);
+        return {
+          subtitles: { ...cur.subtitles, wordsPerCue: per, cues },
+          multiSelection,
+          selection: kept(cur.selection)
+            ? cur.selection
+            : (multiSelection[multiSelection.length - 1] ?? null),
+        };
+      });
+      // The new edges are word onsets where the transcriber measured them and
+      // a share of a line where it didn't. The mix is what tells the two
+      // apart, so the re-cut track is measured against it — the same pass
+      // align_to_audio runs, folded into the change that needed it.
+      const mix = await get().cutMixSamples().catch(() => null);
+      if (!mix) return;
+      if (get().projectId !== projectId || laneEpoch !== epoch) return;
+      set((cur) => {
+        if (cur.subtitles.wordsPerCue !== per) return {}; // changed again mid-render
+        let cues = cur.subtitles.cues;
+        for (let lane = 0; lane < subtitleLaneCount(cur.subtitles); lane++) {
+          const list = laneCues({ ...cur.subtitles, cues }, lane);
+          if (list.length === 0) continue;
+          // A track cut from measured words is nearly right already; one whose
+          // times are a share of a line (a translation, narration, a
+          // hand-edit) earns the wider reach a guess deserves.
+          const guessed = list.some((c) => !c.words || c.words.length === 0);
+          const report = syncToSpeech(list, mix.samples, mix.sampleRate, {
+            ...(guessed ? { reach: 0.6 } : {}),
+          });
+          if (!report.evidence) continue;
+          const byId = new Map(report.items.map((c) => [c.id, c]));
+          cues = cues.map((c) => byId.get(c.id) ?? c);
+        }
+        return {
+          subtitles: { ...cur.subtitles, cues: [...cues].sort((a, b) => a.start - b.start) },
+        };
+      });
+    },
 
     setSubtitleLane: (lane) => {
       const count = Math.max(
@@ -5522,26 +5600,5 @@ export function projectDuration(s: {
   return durValue;
 }
 
-/** Spread a cue's words across [start, end], each word's slice proportional to
- * its length. Used when re-timing captions to a generated voiceover, which
- * carries no per-word timestamps of its own. */
-function spreadWordsEvenly(
-  text: string,
-  start: number,
-  end: number,
-): { t0: number; t1: number; w: string }[] | undefined {
-  const parts = text.split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return undefined;
-  const lengths = parts.map((w) => Math.max(1, w.length));
-  const total = lengths.reduce((a, b) => a + b, 0);
-  const span = Math.max(0, end - start);
-  let acc = 0;
-  return parts.map((w, i) => {
-    const t0 = start + (acc / total) * span;
-    acc += lengths[i];
-    const t1 = start + (acc / total) * span;
-    return { t0, t1, w };
-  });
-}
 
 export const useTotalDuration = () => useEditor((s) => totalDuration(s.clips));

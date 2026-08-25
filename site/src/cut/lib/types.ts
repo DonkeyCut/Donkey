@@ -1217,6 +1217,9 @@ export interface SubtitlesBlock {
    * per-track anchor in `tracks`. Read as the lane-0 fallback. */
   x?: number;
   y?: number;
+  /** How many words one caption holds at a time; absent = the default read
+   * (lib/cueChunk.ts). Changing it re-cuts every track on its own words. */
+  wordsPerCue?: number;
   /** Word effects on: the caption plays word by word as it is spoken, in the
    * preview and the export burn-in. */
   wordHighlight?: boolean;

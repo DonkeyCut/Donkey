@@ -109,6 +109,11 @@ import {
   type TextLayout,
   type TextVariation,
 } from "./textCompose";
+import {
+  cueWordCount,
+  MAX_WORDS_PER_CUE,
+  MIN_WORDS_PER_CUE,
+} from "./cueChunk";
 import { partialWrites, syncToSpeech, type SyncReport } from "./cueSync";
 import { requireTextLook, type TextLook } from "./textLooks";
 import {
@@ -1641,7 +1646,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       };
   },
 
-  set_caption_look: (s, input) => {
+  set_caption_look: async (s, input) => {
       const patch: Parameters<typeof s.setSubtitlesView>[0] = {};
       if (typeof input.look === "string") {
         const look = requireTextLook(input.look);
@@ -1675,13 +1680,23 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       }
       if (isNum(input.y)) patch.y = clamp(input.y, 0.02, 0.98);
       if (isNum(input.x)) patch.x = clamp(input.x, 0.02, 0.98);
-      if (Object.keys(patch).length === 0) throw new ToolError("Nothing to change.");
-      s.setSubtitlesView(patch);
+      const per = isNum(input.words_per_cue)
+        ? clamp(Math.round(input.words_per_cue), MIN_WORDS_PER_CUE, MAX_WORDS_PER_CUE)
+        : null;
+      if (Object.keys(patch).length === 0 && per === null)
+        throw new ToolError("Nothing to change.");
+      if (Object.keys(patch).length > 0) s.setSubtitlesView(patch);
+      // Re-cutting the captions rewrites the track and measures it against the
+      // mix, so the tool waits for the tracks it reports on.
+      const before = per !== null ? useEditor.getState().subtitles.cues.length : 0;
+      if (per !== null) await useEditor.getState().setSubtitleWordsPerCue(per);
       const cur = useEditor.getState().subtitles;
       return {
         style: cur.style ?? "clean",
         size: cur.size,
         font: cur.font,
+        wordsPerCue: cueWordCount(cur),
+        ...(per !== null ? { cues: cur.cues.length, cuesBefore: before } : {}),
         wordHighlight: cur.wordHighlight === true,
         accentColor: cur.accentColor,
         accentMode: cur.accentMode,

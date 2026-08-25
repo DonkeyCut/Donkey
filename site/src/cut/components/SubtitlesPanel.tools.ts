@@ -7,6 +7,11 @@
  */
 
 import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
+import {
+  DEFAULT_WORDS_PER_CUE,
+  MAX_WORDS_PER_CUE,
+  MIN_WORDS_PER_CUE,
+} from "@/cut/lib/cueChunk";
 import { CAPTION_STYLES } from "@/cut/lib/subtitles";
 import {
   WORD_EFFECT_MENU,
@@ -85,11 +90,14 @@ export const SUBTITLES_TOOLS = [
   {
     name: "set_caption_look",
     description:
-      "Style the caption track: a text-videos look id in `look` sets everything at once (preset, size, font, word effect, accent color, frame background), or set the pieces yourself. Restyling captions is a change the user asks for — leave the track as it is when they only asked for the words. Word effects — word_highlight — play the caption word by word as it is spoken or sung, in the preview and the export burn-in; they need word timings, which transcription and sync_lyrics leave on the cues. An emphasis travels along a line that is fully up; a build assembles the line as it is spoken. Naming an accent_mode turns it on, so \"make the words pop as I say them\" is one call with accent_mode: pop, and \"have the caption appear word by word\" is accent_mode: build.",
+      "Style the caption track: a text-videos look id in `look` sets everything at once (preset, size, font, word effect, accent color, frame background), or set the pieces yourself. `words_per_cue` is how the captions READ rather than how they look — it re-cuts the tracks and re-aligns them to the audio. Restyling captions is a change the user asks for — leave the track as it is when they only asked for the words. Word effects — word_highlight — play the caption word by word as it is spoken or sung, in the preview and the export burn-in; they need word timings, which transcription and sync_lyrics leave on the cues. An emphasis travels along a line that is fully up; a build assembles the line as it is spoken. Naming an accent_mode turns it on, so \"make the words pop as I say them\" is one call with accent_mode: pop, and \"have the caption appear word by word\" is accent_mode: build.",
     inputSchema: obj({
       look: str("Text-videos look id — sets the whole caption look"),
       style: str(`Caption preset: ${Object.keys(CAPTION_STYLES).join(", ")}`),
       size: num("Caption size in px at a 1080-wide frame"),
+      words_per_cue: num(
+        `How many words one caption holds at a time (${MIN_WORDS_PER_CUE}–${MAX_WORDS_PER_CUE}, default ${DEFAULT_WORDS_PER_CUE}) — the answer to "show fewer words at once", "one word at a time", "these captions are a wall of text". Every track is re-cut on its own measured words and then re-aligned to the speech in the mix, so the wording survives and the new lines land on the audio; a line somebody authored (a translation, lyrics, narration) is split when it runs long and never merged with the line beside it.`
+      ),
       font: str("Font id"),
       word_highlight: bool("Play the caption word by word as it lands"),
       accent_color: str("Word effect accent color"),
