@@ -77,10 +77,24 @@ interface LiveVoice {
   scheduled: number;
   /** A decode in flight, so a slow read doesn't start a second one. */
   filling: boolean;
-  /** Set when the source can't be read; the voice stays silent rather than
-   * retrying every frame. */
+  /** Set when the voice has run off the end of its source, or its source has
+   * refused enough times to stop asking. */
   dead: boolean;
+  /** Consecutive failed reads. A file that has just been imported is often
+   * unreadable for a moment — the bytes are still going to storage, the
+   * signed URL has not been minted — and a voice that gave up on the first
+   * miss stayed silent for the life of the page. */
+  misses: number;
+  /** Wall time (performance.now) the next read may be attempted at. */
+  retryAt: number;
 }
+
+/** How many times a voice re-reads a source that will not answer before it
+ * gives up, and the backoff between tries. Six tries spans about half a
+ * minute, which covers an import landing behind the playhead. */
+const READ_RETRIES = 6;
+const RETRY_BASE_MS = 400;
+const RETRY_MAX_MS = 8_000;
 
 /** One audio effect element the graph is carrying: its recipe's chain, and
  * the pair of gains that cross the mix between treated and untreated. */
@@ -386,7 +400,13 @@ export class PreviewMixer {
       const live = this.voices.get(v.id) ?? this.open(v, t);
       if (!live) continue;
       live.gain.gain.value = Math.max(0, Math.min(1.5, v.gain));
-      if (!live.dead && !live.filling && live.scheduled < t + AHEAD_S) void this.fill(v.id, live);
+      if (
+        !live.dead &&
+        !live.filling &&
+        live.scheduled < t + AHEAD_S &&
+        performance.now() >= live.retryAt
+      )
+        void this.fill(v.id, live);
       // Windows that have finished playing hold their buffers alive.
       live.windows = live.windows.filter((w) => w.until > t - 1);
     }
@@ -435,6 +455,8 @@ export class PreviewMixer {
       scheduled: Math.max(v.start, t),
       filling: false,
       dead: false,
+      misses: 0,
+      retryAt: 0,
     };
     this.voices.set(v.id, live);
     return live;
@@ -481,9 +503,11 @@ export class PreviewMixer {
       const key = `${live.url}|${sourceFrom.toFixed(3)}|${sourceTo.toFixed(3)}|${live.speed}`;
       let buffer = this.decoded.get(key) ?? null;
       if (!buffer) {
-        const raw = await decodeAudioSpan(live.url, sourceFrom, sourceTo);
+        // The read is the only part of this that says anything about the
+        // source, so it is the only part a miss is spent on.
+        const raw = await decodeAudioSpan(live.url, sourceFrom, sourceTo).catch(() => null);
         if (!raw) {
-          live.dead = true;
+          this.miss(live);
           return;
         }
         buffer = stretched ? this.stretch(raw, 1 / live.speed) : raw;
@@ -520,11 +544,33 @@ export class PreviewMixer {
       }
       live.windows.push({ node, until });
       live.scheduled = until;
+      live.misses = 0;
     } catch {
-      live.dead = true;
+      // Past the read, everything is scheduling: a context closed or swapped
+      // under the voice while this window decoded. The source is fine, so the
+      // voice spaces out its next attempt and keeps every one of its reads.
+      this.backOff(live, live.misses + 1);
     } finally {
       live.filling = false;
     }
+  }
+
+  /** A read that came back empty or threw. The source may simply not be there
+   * yet — a just-imported file still on its way to storage — so the voice
+   * waits and asks again, and stays silent only once its tries are spent. */
+  private miss(live: LiveVoice): void {
+    live.misses += 1;
+    if (live.misses >= READ_RETRIES) {
+      live.dead = true;
+      return;
+    }
+    this.backOff(live, live.misses);
+  }
+
+  /** Hold the voice off until the next attempt, `step` failures in. */
+  private backOff(live: LiveVoice, step: number): void {
+    live.retryAt =
+      performance.now() + Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** Math.max(0, step - 1));
   }
 
   /** Re-lay a buffer at a different length, keeping its pitch. */
