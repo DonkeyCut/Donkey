@@ -467,7 +467,7 @@ function SubtitleCaption({
     <div
       ref={(el) => registerBox(subtitleBoxId(lane), el)}
       className={cn(
-        "sub-caption pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 cursor-grab text-center whitespace-pre-wrap active:cursor-grabbing",
+        "sub-caption pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 cursor-grab text-center whitespace-pre active:cursor-grabbing",
         armed && "outline-[1.5px] outline-offset-[3px] outline-[#0a84ff]"
       )}
       onPointerDown={(e) => {
@@ -492,9 +492,12 @@ function SubtitleCaption({
       style={{
         left: `${ov.x * 100}%`,
         top: `${ov.y * 100}%`,
-        // Hard cap at the safe area so a caption can never spill past the
-        // frame edge, even if a line slips past the wrap estimate.
-        maxWidth: `${0.9 * stageWidth}px`,
+        // The caption draws the lines `cueOverlay` already broke it into,
+        // measured against the room the export gives it. An absolutely
+        // positioned box otherwise shrinks to whatever is left of the stage
+        // beside its own anchor — half of it for a centered caption — and
+        // re-breaks lines the rendered file keeps whole.
+        width: "max-content",
         fontSize: ov.size * scale,
         fontFamily: fontStack(ov.font),
         fontWeight: ov.weight,

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { CAPTION_STYLES, cueOverlay, cueWordFrames, cueWords, trackPos } from "./subtitles";
+import { measureLine, textFontOf } from "./textFit";
 import { emptySubtitles, type SubtitleCue, type SubtitlesBlock } from "./types";
+import { textRoom } from "@donkeycut/effects-kit";
 
 /**
  * A caption's word effect against the speech it was measured from.
@@ -89,6 +91,59 @@ describe("burn-in spans", () => {
     expect(built.length).toBeGreaterThan(spans.length);
     // Three words, at most two extra pictures each.
     expect(built.length).toBeLessThanOrEqual(9);
+  });
+});
+
+describe("the lines a caption is broken into", () => {
+  // The preview draws these lines in the DOM and the export paints them on a
+  // canvas; neither reflows, so the break decided here is what both show.
+  const long: SubtitleCue = {
+    id: "c2",
+    start: 0,
+    end: 3,
+    text: "Don't wait for someone to give you a chance to start the thing you keep talking about",
+  };
+  const linesAt = (size: number, frameW: number, x = 0.5) =>
+    cueOverlay(long, { ...CAPTION_STYLES.clean, size, x }, false, undefined, undefined, frameW)
+      .text.split("\n");
+
+  test("each line fits the room the frame leaves it", () => {
+    for (const line of linesAt(42, 1080)) {
+      expect(measureLine(line, textFontOf(CAPTION_STYLES.clean, 42), 42)).toBeLessThanOrEqual(
+        textRoom(0.5, 1080)
+      );
+    }
+  });
+
+  test("uses the width the frame has, not a share of it", () => {
+    // A caption centered in a 1080-wide frame gets the whole safe width. The
+    // regression this pins: laying it out against half the frame, which broke
+    // a line that had most of the picture still empty beside it.
+    const lines = linesAt(42, 1080);
+    const widest = Math.max(
+      ...lines.map((l) => measureLine(l, textFontOf(CAPTION_STYLES.clean, 42), 42))
+    );
+    expect(widest).toBeGreaterThan(textRoom(0.5, 1080) / 2);
+  });
+
+  test("evens the lines out instead of leaving an orphan", () => {
+    const lines = cueOverlay(
+      { ...long, text: "Don't wait for someone to give you a chance" },
+      CAPTION_STYLES.clean,
+      false,
+      undefined,
+      undefined,
+      1080
+    ).text.split("\n");
+    expect(lines).toHaveLength(2);
+    const widths = lines.map((l) => measureLine(l, textFontOf(CAPTION_STYLES.clean, 42), 42));
+    expect(Math.min(...widths) / Math.max(...widths)).toBeGreaterThan(0.7);
+  });
+
+  test("breaks in design space, so every render size shows the same lines", () => {
+    expect(linesAt(42, 1080)).toEqual(linesAt(42, 1080));
+    // A caption dragged off-center has less room and breaks sooner.
+    expect(linesAt(42, 1080, 0.2).length).toBeGreaterThan(linesAt(42, 1080).length);
   });
 });
 

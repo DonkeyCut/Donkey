@@ -299,18 +299,6 @@ export function captionStyle(style: CaptionStyleId | undefined): CaptionStyle {
   return CAPTION_STYLES[style ?? "clean"] ?? CAPTION_STYLES.clean;
 }
 
-/** Balance a caption onto up to two lines so it never overflows the frame. */
-export function wrapCaption(text: string): string {
-  const t = text.trim().replace(/\s+/g, " ");
-  if (t.length <= 26) return t;
-  const mid = t.length / 2;
-  let best = -1;
-  for (let i = t.indexOf(" "); i !== -1; i = t.indexOf(" ", i + 1)) {
-    if (best === -1 || Math.abs(i - mid) < Math.abs(best - mid)) best = i;
-  }
-  return best === -1 ? t : t.slice(0, best) + "\n" + t.slice(best + 1);
-}
-
 /**
  * Wrap a caption into as many lines as it takes to keep every line inside the
  * frame width at font `size` in `font`. The export burn-in renders each
@@ -320,7 +308,8 @@ export function wrapCaption(text: string): string {
  * The line is measured on the face it will be drawn in. A character count has
  * to assume the widest glyph that face could hold, which broke short cues onto
  * two lines with most of the frame still empty beside them; a measured line
- * puts a cue on one line whenever one line fits.
+ * puts a cue on one line whenever one line fits. A cue that needs more than
+ * one gets its words spread evenly across them.
  */
 export function wrapCaptionForSize(
   text: string,
@@ -333,7 +322,32 @@ export function wrapCaptionForSize(
   const flat = text.trim().replace(/\s+/g, " ");
   if (!flat) return "";
   const css = textFontOf({ font, weight, italic: undefined }, size);
-  return wrapTextToRoom(flat, textRoom(x, frameW), (line) => measureLine(line, css, size));
+  return balanceCaption(flat, textRoom(x, frameW), (line) => measureLine(line, css, size));
+}
+
+/**
+ * The fewest lines the caption fits in, evened out.
+ *
+ * Filling each line to the edge and letting the rest fall through leaves the
+ * last line holding a word or two under a full one — the orphan that makes a
+ * caption look broken. So the line count is settled first (fill greedily
+ * against the real room), and then the same fill is run again at the
+ * narrowest width that still needs no extra line, which spreads the words
+ * across the lines it already committed to. Nothing here can widen a line
+ * past the room: every candidate width is inside it.
+ */
+function balanceCaption(text: string, room: number, measure: (line: string) => number): string {
+  const greedy = wrapTextToRoom(text, room, measure);
+  const lines = greedy.split("\n").length;
+  if (lines < 2 || !(room > 0)) return greedy;
+  let lo = 0;
+  let hi = room;
+  for (let i = 0; i < 12; i++) {
+    const mid = (lo + hi) / 2;
+    if (wrapTextToRoom(text, mid, measure).split("\n").length <= lines) hi = mid;
+    else lo = mid;
+  }
+  return wrapTextToRoom(text, hi, measure);
 }
 
 /** A cue as a synthetic overlay, so captions ride the title pipeline. The style
