@@ -1,4 +1,5 @@
 import type { HeadlessSession } from "./bind";
+import { fetchWithRetry } from "./http";
 import { syncFontAssets } from "../fontAssets";
 import { syncLinkedLibrary } from "../linkedLibrary";
 import { serializeDoc, useEditor } from "../store";
@@ -24,7 +25,11 @@ export async function openCloudProject(
   s: HeadlessSession,
   projectId: string
 ): Promise<HeadlessDocSession> {
-  const res = await fetch(projectPath(s, projectId), { headers: s.headers });
+  const res = await fetchWithRetry(
+    projectPath(s, projectId),
+    { headers: s.headers },
+    `read project ${projectId}`
+  );
   if (!res.ok) throw new Error(`Could not read project ${projectId} (${res.status}).`);
   const version = res.headers.get("x-cut-doc-version");
   if (!version)
@@ -37,11 +42,17 @@ export async function openCloudProject(
   const fileNames = (doc.assets ?? []).map((a) => a.fileName);
   const signed = new Map<string, string>();
   if (fileNames.length > 0) {
-    const mint = await fetch(`${s.base}/api/cut-cloud/media/presign-get`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...s.headers },
-      body: JSON.stringify({ items: fileNames.map((fileName) => ({ projectId, fileName })) }),
-    }).catch(() => null);
+    const mint = await fetchWithRetry(
+      `${s.base}/api/cut-cloud/media/presign-get`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...s.headers },
+        body: JSON.stringify({ items: fileNames.map((fileName) => ({ projectId, fileName })) }),
+      },
+      "sign the project's media URLs",
+      // A mint writes nothing; asking again just re-signs the same names.
+      { retry: true }
+    ).catch(() => null);
     if (mint?.ok) {
       const body = (await mint.json()) as { urls?: { fileName: string; url: string }[] };
       for (const u of body.urls ?? []) signed.set(u.fileName, u.url);
@@ -70,13 +81,14 @@ export async function pushCloudProject(
   const state = useEditor.getState();
   if (state.projectId !== session.projectId)
     throw new Error("The store holds a different project than this session opened.");
-  const res = await fetch(
+  const res = await fetchWithRetry(
     `${projectPath(s, session.projectId)}?v=${encodeURIComponent(session.version)}`,
     {
       method: "PUT",
       headers: { "Content-Type": "application/json", ...s.headers },
       body: JSON.stringify(serializeDoc(state)),
-    }
+    },
+    `save project ${session.projectId}`
   );
   if (res.status === 409)
     throw new Error("The project changed under this session — another writer holds a newer version.");

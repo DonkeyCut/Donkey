@@ -179,7 +179,12 @@ async function runJob(job: ClaimedJob): Promise<void> {
     }
     console.log(`[cut-worker] ${job.kind} ${job.id} done`);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const raw = err instanceof Error ? err.message : String(err);
+    // A bare network rejection reads as "fetch failed" and says nothing to
+    // whoever asked for the render. The row carries words instead.
+    const message = /^(fetch failed|network error|terminated)$/i.test(raw.trim())
+      ? "Could not reach the service — the render stopped. Try it again."
+      : raw;
     // A canceled job's row already says so; the running-state guard also
     // keeps this from resurrecting a row canceled between watcher ticks.
     if (!entry.canceled) {
@@ -190,7 +195,7 @@ async function runJob(job: ClaimedJob): Promise<void> {
         })
         .catch(() => {});
     }
-    console.error(`[cut-worker] ${job.kind} ${job.id} ${entry.canceled ? "canceled" : "failed"}: ${message}`);
+    console.error(`[cut-worker] ${job.kind} ${job.id} ${entry.canceled ? "canceled" : "failed"}: ${raw}`);
     // A canceled turn retires this process once its cleanup settles: the
     // abort tears the agent loop down, and a fresh process guarantees the
     // next claim starts with clean per-user transport bindings even if some
