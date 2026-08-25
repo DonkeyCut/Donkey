@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { create } from "zustand";
 import { engineOrigin, servedFromEngine } from "./api";
 import { getBackend, type CutBackend, type CutMode } from "./backend";
@@ -305,6 +305,64 @@ export const useExports = create<ExportsState>((set, get) => ({
     });
   },
 }));
+
+/** One row a surface shows: an engine job, or a local row this tab owns. */
+export type ExportRow =
+  | { kind: "job"; data: ExportJob }
+  | { kind: "local"; data: LocalRow };
+
+/** Running first, then waiting, then what has settled. */
+const statusRank = (status: string) =>
+  status === "running" || status === "rendering"
+    ? 0
+    : status === "queued" || status === "preparing"
+      ? 1
+      : status === "done"
+        ? 2
+        : 3;
+
+/**
+ * Every export row a surface should show, in that order — the one assembly the
+ * dock and the Media tab share, so the two never disagree about what is in
+ * flight.
+ *
+ * A render this tab is doing itself appears once: the local row carries the
+ * progress, and the reserved job row behind it is held back until the render
+ * settles. Pass a projectId to narrow it to one project's work.
+ *
+ * Dismissal is left to the caller. `dismissed` is the dock's own hide list —
+ * an X there on a still-running export silences the notification while the
+ * render carries on — and the Media tab, which is the project's record of its
+ * work and the only place with a cancel, keeps showing it.
+ */
+export function useExportRows(projectId?: string): ExportRow[] {
+  const jobs = useExports((s) => s.jobs);
+  const local = useExports((s) => s.local);
+  const rendering = useExports((s) => s.rendering);
+  return useMemo(() => {
+    const mine = (x: { projectId: string }) => !projectId || x.projectId === projectId;
+    return [
+      ...jobs
+        .filter((j) => mine(j) && !rendering.includes(j.id))
+        .map((j) => ({ kind: "job" as const, data: j })),
+      ...local.filter(mine).map((r) => ({ kind: "local" as const, data: r })),
+    ].sort((a, b) => {
+      const dr = statusRank(a.data.status) - statusRank(b.data.status);
+      return dr !== 0 ? dr : (a.data.createdAt ?? 0) - (b.data.createdAt ?? 0);
+    });
+  }, [jobs, local, rendering, projectId]);
+}
+
+/** True while that row is still being worked on. */
+export const exportInFlight = (row: ExportRow) => statusRank(row.data.status) <= 1;
+
+/** Whether {@link ExportsState.cancel} can actually stop this row. A job is
+ * cancelable through its backend, and a render this tab is doing itself
+ * through the controller it holds. The seconds a local row spends handing the
+ * cut to the engine ("preparing") hold no controller: that hand-off runs to
+ * the job it creates, which is cancelable the moment it joins the feed. */
+export const exportCancelable = (row: ExportRow) =>
+  row.kind === "job" ? exportInFlight(row) : !!row.data.abort;
 
 /** Badge the Media tab when one of this project's exports finishes in the
  * background: watch the engine feed for jobs newly turned done and report each

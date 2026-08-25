@@ -46,9 +46,11 @@ interface GenNotifyState {
   /** The just-opened tab's arrivals, pulsing until their timer clears them. */
   pulsing: Record<GenTab, string[]>;
   /** In-flight work registered per tab — the rail tile spins while a tab has
-   * entries. For work whose running state lives in no store of its own (audio
-   * syntheses); tabs with a job store (generate, exports, subtitles) are read
-   * directly by the rail. */
+   * entries, and a panel reads its own share through {@link useActiveWork}.
+   * This is where work whose running state lives in no store of its own goes
+   * (the audio syntheses, which pass tells the subtitles panel what it is
+   * waiting on); the tabs with a job feed of their own — Video, Image, Media —
+   * are read from those feeds instead. */
   active: Record<GenTab, string[]>;
   /** The generate tab on screen; a completion here needs no badge or pulse —
    *  the user watched the tile appear. */
@@ -56,8 +58,10 @@ interface GenNotifyState {
   landed: (tab: GenTab, assetId: string) => void;
   /** Register a long task with its tab; call the returned function when it
    * settles. Settling after a project switch is a no-op — reset() already
-   * dropped the entry. */
-  begin: (tab: GenTab) => () => void;
+   * dropped the entry. `job` names which of a tab's generators owns the work,
+   * so a panel can count its own in flight ({@link useActiveWork}) and leave
+   * the tab's other tasks out of it. */
+  begin: (tab: GenTab, job?: string) => () => void;
   watch: (tab: GenTab | null) => void;
   endPulse: (tab: GenTab) => void;
   reset: () => void;
@@ -72,8 +76,8 @@ export const useGenNotify = create<GenNotifyState>((set, get) => ({
     if (get().watching === tab) return; // watched live — no badge, no pulse
     set((s) => ({ unseen: { ...s.unseen, [tab]: [...s.unseen[tab], assetId] } }));
   },
-  begin: (tab) => {
-    const key = `w${workSeq++}`;
+  begin: (tab, job) => {
+    const key = `${job ?? ""}#w${workSeq++}`;
     set((s) => ({ active: { ...s.active, [tab]: [...s.active[tab], key] } }));
     return () =>
       set((s) =>
@@ -100,6 +104,19 @@ export const useGenNotify = create<GenNotifyState>((set, get) => ({
     set((s) => (s.pulsing[tab].length === 0 ? {} : { pulsing: { ...s.pulsing, [tab]: [] } })),
   reset: () => set({ unseen: EMPTY, pulsing: EMPTY, active: EMPTY }),
 }));
+
+/**
+ * How many pieces of work a panel has in flight right now — the durable count,
+ * held in this store, so a generator's "Generating…" row survives a trip to
+ * another tab and back. Pass the `job`
+ * name it registered under to count only its own; omit it for the tab's whole
+ * load.
+ */
+export function useActiveWork(tab: GenTab, job?: string): number {
+  return useGenNotify(
+    (s) => s.active[tab].filter((k) => !job || k.startsWith(`${job}#`)).length
+  );
+}
 
 /** Whether this finished tile is in its tab's fresh-arrival pulse. */
 export function useGenPulse(tab: GenTab, assetId?: string): boolean {

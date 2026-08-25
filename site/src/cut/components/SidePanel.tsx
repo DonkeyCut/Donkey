@@ -44,7 +44,14 @@ import {
 import { useRefCopy } from "@/cut/lib/refCopy";
 import { RefDropZone } from "./RefDropZone";
 import { deleteExport, downloadProjectExport, revealExport } from "@/cut/lib/exportClient";
-import { useExports, useWatchExportLands, type ExportJob } from "@/cut/lib/exportStore";
+import {
+  exportCancelable,
+  exportInFlight,
+  useExportRows,
+  useExports,
+  useWatchExportLands,
+  type ExportRow,
+} from "@/cut/lib/exportStore";
 import { useElapsed } from "@/cut/hooks/useElapsed";
 import { useInView } from "@/cut/hooks/useInView";
 import { useMediaFileSize } from "@/cut/hooks/useMediaFileSize";
@@ -92,7 +99,14 @@ import { mediaUrl, TRANSITION_MAX } from "@/cut/lib/types";
 import { parseSecondsInput } from "@/cut/components/ScrubValue";
 import { ColorField } from "@/cut/components/ColorField";
 import { ValueSlider } from "@/cut/components/ValueSlider";
-import { genPulseOverlay, isGenTab, useGenNotify, useGenPulse, useWatchGenTab } from "@/cut/lib/genNotify";
+import {
+  genPulseOverlay,
+  isGenTab,
+  useActiveWork,
+  useGenNotify,
+  useGenPulse,
+  useWatchGenTab,
+} from "@/cut/lib/genNotify";
 import { useGenerate, type GenerateJob } from "@/cut/lib/generate";
 import { CAPTION_LIMIT, normalizeTags } from "@/cut/lib/publish";
 import { useEditor } from "@/cut/lib/store";
@@ -214,19 +228,17 @@ export function SidePanel({
   // store that owns that work: exports for Media, panel renders for
   // Video/Image, registered syntheses for Audio, the transcription pass for
   // Subtitles.
-  const exporting = useExports(
-    (s) =>
-      s.jobs.some(
-        (j) => j.projectId === projectId && (j.status === "queued" || j.status === "running")
-      ) || s.local.some((r) => r.projectId === projectId && r.status === "preparing")
-  );
+  // Read through the same assembly the Media tab's own Exports list uses, so
+  // the rail tile spins for exactly the work that list shows — a queued engine
+  // job, and a render this tab is doing itself.
+  const exporting = useExportRows(projectId).some(exportInFlight);
   const panelRendering = (s: { jobs: GenerateJob[] }, kind: GenerateJob["kind"]) =>
     s.jobs.some(
       (j) => j.projectId === projectId && j.kind === kind && j.status === "running" && !j.chatId
     );
   const videoBusy = useGenerate((s) => panelRendering(s, "video"));
   const imageBusy = useGenerate((s) => panelRendering(s, "image"));
-  const audioBusy = useGenNotify((s) => s.active.audio.length > 0);
+  const audioBusy = useActiveWork("audio") > 0;
   const subtitlesBusy = useEditor((s) => s.subtitleStatus === "running");
   const busy: Partial<Record<Tab, boolean>> = {
     media: exporting,
@@ -553,12 +565,20 @@ function ExportPulse({ file }: { file: string }) {
   return pulse ? <div aria-hidden className={genPulseOverlay} /> : null;
 }
 
-/** A queued or still-rendering export in the Exports list: spinner, live
- * progress, and a cancel that stops the render (the dock's X only hides the
- * notification). */
-function ExportingRow({ job }: { job: ExportJob }) {
-  const elapsed = useElapsed(job.status === "running" ? job.startedAt ?? null : null);
-  const pct = Math.round(job.progress * 100);
+/** An export still being worked on, in the Exports list: spinner, live
+ * progress, and a cancel that stops it. This is the project's record of the
+ * work, so an export hidden from the dock still has its row and its cancel
+ * here. One row for both kinds of work — a job the engine or the render worker
+ * owns, and a render this tab is doing itself, which is how a cloud or browser
+ * project exports and which carries its progress on its own local row. */
+function ExportingRow({ row }: { row: ExportRow }) {
+  const { status } = row.data;
+  const running = status === "running" || status === "rendering";
+  const cancelable = exportCancelable(row);
+  const startedAt = row.kind === "job" ? row.data.startedAt ?? null : row.data.createdAt;
+  const elapsed = useElapsed(running ? startedAt : null);
+  const progress = row.kind === "job" ? row.data.progress : (row.data.progress ?? 0);
+  const pct = Math.round(progress * 100);
   return (
     <div className="relative flex w-full items-center gap-2.5 overflow-hidden rounded-lg border border-border p-1.5">
       <div className="grid h-11 w-[25px] shrink-0 place-items-center rounded-[4px] bg-muted">
@@ -567,18 +587,24 @@ function ExportingRow({ job }: { job: ExportJob }) {
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[11.5px] font-medium">Exporting…</span>
         <span className="block text-[10.5px] text-muted-foreground tabular-nums">
-          {job.status === "running" ? `${pct}%${elapsed ? ` · ${elapsed}` : ""}` : "Queued"}
+          {running
+            ? `${pct}%${elapsed ? ` · ${elapsed}` : ""}`
+            : status === "preparing"
+              ? "Preparing…"
+              : "Queued"}
         </span>
       </span>
-      <Button
-        variant="ghost"
-        size="xs"
-        className="shrink-0 text-muted-foreground hover:text-destructive"
-        onClick={() => useExports.getState().cancel(job.id)}
-      >
-        Cancel
-      </Button>
-      {job.status === "running" && (
+      {cancelable && (
+        <Button
+          variant="ghost"
+          size="xs"
+          className="shrink-0 text-muted-foreground hover:text-destructive"
+          onClick={() => useExports.getState().cancel(row.data.id)}
+        >
+          Cancel
+        </Button>
+      )}
+      {running && (
         <div className="absolute inset-x-0 bottom-0 h-0.5 bg-secondary">
           <div
             className="h-full bg-primary transition-[width] duration-300"
@@ -681,16 +707,11 @@ function ProjectFilesPanel({
         .sort()
         .join()
   );
-  // This project's exports still in flight: queued/running jobs plus the brief
-  // client-only "preparing" window before the engine hands back a job id.
-  const exportJobs = useExports((s) => s.jobs);
-  const exportLocal = useExports((s) => s.local);
-  const exporting = exportJobs.filter(
-    (j) => j.projectId === projectId && (j.status === "queued" || j.status === "running")
-  );
-  const preparing = exportLocal.filter(
-    (r) => r.projectId === projectId && r.status === "preparing"
-  );
+  // This project's exports still being worked on, assembled the way the dock
+  // assembles every project's. A cloud or browser project renders in the tab,
+  // and that render carries its progress on a local row; the engine's feed
+  // alone showed nothing at all while it ran.
+  const exporting = useExportRows(projectId).filter(exportInFlight);
   const readOnly = useEditor((s) => s.readOnly);
   // The whole panel takes drops: OS files import into this project and stay off
   // the timeline, and a project asset made elsewhere (a generation, a
@@ -707,8 +728,18 @@ function ProjectFilesPanel({
   const [preview, setPreview] = useState<ExportItem | null>(null);
   const [deletingExport, setDeletingExport] = useState<ExportItem | null>(null);
 
+  // Whatever is being worked on right now. When the last of it drops out — a
+  // job settling, a tab-side render finishing — the folder has a new file in
+  // it, so this is the second trigger for the re-read below. It covers the
+  // paths the job feed alone misses: a render this tab did itself never passes
+  // through a queued engine job.
+  const exportingKey = exporting
+    .map((r) => r.data.id)
+    .sort()
+    .join();
+
   // Refresh the list on open, when the export dialog closes, and when a
-  // background render settles (done/error).
+  // background render settles (done/error) or finishes in this tab.
   useEffect(() => {
     if (exportOpen) return;
     let alive = true;
@@ -719,7 +750,7 @@ function ProjectFilesPanel({
     return () => {
       alive = false;
     };
-  }, [projectId, exportOpen, exportsSettled]);
+  }, [projectId, exportOpen, exportsSettled, exportingKey]);
 
   const removeExport = async () => {
     const it = deletingExport;
@@ -838,26 +869,12 @@ function ProjectFilesPanel({
           </Marquee>
         )}
 
-        {exports.length + exporting.length + preparing.length > 0 && (
+        {exports.length + exporting.length > 0 && (
           <div className="mt-5 px-3.5">
             <div className="mb-2 text-[13px] font-semibold tracking-tight">Exports</div>
             <div className="flex flex-col gap-1.5">
-              {preparing.map((r) => (
-                <div
-                  key={r.id}
-                  className="flex w-full items-center gap-2.5 rounded-lg border border-border p-1.5"
-                >
-                  <div className="grid h-11 w-[25px] shrink-0 place-items-center rounded-[4px] bg-muted">
-                    <Loader2 className="size-3.5 animate-spin text-primary" />
-                  </div>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[11.5px] font-medium">Exporting…</span>
-                    <span className="block text-[10.5px] text-muted-foreground">Preparing…</span>
-                  </span>
-                </div>
-              ))}
-              {exporting.map((j) => (
-                <ExportingRow key={j.id} job={j} />
+              {exporting.map((row) => (
+                <ExportingRow key={row.data.id} row={row} />
               ))}
               {exports.map((it) => (
                 <div

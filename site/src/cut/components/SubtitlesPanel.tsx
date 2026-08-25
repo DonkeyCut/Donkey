@@ -20,6 +20,7 @@ import {
 } from "@/cut/lib/subtitles";
 import { useElapsed } from "@/cut/hooks/useElapsed";
 import { useCutCaps } from "@/cut/lib/backend/hooks";
+import { useActiveWork, useGenNotify } from "@/cut/lib/genNotify";
 import { TIMELINE_H_MIN, useEditor } from "@/cut/lib/store";
 import { usePreviewSelector } from "@/cut/lib/playhead";
 import { PLATE_PAD_X, PLATE_PAD_Y, PLATE_RADIUS, plateFill } from "@/cut/lib/textRender";
@@ -101,7 +102,15 @@ export function SubtitlesPanel() {
   };
 
   const translate = (fromLane: number) => {
-    void useEditor.getState().translateSubtitleTrack(fromLane).then(growTimeline);
+    // Registered so the running panel knows which pass it is watching even
+    // after the tab was closed and reopened — the local flag went with the
+    // unmount and the wait then read as a transcription.
+    const settle = useGenNotify.getState().begin("subtitles", "translate");
+    void useEditor
+      .getState()
+      .translateSubtitleTrack(fromLane)
+      .then(growTimeline)
+      .finally(settle);
   };
 
   // A shared view reads the transcript; styling and generation stay the
@@ -432,7 +441,9 @@ function EmptyState({
   const sources = Array.from({ length: subtitleLaneCount(subtitles) }, (_, i) => i).filter(
     (i) => i !== lane && laneCues(subtitles, i).length > 0
   );
-  const [translating, setTranslating] = useState(false);
+  // Which pass is running, read from the store: this component unmounts
+  // whenever the user visits another tab.
+  const translating = useActiveWork("subtitles", "translate") > 0;
 
   if (status === "running") {
     return (
@@ -484,10 +495,7 @@ function EmptyState({
       {caps.transcribe && (
         <Button
           className="sub-generate w-full"
-          onClick={() => {
-            setTranslating(false);
-            onGenerate();
-          }}
+          onClick={onGenerate}
           title="Transcribe your audio into plain captions, word for word"
         >
           <Captions data-icon="inline-start" />
@@ -503,10 +511,7 @@ function EmptyState({
             title={`Write this track by translating the ${laneLanguage(subtitles, i)} captions into ${
               LOCALES.find(([id]) => id === locale)?.[1] ?? locale
             }`}
-            onClick={() => {
-              setTranslating(true);
-              onTranslate(i);
-            }}
+            onClick={() => onTranslate(i)}
           >
             <Languages data-icon="inline-start" />
             Translate from {laneLanguage(subtitles, i)}

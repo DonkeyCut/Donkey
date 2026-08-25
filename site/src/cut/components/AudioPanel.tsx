@@ -46,7 +46,7 @@ import { useMusicGen } from "@/cut/lib/musicGen";
 import { STOCK_MUSIC } from "@/cut/lib/stockMusicManifest";
 import { stockAssetInDoc } from "@/cut/lib/genvideo/docWriter";
 import { creditsUrl, signInUrl, useSignedIn } from "@/cut/lib/generate";
-import { genPulseOverlay, useGenNotify } from "@/cut/lib/genNotify";
+import { genPulseOverlay, useActiveWork, useGenNotify } from "@/cut/lib/genNotify";
 import { enrichAsset } from "@/cut/lib/media";
 import { waveGain } from "@/cut/lib/waveform";
 import { usePreviewAudio } from "@/cut/lib/previewAudio";
@@ -168,7 +168,11 @@ function MusicGenerator({ projectId }: { projectId: string }) {
     1,
     (v) => typeof v === "number" && v >= 1 && v <= 4
   );
-  const [pending, setPending] = useState(0);
+  // How many syntheses are in flight — several can run at once, so the button
+  // stays live and this just drives the status row below it. The count lives in
+  // the store, so a take started here keeps showing after a trip to another tab
+  // and back; the panel unmounts and the work carries on.
+  const pending = useActiveWork("audio", "music");
   // A sample dragged from the library onto the prompt box loads its prompt.
   const [dropActive, setDropActive] = useState(false);
   const droppedSample = (e: React.DragEvent) => {
@@ -194,11 +198,10 @@ function MusicGenerator({ projectId }: { projectId: string }) {
     if (!text) return;
     setError(null);
     const n = takes;
-    setPending((p) => p + n);
     await Promise.all(
       Array.from({ length: n }, async () => {
         // Spins the Audio rail tile for the take's whole flight.
-        const settle = useGenNotify.getState().begin("audio");
+        const settle = useGenNotify.getState().begin("audio", "music");
         try {
           const asset = await synthesizeMusic(projectId, text, { variant, instrumental });
           // A render can outlast the open project — the user may switch away
@@ -216,7 +219,6 @@ function MusicGenerator({ projectId }: { projectId: string }) {
         } catch (e) {
           fail(e, "Music generation failed.");
         } finally {
-          setPending((p) => p - 1);
           settle();
         }
       })
@@ -360,9 +362,9 @@ function VoiceGenerator({ projectId }: { projectId: string }) {
   const language = useSpeechLanguage();
   const [script, setScript] = useState("");
   const [direction, setDirection] = useState("");
-  // How many syntheses are in flight — several can run at once, so the button
-  // stays live and this just drives the status row below it.
-  const [pending, setPending] = useState(0);
+  // In-flight count read from the store, so the status row survives the panel
+  // unmounting when the user changes tabs.
+  const pending = useActiveWork("audio", "voice");
   // `credits` marks a failure caused by an empty balance, which renders with a
   // link to buy more.
   const [error, setError] = useState<{ text: string; credits?: boolean } | null>(null);
@@ -381,10 +383,9 @@ function VoiceGenerator({ projectId }: { projectId: string }) {
   const generate = async () => {
     const text = script.trim();
     if (!text) return;
-    setPending((p) => p + 1);
     // The Audio rail tile spins while this runs — the tab is often closed
     // before the voice lands.
-    const settle = useGenNotify.getState().begin("audio");
+    const settle = useGenNotify.getState().begin("audio", "voice");
     setError(null);
     try {
       const playhead = playheadAt();
@@ -416,7 +417,6 @@ function VoiceGenerator({ projectId }: { projectId: string }) {
     } catch (e) {
       fail(e, "Voice generation failed.");
     } finally {
-      setPending((p) => p - 1);
       settle();
     }
   };

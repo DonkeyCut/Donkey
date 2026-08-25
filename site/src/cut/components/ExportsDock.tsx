@@ -19,6 +19,7 @@ import {
   beginExportPolling,
   endExportPolling,
   exportBackend,
+  useExportRows,
   useExports,
   type ExportJob,
   type LocalRow,
@@ -35,10 +36,6 @@ import { cn } from "@/lib/utils";
  * Cut app layout, above the per-project editor.
  */
 export function ExportsDock() {
-  const jobs = useExports((s) => s.jobs);
-  const local = useExports((s) => s.local);
-  const dismissed = useExports((s) => s.dismissed);
-  const rendering = useExports((s) => s.rendering);
   const [collapsed, setCollapsed] = useState(false);
 
   // Poll the feed while the dock is mounted (i.e. the whole time the app is up).
@@ -47,26 +44,16 @@ export function ExportsDock() {
     return endExportPolling;
   }, []);
 
-  const items = useMemo(() => {
-    const rank = (status: string) =>
-      status === "running" || status === "rendering"
-        ? 0
-        : status === "queued" || status === "preparing"
-          ? 1
-          : status === "done"
-            ? 2
-            : 3;
-    // A row this tab is rendering shows as its local row, which has the
-    // progress; the reserved job row behind it stays out of the dock.
-    const visible = jobs.filter((j) => !dismissed.includes(j.id) && !rendering.includes(j.id));
-    return [
-      ...visible.map((j) => ({ kind: "job" as const, data: j })),
-      ...local.map((r) => ({ kind: "local" as const, data: r })),
-    ].sort((a, b) => {
-      const dr = rank(a.data.status) - rank(b.data.status);
-      return dr !== 0 ? dr : (a.data.createdAt ?? 0) - (b.data.createdAt ?? 0);
-    });
-  }, [jobs, local, dismissed, rendering]);
+  // Every project's work, assembled the same way the Media tab assembles one
+  // project's (`useExportRows`). The dock is the notification, so its own X
+  // list applies here: a hidden row keeps rendering and keeps its place in the
+  // Media tab's Exports list, where the cancel lives.
+  const dismissed = useExports((s) => s.dismissed);
+  const all = useExportRows();
+  const items = useMemo(
+    () => all.filter((i) => !(i.kind === "job" && dismissed.includes(i.data.id))),
+    [all, dismissed]
+  );
 
   if (items.length === 0) return null;
 
