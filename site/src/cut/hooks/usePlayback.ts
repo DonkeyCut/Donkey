@@ -140,6 +140,12 @@ const voiceSpan = (sp: ClipSpan) => {
 class Engine {
   /** Which engine this is, for the perf eval's pool dump. */
   readonly serial = ++engineSerial;
+
+  /** The mixer's own account of itself; see `PreviewMixer.soundState`. */
+  soundState() {
+    return this.mixer.soundState();
+  }
+
   private comp: FrameCompositor;
   private pool = new FrameSourcePool(DECODER_BUDGET, () => this.wake());
   private mixer = new PreviewMixer();
@@ -745,9 +751,16 @@ export function usePlayback(canvasRef: RefObject<HTMLCanvasElement | null>) {
     if (process.env.NODE_ENV !== "production") {
       (window as unknown as Record<string, unknown>).__cutDevEngine = engine;
     }
+    // A preview that has gone quiet looks identical from outside whatever the
+    // reason, and it goes quiet on machines and links that are not here. This
+    // reads back what the sound is doing — the clock, and where each voice has
+    // read to — in any build. Numbers only, and only when asked for.
+    const win = window as unknown as Record<string, unknown>;
+    win.__cutSound = () => engine.soundState();
     registerSourceSampler((clipId) => engine.sourceFor(clipId));
     return () => {
       registerSourceSampler(null);
+      delete win.__cutSound;
       engine.dispose();
     };
   }, [canvasRef]);

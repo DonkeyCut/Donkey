@@ -84,6 +84,11 @@ globals.AudioContext = FakeContext;
 /** Reads that throw, and reads that never answer, over a stretch of wall time. */
 let failUntil = 0;
 let hangUntil = 0;
+/** A walk that reports itself over before the track really is — bytes that
+ * never came, a decoder closed under it. Spent the first time it fires. */
+let endEarlyAt = Infinity;
+/** Where the track truly stops, which can be short of the clip. */
+let trackEnd = CLIP_S;
 
 const waiting: { at: number; wake: () => void }[] = [];
 
@@ -99,16 +104,25 @@ const walks = { opened: 0 };
 const openAudioWalk = (_url: string, from: number, to?: number) => {
   walks.opened++;
   const end = to ?? CLIP_S;
+  // This walk's own false ending, spent on opening: a walk that gives up stays
+  // given up, and the walk sent after it reads the file properly.
+  const givesUpAt = endEarlyAt;
+  endEarlyAt = Infinity;
   let pos = from;
   let closed = false;
+  let done = false;
   return {
     async next() {
-      if (closed) return null;
+      if (closed || done) return null;
       if (wall < hangUntil) return new Promise<null>(() => {});
       await delivered(pos + PART_S);
       if (closed) return null;
       if (wall < failUntil) throw new Error("the link dropped");
-      if (pos >= end - 1e-6) return null;
+      if (pos >= givesUpAt) {
+        done = true;
+        return null;
+      }
+      if (pos >= Math.min(end, trackEnd) - 1e-6) return null;
       const duration = Math.min(PART_S, end - pos);
       const part = {
         buffer: new AudioBuffer({
@@ -203,7 +217,10 @@ const voice = {
 
 /** Play the clip through, running `during` on each frame at the timeline time
  * it is drawing. Answers what was heard. */
-async function play(during?: (t: number, ctx: FakeContext) => void): Promise<Played[]> {
+async function play(
+  during?: (t: number, ctx: FakeContext) => void,
+  file: { endEarlyAt?: number; trackEnd?: number } = {}
+): Promise<Played[]> {
   wall = 0;
   ctxTime = 0;
   resumes = 0;
@@ -213,6 +230,8 @@ async function play(during?: (t: number, ctx: FakeContext) => void): Promise<Pla
   reMints.asked = 0;
   failUntil = 0;
   hangUntil = 0;
+  endEarlyAt = file.endEarlyAt ?? Infinity;
+  trackEnd = file.trackEnd ?? CLIP_S;
   const mixer = new PreviewMixer();
   mixer.start(0);
   try {
@@ -273,6 +292,25 @@ describe("the preview's sound over a link that only just keeps up", () => {
     });
     expect(heard(sound, 0, 18)).toBeGreaterThan(0.9);
     expect(heard(sound, 50, CLIP_S)).toBeGreaterThan(0.9);
+  });
+
+  test("goes after the sound a walk stopped short of", async () => {
+    // The failure this is here for: a walk reports the same ending whether it
+    // read the track's last sample or gave up on it, and a voice that believes
+    // an ending five seconds into a long clip plays the rest of it in silence.
+    const sound = await play(undefined, { endEarlyAt: 5 });
+    expect(heard(sound, 0, 5)).toBeGreaterThan(0.9);
+    expect(heard(sound, 10, CLIP_S)).toBeGreaterThan(0.9);
+    expect(walks.opened).toBeGreaterThan(1); // it went back for the rest
+  });
+
+  test("believes an ending two walks agree on", async () => {
+    // A track really can stop before the picture does. One walk goes back for
+    // what it missed; a second that gets no further has found the end.
+    const sound = await play(undefined, { trackEnd: 30 });
+    expect(heard(sound, 0, 29)).toBeGreaterThan(0.9);
+    expect(heard(sound, 32, CLIP_S)).toBe(0);
+    expect(walks.opened).toBeLessThan(4);
   });
 
   test("picks its context back up when the browser puts it down", async () => {

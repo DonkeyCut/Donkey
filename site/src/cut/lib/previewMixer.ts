@@ -106,6 +106,9 @@ interface LiveVoice {
    * than a verdict: anything that moves the voice clears it, so a seek back
    * into the clip plays again. */
   ended: boolean;
+  /** The furthest point in the source a walk has ended at. A second walk that
+   * gets no further has found where the track really stops. */
+  reached: number;
   /** Consecutive failed reads, and the wall time (performance.now) the next
    * one may be tried at. */
   attempts: number;
@@ -126,6 +129,9 @@ const FILL_STALL_MS = 15_000;
 const READ_RETRY_MS = 1_000;
 const READ_RETRIES = 3;
 const READ_RECHECK_MS = 10_000;
+/** How close to the clip's end a walk may stop and be believed. A track
+ * routinely runs a fraction short of the picture it came with. */
+const END_SLACK_S = 0.25;
 
 /** One audio effect element the graph is carrying: its recipe's chain, and
  * the pair of gains that cross the mix between treated and untreated. */
@@ -261,6 +267,22 @@ export class PreviewMixer {
       return this.heard(wall);
     }
     return this.heard(graph);
+  }
+
+  /**
+   * Where the playhead is, with the clock allowed to re-aim nothing.
+   *
+   * A read asks with this. Asking with `now()` lets a read that took a moment
+   * trip the re-anchor, and re-anchoring disowns every voice — including the
+   * one this read was for, whose sound is then thrown away by the act of
+   * finding out where to put it.
+   */
+  private at(): number {
+    if (!this.anchor) return 0;
+    const wall = this.anchor.timeline + (performance.now() - this.anchor.wall) / 1000;
+    if (!this.ctx || this.ctx.state !== "running") return wall;
+    const graph = this.anchor.timeline + (this.ctx.currentTime - this.anchor.ctx);
+    return this.heard(Math.abs(graph - wall) > 0.25 ? wall : graph);
   }
 
   /**
@@ -481,6 +503,41 @@ export class PreviewMixer {
     }
   }
 
+  /**
+   * What the sound is doing right now: the clock it runs on and where each
+   * voice has read to. Numbers only — no media, and nothing naming a project.
+   *
+   * A preview that has gone quiet looks the same from outside whatever the
+   * reason, and the reasons live in here. Reachable in any build as
+   * `__cutSound()`, because the machine a cut goes quiet on is rarely the one
+   * a developer is sitting at.
+   */
+  soundState() {
+    const ctx = this.ctx;
+    const wall = performance.now();
+    return {
+      running: this.running,
+      ctx: ctx
+        ? { state: ctx.state, time: +ctx.currentTime.toFixed(2), ...this.clockLead() }
+        : null,
+      at: +this.at().toFixed(2),
+      voices: [...this.voices].map(([id, v]) => ({
+        id,
+        url: v.url.slice(0, 60),
+        scheduled: +v.scheduled.toFixed(2),
+        out: v.out,
+        windows: v.windows.length,
+        reading: v.filling,
+        readingMs: v.filling ? Math.round(wall - v.fillAt) : 0,
+        walk: !!v.walk,
+        ended: v.ended,
+        reached: Number.isFinite(v.reached) ? +v.reached.toFixed(2) : null,
+        attempts: v.attempts,
+        retryInMs: Math.max(0, Math.round(v.retryAt - wall)),
+      })),
+    };
+  }
+
   /** Drop the decode cache for a source that has been replaced. */
   forget(url: string): void {
     for (const key of [...this.decoded.keys()]) {
@@ -522,6 +579,7 @@ export class PreviewMixer {
       fillAt: 0,
       gen: 0,
       ended: false,
+      reached: -Infinity,
       attempts: 0,
       retryAt: 0,
     };
@@ -583,15 +641,27 @@ export class PreviewMixer {
       }
       if (!current()) return;
       if (!buffer) {
-        // The reader answered with nothing left to play. A track can stop
-        // before the picture does, and a clip whose file carries no sound at
-        // all answers this way from the first ask.
-        live.ended = true;
+        // A walk reports the same ending whether it read the track's last
+        // sample or gave up on it: bytes that never came, a decoder closed
+        // under it, a link that dropped mid-file. Believed, an ending a few
+        // seconds into a long clip plays the rest of the cut in silence while
+        // the picture reads happily past it — so an ending short of the clip
+        // is a failed read, and another walk goes after the sound it did not
+        // reach. Two things stop that running away: a walk that gets no
+        // further than the one before it has found where the track really
+        // stops, and a track that runs a fraction short of its picture is
+        // inside the slack.
+        if (sourceFrom >= live.out - END_SLACK_S || sourceFrom <= live.reached + 1e-3) {
+          live.ended = true;
+        } else {
+          live.reached = sourceFrom;
+          // A source that stopped answering mid-file is the one case a
+          // re-mint cannot speak to, so this failure keeps to itself.
+          this.miss(live, false);
+        }
         return;
       }
-      // Reading the clock can re-aim the voices (`restart`), so it happens
-      // before the placement below is computed.
-      const tNow = this.now();
+      const tNow = this.at();
       if (!current() || live.scheduled !== from) return;
       const until = from + buffer.duration;
       if (until <= tNow) {
@@ -680,10 +750,11 @@ export class PreviewMixer {
   /** A read that failed, came back empty, or stopped answering. The voice
    * gives up where it was, waits, and asks again — and asks for as long as the
    * play lasts. */
-  private miss(live: LiveVoice): void {
+  private miss(live: LiveVoice, report = true): void {
     this.moved(live);
     live.attempts += 1;
     this.backOff(live, live.attempts);
+    if (!report) return;
     // There is no element to reload and nothing else asks on the sound's
     // behalf, so a signed URL past its window would stay past it. The picture's
     // readers report their failed reads the same way; the re-mint that follows
