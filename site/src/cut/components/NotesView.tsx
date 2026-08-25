@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { FolderPlus, Loader2, Plus, StickyNote } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -32,7 +32,6 @@ const NOTES_MOVE_MIME = "application/x-donkey-notes";
  * folders on the desktop-style shelf the library uses. */
 export function NotesView() {
   const client = useQueryClient();
-  const router = useRouter();
   const base = useCutBase();
   const notes = useNotes();
   const [draft, setDraft] = useState<NoteDraft | null>(null);
@@ -48,8 +47,14 @@ export function NotesView() {
   const shown = list.filter((n) => (n.folderId ?? null) === openFolder);
 
   const reload = () => void client.invalidateQueries({ queryKey: notesKey });
+  // Opening a folder and stepping back out only change this page's query, so
+  // they go through the history API. This page is prefetched as a static
+  // shell, and a router push at the URL it is already on has nothing to fetch
+  // and stops there — the crumb out of a folder did nothing at all. A
+  // pushState reaches the router the same way and `useSearchParams` picks it
+  // up, so the back button still steps folder → root.
   const gotoFolder = (id: string | null) =>
-    router.push(homeHref(base, "notes", id));
+    window.history.pushState(null, "", homeHref(base, "notes", id));
 
   const openNew = () =>
     setDraft({
@@ -289,7 +294,8 @@ export function NotesView() {
                 n.folderId === id ? { ...n, folderId: null } : n,
               ),
             }));
-            if (openFolder === id) router.replace(homeHref(base, "notes"));
+            if (openFolder === id)
+              window.history.replaceState(null, "", homeHref(base, "notes"));
             await deleteNoteFolder(id).catch(() => reload());
           }}
           onDropIds={(ids, folderId) => void moveNotes(ids, folderId)}
