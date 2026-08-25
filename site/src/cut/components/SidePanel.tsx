@@ -98,7 +98,7 @@ import { useRevealEffect, useRevealFlash } from "@/cut/lib/refReveal";
 import { usePanelRequestEffect } from "@/cut/lib/panelRequest";
 import { CopyNameLabel } from "./AssetRefs";
 import { AudioCardFace, AudioPanel } from "./AudioPanel";
-import { FolderCrumb, FolderShelf } from "./desktopFolders";
+import { FolderCrumb, FolderShelf, Marquee, useTilePicks } from "./desktopFolders";
 import { TemplateCard } from "./TemplateCard";
 import { GenerateVideoPanel } from "./GeneratePanel";
 import { ImageGenPanel } from "./ImageGenPanel";
@@ -646,6 +646,9 @@ function ProjectFilesPanel({
   // Fonts are project assets (their bytes live in media/) but they belong to
   // the text inspector's font menu, never the Media grid.
   const assets = useEditor((s) => s.assets).filter((a) => a.origin == null && a.type !== "font");
+  // Which tiles are picked, so a sweep or a ⇧-click can hand the timeline a
+  // run of media in one drag. Anything that leaves the grid leaves the pick.
+  const { picked, setPicked, pick } = useTilePicks(assets.map((a) => a.id));
   const templates = useEditor((s) => s.templates);
   const exportOpen = useEditor((s) => s.exportOpen);
   // A render that finishes in the background (dialog closed) drops a new file in
@@ -793,9 +796,22 @@ function ProjectFilesPanel({
             this project.
           </div>
         ) : (
-          <div className="grid grid-cols-2 content-start gap-2.5 px-3.5">
+          <Marquee
+            scope="self"
+            rootClassName="relative px-3.5"
+            className="grid grid-cols-2 content-start gap-2.5"
+            selected={picked}
+            setSelected={setPicked}
+          >
             {assets.map((a) => (
-              <AssetCard key={a.id} asset={a} projectId={projectId} />
+              <AssetCard
+                key={a.id}
+                asset={a}
+                projectId={projectId}
+                selected={picked.has(a.id)}
+                onSelect={(e) => pick(e, a.id, assets.map((x) => x.id))}
+                dragGroup={[...picked]}
+              />
             ))}
             {importing && (
               <div className="flex aspect-square flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-input text-[11px] text-muted-foreground">
@@ -805,7 +821,7 @@ function ProjectFilesPanel({
                 </span>
               </div>
             )}
-          </div>
+          </Marquee>
         )}
 
         {exports.length + exporting.length + preparing.length > 0 && (
@@ -969,7 +985,23 @@ function UploadState({ asset }: { asset: MediaAsset }) {
   );
 }
 
-function AssetCard({ asset, projectId }: { asset: MediaAsset; projectId: string }) {
+function AssetCard({
+  asset,
+  projectId,
+  selected,
+  onSelect,
+  dragGroup,
+}: {
+  asset: MediaAsset;
+  projectId: string;
+  selected?: boolean;
+  /** Clicking the card picks it — plain replaces the selection, ⇧/⌘ adds to
+   * it. A pick never places anything; the timeline gets media by drag or by
+   * the card's own + button. */
+  onSelect?: (e: React.MouseEvent) => void;
+  /** Everything picked right now, so dragging one card drags them all. */
+  dragGroup?: string[];
+}) {
   const caps = useCutCaps();
   const [saved, setSaved] = useState(false);
   // Number of timeline items that would be cascade-deleted; null = no prompt.
@@ -1012,11 +1044,13 @@ function AssetCard({ asset, projectId }: { asset: MediaAsset; projectId: string 
     <>
     <div
       ref={attachReveal}
+      data-sel-id={asset.id}
       className="asset-card group flex flex-col gap-1.5 text-left"
       title="Drag onto the timeline, or click + to add"
       draggable
+      onClick={onSelect}
       onDragStart={(e) => {
-        setAssetDragData(e, asset.id);
+        setAssetDragData(e, asset.id, dragGroup);
         setObjectDragImage(e);
       }}
       onDragEnd={clearAssetDrag}
@@ -1037,7 +1071,7 @@ function AssetCard({ asset, projectId }: { asset: MediaAsset; projectId: string 
         data-drag-object
         className={cn(
           "relative aspect-square overflow-hidden rounded-lg border border-border bg-muted transition-colors group-hover:border-input",
-          flash && "ring-2 ring-[#0a84ff] ring-offset-1"
+          (flash || selected) && "ring-2 ring-[#0a84ff] ring-offset-1"
         )}
       >
         {asset.type === "video" ? (
@@ -1321,18 +1355,25 @@ function LibraryPanel({ projectId }: { projectId: string }) {
     (files) => void upload(files)
   );
 
+  const all = assets ?? [];
+  const shown = all.filter((a) => folderOf(a) === openFolder);
+
+  // Which cards are picked, so a sweep or a ⇧-click hands the timeline (or a
+  // folder tile) a run of clips in one drag. Only what the open folder shows
+  // can be picked, so walking into another folder leaves its selection behind.
+  const { picked, setPicked, pick } = useTilePicks(shown.map((a) => a.id));
+
   // Let a clip be dragged onto a folder tile to file it (alongside the timeline
   // drag payload the card already sets). The ghost is the card's picture, and
   // it hands over to the timeline's segment preview.
   const onCardDragExtra = (e: React.DragEvent, a: LibraryAsset) => {
-    e.dataTransfer.setData(LIBRARY_MOVE_MIME, JSON.stringify([a.id]));
+    const ids = picked.has(a.id) ? [a.id, ...[...picked].filter((id) => id !== a.id)] : [a.id];
+    e.dataTransfer.setData(LIBRARY_MOVE_MIME, JSON.stringify(ids));
     e.dataTransfer.effectAllowed = "copyMove";
     setObjectDragImage(e);
   };
 
-  const all = assets ?? [];
   const bothShelves = availableResidencies().length > 1;
-  const shown = all.filter((a) => folderOf(a) === openFolder);
   const shownTemplates = templates.filter((t) => (t.folderId ?? null) === openFolder);
   // The Camera Roll tile leads the shelf while the phone has synced anything.
   const shelfFolders: (LibraryFolder & { locked?: boolean })[] =
@@ -1478,31 +1519,39 @@ function LibraryPanel({ projectId }: { projectId: string }) {
           </div>
         ) : null
       ) : (
-        <ScrollArea
-          className="min-h-0 flex-1"
-          contentClassName="grid grid-cols-2 content-start gap-2.5 px-3.5 pb-3.5"
-        >
-          {shown.map((a) => (
-            <LibraryCard
-              key={a.id}
-              asset={a}
-              mention
-              // A font is used from the font menu; there is nothing to place.
-              onUse={
-                a.type === "font" ? undefined : () => void addLibraryAssetToProject(projectId, a)
-              }
-              onDelete={() => setDeleting(a)}
-              onDragStartExtra={(e) => onCardDragExtra(e, a)}
-            />
-          ))}
-          {uploading > 0 && (
-            <div className="flex aspect-square flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-input text-[11px] text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              <span>
-                Uploading… <LiveElapsed />
-              </span>
-            </div>
-          )}
+        <ScrollArea className="min-h-0 flex-1" contentClassName="pb-3.5">
+          <Marquee
+            scope="self"
+            rootClassName="relative min-h-full px-3.5"
+            className="grid grid-cols-2 content-start gap-2.5"
+            selected={picked}
+            setSelected={setPicked}
+          >
+            {shown.map((a) => (
+              <LibraryCard
+                key={a.id}
+                asset={a}
+                mention
+                selected={picked.has(a.id)}
+                onClick={(e) => pick(e, a.id, shown.map((x) => x.id))}
+                dragGroup={shown.filter((x) => picked.has(x.id))}
+                // A font is used from the font menu; there is nothing to place.
+                onUse={
+                  a.type === "font" ? undefined : () => void addLibraryAssetToProject(projectId, a)
+                }
+                onDelete={() => setDeleting(a)}
+                onDragStartExtra={(e) => onCardDragExtra(e, a)}
+              />
+            ))}
+            {uploading > 0 && (
+              <div className="flex aspect-square flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-input text-[11px] text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                <span>
+                  Uploading… <LiveElapsed />
+                </span>
+              </div>
+            )}
+          </Marquee>
         </ScrollArea>
       )}
 

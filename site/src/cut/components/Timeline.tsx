@@ -19,8 +19,10 @@ import {
   draggedAssetId,
   draggedLibraryId,
   draggingAssetId,
+  draggingAssetIds,
   draggingElement,
   draggingLibrary,
+  draggingLibraryMany,
   draggingTemplate,
   hasAssetDrag,
   hasElementDrag,
@@ -38,6 +40,7 @@ import {
   libraryMediaUrl,
   libraryPosterUrl,
   saveAssetToLibrary,
+  type LibraryAsset,
 } from "@/cut/lib/library";
 import { originalSettings, type ExportDoc } from "@/cut/lib/exportClient";
 import { useExports } from "@/cut/lib/exportStore";
@@ -1557,6 +1560,76 @@ export function Timeline() {
         ghost: {
           url: libraryMediaUrl(lib.fileName, lib.residency),
           kind: lib.type,
+  /** How much timeline one asset takes when it lands. */
+  const laidLength = (asset: { type: string; duration: number }) =>
+    asset.type === "image" ? STILL_SECONDS : asset.duration || STILL_SECONDS;
+
+  /** Where the next asset of each kind lands. Video and audio run on their own
+   * rows, so a group holding both lays two runs side by side; an element sits
+   * at the pointer and takes no room from either. */
+  const runCursor = (t: number, atElement: number) => {
+    const at = { clip: t, audio: t };
+    return (asset: MediaAsset, sticker: boolean) => {
+      if (sticker) return atElement;
+      const lane = isClipMedia(asset.type) ? "clip" : "audio";
+      const start = at[lane];
+      at[lane] = start + laidLength(asset);
+      return start;
+    };
+  };
+
+  /** Lay a whole dragged group down in order, each one after the last. A
+   * single card is a group of one, so every drop takes this path. `only`
+   * narrows the group to what the row under the pointer accepts. */
+  const placeAssetsAt = (
+    ids: string[],
+    t: number,
+    atElement: number,
+    audioRow = 0,
+    place: TrackTarget = TRACK_ZERO,
+    elementLane?: number,
+    only?: (asset: MediaAsset) => boolean
+  ) => {
+    const next = runCursor(t, atElement);
+    for (const id of ids) {
+      const asset = useEditor.getState().assets.find((a) => a.id === id);
+      if (!asset || asset.type === "font") continue;
+      if (only && !only(asset)) continue;
+      const sticker = !!stickerOf(asset);
+      placeAssetAt(id, asset.type, next(asset, sticker), audioRow, place, elementLane);
+    }
+  };
+
+  /** Copy a dragged group of library assets into the project, in order, then
+   * lay them down. Each import waits for the last so the run keeps the order
+   * they were selected in. */
+  const placeLibraryAt = async (
+    projectId: string,
+    items: LibraryAsset[],
+    t: number,
+    atElement: number,
+    audioRow = 0,
+    place: TrackTarget = TRACK_ZERO,
+    only?: (asset: MediaAsset) => boolean
+  ) => {
+    const next = runCursor(t, atElement);
+    for (const item of items) {
+      try {
+        const asset = await importLibraryAsset(projectId, item);
+        if (asset.type === "font") continue;
+        if (only && !only(asset)) continue;
+        const sticker = !!stickerOf(asset);
+        placeAssetAt(asset.id, asset.type, next(asset, sticker), audioRow, place);
+      } catch {
+        // A copy that fails leaves the rest of the run alone.
+      }
+    }
+  };
+
+  /** What a video row takes: the clips, and none of the sound or elements a
+   * mixed selection may also be carrying. */
+  const clipsOnly = (asset: MediaAsset) => isClipMedia(asset.type) && !stickerOf(asset);
+
           aspect: lib.width && lib.height ? lib.width / lib.height : undefined,
           // The card's cover is already painted and cached, so the segment
           // has a frame of the video in it from the first move — true frames
@@ -1647,15 +1720,16 @@ export function Timeline() {
       const projectId = useEditor.getState().projectId;
       clearAssetDrag();
       if (libId && lib && isClipMedia(lib.type) && projectId) {
-        void importLibraryAsset(projectId, lib)
-          .then((asset) => useEditor.getState().addVideoFromAsset(asset.id, place, t))
-          .catch(() => {});
+        void placeLibraryAt(projectId, libGroup, t, t, 0, place, clipsOnly);
         return;
       }
       const id = draggedAssetId(e);
+      // The whole dragged group, read before the drag is cleared.
+      const libGroup = draggingLibraryMany();
+      const assetGroup = draggingAssetIds();
       const asset = id ? useEditor.getState().assets.find((a) => a.id === id) : null;
       if (id && !stickerOf(asset) && isClipMedia(asset?.type)) {
-        useEditor.getState().addVideoFromAsset(id, place, t);
+        placeAssetsAt(assetGroup, t, t, 0, place, undefined, clipsOnly);
         return;
       }
       if (stockVideo && projectId) {
@@ -1955,6 +2029,10 @@ export function Timeline() {
         // Elements land at the pointer's own time, not `dropTimeAt`, which
         // pins everything to 0 on an empty timeline — a clip starts the film
         // there, but an element lands where it was dropped.
+        // Everything the drag is carrying — one card, or the whole marquee
+        // selection it was grabbed from — read before the drag is cleared.
+        const libGroup = draggingLibraryMany();
+        const assetGroup = draggingAssetIds();
         const atElement = Math.max(0, timeAt(e.clientX));
         if (element) {
           e.preventDefault();
@@ -1975,34 +2053,14 @@ export function Timeline() {
         }
         if (libId && lib && projectId) {
           e.preventDefault();
-          void importLibraryAsset(projectId, lib)
-            .then((asset) => {
-              if (asset.type !== "font")
-                placeAssetAt(
-                  asset.id,
-                  asset.type,
-                  stickerOf(asset) ? atElement : t,
-                  audioRow,
-                  videoPlace
-                );
-            })
-            .catch(() => {});
+          void placeLibraryAt(projectId, libGroup, t, atElement, audioRow, videoPlace);
           return;
         }
 
         const id = draggedAssetId(e);
         if (id) {
           e.preventDefault();
-          const asset = useEditor.getState().assets.find((a) => a.id === id);
-          if (asset && asset.type !== "font")
-            placeAssetAt(
-              id,
-              asset.type,
-              stickerOf(asset) ? atElement : t,
-              audioRow,
-              videoPlace,
-              elementLane
-            );
+          placeAssetsAt(assetGroup, t, atElement, audioRow, videoPlace, elementLane);
           return;
         }
 

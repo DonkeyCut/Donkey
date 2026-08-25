@@ -1023,6 +1023,7 @@ export function LibraryCard({
   offline = false,
   area,
   mention = false,
+  dragGroup,
   onClick,
   onDelete,
   onUse,
@@ -1041,7 +1042,10 @@ export function LibraryCard({
   /** The card sits beside a prompt (the editor's Library panel), so its name
    * doubles as a mention token to copy. */
   mention?: boolean;
-  onClick?: () => void;
+  /** Everything picked on this shelf right now. Dragging a card that is one of
+   * them carries the whole set, so a drop lands the lot. */
+  dragGroup?: LibraryAsset[];
+  onClick?: (e: React.MouseEvent) => void;
   onDelete?: () => void;
   onUse?: () => void;
   onDragStartExtra?: (e: React.DragEvent) => void;
@@ -1112,7 +1116,7 @@ export function LibraryCard({
                 .open(lightboxItemFromLibrary(a, !onUse))
       }
       onDragStart={(e) => {
-        setLibraryDragData(e, a);
+        setLibraryDragData(e, a, dragGroup);
         onDragStartExtra?.(e);
       }}
       onDragEnd={clearAssetDrag}

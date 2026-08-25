@@ -16,11 +16,16 @@ export const ASSET_MIME = "application/x-cut-asset";
  * target that needs the id during `dragover` (e.g. to size an insertion
  * preview) reads it here instead. */
 let inFlightAssetId: string | null = null;
+/** The whole group a drag is carrying, the grabbed one first. A single card
+ * carries itself; a card inside a marquee selection carries the selection, so
+ * one drop lays the lot down. */
+let inFlightAssetIds: string[] = [];
 
-export function setAssetDragData(e: React.DragEvent, assetId: string) {
+export function setAssetDragData(e: React.DragEvent, assetId: string, group?: string[]) {
   e.dataTransfer.setData(ASSET_MIME, assetId);
   e.dataTransfer.effectAllowed = "copyMove";
   inFlightAssetId = assetId;
+  inFlightAssetIds = groupWithLead(assetId, group);
   // Every media drag also carries the unified asset ref, so reference drop
   // zones (AI chat, the image/video creators) accept it without knowing the
   // source surface.
@@ -33,22 +38,46 @@ export function draggingAssetId(): string | null {
   return inFlightAssetId;
 }
 
+/** Every asset id the drag is carrying, the grabbed one first. */
+export function draggingAssetIds(): string[] {
+  return inFlightAssetIds;
+}
+
+/** The grabbed item, then the rest of its group — a drop lands them in that
+ * order. A grab outside the selection carries only itself. */
+function groupWithLead<T>(lead: T, group: T[] | undefined, same?: (a: T, b: T) => boolean): T[] {
+  const eq = same ?? ((a: T, b: T) => a === b);
+  if (!group || !group.some((g) => eq(g, lead))) return [lead];
+  return [lead, ...group.filter((g) => !eq(g, lead))];
+}
+
 /** A library asset dragged from the library panel. Unlike a project asset it is
  * not in the project yet, so it carries its own MIME and a minimal shape the
  * timeline uses to size the drop preview before the copy-into-project happens. */
 export const LIBRARY_MIME = "application/x-cut-library";
 
 let inFlightLibrary: LibraryAsset | null = null;
+let inFlightLibraryMany: LibraryAsset[] = [];
 
-export function setLibraryDragData(e: React.DragEvent, asset: LibraryAsset) {
+export function setLibraryDragData(
+  e: React.DragEvent,
+  asset: LibraryAsset,
+  group?: LibraryAsset[]
+) {
   e.dataTransfer.setData(LIBRARY_MIME, asset.id);
   e.dataTransfer.effectAllowed = "copy";
   inFlightLibrary = asset;
+  inFlightLibraryMany = groupWithLead(asset, group, (a, b) => a.id === b.id);
   setRefDragData(e, refFromLibrary(asset));
 }
 
 export function draggingLibrary(): LibraryAsset | null {
   return inFlightLibrary;
+}
+
+/** Every library asset the drag is carrying, the grabbed one first. */
+export function draggingLibraryMany(): LibraryAsset[] {
+  return inFlightLibraryMany;
 }
 
 export function hasLibraryDrag(e: React.DragEvent | DragEvent): boolean {
@@ -319,7 +348,9 @@ export function setChipDragImage(e: React.DragEvent) {
 /** Clear the in-flight ids; call on `dragend` and after a drop. */
 export function clearAssetDrag() {
   inFlightAssetId = null;
+  inFlightAssetIds = [];
   inFlightLibrary = null;
+  inFlightLibraryMany = [];
   inFlightTemplate = null;
   clearRefDrag();
 }

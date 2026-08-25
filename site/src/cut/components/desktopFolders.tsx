@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Folder, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -74,6 +74,48 @@ export function FolderGlyph({ className }: { className?: string }) {
   return <Folder className={cn("fill-[#8cc5ff] text-[#8cc5ff]", className)} aria-hidden="true" />;
 }
 
+/**
+ * Click selection over a grid of tiles, the desktop's rules: a plain click
+ * picks one, ⌘/Ctrl toggles one in or out, ⇧ takes the run from the last pick
+ * to this one. Pairs with `Marquee`, which sweeps the same set.
+ */
+export function useTilePicks(shown?: readonly string[]) {
+  const [raw, setPicked] = useState<Set<string>>(new Set());
+  const anchor = useRef<string | null>(null);
+  // A pick reaches no further than the eye does. Navigating into a folder or
+  // deleting a tile leaves ids in the set that are no longer on screen, and a
+  // drag that carried those would file or lay down items nobody can see.
+  const picked = useMemo(() => {
+    if (!shown) return raw;
+    const live = new Set(shown);
+    return new Set([...raw].filter((id) => live.has(id)));
+  }, [raw, shown]);
+  const pick = useCallback((e: React.MouseEvent, id: string, order: string[]) => {
+    if (e.metaKey || e.ctrlKey) {
+      setPicked((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+      anchor.current = id;
+      return;
+    }
+    if (e.shiftKey && anchor.current) {
+      const from = order.indexOf(anchor.current);
+      const to = order.indexOf(id);
+      if (from >= 0 && to >= 0) {
+        const [lo, hi] = from < to ? [from, to] : [to, from];
+        setPicked(new Set(order.slice(lo, hi + 1)));
+        return;
+      }
+    }
+    setPicked(new Set([id]));
+    anchor.current = id;
+  }, []);
+  return { picked, setPicked, pick };
+}
+
 // Elements a press should not turn into a rubber-band: the cards themselves
 // (they drag), folder tiles / breadcrumbs, and any interactive control.
 const MARQUEE_SKIP =
@@ -86,11 +128,21 @@ const MARQUEE_SKIP =
  * selection; a plain click on empty space clears it. */
 export function Marquee({
   className,
+  rootClassName = "relative min-h-[68vh] flex-1",
+  scope = "page",
   selected,
   setSelected,
   children,
 }: {
   className?: string;
+  /** The band's own box. A page grid fills the arena; a panel grid takes the
+   * column it is in. */
+  rootClassName?: string;
+  /** Where a press starts a sweep. "page" arms the whole content arena, so a
+   * press anywhere beside the grid begins one; "self" keeps it inside this
+   * box, which is what a side panel wants — a press in the preview or the
+   * timeline is not a sweep of the panel's tiles. */
+  scope?: "page" | "self";
   selected: Set<string>;
   setSelected: (s: Set<string>) => void;
   children: React.ReactNode;
@@ -103,7 +155,10 @@ export function Marquee({
   );
 
   useEffect(() => {
-    const arena = ref.current?.closest("main") ?? ref.current?.parentElement;
+    const arena =
+      scope === "self"
+        ? ref.current
+        : (ref.current?.closest("main") ?? ref.current?.parentElement);
     if (!arena) return;
     const onPointerDown = (e: PointerEvent) => {
       if (e.button !== 0 || (e.target as HTMLElement).closest(MARQUEE_SKIP)) return;
@@ -142,10 +197,10 @@ export function Marquee({
     };
     arena.addEventListener("pointerdown", onPointerDown);
     return () => arena.removeEventListener("pointerdown", onPointerDown);
-  }, [setSelected]);
+  }, [setSelected, scope]);
 
   return (
-    <div ref={ref} className="relative min-h-[68vh] flex-1">
+    <div ref={ref} className={rootClassName}>
       <div className={className}>{children}</div>
       {rect && (
         <div
