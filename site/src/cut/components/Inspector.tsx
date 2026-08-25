@@ -517,7 +517,7 @@ function ClipPanel({ clip, onColor }: { clip: VideoClip; onColor: () => void }) 
             valueClassName="w-9 text-muted-foreground"
             value={volume}
             min={0}
-            max={1.5}
+            max={3}
             step={0.05}
             snap={[1]}
             format={formatPercent}
@@ -758,7 +758,7 @@ function ClipGeneratedAudio({ clip }: { clip: VideoClip }) {
             valueClassName="w-9 text-muted-foreground"
             value={genVol}
             min={0}
-            max={1.5}
+            max={3}
             step={0.05}
             snap={[1]}
             format={formatPercent}
@@ -879,7 +879,7 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
             valueClassName="w-9 text-muted-foreground"
             value={clip.volume}
             min={0}
-            max={1.5}
+            max={3}
             step={0.05}
             snap={[1]}
             format={formatPercent}

@@ -42,7 +42,7 @@ export const AUDIO_TOOLS = [
         items: { type: "string" },
         description: "Project asset ids to match the sound of — an audio track to emulate, or video/images whose mood the score should carry. Append @seconds to match the passage around a pinned moment (\"<id>@62\")",
       },
-      volume: num("Bed volume 0..1.5 when placed (default 0.4 so it sits under speech)"),
+      volume: num("Bed volume 0..3 when placed (default 0.4 so it sits under speech)"),
       add_to_timeline: bool("Place it on the soundtrack (default false — it stays on its chat card until the user asks)"),
       start: num("Timeline start in seconds (passing it implies add_to_timeline; default when placed: the playhead)"),
     }, ["prompt"]),

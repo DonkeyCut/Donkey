@@ -537,7 +537,7 @@ export class PreviewMixer {
       }
       const live = this.voices.get(v.id) ?? this.open(v, t);
       if (!live) continue;
-      live.gain.gain.value = Math.max(0, Math.min(1.5, v.gain));
+      live.gain.gain.value = Math.max(0, Math.min(3, v.gain));
       // A read that hangs holds the voice as surely as one that fails, and it
       // holds it quietly: nothing else would ever notice, and the voice would
       // wait on it for the rest of the play.

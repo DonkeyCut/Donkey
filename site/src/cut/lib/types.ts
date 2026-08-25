@@ -475,7 +475,7 @@ export interface VideoClip {
   in: number; // trim-in inside the source, seconds
   out: number; // trim-out inside the source, seconds
   muted: boolean;
-  /** Gain on the clip's own audio, 0..1.5; absent = 1 (unchanged). */
+  /** Gain on the clip's own audio, 0..3; absent = 1 (unchanged). */
   volume?: number;
   /** How the clip meets its region: letterboxed ("fit", default) or scaled to
    * cover it ("fill", cropping the overflow). */
@@ -912,7 +912,7 @@ export interface AudioClip {
   start: number; // timeline position, seconds
   in: number;
   out: number;
-  volume: number; // 0..1.5
+  volume: number; // 0..3
   fadeIn?: number; // seconds, ramp up from the clip start
   fadeOut?: number; // seconds, ramp down into the clip end
   /** Muted from the final mix but kept on the timeline (grayed). */

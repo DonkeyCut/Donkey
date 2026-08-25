@@ -66,7 +66,7 @@ export interface ExportSpec {
     in: number;
     out: number;
     muted: boolean;
-    /** Gain on the clip's own audio, 0..1.5; absent = 1 (unchanged). */
+    /** Gain on the clip's own audio, 0..3; absent = 1 (unchanged). */
     volume?: number;
     /** "fit" letterboxes (default); "fill" covers the region and crops. */
     fit?: "fit" | "fill";
@@ -155,7 +155,7 @@ export interface ExportSpec {
     panX?: number; // crop-window pan -1..1, across whatever overflows
     panY?: number;
     muted: boolean;
-    /** Gain on the clip's own audio, 0..1.5; absent = 1 (unchanged). */
+    /** Gain on the clip's own audio, 0..3; absent = 1 (unchanged). */
     volume?: number;
     speed?: number;
     /** Transition ramps, timeline seconds from this overlay's head/tail. On

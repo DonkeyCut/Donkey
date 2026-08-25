@@ -1392,8 +1392,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
 
   set_clip_volume: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
-      if (!isNum(input.volume)) throw new ToolError("volume is required (0..1.5).");
-      const volume = clamp(input.volume, 0, 1.5);
+      if (!isNum(input.volume)) throw new ToolError("volume is required (0..3).");
+      const volume = clamp(input.volume, 0, 3);
       s.updateClip(clip.id, { volume: Math.abs(volume - 1) < 1e-4 ? undefined : volume });
       const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
       return { id: next.id, volume: next.volume ?? 1 };
@@ -1891,7 +1891,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const aSpeed = a.speed && a.speed > 0 ? a.speed : 1;
       const len = (a.out - a.in) / aSpeed;
       const patch: Partial<AudioClip> = {};
-      if (isNum(input.volume)) patch.volume = clamp(input.volume, 0, 1.5);
+      if (isNum(input.volume)) patch.volume = clamp(input.volume, 0, 3);
       if (isNum(input.fadeIn)) patch.fadeIn = clamp(input.fadeIn, 0, len / 2);
       if (isNum(input.fadeOut)) patch.fadeOut = clamp(input.fadeOut, 0, len / 2);
       if (isNum(input.start)) patch.start = Math.max(0, input.start);
@@ -2992,7 +2992,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const start = isNum(input.start) ? Math.max(0, input.start) : playheadAt();
       cur.addAudioFromAsset(asset.id, start);
       // Sits under speech at a soft bed volume by default; the model can raise it.
-      const volume = isNum(input.volume) ? clamp(input.volume, 0, 1.5) : 0.4;
+      const volume = isNum(input.volume) ? clamp(input.volume, 0, 3) : 0.4;
       const sel = useEditor.getState().selection;
       const clipId = sel?.kind === "audio" ? sel.id : null;
       if (clipId) useEditor.getState().updateAudio(clipId, { volume });

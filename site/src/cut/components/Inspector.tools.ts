@@ -156,10 +156,10 @@ export const INSPECTOR_TOOLS = [
   {
     name: "update_audio",
     description:
-      "Update a soundtrack clip: volume (0..1.5), fadeIn/fadeOut seconds, start position, in/out trim, speed, hidden, or duck. `duck` is voiceover ducking — while this clip plays, ALL other audio (video-clip sound and other music) drops to that gain (0..1); pass 1 to clear ducking. Use it to make a voiceover sit over quieter music.",
+      "Update a soundtrack clip: volume (0..3), fadeIn/fadeOut seconds, start position, in/out trim, speed, hidden, or duck. `duck` is voiceover ducking — while this clip plays, ALL other audio (video-clip sound and other music) drops to that gain (0..1); pass 1 to clear ducking. Use it to make a voiceover sit over quieter music.",
     inputSchema: obj({
       id: str("Soundtrack clip id"),
-      volume: num("0..1.5"),
+      volume: num("0..3 (1 = unchanged, above 1 boosts)"),
       fadeIn: num("Fade-in seconds"),
       fadeOut: num("Fade-out seconds"),
       start: num("Timeline start s"),
@@ -173,7 +173,7 @@ export const INSPECTOR_TOOLS = [
   {
     name: "set_clip_volume",
     description: "Set the gain on a video clip's own audio (soundtrack clips use update_audio).",
-    inputSchema: obj({ clipId: str("Video clip id"), volume: num("0..1.5 (1 = unchanged)") }, ["clipId", "volume"]),
+    inputSchema: obj({ clipId: str("Video clip id"), volume: num("0..3 (1 = unchanged, up to 3 boosts the clip's own sound)") }, ["clipId", "volume"]),
   },
   {
     name: "detach_audio",
