@@ -93,6 +93,14 @@ interface Machine {
    * alone, which is what makes a profile a real machine rather than a
    * simulated one. */
   softwareMs: number;
+  /** How many streams this machine decodes in software at once before they
+   * start splitting a processor between them. A software decoder runs several
+   * threads per stream, so a twelve-thread laptop carries a few 720p streams
+   * at full rate and slows down past that — it does not decode one stream at a
+   * time. Charging every stream by the total number decoding anywhere prices a
+   * twelve-clip montage at forty times a frame, which no machine has ever
+   * done, and the profile then says nothing about any of them. */
+  decodeLanes: number;
   /** How far the picture may sit behind the sound here before a viewer would
    * call it broken. */
   lagP95S: number;
@@ -134,43 +142,50 @@ interface Machine {
    */
   netKbps: number;
   /** Round trip to the media host, charged to every ranged request. A chunk
-   * read is a request, so this is paid per 2MB rather than once. */
+   * read is a request, so this is paid per 2MB rather than once.
+   *
+   * The rates here are read against the fixture's own bitrate (`LONG_KBPS`).
+   * A link at the stream's own rate cannot play it and cache it at once, which
+   * is arithmetic rather than a finding; the profiles sit above that, where
+   * what the reader does with a late read is what decides the picture. */
   rttMs: number;
 }
 
 const MACHINES: Machine[] = [
   // The machine this is being written on: nothing binds, and the numbers are
   // held to the tightest budget in the file.
-  { name: "desktop", cpu: 1, slots: 0, softwareMs: 0, outputLatencyS: 0, netKbps: 0, rttMs: 0, lagP95S: 0.05, stallShare: 0.002, lateShare: 0.02, decayFloor: 0.02 },
+  { name: "desktop", cpu: 1, slots: 0, softwareMs: 0, decodeLanes: 4, outputLatencyS: 0, netKbps: 0, rttMs: 0, lagP95S: 0.05, stallShare: 0.002, lateShare: 0.02, decayFloor: 0.02 },
   // A mainstream laptop with an integrated GPU.
-  { name: "laptop", cpu: 4, slots: 6, softwareMs: 6, outputLatencyS: 0.12, netKbps: 25_000, rttMs: 40, lagP95S: 0.06, stallShare: 0.04, lateShare: 0.1, decayFloor: 0.1 },
+  { name: "laptop", cpu: 4, slots: 6, softwareMs: 6, decodeLanes: 4, outputLatencyS: 0.12, netKbps: 25_000, rttMs: 40, lagP95S: 0.06, stallShare: 0.04, lateShare: 0.1, decayFloor: 0.1 },
   // The one people report from: a 15W six-core with Vega graphics, running a
   // browser that is also drawing the editor.
-  { name: "ryzen-5500u", cpu: 10, slots: 4, softwareMs: 8, outputLatencyS: 0.12, netKbps: 12_000, rttMs: 60, lagP95S: 0.06, stallShare: 0.03, lateShare: 0.05, decayFloor: 0.08 },
+  { name: "ryzen-5500u", cpu: 10, slots: 4, softwareMs: 8, decodeLanes: 4, outputLatencyS: 0.12, netKbps: 18_000, rttMs: 60, lagP95S: 0.06, stallShare: 0.03, lateShare: 0.05, decayFloor: 0.08 },
   // Worse than anything anyone has reported, which is the point: what holds
   // here holds on the machines that have not written in yet.
-  { name: "potato", cpu: 20, slots: 2, softwareMs: 12, outputLatencyS: 0.2, netKbps: 6_000, rttMs: 120, lagP95S: 0.1, stallShare: 0.06, lateShare: 0.2, decayFloor: 0.15 },
+  { name: "potato", cpu: 20, slots: 2, softwareMs: 12, decodeLanes: 2, outputLatencyS: 0.2, netKbps: 18_000, rttMs: 120, lagP95S: 0.1, stallShare: 0.06, lateShare: 0.2, decayFloor: 0.15 },
   // No hardware video decode at all. This is not an exotic machine — a
   // blocklisted driver, a codec the GPU does not carry, a browser started with
   // acceleration off, and every stream is on the CPU. A software decoder is
   // slower than a hardware one; it is not broken, and neither is an editor
   // running on top of one. This profile is held to the same standard a laptop
   // is, because that is the claim.
-  { name: "software-decode", cpu: 4, slots: 0, softwareMs: 8, outputLatencyS: 0.12, netKbps: 25_000, rttMs: 40, lagP95S: 0.06, stallShare: 0.04, lateShare: 0.1, decayFloor: 0.1 },
+  { name: "software-decode", cpu: 4, slots: 0, softwareMs: 8, decodeLanes: 4, outputLatencyS: 0.12, netKbps: 25_000, rttMs: 40, lagP95S: 0.06, stallShare: 0.04, lateShare: 0.1, decayFloor: 0.1 },
 ];
 
 const MACHINE_NAME = arg("--machine") ?? "desktop";
 const MACHINE = ((): Machine => {
   const m = MACHINES.find((x) => x.name === MACHINE_NAME);
   if (!m) throw new Error(`unknown --machine ${MACHINE_NAME}; try ${MACHINES.map((x) => x.name).join(", ")}`);
-  // `--cpu`, `--net` and `--rtt` override the profile, for finding where a
-  // machine actually breaks — and, between them, for telling the two kinds of
+  // `--cpu`, `--slots`, `--sw`, `--net` and `--rtt` override the profile, for
+  // finding where a machine actually breaks — and, between them, for telling the two kinds of
   // starvation apart. A case that fails on the profile and passes with the
   // link opened up was starved of bytes; one that fails either way was starved
   // of decode.
   return {
     ...m,
     cpu: Number(arg("--cpu") ?? m.cpu),
+    slots: Number(arg("--slots") ?? m.slots),
+    softwareMs: Number(arg("--sw") ?? m.softwareMs),
     netKbps: Number(arg("--net") ?? m.netKbps),
     rttMs: Number(arg("--rtt") ?? m.rttMs),
   };
@@ -237,6 +252,15 @@ const GATE = {
   // hundred and sixty, so the budget scales with the machine and keeps meaning
   // the same thing.
   longTaskMs: BASE_GATE.longTaskMs * MACHINE.cpu,
+  // A step of a drag is the same work on any machine: read the ring, compose,
+  // paint. What changes is how long a millisecond of it takes, so the budgets
+  // scale with the throttle for the same reason the long-task one does — a
+  // tenth of a machine answering a drag in a tenth of the rate is the drag
+  // behaving, and a fixed number would only say the profile is slow.
+  scrubP50Ms: BASE_GATE.scrubP50Ms * MACHINE.cpu,
+  scrubP95Ms: BASE_GATE.scrubP95Ms * MACHINE.cpu,
+  jumpP50Ms: BASE_GATE.jumpP50Ms * MACHINE.cpu,
+  jumpP95Ms: BASE_GATE.jumpP95Ms * MACHINE.cpu,
 };
 
 /** How far behind the sound the picture has to be for that frame to read as a
@@ -506,7 +530,7 @@ const LONG_KBPS = 12_000;
  *
  * The keyframe cadence is the load-bearing part. A walk that re-anchors decodes
  * from the keyframe before the ask, so how far back that keyframe sits is what
- * the re-anchor costs — and it is what `FIRST_FRAME_S` is a tolerance for.
+ * the re-anchor costs, and what the lead in `aheadOf` has to cover.
  */
 async function buildLongClip(fps: number): Promise<void> {
   const dst = path.join(OUT, `long-${fps}.mp4`);
@@ -550,6 +574,7 @@ const seedLongClip = (fps: number, prefetch: boolean) => async (page: Page): Pro
       const dev = (window as unknown as {
         __cutDev: {
           useEditor: { getState(): Record<string, unknown>; setState(p: unknown): void };
+          markSignedBatch?: (projectId: string, expiresAt: number | null) => void;
           prefetchCloudMedia?: (
             projectId: string,
             files: { fileName: string; url: string; type?: string }[]
@@ -576,6 +601,10 @@ const seedLongClip = (fps: number, prefetch: boolean) => async (page: Page): Pro
         transitions: [],
         loaded: true,
       });
+      // The project this is seeded into owns no media of its own, so the link
+      // keeper's next re-mint would find nothing for this file and repoint it
+      // at the /media route — a URL the fixture route never answers.
+      dev.markSignedBatch?.("", null);
       await new Promise((r) => setTimeout(r, 200));
       if (prefetch) {
         dev.prefetchCloudMedia?.("perf-eval", [{ fileName: name, url, type: "video" }]);
@@ -620,7 +649,10 @@ async function seed(page: Page, files: string[], transitions: boolean): Promise<
   return page.evaluate(
     async ({ payload, clipS, transitions }) => {
       const dev = (window as unknown as {
-        __cutDev: { useEditor: { getState(): Record<string, unknown>; setState(p: unknown): void } };
+        __cutDev: {
+          useEditor: { getState(): Record<string, unknown>; setState(p: unknown): void };
+          markSignedBatch?: (projectId: string, expiresAt: number | null) => void;
+        };
       }).__cutDev;
       const assets = payload.map((p) => ({
         id: p.id,
@@ -649,6 +681,9 @@ async function seed(page: Page, files: string[], transitions: boolean): Promise<
         transitions: [],
         loaded: true,
       });
+      // Fixture files are not the project's media, so nothing re-mints them —
+      // see seedLongClip.
+      dev.markSignedBatch?.("", null);
       // Let the store's own derive pass settle the transition fields.
       await new Promise((r) => setTimeout(r, 200));
       return {
@@ -829,6 +864,8 @@ interface EvalCase {
   name: string;
   bucket: Bucket;
   transitions: boolean;
+  /** Least link this case is measured over — see `linkKbps`. */
+  minKbps?: number;
   /** The project this case measures; the montage of stock clips when unset. */
   seed?: (page: Page) => Promise<Fixture>;
   run: (page: Page, fx: Fixture) => Promise<CaseResult>;
@@ -852,7 +889,12 @@ async function sweep(page: Page, fx: Fixture, from: number, span: number, steps:
       .waitForFunction(
         () => !(window as unknown as { __cutPerf: { awaiting(): boolean } }).__cutPerf.awaiting(),
         undefined,
-        { timeout: 900, polling: "raf" }
+        // Long enough that the measurement is the machine's answer rather than
+        // this wait: a step that takes a second on a tenth of a machine is a
+        // slow step, and the budget is what judges it. Cut off here it would
+        // be recorded as a step that never painted at all, which is a
+        // different — and untrue — thing to say.
+        { timeout: 900 * MACHINE.cpu, polling: "raf" }
       )
       .catch(() => {});
   }
@@ -878,6 +920,7 @@ const scrubCase = (shape: ScrubShape): EvalCase => ({
     await sweep(page, fx, 0, fx.duration - 0.05, 8);
     await startTrace(page);
     await shape.gesture(page, fx);
+    if (has("--detail")) await dumpDetail(page, 0);
     const trace = await stopTrace(page);
     const notes: string[] = [];
     if (!trace) return { name: shape.name, bucket: "scrub", pass: false, notes: ["no trace"] };
@@ -1031,7 +1074,12 @@ async function judgePlay(
   page: Page,
   name: string,
   passes: number,
-  steady: (p: PresentRecord) => boolean
+  steady: (p: PresentRecord) => boolean,
+  // A case whose link cannot carry the stream. Frames that never arrived are
+  // the link's arithmetic, so counting them judges the fixture rather than the
+  // preview. What such a case is for is whether the picture stayed with the
+  // sound while it went short, which the lag and clock notes below still ask.
+  starved = false
 ): Promise<CaseResult> {
   const trace = await stopTrace(page);
   const notes: string[] = [];
@@ -1115,7 +1163,7 @@ async function judgePlay(
   // a clean sheet here — every frame stale, no lag to measure, because there
   // was never a picture to be behind.
   const lateShare = +(late.length / played.length).toFixed(3);
-  if (lateShare > GATE.lateShare) {
+  if (!starved && lateShare > GATE.lateShare) {
     notes.push(`${Math.round(lateShare * 100)}% of frames did not arrive on time`);
   }
   if (decoders && decoders.peak === 0) notes.push("nothing decoded at all");
@@ -1139,7 +1187,7 @@ async function judgePlay(
   if (stallShare > GATE.stallShare) {
     notes.push(`picture hitched a quarter second behind on ${(stallShare * 100).toFixed(1)}% of frames`);
   }
-  if (passes > 1 && decay.last > Math.max(GATE.decayFloor, decay.first * GATE.decayRatio)) {
+  if (!starved && passes > 1 && decay.last > Math.max(GATE.decayFloor, decay.first * GATE.decayRatio)) {
     notes.push(`late frames rose ${decay.first} → ${decay.last} over the play`);
   }
   const warmMb = Math.max(0, ...trace.warmMb);
@@ -1205,8 +1253,8 @@ const montageCase = (name: string, passes: number, dressed = false): EvalCase =>
  * One long clip, played straight through more than once.
  *
  * Three things this shape measures that a montage cannot. A single walk runs
- * long enough to fall behind, which is where `LAG_HOP_S` and `FIRST_FRAME_S`
- * bind and where the sawtooth people report as choppiness lives. The bytes
+ * long enough to fall behind, which is where `LAG_HOP_S` and the re-aim in
+ * `aheadOf` bind and where the sawtooth people report as choppiness lives. The bytes
  * arrive over the media host through the chunk cache, so a walk starved of
  * bytes is distinguishable from one starved of decode. And `cold` traces the
  * very first play, before anything is resident — the state every editor opens
@@ -1220,36 +1268,64 @@ const montageCase = (name: string, passes: number, dressed = false): EvalCase =>
  */
 const longClipCase = (
   name: string,
-  opts: { fps: number; passes?: number; cold?: boolean; remount?: boolean }
+  opts: {
+    fps: number;
+    passes?: number;
+    cold?: boolean;
+    remount?: boolean;
+    prefetch?: boolean;
+    minKbps?: number;
+    starved?: boolean;
+  }
 ): EvalCase => {
   const passes = opts.passes ?? 2;
-  const seed = seedLongClip(opts.fps, true);
+  const seed = seedLongClip(opts.fps, opts.prefetch ?? true);
   return {
     name,
     bucket: "playback",
     transitions: false,
+    minKbps: opts.minKbps,
     seed,
     run: async (page, fx) => {
       if (!opts.cold) {
-        // A pass before the trace, so what follows measures playing rather
-        // than opening the file for the first time. The cold case skips it on
-        // purpose: opening the file for the first time is what it measures.
+        // A whole pass before the trace, so what follows measures playing
+        // rather than reading the file for the first time — and the file here
+        // is read over the link, so a couple of seconds of warming would leave
+        // almost all of it still to arrive. The cold case skips this on
+        // purpose: reading it for the first time is what that one measures.
         await rewind(page);
-        await setPlaying(page, true);
-        await page.waitForTimeout(WARM_PLAY_S * 1000);
+        await playThrough(page, fx.duration);
         await rewind(page);
         await settle(page);
       }
       if (opts.remount) {
         await setPlaying(page, false);
-        await open(page, currentProjectId(page.url()));
+        const id = currentProjectId(page.url());
+        // A reopen paints the cached snapshot first and `loaded` goes true on
+        // that, so seeding straight after the open would be overwritten by the
+        // live document a moment later — and the live copy carries the /media
+        // route URL for a file the fixture route does not answer. Wait for the
+        // document itself, then seed on top of it.
+        const live = page.waitForResponse(
+          (r) => r.url().includes(`/api/cut/projects/${id}`) && r.request().method() === "GET",
+          { timeout: 60_000 }
+        );
+        await open(page, id);
+        await live;
+        await page.waitForTimeout(500);
         await seed(page);
         await settle(page);
       }
       await startTrace(page);
       await playPasses(page, fx, passes);
       // One clip, so only its own head and tail belong to the open.
-      return judgePlay(page, name, passes, (p) => p.t > 1 && p.t < fx.duration - 0.3);
+      return judgePlay(
+        page,
+        name,
+        passes,
+        (p) => p.t > 1 && p.t < fx.duration - 0.3,
+        opts.starved ?? false
+      );
     },
   };
 };
@@ -1609,10 +1685,31 @@ const CASES: EvalCase[] = [
   // first and the buffered span silently halves.
   longClipCase("play-one-long-clip-60fps", { fps: 60 }),
   // Traced from the very first play, with nothing resident: the bytes arrive
-  // over the link while the walk is already reading.
-  longClipCase("play-cold-bytes", { fps: 30, cold: true }),
+  // over the link while the walk is already reading. Measured over a link with
+  // real headroom, since what a first read owes is a picture that keeps up
+  // once the bytes can arrive in time — a link at the stream's own rate cannot
+  // deliver them and that is arithmetic, not a reader.
+  longClipCase("play-cold-bytes", { fps: 30, cold: true, minKbps: LONG_KBPS * 3 }),
   // The editor closed and reopened between the warm pass and the traced one.
   longClipCase("play-after-remount", { fps: 30, remount: true }),
+  // The same play with nothing reading ahead of it. The background walk that
+  // fills the chunk cache shares the link with the walk that is playing, and
+  // this is the case that says how much of the link it is taking.
+  longClipCase("play-without-readahead", { fps: 30, prefetch: false }),
+  // A first read over a link that cannot carry the stream. The bytes are not
+  // going to arrive in time and no reader can invent them, so this one is not
+  // about late frames: it is about what the picture does while it waits. The
+  // sound plays on regardless, and the rule is that the picture stays with it
+  // and gives up resolution and smoothness instead of drifting seconds behind.
+  // Run it with `--net` under the fixture's own rate; the profile links all
+  // sit above it, so it says nothing until asked.
+  // Only when a link is named. A cold first read is the noisiest thing the
+  // suite can measure — the open, the keyframe walk and the first bytes all
+  // land inside the traced pass — and on an unthrottled profile it measures
+  // that noise rather than the link. It earns its keep under `--net` below the
+  // fixture's rate, where it answers what the picture does when the bytes
+  // genuinely cannot arrive in time.
+  ...(has("--net") ? [longClipCase("play-cold-slow-link", { fps: 30, cold: true, starved: true })] : []),
   // The same montage graded and looked, which is what the cost of a real
   // project's frame looks like on a machine that has none to spare.
   montageCase("play-fast-cuts-graded", 2, true),
@@ -1623,11 +1720,23 @@ const CASES: EvalCase[] = [
 
 // ── Run ─────────────────────────────────────────────────────────────────────
 
-/** Pause for the profile's round trip, then for as long as the profile's link
- * takes to carry `bytes`. Zero on either leaves the response alone, which is
- * what keeps the desktop baseline still. */
+/**
+ * The link the throttle is charging against, which a case may raise.
+ *
+ * A profile's link sits close enough to the fixture's own bitrate that what a
+ * reader does with a late read decides the picture. That is the right setting
+ * for a play whose file is already on disk, and the wrong one for a first-ever
+ * read: bytes that have not arrived cannot be shown by any reader, so holding
+ * one to them measures the link's arithmetic rather than the engine. A case
+ * about first reads raises this to where the link is not the answer.
+ */
+let linkKbps = MACHINE.netKbps;
+
+/** Pause for the profile's round trip, then for as long as the link takes to
+ * carry `bytes`. Zero on either leaves the response alone, which is what keeps
+ * the desktop baseline still. */
 const charge = (bytes: number): Promise<void> => {
-  const ms = MACHINE.rttMs + (MACHINE.netKbps > 0 ? (bytes * 8) / MACHINE.netKbps : 0);
+  const ms = MACHINE.rttMs + (linkKbps > 0 ? (bytes * 8) / linkKbps : 0);
   return ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve();
 };
 
@@ -1640,9 +1749,17 @@ const CORS = {
   "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
 };
 
-/** One fixture file, over the profile's link. A `Range` header is not a simple
- * header, so a cross-origin read preflights and that is answered here too. */
-async function serveFixture(route: Route, request: Request): Promise<void> {
+/**
+ * One fixture file. A `Range` header is not a simple header, so a cross-origin
+ * read preflights and that is answered here too.
+ *
+ * `paced` is what separates the two media residencies this serves. A file the
+ * browser already holds — an import in OPFS, a local project's own bytes — is
+ * a disk read, and that is every fixture addressed at `/__cutperf/`. Cloud
+ * media is read over the wire, and only those reads are charged the profile's
+ * link.
+ */
+async function serveFixture(route: Route, request: Request, paced: boolean): Promise<void> {
   if (request.method() === "OPTIONS") {
     await route.fulfill({ status: 204, headers: CORS });
     return;
@@ -1657,7 +1774,7 @@ async function serveFixture(route: Route, request: Request): Promise<void> {
       : body.length - 1
     : body.length - 1;
   const slice = body.subarray(from, to + 1);
-  await charge(slice.length);
+  if (paced) await charge(slice.length);
   await route.fulfill({
     status: range ? 206 : 200,
     body: slice,
@@ -1687,10 +1804,11 @@ async function serveFixture(route: Route, request: Request): Promise<void> {
  * the second kind, so each stream here has a queue and a frame leaves it only
  * once the one before it has had its turn.
  *
- * The turn costs more the more streams are *working* at that moment — eight
- * decoders actually producing frames are eight streams splitting one
- * processor — and more the bigger the frames are, since decode cost runs with
- * pixel count. Working is the word that matters. A preview walk fills its ring
+ * The turn costs more the more streams are *working* at that moment, past what
+ * the machine decodes at once — twelve streams on a machine that carries four
+ * of them run at three times the cost, and the bigger the frames the more
+ * again, since decode cost runs with pixel count. Working is the word that
+ * matters. A preview walk fills its ring
  * a fraction of a second ahead and then stops until something reads it, and a
  * decoder sitting there having decoded nothing recently costs a CPU nothing.
  * Charging for open decoders rather than busy ones would make the eval argue
@@ -1704,7 +1822,7 @@ async function serveFixture(route: Route, request: Request): Promise<void> {
  * Browser source, injected before any page script, so `window.VideoDecoder` is
  * already wrapped by the time the preview reaches for it.
  */
-const decoderShim = ({ slots, softwareMs }: Machine) => `
+const decoderShim = ({ slots, softwareMs, decodeLanes }: Machine) => `
 (() => {
   const Native = window.VideoDecoder;
   if (!Native) return;
@@ -1739,7 +1857,7 @@ const decoderShim = ({ slots, softwareMs }: Machine) => `
                 const area = ((frame.codedWidth || 1280) * (frame.codedHeight || 720)) / (1280 * 720);
                 const now = performance.now();
                 lastOut.set(this, now);
-                const sharing = Math.max(1, busy(now));
+                const sharing = Math.max(1, busy(now) / ${decodeLanes});
                 stats.busyPeak = Math.max(stats.busyPeak, sharing);
                 const cost = ${softwareMs} * sharing * area;
                 // The queue: this frame waits for the one before it to finish.
@@ -1813,7 +1931,12 @@ async function launch(): Promise<{ browser: Browser; page: Page }> {
     extraHTTPHeaders: { "x-donkey-dev-auth-bypass": "1" },
     viewport: { width: 1600, height: 1000 },
   });
-  if (MACHINE.softwareMs > 0) await context.addInitScript({ content: decoderShim(MACHINE) });
+  // The shim is what enforces the slot limit as well as the per-frame cost, so
+  // asking for slots on a profile that pays no CPU cost has to install it too.
+  // Without this, `--slots 2` on a profile whose `softwareMs` is 0 parses,
+  // threads through to the child, and changes nothing at all.
+  if (MACHINE.softwareMs > 0 || arg("--slots"))
+    await context.addInitScript({ content: decoderShim(MACHINE) });
   if (MACHINE.outputLatencyS > 0)
     await context.addInitScript({ content: audioShim(MACHINE.outputLatencyS) });
   // The editor's session gate is a client-side cookie read, and the only sign-in
@@ -1924,26 +2047,27 @@ async function launch(): Promise<{ browser: Browser; page: Page }> {
   // every seek to zero, which the filmstrip case's ground-truth probe relies
   // on being wrong about.
   //
-  // The profile's link is charged here rather than through CDP's network
-  // emulation, which throttles the whole context: the page, the dev build's
-  // module graph and the API all have to arrive at their usual speed, or every
-  // case measures Next's first load. Only the media is paced.
-  await context.route("**/__cutperf/*", (route, request) => serveFixture(route, request));
+  // Cloud media's link is charged in the route rather than through CDP's
+  // network emulation, which throttles the whole context: the page, the dev
+  // build's module graph and the API all have to arrive at their usual speed,
+  // or every case measures Next's first load.
+  await context.route("**/__cutperf/*", (route, request) => serveFixture(route, request, false));
   // The same files addressed as cloud media, which is the path a cloud project
   // actually plays: `chunkIdentity` claims this origin, so reads arrive as 2MB
   // ranged chunks through the chunk cache and land in OPFS as they do.
-  await context.route(`${CUT_MEDIA_ORIGIN}/**`, (route, request) => serveFixture(route, request));
+  await context.route(`${CUT_MEDIA_ORIGIN}/**`, (route, request) => serveFixture(route, request, true));
   const page = await context.newPage();
-  if (MACHINE.cpu > 1 || MACHINE.softwareMs > 0) {
+  if (MACHINE.cpu > 1 || MACHINE.softwareMs > 0 || arg("--slots")) {
     if (MACHINE.cpu > 1) {
       const cdp = await context.newCDPSession(page);
       await cdp.send("Emulation.setCPUThrottlingRate", { rate: MACHINE.cpu });
     }
     console.log(
       `[machine] ${MACHINE.name}: cpu 1/${MACHINE.cpu}` +
-        (MACHINE.softwareMs
-          ? `, ${MACHINE.slots || "no"} hardware decode slot${MACHINE.slots === 1 ? "" : "s"}, +${MACHINE.softwareMs}ms per frame on the CPU`
-          : "")
+        (MACHINE.softwareMs || arg("--slots")
+          ? `, ${MACHINE.slots || "no"} hardware decode slot${MACHINE.slots === 1 ? "" : "s"}`
+          : "") +
+        (MACHINE.softwareMs ? `, +${MACHINE.softwareMs}ms per frame on the CPU` : "")
     );
   }
   page.on("pageerror", (e) => console.log(`[pageerror] ${String(e).slice(0, 200)}`));
@@ -2000,6 +2124,8 @@ async function fanOut(names: string[]): Promise<CaseResult[]> {
       String(RUNS),
       ...(has("--headed") ? ["--headed"] : []),
       ...(arg("--cpu") ? ["--cpu", String(MACHINE.cpu)] : []),
+      ...(arg("--slots") ? ["--slots", String(MACHINE.slots)] : []),
+      ...(arg("--sw") ? ["--sw", String(MACHINE.softwareMs)] : []),
       ...(arg("--net") ? ["--net", String(MACHINE.netKbps)] : []),
       ...(arg("--rtt") ? ["--rtt", String(MACHINE.rttMs)] : []),
     ];
@@ -2064,6 +2190,14 @@ async function main(): Promise<void> {
       // and every frame after that is a frame the picture never arrived for —
       // which read as a clean sheet for as long as the only gates here were
       // about lag, since a picture that never comes is never behind.
+      // Set from the profile every case, rather than raised and left. A case
+      // that asks for a faster link asks for itself alone: carried forward, it
+      // would hand every case after it a link the profile never granted, and
+      // they would pass on a machine the profile says they should not.
+      linkKbps =
+        c.minKbps && MACHINE.netKbps > 0
+          ? Math.max(MACHINE.netKbps, c.minKbps)
+          : MACHINE.netKbps;
       const projectId = await newProject();
       await open(page, projectId);
       const fx = await (c.seed ? c.seed(page) : seed(page, files, c.transitions));

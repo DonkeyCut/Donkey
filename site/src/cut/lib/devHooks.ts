@@ -12,6 +12,7 @@ import { useGenerate } from "./generate";
 import { useGenScene } from "./genScene";
 import { edgeFramesPending, enrichAsset, importFileToProject } from "./media";
 import { awaitingFrame, startTrace, stopTrace, traceReport } from "./perfTrace";
+import { markSignedBatch } from "./mediaLinks";
 import { prefetchCloudMedia } from "./mediaSync";
 import { playheadAt } from "./playhead";
 import { projectDuration, useEditor } from "./store";
@@ -33,6 +34,12 @@ export function installDevHooks(): void {
     // real project has: the file streaming in behind the editor while the
     // playing walk reads the chunks under the playhead.
     prefetchCloudMedia,
+    // A seeded fixture is not one of the project's own media rows, so the
+    // link keeper's next re-mint hands it the /media route URL every asset
+    // the mint missed falls back to, and the fixture stops answering. The
+    // eval clears the batch after seeding, which is what a project with no
+    // time-limited links carries anyway.
+    markSignedBatch,
     // The export eval renders a doc through the tab's own pipeline and reads
     // the bytes back out.
     renderProjectToMp4,
