@@ -361,14 +361,16 @@ export class PreviewMixer {
   start(t: number): void {
     const ctx = this.context();
     void ctx.resume();
-    this.stopVoices();
+    this.restart(t);
     this.anchor = { timeline: t, ctx: ctx.currentTime, wall: performance.now() };
   }
 
-  /** Stop the clock and silence everything. */
+  /** Stop the clock and silence everything, keeping each voice's reader: the
+   * playhead is parked over the same clips it was playing, and the next play
+   * is usually from where this one stopped. */
   stop(): void {
     this.anchor = null;
-    this.stopVoices();
+    for (const live of this.voices.values()) this.stopWindows(live);
   }
 
   /** The whole-project fade, over the finished mix. */
@@ -522,6 +524,78 @@ export class PreviewMixer {
     }
   }
 
+  /**
+   * Get the sound ready for a play that has not started.
+   *
+   * Opening a reader is most of a second on a long file and several on a slow
+   * link — a container parsed, a decoder configured, a seek into the middle of
+   * it — and the sound used to do all of that after the play began. The picture
+   * never did: the clip under a parked playhead has had a decoder open on it
+   * all along, which is why the picture starts on the frame and the sound came
+   * in seconds later, worst right after a seek.
+   *
+   * The playhead standing over a clip is all the notice the sound needs. Each
+   * audible voice opens its file and takes one read at the moment it is parked
+   * on, so the play finds an open file aimed where it is about to read. Nothing
+   * is scheduled and nothing is heard; the context is left alone until a play
+   * asks for it, which is also why this waits for one — a page that has not
+   * played yet has no context to warm into.
+   */
+  warm(t: number, voices: Voice[]): void {
+    if (this.running || !this.ctx) return;
+    const seen = new Set<string>();
+    for (const v of voices) {
+      seen.add(v.id);
+      const prev = this.voices.get(v.id);
+      if (
+        prev &&
+        (prev.url !== v.url ||
+          prev.start !== v.start ||
+          prev.in !== v.in ||
+          prev.out !== v.out ||
+          prev.speed !== v.speed)
+      ) {
+        this.release(prev);
+        this.voices.delete(v.id);
+      }
+      const live = this.voices.get(v.id) ?? this.open(v, t);
+      if (!live) continue;
+      live.gain.gain.value = 0;
+      const from = Math.max(v.start, t);
+      if (live.scheduled !== from) this.reaim(live, from);
+      const source = live.in + (from - live.start) * live.speed;
+      // Already reading, at the end of its source, or standing close enough
+      // that the play's first read is the one it was going to make anyway.
+      if (live.filling || source >= live.out - 1e-3) continue;
+      if (live.walk && live.walk.position >= source && live.walk.position - source <= 1) continue;
+      void this.prime(live, source);
+    }
+    for (const [id, live] of this.voices) {
+      if (seen.has(id)) continue;
+      this.release(live);
+      this.voices.delete(id);
+    }
+  }
+
+  /** One read taken to open the file and put the decoder on the moment the
+   * playhead is parked at. What it reads is thrown away — the walk standing
+   * there is the whole point — and a failure is left for the play to meet, so
+   * a parked playhead never reports anything about a link. */
+  private async prime(live: LiveVoice, source: number): Promise<void> {
+    const gen = live.gen;
+    live.filling = true;
+    live.fillAt = performance.now();
+    try {
+      const walk = (live.walk ??= openAudioWalk(live.url, source, live.out));
+      if (Math.abs(walk.position - source) > 0.02) walk.seek(source);
+      await walk.next();
+    } catch {
+      if (live.gen === gen) this.moved(live);
+    } finally {
+      if (live.gen === gen) live.filling = false;
+    }
+  }
+
   /** Drop the decode cache for a source that has been replaced. */
   private forget(url: string): void {
     for (const key of [...this.decoded.keys()]) {
@@ -531,6 +605,7 @@ export class PreviewMixer {
 
   dispose(): void {
     this.stop();
+    this.stopVoices();
     this.teardownFx();
     this.fxKey = "";
     this.decoded.clear();
@@ -695,6 +770,10 @@ export class PreviewMixer {
     current: () => boolean
   ): Promise<AudioBuffer | null> {
     const walk = (live.walk ??= openAudioWalk(live.url, sourceFrom, live.out));
+    // A walk outlives the read that opened it, so where it stands is its own
+    // to say. Anything that moved it — a re-aim, a priming read taken before
+    // the play began — is answered here rather than trusted.
+    if (Math.abs(walk.position - sourceFrom) > 0.02) walk.seek(sourceFrom);
     const parts: WrappedAudioBuffer[] = [];
     let end = sourceFrom;
     // Bounded by the sound it holds and by the reads that go into it: a track

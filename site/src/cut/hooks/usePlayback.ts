@@ -690,6 +690,11 @@ class Engine {
       } else {
         this.writeHead(t);
       }
+    } else {
+      // The sound's readers on the same footing as the picture's: the clip
+      // under a parked playhead has its file open before the play begins,
+      // rather than opening it once the clock is already running.
+      this.mixer.warm(t, this.voicesAt(t, spans, master));
     }
 
     if (tracing()) {

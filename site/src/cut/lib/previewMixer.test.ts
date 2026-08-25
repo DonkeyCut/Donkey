@@ -22,6 +22,8 @@ const CLIP_S = 70;
  * picture reads is comfortable. */
 const LINK_RATE = 1;
 const HEAD_START_S = 2.5;
+/** How much of the file is already here when a case starts. */
+let headStart = HEAD_START_S;
 
 // ── the clock everything shares ─────────────────────────────────────────────
 let wall = 0;
@@ -119,7 +121,7 @@ function after(seconds: number): Promise<void> {
 
 /** Resolves once the link has delivered the file as far as `sourceTime`. */
 function delivered(sourceTime: number): Promise<void> {
-  const at = Math.max(0, (sourceTime - HEAD_START_S) / LINK_RATE);
+  const at = Math.max(0, (sourceTime - headStart) / LINK_RATE);
   if (wall >= at) return Promise.resolve();
   return new Promise((wake) => waiting.push({ at, wake }));
 }
@@ -167,6 +169,9 @@ const openAudioWalk = (_url: string, from: number, to?: number) => {
       };
       pos += duration;
       return part;
+    },
+    get position() {
+      return pos;
     },
     seek(next: number) {
       pos = next;
@@ -253,12 +258,8 @@ const voice = {
   gain: 1,
 };
 
-/** Play the clip through, running `during` on each frame at the timeline time
- * it is drawing. Answers what was heard. */
-async function play(
-  during?: (t: number, ctx: FakeContext) => void,
-  file: { endEarlyAt?: number; trackEnd?: number } = {}
-): Promise<Played[]> {
+/** Put every control back where a case starts. */
+function reset(file: { endEarlyAt?: number; trackEnd?: number } = {}): void {
   wall = 0;
   ctxTime = 0;
   resumes = 0;
@@ -270,10 +271,20 @@ async function play(
   hangUntil = 0;
   openCostS = 0;
   resumeBlockedUntil = 0;
+  headStart = HEAD_START_S;
   liveCtx = null;
   endEarlyAt = file.endEarlyAt ?? Infinity;
   trackEnd = file.trackEnd ?? CLIP_S;
   voice.url = "clip.mp4";
+}
+
+/** Play the clip through, running `during` on each frame at the timeline time
+ * it is drawing. Answers what was heard. */
+async function play(
+  during?: (t: number, ctx: FakeContext) => void,
+  file: { endEarlyAt?: number; trackEnd?: number } = {}
+): Promise<Played[]> {
+  reset(file);
   const mixer = new PreviewMixer();
   mixer.start(0);
   liveCtx = (mixer as unknown as { ctx: FakeContext }).ctx;
@@ -393,6 +404,43 @@ describe("the preview's sound over a link that only just keeps up", () => {
     expect(heard(sound, 30, CLIP_S)).toBeGreaterThan(0.95);
     // The new address is read by a walk of its own; the old one is let go.
     expect(walks.opened).toBe(2);
+  });
+
+  test("has the file open before the play begins", async () => {
+    // The failure this is here for: the picture starts on the frame and the
+    // sound comes in seconds after it, worst right after a seek. The sound
+    // opened its file once the clock was already running — a container parsed,
+    // a decoder configured, a seek into the middle of a long file — while the
+    // picture had had a decoder open on that clip the whole time it was parked
+    // there. The playhead standing over a clip is the notice the sound needs.
+    reset();
+    openCostS = 5;
+    headStart = CLIP_S; // the link is not the subject here; the open is
+    const mixer = new PreviewMixer();
+    // A page that has played once has a context; warming waits for one.
+    mixer.start(0);
+    liveCtx = (mixer as unknown as { ctx: FakeContext }).ctx;
+    mixer.stop();
+    // Parked at 0:40, six seconds of frames going by.
+    for (let i = 0; i < 160; i++) {
+      step();
+      mixer.warm(40, [voice]);
+      await settle();
+    }
+    played = [];
+    const pressed = ctxTime;
+    mixer.start(40);
+    for (let i = 0; i < 40; i++) {
+      step();
+      mixer.update(Math.min(mixer.now(), CLIP_S), [voice]);
+      await settle();
+    }
+    mixer.dispose();
+    expect(played.length).toBeGreaterThan(0);
+    // Sound within a couple of frames of the press, not a cold open later.
+    expect(Math.min(...played.map((p) => p.from)) - pressed).toBeLessThan(0.5);
+    // The file it read was the one it already had open.
+    expect(walks.opened).toBe(1);
   });
 
   test("keeps its readers when the clock jumps", async () => {

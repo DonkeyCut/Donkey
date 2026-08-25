@@ -487,6 +487,9 @@ export function assembleAudio(
  * gives up the file however far it got. */
 export interface AudioWalk {
   next(): Promise<WrappedAudioBuffer | null>;
+  /** The source time the next read comes from. A caller that has moved can ask
+   * whether this walk is standing where it wants to read. */
+  readonly position: number;
   /** Re-aim the walk at `from` without giving up the file. Opening one is
    * nearly all a walk costs — the container read out of a hundred megabytes
    * over a link — and a caller that has to re-aim has every reason not to pay
@@ -518,8 +521,9 @@ export function openAudioWalk(src: string | Blob, from = 0, to?: number): AudioW
   let closed = false;
   let finding: Promise<InputAudioTrack | null> | null = null;
   let reader: AsyncGenerator<WrappedAudioBuffer, void, unknown> | null = null;
-  /** Where the next read starts, until a reader is standing at it. */
-  let aim: number | null = from;
+  /** Where the next read comes from, and whether a reader stands at it. */
+  let at = from;
+  let aimed = false;
   const stop = (gen: AsyncGenerator<WrappedAudioBuffer, void, unknown> | null) => {
     // Returning a generator is where the decoder it holds is released.
     if (gen) void gen.return().catch(() => {});
@@ -527,24 +531,30 @@ export function openAudioWalk(src: string | Blob, from = 0, to?: number): AudioW
   const open = async () => {
     const track = await (finding ??= audioTrackOf(input));
     if (!track || closed) return null;
-    if (aim !== null) {
+    if (!aimed) {
       const old = reader;
-      reader = new AudioBufferSink(track).buffers(aim, to);
-      aim = null;
+      reader = new AudioBufferSink(track).buffers(at, to);
+      aimed = true;
       stop(old);
     }
     return reader;
   };
   return {
+    get position() {
+      return at;
+    },
     async next() {
       if (closed) return null;
       const gen = await open();
       if (!gen || closed) return null;
       const step = await gen.next();
-      return step.done ? null : step.value;
+      if (step.done) return null;
+      at = step.value.timestamp + step.value.duration;
+      return step.value;
     },
     seek(next) {
-      aim = next;
+      at = next;
+      aimed = false;
     },
     close() {
       if (closed) return;
