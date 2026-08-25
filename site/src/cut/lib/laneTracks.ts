@@ -332,6 +332,51 @@ function settleSnapBack() {
   finish();
 }
 
+// The head of the timeline is a wall: an item resting at 0 has nowhere left
+// to give, and the document can hold no time before it. So the give is drawn.
+// The bar itself slides under the pointer and springs back on release, which
+// puts the same resistance under the hand at the head that an item with room
+// to spare already has.
+let overshoot: { el: HTMLElement; px: number; raf: number } | null = null;
+
+function paintOvershoot(el: HTMLElement | null, px: number) {
+  if (!el) return;
+  if (overshoot && overshoot.el !== el) clearOvershoot();
+  if (px > 0.01) {
+    if (overshoot) cancelAnimationFrame(overshoot.raf);
+    overshoot = { el, px, raf: 0 };
+    el.style.transform = `translateX(${-px}px)`;
+  } else if (overshoot) {
+    clearOvershoot();
+  }
+}
+
+function clearOvershoot() {
+  if (!overshoot) return;
+  cancelAnimationFrame(overshoot.raf);
+  overshoot.el.style.transform = "";
+  overshoot = null;
+}
+
+/** Let a drawn overshoot spring home on the same curve the stored trims use. */
+function releaseOvershoot() {
+  const held = overshoot;
+  if (!held) return;
+  const from = held.px;
+  const t0 = performance.now();
+  const step = (now: number) => {
+    const p = Math.min(1, (now - t0) / 240);
+    if (p < 1) {
+      held.el.style.transform = `translateX(${-Math.max(0, from * (1 - easeOutBack(p)))}px)`;
+      held.raf = requestAnimationFrame(step);
+    } else {
+      held.el.style.transform = "";
+      if (overshoot === held) overshoot = null;
+    }
+  };
+  held.raf = requestAnimationFrame(step);
+}
+
 /** The live move drag, published so the Timeline can render the ghost, the
  * landing slot, and grow the lane stack while a new row is hovered. */
 export interface LaneDrag {
@@ -1084,6 +1129,11 @@ export function startLaneTrim(
   // Primary button only, same as the move grab.
   if (e.button !== 0) return;
   settleSnapBack();
+  clearOvershoot();
+  // The bar the handle sits on, for the drawn give at the head of the
+  // timeline. Read now: the synthetic event's target is gone by the time the
+  // move callbacks run.
+  const bar = (e.currentTarget as HTMLElement).parentElement;
   const s = useEditor.getState();
   if (s.readOnly) return;
   const ad = ADAPTERS[kind];
@@ -1137,6 +1187,7 @@ export function startLaneTrim(
         const desired = Math.min(maxStart, start0 + dx / ui.pps);
         let start: number;
         let reveal: number;
+        paintOvershoot(bar, 0);
         if (desired >= free) {
           // Room to the left: grow freely, snapping to logical times.
           start = desired;
@@ -1160,10 +1211,10 @@ export function startLaneTrim(
         } else {
           // Out of room and out of source: drag with resistance, spring back.
           const bound = reveals ? srcFloor : floor;
-          start = Math.max(
-            0,
-            floor - rubberBand((bound - desired) * ui.pps, RUBBER_PX) / ui.pps
-          );
+          const sprung = floor - rubberBand((bound - desired) * ui.pps, RUBBER_PX) / ui.pps;
+          start = Math.max(0, sprung);
+          // Whatever the wall at 0 refused to give, the bar gives on screen.
+          paintOvershoot(bar, (start - sprung) * ui.pps);
           reveal = Math.max(desired, srcFloor);
           ui.onSnap(null);
         }
@@ -1200,6 +1251,7 @@ export function startLaneTrim(
       },
       onUp: () => {
         ui.onSnap(null);
+        releaseOvershoot();
         const cur = ad.raws(useEditor.getState()).find((r) => ad.view(r).id === id);
         const from = cur ? ad.view(cur).start : floor;
         if (from >= floor - 1e-4) return; // settled within the room
