@@ -15,65 +15,17 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
-import {
-  recentJobsQueryKey,
-  useRecentJobs,
-  useStartJob,
-  type AsyncJobListItem,
-} from "@/queries/jobs";
-
-// The list shows each job's stored payload and result as-is, so it stays
-// honest for job kinds this page doesn't know about: flatten the primitive
-// fields into "email: x@y.com · projects: 3".
-function describeFields(value: unknown): string {
-  if (typeof value !== "object" || value === null) return "";
-  return Object.entries(value)
-    .filter(([, v]) => ["string", "number", "boolean"].includes(typeof v))
-    .map(([k, v]) => `${k}: ${String(v)}`)
-    .join(" · ");
-}
-
-// A finished delete-user job reads as one sentence; other kinds (and
-// unfinished jobs) keep the flattened raw fields.
-function doneSummary(item: AsyncJobListItem): string | null {
-  if (item.kind !== "delete-user" || item.state !== "done") return null;
-  const payload = item.payload as { email?: unknown } | null;
-  const email = typeof payload?.email === "string" ? payload.email : "";
-  const result = item.result;
-  return (
-    `Deleted ${email} — ${String(result?.projects ?? 0)} project(s), ` +
-    `${String(result?.libraryAssets ?? 0)} library asset(s), ` +
-    `${String(result?.r2Objects ?? 0)} stored object(s).`
-  );
-}
-
-function formatWhen(iso: string): string {
-  const then = new Date(iso);
-  const mins = Math.floor((Date.now() - then.getTime()) / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  if (mins < 60 * 24) return `${Math.floor(mins / 60)}h ago`;
-  return then.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-const stateDot: Record<AsyncJobListItem["state"], string> = {
-  queued: "bg-muted-foreground/40",
-  running: "bg-blue-500 animate-pulse",
-  done: "bg-emerald-500",
-  error: "bg-destructive",
-};
+import { recentJobsQueryKey, useStartJob } from "@/queries/jobs";
 
 // User actions. Today: delete a user and everything they own, for cleaning
 // production test accounts out of the data. The delete runs as a background
-// job on the hosted API; this page starts it, and the recent-jobs list below
-// tracks it to completion. The confirm dialog makes the super user retype the
-// email so a paste-slip can't take out the wrong account. The layout gates
-// this route to super users, so the job hooks run unconditionally here.
+// job on the hosted API; this page starts it, and the Jobs surface tracks it
+// to completion. The confirm dialog makes the super user retype the email so
+// a paste-slip can't take out the wrong account. The layout gates this route
+// to super users, so the job hooks run unconditionally here.
 export default function SuUsersPage() {
   const queryClient = useQueryClient();
   const start = useStartJob();
-  const recent = useRecentJobs(true);
   const [email, setEmail] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmEmail, setConfirmEmail] = useState("");
@@ -135,57 +87,12 @@ export default function SuUsersPage() {
               Couldn&apos;t start the delete — check the email and try again.
             </p>
           ) : null}
+          {start.isSuccess ? (
+            <p className="text-sm text-muted-foreground">
+              Delete started — it runs in the background and finishes under Jobs.
+            </p>
+          ) : null}
         </div>
-      </div>
-
-      <div className="rounded-xl border bg-card p-5">
-        <div className="text-sm font-medium">Recent jobs</div>
-        {recent.data?.jobs.length ? (
-          <ul className="mt-3 space-y-3">
-            {recent.data.jobs.map((item) => (
-              <li key={item.id} className="flex items-start gap-2.5">
-                <span
-                  className={cn(
-                    "mt-1.5 size-2 shrink-0 rounded-full",
-                    stateDot[item.state],
-                  )}
-                />
-                <div className="min-w-0 text-sm">
-                  <div className="flex flex-wrap items-baseline gap-x-2">
-                    <span className="font-medium">{item.kind}</span>
-                    <span className="text-muted-foreground">{item.state}</span>
-                    <span className="text-muted-foreground">
-                      {formatWhen(item.createdAt)}
-                    </span>
-                  </div>
-                  {doneSummary(item) ? (
-                    <p className="text-muted-foreground">{doneSummary(item)}</p>
-                  ) : (
-                    <>
-                      {describeFields(item.payload) ? (
-                        <p className="truncate text-muted-foreground">
-                          {describeFields(item.payload)}
-                        </p>
-                      ) : null}
-                      {item.state === "done" && describeFields(item.result) ? (
-                        <p className="truncate text-muted-foreground">
-                          {describeFields(item.result)}
-                        </p>
-                      ) : null}
-                    </>
-                  )}
-                  {item.state === "error" && item.error ? (
-                    <p className="text-destructive">{item.error}</p>
-                  ) : null}
-                </div>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="mt-3 text-sm text-muted-foreground">
-            {recent.isPending ? "Loading…" : "No jobs yet."}
-          </p>
-        )}
       </div>
 
       <Dialog onOpenChange={setConfirmOpen} open={confirmOpen}>

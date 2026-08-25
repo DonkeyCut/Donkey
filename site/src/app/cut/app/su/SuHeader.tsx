@@ -36,6 +36,11 @@ const SECTIONS: {
     description: "Free accounts spending credits, and where each conversation stands.",
     Action: ScanOutreachButton,
   },
+  {
+    suffix: "/su/jobs",
+    title: "Jobs",
+    description: "Background work started from these surfaces, newest first.",
+  },
 ];
 
 export function SuHeader() {
