@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import type React from "react";
+import { createPortal } from "react-dom";
 import { ArrowLeft, Check, ChevronDown, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,6 +34,17 @@ export const noteChanged = (d: NoteDraft) =>
   d.body.trim() !== d.saved.body ||
   d.colorIndex !== d.saved.colorIndex;
 
+/** The box that scrolls around `node`: the app shell gives each page a main
+ * column with its own scrollbar, and the document itself scrolls only where
+ * nothing else claims it. */
+function scrollBoxOf(node: HTMLElement | null): HTMLElement {
+  for (let el = node?.parentElement ?? null; el; el = el.parentElement) {
+    const overflow = getComputedStyle(el).overflowY;
+    if (overflow === "auto" || overflow === "scroll") return el;
+  }
+  return document.documentElement;
+}
+
 /** A text box that grows with what is written, so the page scrolls as one
  * sheet of paper. */
 function useAutoGrow(value: string) {
@@ -45,16 +58,26 @@ function useAutoGrow(value: string) {
   return ref;
 }
 
-/** The note itself, filling the window: a page of paper with a title, a body
- * that runs as long as it needs to, and the paper's color on a menu. Closing
- * it — the back arrow, Done, or Escape — hands the draft back to be saved. */
+/** The note itself, over the whole window: a sheet of paper with a title, a
+ * body that runs as long as it needs to, and the paper's color on a menu. It
+ * covers the app — sidebar and all — so writing a note is the only thing on
+ * screen, and the page behind it holds still while it is open. Closing it —
+ * the back arrow, Done, or Escape — hands the draft back to be saved. */
 export function NoteComposer({
   draft,
+  back,
+  from,
   onChange,
   onClose,
   onDelete,
 }: {
   draft: NoteDraft;
+  /** Where closing goes back to: the folder the note is filed in, or all
+   * notes when it sits at the top level. */
+  back: string;
+  /** The list this note was opened from. The sheet is portaled out of the
+   * page, so this is how it finds the box to hold still while it is up. */
+  from?: React.RefObject<HTMLElement | null>;
   onChange: (draft: NoteDraft) => void;
   onClose: () => void;
   onDelete: () => void;
@@ -74,13 +97,32 @@ export function NoteComposer({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  return (
+  // The page behind the sheet stays put, so a wheel over the note moves the
+  // note and closing it comes back to the same place in the list. The app shell
+  // scrolls its own main column, so the lock goes on whichever box actually
+  // scrolls around the list this note was opened from.
+  useEffect(() => {
+    const box = scrollBoxOf(from?.current ?? null);
+    const held = box.style.overflow;
+    box.style.overflow = "hidden";
+    return () => {
+      box.style.overflow = held;
+    };
+  }, [from]);
+
+  // Portaled to the body so the sheet covers the app: a press on the paper is
+  // a press on the note, and it never reaches the list's rubber-band selection
+  // underneath.
+  return createPortal(
     <div
-      className="flex min-h-full flex-col"
+      role="dialog"
+      aria-modal="true"
+      aria-label={draft.title.trim() || "Untitled note"}
+      className="fixed inset-0 z-50 flex flex-col font-system antialiased"
       style={{ backgroundColor: paper.background, color: NOTE_INK }}
     >
       <header
-        className="sticky top-0 z-10 flex items-center gap-2 px-6 py-3"
+        className="flex shrink-0 items-center gap-2 px-6 py-3"
         style={{ backgroundColor: paper.background }}
       >
         <Button
@@ -89,7 +131,8 @@ export function NoteComposer({
           style={{ color: NOTE_INK }}
           onClick={onClose}
         >
-          <ArrowLeft data-icon="inline-start" /> All notes
+          <ArrowLeft data-icon="inline-start" />{" "}
+          <span className="max-w-56 truncate">{back}</span>
         </Button>
         <div className="flex-1" />
         <DropdownMenu>
@@ -142,7 +185,11 @@ export function NoteComposer({
         </Button>
       </header>
 
-      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 px-8 pt-6 pb-32">
+      {/* The paper scrolls, the header does not. Both text boxes grow with what
+          is written and never scroll on their own, so a wheel anywhere over
+          the sheet moves the sheet. */}
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-8 pt-6 pb-32">
         <textarea
           ref={titleRef}
           autoFocus
@@ -164,11 +211,13 @@ export function NoteComposer({
           rows={1}
           value={draft.body}
           placeholder="Write your note…"
-          className="min-h-[50vh] flex-1 resize-none overflow-hidden bg-transparent text-lg leading-8 outline-none placeholder:opacity-40"
+          className="min-h-[50vh] resize-none overflow-hidden bg-transparent text-lg leading-8 outline-none placeholder:opacity-40"
           style={{ color: NOTE_INK }}
           onChange={(e) => onChange({ ...draft, body: e.target.value })}
         />
+        </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

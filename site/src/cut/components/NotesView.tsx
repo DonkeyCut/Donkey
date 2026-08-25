@@ -199,20 +199,27 @@ export function NotesView() {
   };
 
   const hasContent = list.length > 0 || folders.length > 0;
-
-  // The composer takes the whole page: one note, filling the window.
-  if (draft)
-    return (
-      <NoteComposer
-        draft={draft}
-        onChange={setDraft}
-        onClose={() => void commit()}
-        onDelete={() => void remove()}
-      />
-    );
+  // Closing a note goes back to where it is filed, so a note written inside a
+  // folder says that folder's name.
+  const draftFolderName = folders.find((f) => f.id === draft?.folderId)?.name;
+  // The open note is portaled over the app; this is how it finds the column
+  // this list scrolls in and holds it still.
+  const pageRef = useRef<HTMLDivElement>(null);
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-10 py-9">
+    <div ref={pageRef} className="mx-auto w-full max-w-6xl px-10 py-9">
+      {/* One note at a time, over the whole window. The list stays mounted
+          behind it, so closing comes back to the same scroll position. */}
+      {draft && (
+        <NoteComposer
+          draft={draft}
+          back={draftFolderName ?? "All notes"}
+          from={pageRef}
+          onChange={setDraft}
+          onClose={() => void commit()}
+          onDelete={() => void remove()}
+        />
+      )}
       <div className="mb-5 flex items-center justify-between gap-4">
         {openFolder === null ? (
           <h1 className="text-lg font-semibold tracking-tight">Notes</h1>
