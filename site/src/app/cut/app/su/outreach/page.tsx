@@ -21,7 +21,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { OutreachStatus } from "@/lib/marketing/campaigns";
 import { OUTREACH_PLACEHOLDERS } from "@/lib/marketing/placeholders";
-import { useOutreach, useOutreachAction, type OutreachRow } from "@/queries/outreach";
+import {
+  useOutreach,
+  useOutreachAction,
+  useOutreachCounts,
+  type OutreachRow,
+} from "@/queries/outreach";
 import {
   useDeleteOutreachTemplate,
   useOutreachTemplates,
@@ -91,6 +96,7 @@ export default function SuOutreachPage() {
   const [naming, setNaming] = useState(false);
   const bodyField = useRef<HTMLTextAreaElement>(null);
   const list = useOutreach(status);
+  const counts = useOutreachCounts().data?.counts;
   const act = useOutreachAction();
   const templates = useOutreachTemplates();
   const saveTemplate = useSaveOutreachTemplate();
@@ -217,6 +223,11 @@ export default function SuOutreachPage() {
             variant={status === filter.status ? "default" : "outline"}
           >
             {filter.label}
+            {counts ? (
+              <span className="tabular-nums opacity-60">
+                {counts[filter.status]}
+              </span>
+            ) : null}
           </Button>
         ))}
       </div>

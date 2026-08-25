@@ -36,6 +36,20 @@ export function useOutreach(status: OutreachStatus) {
   });
 }
 
+export const outreachCountsQueryKey = ["outreach", "counts"] as const;
+
+// How many rows every status holds. One key for all four, so switching lists
+// never blanks the totals.
+export function useOutreachCounts() {
+  return useQuery({
+    queryFn: () =>
+      apiFetch<{ counts: Record<OutreachStatus, number> }>(
+        "/api/marketing/outreach/counts",
+      ),
+    queryKey: outreachCountsQueryKey,
+  });
+}
+
 type OutreachAction =
   | { action: "send"; outreachId: string; subject: string; body: string }
   | { action: "ignore" | "unignore" | "replied"; outreachId: string };
