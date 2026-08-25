@@ -64,6 +64,11 @@ class FakeSource {
   }
 }
 
+/** While the wall is short of this, a suspended context refuses to come back —
+ * an output device being switched, a tab the browser has put down. */
+let resumeBlockedUntil = 0;
+let liveCtx: FakeContext | null = null;
+
 class FakeContext {
   state = "running";
   baseLatency = 0;
@@ -80,7 +85,7 @@ class FakeContext {
   }
   resume() {
     resumes++;
-    this.state = "running";
+    if (wall >= resumeBlockedUntil) this.state = "running";
     return Promise.resolve();
   }
   close() {
@@ -229,7 +234,9 @@ async function settle(): Promise<void> {
 
 function step(): void {
   wall += FRAME_S;
-  ctxTime += FRAME_S;
+  // The graph's clock is the context's, and a context that is not running does
+  // not keep one.
+  if (liveCtx?.state === "running") ctxTime += FRAME_S;
   for (const w of waiting.splice(0)) {
     if (w.at <= wall) w.wake();
     else waiting.push(w);
@@ -262,11 +269,14 @@ async function play(
   failUntil = 0;
   hangUntil = 0;
   openCostS = 0;
+  resumeBlockedUntil = 0;
+  liveCtx = null;
   endEarlyAt = file.endEarlyAt ?? Infinity;
   trackEnd = file.trackEnd ?? CLIP_S;
   voice.url = "clip.mp4";
   const mixer = new PreviewMixer();
   mixer.start(0);
+  liveCtx = (mixer as unknown as { ctx: FakeContext }).ctx;
   try {
     for (let t = 0; t < CLIP_S; ) {
       step();
@@ -383,6 +393,25 @@ describe("the preview's sound over a link that only just keeps up", () => {
     expect(heard(sound, 30, CLIP_S)).toBeGreaterThan(0.95);
     // The new address is read by a walk of its own; the old one is let go.
     expect(walks.opened).toBe(2);
+  });
+
+  test("keeps its readers when the clock jumps", async () => {
+    // A context that sat suspended — an output device switched, a tab the
+    // browser put down — comes back with its clock seconds behind the wall,
+    // and every voice is re-aimed at where the playhead now is. They are in
+    // the same files they were reading a moment ago, so they keep them.
+    const sound = await play((t, ctx) => {
+      if (t < 20 || t > 20.1) return;
+      ctx.state = "suspended";
+      resumeBlockedUntil = wall + 5;
+    });
+    expect(heard(sound, 0, 18)).toBeGreaterThan(0.9);
+    // The context's clock stood still while it was down, so what is heard from
+    // here on runs that much behind the timeline; it is unbroken either way.
+    expect(heard(sound, 28, 60)).toBeGreaterThan(0.95);
+    // One file, one container parse: the jump moved the reader, it did not
+    // cost a new one.
+    expect(walks.opened).toBe(1);
   });
 
   test("picks its context back up when the browser puts it down", async () => {

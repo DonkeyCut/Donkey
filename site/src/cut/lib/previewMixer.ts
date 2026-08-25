@@ -92,8 +92,8 @@ interface LiveVoice {
   /** Timeline time everything scheduled so far runs out at. */
   scheduled: number;
   /** The reader walking this voice's source, open from where it last read to.
-   * A walk is a position and nothing more, so anything that moves the voice —
-   * a seek, a clock jump, a read that failed — drops it. */
+   * A voice that moves inside the same file re-aims it; a read that failed, or
+   * a source that moved to another address, drops it. */
   walk: AudioWalk | null;
   /** A read in flight, so a slow one doesn't start a second one, and when it
    * started, so one that has stopped answering can be disowned. */
@@ -303,12 +303,16 @@ export class PreviewMixer {
     return { lead: Math.max(0, graph - this.heard(graph)), reported };
   }
 
-  /** Stop every scheduled window and re-aim each voice at `timeline`. */
+  /** Stop every scheduled window and re-aim each voice at `timeline`, keeping
+   * the file each one is reading: a clock that jumped moved the voices inside
+   * the same sources. */
   private restart(timeline: number): void {
     for (const live of this.voices.values()) {
       this.stopWindows(live);
-      this.moved(live);
-      live.scheduled = Math.max(live.start, timeline);
+      this.reaim(live, Math.max(live.start, timeline));
+      // The voice is somewhere else in its file now, so where a walk stopped
+      // at the old position says nothing about this one.
+      live.reached = -Infinity;
     }
   }
 
@@ -328,11 +332,12 @@ export class PreviewMixer {
   /**
    * The voice is no longer reading where it was.
    *
-   * A seek, a clock jump, a read that failed or stopped answering — each of
-   * them leaves the walk pointing at a moment nobody is waiting for, and a walk
-   * is only a position, so it goes. The read still in flight against it is
-   * disowned in the same breath: it carries the old number and everything it
-   * comes back with is ignored.
+   * This is the one that gives the file up, for the cases where the file is
+   * the problem or is no longer the right one: a read that failed or stopped
+   * answering, a voice released, a source that moved to another address. A
+   * voice that has merely fallen behind keeps its reader and is re-aimed. The
+   * read still in flight is disowned in the same breath: it carries the old
+   * number and everything it comes back with is ignored.
    */
   private moved(live: LiveVoice): void {
     live.gen++;
@@ -517,43 +522,8 @@ export class PreviewMixer {
     }
   }
 
-  /**
-   * What the sound is doing right now: the clock it runs on and where each
-   * voice has read to. Numbers only — no media, and nothing naming a project.
-   *
-   * A preview that has gone quiet looks the same from outside whatever the
-   * reason, and the reasons live in here. Reachable in any build as
-   * `__cutSound()`, because the machine a cut goes quiet on is rarely the one
-   * a developer is sitting at.
-   */
-  soundState() {
-    const ctx = this.ctx;
-    const wall = performance.now();
-    return {
-      running: this.running,
-      ctx: ctx
-        ? { state: ctx.state, time: +ctx.currentTime.toFixed(2), ...this.clockLead() }
-        : null,
-      at: +this.at().toFixed(2),
-      voices: [...this.voices].map(([id, v]) => ({
-        id,
-        url: v.url.slice(0, 60),
-        scheduled: +v.scheduled.toFixed(2),
-        out: v.out,
-        windows: v.windows.length,
-        reading: v.filling,
-        readingMs: v.filling ? Math.round(wall - v.fillAt) : 0,
-        walk: !!v.walk,
-        ended: v.ended,
-        reached: Number.isFinite(v.reached) ? +v.reached.toFixed(2) : null,
-        attempts: v.attempts,
-        retryInMs: Math.max(0, Math.round(v.retryAt - wall)),
-      })),
-    };
-  }
-
   /** Drop the decode cache for a source that has been replaced. */
-  forget(url: string): void {
+  private forget(url: string): void {
     for (const key of [...this.decoded.keys()]) {
       if (key.startsWith(`${url}|`)) this.decoded.delete(key);
     }
@@ -683,7 +653,7 @@ export class PreviewMixer {
         // tab in the background. Where it left the walk is behind the clock
         // now, so the voice re-aims at the clock and gives up the stretch in
         // between; that stretch was going by either way.
-        this.reaim(live, tNow);
+        this.reaim(live, Math.max(live.scheduled, tNow));
         return;
       }
       const node = this.ctx.createBufferSource();
@@ -778,12 +748,12 @@ export class PreviewMixer {
    * out in silence while the picture rolls on. The reader moves instead: same
    * file, same decoder, aimed where the sound is wanted.
    */
-  private reaim(live: LiveVoice, t: number): void {
+  private reaim(live: LiveVoice, timeline: number): void {
     live.gen++;
     live.filling = false;
     live.ended = false;
-    live.scheduled = Math.max(live.scheduled, t);
-    live.walk?.seek(live.in + (live.scheduled - live.start) * live.speed);
+    live.scheduled = timeline;
+    live.walk?.seek(live.in + (timeline - live.start) * live.speed);
   }
 
   /** A read that failed, came back empty, or stopped answering. The voice
