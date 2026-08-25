@@ -32,8 +32,9 @@ const REFRESH_LEAD_FRACTION = 1 / 3;
 const MAX_REFRESH_LEAD_MS = 20 * 60 * 1000; // …and a long-lived one needn't by more
 const MIN_REFRESH_LEAD_MS = 20_000; // …nor a short one by less
 const FORCED_GAP_MS = 15_000; // min gap between failure-driven re-mints
-const ELEMENT_RETRIES = 3;
+const ELEMENT_RETRIES = 6;
 const ELEMENT_RETRY_BASE_MS = 1_000;
+const ELEMENT_RETRY_MAX_MS = 8_000;
 const ATTEMPT_RESET_MS = 60_000; // an old failure streak doesn't cap a new one
 
 let batch: { projectId: string; expiresAt: number; lead: number } | null = null;
@@ -130,17 +131,22 @@ const isCutApiUrl = (src: string) => src.includes("/api/cut");
 
 const attempts = new WeakMap<Element, { n: number; at: number }>();
 
+function reload(el: HTMLImageElement | HTMLMediaElement, src: string) {
+  if (el instanceof HTMLImageElement) {
+    if (el.src !== src) return; // repointed since the failure
+    el.removeAttribute("src");
+    el.src = src;
+  } else {
+    if ((el.currentSrc || el.src) !== src) return;
+    el.load();
+  }
+}
+
 function retryElement(el: HTMLImageElement | HTMLMediaElement, src: string, attempt: number) {
-  window.setTimeout(() => {
-    if (el instanceof HTMLImageElement) {
-      if (el.src !== src) return; // repointed since the failure
-      el.removeAttribute("src");
-      el.src = src;
-    } else {
-      if ((el.currentSrc || el.src) !== src) return;
-      el.load();
-    }
-  }, ELEMENT_RETRY_BASE_MS * attempt);
+  window.setTimeout(
+    () => reload(el, src),
+    Math.min(ELEMENT_RETRY_MAX_MS, ELEMENT_RETRY_BASE_MS * 2 ** (attempt - 1))
+  );
 }
 
 /** A decoder failed to read a media URL. There is no element to reload — the
@@ -174,11 +180,53 @@ export function reportMediaElementError(el: HTMLImageElement | HTMLMediaElement)
   if (!expiring && !isCutApiUrl(src)) return;
   const rec = attempts.get(el) ?? { n: 0, at: 0 };
   if (Date.now() - rec.at > ATTEMPT_RESET_MS) rec.n = 0;
-  if (rec.n >= ELEMENT_RETRIES) return;
-  rec.n += 1;
   rec.at = Date.now();
+  if (rec.n >= ELEMENT_RETRIES) {
+    // Out of tries for now. The element is marked and left addressable: it
+    // stops asking on its own, and the sweep below gives it a fresh run — on
+    // its own timer, and again whenever the tab is looked at, focused, or
+    // comes back online. A thumbnail that lost a race with its own upload used
+    // to wear the broken glyph until the page was reloaded.
+    el.dataset.mediaStalled = "1";
+    armStalledSweep();
+    return;
+  }
+  rec.n += 1;
   attempts.set(el, rec);
+  el.dataset.mediaStalled = "";
+  delete el.dataset.mediaStalled;
   retryElement(el, src, rec.n);
+}
+
+/** Give every element that ran out of tries one more run. */
+function wakeStalled() {
+  document.querySelectorAll<HTMLElement>("[data-media-stalled]").forEach((el) => {
+    if (!(el instanceof HTMLImageElement) && !(el instanceof HTMLMediaElement)) return;
+    delete el.dataset.mediaStalled;
+    attempts.delete(el);
+    reload(el, el instanceof HTMLImageElement ? el.src : el.currentSrc || el.src);
+  });
+}
+
+let stalledTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Wake stalled elements once the streak has gone cold, without waiting to be
+ * asked.
+ *
+ * The events that sweep — visibility, focus, coming back online — all need the
+ * tab to have been away. Editing in a tab that never loses focus fires none of
+ * them, and a thumbnail that stalled during an upload would sit broken there
+ * for the whole session. One timer serves every stalled element, and a hidden
+ * tab leaves the sweep to the visibility handler.
+ */
+function armStalledSweep() {
+  if (stalledTimer) return;
+  stalledTimer = setTimeout(() => {
+    stalledTimer = null;
+    if (document.visibilityState !== "visible") return;
+    wakeStalled();
+  }, ATTEMPT_RESET_MS);
 }
 
 if (typeof window !== "undefined") {
@@ -191,9 +239,17 @@ if (typeof window !== "undefined") {
     // no wake-up left behind it.
     else if (!timer) scheduleRefresh();
   };
-  document.addEventListener("visibilitychange", maybeRefresh);
-  window.addEventListener("focus", maybeRefresh);
-  window.addEventListener("online", maybeRefresh);
+  const wake = () => {
+    if (document.visibilityState !== "visible") return;
+    maybeRefresh();
+    wakeStalled();
+  };
+  document.addEventListener("visibilitychange", wake);
+  window.addEventListener("focus", wake);
+  window.addEventListener("online", () => {
+    maybeRefresh();
+    wakeStalled();
+  });
   // Error events don't bubble, but the capture phase still passes through
   // window for any element in the document — one listener covers every
   // rendered <video>/<img>. The preview engine's detached decoders report
