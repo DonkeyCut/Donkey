@@ -1,7 +1,3 @@
-import {
-  DONKEY_LOGO_CID,
-  DONKEY_LOGO_PNG_BASE64,
-} from "@/emails/_components/logo";
 import OutreachEmail from "@/emails/outreach";
 import {
   emailFrom,
@@ -42,10 +38,10 @@ type SendOutreachInput = {
   vars: OutreachVars;
 };
 
-// Sends one outreach note. Promotional mail, so it checks the opt-out first
-// and carries the one-click unsubscribe headers. The reply-to is the row's own
-// address: a reply comes back through Resend Inbound and finds its row without
-// matching on the sender.
+// Sends one outreach note. Promotional mail, so it checks the opt-out first and
+// carries the one-click unsubscribe headers alongside the link in the message.
+// The reply-to is the row's own address: a reply comes back through Resend
+// Inbound and finds its row without matching on the sender.
 export async function sendOutreachEmail({
   attempt,
   body,
@@ -87,17 +83,6 @@ export async function sendOutreachEmail({
         body: filledBody,
         unsubscribeUrl: unsubscribePageUrl(user.id),
       }),
-      // The mark rides inside the message (Content-ID embed) so no client
-      // fetches anything external; Gmail strips data URIs, so cid is the only
-      // fetch-free form that renders everywhere.
-      attachments: [
-        {
-          content: DONKEY_LOGO_PNG_BASE64,
-          contentId: DONKEY_LOGO_CID,
-          contentType: "image/png",
-          filename: "donkey-cut.png",
-        },
-      ],
       // RFC 8058 one-click: mail providers POST here with no session; the
       // signed token in the URL is the authorization.
       headers: {

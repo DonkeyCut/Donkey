@@ -2,7 +2,6 @@ import {
   Body,
   Container,
   Head,
-  Hr,
   Html,
   Link,
   Preview,
@@ -13,15 +12,14 @@ import {
 import { Fragment } from "react";
 
 import { CommunityPs } from "./_components/CommunityPs";
-import { DonkeyMark } from "./_components/DonkeyMark";
 
-// The shell every outreach note is written into: the mark, the operator's text
-// as paragraphs, the community P.S., and the unsubscribe footer. The words
-// themselves come from a template in src/lib/marketing/templates/ or straight
-// from the send dialog, already filled for this recipient. Preview with
-// `npm run email:dev`. This module stays pure — the react-email preview server
-// bundles it on its own, so everything it needs comes in as props and
-// asset/link URLs are absolute.
+// The shell every outreach note is written into: the operator's text as
+// paragraphs, the community P.S., and one grey line to unsubscribe. It reads
+// like a note a person typed, so there is no letterhead. The words come from a
+// template in src/lib/marketing/templates/ or straight from the send dialog,
+// already filled for this recipient. Preview with `npm run email:dev`. This
+// module stays pure — the react-email preview server bundles it on its own, so
+// everything it needs comes in as props and link URLs are absolute.
 
 type OutreachEmailProps = {
   /** Plain text. A blank line starts a paragraph, a single newline breaks a
@@ -46,7 +44,6 @@ export default function OutreachEmail({ body, unsubscribeUrl }: OutreachEmailPro
       <Tailwind config={{ presets: [pixelBasedPreset] }}>
         <Body className="bg-white font-sans text-[#0F0E0D]">
           <Container className="mx-auto max-w-[520px] px-6 py-12">
-            <DonkeyMark />
             {blocks.map((block, index) => (
               <Text key={index} className="text-[15px] leading-relaxed">
                 {block.split("\n").map((line, lineIndex) => (
@@ -58,13 +55,10 @@ export default function OutreachEmail({ body, unsubscribeUrl }: OutreachEmailPro
               </Text>
             ))}
             <CommunityPs />
-            <Hr className="mt-6 border-[#0F0E0D]/15" />
-            <Text className="text-[12px] leading-relaxed text-[#0F0E0D]/60">
-              You&apos;re receiving this because you created a Donkey Cut
-              account.{" "}
+            <Text className="mt-8 text-[12px] leading-relaxed text-[#0F0E0D]/50">
               <Link
                 href={unsubscribeUrl}
-                className="text-[#0F0E0D]/60 underline"
+                className="text-[#0F0E0D]/50 underline"
               >
                 Unsubscribe
               </Link>{" "}
