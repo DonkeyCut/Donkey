@@ -1,6 +1,7 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Captions, Check, Clapperboard, ClipboardList, Copy, Download, Ellipsis, Film, FolderOpen, FolderPlus, Image as ImageIcon, Loader2, Music, Plus, Shapes, Sparkles, Trash2, Upload, X, Blend } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -25,7 +26,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { apiFetch, apiUrl } from "@/cut/lib/backend";
-import { useCutCaps } from "@/cut/lib/backend/hooks";
+import { useCutCaps, useLocalCompute } from "@/cut/lib/backend/hooks";
 import {
   clearAssetDrag,
   draggingLibrary,
@@ -64,7 +65,6 @@ import {
   deleteFromLibrary,
   deleteLibraryFolder,
   deleteTemplate,
-  fetchLibrary,
   importLibraryAsset,
   importTemplateToProject,
   libraryMediaUrl,
@@ -75,9 +75,10 @@ import {
   saveTemplate,
   uploadToLibrary,
   type LibraryAsset,
+  type LibraryData,
   type LibraryFolder,
-  type LibraryTemplateItem,
 } from "@/cut/lib/library";
+import { patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
 import {
   activeResidency,
   availableResidencies,
@@ -1258,9 +1259,32 @@ function AssetCard({
 const CAMERA_ROLL_FOLDER = "camera-roll";
 
 function LibraryPanel({ projectId }: { projectId: string }) {
-  const [assets, setAssets] = useState<LibraryAsset[] | null>(null);
-  const [folders, setFolders] = useState<LibraryFolder[]>([]);
-  const [templates, setTemplates] = useState<LibraryTemplateItem[]>([]);
+  const client = useQueryClient();
+  // One cached listing serves every library surface (lib/queries.ts), and it
+  // stays live while this panel is open: the shelf re-reads on a timer and
+  // whenever the window comes back to the front, so a clip recorded on the
+  // phone takes its place in the grid with nothing to reload.
+  const library = useLibrary({ live: true });
+  const engineUp = useLocalCompute();
+  // A picker only offers what it can copy into the project, so a shelf that
+  // isn't answering — the Mac's, with the app closed — is left out of it.
+  const reachable = useCallback((r: Residency) => r !== "local" || engineUp, [engineUp]);
+  // A shelf that answered — or failed outright, which the invitation covers.
+  // The listing keeps retrying behind it, so a backend that comes back fills
+  // the grid on its own.
+  const loaded = library.data !== undefined || library.isError;
+  const assets = (library.data?.assets ?? []).filter((a) => reachable(a.residency));
+  const folders = (library.data?.folders ?? []).filter((f) => reachable(f.residency));
+  // Saved text styles ride the template rails but are not templates: they
+  // belong to the text inspector, not this shelf.
+  const templates = (library.data?.templates ?? []).filter(
+    (t) => reachable(t.residency) && !isStylePresetTemplate(t)
+  );
+  const patch = useCallback(
+    (fn: (prev: LibraryData) => LibraryData) => patchLibrary(client, fn),
+    [client]
+  );
+  const reload = useCallback(() => refetchLibrary(client), [client]);
   const [openFolder, setOpenFolder] = useLocalPref<string | null>(
     "cut-library-folder",
     null,
@@ -1269,57 +1293,45 @@ function LibraryPanel({ projectId }: { projectId: string }) {
   const [deleting, setDeleting] = useState<LibraryAsset | null>(null);
   const [uploading, setUploading] = useState(0);
 
-  const reload = () =>
-    fetchLibrary()
-      .then((d) => {
-        setAssets(d.assets);
-        setFolders(d.folders);
-        // Saved text styles ride the template rails but are not templates:
-        // they belong to the text inspector, not this shelf.
-        setTemplates(d.templates.filter((t) => !isStylePresetTemplate(t)));
-      })
-      .catch(() => setAssets([]));
-
   // Where an asset shows: phone recordings gather in the derived Camera Roll
   // folder whatever their server folderId says.
   const folderOf = (a: LibraryAsset) =>
     a.origin === "camera" ? CAMERA_ROLL_FOLDER : (a.folderId ?? null);
-  const cameraCount = (assets ?? []).filter((a) => a.origin === "camera").length;
+  const cameraCount = assets.filter((a) => a.origin === "camera").length;
 
   // A remembered folder can vanish between sessions; drop back to the root.
+  const knownFolder =
+    folders.some((f) => f.id === openFolder) ||
+    (openFolder === CAMERA_ROLL_FOLDER && cameraCount > 0);
   useEffect(() => {
-    const known =
-      folders.some((f) => f.id === openFolder) ||
-      (openFolder === CAMERA_ROLL_FOLDER && cameraCount > 0);
-    if (assets !== null && openFolder !== null && !known) setOpenFolder(null);
-  }, [assets, folders, openFolder, cameraCount, setOpenFolder]);
+    if (loaded && openFolder !== null && !knownFolder) setOpenFolder(null);
+  }, [loaded, knownFolder, openFolder, setOpenFolder]);
 
   // A revealed library asset may sit inside a folder — open it so the card is
   // on screen to scroll to and flash.
   useRevealEffect((ref) => {
     if (ref.scope !== "library") return;
-    const a = (assets ?? []).find((x) => x.id === ref.id);
+    const a = assets.find((x) => x.id === ref.id);
     if (a) setOpenFolder(folderOf(a));
   });
 
   const removeTemplate = async (r: Residency, id: string) => {
-    setTemplates((prev) => prev.filter((t) => t.id !== id));
+    patch((d) => ({ ...d, templates: d.templates.filter((t) => t.id !== id) }));
     await deleteTemplate(r, id).catch(() => void reload());
   };
 
   const commitTemplateRename = async (r: Residency, id: string, name: string) => {
-    setTemplates((prev) => prev.map((t) => (t.id === id ? { ...t, name } : t)));
+    patch((d) => ({
+      ...d,
+      templates: d.templates.map((t) => (t.id === id ? { ...t, name } : t)),
+    }));
     await renameTemplate(r, id, name).catch(() => void reload());
   };
-
-  useEffect(() => {
-    void reload();
-  }, []);
 
   const remove = async () => {
     if (!deleting) return;
     const { id, residency } = deleting;
-    setAssets((prev) => (prev ?? []).filter((a) => a.id !== id));
+    patch((d) => ({ ...d, assets: d.assets.filter((a) => a.id !== id) }));
     setDeleting(null);
     if (isLinkedType(deleting.type)) forgetLinkedCopy(id);
     try {
@@ -1333,7 +1345,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
   // Every item carries its shelf; a folder belongs to one, so an item only
   // files into a folder on the same shelf.
   const shelfOf = (id: string): Residency | null =>
-    (assets ?? []).find((a) => a.id === id)?.residency ??
+    assets.find((a) => a.id === id)?.residency ??
     templates.find((t) => t.id === id)?.residency ??
     null;
 
@@ -1342,8 +1354,11 @@ function LibraryPanel({ projectId }: { projectId: string }) {
     const residency = shelfOf(id);
     if (!residency) return;
     if (folderId && folders.find((f) => f.id === folderId)?.residency !== residency) return;
-    setAssets((prev) => (prev ?? []).map((a) => (a.id === id ? { ...a, folderId } : a)));
-    setTemplates((prev) => prev.map((t) => (t.id === id ? { ...t, folderId } : t)));
+    patch((d) => ({
+      ...d,
+      assets: d.assets.map((a) => (a.id === id ? { ...a, folderId } : a)),
+      templates: d.templates.map((t) => (t.id === id ? { ...t, folderId } : t)),
+    }));
     await moveLibraryItem(residency, id, folderId).catch(() => void reload());
   };
 
@@ -1374,7 +1389,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
           await moveLibraryItem(shelf, asset.id, folderId).catch(() => {});
           asset.folderId = folderId;
         }
-        setAssets((prev) => [asset, ...(prev ?? [])]);
+        patch((d) => ({ ...d, assets: [asset, ...d.assets] }));
         // A lent item is only usable once it is in reach of the menus.
         if (isLinkedType(asset.type)) void syncLinkedLibrary();
       } catch {
@@ -1399,7 +1414,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
     (files) => void upload(files)
   );
 
-  const all = assets ?? [];
+  const all = assets;
   const shown = all.filter((a) => folderOf(a) === openFolder);
 
   // Which cards are picked, so a sweep or a ⇧-click hands the timeline (or a
@@ -1481,19 +1496,24 @@ function LibraryPanel({ projectId }: { projectId: string }) {
             onRename={async (id, name) => {
               const r = folders.find((f) => f.id === id)?.residency;
               if (!r) return;
-              setFolders((prev) => prev.map((f) => (f.id === id ? { ...f, name } : f)));
+              patch((d) => ({
+                ...d,
+                folders: d.folders.map((f) => (f.id === id ? { ...f, name } : f)),
+              }));
               await renameLibraryFolder(r, id, name).catch(() => void reload());
             }}
             onDelete={async (id) => {
               const r = folders.find((f) => f.id === id)?.residency;
               if (!r) return;
-              setFolders((prev) => prev.filter((f) => f.id !== id));
-              setAssets((prev) =>
-                (prev ?? []).map((a) => (a.folderId === id ? { ...a, folderId: null } : a))
-              );
-              setTemplates((prev) =>
-                prev.map((t) => (t.folderId === id ? { ...t, folderId: null } : t))
-              );
+              patch((d) => ({
+                folders: d.folders.filter((f) => f.id !== id),
+                assets: d.assets.map((a) =>
+                  a.folderId === id ? { ...a, folderId: null } : a
+                ),
+                templates: d.templates.map((t) =>
+                  t.folderId === id ? { ...t, folderId: null } : t
+                ),
+              }));
               if (openFolder === id) setOpenFolder(null);
               await deleteLibraryFolder(r, id).catch(() => void reload());
             }}
@@ -1538,7 +1558,12 @@ function LibraryPanel({ projectId }: { projectId: string }) {
                   if (!asset) return;
                   void addAssetToLibraryTemplate(projectId, t, asset)
                     .then((updated) =>
-                      setTemplates((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
+                      patch((d) => ({
+                        ...d,
+                        templates: d.templates.map((x) =>
+                          x.id === updated.id ? updated : x
+                        ),
+                      }))
                     )
                     .catch(() => void reload());
                 }}
@@ -1547,7 +1572,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
           </div>
         </div>
       )}
-      {assets === null ? (
+      {!loaded ? (
         <div className="grid flex-1 place-items-center text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
         </div>

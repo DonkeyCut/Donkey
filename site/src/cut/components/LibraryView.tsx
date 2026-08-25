@@ -345,7 +345,10 @@ export function LibraryView() {
   // on that disk, so they still list, badged and read-only until the app is
   // back. Clicking one raises the gate's banner, which is where the way out
   // of that state lives.
-  const library = useLibrary();
+  // Live while the page is open: a shelf filled from somewhere else — a phone
+  // upload, a second tab, a linked import finishing — lands in the grid on its
+  // own timer instead of waiting for a reload.
+  const library = useLibrary({ live: true });
   const listed = useListedResidencies();
   const engineUp = useLocalCompute();
   // Every shelf but the Mac's is always answering: the cloud is a request away
