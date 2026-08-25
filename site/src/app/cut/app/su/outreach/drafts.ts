@@ -29,6 +29,7 @@ function isDraft(value: unknown): value is OutreachDraft {
 export function useOutreachDrafts(): {
   drafts: OutreachDraft[];
   remember: (draft: { subject: string; body: string }) => void;
+  forget: (savedAt: string) => void;
 } {
   const [drafts, setDrafts] = useLocalPref<OutreachDraft[]>(KEY, [], (value) =>
     Array.isArray(value) && value.every(isDraft),
@@ -47,5 +48,12 @@ export function useOutreachDrafts(): {
     [drafts, setDrafts],
   );
 
-  return { drafts, remember };
+  const forget = useCallback(
+    (savedAt: string) => {
+      setDrafts(drafts.filter((draft) => draft.savedAt !== savedAt));
+    },
+    [drafts, setDrafts],
+  );
+
+  return { drafts, forget, remember };
 }

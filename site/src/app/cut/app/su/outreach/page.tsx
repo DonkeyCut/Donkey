@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { XIcon } from "lucide-react";
+import { useRef, useState } from "react";
 
 import { useOutreachDrafts } from "@/app/cut/app/su/outreach/drafts";
 import { Badge } from "@/components/ui/badge";
@@ -16,13 +17,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import type { OutreachStatus } from "@/lib/marketing/campaigns";
 import { OUTREACH_PLACEHOLDERS } from "@/lib/marketing/placeholders";
 import { useOutreach, useOutreachAction, type OutreachRow } from "@/queries/outreach";
@@ -40,6 +36,20 @@ const FILTERS: { status: OutreachStatus; label: string }[] = [
 ];
 
 const BLANK = "blank";
+
+// A place a note can start from: a saved template, or something this browser
+// already sent. Both are starting points; whatever ends up in the fields is
+// what goes out.
+type StartPoint = {
+  id: string;
+  title: string;
+  meta: string;
+  subject: string;
+  body: string;
+  at: number;
+  remove?: () => void;
+  busy?: boolean;
+};
 
 function ago(iso: string | null): string {
   if (!iso) return "—";
@@ -79,34 +89,54 @@ export default function SuOutreachPage() {
   const [body, setBody] = useState("");
   const [templateName, setTemplateName] = useState("");
   const [naming, setNaming] = useState(false);
+  const bodyField = useRef<HTMLTextAreaElement>(null);
   const list = useOutreach(status);
   const act = useOutreachAction();
   const templates = useOutreachTemplates();
   const saveTemplate = useSaveOutreachTemplate();
   const deleteTemplate = useDeleteOutreachTemplate();
-  const { drafts, remember } = useOutreachDrafts();
+  const { drafts, forget, remember } = useOutreachDrafts();
 
   const saved = templates.data?.templates ?? [];
 
-  // Saved templates are shared and outlive the browser; recent sends are this
-  // browser's own. Both are starting points: whatever ends up in the fields is
-  // what goes out.
-  const sources: { id: string; label: string; subject: string; body: string }[] = [
-    { id: BLANK, label: "Blank", subject: "", body: "" },
+  const dropSource = (id: string) => {
+    if (source === id) setSource(BLANK);
+  };
+
+  // Templates are shared and outlive the browser; recent sends are this
+  // browser's own. One list, newest first, each entry saying which it is.
+  const starts: StartPoint[] = [
     ...saved.map((template) => ({
-      id: `tpl:${template.id}`,
-      label: template.name,
-      subject: template.subject,
+      at: new Date(template.updatedAt).getTime(),
       body: template.body,
+      busy: deleteTemplate.isPending,
+      id: `tpl:${template.id}`,
+      meta: "Template",
+      remove: () =>
+        deleteTemplate.mutate(template.id, {
+          onSuccess: () => dropSource(`tpl:${template.id}`),
+        }),
+      subject: template.subject,
+      title: template.name,
     })),
-    ...drafts.map((draft, index) => ({
-      id: `draft:${index}`,
-      label: `${draft.subject} · sent ${ago(draft.savedAt)}`,
-      subject: draft.subject,
+    ...drafts.map((draft) => ({
+      at: new Date(draft.savedAt).getTime(),
       body: draft.body,
+      id: `draft:${draft.savedAt}`,
+      meta: `Sent ${ago(draft.savedAt)}`,
+      remove: () => {
+        forget(draft.savedAt);
+        dropSource(`draft:${draft.savedAt}`);
+      },
+      subject: draft.subject,
+      title: draft.subject,
     })),
+  ].sort((a, b) => b.at - a.at);
+
+  const sources: StartPoint[] = [
+    { at: 0, body: "", id: BLANK, meta: "", subject: "", title: "Blank" },
+    ...starts,
   ];
-  const sourceLabels = Object.fromEntries(sources.map((s) => [s.id, s.label]));
 
   const sendable = subject.trim() !== "" && body.trim() !== "";
   const selectedTemplate = source.startsWith("tpl:")
@@ -123,9 +153,9 @@ export default function SuOutreachPage() {
   };
 
   const openSend = (row: OutreachRow) => {
-    // Open on the first saved template so the common case is one click from
-    // ready; with none saved yet, a blank note.
-    const start = sources[1] ?? sources[0];
+    // Open on the newest starting point so the common case is one click from
+    // ready; with nothing saved yet, a blank note.
+    const start = starts[0] ?? sources[0];
     setSource(start.id);
     setSubject(start.subject);
     setBody(start.body);
@@ -147,10 +177,17 @@ export default function SuOutreachPage() {
     );
   };
 
-  const removeTemplate = () => {
-    if (!selectedTemplate) return;
-    deleteTemplate.mutate(selectedTemplate.id, {
-      onSuccess: () => setSource(BLANK),
+  // A placeholder is easier to click than to spell, and it lands where the
+  // cursor already is.
+  const insertPlaceholder = (name: string) => {
+    const token = `{{${name}}}`;
+    const field = bodyField.current;
+    const start = field?.selectionStart ?? body.length;
+    const end = field?.selectionEnd ?? start;
+    setBody(`${body.slice(0, start)}${token}${body.slice(end)}`);
+    requestAnimationFrame(() => {
+      field?.focus();
+      field?.setSelectionRange(start + token.length, start + token.length);
     });
   };
 
@@ -266,7 +303,7 @@ export default function SuOutreachPage() {
         onOpenChange={(open) => setSendTarget(open ? sendTarget : null)}
         open={sendTarget !== null}
       >
-        <DialogContent className="max-w-xl">
+        <DialogContent className="grid max-h-[85vh] grid-rows-[auto_minmax(0,1fr)_auto] max-w-[calc(100%-2rem)] sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>Email {sendTarget?.name}</DialogTitle>
             <DialogDescription>
@@ -275,36 +312,78 @@ export default function SuOutreachPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="outreach-source">Start from</Label>
-              <div className="flex items-center gap-2">
-                <Select
-                  items={sourceLabels}
-                  onValueChange={(id) => pickSource(id as string)}
-                  value={source}
-                >
-                  <SelectTrigger className="flex-1" id="outreach-source">
-                    <span className="truncate">{sourceLabels[source]}</span>
-                  </SelectTrigger>
-                  <SelectContent alignItemWithTrigger={false}>
-                    {sources.map((option) => (
-                      <SelectItem key={option.id} value={option.id}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {selectedTemplate ? (
-                  <Button
-                    disabled={deleteTemplate.isPending}
-                    onClick={removeTemplate}
-                    size="sm"
-                    variant="ghost"
-                  >
-                    Delete
-                  </Button>
-                ) : null}
+          <div className="grid min-h-0 min-w-0 gap-4 md:grid-cols-[15rem_minmax(0,1fr)]">
+            <div className="flex min-h-0 flex-col gap-2 md:border-r md:pr-4">
+              <span className="text-xs font-medium text-muted-foreground">
+                Start from
+              </span>
+              <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto max-md:max-h-40">
+                {sources.map((option) => (
+                  <div className="group/start relative" key={option.id}>
+                    <button
+                      className={cn(
+                        "w-full rounded-lg px-2 py-1.5 pr-8 text-left transition-colors",
+                        source === option.id
+                          ? "bg-accent text-accent-foreground"
+                          : "hover:bg-accent/50",
+                      )}
+                      onClick={() => pickSource(option.id)}
+                      type="button"
+                    >
+                      <span className="block truncate text-sm">{option.title}</span>
+                      {option.meta ? (
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {option.meta}
+                        </span>
+                      ) : null}
+                    </button>
+                    {option.remove ? (
+                      <Button
+                        aria-label={`Delete ${option.title}`}
+                        className="absolute top-1.5 right-1 opacity-0 group-hover/start:opacity-100 focus-visible:opacity-100"
+                        disabled={option.busy}
+                        onClick={option.remove}
+                        size="icon-xs"
+                        variant="ghost"
+                      >
+                        <XIcon />
+                      </Button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+              {naming ? (
+                <div className="space-y-2">
+                  <Input
+                    aria-label="Template name"
+                    autoFocus
+                    maxLength={80}
+                    onChange={(event) => setTemplateName(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") submitTemplate();
+                    }}
+                    placeholder="Template name"
+                    value={templateName}
+                  />
+                  <div className="flex items-center gap-2">
+                    <Button
+                      className="flex-1"
+                      disabled={saveTemplate.isPending || templateName.trim() === ""}
+                      onClick={submitTemplate}
+                      size="sm"
+                    >
+                      {saveTemplate.isPending ? "Saving…" : "Save"}
+                    </Button>
+                    <Button
+                      onClick={() => setNaming(false)}
+                      size="sm"
+                      variant="ghost"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
                 <Button
                   disabled={!sendable}
                   onClick={() => {
@@ -316,37 +395,20 @@ export default function SuOutreachPage() {
                 >
                   Save as template
                 </Button>
-              </div>
-              {naming ? (
-                <div className="flex items-center gap-2">
-                  <Input
-                    aria-label="Template name"
-                    autoFocus
-                    maxLength={80}
-                    onChange={(event) => setTemplateName(event.target.value)}
-                    placeholder="Template name"
-                    value={templateName}
-                  />
-                  <Button
-                    disabled={saveTemplate.isPending || templateName.trim() === ""}
-                    onClick={submitTemplate}
-                    size="sm"
-                  >
-                    {saveTemplate.isPending ? "Saving…" : "Save"}
-                  </Button>
-                  <Button onClick={() => setNaming(false)} size="sm" variant="ghost">
-                    Cancel
-                  </Button>
-                </div>
-              ) : null}
-              {saveTemplate.isError || deleteTemplate.isError ? (
-                <p className="text-sm text-destructive">
+              )}
+              {saveTemplate.isError ? (
+                <p className="text-xs text-destructive">
                   Couldn&apos;t save that template. Try a different name.
+                </p>
+              ) : null}
+              {deleteTemplate.isError ? (
+                <p className="text-xs text-destructive">
+                  Couldn&apos;t delete that template.
                 </p>
               ) : null}
             </div>
 
-            <div className="space-y-2">
+            <div className="flex min-h-0 min-w-0 flex-col gap-2">
               <Label htmlFor="outreach-subject">Subject</Label>
               <Input
                 id="outreach-subject"
@@ -354,21 +416,32 @@ export default function SuOutreachPage() {
                 onChange={(event) => setSubject(event.target.value)}
                 value={subject}
               />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="outreach-body">Message</Label>
+              <Label className="mt-1" htmlFor="outreach-body">
+                Message
+              </Label>
               <Textarea
-                className="min-h-64"
+                className="min-h-40 flex-1 resize-none field-sizing-fixed"
                 id="outreach-body"
                 maxLength={5000}
                 onChange={(event) => setBody(event.target.value)}
+                ref={bodyField}
                 value={body}
               />
-              <p className="text-xs text-muted-foreground">
-                Blank line starts a paragraph. Placeholders:{" "}
-                {OUTREACH_PLACEHOLDERS.map((name) => `{{${name}}}`).join(" ")}
-              </p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs text-muted-foreground">
+                  Blank line starts a paragraph. Insert:
+                </span>
+                {OUTREACH_PLACEHOLDERS.map((name) => (
+                  <Button
+                    key={name}
+                    onClick={() => insertPlaceholder(name)}
+                    size="xs"
+                    variant="outline"
+                  >
+                    {`{{${name}}}`}
+                  </Button>
+                ))}
+              </div>
             </div>
           </div>
 
