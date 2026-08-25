@@ -54,6 +54,11 @@ import { registerSourceSampler } from "@/cut/lib/previewCanvas";
 const WARM_HORIZON_S = 2.5;
 /** Inside this, an upcoming clip is walked as well as opened. */
 const WARM_STREAM_S = 0.75;
+/** How long the master's picture has to be missing before a play is held at a
+ * standstill. Short enough that a real stall is caught before the playhead has
+ * gone anywhere, long enough that a decoder a frame behind at a join is not a
+ * stutter and a cut in the sound. */
+const STALL_HOLD_MS = 200;
 /**
  * Decoders alive at once.
  *
@@ -158,6 +163,8 @@ class Engine {
   /** The playhead value the engine itself wrote last, so its own echo is
    * tellable from an outside move — a seek while playing. */
   private written: number | null = null;
+  /** Wall time the master's picture went missing, 0 while it is there. */
+  private stalledAt = 0;
   /** How many 180-steps the preview has traded away, for the engine's life. */
   private dropped = 0;
   private steppedThisPlay = false;
@@ -629,6 +636,8 @@ class Engine {
       s.overlays.length === 0
     ) {
       this.mixer.stop();
+      this.stalledAt = 0;
+      if (s.buffering) useEditor.setState({ buffering: false });
       this.comp.drawLayer(MISSING_FRAME, undefined, true, 1, 0);
       if (s.playing) {
         useEditor.setState({ playing: false });
@@ -647,6 +656,27 @@ class Engine {
     // open can't freeze the playhead or carry playback past a stop mark.
     const masterFrame = master ? this.frameFor(master, t, playing, true) : MISSING_FRAME;
     const pendingMaster = masterFrame.kind === "pending";
+    // A play whose master clip has decoded nothing has nothing to play: the
+    // clock would carry the playhead across a stretch of the cut nobody saw or
+    // heard, and land somewhere further on when the file finally opened. So it
+    // stands still and says so, and the play carries on from where it stopped.
+    // A moment of it is a decoder a frame or two behind rather than a stall,
+    // and stopping the clock for that would stutter the picture and cut the
+    // sound at every join, so a stall has to hold before it counts. A gap in
+    // the timeline is empty on purpose and plays through.
+    if (playing && master && pendingMaster) {
+      this.stalledAt ||= performance.now();
+      if (performance.now() - this.stalledAt >= STALL_HOLD_MS) {
+        this.mixer.hold(t);
+        this.writeHead(t);
+        if (!s.buffering) useEditor.setState({ buffering: true });
+        this.dirty = true;
+        return;
+      }
+    } else {
+      this.stalledAt = 0;
+      if (s.buffering) useEditor.setState({ buffering: false });
+    }
     const fadeGain = this.projectFadeGain(t, total);
     if (pendingMaster) {
       this.dirty = true;

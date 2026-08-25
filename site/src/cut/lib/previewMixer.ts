@@ -170,6 +170,11 @@ export class PreviewMixer {
    * them touches gains alone. */
   private fxKey = "";
   private voices = new Map<string, LiveVoice>();
+  /** Whether the clock is being kept still by `hold`, so entering a hold
+   * silences the mix once rather than on every frame of it. */
+  private holding = false;
+  /** Where the clock is being kept while `holding`. */
+  private heldAt = 0;
   /** Timeline time, context time and wall time of the same instant. Everything
    * scheduled is placed against this. */
   private anchor: { timeline: number; ctx: number; wall: number } | null = null;
@@ -240,6 +245,8 @@ export class PreviewMixer {
    */
   now(): number {
     if (!this.anchor) return 0;
+    // A hold is the clock standing still on purpose; nothing about it is drift.
+    if (this.holding) return this.heldAt;
     const wall = this.anchor.timeline + (performance.now() - this.anchor.wall) / 1000;
     // A browser holds an `AudioContext` suspended until the page has been
     // interacted with, and a suspended context's clock does not move. Reading
@@ -365,11 +372,38 @@ export class PreviewMixer {
     this.anchor = { timeline: t, ctx: ctx.currentTime, wall: performance.now() };
   }
 
+  /**
+   * Keep the clock at `t` while the cut has nothing to show.
+   *
+   * The context's clock runs whatever happens to it, so the anchor moves under
+   * it: the timeline stands still while real time goes on, and the play picks
+   * up where it stopped. Sound stops with it — a mix playing on over a picture
+   * that is not moving is the sound of a cut coming apart, and what is already
+   * scheduled would land at the wrong moment when the picture came back.
+   */
+  hold(t: number): void {
+    if (!this.ctx || !this.anchor) return;
+    if (!this.holding) {
+      this.holding = true;
+      this.heldAt = t;
+      for (const live of this.voices.values()) {
+        this.stopWindows(live);
+        this.reaim(live, Math.max(live.start, t));
+      }
+    }
+    // Both clocks are pulled back to where the hold began, every frame of it:
+    // the context's runs on, and the wall's is what carries a cut whose context
+    // is not running.
+    this.anchor.ctx = this.ctx.currentTime - (this.heldAt - this.anchor.timeline);
+    this.anchor.wall = performance.now() - (this.heldAt - this.anchor.timeline) * 1000;
+  }
+
   /** Stop the clock and silence everything, keeping each voice's reader: the
    * playhead is parked over the same clips it was playing, and the next play
    * is usually from where this one stopped. */
   stop(): void {
     this.anchor = null;
+    this.holding = false;
     for (const live of this.voices.values()) this.stopWindows(live);
   }
 
@@ -460,6 +494,7 @@ export class PreviewMixer {
    */
   update(t: number, voices: Voice[]): void {
     if (!this.anchor || !this.ctx) return;
+    this.holding = false;
     // A context that stops running stops the sound and leaves the picture
     // playing on wall time — an output device taken away, a page the browser
     // put to sleep. Nothing else asks it back, since `start` is the only other

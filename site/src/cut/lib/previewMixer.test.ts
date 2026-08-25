@@ -282,7 +282,13 @@ function reset(file: { endEarlyAt?: number; trackEnd?: number } = {}): void {
  * it is drawing. Answers what was heard. */
 async function play(
   during?: (t: number, ctx: FakeContext) => void,
-  file: { endEarlyAt?: number; trackEnd?: number } = {}
+  file: {
+    endEarlyAt?: number;
+    trackEnd?: number;
+    /** Frames the cut has nothing to show on: the clock is held rather than
+     * carried, which is what the engine does with a stalled picture. */
+    holdWhile?: (t: number) => boolean;
+  } = {}
 ): Promise<Played[]> {
   reset(file);
   const mixer = new PreviewMixer();
@@ -293,7 +299,8 @@ async function play(
       step();
       t = Math.min(mixer.now(), CLIP_S);
       during?.(t, (mixer as unknown as { ctx: FakeContext }).ctx);
-      mixer.update(t, [voice]);
+      if (file.holdWhile?.(t)) mixer.hold(t);
+      else mixer.update(t, [voice]);
       await settle();
     }
   } finally {
@@ -404,6 +411,29 @@ describe("the preview's sound over a link that only just keeps up", () => {
     expect(heard(sound, 30, CLIP_S)).toBeGreaterThan(0.95);
     // The new address is read by a walk of its own; the old one is let go.
     expect(walks.opened).toBe(2);
+  });
+
+  test("stands still while the cut has nothing to show", async () => {
+    // A play whose picture has decoded nothing has nothing to play. Carrying
+    // the clock through it spends a stretch of the cut nobody saw or heard and
+    // lands somewhere further on when the file opens; the sound plays on over
+    // a picture that is not moving. The clock stops instead, and the play
+    // carries on from where it stopped.
+    const held: number[] = [];
+    const sound = await play(undefined, {
+      holdWhile: (t) => {
+        const stalled = t >= 20 && wall < 27;
+        if (stalled) held.push(t);
+        return stalled;
+      },
+    });
+    // Seven seconds of wall went by and the playhead stayed where it was.
+    expect(held.length).toBeGreaterThan(100);
+    expect(Math.max(...held) - Math.min(...held)).toBeLessThan(0.3);
+    // Nothing plays on over a picture standing still.
+    expect(heard(sound, 22, 26)).toBe(0);
+    // And the cut picks up where it stopped rather than further on.
+    expect(heard(sound, 27, 40)).toBeGreaterThan(0.9);
   });
 
   test("has the file open before the play begins", async () => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { Check, Copy, ZoomIn, ZoomOut } from "lucide-react";
+import { Check, Copy, Loader2, ZoomIn, ZoomOut } from "lucide-react";
 import { usePlayback } from "@/cut/hooks/usePlayback";
 import { startDrag } from "@/cut/lib/drag";
 import {
@@ -148,6 +148,20 @@ function pictureInPane(
   const visX = Math.min(pane.w, left + stage.w) - Math.max(0, left);
   const visY = Math.min(pane.h, top + stage.h) - Math.max(0, top);
   return visX >= Math.min(ONSCREEN_MIN_PX, stage.w) && visY >= Math.min(ONSCREEN_MIN_PX, stage.h);
+}
+
+/** A play held at a standstill, waiting on the picture. The playhead is not
+ * moving, so this says what the frozen frame is doing. */
+function BufferingBadge() {
+  const buffering = useEditor((st) => st.buffering);
+  if (!buffering) return null;
+  return (
+    <div className="pointer-events-none absolute inset-0 grid place-items-center">
+      <span className="rounded-full bg-black/55 p-3 text-white shadow-lg">
+        <Loader2 className="size-6 animate-spin" />
+      </span>
+    </div>
+  );
 }
 
 export function Preview() {
@@ -659,6 +673,7 @@ export function Preview() {
             className="block size-full"
           />
           </StagePictureFx>
+          <BufferingBadge />
           <StagePress.Provider value={stagePress}>
             {slices.map((slice) =>
               slice.kind === "elements" ? (

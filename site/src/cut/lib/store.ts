@@ -279,6 +279,10 @@ export interface EditorState {
     track: "pose" | "mask";
   } | null;
   playing: boolean;
+  /** Set while a play is held at a standstill because the cut has nothing to
+   * show yet — a file still opening, a link that has not delivered. The
+   * playhead stops where it is and the preview says so. */
+  buffering: boolean;
   /** While playing a scoped effect preview, the time playback auto-pauses at;
    * null otherwise. Manual seek/play/pause clears it. */
   previewStopAt: number | null;
@@ -1438,6 +1442,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       selection: null,
       multiSelection: [],
       playing: false,
+      buffering: false,
       previewStopAt: null,
       subtitles: emptySubtitles(),
       subtitleLane: 0,
@@ -1486,6 +1491,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     multiSelection: [],
     selectedKey: null,
     playing: false,
+    buffering: false,
     previewStopAt: null,
     pxPerSec: 60,
     timelineH: TIMELINE_H_DEFAULT,
