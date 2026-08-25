@@ -11,11 +11,9 @@ import {
 } from "react-email";
 import { Fragment } from "react";
 
-import { CommunityPs } from "./_components/CommunityPs";
-
 // The shell every outreach note is written into: the operator's text as
-// paragraphs, the community P.S., and one grey line to unsubscribe. It reads
-// like a note a person typed, so there is no letterhead. The words come from a
+// paragraphs and one grey line to unsubscribe. It reads like a note a person
+// typed, so there is no letterhead. The words come from a
 // template in src/lib/marketing/templates/ or straight from the send dialog,
 // already filled for this recipient. Preview with `npm run email:dev`. This
 // module stays pure — the react-email preview server bundles it on its own, so
@@ -54,7 +52,6 @@ export default function OutreachEmail({ body, unsubscribeUrl }: OutreachEmailPro
                 ))}
               </Text>
             ))}
-            <CommunityPs />
             <Text className="mt-8 text-[12px] leading-relaxed text-[#0F0E0D]/50">
               <Link
                 href={unsubscribeUrl}
