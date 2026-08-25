@@ -126,6 +126,21 @@ after the provider succeeds. Listing models is free. If the provider or runtime
 fails after a successful preflight, the route records a zero-cost failed-usage
 event with a sanitized error code.
 
+How much the preflight can check depends on how the model bills. A token-metered
+call clears on any positive balance, because its cost is unknown until the model
+has run; whatever it overshoots the balance by is written off, and the write-off
+is booked as a ledger row so the leakage stays countable. A generation that bills
+a flat amount — video, images, music — is held to that amount, so a clip priced
+above the balance never starts. That check needs the model that will actually be
+charged, and asset callers routinely omit the model and let the adapter pick one,
+so an asset provider reports its billed model for a request and the route resolves
+it before the preflight.
+
+Both refusals answer 402 with the same message. They carry different codes: a
+balance short of one flat-priced generation also returns the price it could not
+cover, and that account can still run chat and the other metered calls, so a
+client knows to keep the rest of the surface working.
+
 Manual credit grants go through `POST /api/credits/grants/`. The caller must be
 signed in with `user.superUser` set, and the target user is addressed by
 internal id. The route reads a whole-dollar amount as credits — `$1` is one
