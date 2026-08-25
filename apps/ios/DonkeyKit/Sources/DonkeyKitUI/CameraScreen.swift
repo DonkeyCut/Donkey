@@ -611,21 +611,29 @@ struct TeleprompterOverlay: View {
             let lines = script(room: geometry.size.width - Self.sidePadding * 2)
             TimelineView(.animation) { context in
                 let elapsed = elapsed(at: context.date)
-                // Two passes, one behind the other: the script runs without
-                // ever leaving the screen empty, in a take as in a preview.
-                VStack(alignment: .leading, spacing: gap) {
-                    scriptText(lines)
-                        .onGeometryChange(for: Double.self, of: { $0.size.height }) { textHeight = $0 }
-                    scriptText(lines)
-                }
-                .offset(
-                    y: camera.teleprompter.scrollOffset(
-                        elapsed: elapsed,
-                        overlayHeight: height,
-                        textHeight: textHeight,
-                        gap: gap
-                    ) + dragged + dragging
+                // As many passes as the screen holds, above it and below it:
+                // the loop comes round with the words already in place, in a
+                // take as in a preview.
+                let pass = camera.teleprompter.prompterPass(
+                    elapsed: elapsed,
+                    overlayHeight: height,
+                    textHeight: textHeight,
+                    gap: gap,
+                    nudge: dragged + dragging
                 )
+                VStack(alignment: .leading, spacing: gap) {
+                    ForEach(0..<pass.copies, id: \.self) { copy in
+                        if copy == 0 {
+                            scriptText(lines)
+                                .onGeometryChange(for: Double.self, of: { $0.size.height }) {
+                                    textHeight = $0
+                                }
+                        } else {
+                            scriptText(lines)
+                        }
+                    }
+                }
+                .offset(y: pass.offset)
                 .padding(.horizontal, Self.sidePadding)
             }
             .frame(height: height, alignment: .top)

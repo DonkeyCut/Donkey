@@ -61,35 +61,87 @@ import Testing
 }
 
 @Suite struct TeleprompterTests {
-    @Test func scrollStartsLowAndMovesUp() {
+    /// A prompter of `words` words read at 120 wpm.
+    func prompter(words: Int) -> TeleprompterState {
         var state = TeleprompterState()
         state.settings.wordsPerMinute = 120
-        state.script = Array(repeating: "word", count: 120).joined(separator: " ")
-        // 120 words at 120 wpm = 60s, so 420pt of script passes in a minute.
-        // The script starts halfway down the prompter and rises at that pace.
-        #expect(state.duration == 60)
-        let start = state.scrollOffset(elapsed: 0, overlayHeight: 300, textHeight: 420, gap: 100)
-        #expect(start == 150)
-        let mid = state.scrollOffset(elapsed: 30, overlayHeight: 300, textHeight: 420, gap: 100)
-        #expect(mid == 150 - 210)
-        let end = state.scrollOffset(elapsed: 60, overlayHeight: 300, textHeight: 420, gap: 100)
-        #expect(end == 150 - 420)
+        state.script = Array(repeating: "word", count: words).joined(separator: " ")
+        return state
     }
 
-    @Test func scrollWrapsAtTheGapWithoutAnEmptyScreen() {
-        var state = TeleprompterState()
-        state.settings.wordsPerMinute = 120
-        state.script = Array(repeating: "word", count: 120).joined(separator: " ")
-        // 7pt a second: the second copy of the script reaches the first one's
-        // starting place exactly when the travel wraps.
-        let cycle = (420.0 + 100.0) / 7
-        let wrapped = state.scrollOffset(elapsed: cycle, overlayHeight: 300, textHeight: 420, gap: 100)
-        #expect(abs(wrapped - 150) < 0.000_001)
+    /// The lowest point the drawn copies reach without a break above it: the
+    /// window is covered from its top down to here.
+    func covered(_ pass: PrompterPass, textHeight: Double, gap: Double) -> Double {
+        var reach = pass.offset <= 0 ? pass.offset + textHeight : 0
+        for copy in 1..<max(1, pass.copies) {
+            let top = pass.offset + Double(copy) * (textHeight + gap)
+            // The gap is breathing room the reader expects; what must never
+            // happen is a copy starting below where the drawn ones ran out.
+            if top > reach + gap + 0.000_001 { break }
+            reach = max(reach, top + textHeight)
+        }
+        return reach
+    }
+
+    @Test func theScriptStartsLowAndRisesAtTheReadingPace() {
+        let state = prompter(words: 120)
+        // 120 words at 120 wpm = 60s, so 420pt of script passes in a minute.
+        #expect(state.duration == 60)
+        let start = state.prompterPass(elapsed: 0, overlayHeight: 300, textHeight: 420, gap: 100)
+        #expect(start.offset == 150 - 520)  // one pass up, so the words above are drawn too
+        let mid = state.prompterPass(elapsed: 30, overlayHeight: 300, textHeight: 420, gap: 100)
+        #expect(mid.offset == 150 - 210)
+        // A pass on from the start sits exactly where the start did.
+        let cycle = 520.0 / 7  // 7pt a second
+        let round = state.prompterPass(elapsed: cycle, overlayHeight: 300, textHeight: 420, gap: 100)
+        #expect(abs(round.offset - start.offset) < 0.000_001)
+    }
+
+    @Test func theWindowIsCoveredAtEveryMomentOfTheLoop() {
+        // A long script and a short one, on a tall window and a short one:
+        // whatever the shape, the words reach the foot of the screen.
+        for words in [8, 40, 400] {
+            for overlayHeight in [400.0, 900.0] {
+                let state = prompter(words: words)
+                let textHeight = Double(words) * 3.5
+                let gap = overlayHeight * 0.3
+                let cycle = (textHeight + gap) / (textHeight / state.duration)
+                // Three loops, sampled finely enough to catch a single frame.
+                for step in 0...600 {
+                    let elapsed = cycle * 3 * Double(step) / 600
+                    let pass = state.prompterPass(
+                        elapsed: elapsed,
+                        overlayHeight: overlayHeight,
+                        textHeight: textHeight,
+                        gap: gap
+                    )
+                    #expect(pass.offset <= 0.000_001)
+                    #expect(pass.offset > -(textHeight + gap) - 0.000_001)
+                    #expect(covered(pass, textHeight: textHeight, gap: gap) >= overlayHeight)
+                }
+            }
+        }
+    }
+
+    @Test func aReadersNudgeMovesTheWordsAndKeepsTheScreenCovered() {
+        let state = prompter(words: 40)
+        for nudge in [-800.0, -120.0, 0.0, 120.0, 800.0] {
+            let pass = state.prompterPass(
+                elapsed: 12,
+                overlayHeight: 800,
+                textHeight: 140,
+                gap: 240,
+                nudge: nudge
+            )
+            #expect(covered(pass, textHeight: 140, gap: 240) >= 800)
+        }
     }
 
     @Test func emptyScriptHoldsAtLead() {
         let state = TeleprompterState()
-        #expect(state.scrollOffset(elapsed: 5, overlayHeight: 300, textHeight: 0, gap: 100) == 150)
+        let pass = state.prompterPass(elapsed: 5, overlayHeight: 300, textHeight: 0, gap: 100)
+        #expect(pass.offset == 150)
+        #expect(pass.copies == 1)
     }
 
     @Test func hasScriptIgnoresWhitespace() {

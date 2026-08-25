@@ -102,25 +102,57 @@ nonisolated public struct TeleprompterState: Equatable, Sendable {
     /// of the prompter's height.
     public static let leadShare = 0.5
 
-    /// Vertical offset of the script at `elapsed` seconds in. The script
-    /// starts halfway down the prompter and rises at the reading pace — its
-    /// own rendered height per read duration, so the words pass the reader at
-    /// the set words per minute, paragraph gaps included as natural pauses.
+    /// Where the script sits at `elapsed` seconds in, and how many copies of
+    /// it the screen needs to stay covered.
     ///
-    /// The travel wraps at the script's height plus `gap`, which is the copy
-    /// the screen draws twice: the next pass comes up from below as the last
-    /// one leaves, so the loop never runs through an empty screen.
-    public func scrollOffset(
+    /// The script starts halfway down the prompter and rises at the reading
+    /// pace — its own rendered height per read duration, so the words pass the
+    /// reader at the set words per minute, paragraph gaps included as natural
+    /// pauses. `nudge` is the reader's own hand on the script; it moves with
+    /// the pacing rather than fighting it.
+    ///
+    /// One pass is drawn every `textHeight + gap`, above the window as well as
+    /// below it, and the offset it starts from is always within one pass of the
+    /// top. However long the run goes and wherever the loop has reached, the
+    /// screen is covered top to bottom: a reader never watches the words leave
+    /// and nothing take their place.
+    public func prompterPass(
         elapsed: TimeInterval,
         overlayHeight: Double,
         textHeight: Double,
-        gap: Double
-    ) -> Double {
+        gap: Double,
+        nudge: Double = 0
+    ) -> PrompterPass {
         let lead = overlayHeight * Self.leadShare
         let total = duration
-        guard total > 0, textHeight > 0 else { return lead }
-        let speed = textHeight / total
         let cycle = textHeight + gap
-        return lead - (speed * elapsed).truncatingRemainder(dividingBy: cycle)
+        guard total > 0, textHeight > 0, cycle > 0 else {
+            return PrompterPass(offset: lead + nudge, copies: 1)
+        }
+        let travelled = textHeight / total * elapsed
+        // The first copy's top, carried back up to within one pass of the
+        // window's own top: the passes before it are drawn, so the words that
+        // have already gone by are still there to run off the screen.
+        let raw = lead - travelled + nudge
+        let wrapped = raw.truncatingRemainder(dividingBy: cycle)
+        let offset = wrapped > 0 ? wrapped - cycle : wrapped
+        // Enough passes to reach the foot of the window from there, plus one
+        // waiting below it so the next is always on its way up.
+        let copies = Int(((overlayHeight - offset) / cycle).rounded(.up)) + 1
+        return PrompterPass(offset: offset, copies: max(2, copies))
+    }
+}
+
+/// One frame of the prompter's loop: where the first copy of the script sits
+/// and how many copies follow it down the screen.
+nonisolated public struct PrompterPass: Equatable, Sendable {
+    /// The top of the first copy, in the prompter's own space.
+    public var offset: Double
+    /// Copies to draw, spaced a gap apart.
+    public var copies: Int
+
+    public init(offset: Double, copies: Int) {
+        self.offset = offset
+        self.copies = copies
     }
 }
