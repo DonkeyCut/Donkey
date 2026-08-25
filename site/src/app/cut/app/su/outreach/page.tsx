@@ -3,7 +3,10 @@
 import { XIcon } from "lucide-react";
 import { useRef, useState } from "react";
 
-import { useOutreachDrafts } from "@/app/cut/app/su/outreach/drafts";
+import {
+  useLastOutreachStart,
+  useOutreachDrafts,
+} from "@/app/cut/app/su/outreach/drafts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -104,6 +107,7 @@ export default function SuOutreachPage() {
   const saveTemplate = useSaveOutreachTemplate();
   const deleteTemplate = useDeleteOutreachTemplate();
   const { drafts, forget, remember } = useOutreachDrafts();
+  const [lastStart, setLastStart] = useLastOutreachStart();
 
   const saved = templates.data?.templates ?? [];
 
@@ -161,9 +165,11 @@ export default function SuOutreachPage() {
   };
 
   const openSend = (row: OutreachRow) => {
-    // Open on the newest starting point so the common case is one click from
-    // ready; with nothing saved yet, a blank note.
-    const start = starts[0] ?? sources[0];
+    // Open on whatever the last note went out from, so a run through the list
+    // is one click from ready; with nothing sent yet, the newest starting
+    // point, and with nothing saved at all, a blank note.
+    const start =
+      sources.find((option) => option.id === lastStart) ?? starts[0] ?? sources[0];
     setSource(start.id);
     setSubject(start.subject);
     setBody(start.body);
@@ -178,6 +184,17 @@ export default function SuOutreachPage() {
       { body, name, subject },
       {
         onSuccess: (result) => {
+          // The words now live in a template, so the sent copy of them stops
+          // being a second entry saying the same thing.
+          const same = drafts.find(
+            (draft) => draft.subject === subject && draft.body === body,
+          );
+          if (same) {
+            forget(same.savedAt);
+            if (lastStart === `draft:${same.savedAt}`) {
+              setLastStart(`tpl:${result.template.id}`);
+            }
+          }
           setSource(`tpl:${result.template.id}`);
           setNaming(false);
         },
@@ -202,11 +219,15 @@ export default function SuOutreachPage() {
   const submitSend = () => {
     const target = sendTarget;
     if (!target || subject.trim() === "" || body.trim() === "") return;
+    // Sending a start point word for word is that start point; only edited
+    // words become an entry of their own.
+    const from = sources.find((option) => option.id === source);
+    const edited = from?.subject !== subject || from.body !== body;
     act.mutate(
       { action: "send", body, outreachId: target.id, subject },
       {
         onSuccess: () => {
-          remember({ body, subject });
+          setLastStart(edited ? `draft:${remember({ body, subject })}` : source);
           // A send in flight leaves the dialog free for the next row, so only
           // close it if that row is still the one on screen.
           setSendTarget((current) => (current?.id === target.id ? null : current));

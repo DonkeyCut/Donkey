@@ -14,6 +14,7 @@ export type OutreachDraft = {
 };
 
 const KEY = "donkey.outreach.drafts";
+const START_KEY = "donkey.outreach.lastStart";
 const LIMIT = 20;
 
 function isDraft(value: unknown): value is OutreachDraft {
@@ -26,9 +27,18 @@ function isDraft(value: unknown): value is OutreachDraft {
   );
 }
 
+// Which start point the last note went out from, so the next row opens on it.
+export function useLastOutreachStart(): [string | null, (id: string) => void] {
+  return useLocalPref<string | null>(
+    START_KEY,
+    null,
+    (value) => value === null || typeof value === "string",
+  );
+}
+
 export function useOutreachDrafts(): {
   drafts: OutreachDraft[];
-  remember: (draft: { subject: string; body: string }) => void;
+  remember: (draft: { subject: string; body: string }) => string;
   forget: (savedAt: string) => void;
 } {
   const [drafts, setDrafts] = useLocalPref<OutreachDraft[]>(KEY, [], (value) =>
@@ -41,9 +51,9 @@ export function useOutreachDrafts(): {
       const rest = drafts.filter(
         (draft) => draft.subject !== subject || draft.body !== body,
       );
-      setDrafts(
-        [{ body, savedAt: new Date().toISOString(), subject }, ...rest].slice(0, LIMIT),
-      );
+      const savedAt = new Date().toISOString();
+      setDrafts([{ body, savedAt, subject }, ...rest].slice(0, LIMIT));
+      return savedAt;
     },
     [drafts, setDrafts],
   );
