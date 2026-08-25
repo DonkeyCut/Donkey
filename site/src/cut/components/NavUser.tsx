@@ -21,6 +21,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { UserAvatar } from "@/cut/components/UserAvatar";
 import { forgetRememberedEngineUser } from "@/cut/lib/api";
+import { useEngineUser } from "@/cut/lib/backend/hooks";
 import { connectToEngine } from "@/cut/lib/connect";
 import { cutInstallHref } from "@/cut/lib/install";
 import { openOnboarding } from "@/cut/lib/onboarding";
@@ -30,15 +31,23 @@ import { useAccountProfile, visibleName } from "@/queries/accountProfile";
 
 // Signed-in user row pinned to the sidebar bottom; the whole row opens the
 // account menu. Hidden while signed out — the editor itself needs no account,
-// so the row only surfaces once a session exists.
+// so the row only surfaces once an account is bound.
+//
+// Whether to draw the row comes from that binding, not from the session
+// object: the auth client re-reads the session on every window focus and
+// reports null while the request is in the air, which took the row off the
+// sidebar and put it back a moment later. The session is read here only for
+// the name and picture the provider gave us, and only until the profile —
+// which holds both, and is cached — answers.
 export function NavUser() {
   const router = useRouter();
   const base = useCutBase();
+  const user = useEngineUser();
   const { data: session } = authClient.useSession();
-  // Mounted above the session check so the hook order is stable; it stays idle
-  // until there's a session to read a profile for.
-  const { data: profile, isPending } = useAccountProfile({ enabled: Boolean(session) });
-  if (!session) return null;
+  // Mounted above the account check so the hook order is stable; it stays idle
+  // until there's an account to read a profile for.
+  const { data: profile, isPending } = useAccountProfile({ enabled: Boolean(user) });
+  if (!user) return null;
 
   // The name and picture the user chose live in the profile, not the session.
   // The row waits for them behind a skeleton of its own shape rather than
@@ -53,8 +62,8 @@ export function NavUser() {
   }
 
   // The name the user chose wins over the one the provider gave us.
-  const name = visibleName(profile, session.user.name);
-  const image = profile?.image ?? session.user.image;
+  const name = visibleName(profile, session?.user.name ?? "");
+  const image = profile?.image ?? session?.user.image;
 
   const runLocally = () => {
     // Reach for the engine first — the app may already be installed and

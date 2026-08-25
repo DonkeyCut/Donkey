@@ -12,9 +12,8 @@
 // and picking in one has to move the other.
 import { useSyncExternalStore } from "react";
 
-import { authClient } from "@/lib/auth-client";
 import { supportsBrowserStore } from "./backend/browser/opfs";
-import { useCloudUsage, useLocalCompute } from "./backend/hooks";
+import { useCloudUsage, useEngineUser, useLocalCompute } from "./backend/hooks";
 import type { Residency } from "./residency";
 
 const KEY = "cut-new-project-residency";
@@ -62,7 +61,12 @@ export type NewProjectTarget = {
 };
 
 export function useNewProjectTarget(): NewProjectTarget {
-  const { data: session } = authClient.useSession();
+  // The account the app is bound to, rather than the session object. The auth
+  // client re-reads the session on every window focus and reports null while
+  // that request is in the air, so a control shaped from it changed shape
+  // every time the user came back to the tab. The binding changes when the
+  // account changes and at no other time.
+  const signedIn = useEngineUser() !== null;
   // The engine is never probed here — this reads the answer the ConnectGate
   // already has, and redraws when it lands.
   const engineUp = useLocalCompute();
@@ -70,7 +74,7 @@ export function useNewProjectTarget(): NewProjectTarget {
   // "Local" is one place to the user, so one local entry ever lists: the Mac
   // engine when it is up, else the browser's own store.
   const store = supportsBrowserStore();
-  const choices: Residency[] = !session
+  const choices: Residency[] = !signedIn
     ? ["local"]
     : engineUp
       ? ["cloud", "local"]
@@ -82,7 +86,7 @@ export function useNewProjectTarget(): NewProjectTarget {
   // storage fills; from then on new projects land on the device. The read only
   // happens while the default is still deciding — a user who has picked is
   // done being defaulted.
-  const usage = useCloudUsage(Boolean(session) && !picked, { poll: false });
+  const usage = useCloudUsage(signedIn && !picked, { poll: false });
   const u = usage.data;
   const cloudFull = u != null && u.quotaBytes !== null && u.bytes >= u.quotaBytes;
   const fallback = (cloudFull && choices.find((c) => c !== "cloud")) || choices[0];

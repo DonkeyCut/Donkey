@@ -1,25 +1,22 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import { Skeleton } from "@/components/ui/skeleton";
-import { signInUrl } from "@/cut/lib/generate";
-import { authClient } from "@/lib/auth-client";
+import { useEngineUser } from "@/cut/lib/backend/hooks";
 
-// Session guard for Cut's billing and usage pages. Signed-out visitors go
-// through the same host-aware sign-in flow as the editor's generation
-// surfaces (signInUrl): the same-host sign-in page (Google's redirect_uri is
-// pinned to the auth-owning host). Reading window.location is safe from
-// hydration mismatch: the redirect runs only after the client session resolves.
+// Account guard for Cut's billing and usage pages: they read the account, so
+// they wait for it.
+//
+// It waits on the app's account binding rather than on the session object.
+// The auth client re-reads the session on every window focus and answers null
+// while that request is in the air, and a guard reading it directly sent a
+// signed-in user to sign-in mid-visit. RequireSession, above this whole
+// subtree, is what redirects a visitor who really is signed out.
 export function SettingsGuard({ children }: { children: ReactNode }) {
-  const { data: session, isPending } = authClient.useSession();
+  const user = useEngineUser();
 
-  useEffect(() => {
-    if (isPending || session) return;
-    window.location.assign(signInUrl());
-  }, [isPending, session]);
-
-  if (isPending || !session) {
+  if (!user) {
     return (
       <div className="mx-auto max-w-3xl px-8 py-10">
         <Skeleton className="h-8 w-48" />

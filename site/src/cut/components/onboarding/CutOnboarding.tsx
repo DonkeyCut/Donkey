@@ -10,10 +10,10 @@ import { ModesSlide } from "@/cut/components/onboarding/slides/Modes";
 import { PlansSlide } from "@/cut/components/onboarding/slides/Plans";
 import { ReferralSlide } from "@/cut/components/onboarding/slides/Referral";
 import { WelcomeSlide } from "@/cut/components/onboarding/slides/Welcome";
+import { useEngineUser } from "@/cut/lib/backend/hooks";
 import { useCutBase } from "@/cut/lib/nav";
 import { onOpenOnboarding, setOnboardingCover } from "@/cut/lib/onboarding";
 import { track } from "@/lib/analytics";
-import { authClient } from "@/lib/auth-client";
 import {
   ONBOARDING_VERSION,
   isKnownReferralSource,
@@ -61,9 +61,11 @@ const doneHere = (userId: string): boolean =>
 // thing it writes is what it asks for: where the account heard about us.
 export function CutOnboarding() {
   const base = useCutBase();
-  // Mounted inside a SessionGate, so the session is already resolved.
-  const { data: session } = authClient.useSession();
-  const userId = session?.user.id ?? "";
+  // Mounted inside a SessionGate, so the account is already bound. Read from
+  // the binding rather than the session object, which answers null while the
+  // auth client re-reads it and would key this browser's "seen it" mark to
+  // no account at all.
+  const userId = useEngineUser() ?? "";
   const { data: state, isPending } = useOnboardingState();
   const { data: pro } = useProSubscription();
   const save = useSaveOnboarding();
