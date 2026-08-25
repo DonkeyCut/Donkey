@@ -195,6 +195,13 @@ async function run(job: Job) {
       upload: undefined,
       ...(asset.type === "image" ? { thumbs: [url] } : {}),
     });
+    // The stored file's route URL redirects to a freshly signed link on every
+    // read. Mint it now so the asset settles on the media origin — which the
+    // chunk cache keeps and a playing clip reads straight from — instead of
+    // being repointed a second time at the next scheduled mint.
+    void import("./mediaLinks")
+      .then((m) => m.refreshSignedUrls(true))
+      .catch(() => {});
     // Decoders repoint on the URL change; let the frame they are painting
     // finish before the bytes behind them go away.
     setTimeout(() => revokeTabUrl(localUrl), 10_000);

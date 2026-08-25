@@ -8,6 +8,13 @@ import { cutCloudCatchAll } from "@/cut/server/cloud/routes";
 // (src/cut/server/cloud/routes.ts). The client's cloud driver rewrites the
 // engine's /api/cut/* paths to this prefix.
 
+// Some of these routes move media rather than rows — a library file copied
+// into a project, an export handed on — and a big phone video takes longer
+// than the platform's default ceiling, which ends the request mid-copy. The
+// copy worker already runs at this ceiling; the routes that hand it work run
+// there too.
+export const maxDuration = 300;
+
 // The Cut API surface takes machine callers: a `dk_live_` bearer key acts as
 // its user across the same routes the page uses, and the Cut runner calls
 // back here with its grant while executing a queued turn.

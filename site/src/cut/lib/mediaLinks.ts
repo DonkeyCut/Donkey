@@ -74,8 +74,14 @@ export function markSignedBatch(projectId: string, expiresAt: number | null) {
 }
 
 /** Re-mint the loaded project's signed URLs and swap them into the store.
- * Single-flight; skips while the batch is comfortably fresh unless forced. */
-function refreshSignedUrls(force = false): Promise<void> {
+ * Single-flight; skips while the batch is comfortably fresh unless forced.
+ *
+ * Exported for the import queue: a copy that has just landed is holding the
+ * `/media` route URL, which re-signs and redirects on every range request and
+ * is on no origin the chunk cache keeps. Minting it now puts the asset on the
+ * media origin in one move rather than leaving a playing clip to be repointed
+ * a second time whenever the next scheduled mint comes round. */
+export function refreshSignedUrls(force = false): Promise<void> {
   if (refreshing) return refreshing;
   refreshing = (async () => {
     const b = batch;
