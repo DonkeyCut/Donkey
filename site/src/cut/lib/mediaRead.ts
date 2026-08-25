@@ -487,6 +487,12 @@ export function assembleAudio(
  * gives up the file however far it got. */
 export interface AudioWalk {
   next(): Promise<WrappedAudioBuffer | null>;
+  /** Re-aim the walk at `from` without giving up the file. Opening one is
+   * nearly all a walk costs — the container read out of a hundred megabytes
+   * over a link — and a caller that has to re-aim has every reason not to pay
+   * it twice: the clock ran past what this walk was reading, a seek landed
+   * somewhere else in the same file. The next read starts there. */
+  seek(from: number): void;
   close(): void;
 }
 
@@ -510,12 +516,25 @@ export interface AudioWalk {
 export function openAudioWalk(src: string | Blob, from = 0, to?: number): AudioWalk {
   const input = openMedia(src);
   let closed = false;
-  let opening: Promise<AsyncGenerator<WrappedAudioBuffer, void, unknown> | null> | null = null;
-  const open = () =>
-    (opening ??= (async () => {
-      const track = await audioTrackOf(input);
-      return track ? new AudioBufferSink(track).buffers(from, to) : null;
-    })());
+  let finding: Promise<InputAudioTrack | null> | null = null;
+  let reader: AsyncGenerator<WrappedAudioBuffer, void, unknown> | null = null;
+  /** Where the next read starts, until a reader is standing at it. */
+  let aim: number | null = from;
+  const stop = (gen: AsyncGenerator<WrappedAudioBuffer, void, unknown> | null) => {
+    // Returning a generator is where the decoder it holds is released.
+    if (gen) void gen.return().catch(() => {});
+  };
+  const open = async () => {
+    const track = await (finding ??= audioTrackOf(input));
+    if (!track || closed) return null;
+    if (aim !== null) {
+      const old = reader;
+      reader = new AudioBufferSink(track).buffers(aim, to);
+      aim = null;
+      stop(old);
+    }
+    return reader;
+  };
   return {
     async next() {
       if (closed) return null;
@@ -524,14 +543,17 @@ export function openAudioWalk(src: string | Blob, from = 0, to?: number): AudioW
       const step = await gen.next();
       return step.done ? null : step.value;
     },
+    seek(next) {
+      aim = next;
+    },
     close() {
       if (closed) return;
       closed = true;
-      // The generator is told it is over, which is where the decoder it holds
-      // is released, and the file goes at once behind it: disposing is what
-      // cancels a read still in the air, and a walk being closed because it
-      // stopped answering is waiting on exactly one of those.
-      void opening?.then((gen) => gen?.return()).catch(() => {});
+      // The file goes at once behind the reader: disposing is what cancels a
+      // read still in the air, and a walk being closed because it stopped
+      // answering is waiting on exactly one of those.
+      stop(reader);
+      reader = null;
       input.dispose();
     },
   };

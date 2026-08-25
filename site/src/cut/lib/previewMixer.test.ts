@@ -46,13 +46,22 @@ class FakeGain {
 
 class FakeSource {
   buffer: { duration: number } | null = null;
+  private span: Played | null = null;
   connect() {}
   disconnect() {}
   start(when: number, offset = 0) {
     const length = (this.buffer?.duration ?? 0) - offset;
-    if (length > 0) played.push({ from: when, to: when + length });
+    if (length > 0) {
+      this.span = { from: when, to: when + length };
+      played.push(this.span);
+    }
   }
-  stop() {}
+  /** Stopping a scheduled source silences what it had not played yet, so what
+   * was heard ends here — the difference between a voice let alone and a voice
+   * taken down mid-sound. */
+  stop() {
+    if (this.span) this.span.to = Math.max(this.span.from, Math.min(this.span.to, ctxTime));
+  }
 }
 
 class FakeContext {
@@ -90,7 +99,18 @@ let endEarlyAt = Infinity;
 /** Where the track truly stops, which can be short of the clip. */
 let trackEnd = CLIP_S;
 
+/** What the first read off a newly opened walk costs before it answers: a
+ * container parsed from nothing over the link. A voice that reopens mid-play
+ * pays it; one that keeps its reader does not. */
+let openCostS = 0;
+
 const waiting: { at: number; wake: () => void }[] = [];
+
+/** Resolves `seconds` of wall time from now. */
+function after(seconds: number): Promise<void> {
+  if (seconds <= 0) return Promise.resolve();
+  return new Promise((wake) => waiting.push({ at: wall + seconds, wake }));
+}
 
 /** Resolves once the link has delivered the file as far as `sourceTime`. */
 function delivered(sourceTime: number): Promise<void> {
@@ -108,12 +128,19 @@ const openAudioWalk = (_url: string, from: number, to?: number) => {
   // given up, and the walk sent after it reads the file properly.
   const givesUpAt = endEarlyAt;
   endEarlyAt = Infinity;
+  const cost = openCostS;
+  let opened = false;
   let pos = from;
   let closed = false;
   let done = false;
   return {
     async next() {
       if (closed || done) return null;
+      if (!opened) {
+        opened = true;
+        await after(cost);
+        if (closed) return null;
+      }
       if (wall < hangUntil) return new Promise<null>(() => {});
       await delivered(pos + PART_S);
       if (closed) return null;
@@ -135,6 +162,10 @@ const openAudioWalk = (_url: string, from: number, to?: number) => {
       };
       pos += duration;
       return part;
+    },
+    seek(next: number) {
+      pos = next;
+      done = false;
     },
     close() {
       closed = true;
@@ -230,8 +261,10 @@ async function play(
   reMints.asked = 0;
   failUntil = 0;
   hangUntil = 0;
+  openCostS = 0;
   endEarlyAt = file.endEarlyAt ?? Infinity;
   trackEnd = file.trackEnd ?? CLIP_S;
+  voice.url = "clip.mp4";
   const mixer = new PreviewMixer();
   mixer.start(0);
   try {
@@ -311,6 +344,45 @@ describe("the preview's sound over a link that only just keeps up", () => {
     expect(heard(sound, 0, 29)).toBeGreaterThan(0.9);
     expect(heard(sound, 32, CLIP_S)).toBe(0);
     expect(walks.opened).toBeLessThan(4);
+  });
+
+  test("catches the clock up after an open that took seconds", async () => {
+    // The failure this is here for, and the shape every report of it took: the
+    // sound plays, stops somewhere in the first minute, and never comes back
+    // while the picture rolls on to the end. One read fails, the walk that
+    // replaces it takes a few seconds to parse the file, and the sound it
+    // finally brings back is for a moment that has gone by — so the voice
+    // gives the walk up, opens another, and is late again by exactly as much.
+    // It pays the open for the rest of the play and never catches the clock.
+    const sound = await play((t) => {
+      if (t < 20) return;
+      openCostS = 5;
+      if (t < 21) failUntil = 21;
+    });
+    expect(heard(sound, 0, 18)).toBeGreaterThan(0.9);
+    expect(heard(sound, 32, CLIP_S)).toBeGreaterThan(0.95);
+    // One open answered for; the walk is re-aimed after that, not replaced.
+    expect(walks.opened).toBeLessThan(4);
+  });
+
+  test("plays on when the same sound moves to a new address", async () => {
+    // The failure this is here for: a clip dragged in from the library plays
+    // from the library's own URL while its bytes are copied into the project
+    // behind the editor, and the asset moves to the stored file the moment
+    // they land — mid-play, without a note of the sound changing. Taking the
+    // voice down there stops what was already scheduled and puts the sound
+    // out for as long as a cold open of a long file takes.
+    const sound = await play((t) => {
+      if (t < 20) return;
+      openCostS = 5;
+      voice.url = "landed.mp4";
+    });
+    // What the voice had already read plays out across the swap. It is the
+    // reader that moves, and it moves while that sound is playing.
+    expect(heard(sound, 18, 22)).toBeGreaterThan(0.95);
+    expect(heard(sound, 30, CLIP_S)).toBeGreaterThan(0.95);
+    // The new address is read by a walk of its own; the old one is let go.
+    expect(walks.opened).toBe(2);
   });
 
   test("picks its context back up when the browser puts it down", async () => {

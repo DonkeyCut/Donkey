@@ -463,21 +463,35 @@ export class PreviewMixer {
     for (const v of voices) {
       seen.add(v.id);
       // An edit to a playing clip arrives as the same id with new geometry — a
-      // trim, a move, a speed change, a re-minted URL. Gain is the only part of
-      // a voice that tunes live; everything else is baked into what was already
-      // scheduled, so the voice reopens and the sound follows the edit the way
-      // the picture does.
+      // trim, a move, a speed change. Gain is the only part of a voice that
+      // tunes live; everything else is baked into what was already scheduled,
+      // so the voice reopens and the sound follows the edit the way the
+      // picture does.
       const prev = this.voices.get(v.id);
       if (
         prev &&
-        (prev.url !== v.url ||
-          prev.start !== v.start ||
+        (prev.start !== v.start ||
           prev.in !== v.in ||
           prev.out !== v.out ||
           prev.speed !== v.speed)
       ) {
         this.release(prev);
         this.voices.delete(v.id);
+      } else if (prev && prev.url !== v.url) {
+        // The same sound at a new address: a signed link re-minted, an import
+        // that landed in project storage and moved off the URL it arrived on.
+        // The bytes already scheduled are the same sound, so they play on and
+        // only the next read moves — dropping them would take the sound out
+        // for as long as a cold open of the new address takes, which on a
+        // long file is most of a minute and sounds like the audio quitting.
+        this.forget(prev.url);
+        prev.url = v.url;
+        this.moved(prev);
+        // A new address answers for itself, so nothing the old one did holds
+        // this voice back from asking straight away.
+        prev.attempts = 0;
+        prev.retryAt = 0;
+        prev.reached = -Infinity;
       }
       const live = this.voices.get(v.id) ?? this.open(v, t);
       if (!live) continue;
@@ -669,8 +683,7 @@ export class PreviewMixer {
         // tab in the background. Where it left the walk is behind the clock
         // now, so the voice re-aims at the clock and gives up the stretch in
         // between; that stretch was going by either way.
-        this.moved(live);
-        live.scheduled = Math.max(live.scheduled, tNow);
+        this.reaim(live, tNow);
         return;
       }
       const node = this.ctx.createBufferSource();
@@ -721,6 +734,12 @@ export class PreviewMixer {
       const part = await walk.next();
       if (!current()) return null;
       if (!part) break;
+      // The stall guard is about a source that stopped answering, and a walk
+      // that is handing sound back has not: every part it delivers is the read
+      // saying it is still there. Without this a cold open of a long file over
+      // a slow link is disowned on the clock, re-opened from nothing, and
+      // disowned again, and the voice never gets a group out.
+      live.fillAt = performance.now();
       parts.push(part);
       end = part.timestamp + part.duration;
     }
@@ -745,6 +764,26 @@ export class PreviewMixer {
     if (this.decoded.size > 24) this.decoded.clear();
     this.decoded.set(key, buffer);
     return buffer;
+  }
+
+  /**
+   * Move a voice up to the clock, keeping the file it is reading.
+   *
+   * A group that lands after the moment it was for is the ordinary shape of a
+   * slow open: the file takes a few seconds to parse, and by the time the
+   * first sound comes back the playhead has gone past it. Answering that by
+   * giving up the walk starts the whole open again a second behind where it
+   * just was, and again after that — the voice pays the open cost for the rest
+   * of the play and never once catches the clock, which is a cut that plays
+   * out in silence while the picture rolls on. The reader moves instead: same
+   * file, same decoder, aimed where the sound is wanted.
+   */
+  private reaim(live: LiveVoice, t: number): void {
+    live.gen++;
+    live.filling = false;
+    live.ended = false;
+    live.scheduled = Math.max(live.scheduled, t);
+    live.walk?.seek(live.in + (live.scheduled - live.start) * live.speed);
   }
 
   /** A read that failed, came back empty, or stopped answering. The voice
