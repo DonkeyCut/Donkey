@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import type React from "react";
 import { createPortal } from "react-dom";
 import { ArrowLeft, Check, ChevronDown, Trash2 } from "lucide-react";
@@ -46,14 +46,21 @@ function scrollBoxOf(node: HTMLElement | null): HTMLElement {
 }
 
 /** A text box that grows with what is written, so the page scrolls as one
- * sheet of paper. */
+ * sheet of paper. Measuring the text means collapsing the box first, which
+ * drops the sheet's height for an instant and makes the browser clamp how far
+ * it is scrolled. The place in the note is taken before the measure and handed
+ * back after it, ahead of the frame being painted, so a backspace partway down
+ * a long note leaves the words where they are. */
 function useAutoGrow(value: string) {
   const ref = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    const box = scrollBoxOf(el);
+    const at = box.scrollTop;
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
+    if (box.scrollTop !== at) box.scrollTop = at;
   }, [value]);
   return ref;
 }
