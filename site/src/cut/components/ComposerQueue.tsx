@@ -14,7 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useDragSort } from "@/components/Sortable";
-import { RefThumb } from "./AssetRefs";
+import { MentionedText, RefThumb } from "./AssetRefs";
 import type { AssetRef } from "@/cut/lib/assetRef";
 
 /** Small icon control on a tray row or the tray header. */
@@ -230,7 +230,10 @@ export function ComposerQueue({
                             gone && "line-through decoration-muted-foreground/40",
                           )}
                         >
-                          {it.text}
+                          <MentionedText
+                            text={it.text}
+                            attachments={it.attachments}
+                          />
                         </div>
                         {it.attachments.length > 0 && (
                           <div

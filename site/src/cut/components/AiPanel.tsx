@@ -76,7 +76,6 @@ import {
   normalizeRef,
   sameRef,
   setRefDragData,
-  splitMentions,
   upsertRef,
   useRefCandidates,
   useAssetDrop,
@@ -101,7 +100,7 @@ import { useEditor } from "@/cut/lib/store";
 import { reportActivity } from "@/cut/lib/tabActivity";
 import { cn } from "@/lib/utils";
 import { cardIconButton } from "@/cut/components/iconButton";
-import { MentionTextarea, RefChips, RefThumb, RefTokenChip } from "./AssetRefs";
+import { MentionedText, MentionTextarea, RefChips, RefThumb } from "./AssetRefs";
 import { ComposerQueue, type QueuedMessage } from "./ComposerQueue";
 import { DictationBody } from "./MicDictation";
 import { RECORD_RUNNING_TTL_MS, ToolOutputAssets } from "./ChatAssets";
@@ -1535,34 +1534,6 @@ function MessageAssetCard({ asset }: { asset: AssetRef }) {
   );
 }
 
-/** User-message text with resolved `@` mentions rendered as interactive token
- * chips. Tokens resolve against the message's own attachments first (they hold
- * what was meant at send time), then the live candidates. */
-function MentionedText({
-  text,
-  attachments,
-}: {
-  text: string;
-  attachments: AssetRef[];
-}) {
-  const candidates = useRefCandidates();
-  const parts = useMemo(
-    () => splitMentions(text, [...attachments, ...candidates]),
-    [text, attachments, candidates],
-  );
-  return (
-    <>
-      {parts.map((p, i) =>
-        typeof p === "string" ? (
-          <span key={i}>{p}</span>
-        ) : (
-          <RefTokenChip key={i} item={p} onDark />
-        ),
-      )}
-    </>
-  );
-}
-
 /** Copy-to-clipboard affordance revealed on message hover. */
 function MessageCopy({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -1885,7 +1856,7 @@ const MessageView = memo(function MessageView({
         )}
         {text && (
           <div className="max-w-[85%] rounded-2xl rounded-br-md bg-neutral-900 px-3 py-2 text-[12.5px] leading-relaxed break-words whitespace-pre-wrap text-white">
-            <MentionedText text={text} attachments={attachments} />
+            <MentionedText text={text} attachments={attachments} onDark />
           </div>
         )}
         <MessageCopy text={text} />

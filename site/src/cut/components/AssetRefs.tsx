@@ -8,6 +8,7 @@ import {
   mentionToken,
   refToken,
   sameRef,
+  splitMentions,
   type AssetRef,
 } from "@/cut/lib/assetRef";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
@@ -287,7 +288,7 @@ export function RefTokenChip({
   peekSide = "top",
 }: {
   item: AssetRef;
-  /** Style for a dark bubble (the user message) instead of the light page. */
+  /** Style for a dark bubble — the user message. */
   onDark?: boolean;
   peekSide?: "top" | "bottom";
 }) {
@@ -333,6 +334,40 @@ export function RefTokenChip({
       </button>
       {peek && <RefPeek item={item} side={peekSide} />}
     </span>
+  );
+}
+
+/** Message text with its resolved `@` mentions drawn as token chips. One
+ * renderer for every place a written message is shown — the chat thread and
+ * the queue tray above the composer — so a message reads the same before it
+ * is sent, while it waits, and after it lands. Tokens resolve against the
+ * message's own attachments first (they hold what was meant when it was
+ * written), then the live candidates. */
+export function MentionedText({
+  text,
+  attachments = [],
+  onDark,
+}: {
+  text: string;
+  attachments?: AssetRef[];
+  /** Style for a dark bubble — the user message. */
+  onDark?: boolean;
+}) {
+  const candidates = useRefCandidates();
+  const parts = useMemo(
+    () => splitMentions(text, [...attachments, ...candidates]),
+    [text, attachments, candidates]
+  );
+  return (
+    <>
+      {parts.map((p, i) =>
+        typeof p === "string" ? (
+          <span key={i}>{p}</span>
+        ) : (
+          <RefTokenChip key={i} item={p} onDark={onDark} />
+        )
+      )}
+    </>
   );
 }
 
