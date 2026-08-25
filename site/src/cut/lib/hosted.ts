@@ -14,9 +14,9 @@ const CLIENT_ID = "donkey-cut";
 const OUT_KEY = "cut-credits-out";
 
 /** Whether the account balance is known to be empty: the last hosted call
- * bounced with a 402. Set and cleared by `hostedPost` — the single chokepoint
- * for hosted calls — and persisted so a reload keeps the composer's credits
- * tab up until a call goes through again. */
+ * bounced with a 402 that named no price. Set and cleared by `hostedPost` — the
+ * single chokepoint for hosted calls — and persisted so a reload keeps the
+ * composer's credits tab up until a call goes through again. */
 export const useOutOfCredits = create<{ out: boolean }>(() => ({
   out: typeof window !== "undefined" && safeRead() === "1",
 }));
@@ -39,8 +39,22 @@ function setOut(out: boolean) {
   }
 }
 
-function noteBalance(res: Response) {
-  if (res.status === 402 || res.ok) setOut(res.status === 402);
+async function noteBalance(res: Response) {
+  if (res.ok) {
+    setOut(false);
+    return;
+  }
+  if (res.status !== 402) return;
+  // Two kinds of 402. An empty balance stops everything hosted and takes the
+  // page out; a balance merely short of one flat-priced generation stops that
+  // generation while chat and the metered calls keep working, so it leaves the
+  // flag alone and the tile carries the message. The body is a few bytes and
+  // the caller still gets an unread stream.
+  const body = (await res
+    .clone()
+    .json()
+    .catch(() => null)) as { error?: unknown } | null;
+  if (body?.error !== "insufficient_credits_for_generation") setOut(true);
 }
 
 // One re-check in flight at a time; focus/visibility events can fire together.
@@ -127,6 +141,6 @@ export const hostedPost = async (path: string, body: unknown, signal?: AbortSign
     body: payload,
     signal,
   });
-  noteBalance(res);
+  await noteBalance(res);
   return res;
 };

@@ -16,6 +16,7 @@ import {
   stockAssetInDoc,
   upsertRenderInDoc,
 } from "./genvideo/docWriter";
+import { NO_CREDITS_MESSAGE } from "./credits";
 import { CUT_APP_BASE } from "./nav";
 import { hostedFetch, hostedPost } from "./hosted";
 import { enrichAsset, importFileToProject, uploadProjectImage } from "./media";
@@ -223,11 +224,6 @@ export function signInUrl(): string {
   if (typeof window === "undefined") return "/sign-in";
   return `/sign-in?callbackURL=${encodeURIComponent(window.location.href)}`;
 }
-
-/** Shown for any 402 (empty balance) across chat and generation tiles. The
- * chat error box and the job tiles match this text to swap in a "reload here"
- * credits link, so keep it and those call sites in sync. */
-export const NO_CREDITS_MESSAGE = "No credits left";
 
 /** Cut's billing page, where credits are bought. Linked from any generation
  * error caused by an empty balance. */
@@ -689,8 +685,8 @@ export const useGenerate = create<GenerateState>((set, get) => {
             // The next rung is a fresh submission: drop the dead rung's poll
             // payload so a reload can't resume a render that already failed.
             onRungFailed: () => update(job.id, { poll: undefined }),
-            // An empty balance fails every rung identically — stop there so
-            // a broke render fails fast, not once per rung.
+            // The balance fails every rung identically — stop there so a
+            // render nobody can pay for fails fast, not once per rung.
             fatal: (error) => error === NO_CREDITS_MESSAGE,
           }
         );

@@ -1255,7 +1255,7 @@ function ChatSession({
               >
                 <TriangleAlert className="size-3 shrink-0" />
                 <span>
-                  No credits left —{" "}
+                  Insufficient credits —{" "}
                   <span className="font-medium underline">reload credits</span>
                 </span>
               </a>

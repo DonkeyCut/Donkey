@@ -45,7 +45,8 @@ import { draggingRef, hasRefDrag } from "@/cut/lib/assetRef";
 import { useMusicGen } from "@/cut/lib/musicGen";
 import { STOCK_MUSIC } from "@/cut/lib/stockMusicManifest";
 import { stockAssetInDoc } from "@/cut/lib/genvideo/docWriter";
-import { creditsUrl, signInUrl, useSignedIn } from "@/cut/lib/generate";
+import { signInUrl, useSignedIn } from "@/cut/lib/generate";
+import { HostedErrorText } from "./hostedError";
 import { genPulseOverlay, useActiveWork, useGenNotify } from "@/cut/lib/genNotify";
 import { enrichAsset } from "@/cut/lib/media";
 import { waveGain } from "@/cut/lib/waveform";
@@ -53,7 +54,7 @@ import { usePreviewAudio } from "@/cut/lib/previewAudio";
 import { useEditor } from "@/cut/lib/store";
 import { playheadAt } from "@/cut/lib/playhead";
 import { formatTime } from "@/cut/lib/time";
-import { NoCreditsError, synthesizeSpeech } from "@/cut/lib/tts";
+import { synthesizeSpeech } from "@/cut/lib/tts";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { DUCK_DEFAULT } from "@/cut/lib/voiceover";
 import { useSpeakerVoice, useSpeechLanguage, VoicePicker } from "@/cut/components/VoicePicker";
@@ -181,13 +182,9 @@ function MusicGenerator({ projectId }: { projectId: string }) {
     if (ref?.scope !== "stock" || ref.kind !== "audio") return undefined;
     return STOCK_MUSIC.find((s) => s.id === ref.id);
   };
-  const [error, setError] = useState<{ text: string; credits?: boolean } | null>(null);
+  const [error, setError] = useState<{ text: string } | null>(null);
   const fail = (e: unknown, fallback: string) =>
-    setError(
-      e instanceof Error
-        ? { text: e.message, credits: e instanceof NoCreditsError }
-        : { text: fallback }
-    );
+    setError({ text: e instanceof Error ? e.message : fallback });
   // Music runs on the user's Donkey account, like image/video/voiceover.
   const signedOut = useSignedIn() === false;
 
@@ -336,20 +333,7 @@ function MusicGenerator({ projectId }: { projectId: string }) {
       ) : (
         error && (
           <p className="music-error text-[11px] leading-relaxed text-red-600">
-            {error.text}
-            {error.credits && (
-              <>
-                {" "}
-                <a
-                  className="font-medium underline hover:no-underline"
-                  href={creditsUrl()}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Add credits
-                </a>
-              </>
-            )}
+            <HostedErrorText error={error.text} />
           </p>
         )
       )}
@@ -365,15 +349,9 @@ function VoiceGenerator({ projectId }: { projectId: string }) {
   // In-flight count read from the store, so the status row survives the panel
   // unmounting when the user changes tabs.
   const pending = useActiveWork("audio", "voice");
-  // `credits` marks a failure caused by an empty balance, which renders with a
-  // link to buy more.
-  const [error, setError] = useState<{ text: string; credits?: boolean } | null>(null);
+  const [error, setError] = useState<{ text: string } | null>(null);
   const fail = (e: unknown, fallback: string) =>
-    setError(
-      e instanceof Error
-        ? { text: e.message, credits: e instanceof NoCreditsError }
-        : { text: fallback }
-    );
+    setError({ text: e instanceof Error ? e.message : fallback });
   const directionInput = useRef<HTMLTextAreaElement>(null);
   // Voiceovers run on the user's Donkey account, like image/video generation.
   const signedOut = useSignedIn() === false;
@@ -536,20 +514,7 @@ function VoiceGenerator({ projectId }: { projectId: string }) {
       ) : (
         error && (
           <p className="voice-error text-[11px] leading-relaxed text-red-600">
-            {error.text}
-            {error.credits && (
-              <>
-                {" "}
-                <a
-                  className="font-medium underline hover:no-underline"
-                  href={creditsUrl()}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Add credits
-                </a>
-              </>
-            )}
+            <HostedErrorText error={error.text} />
           </p>
         )
       )}

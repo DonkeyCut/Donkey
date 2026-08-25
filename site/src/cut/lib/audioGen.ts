@@ -1,6 +1,7 @@
 "use client";
 
 import { bytesFromBase64 } from "./bytes";
+import { NO_CREDITS_MESSAGE } from "./credits";
 import { hostedPost } from "./hosted";
 import { importFileToProject } from "./media";
 import { NoCreditsError } from "./tts";
@@ -32,7 +33,7 @@ async function readError(res: Response, fallback: string): Promise<string> {
   const message = [body?.message, body?.error].find(
     (v): v is string => typeof v === "string" && v.length > 0
   );
-  if (res.status === 402) return message ?? "Not enough Donkey credits — top up to continue.";
+  if (res.status === 402) return NO_CREDITS_MESSAGE;
   // The provider's own error (`details.message`) names the actual rejection (a
   // filtered prompt, a timeout); the top-level message is generic.
   const detail = body?.details?.message;

@@ -3,7 +3,7 @@ import { AI_SKILL_INDEX, AI_SKILLS } from "@/cut/server/ai/catalog";
 import { buildAiContext } from "../aiContext";
 import { MEDIA_RUNTIME_TOOLS, runAiTool, UI_TOOLS } from "../aiTools";
 import { normalizeRef } from "../assetRef";
-import { NO_CREDITS_MESSAGE } from "../generate";
+import { NO_CREDITS_MESSAGE } from "../credits";
 import { hostedPost } from "../hosted";
 import { bindHeadlessSession, type HeadlessSession } from "../headless/bind";
 import { headlessRuntime } from "../headless/runtime";

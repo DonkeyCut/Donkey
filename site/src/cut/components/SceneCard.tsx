@@ -15,7 +15,7 @@ import { useHoverPlay } from "../hooks/useHoverPlay";
 import { refFromAsset, type AssetRef } from "../lib/assetRef";
 import { lightboxItemFromRef, useLightbox } from "../lib/lightbox";
 import { formatDuration, useGenScene, type SceneRun } from "../lib/genScene";
-import { NO_CREDITS_MESSAGE } from "../lib/generate";
+import { NO_CREDITS_MESSAGE } from "../lib/credits";
 import { GEN_FPS } from "../lib/genvideo/editorBridge";
 import { useEditor } from "../lib/store";
 import { formatTime } from "../lib/time";
@@ -98,14 +98,15 @@ export function SceneCard({ threadId }: { threadId: string }) {
   const hasFrames = run.shots.some((sh) => sh.clip || sh.startKeyframe);
   // Shots that couldn't be rendered as video and are holding a still instead.
   const stillCount = run.shots.filter((sh) => sh.status === "failed").length;
-  // Any shot stopped by an empty balance: the summary names the cause (the
-  // composer's credits tab carries the reload link).
-  const creditsOut = run.shots.some(
-    (sh) => sh.status === "failed" && sh.error === NO_CREDITS_MESSAGE
-  );
   // Why they held: the first failed shot's own error, so the notice names the
-  // cause instead of stating that something failed.
-  const stillReason = run.shots.find((sh) => sh.status === "failed" && sh.error)?.error;
+  // cause instead of stating that something failed. A shot stopped by the
+  // balance wins the summary even when a later one failed for its own reason —
+  // it is the one the user can act on.
+  const creditsReason = run.shots.find(
+    (sh) => sh.status === "failed" && sh.error === NO_CREDITS_MESSAGE
+  )?.error;
+  const stillReason =
+    creditsReason ?? run.shots.find((sh) => sh.status === "failed" && sh.error)?.error;
   // Elapsed clock: planning counts from the run start, rendering from approval;
   // it stops at the end. Hidden while waiting for the user at the gate.
   const clockAnchor = run.status === "planning" ? run.startedAt : run.renderStartedAt ?? run.startedAt;
@@ -198,8 +199,8 @@ export function SceneCard({ threadId }: { threadId: string }) {
               <span>
                 {stillCount} of {run.shots.length} shot{run.shots.length === 1 ? "" : "s"} held a
                 still —{" "}
-                {creditsOut || stillReason ? (
-                  <HostedErrorText error={creditsOut ? NO_CREDITS_MESSAGE : stillReason!} link={false} />
+                {stillReason ? (
+                  <HostedErrorText error={stillReason} link={false} />
                 ) : (
                   "video generation failed"
                 )}

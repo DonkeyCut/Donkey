@@ -16,7 +16,7 @@
 
 import { geminiModelRoles } from "@/lib/inference/gemini-models";
 import { hostedPost } from "../../hosted";
-import { NO_CREDITS_MESSAGE } from "../../generate";
+import { NO_CREDITS_MESSAGE } from "../../credits";
 import { secToFrame, type RawShot } from "../coverage";
 import { wordsInRange, type BreakdownRole, type ScriptRole, type StyleRole } from "../capabilities";
 import { refImageParts, type InlineImagePart } from "./refImages";

@@ -9,10 +9,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SectionTitle } from "@/cut/components/SectionTitle";
-import { creditsUrl, signInUrl, useSignedIn } from "@/cut/lib/generate";
+import { signInUrl, useSignedIn } from "@/cut/lib/generate";
+import { HostedErrorText } from "./hostedError";
 import { useGenNotify } from "@/cut/lib/genNotify";
 import { useEditor, type EditorState } from "@/cut/lib/store";
-import { NoCreditsError, renderSpeechClip, resolveLanguage, resolveVoice } from "@/cut/lib/tts";
+import { renderSpeechClip, resolveLanguage, resolveVoice } from "@/cut/lib/tts";
 import {
   SPEECH_VOICES,
   VOICE_SAMPLE_TEXT,
@@ -298,7 +299,7 @@ export function GenerateSubtitlesAudio({
   const language = useSpeechLanguage();
   const signedOut = useSignedIn() === false;
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<{ text: string; credits?: boolean } | null>(null);
+  const [error, setError] = useState<{ text: string } | null>(null);
   const cueCount = useEditor((s) => scopedCueIds(s, selectCueIds).length);
   const hasVideo = useEditor((s) => s.clips.length > 0);
 
@@ -333,11 +334,9 @@ export function GenerateSubtitlesAudio({
       });
       useGenNotify.getState().landed("audio", asset.id);
     } catch (e) {
-      setError(
-        e instanceof Error
-          ? { text: e.message, credits: e instanceof NoCreditsError }
-          : { text: "Voice generation failed." }
-      );
+      setError({
+        text: e instanceof Error ? e.message : "Voice generation failed.",
+      });
     } finally {
       setBusy(false);
       settle();
@@ -374,20 +373,7 @@ export function GenerateSubtitlesAudio({
       ) : (
         error && (
           <p className="voice-error text-[11px] leading-relaxed text-red-600">
-            {error.text}
-            {error.credits && (
-              <>
-                {" "}
-                <a
-                  className="font-medium underline hover:no-underline"
-                  href={creditsUrl()}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Add credits
-                </a>
-              </>
-            )}
+            <HostedErrorText error={error.text} />
           </p>
         )
       )}
