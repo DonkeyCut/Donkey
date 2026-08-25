@@ -31,10 +31,27 @@ struct CameraScreen<CameraPreview: View>: View {
     @State private var isFlying = false
     /// The well's rectangle in stage coordinates — the flight's landing spot.
     @State private var wellFrame: CGRect = .zero
+    /// True while a tap is holding the chrome on a stage that would otherwise
+    /// be clear.
+    @State private var showsChrome = false
+    /// The wait that takes the chrome back down.
+    @State private var chromeHider: Task<Void, Never>?
 
     private static var stageSpace: String { "cameraStage" }
     private static var wellSide: CGFloat { 54 }
     private static var wellLifetime: Duration { .seconds(30) }
+    /// How long a tap keeps the chrome up.
+    private static var chromeLifetime: Duration { .seconds(5) }
+
+    /// Whether the screen belongs to the picture alone.
+    ///
+    /// Reading a script is the same job whether or not the camera is rolling,
+    /// so a rehearsal looks exactly like a take: the buttons go, the words and
+    /// the picture stay.
+    private var stageIsClear: Bool { camera.isRecording || camera.teleprompter.isRunning }
+
+    /// Whether the controls are on screen at all.
+    private var chromeShown: Bool { !stageIsClear || showsChrome }
 
     var body: some View {
         ZStack {
@@ -56,12 +73,26 @@ struct CameraScreen<CameraPreview: View>: View {
             }
         }
         .coordinateSpace(.named(Self.stageSpace))
+        // The tabs are chrome too: a run gets the whole screen, and they come
+        // back with everything else.
+        .toolbar(chromeShown ? .visible : .hidden, for: .tabBar)
+        // Alongside whatever was touched, so working the rail keeps the chrome
+        // up as surely as tapping the picture brings it back.
+        .contentShape(Rectangle())
+        .simultaneousGesture(TapGesture().onEnded { revealChrome() })
         .background(.black, ignoresSafeAreaEdges: .all)
         // The stage is live video: the chrome is dark whatever the app-wide
         // appearance says. Setting the environment (not a color-scheme
         // preference) keeps the root appearance choice from overriding it.
         .environment(\.colorScheme, .dark)
         .onChange(of: media.recordings.first?.id) { _, _ in dockLatestTake() }
+        // A run begins on a clear stage, and the controls are back the moment
+        // it ends.
+        .onChange(of: stageIsClear) { _, _ in
+            chromeHider?.cancel()
+            chromeHider = nil
+            showsChrome = false
+        }
         // The docked clip keeps itself to one appearance: watching it or
         // waiting out the timer both retire it.
         .task(id: corner?.id) {
@@ -140,6 +171,36 @@ struct CameraScreen<CameraPreview: View>: View {
         .animation(.spring(duration: 0.45), value: corner?.id)
         .animation(.spring(duration: 0.45), value: camera.isRecording)
         .padding(.top, 8)
+        // A clear stage keeps its controls laid out and invisible: they fade
+        // in place, so a tap brings them back exactly where the hand left
+        // them, and while they are gone the picture underneath takes every
+        // touch.
+        .opacity(chromeShown ? 1 : 0)
+        .allowsHitTesting(chromeShown)
+        .animation(.spring(duration: 0.3), value: chromeShown)
+    }
+
+    /// A tap on a clear stage brings the controls back for a few seconds:
+    /// enough to stop the take, light the room, or turn the camera round.
+    /// Every tap re-arms the wait, so a hand working the rail keeps it up.
+    private func revealChrome() {
+        guard stageIsClear else { return }
+        showsChrome = true
+        armChromeHider()
+    }
+
+    private func armChromeHider() {
+        chromeHider?.cancel()
+        chromeHider = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.chromeLifetime)
+                if Task.isCancelled { return }
+                // A picker standing open is somebody mid-decision.
+                if showsZoomPicker || showsQualityPopover { continue }
+                showsChrome = false
+                return
+            }
+        }
     }
 
     /// Where the take lands. The slot holds its place whether or not a clip
