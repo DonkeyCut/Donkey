@@ -130,9 +130,20 @@ export function useProjectsSection(r: Residency, { list, live }: { list: boolean
   });
 }
 
+/** How often a live library listing re-reads. Long enough that an open tab is
+ * cheap, short enough that a clip finishing its upload from the phone lands on
+ * screen while the user is still looking at the page. */
+const LIBRARY_LIVE_MS = 6000;
+
 /** The user's whole shelf: every residency's library, merged — including the
- * one this browser can only remember. */
-export function useLibrary() {
+ * one this browser can only remember.
+ *
+ * `live` keeps the listing current while the page is open: the surfaces fed
+ * from another device — the Camera Roll, filled by the iOS app — poll on a
+ * timer and re-read the moment the window comes back to the front, so a
+ * recording made on the phone shows up here without a reload. The timer only
+ * runs while this tab is the focused one. */
+export function useLibrary({ live = false }: { live?: boolean } = {}) {
   // Not read for the query itself — the backend binding decides which
   // residencies are reachable, so a mode change re-keys and re-reads.
   useCutMode();
@@ -154,18 +165,33 @@ export function useLibrary() {
     },
     staleTime: 0,
     refetchOnMount: "always",
+    refetchOnWindowFocus: live,
+    refetchInterval: live ? LIBRARY_LIVE_MS : false,
     retry: false,
   });
 }
 
+/** Drop a read already on the wire for this key, so its answer — taken before
+ * the mutation the caller is about to apply — never lands on top of the edit.
+ * A live listing is re-reading on a timer, and a delete applied while one of
+ * those reads was in the air used to see the deleted item reappear.
+ *
+ * Only once the key holds something: the first load has nothing to overwrite,
+ * and stopping it would leave the page empty until the next trigger. */
+function stopReads(client: QueryClient, queryKey: readonly unknown[]) {
+  if (client.getQueryData(queryKey) === undefined) return;
+  void client.cancelQueries({ queryKey }, { revert: false });
+}
+
 /** Edit a residency's cached listing in place — the optimistic half of every
  * projects mutation. The snapshot moves with it, so a reload right after a
- * rename shows the new name rather than flashing the old one back. */
+ * rename shows the new name and never flashes the old one back. */
 export function patchProjects(
   client: QueryClient,
   r: Residency,
   fn: (prev: ProjectsSection) => ProjectsSection
 ) {
+  stopReads(client, projectsKey(r));
   const next = client.setQueryData<ProjectsSection>(projectsKey(r), (prev) =>
     prev ? fn(prev) : prev
   );
@@ -176,6 +202,7 @@ export function patchProjects(
  * merged listing is patched however the mutation asks. */
 export function patchLibrary(client: QueryClient, fn: (prev: LibraryData) => LibraryData) {
   const scope = libraryScope();
+  stopReads(client, libraryKey(scope));
   const next = client.setQueryData<LibraryData>(libraryKey(scope), (prev) =>
     prev ? fn(prev) : prev
   );
@@ -195,19 +222,33 @@ export function refetchLibrary(client: QueryClient) {
 // --- Phone surfaces: the iOS link flag and synced notes ---
 
 const PHONE_KEY = ["cut", "phone"] as const;
+// Scoped to the account: two people signing in on one Mac must not read each
+// other's answer.
+const phoneSnapshot = () => snapshotKey("cloud", "phone");
 
 /** Whether this account has been seen from the iOS app. Gates the mobile
  * surfaces (Camera Roll, Notes) in the home sidebar; an account that never
- * signed in on a phone keeps the desktop exactly as it was. */
+ * signed in on a phone keeps the desktop exactly as it was.
+ *
+ * Asked once per tab: the flag only ever turns on, and the sidebar unmounts
+ * every time a project opens, so a second read would only cost the two rows a
+ * blink on the way back. The snapshot carries the last answer across reloads,
+ * so a cold load draws the same sidebar it drew last time. */
 export function usePhoneLink() {
+  const client = useQueryClient();
+  useEffect(
+    () => seedFromSnapshot<boolean>(client, PHONE_KEY, phoneSnapshot()),
+    [client]
+  );
   const query = useQuery<boolean>({
     queryKey: PHONE_KEY,
     queryFn: async () => {
       const res = await backendFor("cloud").fetch("/api/cut/phone");
       if (!res.ok) throw new Error(String(res.status));
-      return ((await res.json()) as { linked?: boolean }).linked === true;
+      const linked = ((await res.json()) as { linked?: boolean }).linked === true;
+      writeSnapshot(phoneSnapshot(), linked);
+      return linked;
     },
-    // The flag only ever turns on, and once on it never needs re-asking.
     staleTime: Infinity,
     retry: false,
   });

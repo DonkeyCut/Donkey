@@ -1079,6 +1079,10 @@ export function LibraryCard({
   // An ffmpeg still washes out iPhone HDR (HLG) footage — the browser tone-maps
   // the video correctly, so we render the frame instead of a baked thumbnail.
   const posterT = Math.min(1, Math.max(0.1, (a.duration || 2) / 10));
+  // Whether the tile's own picture has painted. Until it does the tile is a
+  // shimmering slab, so a clip that lands while the page is open takes its
+  // place in the grid at once and resolves into itself a moment later.
+  const [painted, setPainted] = useState(false);
   // The size pill only shows on hover, so the lookup waits for the first one.
   // A font wears its size in the footer at rest, so that one asks as it scrolls
   // into view.
@@ -1227,6 +1231,11 @@ export function LibraryCard({
                 playsInline
                 preload="metadata"
                 className="size-full object-cover"
+                // Whichever lands first: a clip with a stored poster paints
+                // from that, one without paints its own first frame.
+                onLoadedMetadata={() => setPainted(true)}
+                onLoadedData={() => setPainted(true)}
+                onError={() => setPainted(true)}
               />
               {/* The source's own cover — a video's thumbnail where it came
                   from — is the face at rest: the element's poster gives way as
@@ -1241,6 +1250,8 @@ export function LibraryCard({
                   alt=""
                   aria-hidden
                   className="pointer-events-none absolute inset-0 size-full object-cover transition-opacity group-hover:opacity-0"
+                  onLoad={() => setPainted(true)}
+                  onError={() => setPainted(true)}
                 />
               )}
             </>
@@ -1253,6 +1264,8 @@ export function LibraryCard({
             alt={a.name}
             loading="lazy"
             className="size-full object-cover"
+            onLoad={() => setPainted(true)}
+            onError={() => setPainted(true)}
           />
         ) : (
           <AudioCardFace
@@ -1262,6 +1275,13 @@ export function LibraryCard({
             durationClassName={
               !!onUse && "transition-opacity group-hover:opacity-0"
             }
+          />
+        )}
+        {!offline && !font && a.type !== "audio" && !painted && (
+          <Skeleton
+            data-drag-omit
+            aria-hidden
+            className="pointer-events-none absolute inset-0 rounded-none"
           />
         )}
         {a.type !== "audio" &&

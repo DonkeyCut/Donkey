@@ -23,10 +23,15 @@ import { LibraryCard } from "./LibraryView";
 /** The phone's recordings, synced up from the iOS app: every cloud library
  * asset tagged origin "camera", newest first. Clips here are ordinary library
  * assets — the editor's Library panel offers them to any project — this page
- * is where they are watched and pruned. */
+ * is where they are watched and pruned. The listing stays live while the tab
+ * is open, so a recording made on the phone arrives on its own. */
 export function CameraRollView() {
   const client = useQueryClient();
-  const library = useLibrary();
+  // The phone fills this page, so it re-reads on a timer and whenever the
+  // window comes back to the front: a clip finishes uploading and takes its
+  // place in the grid — a shimmering tile first, the clip a moment later —
+  // with nothing to reload.
+  const library = useLibrary({ live: true });
   const [deleting, setDeleting] = useState<LibraryAsset | null>(null);
   const clips = (library.data?.assets ?? []).filter((a) => a.origin === "camera");
   const patch = useCallback(
