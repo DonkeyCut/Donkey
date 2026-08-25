@@ -72,6 +72,34 @@ const DECODER_BUDGET = 12;
 const sourceTimeOf = (clip: VideoClip, t: number) =>
   clip.in + Math.max(0, t - clip.start) * clipSpeed(clip);
 
+/**
+ * When the preview gives up resolution to keep the picture with the sound.
+ *
+ * A machine whose decoder cannot deliver a frame per frame period falls
+ * further behind for as long as the play lasts: the sound goes on, the picture
+ * does not, and nothing in the reader can invent the frames. Decoding smaller
+ * is the one lever that reduces the work itself. The
+ * trade is deliberate — a softer picture that stays with its sound beats a
+ * sharp one seconds behind it.
+ */
+const TRAIL_LAG_S = 0.5;
+/** How long the picture has to stay behind before the trade is taken. A cold
+ * open hops once and catches up; this is about the state it cannot leave. */
+const TRAIL_MS = 3_000;
+/** Below this the preview would be mush, so it stops trading. */
+const DECODE_FLOOR = 360;
+/**
+ * How long a play runs before the trade is on the table at all.
+ *
+ * Starting a play is the one moment every machine trails: nothing is decoded
+ * yet, each source is finding its keyframe, and the first read of a file comes
+ * off the link. That settles on its own within a few seconds and says nothing
+ * about whether the machine can hold the cut. Trading resolution away for it
+ * would leave every preview softer for the rest of the session on the strength
+ * of its first breath.
+ */
+const PLAY_SETTLE_MS = 6_000;
+
 /** The decode identity of a clip — see `mappingKey`. */
 const keyOf = (clip: VideoClip, asset: MediaAsset) =>
   mappingKey(asset.id, clipSpeed(clip), clip.in, clip.start);
@@ -129,6 +157,12 @@ class Engine {
   /** The playhead value the engine itself wrote last, so its own echo is
    * tellable from an outside move — a seek while playing. */
   private written: number | null = null;
+  /** How many 180-steps the preview has traded away, for the engine's life. */
+  private dropped = 0;
+  private steppedThisPlay = false;
+  private trailingSince = 0;
+  private playSince = 0;
+  private wasPlaying = false;
   private lastWalkCost = 0;
 
   private unsubscribe: () => void;
@@ -173,13 +207,53 @@ class Engine {
    * box moves and never decodes below display size, and the step is small
    * enough that the extra rows decoded above it stay cheap.
    *
-   * It holds still for the life of the engine for a second reason: the pool
-   * keys on it, so moving it mid-play abandons every open decoder at once and
-   * pays a fresh keyframe walk for each — on the machines this would be meant
-   * to help, that storm costs far more than the pixels it saves.
+   * Nothing the window does moves it, for a second reason: the pool keys on
+   * it, so a height that follows the canvas would abandon every open decoder
+   * each time the box moved and pay a fresh keyframe walk for each.
+   *
+   * `noteLag` moves it exactly once per play, and pays that price knowingly.
+   * The abandoned sources keep their decoders until the pool stands them down,
+   * so for a second or two the machine holds about twice the decoders it needs
+   * — on a machine already behind, which is the whole reason the step is being
+   * taken. It is worth it because the alternative is a play that never catches
+   * up at all, and because it happens once: the step is one-way, so the cost is
+   * paid a single time and a wobbling picture never pays it again.
    */
   private decodeHeight(): number {
-    return Math.ceil(this.canvas.height / 180) * 180 || 180;
+    const asked = Math.ceil(this.canvas.height / 180) * 180 || 180;
+    return Math.max(DECODE_FLOOR, asked - this.dropped * 180);
+  }
+
+  /**
+   * The picture has been behind the sound for a while, so decode smaller.
+   *
+   * One step per play and never back up. Stepping re-keys the pool, so every
+   * open decoder is abandoned and each source pays a fresh keyframe walk;
+   * paying that twice to undo it would cost more than the pixels are worth,
+   * and paying it repeatedly inside one play is the storm the fixed height
+   * exists to avoid.
+   */
+  private noteLag(lag: number, now: number, byteBound: boolean): void {
+    if (lag <= TRAIL_LAG_S) {
+      this.trailingSince = 0;
+      return;
+    }
+    // Behind because the bytes are not here yet, which decoding smaller does
+    // not help. The clock does not start while that is true, so the stretch
+    // that earns the trade is one the decoder was responsible for.
+    if (byteBound) return;
+    if (!this.trailingSince) {
+      this.trailingSince = now;
+      return;
+    }
+    if (now - this.trailingSince < TRAIL_MS) return;
+    if (now - this.playSince < PLAY_SETTLE_MS) return;
+    if (this.steppedThisPlay || this.decodeHeight() <= DECODE_FLOOR) return;
+    this.steppedThisPlay = true;
+    this.trailingSince = 0;
+    this.dropped++;
+    engineLog(`decode step down to ${this.decodeHeight()}`);
+    this.wake();
   }
 
   /** The engine's own playhead writes go through here, so `written` always
@@ -251,8 +325,12 @@ class Engine {
     const frame = src.frameAt(st, span.clip.in, span.clip.out);
     // The picture on track 0 is the one being watched, so it is the one the
     // machine is judged on — see the meter in `perfTrace`.
-    if (master && playing && metering())
-      meterFrame(frame ? Math.max(0, st - frame.timestamp) : 0, !frame);
+    if (master && playing) {
+      const lag = frame ? Math.max(0, st - frame.timestamp) : 0;
+      // The trade does not wait for anyone to turn diagnostics on.
+      this.noteLag(lag, performance.now(), src.byteBound);
+      if (metering()) meterFrame(lag, !frame);
+    }
     if (frame)
       return { kind: "ready", image: frame.image, width: frame.width, height: frame.height };
     return src.failed ? MISSING_FRAME : PENDING_FRAME;
@@ -480,6 +558,14 @@ class Engine {
       this.lastTickAt = now;
     }
     const playing = useEditor.getState().playing;
+    if (playing !== this.wasPlaying) {
+      this.wasPlaying = playing;
+      this.trailingSince = 0;
+      if (playing) {
+        this.steppedThisPlay = false;
+        this.playSince = performance.now();
+      }
+    }
     // Playing redraws every frame; paused, only what changed since the last
     // paint. Either way the loop stops as soon as there is nothing to do.
     if (playing || this.dirty) {
