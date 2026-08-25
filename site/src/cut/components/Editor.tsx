@@ -645,6 +645,23 @@ export function Editor({
     };
   }, [projectId, viewer]);
 
+  // Hand the keyboard back to the editor shell, unless the user is typing.
+  const shellRef = useRef<HTMLDivElement>(null);
+  const focusShell = useCallback(() => {
+    const active = document.activeElement as HTMLElement | null;
+    if (active) {
+      const type = (active as HTMLInputElement).type;
+      const typing =
+        active.tagName === "TEXTAREA" ||
+        active.isContentEditable ||
+        (active.tagName === "INPUT" &&
+          !["checkbox", "radio", "range", "button", "file"].includes(type));
+      if (typing) return;
+      active.blur();
+    }
+    shellRef.current?.focus({ preventScroll: true });
+  }, []);
+
   const importFiles = useCallback(
     async (
       files: FileList | File[],
@@ -662,6 +679,12 @@ export function Editor({
       }
     ) => {
       const list = Array.from(files);
+      // The keyboard comes back to the editor. An import is started from a
+      // panel control — an Upload button, a library tile, a file input the OS
+      // dialog hands focus back to — and whichever one it was keeps focus
+      // afterwards, so the first Space after an import went to that control.
+      // Typing is never interrupted: a focused text field keeps the keyboard.
+      focusShell();
       setImporting((n) => n + list.length);
       // Files are prepared one at a time: each claims its stored name against
       // the names already taken, so two drops of the same name must not race
@@ -713,7 +736,7 @@ export function Editor({
         }
       }
     },
-    [projectId]
+    [projectId, focusShell]
   );
 
   // Whole-window drag & drop for OS files. Chrome tags native <img> drags
@@ -867,11 +890,19 @@ export function Editor({
         target.tagName === "SELECT" ||
         target.isContentEditable ||
         (target.tagName === "INPUT" &&
-          !["checkbox", "radio", "range", "button"].includes(inputType));
+          !["checkbox", "radio", "range", "button", "file"].includes(inputType));
       if (textEntry) return;
       // Let native toggle/slider behavior win for focused controls.
       const controlFocused =
         target.tagName === "INPUT" || target.closest('[role="switch"],[role="slider"]') !== null;
+      // Space is narrower: a checkbox or a switch flips on it, so it keeps the
+      // key. A slider does not — it moves on the arrows — and neither does a
+      // scrub bar, so focus left on one of those (the transport, the zoom
+      // control, the seek bar the pointer last touched) must not swallow the
+      // one key the whole editor is played with.
+      const spaceTaken =
+        ["checkbox", "radio"].includes(inputType) ||
+        target.closest('[role="switch"],[role="checkbox"]') !== null;
       const s = useEditor.getState();
       if (s.exportOpen || document.querySelector('[data-slot="dialog-content"]')) return;
 
@@ -888,7 +919,7 @@ export function Editor({
         if (!allowed) return;
       }
 
-      if (e.code === "Space" && !controlFocused) {
+      if (e.code === "Space" && !spaceTaken) {
         e.preventDefault();
         if (!s.playing && playheadAt() >= projectDuration(s) - 0.01) s.seek(0);
         s.setPlaying(!s.playing);
@@ -1040,7 +1071,7 @@ export function Editor({
     // space that was not there. Shrinking, each of those resolves on its own —
     // the panels give up width, the top bar collapses to a menu, and the
     // timeline scrolls inside itself as it always has.
-    <div className="flex h-full min-w-0 overflow-hidden">
+    <div ref={shellRef} tabIndex={-1} className="flex h-full min-w-0 overflow-hidden outline-none">
       {/* The tab wears whatever is still running here. */}
       <TabStatus />
       <div className="grid min-w-0 flex-1 grid-rows-[46px_minmax(0,1fr)_auto]">
