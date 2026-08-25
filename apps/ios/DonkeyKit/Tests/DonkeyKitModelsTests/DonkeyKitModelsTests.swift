@@ -995,6 +995,93 @@ import Testing
     }
 }
 
+@Suite struct AnalyticsModelTests {
+    final class Service: AnalyticsServicing, @unchecked Sendable {
+        var answer: Result<AnalyticsRollup, any Error> = .failure(CloudSyncError.transport)
+        var calls = 0
+
+        func fetchAnalyticsRollup() async throws -> AnalyticsRollup {
+            calls += 1
+            return try answer.get()
+        }
+    }
+
+    func rollup() -> AnalyticsRollup {
+        AnalyticsRollup(
+            generatedAt: "2026-08-21T04:00:00.000Z",
+            days: ["2026-08-20"],
+            sources: ["renders"],
+            missing: [],
+            billing: nil,
+            users: [.init(registeredAt: "2026-08-01T10:00:00.000Z", balanceMicros: "0", activity: [1])]
+        )
+    }
+
+    @Test func aDeadLinkNamesItselfAndCarriesItsCode() async {
+        let service = Service()
+        service.answer = .failure(CloudSyncError.unreachable(.dropped, code: -1005))
+        let model = AnalyticsModel(service: service)
+        await model.refresh()
+        guard case .failed(let reason) = model.state else {
+            Issue.record("expected a failed state")
+            return
+        }
+        #expect(reason.contains("connection dropped"))
+        #expect(reason.contains("-1005"))
+    }
+
+    @Test func anOfflinePhoneIsToldItIsOffline() async {
+        let service = Service()
+        service.answer = .failure(CloudSyncError.unreachable(.offline, code: -1009))
+        let model = AnalyticsModel(service: service)
+        await model.refresh()
+        guard case .failed(let reason) = model.state else {
+            Issue.record("expected a failed state")
+            return
+        }
+        #expect(reason.hasPrefix("This phone is offline"))
+    }
+
+    @Test func aCancelledFetchLeavesTheStateAlone() async {
+        let service = Service()
+        service.answer = .failure(CancellationError())
+        let model = AnalyticsModel(service: service)
+        await model.refresh()
+        guard case .loading = model.state else {
+            Issue.record("a cancelled fetch should leave the screen loading")
+            return
+        }
+    }
+
+    @Test func aRetryOverAFailureSpinsAgain() async {
+        let service = Service()
+        service.answer = .failure(CloudSyncError.unreachable(.timedOut, code: -1001))
+        let model = AnalyticsModel(service: service)
+        await model.refresh()
+        service.answer = .success(rollup())
+        await model.refresh()
+        guard case .loaded(let summary) = model.state else {
+            Issue.record("expected the retry to load")
+            return
+        }
+        #expect(summary.registered == 1)
+        #expect(service.calls == 2)
+    }
+
+    @Test func aFailedRefreshKeepsChartsThatAlreadyLoaded() async {
+        let service = Service()
+        service.answer = .success(rollup())
+        let model = AnalyticsModel(service: service)
+        await model.refresh()
+        service.answer = .failure(CloudSyncError.unreachable(.dropped, code: -1005))
+        await model.refresh()
+        guard case .loaded = model.state else {
+            Issue.record("a refresh failure should leave the loaded charts up")
+            return
+        }
+    }
+}
+
 @Suite struct UserProfileDecodingTests {
     @Test func profileCachedBeforeRoleFieldDecodesAsRegular() throws {
         let data = Data(#"{"id":"u1","name":"Dana","email":"dana@example.com"}"#.utf8)

@@ -217,6 +217,37 @@ nonisolated public enum RenderProgress: Equatable, Sendable {
     case failed(String)
 }
 
+/// Why a request never reached an answer. The client keeps the network's own
+/// verdict this far so a screen can say what happened; collapsing every
+/// network failure into one word leaves a phone with full bars being told to
+/// check its connection.
+nonisolated public enum NetworkReach: Sendable, Equatable {
+    /// The phone has no route out at all — airplane mode, no signal.
+    case offline
+    /// The link is up and the answer took longer than the client waits.
+    case timedOut
+    /// The connection died between the request and the answer.
+    case dropped
+    /// The host itself went unanswered: DNS, TLS, a refused socket.
+    case unreachable
+
+    /// Whether asking again in a moment could get a different answer. A phone
+    /// with no route out needs the person, so nothing retries there.
+    public var isWorthAnotherTry: Bool {
+        self != .offline
+    }
+
+    /// A sentence for the person holding the phone, naming this cause.
+    public var sentence: String {
+        switch self {
+        case .offline: "This phone is offline. Reconnect and try again."
+        case .timedOut: "donkeycut.com took too long to answer."
+        case .dropped: "The connection dropped before the answer arrived."
+        case .unreachable: "Couldn't reach donkeycut.com."
+        }
+    }
+}
+
 nonisolated public enum CloudSyncError: Error, Equatable {
     /// The server refused with a reason worth reading out loud — out of
     /// renders for the day, out of room. The message is the server's own.
@@ -226,8 +257,12 @@ nonisolated public enum CloudSyncError: Error, Equatable {
     case storageFull
     /// The session is gone; syncing waits for the next sign-in.
     case unauthorized
-    /// Anything transient: network, 5xx. The item stays queued.
+    /// An answer came back and it was no good: a 5xx, a body that won't
+    /// decode. The item stays queued.
     case transport
+    /// No answer came back at all, and the network said why. Transient like
+    /// `transport`; the item stays queued.
+    case unreachable(NetworkReach, code: Int)
 }
 
 /// What the app target's CutCloudClient does for the sync engine.

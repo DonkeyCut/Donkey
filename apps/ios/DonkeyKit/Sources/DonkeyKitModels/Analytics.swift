@@ -275,15 +275,21 @@ public final class AnalyticsModel {
     }
 
     /// Fetches the rollup. A refresh over loaded data keeps the charts up
-    /// while it runs and on failure; a first load surfaces the error, saying
+    /// while it runs and on failure; a retry over a failure spins, so the tap
+    /// shows something happening. A first load surfaces the error, saying
     /// which one it was — a failure that only reads "try again" tells nobody
     /// whether the phone, the session, or the server is at fault.
+    ///
+    /// A cancelled fetch is the screen closing, so it leaves the state alone.
     public func refresh() async {
+        if case .failed = state { state = .loading }
         do {
             let rollup = try await service.fetchAnalyticsRollup()
             state = .loaded(AnalyticsSummary(rollup: rollup))
         } catch AnalyticsError.noRollup {
             state = .empty
+        } catch is CancellationError {
+            return
         } catch {
             if case .loaded = state { return }
             state = .failed(Self.reason(for: error))
@@ -296,10 +302,12 @@ public final class AnalyticsModel {
             "This account can't read analytics. Sign out and back in."
         case CloudSyncError.refused(let message):
             message
+        case CloudSyncError.unreachable(let reach, let code):
+            "\(reach.sentence) (\(code))"
         case AnalyticsError.unreadable:
             "The rollup came back in a shape this build doesn't read."
         default:
-            "Couldn't reach donkeycut.com. Check your connection."
+            "The rollup didn't load. Try again."
         }
     }
 }
