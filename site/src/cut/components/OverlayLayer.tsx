@@ -61,6 +61,15 @@ const PLATE_RADIUS_EM = `${PLATE_RADIUS}em`;
  * and grabbable, the way the video clip gizmo already does. */
 export const OverlayChromeHost = createContext<HTMLElement | null>(null);
 
+/** How the stage takes a press that started on something the user has not
+ * selected. Selection comes first: an unselected title, shape, sticker or
+ * caption is part of the picture, so pressing one pans the picture the way
+ * pressing bare footage does, and a press that never travels selects it.
+ * Grabbing to move is what a selected element does. */
+export const StagePress = createContext<
+  ((e: React.PointerEvent, onTap: () => void) => void) | null
+>(null);
+
 /**
  * The rotate handle's cursor. CSS has no rotate cursor, so the affordance is
  * drawn here — and because the glyph is an arc with a head at each end rather
@@ -296,6 +305,9 @@ export function OverlayLayer({
         // handles or drag. The timeline bar is the thing you grab.
         if (o.kind === "effect") return null;
         const selected = sel?.id === o.id;
+        // A group drags as a unit, so any member is grabbable once the
+        // selection is anywhere inside it.
+        const inGroup = !!sel?.groupId && sel.groupId === o.groupId;
         const inRange = t >= o.start && t <= o.end;
         // While hover-scrubbing (paused, skimmer active) the preview must show the
         // exact frame under the skimmer — a selected but out-of-frame title can't
@@ -309,6 +321,7 @@ export function OverlayLayer({
             // The skimmer paints the bare frame: the item still renders, its
             // selection chrome (outline, resize handle) does not.
             selected={selected && !scrubbing}
+            armed={(selected || inGroup) && !scrubbing}
             ghost={!inRange && !selected}
             t={t}
             stageWidth={stageWidth}
@@ -425,11 +438,16 @@ function SubtitleCaption({
 }) {
   const subtitles = useEditor((s) => s.subtitles);
   const frame = frameOf(useEditor((s) => s.aspect));
+  const selection = useEditor((s) => s.selection);
+  const stagePress = useContext(StagePress);
   const t = usePreviewTime();
 
   const cues = laneCues(subtitles, lane);
   const cue = cueAt(cues, t);
   if (!cue || !cue.text.trim()) return null;
+  // The caption moves its whole track, so it takes the same rule the elements
+  // take: the cue on screen has to be the selection before a drag moves it.
+  const armed = selection?.kind === "cue" && selection.id === cue.id;
 
   // Captions ride the same style/opener/anchor logic as the export burn-in,
   // so the preview and the rendered file match exactly.
@@ -448,9 +466,16 @@ function SubtitleCaption({
   return (
     <div
       ref={(el) => registerBox(subtitleBoxId(lane), el)}
-      className="sub-caption pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 cursor-grab text-center whitespace-pre-wrap active:cursor-grabbing"
+      className={cn(
+        "sub-caption pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 cursor-grab text-center whitespace-pre-wrap active:cursor-grabbing",
+        armed && "outline-[1.5px] outline-offset-[3px] outline-[#0a84ff]"
+      )}
       onPointerDown={(e) => {
         const s = useEditor.getState();
+        if (!armed && stagePress) {
+          stagePress(e, () => s.select({ kind: "cue", id: cue.id }));
+          return;
+        }
         s.pushHistory();
         const { x: x0, y: y0 } = ov;
         startDrag(e, {
@@ -491,6 +516,7 @@ function SubtitleCaption({
 function OverlayItem({
   overlay: o,
   selected,
+  armed,
   ghost,
   t,
   stageWidth,
@@ -502,6 +528,9 @@ function OverlayItem({
 }: {
   overlay: Overlay;
   selected: boolean;
+  /** Whether a press on this element moves it. Only the selection (or the
+   * group holding it) drags; everything else hands the press to the stage. */
+  armed: boolean;
   ghost: boolean;
   /** The previewed timeline moment (playhead or paused skimmer). */
   t: number;
@@ -624,6 +653,7 @@ function OverlayItem({
   // The twin copies the box's placement and transform chain; its laid-out
   // size is read off the real box, which keeps auto-sized text honest.
   const chromeHost = useContext(OverlayChromeHost);
+  const stagePress = useContext(StagePress);
   const liftChrome = !!chromeHost && selected && !editing;
   const [chromeSize, setChromeSize] = useState<{ w: number; h: number } | null>(null);
   useLayoutEffect(() => {
@@ -960,6 +990,13 @@ function OverlayItem({
   const beginMove = (e: React.PointerEvent) => {
     if (editing) return;
     const s = useEditor.getState();
+    // Nothing moves until it is the selection: an unselected element is part
+    // of the picture, so the stage pans under it and a stationary press picks
+    // it up for the next drag.
+    if (!armed && stagePress) {
+      stagePress(e, () => s.select({ kind: "overlay", id: o.id }));
+      return;
+    }
     s.select({ kind: "overlay", id: o.id });
     s.pushHistory();
     // A grouped element drags its whole group: the grabbed one snaps, the

@@ -22,7 +22,7 @@ import { resizePreviewSurface, setPreviewCanvas } from "@/cut/lib/previewCanvas"
 import { CLIP_MAX_ZOOM, clipCovers, clipKeyed, clipPoseAt, clipZoom, contentRect, frameOf, isFullRect, rectOf, REGION_MAX_SCALE, type Aspect, type ClipSpan, type FrameRect, type MediaAsset, type VideoClip } from "@/cut/lib/types";
 import { hasMaskKeys, type MaskKey } from "@donkeycut/effects-kit";
 import { cn } from "@/lib/utils";
-import { MaskGizmoCore, OverlayChromeHost, OverlayLayer } from "./OverlayLayer";
+import { MaskGizmoCore, OverlayChromeHost, OverlayLayer, StagePress } from "./OverlayLayer";
 import { CORNER_HANDLES, HANDLE_AXIS, TransformHandles, type ResizeHandle } from "./TransformHandles";
 import {
   StageEffectPaint,
@@ -489,7 +489,7 @@ export function Preview() {
   // Drag a selected fill-mode clip inside the frame to choose the visible crop.
   // The clip has to be the selection: an unselected picture is something to
   // grab and move around the pane, and that press goes to the camera.
-  const panDrag = (e: React.PointerEvent) => {
+  const panDrag = (e: React.PointerEvent, onTap: () => void = stageClick) => {
     const s = useEditor.getState();
     const span = pannableSpan(s, previewAt());
     if (!span || s.selection?.kind !== "clip" || s.selection.id !== span.clip.id) return false;
@@ -530,10 +530,18 @@ export function Preview() {
       // first, play or pause once nothing is selected.
       onUp: (_dx, _dy, moved) => {
         setCropCentered((c) => (c.x || c.y ? { x: false, y: false } : c));
-        if (!moved) stageClick();
+        if (!moved) onTap();
       },
     });
     return true;
+  };
+
+  /** A press that landed on something drawn over the picture the user has not
+   * selected — a title, a caption. It belongs to the picture: the drag pans,
+   * exactly as it would on bare footage, and a press that never travels runs
+   * `onTap`, which is where the thing under the pointer gets selected. */
+  const stagePress = (e: React.PointerEvent, onTap: () => void) => {
+    if (!panDrag(e, onTap)) cameraDrag(e, onTap);
   };
 
   // The topmost regioned clip under a stage point at the playhead — clicking
@@ -651,21 +659,23 @@ export function Preview() {
             className="block size-full"
           />
           </StagePictureFx>
-          {slices.map((slice) =>
-            slice.kind === "elements" ? (
-              <OverlayChromeHost.Provider key={slice.key} value={chromeHost}>
-                <OverlayLayer
-                  stageWidth={stage.w}
-                  gradeAbove={slice.gradeAbove}
-                  from={slice.from}
-                  to={slice.to}
-                  captions={slice.captions}
-                />
-              </OverlayChromeHost.Provider>
-            ) : (
-              <StageEffectPaint key={slice.key} lane={slice.lane} />
-            )
-          )}
+          <StagePress.Provider value={stagePress}>
+            {slices.map((slice) =>
+              slice.kind === "elements" ? (
+                <OverlayChromeHost.Provider key={slice.key} value={chromeHost}>
+                  <OverlayLayer
+                    stageWidth={stage.w}
+                    gradeAbove={slice.gradeAbove}
+                    from={slice.from}
+                    to={slice.to}
+                    captions={slice.captions}
+                  />
+                </OverlayChromeHost.Provider>
+              ) : (
+                <StageEffectPaint key={slice.key} lane={slice.lane} />
+              )
+            )}
+          </StagePress.Provider>
         </div>
         {/* Chrome layers sit beside the stage, outside its clipping: the
             element chrome host, the clip's mask gizmo, and the clip gizmo.
