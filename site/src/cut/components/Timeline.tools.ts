@@ -188,7 +188,7 @@ export const TIMELINE_TOOLS = [
   {
     name: "add_title",
     description:
-      "Add a text title overlay. Position is the text center as a fraction of the frame (x,y in 0..1; y=0.42 is the default band). Size is px at 1080-wide. Font ids come from the graphics skill (system set + the bundled Google families).",
+      "Add a text title overlay. Position is the text center as a fraction of the frame (x,y in 0..1; y=0.42 is the default band). Size is px at 1080-wide. Font ids come from the graphics skill (system set + the bundled Google families). A line wider than the room its anchor leaves is broken onto more lines when it draws, so a title always sits inside the frame — write the words and pick the size the design wants.",
     inputSchema: obj({
       text: str("The title text (\\n for line breaks)"),
       start: num("Start time s (default: playhead)"),

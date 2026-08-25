@@ -1,11 +1,14 @@
 import {
   contrastText as kitContrastText,
+  textRoom,
+  wrapTextToRoom,
   wordDrawsAt,
   WORD_ACCENT_DEFAULT,
   wordEffect,
   wordSampleWindows,
   type OverlayWords,
 } from "@donkeycut/effects-kit";
+import { measureLine, textFontOf } from "./textFit";
 import { formatTime } from "./time";
 import type {
   CaptionStyleId,
@@ -310,29 +313,27 @@ export function wrapCaption(text: string): string {
 
 /**
  * Wrap a caption into as many lines as it takes to keep every line inside the
- * frame width at font `size`. The export burn-in renders each `\n`-separated
- * line centered without wrapping, so this is what guarantees captions stay in
- * bounds — bigger styles (and the punchy opener) wrap to fewer words per line.
+ * frame width at font `size` in `font`. The export burn-in renders each
+ * `\n`-separated line centered without wrapping, so this is what decides how
+ * a cue sits in the frame.
+ *
+ * The line is measured on the face it will be drawn in. A character count has
+ * to assume the widest glyph that face could hold, which broke short cues onto
+ * two lines with most of the frame still empty beside them; a measured line
+ * puts a cue on one line whenever one line fits.
  */
-export function wrapCaptionForSize(text: string, size: number, frameW: number): string {
-  const words = text.trim().replace(/\s+/g, " ").split(" ").filter(Boolean);
-  if (words.length === 0) return "";
-  // ~88% of the frame width, with a conservative bold-glyph advance
-  // (~0.58·size) so real fonts stay comfortably inside the safe area.
-  const maxChars = Math.max(8, Math.floor((0.88 * frameW) / (0.58 * size)));
-  const lines: string[] = [];
-  let line = "";
-  for (const w of words) {
-    const cand = line ? `${line} ${w}` : w;
-    if (line && cand.length > maxChars) {
-      lines.push(line);
-      line = w;
-    } else {
-      line = cand;
-    }
-  }
-  if (line) lines.push(line);
-  return lines.join("\n");
+export function wrapCaptionForSize(
+  text: string,
+  size: number,
+  frameW: number,
+  font: FontId = "sf",
+  weight: 400 | 700 = 700,
+  x = 0.5
+): string {
+  const flat = text.trim().replace(/\s+/g, " ");
+  if (!flat) return "";
+  const css = textFontOf({ font, weight, italic: undefined }, size);
+  return wrapTextToRoom(flat, textRoom(x, frameW), (line) => measureLine(line, css, size));
 }
 
 /** A cue as a synthetic overlay, so captions ride the title pipeline. The style
@@ -352,13 +353,21 @@ export function cueOverlay(
   const size = Math.round(
     (pos?.size ?? style.size) * (isOpener && style.openerScale ? style.openerScale : 1)
   );
-  const text = wrapCaptionForSize(cue.text, size, frameW);
+  const x = pos?.x ?? style.x;
+  const text = wrapCaptionForSize(
+    cue.text,
+    size,
+    frameW,
+    pos?.font ?? style.font,
+    style.weight,
+    x
+  );
   return {
     id: `sub-${cue.id}`,
     text,
     start: cue.start,
     end: cue.end,
-    x: pos?.x ?? style.x,
+    x,
     y: pos?.y ?? style.y,
     size,
     font: pos?.font ?? style.font,

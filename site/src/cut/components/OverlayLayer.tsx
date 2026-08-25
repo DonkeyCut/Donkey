@@ -25,6 +25,7 @@ import {
   SHADOW,
   wordDrawCss,
 } from "@/cut/lib/textRender";
+import { fitTextToFrame } from "@/cut/lib/textFit";
 import {
   behindSubjectOverlay,
   clampOverlayPos,
@@ -524,6 +525,11 @@ function OverlayItem({
   const scale = stageWidth / frame.w;
   const stageHeight = (stageWidth * frame.h) / frame.w;
   const isText = isTextOverlay(o);
+  // What the element actually reads as: its written lines, broken wherever a
+  // line is wider than the room the frame leaves it. The export's painter
+  // breaks the same lines in the same places; editing shows the raw text, so
+  // the box holds what the author typed.
+  const drawnText = !isTextOverlay(o) ? "" : editing ? o.text : fitTextToFrame(o, frame.w);
 
   // Publish this element's box so a sibling drag can align to it.
   useEffect(() => {
@@ -588,7 +594,7 @@ function OverlayItem({
   const wordDraw =
     words && !glyphs && isTextOverlay(o)
       ? wordDrawsAt(
-          o.text,
+          drawnText,
           words,
           o.color ?? WORD_ACCENT_DEFAULT,
           Math.max(0.1, o.end - o.start),
@@ -599,9 +605,9 @@ function OverlayItem({
   // the box is being edited).
   const shownText =
     isText && live?.textProgress !== undefined && !editing
-      ? o.text.slice(0, Math.ceil(live.textProgress * o.text.length))
+      ? drawnText.slice(0, Math.ceil(live.textProgress * drawnText.length))
       : isText
-        ? o.text
+        ? drawnText
         : "";
   // Behind-the-speaker elements draw inside the canvas compositor; the DOM
   // keeps an invisible hit target (and the selection chrome) so editing

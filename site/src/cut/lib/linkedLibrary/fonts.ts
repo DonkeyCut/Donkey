@@ -15,6 +15,7 @@
  */
 
 import { installFontFace } from "../fontAssets";
+import { forgetTextWidths } from "../textFit";
 import { isFontFile } from "../media";
 import { fontsFromArchive, isFontArchive } from "../fontArchive";
 import {
@@ -57,7 +58,10 @@ registerLinkedKind({
     await installFontFace(familyOf(key), bytes);
     registerFonts([{ id: libraryFontId(key), label, stack: `"${familyOf(key)}"` }]);
   },
-  drop: (keys) => unregisterFonts(keys.map(libraryFontId)),
+  drop: (keys) => {
+    unregisterFonts(keys.map(libraryFontId));
+    forgetTextWidths();
+  },
 });
 
 /** The account's fonts, one entry per typeface however many shelves hold it. */

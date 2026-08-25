@@ -1,4 +1,5 @@
 import { setFontInstaller } from "../fontAssets";
+import { forgetTextWidths } from "../textFit";
 import { registerFonts } from "../types";
 
 /**
@@ -68,6 +69,9 @@ export async function installHeadlessFonts(): Promise<number> {
         ]);
       loaded++;
     }
+    // Faces installed after a line was measured would leave that line broken
+    // against the fallback for the life of the process.
+    if (loaded > 0) forgetTextWidths();
     return loaded;
   } catch {
     return 0;

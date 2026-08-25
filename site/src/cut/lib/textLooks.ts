@@ -49,11 +49,6 @@ export interface TextLook {
     shadow?: boolean;
     x: number;
     y: number;
-    /** Average glyph width as a fraction of the type size, for this face.
-     * A sequence uses it to break and size a line so it fits the frame it is
-     * actually in — the same 132px that fills a 16:9 frame runs off a 9:16
-     * one. Absent = 0.55, an ordinary sans. */
-    widthRatio?: number;
   };
   /** The color that marks the word that matters: the karaoke highlight, an
    * accent line, a marker scribble. */
@@ -99,7 +94,6 @@ export const TEXT_LOOKS: Record<string, TextLook> = {
       shadow: true,
       x: 0.5,
       y: 0.78,
-      widthRatio: 0.52,
     },
     accent: "#FFFFFF",
     motion: { in: { style: "fade", seconds: 0.25 }, out: { style: "fade", seconds: 0.2 } },
@@ -127,7 +121,6 @@ export const TEXT_LOOKS: Record<string, TextLook> = {
       shadow: false,
       x: 0.5,
       y: 0.5,
-      widthRatio: 0.62,
     },
     accent: "#FF5500",
     motion: { in: { style: "pop", seconds: 0.35 } },
@@ -161,7 +154,6 @@ export const TEXT_LOOKS: Record<string, TextLook> = {
       shadow: true,
       x: 0.5,
       y: 0.5,
-      widthRatio: 0.56,
     },
     accent: "#FFE94A",
     motion: { in: { style: "fade", seconds: 0.25 }, out: { style: "fade", seconds: 0.25 } },
@@ -192,7 +184,6 @@ export const TEXT_LOOKS: Record<string, TextLook> = {
       shadow: true,
       x: 0.5,
       y: 0.5,
-      widthRatio: 0.42,
     },
     accent: "#F0ABFC",
     motion: { in: { style: "streak", seconds: 0.4 }, loop: { style: "flicker", speed: 0.6 } },
@@ -226,7 +217,6 @@ export const TEXT_LOOKS: Record<string, TextLook> = {
       shadow: false,
       x: 0.5,
       y: 0.48,
-      widthRatio: 0.42,
     },
     accent: "#FF5500",
     motion: { in: { style: "typewriter", seconds: 0.5 } },
@@ -259,7 +249,6 @@ export const TEXT_LOOKS: Record<string, TextLook> = {
       shadow: false,
       x: 0.5,
       y: 0.5,
-      widthRatio: 0.5,
     },
     accent: "#C9A227",
     motion: { in: { style: "fade", seconds: 0.8 }, out: { style: "fade", seconds: 0.8 } },
@@ -293,7 +282,6 @@ export const TEXT_LOOKS: Record<string, TextLook> = {
       shadow: false,
       x: 0.5,
       y: 0.5,
-      widthRatio: 0.6,
     },
     accent: "#F2F2F2",
     motion: { in: { style: "typewriter", seconds: 0.6 } },
@@ -324,7 +312,6 @@ export const TEXT_LOOKS: Record<string, TextLook> = {
       shadow: true,
       x: 0.5,
       y: 0.72,
-      widthRatio: 0.46,
     },
     accent: "#FFE94A",
     motion: { in: { style: "rise", seconds: 0.35 }, out: { style: "fade", seconds: 0.2 } },
@@ -358,7 +345,6 @@ export const TEXT_LOOKS: Record<string, TextLook> = {
       shadow: false,
       x: 0.5,
       y: 0.5,
-      widthRatio: 0.58,
     },
     accent: "#FDE047",
     motion: { in: { style: "scatter", seconds: 0.5 }, out: { style: "converge", seconds: 0.3 } },
@@ -392,7 +378,6 @@ export const TEXT_LOOKS: Record<string, TextLook> = {
       shadow: false,
       x: 0.5,
       y: 0.5,
-      widthRatio: 0.62,
     },
     accent: "#E11D48",
     motion: { in: { style: "pop", seconds: 0.18 } },
@@ -429,7 +414,6 @@ export const TEXT_LOOKS: Record<string, TextLook> = {
       shadow: false,
       x: 0.5,
       y: 0.5,
-      widthRatio: 0.44,
     },
     accent: "#FF3D00",
     motion: { in: { style: "rise", seconds: 0.3 } },
@@ -463,7 +447,6 @@ export const TEXT_LOOKS: Record<string, TextLook> = {
       shadow: false,
       x: 0.5,
       y: 0.5,
-      widthRatio: 0.58,
     },
     accent: "#FB7185",
     motion: { in: { style: "bounce", seconds: 0.45 } },

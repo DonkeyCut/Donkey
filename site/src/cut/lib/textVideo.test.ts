@@ -3,7 +3,8 @@ import { runAiTool } from "./aiTools";
 import { useEditor } from "./store";
 import { composeTextRun, TEXT_LAYOUT_IDS, TEXT_LAYOUT_NOTES } from "./textCompose";
 import { TEXT_LOOKS, textLookCatalog } from "./textLooks";
-import { evalOverlayFrame } from "@donkeycut/effects-kit";
+import { evalOverlayFrame, textRoom } from "@donkeycut/effects-kit";
+import { measureLine, textFontOf } from "./textFit";
 import { liftMoveTracks, matchTextMove, TEXT_MOVE_IDS, TEXT_MOVE_NOTES, textMoveKeys } from "./textMotion";
 import { emptySubtitles, frameOf, isTextOverlay, isShapeOverlay, type SubtitleCue } from "./types";
 
@@ -110,9 +111,15 @@ describe("add_text_sequence", () => {
     const word = overlays().filter(isTextOverlay)[0];
     expect(word.text).toContain("\n");
     const frame = frameOf("9:16");
-    const ratio = TEXT_LOOKS["neon-club"].text.widthRatio!;
+    const look = TEXT_LOOKS["neon-club"];
+    // Measured the way the painter measures it: every line inside the room the
+    // element's anchor leaves in this frame.
+    const room = textRoom(word.x, frame.w);
     for (const line of word.text.split("\n"))
-      expect(line.length * word.size * ratio).toBeLessThanOrEqual(frame.w * 0.9);
+      expect(
+        measureLine(line, textFontOf({ font: word.font, weight: word.weight }, word.size), word.size)
+      ).toBeLessThanOrEqual(room);
+    expect(word.size).toBeLessThanOrEqual(look.text.size);
   });
 
   test("a per-line color overrides the look", async () => {

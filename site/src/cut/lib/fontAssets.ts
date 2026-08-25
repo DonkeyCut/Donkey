@@ -9,6 +9,7 @@
  * here keeps the ones already saved rendering.
  */
 
+import { forgetTextWidths } from "./textFit";
 import {
   registerFonts,
   unregisterFonts,
@@ -43,7 +44,13 @@ export function setFontInstaller(install: FontInstaller): void {
  * folder or the account's Library shelf. Throws on bytes that are not a font,
  * which is what makes it double as the upload's validity check. */
 export function installFontFace(family: string, bytes: ArrayBuffer): Promise<void> {
-  return installFace(family, bytes);
+  return installFace(family, bytes).then(() => {
+    // Anything measured while this face was still on its way was measured
+    // against a fallback. A headless process has no `document.fonts` to watch,
+    // so the install is the only sign the real face arrived, and a wrap pinned
+    // on fallback widths breaks the line somewhere the drawn text does not.
+    forgetTextWidths();
+  });
 }
 
 /** A display label from the uploaded file's name, extension dropped. */
@@ -80,6 +87,7 @@ export function syncFontAssets(assets: MediaAsset[]): Promise<void> {
   if (stale.length) {
     for (const id of stale) loaded.delete(id);
     unregisterFonts(stale.map(uploadedFontId));
+    forgetTextWidths();
   }
   return Promise.all(fonts.map(registerFontAsset)).then(() => {});
 }

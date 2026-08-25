@@ -340,11 +340,69 @@ export function textCssFont(overlay: TextOverlay, fpx: number, env: RenderEnv): 
   return `${overlay.italic ? "italic " : ""}${overlay.weight} ${fpx}px ${env.fontStack(overlay.font)}`;
 }
 
+/** Share of the frame width a line of type may take. The rest is the margin
+ * that keeps words off the edge of the picture. */
+export const TEXT_SAFE_WIDTH = 0.88;
+
+/** The room an element anchored at `x` has for a centered box: the safe width,
+ * narrowed when the anchor sits off-center so the box cannot reach past the
+ * near edge. An anchor pinned to an edge has no room at all, and text there is
+ * left whole — nothing a break could do would bring it back into the picture. */
+export function textRoom(x: number, frameWidth: number): number {
+  const anchored = 2 * Math.min(Math.max(0, x), Math.max(0, 1 - x));
+  return Math.min(TEXT_SAFE_WIDTH, anchored) * frameWidth;
+}
+
+/**
+ * Break text into lines that each fit `room`, keeping the author's own breaks.
+ *
+ * Every surface draws text from explicit lines and none of them reflows, so a
+ * line longer than the frame simply runs off it. This is where that is
+ * prevented, and the measurer is the caller's: the painter
+ * measures with the canvas it is about to draw on, the preview with the face
+ * the browser has loaded, and both break in the same places.
+ *
+ * A word too wide for the room keeps its own line whole.
+ *
+ * A line already inside the room is handed back exactly as written, so the
+ * spacing an author typed survives everywhere it fits.
+ */
+export function wrapTextToRoom(
+  text: string,
+  room: number,
+  measure: (line: string) => number
+): string {
+  if (!(room > 0)) return text;
+  const out = text.split("\n").map((source) => {
+    if (measure(source) <= room) return source;
+    const words = source.split(/\s+/).filter(Boolean);
+    if (words.length === 0) return "";
+    const lines: string[] = [];
+    let line = "";
+    for (const w of words) {
+      const cand = line ? `${line} ${w}` : w;
+      if (line && measure(cand) > room) {
+        lines.push(line);
+        line = w;
+      } else {
+        line = cand;
+      }
+    }
+    if (line) lines.push(line);
+    return lines.join("\n");
+  });
+  return out.join("\n");
+}
+
 async function paintText(
   ctx: CanvasRenderingContext2D,
   overlay: TextOverlay,
   frame: PaintFrame,
-  env: RenderEnv
+  env: RenderEnv,
+  /** Width a line may measure, in the space this call draws in. The stretch
+   * pass hands its own down, because everything measured under `ctx.scale` is
+   * drawn wider than it measures. */
+  room?: number
 ) {
   // Glyph stretch scales everything the element paints — plate, stroke,
   // per-glyph motion — about its center, the same space the DOM pair
@@ -358,7 +416,13 @@ async function paintText(
     ctx.scale(sx, sy);
     ctx.translate(-cx, -cy);
     try {
-      await paintText(ctx, { ...overlay, stretchX: undefined, stretchY: undefined }, frame, env);
+      await paintText(
+        ctx,
+        { ...overlay, stretchX: undefined, stretchY: undefined },
+        frame,
+        env,
+        textRoom(overlay.x, frame.width) / sx
+      );
     } finally {
       ctx.restore();
     }
@@ -377,7 +441,11 @@ async function paintText(
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
 
-  const lines = overlay.text.split("\n");
+  // Words stay in the picture: a line wider than the room its anchor leaves
+  // is broken here, measured on the very context that is about to draw it.
+  const lines = wrapTextToRoom(overlay.text, room ?? textRoom(overlay.x, width), (line) =>
+    ctx.measureText(line).width
+  ).split("\n");
   const lineH = fpx * (overlay.lineHeight ?? LINE_HEIGHT);
   const totalH = lines.length * lineH;
   const cx = overlay.x * width;
@@ -772,7 +840,10 @@ export async function measureElementBounds(
   const ctx = scratch.getContext("2d")!;
   ctx.font = cssFont;
   if ("letterSpacing" in ctx) ctx.letterSpacing = `${(o.letterSpacing ?? 0) * fpx}px`;
-  const lines = o.text.split("\n");
+  const { sx, sy } = textStretch(o);
+  const lines = wrapTextToRoom(o.text, textRoom(o.x, frame.width) / sx, (line) =>
+    ctx.measureText(line).width
+  ).split("\n");
   const maxW = Math.max(...lines.map((l) => ctx.measureText(l).width), 1);
   const lineH = fpx * (o.lineHeight ?? LINE_HEIGHT);
   let w = maxW;
@@ -781,7 +852,6 @@ export async function measureElementBounds(
     w += PLATE_PAD_X * fpx * 2;
     h += PLATE_PAD_Y * fpx * 2;
   }
-  const { sx, sy } = textStretch(o);
   if (opts?.pad === false) return { cx, cy, w: w * sx, h: h * sy };
   const strokePad = (o.stroke?.width ?? 0) * fpx * 2;
   const shadow = resolveShadow(o.shadow);

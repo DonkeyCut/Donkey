@@ -1,4 +1,6 @@
+import { textRoom, wrapTextToRoom } from "@donkeycut/effects-kit";
 import type { OverlayAnim, OverlayAnimStyle } from "@donkeycut/effects-kit";
+import { measureLine, textFontOf } from "./textFit";
 import type { TextLook } from "./textLooks";
 import type { TextMoveId } from "./textMotion";
 import type { FontId } from "./types";
@@ -126,34 +128,6 @@ const EMPHASIS_SCALE: Record<TextEmphasis, number> = {
   hero: 1.34,
 };
 
-/** Average glyph width as a fraction of the type size, per face. A run that
- * changes typeface has to re-break every line against the face carrying it —
- * the same string in Bebas and Archivo Black are nowhere near the same width. */
-export const FACE_WIDTH_RATIO: Record<string, number> = {
-  sf: 0.52,
-  serif: 0.5,
-  rounded: 0.55,
-  mono: 0.6,
-  impact: 0.46,
-  inter: 0.53,
-  montserrat: 0.56,
-  poppins: 0.58,
-  oswald: 0.45,
-  "space-grotesk": 0.55,
-  playfair: 0.5,
-  caveat: 0.42,
-  bebas: 0.42,
-  anton: 0.44,
-  "archivo-black": 0.62,
-  bangers: 0.48,
-  lobster: 0.46,
-  pacifico: 0.52,
-  "permanent-marker": 0.5,
-  "dm-serif": 0.5,
-};
-
-export const faceWidth = (font: string): number => FACE_WIDTH_RATIO[font] ?? 0.55;
-
 /** One face in a look's ensemble. */
 export interface TextFace {
   font: FontId;
@@ -232,50 +206,52 @@ const normText = (t: string): string =>
     .replace(/[^\p{L}\p{N}]/gu, "");
 
 /**
- * A line broken and sized to the room it actually has. The look's size is a
- * ceiling written for a wide frame at center; a vertical cut, a long line, a
- * wider face, or a line placed off to one side all get breaks at word
- * boundaries first and a smaller size only when breaking is not enough.
+ * A line broken and sized to the room it actually has.
+ *
+ * The look's size is a ceiling written for a wide frame at center; a vertical
+ * cut, a long line, a wider face, or a line placed off to one side all get
+ * breaks at word boundaries first and a smaller size only when breaking is not
+ * enough. Every width here is measured on the face the line will be drawn in,
+ * through the same seam the painter and the preview measure with, so a run
+ * lands where the frame says it lands.
  */
-export function fitTextToFrame(
+export function fitLineToFrame(
   text: string,
   frame: { w: number; h: number },
   size: number,
-  opts: { widthRatio: number; lineHeight?: number; x?: number; maxLines?: number } = {
-    widthRatio: 0.55,
+  opts: {
+    font: FontId;
+    weight: 400 | 700;
+    italic?: boolean;
+    lineHeight?: number;
+    x?: number;
+    maxLines?: number;
   }
 ): { text: string; size: number } {
   if (text.includes("\n")) return { text, size }; // the caller broke it themselves
-  const ratio = opts.widthRatio;
-  // An element centered off-axis only has the narrower half of the frame to
-  // spread into before it runs off the edge.
-  const x = opts.x ?? 0.5;
-  const room = Math.max(0.3, 2 * Math.min(x, 1 - x));
-  const usable = frame.w * 0.86 * room;
+  const room = textRoom(opts.x ?? 0.5, frame.w);
   const words = text.split(/\s+/).filter((w) => w.length > 0);
-  if (words.length === 0) return { text, size };
+  if (words.length === 0 || !(room > 0)) return { text, size };
   const maxLines = opts.maxLines ?? 3;
-  const budget = Math.max(6, Math.floor(usable / (size * ratio)));
-  const lines: string[] = [];
-  let cur = "";
-  for (const w of words) {
-    const next = cur ? `${cur} ${w}` : w;
-    if (next.length <= budget || cur === "") cur = next;
-    else {
-      lines.push(cur);
-      cur = w;
-    }
-  }
-  if (cur) lines.push(cur);
-  const longest = lines.reduce((n, l) => Math.max(n, l.length), 0);
-  let fitted = size;
-  if (longest > budget) fitted = Math.floor(usable / (longest * ratio));
-  if (lines.length > maxLines) fitted = Math.min(fitted, Math.floor(size * (maxLines / lines.length)));
-  const rows = lines.length;
   const lineH = opts.lineHeight ?? 1.25;
-  const tall = rows * fitted * lineH;
-  if (tall > frame.h * 0.8) fitted = Math.floor((frame.h * 0.8) / (rows * lineH));
-  return { text: lines.join("\n"), size: Math.max(16, Math.min(size, fitted)) };
+  const widthAt = (line: string, px: number) =>
+    measureLine(line, textFontOf({ font: opts.font, weight: opts.weight, italic: opts.italic }, px), px);
+
+  const layout = (px: number) => wrapTextToRoom(text, room, (line) => widthAt(line, px)).split("\n");
+  let lines = layout(size);
+  let fitted = size;
+  // A single word wider than the room is the one break that cannot help, so
+  // the size comes down until it fits.
+  const widest = Math.max(...lines.map((l) => widthAt(l, size)), 1);
+  if (widest > room) fitted = Math.floor((size * room) / widest);
+  // Too many lines is a design failure the same way overflow is: the run
+  // shrinks until the stack is the height the look asked for.
+  if (lines.length > maxLines) fitted = Math.min(fitted, Math.floor(size * (maxLines / lines.length)));
+  if (fitted < size) lines = layout(Math.max(16, fitted));
+  const tall = lines.length * fitted * lineH;
+  if (tall > frame.h * 0.8) fitted = Math.floor((frame.h * 0.8) / (lines.length * lineH));
+  const px = Math.max(16, Math.min(size, fitted));
+  return { text: layout(px).join("\n"), size: px };
 }
 
 /**
@@ -351,12 +327,13 @@ export function composeTextRun(
 
     const base = (line.size ?? look.text.size) * (line.size ? 1 : face.scale ?? 1);
     const wanted = Math.round(base * EMPHASIS_SCALE[emphasis] * repeatBoost);
-    // The look's own ratio is measured for its own face; the moment a line
-    // is carried by a different one, the line has to be broken against that
-    // face instead or it fits the frame on paper only.
-    const ownFace = font === look.text.font;
-    const fit = fitTextToFrame(line.text, frame, wanted, {
-      widthRatio: ownFace ? look.text.widthRatio ?? faceWidth(font) : faceWidth(font),
+    // Measured on the face this line is actually carried by, so a line that
+    // takes the ensemble's wider typeface breaks where that face runs out of
+    // room.
+    const fit = fitLineToFrame(line.text, frame, wanted, {
+      font,
+      weight: face.weight,
+      italic: face.italic ?? false,
       lineHeight: look.text.lineHeight,
       x,
     });
