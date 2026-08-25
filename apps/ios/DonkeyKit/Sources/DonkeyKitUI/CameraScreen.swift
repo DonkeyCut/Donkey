@@ -201,7 +201,13 @@ struct CameraScreen<CameraPreview: View>: View {
                 }
 
                 Button {
-                    if camera.teleprompter.isCardShown {
+                    if camera.isRecording {
+                        // Mid-take the card stays away, so the button is the
+                        // script's own switch: it leaves the picture and comes
+                        // back where the pacing has reached, and the take never
+                        // pauses for either.
+                        camera.teleprompter.isRunning.toggle()
+                    } else if camera.teleprompter.isCardShown {
                         camera.dismissTeleprompter()
                     } else {
                         // A running script comes back to the card to be
