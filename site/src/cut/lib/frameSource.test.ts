@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { FrameRing, FrameSourcePool, mappingKey, type Timed } from "./frameSource";
+import { FrameRing, FrameSourcePool, mappingKey, walkClaim, type Timed } from "./frameSource";
 import type { MediaAsset } from "./types";
 
 /** A decoded frame at 30fps, as the sink would hand it over. */
@@ -138,6 +138,82 @@ describe("mappingKey", () => {
 
   test("different files never share", () => {
     expect(mappingKey("a", 1, 0, 0)).not.toBe(mappingKey("b", 1, 0, 0));
+  });
+});
+
+describe("walkClaim", () => {
+  /** A walk that has landed frames from `from` to `tail`, asked for `t`. */
+  const landed = (t: number, from: number, tail: number, covered = false) =>
+    walkClaim({ t, walkFor: from, from, tail, landed: true, covered, comingS: 5, playing: true });
+
+  test("playback inside the walk keeps it", () => {
+    // The ordinary tick: the playhead is a beat behind the walk's tail and the
+    // frame is in the ring. Anything but `hold` here is a decode per frame.
+    expect(landed(3, 2, 3.3, true)).toBe("hold");
+  });
+
+  test("a walk running behind keeps its claim until it is history", () => {
+    // Frames still land; the picture advances a beat late. Restarting would
+    // pay a fresh keyframe seek to be in the same place.
+    expect(landed(4, 2, 3)).toBe("hold");
+    expect(landed(5, 2, 3.5)).toBe("hold");
+    // Past the allowance the frames it is about to land are already gone by.
+    expect(landed(6, 2, 3.5)).toBe("hop");
+  });
+
+  test("a walk ahead of the reader is kept, however far ahead it is", () => {
+    // A walk holding its lookahead is always a little way past the reader, and
+    // the ring stops covering that moment before the walk has done anything
+    // wrong. Measured on a laptop's montage, tearing one down there took a
+    // clean run to a seventh of its frames late — every lapse in coverage
+    // bought a fresh keyframe seek.
+    expect(landed(3, 2, 3.3)).toBe("hold");
+    expect(landed(3, 2, 4.9)).toBe("hold");
+    expect(landed(1, 0, 8)).toBe("hold");
+  });
+
+  test("a walk aimed ahead is kept while the reader catches up to it", () => {
+    // A hop anchors ahead of the reader by what reaching a frame costs. The
+    // reader is behind the anchor by construction, and that is not the walk
+    // going past it — it is the walk about to be right.
+    const lead = {
+      t: 4, walkFor: 4, from: 4.5, tail: 4.6, landed: true, covered: false, playing: true,
+    };
+    expect(walkClaim({ ...lead, comingS: 5 })).toBe("hold");
+    expect(walkClaim({ ...lead, t: 4.4, comingS: 5 })).toBe("hold");
+    // A reader that jumps back behind where the walk was sent gets the moment
+    // it asked for, not the lead.
+    expect(walkClaim({ ...lead, t: 3, comingS: 5 })).toBe("restart");
+  });
+
+  test("a walk still coming is left to land", () => {
+    // Nothing has landed: the keyframe seek, the bytes it needs, and every
+    // frame from the keyframe forward are all in flight. Starting another asks
+    // for the whole thing again, which on a reader short of bytes is the
+    // difference between a walk that lands and one that never does.
+    const coming = { walkFor: 2, from: 2, tail: 2, landed: false, covered: false, playing: true };
+    expect(walkClaim({ ...coming, t: 2.5, comingS: 0.5 })).toBe("hold");
+    expect(walkClaim({ ...coming, t: 9, comingS: 1.5 })).toBe("hold");
+    // Past the lag it was meant to cure, at a reader that has run beyond it,
+    // waiting only widens the gap it will land into.
+    expect(walkClaim({ ...coming, t: 9, comingS: 3 })).toBe("hop");
+    // Still coming, and the reader has not passed it: there is nothing better
+    // to do than let it land.
+    expect(walkClaim({ ...coming, t: 3, comingS: 3 })).toBe("hold");
+    // A reader behind where it was sent is not waiting for it at all.
+    expect(walkClaim({ ...coming, t: 1, comingS: 0.1 })).toBe("restart");
+  });
+
+  test("a frame in hand beats every other rule", () => {
+    expect(walkClaim({
+      t: 0, walkFor: 5, from: 5, tail: 9, landed: true, covered: true, comingS: 9, playing: true,
+    })).toBe("hold");
+
+    // A paused reader is served by the backward cache and by the single-frame
+    // fetch, so a walk it cannot use is left where it is.
+    expect(walkClaim({
+      t: 1, walkFor: 5, from: 5, tail: 6, landed: true, covered: false, comingS: 9, playing: false,
+    })).toBe("hold");
   });
 });
 

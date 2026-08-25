@@ -25,6 +25,7 @@
 
 import type { Input, InputVideoTrack, WrappedCanvas } from "mediabunny";
 import { frameSink, keyframeTimeAt, openMedia, videoTrackOf, type FrameCanvasSink } from "./mediaRead";
+import { meterPull, meterSource, meterWalk } from "./perfTrace";
 import { createRasterCanvas } from "./raster";
 import type { MediaAsset } from "./types";
 
@@ -76,11 +77,111 @@ export const DECODE_AHEAD_S = 0.3;
  */
 const LAG_HOP_S = 2;
 
-/** How far the playhead may travel past a walk's start while its first frame
- * is still decoding. That first step is a keyframe seek — every frame from the
- * keyframe to the start decodes before one lands — and a restart pays the
- * whole seek again from scratch, so a slow decoder gets room to finish it. */
-const FIRST_FRAME_S = 4;
+/**
+ * The furthest a re-anchored walk will aim ahead of the playhead.
+ *
+ * The lead is what reaching a frame has been costing (`aheadOf`), and on a
+ * reader waiting for bytes that cost is measured in seconds. Aiming that far
+ * ahead skips the stretch the walk could never have caught up with, which is
+ * the trade this makes on purpose — the sound is going there regardless, and a
+ * picture that arrives with it beats one that arrives behind it. The cap is
+ * what keeps a single slow read from throwing away half a clip.
+ */
+const LEAD_CAP_S = 4;
+/**
+ * How far short of the file's end a walk has to stop before that reads as the
+ * walk failing rather than the film ending.
+ *
+ * A walk reports the same `done` either way: bytes that never came, a decoder
+ * closed under it, a demuxer that lost the file. Taken as the end, a walk that
+ * stops a second into a half-hour clip pins the picture on the frame before it
+ * and nothing ever asks for another — the sound plays the rest of the cut over
+ * one still. So a walk that ends well short of the file is one that failed,
+ * and another goes after the film it did not reach.
+ *
+ * The margin is wide because the number it is measured against is loose: a
+ * file's stated length runs past its last frame by however much its metadata
+ * rounds or its audio outlasts its picture, and a margin under that charges
+ * every sound file a second doomed walk to prove it really ended. Wide, the
+ * cost is the other way: a walk that dies inside the last two seconds of a
+ * clip reads as the end, and the picture holds there. Three things keep the
+ * retries bounded — a walk that gets no further than a previous one has found
+ * where the film really stops, a walk that died does not aim ahead again, and
+ * a source that has had two die in a row waits `WALK_RETRY_MS`.
+ */
+const END_SLACK_S = 2;
+/** A pull costing more than this came off the link rather than the decoder —
+ * a decoder that cannot keep up still answers within a frame or two. */
+const SLOW_PULL_MS = 60;
+/** How long one slow pull speaks for. Bytes arrive in bursts, so the gap
+ * between two stalls says nothing about the link having recovered. */
+const SLOW_PULL_HOLD_MS = 5_000;
+/** How long a source waits before sending a walk after two have died under it
+ * in a row. The first goes straight away — a walk dies for a moment's reason
+ * far more often than a lasting one, and the picture is moving. A reader that
+ * cannot get through the file at all would otherwise send one per frame, each
+ * paying a keyframe decode, taking the machine that is already short of it. */
+const WALK_RETRY_MS = 250;
+/**
+ * What a walk in progress is still good for.
+ *
+ * Every rule about keeping or dropping a walk is here, away from the source's
+ * mutable state, because the rules are the part that is easy to get wrong and
+ * hard to see wrong: the failures they prevent take minutes of playback on a
+ * slow machine to show up, and read as "the video goes choppy" rather than as
+ * anything a stack trace names.
+ *
+ * `hold` keeps the walk and pulls it. `hop` ends it and sends the next one
+ * ahead of the reader, which is the answer to a walk the playhead has outrun.
+ * `restart` ends it and sends the next one exactly where the reader asked,
+ * which is the answer to a reader the walk cannot serve from where it is.
+ */
+export type WalkClaim = "hold" | "hop" | "restart";
+
+export function walkClaim(w: {
+  /** The moment being asked for. */
+  t: number;
+  /** Where the reader stood when this walk was sent — at or behind `from`. */
+  walkFor: number;
+  /** Where the walk was anchored. */
+  from: number;
+  /** The last frame it landed; `walkFor` until one lands. */
+  tail: number;
+  /** Whether it has landed a frame yet. */
+  landed: boolean;
+  /** Whether the ring holds `t` already. */
+  covered: boolean;
+  /** How long it has been coming, in seconds. */
+  comingS: number;
+  /** Whether the reader is moving with the clock. A paused one is served by
+   * the backward cache and by `pumpSeek`'s single-frame fetch, so a walk it
+   * cannot use is left alone: ending one costs a keyframe decode that competes
+   * with the fetch actually painting the picture, and on a slow machine that
+   * is a drag position that never paints at all. */
+  playing: boolean;
+}): WalkClaim {
+  // The frame is in hand. Nothing about the walk can improve on that.
+  if (w.covered) return "hold";
+  // The reader is somewhere the walk was never sent for. A walk only moves
+  // forward, so it is never going to arrive there.
+  const behind = w.playing && w.t < w.walkFor - SAME;
+  if (!w.landed) {
+    // Nothing landed means the walk is still doing the only work that can
+    // produce a picture — finding the keyframe before its anchor, fetching the
+    // bytes it sits in, decoding forward to it. Starting another throws all of
+    // that away and asks for it again, so it is left alone while it has any
+    // prospect of landing where the reader is. Past that, waiting only widens
+    // the gap: the playhead runs for as long as the walk keeps coming.
+    if (!behind && (w.comingS <= LAG_HOP_S || w.t <= w.from + LAG_HOP_S)) return "hold";
+    return behind ? "restart" : "hop";
+  }
+  // Outrun: the playhead is past the last frame it landed by more than the
+  // allowance, so the frames it is about to land are already history.
+  const outrun = w.t > w.tail + LAG_HOP_S;
+  if (!(outrun || behind)) return "hold";
+  return outrun ? "hop" : "restart";
+}
+
 /**
  * How long recent walks took to land their first frame, newest last.
  *
@@ -338,12 +439,71 @@ export class ClipFrameSource {
    * frame, a spent walk — and a min/max over that sparse set has holes in it
    * that read as coverage. */
   private stream: AsyncGenerator<WrappedCanvas, void, unknown> | null = null;
+  /**
+   * A walk on its way, before it is a walk.
+   *
+   * Starting one awaits the file and the drain of whatever it replaced, and
+   * both of those can take real time — the replaced drain is often parked on a
+   * read that is waiting for bytes. Without this the walk does not exist yet
+   * as far as `pumpStream` can tell, so every tick in that window starts
+   * another, each one moving the anchor the one before it was checked
+   * against, so every one of them bails and none of them ever runs. Measured
+   * on the eval's throttled link, one play was starting nearly three hundred
+   * walks and completing a handful.
+   */
+  private pullWait = 0;
+  private slowPullAt = 0;
+  private starting: Promise<void> | null = null;
   private streamFrom = 0;
   private streamTail = 0;
   /** When the current walk was started, and whether it has landed anything
    * yet, for timing what reaching a clip costs on this machine. */
   private walkAt = 0;
   private walkFirst = false;
+  /** What this source's last walk took to land its first frame, in seconds.
+   * The median in `walkCostMs` is across every source on this machine; one
+   * file being read over a link that cannot keep up costs far more than that
+   * median, and this is what says so. */
+  private lastWalkS = 0;
+  /** A walk was torn down for running behind and its replacement has yet to
+   * start. The intent has to outlive the open, since starting a walk awaits
+   * the file and the previous drain, and every tick in between would otherwise
+   * re-anchor at the playhead and undo the lead. */
+  private hopping = false;
+  /**
+   * The moment the walk was sent for — where the reader stood, which is at or
+   * behind the anchor once a lead is added.
+   *
+   * It is the walk's lower edge. A walk serves a reader moving forward through
+   * it; a reader that asks from behind it is somewhere the walk is never going
+   * to reach, since a walk only moves forward. That happens for real: a
+   * montage replayed from the top asks every clip for its first frame while
+   * the walk from the previous pass sits at the clip's last, and a clip
+   * re-entered from an earlier point does the same. Without this edge such a
+   * walk is held forever and the clip shows a frame from the pass before.
+   */
+  private walkFor = 0;
+  /** The furthest a walk has ended short of the file — see `END_SLACK_S`. */
+  private shortEndAt = -1;
+  /**
+   * Where this file's picture actually stops, off the video track.
+   *
+   * The asset's own duration is the container's, which is as long as its
+   * longest track — an audio track outlasting the picture moves it. This is
+   * the video track's, off the file's metadata. Reading it off the last packet
+   * instead would be exact, and is the wrong trade: finding that packet means
+   * reading toward the end of the file, and on the link this rule exists for
+   * that competes with the frames the reader is waiting for. Measured on a
+   * throttled link, a montage of twelve sources doing it stalled playback
+   * outright.
+   */
+  private fileEnd: number | null = null;
+  /** When a walk last ended without reaching what it was sent for, how many
+   * have done so in a row, and the moment they were sent for, for the backoff
+   * in `pumpStream`. */
+  private failedAt = 0;
+  private failStreak = 0;
+  private failedFor = -1;
   /** The walk ran off the end of the file. Its span is still the truth — there
    * are no frames past its tail to decode — so a reader inside it must not
    * keep restarting a walk that can only end again. */
@@ -453,6 +613,33 @@ export class ClipFrameSource {
     return this.still !== null || this.ring.size > 0;
   }
 
+  /**
+   * What the walk is waiting on right now, in milliseconds.
+   *
+   * The smoothed cost of pulls that have finished, and the age of one still in
+   * flight — whichever is worse. A pull sitting two seconds on bytes that have
+   * not arrived only enters the average when it lands, so an average alone
+   * reads as healthy exactly when the reader is most starved.
+   */
+  get pullWaitMs(): number {
+    const inFlight = this.nextStartedAt ? performance.now() - this.nextStartedAt : 0;
+    return Math.max(this.pullWait, inFlight);
+  }
+
+  /**
+   * The walk is short of bytes rather than short of decode.
+   *
+   * The one place that judgement is made. A caller comparing `pullWaitMs`
+   * against a threshold of its own would have to keep that number in step with
+   * the one a slow pull is marked by, in another file, with nothing to catch
+   * them drifting apart.
+   */
+  get byteBound(): boolean {
+    const now = performance.now();
+    if (this.slowPullAt && now - this.slowPullAt < SLOW_PULL_HOLD_MS) return true;
+    return this.pullWaitMs > SLOW_PULL_MS;
+  }
+
   get failed(): boolean {
     return this.unreadable;
   }
@@ -497,7 +684,7 @@ export class ClipFrameSource {
       this.lastAsk = null;
       // Playback reads forward; the backward cache's copies are dead weight.
       this.back = null;
-      this.pumpStream(t);
+      this.pumpStream(t, true);
     } else {
       const prev = this.lastAsk;
       this.lastAsk = t;
@@ -520,15 +707,29 @@ export class ClipFrameSource {
       // leftover from some other gesture entirely.
       const walkEdge = Math.max(this.streamFrom, this.streamTail);
       const nearWalk = this.stream !== null && t >= walkEdge - SAME && t < walkEdge + 0.5;
+      // A walk that has ended cannot be crept along, and the frames past its
+      // tail are not coming from it. Creeping is offered to it anyway, the ask
+      // reaches `pumpStream`, whose finished branch has nothing to do and says
+      // so by doing nothing: no walk, no fetch, no frame, and no repaint to
+      // ask again on. Every later position is then unanswerable for as long as
+      // the reader stays past that tail. The single-frame fetch below is what
+      // answers here, and it answers whether or not the tail really was the
+      // end of the film.
       const nearLast =
-        this.ring.size > 0 && t >= this.ring.newest - SAME && t < this.ring.newest + 0.5;
+        !this.streamDone &&
+        this.ring.size > 0 &&
+        t >= this.ring.newest - SAME &&
+        t < this.ring.newest + 0.5;
       if (nearWalk || nearLast) {
-        this.pumpStream(t);
+        this.pumpStream(t, false);
         return;
       }
       // A real jump: drop the walk and fetch the one frame. Newest ask wins, so
       // a fast drag decodes where it stopped rather than everywhere it crossed.
       this.stopStream();
+      // A paused reader wants the frame under the pointer, not one the lead
+      // would have aimed past it.
+      this.hopping = false;
       // The jump also starts a new walk story. A finished flag left over from
       // the old walk would pin playback to the seeked frame on resume: the
       // ring covers it, so no walk would restart until the frame aged out.
@@ -556,6 +757,7 @@ export class ClipFrameSource {
     this.asleep = true;
     this.stopStream();
     this.streamDone = false;
+    this.hopping = false;
     this.ring.clear();
     this.back = null;
     this.wanted = null;
@@ -623,6 +825,15 @@ export class ClipFrameSource {
         }
         this.input = input;
         this.track = track;
+        // Not awaited: it reads metadata the sink is about to read anyway, and
+        // the first frame should not wait behind it. Until it answers, the
+        // container's duration stands in.
+        void track
+          .getDurationFromMetadata()
+          .then((d) => {
+            if (d !== null && d > 0) this.fileEnd = d;
+          })
+          .catch(() => {});
         // Height alone: the sink keeps the source's aspect and applies the
         // file's rotation, so a phone clip arrives upright at preview size and
         // no caller has to know it was ever sideways.
@@ -663,6 +874,7 @@ export class ClipFrameSource {
   private stopStream(): void {
     const s = this.stream;
     this.stream = null;
+    this.starting = null;
     this.nextStartedAt = 0;
     void s?.return(undefined).catch(() => {});
   }
@@ -670,48 +882,106 @@ export class ClipFrameSource {
   /**
    * Keep the forward walk running and roughly `DECODE_AHEAD_S` ahead of `t`.
    *
-   * A walk already covering `t` is left alone — restarting it would throw away
-   * the buffer it has built and re-decode from the nearest keyframe, which is
-   * the hitch this design exists to remove. It ends only for a real jump — a
-   * scrub, a clip re-entered from somewhere else — or once the playhead has
-   * outrun it past its allowance, where a fresh walk anchored at the playhead
-   * is the faster way back to a current picture.
+   * `walkClaim` decides what the walk in progress is still good for; this
+   * carries the decision out. Restarting a walk throws away the buffer it has
+   * built and re-decodes from the nearest keyframe, which is the hitch this
+   * design exists to remove, so the default is to keep it. What a re-aim
+   * repeats is the decode — the bytes the first attempt pulled are resident by
+   * then (chunkCache.ts) — so the read is not paid twice.
    */
-  private pumpStream(t: number): void {
-    // Whether the walk serves `t` is a question about the walk — where it
-    // started and the last frame it has landed. On a machine whose decoder
-    // trails real time the tail falls behind the playhead while frames keep
-    // landing: the picture advances, a beat late. It keeps its claim until the
-    // frames it lands are history (`LAG_HOP_S`), and then re-anchors at the
-    // playhead. A walk still decoding toward its first frame — mid keyframe
-    // seek, nothing landed yet — gets the longer `FIRST_FRAME_S`, since a
-    // restart would begin that same seek again.
-    if (this.stream) {
-      // The walk serves `t` if the frame is already held, or if `t` reads at
-      // or past the walk's edge — the tail once frames have landed, its start
-      // until then — within the allowance. Its span behind the tail proves
-      // nothing: frames there have been aging out of the ring the whole time,
-      // so a reader that went back to the walk's beginning would find a
-      // record of coverage and no frames.
-      const landed = this.streamTail > this.streamFrom + SAME;
-      const edge = landed ? this.streamTail : this.streamFrom;
-      const slack = landed ? LAG_HOP_S : FIRST_FRAME_S;
-      if ((t >= edge - SAME && t <= edge + slack) || this.ring.covers(t)) {
+  private pumpStream(t: number, playing: boolean): void {
+    if (this.starting || this.stream) {
+      const claim = walkClaim({
+        t,
+        walkFor: this.walkFor,
+        from: this.streamFrom,
+        tail: this.streamTail,
+        landed: !this.walkFirst,
+        covered: this.ring.covers(t),
+        comingS: (performance.now() - this.walkAt) / 1000,
+        playing,
+      });
+      if (claim === "hold") {
         void this.drain(t);
         return;
       }
       this.stopStream();
+      this.hopping = claim === "hop";
     } else if (this.streamDone && (this.ring.covers(t) || t >= this.streamTail - SAME)) {
-      // The walk ended at the file's last frame. Inside its span the frame is
-      // already held, and past its tail there is nothing left to decode — the
-      // newest frame held is the answer. Restarting here would re-decode the
-      // whole tail from its keyframe once per tick, forever.
+      // The walk reached where the film stops — the file's last frame, or the
+      // place a second walk confirmed it ends (see the end of `drain`).
+      // Inside its span the frame is already held, and past its tail there is
+      // nothing left to decode: the newest frame held is the answer.
+      // Restarting here would re-decode the whole tail from its keyframe once
+      // per tick, forever.
       return;
     }
-    this.streamFrom = t;
+    // A walk that just died is not worth following straight away with another
+    // that will die the same way; the ring keeps showing what it has until the
+    // reader is answering again. A reader that has not moved since is worth no
+    // further walks at all — the answer would be the same one, and each attempt
+    // pushes a rough frame and repaints, so a parked playhead over a file that
+    // reads back short costs frames for the rest of the session.
+    if (this.failStreak > 1) {
+      const moved = Math.abs(t - this.failedFor) > SAME;
+      if (!moved || performance.now() - this.failedAt < WALK_RETRY_MS) return;
+    }
+    // A lead is for a playhead that keeps running. A paused reader wants the
+    // moment under the pointer, so an intent left over from playback is spent.
+    if (!playing) this.hopping = false;
+    const from = this.hopping ? this.aheadOf(t) : t;
+    poolLog(
+      `walk ${this.asset.fileName} from ${from.toFixed(2)} at ${t.toFixed(2)}` +
+        (this.hopping ? ` (hop, lead ${(from - t).toFixed(2)}s)` : "")
+    );
+    // From the ask, not from the moment the file and the previous drain let go
+    // of it: waiting for those is most of what reaching a frame costs on a
+    // reader that is short of bytes, and it is the reader that pays it.
+    this.walkAt = performance.now();
+    if (playing) meterWalk();
+    this.walkFirst = true;
+    this.streamFrom = from;
+    this.walkFor = t;
+    // The tail is the last frame landed, and this walk has landed none. It
+    // starts at the playhead rather than at the anchor so the first pull is
+    // not mistaken for a lookahead that is already deep enough.
     this.streamTail = t;
     this.streamDone = false;
-    void this.startStream(t);
+    const run = this.startStream(from);
+    this.starting = run;
+    // Only this start's own settle clears the claim. A start that was
+    // superseded settles too, and left to clear the field unconditionally it
+    // would retract the claim of the walk that replaced it — which is the
+    // window every tick in it starts another walk.
+    void run.finally(() => {
+      if (this.starting === run) this.starting = null;
+    });
+  }
+
+  /** The source time the file's last frame sits at, as near as the asset
+   * knows. Unknown durations answer with infinity, so nothing is ever taken
+   * for the end. */
+  private endOfFile(): number {
+    if (this.fileEnd !== null) return this.fileEnd;
+    return this.asset.duration > 0 ? this.asset.duration : Infinity;
+  }
+
+  /**
+   * Where to anchor a walk that fell behind.
+   *
+   * Anchored at the playhead, a walk lands its first frame at a moment that is
+   * already history: the seek took time and the playhead moved for all of it,
+   * so the walk comes out of the re-anchor exactly as far behind as the
+   * re-anchor cost — and is due to re-anchor again immediately. That is the
+   * cycle behind a picture that creeps, freezes, jumps, and creeps again.
+   * Aiming the cost ahead breaks it: the frame lands where the playhead has
+   * reached, and the walk goes on from there in step with it.
+   */
+  private aheadOf(t: number): number {
+    const lead = Math.min(LEAD_CAP_S, Math.max(walkCostMs() / 1000, this.lastWalkS));
+    // Past the file's last frame the walk ends without landing anything, and
+    // the picture would sit on whatever the ring still held.
+    return Math.max(t, Math.min(t + lead, this.endOfFile() - 0.05));
   }
 
   private async startStream(from: number): Promise<void> {
@@ -722,8 +992,6 @@ export class ClipFrameSource {
     if (this.closed || !this.sink || this.stream) return;
     // The read may have been overtaken while the file was opening.
     if (Math.abs(this.streamFrom - from) > SAME) return;
-    this.walkAt = performance.now();
-    this.walkFirst = true;
     this.stream = this.sink.canvases(Math.max(0, from));
     void this.drain(from);
   }
@@ -841,20 +1109,92 @@ export class ClipFrameSource {
           // gestures merely age out of the cache as the walk pushes.
           if (this.streamTail >= t + DECODE_AHEAD_S) break;
           if (this.ring.between(Math.max(t, this.streamFrom), this.streamTail) >= RING - 1) break;
-          this.nextStartedAt = performance.now();
+          const pullAt = performance.now();
+          this.nextStartedAt = pullAt;
           const { value, done } = await stream.next();
           this.nextStartedAt = 0;
+          // A pull that took longer than a frame is the walk waiting on
+          // something — bytes that have not arrived, or a decoder that is
+          // behind. Timed against a local, since a walk replaced mid-pull
+          // clears the field this would otherwise read.
+          const waited = performance.now() - pullAt;
+          meterPull(waited);
+          // What the walk is actually waiting on. A decoder that cannot keep
+          // up answers every pull in about a frame period; a reader whose
+          // bytes have not arrived sits on one for hundreds of milliseconds.
+          // The engine reads this to tell the two apart before trading away
+          // resolution, which helps the first and does nothing for the second.
+          this.pullWait = this.pullWait * 0.9 + waited * 0.1;
+          // One slow pull is the link talking, and averaging it away is how a
+          // starved reader reads as a healthy one: a 200ms wait smoothed into
+          // a 25ms average clears every bar it should have tripped. The worst
+          // recent pull stands on its own until it ages out.
+          if (waited > SLOW_PULL_MS) this.slowPullAt = performance.now();
+          if (waited > SLOW_PULL_MS)
+            poolLog(`pull waited ${Math.round(waited)}ms at ${this.streamTail.toFixed(2)}`);
           // A restart or a close while awaiting: this walk is no longer the one.
           if (this.stream !== stream) break;
           if (done || !value) {
             this.stream = null;
-            this.streamDone = true;
+            // An end short of the file's last frame is a walk that failed
+            // rather than a file that ended, and taking it for the file's end
+            // holds the picture on the frame before it for the rest of the
+            // clip. Another walk goes after the rest; one that gets no
+            // further than a walk already did is the film stopping there.
+            // A walk that stopped before the moment it was sent to never
+            // reached the film it went for, so it says nothing about where
+            // the file ends — the end of a file is never behind a moment
+            // inside it. That one is a failure outright.
+            const reached = this.streamTail >= this.streamFrom - SAME;
+            const short = this.streamTail < this.endOfFile() - END_SLACK_S;
+            const known = this.shortEndAt;
+            if (short && reached) this.shortEndAt = Math.max(known, this.streamTail);
+            this.streamDone = reached && (!short || this.streamTail <= known + SAME);
+            if (this.streamDone) {
+              // It reached the end of the film. Whatever went wrong before is
+              // over.
+              this.failStreak = 0;
+            } else {
+              this.failedAt = performance.now();
+              this.failStreak++;
+              this.failedFor = this.walkFor;
+              // A walk that died is the aim disproved. Aiming ahead is a bet
+              // that a walk sent past the reader will land there in time; one
+              // that just died at that anchor has settled the bet, and taking
+              // it again sends every replacement into the same place. Measured
+              // on a file whose last second reads back empty, that was a walk
+              // per tick, each leaping to the same dead spot, until the reader
+              // itself arrived there.
+              this.hopping = false;
+            }
             break;
           }
           this.streamTail = value.timestamp;
           if (this.walkFirst) {
             this.walkFirst = false;
-            noteWalkCost(performance.now() - this.walkAt);
+            this.hopping = false;
+            // The streak counts walks that ended without getting there, and a
+            // frame landing is not one of them getting there: a walk that
+            // lands frames and then stops short has still failed. Cleared
+            // here, a source whose every walk lands a frame and dies never
+            // builds a streak, so nothing ever rate-limits it — measured, that
+            // was a parked playhead paying a keyframe decode and a repaint
+            // twenty-five times a second, for as long as it sat there.
+            const ms = performance.now() - this.walkAt;
+            noteWalkCost(ms);
+            meterWalk(ms);
+            this.lastWalkS = ms / 1000;
+            // The file's own rate, read off the frame rather than probed: a
+            // probe is packets, and packets are the thing this reader is
+            // short of.
+            if (value.duration > 0) {
+              meterSource(
+                this.asset.width ?? 0,
+                this.asset.height ?? 0,
+                1 / value.duration,
+                this.track?.codec ?? ""
+              );
+            }
           }
           this.ring.push(value);
           this.onFrame();
@@ -883,6 +1223,14 @@ export class ClipFrameSource {
   private async pumpSeek(): Promise<void> {
     if (this.reading) return;
     this.reading = true;
+    // The moment a walk has already been sent after for, so an ask the file
+    // cannot answer is asked twice and no more. Some asks never can be
+    // answered: a transition holds the outgoing clip's last frame, which asks
+    // its source for a moment past the final frame it has. Left to repeat,
+    // that spins a keyframe decode per turn for as long as the pointer rests
+    // there — the position never paints, and every turn pushes a rough frame
+    // and repaints, so a parked playhead never goes quiet.
+    let retriedFor = -1;
     try {
       await this.open();
       for (;;) {
@@ -921,8 +1269,31 @@ export class ClipFrameSource {
         this.streamDone = false;
         this.streamFrom = t;
         this.streamTail = t;
+        // A seek's walk owns the walk state like any other. Left holding the
+        // last walk's, the play that usually follows a seek would read a
+        // pending flag and a start time belonging to something else.
+        this.walkAt = performance.now();
+        this.walkFirst = true;
+        this.hopping = false;
+        this.walkFor = t;
         this.stream = this.sink.canvases(Math.max(0, t));
         await this.drain(t);
+        // The walk ended before it reached the ask. Whatever ended it — bytes
+        // that never came, a decoder closed under it — the pointer is left on
+        // the rough keyframe with nothing on the way, so this asks again. The
+        // walk that finds where the film really stops sets `streamDone`, and
+        // that is what ends this.
+        if (
+          this.wanted === null &&
+          !this.stream &&
+          !this.streamDone &&
+          !this.hasExact(t) &&
+          Math.abs(retriedFor - t) > SAME
+        ) {
+          retriedFor = t;
+          this.wanted = t;
+          continue;
+        }
         // Another position was asked for while this one decoded; that one is
         // where the pointer actually is now.
         if (this.wanted === null) break;
