@@ -10,6 +10,36 @@ import UIKit
 final class CutCloudClient: NSObject {
     private let base = AuthBackend.baseURL
 
+    // MARK: Transport
+
+    /// How many times one GET is asked for before the link is called broken.
+    private static let attempts = 3
+
+    /// The API's own session. A phone waits a bounded 20 seconds for an
+    /// answer, and a whole call — retries included — is over inside a minute,
+    /// so a screen waiting on it either draws or says why.
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 20
+        config.timeoutIntervalForResource = 60
+        config.waitsForConnectivity = false
+        return URLSession(configuration: config)
+    }()
+
+    /// The network's verdict, read off the URL error it raised.
+    private static func reach(for error: URLError) -> NetworkReach {
+        switch error.code {
+        case .notConnectedToInternet, .dataNotAllowed, .internationalRoamingOff:
+            .offline
+        case .timedOut:
+            .timedOut
+        case .networkConnectionLost, .cannotLoadFromNetwork, .secureConnectionFailed:
+            .dropped
+        default:
+            .unreachable
+        }
+    }
+
     // MARK: Requests
 
     private var token: String? {
@@ -44,15 +74,40 @@ final class CutCloudClient: NSObject {
         ) ?? fileName)
     }
 
-    private func send(_ request: URLRequest) async throws -> Data {
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await URLSession.shared.data(for: request)
-        } catch {
-            throw CloudSyncError.transport
+    /// One answer from the API: its bytes and the status they came with.
+    ///
+    /// A phone's link drops connections on its own — the pooled socket dies
+    /// while the app is in the background, the radio hands off between towers,
+    /// a request outlives its window. A GET is safe to ask again, so it is
+    /// asked again here, spaced out, and only a link that stays broken across
+    /// every attempt reaches the caller. A cancelled task cancels: it is the
+    /// screen going away, never a failure to report.
+    private func perform(
+        _ request: URLRequest,
+        delegate: (any URLSessionTaskDelegate)? = nil
+    ) async throws -> (Data, HTTPURLResponse) {
+        let idempotent = request.httpMethod == "GET"
+        var attempt = 0
+        while true {
+            do {
+                let (data, response) = try await Self.session.data(for: request, delegate: delegate)
+                guard let http = response as? HTTPURLResponse else { throw CloudSyncError.transport }
+                return (data, http)
+            } catch let error as URLError where error.code == .cancelled {
+                throw CancellationError()
+            } catch let error as URLError {
+                let reach = Self.reach(for: error)
+                attempt += 1
+                guard idempotent, reach.isWorthAnotherTry, attempt < Self.attempts else {
+                    throw CloudSyncError.unreachable(reach, code: error.errorCode)
+                }
+                try await Task.sleep(for: .milliseconds(300 << (attempt - 1)))
+            }
         }
-        guard let http = response as? HTTPURLResponse else { throw CloudSyncError.transport }
+    }
+
+    private func send(_ request: URLRequest) async throws -> Data {
+        let (data, http) = try await perform(request)
         switch http.statusCode {
         case 200..<300: return data
         case 401, 403: throw CloudSyncError.unauthorized
@@ -63,18 +118,27 @@ final class CutCloudClient: NSObject {
 
     /// A send whose 4xx body is worth reading back to the user: the render cap
     /// and the storage quota both answer with a sentence written for a person.
+    /// The body comes off the same answer, so a POST is sent once.
     private func sendReadingRefusal(_ request: URLRequest) async throws -> Data {
         struct Refusal: Decodable { var error: String? }
-        do {
-            return try await send(request)
-        } catch let error as CloudSyncError {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse,
-                  (400..<500).contains(http.statusCode),
-                  let message = (try? JSONDecoder().decode(Refusal.self, from: data))?.error,
-                  !message.isEmpty
-            else { throw error }
-            throw CloudSyncError.refused(message)
+        let (data, http) = try await perform(request)
+        switch http.statusCode {
+        case 200..<300: return data
+        // A signed-out answer is a session fact before it is a sentence. Every
+        // handler writes one of these with an `error` body, so reading the body
+        // first would hand the user the server's wording and leave the session
+        // marked live, with nothing prompting a sign-in.
+        case 401, 403: throw CloudSyncError.unauthorized
+        case 400..<500:
+            if let message = (try? JSONDecoder().decode(Refusal.self, from: data))?.error,
+               !message.isEmpty {
+                throw CloudSyncError.refused(message)
+            }
+            switch http.statusCode {
+            case 413: throw CloudSyncError.storageFull
+            default: throw CloudSyncError.transport
+            }
+        default: throw CloudSyncError.transport
         }
     }
 
@@ -89,14 +153,8 @@ final class CutCloudClient: NSObject {
     /// so AVPlayer streams the CDN directly.
     private func resolveRedirect(_ path: String) async throws -> URL {
         let request = try request("GET", path)
-        let response: URLResponse
-        do {
-            (_, response) = try await URLSession.shared.data(for: request, delegate: RedirectCatcher())
-        } catch {
-            throw CloudSyncError.transport
-        }
-        guard let http = response as? HTTPURLResponse,
-              (300..<400).contains(http.statusCode),
+        let (_, http) = try await perform(request, delegate: RedirectCatcher())
+        guard (300..<400).contains(http.statusCode),
               let location = http.value(forHTTPHeaderField: "Location"),
               let url = URL(string: location, relativeTo: base) else {
             throw CloudSyncError.transport
@@ -581,15 +639,7 @@ extension CutCloudClient: AnalyticsServicing {
     /// The nightly analytics rollup. The API serves it to super users only,
     /// so a regular account reads as unauthorized here.
     func fetchAnalyticsRollup() async throws -> AnalyticsRollup {
-        let request = try request("GET", "/api/analytics/rollup")
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await URLSession.shared.data(for: request)
-        } catch {
-            throw CloudSyncError.transport
-        }
-        guard let http = response as? HTTPURLResponse else { throw CloudSyncError.transport }
+        let (data, http) = try await perform(try request("GET", "/api/analytics/rollup"))
         switch http.statusCode {
         case 200..<300: break
         case 404: throw AnalyticsError.noRollup
