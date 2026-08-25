@@ -446,11 +446,24 @@ export function projectRefs(assets: MediaAsset[]): AssetRef[] {
  * so a prompt can point at a segment of the cut ("@c2 doesn't match the
  * audio"). Handles are derived from the current order, never stored; the
  * timeline shows each clip's token on hover. */
+/** Every video-track clip in one sequence — track 0 first, then each upper
+ * track in order, each track's own clips by start time. Upper tracks carry the
+ * cut's picture-in-picture, its inserts and its B-roll, so a clip up there is
+ * as referenceable as one on the spine: leaving them out meant copying one
+ * yielded nothing to paste and no `@` token could reach it. */
+export function allClipSpans(
+  clips: Parameters<typeof getClipSpans>[0],
+  assets: MediaAsset[]
+): ReturnType<typeof getClipSpans> {
+  const tracks = [...new Set(clips.map((c) => c.track ?? 0))].sort((a, b) => a - b);
+  return tracks.flatMap((track) => getClipSpans(clips, assets, track));
+}
+
 export function clipRefs(
   clips: Parameters<typeof getClipSpans>[0],
   assets: MediaAsset[]
 ): AssetRef[] {
-  return getClipSpans(clips, assets).map((sp, i) => ({
+  return allClipSpans(clips, assets).map((sp, i) => ({
     scope: "clip",
     id: sp.clip.id,
     name: `clip ${i + 1}`,
@@ -629,7 +642,7 @@ export function entityRefs(src: EntitySources): AssetRef[] {
     out.push(...keyRefs("overlay", o.id, name, o.start, o.mask?.kf, "mask"));
   });
 
-  getClipSpans(src.clips, src.assets).forEach((sp, i) => {
+  allClipSpans(src.clips, src.assets).forEach((sp, i) => {
     // The clip's session handle ("c3") — clipRefs numbers the same spans.
     const parent = `c${i + 1}`;
     out.push(...keyRefs("clip", sp.clip.id, parent, sp.start, sp.clip.kf, "pose"));

@@ -29,7 +29,7 @@ import {
   hasLibraryDrag,
   hasTemplateDrag,
 } from "@/cut/lib/assetDrag";
-import { audioClipRefs, draggingRef, hasRefDrag, refFromAsset, type AssetRef } from "@/cut/lib/assetRef";
+import { audioClipRefs, clipRefs, draggingRef, hasRefDrag, refFromAsset, type AssetRef } from "@/cut/lib/assetRef";
 import { sendFrameToChat, type FrameGrabOrigin } from "@/cut/lib/chatIntake";
 import { copyRefImage } from "@/cut/lib/refMedia";
 import { useCutCaps } from "@/cut/lib/backend/hooks";
@@ -1063,6 +1063,17 @@ export function Timeline() {
     return map;
   }, [audioClips, assets]);
 
+  // The same, per video clip ("@c3"), across every track — an upper-track
+  // insert is as referenceable as one on the spine, and the chip on hover is
+  // exactly what pulls it into a message.
+  const clipMentions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const ref of clipRefs(clips, assets)) {
+      if (ref.handle) map.set(ref.id, `@${ref.handle}`);
+    }
+    return map;
+  }, [clips, assets]);
+
   // The home track of an in-flight upper-layer drag, so that row can render
   // the landing slot while the clip stays on its own track.
   const draggedOverlayTrack =
@@ -1549,17 +1560,6 @@ export function Timeline() {
     }
   };
 
-  // The video being dragged — project media, a library clip, or an image ref
-  // (which lands as a still) — with the ghost its landing segment paints.
-  const draggedVideo = (e: React.DragEvent): { duration: number; ghost: DropGhost } | null => {
-    if (hasLibraryDrag(e)) {
-      const lib = draggingLibrary();
-      if (!lib || !isClipMedia(lib.type)) return null;
-      return {
-        duration: lib.type === "image" ? STILL_SECONDS : lib.duration,
-        ghost: {
-          url: libraryMediaUrl(lib.fileName, lib.residency),
-          kind: lib.type,
   /** How much timeline one asset takes when it lands. */
   const laidLength = (asset: { type: string; duration: number }) =>
     asset.type === "image" ? STILL_SECONDS : asset.duration || STILL_SECONDS;
@@ -1630,6 +1630,17 @@ export function Timeline() {
    * mixed selection may also be carrying. */
   const clipsOnly = (asset: MediaAsset) => isClipMedia(asset.type) && !stickerOf(asset);
 
+  // The video being dragged — project media, a library clip, or an image ref
+  // (which lands as a still) — with the ghost its landing segment paints.
+  const draggedVideo = (e: React.DragEvent): { duration: number; ghost: DropGhost } | null => {
+    if (hasLibraryDrag(e)) {
+      const lib = draggingLibrary();
+      if (!lib || !isClipMedia(lib.type)) return null;
+      return {
+        duration: lib.type === "image" ? STILL_SECONDS : lib.duration,
+        ghost: {
+          url: libraryMediaUrl(lib.fileName, lib.residency),
+          kind: lib.type,
           aspect: lib.width && lib.height ? lib.width / lib.height : undefined,
           // The card's cover is already painted and cached, so the segment
           // has a frame of the video in it from the first move — true frames
@@ -1715,6 +1726,9 @@ export function Timeline() {
       setDropType(null);
       const lib = draggingLibrary();
       const libId = draggedLibraryId(e);
+      // The whole dragged group, read before the drag is cleared.
+      const libGroup = draggingLibraryMany();
+      const assetGroup = draggingAssetIds();
       const still = draggingStill(e);
       const stockVideo = draggingStockVideo(e);
       const projectId = useEditor.getState().projectId;
@@ -1724,9 +1738,6 @@ export function Timeline() {
         return;
       }
       const id = draggedAssetId(e);
-      // The whole dragged group, read before the drag is cleared.
-      const libGroup = draggingLibraryMany();
-      const assetGroup = draggingAssetIds();
       const asset = id ? useEditor.getState().assets.find((a) => a.id === id) : null;
       if (id && !stickerOf(asset) && isClipMedia(asset?.type)) {
         placeAssetsAt(assetGroup, t, t, 0, place, undefined, clipsOnly);
@@ -2018,6 +2029,10 @@ export function Timeline() {
         // A library asset must be copied into the project before it can land.
         const lib = draggingLibrary();
         const libId = draggedLibraryId(e);
+        // Everything the drag is carrying — one card, or the whole marquee
+        // selection it was grabbed from — read before the drag is cleared.
+        const libGroup = draggingLibraryMany();
+        const assetGroup = draggingAssetIds();
         const still = draggingStill(e);
         const stockVideo = draggingStockVideo(e);
         const stockMusic = draggingStockMusic(e);
@@ -2029,10 +2044,6 @@ export function Timeline() {
         // Elements land at the pointer's own time, not `dropTimeAt`, which
         // pins everything to 0 on an empty timeline — a clip starts the film
         // there, but an element lands where it was dropped.
-        // Everything the drag is carrying — one card, or the whole marquee
-        // selection it was grabbed from — read before the drag is cleared.
-        const libGroup = draggingLibraryMany();
-        const assetGroup = draggingAssetIds();
         const atElement = Math.max(0, timeAt(e.clientX));
         if (element) {
           e.preventDefault();
@@ -2605,6 +2616,7 @@ export function Timeline() {
                 <ClipView
                   key={span.clip.id}
                   span={span}
+                  mention={clipMentions.get(span.clip.id)}
                   pps={pps}
                   selected={selKeys.has(`clip:${span.clip.id}`)}
                   drag={laneDragFor(laneDrag, "overlayClip", span.clip.id)}
@@ -2668,11 +2680,11 @@ export function Timeline() {
             )}
             {assetDrop &&
               dropSegment(assetDrop.t, assetDrop.len, rowH0 - 4, assetDrop.ghost)}
-            {spans.map((span, i) => (
+            {spans.map((span) => (
               <ClipView
                 key={span.clip.id}
                 span={span}
-                mention={`@c${i + 1}`}
+                mention={clipMentions.get(span.clip.id)}
                 pps={pps}
                 selected={selKeys.has(`clip:${span.clip.id}`)}
                 drag={laneDragFor(laneDrag, "clip", span.clip.id)}

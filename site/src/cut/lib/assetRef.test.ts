@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { entityRefs, selectionRefTokens, type EntitySources } from "./assetRef";
+import { clipRefs, entityRefs, selectionRefTokens, type EntitySources } from "./assetRef";
 import type { MediaAsset, Overlay, VideoClip } from "./types";
 
 const asset = (id: string): MediaAsset =>
@@ -192,5 +192,26 @@ describe("selectionRefTokens", () => {
 
   test("nothing resolvable yields null", () => {
     expect(selectionRefTokens({ ...base, selection: { kind: "clip", id: "gone" } })).toBe(null);
+  });
+
+  test("a clip on an upper track tokens too, numbered after track 0", () => {
+    const token = selectionRefTokens({
+      ...base,
+      clips: [clip("c-a", 0), clip("pip", 1, { track: 1 })],
+      assets: [asset("c-a"), asset("pip")],
+      selection: { kind: "clip", id: "pip" },
+    });
+    expect(token).toBe("@c2");
+  });
+});
+
+describe("clipRefs", () => {
+  test("covers every track, track 0 first", () => {
+    const refs = clipRefs(
+      [clip("a", 0), clip("up", 0, { track: 1 }), clip("b", 5)],
+      [asset("a"), asset("up"), asset("b")]
+    );
+    expect(refs.map((r) => r.id)).toEqual(["a", "b", "up"]);
+    expect(refs.map((r) => r.handle)).toEqual(["c1", "c2", "c3"]);
   });
 });
