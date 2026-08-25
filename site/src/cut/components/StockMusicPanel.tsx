@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Pause, Play, Plus } from "lucide-react";
 import { PeakStrip } from "@/cut/components/AudioPanel";
 import { clearRefDrag, refFromStockMusic, setRefDragData } from "@/cut/lib/assetRef";
+import { useRefCopy } from "@/cut/lib/refCopy";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
 import { importStockMusic } from "@/cut/lib/media";
 import { useMusicGen } from "@/cut/lib/musicGen";
@@ -115,8 +116,10 @@ function SampleCard({
   onTogglePlay: () => void;
   onAdd: () => void;
 }) {
+  const copyRef = useRefCopy(() => [refFromStockMusic(sample)]);
   return (
     <div
+      ref={copyRef}
       className="group flex cursor-grab flex-col overflow-hidden rounded-xl border border-border bg-muted/40"
       draggable
       onDragStart={(e) => {

@@ -55,6 +55,7 @@ import { applyOwnership, useGenerate, type VideoAttempt, type VideoGenOptions } 
 import { useGenScene } from "./genScene";
 import { anchorRefused } from "./genvideo/shotAttempts";
 import {
+  addProjectTemplateToTimeline,
   addTemplateToProject,
   createLibraryFolder,
   deleteFromLibrary,
@@ -2583,12 +2584,18 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   template_add: async (s, input) => {
       const projectId = s.projectId;
       if (!projectId) throw new ToolError("No project open.");
-      const t = (await fetchLibrary()).templates.find((x) => x.id === String(input.id ?? ""));
+      const id = String(input.id ?? "");
+      // A template saved into this project's own Media is already here, media
+      // and all; a Library one has to be carried in first.
+      const own = useEditor.getState().templates.find((x) => x.id === id);
+      const shelved = own ? null : (await fetchLibrary()).templates.find((x) => x.id === id);
+      const t = own ?? shelved;
       if (!t)
-        throw new ToolError(`No template with id ${String(input.id)}. Call library_list for ids.`);
+        throw new ToolError(`No template with id ${id}. Call library_list for ids.`);
       const chatId = chatOwner();
       const before = new Set(s.assets.map((a) => a.id));
-      await addTemplateToProject(projectId, t);
+      if (shelved) await addTemplateToProject(projectId, shelved);
+      else addProjectTemplateToTimeline(projectId, t);
       // Chat-fetched media files under the asking thread, like stock/library
       // imports; the template's clips reference it, so it survives cleanup.
       for (const a of useEditor.getState().assets) {

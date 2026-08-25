@@ -7,13 +7,12 @@ import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { clearAssetDrag, setAssetDragData, setChipDragImage } from "@/cut/lib/assetDrag";
 import {
-  projectRefs,
   refFromAsset,
-  refToken,
   setRefDragData,
   type AssetRef,
   type AssetRefKind,
 } from "@/cut/lib/assetRef";
+import { copyRefs, useRefCopy } from "@/cut/lib/refCopy";
 import { useElapsed } from "@/cut/hooks/useElapsed";
 import { useHoverPlay } from "@/cut/hooks/useHoverPlay";
 import { useInView } from "@/cut/hooks/useInView";
@@ -56,10 +55,18 @@ export function ChatAssetCard({ item }: { item: AssetRef }) {
   const asset = useEditor((s) =>
     item.scope === "project" ? s.assets.find((a) => a.id === item.id) : undefined
   );
+  // ⌘C over a chat card copies its mention token, so an asset the assistant
+  // made goes straight into the next prompt. The wrapper lays out as nothing —
+  // it is only somewhere for the copy registration to hang.
+  const copyRef = useRefCopy(() => [liveRef(item, asset)]);
   // A project ref whose asset is gone has nothing left to preview.
   if (item.scope === "project" && !asset) return null;
   const Card = CHAT_CARDS[item.kind];
-  return <Card item={item} asset={asset} />;
+  return (
+    <div ref={copyRef} className="contents">
+      <Card item={item} asset={asset} />
+    </div>
+  );
 }
 
 /** Chat card for a project asset id — how tool outputs name what they made. */
@@ -221,16 +228,7 @@ function ChatCardMenu({ asset, triggerClassName }: { asset: MediaAsset; triggerC
             <Maximize2 /> Expand
           </DropdownMenuItem>
           <DropdownMenuItem
-            onClick={() => {
-              // The session handle (v2, i1) is derived, not stored — resolve
-              // it at click time instead of subscribing every card to it.
-              const live = projectRefs(useEditor.getState().assets).find(
-                (r) => r.id === asset.id
-              );
-              void navigator.clipboard
-                .writeText(refToken(live ?? refFromAsset(asset)))
-                .catch(() => {});
-            }}
+            onClick={() => copyRefs([refFromAsset(asset)])}
           >
             <Copy /> Copy reference
           </DropdownMenuItem>

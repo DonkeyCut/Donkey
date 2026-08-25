@@ -21,6 +21,7 @@ import {
   type ExportDoc,
 } from "@/cut/lib/exportClient";
 import { fileZoneAt, hasRefDrag, selectionRefTokens } from "@/cut/lib/assetRef";
+import { copyableRefs } from "@/cut/lib/refCopy";
 import { startUpload } from "@/cut/lib/importQueue";
 import { enrichAsset, importFileToProject, prepareImport } from "@/cut/lib/media";
 import { clearCopiedFrame, copiedFrameFile, hasCopiedFrame } from "@/cut/lib/stageFrame";
@@ -937,6 +938,11 @@ export function Editor({
         // element, transition, cue, or keyframe pastes into the chat
         // composer as a reference.
         if (!window.getSelection()?.toString()) {
+          // A card or tile under the pointer is the more deliberate pick, and
+          // the shared ⌘C path (lib/refCopy.ts) has already copied it off the
+          // same keystroke. The timeline clipboard keeps its last timeline
+          // copy, so ⌘V still pastes what was copied for the timeline.
+          if (copyableRefs().length > 0) return;
           const token = selectionRefTokens(s);
           if (token) void navigator.clipboard.writeText(token).catch(() => {});
           // The newer copy owns the clipboard: a copied preview frame steps

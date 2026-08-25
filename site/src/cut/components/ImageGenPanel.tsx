@@ -243,6 +243,7 @@ function GeneratedTile({
   return (
     <div
       ref={tileRef}
+      data-pick-id={asset.id}
       className={cn("group relative overflow-hidden rounded-lg", picked && PICKED_RING)}
     >
       <button

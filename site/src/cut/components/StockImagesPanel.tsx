@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronLeft, ChevronRight, Maximize2, Search } from "lucide-react";
 import { clearRefDrag, refFromStock, setRefDragData } from "@/cut/lib/assetRef";
+import { useRefCopy } from "@/cut/lib/refCopy";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
 import { useLightbox } from "@/cut/lib/lightbox";
 import { useRevealEffect, useRevealFlash } from "@/cut/lib/refReveal";
@@ -153,9 +154,13 @@ function SectionHead({ title, onViewAll }: { title: string; onViewAll?: () => vo
  * and it drags as an asset ref (chat attachment, generation reference). */
 function StockTile({ item }: { item: StockImage }) {
   const { flash, attachReveal } = useRevealFlash("stock", item.id);
+  const copyRef = useRefCopy(() => [refFromStock(item)]);
   return (
     <div
-      ref={attachReveal}
+      ref={(el) => {
+        attachReveal(el);
+        copyRef(el);
+      }}
       className={cn(
         "group relative overflow-hidden rounded-lg",
         flash && "ring-2 ring-[#0a84ff] ring-offset-1"

@@ -35,8 +35,11 @@ export const LIBRARY_TOOLS = [
   {
     name: "template_add",
     description:
-      "Re-materialize a Library template into the project: its media import as assets and its clips, overlays, titles, and captions land editable, exactly as saved (clip layers append to track 0; free-positioned parts line up at the playhead). Call it only when the user asked for the template in the cut.",
-    inputSchema: obj({ id: str("Template id from library_list") }, ["id"]),
+      "Re-materialize a template into the project: its clips, overlays, titles, and captions land editable, exactly as saved (clip layers append to track 0; free-positioned parts line up at the playhead). A Library template's media import as assets on the way in; a template saved in this project's own Media reuses the media already here. Call it only when the user asked for the template in the cut.",
+    inputSchema: obj(
+      { id: str("Template id — from library_list, or the id carried by a template the user referenced") },
+      ["id"],
+    ),
   },
   {
     name: "save_template",

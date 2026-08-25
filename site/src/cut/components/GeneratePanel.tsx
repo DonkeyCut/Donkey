@@ -331,6 +331,7 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
   return (
     <div
       ref={tileRef}
+      data-pick-id={job.assetId ?? undefined}
       className={cn("gen-job group relative overflow-hidden rounded-lg", picked && PICKED_RING)}
       onMouseEnter={() => {
         const v = videoRef.current;

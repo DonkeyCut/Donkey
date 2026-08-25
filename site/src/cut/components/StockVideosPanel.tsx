@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { ChevronRight, Maximize2, Search } from "lucide-react";
 import { clearRefDrag, refFromStockVideo, setRefDragData } from "@/cut/lib/assetRef";
+import { useRefCopy } from "@/cut/lib/refCopy";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
 import { useLightbox } from "@/cut/lib/lightbox";
 import { useRevealEffect, useRevealFlash } from "@/cut/lib/refReveal";
@@ -211,9 +212,13 @@ function Grid({ items }: { items: StockVideo[] }) {
 function StockTile({ item }: { item: StockVideo }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const { flash, attachReveal } = useRevealFlash("stock", item.id);
+  const copyRef = useRefCopy(() => [refFromStockVideo(item)]);
   return (
     <div
-      ref={attachReveal}
+      ref={(el) => {
+        attachReveal(el);
+        copyRef(el);
+      }}
       className={cn(
         "group relative overflow-hidden rounded-lg",
         flash && "ring-2 ring-[#0a84ff] ring-offset-1"

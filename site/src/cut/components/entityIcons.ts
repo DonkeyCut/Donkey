@@ -18,6 +18,7 @@ import {
   FoldHorizontal,
   Heart,
   Hexagon,
+  Layers,
   Minus,
   Moon,
   MoveRight,
@@ -105,6 +106,8 @@ export function entityIcon(ref: AssetRef): LucideIcon | null {
       return Captions;
     case "keyframe":
       return Diamond;
+    case "template":
+      return Layers;
     default:
       return null;
   }

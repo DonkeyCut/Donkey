@@ -114,6 +114,8 @@ import { shapeBand } from "@/cut/lib/types";
 import { useRevealFlash } from "@/cut/lib/refReveal";
 import { formatTime } from "@/cut/lib/time";
 import { cn } from "@/lib/utils";
+import { refFromLibrary } from "@/cut/lib/assetRef";
+import { useRefCopy } from "@/cut/lib/refCopy";
 import { CopyNameLabel } from "./AssetRefs";
 import { FontSpecimen } from "./FontSpecimen";
 import {
@@ -662,6 +664,9 @@ export function LibraryView() {
 
   const bothShelves = listed.length > 1;
   const shown = all.filter((a) => (a.folderId ?? null) === openFolder);
+  // The picked run, built once for the whole grid: every card hands the same
+  // array to its drag and its ⌘C.
+  const pickedRun = shown.filter((a) => selected.has(a.id));
   // Similar-shape tiles get their own band of wrapped rows, so a wide tile
   // never shares a row with a tall one; audio and unmeasured assets band as
   // squares. Order within and across bands follows the listing. An arrival
@@ -909,6 +914,7 @@ export function LibraryView() {
                       asset={a}
                       area={TILE_AREA}
                       selected={selected.has(a.id)}
+                      dragGroup={pickedRun}
                       offline={!live(a.residency)}
                       // A live item opens in the viewer. Clicking one this browser
                       // can only remember is the moment something is actually
@@ -1052,6 +1058,15 @@ export function LibraryCard({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const { flash, attachReveal } = useRevealFlash("library", a.id);
+  // ⌘C over the card copies its mention token. A card inside the current
+  // selection carries the whole set, the same rule its drag follows. A font is
+  // used from the font menu, so it names nothing a prompt can point a tool
+  // at.
+  const copyRef = useRefCopy(() =>
+    (selected && dragGroup?.length ? dragGroup : [a])
+      .filter((x) => x.type !== "font")
+      .map(refFromLibrary),
+  );
   // With one shelf listed, every card is on it — the badge would say nothing.
   // Phone recordings all come up from the cloud, so they carry none either.
   const bothShelves =
@@ -1098,7 +1113,10 @@ export function LibraryCard({
 
   return (
     <div
-      ref={attachReveal}
+      ref={(el) => {
+        attachReveal(el);
+        copyRef(el);
+      }}
       data-sel-id={a.id}
       className="group flex flex-col"
       draggable={!offline}
@@ -1170,7 +1188,7 @@ export function LibraryCard({
               <CopyNameLabel
                 name={a.name}
                 dark
-                mention={mention}
+                mention={false}
                 className="min-w-0 text-[11px] font-medium @[220px]:text-[13px]"
               />
               {fontMeta && (

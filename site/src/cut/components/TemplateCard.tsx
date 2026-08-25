@@ -29,7 +29,8 @@ import {
   type TemplateDrag,
 } from "@/cut/lib/assetDrag";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
-import { useAssetDrop, type AssetRef } from "@/cut/lib/assetRef";
+import { refFromTemplate, useAssetDrop, type AssetRef } from "@/cut/lib/assetRef";
+import { useRefCopy } from "@/cut/lib/refCopy";
 import { cardIconButton } from "@/cut/components/iconButton";
 import { formatTime } from "@/cut/lib/time";
 import { EFFECT_LABELS } from "@donkeycut/effects-kit";
@@ -84,6 +85,9 @@ export function TemplateCard({
   selected?: boolean;
 }) {
   const refDrop = useAssetDrop((r) => onRefDrop?.(r));
+  // ⌘C over the card copies its mention token, so a saved arrangement can be
+  // named in a prompt the same way a clip or an effect is.
+  const copyRef = useRefCopy(() => [refFromTemplate(t)]);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState("");
   const [expanded, setExpanded] = useState(false);
@@ -145,7 +149,10 @@ export function TemplateCard({
 
   return (
     <div
-      ref={onRefDrop ? refDrop.attachTarget : undefined}
+      ref={(el) => {
+        if (onRefDrop) refDrop.attachTarget(el);
+        copyRef(el);
+      }}
       {...(onRefDrop ? refDrop.targetProps : {})}
       data-sel-id={selectId}
       className={cn(

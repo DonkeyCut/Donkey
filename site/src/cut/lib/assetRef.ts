@@ -2,11 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
-import { fetchLibrary, libraryRouteUrl, type LibraryAsset } from "./library";
+import { libraryRouteUrl, type LibraryAsset, type LibraryData } from "./library";
+import { useLibrary } from "./queries";
 import { stockAspectDims, stockTitle, type StockImage, type StockMusic, type StockVideo } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
+import { STOCK_MUSIC } from "./stockMusicManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
-import { EFFECT_LABELS, type EffectId } from "@donkeycut/effects-kit";
+import {
+  ALL_EFFECT_IDS,
+  EFFECT_LABELS,
+  isAudioEffect,
+  type EffectId,
+} from "@donkeycut/effects-kit";
 import { clipLen, getClipSpans, useEditor } from "./store";
 import {
   isEffectOverlay,
@@ -14,6 +21,7 @@ import {
   isStickerOverlay,
   isTextOverlay,
   SHAPE_LABELS,
+  TRANSITION_STYLE_IDS,
   TRANSITION_STYLE_LABELS,
   type ShapeKind,
   type TransitionStyle,
@@ -85,8 +93,18 @@ export interface AssetRef {
    * media order by `useRefCandidates`. Derived per session, not persisted —
    * display surfaces re-resolve it live so a stale copy never shows. */
   handle?: string;
-  /** Which timeline entity an `"entity"` ref names — picks the pill's icon. */
-  entityKind?: "title" | "shape" | "sticker" | "effect" | "transition" | "cue" | "keyframe";
+  /** Which timeline entity an `"entity"` ref names — picks the pill's icon.
+   * Catalog refs ride the same field: an effect, transition, shape or
+   * template a panel offers, waiting to be placed. */
+  entityKind?:
+    | "title"
+    | "shape"
+    | "sticker"
+    | "effect"
+    | "transition"
+    | "cue"
+    | "keyframe"
+    | "template";
   /** The shape element's kind, for the pill's per-shape icon. */
   shapeKind?: ShapeKind;
   /** The transition bar's style, so its pill wears the icon its bar wears. */
@@ -419,8 +437,7 @@ export function useAssetDrop(
 // ---------------------------------------------------------------------------
 // Candidates and @name mentions
 
-let libraryCache: LibraryAsset[] | null = null;
-let libraryLoad: Promise<LibraryAsset[]> | null = null;
+const EMPTY_LIBRARY: LibraryData = { assets: [], folders: [], templates: [] };
 
 /** The open project's media as refs with their session handles, assigned in
  * media order — `v1` videos, `i1` generated stills, `a1` audio — so a prompt
@@ -695,6 +712,101 @@ export function entityRefs(src: EntitySources): AssetRef[] {
   return out;
 }
 
+/** Catalog ids live apart from timeline entity ids (`overlay:…`,
+ * `transition:…`); those name something the doc already holds. */
+export const CATALOG_PREFIX = "catalog:";
+
+/** Whether a ref names a panel catalog entry: a treatment waiting to be
+ * placed, offered by a panel and held nowhere in the cut yet. */
+export const isCatalogRef = (ref: AssetRef) =>
+  ref.scope === "entity" && ref.id.startsWith(CATALOG_PREFIX);
+
+/** The panels' catalogs as refs: every effect treatment, every transition
+ * style, every shape kind. Each names a thing that can be made, so a tile
+ * copied out of the Effects, Transitions or Elements tab pastes into a prompt
+ * as a grounded mention ("put a @\"Cross
+ * fade transition\" on that cut"). The payload carries the catalog id and the
+ * tool that places it, so the model acts on the exact treatment the user
+ * pointed at.
+ *
+ * Names carry the kind word ("Zoom effect", "Rectangle shape") so a catalog
+ * entry never collides with a timeline element wearing the same label; the
+ * live element keeps the bare name. */
+let catalogCache: AssetRef[] | null = null;
+
+export function catalogRefs(): AssetRef[] {
+  if (catalogCache) return catalogCache;
+  const out: AssetRef[] = [];
+  for (const id of ALL_EFFECT_IDS) {
+    const label = EFFECT_LABELS[id];
+    const audio = isAudioEffect(id);
+    out.push(
+      entityRef(
+        `${CATALOG_PREFIX}effect:${id}`,
+        `${label} ${audio ? "sound effect" : "effect"}`,
+        `the "${label}" ${audio ? "sound treatment" : "picture effect"} from the Effects tab, effect id "${id}". ` +
+          `Nothing on the timeline holds it yet. Place one with add_effect(effect: "${id}").`,
+        { entityKind: "effect", effectId: id }
+      )
+    );
+  }
+  for (const style of TRANSITION_STYLE_IDS) {
+    const label = TRANSITION_STYLE_LABELS[style];
+    out.push(
+      entityRef(
+        `${CATALOG_PREFIX}transition:${style}`,
+        `${label} transition`,
+        `the "${label}" transition from the Transitions tab, style id "${style}". ` +
+          `Nothing on the timeline holds it yet. Put one on a cut with set_transition(clipId, seconds, style: "${style}").`,
+        { entityKind: "transition", transitionStyle: style }
+      )
+    );
+  }
+  for (const shape of Object.keys(SHAPE_LABELS) as ShapeKind[]) {
+    const label = SHAPE_LABELS[shape];
+    out.push(
+      entityRef(
+        `${CATALOG_PREFIX}shape:${shape}`,
+        `${label} shape`,
+        `the "${label}" shape from the Elements tab, shape kind "${shape}". ` +
+          `Nothing on the timeline holds it yet. Place one with add_shape(shape: "${shape}").`,
+        { entityKind: "shape", shapeKind: shape }
+      )
+    );
+  }
+  // The catalogs are compile-time constants, so this is built once.
+  catalogCache = out;
+  return out;
+}
+
+/** One catalog entry by the id a panel tile already marks itself with
+ * (`effect:zoom`, `transition:crossfade`, `shape:rect`) — how ⌘C on a tile
+ * finds what that tile stands for. */
+export function catalogRefForPick(pickId: string): AssetRef | null {
+  return catalogRefs().find((r) => r.id === `${CATALOG_PREFIX}${pickId}`) ?? null;
+}
+
+/** A saved template as a ref — one on the shared shelf or one kept in this
+ * project's own Media. Like the panel catalogs it names a thing waiting to be
+ * placed, and its payload carries the id `template_add` takes, so "lay in
+ * @\"Intro template\"" reaches the right arrangement. */
+export function refFromTemplate(t: {
+  id: string;
+  name: string;
+  duration: number;
+  media: unknown[];
+}): AssetRef {
+  return entityRef(
+    `${CATALOG_PREFIX}template:${t.id}`,
+    `${t.name} template`,
+    `the "${t.name}" template — a saved arrangement of clips, titles and captions, ` +
+      `${t.duration.toFixed(1)}s long over ${t.media.length} media item${t.media.length === 1 ? "" : "s"}, ` +
+      `template id "${t.id}". Nothing on the timeline holds it yet. ` +
+      `Lay it into the cut with template_add(id: "${t.id}").`,
+    { entityKind: "template" }
+  );
+}
+
 /** The prompt tokens for the current timeline selection, ready for the
  * system clipboard — a picked keyframe first, then every selected clip,
  * sound, element, transition, or cue that resolves to a ref. ⌘C writes this
@@ -744,7 +856,9 @@ export function selectionRefTokens(s: EntitySources & {
  * clips first — video-track clips, then soundtrack clips (what's in front of
  * the user — a bare `@` leads with the cut), then the timeline's media-less
  * entities (elements, transitions, cues, keyframes — pasted in via ⌘C), then
- * the open project's media, the shared library, and the stock catalog.
+ * the open project's media and its saved templates, the shared library, the
+ * stock catalog, and last the panels' own catalogs of effects, transitions and
+ * shapes.
  * Names are unique within the list (first scope wins) so a mention resolves
  * to one asset. Library items mention by name; stock ids are already short
  * (`@nature-dunes`). */
@@ -755,18 +869,11 @@ export function useRefCandidates(): AssetRef[] {
   const overlays = useEditor((s) => s.overlays);
   const transitions = useEditor((s) => s.transitions);
   const subtitles = useEditor((s) => s.subtitles);
-  const [lib, setLib] = useState<LibraryAsset[]>(libraryCache ?? []);
-
-  useEffect(() => {
-    libraryLoad ??= fetchLibrary()
-      .then((d) => (libraryCache = d.assets))
-      .catch(() => (libraryCache = []));
-    let alive = true;
-    void libraryLoad.then((l) => alive && setLib(l));
-    return () => {
-      alive = false;
-    };
-  }, []);
+  const projectTemplates = useEditor((s) => s.templates);
+  // The same listing the Library panel and the Camera Roll read, so a clip
+  // uploaded from the phone or a template just pushed to the shelf is
+  // mentionable the moment it lands.
+  const lib = useLibrary().data ?? EMPTY_LIBRARY;
 
   return useMemo(() => {
     const project = projectRefs(assets);
@@ -777,9 +884,15 @@ export function useRefCandidates(): AssetRef[] {
       ...audioClipRefs(audioClips, assets),
       ...entityRefs({ clips, assets, overlays, transitions, subtitles }),
       ...project,
-      ...lib.map(refFromLibrary),
+      ...projectTemplates.map(refFromTemplate),
+      // A font is used from the font menu, so there is nothing to point a tool
+      // at; library fonts stay out of the candidates the way project fonts do.
+      ...lib.assets.filter((a) => a.type !== "font").map(refFromLibrary),
+      ...lib.templates.map(refFromTemplate),
       ...STOCK_IMAGES.map(refFromStock),
       ...STOCK_VIDEOS.map(refFromStockVideo),
+      ...STOCK_MUSIC.map(refFromStockMusic),
+      ...catalogRefs(),
     ]) {
       const key = ref.name.toLowerCase();
       if (seen.has(key)) continue;
@@ -787,7 +900,7 @@ export function useRefCandidates(): AssetRef[] {
       out.push(ref);
     }
     return out;
-  }, [assets, clips, audioClips, overlays, transitions, subtitles, lib]);
+  }, [assets, clips, audioClips, overlays, transitions, subtitles, projectTemplates, lib]);
 }
 
 /** The prompt token for an asset name: `@name`, quoted when it has spaces. */

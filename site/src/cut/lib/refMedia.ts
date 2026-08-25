@@ -1,6 +1,6 @@
 "use client";
 
-import { refFromAsset, refFromTextFile, type AssetRef } from "./assetRef";
+import { isCatalogRef, refFromAsset, refFromTextFile, type AssetRef } from "./assetRef";
 import { tagChatAsset } from "./chatAssets";
 import { startUpload } from "./importQueue";
 import {
@@ -412,9 +412,11 @@ export async function refsToParts(
     if (ref.kind === "text") {
       parts.push({
         text:
-          ref.scope === "entity"
-            ? `Referenced timeline entity "${ref.name}":\n${await readRefText(ref)}`
-            : `Attached file "${ref.name}":\n${await readRefText(ref)}`,
+          isCatalogRef(ref)
+            ? `Referenced "${ref.name}" — ${await readRefText(ref)}`
+            : ref.scope === "entity"
+              ? `Referenced timeline entity "${ref.name}":\n${await readRefText(ref)}`
+              : `Attached file "${ref.name}":\n${await readRefText(ref)}`,
       });
       continue;
     }

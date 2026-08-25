@@ -35,7 +35,13 @@ import {
   setAssetDragData,
   setObjectDragImage,
 } from "@/cut/lib/assetDrag";
-import { draggingRef, useAssetDrop, type AssetRef } from "@/cut/lib/assetRef";
+import {
+  draggingRef,
+  refFromAsset,
+  useAssetDrop,
+  type AssetRef,
+} from "@/cut/lib/assetRef";
+import { useRefCopy } from "@/cut/lib/refCopy";
 import { RefDropZone } from "./RefDropZone";
 import { deleteExport, downloadProjectExport, revealExport } from "@/cut/lib/exportClient";
 import { useExports, useWatchExportLands, type ExportJob } from "@/cut/lib/exportStore";
@@ -649,6 +655,8 @@ function ProjectFilesPanel({
   // Which tiles are picked, so a sweep or a ⇧-click can hand the timeline a
   // run of media in one drag. Anything that leaves the grid leaves the pick.
   const { picked, setPicked, pick } = useTilePicks(assets.map((a) => a.id));
+  // Built once for the whole grid; each card hands the same array on.
+  const pickedIds = [...picked];
   const templates = useEditor((s) => s.templates);
   const exportOpen = useEditor((s) => s.exportOpen);
   // A render that finishes in the background (dialog closed) drops a new file in
@@ -810,7 +818,7 @@ function ProjectFilesPanel({
                 projectId={projectId}
                 selected={picked.has(a.id)}
                 onSelect={(e) => pick(e, a.id, assets.map((x) => x.id))}
-                dragGroup={[...picked]}
+                dragGroup={pickedIds}
               />
             ))}
             {importing && (
@@ -1008,6 +1016,16 @@ function AssetCard({
   const [confirmUses, setConfirmUses] = useState<number | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const { flash, attachReveal } = useRevealFlash("project", asset.id);
+  // ⌘C over the card copies its mention token (`@v2`). A card inside the
+  // current pick carries the whole set, the same rule its drag follows.
+  const copyRef = useRefCopy(() => {
+    const all = useEditor.getState().assets;
+    const ids = selected && dragGroup?.length ? dragGroup : [asset.id];
+    return ids
+      .map((id) => all.find((x) => x.id === id))
+      .filter((x): x is MediaAsset => !!x)
+      .map(refFromAsset);
+  });
   // A media-heavy project would open every one of these connections at once;
   // the source waits until the tile has been scrolled near.
   const [tileRef, seen] = useInView<HTMLDivElement>();
@@ -1043,7 +1061,10 @@ function AssetCard({
   return (
     <>
     <div
-      ref={attachReveal}
+      ref={(el) => {
+        attachReveal(el);
+        copyRef(el);
+      }}
       data-sel-id={asset.id}
       className="asset-card group flex flex-col gap-1.5 text-left"
       title="Drag onto the timeline, or click + to add"
@@ -1362,6 +1383,8 @@ function LibraryPanel({ projectId }: { projectId: string }) {
   // folder tile) a run of clips in one drag. Only what the open folder shows
   // can be picked, so walking into another folder leaves its selection behind.
   const { picked, setPicked, pick } = useTilePicks(shown.map((a) => a.id));
+  // Built once for the whole grid; each card hands the same array on.
+  const pickedRun = shown.filter((a) => picked.has(a.id));
 
   // Let a clip be dragged onto a folder tile to file it (alongside the timeline
   // drag payload the card already sets). The ghost is the card's picture, and
@@ -1534,7 +1557,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
                 mention
                 selected={picked.has(a.id)}
                 onClick={(e) => pick(e, a.id, shown.map((x) => x.id))}
-                dragGroup={shown.filter((x) => picked.has(x.id))}
+                dragGroup={pickedRun}
                 // A font is used from the font menu; there is nothing to place.
                 onUse={
                   a.type === "font" ? undefined : () => void addLibraryAssetToProject(projectId, a)
