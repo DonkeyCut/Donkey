@@ -1,6 +1,11 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useMutationState,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 
 import type { OutreachStatus } from "@/lib/marketing/campaigns";
 import { apiFetch } from "@/queries/apiClient";
@@ -54,7 +59,11 @@ type OutreachAction =
   | { action: "send"; outreachId: string; subject: string; body: string }
   | { action: "ignore" | "unignore" | "replied"; outreachId: string };
 
-// Any action moves a row between lists, so every list is invalidated.
+const outreachActionKey = ["outreach", "action"] as const;
+
+// Any action moves a row between lists, so every list is invalidated. Actions
+// run one per row and in parallel: the key lets the list ask which rows are in
+// flight instead of freezing on any one of them.
 export function useOutreachAction() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -63,8 +72,19 @@ export function useOutreachAction() {
         body: JSON.stringify(input),
         method: "POST",
       }),
+    mutationKey: outreachActionKey,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["outreach"] }),
   });
+}
+
+// The rows with an action still running.
+export function useBusyOutreachIds(): Set<string> {
+  const running = useMutationState({
+    filters: { mutationKey: outreachActionKey, status: "pending" },
+    select: (mutation) =>
+      (mutation.state.variables as OutreachAction | undefined)?.outreachId,
+  });
+  return new Set(running.filter((id): id is string => typeof id === "string"));
 }
 
 // Super-user only: roll credit usage into the list now and follow the job to

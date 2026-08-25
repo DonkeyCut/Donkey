@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import type { OutreachStatus } from "@/lib/marketing/campaigns";
 import { OUTREACH_PLACEHOLDERS } from "@/lib/marketing/placeholders";
 import {
+  useBusyOutreachIds,
   useOutreach,
   useOutreachAction,
   useOutreachCounts,
@@ -98,6 +99,7 @@ export default function SuOutreachPage() {
   const list = useOutreach(status);
   const counts = useOutreachCounts().data?.counts;
   const act = useOutreachAction();
+  const busy = useBusyOutreachIds();
   const templates = useOutreachTemplates();
   const saveTemplate = useSaveOutreachTemplate();
   const deleteTemplate = useDeleteOutreachTemplate();
@@ -198,19 +200,26 @@ export default function SuOutreachPage() {
   };
 
   const submitSend = () => {
-    if (!sendTarget || subject.trim() === "" || body.trim() === "") return;
+    const target = sendTarget;
+    if (!target || subject.trim() === "" || body.trim() === "") return;
     act.mutate(
-      { action: "send", body, outreachId: sendTarget.id, subject },
+      { action: "send", body, outreachId: target.id, subject },
       {
         onSuccess: () => {
           remember({ body, subject });
-          setSendTarget(null);
+          // A send in flight leaves the dialog free for the next row, so only
+          // close it if that row is still the one on screen.
+          setSendTarget((current) => (current?.id === target.id ? null : current));
         },
       },
     );
   };
 
   const rows = list.data?.rows ?? [];
+  const sending = sendTarget !== null && busy.has(sendTarget.id);
+  // A failed send keeps its dialog open, so the reason belongs in there with
+  // the words that still need fixing.
+  const sendFailed = act.isError && act.variables?.action === "send";
 
   return (
     <div className="space-y-4 pb-9">
@@ -252,7 +261,7 @@ export default function SuOutreachPage() {
                 <div className="flex shrink-0 items-center gap-2">
                   {row.status === "sent" ? (
                     <Button
-                      disabled={act.isPending}
+                      disabled={busy.has(row.id)}
                       onClick={() =>
                         act.mutate({ action: "replied", outreachId: row.id })
                       }
@@ -264,7 +273,7 @@ export default function SuOutreachPage() {
                   ) : null}
                   {row.status === "ignored" ? (
                     <Button
-                      disabled={act.isPending}
+                      disabled={busy.has(row.id)}
                       onClick={() =>
                         act.mutate({ action: "unignore", outreachId: row.id })
                       }
@@ -275,7 +284,7 @@ export default function SuOutreachPage() {
                     </Button>
                   ) : (
                     <Button
-                      disabled={act.isPending}
+                      disabled={busy.has(row.id)}
                       onClick={() =>
                         act.mutate({ action: "ignore", outreachId: row.id })
                       }
@@ -286,7 +295,7 @@ export default function SuOutreachPage() {
                     </Button>
                   )}
                   <Button
-                    disabled={act.isPending}
+                    disabled={busy.has(row.id)}
                     onClick={() => openSend(row)}
                     size="sm"
                   >
@@ -303,10 +312,9 @@ export default function SuOutreachPage() {
         )}
       </div>
 
-      {act.isError ? (
+      {act.isError && !sendFailed ? (
         <p className="text-sm text-destructive">
-          That didn&apos;t go through. The account may have unsubscribed since the
-          last scan, or the text may name a placeholder that doesn&apos;t exist.
+          That didn&apos;t go through. Run a scan and try again.
         </p>
       ) : null}
 
@@ -453,13 +461,20 @@ export default function SuOutreachPage() {
                   </Button>
                 ))}
               </div>
+              {sendFailed ? (
+                <p className="text-sm text-destructive">
+                  That didn&apos;t go through. The account may have unsubscribed
+                  since the last scan, or the text may name a placeholder that
+                  doesn&apos;t exist.
+                </p>
+              ) : null}
             </div>
           </div>
 
           <DialogFooter>
             <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
-            <Button disabled={act.isPending || !sendable} onClick={submitSend}>
-              {act.isPending ? "Sending…" : "Send"}
+            <Button disabled={sending || !sendable} onClick={submitSend}>
+              {sending ? "Sending…" : "Send"}
             </Button>
           </DialogFooter>
         </DialogContent>
