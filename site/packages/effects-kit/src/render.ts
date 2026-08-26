@@ -367,6 +367,30 @@ export function textRoom(x: number, frameWidth: number): number {
  * A line already inside the room is handed back exactly as written, so the
  * spacing an author typed survives everywhere it fits.
  */
+/**
+ * Break one token across lines, at the last character that still fits.
+ *
+ * Walks code points rather than code units, so a break never lands inside an
+ * emoji or a surrogate pair. A single character wider than the room is emitted
+ * on its own — there is nothing narrower to fall back to, and the alternative
+ * is a loop with no end.
+ */
+function breakToken(word: string, room: number, measure: (line: string) => number): string[] {
+  const parts: string[] = [];
+  let line = "";
+  for (const ch of Array.from(word)) {
+    const cand = line + ch;
+    if (line && measure(cand) > room) {
+      parts.push(line);
+      line = ch;
+    } else {
+      line = cand;
+    }
+  }
+  if (line) parts.push(line);
+  return parts;
+}
+
 export function wrapTextToRoom(
   text: string,
   room: number,
@@ -380,6 +404,17 @@ export function wrapTextToRoom(
     const lines: string[] = [];
     let line = "";
     for (const w of words) {
+      // A token with nowhere to break that is still too wide — a URL, a long
+      // compound, a hashtag. Every surface draws these lines as they are
+      // given, so a line left over the room is a line that runs off the frame
+      // in the preview and in the rendered file alike.
+      if (measure(w) > room) {
+        if (line) lines.push(line);
+        const parts = breakToken(w, room, measure);
+        lines.push(...parts.slice(0, -1));
+        line = parts[parts.length - 1] ?? "";
+        continue;
+      }
       const cand = line ? `${line} ${w}` : w;
       if (line && measure(cand) > room) {
         lines.push(line);
