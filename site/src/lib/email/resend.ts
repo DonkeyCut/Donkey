@@ -6,6 +6,15 @@ export function emailFrom(): string {
   return process.env.RESEND_FROM_EMAIL ?? "";
 }
 
+// Who list mail comes from: the welcome email, and the broadcasts sent from
+// the Resend dashboard. A mail provider keeps one reputation record per
+// signing domain, so bulk sends get a subdomain of their own and the apex in
+// RESEND_FROM_EMAIL stays the address a person writes from. Unset falls back
+// to that shared sender, which puts both streams on one domain.
+export function bulkFrom(): string {
+  return process.env.RESEND_BULK_FROM_EMAIL || emailFrom();
+}
+
 // The Resend segment every account joins at signup, so broadcasts have one
 // list to target: Segments → "Registered Users" in the dashboard. Empty skips
 // the segment step — contacts are still created.

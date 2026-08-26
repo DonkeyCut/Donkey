@@ -4,6 +4,7 @@ import {
 } from "@/emails/_components/logo";
 import WelcomeEmail from "@/emails/welcome";
 import {
+  bulkFrom,
   emailFrom,
   getResend,
   isResendConfigured,
@@ -27,9 +28,9 @@ export async function sendWelcomeEmail(user: EmailUser): Promise<void> {
     });
     return;
   }
-  const from = emailFrom();
+  const from = bulkFrom();
   if (!from) {
-    console.log("[email] RESEND_FROM_EMAIL not set; skipping welcome email", {
+    console.log("[email] no sender configured; skipping welcome email", {
       userId: user.id,
     });
     return;
@@ -53,6 +54,9 @@ export async function sendWelcomeEmail(user: EmailUser): Promise<void> {
     {
       from,
       to: user.email,
+      // The bulk subdomain sends but does not receive; a reply goes to the
+      // apex address, where Google Workspace delivers it.
+      replyTo: emailFrom() || from,
       subject: "Thanks for signing up ❤️",
       react: WelcomeEmail({
         credits: signupAppCredits,
