@@ -105,6 +105,9 @@ interface LaneAdapter<T> {
   lanePatch?(raw: T, lane: number): Patch<T>;
   /** The media behind the item, so dragging it can feed reference drop zones. */
   assetOf?(s: S, raw: T): MediaAsset | undefined;
+  /** The asset's beat grid mapped through this item onto the timeline —
+   * snap targets, so an edge lands on the music. Media kinds only. */
+  beatTimes?(s: S, raw: T): number[];
   /** A lifted item's slot closes behind it: while one drags, same-lane items
    * past its old spot rest slid left by its length, so the run heals the
    * moment the item leaves. Video tracks set this; free-form lanes (audio,
@@ -118,6 +121,21 @@ interface LaneAdapter<T> {
 }
 
 const speedOf = (c: { speed?: number }) => (c.speed && c.speed > 0 ? c.speed : 1);
+
+/** The asset's beats inside a media item's trimmed range, in timeline
+ * seconds. Beats live on the asset in source seconds, so every clip showing
+ * the source maps its own window of them. */
+function mediaBeatTimes(
+  s: S,
+  c: { assetId: string; start: number; in: number; out: number; speed?: number }
+): number[] {
+  const beats = s.assets.find((a) => a.id === c.assetId)?.beats?.beats;
+  if (!beats?.length) return [];
+  const speed = speedOf(c);
+  const times: number[] = [];
+  for (const b of beats) if (b >= c.in && b <= c.out) times.push(c.start + (b - c.in) / speed);
+  return times;
+}
 
 function videoMaxLen(s: S, c: VideoClip): number {
   const a = s.assets.find((x) => x.id === c.assetId);
@@ -150,7 +168,9 @@ const clipAdapter: LaneAdapter<VideoClip> = {
   leftFloor: (c) => Math.max(0, c.start - c.in / speedOf(c)),
   maxLen: videoMaxLen,
   closesGap: true,
-  assetOf: (s, c) => s.assets.find((x) => x.id === c.assetId),  onMoved: () => useEditor.getState().sortClips(),
+  assetOf: (s, c) => s.assets.find((x) => x.id === c.assetId),
+  beatTimes: mediaBeatTimes,
+  onMoved: () => useEditor.getState().sortClips(),
 };
 
 const audioAdapter: LaneAdapter<AudioClip> = {
@@ -176,7 +196,9 @@ const audioAdapter: LaneAdapter<AudioClip> = {
   maxLen: (s, a) =>
     ((s.assets.find((x) => x.id === a.assetId)?.duration ?? a.out) - a.in) / speedOf(a),
   lanePatch: (a, lane) => ({ id: a.id, patch: { lane: lane > 0 ? lane : undefined } }),
-  assetOf: (s, a) => s.assets.find((x) => x.id === a.assetId),};
+  assetOf: (s, a) => s.assets.find((x) => x.id === a.assetId),
+  beatTimes: mediaBeatTimes,
+};
 
 const textAdapter: LaneAdapter<Overlay> = {
   minLen: 0.2,
@@ -217,7 +239,9 @@ const overlayClipAdapter: LaneAdapter<VideoClip> = {
   leftFloor: (c) => Math.max(0, c.start - c.in / speedOf(c)),
   maxLen: videoMaxLen,
   closesGap: true,
-  assetOf: (s, c) => s.assets.find((x) => x.id === c.assetId),};
+  assetOf: (s, c) => s.assets.find((x) => x.id === c.assetId),
+  beatTimes: mediaBeatTimes,
+};
 
 const cueAdapter: LaneAdapter<SubtitleCue> = {
   minLen: 0.15,
@@ -256,15 +280,26 @@ const ADAPTERS: Record<LaneKind, LaneAdapter<LaneRaw>> = {
 };
 
 /** Logical times an edge can snap to: the timeline start, video track 0's
- * cut points and end, the playhead, and every other lane item's edges across
- * all track kinds — a title can align to a music hit and vice versa. */
-function snapTargets(s: S, kind: LaneKind, selfId: string): number[] {
-  return snapTargetsExcluding(s, new Set([`${structureOf(kind)}:${selfId}`]));
+ * cut points and end, the playhead, every other lane item's edges across all
+ * track kinds, and every beat of an asset's detected grid mapped through its
+ * clips — a title can align to a music hit and vice versa. */
+function snapTargets(s: S, kind: LaneKind, selfId: string, ownBeats = false): number[] {
+  return snapTargetsExcluding(s, new Set([`${structureOf(kind)}:${selfId}`]), ownBeats);
 }
 
 /** Snap targets with a whole set of items excluded — a group drag must not
- * snap the moving set against its own edges. Keys are `structure:id`. */
-function snapTargetsExcluding(s: S, excluded: ReadonlySet<string>): number[] {
+ * snap the moving set against its own edges. Keys are `structure:id`.
+ *
+ * `ownBeats` keeps the excluded items' beat grids as targets, which is what a
+ * trim wants: neither edge moves the source under the bar, so the item's own
+ * beats hold still while the edge travels and landing an edit on the music
+ * means landing on one of them. A move carries the source along, so there the
+ * grid travels with the item and only everything else's beats are targets. */
+function snapTargetsExcluding(
+  s: S,
+  excluded: ReadonlySet<string>,
+  ownBeats = false
+): number[] {
   const pts = new Set<number>([0]);
   for (const sp of getClipSpans(s.clips, s.assets)) {
     // The joint: every pair meets at the footprint end — a transition is a
@@ -276,9 +311,12 @@ function snapTargetsExcluding(s: S, excluded: ReadonlySet<string>): number[] {
   for (const k of Object.keys(ADAPTERS) as LaneKind[]) {
     for (const raw of ADAPTERS[k].raws(s)) {
       const v = ADAPTERS[k].view(raw);
-      if (excluded.has(`${structureOf(k)}:${v.id}`)) continue;
-      pts.add(v.start);
-      pts.add(v.start + v.len);
+      const self = excluded.has(`${structureOf(k)}:${v.id}`);
+      if (!self) {
+        pts.add(v.start);
+        pts.add(v.start + v.len);
+      }
+      if (!self || ownBeats) for (const t of ADAPTERS[k].beatTimes?.(s, raw) ?? []) pts.add(t);
     }
   }
   return [...pts];
@@ -1141,7 +1179,9 @@ export function startLaneTrim(
   // Grabbing an edge pauses playback so the trim isn't fighting a moving playhead.
   if (s.playing) s.setPlaying(false);
   s.pushHistory();
-  const targets = snapTargets(s, kind, id);
+  // A trim leaves the source where it is, so this item's own beats are targets
+  // like any other: "cut on the beat" is the whole point of the grid.
+  const targets = snapTargets(s, kind, id, true);
   const tol = SNAP_PX / ui.pps;
   const sameLane = ad
     .raws(s)

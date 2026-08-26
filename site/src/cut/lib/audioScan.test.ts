@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { scanSilence, scanSpeech, type PcmChunk } from "./audioScan";
+import { scanBeats, scanSilence, scanSpeech, type PcmChunk } from "./audioScan";
 
 const RATE = 8000;
 
@@ -212,5 +212,132 @@ describe("scanSpeech", () => {
     expect(part.segments).toHaveLength(1);
     expect(part.segments[0].start).toBeCloseTo(last.start, 1);
     expect(part.segments[0].end).toBeCloseTo(last.end, 1);
+  });
+});
+
+/** A percussive track: 20ms tone bursts every `period` seconds over silence. */
+function clickTrack(seconds: number, period: number, first = 0.5): Float32Array {
+  const data = new Float32Array(Math.round(seconds * RATE));
+  const burst = Math.round(0.02 * RATE);
+  for (let t = first; t < seconds - 0.05; t += period) {
+    const start = Math.round(t * RATE);
+    for (let i = 0; i < burst && start + i < data.length; i++) {
+      data[start + i] = 0.9 * Math.sin((2 * Math.PI * 1000 * i) / RATE);
+    }
+  }
+  return data;
+}
+
+/** Feed `data` as mono chunks split every `every` seconds, timestamped from `at`. */
+async function* beatPcm(data: Float32Array, every = 1, at = 0): AsyncGenerator<PcmChunk> {
+  const per = Math.round(every * RATE);
+  for (let start = 0; start < data.length; start += per) {
+    yield {
+      channels: [data.subarray(start, Math.min(data.length, start + per))],
+      timestamp: at + start / RATE,
+      sampleRate: RATE,
+    };
+  }
+}
+
+/** How far each beat sits from its nearest click, worst case. */
+function worstMiss(beats: number[], seconds: number, period: number, first = 0.5): number {
+  const clicks: number[] = [];
+  for (let t = first; t < seconds - 0.05; t += period) clicks.push(t);
+  return Math.max(...beats.map((b) => Math.min(...clicks.map((c) => Math.abs(b - c)))));
+}
+
+describe("scanBeats", () => {
+  test("locks onto a 120 BPM click track", async () => {
+    const found = await scanBeats(beatPcm(clickTrack(12, 0.5)));
+    expect(Math.abs(found.bpm - 120)).toBeLessThan(4);
+    expect(found.beats.length).toBeGreaterThan(17);
+    expect(worstMiss(found.beats, 12, 0.5)).toBeLessThan(0.04);
+  });
+
+  test("locks onto a slower pulse", async () => {
+    const period = 60 / 90;
+    const found = await scanBeats(beatPcm(clickTrack(14, period)));
+    expect(Math.abs(found.bpm - 90)).toBeLessThan(4);
+    expect(worstMiss(found.beats, 14, period)).toBeLessThan(0.04);
+  });
+
+  test("hears no beats in a steady tone", async () => {
+    const data = new Float32Array(8 * RATE);
+    for (let i = 0; i < data.length; i++) data[i] = 0.5 * Math.sin((2 * Math.PI * 440 * i) / RATE);
+    expect((await scanBeats(beatPcm(data))).beats).toEqual([]);
+  });
+
+  test("hears no beats in silence", async () => {
+    expect((await scanBeats(beatPcm(new Float32Array(8 * RATE)))).beats).toEqual([]);
+  });
+
+  test("reads the same grid however the chunks are split", async () => {
+    const data = clickTrack(12, 0.5);
+    const whole = await scanBeats(beatPcm(data, 12));
+    const split = await scanBeats(beatPcm(data, 0.7));
+    expect(split.beats).toEqual(whole.beats);
+    expect(split.bpm).toBe(whole.bpm);
+  });
+
+  test("keeps beats in absolute source seconds", async () => {
+    const found = await scanBeats(beatPcm(clickTrack(12, 0.5), 1, 3));
+    expect(found.beats[0]).toBeGreaterThan(3);
+    const shifted = found.beats.map((b) => b - 3);
+    expect(worstMiss(shifted, 12, 0.5)).toBeLessThan(0.04);
+  });
+});
+
+/** Clicks at the given moments, over an optional noise floor (amplitude). */
+function clicksAt(times: number[], seconds: number, noise = 0): Float32Array {
+  const data = new Float32Array(Math.round(seconds * RATE));
+  if (noise > 0) {
+    const r = rng(11);
+    for (let i = 0; i < data.length; i++) data[i] = r() * noise * 2;
+  }
+  const burst = Math.round(0.02 * RATE);
+  for (const t of times) {
+    const start = Math.round(t * RATE);
+    for (let i = 0; i < burst && start + i < data.length; i++)
+      data[start + i] += 0.9 * Math.sin((2 * Math.PI * 1000 * i) / RATE);
+  }
+  return data;
+}
+
+/** How far each detected beat sits from its nearest click, worst case. */
+const missVs = (beats: number[], clicks: number[]) =>
+  Math.max(...beats.map((b) => Math.min(...clicks.map((c) => Math.abs(b - c)))));
+
+describe("scanBeats under real-world conditions", () => {
+  test("follows a player who speeds up", async () => {
+    // The pulse tightens from 0.54s to 0.46s across the take — a fixed grid
+    // at the average tempo would land ~40ms off by the ends.
+    const times: number[] = [];
+    for (let t = 0.5; t < 13.5; t += 0.54 - 0.08 * (t / 14)) times.push(t);
+    const found = await scanBeats(beatPcm(clicksAt(times, 14)));
+    expect(found.beats.length).toBeGreaterThan(20);
+    expect(missVs(found.beats, times)).toBeLessThan(0.05);
+  });
+
+  test("hears the pulse through a noise bed", async () => {
+    const times: number[] = [];
+    for (let t = 0.5; t < 11.5; t += 0.5) times.push(t);
+    const found = await scanBeats(beatPcm(clicksAt(times, 12, 0.03)));
+    expect(Math.abs(found.bpm - 120)).toBeLessThan(4);
+    expect(missVs(found.beats, times)).toBeLessThan(0.04);
+  });
+
+  test("holds the grid across a rest", async () => {
+    // Three hits sit out mid-track. The grid keeps time through the rest —
+    // that is what a rest is — so the check is that every played hit still
+    // has a beat on it, at the played tempo.
+    const times: number[] = [];
+    for (let t = 0.5; t < 13.5; t += 0.5) times.push(t);
+    const played = times.filter((t) => t < 6 || t > 7.6);
+    const found = await scanBeats(beatPcm(clicksAt(played, 14)));
+    expect(Math.abs(found.bpm - 120)).toBeLessThan(4);
+    for (const c of played) {
+      expect(Math.min(...found.beats.map((b) => Math.abs(b - c)))).toBeLessThan(0.045);
+    }
   });
 });

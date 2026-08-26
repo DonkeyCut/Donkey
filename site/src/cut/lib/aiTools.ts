@@ -70,6 +70,8 @@ import {
 import { fetchNotes } from "./notes";
 import {
   captureFreezeFrame,
+  beatlessFor,
+  detectAssetBeats,
   detectSilenceClientSide,
   enrichAsset,
   ensurePeaks,
@@ -133,6 +135,7 @@ import {
   allFonts,
   ANIM_DEFAULT_SECONDS,
   ANIM_STYLE_IDS,
+  assetIsSilent,
   CLIP_MAX_ZOOM,
   clipCovers,
   DEFAULT_BACKGROUND,
@@ -981,6 +984,49 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         ...(silences.length === 0
           ? { note: "No silence at these settings — a higher threshold_db or shorter min_silence hears more." }
           : {}),
+      };
+  },
+
+  detect_beats: async (s, input) => {
+      const { asset, clip, speed, from, to } = resolveWatchRange(s, input);
+      if (assetIsSilent(asset)) throw new ToolError(`"${asset.name}" carries no audio.`);
+      // A stored grid holds the user's hand edits, so it answers as it stands;
+      // regenerate re-scans the source and replaces it. A source a scan has
+      // already read and heard nothing in answers empty without scanning
+      // again — asking about three clips of one interview is one scan.
+      const stored = asset.beats;
+      const known = stored ?? (beatlessFor(asset.id) ? { beats: [], bpm: 0 } : null);
+      const grid =
+        known && input.regenerate !== true
+          ? known
+          : await detectAssetBeats(asset).catch((e) => {
+              throw new ToolError(e instanceof Error ? e.message : "Could not read the audio.");
+            });
+      const beats = grid.beats.filter((b) => b >= from && (to === undefined || b <= to));
+      const toTimeline = (t: number) => round2(clip!.start + (t - clip!.in) / speed);
+      return {
+        bpm: grid.bpm,
+        beats: beats.map(round2),
+        ...(clip
+          ? {
+              timelineBeats: grid.beats.filter((b) => b >= clip.in && b <= clip.out).map(toTimeline),
+              clip: {
+                id: clip.id,
+                timelineStart: round2(clip.start),
+                in: round2(clip.in),
+                out: round2(clip.out),
+                speed: round2(speed),
+              },
+            }
+          : {}),
+        source: { assetId: asset.id, name: asset.name, duration: round2(asset.duration) },
+        note:
+          grid.beats.length === 0
+            ? "No steady pulse heard — the source reads as speech or ambience. The user can place beats by hand (⌥-click the clip bar)."
+            : "The grid lives on the asset: its clips draw the beats as dots and every drag or trim snaps to them." +
+              (stored && input.regenerate !== true
+                ? " This is the stored grid, the user's hand edits included; pass regenerate to re-scan."
+                : ""),
       };
   },
 
@@ -3373,6 +3419,7 @@ export const MEDIA_RUNTIME_TOOLS: ReadonlySet<string> = new Set([
   "watch_video",
   "listen_audio",
   "detect_silence",
+  "detect_beats",
   "refine_speech_cuts",
   "capture_frame",
   "freeze_frame",

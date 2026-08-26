@@ -16,6 +16,7 @@ import {
 import { create } from "zustand";
 import type {
   Aspect,
+  AssetBeats,
   AudioClip,
   ClipAnim,
   ClipSpan,
@@ -216,6 +217,11 @@ interface DocSnapshot {
   audioClips: AudioClip[];
   overlays: Overlay[];
   subtitles: SubtitlesBlock;
+  /** Each asset's beat grid. Beats are edited on the timeline like anything
+   * else — dragged, added, removed, cleared — but they live on the asset
+   * rather than in the doc arrays, so the checkpoint carries them separately
+   * and the restore puts them back. */
+  beats: { id: string; grid: AssetBeats | undefined }[];
 }
 
 export type SubtitleStatus = "idle" | "running" | "ready" | "empty" | "error";
@@ -1334,8 +1340,9 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
   api.setState = set as typeof api.setState;
 
   const snapshot = (): DocSnapshot => {
-    const { clips, transitions, audioClips, overlays, subtitles } = get();
+    const { clips, transitions, audioClips, overlays, subtitles, assets } = get();
     return {
+      beats: assets.map((a) => ({ id: a.id, grid: a.beats })),
       // Render-owned clips are excluded — history captures the user's timeline,
       // not the background run's placements (restoreDoc re-attaches the live ones).
       clips: clips.filter((c) => !genClipIds.has(c.id)).map((c) => ({ ...c })),
@@ -1353,13 +1360,22 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
    * an undo/redo never disturbs a background run's placements. The live gen
    * clips are read at restore time, so the set is always current. */
   const restoreDoc = (snap: DocSnapshot) => {
-    const { clips, audioClips } = get();
+    const { beats, ...doc } = snap;
+    const { clips, audioClips, assets } = get();
     const genClips = clips.filter((c) => genClipIds.has(c.id));
     const genAudio = audioClips.filter((c) => genAudioIds.has(c.id));
+    // Beat grids go back onto the assets they came off. An asset imported
+    // since the checkpoint was taken is not in it and keeps the grid it has.
+    const grids = new Map(beats.map((b) => [b.id, b.grid]));
+    const withBeats = assets.map((a) =>
+      grids.has(a.id) && grids.get(a.id) !== a.beats ? { ...a, beats: grids.get(a.id) } : a
+    );
+    const beatsMoved = withBeats.some((a, i) => a !== assets[i]);
     set({
-      ...snap,
-      clips: [...snap.clips, ...genClips].sort((a, b) => a.start - b.start),
-      audioClips: [...snap.audioClips, ...genAudio],
+      ...doc,
+      clips: [...doc.clips, ...genClips].sort((a, b) => a.start - b.start),
+      audioClips: [...doc.audioClips, ...genAudio],
+      ...(beatsMoved ? { assets: withBeats } : {}),
       selection: null,
       multiSelection: [],
     });
@@ -4688,15 +4704,27 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
   };
 });
 
+/** Whether any asset's beat grid was rewritten between two asset lists. An
+ * asset arriving or leaving is no beat edit; only a grid changing under an id
+ * that was already there counts. */
+function beatsEdited(prev: MediaAsset[], next: MediaAsset[]): boolean {
+  const before = new Map(prev.map((a) => [a.id, a.beats]));
+  return next.some((a) => before.has(a.id) && before.get(a.id) !== a.beats);
+}
+
 // Track real edits to the persistable doc so a deferred checkpoint (see push)
-// knows whether an edit actually happened between capture and commit.
+// knows whether an edit actually happened between capture and commit. Beat
+// grids ride on the assets, and an asset list churns for reasons that are no
+// edit at all (peaks, filmstrips, re-signed URLs), so that one is read by
+// what actually changed.
 useEditor.subscribe((s, prev) => {
   if (
     s.clips !== prev.clips ||
     s.transitions !== prev.transitions ||
     s.audioClips !== prev.audioClips ||
     s.overlays !== prev.overlays ||
-    s.subtitles !== prev.subtitles
+    s.subtitles !== prev.subtitles ||
+    (s.assets !== prev.assets && beatsEdited(prev.assets, s.assets))
   )
     docSeq++;
 });
@@ -4767,7 +4795,7 @@ export const docOverlays = (() => {
 export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
   return assets
     .filter((a) => !tabOnlyUpload(a))
-    .map(({ id, fileName, name, type, duration, width, height, origin, chatId, language, watch, speech }) => ({
+    .map(({ id, fileName, name, type, duration, width, height, origin, chatId, language, watch, speech, beats }) => ({
       id,
       fileName,
       name,
@@ -4780,6 +4808,7 @@ export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
       ...(language !== undefined ? { language } : {}),
       ...(watch !== undefined ? { watch } : {}),
       ...(speech !== undefined ? { speech } : {}),
+      ...(beats !== undefined ? { beats } : {}),
     }));
 }
 

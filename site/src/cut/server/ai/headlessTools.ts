@@ -23,6 +23,7 @@ const PAGE_MEDIA_TOOLS: ReadonlySet<string> = new Set([
   "watch_video",
   "listen_audio",
   "detect_silence",
+  "detect_beats",
   "refine_speech_cuts",
   "freeze_frame",
   "capture_frame",

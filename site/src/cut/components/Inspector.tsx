@@ -1,7 +1,7 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, Italic, SlidersHorizontal, Smile, Trash2, Type } from "lucide-react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, Italic, Loader2, SlidersHorizontal, Smile, Trash2, Type } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmojiPicker } from "@/cut/components/EmojiPicker";
 import { FontPicker } from "@/cut/components/FontPicker";
@@ -89,6 +89,7 @@ import {
   SPEED_FLOOR,
   SPEED_MAX,
   SPEED_MIN,
+  assetIsSilent,
   clampOverlayPos,
   type AudioClip,
   type BoxStyle,
@@ -96,12 +97,15 @@ import {
   type FrameRect,
   type LayoutId,
   type EffectOverlay,
+  type MediaAsset,
   type Overlay,
   type ShapeOverlay,
   type StickerOverlay,
   type TextOverlay,
   type VideoClip,
 } from "@/cut/lib/types";
+import { beatsBusyFor, detectAssetBeats, subscribeBeatsBusy } from "@/cut/lib/media";
+import { reportSwallowed } from "@/cut/lib/report";
 import { GRADE_PRESETS, isNeutralGrade } from "@donkeycut/effects-kit";
 import {
   MOVE_STRENGTH_MAX,
@@ -535,6 +539,14 @@ function ClipPanel({ clip, onColor }: { clip: VideoClip; onColor: () => void }) 
             onCheckedChange={(v) => updateClip(clip.id, { muted: v })}
           />
         </Row>
+        {asset && !assetIsSilent(asset) && (
+          <Row
+            label="Beats"
+            info="Beat markers detected from the clip's sound, drawn as dots along its bar. Every drag and trim snaps to them; drag a dot to move it, double-click removes it, ⌥-click the clip adds one."
+          >
+            <BeatsControl asset={asset} />
+          </Row>
+        )}
 
         {/* Picture */}
         <div className="my-1.5 h-px bg-border" />
@@ -783,6 +795,45 @@ function ClipGeneratedAudio({ clip }: { clip: VideoClip }) {
   );
 }
 
+/** The Beats row's control: detect (or re-run) the asset's beat grid, and
+ * clear it. The dots themselves live on the clip bars — dragged, added
+ * (⌥-click), and removed (double-click) there. */
+function BeatsControl({ asset }: { asset: MediaAsset }) {
+  const busy = useSyncExternalStore(subscribeBeatsBusy, () => beatsBusyFor(asset.id), () => false);
+  const grid = asset.beats;
+  return (
+    <>
+      {grid && (
+        <Value className="whitespace-nowrap text-muted-foreground">
+          {grid.beats.length}
+          {grid.bpm > 0 ? `·${Math.round(grid.bpm)} BPM` : " beats"}
+        </Value>
+      )}
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={busy || !!asset.upload}
+        onClick={() => {
+          void detectAssetBeats(asset).catch((err) => {
+            reportSwallowed(`[cut] beat scan failed for ${asset.fileName}`, err);
+          });
+        }}
+      >
+        {busy && <Loader2 className="size-3.5 animate-spin" />}
+        Detect
+      </Button>
+      <ResetButton
+        title="Clear beats"
+        show={!!grid}
+        onClick={() => {
+          useEditor.getState().pushHistory();
+          useEditor.getState().updateAsset(asset.id, { beats: undefined });
+        }}
+      />
+    </>
+  );
+}
+
 function AudioPanel({ clip }: { clip: AudioClip }) {
   const asset = useEditor((s) => s.assets.find((a) => a.id === clip.assetId));
   const updateAudioTransient = useEditor((s) => s.updateAudioTransient);
@@ -940,6 +991,14 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
             onCommit={(v) => commitAudio({ duck: v < 0.999 ? v : undefined })}
           />
         </Row>
+        {asset && !assetIsSilent(asset) && (
+          <Row
+            label="Beats"
+            info="Beat markers detected from the music, drawn as dots on the clip. Every drag and trim snaps to them; drag a dot to move it, double-click removes it, ⌥-click the clip adds one."
+          >
+            <BeatsControl asset={asset} />
+          </Row>
+        )}
         <Row label="Hidden">
           <Switch
             checked={!!clip.hidden}

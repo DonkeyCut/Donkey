@@ -55,7 +55,7 @@ import { playheadAt, setSkim, skimAt, subscribePlayhead, usePlayhead, useSkim } 
 import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
 import { EFFECT_LABELS, type EffectId } from "@donkeycut/effects-kit";
-import { emptySubtitles, IMAGE_CLIP_SECONDS, isAudioTransition, SHAPE_LABELS, TRANSITION_MAX, TRANSITION_STYLE_LABELS, transitionBarStart, transitionDefaultSeconds, type ShapeKind } from "@/cut/lib/types";
+import { assetIsSilent, emptySubtitles, IMAGE_CLIP_SECONDS, isAudioTransition, SHAPE_LABELS, TRANSITION_MAX, TRANSITION_STYLE_LABELS, transitionBarStart, transitionDefaultSeconds, type ShapeKind } from "@/cut/lib/types";
 import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, Selection, StickerOverlay, SubtitleCue, TimelineTransition, TransitionStyle, VideoClip } from "@/cut/lib/types";
 import { isLottieAsset } from "@/cut/lib/lottieAssets";
 import { gradeCssApprox } from "@donkeycut/effects-kit";
@@ -3795,7 +3795,15 @@ function ClipView({
       }}
       ref={boxRef}
       data-tl-sel={`clip:${clip.id}`}
-      onPointerDown={(e) => startLaneMove(e, lane, clip.id, ui)}
+      onPointerDown={(e) => {
+        // The grid sits on the source, so a muted clip takes a beat the same
+        // as a playing one — the same test the Beats row and the snapping use.
+        if (e.altKey && !assetIsSilent(asset)) {
+          addBeatAt(e, asset, clip, pps);
+          return;
+        }
+        startLaneMove(e, lane, clip.id, ui);
+      }}
       onContextMenu={(e) => {
         if (asset.type !== "video") return;
         const rect = e.currentTarget.getBoundingClientRect();
@@ -3884,6 +3892,10 @@ function ClipView({
           width={barW}
         />
       ))}
+      {/* Drawn wherever the source has a grid: on the band when there is one,
+          along the bar's bottom edge when the clip plays silent. Every edge
+          snaps to them either way. */}
+      <BeatDots asset={asset} from={filmIn} to={filmOut} speed={speed} pps={pps} w={barW} />
       <span
         className={cn(trimHandle, "tl-trim-l left-0")}
         onPointerDown={(e) => startLaneTrim(e, lane, clip.id, "l", ui)}
@@ -4720,6 +4732,146 @@ function WaveTile({
   return <canvas ref={ref} className="absolute top-0" style={{ left, width: tw, height: h }} />;
 }
 
+/** Rewrite one asset's beat grid by hand: sorted, deduped, clamped to the
+ * source; an emptied grid clears. Beats live on the asset in source seconds,
+ * so every clip showing the source follows the edit. Editing a dot makes the
+ * grid the user's rather than the detector's, so the tempo goes with it
+ * (types.ts AssetBeats) — the row reads "N beats" from there on. */
+function writeBeats(assetId: string, edit: (beats: number[]) => number[]) {
+  const s = useEditor.getState();
+  const asset = s.assets.find((a) => a.id === assetId);
+  if (!asset) return;
+  const next = [
+    ...new Set(
+      edit(asset.beats?.beats ?? []).map(
+        (t) => Math.round(Math.min(asset.duration, Math.max(0, t)) * 1000) / 1000
+      )
+    ),
+  ].sort((a, b) => a - b);
+  s.updateAsset(assetId, { beats: next.length ? { beats: next, bpm: 0 } : undefined });
+}
+
+/** ⌥-click on a clip bar drops a beat under the pointer, in source seconds. */
+function addBeatAt(
+  e: React.PointerEvent<HTMLElement>,
+  asset: MediaAsset,
+  clip: { in: number; speed?: number },
+  pps: number
+) {
+  e.preventDefault();
+  e.stopPropagation();
+  const rect = e.currentTarget.getBoundingClientRect();
+  const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
+  useEditor.getState().pushHistory();
+  writeBeats(asset.id, (list) => [...list, clip.in + ((e.clientX - rect.left) / pps) * speed]);
+}
+
+/**
+ * One beat on a clip bar: a yellow dot on the bottom edge where the music
+ * hits. The grab is its own (startDrag stops the bar's gesture), so dragging
+ * a dot retimes the beat — in source seconds, every clip of the asset
+ * follows — and a double-click removes it.
+ */
+function BeatDot({
+  assetId,
+  duration,
+  t,
+  from,
+  speed,
+  pps,
+  w,
+}: {
+  assetId: string;
+  /** The source's length, the drag's bound. */
+  duration: number;
+  /** The beat, source seconds. */
+  t: number;
+  /** The bar's own source window start and rate. */
+  from: number;
+  speed: number;
+  pps: number;
+  /** Visible bar width, px, for parking the edge dots inside it. */
+  w: number;
+}) {
+  return (
+    <span
+      className="tl-beat absolute bottom-0 z-5 grid h-3.5 w-3 cursor-ew-resize place-items-end justify-center pb-[3px]"
+      style={{
+        left: Math.min(w - 4, Math.max(4, ((t - from) / speed) * pps)),
+        transform: "translateX(-50%)",
+      }}
+      title="Drag to move, double-click to remove"
+      onPointerDown={(e) => {
+        const s = useEditor.getState();
+        let live = t;
+        // The undo step opens on the first movement, so a stray grab that
+        // never moves leaves nothing behind.
+        let checkpointed = false;
+        startDrag(e, {
+          onMove: (dx) => {
+            if (!checkpointed) {
+              checkpointed = true;
+              s.pushHistory();
+            }
+            // Rounded the way the grid stores, so the moved beat is found again.
+            const next =
+              Math.round(Math.min(duration, Math.max(0, t + (dx / pps) * speed)) * 1000) / 1000;
+            const at = live;
+            writeBeats(assetId, (list) => list.map((b) => (b === at ? next : b)));
+            live = next;
+          },
+        });
+      }}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        useEditor.getState().pushHistory();
+        writeBeats(assetId, (list) => list.filter((b) => b !== t));
+      }}
+    >
+      <span className="pointer-events-none size-[5px] rounded-full bg-[#ffd60a] shadow-[0_0_0_1px_rgba(0,0,0,0.4)]" />
+    </span>
+  );
+}
+
+/** The asset's beat grid across one clip bar — the dots inside the bar's
+ * source window `from..to`. */
+function BeatDots({
+  asset,
+  from,
+  to,
+  speed,
+  pps,
+  w,
+}: {
+  asset: MediaAsset;
+  from: number;
+  to: number;
+  speed: number;
+  pps: number;
+  w: number;
+}) {
+  const beats = asset.beats?.beats;
+  if (!beats?.length) return null;
+  return (
+    <>
+      {beats
+        .filter((b) => b >= from && b <= to)
+        .map((b) => (
+          <BeatDot
+            key={b}
+            assetId={asset.id}
+            duration={asset.duration}
+            t={b}
+            from={from}
+            speed={speed}
+            pps={pps}
+            w={w}
+          />
+        ))}
+    </>
+  );
+}
+
 function AudioView({
   clip,
   asset,
@@ -4764,6 +4916,7 @@ function AudioView({
   // The bar is drawn a gutter narrower than the footprint; what sits inside
   // it measures against that.
   const barW = Math.max(10, w - CLIP_GAP);
+  const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
 
   if (!asset) return null;
 
@@ -4791,9 +4944,16 @@ function AudioView({
         zIndex: drag || rowMove === "lift" ? 20 : undefined,
       }}
       data-tl-sel={`audio:${clip.id}`}
-      onPointerDown={(e) => startLaneMove(e, "audio", clip.id, ui)}
+      onPointerDown={(e) => {
+        if (e.altKey && !assetIsSilent(asset)) {
+          addBeatAt(e, asset, clip, pps);
+          return;
+        }
+        startLaneMove(e, "audio", clip.id, ui);
+      }}
     >
       <WaveformCanvas asset={asset} from={clip.in} to={clip.out} w={barW} h={AUDIO_H - 8} className="inset-x-0 inset-y-1" />
+      <BeatDots asset={asset} from={clip.in} to={clip.out} speed={speed} pps={pps} w={barW} />
       {(clip.fadeIn ?? 0) > 0 && (
         <div
           className="tl-fade-in pointer-events-none absolute inset-y-0 left-0 bg-gradient-to-r from-black/45 to-transparent"

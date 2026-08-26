@@ -163,6 +163,17 @@ export interface AssetSpeech {
   locale?: string;
 }
 
+/** The source's musical beat grid, in source seconds. Detected from the
+ * audio, then the user's to edit: the dots on a clip move, add, and delete
+ * beats by hand. Same lifecycle as AssetSpeech: saves with the project, dies
+ * with the asset, never stale (media files are immutable). */
+export interface AssetBeats {
+  /** Beat moments, ascending. */
+  beats: number[];
+  /** Tempo of the detected grid, BPM; 0 once the grid is hand-placed. */
+  bpm: number;
+}
+
 export interface StoredAsset {
   id: string;
   fileName: string; // file inside the project's media/ folder
@@ -175,6 +186,8 @@ export interface StoredAsset {
   watch?: AssetWatch;
   /** The source's own transcript — what the assistant has heard. */
   speech?: AssetSpeech;
+  /** The music's beat grid — dots on the clip, snap targets for every edge. */
+  beats?: AssetBeats;
   /** How this asset entered the project. Absent = the user imported it (drag,
    * drop, or upload), so it belongs in the Media panel. Any value marks media
    * Cut created or fetched — it lives where it was made (the timeline, a

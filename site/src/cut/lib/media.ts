@@ -1,6 +1,6 @@
 "use client";
 
-import { scanSilence, scanSpeech, type PcmChunk, type SpeechScan } from "./audioScan";
+import { scanBeats, scanSilence, scanSpeech, type BeatScan, type PcmChunk, type SpeechScan } from "./audioScan";
 import { apiFetch, apiJson, getBackend, type CutBackend } from "./backend";
 import { cloudBackend } from "./backend/cloud";
 import { pollCloudJob } from "./cloudJob";
@@ -44,7 +44,7 @@ import {
 import { pickThumbTimes, type ThumbProbe } from "./filmstrip";
 import { reportSwallowed } from "./report";
 import { useEditor } from "./store";
-import type { AssetType, AudioClip, MediaAsset, ProjectSummary, StoredAsset, VideoClip, WatchKeepReason } from "./types";
+import type { AssetBeats, AssetType, AudioClip, MediaAsset, ProjectSummary, StoredAsset, VideoClip, WatchKeepReason } from "./types";
 import { contentRect, IMAGE_CLIP_SECONDS, mediaUrl } from "./types";
 import { createDedupSelector, DEDUP_TUNING } from "./watch/dedupSelector";
 import { diffCellPct, frameSig } from "./watch/signatures";
@@ -1101,6 +1101,15 @@ export async function scanSourceSpeech(
   return scanSpeech(sourcePcm(sourceUrl, from, opts.to), { ...opts, from });
 }
 
+/** The source's musical beat grid, end to end. The grid is a property of the
+ * whole file — tempo tracking needs the run of it — so a scan always reads
+ * everything; callers window the result. Same residency story as the speech
+ * scan: the page decodes its own media, the headless runner installs the
+ * same decoders. */
+export async function scanSourceBeats(sourceUrl: string): Promise<BeatScan> {
+  return scanBeats(sourcePcm(sourceUrl, 0, undefined));
+}
+
 /** Cloud twin of the engine's audio-extract route: render a span of the
  * source's audio to 16 kHz mono WAV in the browser, for the AI to hear
  * inline. An empty `to` runs to the end. */
@@ -1565,6 +1574,59 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
     );
   } finally {
     enrichInFlight.delete(asset.id);
+  }
+}
+
+// Beat scans in flight, by asset id — session state. The clip menu reads it
+// to show the scan running, and a second ask joins the first's promise.
+const beatScans = new Map<string, Promise<AssetBeats>>();
+// Sources a scan has already read and found no steady pulse in. Nothing lands
+// on the asset in that case — an empty grid is no grid — so without this a
+// caller that only wants the stored grid would pay for the whole scan again
+// every time it asked about a speech recording.
+const beatlessScans = new Set<string>();
+const beatListeners = new Set<() => void>();
+
+export function subscribeBeatsBusy(fn: () => void) {
+  beatListeners.add(fn);
+  return () => {
+    beatListeners.delete(fn);
+  };
+}
+
+/** Whether a beat scan is running for this asset. */
+export const beatsBusyFor = (assetId: string) => beatScans.has(assetId);
+
+/** Whether a scan has already read this source and heard no pulse. A caller
+ * reading the stored grid uses it to tell "never scanned" from "scanned, no
+ * beats" — the second needs no second scan. A re-scan clears it. */
+export const beatlessFor = (assetId: string) => beatlessScans.has(assetId);
+
+/**
+ * Detect the source's beat grid and write it onto the asset (types.ts
+ * AssetBeats): its clips draw the beats as dots and every drag or trim snaps
+ * to them. Replaces whatever grid was there — detection is the starting
+ * point, the dots are the user's to edit from there. A scan that hears no
+ * steady pulse clears the grid and returns the empty scan.
+ */
+export async function detectAssetBeats(asset: MediaAsset): Promise<AssetBeats> {
+  const running = beatScans.get(asset.id);
+  if (running) return running;
+  const scan = (async () => {
+    const { beats, bpm } = await scanSourceBeats(asset.url);
+    const grid = { beats, bpm };
+    useEditor.getState().updateAsset(asset.id, { beats: beats.length ? grid : undefined });
+    if (beats.length) beatlessScans.delete(asset.id);
+    else beatlessScans.add(asset.id);
+    return grid;
+  })();
+  beatScans.set(asset.id, scan);
+  for (const fn of beatListeners) fn();
+  try {
+    return await scan;
+  } finally {
+    beatScans.delete(asset.id);
+    for (const fn of beatListeners) fn();
   }
 }
 

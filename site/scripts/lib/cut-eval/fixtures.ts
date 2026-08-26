@@ -22,6 +22,7 @@ export const SAFE_TOOLS = new Set([
   "capture_frame",
   "watch_video",
   "detect_silence",
+  "detect_beats",
   "listen_audio",
   "read_color_stats",
   "library_list",
@@ -620,5 +621,6 @@ export function serveSafeTool(name: string, state: unknown): unknown {
   if (name === "list_skills") return { skills: AI_SKILL_INDEX };
   if (name === "library_list") return { folders: [], assets: [], templates: [] };
   if (name === "detect_silence") return { silences: [] };
+  if (name === "detect_beats") return { bpm: 0, beats: [] };
   return { ok: true };
 }

@@ -327,3 +327,314 @@ export async function scanSpeech(
   const env = await scanEnvelope(chunks, { ...opts, hop: SPEECH_HOP });
   return speechFrom(env);
 }
+
+/** A source's musical beat grid. */
+export interface BeatScan {
+  /** Beat moments in source seconds, ascending. */
+  beats: number[];
+  /** Tempo of the grid, beats per minute; 0 when no steady pulse was heard. */
+  bpm: number;
+}
+
+// The beat scan hears music the way the level fold cannot: a bass drop or a
+// synth swell moves the RMS while the pulse hides inside it. So the fold here
+// is spectral — each analysis window becomes a magnitude spectrum, and an
+// onset is the frame where energy APPEARS across bins (half-wave rectified
+// spectral flux on log magnitudes). Tempo is the onset train's strongest
+// periodicity, and the beats themselves come from a dynamic program that
+// walks the onsets at that period while giving a little to follow the player.
+
+/** Analysis window, seconds. Rounded to a power of two of the stream's rate. */
+const BEAT_WIN_S = 0.046;
+/** The highest rate the beat scan analyzes at. Onsets live in spectral flux a
+ * few kHz up at most, so a source above this folds down to it: the window
+ * shrinks with the rate and the arithmetic inside each FFT with it, while the
+ * hop stays the same slice of time — the grid keeps its accuracy and a long
+ * file costs a fraction of what a full-rate scan would. A source already
+ * below it is read as it is; resampling upward would only invent detail. */
+const BEAT_RATE = 11025;
+/** Log compression of the magnitudes, so quiet hits register beside loud ones. */
+const FLUX_GAMMA = 100;
+/** The local-mean window that turns flux into onsets, seconds each side. */
+const FLUX_MEAN_S = 0.5;
+/** Tempo prior: a pulse near 120 BPM is the likeliest read... */
+const TEMPO_CENTER_S = 0.5;
+/** ...with an octave of width either way. */
+const TEMPO_WIDTH_OCT = 1.0;
+/** Fastest tempo considered — 240 BPM. */
+const TEMPO_MIN_S = 0.25;
+/** Slowest tempo considered — 50 BPM. */
+const TEMPO_MAX_S = 1.2;
+/** Onset autocorrelation under this share of the train's energy is no pulse. */
+const MIN_PERIODICITY = 0.1;
+/** Onsets under this per-bin flux are the numeric floor — a steady tone's
+ * leakage ripple beats against the hop grid periodically, and real music sits
+ * orders of magnitude above it. */
+const MIN_ONSET_LEVEL = 0.01;
+/** How hard the tracker holds the tempo against the onsets' pull. */
+const TIGHTNESS = 100;
+/** A grid needs at least this many beats to be one. */
+const MIN_BEATS = 4;
+/** An edge beat holds only with onset energy under it, so the grid stops
+ * where the music does: at least this much on the rms-normalized envelope... */
+const EDGE_SUPPORT = 0.1;
+/** ...and at least this share of the median beat's — a noise floor sits well
+ * under the hits however the normalization landed. */
+const EDGE_SHARE = 0.2;
+
+/** In-place radix-2 FFT over split re/im arrays (length a power of two). */
+function fft(re: Float32Array, im: Float32Array) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j |= bit;
+    if (i < j) {
+      const tr = re[i];
+      re[i] = re[j];
+      re[j] = tr;
+      const ti = im[i];
+      im[i] = im[j];
+      im[j] = ti;
+    }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = (-2 * Math.PI) / len;
+    const wr = Math.cos(ang);
+    const wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1;
+      let ci = 0;
+      for (let k = 0; k < len / 2; k++) {
+        const a = i + k;
+        const b = a + len / 2;
+        const xr = re[b] * cr - im[b] * ci;
+        const xi = re[b] * ci + im[b] * cr;
+        re[b] = re[a] - xr;
+        im[b] = im[a] - xi;
+        re[a] += xr;
+        im[a] += xi;
+        const nr = cr * wr - ci * wi;
+        ci = cr * wi + ci * wr;
+        cr = nr;
+      }
+    }
+  }
+}
+
+/**
+ * The beat grid behind an onset envelope: tempo by autocorrelation under a
+ * log-Gaussian prior, then beat placement by dynamic programming — each frame
+ * either extends a chain one period back (give or take, at a log-time cost)
+ * or starts fresh, and the best-scoring chain is the grid. `t0` is the source
+ * second of frame 0, `hopSec` the frame width.
+ */
+export function beatsFromOnsets(flux: Float32Array, hopSec: number, t0: number): BeatScan {
+  const n = flux.length;
+  const none: BeatScan = { beats: [], bpm: 0 };
+  if (n * hopSec < 2) return none;
+
+  // Onset strength: flux over its local mean, so a swell carries no onsets
+  // and a hit in a quiet bar counts beside one in a loud chorus.
+  const half = Math.max(1, Math.round(FLUX_MEAN_S / hopSec));
+  const prefix = new Float64Array(n + 1);
+  for (let i = 0; i < n; i++) prefix[i + 1] = prefix[i] + flux[i];
+  const o = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const a = Math.max(0, i - half);
+    const b = Math.min(n, i + half + 1);
+    o[i] = Math.max(0, flux[i] - (prefix[b] - prefix[a]) / (b - a));
+  }
+  let sq = 0;
+  for (let i = 0; i < n; i++) sq += o[i] * o[i];
+  const rms = Math.sqrt(sq / n);
+  if (rms < MIN_ONSET_LEVEL) return none;
+  for (let i = 0; i < n; i++) o[i] /= rms;
+
+  // Tempo: the onset train's autocorrelation, weighted toward middle tempi.
+  const lagMin = Math.max(1, Math.round(TEMPO_MIN_S / hopSec));
+  const lagMax = Math.min(n - 1, Math.round(TEMPO_MAX_S / hopSec));
+  if (lagMax <= lagMin) return none;
+  const score = new Float64Array(lagMax + 1);
+  let bestLag = 0;
+  let periodicity = 0;
+  for (let lag = lagMin; lag <= lagMax; lag++) {
+    let r = 0;
+    for (let i = 0; i + lag < n; i++) r += o[i] * o[i + lag];
+    r /= n - lag;
+    const oct = Math.log2((lag * hopSec) / TEMPO_CENTER_S) / TEMPO_WIDTH_OCT;
+    score[lag] = r * Math.exp(-0.5 * oct * oct);
+    if (bestLag === 0 || score[lag] > score[bestLag]) {
+      bestLag = lag;
+      periodicity = r;
+    }
+  }
+  // The envelope is rms-normalized, so its per-frame energy is 1 and the raw
+  // autocorrelation reads directly as a share of it.
+  if (periodicity < MIN_PERIODICITY) return none;
+  let period = bestLag;
+  if (bestLag > lagMin && bestLag < lagMax) {
+    const y0 = score[bestLag - 1];
+    const y1 = score[bestLag];
+    const y2 = score[bestLag + 1];
+    const d = y0 - 2 * y1 + y2;
+    if (d < 0) period = bestLag + (0.5 * (y0 - y2)) / d;
+  }
+
+  // Beat placement: chain onsets a period apart, log-time cost on the slack.
+  const winLo = Math.max(1, Math.round(period / 2));
+  const winHi = Math.round(period * 2);
+  const cum = new Float64Array(n);
+  const back = new Int32Array(n).fill(-1);
+  for (let i = 0; i < n; i++) {
+    let bestS = 0;
+    let bestJ = -1;
+    for (let j = Math.max(0, i - winHi); j <= i - winLo; j++) {
+      const slack = Math.log((i - j) / period);
+      const s = cum[j] - TIGHTNESS * slack * slack;
+      if (s > bestS) {
+        bestS = s;
+        bestJ = j;
+      }
+    }
+    cum[i] = o[i] + (bestJ >= 0 ? bestS : 0);
+    back[i] = bestJ;
+  }
+  let end = 0;
+  for (let i = 1; i < n; i++) if (cum[i] > cum[end]) end = i;
+  const idx: number[] = [];
+  for (let i = end; i >= 0; i = back[i]) idx.push(i);
+  idx.reverse();
+
+  // The chain drifts on through leading and trailing quiet at pure penalty;
+  // drop edge beats with nothing under them, so the grid spans the music.
+  const support = (k: number) => {
+    let m = 0;
+    for (let j = Math.max(0, k - 2); j <= Math.min(n - 1, k + 2); j++) m = Math.max(m, o[j]);
+    return m;
+  };
+  const supports = idx.map(support);
+  const median = supports.slice().sort((a, b) => a - b)[Math.floor(supports.length / 2)] ?? 0;
+  const floor = Math.max(EDGE_SUPPORT, EDGE_SHARE * median);
+  let lo = 0;
+  let hi = idx.length;
+  while (lo < hi && supports[lo] < floor) lo++;
+  while (hi > lo && supports[hi - 1] < floor) hi--;
+  const kept = idx.slice(lo, hi);
+  if (kept.length < MIN_BEATS) return none;
+
+  return {
+    beats: kept.map((k) => round3(t0 + k * hopSec)),
+    bpm: Math.round((60 / (period * hopSec)) * 10) / 10,
+  };
+}
+
+/**
+ * The beat grid in `chunks`, in absolute source seconds.
+ *
+ * Everything runs on one fixed analysis grid at BEAT_RATE: each chunk is
+ * folded down to it as it arrives, so a source whose decoder answers with a
+ * different sample rate partway through still lands every sample in the right
+ * place, and an hour-long file costs the frames its length deserves rather
+ * than the frames its sample rate would buy.
+ */
+export async function scanBeats(chunks: AsyncIterable<PcmChunk>): Promise<BeatScan> {
+  // The analysis rate is settled by the first chunk and holds for the scan.
+  // The grid it defines is in absolute source time, so a later chunk arriving
+  // at a different rate still folds onto it in the right place.
+  let ar = 0;
+  let win = 0;
+  let hop = 0;
+  let ring = new Float32Array(0);
+  let hann = new Float32Array(0);
+  let re = new Float32Array(0);
+  let im = new Float32Array(0);
+  let prev = new Float32Array(0);
+  const flux: number[] = [];
+  let base0 = -1;
+  let filled = 0;
+
+  const frame = () => {
+    for (let i = 0; i < win; i++) {
+      re[i] = ring[(filled - win + i) % win] * hann[i];
+      im[i] = 0;
+    }
+    fft(re, im);
+    let f = 0;
+    for (let k = 1; k < win / 2; k++) {
+      const m = Math.log1p(FLUX_GAMMA * Math.sqrt(re[k] * re[k] + im[k] * im[k]));
+      const d = m - prev[k];
+      if (d > 0) f += d;
+      prev[k] = m;
+    }
+    // Per bin, so the envelope reads the same at every sample rate — and the
+    // first window, with nothing behind it, reads as zero by definition.
+    flux.push(flux.length === 0 && filled === win ? 0 : f / (win >> 1));
+  };
+
+  const push = (v: number) => {
+    ring[filled % win] = v;
+    filled++;
+    if (filled >= win && (filled - win) % hop === 0) frame();
+  };
+
+  // The analysis sample being folded: every source sample landing on it
+  // averages in, so decimating a 48 kHz file never drops a transient between
+  // the samples it keeps.
+  let foldAt = NaN;
+  let foldSum = 0;
+  let foldN = 0;
+  const fold = () => {
+    if (foldN === 0) return;
+    const v = foldSum / foldN;
+    foldSum = 0;
+    foldN = 0;
+    const at = foldAt - base0;
+    if (at < filled) return; // already covered — chunks that overlap
+    // A step up in rate (or a hole in the stream) holds the level rather than
+    // dropping to zero, so the fill itself reads as no onset at all.
+    while (filled < at) push(v);
+    push(v);
+  };
+
+  for await (const { channels, timestamp, sampleRate } of chunks) {
+    if (channels.length === 0 || channels[0].length === 0) continue;
+    if (!(sampleRate > 0)) continue;
+    if (ar === 0) {
+      ar = Math.min(BEAT_RATE, sampleRate);
+      win = 1 << Math.round(Math.log2(BEAT_WIN_S * ar));
+      hop = win >> 2;
+      ring = new Float32Array(win);
+      re = new Float32Array(win);
+      im = new Float32Array(win);
+      prev = new Float32Array(win / 2);
+      hann = new Float32Array(win);
+      for (let i = 0; i < win; i++) hann[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / win);
+    }
+    const length = channels[0].length;
+    const step = ar / sampleRate;
+    // Sample positions rebuild from an index on the analysis grid, so neither
+    // a chunk split nor a change of sample rate can move the frame grid
+    // (scanEnvelope does the same).
+    const base = timestamp * ar;
+    for (let i = 0; i < length; i++) {
+      const at = Math.floor(base + i * step);
+      if (at !== foldAt) {
+        fold();
+        foldAt = at;
+        if (base0 < 0) base0 = at;
+      }
+      let v = 0;
+      for (const ch of channels) v += ch[i];
+      foldSum += v / channels.length;
+      foldN++;
+    }
+  }
+  fold();
+  if (ar === 0 || flux.length === 0) return { beats: [], bpm: 0 };
+
+  // A frame's flux belongs to the hop of samples that entered the window for
+  // it; its moment is the middle of that hop.
+  const t0 = (base0 + win - hop / 2) / ar;
+  return beatsFromOnsets(Float32Array.from(flux), hop / ar, t0);
+}

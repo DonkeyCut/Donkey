@@ -7,7 +7,7 @@
  * (the `server: true` tools run in the engine and take no browser handler).
  */
 
-import { num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
+import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 
 export const AI_PANEL_TOOLS = [
   {
@@ -63,6 +63,18 @@ export const AI_PANEL_TOOLS = [
       to: num("Source end s (default: the clip's out, else the source's end)"),
       threshold_db: num("Loudness below this counts as silence, dBFS (default -30)"),
       min_silence: num("Shortest silent stretch to report, seconds (default 0.35)"),
+    }),
+  },
+  {
+    name: "detect_beats",
+    description:
+      "Read a source's musical beat grid — the tempo and where each beat lands — for cutting to the music. Returns bpm and beats in SOURCE seconds; with clip_id it also returns timelineBeats, the beats inside the clip's trimmed range mapped to timeline seconds, ready for split_at. The grid persists on the asset: its clips draw the beats as yellow dots and every drag or trim snaps to them, so one detection serves the whole edit. A stored grid comes back as-is — the user can hand-edit the dots, and their edits hold, and a grid they have edited reports bpm 0 because the tempo is theirs now — so pass regenerate only to re-scan and replace it. Detection always reads the whole source; from/to just window the reply.",
+    inputSchema: obj({
+      clip_id: str("Clip id — video, overlay, or soundtrack; windows the reply to its trimmed range and maps beats to timeline seconds"),
+      asset_id: str("Project asset id (video or audio)"),
+      from: num("Source start s (default: the clip's in, else 0)"),
+      to: num("Source end s (default: the clip's out, else the source's end)"),
+      regenerate: bool("Re-scan and replace a stored grid, dropping any hand edits (default false)"),
     }),
   },
   {
