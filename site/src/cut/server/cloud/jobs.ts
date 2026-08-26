@@ -471,7 +471,7 @@ export const jobsCloud = {
    * engine's synchronous route. */
   async importUrl(userId: string, projectId: string, req: Request) {
     try {
-      const { url } = (await req.json()) as { url?: string };
+      const { url, audio } = (await req.json()) as { url?: string; audio?: boolean };
       if (!url) return err("No URL provided.", 400);
       if (!(await getProject(userId, projectId))) return err("Project not found.", 404);
       const capped = await renderJobCheck(userId);
@@ -481,7 +481,7 @@ export const jobsCloud = {
           userId,
           projectId,
           kind: "import_url",
-          spec: { url } as unknown as Prisma.InputJsonValue,
+          spec: { url, ...(audio === true ? { audio: true } : {}) } as unknown as Prisma.InputJsonValue,
         },
       });
       wakeRenderWorker();
@@ -496,7 +496,11 @@ export const jobsCloud = {
    * the assets, and the client polls this job for them. */
   async importUrlToLibrary(userId: string, req: Request) {
     try {
-      const { url, origin } = (await req.json()) as { url?: string; origin?: string };
+      const { url, origin, audio } = (await req.json()) as {
+        url?: string;
+        origin?: string;
+        audio?: boolean;
+      };
       if (!url) return err("No URL provided.", 400);
       const capped = await renderJobCheck(userId);
       if (capped) return capped;
@@ -507,6 +511,7 @@ export const jobsCloud = {
           spec: {
             url,
             target: "library",
+            ...(audio === true ? { audio: true } : {}),
             // An inspiration link's downloads land in the Inspiration folder,
             // carrying the origin the Camera Roll and Library filters read.
             ...(origin === "inspiration" ? { origin } : {}),

@@ -845,7 +845,8 @@ export async function importStockMusic(
  * an article, or a video's title and description. */
 export async function importUrlMedia(
   projectId: string,
-  url: string
+  url: string,
+  opts: { audio?: boolean } = {}
 ): Promise<{ assets: MediaAsset[]; text?: string }> {
   url = normalizeLink(url);
   // Pinned at start: the download can outlast navigation into a project of
@@ -854,13 +855,13 @@ export async function importUrlMedia(
   // A browser project has no server of its own to run the fetch, so its import
   // rides the cloud worker and the bytes come back down.
   if (backend.kind === "browser") {
-    const staged = await importUrlThroughCloud(projectId, backend, url);
+    const staged = await importUrlThroughCloud(projectId, backend, url, opts);
     return adoptImportedFiles(projectId, backend, staged);
   }
   const res = await backend.fetch(`/api/cut/projects/${projectId}/import-url`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({ url, ...(opts.audio ? { audio: true } : {}) }),
   });
   let body: { files?: { fileName: string; title: string }[]; text?: string; error?: string };
   if (backend.kind === "cloud") {
@@ -911,12 +912,13 @@ async function adoptImportedFiles(
 async function importUrlThroughCloud(
   projectId: string,
   backend: CutBackend,
-  url: string
+  url: string,
+  opts: { audio?: boolean } = {}
 ): Promise<{ files: { fileName: string; title: string }[]; text?: string }> {
   const res = await cloudBackend.fetch("/api/cut/library/import-url", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({ url, ...(opts.audio ? { audio: true } : {}) }),
   });
   const started = await apiJson<{ jobId?: string }>(res);
   if (!res.ok || !started.jobId) throw new Error(started.error ?? "Could not import that URL.");

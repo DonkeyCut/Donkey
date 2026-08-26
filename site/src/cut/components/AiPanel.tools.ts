@@ -97,8 +97,16 @@ export const AI_PANEL_TOOLS = [
   {
     name: "import_url",
     description:
-      "Read any URL — TikTok, YouTube, Instagram Reels, an X/Twitter post or Article, an ordinary web page, or a direct video/audio/image link — with the bundled downloader and import what it holds into the project. Free and local. A web page comes back as its article text plus the pictures on it; a post as its video or photos; and the source's own words (returned as sourceText) are quoted for the user beside the media automatically — don't retype them in your reply. A source that is only words returns sourceText with no assets, which is a success: read it and answer from it. This is how you look something up: point it at the page and read what comes back. Media lands on a card in this chat and the user drags it to the timeline, Media, or the Library; place it yourself (add_clip) only when they asked for it in the cut. A short clip downloads in seconds; a long video can take a couple of minutes.",
-    inputSchema: obj({ url: str("The page or media URL to download") }, ["url"]),
+      "Read any URL — TikTok, YouTube, Instagram Reels, an X/Twitter post or Article, an ordinary web page, or a direct video/audio/image link — with the bundled downloader and import what it holds into the project. Free and local. A web page comes back as its article text plus the pictures on it; a post as its video or photos; and the source's own words (returned as sourceText) are quoted for the user beside the media automatically — don't retype them in your reply. A source that is only words returns sourceText with no assets, which is a success: read it and answer from it. This is how you look something up: point it at the page and read what comes back. When the user wants only the sound — a song, a soundtrack, a podcast — pass audio_only and the source's audio track lands as an audio asset. Media lands on a card in this chat and the user drags it to the timeline, Media, or the Library; place it yourself (add_clip) only when they asked for it in the cut. A short clip downloads in seconds; a long video can take a couple of minutes.",
+    inputSchema: obj(
+      {
+        url: str("The page or media URL to download"),
+        audio_only: bool(
+          "Import only the source's audio track, extracted to an audio file (default false)"
+        ),
+      },
+      ["url"]
+    ),
   },
   {
     name: "list_skills",

@@ -2563,7 +2563,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // Captured before the download: the media files under the chat that
       // asked, even if the user switches threads while it downloads.
       const chatId = chatOwner();
-      const { assets, text } = await importUrlMedia(projectId, url);
+      const { assets, text } = await importUrlMedia(projectId, url, {
+        audio: input.audio_only === true,
+      });
       for (const asset of assets) tagChatAsset(asset.id, chatId);
       return {
         assets: assets.map((asset) => ({

@@ -39,6 +39,13 @@ export interface Downloaded {
   text?: string;
 }
 
+export interface DownloadOptions {
+  /** Bring back only the sound: the source's audio track, landed as an audio
+   * file. Reads the media rung; a post's photos and a page's text come back as
+   * themselves. */
+  audio?: boolean;
+}
+
 // A video's own words for the chat: its title and description joined, capped so
 // a long YouTube description (link dumps, chapter lists) can't flood the chat.
 // TikTok/Instagram often repeat the caption as both fields, so drop a
@@ -71,7 +78,11 @@ const X_URL_RE = /^https?:\/\/(?:www\.|mobile\.)?(?:x|twitter)\.com\//i;
  * then the post's words alone. Every other URL tries yt-dlp, then the page
  * itself — what it says and what it shows. When no rung produces anything, the
  * first failure is what surfaces — it names the real cause. */
-export async function download(url: string, tmp: string): Promise<Downloaded> {
+export async function download(
+  url: string,
+  tmp: string,
+  opts: DownloadOptions = {}
+): Promise<Downloaded> {
   if (IMAGE_URL_RE.test(url)) return downloadDirectImage(url, tmp);
   const rungs: (() => Promise<Downloaded | null>)[] = [];
   const postId = X_STATUS_RE.exec(url)?.[1];
@@ -85,14 +96,14 @@ export async function download(url: string, tmp: string): Promise<Downloaded> {
     const post = fetchPost(postId);
     rungs.push(
       () => xPostMedia(post, url, tmp, { deferVideo: true }),
-      () => downloadMedia(url, tmp),
+      () => downloadMedia(url, tmp, opts),
       () => xPostMedia(post, url, tmp, { deferVideo: false }),
       () => xPostText(post, url)
     );
   } else if (X_ARTICLE_RE.test(url)) {
     rungs.push(() => xArticle({}, url, tmp));
   } else {
-    rungs.push(() => downloadMedia(url, tmp), () => readPage(url, tmp));
+    rungs.push(() => downloadMedia(url, tmp, opts), () => readPage(url, tmp));
   }
   const failures: unknown[] = [];
   for (const rung of rungs) {
@@ -116,7 +127,7 @@ class MediaHostError extends Error {}
  * is the last. */
 class MissingToolError extends Error {}
 
-async function downloadMedia(url: string, tmp: string): Promise<Downloaded> {
+async function downloadMedia(url: string, tmp: string, opts: DownloadOptions = {}): Promise<Downloaded> {
   // Read what sits at the URL before pulling any bytes. The extractor name
   // says whether this is a site that serves video, and that decides what a
   // failed download means: on a video host the import stops with the real
@@ -139,7 +150,7 @@ async function downloadMedia(url: string, tmp: string): Promise<Downloaded> {
   let meta: YtMeta;
   let out: string;
   try {
-    ({ meta, dir: out } = await runYtDlp(url, tmp, bin));
+    ({ meta, dir: out } = await runYtDlp(url, tmp, bin, opts));
   } catch (e) {
     if (!videoHost) throw e;
     throw new MediaHostError(e instanceof Error ? e.message : "Download failed.");
@@ -710,7 +721,8 @@ const DOWNLOAD_BUDGET_MS = 8 * 60_000;
 async function runYtDlp(
   url: string,
   dir: string,
-  preferred: string
+  preferred: string,
+  opts: DownloadOptions = {}
 ): Promise<{ meta: YtMeta; dir: string }> {
   const bins = [preferred, ...ytDlpBinaries().filter((b) => b !== preferred)];
   const deadline = Date.now() + DOWNLOAD_BUDGET_MS;
@@ -722,7 +734,7 @@ async function runYtDlp(
     const out = path.join(dir, `try${i}`);
     await mkdir(out, { recursive: true });
     try {
-      return { meta: await ytDlp(bin, url, out, client, left), dir: out };
+      return { meta: await ytDlp(bin, url, out, client, left, opts), dir: out };
     } catch (e) {
       if (e instanceof MissingToolError) throw e;
       first ??= e;
@@ -736,26 +748,40 @@ function ytDlp(
   url: string,
   dir: string,
   client: string | null,
-  timeoutMs: number
+  timeoutMs: number,
+  opts: DownloadOptions = {}
 ): Promise<YtMeta> {
+  // An audio import takes the best sound stream alone and lands it as m4a.
+  // AAC leads the sort — it decodes everywhere the import goes — and -x
+  // extracts the sound when the site only serves a combined file, transcoding
+  // an Opus-only stream through the bundled ffmpeg.
+  const format = opts.audio
+    ? [
+        "-f", "bestaudio/best",
+        "-S", "acodec:aac",
+        "-x", "--audio-format", "m4a",
+      ]
+    : [
+        // Take the best video and the best audio and put them together. Asking for
+        // a ready-made mp4 first would land whatever single file the site keeps
+        // around for compatibility — on YouTube that is 360p next to a 4K original.
+        //
+        // Codec leads the sort, resolution follows it. Apple decodes H.264 and
+        // HEVC and nothing else, so a taller VP9 or AV1 stream is a file that
+        // plays nowhere the import is going: the phone's viewer, the Mac's own
+        // player, Safari. Instagram serves 1440p VP9 beside a 1080p-class H.264
+        // file, and the H.264 one is worth having. Sound is compared last, after
+        // the picture: judged any earlier it would rank YouTube's 360p
+        // sound-and-picture file over the 1080p stream that carries no sound of
+        // its own. A source with no H.264 at all still comes down, and the
+        // conversion below makes it playable.
+        "-f", "bestvideo*+bestaudio/best",
+        "-S", "vcodec:h264,res,fps,hdr:sdr,acodec:aac",
+        "--merge-output-format", "mp4",
+      ];
   return ytDlpJson(bin, [
     ...(client ? ["--extractor-args", `youtube:player_client=${client}`] : []),
-    // Take the best video and the best audio and put them together. Asking for
-    // a ready-made mp4 first would land whatever single file the site keeps
-    // around for compatibility — on YouTube that is 360p next to a 4K original.
-    //
-    // Codec leads the sort, resolution follows it. Apple decodes H.264 and
-    // HEVC and nothing else, so a taller VP9 or AV1 stream is a file that
-    // plays nowhere the import is going: the phone's viewer, the Mac's own
-    // player, Safari. Instagram serves 1440p VP9 beside a 1080p-class H.264
-    // file, and the H.264 one is worth having. Sound is compared last, after
-    // the picture: judged any earlier it would rank YouTube's 360p
-    // sound-and-picture file over the 1080p stream that carries no sound of
-    // its own. A source with no H.264 at all still comes down, and the
-    // conversion below makes it playable.
-    "-f", "bestvideo*+bestaudio/best",
-    "-S", "vcodec:h264,res,fps,hdr:sdr,acodec:aac",
-    "--merge-output-format", "mp4",
+    ...format,
     "-o", path.join(dir, "%(id)s.%(ext)s"),
     "--print-json",
     url,

@@ -188,9 +188,9 @@ export const projectsApi = {
   /** Download a media URL straight into the project's media folder. */
   async importUrl(req: Request, { id }: { id: string }) {
     try {
-      const { url } = (await req.json()) as { url?: string };
+      const { url, audio } = (await req.json()) as { url?: string; audio?: boolean };
       if (!url) return err("No URL provided.", 400);
-      return Response.json(await importUrlToProject(id, url));
+      return Response.json(await importUrlToProject(id, url, { audio: audio === true }));
     } catch (e) {
       return caught(e, "Could not import that URL.");
     }

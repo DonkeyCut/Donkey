@@ -113,9 +113,9 @@ export const libraryApi = {
   /** Download a media URL straight into the library. */
   async importUrl(req: Request) {
     try {
-      const { url } = (await req.json()) as { url?: string };
+      const { url, audio } = (await req.json()) as { url?: string; audio?: boolean };
       if (!url) return err("No URL provided.", 400);
-      return Response.json(await importFromUrl(url));
+      return Response.json(await importFromUrl(url, { audio: audio === true }));
     } catch (e) {
       return caught(e, "Could not import that URL.");
     }

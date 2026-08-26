@@ -35,10 +35,11 @@ export async function runImportUrlJob(
   job: ClaimedJob,
   isCanceled: () => boolean
 ): Promise<ImportUrlResult | LibraryImportResult> {
-  const { url, target, origin } = (job.spec ?? {}) as {
+  const { url, target, origin, audio } = (job.spec ?? {}) as {
     url?: string;
     target?: string;
     origin?: string;
+    audio?: boolean;
   };
   if (!url || !/^https?:\/\//i.test(url.trim())) throw new Error("Enter a valid http(s) URL.");
   const toLibrary = target === "library";
@@ -59,7 +60,7 @@ export async function runImportUrlJob(
 
   const tmp = await mkdtemp(path.join(os.tmpdir(), "cut-dl-"));
   try {
-    const dl = await download(url.trim(), tmp);
+    const dl = await download(url.trim(), tmp, { audio: audio === true });
     if (isCanceled()) throw new Error("Import canceled.");
 
     const rows = await prisma.cutMediaObject.findMany({

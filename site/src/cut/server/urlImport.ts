@@ -4,7 +4,7 @@ import path from "node:path";
 import { addDownloaded, type LibraryAsset, type LibrarySource } from "./library";
 import { assertLocalRuntime } from "./local-only";
 import { mediaDir, mediaPath as projectMediaPath, readProject } from "./projects";
-import { download, type Downloaded } from "./urlDownload";
+import { download, type Downloaded, type DownloadOptions } from "./urlDownload";
 import { uniqueName } from "./util";
 
 // Import a URL (TikTok, YouTube, Instagram, an X post, a page, …) into the
@@ -21,7 +21,11 @@ let active = 0;
  * inside the try so a failure there still releases the slot (else a rejection
  * would leak it and, after MAX_ACTIVE failures, brick URL import until
  * restart). */
-async function withDownload<T>(url: string, consume: (dl: Downloaded) => Promise<T>): Promise<T> {
+async function withDownload<T>(
+  url: string,
+  opts: DownloadOptions,
+  consume: (dl: Downloaded) => Promise<T>
+): Promise<T> {
   assertLocalRuntime();
   if (!/^https?:\/\//i.test(url.trim())) throw new Error("Enter a valid http(s) URL.");
   if (active >= MAX_ACTIVE) {
@@ -31,7 +35,7 @@ async function withDownload<T>(url: string, consume: (dl: Downloaded) => Promise
   try {
     const tmp = await mkdtemp(path.join(os.tmpdir(), "cut-dl-"));
     try {
-      return await consume(await download(url.trim(), tmp));
+      return await consume(await download(url.trim(), tmp, opts));
     } finally {
       void rm(tmp, { recursive: true, force: true });
     }
@@ -44,8 +48,11 @@ async function withDownload<T>(url: string, consume: (dl: Downloaded) => Promise
  * A multi-photo post lands as one asset per photo. The Library holds media, so
  * a source that turned out to be only words fails here — the chat's import is
  * where text lands. */
-export async function importFromUrl(url: string): Promise<LibraryAsset[]> {
-  return withDownload(url, async (dl) => {
+export async function importFromUrl(
+  url: string,
+  opts: DownloadOptions = {}
+): Promise<LibraryAsset[]> {
+  return withDownload(url, opts, async (dl) => {
     if (dl.files.length === 0) throw new Error("That link has no media to import.");
     const assets: LibraryAsset[] = [];
     for (const f of dl.files) {
@@ -61,10 +68,11 @@ export async function importFromUrl(url: string): Promise<LibraryAsset[]> {
  * the assets. */
 export async function importUrlToProject(
   projectId: string,
-  url: string
+  url: string,
+  opts: DownloadOptions = {}
 ): Promise<{ files: { fileName: string; title: string }[]; source: LibrarySource; text?: string }> {
   if (!(await readProject(projectId))) throw new Error("Project not found.");
-  return withDownload(url, async (dl) => {
+  return withDownload(url, opts, async (dl) => {
     await mkdir(mediaDir(projectId), { recursive: true });
     const files: { fileName: string; title: string }[] = [];
     for (const f of dl.files) {
