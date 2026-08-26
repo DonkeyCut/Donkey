@@ -1,5 +1,7 @@
 import posthog from "posthog-js";
 
+import { isSuHost } from "@/cut/lib/hosts";
+
 // Surfaces that composite video onto a canvas every frame never record session
 // replay (see app/_components/NoSessionReplay.tsx): the Cut app and the shared
 // player, at their public paths and at the /cut/… routes the proxy serves them
@@ -7,6 +9,13 @@ import posthog from "posthog-js";
 // direct load; NoSessionReplay stops a recorder carried in by a client-side
 // navigation.
 const REPLAY_FREE = /^\/(?:cut\/)?(?:app|s)(?:\/|$)/;
+
+// The super-user host is off for a second reason: every one of its surfaces
+// draws other people's email addresses, credit balances, and outreach state,
+// and a replay would carry all of it to a third party. Its addresses are bare
+// ("/analytics"), so the host is what identifies it.
+const replayFree = () =>
+  isSuHost(window.location.host) || REPLAY_FREE.test(window.location.pathname);
 
 // Signed media URLs carry user-id paths and signatures; error messages that
 // embed one get it masked before the event leaves the browser.
@@ -47,7 +56,7 @@ if (process.env.NEXT_PUBLIC_POSTHOG_KEY && process.env.NODE_ENV === "production"
   posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY, {
     api_host: "https://us.i.posthog.com",
     defaults: "2026-05-30",
-    disable_session_recording: REPLAY_FREE.test(window.location.pathname),
+    disable_session_recording: replayFree(),
     // Error tracking: unhandled errors, unhandled rejections, and every
     // console.error become $exception events. Failures a feature carries on
     // past reach it through cut/lib/report.ts, which words the report and
