@@ -4,6 +4,21 @@ export function daysUntil(iso: string): number {
   return Math.max(0, Math.floor((new Date(iso).getTime() - Date.now()) / 86_400_000));
 }
 
+/** A moment as a shelf reads it: minutes and hours while it is recent, then
+ * the calendar date, with the year only once it is not this one. */
+export function formatDate(ts: number) {
+  const d = new Date(ts);
+  const mins = Math.floor((Date.now() - ts) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  if (mins < 60 * 24) return `${Math.floor(mins / 60)}h ago`;
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}),
+  });
+}
+
 /** Elapsed wall-clock as "m:ss" — 63400ms -> "1:03". */
 export function formatElapsed(ms: number) {
   const t = Math.max(0, Math.floor(ms / 1000));

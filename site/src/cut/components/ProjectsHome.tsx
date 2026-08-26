@@ -80,7 +80,7 @@ import { createProjectFromFile, isMediaFile } from "@/cut/lib/media";
 import { dropLocalProjectCopy, localMediaUrl } from "@/cut/lib/mediaSync";
 import { copyProjectAcross } from "@/cut/lib/projectCopy";
 import { homeHref, projectHref, useCutBase } from "@/cut/lib/nav";
-import { daysUntil, formatTime } from "@/cut/lib/time";
+import { daysUntil, formatDate, formatTime } from "@/cut/lib/time";
 import {
   parseRatio,
   shapeBand,
@@ -114,20 +114,6 @@ type SectionData = {
 // A dragged selection is carried as a JSON array of project ids, so one drag can
 // move a whole marquee-selected collection into a folder.
 const PROJECT_MIME = "application/x-cut-project";
-
-function formatDate(ts: number) {
-  const d = new Date(ts);
-  const now = Date.now();
-  const mins = Math.floor((now - ts) / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  if (mins < 60 * 24) return `${Math.floor(mins / 60)}h ago`;
-  return d.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    ...(d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}),
-  });
-}
 
 // The badge marks where one project lives, so it says that outright rather
 // than repeating the shelf heading it sits under. A local project the Donkey
