@@ -19,8 +19,9 @@
 //   failed for any other reason.
 //
 // A re-mint swaps the store's asset URLs in place. Media elements key off
-// asset.url and the preview's decoder pool compares each source against it, so
-// the swap heals both on the next render. The store marks the batch at load; a
+// asset.url and reload on it; the preview's decoder pool compares each source
+// against it and moves the source to the new address in place, its decoded
+// frames carrying the picture while the address opens. The store marks the batch at load; a
 // global capture-phase error listener watches DOM elements, and the preview's
 // frame sources report their failed reads through reportMediaUrlError.
 import { fetchSignedMediaUrls } from "./backend/cloud";
@@ -74,13 +75,7 @@ export function markSignedBatch(projectId: string, expiresAt: number | null) {
 }
 
 /** Re-mint the loaded project's signed URLs and swap them into the store.
- * Single-flight; skips while the batch is comfortably fresh unless forced.
- *
- * Exported for the import queue: a copy that has just landed is holding the
- * `/media` route URL, which re-signs and redirects on every range request and
- * is on no origin the chunk cache keeps. Minting it now puts the asset on the
- * media origin in one move rather than leaving a playing clip to be repointed
- * a second time whenever the next scheduled mint comes round. */
+ * Single-flight; skips while the batch is comfortably fresh unless forced. */
 export function refreshSignedUrls(force = false): Promise<void> {
   if (refreshing) return refreshing;
   refreshing = (async () => {
@@ -122,6 +117,17 @@ export function refreshSignedUrls(force = false): Promise<void> {
   return refreshing;
 }
 
+/** Mint the signed URL for one just-landed file, so an import moves straight
+ * onto the media origin — the origin the chunk cache keeps and a playing clip
+ * reads from. Null when the project has no signed batch (its route URLs serve
+ * as they are) or the mint comes back empty; the route URL stands in and the
+ * scheduled machinery rotates it later. */
+export async function mintLandedUrl(projectId: string, fileName: string): Promise<string | null> {
+  if (!batch || batch.projectId !== projectId) return null;
+  const minted = await fetchSignedMediaUrls(projectId, [fileName]);
+  return minted.urls.get(fileName) ?? null;
+}
+
 /** A URL whose access expires and can be re-minted: an edge media token
  * (`?e=<expiry>&s=<signature>`). It heals by re-minting the batch; anything
  * else does not. */
@@ -157,8 +163,8 @@ function retryElement(el: HTMLImageElement | HTMLMediaElement, src: string, atte
 
 /** A decoder failed to read a media URL. There is no element to reload — the
  * frame source retries on its own — but an expiring URL may genuinely have
- * expired, and only a re-mint heals that. The store swap repoints the decoder
- * pool, which opens a fresh source under the new URL. */
+ * expired, and only a re-mint heals that. The store swap moves the pool's
+ * source onto the new URL, which is what gets reads going again. */
 export function reportMediaUrlError(src: string) {
   if (!src || src.startsWith("blob:") || src.startsWith("data:")) return;
   if (!isExpiringUrl(src)) return;

@@ -185,25 +185,27 @@ async function run(job: Job) {
     // The stored file takes over from the source bytes, under the name the
     // copy resolved to (a dropped file reserved it up front; a remote import
     // learns it here). When the browser store holds the bytes the asset keeps
-    // playing from disk; otherwise it moves to the backend URL. Filmstrips
-    // are self-contained frames and survive the swap; a still's single
-    // "frame" is the source itself, so it repoints with the asset.
-    const url = (await localMediaUrl(job.projectId, fileName)) ?? mediaUrl(job.projectId, fileName);
+    // playing from disk. Otherwise it lands on the media origin in one move:
+    // the signed URL is minted before the swap, because the route URL
+    // re-signs and redirects on every range read and sits on no origin the
+    // chunk cache keeps, and each move repoints every reader on the asset.
+    // Filmstrips are self-contained frames and survive the swap; a still's
+    // single "frame" is the source itself, so it repoints with the asset.
+    const local = await localMediaUrl(job.projectId, fileName);
+    const url =
+      local ??
+      (await import("./mediaLinks")
+        .then((m) => m.mintLandedUrl(job.projectId, fileName))
+        .catch(() => null)) ??
+      mediaUrl(job.projectId, fileName);
     useEditor.getState().updateAsset(asset.id, {
       fileName,
       url,
       upload: undefined,
       ...(asset.type === "image" ? { thumbs: [url] } : {}),
     });
-    // The stored file's route URL redirects to a freshly signed link on every
-    // read. Mint it now so the asset settles on the media origin — which the
-    // chunk cache keeps and a playing clip reads straight from — instead of
-    // being repointed a second time at the next scheduled mint.
-    void import("./mediaLinks")
-      .then((m) => m.refreshSignedUrls(true))
-      .catch(() => {});
-    // Decoders repoint on the URL change; let the frame they are painting
-    // finish before the bytes behind them go away.
+    // Decoders and voices carry across the URL change on what they already
+    // hold; the source bytes stay readable while their new stacks open.
     setTimeout(() => revokeTabUrl(localUrl), 10_000);
   } catch (err) {
     if (job.controller.signal.aborted) return;
