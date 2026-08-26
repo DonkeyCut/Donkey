@@ -198,6 +198,14 @@ async function run(job: Job) {
         .then((m) => m.mintLandedUrl(job.projectId, fileName))
         .catch(() => null)) ??
       mediaUrl(job.projectId, fileName);
+    // The stored copy is the same bytes at a new key: what this session
+    // already read under the source's key — the play so far, the waveform and
+    // filmstrip decodes — carries over before anything opens the new address,
+    // so the swap lands on a warm cache.
+    const playingFrom = useEditor.getState().assets.find((a) => a.id === asset.id)?.url ?? localUrl;
+    await import("./chunkCache")
+      .then((m) => m.adoptChunks(playingFrom, url))
+      .catch(() => {});
     useEditor.getState().updateAsset(asset.id, {
       fileName,
       url,

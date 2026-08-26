@@ -805,6 +805,81 @@ export function chunkSourceOptions(url: string): {
   };
 }
 
+/**
+ * Carry one object's resident bytes to another key holding the same bytes.
+ *
+ * An import that lands moves an asset off the URL it arrived on — a library
+ * file copied into the project — and the copy is byte-identical, so what the
+ * session already read under the old key answers for the new one: the play
+ * that ran, the waveform and filmstrip decodes, a prefetch. Left behind,
+ * the whole session reads cold off the new key while the same bytes sit
+ * resident a directory away — the roughness a clip shows on its first
+ * session and never after a reload, because a reload holds one key all
+ * session. Chunk files are copied and the source keeps its own; a carry
+ * that fails costs only the refetch it always cost.
+ */
+export async function adoptChunks(fromUrl: string, toUrl: string): Promise<void> {
+  if (!supportsBrowserStore()) return;
+  const from = chunkIdentity(fromUrl);
+  const to = chunkIdentity(toUrl);
+  if (!from || !to || stateKey(from) === stateKey(to)) return;
+  try {
+    const root = await chunksDir(false);
+    if (!root) return;
+    const srcDir = await (await root.getDirectoryHandle(from.keyHash)).getDirectoryHandle(
+      from.versionTag
+    );
+    const meta = await readJson<ChunkMeta>(srcDir, META);
+    if (
+      !meta ||
+      meta.key !== from.key ||
+      meta.chunk !== CHUNK_SIZE ||
+      !Number.isInteger(meta.size) ||
+      meta.size <= 0
+    )
+      return;
+    const total = chunkCount(meta.size);
+    const resident = meta.resident
+      ? decodeResident(meta.resident, total)
+      : await scanResident(srcDir, total);
+    if (resident.size === 0) return;
+    const dest = await versionDir(to);
+    if (!dest) return;
+    const copied = new Set<number>();
+    for (const idx of [...resident].sort((a, b) => a - b)) {
+      const bytes = await readFileAt(srcDir, String(idx));
+      // A file the map names but the disk cannot back, or one of the wrong
+      // length, answers for bytes it does not hold; it stays behind.
+      if (!bytes || bytes.size !== chunkLen(idx, meta.size)) continue;
+      await writeFileAt(dest, String(idx), bytes);
+      copied.add(idx);
+    }
+    if (copied.size === 0) return;
+    const out: ChunkMeta = {
+      key: to.key,
+      version: to.version,
+      size: meta.size,
+      chunk: CHUNK_SIZE,
+      at: Date.now(),
+      resident: encodeResident(copied, total),
+    };
+    await writeFileAt(dest, META, JSON.stringify(out));
+    // A reader already holding the destination open learns what landed.
+    const open = states.get(stateKey(to));
+    if (open)
+      void open
+        .then((s) => {
+          if (s.dead) return;
+          if (!s.size) s.size = meta.size;
+          for (const i of copied) s.resident.add(i);
+        })
+        .catch(() => {});
+  } catch {
+    // A cache that could not be carried is a cache that never was: the next
+    // open probes and reads over the network, exactly as before.
+  }
+}
+
 /** Walk a file's chunks into the store front to back, skipping what is
  * already resident or in the air. Stops on abort, on a store that has run out
  * of room, and on a network failure — every chunk that landed stays. */
