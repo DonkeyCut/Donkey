@@ -1,6 +1,92 @@
-import { describe, expect, test } from "bun:test";
-import { FrameRing, FrameSourcePool, mappingKey, walkClaim, type Timed } from "./frameSource";
+import { describe, expect, mock, test } from "bun:test";
+import type { Timed } from "./frameSource";
 import type { MediaAsset } from "./types";
+
+// ── the files a source reads, stood in for ──────────────────────────────────
+// Only the reads are replaced; the module mock spreads the real module, so
+// every other export is carried through as it is (and other test files in the
+// run see the real behavior for everything but these).
+
+interface FakeInput {
+  url: string;
+  disposed: boolean;
+  dispose(): void;
+}
+const inputs: FakeInput[] = [];
+/** Addresses whose open is held until the test releases or refuses it. */
+const gates = new Map<string, { promise: Promise<void>; release(): void; refuse(): void }>();
+const gate = (url: string) => {
+  let release!: () => void;
+  let refuse!: () => void;
+  const promise = new Promise<void>((res, rej) => {
+    release = res;
+    refuse = () => rej(new Error("no track"));
+  });
+  const g = { promise, release, refuse };
+  gates.set(url, g);
+  return g;
+};
+
+const openMedia = ((src: string | Blob) => {
+  const input: FakeInput = {
+    url: String(src),
+    disposed: false,
+    dispose() {
+      this.disposed = true;
+    },
+  };
+  inputs.push(input);
+  return input;
+}) as never;
+
+interface FakeTrack {
+  url: string;
+  codec: string;
+  getDurationFromMetadata(): Promise<number>;
+}
+const videoTrackOf = (async (input: FakeInput) => {
+  const g = gates.get(input.url);
+  if (g) await g.promise;
+  const track: FakeTrack = { url: input.url, codec: "avc1", getDurationFromMetadata: async () => 10 };
+  return track;
+}) as never;
+
+/** Every walk a fake sink was asked for, with the address it reads. */
+const sinkWalks: { url: string; from: number }[] = [];
+const frame = (track: FakeTrack, timestamp: number) => ({
+  canvas: { width: 640, height: 360 },
+  timestamp,
+  duration: 1 / 30,
+});
+const frameSink = ((track: FakeTrack) => ({
+  async *canvases(from: number) {
+    sinkWalks.push({ url: track.url, from });
+    for (let i = 0; ; i++) {
+      const timestamp = from + i / 30;
+      if (timestamp > 10) return;
+      yield frame(track, timestamp);
+    }
+  },
+  async getCanvas(t: number) {
+    return frame(track, t);
+  },
+  async *canvasesAtTimestamps(asks: number[]) {
+    for (const t of asks) yield frame(track, t);
+  },
+})) as never;
+const keyframeTimeAt = (async (_track: unknown, t: number) => Math.max(0, Math.floor(t))) as never;
+
+const media = await import("./mediaRead");
+mock.module("./mediaRead", () => ({ ...media, openMedia, videoTrackOf, frameSink, keyframeTimeAt }));
+
+const { ClipFrameSource, FrameRing, FrameSourcePool, mappingKey, walkClaim } = await import(
+  "./frameSource"
+);
+
+/** Let the opens, walks and drains the last call set going run out. */
+const settle = async (rounds = 400) => {
+  for (let i = 0; i < rounds; i++) await Promise.resolve();
+};
 
 /** A decoded frame at 30fps, as the sink would hand it over. */
 const f = (timestamp: number, duration = 1 / 30): Timed => ({ timestamp, duration });
@@ -229,17 +315,18 @@ describe("FrameSourcePool", () => {
     expect(pool.size).toBe(2);
   });
 
-  test("a source follows its asset's URL", () => {
-    // A signed URL re-mints, or a shot re-renders onto its asset id. The
-    // mapping still names the same pictures, but they now live somewhere else,
-    // so the old source is closed and a fresh one reads the new URL.
+  test("a source follows its asset's URL, in place", () => {
+    // A signed URL re-mints, or an import lands in project storage. The
+    // mapping still names the same pictures at a new address, so the source
+    // moves there itself — everything it has decoded keeps answering while
+    // the new address opens behind it.
     const pool = new FrameSourcePool(4);
     pool.beginFrame();
     const before = pool.get("k", asset("a"), 480);
     expect(pool.get("k", asset("a"), 480)).toBe(before);
     const moved = { ...asset("a"), url: "https://example.test/a.mp4?e=2&s=next" };
     const after = pool.get("k", moved, 480);
-    expect(after).not.toBe(before);
+    expect(after).toBe(before);
     expect(after.url).toBe(moved.url);
     expect(pool.size).toBe(1);
   });
@@ -328,5 +415,71 @@ describe("FrameSourcePool", () => {
     pool.beginFrame();
     pool.evict();
     expect(pool.get("a", asset("a"), 480)).toBe(a);
+  });
+});
+
+describe("ClipFrameSource retarget", () => {
+  const reset = () => {
+    inputs.length = 0;
+    sinkWalks.length = 0;
+    gates.clear();
+  };
+
+  test("the picture rides its ring across a change of address", async () => {
+    // The failure this is here for: a library clip lands in project storage
+    // mid-play and its asset moves to the stored URL, and closing the source
+    // there put a cold open — a container read over the link, an empty ring —
+    // in front of the very next frame. The frames already decoded carry the
+    // picture while the new address opens behind them.
+    reset();
+    const before = asset("ride");
+    const src = new ClipFrameSource(before, 360);
+    src.want(0.1, true);
+    await settle();
+    expect(src.frameAt(0.1)).not.toBeNull();
+    const movedUrl = "https://example.test/ride-landed.mp4";
+    const g = gate(movedUrl);
+    src.retarget({ ...before, url: movedUrl });
+    expect(src.url).toBe(movedUrl);
+    await settle();
+    // The new address has not opened yet: everything decoded keeps answering,
+    // and the old stack keeps walking frames in.
+    expect(src.frameAt(0.1)).not.toBeNull();
+    src.want(0.3, true);
+    await settle();
+    expect(src.frameAt(0.3)).not.toBeNull();
+    expect(inputs[0].disposed).toBe(false);
+    g.release();
+    await settle();
+    // The stack swapped: the old file let go, the frames kept.
+    expect(inputs[0].disposed).toBe(true);
+    expect(src.frameAt(0.3)).not.toBeNull();
+    src.want(0.6, true);
+    await settle();
+    // The walk carrying on reads the new address.
+    expect(sinkWalks[sinkWalks.length - 1].url).toBe(movedUrl);
+    expect(src.frameAt(0.6)).not.toBeNull();
+    src.close();
+  });
+
+  test("a new address that will not open leaves the picture standing", async () => {
+    reset();
+    const before = asset("stay");
+    const src = new ClipFrameSource(before, 360);
+    src.want(0.1, true);
+    await settle();
+    expect(src.frameAt(0.1)).not.toBeNull();
+    const movedUrl = "https://example.test/stay-gone.mp4";
+    const g = gate(movedUrl);
+    src.retarget({ ...before, url: movedUrl });
+    await settle();
+    g.refuse();
+    await settle();
+    // The failed open is spent on the probe alone: the frames stay, the old
+    // file stays open, and the usual retries go after the new address.
+    expect(src.frameAt(0.1)).not.toBeNull();
+    expect(inputs[0].disposed).toBe(false);
+    expect(inputs[inputs.length - 1].disposed).toBe(true);
+    src.close();
   });
 });

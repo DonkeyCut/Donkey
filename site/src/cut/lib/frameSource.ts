@@ -425,6 +425,10 @@ export class ClipFrameSource {
   /** A still's single frame; stills never stream. */
   private still: SourceFrame | null = null;
   private opening: Promise<void> | null = null;
+  /** Bumped each time the source is sent to a new address. An open that comes
+   * back to find the count moved built its stack for an address the source
+   * has since left. */
+  private aim = 0;
   private closed = false;
   /** Set when the file turns out to hold no picture this browser can read. */
   private unreadable = false;
@@ -565,7 +569,7 @@ export class ClipFrameSource {
   }
 
   constructor(
-    private readonly asset: MediaAsset,
+    private asset: MediaAsset,
     private readonly height: number,
     /** Called whenever a frame lands. A paused editor draws the nearest frame
      * it has and stops; without a nudge, the exact frame would decode into a
@@ -782,6 +786,81 @@ export class ClipFrameSource {
   }
 
   /**
+   * Move this source onto the asset's current address, keeping every frame it
+   * holds.
+   *
+   * An asset's URL moves while its clips are mid-play: an import lands in
+   * project storage and leaves the URL it arrived on, a signed link re-mints
+   * ahead of expiry. The same pictures now live at the new address, so the
+   * ring keeps answering while a fresh stack — file, track, sink — opens on
+   * that address behind it, exactly the way a voice plays out its scheduled
+   * sound across the same move. The old stack serves reads until the new one
+   * is ready: the import queue holds the source bytes for this window, and a
+   * re-minted link is still inside its signing window. Once the stack swaps,
+   * the next ask starts a walk from wherever the reader stands, on canvases
+   * the ring's held frames no longer live on.
+   */
+  retarget(asset: MediaAsset): void {
+    this.asset = asset;
+    if (this.closed || asset.type === "image") return;
+    const aim = ++this.aim;
+    // Nothing open and nothing opening: the next ask opens the new address.
+    if (!this.input && !this.opening) return;
+    void (async () => {
+      // An open in flight built its stack for the old address; it settles
+      // first, so the swap below replaces a stack that has stopped moving.
+      try {
+        await this.opening;
+      } catch {}
+      if (this.closed || this.aim !== aim) return;
+      const input = openMedia(this.asset.url);
+      try {
+        const track = await videoTrackOf(input);
+        if (this.closed || this.aim !== aim) return input.dispose();
+        if (!track) {
+          input.dispose();
+          this.fail();
+          return;
+        }
+        const sink = frameSink(track, { height: this.height }, { poolSize: POOL, lowLatency: true });
+        // The new stack installs first, so a walk starting this instant is
+        // already on it; the walk still running was on the old one and ends
+        // now. Its frames stay: the old sink has stopped cycling its
+        // canvases, so they hold still, and they are what answers until the
+        // first walk on the new stack lands. The old file is let go once the
+        // old walk's drain has let go of it.
+        const oldInput = this.input;
+        this.input = input;
+        this.track = track;
+        this.sink = sink;
+        this.opening = Promise.resolve();
+        this.backSink = null;
+        this.back = null;
+        this.stopStream();
+        await this.drainRun;
+        oldInput?.dispose();
+        if (this.closed || this.aim !== aim) return;
+        // Walk bookkeeping belongs to the stack that is gone; the new one
+        // starts clean, quick retries and all.
+        this.streamDone = false;
+        this.shortEndAt = -1;
+        this.failStreak = 0;
+        this.unreadable = false;
+        this.attempts = 0;
+        // A paused reader is only asked again on a repaint; the nudge is what
+        // sends its ask to the new stack.
+        this.onFrame();
+      } catch {
+        input.dispose();
+        // The old stack stays installed and keeps serving its ring; the
+        // failure books the usual retries, and the retry's open reads the
+        // current address.
+        if (this.aim === aim && !this.closed) this.fail();
+      }
+    })();
+  }
+
+  /**
    * An open failed. That is usually a moment — a network blip, a signed URL a
    * few seconds past its window — so the source tells the link keeper (which
    * re-mints an expired URL; the pool then swaps this source out under the new
@@ -823,6 +902,7 @@ export class ClipFrameSource {
           input.dispose();
           return;
         }
+        this.input?.dispose();
         this.input = input;
         this.track = track;
         // Not awaited: it reads metadata the sink is about to read anyway, and
@@ -1338,13 +1418,11 @@ export class FrameSourcePool {
     const id = `${key}|${height}`;
     let src = this.sources.get(id);
     // The mapping names which pictures; the URL is where they are read from,
-    // and it moves — a signed link re-mints, a shot re-renders onto its asset.
-    // A source is only current while it reads the store's current URL.
-    if (src && src.url !== asset.url) {
-      src.close();
-      this.sources.delete(id);
-      src = undefined;
-    }
+    // and it moves — an import lands in project storage, a signed link
+    // re-mints. The source follows the move in place, holding every frame it
+    // has decoded, so a clip mid-play rides across the swap on its ring while
+    // the new address opens behind it.
+    if (src && src.url !== asset.url) src.retarget(asset);
     if (!src) {
       poolLog(`pool open ${id}`);
       src = new ClipFrameSource(asset, height, this.onFrame);
