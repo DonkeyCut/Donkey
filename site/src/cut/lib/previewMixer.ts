@@ -45,6 +45,14 @@ import { timeStretch } from "./timeStretch";
  * short enough that the bytes it waits on are the ones the picture is reading
  * anyway. */
 const GROUP_S = 1;
+/** The first window scheduled from a standing start — a play begun, a seek
+ * landed, a hold released. The picture opens on a frame already decoded, and a
+ * sound that waits for a whole group joins it a group-read late; a short first
+ * window puts the sound beside the first frame, and the fills behind it extend
+ * the lead by whole groups. A link that cannot feed the second window in time
+ * starts it where the clock stands, the way any late window starts — a beat of
+ * sound and a catch-up beats a silence the length of the group. */
+const FIRST_GROUP_S = 0.3;
 /** Most reads one group is assembled from. A packet of compressed audio holds
  * a fraction of a second, so a group is tens of reads, and this is the ceiling
  * over them. */
@@ -388,7 +396,14 @@ export class PreviewMixer {
       this.heldAt = t;
       for (const live of this.voices.values()) {
         this.stopWindows(live);
-        this.reaim(live, Math.max(live.start, t));
+        const from = Math.max(live.start, t);
+        this.reaim(live, from);
+        // The held moment's sound comes down while the picture opens: one
+        // read aims the walk and pulls the bytes it sits in — the primer a
+        // parked playhead uses — so the release finds an open file already
+        // read where the first window starts.
+        const source = live.in + (from - live.start) * live.speed;
+        if (!live.filling && source < live.out - 1e-3) void this.prime(live, source);
       }
     }
     // Both clocks are pulled back to where the hold began, every frame of it:
@@ -624,6 +639,13 @@ export class PreviewMixer {
       const walk = (live.walk ??= openAudioWalk(live.url, source, live.out));
       if (Math.abs(walk.position - source) > 0.02) walk.seek(source);
       await walk.next();
+      // The read answering is the source answering: a voice backed off by an
+      // outage is willing again the moment its file reads, so the play that
+      // follows is never left waiting out a cadence the outage booked.
+      if (live.gen === gen) {
+        live.attempts = 0;
+        live.retryAt = 0;
+      }
     } catch {
       if (live.gen === gen) this.moved(live);
     } finally {
@@ -723,10 +745,14 @@ export class PreviewMixer {
       }
       let buffer: AudioBuffer | null;
       try {
+        // Nothing scheduled means the sound is standing still — the play just
+        // began, a seek landed, a hold let go — and the picture is not
+        // waiting. The first window is short so the sound joins it now.
+        const group = live.windows.length ? GROUP_S : FIRST_GROUP_S;
         buffer =
           Math.abs(live.speed - 1) > 1e-3
             ? await this.stretchedWindow(live, sourceFrom)
-            : await this.walkGroup(live, sourceFrom, current);
+            : await this.walkGroup(live, sourceFrom, current, group);
       } catch {
         // The read is the only part of this that says anything about the
         // source, so it is the only part a failure is spent on.
@@ -802,7 +828,8 @@ export class PreviewMixer {
   private async walkGroup(
     live: LiveVoice,
     sourceFrom: number,
-    current: () => boolean
+    current: () => boolean,
+    group: number
   ): Promise<AudioBuffer | null> {
     const walk = (live.walk ??= openAudioWalk(live.url, sourceFrom, live.out));
     // A walk outlives the read that opened it, so where it stands is its own
@@ -814,7 +841,7 @@ export class PreviewMixer {
     // Bounded by the sound it holds and by the reads that go into it: a track
     // answering with buffers that carry no time would otherwise be pulled for
     // as long as the frame lasted.
-    for (let pulls = 0; end - sourceFrom < GROUP_S && pulls < GROUP_PULLS; pulls++) {
+    for (let pulls = 0; end - sourceFrom < group && pulls < GROUP_PULLS; pulls++) {
       const part = await walk.next();
       if (!current()) return null;
       if (!part) break;

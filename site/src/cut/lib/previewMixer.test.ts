@@ -406,8 +406,10 @@ describe("the preview's sound over a link that only just keeps up", () => {
       voice.url = "landed.mp4";
     });
     // What the voice had already read plays out across the swap. It is the
-    // reader that moves, and it moves while that sound is playing.
-    expect(heard(sound, 18, 22)).toBeGreaterThan(0.95);
+    // reader that moves, and it moves while that sound is playing. The lead in
+    // hand at the move is at least the lookahead less the group a fill was
+    // mid-extension on, so the second past it is the guaranteed part.
+    expect(heard(sound, 18, 21)).toBeGreaterThan(0.95);
     expect(heard(sound, 30, CLIP_S)).toBeGreaterThan(0.95);
     // The new address is read by a walk of its own; the old one is let go.
     expect(walks.opened).toBe(2);
@@ -434,6 +436,114 @@ describe("the preview's sound over a link that only just keeps up", () => {
     expect(heard(sound, 22, 26)).toBe(0);
     // And the cut picks up where it stopped rather than further on.
     expect(heard(sound, 27, 40)).toBeGreaterThan(0.9);
+  });
+
+  test("a play's first sound is not a whole group away", async () => {
+    // The failure this is here for: the picture opens on a frame it already
+    // holds while the sound assembles a whole group before scheduling its
+    // first window, so a play or a landed seek starts with the picture moving
+    // and the sound a group-read behind it. From a standing start the first
+    // window is short, and the sound joins the first frame.
+    reset();
+    headStart = 0.6; // the head of the file is here; a whole group is not
+    const mixer = new PreviewMixer();
+    mixer.start(0);
+    liveCtx = (mixer as unknown as { ctx: FakeContext }).ctx;
+    for (let i = 0; i < 30; i++) {
+      step();
+      mixer.update(Math.min(mixer.now(), CLIP_S), [voice]);
+      await settle();
+    }
+    mixer.dispose();
+    expect(played.length).toBeGreaterThan(0);
+    expect(Math.min(...played.map((p) => p.from))).toBeLessThan(0.4);
+    expect(walks.opened).toBe(1);
+  });
+
+  test("a seek keeps its reader and lands with its sound", async () => {
+    // The failure this is here for: picking a position mid-play re-anchors the
+    // clock, and a voice that gave up its walk there paid a fresh open — a
+    // container parsed out of a long file — before the first window after the
+    // seek, so the picture jumped and the sound came in seconds later.
+    reset();
+    headStart = CLIP_S; // the link is not the subject; the reader is
+    const mixer = new PreviewMixer();
+    mixer.start(0);
+    liveCtx = (mixer as unknown as { ctx: FakeContext }).ctx;
+    for (let i = 0; i < 20; i++) {
+      step();
+      mixer.update(Math.min(mixer.now(), CLIP_S), [voice]);
+      await settle();
+    }
+    // Opening a file costs seconds from here on; a voice that keeps its
+    // reader never pays it.
+    openCostS = 5;
+    played = [];
+    mixer.start(10);
+    const pressed = ctxTime;
+    for (let i = 0; i < 20; i++) {
+      step();
+      mixer.update(Math.min(mixer.now(), CLIP_S), [voice]);
+      await settle();
+    }
+    mixer.dispose();
+    expect(played.length).toBeGreaterThan(0);
+    expect(Math.min(...played.map((p) => p.from)) - pressed).toBeLessThan(0.5);
+    // The file it read after the seek was the one it already had open.
+    expect(walks.opened).toBe(1);
+  });
+
+  test("a hold pays the sound's open before it releases", async () => {
+    // A play held for a picture still opening used to leave the sound waiting
+    // too: nothing read during the hold, and the release paid the file's open
+    // before the first window. The hold primes each voice at the held moment,
+    // so the open runs beside the picture's and the release finds both ready.
+    reset();
+    headStart = CLIP_S;
+    const mixer = new PreviewMixer();
+    mixer.start(0);
+    liveCtx = (mixer as unknown as { ctx: FakeContext }).ctx;
+    for (let i = 0; i < 20; i++) {
+      step();
+      mixer.update(Math.min(mixer.now(), CLIP_S), [voice]);
+      await settle();
+    }
+    // What an outage leaves behind: the reader given up, the voice backed
+    // off on the long cadence.
+    const live = (
+      mixer as unknown as {
+        voices: Map<string, { walk: { close(): void } | null; retryAt: number }>;
+      }
+    ).voices.get("clip")!;
+    live.walk?.close();
+    live.walk = null;
+    live.retryAt = performance.now() + 10_000;
+    const opens = walks.opened;
+    // The picture stalls; opening the sound's file costs seconds now.
+    openCostS = 3;
+    played = [];
+    const holdUntil = wall + 4;
+    let first = true;
+    while (wall < holdUntil) {
+      step();
+      mixer.hold(Math.min(mixer.now(), CLIP_S));
+      await settle();
+      // Entering the hold is what primes: the walk opens there, during it.
+      if (first) {
+        first = false;
+        expect(walks.opened).toBe(opens + 1);
+      }
+    }
+    expect(played.length).toBe(0); // a hold schedules nothing
+    const released = ctxTime;
+    for (let i = 0; i < 20; i++) {
+      step();
+      mixer.update(Math.min(mixer.now(), CLIP_S), [voice]);
+      await settle();
+    }
+    mixer.dispose();
+    expect(played.length).toBeGreaterThan(0);
+    expect(Math.min(...played.map((p) => p.from)) - released).toBeLessThan(0.5);
   });
 
   test("has the file open before the play begins", async () => {
