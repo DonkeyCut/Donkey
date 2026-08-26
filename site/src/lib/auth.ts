@@ -2,17 +2,31 @@ import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { bearer } from "better-auth/plugins";
 
-import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
+import { AUTH_COOKIE_DOMAIN, DONKEYCUT_CANONICAL, SU_ORIGIN } from "@/cut/lib/hosts";
 import { provisionSignupGrants } from "@/lib/onboarding/signup-grants";
 import { prisma } from "@/lib/prisma";
 
-// donkeycut.com is the single production host: the sign-in pages, the auth
-// API, the Google OAuth callback, and the session all live on that one origin
-// (the proxy 308s www. to the apex before anything serves), so auth cookies
-// stay plain host-only cookies. Hosted deploys pin baseURL there — it decides
-// the OAuth redirect_uri — while local dev leaves it unset and better-auth
-// derives it from the localhost request.
+// donkeycut.com owns sign-in: the auth pages, the auth API, and the Google
+// OAuth callback all serve on that one origin (the proxy 308s www. to the apex
+// before anything serves). Hosted deploys pin baseURL there — it decides the
+// OAuth redirect_uri — while local dev leaves it unset and better-auth derives
+// it from the localhost request.
 const baseURL = process.env.VERCEL ? DONKEYCUT_CANONICAL : undefined;
+
+// The session is shared with the apex's subdomains: the super-user surface is
+// its own host, and a host-only cookie would never reach it. Scoping the auth
+// cookies to the registrable host lets the session ride across, and listing the
+// subdomain as a trusted origin lets a sign-in started there name its own
+// address as the post-auth callback. Hosted only — localhost can't carry a
+// Domain attribute, and dev serves both surfaces from one origin anyway.
+const crossSubDomain = process.env.VERCEL
+  ? {
+      advanced: {
+        crossSubDomainCookies: { domain: AUTH_COOKIE_DOMAIN, enabled: true },
+      },
+      trustedOrigins: [DONKEYCUT_CANONICAL, SU_ORIGIN],
+    }
+  : {};
 
 // The iOS app signs in natively and exchanges the provider's ID token for a
 // session at /api/auth/sign-in/social. ID tokens are verified against these
@@ -23,6 +37,7 @@ const IOS_APP_BUNDLE_ID = "com.donkeycut.donkeycut";
 const APPLE_SERVICES_ID = "com.donkeycut.signin";
 
 export const auth = betterAuth({
+  ...crossSubDomain,
   baseURL,
   secret: process.env.BETTER_AUTH_SECRET,
   // Sessions last a year, and the rolling expiry is refreshed daily on use, so an active user
