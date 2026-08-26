@@ -20,6 +20,12 @@ import { clipLen, getClipSpans, useEditor } from "@/cut/lib/store";
 import { playheadAt } from "@/cut/lib/playhead";
 import { AudioPillSurface } from "@/cut/components/AudioPanel";
 import { entityGlyph } from "@/cut/components/entityIcons";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { parseTimeInput } from "@/cut/components/ScrubValue";
 import { ValueSlider } from "@/cut/components/ValueSlider";
 import { cn } from "@/lib/utils";
@@ -831,15 +837,51 @@ export function CopyRefButton({ name, className }: { name: string; className?: s
   );
 }
 
+/** One line of text that hands over the whole string when the line it sits on
+ * is too narrow to hold it. The measurement re-runs as the box resizes, so a
+ * label that widens on hover only reaches for a tooltip if it is still cut
+ * off at its full width. */
+export function TruncatedText({ text, className }: { text: string; className?: string }) {
+  const [el, setEl] = useState<HTMLSpanElement | null>(null);
+  const [clipped, setClipped] = useState(false);
+  useEffect(() => {
+    if (!el) return;
+    const measure = () => setClipped(el.scrollWidth > el.clientWidth + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [el, text]);
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger
+          ref={setEl}
+          render={<span />}
+          className={cn("block min-w-0 truncate", className)}
+        >
+          {text}
+        </TooltipTrigger>
+        {clipped && <TooltipContent>{text}</TooltipContent>}
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 /** A card's name caption with its short handle; clicking copies the reference
  * token, ready to paste into any prompt. */
 export function CopyNameLabel({
   name,
+  label,
   className,
   dark,
   mention = true,
 }: {
   name: string;
+  /** What to show in place of the name. The token still comes from `name`, so
+   * a card that reads under a title still copies the reference a prompt
+   * resolves. */
+  label?: string;
   className?: string;
   /** On a dark/filled surface (audio cards): white badge and copied text. */
   dark?: boolean;
@@ -851,8 +893,9 @@ export function CopyNameLabel({
   const [copied, copy] = useCopied();
   const ref = useRefFor(name);
   const token = ref ? refToken(ref) : mentionToken(name);
+  const shown = label?.trim() || name;
   if (!mention) {
-    return <span className={cn("block min-w-0 truncate text-left", className)}>{name}</span>;
+    return <TruncatedText text={shown} className={cn("text-left", className)} />;
   }
   return (
     <button
@@ -875,7 +918,7 @@ export function CopyNameLabel({
           Copied {token}
         </span>
       ) : (
-        <span className="truncate">{name}</span>
+        <TruncatedText text={shown} />
       )}
     </button>
   );
