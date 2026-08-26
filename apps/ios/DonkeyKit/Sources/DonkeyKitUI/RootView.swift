@@ -1,4 +1,5 @@
 #if os(iOS)
+import Combine
 import SwiftUI
 import DonkeyKitModels
 
@@ -86,9 +87,20 @@ public struct RootView<CameraPreview: View>: View {
             await projects.refresh()
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active, auth.isSignedIn {
-                media.sync?.kick()
-            }
+            guard phase == .active else { return }
+            // The Wi-Fi switch is also on the app's page in iOS Settings,
+            // where it may have been flipped while this app was away.
+            app.refreshFromDefaults()
+            if auth.isSignedIn { media.sync?.kick() }
+        }
+        // Both apps on screen at once — iPad Split View — so the switch lands
+        // without waiting for a trip to the background.
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            app.refreshFromDefaults()
+        }
+        // Letting media onto cellular is a change the queue acts on at once.
+        .onChange(of: app.mediaOnWiFiOnly) { _, _ in
+            media.sync?.kick()
         }
         .onChange(of: auth.isSignedIn) { _, signedIn in
             guard signedIn else {

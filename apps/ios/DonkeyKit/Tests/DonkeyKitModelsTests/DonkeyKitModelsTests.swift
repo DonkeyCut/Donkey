@@ -325,7 +325,7 @@ import Testing
         let engine: SyncEngine
     }
 
-    func makeRig() throws -> Rig {
+    func makeRig(wiFiOnlyForMedia: Bool = true) throws -> Rig {
         let store = try DonkeyStore(inMemory: true)
         let cloud = FakeCloud()
         let ideas = IdeasModel(store: store)
@@ -334,6 +334,7 @@ import Testing
             journal: store,
             service: cloud,
             signedIn: { true },
+            wiFiOnlyForMedia: { wiFiOnlyForMedia },
             uploadFor: { recording in
                 LibraryUpload(
                     fileURL: media.movieURL(for: recording),
@@ -658,18 +659,52 @@ import Testing
         #expect(try rig.store.tombstones().isEmpty)
     }
 
-    @Test func cellularMovesEverything() async throws {
-        // iOS Settings owns the cellular switch, so the engine treats a
-        // cellular path like any other connection.
+    @Test func cellularCarriesNotesAndHoldsVideos() async throws {
+        // The default: notes are small enough to spend cellular data on, a
+        // clip is not. The clip says so on its card and moves on Wi-Fi.
         let rig = try makeRig()
         rig.engine.network = .cellular
         let recording = try ingestClip(rig)
+        rig.ideas.addInspiration(mediaData: Data(repeating: 3, count: 64), isVideo: true)
         rig.ideas.openEditor()
         rig.ideas.draft?.body = "typed on the train"
         let note = rig.ideas.saveDraft()!
         await rig.engine.run()
-        #expect(rig.cloud.uploads == [recording.fileName])
+        #expect(rig.cloud.uploads.isEmpty)
         #expect(rig.cloud.notes[note.id] != nil)
+        #expect(rig.engine.state(for: recording) == .waitingForWiFi)
+        #expect(rig.engine.waitingForWiFi)
+
+        rig.engine.network = .wifi
+        await rig.engine.run()
+        #expect(rig.cloud.uploads.count == 2)
+        #expect(rig.engine.state(for: recording) == .synced)
+        #expect(!rig.engine.waitingForWiFi)
+    }
+
+    @Test func cellularMovesVideosWhenTheSettingIsOff() async throws {
+        let rig = try makeRig(wiFiOnlyForMedia: false)
+        rig.engine.network = .cellular
+        let recording = try ingestClip(rig)
+        await rig.engine.run()
+        #expect(rig.cloud.uploads == [recording.fileName])
+        #expect(rig.engine.state(for: recording) == .synced)
+        #expect(!rig.engine.waitingForWiFi)
+    }
+
+    @Test func cellularStillReplaysDeletesAndLinks() async throws {
+        // Everything light keeps moving while media waits: a delete made here
+        // reaches the cloud, and a saved link is handed to the worker.
+        let rig = try makeRig()
+        let recording = try ingestClip(rig)
+        await rig.engine.run()
+        let assetId = try #require(try rig.store.recordingRemote(recording.id).assetId)
+        rig.engine.network = .cellular
+        rig.media.delete(recording)
+        #expect(rig.ideas.addInspiration(urlText: "https://example.com/clip"))
+        await rig.engine.run()
+        #expect(rig.cloud.deletedAssets == [assetId])
+        #expect(rig.cloud.links.count == 1)
     }
 
     @Test func inspirationMediaUploadsOnce() async throws {
@@ -693,6 +728,38 @@ import Testing
         await rig.engine.run()
         #expect(rig.cloud.uploads.isEmpty)
         #expect(rig.cloud.notes[note.id] == nil)
+    }
+}
+
+@Suite struct AppSettingsTests {
+    /// A defaults suite of this test's own, thrown away after.
+    func makeDefaults() -> UserDefaults {
+        let name = "settings-test-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return defaults
+    }
+
+    @Test func videosWaitForWiFiOutOfTheBox() {
+        #expect(AppModel(defaults: makeDefaults()).mediaOnWiFiOnly)
+    }
+
+    @Test func theSwitchSurvivesALaunch() {
+        let defaults = makeDefaults()
+        AppModel(defaults: defaults).mediaOnWiFiOnly = false
+        #expect(!AppModel(defaults: defaults).mediaOnWiFiOnly)
+    }
+
+    @Test func theSettingsAppsWordIsTaken() {
+        // What the app's page in iOS Settings writes, under the same key.
+        let defaults = makeDefaults()
+        let app = AppModel(defaults: defaults)
+        defaults.set(false, forKey: "mediaOnWiFiOnly")
+        app.refreshFromDefaults()
+        #expect(!app.mediaOnWiFiOnly)
+        defaults.set(true, forKey: "mediaOnWiFiOnly")
+        app.refreshFromDefaults()
+        #expect(app.mediaOnWiFiOnly)
     }
 }
 

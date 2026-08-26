@@ -19,6 +19,9 @@ nonisolated public struct Recording: Identifiable, Equatable, Sendable {
 /// Where a clip's bytes live relative to the cloud.
 nonisolated public enum RecordingSyncState: Equatable, Sendable {
     case onDevice
+    /// On cellular with the Wi-Fi-only setting on: the clip has somewhere to
+    /// go and is waiting for the connection to allow it.
+    case waitingForWiFi
     case uploading(percent: Int)
     case synced
 }
@@ -59,6 +62,9 @@ public final class MediaModel {
 
     /// The cloud is out of room; the Library banner reads this.
     public var storageFull: Bool { sync?.storageFull ?? false }
+
+    /// Clips are waiting for Wi-Fi; the Library banner reads this too.
+    public var waitingForWiFi: Bool { sync?.waitingForWiFi ?? false }
 
     public func ingest(movieAt url: URL, duration: TimeInterval, thumbnail: Data?) {
         guard let recording = try? store.ingest(movieAt: url, duration: duration, thumbnail: thumbnail) else { return }

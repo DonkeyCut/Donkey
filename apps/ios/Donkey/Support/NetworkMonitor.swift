@@ -4,7 +4,8 @@ import Network
 
 /// Feeds the sync engine the current network path so policy can decide what
 /// moves. Cellular and other expensive paths (personal hotspots) both count
-/// as cellular: they spend metered data.
+/// as cellular: they spend metered data, so the Wi-Fi-only setting holds
+/// media back on either.
 final class NetworkMonitor {
     private let monitor = NWPathMonitor()
 

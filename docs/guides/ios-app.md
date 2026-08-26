@@ -14,10 +14,19 @@ kept in the app's SwiftData store, so nothing depends on the app staying open
 — whatever was mid-flight when the app died is picked up on the next launch,
 foreground, network change, or edit.
 
-**The one rule on data:** a transfer moves whenever the phone is online. Who
-gets to spend cellular data is the system's call — iOS Settings carries the
-per-app Cellular Data switch, and a request it forbids fails on its own — so
-the app keeps no network preference of its own.
+**The one rule on data:** traffic comes in two weights. Notes, folders,
+deletes and saved links are small, so they move whenever the phone is online.
+Recordings and inspiration media are not, so they ride Wi-Fi. *Videos on Wi-Fi
+Only*, on out of the box, is the app's one switch on the matter, and it lives
+where the system's own data controls do: the app's page in iOS Settings, from
+a Settings bundle that writes the `mediaOnWiFiOnly` default the sync engine
+reads. The app takes whatever that key says as it comes forward. While the
+switch holds on a cellular connection the clips stay on the phone, each card
+says Wi-Fi and the Library and Ideas screens carry a slim banner, and the queue
+drains the moment the phone joins a network. Turn it off and media moves on
+whatever connection there is. Whether the app may touch cellular at all stays
+the system's call: iOS Settings carries the per-app Cellular Data switch, and a
+request it forbids fails on its own.
 
 Every byte moves at most once. Uploads go straight to storage on presigned
 URLs; an interrupted upload re-presigns under the name it already claimed, and

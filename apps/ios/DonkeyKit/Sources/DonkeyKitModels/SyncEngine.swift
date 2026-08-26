@@ -4,8 +4,12 @@ import Foundation
 // inspiration up, notes both ways, deletes replayed — against a journal the
 // store persists, so nothing depends on the app staying open: whatever was
 // mid-flight when the app died is picked up from the journal on the next
-// kick. Every byte moves at most once, and it moves on whatever connection
-// the phone has: iOS Settings owns the per-app cellular switch.
+// kick. Every byte moves at most once.
+//
+// Two weights of traffic ride different connections. Notes, folders, deletes
+// and saved links are small, so they move whenever the phone is online.
+// Recordings and inspiration media are not, so they wait for Wi-Fi while the
+// app's Wi-Fi-only setting holds.
 
 nonisolated public struct SyncTombstone: Equatable, Sendable, Identifiable {
     nonisolated public enum Kind: String, Sendable {
@@ -111,6 +115,9 @@ public final class SyncEngine {
     public var network: NetworkPath = .offline {
         didSet { if network != oldValue, network != .offline { kick() } }
     }
+    /// The app's setting: media waits for Wi-Fi. Read on every decision, so
+    /// flipping the switch takes effect on the next kick.
+    private let wiFiOnlyForMedia: () -> Bool
 
     /// Live upload progress per recording, layered over the journal.
     private var uploadStates: [UUID: RecordingSyncState] = [:]
@@ -146,11 +153,13 @@ public final class SyncEngine {
         journal: any SyncJournalStoring,
         service: any CloudSyncServicing,
         signedIn: @escaping () -> Bool,
+        wiFiOnlyForMedia: @escaping () -> Bool = { true },
         uploadFor: @escaping (Recording) async -> LibraryUpload?
     ) {
         self.journal = journal
         self.service = service
         self.signedIn = signedIn
+        self.wiFiOnlyForMedia = wiFiOnlyForMedia
         self.uploadFor = uploadFor
     }
 
@@ -164,11 +173,32 @@ public final class SyncEngine {
     public func state(for recording: Recording) -> RecordingSyncState {
         if let live = uploadStates[recording.id] { return live }
         if syncedIds.contains(recording.id) { return .synced }
-        if checkedIds.contains(recording.id) { return .onDevice }
-        checkedIds.insert(recording.id)
-        guard (try? journal.recordingRemote(recording.id))?.assetId != nil else { return .onDevice }
-        syncedIds.insert(recording.id)
-        return .synced
+        if !checkedIds.contains(recording.id) {
+            checkedIds.insert(recording.id)
+            if (try? journal.recordingRemote(recording.id))?.assetId != nil {
+                syncedIds.insert(recording.id)
+                return .synced
+            }
+        }
+        return heldForWiFi ? .waitingForWiFi : .onDevice
+    }
+
+    /// The connection is cellular and the setting says media stays off it.
+    /// A clip's badge says so, and the Library banner reads the same policy
+    /// once there is something actually waiting on it.
+    public var heldForWiFi: Bool {
+        network == .cellular && wiFiOnlyForMedia()
+    }
+
+    /// Media is held back and there is media to hold: what the Library banner
+    /// shows.
+    public var waitingForWiFi: Bool {
+        heldForWiFi && pendingMedia
+    }
+
+    /// Whether media may ride the connection the phone has right now.
+    private var mediaAllowed: Bool {
+        online && !heldForWiFi
     }
 
     /// How often the phone looks at the cloud on its own. Notes are written
@@ -234,7 +264,7 @@ public final class SyncEngine {
         guard online else { return }
         await syncLibrary()
         await refreshStorage()
-        guard !storageFull else { return }
+        guard !storageFull, mediaAllowed else { return }
         await uploadPendingRecordings()
         await uploadPendingInspirationMedia()
     }
@@ -259,28 +289,40 @@ public final class SyncEngine {
         }
     }
 
-    /// Anything the journal still owes the cloud after a pass.
+    /// Anything the journal still owes the cloud after a pass. Media held
+    /// back for Wi-Fi is not queued work: nothing about waiting is retried on
+    /// a clock, and the network change that lifts the hold kicks a pass.
     private var pendingWork: Bool {
         if !(((try? journal.tombstones()) ?? []).isEmpty) { return true }
         if notesPending { return true }
-        if (media?.recordings ?? []).contains(where: {
-            !unreadable.contains($0.id) && ((try? journal.recordingRemote($0.id))?.assetId) == nil
-        }) { return true }
-        return (ideas?.inspiration ?? []).contains { item in
-            switch item.kind {
-            case .link:
-                ((try? journal.isInspirationLinkSynced(item.id)) ?? true) == false
-                    || ((try? journal.inspirationImportJobId(item.id)) ?? nil) != nil
-            case .media:
-                ((try? journal.inspirationRemoteAssetId(item.id)) ?? nil) == nil
-            }
-        }
+        if linksPending { return true }
+        return mediaAllowed && pendingMedia
     }
 
     /// Folders and notes the phone still owes the cloud.
     private var notesPending: Bool {
         !(((try? journal.dirtyNotes()) ?? []).isEmpty)
             || !(((try? journal.dirtyNoteFolders()) ?? []).isEmpty)
+    }
+
+    /// Links the cloud has not been handed, or is still fetching.
+    private var linksPending: Bool {
+        (ideas?.inspiration ?? []).contains { item in
+            guard case .link = item.kind else { return false }
+            return ((try? journal.isInspirationLinkSynced(item.id)) ?? true) == false
+                || ((try? journal.inspirationImportJobId(item.id)) ?? nil) != nil
+        }
+    }
+
+    /// Bytes the phone still owes the cloud: clips it shot, media it saved.
+    private var pendingMedia: Bool {
+        if (media?.recordings ?? []).contains(where: {
+            !unreadable.contains($0.id) && ((try? journal.recordingRemote($0.id))?.assetId) == nil
+        }) { return true }
+        return (ideas?.inspiration ?? []).contains { item in
+            guard case .media = item.kind else { return false }
+            return ((try? journal.inspirationRemoteAssetId(item.id)) ?? nil) == nil
+        }
     }
 
     // MARK: Deletes
@@ -489,7 +531,7 @@ public final class SyncEngine {
 
     // MARK: Recordings
 
-    /// A finished recording heads for the cloud at once (policy permitting).
+    /// A finished recording heads for the cloud at once, or waits for Wi-Fi.
     public func recordingAdded(_ recording: Recording) {
         unreadable.removeAll()
         kick()
@@ -497,7 +539,7 @@ public final class SyncEngine {
 
     private func uploadPendingRecordings() async {
         for recording in media?.recordings ?? [] {
-            guard online, !storageFull else { return }
+            guard mediaAllowed, !storageFull else { return }
             let remote = try? journal.recordingRemote(recording.id)
             guard remote?.assetId == nil,
                   !uploading.contains(recording.id),
@@ -636,7 +678,7 @@ public final class SyncEngine {
     private func uploadPendingInspirationMedia() async {
         for item in ideas?.inspiration ?? [] {
             guard case .media(let fileName, let isVideo) = item.kind else { continue }
-            guard online, !storageFull else { continue }
+            guard mediaAllowed, !storageFull else { continue }
             guard ((try? journal.inspirationRemoteAssetId(item.id)) ?? nil) == nil else { continue }
             guard let fileURL = ideas?.mediaURL(fileName: fileName),
                   let bytes = fileURL.fileByteCount else { continue }

@@ -22,6 +22,8 @@ struct MediaScreen: View {
         VStack(spacing: 0) {
             if media.storageFull {
                 StorageBanner()
+            } else if media.waitingForWiFi {
+                WiFiBanner()
             }
             ScreenHeader(title: headerTitle, app: app, auth: auth) {
                 if selecting {
@@ -199,6 +201,20 @@ struct StorageBanner: View {
     }
 }
 
+/// Cellular, with videos set to Wi-Fi only: the clips are on the phone and
+/// go up as soon as it joins a network.
+struct WiFiBanner: View {
+    var body: some View {
+        Label("On cellular — videos upload on Wi-Fi", systemImage: "wifi")
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 8)
+            .background(Color(hex: "#3c4043").ignoresSafeArea(edges: [.top, .horizontal]))
+    }
+}
+
 struct RecordingCard: View {
     let recording: Recording
     var media: MediaModel
@@ -245,21 +261,31 @@ struct RecordingCard: View {
     }
 }
 
-/// Shown on a card only while its bytes are on their way up, in the same
-/// white-on-scrim overlay the duration reads in. A clip that is settled —
-/// on the phone or in the cloud — carries no badge.
+/// Shown on a card while its bytes are on their way up, or while they are
+/// waiting for Wi-Fi, in the same white-on-scrim overlay the duration reads
+/// in. A clip that is settled — on the phone or in the cloud — carries no
+/// badge.
 struct SyncBadge: View {
     let state: RecordingSyncState
 
     var body: some View {
-        if case .uploading = state {
-            Text("Syncing")
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 8))
+        switch state {
+        case .uploading:
+            scrim { Text("Syncing") }
+        case .waitingForWiFi:
+            scrim { Label("Wi-Fi", systemImage: "wifi") }
+        case .onDevice, .synced:
+            EmptyView()
         }
+    }
+
+    private func scrim(@ViewBuilder _ content: () -> some View) -> some View {
+        content()
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 

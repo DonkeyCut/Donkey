@@ -54,6 +54,7 @@ final class AppWiring {
             journal: store,
             service: cloud,
             signedIn: { auth.isSignedIn },
+            wiFiOnlyForMedia: { app.mediaOnWiFiOnly },
             uploadFor: { recording in
                 await CutCloudClient.uploadPayload(for: recording, media: media)
             }

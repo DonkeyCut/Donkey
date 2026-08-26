@@ -363,9 +363,11 @@ public protocol CloudProjectsServicing: AnyObject, Sendable {
 
 // MARK: - Network policy
 
-/// The connection the sync engine is working over. Whether cellular data may
-/// be spent is the system's call: iOS Settings carries the per-app Cellular
-/// Data switch, and a request it forbids fails on its own.
+/// The connection the sync engine is working over. Notes and other small
+/// payloads ride any of them; media waits for `.wifi` while the app's
+/// Wi-Fi-only setting holds. Whether the app may touch cellular at all stays
+/// the system's call: iOS Settings carries the per-app Cellular Data switch,
+/// and a request it forbids fails on its own.
 nonisolated public enum NetworkPath: Equatable, Sendable {
     case wifi
     case cellular

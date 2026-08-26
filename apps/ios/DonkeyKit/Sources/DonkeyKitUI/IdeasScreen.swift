@@ -27,6 +27,9 @@ struct IdeasScreen: View {
     var body: some View {
         NavigationStack(path: $path) {
             VStack(spacing: 0) {
+                if media.waitingForWiFi {
+                    WiFiBanner()
+                }
                 ScreenHeader(title: "Ideas", app: app, auth: auth)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
