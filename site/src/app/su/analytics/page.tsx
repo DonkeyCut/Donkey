@@ -21,7 +21,7 @@ import type {
 import { REFERRAL_SOURCES } from "@/lib/onboarding/sequence";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { cn } from "@/lib/utils";
-import { DragBlock, useReorder } from "@/app/cut/app/su/analytics/Reorder";
+import { DragBlock, useReorder } from "@/app/su/analytics/Reorder";
 import { useAnalyticsRollup } from "@/queries/analytics";
 import { ApiError } from "@/queries/apiClient";
 

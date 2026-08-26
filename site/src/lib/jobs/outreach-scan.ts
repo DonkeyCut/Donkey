@@ -16,7 +16,7 @@ const BATCH = 50;
 
 // Rolls credit usage into the outreach list. Runs nightly from
 // /api/marketing/outreach/scan and by hand from the Outreach tab's Scan now
-// button. Everything the /su page shows is written here, so the page itself
+// button. Everything the Outreach tab shows is written here, so the page itself
 // never touches the credit tables.
 export const outreachScanJob = defineJob(z.object({}).strict(), async () => {
   const startedAt = new Date();

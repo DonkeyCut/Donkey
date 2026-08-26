@@ -6,7 +6,7 @@ import { useRef, useState } from "react";
 import {
   useLastOutreachStart,
   useOutreachDrafts,
-} from "@/app/cut/app/su/outreach/drafts";
+} from "@/app/su/outreach/drafts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {

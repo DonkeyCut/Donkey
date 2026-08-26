@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
-import { SU_NAV } from "@/app/cut/app/su/nav";
-import { useCutBase } from "@/cut/lib/nav";
+import { SU_NAV } from "@/app/su/nav";
+import { SU_APP_ORIGIN } from "@/cut/lib/hosts";
 import { cn } from "@/lib/utils";
 
 const itemClass =
@@ -15,7 +15,6 @@ const itemClass =
 // admin surfaces as tabs and a way back to the app pinned to the bottom.
 export function SuSidebar() {
   const pathname = usePathname();
-  const base = useCutBase();
 
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-card px-3 py-4">
@@ -33,8 +32,7 @@ export function SuSidebar() {
       </div>
 
       <nav className="flex flex-col gap-0.5">
-        {SU_NAV.map(({ suffix, label, icon: Icon }) => {
-          const href = `${base}/su${suffix}`;
+        {SU_NAV.map(({ href, label, icon: Icon }) => {
           const active = pathname === href;
           return (
             <Link
@@ -49,11 +47,12 @@ export function SuSidebar() {
         })}
       </nav>
 
+      {/* The app is a different host, so this is a document load. */}
       <div className="mt-auto flex flex-col">
-        <Link href={base} className={itemClass}>
+        <a href={`${SU_APP_ORIGIN}/app`} className={itemClass}>
           <ArrowLeft className="size-4" />
           Back to app
-        </Link>
+        </a>
       </div>
     </aside>
   );

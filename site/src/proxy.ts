@@ -1,14 +1,19 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { allowedOrigin, corsHeaders, preflightHeaders } from "@/cut/server/cors";
-import { DONKEYCUT_CANONICAL, isDonkeycutHost } from "@/cut/lib/hosts";
+import { DONKEYCUT_CANONICAL, isDonkeycutHost, isSuHost } from "@/cut/lib/hosts";
 
 // Cut (the video editor, publicly "Donkey Cut") lives under /cut in this single
-// site app: the marketing landing at /cut and the app under /cut/app. Every
-// host gets the same mapping — "/" → landing, "/app/…" → editor app (generic
-// "/…" → "/cut/…" rewrite) — with donkeycut.com as the one production host.
-// The auth pages (/sign-in, /sign-up), "/install", and the legal pages are
-// real root-level routes and pass through the rewrite.
+// site app: the marketing landing at /cut and the app under /cut/app. The
+// product host gets that mapping — "/" → landing, "/app/…" → editor app
+// (generic "/…" → "/cut/…" rewrite) — with donkeycut.com as the one production
+// host. The auth pages (/sign-in, /sign-up), "/install", and the legal pages
+// are real root-level routes and pass through the rewrite.
+//
+// su.donkeycut.com is the second surface this file routes: the super-user
+// section under /su, served at bare addresses ("/analytics") on that host
+// alone. It shares the deployment and its /api handlers, and it shares the
+// session, because auth cookies are scoped to donkeycut.com (src/lib/auth.ts).
 // www. 308s to the apex; retired domains redirect to donkeycut.com at the
 // edge (Cloudflare) and never reach this app.
 //
@@ -69,11 +74,27 @@ const underPath = (pathname: string, prefix: string) =>
 const passesThrough = (pathname: string) =>
   PASSTHROUGH.some((p) => underPath(pathname, p));
 
+// The super-user host serves one section and nothing else: /su/… for pages,
+// the shared /api handlers for their data. Nothing here belongs in a search
+// index, so every page response carries the header that says so.
+const SU_ROOT = "/su";
+
+function suHost(req: NextRequest, pathname: string): NextResponse {
+  if (underPath(pathname, "/api")) return NextResponse.next();
+  const url = req.nextUrl.clone();
+  url.pathname = `${SU_ROOT}${pathname === "/" ? "" : pathname}`;
+  const res = NextResponse.rewrite(url);
+  res.headers.set("X-Robots-Tag", "noindex, nofollow");
+  return res;
+}
+
 export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (isCutApi(pathname)) return cutApi(req);
 
   const host = req.headers.get("host");
+
+  if (isSuHost(host)) return suHost(req, pathname);
 
   // Aliases (www.) canonicalize to the apex.
   if (isDonkeycutHost(host) && host?.split(":")[0] !== "donkeycut.com") {

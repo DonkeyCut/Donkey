@@ -1,7 +1,7 @@
 // Founder outreach: one row per account per campaign, seeded by the nightly
-// outreach-scan job (src/lib/jobs/outreach-scan.ts) and worked by hand from
-// /app/su/outreach. The row is a marker, not a mailbox — it carries status,
-// timestamps, and the scan's credit snapshot, never a subject or a message
+// outreach-scan job (src/lib/jobs/outreach-scan.ts) and worked by hand from the
+// super-user Outreach tab. The row is a marker, not a mailbox — it carries
+// status, timestamps, and the scan's credit snapshot, never a subject or a message
 // body. The conversation itself lives in the operator's inbox.
 
 model UserOutreach {

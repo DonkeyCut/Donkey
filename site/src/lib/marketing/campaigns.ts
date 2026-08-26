@@ -1,4 +1,4 @@
-// The outreach campaigns the scan and the /su surface know about. Ids are
+// The outreach campaigns the scan and the super-user surface know about. Ids are
 // code, not data: adding one here is what makes it scannable and listable.
 
 /** Free accounts that have spent credits — the people worth a personal note. */
