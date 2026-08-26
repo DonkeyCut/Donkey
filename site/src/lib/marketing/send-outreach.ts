@@ -1,15 +1,10 @@
-import OutreachEmail from "@/emails/outreach";
 import {
   emailFrom,
   getResend,
   isResendConfigured,
   type EmailUser,
 } from "@/lib/email/resend";
-import {
-  isMarketingUnsubscribed,
-  unsubscribeActionUrl,
-  unsubscribePageUrl,
-} from "@/lib/email/unsubscribe";
+import { isMarketingUnsubscribed, unsubscribePageUrl } from "@/lib/email/unsubscribe";
 import { outreachReplyAddress } from "@/lib/marketing/replyAddress";
 import {
   fillOutreachText,
@@ -38,10 +33,17 @@ type SendOutreachInput = {
   vars: OutreachVars;
 };
 
-// Sends one outreach note. Promotional mail, so it checks the opt-out first and
-// carries the one-click unsubscribe headers alongside the link in the message.
-// The reply-to is the row's own address: a reply comes back through Resend
-// Inbound and finds its row without matching on the sender.
+// One person writing to one person, so the message goes out as text/plain with
+// no markup, no template shell, and no bulk-mail headers. A mail provider reads
+// an HTML body or a `List-Unsubscribe` header as a mailing list and files the
+// note under promotions; the opt-out still rides along as a line of text and
+// the send still checks it first.
+function outreachText(body: string, unsubscribeUrl: string): string {
+  return `${body.trim()}\n\n--\nUnsubscribe from product emails: ${unsubscribeUrl}\n`;
+}
+
+// Sends one outreach note. The reply-to is the row's own address: a reply comes
+// back through Resend Inbound and finds its row without matching on the sender.
 export async function sendOutreachEmail({
   attempt,
   body,
@@ -79,16 +81,7 @@ export async function sendOutreachEmail({
       to: user.email,
       replyTo: outreachReplyAddress(outreachId),
       subject: filledSubject,
-      react: OutreachEmail({
-        body: filledBody,
-        unsubscribeUrl: unsubscribePageUrl(user.id),
-      }),
-      // RFC 8058 one-click: mail providers POST here with no session; the
-      // signed token in the URL is the authorization.
-      headers: {
-        "List-Unsubscribe": `<${unsubscribeActionUrl(user.id)}>`,
-        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-      },
+      text: outreachText(filledBody, unsubscribePageUrl(user.id)),
     },
     { idempotencyKey: `outreach:${outreachId}:${attempt}` },
   );
