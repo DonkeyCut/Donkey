@@ -3722,6 +3722,9 @@ function ClipView({
   // transition is a render-time blend at the cut, drawn as the bar above the
   // tracks — so a box's width is the clip's own length, whatever joins it.
   const w = Math.max(10, span.len * pps);
+  // The box is drawn a gutter narrower than the footprint, so everything laid
+  // out inside it — the strip, the dots — measures against this, not `w`.
+  const barW = Math.max(10, w - CLIP_GAP);
   const filmIn = clip.in;
   const filmOut = filmIn + span.len * speed;
 
@@ -3785,7 +3788,7 @@ function ClipView({
       style={{
         left: drag ? drag.ghostX : (partAt ?? span.start) * pps,
         top: drag ? 2 + drag.ghostY : undefined,
-        width: Math.max(10, w - CLIP_GAP),
+        width: barW,
         height: hasWave ? VIDEO_H - 4 : FILM_H,
         // Inline so it beats SELECTED_SHADOW's z-10 class on the same element.
         zIndex: drag ? 20 : undefined,
@@ -3811,7 +3814,7 @@ function ClipView({
           className="tl-clip-wave pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-b from-[#59c09d] to-[#43b18d]"
           style={{ height: WAVE_H }}
         >
-          <WaveformCanvas asset={asset} from={filmIn} to={filmOut} w={w} h={WAVE_H - 4} className="inset-x-0 inset-y-0.5" />
+          <WaveformCanvas asset={asset} from={filmIn} to={filmOut} w={barW} h={WAVE_H - 4} className="inset-x-0 inset-y-0.5" />
         </div>
       )}
       {selected && (
@@ -3878,7 +3881,7 @@ function ClipView({
           kind="clip"
           t={k.t}
           pps={pps}
-          width={w}
+          width={barW}
         />
       ))}
       <span
@@ -3928,6 +3931,7 @@ function ClipMaskKeyStrip({
   hidden: boolean;
 }) {
   if (hidden || !clip.mask?.kf?.length) return null;
+  const barW = Math.max(10, w - CLIP_GAP);
   return (
     <div
       className="pointer-events-none absolute z-5"
@@ -3936,7 +3940,7 @@ function ClipMaskKeyStrip({
         // A hair below the bar's bottom edge, deep enough that the diamonds —
         // the picked one's ring included — never touch the clip's box.
         top: boxH + 3,
-        width: Math.max(10, w - CLIP_GAP),
+        width: barW,
         height: 16,
       }}
     >
@@ -3949,7 +3953,7 @@ function ClipMaskKeyStrip({
           track="mask"
           t={k.t}
           pps={pps}
-          width={w}
+          width={barW}
         />
       ))}
     </div>
@@ -4593,9 +4597,15 @@ function MuteChip({
   );
 }
 
+/** A wave canvas's intrinsic width cap. A deep zoom puts a long song at
+ * 100k+ px, far past the browser's canvas limit — one capped, CSS-stretched
+ * canvas turns blocky there, so the strip is drawn as a run of tiles this
+ * wide, each 1:1 with the pixel grid. */
+const WAVE_TILE_W = 4096;
+
 /** Waveform bars for the slice of `asset` between source times `from` and
- * `to`, stretched across a `w`px bar. Each bar folds the max of every peak
- * bucket it covers, so a zoomed-out strip keeps its transients. */
+ * `to`, across a `w`px bar. Each bar folds the max of every peak bucket it
+ * covers, so a zoomed-out strip keeps its transients. */
 function WaveformCanvas({
   asset,
   from,
@@ -4611,38 +4621,103 @@ function WaveformCanvas({
   h: number;
   className?: string;
 }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const peaks = asset.peaks;
   // The strip is drawn against the clip's own loudest moment, so a quietly
   // recorded clip shows its shape instead of a flat line (lib/waveform.ts).
   const gain = useMemo(() => waveGain(peaks ?? []), [peaks]);
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !peaks?.length) return;
-    // Cap the backing store below browser canvas limits; the element is
-    // CSS-stretched to the bar, so past the cap bars widen instead of the
-    // tail going bare (a canvas keeps its intrinsic width under inset-x-0).
-    const width = Math.min(16384, Math.round(w));
-    canvas.width = width;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d")!;
-    ctx.clearRect(0, 0, width, h);
-    ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
-    const n = peaks.length;
-    const bars = Math.max(1, Math.floor(width / 3));
-    const start = (from / asset.duration) * n;
-    const perBar = (((to - from) / asset.duration) * n) / bars;
-    for (let i = 0; i < bars; i++) {
-      const a = Math.max(0, Math.min(n - 1, Math.floor(start + i * perBar)));
-      const b = Math.max(a + 1, Math.ceil(start + (i + 1) * perBar));
-      let p = 0;
-      for (let j = a; j < b && j < n; j++) if (peaks[j] > p) p = peaks[j];
-      const bh = Math.max(1.5, Math.min(1, p * gain) * (h - 2));
-      ctx.fillRect(i * 3, (h - bh) / 2, 2, bh);
-    }
-  }, [asset.duration, peaks, gain, from, to, w, h]);
   if (!peaks?.length) return null;
-  return <canvas ref={canvasRef} className={cn("pointer-events-none absolute w-full", className)} />;
+  const width = Math.max(1, Math.round(w));
+  const tiles: { left: number; tw: number }[] = [];
+  for (let left = 0; left < width; left += WAVE_TILE_W)
+    tiles.push({ left, tw: Math.min(WAVE_TILE_W, width - left) });
+  return (
+    <div className={cn("pointer-events-none absolute overflow-hidden", className)}>
+      {tiles.map((t) => (
+        <WaveTile
+          key={t.left}
+          peaks={peaks}
+          gain={gain}
+          duration={asset.duration}
+          from={from + (to - from) * (t.left / width)}
+          to={from + (to - from) * ((t.left + t.tw) / width)}
+          left={t.left}
+          tw={t.tw}
+          h={h}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** One tile of a waveform strip. A tile on or near the screen paints in its
+ * effect; one far down a zoomed-out-of-view stretch waits for the viewport to
+ * approach, so a deep zoom books backing store only for what gets seen. */
+function WaveTile({
+  peaks,
+  gain,
+  duration,
+  from,
+  to,
+  left,
+  tw,
+  h,
+}: {
+  peaks: number[];
+  gain: number;
+  duration: number;
+  from: number;
+  to: number;
+  left: number;
+  tw: number;
+  h: number;
+}) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    let drawn = false;
+    const draw = () => {
+      if (drawn) return;
+      drawn = true;
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      canvas.width = Math.round(tw * dpr);
+      canvas.height = Math.round(h * dpr);
+      const ctx = canvas.getContext("2d")!;
+      ctx.scale(dpr, dpr);
+      ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
+      const n = peaks.length;
+      const bars = Math.max(1, Math.floor(tw / 3));
+      const start = (from / duration) * n;
+      const perBar = (((to - from) / duration) * n) / bars;
+      for (let i = 0; i < bars; i++) {
+        const a = Math.max(0, Math.min(n - 1, Math.floor(start + i * perBar)));
+        const b = Math.max(a + 1, Math.ceil(start + (i + 1) * perBar));
+        let p = 0;
+        for (let j = a; j < b && j < n; j++) if (peaks[j] > p) p = peaks[j];
+        const bh = Math.max(1.5, Math.min(1, p * gain) * (h - 2));
+        ctx.fillRect(i * 3, (h - bh) / 2, 2, bh);
+      }
+    };
+    // On-screen tiles paint now — a zoom redraws with no flicker — and the
+    // rest paint as the viewport nears them.
+    const r = canvas.getBoundingClientRect();
+    if (r.right > -WAVE_TILE_W && r.left < window.innerWidth + WAVE_TILE_W) {
+      draw();
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          draw();
+          io.disconnect();
+        }
+      },
+      { rootMargin: `50% ${WAVE_TILE_W}px` }
+    );
+    io.observe(canvas);
+    return () => io.disconnect();
+  }, [peaks, gain, duration, from, to, tw, h]);
+  return <canvas ref={ref} className="absolute top-0" style={{ left, width: tw, height: h }} />;
 }
 
 function AudioView({
@@ -4686,6 +4761,9 @@ function AudioView({
   const loading = useEditor((s) => (asset ? s.loadingMedia.has(asset.fileName) : false));
   const len = clipLen(clip);
   const w = Math.max(10, len * pps);
+  // The bar is drawn a gutter narrower than the footprint; what sits inside
+  // it measures against that.
+  const barW = Math.max(10, w - CLIP_GAP);
 
   if (!asset) return null;
 
@@ -4707,7 +4785,7 @@ function AudioView({
       style={{
         left: drag ? drag.ghostX : clip.start * pps,
         top: top + 2 + (drag ? drag.ghostY : 0),
-        width: Math.max(10, w - CLIP_GAP),
+        width: barW,
         height: AUDIO_H - 4,
         // Inline so it beats SELECTED_SHADOW's z-10 class on the same element.
         zIndex: drag || rowMove === "lift" ? 20 : undefined,
@@ -4715,7 +4793,7 @@ function AudioView({
       data-tl-sel={`audio:${clip.id}`}
       onPointerDown={(e) => startLaneMove(e, "audio", clip.id, ui)}
     >
-      <WaveformCanvas asset={asset} from={clip.in} to={clip.out} w={w} h={AUDIO_H - 8} className="inset-x-0 inset-y-1" />
+      <WaveformCanvas asset={asset} from={clip.in} to={clip.out} w={barW} h={AUDIO_H - 8} className="inset-x-0 inset-y-1" />
       {(clip.fadeIn ?? 0) > 0 && (
         <div
           className="tl-fade-in pointer-events-none absolute inset-y-0 left-0 bg-gradient-to-r from-black/45 to-transparent"
@@ -4930,6 +5008,9 @@ function TextBar({
   onMenu: (m: { x: number; y: number; id: string; key?: number }) => void;
 }) {
   const w = Math.max(8, (o.end - o.start) * pps);
+  // The bar is drawn a gutter narrower than the footprint; the keys on it
+  // measure against that.
+  const barW = Math.max(8, w - CLIP_GAP);
   // Element rows are a z-order, so the top of the stack is a place a drag
   // can reach: past the top edge opens a row there.
   const ui = { pps, rowH: TEXT_H, laneCount, homeRow, topInsert: true, onDrag, onSnap };
@@ -4973,7 +5054,7 @@ function TextBar({
       style={{
         left: drag ? drag.ghostX : o.start * pps,
         top: top + 2 + (drag ? drag.ghostY : 0),
-        width: Math.max(8, w - CLIP_GAP),
+        width: barW,
         height: TEXT_H - 6,
         // Inline so it beats SELECTED_SHADOW's z-10 class on the same element.
         zIndex: drag || rowMove === "lift" ? 20 : undefined,
@@ -4991,10 +5072,10 @@ function TextBar({
       {/* Keys sit on the bar where they fall, so a track is visible without
           opening the inspector. */}
       {(o.kf ?? []).map((k) => (
-        <KeyMarker key={k.t} item={o} kind="overlay" t={k.t} pps={pps} width={w} onMenu={onMenu} />
+        <KeyMarker key={k.t} item={o} kind="overlay" t={k.t} pps={pps} width={barW} onMenu={onMenu} />
       ))}
       {(o.mask?.kf ?? []).map((k) => (
-        <KeyMarker key={`m${k.t}`} item={o} kind="overlay" track="mask" t={k.t} pps={pps} width={w} />
+        <KeyMarker key={`m${k.t}`} item={o} kind="overlay" track="mask" t={k.t} pps={pps} width={barW} />
       ))}
       <HideChip
         hidden={!!o.hidden}

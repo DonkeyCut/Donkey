@@ -2100,13 +2100,21 @@ async function pumpEdgeFrames() {
   }
 }
 
-/** Waveform buckets per second of media. Density scaling with length keeps a
- * zoomed-in strip honest; the bounds keep tiny stings drawable and hour-long
- * files a bounded array. */
-const PEAKS_PER_SECOND = 50;
+/** Waveform buckets per second of media. At the deepest zoom (800 px/s) a
+ * bucket spans 4px — about one drawn bar — so the strip stays honest at every
+ * zoom. */
+const PEAKS_PER_SECOND = 200;
+/** Most buckets one source may hold. The array stays resident for the whole
+ * session — on the asset and in the cache entry beside it — so length is what
+ * bounds the memory a project of long sources costs. Anything up to five
+ * minutes keeps the full density; past that the strip folds more of the
+ * source into each bar the further in it is zoomed. */
+const PEAKS_MAX = 60_000;
 
 function makePeaks(src: string | Blob, duration: number): Promise<number[]> {
   const buckets =
-    duration > 0 ? Math.min(30_000, Math.max(400, Math.round(duration * PEAKS_PER_SECOND))) : 1600;
+    duration > 0
+      ? Math.min(PEAKS_MAX, Math.max(400, Math.round(duration * PEAKS_PER_SECOND)))
+      : 1600;
   return audioPeaks(src, buckets);
 }
