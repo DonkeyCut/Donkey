@@ -11,6 +11,7 @@ import { chatsCloud } from "./chats";
 import { copyJobs } from "./copyQueue";
 import { runGc } from "./gc";
 import { jobsCloud } from "./jobs";
+import { clipTitleCloud } from "./clipTitle";
 import { libraryCloud } from "./library";
 import { mediaCloud } from "./media";
 import { notesCloud } from "./notes";
@@ -72,6 +73,7 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "POST", path: "/api/cut-cloud/library/complete", handler: (r, u) => libraryCloud.complete(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/presign-get", handler: (r, u) => libraryCloud.presignGetBatch(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/use", handler: (r, u) => libraryCloud.use(u, r) },
+  { method: "POST", path: "/api/cut-cloud/library/title", handler: (r, u) => clipTitleCloud.title(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/save", handler: (r, u) => libraryCloud.save(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/move", handler: (r, u) => libraryCloud.move(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/templates", handler: (r, u) => libraryCloud.saveTemplate(u, r) },

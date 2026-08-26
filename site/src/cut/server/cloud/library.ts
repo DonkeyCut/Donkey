@@ -37,6 +37,10 @@ const PRESIGN_GET_BATCH_MAX = 500;
  * the source project doc. */
 interface AssetMeta {
   name?: string;
+  /** The short name the titling model read off the clip itself, standing in
+   * for the file's own name wherever the asset is shown. Written once, by
+   * cloud/clipTitle.ts. */
+  title?: string;
   type?: "video" | "audio" | "image" | "font";
   duration?: number;
   width?: number;
@@ -93,6 +97,7 @@ function assetView(
     folderId: row.folderId ?? null,
     ...(meta.source ? { source: meta.source } : {}),
     ...(meta.posterFile ? { posterFile: meta.posterFile } : {}),
+    ...(meta.title ? { title: meta.title } : {}),
     ...(meta.origin ? { origin: meta.origin } : {}),
   };
 }

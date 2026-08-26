@@ -54,7 +54,9 @@ export const lightboxItemFromLibrary = (
 ): LightboxItem => ({
   kind: a.type,
   src: libraryMediaUrl(a.fileName, a.residency),
-  name: a.name,
+  // The title read off the clip is what it is called wherever it is shown, so
+  // the viewer captions it that way and an import from here lands under it.
+  name: a.title || a.name,
   prompt: "",
   assetId: null,
   libraryId: a.id,

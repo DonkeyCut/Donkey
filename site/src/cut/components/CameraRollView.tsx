@@ -13,9 +13,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useClipTitles } from "@/cut/lib/clipTitle";
 import { deleteFromLibrary, type LibraryAsset } from "@/cut/lib/library";
 import { lightboxItemFromLibrary, useLightbox } from "@/cut/lib/lightbox";
 import { patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
+import { formatDate } from "@/cut/lib/time";
 import { shapeBand } from "@/cut/lib/types";
 import { Lightbox } from "./Lightbox";
 import { LibraryCard } from "./LibraryView";
@@ -24,7 +26,8 @@ import { LibraryCard } from "./LibraryView";
  * asset tagged origin "camera", newest first. Clips here are ordinary library
  * assets — the editor's Library panel offers them to any project — this page
  * is where they are watched and pruned. The listing stays live while the tab
- * is open, so a recording made on the phone arrives on its own. */
+ * is open, so a recording made on the phone arrives on its own, and names
+ * itself off what is said in it. */
 export function CameraRollView() {
   const client = useQueryClient();
   // The phone fills this page, so it re-reads on a timer and whenever the
@@ -38,6 +41,7 @@ export function CameraRollView() {
     (fn: Parameters<typeof patchLibrary>[1]) => patchLibrary(client, fn),
     [client]
   );
+  useClipTitles(clips, patch);
 
   const remove = async () => {
     if (!deleting) return;
@@ -87,6 +91,7 @@ export function CameraRollView() {
                   key={a.id}
                   asset={a}
                   area={TILE_AREA}
+                  caption={formatDate(a.addedAt)}
                   onClick={() =>
                     useLightbox.getState().open(lightboxItemFromLibrary(a, true))
                   }
@@ -101,7 +106,7 @@ export function CameraRollView() {
       <AlertDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete “{deleting?.name}”?</AlertDialogTitle>
+            <AlertDialogTitle>Delete “{deleting?.title || deleting?.name}”?</AlertDialogTitle>
             <AlertDialogDescription>
               The clip leaves your cloud Camera Roll and the phone it was shot on. Projects that
               already use it keep their own copy.

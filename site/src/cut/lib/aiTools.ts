@@ -2537,6 +2537,10 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         assets: lib.assets.map((a) => ({
           id: a.id,
           name: a.name,
+          // Read off the clip itself — what is said in it and what is on
+          // screen. A phone recording's own name is the clock it was shot on,
+          // so this is what says which clip it is.
+          ...(a.title ? { title: a.title } : {}),
           kind: a.type,
           duration: round2(a.duration),
           ...(a.folderId ? { folderId: a.folderId } : {}),

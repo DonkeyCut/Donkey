@@ -78,6 +78,7 @@ import {
   type LibraryData,
   type LibraryFolder,
 } from "@/cut/lib/library";
+import { useClipTitles } from "@/cut/lib/clipTitle";
 import { patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
 import {
   activeResidency,
@@ -1257,6 +1258,9 @@ function AssetCard({
 // Not a server folder: assets tagged origin "camera" file here by themselves,
 // so phone footage is one click from any project.
 const CAMERA_ROLL_FOLDER = "camera-roll";
+/** A stable empty list, so the titling hook sees no work rather than a new
+ * array on every render. */
+const EMPTY_CLIPS: LibraryAsset[] = [];
 
 function LibraryPanel({ projectId }: { projectId: string }) {
   const client = useQueryClient();
@@ -1297,7 +1301,12 @@ function LibraryPanel({ projectId }: { projectId: string }) {
   // folder whatever their server folderId says.
   const folderOf = (a: LibraryAsset) =>
     a.origin === "camera" ? CAMERA_ROLL_FOLDER : (a.folderId ?? null);
-  const cameraCount = assets.filter((a) => a.origin === "camera").length;
+  const cameraClips = assets.filter((a) => a.origin === "camera");
+  const cameraCount = cameraClips.length;
+  // Phone recordings name themselves off what is said in them. Only while the
+  // Camera Roll folder is open — a panel showing anything else has no reason
+  // to read those files.
+  useClipTitles(openFolder === CAMERA_ROLL_FOLDER ? cameraClips : EMPTY_CLIPS, patch);
 
   // A remembered folder can vanish between sessions; drop back to the root.
   const knownFolder =

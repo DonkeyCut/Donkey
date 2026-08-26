@@ -62,6 +62,12 @@ export interface LibraryAsset {
    * recording (shown in Camera Roll, kept out of the Library grid) or an
    * inspiration item. Cloud shelf only. */
   origin?: "camera" | "inspiration";
+  /** A short name read off the clip itself — what is said in it and what is on
+   * screen — standing in for `name` wherever the asset is shown. A phone
+   * recording arrives named after the clock it was shot on, which tells nobody
+   * which clip it is; this is what the card, the viewer and the assistant read
+   * instead. Written once per clip by lib/clipTitle.ts. */
+  title?: string;
   /** Which shelf this came off. Stamped on arrival — the servers each answer
    * for themselves and don't know the other exists. */
   residency: Residency;
@@ -499,7 +505,9 @@ export async function carryAssetTo(
     new File([await res.blob()], asset.fileName),
     to,
     {
-      name: asset.name,
+      // A clip carried to another shelf keeps the name the user reads, which
+      // for a phone recording is the title read off the clip.
+      name: asset.title || asset.name,
       ...(asset.source ? { source: asset.source } : {}),
       ...(cover ? { poster: cover } : {}),
     },
@@ -696,7 +704,9 @@ export async function importLibraryAsset(
     projectId,
     {
       url: libraryMediaUrl(lib.fileName, lib.residency),
-      name: lib.name,
+      // The project's media takes the name the shelf shows, so a phone
+      // recording lands on the timeline under its title.
+      name: lib.title || lib.name,
       fileName: lib.fileName,
       type: lib.type,
       duration: lib.duration,

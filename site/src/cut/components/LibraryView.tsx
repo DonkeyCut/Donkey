@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -1032,6 +1032,7 @@ export function LibraryCard({
   offline = false,
   area,
   mention = false,
+  caption,
   dragGroup,
   onClick,
   onDelete,
@@ -1051,6 +1052,8 @@ export function LibraryCard({
   /** The card sits beside a prompt (the editor's Library panel), so its name
    * doubles as a mention token to copy. */
   mention?: boolean;
+  /** A line under the tile — where the Camera Roll puts a recording's date. */
+  caption?: ReactNode;
   /** Everything picked on this shelf right now. Dragging a card that is one of
    * them carries the whole set, so a drop lands the lot. */
   dragGroup?: LibraryAsset[];
@@ -1194,6 +1197,7 @@ export function LibraryCard({
             <div className="mx-3 flex items-center justify-between gap-2 border-t border-white/10 py-2 @[220px]:mx-5 @[220px]:py-3">
               <CopyNameLabel
                 name={a.name}
+                label={a.title}
                 dark
                 mention={false}
                 className="min-w-0 text-[11px] font-medium @[220px]:text-[13px]"
@@ -1411,6 +1415,7 @@ export function LibraryCard({
         {!font && (
           <CopyNameLabel
             name={a.name}
+            label={a.title}
             dark={a.type === "audio"}
             mention={mention}
             className={cn(
@@ -1421,6 +1426,11 @@ export function LibraryCard({
           />
         )}
       </div>
+      {caption && (
+        <div data-drag-omit className="mt-2 px-0.5 text-xs text-muted-foreground">
+          {caption}
+        </div>
+      )}
     </div>
   );
 }
