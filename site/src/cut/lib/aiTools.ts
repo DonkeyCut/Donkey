@@ -2558,17 +2558,25 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   },
 
   notes_list: async () => {
-      const { notes, folders } = await fetchNotes();
+      const { notes, folders, labels } = await fetchNotes();
       const folderName = new Map(folders.map((f) => [f.id, f.name]));
+      const labelName = new Map(labels.map((l) => [l.id, l.name]));
       return {
         folders: folders.map((f) => ({ id: f.id, name: f.name })),
-        notes: notes.map((n) => ({
-          id: n.id,
-          title: n.title,
-          body: n.body,
-          ...(n.folderId ? { folder: folderName.get(n.folderId) ?? n.folderId } : {}),
-          updatedAt: new Date(n.updatedAt).toISOString(),
-        })),
+        labels: labels.map((l) => l.name),
+        notes: notes.map((n) => {
+          const worn = n.labelIds
+            .map((id) => labelName.get(id))
+            .filter((name): name is string => !!name);
+          return {
+            id: n.id,
+            title: n.title,
+            body: n.body,
+            ...(n.folderId ? { folder: folderName.get(n.folderId) ?? n.folderId } : {}),
+            ...(worn.length > 0 ? { labels: worn } : {}),
+            updatedAt: new Date(n.updatedAt).toISOString(),
+          };
+        }),
       };
   },
 

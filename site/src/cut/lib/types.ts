@@ -192,6 +192,12 @@ export interface StoredAsset {
   chatId?: string;
 }
 
+/** Most labels one note may wear. Both clients hold the line at this — the
+ * picker stops offering more — and the write is refused past it, so a note
+ * never comes back from the server quietly wearing fewer labels than the
+ * person put on it. */
+export const NOTE_LABELS_MAX = 20;
+
 /** True for an asset that carries no sound. Only video and audio files hold an
  * audio track; a still (a freeze frame, an imported image) is not a media
  * container at all, and handing its URL to the audio reader fails the read

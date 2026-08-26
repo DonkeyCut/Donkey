@@ -20,6 +20,7 @@ export interface CutNote {
   body: string;
   colorIndex: number;
   folderId: string | null;
+  labelIds: string[];
   updatedAt: number;
   deletedAt: number | null;
   createdAt: number;
@@ -32,9 +33,19 @@ export interface CutNoteFolder {
   createdAt: number;
 }
 
+/** A label notes carry. Like folders, ids are client-generated and one PUT
+ * both creates and renames. */
+export interface CutNoteLabel {
+  id: string;
+  name: string;
+  updatedAt: number;
+  createdAt: number;
+}
+
 export interface NotesData {
   notes: CutNote[];
   folders: CutNoteFolder[];
+  labels: CutNoteLabel[];
 }
 
 /** The note paper palette, shared with the iOS app (NoteColor). Index into it
@@ -68,6 +79,7 @@ export async function fetchNotes(): Promise<NotesData> {
   return {
     notes: (body.notes ?? []).filter((n) => n.deletedAt === null),
     folders: body.folders ?? [],
+    labels: body.labels ?? [],
   };
 }
 
@@ -79,6 +91,7 @@ export async function saveNote(note: {
   body: string;
   colorIndex: number;
   folderId: string | null;
+  labelIds: string[];
 }): Promise<CutNote> {
   const res = await notesFetch(
     `/api/cut/notes/${encodeURIComponent(note.id)}`,
@@ -112,4 +125,23 @@ export async function deleteNoteFolder(id: string): Promise<void> {
     method: "DELETE",
   });
   if (!res.ok) throw new Error("Could not delete the folder.");
+}
+
+/** Create or rename a label under `id`. A create mints the id here so the
+ * new label is on the note before the write returns. */
+export async function saveNoteLabel(id: string, name: string): Promise<CutNoteLabel> {
+  const res = await notesFetch(
+    `/api/cut/notes/labels/${encodeURIComponent(id)}`,
+    json({ name }),
+  );
+  if (!res.ok) throw new Error("Could not save the label.");
+  return (await res.json()) as CutNoteLabel;
+}
+
+/** Delete a label. Every note carrying it lets it go. */
+export async function deleteNoteLabel(id: string): Promise<void> {
+  const res = await notesFetch(`/api/cut/notes/labels/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Could not delete the label.");
 }

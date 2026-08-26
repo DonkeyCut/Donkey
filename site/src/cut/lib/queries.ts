@@ -256,9 +256,9 @@ export function usePhoneLink() {
 }
 
 export const notesKey = ["cut", "notes"] as const;
-// The snapshot carries the notes and their folders together; the key moved
-// with that shape so a page holding the old array never paints from it.
-const NOTES_SNAPSHOT = "cut-notes-v2";
+// The snapshot carries the notes with their folders and labels; the key moves
+// with that shape so a page holding an old shape never paints from it.
+const NOTES_SNAPSHOT = "cut-notes-v3";
 
 /** The account's synced notes and their folders, phone and desktop edits
  * merged server-side. */

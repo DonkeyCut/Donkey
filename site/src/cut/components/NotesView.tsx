@@ -8,9 +8,11 @@ import { Button } from "@/components/ui/button";
 import {
   deleteNote,
   deleteNoteFolder,
+  deleteNoteLabel,
   noteColor,
   saveNote,
   saveNoteFolder,
+  saveNoteLabel,
   type CutNote,
 } from "@/cut/lib/notes";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
@@ -38,8 +40,9 @@ async function writeNote(
   client: QueryClient,
   d: NoteDraft,
   settleFolder: (folderId: string | null) => Promise<void>,
+  settleLabels: (labelIds: string[]) => Promise<string[]>,
 ): Promise<boolean> {
-  const { id, title, body, colorIndex, folderId } = d;
+  const { id, title, body, colorIndex, folderId, labelIds } = d;
   if (!title.trim() && !body.trim()) return true;
   if (!noteChanged(d)) return true;
   const now = Date.now();
@@ -49,6 +52,7 @@ async function writeNote(
     body: body.trim(),
     colorIndex,
     folderId,
+    labelIds,
     updatedAt: now,
     deletedAt: null,
     createdAt: now,
@@ -62,12 +66,17 @@ async function writeNote(
     };
   });
   await settleFolder(folderId);
+  // Only the labels whose own writes landed: one the server never got would be
+  // dropped from the note there, and the note would come back missing a label
+  // the picker is still showing.
+  const live = await settleLabels(labelIds);
   const saved = await saveNote({
     id,
     title: optimistic.title,
     body: optimistic.body,
     colorIndex,
     folderId,
+    labelIds: live,
   }).catch(() => null);
   if (!saved) return false;
   patchNotes(client, (prev) => ({
@@ -77,6 +86,14 @@ async function writeNote(
   return true;
 }
 
+/** A fresh label under a client-minted id, stamped now. */
+const mintLabel = (name: string) => ({
+  id: crypto.randomUUID(),
+  name,
+  updatedAt: Date.now(),
+  createdAt: Date.now(),
+});
+
 /** A stored note, opened for editing. */
 const draftOf = (n: CutNote): NoteDraft => ({
   id: n.id,
@@ -84,8 +101,9 @@ const draftOf = (n: CutNote): NoteDraft => ({
   body: n.body,
   colorIndex: n.colorIndex,
   folderId: n.folderId ?? null,
+  labelIds: n.labelIds,
   isNew: false,
-  saved: { title: n.title, body: n.body, colorIndex: n.colorIndex },
+  saved: { title: n.title, body: n.body, colorIndex: n.colorIndex, labelIds: n.labelIds },
 });
 
 /** Synced notes: written on the phone or here, merged by last writer wins.
@@ -110,6 +128,8 @@ export function NotesView() {
 
   const list = notes.data?.notes ?? [];
   const folders = notes.data?.folders ?? [];
+  const labels = notes.data?.labels ?? [];
+  const labelName = new Map(labels.map((l) => [l.id, l.name]));
   // The open folder and the open note both live in the URL (?folder=…&note=…),
   // so the browser's back button — the mouse's too — steps out of the note and
   // then out of the folder, and the location survives a reload.
@@ -159,8 +179,9 @@ export function NotesView() {
       colorIndex: 0,
       // A note written inside a folder is filed there.
       folderId: openFolder,
+      labelIds: [],
       isNew: true,
-      saved: { title: "", body: "", colorIndex: 0 },
+      saved: { title: "", body: "", colorIndex: 0, labelIds: [] },
     });
     openAt(id);
   };
@@ -174,11 +195,77 @@ export function NotesView() {
   const settleFolder = async (folderId: string | null) => {
     if (folderId) await folderWrites.current.get(folderId);
   };
+  // The same holds for labels: one made in the picker is on the note at once,
+  // and its own write is awaited before a note carries the id to the server.
+  // A write that failed answers false, and the id it minted never reaches a
+  // note — the server would drop it from labelIds without a word.
+  const labelWrites = useRef(new Map<string, Promise<boolean>>());
+  const settleLabels = async (labelIds: string[]) => {
+    const landed = await Promise.all(
+      labelIds.map(async (id) => (await labelWrites.current.get(id)) ?? true),
+    );
+    return labelIds.filter((_, i) => landed[i]);
+  };
+
+  /** Take a label out of the picker, off every note, and off the open draft.
+   * What a delete does here, and what a failed create undoes. */
+  const forgetLabel = (id: string) => {
+    patchNotes(client, (prev) => ({
+      ...prev,
+      labels: prev.labels.filter((l) => l.id !== id),
+      notes: prev.notes.map((n) =>
+        n.labelIds.includes(id)
+          ? { ...n, labelIds: n.labelIds.filter((l) => l !== id) }
+          : n,
+      ),
+    }));
+    const held = buffer.current;
+    if (held?.labelIds.includes(id)) {
+      edit({
+        ...held,
+        labelIds: held.labelIds.filter((l) => l !== id),
+        saved: { ...held.saved, labelIds: held.saved.labelIds.filter((l) => l !== id) },
+      });
+    }
+  };
+
+  /** Make a label under a fresh id and answer with it. */
+  const createLabel = (name: string): string => {
+    const label = mintLabel(name);
+    patchNotes(client, (prev) => ({ ...prev, labels: [...prev.labels, label] }));
+    const write = saveNoteLabel(label.id, name).then(
+      () => true,
+      () => {
+        // The label was never made, so it comes off the picker and off the
+        // note that was wearing it rather than lingering as a dead id.
+        forgetLabel(label.id);
+        return false;
+      },
+    );
+    labelWrites.current.set(label.id, write);
+    void write.finally(() => labelWrites.current.delete(label.id));
+    return label.id;
+  };
+
+  const renameLabel = (id: string, name: string) => {
+    patchNotes(client, (prev) => ({
+      ...prev,
+      labels: prev.labels.map((l) => (l.id === id ? { ...l, name } : l)),
+    }));
+    void saveNoteLabel(id, name).catch(() => reload());
+  };
+
+  /** Delete a label. Every note wearing it — the open draft too — lets it
+   * go. */
+  const removeLabel = (id: string) => {
+    forgetLabel(id);
+    void deleteNoteLabel(id).catch(() => reload());
+  };
 
   /** Write a note out and let go of it. */
   const commit = (d: NoteDraft) => {
     setEditing(null);
-    void writeNote(client, d, settleFolder).then((ok) => {
+    void writeNote(client, d, settleFolder, settleLabels).then((ok) => {
       if (!ok) reload();
     });
   };
@@ -231,6 +318,7 @@ export function NotesView() {
           body: n.body,
           colorIndex: n.colorIndex,
           folderId,
+          labelIds: n.labelIds,
         }).catch(() => null),
       ),
     );
@@ -317,9 +405,13 @@ export function NotesView() {
           draft={draft}
           back={draftFolderName ?? "All notes"}
           from={pageRef}
+          labels={labels}
           onChange={edit}
           onClose={closeNote}
           onDelete={remove}
+          onCreateLabel={createLabel}
+          onRenameLabel={renameLabel}
+          onDeleteLabel={removeLabel}
         />
       )}
       <div className="mb-5 flex items-center justify-between gap-4">
@@ -386,6 +478,7 @@ export function NotesView() {
           }}
           onDelete={async (id) => {
             patchNotes(client, (prev) => ({
+              ...prev,
               folders: prev.folders.filter((f) => f.id !== id),
               notes: prev.notes.map((n) =>
                 n.folderId === id ? { ...n, folderId: null } : n,
@@ -423,23 +516,40 @@ export function NotesView() {
           selected={selected}
           setSelected={setSelected}
         >
-          {shown.map((n) => (
-            <button
-              key={n.id}
-              data-sel-id={n.id}
-              draggable
-              onDragStart={(e) => onCardDragStart(e, n.id)}
-              className={cn(
-                "flex min-h-40 cursor-pointer flex-col gap-1.5 rounded-2xl p-4 text-left shadow-sm transition-transform hover:-translate-y-0.5",
-                selected.has(n.id) && "ring-2 ring-[#0a84ff]",
-              )}
-              style={{ backgroundColor: noteColor(n.colorIndex).background, color: NOTE_INK }}
-              onClick={() => openNote(n)}
-            >
-              {n.title && <div className="font-semibold">{n.title}</div>}
-              <div className="line-clamp-6 text-sm whitespace-pre-wrap opacity-80">{n.body}</div>
-            </button>
-          ))}
+          {shown.map((n) => {
+            const worn = n.labelIds
+              .map((id) => labelName.get(id))
+              .filter((name): name is string => !!name);
+            return (
+              <button
+                key={n.id}
+                data-sel-id={n.id}
+                draggable
+                onDragStart={(e) => onCardDragStart(e, n.id)}
+                className={cn(
+                  "flex min-h-40 cursor-pointer flex-col gap-1.5 rounded-2xl p-4 text-left shadow-sm transition-transform hover:-translate-y-0.5",
+                  selected.has(n.id) && "ring-2 ring-[#0a84ff]",
+                )}
+                style={{ backgroundColor: noteColor(n.colorIndex).background, color: NOTE_INK }}
+                onClick={() => openNote(n)}
+              >
+                {n.title && <div className="font-semibold">{n.title}</div>}
+                <div className="line-clamp-6 text-sm whitespace-pre-wrap opacity-80">{n.body}</div>
+                {worn.length > 0 && (
+                  <div className="mt-auto flex flex-wrap gap-1 pt-1.5">
+                    {worn.map((name) => (
+                      <span
+                        key={name}
+                        className="rounded-full bg-black/10 px-2 py-0.5 text-[11px] font-medium"
+                      >
+                        {name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </button>
+            );
+          })}
         </Marquee>
       )}
     </div>

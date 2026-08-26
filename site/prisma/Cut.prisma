@@ -149,11 +149,27 @@ model CutNote {
   colorIndex Int       @default(0)
   // The CutFolder (scope "note") this note is filed in; null is the top level.
   folderId   String?
+  // CutNoteLabel ids this note carries. Labels ride the note's own
+  // last-writer-wins write; ids naming no label are dropped on read.
+  labelIds   String[]  @default([])
   updatedAt  DateTime
   deletedAt  DateTime?
   createdAt  DateTime  @default(now())
 
   @@index([userId, updatedAt])
+}
+
+// One note label, shared by the iOS app and the desktop Notes tab. Like note
+// folders: the id is client-generated, one PUT creates and renames, and the
+// listing is the truth — a label missing from it was deleted.
+model CutNoteLabel {
+  id        String   @id
+  userId    String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }
 
 // Set once an account has been seen from the iOS app. The desktop shows its
