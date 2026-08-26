@@ -213,7 +213,7 @@ export const INSPECTOR_TOOLS = [
   {
     name: "set_speed",
     description:
-      "Set a video clip's playback speed. Faster shortens the clip on the timeline; slower stretches it. Later titles and captions shift to stay in sync.",
+      "Set a video clip's playback speed. Faster shortens the clip on the timeline; slower stretches it. Later clips, titles, captions, and soundtrack shift to stay in sync.",
     inputSchema: obj({ clipId: str("Video clip id"), speed: num("Playback rate (1 = normal, no upper limit)") }, ["clipId", "speed"]),
   },
   {

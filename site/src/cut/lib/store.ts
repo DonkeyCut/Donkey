@@ -415,12 +415,14 @@ export interface EditorState {
   /** Place an effect element; a drop passes where it landed. */
   addEffect: (effect: EffectId, aim?: { at?: number; lane?: number }) => void;
   updateClip: (id: string, patch: Partial<VideoClip>) => void;
-  /** Set a clip's playback rate (0.25–4). A longer footprint pushes the
-   * following clips right by the overflow; a shorter one opens a gap. */
+  /** Set a clip's playback rate (0.25–4). The footprint change carries the
+   * timeline behind it the way a trim does (see resizeClipFootprint). */
   setClipSpeed: (id: string, speed: number) => void;
-  /** Set a clip's source trim points with the same run rules as a speed
-   * resize: a longer footprint pushes the following clips right, a shorter
-   * one opens a gap, and a live dissolve keeps its overlap. */
+  /** Set a clip's source trim points. While track 0 is the only video track,
+   * a track-0 resize ripples: everything past the clip's tail rides the moved
+   * edge both directions, gaps keeping their width. Otherwise the run rules
+   * stay on the clip's own track: growth pushes the following clips right, a
+   * shrink opens a gap, and a live dissolve keeps its contact. */
   setClipTrim: (id: string, nextIn: number, nextOut: number) => void;
   /** Set the transition into the next clip (seconds; 0 clears it), optionally
    * changing its style; omitting the style keeps the current one. Upserts the
@@ -548,6 +550,14 @@ export interface EditorState {
   updateAudiosTransient: (patches: { id: string; patch: Partial<AudioClip> }[]) => void;
   updateCuesTransient: (patches: { id: string; patch: Partial<SubtitleCue> }[]) => void;
   updateClipsTransient: (patches: { id: string; patch: Partial<VideoClip> }[]) => void;
+  /** Patch every collection in one write — a trim gesture's ripple lands the
+   * whole document per pointer move, so the frame renders once. */
+  updateDocTransient: (patches: {
+    clips?: { id: string; patch: Partial<VideoClip> }[];
+    audioClips?: { id: string; patch: Partial<AudioClip> }[];
+    overlays?: { id: string; patch: OverlayPatch }[];
+    cues?: { id: string; patch: Partial<SubtitleCue> }[];
+  }) => void;
   updateClipTransient: (id: string, patch: Partial<VideoClip>) => void;
   updateAudioTransient: (id: string, patch: Partial<AudioClip>) => void;
   /** Keep the clips array sorted by start (consumers read `clips[0]` as the
@@ -635,14 +645,17 @@ export interface EditorState {
    * from the original recording, so the word highlighter would otherwise drift). */
   retimeCues: (entries: { id: string; start: number; end: number }[]) => void;
   sortCues: () => void;
-  /** Delete the current selection. While track 0 is the only video track and
+  /** Delete the current selection — and only the selection: a clip delete
+   * never takes a title, sticker, caption or soundtrack clip with it, whatever
+   * footage they were laid over. While track 0 is the only video track and
    * some of its footage survives, a track-0 clip delete ripples: the footprint
-   * it occupied closes and everything after it — clips, titles, captions,
-   * soundtrack — slides left in sync (see exciseRange). With upper video
-   * layers present the slide would shear them against track 0, and with track
-   * 0 emptied there is nothing left for the close to keep contiguous, so both
-   * leave the gap and everything laid over the footage stands; closing it is
-   * `removeLaneGap`. Deletes on every other track remove just that item. */
+   * it occupied closes and everything after it slides left in sync, while
+   * anything standing over the hole falls back to where the footage started
+   * (see rippleAt). With upper video layers present the slide would shear
+   * them against track 0, and with track 0 emptied there is nothing left for
+   * the close to keep contiguous, so both leave the gap and everything stands
+   * where it was; closing it is `removeLaneGap`. Deletes on every other track
+   * remove just that item. */
   deleteSelection: () => void;
   /** Close the empty span on `lane` containing `at` — a video track, an audio
    * track, or a title track. Only that row's later items slide left; every
@@ -948,38 +961,61 @@ function pushOverlaysClearOf(ids: Set<string>) {
   }));
 }
 
-/** Resize a clip's footprint to `newLen` (a trim or speed change), keeping its
- * own track sound: a cut the clip transitions over stays a cut (the run
- * follows the resize so the pair keeps its contact); otherwise a longer
- * footprint pushes the run right by the overflow and a shorter one just opens
- * a gap. Everything is scoped to the clip's track — resizing a track-0 clip
- * never drags the composited layers (or vice versa), so each track's
- * annotations keep the timing they were placed at. One undo step. */
+/** Resize a clip's footprint to `newLen` (a trim or speed change) and carry
+ * the timeline behind the moved tail. While track 0 is the only video track,
+ * a track-0 resize ripples the whole document: everything past the tail —
+ * clips, titles, captions, soundtrack — rides the edge in both directions and
+ * every pre-existing gap keeps its width, so annotations stay on the footage
+ * they were laid over. Layer clips, and a spine resize under overlay video
+ * tracks (where the slide would shear the layers), keep the run rules scoped
+ * to their own track: a cut the clip transitions over stays a cut, a longer
+ * footprint pushes the run right by the overflow, and a shorter one opens a
+ * gap. One undo step. */
 function resizeClipFootprint(clip: VideoClip, patch: Partial<VideoClip>, newLen: number) {
   useEditor.getState().pushHistory();
   const before = useEditor.getState().clips;
-  const next = useEditor
-    .getState()
-    .clips.filter((c) => c.id !== clip.id && c.track === clip.track && c.start >= clip.start)
-    .reduce<VideoClip | null>((m, c) => (!m || c.start < m.start ? c : m), null);
-  // Whether the pair makes the cut this clip's transition lives on, measured
-  // before the resize lands.
-  const keepContact = !!next && transitionOverlap(clip, next) > 1e-6;
+  const end0 = clip.start + clipLen(clip);
+  const newEnd = clip.start + newLen;
   useEditor.getState().updateClipTransient(clip.id, patch);
-  const nextStart = next?.start ?? Infinity;
-  const delta = keepContact
-    ? clip.start + newLen - nextStart
-    : Math.max(0, clip.start + newLen - nextStart);
-  if (Math.abs(delta) > 1e-6) {
-    useEditor.setState((st) => ({
-      clips: st.clips
-        .map((c) =>
-          c.id !== clip.id && c.track === clip.track && c.start >= clip.start
-            ? { ...c, start: Math.max(0, c.start + delta) }
-            : c
-        )
-        .sort((a, b) => a.start - b.start),
-    }));
+  if (clip.track === 0 && !before.some((c) => c.track !== 0)) {
+    // The spine resize ripples: everything past the clip's tail — clips,
+    // titles, captions, soundtrack — rides the moved edge in both directions,
+    // every pre-existing gap keeping its width (see rippleAt).
+    useEditor.setState((st) => {
+      const out = rippleAt(
+        { clips: st.clips, audioClips: st.audioClips, overlays: st.overlays, cues: st.subtitles.cues },
+        Math.min(end0, newEnd),
+        newEnd - end0
+      );
+      return {
+        clips: out.clips === st.clips ? st.clips : [...out.clips].sort((a, b) => a.start - b.start),
+        audioClips: out.audioClips,
+        overlays: out.overlays,
+        ...(out.cues !== st.subtitles.cues ? { subtitles: { ...st.subtitles, cues: out.cues } } : {}),
+      };
+    });
+  } else {
+    // With upper video layers present the slide would shear them against the
+    // footage they were composed over, so growth pushes the same-track run
+    // and a shrink leaves the gap — except a live dissolve's partner, which
+    // follows the edge to keep the cut it blends.
+    const next = before
+      .filter((c) => c.id !== clip.id && c.track === clip.track && c.start >= clip.start)
+      .reduce<VideoClip | null>((m, c) => (!m || c.start < m.start ? c : m), null);
+    const keepContact = !!next && transitionOverlap(clip, next) > 1e-6;
+    const nextStart = next?.start ?? Infinity;
+    const delta = keepContact ? newEnd - nextStart : Math.max(0, newEnd - nextStart);
+    if (Math.abs(delta) > 1e-6) {
+      useEditor.setState((st) => ({
+        clips: st.clips
+          .map((c) =>
+            c.id !== clip.id && c.track === clip.track && c.start >= clip.start
+              ? { ...c, start: Math.max(0, c.start + delta) }
+              : c
+          )
+          .sort((a, b) => a.start - b.start),
+      }));
+    }
   }
   // The resized clip's own edge moved, and the run behind it with it, so the
   // bars playing those cuts follow.
@@ -2933,6 +2969,43 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         };
       }),
 
+    updateDocTransient: (patches) =>
+      set((s) => {
+        const out: Partial<EditorState> = {};
+        if (patches.clips?.length) {
+          const byId = new Map(patches.clips.map((p) => [p.id, p.patch]));
+          out.clips = s.clips.map((c) => {
+            const patch = byId.get(c.id);
+            return patch ? { ...c, ...patch } : c;
+          });
+        }
+        if (patches.audioClips?.length) {
+          const byId = new Map(patches.audioClips.map((p) => [p.id, p.patch]));
+          out.audioClips = s.audioClips.map((a) => {
+            const patch = byId.get(a.id);
+            return patch ? { ...a, ...patch } : a;
+          });
+        }
+        if (patches.overlays?.length) {
+          const byId = new Map(patches.overlays.map((p) => [p.id, p.patch]));
+          out.overlays = s.overlays.map((o) => {
+            const patch = byId.get(o.id);
+            return patch ? { ...o, ...patch } : o;
+          });
+        }
+        if (patches.cues?.length) {
+          const byId = new Map(patches.cues.map((p) => [p.id, p.patch]));
+          out.subtitles = {
+            ...s.subtitles,
+            cues: s.subtitles.cues.map((c) => {
+              const patch = byId.get(c.id);
+              return patch ? { ...c, ...patch } : c;
+            }),
+          };
+        }
+        return out;
+      }),
+
     sortClips: () =>
       set((s) => ({ clips: [...s.clips].sort((a, b) => a.start - b.start) })),
 
@@ -3242,18 +3315,17 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         let cues = s.subtitles.cues.filter((c) => !cueIds.has(c.id));
         // Deleting a track-0 clip closes the hole it leaves: everything after
         // it — clips, titles, captions, soundtrack — slides left with the
-        // surviving footage, and anything living inside the hole annotated
-        // footage that is gone, so it goes too. Two conditions gate that
-        // ripple. Track 0 has to be the only video track, since with upper
-        // layers surviving the slide would shear them against the footage they
-        // were composed over. And some track-0 footage has to survive the
-        // delete: clearing the whole track leaves no hole to close, and closing
-        // it anyway would carry every title, card and caption in the project
-        // into the excision. Either way the delete leaves the gap and closing
-        // it is an explicit act (removeGap, via right-click on the empty
-        // space). Deletes on every other track are plain removals (already
-        // applied above). Holes close right-to-left so each one's coordinates
-        // stay valid while the ones before it are unprocessed.
+        // surviving footage, and anything standing over the hole falls back to
+        // where the footage started. Nothing but the picked clip leaves the
+        // project. Two conditions gate that ripple. Track 0 has to be the only
+        // video track, since with upper layers surviving the slide would shear
+        // them against the footage they were composed over. And some track-0
+        // footage has to survive the delete, since clearing the whole track
+        // leaves no hole to close. Either way the delete leaves the gap and
+        // closing it is an explicit act (removeGap, via right-click on the
+        // empty space). Deletes on every other track are plain removals
+        // (already applied above). Holes close right-to-left so each one's
+        // coordinates stay valid while the ones before it are unprocessed.
         const rippling = clips.some((c) => c.track === 0) && !clips.some((c) => c.track !== 0);
         const holes = rippling
           ? s.clips
@@ -3270,10 +3342,10 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           // any gap that already existed after it survives.
           const delta = Math.min(clipLen(gone), next - gone.start);
           if (delta < 0.05) continue;
-          ({ clips, audioClips, overlays, cues } = exciseRange(
+          ({ clips, audioClips, overlays, cues } = rippleAt(
             { clips, audioClips, overlays, cues },
             gone.start,
-            delta
+            -delta
           ));
         }
         clips = clips.sort((a, b) => a.start - b.start);
@@ -5280,13 +5352,27 @@ export function laneGapAt(
   return null;
 }
 
-/** Cut the timeline range [at, at + delta) out of the whole document — the
- * ripple half of a track-0 delete. Items past the hole slide left by delta;
- * items wholly inside it are removed; items straddling an edge keep the part
- * that survives (a layer/soundtrack clip spanning the hole splits around it,
- * excising those source seconds). Track-0 clips only shift: the hole is a
- * deleted track-0 clip's own footprint, so no survivor there can straddle it. */
-function exciseRange(
+/** Items grouped by the row they live on, each row in play order. */
+function byRow<T>(items: T[], row: (x: T) => number, startOf: (x: T) => number): Map<number, T[]> {
+  const rows = new Map<number, T[]>();
+  for (const item of items) {
+    const list = rows.get(row(item));
+    if (list) list.push(item);
+    else rows.set(row(item), [item]);
+  }
+  for (const list of rows.values()) list.sort((a, b) => startOf(a) - startOf(b));
+  return rows;
+}
+
+/** Slide everything on every row past `at` by `shift` seconds — how a track-0
+ * delete or resize carries the rest of the document. A negative shift closes
+ * the span [at, at - shift): items past it slide left in sync, an item
+ * standing over it falls back to `at`, and each row packs so no item overruns
+ * the one ahead of it. A positive shift opens that span, sliding items past
+ * `at` right together. Either way every item survives whole — same media,
+ * same length — pre-existing gaps keep their width, cue words ride along, and
+ * a grouped set of elements moves as one. Items at or before `at` stand. */
+export function rippleAt(
   doc: {
     clips: VideoClip[];
     audioClips: AudioClip[];
@@ -5294,65 +5380,219 @@ function exciseRange(
     cues: SubtitleCue[];
   },
   at: number,
-  delta: number
+  shift: number
 ): typeof doc {
+  if (Math.abs(shift) < 1e-9) return doc;
   const EPS = 0.001;
-  const end = at + delta;
+  /** The ripple's own pull on a time: past `at` it moves by the shift, and a
+   * close never drags anything in front of where the closed span began. An
+   * item sitting exactly on `at` — the clip abutting a growing tail — rides
+   * an open and stands through a close (a close cannot move it anyway). */
+  const pull =
+    shift > 0
+      ? (start: number) => (start < at - EPS ? start : start + shift)
+      : (start: number) => (start <= at + EPS ? start : Math.max(at, start + shift));
 
-  const cutClip = <T extends VideoClip | AudioClip>(c: T): T[] => {
-    const speed = c.speed && c.speed > 0 ? c.speed : 1;
-    const stop = c.start + clipLen(c);
-    if (stop <= at + EPS) return [c];
-    if (c.start >= end - EPS) return [{ ...c, start: c.start - delta }];
-    const pieces: T[] = [];
-    if (c.start < at) pieces.push({ ...c, out: c.in + (at - c.start) * speed });
-    if (stop > end) pieces.push({ ...c, id: pieces.length ? uid() : c.id, start: at, in: c.in + (end - c.start) * speed });
-    return pieces.filter((p) => (p.out - p.in) / speed >= MIN_LEN);
-  };
-
-  const cutText = (o: Overlay): Overlay[] => {
-    if (o.end <= at + EPS) return [o];
-    if (o.start >= end - EPS) return [{ ...o, start: o.start - delta, end: o.end - delta }];
-    const start = Math.min(o.start, at);
-    const stop = o.end > end ? o.end - delta : at;
-    return stop - start >= MIN_LEN ? [{ ...o, start, end: stop }] : [];
-  };
-
-  const cutCue = (c: SubtitleCue): SubtitleCue[] => {
-    if (c.end <= at + EPS) return [c];
-    if (c.start >= end - EPS) {
-      return [{
-        ...c,
-        start: c.start - delta,
-        end: c.end - delta,
-        words: c.words?.map((w) => ({ ...w, t0: w.t0 - delta, t1: w.t1 - delta })),
-      }];
+  /** One kind of row re-laid: each item takes the ripple's pull, then gives
+   * way to whatever the item ahead of it on its row needs. Returns each
+   * item's move. */
+  const slides = <T,>(
+    items: T[],
+    row: (x: T) => number,
+    startOf: (x: T) => number,
+    lenOf: (x: T) => number
+  ): Map<T, number> => {
+    const out = new Map<T, number>();
+    for (const list of byRow(items, row, startOf).values()) {
+      let cursor = -Infinity;
+      for (const item of list) {
+        const start = startOf(item);
+        const landed = Math.max(pull(start), cursor);
+        out.set(item, landed - start);
+        cursor = landed + lenOf(item);
+      }
     }
-    const start = Math.min(c.start, at);
-    const stop = c.end > end ? c.end - delta : at;
-    if (stop - start < MIN_LEN) return [];
-    // Same convention as splitCue: a word sits left of a cut when it starts
-    // before it. Words swallowed by the hole go with it; later ones slide left
-    // and the text follows the surviving words.
-    const words = c.words
-      ?.filter((w) => w.t0 < at || w.t0 >= end)
-      .map((w) => (w.t0 >= end ? { ...w, t0: w.t0 - delta, t1: w.t1 - delta } : w));
-    return [{
-      ...c,
-      start,
-      end: stop,
-      words: words?.length ? words : undefined,
-      text: words?.length ? words.map((w) => w.w).join(" ") : c.text,
-    }];
+    return out;
   };
+
+  /** Elements re-lay the same way, with a grouped set held rigid: the group
+   * takes one move — the member with the least room pins the set — and a
+   * member crowded on its own lane raises it for all of them until every
+   * lane is clear. */
+  const elementSlides = (overlays: Overlay[]): Map<Overlay, number> => {
+    const unit = (o: Overlay) => o.groupId ?? o.id;
+    const tighter = (a: number, b: number) => (Math.abs(a) < Math.abs(b) ? a : b);
+    const moves = new Map<string, number>();
+    for (const o of overlays) {
+      const want = pull(o.start) - o.start;
+      const cur = moves.get(unit(o));
+      moves.set(unit(o), cur === undefined ? want : tighter(cur, want));
+    }
+    const lanes = byRow(overlays, (o) => o.lane ?? 0, (o) => o.start);
+    for (let pass = 0; pass <= overlays.length; pass++) {
+      let raised = false;
+      for (const list of lanes.values()) {
+        let cursor = -Infinity;
+        for (const o of list) {
+          if (o.start + moves.get(unit(o))! < cursor - 1e-9) {
+            moves.set(unit(o), cursor - o.start);
+            raised = true;
+          }
+          cursor = o.start + moves.get(unit(o))! + (o.end - o.start);
+        }
+      }
+      if (!raised) break;
+    }
+    return new Map(overlays.map((o) => [o, moves.get(unit(o))!]));
+  };
+
+  const clipBy = slides(doc.clips, (c) => c.track, (c) => c.start, clipLen);
+  const audioBy = slides(doc.audioClips, (a) => a.lane ?? 0, (a) => a.start, clipLen);
+  const textBy = elementSlides(doc.overlays);
+  const cueBy = slides(doc.cues, (c) => c.lane ?? 0, (c) => c.start, (c) => c.end - c.start);
+  const moved = <T,>(item: T, moves: Map<T, number>) => {
+    const by = moves.get(item)!;
+    return Math.abs(by) < 1e-6 ? 0 : by;
+  };
+  /** Same array back when nothing on it moved, so an untouched collection
+   * keeps its identity (autosave tells an edit from a re-read by it). */
+  const keep = <T,>(orig: T[], next: T[]) => (next.some((x, i) => x !== orig[i]) ? next : orig);
 
   return {
-    clips: doc.clips.flatMap((c) =>
-      c.track !== 0 ? cutClip(c) : c.start >= end - EPS ? [{ ...c, start: c.start - delta }] : [c]
+    clips: keep(
+      doc.clips,
+      doc.clips.map((c) => {
+        const by = moved(c, clipBy);
+        return by ? { ...c, start: c.start + by } : c;
+      })
     ),
-    audioClips: doc.audioClips.flatMap(cutClip),
-    overlays: doc.overlays.flatMap(cutText),
-    cues: doc.cues.flatMap(cutCue),
+    audioClips: keep(
+      doc.audioClips,
+      doc.audioClips.map((a) => {
+        const by = moved(a, audioBy);
+        return by ? { ...a, start: a.start + by } : a;
+      })
+    ),
+    overlays: keep(
+      doc.overlays,
+      doc.overlays.map((o) => {
+        const by = moved(o, textBy);
+        return by ? { ...o, start: o.start + by, end: o.end + by } : o;
+      })
+    ),
+    cues: keep(
+      doc.cues,
+      doc.cues.map((c) => {
+        const by = moved(c, cueBy);
+        if (!by) return c;
+        return {
+          ...c,
+          start: c.start + by,
+          end: c.end + by,
+          words: c.words?.map((w) => ({ ...w, t0: w.t0 + by, t1: w.t1 + by })),
+        };
+      })
+    ),
+  };
+}
+
+/** The live ripple a trim-handle drag spreads while track 0 is the only video
+ * track: created at grab, fed the clip's footprint-end travel each pointer
+ * move, settled on release. Each move re-lays every other item from the
+ * grab-time layout through `rippleAt` — so a retreating drag flows everything
+ * back to where it stood — and lands the whole document in one write. Null
+ * when an overlay video track is present: the slide would shear the layers
+ * against the footage they were composed over, so those trims keep the run
+ * rules on their own track (the delete gate). */
+export function startTrimRipple(
+  s: Pick<EditorState, "clips" | "audioClips" | "overlays" | "subtitles" | "transitions">,
+  selfId: string,
+  end0: number
+): {
+  /** Apply one pointer move: `shift` is the footprint end's travel from where
+   * it stood at grab (negative = shorter), `clipPatches` the gesture's own
+   * clip writes — the trim itself, plus any leaders it re-laid. */
+  move: (shift: number, clipPatches: { id: string; patch: Partial<VideoClip> }[]) => void;
+  /** Land the gesture. A left-handle trim that moved the head rightward
+   * leaves its trimmed footage as a gap; `close` names where the head stood
+   * and how far everything behind it slides back to swallow it. Then the
+   * transition bars re-seat on the cuts the gesture moved. */
+  settle: (close?: { at: number; shift: number }) => void;
+} | null {
+  if (s.clips.some((c) => c.track !== 0)) return null;
+  const clips0 = s.clips;
+  const doc0 = {
+    clips: s.clips.filter((c) => c.id !== selfId),
+    audioClips: s.audioClips,
+    overlays: s.overlays,
+    cues: s.subtitles.cues,
+  };
+  // Where each rider last landed, so a move patches only what it changes and
+  // a retreat restores what an earlier move displaced.
+  const placed = new Map<string, number>();
+  for (const c of doc0.clips) placed.set(`c${c.id}`, c.start);
+  for (const a of doc0.audioClips) placed.set(`a${a.id}`, a.start);
+  for (const o of doc0.overlays) placed.set(`o${o.id}`, o.start);
+  for (const q of doc0.cues) placed.set(`q${q.id}`, q.start);
+  let dirty = false;
+  return {
+    move: (shift, clipPatches) => {
+      dirty = true;
+      // The trimmed clip rides along as its patch; `at` sits at the tail's
+      // earlier position, so a shrink pulls nothing in front of the new tail
+      // and growth carries everything past the old one.
+      const out = rippleAt(doc0, Math.min(end0, end0 + shift), shift);
+      const clips = [...clipPatches];
+      const audioClips: { id: string; patch: Partial<AudioClip> }[] = [];
+      const overlays: { id: string; patch: OverlayPatch }[] = [];
+      const cues: { id: string; patch: Partial<SubtitleCue> }[] = [];
+      for (const c of out.clips)
+        if (placed.get(`c${c.id}`) !== c.start) {
+          placed.set(`c${c.id}`, c.start);
+          clips.push({ id: c.id, patch: { start: c.start } });
+        }
+      for (const a of out.audioClips)
+        if (placed.get(`a${a.id}`) !== a.start) {
+          placed.set(`a${a.id}`, a.start);
+          audioClips.push({ id: a.id, patch: { start: a.start } });
+        }
+      for (const o of out.overlays)
+        if (placed.get(`o${o.id}`) !== o.start) {
+          placed.set(`o${o.id}`, o.start);
+          overlays.push({ id: o.id, patch: { start: o.start, end: o.end } });
+        }
+      for (const q of out.cues)
+        if (placed.get(`q${q.id}`) !== q.start) {
+          placed.set(`q${q.id}`, q.start);
+          cues.push({ id: q.id, patch: { start: q.start, end: q.end, words: q.words } });
+        }
+      useEditor.getState().updateDocTransient({ clips, audioClips, overlays, cues });
+    },
+    settle: (close) => {
+      if (close && close.shift < -1e-6) {
+        dirty = true;
+        useEditor.setState((st) => {
+          const out = rippleAt(
+            { clips: st.clips, audioClips: st.audioClips, overlays: st.overlays, cues: st.subtitles.cues },
+            close.at,
+            close.shift
+          );
+          return {
+            clips: out.clips,
+            audioClips: out.audioClips,
+            overlays: out.overlays,
+            ...(out.cues !== st.subtitles.cues ? { subtitles: { ...st.subtitles, cues: out.cues } } : {}),
+          };
+        });
+      }
+      if (!dirty) return;
+      const st = useEditor.getState();
+      // One mapping from the grab layout to where the gesture left the cuts,
+      // so every bar keeps playing the boundary it played.
+      if (st.transitions.length)
+        useEditor.setState({ transitions: reanchorTransitions(clips0, st.clips, st.transitions) });
+      st.sortClips();
+    },
   };
 }
 

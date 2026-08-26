@@ -57,7 +57,7 @@ export const TIMELINE_TOOLS = [
   {
     name: "trim_clip",
     description:
-      "Set a video clip's trim points inside its source media (seconds). Changing `in` hides the leading part; `out` the trailing part.",
+      "Set a video clip's trim points inside its source media (seconds). Changing `in` hides the leading part; `out` the trailing part. While track 0 is the only video track, a track-0 resize ripples: everything past the clip's tail — clips, titles, captions, soundtrack — rides the moved edge in both directions, and every existing gap keeps its width. With overlay video tracks present, growth pushes the track-0 run and a shrink leaves a gap.",
     inputSchema: obj({ clipId: str("Video clip id"), in: num("New in point (optional)"), out: num("New out point (optional)") }, ["clipId"]),
   },
   {
@@ -125,7 +125,7 @@ export const TIMELINE_TOOLS = [
   {
     name: "delete_item",
     description:
-      "Delete a video clip (any track), soundtrack clip, or overlay element (title/shape/sticker) by id. While track 0 is the only video track, deleting a track-0 clip ripples: its footprint closes and everything after it — clips, titles, captions, soundtrack — slides left in sync; items wholly inside that span are removed with it, straddlers are trimmed. With overlay video tracks present the delete leaves its gap in place (remove_gap closes it). Deletes on other tracks remove just that item.",
+      "Delete a video clip (any track), soundtrack clip, or overlay element (title/shape/sticker) by id. Only the listed item leaves the project — anything else laid over it survives at full length. While track 0 is the only video track, deleting a track-0 clip ripples: its footprint closes and everything after it — clips, titles, captions, soundtrack — slides left in sync, while items standing over the footprint fall back to where it started. With overlay video tracks present the delete leaves its gap in place (remove_gap closes it). Deletes on other tracks remove just that item.",
     inputSchema: obj({
       kind: { type: "string", enum: ["clip", "audio", "overlay"], description: "Item kind — 'clip' is any video clip, whatever track; 'overlay' is any title-lane element" },
       id: str("Item id"),

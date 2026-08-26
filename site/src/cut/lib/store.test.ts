@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { groupRemap } from "@donkeycut/effects-kit";
-import { adoptTransitionFields, clipLen, cutTranscribeSpec, deriveTransitionFields, docOverlays, getClipSpans, liftClipLooks, moveOverlayGroup, overlayLaneOrder, normalizeElementLanes, parkedTransitions, placeInRun, projectDuration, separateOverlaps, serializeDoc, useEditor } from "./store";
+import { adoptTransitionFields, clipLen, cutTranscribeSpec, deriveTransitionFields, docOverlays, getClipSpans, liftClipLooks, moveOverlayGroup, overlayLaneOrder, normalizeElementLanes, parkedTransitions, placeInRun, projectDuration, separateOverlaps, serializeDoc, startTrimRipple, useEditor } from "./store";
 import { playheadAt, setPlayhead, setSkim } from "./playhead";
 import { emptySubtitles } from "./types";
 import type { AudioClip, MediaAsset, SubtitleCue, TextOverlay, VideoClip } from "./types";
@@ -747,6 +747,96 @@ describe("delete ripple and gaps", () => {
     expect(s().overlays[0].start).toBeCloseTo(1);
   });
 
+  test("a title on its own row survives the clip it was written over", () => {
+    const a = vclip({ track: 0, start: 0, out: 2 });
+    const b = vclip({ track: 0, start: 2, out: 2 });
+    const t = title({ start: 2.5, end: 3.5, lane: 1 });
+    useEditor.setState({
+      clips: [a, b],
+      overlays: [t],
+      selection: { kind: "clip", id: b.id },
+    });
+    s().deleteSelection();
+    // The clip goes; the title keeps its full second and falls back to where
+    // the footage under it used to start.
+    expect(s().overlays.map((o) => o.id)).toEqual([t.id]);
+    expect(s().overlays[0].start).toBeCloseTo(2);
+    expect(s().overlays[0].end).toBeCloseTo(3);
+  });
+
+  test("a soundtrack spanning the deleted clip keeps every second of it", () => {
+    const a = vclip({ track: 0, start: 0, out: 2 });
+    const b = vclip({ track: 0, start: 2, out: 2 });
+    const c = vclip({ track: 0, start: 4, out: 2 });
+    const bed = aclip({ start: 0, out: 6 });
+    useEditor.setState({
+      clips: [a, b, c],
+      audioClips: [bed],
+      selection: { kind: "clip", id: b.id },
+    });
+    s().deleteSelection();
+    expect(s().audioClips.map((x) => x.id)).toEqual([bed.id]);
+    expect(audioById(bed.id).start).toBeCloseTo(0);
+    expect(clipLen(audioById(bed.id))).toBeCloseTo(6);
+    expect(clipById(c.id).start).toBeCloseTo(2);
+  });
+
+  test("captions over the deleted footage stand, packed and in order", () => {
+    const a = vclip({ track: 0, start: 0, out: 2 });
+    const b = vclip({ track: 0, start: 2, out: 4 });
+    const q1 = cue({ start: 2.5, end: 3, words: [{ t0: 2.5, t1: 3, w: "one" }] });
+    const q2 = cue({ start: 3.5, end: 4 });
+    useEditor.setState({
+      clips: [a, b],
+      subtitles: { ...emptySubtitles(), cues: [q1, q2] },
+      selection: { kind: "clip", id: b.id },
+    });
+    s().deleteSelection();
+    const cues = s().subtitles.cues;
+    expect(cues.map((c) => c.id)).toEqual([q1.id, q2.id]);
+    expect(cues[0].start).toBeCloseTo(2);
+    expect(cues[0].end).toBeCloseTo(2.5);
+    expect(cues[0].words![0].t0).toBeCloseTo(2);
+    expect(cues[1].start).toBeCloseTo(2.5);
+    expectLaneSound(cues);
+  });
+
+  test("two titles on one row pulled back by a ripple stay apart", () => {
+    const a = vclip({ track: 0, start: 0, out: 2 });
+    const b = vclip({ track: 0, start: 2, out: 4 });
+    const t1 = title({ start: 2.5, end: 3 });
+    const t2 = title({ start: 3.5, end: 4 });
+    useEditor.setState({
+      clips: [a, b],
+      overlays: [t1, t2],
+      selection: { kind: "clip", id: b.id },
+    });
+    s().deleteSelection();
+    expect(s().overlays.map((o) => o.id)).toEqual([t1.id, t2.id]);
+    expectLaneSound(s().overlays);
+    expect(s().overlays.find((o) => o.id === t2.id)!.start).toBeCloseTo(2.5);
+  });
+
+  test("a grouped set crossing rows stays rigid through the ripple", () => {
+    const a = vclip({ track: 0, start: 0, out: 2 });
+    const b = vclip({ track: 0, start: 2, out: 6 });
+    // Lane 0 is crowded right where the group wants to land, so its member
+    // packs in behind the resident — and its peer on lane 1 comes along.
+    const resident = title({ start: 2.2, end: 2.9 });
+    const g1 = title({ start: 4, end: 5, groupId: "g" });
+    const g2 = title({ start: 4, end: 5, lane: 1, groupId: "g" });
+    useEditor.setState({
+      clips: [a, b],
+      overlays: [resident, g1, g2],
+      selection: { kind: "clip", id: b.id },
+    });
+    s().deleteSelection();
+    const byId = (id: string) => s().overlays.find((o) => o.id === id)!;
+    expect(s().overlays.length).toBe(3);
+    expect(byId(g1.id).start).toBeCloseTo(byId(g2.id).start);
+    expectLaneSound(s().overlays.filter((o) => (o.lane ?? 0) === 0));
+  });
+
   test("delete with an overlay video track leaves the gap in place", () => {
     const a = vclip({ track: 0, start: 0, out: 2 });
     const b = vclip({ track: 0, start: 2, out: 2 });
@@ -835,6 +925,123 @@ describe("delete ripple and gaps", () => {
     expect(byId(late.id).start).toBeCloseTo(1);
     expect(byId(late.id).end).toBeCloseTo(3);
     expect(byId(other.id).start).toBeCloseTo(4);
+  });
+});
+
+describe("resize ripple", () => {
+  test("shrinking a clip pulls everything after it along, gaps kept", () => {
+    const a = vclip({ track: 0, start: 0, out: 4 });
+    const b = vclip({ track: 0, start: 4, out: 2 });
+    const t = title({ start: 4.5, end: 5.5 });
+    const au = aclip({ start: 5, out: 1 });
+    const q = cue({ start: 4.2, end: 4.8, words: [{ t0: 4.2, t1: 4.8, w: "hi" }] });
+    useEditor.setState({
+      clips: [a, b],
+      overlays: [t],
+      audioClips: [au],
+      subtitles: { ...emptySubtitles(), cues: [q] },
+    });
+    s().setClipTrim(a.id, 0, 3);
+    expect(clipById(b.id).start).toBeCloseTo(3);
+    expect(s().overlays[0].start).toBeCloseTo(3.5);
+    expect(audioById(au.id).start).toBeCloseTo(4);
+    expect(s().subtitles.cues[0].start).toBeCloseTo(3.2);
+    expect(s().subtitles.cues[0].words![0].t0).toBeCloseTo(3.2);
+  });
+
+  test("growing a clip pushes them right the same way", () => {
+    const av = asset(8);
+    const a = vclip({ track: 0, start: 0, out: 4, assetId: av.id });
+    const b = vclip({ track: 0, start: 5, out: 2, assetId: av.id }); // a 1s gap before b
+    const t = title({ start: 5, end: 6 });
+    useEditor.setState({ assets: [av], clips: [a, b], overlays: [t] });
+    s().setClipTrim(a.id, 0, 6);
+    expect(clipById(b.id).start).toBeCloseTo(7); // its gap survives
+    expect(s().overlays[0].start).toBeCloseTo(7);
+  });
+
+  test("growing into an abutting neighbor carries it along, never over it", () => {
+    const av = asset(8);
+    const a = vclip({ track: 0, start: 0, out: 4, assetId: av.id });
+    const b = vclip({ track: 0, start: 4, out: 2, assetId: av.id }); // butted joint
+    const t = title({ start: 4, end: 5 });
+    useEditor.setState({ assets: [av], clips: [a, b], overlays: [t] });
+    s().setClipTrim(a.id, 0, 6);
+    expect(clipById(b.id).start).toBeCloseTo(6);
+    expect(s().overlays[0].start).toBeCloseTo(6);
+    expectLaneSound(videoLane(0));
+  });
+
+  test("the gesture's tail growth rides the abutting run too", () => {
+    // The left handle's pinned reveal and the right handle's growth both feed
+    // the engine a positive shift; the clip butted against the tail moves.
+    const a = vclip({ track: 0, start: 0, out: 4 });
+    const b = vclip({ track: 0, start: 4, out: 2 });
+    useEditor.setState({ clips: [a, b] });
+    const engine = startTrimRipple(s(), a.id, 4)!;
+    engine.move(1, [{ id: a.id, patch: { out: 5 } }]);
+    expect(clipById(b.id).start).toBeCloseTo(5);
+    expectLaneSound(videoLane(0));
+    engine.move(0, [{ id: a.id, patch: { out: 4 } }]);
+    expect(clipById(b.id).start).toBeCloseTo(4);
+    engine.settle();
+  });
+
+  test("an item standing over the shortened tail falls back to the new end", () => {
+    const a = vclip({ track: 0, start: 0, out: 4 });
+    const t = title({ start: 3, end: 5 });
+    useEditor.setState({ clips: [a], overlays: [t] });
+    s().setClipTrim(a.id, 0, 2);
+    expect(s().overlays[0].start).toBeCloseTo(2);
+    expect(s().overlays[0].end).toBeCloseTo(4);
+  });
+
+  test("with an overlay video track a shrink keeps its own-track rules", () => {
+    const a = vclip({ track: 0, start: 0, out: 4 });
+    const b = vclip({ track: 0, start: 4, out: 2 });
+    const layer = vclip({ track: 1, start: 1, out: 2 });
+    useEditor.setState({ clips: [a, b, layer] });
+    s().setClipTrim(a.id, 0, 3);
+    expect(clipById(b.id).start).toBeCloseTo(4); // the gap stays
+    expect(clipById(layer.id).start).toBeCloseTo(1);
+  });
+
+  test("the trim gesture ripples live and a retreat flows everything back", () => {
+    const a = vclip({ track: 0, start: 0, out: 4 });
+    const b = vclip({ track: 0, start: 4, out: 2 });
+    const t = title({ start: 4.5, end: 5 });
+    useEditor.setState({ clips: [a, b], overlays: [t] });
+    const engine = startTrimRipple(s(), a.id, 4)!;
+    engine.move(-1, [{ id: a.id, patch: { out: 3 } }]);
+    expect(clipById(a.id).out).toBeCloseTo(3);
+    expect(clipById(b.id).start).toBeCloseTo(3);
+    expect(s().overlays[0].start).toBeCloseTo(3.5);
+    engine.move(0, [{ id: a.id, patch: { out: 4 } }]);
+    expect(clipById(b.id).start).toBeCloseTo(4);
+    expect(s().overlays[0].start).toBeCloseTo(4.5);
+    engine.settle();
+  });
+
+  test("settling a head trim closes the footage it removed", () => {
+    const a = vclip({ track: 0, start: 0, out: 4 });
+    const b = vclip({ track: 0, start: 4, out: 2 });
+    const t = title({ start: 5, end: 6 });
+    useEditor.setState({ clips: [a, b], overlays: [t] });
+    const engine = startTrimRipple(s(), a.id, 4)!;
+    // The left handle dragged right by 1: head trimmed, gap opened before.
+    engine.move(0, [{ id: a.id, patch: { start: 1, in: 1 } }]);
+    engine.settle({ at: 0, shift: -1 });
+    expect(clipById(a.id).start).toBeCloseTo(0);
+    expect(clipById(a.id).in).toBeCloseTo(1);
+    expect(clipById(b.id).start).toBeCloseTo(3);
+    expect(s().overlays[0].start).toBeCloseTo(4);
+  });
+
+  test("with an overlay video track the gesture engine stays off", () => {
+    const a = vclip({ track: 0, start: 0, out: 4 });
+    const layer = vclip({ track: 1, start: 0, out: 2 });
+    useEditor.setState({ clips: [a, layer] });
+    expect(startTrimRipple(s(), a.id, 4)).toBe(null);
   });
 });
 

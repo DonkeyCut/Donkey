@@ -30,7 +30,7 @@
 import type React from "react";
 import { refFromAsset, startPointerRefDrag } from "./assetRef";
 import { startDrag } from "./drag";
-import { track0Clips, clipLen, getClipSpans, moveOverlayGroup, nextFreeStart, overlayLaneOrder, overlayLayers, projectDuration, useEditor } from "./store";
+import { track0Clips, clipLen, getClipSpans, moveOverlayGroup, nextFreeStart, overlayLaneOrder, overlayLayers, projectDuration, reanchorTransitions, startTrimRipple, useEditor } from "./store";
 import { playheadAt } from "./playhead";
 import type {
   AudioClip,
@@ -150,8 +150,7 @@ const clipAdapter: LaneAdapter<VideoClip> = {
   leftFloor: (c) => Math.max(0, c.start - c.in / speedOf(c)),
   maxLen: videoMaxLen,
   closesGap: true,
-  assetOf: (s, c) => s.assets.find((x) => x.id === c.assetId),
-  onMoved: () => useEditor.getState().sortClips(),
+  assetOf: (s, c) => s.assets.find((x) => x.id === c.assetId),  onMoved: () => useEditor.getState().sortClips(),
 };
 
 const audioAdapter: LaneAdapter<AudioClip> = {
@@ -177,8 +176,7 @@ const audioAdapter: LaneAdapter<AudioClip> = {
   maxLen: (s, a) =>
     ((s.assets.find((x) => x.id === a.assetId)?.duration ?? a.out) - a.in) / speedOf(a),
   lanePatch: (a, lane) => ({ id: a.id, patch: { lane: lane > 0 ? lane : undefined } }),
-  assetOf: (s, a) => s.assets.find((x) => x.id === a.assetId),
-};
+  assetOf: (s, a) => s.assets.find((x) => x.id === a.assetId),};
 
 const textAdapter: LaneAdapter<Overlay> = {
   minLen: 0.2,
@@ -219,8 +217,7 @@ const overlayClipAdapter: LaneAdapter<VideoClip> = {
   leftFloor: (c) => Math.max(0, c.start - c.in / speedOf(c)),
   maxLen: videoMaxLen,
   closesGap: true,
-  assetOf: (s, c) => s.assets.find((x) => x.id === c.assetId),
-};
+  assetOf: (s, c) => s.assets.find((x) => x.id === c.assetId),};
 
 const cueAdapter: LaneAdapter<SubtitleCue> = {
   minLen: 0.15,
@@ -1150,6 +1147,34 @@ export function startLaneTrim(
     .raws(s)
     .map((r) => ({ raw: r, view: ad.view(r) }))
     .filter((x) => x.view.id !== id && x.view.lane === self.lane);
+  // While track 0 is the only video track, a spine trim ripples: everything
+  // past the clip's tail — clips, titles, captions, soundtrack — rides the
+  // moved edge in both directions, every gap keeping its width. With overlay
+  // video tracks present the engine is null (the delete gate) and the trim
+  // keeps its own track's push rules.
+  const ripple =
+    kind === "clip"
+      ? (startTrimRipple(s, id, self.start + self.len) as {
+          move: (shift: number, clipPatches: Patch<LaneRaw>[]) => void;
+          settle: (close?: { at: number; shift: number }) => void;
+        } | null)
+      : null;
+  // The clip layout the gesture started from, so a trim with no ripple engine
+  // behind it can still map the bars onto where it left the cuts.
+  const clips0 = kind === "clip" ? s.clips : null;
+  /** Close the gesture: the ripple settles the document when there is one,
+   * and either way the transition bars re-seat onto the cuts the trim moved.
+   * A dissolve follows its cut whether or not the project has overlay tracks. */
+  const settle = (close?: { at: number; shift: number }) => {
+    if (ripple) {
+      ripple.settle(close);
+      return;
+    }
+    if (!clips0) return;
+    const st = useEditor.getState();
+    if (st.transitions.length)
+      useEditor.setState({ transitions: reanchorTransitions(clips0, st.clips, st.transitions) });
+  };
 
   if (side === "l") {
     const start0 = self.start;
@@ -1242,30 +1267,44 @@ export function startLaneTrim(
         const end = ad.revealLeftPatch
           ? Math.max(start, floor) + len0 + (start0 - reveal)
           : start0 + len0;
-        const delta = Math.max(0, end - nextStart);
-        if (delta !== lastDelta) {
-          patches.push(...followers.map((f) => ad.movePatch(f.raw, f.view.start + delta)));
-          lastDelta = delta;
+        if (ripple) {
+          ripple.move(end - (start0 + len0), patches);
+        } else {
+          const delta = Math.max(0, end - nextStart);
+          if (delta !== lastDelta) {
+            patches.push(...followers.map((f) => ad.movePatch(f.raw, f.view.start + delta)));
+            lastDelta = delta;
+          }
+          ad.apply(patches);
         }
-        ad.apply(patches);
       },
       onUp: () => {
         ui.onSnap(null);
         releaseOvershoot();
         const cur = ad.raws(useEditor.getState()).find((r) => ad.view(r).id === id);
         const from = cur ? ad.view(cur).start : floor;
-        if (from >= floor - 1e-4) return; // settled within the room
+        if (from >= floor - 1e-4) {
+          // Settled within the room. A head trimmed to the right left its
+          // trimmed footage as a gap; the ripple closes it, pulling the clip
+          // and everything after back onto the footage that survives.
+          settle(from > start0 + 1e-4 ? { at: start0, shift: start0 - from } : undefined);
+          return;
+        }
         // Elastic spring back to the floor. `finish` lands the floor exactly,
         // so an interrupting gesture settles rather than strands the trim.
         // The rubber engages only past the source floor, so the sprung patch
         // keeps the full reveal.
         const t0 = performance.now();
-        const finish = () => ad.apply([selfPatch(floor, srcFloor)]);
+        const finish = () => {
+          ad.apply([selfPatch(floor, srcFloor)]);
+          settle();
+        };
         const step = (now: number) => {
           const p = Math.min(1, (now - t0) / 240);
           const v = Math.max(0, from + (floor - from) * easeOutBack(p));
           ad.apply([selfPatch(p < 1 ? v : floor, srcFloor)]);
           snapBack = p < 1 ? { raf: requestAnimationFrame(step), finish } : null;
+          if (p >= 1) settle();
         };
         snapBack = { raf: requestAnimationFrame(step), finish };
       },
@@ -1306,33 +1345,48 @@ export function startLaneTrim(
         end = ceil + rubberBand((desired - ceil) * ui.pps, RUBBER_PX) / ui.pps;
         ui.onSnap(null);
       }
-      // Followers respond only to growth up to the ceiling, so the overshoot
+      // Followers respond only to travel up to the ceiling, so the overshoot
       // gives visually without shoving the run — and springing back needs no
       // re-lay, just as packed leaders hold at the floor on the left edge.
-      const delta = Math.max(0, Math.min(end, ceil) - nextStart);
-      const run =
-        delta === lastDelta
-          ? []
-          : followers.map((f) => ad.movePatch(f.raw, f.view.start + delta));
-      lastDelta = delta;
-      ad.apply([ad.trimRightPatch(raw0, end), ...run]);
+      if (ripple) {
+        // The document rides the edge both ways, every gap keeping its width.
+        ripple.move(Math.min(end, ceil) - end0, [ad.trimRightPatch(raw0, end)]);
+      } else {
+        const delta = Math.max(0, Math.min(end, ceil) - nextStart);
+        const run =
+          delta === lastDelta
+            ? []
+            : followers.map((f) => ad.movePatch(f.raw, f.view.start + delta));
+        lastDelta = delta;
+        ad.apply([ad.trimRightPatch(raw0, end), ...run]);
+      }
     },
     onUp: () => {
       ui.onSnap(null);
       const cur = ad.raws(useEditor.getState()).find((r) => ad.view(r).id === id);
-      if (!cur) return;
+      if (!cur) {
+        settle();
+        return;
+      }
       const v = ad.view(cur);
       const from = v.start + v.len;
-      if (from <= ceil + 1e-4) return; // settled within the room
+      if (from <= ceil + 1e-4) {
+        settle();
+        return; // settled within the room
+      }
       // Elastic spring back to the ceiling. `finish` lands it exactly, so an
       // interrupting gesture settles rather than strands an over-ceiling trim.
       const t0 = performance.now();
-      const finish = () => ad.apply([ad.trimRightPatch(raw0, ceil)]);
+      const finish = () => {
+        ad.apply([ad.trimRightPatch(raw0, ceil)]);
+        settle();
+      };
       const step = (now: number) => {
         const p = Math.min(1, (now - t0) / 240);
         const e2 = from + (ceil - from) * easeOutBack(p);
         ad.apply([ad.trimRightPatch(raw0, p < 1 ? e2 : ceil)]);
         snapBack = p < 1 ? { raf: requestAnimationFrame(step), finish } : null;
+        if (p >= 1) settle();
       };
       snapBack = { raf: requestAnimationFrame(step), finish };
     },
