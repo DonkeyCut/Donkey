@@ -98,6 +98,7 @@ nonisolated public struct RemoteNote: Equatable, Sendable {
     public var body: String
     public var colorIndex: Int
     public var folderId: UUID?
+    public var labelIds: [UUID]
     public var updatedAt: Date
     public var deletedAt: Date?
     public var createdAt: Date
@@ -108,6 +109,7 @@ nonisolated public struct RemoteNote: Equatable, Sendable {
         body: String,
         colorIndex: Int,
         folderId: UUID? = nil,
+        labelIds: [UUID] = [],
         updatedAt: Date,
         deletedAt: Date? = nil,
         createdAt: Date = .now
@@ -117,6 +119,7 @@ nonisolated public struct RemoteNote: Equatable, Sendable {
         self.body = body
         self.colorIndex = colorIndex
         self.folderId = folderId
+        self.labelIds = labelIds
         self.updatedAt = updatedAt
         self.deletedAt = deletedAt
         self.createdAt = createdAt
@@ -139,20 +142,38 @@ nonisolated public struct RemoteNoteFolder: Equatable, Sendable {
     }
 }
 
+/// A note label as the cloud stores it. Like folders, labels carry no
+/// tombstone: a label missing from the listing was deleted.
+nonisolated public struct RemoteNoteLabel: Equatable, Sendable {
+    public var id: UUID
+    public var name: String
+    public var updatedAt: Date
+    public var createdAt: Date
+
+    public init(id: UUID, name: String, updatedAt: Date, createdAt: Date) {
+        self.id = id
+        self.name = name
+        self.updatedAt = updatedAt
+        self.createdAt = createdAt
+    }
+}
+
 /// One listing of the account's notes: the notes themselves, tombstones
-/// included, and every folder they file into.
+/// included, every folder they file into, and every label they wear.
 ///
-/// `folders` is nil when the listing carried no folder key at all — an older
-/// site speaking to a newer phone. A reader treats that as "this response says
-/// nothing about folders", which is different from an empty list meaning the
-/// account has none.
+/// `folders` and `labels` are nil when the listing carried no such key at all
+/// — an older site speaking to a newer phone. A reader treats that as "this
+/// response says nothing about them", which is different from an empty list
+/// meaning the account has none.
 nonisolated public struct RemoteNotes: Equatable, Sendable {
     public var notes: [RemoteNote]
     public var folders: [RemoteNoteFolder]?
+    public var labels: [RemoteNoteLabel]?
 
-    public init(notes: [RemoteNote], folders: [RemoteNoteFolder]?) {
+    public init(notes: [RemoteNote], folders: [RemoteNoteFolder]?, labels: [RemoteNoteLabel]? = nil) {
         self.notes = notes
         self.folders = folders
+        self.labels = labels
     }
 }
 
@@ -294,6 +315,9 @@ public protocol CloudSyncServicing: AnyObject {
     /// Create or rename one folder under the id the phone gave it.
     func putNoteFolder(_ folder: RemoteNoteFolder) async throws
     func deleteNoteFolder(id: UUID) async throws
+    /// Create or rename one label under the id the phone gave it.
+    func putNoteLabel(_ label: RemoteNoteLabel) async throws
+    func deleteNoteLabel(id: UUID) async throws
 }
 
 // MARK: - Projects (down-sync)

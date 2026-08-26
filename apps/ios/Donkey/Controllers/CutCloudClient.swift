@@ -422,6 +422,8 @@ extension CutCloudClient: CloudSyncServicing {
         var body: String
         var colorIndex: Int
         var folderId: String?
+        // Optional so a site from before labels still decodes.
+        var labelIds: [String]?
         var updatedAt: Double
         var deletedAt: Double?
         var createdAt: Double
@@ -441,6 +443,7 @@ extension CutCloudClient: CloudSyncServicing {
             body: dto.body,
             colorIndex: dto.colorIndex,
             folderId: dto.folderId.flatMap(UUID.init(uuidString:)),
+            labelIds: (dto.labelIds ?? []).compactMap(UUID.init(uuidString:)),
             updatedAt: Date(timeIntervalSince1970: dto.updatedAt / 1000),
             deletedAt: dto.deletedAt.map { Date(timeIntervalSince1970: $0 / 1000) },
             createdAt: Date(timeIntervalSince1970: dto.createdAt / 1000)
@@ -451,6 +454,7 @@ extension CutCloudClient: CloudSyncServicing {
         struct NotesResponse: Decodable {
             var notes: [NoteDTO]
             var folders: [NoteFolderDTO]?
+            var labels: [NoteFolderDTO]?
         }
         let data = try await send(try request("GET", "/api/cut-cloud/notes"))
         let response = try decode(NotesResponse.self, from: data)
@@ -470,6 +474,16 @@ extension CutCloudClient: CloudSyncServicing {
                     updatedAt: Date(timeIntervalSince1970: dto.updatedAt / 1000),
                     createdAt: Date(timeIntervalSince1970: dto.createdAt / 1000)
                 )
+            },
+            // Labels ride the same wire shape as folders.
+            labels: response.labels?.compactMap { dto in
+                guard let id = UUID(uuidString: dto.id) else { return nil }
+                return RemoteNoteLabel(
+                    id: id,
+                    name: dto.name,
+                    updatedAt: Date(timeIntervalSince1970: dto.updatedAt / 1000),
+                    createdAt: Date(timeIntervalSince1970: dto.createdAt / 1000)
+                )
             }
         )
     }
@@ -479,6 +493,7 @@ extension CutCloudClient: CloudSyncServicing {
             "title": note.title,
             "body": note.body,
             "colorIndex": note.colorIndex,
+            "labelIds": note.labelIds.map { $0.uuidString.lowercased() },
             "updatedAt": Int(note.updatedAt.timeIntervalSince1970 * 1000),
         ]
         body["folderId"] = note.folderId.map { $0.uuidString.lowercased() } ?? NSNull()
@@ -505,6 +520,22 @@ extension CutCloudClient: CloudSyncServicing {
     func deleteNoteFolder(id: UUID) async throws {
         _ = try await send(
             try request("DELETE", "/api/cut-cloud/notes/folders/\(id.uuidString.lowercased())")
+        )
+    }
+
+    func putNoteLabel(_ label: RemoteNoteLabel) async throws {
+        _ = try await send(
+            try request(
+                "PUT",
+                "/api/cut-cloud/notes/labels/\(label.id.uuidString.lowercased())",
+                body: ["name": label.name]
+            )
+        )
+    }
+
+    func deleteNoteLabel(id: UUID) async throws {
+        _ = try await send(
+            try request("DELETE", "/api/cut-cloud/notes/labels/\(id.uuidString.lowercased())")
         )
     }
 }

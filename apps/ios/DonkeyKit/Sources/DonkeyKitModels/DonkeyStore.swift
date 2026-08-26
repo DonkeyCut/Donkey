@@ -15,6 +15,8 @@ final class NoteRecord {
     var colorIndex: Int
     /// The folder this note is filed in; nil is the top level.
     var folderId: UUID?
+    /// The labels this note wears. Older rows carry nil and read as none.
+    var labelIds: [UUID]?
     var createdAt: Date
     /// Last edit, the sync's last-writer-wins clock. Older rows carry nil and
     /// read as their creation time.
@@ -29,6 +31,7 @@ final class NoteRecord {
         body = note.body
         colorIndex = note.color.rawValue
         folderId = note.folderId
+        labelIds = note.labelIds
         createdAt = note.createdAt
         updatedAt = note.updatedAt
         self.dirty = dirty
@@ -41,6 +44,7 @@ final class NoteRecord {
             body: body,
             color: NoteColor(rawValue: colorIndex) ?? .butter,
             folderId: folderId,
+            labelIds: labelIds ?? [],
             createdAt: createdAt,
             updatedAt: updatedAt ?? createdAt
         )
@@ -67,6 +71,29 @@ final class NoteFolderRecord {
 
     var folder: NoteFolder {
         NoteFolder(id: id, name: name, createdAt: createdAt, updatedAt: updatedAt)
+    }
+}
+
+/// A label notes wear. Labels are few and small like folders, so the whole
+/// set pushes and pulls each pass; `dirty` marks one this phone changed.
+@Model
+final class NoteLabelRecord {
+    @Attribute(.unique) var id: UUID
+    var name: String
+    var createdAt: Date
+    var updatedAt: Date
+    var dirty: Bool
+
+    init(_ label: NoteLabel, dirty: Bool) {
+        id = label.id
+        name = label.name
+        createdAt = label.createdAt
+        updatedAt = label.updatedAt
+        self.dirty = dirty
+    }
+
+    var label: NoteLabel {
+        NoteLabel(id: id, name: name, createdAt: createdAt, updatedAt: updatedAt)
     }
 }
 
@@ -232,6 +259,7 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
         let schema = Schema([
             NoteRecord.self,
             NoteFolderRecord.self,
+            NoteLabelRecord.self,
             InspirationRecord.self,
             RecordingRecord.self,
             TombstoneRecord.self,
@@ -256,6 +284,7 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
             existing.body = note.body
             existing.colorIndex = note.color.rawValue
             existing.folderId = note.folderId
+            existing.labelIds = note.labelIds
             existing.updatedAt = note.updatedAt
             existing.dirty = true
         } else {
@@ -299,6 +328,38 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
             record.dirty = true
         }
         context.insert(TombstoneRecord(kind: SyncTombstone.Kind.noteFolder.rawValue, remoteId: id.uuidString, stamp: .now))
+        try context.save()
+    }
+
+    public func loadNoteLabels() throws -> [NoteLabel] {
+        let descriptor = FetchDescriptor<NoteLabelRecord>(sortBy: [SortDescriptor(\.createdAt)])
+        return try context.fetch(descriptor).map(\.label)
+    }
+
+    public func upsert(_ label: NoteLabel) throws {
+        let id = label.id
+        let descriptor = FetchDescriptor<NoteLabelRecord>(predicate: #Predicate { $0.id == id })
+        if let existing = try context.fetch(descriptor).first {
+            existing.name = label.name
+            existing.updatedAt = label.updatedAt
+            existing.dirty = true
+        } else {
+            context.insert(NoteLabelRecord(label, dirty: true))
+        }
+        try context.save()
+    }
+
+    public func deleteNoteLabel(id: UUID) throws {
+        try context.delete(model: NoteLabelRecord.self, where: #Predicate { $0.id == id })
+        // Every note wearing the label lets it go, each as a write of its own
+        // so the cloud copies follow.
+        for record in try context.fetch(FetchDescriptor<NoteRecord>())
+        where record.labelIds?.contains(id) == true {
+            record.labelIds = record.labelIds?.filter { $0 != id }
+            record.updatedAt = .now
+            record.dirty = true
+        }
+        context.insert(TombstoneRecord(kind: SyncTombstone.Kind.noteLabel.rawValue, remoteId: id.uuidString, stamp: .now))
         try context.save()
     }
 
@@ -403,6 +464,7 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
             existing.body = note.body
             existing.colorIndex = note.color.rawValue
             existing.folderId = note.folderId
+            existing.labelIds = note.labelIds
             existing.updatedAt = note.updatedAt
             existing.dirty = false
         } else {
@@ -462,6 +524,48 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
         let descriptor = FetchDescriptor<NoteRecord>(predicate: #Predicate { $0.folderId == id })
         for record in try context.fetch(descriptor) where record.dirty != true {
             record.folderId = nil
+        }
+        try context.save()
+    }
+
+    public func dirtyNoteLabels() throws -> [NoteLabel] {
+        let descriptor = FetchDescriptor<NoteLabelRecord>(sortBy: [SortDescriptor(\.createdAt)])
+        return try context.fetch(descriptor).filter(\.dirty).map(\.label)
+    }
+
+    public func applyRemoteNoteLabel(_ label: NoteLabel) throws {
+        let id = label.id
+        let descriptor = FetchDescriptor<NoteLabelRecord>(predicate: #Predicate { $0.id == id })
+        if let existing = try context.fetch(descriptor).first {
+            guard !existing.dirty else { return }
+            existing.name = label.name
+            existing.updatedAt = label.updatedAt
+        } else {
+            context.insert(NoteLabelRecord(label, dirty: false))
+        }
+        try context.save()
+    }
+
+    public func clearNoteLabelDirty(id: UUID, ifUpdatedAt stamp: Date) throws {
+        let descriptor = FetchDescriptor<NoteLabelRecord>(predicate: #Predicate { $0.id == id })
+        guard let record = try context.fetch(descriptor).first, record.updatedAt == stamp else { return }
+        record.dirty = false
+        try context.save()
+    }
+
+    /// Label ids this phone holds that the cloud no longer lists, so they
+    /// were deleted elsewhere. A label still waiting to be pushed is not one
+    /// of them.
+    public func cleanNoteLabelIds() throws -> [UUID] {
+        let descriptor = FetchDescriptor<NoteLabelRecord>()
+        return try context.fetch(descriptor).filter { !$0.dirty }.map(\.id)
+    }
+
+    public func removeNoteLabelFromCloudDelete(id: UUID) throws {
+        try context.delete(model: NoteLabelRecord.self, where: #Predicate { $0.id == id })
+        for record in try context.fetch(FetchDescriptor<NoteRecord>())
+        where record.dirty != true && record.labelIds?.contains(id) == true {
+            record.labelIds = record.labelIds?.filter { $0 != id }
         }
         try context.save()
     }

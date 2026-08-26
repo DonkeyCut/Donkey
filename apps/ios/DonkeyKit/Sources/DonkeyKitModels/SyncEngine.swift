@@ -18,6 +18,9 @@ nonisolated public struct SyncTombstone: Equatable, Sendable, Identifiable {
         /// A note folder deleted here. The cloud row goes; the notes in it
         /// come back to the top level on both sides.
         case noteFolder
+        /// A note label deleted here. The cloud row goes, and every note
+        /// wearing it lets it go on both sides.
+        case noteLabel
         /// A synced recording or inspiration item deleted here; the cloud
         /// asset goes with it.
         case libraryAsset
@@ -60,6 +63,13 @@ public protocol SyncJournalStoring: AnyObject {
     func clearNoteFolderDirty(id: UUID, ifUpdatedAt: Date) throws
     func cleanNoteFolderIds() throws -> [UUID]
     func removeNoteFolderFromCloudDelete(id: UUID) throws
+
+    // Labels: folders' twin — push-then-pull, no tombstone rows in the cloud.
+    func dirtyNoteLabels() throws -> [NoteLabel]
+    func applyRemoteNoteLabel(_ label: NoteLabel) throws
+    func clearNoteLabelDirty(id: UUID, ifUpdatedAt: Date) throws
+    func cleanNoteLabelIds() throws -> [UUID]
+    func removeNoteLabelFromCloudDelete(id: UUID) throws
 
     // Recordings
     func recordingRemote(_ id: UUID) throws -> (assetId: String?, claimedFileName: String?)
@@ -299,10 +309,11 @@ public final class SyncEngine {
         return mediaAllowed && pendingMedia
     }
 
-    /// Folders and notes the phone still owes the cloud.
+    /// Folders, labels and notes the phone still owes the cloud.
     private var notesPending: Bool {
         !(((try? journal.dirtyNotes()) ?? []).isEmpty)
             || !(((try? journal.dirtyNoteFolders()) ?? []).isEmpty)
+            || !(((try? journal.dirtyNoteLabels()) ?? []).isEmpty)
     }
 
     /// Links the cloud has not been handed, or is still fetching.
@@ -337,6 +348,9 @@ public final class SyncEngine {
                 case .noteFolder:
                     guard let id = UUID(uuidString: tombstone.remoteId) else { break }
                     try await service.deleteNoteFolder(id: id)
+                case .noteLabel:
+                    guard let id = UUID(uuidString: tombstone.remoteId) else { break }
+                    try await service.deleteNoteLabel(id: id)
                 case .libraryAsset:
                     try await service.deleteLibraryAsset(id: tombstone.remoteId)
                 }
@@ -426,6 +440,24 @@ public final class SyncEngine {
                 // Transient; stays dirty.
             }
         }
+        // Labels go up before the notes that wear them, for the same reason.
+        for label in (try? journal.dirtyNoteLabels()) ?? [] {
+            do {
+                try await service.putNoteLabel(
+                    RemoteNoteLabel(
+                        id: label.id,
+                        name: label.name,
+                        updatedAt: label.updatedAt,
+                        createdAt: label.createdAt
+                    )
+                )
+                try? journal.clearNoteLabelDirty(id: label.id, ifUpdatedAt: label.updatedAt)
+            } catch CloudSyncError.unauthorized {
+                return
+            } catch {
+                // Transient; stays dirty.
+            }
+        }
         // Push local edits first so the pull that follows can't overwrite them.
         for note in (try? journal.dirtyNotes()) ?? [] {
             do {
@@ -436,6 +468,7 @@ public final class SyncEngine {
                         body: note.body,
                         colorIndex: note.color.rawValue,
                         folderId: note.folderId,
+                        labelIds: note.labelIds,
                         updatedAt: note.updatedAt,
                         createdAt: note.createdAt
                     )
@@ -453,6 +486,7 @@ public final class SyncEngine {
         do {
             let remote = try await service.fetchNotes()
             try mergeRemoteFolders(remote.folders)
+            try mergeRemoteLabels(remote.labels)
             try mergeRemoteNotes(remote.notes)
             ideas?.reloadFromStore()
         } catch {
@@ -492,6 +526,35 @@ public final class SyncEngine {
         }
     }
 
+    /// Labels merge the way folders do: the listing is the truth, and one
+    /// this phone has clean that the listing does not name was deleted on
+    /// the other side. A nil listing came from a site that does not speak
+    /// labels, and its silence leaves this phone's labels where they are.
+    private func mergeRemoteLabels(_ remote: [RemoteNoteLabel]?) throws {
+        guard let remote else { return }
+        let pendingDeletes = Set(
+            ((try? journal.tombstones()) ?? [])
+                .filter { $0.kind == .noteLabel }
+                .compactMap { UUID(uuidString: $0.remoteId) }
+        )
+        var live: Set<UUID> = []
+        for label in remote {
+            if pendingDeletes.contains(label.id) { continue }
+            live.insert(label.id)
+            try journal.applyRemoteNoteLabel(
+                NoteLabel(
+                    id: label.id,
+                    name: label.name,
+                    createdAt: label.createdAt,
+                    updatedAt: label.updatedAt
+                )
+            )
+        }
+        for id in try journal.cleanNoteLabelIds() where !live.contains(id) {
+            try journal.removeNoteLabelFromCloudDelete(id: id)
+        }
+    }
+
     private func mergeRemoteNotes(_ remote: [RemoteNote]) throws {
         let localById = Dictionary(
             uniqueKeysWithValues: (ideas?.notes ?? []).map { ($0.id, $0) }
@@ -524,6 +587,7 @@ public final class SyncEngine {
             body: remote.body,
             color: NoteColor(rawValue: remote.colorIndex) ?? .butter,
             folderId: remote.folderId,
+            labelIds: remote.labelIds,
             createdAt: remote.createdAt,
             updatedAt: remote.updatedAt
         )

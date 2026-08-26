@@ -219,9 +219,13 @@ import Testing
         var downloads: [String] = []
         var folders: [UUID: RemoteNoteFolder] = [:]
         var deletedFolders: [UUID] = []
+        var labels: [UUID: RemoteNoteLabel] = [:]
+        var deletedLabels: [UUID] = []
         /// Whether the listing carries a folders key at all. A site that
         /// predates folders answers without one.
         var reportsFolders = true
+        /// The same, for labels.
+        var reportsLabels = true
         /// What an import job answers with once it is asked about.
         var imported: LinkImport = .ready(
             ImportedLink(
@@ -288,7 +292,8 @@ import Testing
         func fetchNotes() async throws -> RemoteNotes {
             RemoteNotes(
                 notes: Array(notes.values),
-                folders: reportsFolders ? Array(folders.values) : nil
+                folders: reportsFolders ? Array(folders.values) : nil,
+                labels: reportsLabels ? Array(labels.values) : nil
             )
         }
 
@@ -313,6 +318,19 @@ import Testing
             for (noteId, note) in notes where note.folderId == id {
                 notes[noteId]?.folderId = nil
                 _ = noteId
+            }
+        }
+
+        func putNoteLabel(_ label: RemoteNoteLabel) async throws {
+            labels[label.id] = label
+        }
+
+        func deleteNoteLabel(id: UUID) async throws {
+            deletedLabels.append(id)
+            labels[id] = nil
+            for (noteId, note) in notes where note.labelIds.contains(id) {
+                notes[noteId]?.labelIds.removeAll { $0 == id }
+                _ = note
             }
         }
     }
@@ -656,6 +674,61 @@ import Testing
         rig.ideas.deleteFolder(id: folder.id)
         await rig.engine.run()
         #expect(rig.cloud.deletedFolders == [folder.id])
+        #expect(try rig.store.tombstones().isEmpty)
+    }
+
+    @Test func labelPushesAheadOfTheNoteWearingIt() async throws {
+        let rig = try makeRig()
+        let label = try #require(rig.ideas.addLabel(named: "Hooks"))
+        rig.ideas.openEditor()
+        rig.ideas.draft?.body = "wearing it"
+        rig.ideas.toggleDraftLabel(label.id)
+        let note = try #require(rig.ideas.saveDraft())
+        await rig.engine.run()
+        #expect(rig.cloud.labels[label.id]?.name == "Hooks")
+        #expect(rig.cloud.notes[note.id]?.labelIds == [label.id])
+    }
+
+    @Test func labelDeletedInTheCloudComesOffItsNotes() async throws {
+        let rig = try makeRig()
+        let label = try #require(rig.ideas.addLabel(named: "Hooks"))
+        rig.ideas.openEditor()
+        rig.ideas.draft?.body = "wearing it"
+        rig.ideas.toggleDraftLabel(label.id)
+        let note = try #require(rig.ideas.saveDraft())
+        await rig.engine.run()
+        // Gone from the desktop: the listing no longer names it, which is the
+        // only signal a label delete has.
+        rig.cloud.labels[label.id] = nil
+        await rig.engine.run()
+        #expect(rig.ideas.labels.isEmpty)
+        let held = try #require(rig.ideas.notes.first { $0.id == note.id })
+        #expect(rig.ideas.labels(on: held).isEmpty)
+    }
+
+    @Test func aListingWithoutLabelsKeepsTheOnesHere() async throws {
+        let rig = try makeRig()
+        let label = try #require(rig.ideas.addLabel(named: "Hooks"))
+        await rig.engine.run()
+        // A site that does not speak labels answers without the key; its
+        // silence leaves this phone's labels alone.
+        rig.cloud.reportsLabels = false
+        await rig.engine.run()
+        #expect(rig.ideas.labels.map(\.id) == [label.id])
+    }
+
+    @Test func labelDeletedHereReachesTheCloudAndItsNotes() async throws {
+        let rig = try makeRig()
+        let label = try #require(rig.ideas.addLabel(named: "Hooks"))
+        rig.ideas.openEditor()
+        rig.ideas.draft?.body = "wearing it"
+        rig.ideas.toggleDraftLabel(label.id)
+        let note = try #require(rig.ideas.saveDraft())
+        await rig.engine.run()
+        rig.ideas.deleteLabel(id: label.id)
+        await rig.engine.run()
+        #expect(rig.cloud.deletedLabels == [label.id])
+        #expect(rig.cloud.notes[note.id]?.labelIds == [])
         #expect(try rig.store.tombstones().isEmpty)
     }
 

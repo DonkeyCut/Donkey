@@ -695,7 +695,7 @@ struct NotePickerSheet: View {
                                 Button {
                                     onPick(note)
                                 } label: {
-                                    NoteCard(note: note)
+                                    NoteCard(note: note, labels: ideas.labels(on: note))
                                 }
                                 .buttonStyle(.plain)
                             }

@@ -354,7 +354,7 @@ struct NotesGrid: View {
                 Button {
                     ideas.openEditor(for: note)
                 } label: {
-                    NoteCard(note: note)
+                    NoteCard(note: note, labels: ideas.labels(on: note))
                 }
                 .buttonStyle(.plain)
                 .contextMenu {
@@ -499,6 +499,7 @@ private struct FolderPromptModifier: ViewModifier {
 
 struct NoteCard: View {
     let note: Note
+    var labels: [NoteLabel] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -511,6 +512,9 @@ struct NoteCard: View {
                 .opacity(0.75)
                 .lineLimit(8)
             Spacer(minLength: 0)
+            if !labels.isEmpty {
+                NoteLabelChips(names: labels.map(\.name))
+            }
         }
         .foregroundStyle(Color.notePaperInk)
         .padding(14)
@@ -533,6 +537,104 @@ struct FoldCorner: Shape {
         path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
         path.closeSubpath()
         return path
+    }
+}
+
+/// The labels a note wears, as small chips wrapping onto as many lines as
+/// they need. Drawn in the note paper's ink, on the card and in the editor.
+struct NoteLabelChips: View {
+    let names: [String]
+
+    var body: some View {
+        ChipWrap(spacing: 5) {
+            ForEach(names, id: \.self) { name in
+                Text(name)
+                    .font(.caption2.weight(.medium))
+                    .lineLimit(1)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.black.opacity(0.1), in: Capsule())
+            }
+        }
+        // Stay clear of the card's folded corner.
+        .padding(.trailing, 18)
+    }
+}
+
+/// Lays subviews left to right, wrapping to a new line when the width runs
+/// out.
+///
+/// The height depends on the width, and a container is free to ask for a size
+/// without naming one — a card measured inside a scrolling grid does exactly
+/// that. Answering such an ask with a single line would report a height the
+/// placement then overflows, and the extra rows would be clipped by the card,
+/// so the width the layout was last placed at is remembered and answers for
+/// the one that was not given. The same cache holds the frames themselves,
+/// which the measure and the placement would otherwise each compute.
+struct ChipWrap: Layout {
+    var spacing: CGFloat = 5
+
+    struct Cache {
+        /// The last width `frames` was computed for, and its result.
+        var width: CGFloat?
+        var frames: [CGRect] = []
+        var bounds: CGSize = .zero
+        /// The width the layout was actually placed at, for an ask that names none.
+        var placed: CGFloat?
+    }
+
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+
+    func updateCache(_ cache: inout Cache, subviews: Subviews) {
+        cache.width = nil
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        layout(subviews, in: proposal.width ?? cache.placed ?? .infinity, cache: &cache).bounds
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        cache.placed = bounds.width
+        for (frame, subview) in zip(layout(subviews, in: bounds.width, cache: &cache).frames, subviews) {
+            subview.place(
+                at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                proposal: ProposedViewSize(frame.size)
+            )
+        }
+    }
+
+    private func layout(
+        _ subviews: Subviews,
+        in width: CGFloat,
+        cache: inout Cache
+    ) -> (frames: [CGRect], bounds: CGSize) {
+        if cache.width == width { return (cache.frames, cache.bounds) }
+        let laid = frames(for: subviews, in: width)
+        cache.width = width
+        cache.frames = laid.frames
+        cache.bounds = laid.bounds
+        return laid
+    }
+
+    private func frames(for subviews: Subviews, in width: CGFloat) -> (frames: [CGRect], bounds: CGSize) {
+        var frames: [CGRect] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var widest: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            frames.append(CGRect(origin: CGPoint(x: x, y: y), size: size))
+            rowHeight = max(rowHeight, size.height)
+            x += size.width + spacing
+            widest = max(widest, x - spacing)
+        }
+        return (frames, CGSize(width: widest, height: y + rowHeight))
     }
 }
 

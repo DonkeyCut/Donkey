@@ -47,6 +47,23 @@ nonisolated public struct NoteFolder: Identifiable, Equatable, Hashable, Sendabl
     }
 }
 
+/// A label notes carry. Like folders, ids are minted by whichever client
+/// makes the label, one PUT both creates and renames, and the cloud listing
+/// is the truth — a label missing from it was deleted.
+nonisolated public struct NoteLabel: Identifiable, Equatable, Hashable, Sendable {
+    public var id: UUID
+    public var name: String
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(id: UUID = UUID(), name: String, createdAt: Date = .now, updatedAt: Date = .now) {
+        self.id = id
+        self.name = name
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
 nonisolated public struct Note: Identifiable, Equatable, Sendable {
     public var id: UUID
     public var title: String
@@ -54,6 +71,9 @@ nonisolated public struct Note: Identifiable, Equatable, Sendable {
     public var color: NoteColor
     /// The folder this note is filed in; nil is the top level.
     public var folderId: UUID?
+    /// The labels this note wears. They ride the note's own last-writer-wins
+    /// write; an id naming no label is dropped from view.
+    public var labelIds: [UUID]
     public var createdAt: Date
     /// Last edit, wherever it happened. The sync's last-writer-wins clock:
     /// the newer stamp survives when the phone and the desktop both wrote.
@@ -65,6 +85,7 @@ nonisolated public struct Note: Identifiable, Equatable, Sendable {
         body: String,
         color: NoteColor,
         folderId: UUID? = nil,
+        labelIds: [UUID] = [],
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
@@ -73,6 +94,7 @@ nonisolated public struct Note: Identifiable, Equatable, Sendable {
         self.body = body
         self.color = color
         self.folderId = folderId
+        self.labelIds = labelIds
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -248,6 +270,10 @@ public protocol IdeasStoring: AnyObject {
     /// Delete a folder. Its notes come back to the top level rather than
     /// going with it — the same line the cloud draws.
     func deleteNoteFolder(id: UUID) throws
+    func loadNoteLabels() throws -> [NoteLabel]
+    func upsert(_ label: NoteLabel) throws
+    /// Delete a label. Every note wearing it lets it go, as its own write.
+    func deleteNoteLabel(id: UUID) throws
     func loadInspiration() throws -> [InspirationItem]
     func addLink(_ url: URL) throws -> InspirationItem
     func addMedia(data: Data, isVideo: Bool) throws -> InspirationItem
@@ -275,6 +301,7 @@ nonisolated public enum IdeasFilter: String, CaseIterable, Sendable {
 public final class IdeasModel {
     public private(set) var notes: [Note] = []
     public private(set) var folders: [NoteFolder] = []
+    public private(set) var labels: [NoteLabel] = []
     public private(set) var inspiration: [InspirationItem] = []
     public var filter: IdeasFilter = .all
 
@@ -300,6 +327,7 @@ public final class IdeasModel {
     public func reloadFromStore() {
         notes = (try? store.loadNotes()) ?? []
         folders = (try? store.loadNoteFolders()) ?? []
+        labels = (try? store.loadNoteLabels()) ?? []
         inspiration = (try? store.loadInspiration()) ?? []
     }
 
@@ -354,6 +382,66 @@ public final class IdeasModel {
         onLocalChange?()
     }
 
+    // MARK: Labels
+
+    /// The labels a note wears, in the order the account lists them. An id
+    /// naming nothing — a label deleted on another device — drops from view.
+    public func labels(on note: Note) -> [NoteLabel] {
+        labels.filter { note.labelIds.contains($0.id) }
+    }
+
+    @discardableResult
+    public func addLabel(named name: String) -> NoteLabel? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let label = NoteLabel(name: trimmed)
+        try? store.upsert(label)
+        labels.append(label)
+        onLocalChange?()
+        return label
+    }
+
+    public func renameLabel(id: UUID, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, var label = labels.first(where: { $0.id == id }) else { return }
+        label.name = trimmed
+        label.updatedAt = .now
+        try? store.upsert(label)
+        if let index = labels.firstIndex(where: { $0.id == id }) { labels[index] = label }
+        onLocalChange?()
+    }
+
+    /// Delete a label. Every note wearing it — the open draft too — lets it
+    /// go.
+    public func deleteLabel(id: UUID) {
+        try? store.deleteNoteLabel(id: id)
+        draft?.labelIds.removeAll { $0 == id }
+        reloadFromStore()
+        onLocalChange?()
+    }
+
+    /// Most labels one note may wear. The cloud refuses a write past this, so
+    /// the picker holds the same line — a label taken past it would come back
+    /// off the note on the next merge.
+    public static let maxLabelsPerNote = 20
+
+    /// Whether the open draft has room for another label.
+    public var draftTakesLabels: Bool {
+        (draft?.labelIds.count ?? 0) < Self.maxLabelsPerNote
+    }
+
+    /// Put a label on the open draft, or take it off.
+    public func toggleDraftLabel(_ id: UUID) {
+        guard var draft else { return }
+        if draft.labelIds.contains(id) {
+            draft.labelIds.removeAll { $0 == id }
+        } else {
+            guard draft.labelIds.count < Self.maxLabelsPerNote else { return }
+            draft.labelIds.append(id)
+        }
+        self.draft = draft
+    }
+
     nonisolated public struct NoteDraft: Identifiable, Equatable {
         public var id: UUID
         public var title: String
@@ -362,6 +450,8 @@ public final class IdeasModel {
         /// The folder the note is filed in — the one it was opened from for a
         /// new note.
         public var folderId: UUID?
+        /// The labels the note wears.
+        public var labelIds: [UUID]
         public var isNew: Bool
 
         public var hasContent: Bool {
@@ -378,10 +468,19 @@ public final class IdeasModel {
                 body: note.body,
                 color: note.color,
                 folderId: note.folderId,
+                labelIds: note.labelIds,
                 isNew: false
             )
         } else {
-            draft = NoteDraft(id: UUID(), title: "", body: "", color: .butter, folderId: folderId, isNew: true)
+            draft = NoteDraft(
+                id: UUID(),
+                title: "",
+                body: "",
+                color: .butter,
+                folderId: folderId,
+                labelIds: [],
+                isNew: true
+            )
         }
     }
 
@@ -406,6 +505,7 @@ public final class IdeasModel {
             body: body,
             color: draft.color,
             folderId: draft.folderId,
+            labelIds: draft.labelIds,
             createdAt: existing?.createdAt ?? .now,
             updatedAt: .now
         )

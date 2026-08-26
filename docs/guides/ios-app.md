@@ -54,7 +54,12 @@ with tombstones so a delete made offline on either side still lands on the
 other. The folders notes file into travel with them, under ids whichever
 device made them chose; a folder carries no tombstone, so a folder the cloud
 listing no longer names was deleted elsewhere and its notes come back to the
-top level.
+top level. Labels follow the same rule as folders: a note's labels ride its
+own write, and a label the listing no longer names comes off every note that
+wore it. A note wears twenty labels at most, and both pickers stop offering
+more at that count — the write past it is refused rather than trimmed, so a
+note never comes back from a merge wearing fewer labels than the person put
+on it.
 
 Deletes on the shelf run both ways. A synced recording deleted on the phone
 takes the cloud copy with it, and a clip deleted at the desk — from the Camera
