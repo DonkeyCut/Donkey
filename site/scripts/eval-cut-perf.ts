@@ -525,15 +525,29 @@ const LONG_S = 30;
  * reported project was about 14 Mbps. */
 const LONG_KBPS = 12_000;
 
+/** Long-clip shapes. 720p is the baseline; 1080p is what phones and screen
+ * recorders write, and what every stutter report from a machine we cannot
+ * reproduce has carried. */
+const LONG_H = 720;
+const SOURCE_H = 1080;
+
+/** The picture width for a long clip at `height`, keeping the source's 16:9. */
+const longWidth = (height: number) => Math.round((height * 16) / 9 / 2) * 2;
+
+/** The fixture name for one long-clip shape. */
+const longName = (fps: number, height: number) =>
+  height === LONG_H ? `long-${fps}.mp4` : `long-${fps}-${height}.mp4`;
+
 /**
- * One long clip with sound, at `fps`, with keyframes two seconds apart.
+ * One long clip with sound, at `fps` and `height`, with keyframes two seconds
+ * apart.
  *
  * The keyframe cadence is the load-bearing part. A walk that re-anchors decodes
  * from the keyframe before the ask, so how far back that keyframe sits is what
  * the re-anchor costs, and what the lead in `aheadOf` has to cover.
  */
-async function buildLongClip(fps: number): Promise<void> {
-  const dst = path.join(OUT, `long-${fps}.mp4`);
+async function buildLongClip(fps: number, height = LONG_H): Promise<void> {
+  const dst = path.join(OUT, longName(fps, height));
   if (existsSync(dst)) return;
   const src = path.join(STOCK, "animal-dog-sprint.mp4");
   await run("ffmpeg", [
@@ -545,7 +559,7 @@ async function buildLongClip(fps: number): Promise<void> {
     "-c:v", "libx264", "-preset", "veryfast",
     "-g", String(fps * 2), "-keyint_min", String(fps * 2),
     "-b:v", `${LONG_KBPS}k`, "-maxrate", `${LONG_KBPS}k`, "-bufsize", `${LONG_KBPS * 2}k`,
-    "-r", String(fps), "-vf", "scale=1280:-2", "-pix_fmt", "yuv420p",
+    "-r", String(fps), "-vf", `scale=-2:${height}`, "-pix_fmt", "yuv420p",
     "-c:a", "aac", "-b:a", "128k",
     "-shortest",
     dst,
@@ -568,9 +582,11 @@ const mediaUrl = (name: string) =>
 /** Seed one long clip, read as cloud media. `prefetch` starts the background
  * walk that fills the chunk cache behind the editor, which in a real project
  * is racing the playing walk for the same link — see `prefetchCloudMedia`. */
-const seedLongClip = (fps: number, prefetch: boolean) => async (page: Page): Promise<Fixture> =>
+const seedLongClip =
+  (fps: number, prefetch: boolean, height = LONG_H) =>
+  async (page: Page): Promise<Fixture> =>
   page.evaluate(
-    async ({ url, duration, prefetch }) => {
+    async ({ url, duration, prefetch, width, height }) => {
       const dev = (window as unknown as {
         __cutDev: {
           useEditor: { getState(): Record<string, unknown>; setState(p: unknown): void };
@@ -591,8 +607,8 @@ const seedLongClip = (fps: number, prefetch: boolean) => async (page: Page): Pro
             type: "video",
             url,
             duration,
-            width: 1280,
-            height: 720,
+            width,
+            height,
           },
         ],
         clips: [{ id: "c-long", assetId: "long", track: 0, start: 0, in: 0, out: duration }],
@@ -611,7 +627,13 @@ const seedLongClip = (fps: number, prefetch: boolean) => async (page: Page): Pro
       }
       return { cuts: [], duration };
     },
-    { url: mediaUrl(`long-${fps}.mp4`), duration: LONG_S, prefetch }
+    {
+      url: mediaUrl(longName(fps, height)),
+      duration: LONG_S,
+      prefetch,
+      width: longWidth(height),
+      height,
+    }
   );
 
 /** The ramp with a hard scene cut every three seconds: the color circle jumps
@@ -720,8 +742,8 @@ const seedTimeCoded = (src: string, cuts: number[]) => async (page: Page): Promi
             type: "video",
             url: src,
             duration,
-            width: 1280,
-            height: 720,
+            width,
+            height,
           },
         ],
         clips: [{ id: "c-fixture", assetId: "fixture", track: 0, start: 0, in: 0, out: duration }],
@@ -1276,10 +1298,12 @@ const longClipCase = (
     prefetch?: boolean;
     minKbps?: number;
     starved?: boolean;
+    /** Picture height of the file played. Defaults to the 720p baseline. */
+    height?: number;
   }
 ): EvalCase => {
   const passes = opts.passes ?? 2;
-  const seed = seedLongClip(opts.fps, opts.prefetch ?? true);
+  const seed = seedLongClip(opts.fps, opts.prefetch ?? true, opts.height ?? LONG_H);
   return {
     name,
     bucket: "playback",
@@ -1692,6 +1716,11 @@ const CASES: EvalCase[] = [
   longClipCase("play-cold-bytes", { fps: 30, cold: true, minKbps: LONG_KBPS * 3 }),
   // The editor closed and reopened between the warm pass and the traced one.
   longClipCase("play-after-remount", { fps: 30, remount: true }),
+  // The shape people actually import, and the shape every stutter report has
+  // carried: 1080p60 off a phone or a screen recorder. Two and a quarter times
+  // the pixels of the 720p case at twice the frames, which is what a weak
+  // decoder is really being asked for. The 720p fixtures never reproduced it.
+  longClipCase("play-source-1080p60", { fps: 60, height: SOURCE_H }),
   // The same play with nothing reading ahead of it. The background walk that
   // fills the chunk cache shares the link with the walk that is playing, and
   // this is the case that says how much of the link it is taking.
@@ -2165,7 +2194,10 @@ async function main(): Promise<void> {
   await buildMontageSource();
   await buildLongClip(30);
   await buildLongClip(60);
-  console.log(`[fixtures] ${files.length} clips + ramp + cuts + long 30/60 in ${OUT}`);
+  await buildLongClip(60, SOURCE_H);
+  console.log(
+    `[fixtures] ${files.length} clips + ramp + cuts + long 30/60 and ${SOURCE_H}p60 in ${OUT}`
+  );
 
   const cases = CASES.filter(
     (c) => (!ONLY || c.name === ONLY) && (!BUCKET || c.bucket === BUCKET)
