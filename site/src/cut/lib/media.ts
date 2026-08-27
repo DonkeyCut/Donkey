@@ -1514,7 +1514,7 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
     } else if (asset.type === "video") {
       if (!stripComplete(asset)) {
         setStripFailed(asset.id, false);
-        const key = stripCacheKey(useEditor.getState().projectId, asset.fileName);
+        const key = stripCacheKey(useEditor.getState().projectId, asset.id);
         const cached = await readCachedStrip(key, asset.duration);
         if (cached) {
           useEditor.getState().updateAsset(asset.id, {
@@ -1666,16 +1666,19 @@ type CachedStrip = {
   at: number;
 };
 
-function stripCacheKey(projectId: string | null, fileName: string) {
+// Cache entries are keyed by asset id: each import is its own asset, so a
+// file re-imported under a name the project has seen before starts a fresh
+// strip, and reopening the project still finds its assets' entries.
+function stripCacheKey(projectId: string | null, assetId: string) {
   // "s3" marks strips that carry scene cuts; strips cached before them regenerate.
-  return `${projectId ?? ""}/${fileName}@${THUMB_H}s3`;
+  return `${projectId ?? ""}/${assetId}@${THUMB_H}s3`;
 }
 
 type CachedPeaks = { peaks: number[]; duration: number; at: number };
 
-function peaksCacheKey(projectId: string | null, fileName: string) {
+function peaksCacheKey(projectId: string | null, assetId: string) {
   // The density marker versions the cache; peaks sampled differently regenerate.
-  return `${projectId ?? ""}/${fileName}@peaks${PEAKS_PER_SECOND}`;
+  return `${projectId ?? ""}/${assetId}@peaks${PEAKS_PER_SECOND}`;
 }
 
 function openStripDb(): Promise<IDBDatabase> {
@@ -1730,7 +1733,7 @@ async function readCachedPeaks(key: string, duration: number): Promise<number[] 
  * undefined so the browser decodes on its next open. */
 async function loadPeaks(asset: MediaAsset, src = asset.url): Promise<number[] | undefined> {
   if (typeof AudioDecoder === "undefined") return undefined;
-  const key = peaksCacheKey(useEditor.getState().projectId, asset.fileName);
+  const key = peaksCacheKey(useEditor.getState().projectId, asset.id);
   const cached = await readCachedPeaks(key, asset.duration);
   if (cached) return cached;
   const peaks = await makePeaks(src, asset.duration);
@@ -1973,8 +1976,8 @@ async function refineSceneCuts(assetId: string, url: string, duration: number) {
     // moves no grab point still answered the expensive question, and a cache
     // written without the answer sends every later open through the whole
     // probe again.
-    const persist = (fileName: string, thumbs: string[]) =>
-      writeCache(stripCacheKey(useEditor.getState().projectId, fileName), {
+    const persist = (thumbs: string[]) =>
+      writeCache(stripCacheKey(useEditor.getState().projectId, assetId), {
         thumbs,
         thumbStep,
         cuts,
@@ -1989,7 +1992,7 @@ async function refineSceneCuts(assetId: string, url: string, duration: number) {
     const asset = live();
     if (!asset?.thumbs?.length) return;
     if (!moved.length) {
-      persist(asset.fileName, asset.thumbs);
+      persist(asset.thumbs);
       return;
     }
     const regrabbed = new Map<number, string>();
@@ -2009,7 +2012,7 @@ async function refineSceneCuts(assetId: string, url: string, duration: number) {
     const thumbs = [...current.thumbs];
     for (const [i, tile] of regrabbed) if (i < thumbs.length) thumbs[i] = tile;
     useEditor.getState().updateAsset(assetId, { thumbs });
-    persist(current.fileName, thumbs);
+    persist(thumbs);
   } finally {
     sceneProbeInFlight.delete(assetId);
   }
