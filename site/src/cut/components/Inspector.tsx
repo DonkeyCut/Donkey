@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, Italic, Loader2, SlidersHorizontal, Smile, Trash2, Type } from "lucide-react";
+import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, Frame, Italic, Loader2, Palette, Smile, Trash2, Type, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmojiPicker } from "@/cut/components/EmojiPicker";
 import { FontPicker } from "@/cut/components/FontPicker";
@@ -106,7 +106,7 @@ import {
 } from "@/cut/lib/types";
 import { beatsBusyFor, detectAssetBeats, subscribeBeatsBusy } from "@/cut/lib/media";
 import { reportSwallowed } from "@/cut/lib/report";
-import { GRADE_PRESETS, isNeutralGrade } from "@donkeycut/effects-kit";
+import { isNeutralGrade } from "@donkeycut/effects-kit";
 import {
   MOVE_STRENGTH_MAX,
   MOVE_STRENGTH_MIN,
@@ -166,11 +166,6 @@ function InspectorColumn({
   overlay?: Overlay;
 }) {
   const [animView, setAnimView] = useState<"closed" | "open" | "returned">("closed");
-  // The color subview replaces the whole column the same way the animation
-  // panel does: it lays out its own bands (header, chips, floor bar) around
-  // its own scroller. It remembers which clip opened it, so selecting another
-  // clip lands back on the main view.
-  const [colorFor, setColorFor] = useState<string | null>(null);
   const nav = useMemo<AnimNav>(
     () => ({
       view: animView,
@@ -186,14 +181,11 @@ function InspectorColumn({
         <AnimationPanel overlay={overlay} onBack={nav.back} />
       </AnimNavContext.Provider>
     );
-  if (clip && colorFor === clip.id)
-    return <ColorPanel clip={clip} onBack={() => setColorFor(null)} />;
+  if (clip) return <ClipColumn clip={clip} />;
   return (
     <AnimNavContext.Provider value={nav}>
       <ScrollArea className="min-h-0 flex-1">
-        {clip ? (
-          <ClipPanel clip={clip} onColor={() => setColorFor(clip.id)} />
-        ) : audio ? (
+        {audio ? (
           <AudioPanel clip={audio} />
         ) : overlay ? (
           isTextOverlay(overlay) ? (
@@ -399,7 +391,175 @@ function LayoutButtons({
   );
 }
 
-function ClipPanel({ clip, onColor }: { clip: VideoClip; onColor: () => void }) {
+/** The clip column's floor toolbar: the three deep views, each an icon over
+ * its name. The open view's button reads dark and pressing it again returns
+ * to the main settings; a dot marks a view whose settings are in play. */
+const CLIP_TABS = [
+  { id: "color", label: "Color", Icon: Palette },
+  { id: "frame", label: "Frame", Icon: Frame },
+  { id: "audio", label: "Audio", Icon: Volume2 },
+] as const;
+type ClipTab = (typeof CLIP_TABS)[number]["id"] | "main";
+
+/**
+ * The video clip's column: the main settings with the Color, Frame, and Audio
+ * views behind a toolbar pinned under the scroller, so it stays put whichever
+ * view is open. Color lays out its own bands around its own scroller; the
+ * others ride the column's. The column is keyed on the selection, so picking
+ * another clip lands back on the main view.
+ */
+function ClipColumn({ clip }: { clip: VideoClip }) {
+  const [tab, setTab] = useState<ClipTab>("main");
+  const back = () => setTab("main");
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {tab === "color" ? (
+        <ColorPanel clip={clip} onBack={back} />
+      ) : (
+        <ScrollArea className="min-h-0 flex-1">
+          {tab === "frame" ? (
+            <ClipFramePanel clip={clip} onBack={back} />
+          ) : tab === "audio" ? (
+            <ClipAudioPanel clip={clip} onBack={back} />
+          ) : (
+            <ClipPanel clip={clip} />
+          )}
+        </ScrollArea>
+      )}
+      <ClipToolbar clip={clip} tab={tab} onPick={(t) => setTab(tab === t ? "main" : t)} />
+    </div>
+  );
+}
+
+function ClipToolbar({
+  clip,
+  tab,
+  onPick,
+}: {
+  clip: VideoClip;
+  tab: ClipTab;
+  onPick: (tab: Exclude<ClipTab, "main">) => void;
+}) {
+  const marked: Record<Exclude<ClipTab, "main">, boolean> = {
+    color: !isNeutralGrade(clip.grade),
+    frame: clipKeyed(clip) || !!clip.boxStyle || !!clip.mask,
+    audio: !!clip.muted || (clip.volume ?? 1) !== 1,
+  };
+  return (
+    <div className="flex shrink-0 border-t border-border bg-card">
+      {CLIP_TABS.map(({ id, label, Icon }) => (
+        <button
+          key={id}
+          type="button"
+          aria-pressed={tab === id}
+          className={cn(
+            `clip-tab-${id} flex flex-1 flex-col items-center justify-center gap-0.5 py-1 text-[10px] leading-none font-medium transition-colors`,
+            tab === id
+              ? "bg-neutral-900 text-white"
+              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+          )}
+          onClick={() => onPick(id)}
+        >
+          <span className="relative">
+            <Icon className="size-3.5" strokeWidth={tab === id ? 2.25 : 2} />
+            {marked[id] && (
+              <span
+                aria-hidden
+                className="absolute -top-0.5 -right-1 size-1.5 rounded-full bg-violet-500"
+              />
+            )}
+          </span>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Header for a toolbar view: the back chevron and the view's name, the same
+ * band the Color view opens with. */
+function SubviewHead({ title, onBack }: { title: string; onBack: () => void }) {
+  return (
+    <div className="flex h-10 shrink-0 items-center gap-1 px-2.5 text-sm font-semibold tracking-tight">
+      <button
+        type="button"
+        aria-label="Back"
+        className="grid size-6 place-items-center rounded text-muted-foreground transition-colors hover:text-foreground"
+        onClick={onBack}
+      >
+        <ChevronLeft className="size-4" />
+      </button>
+      {title}
+    </div>
+  );
+}
+
+/** The Frame view: what the clip's box does — its pose keyframes, border,
+ * shadow, and mask. */
+function ClipFramePanel({ clip, onBack }: { clip: VideoClip; onBack: () => void }) {
+  return (
+    <>
+      <SubviewHead title="Frame" onBack={onBack} />
+      <div className="flex flex-col gap-1 px-3.5 pb-4">
+        <ClipTransformSection clip={clip} />
+        <ClipBorderSection clip={clip} />
+        <ClipShadowSection clip={clip} />
+        <ClipMaskSection clip={clip} />
+      </div>
+    </>
+  );
+}
+
+/** The Audio view: the clip's own sound and the generated voice laid over it. */
+function ClipAudioPanel({ clip, onBack }: { clip: VideoClip; onBack: () => void }) {
+  const asset = useEditor((s) => s.assets.find((a) => a.id === clip.assetId));
+  const updateClip = useEditor((s) => s.updateClip);
+  const [volumeDraft, setVolumeDraft] = useState<number | null>(null);
+  const volume = volumeDraft ?? clip.volume ?? 1;
+  return (
+    <>
+      <SubviewHead title="Audio" onBack={onBack} />
+      <div className="flex flex-col gap-1 px-3.5 pb-4">
+        <Row label="Volume">
+          <ValueSlider
+            label="Volume"
+            sliderClassName="clip-volume data-horizontal:w-24"
+            valueClassName="w-9 text-muted-foreground"
+            value={volume}
+            min={0}
+            max={3}
+            step={0.05}
+            snap={[1]}
+            format={formatPercent}
+            parse={parsePercentInput}
+            onDraft={setVolumeDraft}
+            onCommit={(v) => {
+              updateClip(clip.id, { volume: v === 1 ? undefined : v });
+              setVolumeDraft(null);
+            }}
+          />
+        </Row>
+        <Row label="Mute audio">
+          <Switch
+            checked={clip.muted}
+            onCheckedChange={(v) => updateClip(clip.id, { muted: v })}
+          />
+        </Row>
+        {asset && !assetIsSilent(asset) && (
+          <Row
+            label="Beats"
+            info="Beat markers detected from the clip's sound, drawn as dots along its bar. Every drag and trim snaps to them; drag a dot to move it, double-click removes it, ⌥-click the clip adds one."
+          >
+            <BeatsControl asset={asset} />
+          </Row>
+        )}
+        <ClipGeneratedAudio clip={clip} />
+      </div>
+    </>
+  );
+}
+
+function ClipPanel({ clip }: { clip: VideoClip }) {
   const asset = useEditor((s) => s.assets.find((a) => a.id === clip.assetId));
   const aspect = useEditor((s) => s.aspect);
   const updateClip = useEditor((s) => s.updateClip);
@@ -407,8 +567,6 @@ function ClipPanel({ clip, onColor }: { clip: VideoClip; onColor: () => void }) 
   const turnCk = useSliderCheckpoint();
   const fadeCk = useSliderCheckpoint();
   const [speedDraft, setSpeedDraft] = useState<number | null>(null);
-  const [volumeDraft, setVolumeDraft] = useState<number | null>(null);
-  const volume = volumeDraft ?? clip.volume ?? 1;
   const speed = speedDraft ?? clip.speed ?? 1;
   const speedLen = (clip.out - clip.in) / (speed > 0 ? speed : 1);
   // Typing can trim out to the source's end but no further; an image has no
@@ -493,60 +651,6 @@ function ClipPanel({ clip, onColor }: { clip: VideoClip; onColor: () => void }) 
             }}
           />
         </Row>
-        <Row label="Color">
-          <button
-            type="button"
-            className="clip-color flex h-8 w-[8.5rem] items-center justify-between rounded-md border border-input px-2.5 text-[11.5px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-            onClick={onColor}
-          >
-            <span className="flex min-w-0 items-center gap-1.5">
-              <SlidersHorizontal className="size-3.5 shrink-0" />
-              <span className="truncate">
-                {(clip.grade?.preset && GRADE_PRESETS[clip.grade.preset.id]?.label) || "Adjust"}
-              </span>
-              {!isNeutralGrade(clip.grade) && (
-                <span className="size-1.5 shrink-0 rounded-full bg-violet-500" aria-label="Adjusted" />
-              )}
-            </span>
-            <ChevronRight className="size-3.5 shrink-0" />
-          </button>
-        </Row>
-
-        {/* Audio */}
-        <div className="my-1.5 h-px bg-border" />
-        <Row label="Clip volume">
-          <ValueSlider
-            label="Clip volume"
-            sliderClassName="clip-volume data-horizontal:w-24"
-            valueClassName="w-9 text-muted-foreground"
-            value={volume}
-            min={0}
-            max={3}
-            step={0.05}
-            snap={[1]}
-            format={formatPercent}
-            parse={parsePercentInput}
-            onDraft={setVolumeDraft}
-            onCommit={(v) => {
-              updateClip(clip.id, { volume: v === 1 ? undefined : v });
-              setVolumeDraft(null);
-            }}
-          />
-        </Row>
-        <Row label="Mute audio">
-          <Switch
-            checked={clip.muted}
-            onCheckedChange={(v) => updateClip(clip.id, { muted: v })}
-          />
-        </Row>
-        {asset && !assetIsSilent(asset) && (
-          <Row
-            label="Beats"
-            info="Beat markers detected from the clip's sound, drawn as dots along its bar. Every drag and trim snaps to them; drag a dot to move it, double-click removes it, ⌥-click the clip adds one."
-          >
-            <BeatsControl asset={asset} />
-          </Row>
-        )}
 
         {/* Picture */}
         <div className="my-1.5 h-px bg-border" />
@@ -692,11 +796,6 @@ function ClipPanel({ clip, onColor }: { clip: VideoClip; onColor: () => void }) 
               : undefined
           }
         />
-        <ClipTransformSection clip={clip} />
-        <ClipBorderSection clip={clip} />
-        <ClipShadowSection clip={clip} />
-        <ClipMaskSection clip={clip} />
-        <ClipGeneratedAudio clip={clip} />
       </div>
     </>
   );
