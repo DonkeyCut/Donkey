@@ -50,6 +50,7 @@ Every Cut change has to hold on all four surfaces, and the plan for it says how:
 - After a commit run finishes, ship iOS: when the committed changes touch `apps/ios/` and the working tree is clean, run `scripts/ship-ios-testflight.sh` once the merge into `main` lands, so the build reaches TestFlight. The script archives from the committed ref, so it goes after the commits.
 - Prefer deleting over documenting what was removed. Guides describe what is supported now, not what used to be.
 - Build forward by default. Prefer updating callers and contracts to the new supported shape instead of preserving old compatibility paths; ask before adding or keeping backwards-compatibility shims.
+- Fail hard. One provider, one model, one code path per job; a missing API key, service, or capability is an error surfaced to the caller. No secondary providers, no retry-on-another-model paths, no `env.X || default` softening. A fallback exists only when it is absolutely necessary — a surface that genuinely cannot carry the feature — and the summary and the guide say so.
 - After finishing a task, summarize what you did. Ground the summary in the actual code changes — name the files and behavior that changed, not the intent you set out with. If nothing changed, say so. When the change has a shape worth seeing — a system flow or a UI layout — include a small ASCII diagram of it.
 - This is an open source project. Stay alert for security concerns, and never commit PII, API keys, tokens, credentials, private config, or other secrets.
 - Keep this file stable and lightweight.
