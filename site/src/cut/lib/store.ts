@@ -1588,6 +1588,18 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const hydrate = (doc: Partial<ProjectDoc>, assets: MediaAsset[], ui: ProjectUiState) =>
         get().applyDocState(doc, assets, ui);
 
+      // Filmstrips and waveforms live in the IndexedDB caches, so a sweep
+      // right after each paint puts them on the timeline in the same breath
+      // as the clips. enrichAsset skips whatever is already filled, so the
+      // snapshot's sweep and the live document's compose.
+      const sweepEnrich = () =>
+        void import("./media")
+          .then((m) => {
+            if (get().projectId !== id || !get().loaded) return;
+            for (const a of get().assets) void m.enrichAsset(a);
+          })
+          .catch(() => {});
+
       // The live document goes out first, so everything below is a head start
       // on it and never a substitute for it.
       const docReq = apiFetch(`/api/cut/projects/${id}`);
@@ -1655,6 +1667,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             // arrives: these links do expire.
             markSignedBatch(id, links?.expiresAt ?? null);
             paintedFromCache = true;
+            sweepEnrich();
             if (cached?.dirty && !get().readOnly) {
               paintedDirty = true;
               dirtyBase = cached.baseVersion;
@@ -1686,10 +1699,20 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           throw new Error("This project could not be loaded.");
         }
         const doc = (await res.json()) as ProjectDoc;
-        const assets: MediaAsset[] = doc.assets.map((a) => ({
-          ...a,
-          url: mediaUrl(id, a.fileName),
-        }));
+        // The strips and peaks the snapshot's sweep already filled ride
+        // across the replacement — the landing document names the same
+        // assets, and blanking them would gray the timeline it just painted.
+        const prior = new Map(get().assets.map((a) => [a.id, a]));
+        const assets: MediaAsset[] = doc.assets.map((a) => {
+          const kept = prior.get(a.id);
+          return {
+            ...a,
+            ...(kept?.thumbs ? { thumbs: kept.thumbs, thumbStep: kept.thumbStep } : {}),
+            ...(kept?.sceneCuts !== undefined ? { sceneCuts: kept.sceneCuts } : {}),
+            ...(kept?.peaks !== undefined ? { peaks: kept.peaks } : {}),
+            url: mediaUrl(id, a.fileName),
+          };
+        });
         // Cloud and shared media ride signed R2 URLs, batch-minted once per
         // load; the /media route's 302 stays the fallback for anything the
         // mint misses. mediaLinks re-mints the batch as it nears expiry.
@@ -1802,6 +1825,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         }
         writeCachedDoc(id, doc);
         hydrate(doc, assets, ui);
+        sweepEnrich();
         resumeUploads();
       } catch (err) {
         // Couldn't reach the server. A snapshot already on screen is the

@@ -209,11 +209,9 @@ export function Editor({
           // loadProject clears `loaded` synchronously before its first await,
           // so marking the mount opened here can never show the editor
           // against leftover state.
-          const load = useEditor.getState().loadProject(projectId);
+          // loadProject sweeps the enrich caches itself, once per paint.
+          void useEditor.getState().loadProject(projectId);
           setOpened(true);
-          void load.then(() => {
-            for (const asset of useEditor.getState().assets) void enrichAsset(asset);
-          });
           return;
         }
         // The project is on this Mac with no app answering. The gate keeps
@@ -341,7 +339,6 @@ export function Editor({
             if (version && showing && version !== showing) {
               const at = playheadAt();
               await useEditor.getState().loadProject(projectId, { inPlace: true });
-              for (const asset of useEditor.getState().assets) void enrichAsset(asset);
               useEditor.getState().seek(at);
             }
           }
@@ -367,12 +364,7 @@ export function Editor({
     const onConflict = (e: Event) => {
       const detail = (e as CustomEvent<{ projectId: string }>).detail;
       if (!detail || detail.projectId !== projectId) return;
-      void useEditor
-        .getState()
-        .loadProject(projectId, { inPlace: true })
-        .then(() => {
-          for (const asset of useEditor.getState().assets) void enrichAsset(asset);
-        });
+      void useEditor.getState().loadProject(projectId, { inPlace: true });
       setConflictReloaded(true);
     };
     window.addEventListener("cut-cloud-doc-conflict", onConflict);
