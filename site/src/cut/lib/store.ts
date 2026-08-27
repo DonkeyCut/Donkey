@@ -1622,14 +1622,33 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           // and browser projects serve their own bytes; their URLs are minted
           // per session and never cached.
           const kind = getBackend().kind;
-          const links =
+          // Files this browser already holds paint straight off disk: the
+          // snapshot resolves the same blob URLs the live load is about to
+          // resolve, so a reopened cloud project's images and audio are on
+          // screen before any request returns.
+          const [links, held] = await Promise.all([
             kind === "local" || kind === "browser"
               ? null
-              : await readCachedMediaLinks(id, stale.map((a) => a.fileName));
+              : readCachedMediaLinks(id, stale.map((a) => a.fileName)),
+            (async () => {
+              const held = new Map<string, string>();
+              if (kind !== "cloud") return held;
+              await Promise.all(
+                stale.map(async (a) => {
+                  const url = await localMediaUrl(id, a.fileName);
+                  if (url) held.set(a.fileName, url);
+                })
+              );
+              return held;
+            })(),
+          ]);
           if (openable()) {
             hydrate(
               stored,
-              stale.map((a) => ({ ...a, url: links?.urls.get(a.fileName) ?? mediaUrl(id, a.fileName) })),
+              stale.map((a) => ({
+                ...a,
+                url: held.get(a.fileName) ?? links?.urls.get(a.fileName) ?? mediaUrl(id, a.fileName),
+              })),
               ui
             );
             // Keep the re-mint schedule honest even if the live load never
