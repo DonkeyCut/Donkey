@@ -572,6 +572,15 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
   // Typing can trim out to the source's end but no further; an image has no
   // intrinsic duration, so its clip can be any length.
   const maxOut = asset && asset.type !== "image" ? asset.duration : Infinity;
+  // The Shape row shows only while snugging the box to the footage's shape
+  // would move it, so the button always visibly does something.
+  const rect = rectOf(clip);
+  const snug =
+    asset?.width && asset?.height
+      ? sourceAspectRect(rect, asset.width, asset.height, frameOf(aspect))
+      : null;
+  const snugMoves =
+    !!snug && (["x", "y", "w", "h"] as const).some((k) => Math.abs(snug[k] - rect[k]) > 1e-3);
   return (
     <>
       <div className="flex flex-col gap-1 px-3.5 pb-4">
@@ -781,13 +790,13 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
           />
         </Row>
         <LayoutButtons
-          rect={rectOf(clip)}
+          rect={rect}
           onPick={(frame, fit) => updateClip(clip.id, { frame, fit })}
           onSourceAspect={
-            asset?.width && asset?.height
+            snug && snugMoves
               ? () =>
                   updateClip(clip.id, {
-                    frame: sourceAspectRect(rectOf(clip), asset.width!, asset.height!, frameOf(aspect)),
+                    frame: snug,
                     fit: "fit",
                     zoom: undefined,
                     panX: 0,
