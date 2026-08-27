@@ -106,7 +106,6 @@ import {
 } from "@/cut/lib/types";
 import { beatsBusyFor, detectAssetBeats, subscribeBeatsBusy } from "@/cut/lib/media";
 import { reportSwallowed } from "@/cut/lib/report";
-import { isNeutralGrade } from "@donkeycut/effects-kit";
 import {
   MOVE_STRENGTH_MAX,
   MOVE_STRENGTH_MIN,
@@ -393,7 +392,7 @@ function LayoutButtons({
 
 /** The clip column's floor toolbar: the three deep views, each an icon over
  * its name. The open view's button reads dark and pressing it again returns
- * to the main settings; a dot marks a view whose settings are in play. */
+ * to the main settings. */
 const CLIP_TABS = [
   { id: "color", label: "Color", Icon: Palette },
   { id: "frame", label: "Frame", Icon: Frame },
@@ -426,25 +425,18 @@ function ClipColumn({ clip }: { clip: VideoClip }) {
           )}
         </ScrollArea>
       )}
-      <ClipToolbar clip={clip} tab={tab} onPick={(t) => setTab(tab === t ? "main" : t)} />
+      <ClipToolbar tab={tab} onPick={(t) => setTab(tab === t ? "main" : t)} />
     </div>
   );
 }
 
 function ClipToolbar({
-  clip,
   tab,
   onPick,
 }: {
-  clip: VideoClip;
   tab: ClipTab;
   onPick: (tab: Exclude<ClipTab, "main">) => void;
 }) {
-  const marked: Record<Exclude<ClipTab, "main">, boolean> = {
-    color: !isNeutralGrade(clip.grade),
-    frame: clipKeyed(clip) || !!clip.boxStyle || !!clip.mask,
-    audio: !!clip.muted || (clip.volume ?? 1) !== 1,
-  };
   return (
     <div className="flex shrink-0 border-t border-border bg-card">
       {CLIP_TABS.map(({ id, label, Icon }) => (
@@ -460,15 +452,7 @@ function ClipToolbar({
           )}
           onClick={() => onPick(id)}
         >
-          <span className="relative">
-            <Icon className="size-3.5" strokeWidth={tab === id ? 2.25 : 2} />
-            {marked[id] && (
-              <span
-                aria-hidden
-                className="absolute -top-0.5 -right-1 size-1.5 rounded-full bg-violet-500"
-              />
-            )}
-          </span>
+          <Icon className="size-3.5" strokeWidth={tab === id ? 2.25 : 2} />
           {label}
         </button>
       ))}
