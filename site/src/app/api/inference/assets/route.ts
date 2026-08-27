@@ -41,16 +41,54 @@ export const POST = withDonkeyAuth(async (request) => {
     return validationErrorResponse(parsed.error);
   }
 
-  // Select the provider and settle the model it will bill before the preflight, so credit limits
-  // and pricing are scoped to what actually runs. Callers routinely omit the model and let the
-  // adapter pick one (music picks by requested length), so asking the provider is the only way the
-  // preflight sees the id that gets charged.
+  // Select the provider, settle the model it will bill, and count the units the request will
+  // charge, all before the preflight, so credit limits and pricing are scoped to what actually
+  // runs. Callers routinely omit the model and let the adapter pick one (music picks by requested
+  // length), so asking the provider is the only way the preflight sees the id that gets charged.
+  // Reference pictures and seed frames ride storage, not the request body — they become inline
+  // data on the server-to-server leg. That resolution reads whole objects out of storage, so it
+  // waits for the balance to clear; only a provider whose charge scales with the input (the matte
+  // segmenter's frame chunks) resolves ahead of the preflight, because its count is read from the
+  // resolved media.
+  const resolveRequest = async () => {
+    const inputs: JsonObject | undefined = parsed.data.inputs
+      ? toJsonObject(
+          await resolveInferenceBlobs(
+            toJsonValue(parsed.data.inputs),
+            request.donkey.userId,
+          ),
+        )
+      : undefined;
+    return inputs ? { ...parsed.data, inputs } : parsed.data;
+  };
   let provider;
   let model;
+  let generationRequest;
+  let generationCount: number | undefined;
   try {
     provider = createProviderRegistry().assetProvider(parsed.data);
     model = provider.assetModelFor?.(parsed.data) ?? parsed.data.model;
+    generationRequest = parsed.data;
+    if (provider.assetGenerationCountFor) {
+      generationRequest = await resolveRequest();
+      generationCount = await provider.assetGenerationCountFor(generationRequest);
+    }
   } catch (error) {
+    // A rejected request still leaves its diagnostic trail, same as a
+    // failure after the preflight.
+    await recordFailedInferenceUsage({
+      clientId: client.clientId,
+      conversationId: request.donkey.conversationId,
+      errorCode: inferenceErrorCode(error),
+      metadata: {
+        assetKind: parsed.data.kind,
+      },
+      model: model ?? parsed.data.model ?? "default",
+      provider: provider?.id ?? parsed.data.provider ?? "unresolved",
+      requestKind: "asset_generation",
+      route: inferenceUsageRoutes.assets,
+      userId: request.donkey.userId,
+    });
     if (error instanceof InferenceProviderError) {
       return inferenceProviderErrorResponse(error);
     }
@@ -63,9 +101,10 @@ export const POST = withDonkeyAuth(async (request) => {
     route: inferenceUsageRoutes.assets,
     userId: request.donkey.userId,
     // The billed model is known here, so the preflight holds the generation to it: an unpriced
-    // model never runs and bills upstream, and a flat-priced one never starts on a balance that
-    // can't cover it.
+    // model never runs and bills upstream, and a priced one never starts on a balance that
+    // can't cover the full unit count.
     enforceModelPrice: true,
+    generationCount,
   });
   if (!credits.ok) {
     return credits.response;
@@ -74,24 +113,16 @@ export const POST = withDonkeyAuth(async (request) => {
   const failedUsageProvider = provider.id;
 
   try {
+    if (!provider.assetGenerationCountFor) generationRequest = await resolveRequest();
     const generationId = generationIDForRequest(parsed.data);
     const generation = {
       id: generationId,
       kind: parsed.data.kind,
     };
-    // Reference pictures and seed frames ride storage, not the request body —
-    // they become inline data here, on the server-to-server leg.
-    const inputs: JsonObject | undefined = parsed.data.inputs
-      ? toJsonObject(
-          await resolveInferenceBlobs(
-            toJsonValue(parsed.data.inputs),
-            request.donkey.userId,
-          ),
-        )
-      : undefined;
     const result = await provider.generateAsset?.({
       generationId,
-      request: inputs ? { ...parsed.data, inputs } : parsed.data,
+      request: generationRequest,
+      generationCount,
     });
 
     if (!result) {

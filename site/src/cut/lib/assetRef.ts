@@ -447,11 +447,13 @@ const EMPTY_LIBRARY: LibraryData = { assets: [], folders: [], templates: [] };
  * keyframes, takes — visible nowhere the user works, so they don't become
  * candidates; a take placed on the timeline is reachable as its clip (@c2).
  * Uploaded fonts are project assets too, but there is nothing to say about a
- * typeface file in a prompt, so they stay out of the handle numbering. */
+ * typeface file in a prompt, so they stay out of the handle numbering. Baked
+ * mattes (origin "matte") are a cutout's internals the same way — numbering
+ * them would shift every later @v handle when a bake lands. */
 export function projectRefs(assets: MediaAsset[]): AssetRef[] {
   const counters = { v: 0, i: 0, a: 0 };
   return assets
-    .filter((a) => a.origin !== "chat" && a.type !== "font")
+    .filter((a) => a.origin !== "chat" && a.origin !== "matte" && a.type !== "font")
     .map((a) => {
       const prefix = a.type === "image" ? "i" : a.type === "video" ? "v" : "a";
       counters[prefix] += 1;

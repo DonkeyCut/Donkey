@@ -1,7 +1,8 @@
 // Stage the MediaPipe vision runtime into public/ so segmentation runs
 // self-hosted (no runtime Google fetch). The wasm pair is ~12MB, so it is
-// copied from node_modules on install rather than committed; the tiny
-// person-segmentation model is committed beside it. Runs from postinstall.
+// copied from node_modules on install rather than committed; the
+// person-segmentation and tap-to-select models are committed beside it.
+// Runs from postinstall.
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

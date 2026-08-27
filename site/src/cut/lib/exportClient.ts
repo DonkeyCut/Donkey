@@ -10,14 +10,15 @@ import { exportsDir, readFileAt, saveExport } from "./backend/browser/opfs";
 import { holdRegistered, registerBlobFile, releaseRegistered } from "./backend/browser/registry";
 import { quotaErrorMessage } from "./backend/cloud";
 import { downloadFromUrl } from "./download";
-import { renderProjectToMp4 } from "./exportRender";
+import { ClipReader, renderProjectToMp4 } from "./exportRender";
 import { putSigned } from "./media";
+import { renderRemovalPieces } from "./removalVideo";
 import { createRasterCanvas, rasterCanvasToPng } from "./raster";
 import { clipSpeed, getClipSpans, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
-import { isMaskAnimated, isOverlayAnimated, normalizeGrade, paintMaskLuma } from "@donkeycut/effects-kit";
+import { chromaAlphaInto, isMaskAnimated, isOverlayAnimated, matteLumaToAlpha, normalizeGrade, paintMaskLuma, paintStrokeInk } from "@donkeycut/effects-kit";
 import { renderElementFrames, renderElementPng } from "./textRender";
-import { clipCovers, clipKeyed, clipPosed, clipPoseAt, clipZoom, contentRect, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, regionPx, shadowInk, subjectMasked } from "./types";
+import { clipCovers, clipKeyed, clipPosed, clipPoseAt, clipZoom, contentRect, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, regionPx, removalActive, shadowInk, subjectMasked } from "./types";
 import type {
   Aspect,
   AudioClip,
@@ -283,14 +284,113 @@ async function renderClipMaskPictures(
   return { frames };
 }
 
+/** The keyed silhouette a removal clip's shadow falls from: white coverage
+ * over transparency in the clip's source frame, sampled at a shadow frame's
+ * local second. Null means the shadow keeps the picture's rectangle — no
+ * active removal, a backdrop fill restoring the full picture, or an AI
+ * removal whose matte hasn't baked (the export shows the plain picture then,
+ * and a rectangular shadow matches it). */
+function removalShadowSilhouette(
+  clip: VideoClip,
+  assets: MediaAsset[]
+): { at: (tLocal: number) => Promise<CanvasImageSource | null>; dispose: () => void } | null {
+  const r = clip.removal;
+  if (!removalActive(r)) return null;
+  if (r!.backdrop && r!.backdrop.kind !== "none") return null;
+  const asset = assets.find((a) => a.id === clip.assetId);
+  if (!asset) return null;
+  const speed = clipSpeed(clip);
+  const still = asset.type === "image";
+  const canvas = createRasterCanvas(2, 2);
+  const ctx = canvas.getContext("2d", {
+    willReadFrequently: true,
+  }) as CanvasRenderingContext2D | null;
+  if (!ctx) return null;
+  const stage = (w: number, h: number) => {
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    ctx.clearRect(0, 0, w, h);
+  };
+  // The preview's shadow falls from the whole layer — keyed picture plus the
+  // stroke ink laid behind it — so the ink joins the silhouette here too;
+  // a thick or offset stroke moves the shadow's edge with it.
+  const ink = createRasterCanvas(2, 2);
+  const inkCtx = ink.getContext("2d") as CanvasRenderingContext2D | null;
+  const withStroke = (w: number, h: number, tLocal: number): CanvasImageSource => {
+    const stroke = r!.stroke;
+    if (!stroke || !inkCtx) return canvas as CanvasImageSource;
+    if (ink.width !== w || ink.height !== h) {
+      ink.width = w;
+      ink.height = h;
+    }
+    inkCtx.setTransform(1, 0, 0, 1, 0, 0);
+    inkCtx.globalCompositeOperation = "source-over";
+    inkCtx.clearRect(0, 0, w, h);
+    paintStrokeInk(inkCtx, canvas as CanvasImageSource, w, h, stroke, tLocal, Math.min(w, h) / 1080);
+    ctx.globalCompositeOperation = "destination-over";
+    ctx.drawImage(ink, 0, 0);
+    ctx.globalCompositeOperation = "source-over";
+    return canvas as CanvasImageSource;
+  };
+  if (r!.mode === "chroma") {
+    const key = r!.chroma;
+    if (!key) return null;
+    const reader = new ClipReader(asset, () => asset.url);
+    return {
+      at: async (tLocal) => {
+        const frame = await reader.frameAt(still ? 0 : clip.in + tLocal * speed);
+        if (frame.kind !== "ready") return null;
+        // Sampled small — the silhouette blurs into a shadow anyway.
+        const s = Math.min(1, 480 / Math.max(1, Math.min(frame.width, frame.height)));
+        const w = Math.max(2, Math.round(frame.width * s));
+        const h = Math.max(2, Math.round(frame.height * s));
+        stage(w, h);
+        ctx.drawImage(frame.image, 0, 0, w, h);
+        const px = ctx.getImageData(0, 0, w, h);
+        chromaAlphaInto(px.data, key);
+        for (let i = 0; i < px.data.length; i += 4) {
+          px.data[i] = 255;
+          px.data[i + 1] = 255;
+          px.data[i + 2] = 255;
+        }
+        ctx.putImageData(px, 0, 0);
+        return withStroke(w, h, tLocal);
+      },
+      dispose: () => reader.dispose(),
+    };
+  }
+  const matte = r!.matte ? assets.find((a) => a.id === r!.matte!.assetId) : undefined;
+  if (!matte) return null;
+  const reader = new ClipReader(matte, () => matte.url);
+  const mdur = Math.max(0.1, matte.duration || 0.1);
+  return {
+    at: async (tLocal) => {
+      const srcT = still ? 0 : clip.in + tLocal * speed;
+      const frame = await reader.frameAt(
+        Math.min(Math.max(0, srcT - r!.matte!.in), mdur - 0.001)
+      );
+      if (frame.kind !== "ready") return null;
+      stage(frame.width, frame.height);
+      ctx.drawImage(frame.image, 0, 0);
+      const px = ctx.getImageData(0, 0, frame.width, frame.height);
+      matteLumaToAlpha(px.data);
+      ctx.putImageData(px, 0, 0);
+      return withStroke(frame.width, frame.height, tLocal);
+    },
+    dispose: () => reader.dispose(),
+  };
+}
+
 /**
  * Paint the shadow a clip casts, frame-sized and transparent everywhere else.
  * The silhouette is the picture the clip really shows — its box, its rounded
- * corners, its mask, its pose — thrown behind itself and then punched back
- * out, so the graph can lay the result over the frame and get what sitting
- * behind the clip would have looked like. A moving clip samples the shadow
- * per frame, the way a keyframed mask samples its coverage. Null without a
- * shadow.
+ * corners, its mask, its pose, its keyed cutout — thrown behind itself and
+ * then punched back out, so the graph can lay the result over the frame and
+ * get what sitting behind the clip would have looked like. A moving clip
+ * samples the shadow per frame, the way a keyframed mask samples its
+ * coverage. Null without a shadow.
  */
 async function renderClipShadowPictures(
   clip: VideoClip,
@@ -299,10 +399,14 @@ async function renderClipShadowPictures(
   H: number,
   dur: number,
   tag: string,
-  pngs: ExportPayload["pngs"]
+  pngs: ExportPayload["pngs"],
+  assets: MediaAsset[]
 ): Promise<SpecMask | undefined> {
   const sh = clip.boxStyle?.shadow;
   if (!sh) return undefined;
+  // A cutout's shadow falls from the keyed subject, sampled per frame from
+  // the matte (or the chroma key), the way the preview casts it.
+  const silhouette = removalShadowSilhouette(clip, assets);
   const scale = Math.min(W, H) / 1080;
   const frame = { width: W, height: H, scale };
   const rect = rectOf(clip);
@@ -319,7 +423,8 @@ async function renderClipShadowPictures(
   const cover = createRasterCanvas(W, H);
   const canvas = createRasterCanvas(W, H);
   const anchor = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
-  const blobAt = (tLocal: number) => {
+  const blobAt = async (tLocal: number) => {
+    const sil = silhouette ? await silhouette.at(tLocal) : null;
     const shapeCtx = shape.getContext("2d") as CanvasRenderingContext2D;
     shapeCtx.setTransform(1, 0, 0, 1, 0, 0);
     shapeCtx.clearRect(0, 0, W, H);
@@ -330,13 +435,18 @@ async function renderClipShadowPictures(
       shapeCtx.scale(pose.scale, pose.scale);
       shapeCtx.translate(-anchor.x * W, -anchor.y * H);
     }
-    // The lit shape: the picture, trimmed at the box's rounded corners.
+    // The lit shape: the picture — a cutout's keyed silhouette in its place —
+    // trimmed at the box's rounded corners.
     shapeCtx.save();
     shapeCtx.beginPath();
     shapeCtx.roundRect(box.x, box.y, box.w, box.h, radius);
     shapeCtx.clip();
-    shapeCtx.fillStyle = "#ffffff";
-    shapeCtx.fillRect(pic.x, pic.y, pic.w, pic.h);
+    if (sil) {
+      shapeCtx.drawImage(sil, pic.x, pic.y, pic.w, pic.h);
+    } else {
+      shapeCtx.fillStyle = "#ffffff";
+      shapeCtx.fillRect(pic.x, pic.y, pic.w, pic.h);
+    }
     shapeCtx.restore();
     if (mask) {
       // The mask decides the rest of the shape; its luma becomes coverage.
@@ -362,21 +472,27 @@ async function renderClipShadowPictures(
     ctx.globalCompositeOperation = "source-over";
     return rasterCanvasToPng(canvas);
   };
-  const moves = (mask && isMaskAnimated(mask)) || clipKeyed(clip);
-  if (!moves) {
-    const name = `${tag}.png`;
-    pngs.push({ name, blob: await blobAt(0) });
-    return { file: name };
+  try {
+    // A keyed subject moves every frame, so its shadow samples like an
+    // animated mask does.
+    const moves = (mask && isMaskAnimated(mask)) || clipKeyed(clip) || !!silhouette;
+    if (!moves) {
+      const name = `${tag}.png`;
+      pngs.push({ name, blob: await blobAt(0) });
+      return { file: name };
+    }
+    const step = 1 / MASK_SAMPLE_FPS;
+    const n = Math.max(1, Math.round(dur * MASK_SAMPLE_FPS));
+    const frames: { file: string; duration: number }[] = [];
+    for (let i = 0; i < n; i++) {
+      const name = `${tag}_f${i}.png`;
+      pngs.push({ name, blob: await blobAt(i * step) });
+      frames.push({ file: name, duration: i === n - 1 ? Math.max(step, dur - (n - 1) * step) : step });
+    }
+    return { frames };
+  } finally {
+    silhouette?.dispose();
   }
-  const step = 1 / MASK_SAMPLE_FPS;
-  const n = Math.max(1, Math.round(dur * MASK_SAMPLE_FPS));
-  const frames: { file: string; duration: number }[] = [];
-  for (let i = 0; i < n; i++) {
-    const name = `${tag}_f${i}.png`;
-    pngs.push({ name, blob: await blobAt(i * step) });
-    frames.push({ file: name, duration: i === n - 1 ? Math.max(step, dur - (n - 1) * step) : step });
-  }
-  return { frames };
 }
 
 /** Paint the clip's border ring — a stroked rounded rect along its box edge,
@@ -514,6 +630,7 @@ export async function buildExportPayload(
     shadow: undefined as SpecMask | undefined,
     kf: posed(sp.clip).kf,
     border: undefined as string | undefined,
+    removal: undefined as { rgb: string; alpha: string } | undefined,
   }));
   // Track-0 segments render at the full output frame (regioned clips pad out
   // to it), so their masks paint full-frame. A subject mask rides the shared
@@ -558,8 +675,33 @@ export async function buildExportPayload(
       settings.height,
       dur,
       `shadow_c${i}`,
-      pngs
+      pngs,
+      doc.assets
     );
+    // A removal clip's picture travels as its keyed layer, client-rendered:
+    // a color/alpha pair the engine merges and frames in place of the source
+    // decode. Grade and key are baked in (the entry's grade clears so the
+    // engine never grades twice); the look stays on the entry — the engine
+    // runs it over the flattened segment. A null is the declared degrade (no
+    // matte yet — the export shows the plain picture, like the preview); a
+    // broken render throws and fails the export instead of silently dropping
+    // the cutout.
+    if (removalActive(c.removal) && !c.hidden) {
+      const pieces = await renderRemovalPieces(spans[i].asset, spans[i].clip, doc.assets, {
+        fps: settings.fps,
+        maxShort: Math.min(
+          2160,
+          Math.round(Math.min(settings.width, settings.height) * clipZoom(c))
+        ),
+        bakeLook: false,
+      });
+      if (pieces) {
+        pngs.push({ name: `removal_c${i}_rgb.mp4`, blob: pieces.rgb });
+        pngs.push({ name: `removal_c${i}_a.mp4`, blob: pieces.alpha });
+        clipEntries[i].removal = { rgb: `removal_c${i}_rgb.mp4`, alpha: `removal_c${i}_a.mp4` };
+        clipEntries[i].grade = undefined;
+      }
+    }
   }
 
   // The server's video graph is a sequential fold, so gaps between the
@@ -674,6 +816,7 @@ export async function buildExportPayload(
           shadow: undefined as SpecMask | undefined,
           kf: posed(c).kf,
           border: undefined as string | undefined,
+          removal: undefined as { rgb: string; alpha: string } | undefined,
           ...ramp,
         };
         overlayClipOf.set(entry, posed(c));
@@ -725,8 +868,30 @@ export async function buildExportPayload(
       settings.height,
       olen,
       `shadow_ov${i}`,
-      pngs
+      pngs,
+      doc.assets
     );
+    // The keyed layer keeps its alpha over the tracks beneath, so the engine
+    // applies no grade or look to it — both bake into the pieces here, the
+    // way image overlays already carry their pixels ready-made.
+    const oAsset = assetById.get(c.assetId);
+    if (removalActive(c.removal) && oAsset) {
+      const pieces = await renderRemovalPieces(oAsset, c, doc.assets, {
+        fps: settings.fps,
+        maxShort: Math.min(
+          2160,
+          Math.round(Math.min(settings.width, settings.height) * clipZoom(c))
+        ),
+        bakeLook: true,
+      });
+      if (pieces) {
+        pngs.push({ name: `removal_ov${i}_rgb.mp4`, blob: pieces.rgb });
+        pngs.push({ name: `removal_ov${i}_a.mp4`, blob: pieces.alpha });
+        entry.removal = { rgb: `removal_ov${i}_rgb.mp4`, alpha: `removal_ov${i}_a.mp4` };
+        entry.grade = undefined;
+        entry.look = undefined;
+      }
+    }
   }
 
   const audio = doc.audioClips

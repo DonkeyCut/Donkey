@@ -19,7 +19,8 @@
  * it was reached by playing there or by rendering the 135th frame.
  */
 
-import { applyLutToImageData, applyMaskToCanvas, buildGradeLut, gradeKey, gradeNeedsLut, gradeTint, gradeToCssFilter, grainTile, isNeutralGrade, lookCssFilter, lookPost, maskComposite, type GradeLut } from "@donkeycut/effects-kit";
+import { applyLutToImageData, applyMaskToCanvas, buildGradeLut, chromaAlphaInto, gradeKey, gradeNeedsLut, gradeTint, gradeToCssFilter, grainTile, isNeutralGrade, lookCssFilter, lookPost, maskComposite, paintStrokeInk, removalActive, type GradeLut } from "@donkeycut/effects-kit";
+import { chromaKeyGpu } from "./chromaGpu";
 import { applyLutGpu } from "./gradeGpu";
 import { createRasterCanvas } from "./raster";
 import { clipCovers, clipPosed, clipPoseAt, clipZoom, contentRect, DEFAULT_BACKGROUND, isFullRect, rectOf, shadowInk } from "./types";
@@ -133,6 +134,18 @@ export class FrameCompositor {
   private poseScratch: Surface | null = null;
   /** Where a shadow is cast before the picture goes down over it. */
   private shadowScratch: Surface | null = null;
+  /** The removal pass: the keyed picture builds in `removalScratch`, its
+   * silhouette in `removalSil`, the stroke's ink in `removalInk`, and an AI
+   * matte lands in `removalMatte` on its way to the alpha multiply. */
+  private removalScratch: Surface | null = null;
+  private removalMatte: Surface | null = null;
+  private removalSil: Surface | null = null;
+  private removalInk: Surface | null = null;
+  /** The piece renderer's look bake: the post passes run over a copy in
+   * `removalLookA`, then land back inside the layer's own coverage through
+   * `removalLookB`. */
+  private removalLookA: Surface | null = null;
+  private removalLookB: Surface | null = null;
 
   /** Where a subject-masked clip's person matte comes from: the host hands a
    * reader over the canvas as it stands (the layers beneath the clip), so
@@ -143,6 +156,19 @@ export class FrameCompositor {
   subjectMatteProvider:
     | ((at: number) => { alpha: CanvasImageSource | null } | null)
     | null = null;
+
+  /** Where a removal clip's baked AI matte comes from: an alpha image
+   * (subject opaque, backdrop transparent — the host converts a decoded
+   * luma frame) covering the clip's source frame at `at` timeline seconds.
+   * Null = no matte yet; the picture draws plain until the bake lands. */
+  removalMatteProvider: ((clip: VideoClip, at: number) => CanvasImageSource | null) | null = null;
+
+  /** Resolves a backdrop fill's image asset to a drawable picture. */
+  backdropImageProvider: ((assetId: string) => CanvasImageSource | null) | null = null;
+
+  /** A clip id whose removal is bypassed this frame — the panel's eye toggle
+   * showing the original picture. */
+  removalBypass: string | null = null;
 
   /**
    * The frame's own color, behind everything drawn into it. The project owns
@@ -182,7 +208,13 @@ export class FrameCompositor {
       | "layerScratch"
       | "maskScratch"
       | "poseScratch"
-      | "shadowScratch",
+      | "shadowScratch"
+      | "removalScratch"
+      | "removalMatte"
+      | "removalSil"
+      | "removalInk"
+      | "removalLookA"
+      | "removalLookB",
     w: number,
     h: number
   ): { surface: Surface; resized: boolean } {
@@ -306,6 +338,155 @@ export class FrameCompositor {
   }
 
   /**
+   * The clip's graded picture with its background removal applied: the key
+   * multiplies an alpha into the frame (a chroma key computed here, or the
+   * baked AI matte the host provides), the stroke's ink goes down behind the
+   * silhouette, and the backdrop fills in behind everything. Runs in the
+   * clip's source pixel space, before the fit/fill draw, so the keyed layer
+   * rides zoom, pan, masks, poses and transitions like any other picture.
+   */
+  /** The keyed layer alone, in source pixel space — what the ffmpeg export's
+   * piece renderer encodes so the engine composites the very pixels the
+   * preview draws. `bakeLookPost` folds the look's post passes (grain,
+   * vignette, glow, washes) into the layer for the overlay pieces, where the
+   * engine applies no look to an alpha layer: the passes run over a copy and
+   * land back inside the layer's own coverage, so the keyed-out hole stays
+   * transparent. */
+  removedLayer(
+    frame: Extract<Frame, { kind: "ready" }>,
+    clip: VideoClip | undefined,
+    at: number,
+    opts: { bakeLookPost?: boolean } = {}
+  ): CanvasImageSource {
+    const out = this.removedSource(frame, clip, at);
+    if (!opts.bakeLookPost || !lookPost(clip?.look, clip?.lookAmount)) return out;
+    const w = frame.width;
+    const h = frame.height;
+    const { surface: processed } = this.scratch("removalLookA", w, h);
+    const pctx = processed.getContext("2d") as Ctx | null;
+    const { surface: baked } = this.scratch("removalLookB", w, h);
+    const bctx = baked.getContext("2d") as Ctx | null;
+    if (!pctx || !bctx) return out;
+    for (const c of [pctx, bctx]) {
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.globalAlpha = 1;
+      c.globalCompositeOperation = "source-over";
+      c.clearRect(0, 0, w, h);
+      c.drawImage(out, 0, 0, w, h);
+    }
+    this.applyLookPost(clip, 0, 0, w, h, 1, at, { canvas: processed, ctx: pctx });
+    bctx.globalCompositeOperation = "source-atop";
+    bctx.drawImage(processed, 0, 0, w, h);
+    bctx.globalCompositeOperation = "source-over";
+    return baked as CanvasImageSource;
+  }
+
+  private removedSource(
+    frame: Extract<Frame, { kind: "ready" }>,
+    clip: VideoClip | undefined,
+    at: number
+  ): CanvasImageSource {
+    const base = this.gradedSource(frame, clip);
+    const r = clip?.removal;
+    if (!r || !removalActive(r) || (clip && this.removalBypass === clip.id)) return base;
+    const w = frame.width;
+    const h = frame.height;
+    // The matte answers before any scratch is staged: while the bake is still
+    // running the picture stays plain — the stroke and backdrop wait with it —
+    // and a full-frame clear and composite per tick would be pure waste.
+    const matte =
+      r.mode === "chroma" ? null : clip ? (this.removalMatteProvider?.(clip, at) ?? null) : null;
+    if (r.mode !== "chroma" && !matte) return base;
+    const { surface } = this.scratch("removalScratch", w, h);
+    const ctx = surface.getContext("2d") as Ctx | null;
+    if (!ctx) return base;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.clearRect(0, 0, w, h);
+
+    // 1. The key: alpha into the picture.
+    if (r.mode === "chroma" && r.chroma) {
+      const gpu = chromaKeyGpu(base, w, h, r.chroma);
+      if (gpu) {
+        ctx.drawImage(gpu as CanvasImageSource, 0, 0, w, h);
+      } else {
+        ctx.drawImage(base, 0, 0, w, h);
+        const img = ctx.getImageData(0, 0, w, h);
+        chromaAlphaInto(img.data, r.chroma);
+        ctx.putImageData(img, 0, 0);
+      }
+    } else {
+      ctx.drawImage(base, 0, 0, w, h);
+      const { surface: cover } = this.scratch("removalMatte", w, h);
+      const cctx = cover.getContext("2d") as Ctx | null;
+      if (cctx) {
+        cctx.setTransform(1, 0, 0, 1, 0, 0);
+        cctx.clearRect(0, 0, w, h);
+        cctx.imageSmoothingEnabled = true;
+        cctx.drawImage(matte!, 0, 0, w, h);
+        maskComposite(ctx, cover as CanvasImageSource, false);
+      }
+    }
+
+    const tLocal = Math.max(0, at - (clip?.start ?? 0));
+    // Design px at the source frame's own short side: ink painted here is
+    // scaled with the picture into its box, so the stroke holds its design
+    // size wherever the clip lands.
+    const ds = Math.min(w, h) / 1080;
+
+    // 2. Stroke ink around the keyed silhouette, behind the picture.
+    if (r.stroke) {
+      const { surface: sil } = this.scratch("removalSil", w, h);
+      const sctx = sil.getContext("2d") as Ctx | null;
+      const { surface: ink } = this.scratch("removalInk", w, h);
+      const ictx = ink.getContext("2d") as Ctx | null;
+      if (sctx && ictx) {
+        sctx.setTransform(1, 0, 0, 1, 0, 0);
+        sctx.globalCompositeOperation = "source-over";
+        sctx.clearRect(0, 0, w, h);
+        sctx.drawImage(surface, 0, 0);
+        sctx.globalCompositeOperation = "source-in";
+        sctx.fillStyle = "#ffffff";
+        sctx.fillRect(0, 0, w, h);
+        sctx.globalCompositeOperation = "source-over";
+        ictx.setTransform(1, 0, 0, 1, 0, 0);
+        ictx.globalCompositeOperation = "source-over";
+        ictx.clearRect(0, 0, w, h);
+        paintStrokeInk(ictx, sil as CanvasImageSource, w, h, r.stroke, tLocal, ds);
+        // Color the white ink, then lay it under the picture.
+        ictx.globalCompositeOperation = "source-in";
+        ictx.fillStyle = r.stroke.color;
+        ictx.fillRect(0, 0, w, h);
+        ictx.globalCompositeOperation = "source-over";
+        ctx.globalCompositeOperation = "destination-over";
+        ctx.drawImage(ink, 0, 0);
+        ctx.globalCompositeOperation = "source-over";
+      }
+    }
+
+    // 3. Backdrop behind it all, covering the source frame.
+    const bd = r.backdrop;
+    if (bd && bd.kind !== "none") {
+      ctx.globalCompositeOperation = "destination-over";
+      if (bd.kind === "color" && bd.color) {
+        ctx.fillStyle = bd.color;
+        ctx.fillRect(0, 0, w, h);
+      } else if (bd.kind === "image" && bd.assetId) {
+        const img = this.backdropImageProvider?.(bd.assetId) ?? null;
+        const iw = img ? Number((img as { width?: number }).width ?? 0) : 0;
+        const ih = img ? Number((img as { height?: number }).height ?? 0) : 0;
+        if (img && iw > 0 && ih > 0) {
+          const s = Math.max(w / iw, h / ih);
+          ctx.drawImage(img, (w - iw * s) / 2, (h - ih * s) / 2, iw * s, ih * s);
+        }
+      }
+      ctx.globalCompositeOperation = "source-over";
+    }
+    return surface;
+  }
+
+  /**
    * Draw a look's post passes over one composited layer's footprint (canvas
    * pixels): vignette, animated grain, self-copy glow, color washes, chroma
    * ghosts. `alpha` follows the layer so a dissolving clip's grain dissolves
@@ -320,14 +501,18 @@ export class FrameCompositor {
     rw: number,
     rh: number,
     alpha: number,
-    at: number
+    at: number,
+    // A different surface to paint over — the piece renderer bakes the post
+    // passes into the keyed layer itself. Default: the frame canvas.
+    target?: { canvas: Surface; ctx: Ctx }
   ) {
     const post = lookPost(clip?.look, clip?.lookAmount);
     if (!post || alpha <= 0 || rw <= 0 || rh <= 0) return;
-    const ctx = this.ctx();
+    const canvas = target?.canvas ?? this.canvas;
+    const ctx = target?.ctx ?? this.ctx();
     if (!ctx || !("filter" in ctx)) return;
-    const W = this.canvas.width;
-    const H = this.canvas.height;
+    const W = canvas.width;
+    const H = canvas.height;
     ctx.save();
     ctx.beginPath();
     ctx.rect(rx, ry, rw, rh);
@@ -343,7 +528,7 @@ export class FrameCompositor {
         sctx.filter = post.glow.bright
           ? `contrast(2.5) brightness(0.55) saturate(1.4) sepia(0.35) blur(${blurPx}px)`
           : `blur(${blurPx}px)`;
-        sctx.drawImage(this.canvas, rx, ry, rw, rh, rx, ry, rw, rh);
+        sctx.drawImage(canvas, rx, ry, rw, rh, rx, ry, rw, rh);
         sctx.filter = "none";
         ctx.globalAlpha = post.glow.alpha * alpha;
         ctx.globalCompositeOperation = post.glow.mode;
@@ -358,14 +543,14 @@ export class FrameCompositor {
         const shift = Math.max(1, post.ghost.shiftFrac * W);
         sctx.clearRect(rx, ry, rw, rh);
         sctx.filter = "sepia(1) saturate(4) hue-rotate(-40deg) brightness(0.55)";
-        sctx.drawImage(this.canvas, rx, ry, rw, rh, rx, ry, rw, rh);
+        sctx.drawImage(canvas, rx, ry, rw, rh, rx, ry, rw, rh);
         sctx.filter = "none";
         ctx.globalAlpha = post.ghost.alpha * alpha;
         ctx.globalCompositeOperation = "lighter";
         ctx.drawImage(scratch, rx, ry, rw, rh, rx + shift, ry, rw, rh);
         sctx.clearRect(rx, ry, rw, rh);
         sctx.filter = "sepia(1) saturate(4) hue-rotate(140deg) brightness(0.55)";
-        sctx.drawImage(this.canvas, rx, ry, rw, rh, rx, ry, rw, rh);
+        sctx.drawImage(canvas, rx, ry, rw, rh, rx, ry, rw, rh);
         sctx.filter = "none";
         ctx.drawImage(scratch, rx, ry, rw, rh, rx - shift, ry, rw, rh);
       }
@@ -615,7 +800,7 @@ export class FrameCompositor {
       clip?.panX ?? 0,
       clip?.panY ?? 0
     );
-    const src = this.gradedSource(frame, clip);
+    const src = this.removedSource(frame, clip, at);
     const bs = clip?.boxStyle;
     // Box style lengths are design px at the 1080 short side, like masks.
     const ds = Math.min(W, H) / 1080;
@@ -725,7 +910,7 @@ export class FrameCompositor {
     );
     const prevAlpha = ctx.globalAlpha;
     ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-    ctx.drawImage(this.gradedSource(frame, clip), dx, dy, dw, dh);
+    ctx.drawImage(this.removedSource(frame, clip, at), dx, dy, dw, dh);
     ctx.globalAlpha = prevAlpha;
     this.applyLookPost(clip, 0, 0, W, H, alpha, at);
     if (hasFx) ctx.restore();

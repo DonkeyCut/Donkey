@@ -128,6 +128,21 @@ async function put(url: string, bytes: Uint8Array, mimeType: string): Promise<bo
 }
 
 /**
+ * Store one blob in the inference scratch space and return its object key,
+ * for a request that references media by key (e.g. `blobUrl` placeholders)
+ * instead of carrying payload fields. Null when storage is unavailable.
+ */
+export async function storeHostedBlob(blob: Blob, clientId: string): Promise<string | null> {
+  const mimeType = blob.type || "application/octet-stream";
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const sha256 = await sha256Hex(bytes);
+  const [claim] = await claimKeys([{ sha256, mimeType, bytes: bytes.byteLength }], clientId);
+  if (!claim?.blobRef) return null;
+  if (claim.putUrl && !(await put(claim.putUrl, bytes, mimeType))) return null;
+  return claim.blobRef;
+}
+
+/**
  * A copy of `body` with its media payloads moved to storage and replaced by
  * references. Returns `body` itself when there is nothing worth moving.
  */

@@ -3,6 +3,7 @@ import { createGeminiImageAssetProvider } from "@/lib/inference/adapters/gemini-
 import { createGeminiMusicAssetProvider } from "@/lib/inference/adapters/gemini-music";
 import { createGeminiSpeechAssetProvider } from "@/lib/inference/adapters/gemini-speech";
 import { createGeminiOmniVideoAssetProvider } from "@/lib/inference/adapters/gemini-omni-video";
+import { createFalMatteProvider } from "@/lib/inference/adapters/fal-matte";
 import {
   InferenceProviderError,
   type AssetGenerationRequest,
@@ -230,6 +231,10 @@ export function createProviderRegistry() {
     // adapter picks the clip or the longer pro model from the requested length so
     // a bed can still span a longer video (see gemini-music.ts).
     createGeminiMusicAssetProvider(),
+    // The matte segmenter serves kind="matte": Cut's background-removal
+    // quality bake, a clip segment plus a text description and/or point
+    // prompts in, a mask video out.
+    createFalMatteProvider(),
     createGeminiResponsesProvider(),
   ]);
 }

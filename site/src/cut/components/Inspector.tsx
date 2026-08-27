@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, Frame, Italic, Loader2, Palette, Smile, Trash2, Type, Volume2 } from "lucide-react";
+import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, Frame, Italic, Loader2, Palette, Scissors, Smile, Trash2, Type, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmojiPicker } from "@/cut/components/EmojiPicker";
 import { FontPicker } from "@/cut/components/FontPicker";
@@ -49,6 +49,7 @@ import {
   type WordEffectId,
 } from "@donkeycut/effects-kit";
 import { clipWindow, useEditor, type EditorState } from "@/cut/lib/store";
+import { usePanelView } from "@/cut/lib/panelViews";
 import { usePreviewTime } from "@/cut/lib/playhead";
 import { CLIP_MAX_ZOOM, clipKeyed, clipPoseAt, clipZoom, contentRect } from "@/cut/lib/types";
 import { AnimationCard, AnimationTiles } from "@/cut/components/AnimationTiles";
@@ -116,6 +117,7 @@ import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { InfoTip, ResetButton, Row, useSliderCheckpoint, Value } from "@/cut/components/panelBits";
 import { ColorPanel } from "@/cut/components/ColorPanel";
+import { RemovalPanel } from "@/cut/components/RemovalPanel";
 
 /** Where the animation panel is, for the panel that offers the way in. It is
  * held by the Inspector rather than by each panel because the animation panel
@@ -164,13 +166,28 @@ function InspectorColumn({
   audio?: AudioClip;
   overlay?: Overlay;
 }) {
-  const [animView, setAnimView] = useState<"closed" | "open" | "returned">("closed");
+  // Whether the Animations view is open holds for the session per overlay,
+  // so an overlay reselected after a look elsewhere reopens on it. The
+  // transitional "returned" state stays local — it exists for scroll restore
+  // on the way back, and only "open"/"closed" are worth remembering.
+  const [heldAnim, setHeldAnim] = usePanelView<"open" | "closed">(
+    `overlay-anim:${overlay?.id ?? "none"}`,
+    "closed"
+  );
+  const [animView, setAnimView] = useState<"closed" | "open" | "returned">(heldAnim);
   const nav = useMemo<AnimNav>(
     () => ({
       view: animView,
-      open: () => setAnimView("open"),
-      back: () => setAnimView("returned"),
+      open: () => {
+        setHeldAnim("open");
+        setAnimView("open");
+      },
+      back: () => {
+        setHeldAnim("closed");
+        setAnimView("returned");
+      },
     }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [animView]
   );
 
@@ -296,7 +313,7 @@ function Section({
 }) {
   const gated = !!onEnabledChange;
   return (
-    <section className="mt-1.5 border-t border-border pt-1.5">
+    <section className="mt-1.5 border-t border-border pt-1.5 first:mt-0 first:border-t-0">
       <div className="flex min-h-9 items-center justify-between gap-2">
         <span className="flex min-w-0 items-center gap-1 text-[13px] font-medium">
           <span className="truncate">{title}</span>
@@ -395,6 +412,7 @@ function LayoutButtons({
  * to the main settings. */
 const CLIP_TABS = [
   { id: "color", label: "Color", Icon: Palette },
+  { id: "cutout", label: "Cutout", Icon: Scissors },
   { id: "frame", label: "Frame", Icon: Frame },
   { id: "audio", label: "Audio", Icon: Volume2 },
 ] as const;
@@ -404,16 +422,19 @@ type ClipTab = (typeof CLIP_TABS)[number]["id"] | "main";
  * The video clip's column: the main settings with the Color, Frame, and Audio
  * views behind a toolbar pinned under the scroller, so it stays put whichever
  * view is open. Color lays out its own bands around its own scroller; the
- * others ride the column's. The column is keyed on the selection, so picking
- * another clip lands back on the main view.
+ * others ride the column's. The open view holds for the session per clip, so
+ * deselecting to look at something and coming back lands this clip on its
+ * own view; a clip whose panel was never opened starts at the main one.
  */
 function ClipColumn({ clip }: { clip: VideoClip }) {
-  const [tab, setTab] = useState<ClipTab>("main");
+  const [tab, setTab] = usePanelView<ClipTab>(`clip-tab:${clip.id}`, "main");
   const back = () => setTab("main");
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {tab === "color" ? (
         <ColorPanel clip={clip} onBack={back} />
+      ) : tab === "cutout" ? (
+        <RemovalPanel clip={clip} onBack={back} />
       ) : (
         <ScrollArea className="min-h-0 flex-1">
           {tab === "frame" ? (
@@ -1926,7 +1947,8 @@ type AnimSlot = "in" | "out" | "loop" | "move" | "words";
  * which a stack of grids would not be. */
 function AnimationPanel({ overlay: o, onBack }: { overlay: Overlay; onBack: () => void }) {
   const anim = o.anim ?? {};
-  const [picked, setSlot] = useState<AnimSlot>("in");
+  // The active slot holds for the session, like every settings view's tab.
+  const [picked, setSlot] = usePanelView<AnimSlot>(`anim-slot:${o.id}`, "in");
   // Word emphasis is a title's slot; a shape or a sticker has no words, so
   // selecting one hands the picker back to the entrance.
   const tabs: AnimSlot[] = isTextOverlay(o)

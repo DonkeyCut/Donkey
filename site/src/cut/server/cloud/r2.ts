@@ -83,6 +83,14 @@ export function presignPut(key: string, mime: string): Promise<string> {
   );
 }
 
+/** A time-limited read URL, for handing an object to an inference provider
+ * that fetches its input itself. */
+export function presignGet(key: string): Promise<string> {
+  return getSignedUrl(r2(), new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }), {
+    expiresIn: PUT_EXPIRY_SECONDS,
+  });
+}
+
 
 /** Object size/type, or null when the object does not exist. */
 export async function head(

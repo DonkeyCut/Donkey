@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { Check, Copy, Loader2, ZoomIn, ZoomOut } from "lucide-react";
 import { usePlayback } from "@/cut/hooks/usePlayback";
 import { startDrag } from "@/cut/lib/drag";
+import { useBrushUi } from "@/cut/lib/removal/brushUi";
 import {
   playheadAt,
   previewAt,
@@ -23,6 +24,7 @@ import { CLIP_MAX_ZOOM, clipCovers, clipKeyed, clipPoseAt, clipZoom, contentRect
 import { hasMaskKeys, type MaskKey } from "@donkeycut/effects-kit";
 import { cn } from "@/lib/utils";
 import { MaskGizmoCore, OverlayChromeHost, OverlayLayer, StagePress } from "./OverlayLayer";
+import { RemovalBrush } from "./RemovalBrush";
 import { CORNER_HANDLES, HANDLE_AXIS, TransformHandles, type ResizeHandle } from "./TransformHandles";
 import {
   StageEffectPaint,
@@ -148,6 +150,24 @@ function pictureInPane(
   const visX = Math.min(pane.w, left + stage.w) - Math.max(0, left);
   const visY = Math.min(pane.h, top + stage.h) - Math.max(0, top);
   return visX >= Math.min(ONSCREEN_MIN_PX, stage.w) && visY >= Math.min(ONSCREEN_MIN_PX, stage.h);
+}
+
+/** While the Cutout panel's Original toggle is on, the stage says so — the
+ * cutout looks gone otherwise. Clicking the badge brings the cutout back. */
+function OriginalPeekBadge() {
+  const peeking = useEditor((st) => !!st.removalPeek);
+  if (!peeking) return null;
+  return (
+    <div className="absolute inset-x-0 top-2 flex justify-center">
+      <button
+        type="button"
+        className="clip-peek-badge rounded-full bg-black/55 px-3 py-1 text-[11.5px] font-medium text-white shadow-lg transition-colors hover:bg-black/70"
+        onClick={() => useEditor.setState({ removalPeek: null })}
+      >
+        Showing the original — click to see the cutout
+      </button>
+    </div>
+  );
 }
 
 /** A play held at a standstill, waiting on the picture. The playhead is not
@@ -674,6 +694,7 @@ export function Preview() {
           />
           </StagePictureFx>
           <BufferingBadge />
+          <OriginalPeekBadge />
           <StagePress.Provider value={stagePress}>
             {slices.map((slice) =>
               slice.kind === "elements" ? (
@@ -710,6 +731,7 @@ export function Preview() {
           <div className="pointer-events-none absolute inset-x-0 top-1/2 z-20 h-px bg-neutral-400/80" />
         )}
         <ClipMaskGizmo stage={stage} />
+        <RemovalBrush stage={stage} />
         <ClipTransformGizmo stage={stage} />
         </div>
       </div>
@@ -928,6 +950,7 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
   // that answer instead of to the clock: one render when the clip comes and
   // goes, rather than one per frame while it stays.
   const selectedClip = selection?.kind === "clip" ? clips.find((c) => c.id === selection.id) : null;
+  const brushClipId = useBrushUi((s) => s.clipId);
   const live = usePreviewSelector((t) => {
     if (!selectedClip) return false;
     const speed = selectedClip.speed && selectedClip.speed > 0 ? selectedClip.speed : 1;
@@ -939,6 +962,9 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
   if (skimTime !== null) return null;
   const clip = selectedClip;
   if (!clip || clip.hidden || !live) return null;
+  // An open brush session owns the stage for its clip: presses paint the
+  // removal, so the move box and its grips step aside until the session ends.
+  if (brushClipId === clip.id && clip.removal?.mode === "custom") return null;
 
   const st = () => useEditor.getState();
   const patch = (p: Partial<VideoClip>) => st().updateClipTransient(clip.id, p);

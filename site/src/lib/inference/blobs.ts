@@ -15,7 +15,7 @@
 // what keeps this one function enough for every payload shape — asset inputs
 // read `data`, content parts read `dataBase64` — with no consumer aware that
 // media ever left the body.
-import { getObject } from "@/cut/server/cloud/r2";
+import { getObject, head, presignGet } from "@/cut/server/cloud/r2";
 import { isJsonObject } from "@/lib/inference/json";
 import { InferenceProviderError, type JsonValue } from "@/lib/inference/providers";
 
@@ -24,13 +24,20 @@ import { InferenceProviderError, type JsonValue } from "@/lib/inference/provider
 // counted, so the caller hears about it here instead.
 const MAX_RESOLVED_BYTES = 20 * 1024 * 1024;
 
-/** True for a value shaped like a stored-blob placeholder. */
-function blobRefOf(value: JsonValue): { key: string; field: string } | null {
+/** True for a value shaped like a stored-blob placeholder. `blobUrl: true`
+ * asks for a time-limited read URL in place of inline bytes — for a provider
+ * that fetches its input itself, where a long video would blow the inline
+ * ceiling. */
+function blobRefOf(value: JsonValue): { key: string; field: string; asUrl: boolean } | null {
   if (!isJsonObject(value)) return null;
   const key = value.blobRef;
   const field = value.blobField;
   if (typeof key !== "string" || !key) return null;
-  return { key, field: typeof field === "string" && field ? field : "data" };
+  return {
+    key,
+    field: typeof field === "string" && field ? field : "data",
+    asUrl: value.blobUrl === true,
+  };
 }
 
 export type BlobReader = (key: string) => Promise<{ bytes: Buffer; mime: string } | null>;
@@ -76,6 +83,19 @@ export async function resolveInferenceBlobs(
         statusCode: 403,
         code: "blob_not_owned",
       });
+    }
+    if (ref.asUrl) {
+      if (!(await head(ref.key))) {
+        throw new InferenceProviderError(
+          "An attached file is no longer in storage. Send the request again.",
+          { statusCode: 400, code: "blob_missing" }
+        );
+      }
+      const rest = { ...value };
+      delete rest.blobRef;
+      delete rest.blobField;
+      delete rest.blobUrl;
+      return { ...rest, [ref.field]: await presignGet(ref.key) };
     }
     const object = await read(ref.key);
     if (!object) {

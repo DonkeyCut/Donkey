@@ -7,20 +7,8 @@
  */
 
 import type { GradeLut } from "@donkeycut/effects-kit";
-import { createRasterCanvas, type RasterSurface } from "./raster";
-
-// The V axis is inverted here rather than at upload: `UNPACK_FLIP_Y_WEBGL` is
-// ignored for an ImageBitmap source (a still's frame), so a pass that leaned on
-// it graded stills upside down while video frames came out upright. Sampling
-// the texture top-down puts every source kind — bitmap, canvas, video frame —
-// the same way up.
-const VERT = `#version 300 es
-in vec2 aPos;
-out vec2 vUv;
-void main() {
-  vUv = vec2(aPos.x * 0.5 + 0.5, 0.5 - aPos.y * 0.5);
-  gl_Position = vec4(aPos, 0.0, 1.0);
-}`;
+import { gpuPassSingleton, uploadPassSource, type GpuPass } from "./gpuPass";
+import type { RasterSurface } from "./raster";
 
 const FRAG = `#version 300 es
 precision highp float;
@@ -58,11 +46,7 @@ void main() {
   outColor = vec4(rgb, s.a);
 }`;
 
-interface GpuState {
-  canvas: RasterSurface;
-  gl: WebGL2RenderingContext;
-  program: WebGLProgram;
-  srcTex: WebGLTexture;
+interface GradeExt {
   sizeLoc: WebGLUniformLocation;
   /** One uploaded texture per grade, so two graded clips in the same frame
    * take turns binding instead of re-uploading 33³ floats twice a frame. */
@@ -72,61 +56,23 @@ interface GpuState {
 /** Uploaded LUT textures kept at once; a 33³ RGBA32F texture is ~0.6MB. */
 const LUT_TEXTURE_MAX = 6;
 
-let state: GpuState | null | false = null;
-
-function init(): GpuState | false {
-  const canvas = createRasterCanvas(2, 2);
-  const gl = (canvas.getContext as (id: string, opts?: unknown) => unknown)("webgl2", {
-    premultipliedAlpha: false,
-    preserveDrawingBuffer: true,
-  }) as WebGL2RenderingContext | null;
-  if (!gl) return false;
-  const compile = (type: number, src: string) => {
-    const sh = gl.createShader(type)!;
-    gl.shaderSource(sh, src);
-    gl.compileShader(sh);
-    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) return null;
-    return sh;
-  };
-  const vs = compile(gl.VERTEX_SHADER, VERT);
-  const fs = compile(gl.FRAGMENT_SHADER, FRAG);
-  if (!vs || !fs) return false;
-  const program = gl.createProgram()!;
-  gl.attachShader(program, vs);
-  gl.attachShader(program, fs);
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) return false;
-  gl.useProgram(program);
-  const buf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-  const posLoc = gl.getAttribLocation(program, "aPos");
-  gl.enableVertexAttribArray(posLoc);
-  gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
-  const srcTex = gl.createTexture()!;
-  gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, srcTex);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.uniform1i(gl.getUniformLocation(program, "uSrc"), 0);
+const acquire = gpuPassSingleton(FRAG, ({ gl, program }): GradeExt | null => {
   gl.uniform1i(gl.getUniformLocation(program, "uLut"), 1);
   const sizeLoc = gl.getUniformLocation(program, "uSize");
-  if (!sizeLoc) return false;
-  return { canvas, gl, program, srcTex, sizeLoc, luts: new Map() };
-}
+  if (!sizeLoc) return null;
+  return { sizeLoc, luts: new Map() };
+});
 
 /** Bind the LUT's texture, uploading it the first time this grade is seen. */
-function bindLut(s: GpuState, lut: GradeLut, key: string): void {
-  const { gl } = s;
+function bindLut(s: { pass: GpuPass; ext: GradeExt }, lut: GradeLut, key: string): void {
+  const { gl } = s.pass;
   gl.activeTexture(gl.TEXTURE1);
-  const held = s.luts.get(key);
+  const held = s.ext.luts.get(key);
   if (held) {
     gl.bindTexture(gl.TEXTURE_3D, held);
     // Re-insert so the cap drops the grade least recently drawn.
-    s.luts.delete(key);
-    s.luts.set(key, held);
+    s.ext.luts.delete(key);
+    s.ext.luts.set(key, held);
     return;
   }
   const tex = gl.createTexture()!;
@@ -145,13 +91,13 @@ function bindLut(s: GpuState, lut: GradeLut, key: string): void {
     rgba[i * 4 + 3] = 1;
   }
   gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGBA32F, lut.size, lut.size, lut.size, 0, gl.RGBA, gl.FLOAT, rgba);
-  s.luts.set(key, tex);
-  if (s.luts.size > LUT_TEXTURE_MAX) {
-    const oldest = s.luts.keys().next().value;
+  s.ext.luts.set(key, tex);
+  if (s.ext.luts.size > LUT_TEXTURE_MAX) {
+    const oldest = s.ext.luts.keys().next().value;
     if (oldest !== undefined && oldest !== key) {
-      const stale = s.luts.get(oldest);
+      const stale = s.ext.luts.get(oldest);
       if (stale) gl.deleteTexture(stale);
-      s.luts.delete(oldest);
+      s.ext.luts.delete(oldest);
     }
   }
 }
@@ -168,30 +114,16 @@ export function applyLutGpu(
   lut: GradeLut,
   key: string
 ): RasterSurface | null {
-  if (state === false) return null;
-  if (!state) {
-    try {
-      state = init();
-    } catch {
-      state = false;
-    }
-    if (!state) return null;
-  }
-  const s = state;
-  const { gl } = s;
+  const held = acquire(w, h);
+  if (!held) return null;
+  const { pass, ext } = held;
+  const { gl } = pass;
   try {
-    if (s.canvas.width !== w || s.canvas.height !== h) {
-      s.canvas.width = w;
-      s.canvas.height = h;
-    }
-    bindLut(s, lut, key);
-    gl.viewport(0, 0, w, h);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, s.srcTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source as TexImageSource);
-    gl.uniform1f(s.sizeLoc, lut.size);
+    bindLut(held, lut, key);
+    uploadPassSource(pass, source);
+    gl.uniform1f(ext.sizeLoc, lut.size);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    return s.canvas;
+    return pass.canvas;
   } catch {
     return null;
   }

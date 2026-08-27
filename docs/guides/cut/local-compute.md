@@ -79,6 +79,7 @@ In place is what makes the plain version of this work. Someone with a folder of 
 | Thumbnails, waveforms, media probing | the browser, always | it decodes the media itself |
 | Converting media to MP4 | the machine holding the bytes: the Mac, the worker, or the tab — and the Mac for a browser project the tab can't decode | see Converting footage above |
 | Image, video, and voice generation | hosted, always | no local counterpart |
+| Cutout mattes | the quick person matte in the tab, on-device and free; the quality and tracked bakes hosted (credits), driven by the tab | the tab decodes the clip and owns the session; the engine and the worker only consume the stored matte asset |
 | The assistant's Gemini models | hosted, always | credits and the user's session |
 | The assistant's Claude and Codex providers | the Mac, always | the user's own CLI logins |
 

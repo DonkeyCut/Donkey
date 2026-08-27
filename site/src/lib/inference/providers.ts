@@ -5,8 +5,8 @@ import type {
 } from "@/lib/inference/schemas";
 import type { z } from "zod";
 
-export type InferenceModality = "text" | "image" | "video" | "audio" | "music" | "speech";
-export type AssetGenerationKind = "image" | "video" | "music" | "speech";
+export type InferenceModality = "text" | "image" | "video" | "audio" | "music" | "speech" | "matte";
+export type AssetGenerationKind = "image" | "video" | "music" | "speech" | "matte";
 export type GenerationStatus =
   | "pending"
   | "in_progress"
@@ -87,6 +87,10 @@ export type ResponseStreamResult = {
 export type AssetGenerationProviderRequest = {
   generationId: string;
   request: AssetGenerationRequest;
+  // The billable unit count the route settled through assetGenerationCountFor,
+  // for a provider whose charge scales with the input. The provider bills
+  // exactly this count, so the preflight and the charge agree by construction.
+  generationCount?: number;
 };
 
 export type AssetGenerationProviderResult = {
@@ -141,6 +145,12 @@ export type InferenceProvider = {
   // which is what lets the preflight price the generation. Throws the same way generateAsset would
   // for an unpriced model, only sooner.
   assetModelFor?: (request: AssetGenerationRequest) => string;
+  // How many generation units this request will bill, for a provider whose
+  // charge scales with the input (the matte segmenter's frame chunks). The
+  // route calls it with resolved inputs before the credit preflight, so the
+  // balance check covers the whole charge, and hands the count back through
+  // generateAsset's generationCount.
+  assetGenerationCountFor?: (request: AssetGenerationRequest) => Promise<number>;
   generateAsset?: (
     request: AssetGenerationProviderRequest,
   ) => Promise<AssetGenerationProviderResult>;

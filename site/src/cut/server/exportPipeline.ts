@@ -139,6 +139,12 @@ export interface ExportSpec {
       file?: string;
       frames?: { file: string; duration: number }[];
     };
+    /** Background removal: the clip's keyed layer, client-rendered as a
+     * segment-aligned color/alpha video pair (grade, key, stroke ink and
+     * backdrop baked in, straight alpha colors). The pair replaces the source
+     * decode for the picture; audio still reads the original file, and the
+     * look applies to the flattened segment. */
+    removal?: { rgb: string; alpha: string };
   }[];
   /** Video tracks composited over the track-0 `clips`, lowest track first. */
   overlayVideos?: {
@@ -204,6 +210,9 @@ export interface ExportSpec {
       file?: string;
       frames?: { file: string; duration: number }[];
     };
+    /** Background removal, as on `clips`; this layer keeps its alpha over the
+     * tracks beneath, so grade and look are both baked into the pair. */
+    removal?: { rgb: string; alpha: string };
   }[];
   audio: {
     file: string;
@@ -678,6 +687,25 @@ export async function runExport(
     overlayBorderInput.set(oc, borderStill(oc.border, olen));
   }
 
+  // Removal pieces: each removal clip's keyed layer arrives as a color/alpha
+  // video pair uploaded with the stills; the pair replaces the source decode.
+  const removalInputs = (rm: { rgb: string; alpha: string }) => {
+    const rgb = nInputs++;
+    inputs.push("-i", path.join(job.tmpDir, path.basename(rm.rgb)));
+    const a = nInputs++;
+    inputs.push("-i", path.join(job.tmpDir, path.basename(rm.alpha)));
+    return { rgb, a };
+  };
+  const clipRemovalInput = new Map<number, { rgb: number; a: number }>();
+  for (let j = 0; j < spec.clips.length; j++) {
+    const c = spec.clips[j];
+    if (c.removal) clipRemovalInput.set(j, removalInputs(c.removal));
+  }
+  const overlayRemovalInput = new Map<(typeof overlayVideos)[number], { rgb: number; a: number }>();
+  for (const oc of overlayVideos) {
+    if (oc.removal) overlayRemovalInput.set(oc, removalInputs(oc.removal));
+  }
+
   // One concat-demuxer input per subtitle track: within a track cues never
   // overlap, so each plays as a slideshow with transparent filler
   // ("sub_blank.png", uploaded with the stills) covering the gaps. Tracks
@@ -1093,13 +1121,29 @@ export async function runExport(
     if (!tailFx && tf <= 0.01 && czTail > 0.01) {
       tailFx = { kind: "zoom", secs: Math.min(czTail, dur - (headFx?.secs ?? 0)) };
     }
+    const rmIn = clipRemovalInput.get(j);
     // A still's looped input is already the right length at `fps`; it has no
-    // source span to trim. Footage trims `in..out` and re-times by speed.
-    const timebase = c.image
-      ? `[${idx}:v]setpts=PTS-STARTPTS`
-      : `[${idx}:v]trim=${num(c.in)}:${num(c.out)},setpts=(PTS-STARTPTS)/${num(speed)}`;
-    if ((c.image || videoPresence.get(c.file)) && !c.hidden) {
+    // source span to trim. Footage trims `in..out` and re-times by speed. A
+    // removal clip's picture is its uploaded keyed pair instead: the color
+    // stream merges its alpha luma, clone-padded so a piece a frame short
+    // never shortens the join, and rides the same framing chain in rgba.
+    let timebase: string;
+    if (rmIn) {
+      filters.push(`[${rmIn.a}:v]setpts=PTS-STARTPTS,format=gray[rva${j}]`);
+      filters.push(`[${rmIn.rgb}:v]setpts=PTS-STARTPTS,format=rgba[rvc${j}]`);
+      filters.push(`[rvc${j}][rva${j}]alphamerge,tpad=stop_mode=clone:stop_duration=1[rvs${j}]`);
+      timebase = `[rvs${j}]null`;
+    } else {
+      timebase = c.image
+        ? `[${idx}:v]setpts=PTS-STARTPTS`
+        : `[${idx}:v]trim=${num(c.in)}:${num(c.out)},setpts=(PTS-STARTPTS)/${num(speed)}`;
+    }
+    if ((c.image || rmIn || videoPresence.get(c.file)) && !c.hidden) {
       const region = regionPx(c.frame, W, H);
+      // The keyed layer's letterbox stays transparent (the flatten below lays
+      // the frame color behind it), and its alpha survives the chain.
+      const segPad = rmIn ? "black@0.0" : padColor;
+      const segFmt = rmIn ? "rgba" : clipFmt;
       let frame: string;
       if (region) {
         // A regioned track-0 clip (split-screen half) scales into its rect,
@@ -1117,22 +1161,24 @@ export async function runExport(
         // the rect exactly, a fitted one keeps its margins.
         frame =
           `${boxFraming(rw, rh, c.fit === "fill", c.zoom, c.panX, c.panY)},` +
-          `pad=${bw}:${bh}:${rx - bx}+(${rw}-iw)/2:${ry - by}+(${rh}-ih)/2:color=${padColor}${win}`;
+          `pad=${bw}:${bh}:${rx - bx}+(${rw}-iw)/2:${ry - by}+(${rh}-ih)/2:color=${segPad}${win}`;
       } else {
         const cover = c.fit === "fill";
         frame =
           boxFraming(W, H, cover, c.zoom, c.panX, c.panY) +
           // A covering picture already spans the frame; a fitted one letterboxes.
-          (cover ? "" : `,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=${padColor}`);
+          (cover ? "" : `,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=${segPad}`);
       }
       // setpts/speed rescales the clip's duration on the timeline (footage);
       // a still just replays its looped input.
       // The grade sits after the color conversion (so it acts on the same
       // BT.709 values the preview shows) and before the terminal format.
-      let core = `${timebase},fps=${fps},${frame},setsar=1,${colorFix.get(c.file) ?? ""}${gradeChain(c.grade)}format=${clipFmt}`;
+      let core = `${timebase},fps=${fps},${frame},setsar=1,${rmIn ? "" : colorFix.get(c.file) ?? ""}${gradeChain(rmIn ? undefined : c.grade)}format=${segFmt}`;
       // The look bakes in after grade + framing, before the edge effects, so
-      // animations move already-graded pixels (matching the preview order).
-      if (c.look) {
+      // animations move already-graded pixels (matching the preview order). A
+      // removal clip's look runs after the flatten below instead — the chain's
+      // internal blends would drop the keyed layer's alpha.
+      if (c.look && !rmIn) {
         const lines = lookFilterLines(`lki${j}`, `lko${j}`, c.look, c.lookAmount, H, clipFmt, `c${j}`);
         if (lines) {
           filters.push(`${core}[lki${j}]`);
@@ -1145,12 +1191,16 @@ export async function runExport(
       const brIdx = clipBorderInput.get(j);
       if (brIdx !== undefined) {
         filters.push(`${core}[cbi${j}]`);
-        filters.push(`[cbi${j}][${brIdx}:v]overlay=0:0:eof_action=pass,format=${clipFmt}[cbo${j}]`);
+        filters.push(`[cbi${j}][${brIdx}:v]overlay=0:0:eof_action=pass,format=${segFmt}[cbo${j}]`);
         core = `[cbo${j}]null`;
       }
+      // A removal segment carries alpha, so its fades must ramp the alpha
+      // plane too — a color-only fade darkens the still-opaque silhouette to
+      // black where the preview dissolves it.
+      const fadeAlpha = rmIn ? ":alpha=1" : "";
       const fades =
-        (hf > 0.01 ? `,fade=t=in:st=0:d=${num(hf)}` : "") +
-        (tf > 0.01 ? `,fade=t=out:st=${num(Math.max(0, dur - tf))}:d=${num(tf)}` : "");
+        (hf > 0.01 ? `,fade=t=in:st=0:d=${num(hf)}${fadeAlpha}` : "") +
+        (tf > 0.01 ? `,fade=t=out:st=${num(Math.max(0, dur - tf))}:d=${num(tf)}${fadeAlpha}` : "");
       // A neighbor's backdrop animation freezes a frame of this segment —
       // split the copies it needs off the pre-backdrop picture.
       const nFz = (needFirstFreeze[j] ? 1 : 0) + (needLastFreeze[j] ? 1 : 0);
@@ -1164,7 +1214,7 @@ export async function runExport(
       const mkIdx = clipMaskInput.get(j);
       const subjMask = subjectActive && matteConsumers > 0 ? c.mask?.subject : undefined;
       const keyed = !!c.kf?.length;
-      if (mkIdx !== undefined || subjMask || keyed) {
+      if (mkIdx !== undefined || subjMask || keyed || rmIn) {
         // Masked or keyframed track-0 clip, composed in the preview's order:
         // the painted coverage multiplies first (it rides the clip), the
         // pose transforms and positions the result over a transparent base,
@@ -1172,7 +1222,7 @@ export async function runExport(
         // restores the constant-size opaque frame the join expects. The
         // multiply chains (alphaextract → blend → alphamerge) compose with
         // any alpha the segment carries.
-        pushEdgeFx(core, dur, headFx, tailFx, W, H, clipFmt, fades, `vmr${j}`, `c${j}`);
+        pushEdgeFx(core, dur, headFx, tailFx, W, H, rmIn ? "yuva420p" : clipFmt, fades, `vmr${j}`, `c${j}`);
         let cur = `vmr${j}`;
         if (mkIdx !== undefined) {
           filters.push(`[${mkIdx}:v]fps=${fps},scale=${W}:${H},setsar=1,format=gray[cmk${j}]`);
@@ -1215,10 +1265,22 @@ export async function runExport(
           filters.push(`[cs0_${j}][csm${j}]alphamerge[csc${j}]`);
           cur = `csc${j}`;
         }
-        filters.push(`color=c=black:s=${W}x${H}:r=${fps}:d=${num(dur)}[cmb${j}]`);
+        // A keyed layer flattens onto the frame color — where the removal
+        // left the picture transparent, the export shows what the preview
+        // shows behind track 0.
         filters.push(
-          `[cmb${j}][${cur}]overlay=0:0:shortest=1,format=${clipFmt},fps=${fps}[${segCore}]`
+          `color=c=${rmIn ? padColor : "black"}:s=${W}x${H}:r=${fps}:d=${num(dur)}[cmb${j}]`
         );
+        const flatOut = rmIn && c.look ? `vrl${j}` : segCore;
+        filters.push(
+          `[cmb${j}][${cur}]overlay=0:0:shortest=1,format=${clipFmt},fps=${fps}[${flatOut}]`
+        );
+        if (flatOut !== segCore) {
+          // The removal clip's look, over the flattened opaque segment.
+          const lines = lookFilterLines(`vrl${j}`, segCore, c.look!, c.lookAmount, H, clipFmt, `cr${j}`);
+          if (lines) filters.push(...lines);
+          else filters.push(`[vrl${j}]null[${segCore}]`);
+        }
       } else {
         pushEdgeFx(core, dur, headFx, tailFx, W, H, clipFmt, fades, segCore, `c${j}`);
       }
@@ -1442,7 +1504,8 @@ export async function runExport(
   // Overlay one track clip onto `onto`, returning the new label; also queues
   // its audio.
   const addOverlay = (oc: (typeof overlayVideos)[number], onto: string): string => {
-    if (!oc.image && !videoPresence.get(oc.file)) return onto;
+    const orIn = overlayRemovalInput.get(oc);
+    if (!oc.image && !orIn && !videoPresence.get(oc.file)) return onto;
     const idx = oc.image ? imageOverlayInput.get(oc)! : inputIndex.get(oc.file)!;
     const ospeed = oc.speed && oc.speed > 0 ? oc.speed : 1;
     const olen = Math.max(0.1, (oc.out - oc.in) / ospeed);
@@ -1491,7 +1554,7 @@ export async function runExport(
       ? `,format=yuva420p,pad=${boxW}:${boxH}:(ow-iw)/2:(oh-ih)/2:color=black@0.0`
       : "";
     if (boxed) pos = region ? `${region.rx}:${region.ry}` : "0:0";
-    const fmt = hf > 0.01 || tf > 0.01 || boxed ? "yuva420p" : "yuv420p";
+    const fmt = hf > 0.01 || tf > 0.01 || boxed || orIn ? "yuva420p" : "yuv420p";
     // The look chain reads the pre-pad picture, which is opaque.
     const lookFmt = boxed ? "yuv420p" : fmt;
     const fades =
@@ -1500,15 +1563,25 @@ export async function runExport(
     const k = ovk++;
     const seg = `ovv${k}`;
     // A still replays its looped input; footage trims its source span and
-    // re-times by speed. tpad then delays the clip to its timeline start.
-    const timebase = oc.image
-      ? `[${idx}:v]setpts=PTS-STARTPTS`
-      : `[${idx}:v]trim=${num(oc.in)}:${num(oc.out)},setpts=(PTS-STARTPTS)/${num(ospeed)}`;
-    let core = `${timebase},fps=${fps},${framing},setsar=1,${colorFix.get(oc.file) ?? ""}${gradeChain(oc.grade)}format=${lookFmt}`;
+    // re-times by speed. tpad then delays the clip to its timeline start. A
+    // removal overlay's picture is its uploaded keyed pair, alpha merged in
+    // and clone-padded, grade and look already baked into the pixels.
+    let timebase: string;
+    if (orIn) {
+      filters.push(`[${orIn.a}:v]setpts=PTS-STARTPTS,format=gray[ova${k}]`);
+      filters.push(`[${orIn.rgb}:v]setpts=PTS-STARTPTS,format=rgba[ovc${k}]`);
+      filters.push(`[ovc${k}][ova${k}]alphamerge,tpad=stop_mode=clone:stop_duration=1[ovr${k}]`);
+      timebase = `[ovr${k}]null`;
+    } else {
+      timebase = oc.image
+        ? `[${idx}:v]setpts=PTS-STARTPTS`
+        : `[${idx}:v]trim=${num(oc.in)}:${num(oc.out)},setpts=(PTS-STARTPTS)/${num(ospeed)}`;
+    }
+    let core = `${timebase},fps=${fps},${framing},setsar=1,${orIn ? "" : colorFix.get(oc.file) ?? ""}${gradeChain(orIn ? undefined : oc.grade)}format=${orIn ? "yuva420p" : lookFmt}`;
     // Looks bake into footage overlays only: an image may carry alpha, which
     // the look chain's internal filters would flatten onto black over the
     // tracks beneath. The alpha fades stay safe: they apply after the look.
-    if (oc.look && !oc.image) {
+    if (oc.look && !oc.image && !orIn) {
       const lines = lookFilterLines(`olki${k}`, `olko${k}`, oc.look, oc.lookAmount, H, lookFmt, `o${k}`);
       if (lines) {
         filters.push(`${core}[olki${k}]`);

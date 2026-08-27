@@ -4,6 +4,7 @@ import {
   poseAt,
   stampOverlayKinds,
   stripDefaultOverlayKinds,
+  type ClipRemoval,
   type ColorGrade,
   type EffectOverlay,
   type LookStyle,
@@ -192,7 +193,7 @@ export interface StoredAsset {
    * drop, or upload), so it belongs in the Media panel. Any value marks media
    * Cut created or fetched — it lives where it was made (the timeline, a
    * generation panel, or an AI chat card) and is kept out of the Media panel. */
-  origin?: "voiceover" | "generated" | "recording" | "stock" | "freeze" | "chat" | "sticker";
+  origin?: "voiceover" | "generated" | "recording" | "stock" | "freeze" | "chat" | "sticker" | "matte";
   /** BCP-47 of the audio's spoken language, when known (stamped on voiceovers
    * at synthesis) — what transcription should run its recognizer in. */
   language?: string;
@@ -554,12 +555,36 @@ export interface VideoClip {
   kf?: OverlayKey[];
   /** Rounded corners and a border stroke on the clip's box; absent = plain. */
   boxStyle?: BoxStyle;
+  /** Background removal: keys the clip's picture to an alpha matte (chroma
+   * key, or an AI matte baked to a grayscale video asset), with an optional
+   * stroke around the silhouette and a backdrop filled in behind it (see the
+   * kit's removal.ts). Absent = the whole picture shows. */
+  removal?: ClipRemoval;
 }
 
 // Color grading (the dual-renderer math) lives in the effects kit; the model
 // types and ranges re-export here so doc-model consumers keep one import.
 export { GRADE_BASIC_FIELDS, GRADE_HUE_MAX, GRADE_MAX, HSL_BANDS } from "@donkeycut/effects-kit";
 export type { ColorGrade, GradePresetRef, HslBand } from "@donkeycut/effects-kit";
+
+// Background removal follows the same split: math and model in the kit, the
+// doc-model types re-exported here.
+export {
+  removalActive,
+  removalFingerprint,
+  removalNeedsBake,
+  STROKE_STYLE_LABELS,
+  STROKE_STYLES,
+} from "@donkeycut/effects-kit";
+export type {
+  ChromaKey,
+  ClipRemoval,
+  RemovalBackdrop,
+  RemovalMode,
+  RemovalSeeds,
+  RemovalStroke,
+  StrokeStyleId,
+} from "@donkeycut/effects-kit";
 
 /** Speed slider range. Typed entry and tools may go beyond it; SPEED_FLOOR is
  * the only hard bound, keeping rates positive so length math stays finite. */

@@ -9,6 +9,7 @@ import { isJsonObject } from "@/lib/inference/json";
 const extensionByKind: Record<AssetGenerationKind, RegExp> = {
   image: /\.(png|jpe?g|webp|gif|heic|avif)(\?|#|$)/i,
   video: /\.(mp4|webm|mov|m4v)(\?|#|$)/i,
+  matte: /\.(mp4|webm|mov|m4v)(\?|#|$)/i,
   music: /\.(mp3|wav|m4a|aac|ogg|flac)(\?|#|$)/i,
   speech: /\.(mp3|wav|m4a|aac|ogg|flac|pcm)(\?|#|$)/i,
 };
@@ -16,12 +17,14 @@ const extensionByKind: Record<AssetGenerationKind, RegExp> = {
 const contentTypeByKind: Record<AssetGenerationKind, string> = {
   image: "image/png",
   video: "video/mp4",
+  matte: "video/mp4",
   music: "audio/mpeg",
   speech: "audio/mpeg",
 };
 
 export function mediaKind(kind: AssetGenerationKind): InferenceModality {
-  return kind === "music" || kind === "speech" ? "audio" : kind;
+  if (kind === "music" || kind === "speech") return "audio";
+  return kind === "matte" ? "video" : kind;
 }
 
 export function extractMediaOutputs(

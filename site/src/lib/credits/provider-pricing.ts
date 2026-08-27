@@ -17,6 +17,7 @@ import {
   type GeminiTtsModel,
 } from "@/lib/inference/gemini-models";
 import { browserUsePerStepUsd } from "@/lib/browser/pricing";
+import { falMatteModels, type FalMatteModel } from "@/lib/inference/matte-models";
 
 export type ProviderCreditPricing = {
   inputTokenCostMicrosPerMillion?: bigint;
@@ -64,6 +65,11 @@ export function providerCreditPricing(
   }
   if (normalizedProvider === "elevenlabs") {
     return elevenLabsCreditPricing(normalizedModel);
+  }
+  // The matte segmenter id is hardcoded (matte-models.ts); a matte bills at
+  // submit, one generation per 16-frame chunk of the segment.
+  if (normalizedProvider === "fal") {
+    return falMatteCreditPricing(normalizedModel);
   }
   if (normalizedProvider === "browser-use") {
     return browserUseCreditPricing();
@@ -322,6 +328,18 @@ const geminiOmniModelPricing: Record<GeminiOmniModel, ProviderCreditPricing> = {
 
 function geminiOmniCreditPricing(model: string): ProviderCreditPricing | undefined {
   return geminiOmniModelPricing[model as GeminiOmniModel];
+}
+
+// The matte segmenter bills upstream per 16 processed frames ($0.005 a
+// chunk); the adapter counts the submitted segment's frames and charges the
+// same unit, generationCount = started chunks. Keyed by FalMatteModel, so
+// adding a segmenter id without a price fails the build.
+const falMatteModelPricing: Record<FalMatteModel, ProviderCreditPricing> = {
+  [falMatteModels.segmenter]: { generationCostMicros: usdWithMargin("0.005") },
+};
+
+function falMatteCreditPricing(model: string): ProviderCreditPricing | undefined {
+  return falMatteModelPricing[model as FalMatteModel];
 }
 
 // Generative music (Gemini/Lyria) bills flat per rendered clip: the render is a

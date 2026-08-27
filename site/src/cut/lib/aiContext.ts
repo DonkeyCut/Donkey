@@ -3,6 +3,7 @@
 import { hasOverlayAnim } from "@donkeycut/effects-kit";
 import { chatOwner } from "./chatAssets";
 import { useGenerate } from "./generate";
+import { useMatteBakes } from "./removal/bakeJobs";
 import { getClipSpans, overlayLayers, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt, skimAt } from "./playhead";
 import { cueWordCount } from "./cueChunk";
@@ -66,6 +67,46 @@ function clipEffects(clip: VideoClip) {
       : {}),
     ...color,
     ...(clip.boxStyle ? { boxStyle: clip.boxStyle } : {}),
+    ...describeRemoval(clip),
+  };
+}
+
+/** The clip's cutout state: mode, whether its AI matte is ready (and at which
+ * tier), a live bake's progress, and the stroke/background riding on it —
+ * what set_removal claims must be grounded in. */
+function describeRemoval(clip: VideoClip) {
+  const rm = clip.removal;
+  if (!rm) return {};
+  const job = useMatteBakes.getState().jobs[clip.id];
+  return {
+    removal: {
+      mode: rm.mode,
+      ...(rm.subject ? { subject: rm.subject } : {}),
+      ...(rm.mode === "chroma" && rm.chroma ? { chroma: rm.chroma } : {}),
+      ...(rm.mode === "auto" || rm.mode === "custom"
+        ? {
+            matte: rm.matte ? `ready (${rm.matte.quality === "hq" ? "quality" : "quick"})` : "none",
+            ...(job
+              ? {
+                  bake:
+                    job.status === "running"
+                      ? `baking ${job.quality === "hq" ? "quality" : "quick"} (${Math.round(job.progress * 100)}%)`
+                      : `error: ${job.error ?? "failed"}`,
+                }
+              : {}),
+          }
+        : {}),
+      ...(rm.stroke
+        ? {
+            stroke: {
+              style: rm.stroke.style,
+              color: rm.stroke.color,
+              ...(rm.stroke.width !== undefined ? { width: rm.stroke.width } : {}),
+            },
+          }
+        : {}),
+      ...(rm.backdrop && rm.backdrop.kind !== "none" ? { background: rm.backdrop } : {}),
+    },
   };
 }
 

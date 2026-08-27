@@ -300,6 +300,10 @@ export interface EditorState {
   /** While playing a scoped effect preview, the time playback auto-pauses at;
    * null otherwise. Manual seek/play/pause clears it. */
   previewStopAt: number | null;
+  /** A clip whose background removal is temporarily bypassed — the removal
+   * panel's eye toggle showing the original picture; null otherwise. View
+   * state, never saved. */
+  removalPeek: string | null;
   pxPerSec: number;
   /** Timeline panel height in px (drag the panel's top border to change). */
   timelineH: number;
@@ -1508,6 +1512,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       playing: false,
       buffering: false,
       previewStopAt: null,
+      removalPeek: null,
       subtitles: emptySubtitles(),
       subtitleLane: 0,
       subtitleStatus: "idle",
@@ -1557,6 +1562,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     playing: false,
     buffering: false,
     previewStopAt: null,
+    removalPeek: null,
     pxPerSec: 60,
     timelineH: TIMELINE_H_DEFAULT,
     publish: { caption: "", tags: "", soundTitle: "", handle: "" },

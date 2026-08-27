@@ -29,6 +29,11 @@ import {
   type OverlayAnim,
   type OverlayAnimStyle,
   type OverlayLoopStyle,
+  STROKE_OFFSET_MAX,
+  STROKE_STYLES,
+  STROKE_WIDTH_MAX,
+  type RemovalStroke,
+  type StrokeStyleId,
 } from "@donkeycut/effects-kit";
 import type { AiPanelToolName } from "@/cut/components/AiPanel.tools";
 import type { OverlayAnimationToolName } from "@/cut/components/AnimationTiles.tools";
@@ -41,6 +46,7 @@ import type { ImageGenToolName } from "@/cut/components/ImageGenPanel.tools";
 import type { InspectorToolName } from "@/cut/components/Inspector.tools";
 import type { LibraryToolName } from "@/cut/components/LibraryView.tools";
 import type { PreviewToolName } from "@/cut/components/Preview.tools";
+import type { RemovalToolName } from "@/cut/components/RemovalPanel.tools";
 import type { SceneToolName } from "@/cut/components/SceneCard.tools";
 import type { SidePanelToolName } from "@/cut/components/SidePanel.tools";
 import type { StockToolName } from "@/cut/components/StockPanels.tools";
@@ -88,6 +94,13 @@ import { convertAssetToMp4 } from "./mediaConvert";
 import { isLottieAsset } from "./lottieAssets";
 import { AIR, MIN_AIR, placeEdge, REACH, settleJoint, type Pace, type PlacedEdge } from "./cutRefine";
 import { requestSidePanel } from "./panelRequest";
+import {
+  confirmMatteBake,
+  ensureMatteBake,
+  matteBakesAvailable,
+  useMatteBakes,
+} from "./removal/bakeJobs";
+import { clipKeyColor, suggestKeyColor } from "./removal/keyColor";
 import { blobToInlineAudio, refToInlineAudio, visualRefs, type InlineImage } from "./refMedia";
 import { characterPrompt, stockAspectDims, stockTitle } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
@@ -341,6 +354,7 @@ type BrowserToolName = Exclude<
   | LibraryToolName
   | OverlayAnimationToolName
   | PreviewToolName
+  | RemovalToolName
   | SceneToolName
   | SidePanelToolName
   | StockToolName
@@ -2045,6 +2059,146 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return { id: clip.id, boxStyle: boxStyle ?? null };
   },
 
+  set_removal: async (s, input) => {
+      const clip = requireItem(s.clips, input.clipId, "video clip");
+      const mode = String(input.mode ?? "");
+      if (mode === "off") {
+        s.updateClip(clip.id, { removal: undefined });
+        return { id: clip.id, removal: null };
+      }
+      const bakeNote = matteBakesAvailable
+        ? "The cutout matte is baking in the background — wait_for_renders reports when it lands."
+        : "The cutout is set; its matte bakes the next time the project is open in the editor.";
+      if (mode === "auto") {
+        // The tool call is the explicit start, so the bake is requested here
+        // the way the panel's Start button requests it.
+        s.updateClip(clip.id, { removal: { ...clip.removal, mode: "auto", requested: true } });
+        ensureMatteBake(clip.id);
+        return { id: clip.id, mode, note: bakeNote };
+      }
+      if (mode === "custom") {
+        const subject = typeof input.subject === "string" ? input.subject.trim() : "";
+        if (!subject || subject.length > 100)
+          throw new ToolError('mode "custom" needs `subject` — what to keep, in a few words.');
+        // A named subject replaces any painted selection: the seeds point at
+        // whatever the user brushed before, and the words are the new ask.
+        s.updateClip(clip.id, {
+          removal: {
+            ...clip.removal,
+            mode: "custom",
+            subject,
+            seeds: { prompts: [] },
+            requested: true,
+          },
+        });
+        confirmMatteBake(clip.id);
+        return { id: clip.id, mode, subject, note: bakeNote };
+      }
+      if (mode !== "chroma")
+        throw new ToolError('mode must be "off", "auto", "custom", or "chroma".');
+      const prev = clip.removal?.chroma;
+      const explicit =
+        typeof input.color === "string" && /^#[0-9a-f]{6}$/i.test(input.color)
+          ? input.color.toLowerCase()
+          : null;
+      // The default key comes from the clip's own footage: the live frame
+      // when a decoder shows it, its decoded in-point frame when the clip is
+      // away from the playhead or the turn runs headless.
+      let color = explicit ?? prev?.color ?? suggestKeyColor(clip.id);
+      if (!color) {
+        const asset = s.assets.find((a) => a.id === clip.assetId);
+        color = asset ? await clipKeyColor(asset, clip) : null;
+      }
+      if (!color)
+        throw new ToolError(
+          "The clip's picture could not be read for a key suggestion — pass `color` as #rrggbb."
+        );
+      const chroma = {
+        color,
+        ...(isNum(input.intensity)
+          ? { intensity: clamp(input.intensity, 0, 1) }
+          : prev?.intensity !== undefined && { intensity: prev.intensity }),
+        ...(isNum(input.softness)
+          ? { softness: clamp(input.softness, 0, 1) }
+          : prev?.softness !== undefined && { softness: prev.softness }),
+        ...(isNum(input.spill)
+          ? { spill: clamp(input.spill, 0, 1) }
+          : prev?.spill !== undefined && { spill: prev.spill }),
+      };
+      s.updateClip(clip.id, { removal: { ...clip.removal, mode: "chroma", chroma } });
+      return { id: clip.id, mode, chroma };
+  },
+
+  set_removal_stroke: (s, input) => {
+      const clip = requireItem(s.clips, input.clipId, "video clip");
+      const removal = clip.removal;
+      if (!removal) throw new ToolError("The clip has no cutout yet — call set_removal first.");
+      const style = String(input.style ?? "");
+      if (style === "none") {
+        s.updateClip(clip.id, { removal: { ...removal, stroke: undefined } });
+        return { id: clip.id, stroke: null };
+      }
+      if (!(STROKE_STYLES as readonly string[]).includes(style))
+        throw new ToolError(`style must be one of ${[...STROKE_STYLES, "none"].join(", ")}.`);
+      const prev = removal.stroke;
+      // Canvas silently ignores an invalid fillStyle, so a bad color would
+      // store and draw as whatever came before it.
+      if (typeof input.color === "string" && input.color && !/^#[0-9a-f]{6}$/i.test(input.color))
+        throw new ToolError("color must be #rrggbb.");
+      const stroke: RemovalStroke = {
+        style: style as StrokeStyleId,
+        color:
+          typeof input.color === "string" && input.color
+            ? input.color.toLowerCase()
+            : prev?.color ?? "#ffffff",
+        ...(isNum(input.width)
+          ? { width: clamp(input.width, 1, STROKE_WIDTH_MAX) }
+          : prev?.width !== undefined && { width: prev.width }),
+        ...(isNum(input.offset_x)
+          ? input.offset_x !== 0 && {
+              offsetX: clamp(input.offset_x, -STROKE_OFFSET_MAX, STROKE_OFFSET_MAX),
+            }
+          : prev?.offsetX !== undefined && { offsetX: prev.offsetX }),
+        ...(isNum(input.offset_y)
+          ? input.offset_y !== 0 && {
+              offsetY: clamp(input.offset_y, -STROKE_OFFSET_MAX, STROKE_OFFSET_MAX),
+            }
+          : prev?.offsetY !== undefined && { offsetY: prev.offsetY }),
+      };
+      s.updateClip(clip.id, { removal: { ...removal, stroke } });
+      return { id: clip.id, stroke };
+  },
+
+  set_removal_background: (s, input) => {
+      const clip = requireItem(s.clips, input.clipId, "video clip");
+      const removal = clip.removal;
+      if (!removal) throw new ToolError("The clip has no cutout yet — call set_removal first.");
+      const kind = String(input.kind ?? "");
+      if (kind === "none") {
+        s.updateClip(clip.id, { removal: { ...removal, backdrop: undefined } });
+        return { id: clip.id, background: null };
+      }
+      if (kind === "color") {
+        if (typeof input.color === "string" && input.color && !/^#[0-9a-f]{6}$/i.test(input.color))
+          throw new ToolError("color must be #rrggbb.");
+        const color =
+          typeof input.color === "string" && input.color
+            ? input.color.toLowerCase()
+            : removal.backdrop?.color ?? "#101014";
+        s.updateClip(clip.id, { removal: { ...removal, backdrop: { kind: "color", color } } });
+        return { id: clip.id, background: { kind, color } };
+      }
+      if (kind !== "image") throw new ToolError('kind must be "none", "color", or "image".');
+      const assetId = typeof input.asset_id === "string" ? input.asset_id : "";
+      const bgAsset = s.assets.find((a) => a.id === assetId);
+      if (bgAsset?.type !== "image")
+        throw new ToolError(
+          assetId ? `No image asset with id ${assetId}.` : "asset_id is required for kind \"image\"."
+        );
+      s.updateClip(clip.id, { removal: { ...removal, backdrop: { kind: "image", assetId } } });
+      return { id: clip.id, background: { kind, assetId } };
+  },
+
   freeze_frame: async (s, input) => {
       const projectId = s.projectId;
       if (!projectId) throw new ToolError("No project open.");
@@ -2298,8 +2452,13 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           (j) => j.kind === "video" && j.status === "running" && j.projectId === projectId
         )
         .map((j) => j.id);
-      if (watched.length === 0) {
-        return { renders: [], note: "No renders in flight — check `renders` in the state for recent outcomes." };
+      // Cutout matte bakes settle here too, so "the background is removed"
+      // waits for the matte the claim rests on.
+      const watchedBakes = Object.entries(useMatteBakes.getState().jobs)
+        .filter(([, j]) => j.status === "running")
+        .map(([clipId]) => clipId);
+      if (watched.length === 0 && watchedBakes.length === 0) {
+        return { renders: [], note: "No renders or cutout bakes in flight — check `renders` in the state for recent outcomes." };
       }
       // Poll the job store rather than the settlement promises: it also tracks
       // renders another tab owns. Stay under the tool bridge's 2-minute cap;
@@ -2307,7 +2466,11 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const deadline = Date.now() + 100_000;
       while (Date.now() < deadline) {
         const jobs = useGenerate.getState().jobs;
-        if (!watched.some((id) => jobs.find((j) => j.id === id)?.status === "running")) break;
+        const bakes = useMatteBakes.getState().jobs;
+        const busy =
+          watched.some((id) => jobs.find((j) => j.id === id)?.status === "running") ||
+          watchedBakes.some((id) => bakes[id]?.status === "running");
+        if (!busy) break;
         await new Promise((r) => setTimeout(r, 1000));
       }
       const jobs = useGenerate.getState().jobs;
@@ -2323,9 +2486,26 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           ...(j.status === "error" && j.error ? { error: j.error } : {}),
         };
       });
-      const stillRunning = renders.filter((x) => x.status === "running").length;
+      const bakes = useMatteBakes.getState().jobs;
+      const cutouts = watchedBakes.map((clipId) => {
+        const j = bakes[clipId];
+        if (!j) {
+          const m = cur.clips.find((c) => c.id === clipId)?.removal?.matte;
+          return { clipId, status: "done" as const, ...(m ? { quality: m.quality } : {}) };
+        }
+        return {
+          clipId,
+          status: j.status,
+          quality: j.quality,
+          ...(j.error ? { error: j.error } : {}),
+        };
+      });
+      const stillRunning =
+        renders.filter((x) => x.status === "running").length +
+        cutouts.filter((c) => c.status === "running").length;
       return {
         renders,
+        ...(cutouts.length > 0 ? { cutouts } : {}),
         ...(stillRunning > 0
           ? { note: `${stillRunning} still rendering — call wait_for_renders again to keep waiting.` }
           : {}),

@@ -34,7 +34,8 @@ import { overlayPlan, trackZeroPlan } from "./framePlan";
 import { frameSink, openMedia, videoTrackOf } from "./mediaRead";
 import { getClipSpans, overlayLayers, projectDuration, spanSequence } from "./store";
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
-import { applyEffectToCanvas, evalOverlayFrame, grainTile, isAudioEffect, isMaskAnimated, isOverlayAnimated, maskFrameAt, planAnimatedLayers, type LottieHandle, type OverlayAnim, type PaintPhase } from "@donkeycut/effects-kit";
+import { applyEffectToCanvas, evalOverlayFrame, grainTile, isAudioEffect, isMaskAnimated, isOverlayAnimated, maskFrameAt, MATTE_FPS, matteLumaToAlpha, planAnimatedLayers, type LottieHandle, type OverlayAnim, type PaintPhase } from "@donkeycut/effects-kit";
+import { backdropStill, loadBackdropStill } from "./backdropStills";
 import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
 import { createRasterCanvas, type RasterSurface } from "./raster";
 import { renderElementPng } from "./textRender";
@@ -807,6 +808,15 @@ export class FramePainter {
   private readers = new Map<string, ClipReader>();
   private behind: SubjectMaskCompositor | null = null;
   private fxScratch: RasterSurface | null = null;
+  /** This frame's removal mattes, one alpha image per keyed clip — fetched
+   * with the layer frames (readers are async) and read synchronously by the
+   * compositor's provider mid-draw. */
+  private matteFrames = new Map<string, CanvasImageSource>();
+  /** Per-clip conversion scratch for those mattes (luma frame → alpha). */
+  private matteScratch = new Map<string, RasterSurface>();
+  /** Which matte frame each scratch currently holds, so the luma → alpha
+   * pixel pass runs once per matte frame. */
+  private matteStamp = new Map<string, string>();
   /** Text layers, deepest lane first — so a walk of them is a walk up the stack. */
   private stacked: StampedLayer[] = [];
   private spans: ClipSpan[] = [];
@@ -849,6 +859,23 @@ export class FramePainter {
       this.comp.subjectMatteProvider = (at) =>
         behind.clipMatteOf(this.canvas, at, { minMaskInterval: 0 });
     }
+    // Removal: baked mattes are prefetched per frame into `matteFrames`; the
+    // provider is a synchronous read of that map. Backdrop stills decode once
+    // here, so mid-render reads are cache hits.
+    this.comp.removalMatteProvider = (clip) => this.matteFrames.get(clip.id) ?? null;
+    this.comp.backdropImageProvider = (assetId) => backdropStill(this.doc.assets, assetId);
+    const backdropIds = new Set(
+      this.doc.clips
+        .map((c) => c.removal?.backdrop)
+        .filter((b) => b?.kind === "image" && b.assetId)
+        .map((b) => b!.assetId!)
+    );
+    await Promise.all(
+      [...backdropIds].map((id) => {
+        const asset = this.doc.assets.find((a) => a.id === id);
+        return asset ? loadBackdropStill({ ...asset, url: this.resolve(asset) }) : null;
+      })
+    );
     // Span geometry is a property of the document, which does not change while
     // rendering — so it is computed once rather than per overlay per frame.
     this.spans = getClipSpans(this.doc.clips, this.doc.assets, 0);
@@ -866,6 +893,43 @@ export class FramePainter {
     return r;
   }
 
+  /** Pull a removal clip's baked matte frame for timeline time `t` and stage
+   * it, luma turned to alpha, where the compositor's provider reads. A clip
+   * with no matte (chroma, or a bake still owed) stages nothing. */
+  private async fetchRemovalMatte(span: ClipSpan, t: number): Promise<void> {
+    const clip = span.clip;
+    const m = clip.removal?.matte;
+    this.matteFrames.delete(clip.id);
+    if (!m) return;
+    const asset = this.doc.assets.find((a) => a.id === m.assetId);
+    if (!asset) return;
+    const dur = Math.max(0.001, asset.duration);
+    const mt = Math.max(0, Math.min(sourceTimeAt(span, t) - m.in, dur - 0.001));
+    const frame = await this.readerFor(asset).frameAt(mt);
+    if (frame.kind !== "ready") return;
+    let scratch = this.matteScratch.get(clip.id);
+    // The matte advances at its own baked rate below the export's, so a
+    // converted frame is reused until the read crosses into the next one —
+    // the pixel pass is per matte frame, never per output frame.
+    const stamp = `${m.assetId}:${Math.floor(mt * MATTE_FPS)}`;
+    if (scratch && this.matteStamp.get(clip.id) === stamp) {
+      this.matteFrames.set(clip.id, scratch as CanvasImageSource);
+      return;
+    }
+    if (!scratch) this.matteScratch.set(clip.id, (scratch = createRasterCanvas(frame.width, frame.height)));
+    if (scratch.width !== frame.width) scratch.width = frame.width;
+    if (scratch.height !== frame.height) scratch.height = frame.height;
+    const ctx = scratch.getContext("2d") as CanvasRenderingContext2D | null;
+    if (!ctx) return;
+    ctx.clearRect(0, 0, scratch.width, scratch.height);
+    ctx.drawImage(frame.image, 0, 0, scratch.width, scratch.height);
+    const img = ctx.getImageData(0, 0, scratch.width, scratch.height);
+    matteLumaToAlpha(img.data);
+    ctx.putImageData(img, 0, 0);
+    this.matteStamp.set(clip.id, stamp);
+    this.matteFrames.set(clip.id, scratch as CanvasImageSource);
+  }
+
   /** Draw the whole cut at timeline time `t` onto the canvas. */
   async drawAt(t: number): Promise<void> {
     const { canvas, comp, doc, stamps } = this;
@@ -876,7 +940,10 @@ export class FramePainter {
     const master = this.spans.find((sp) => t >= sp.start && t < sp.start + sp.len);
     if (master) {
       const plan = trackZeroPlan(master, this.spans, t);
+      await this.fetchRemovalMatte(master, t);
+      if (plan.incoming) await this.fetchRemovalMatte(plan.incoming, t);
       if (plan.backdrop) {
+        await this.fetchRemovalMatte(plan.backdrop.span, t);
         const frame = await this.readerFor(plan.backdrop.span.asset).frameAt(plan.backdrop.at);
         comp.drawLayer(frame, plan.backdrop.span.clip, false, 1, t);
       }
@@ -912,6 +979,7 @@ export class FramePainter {
     for (const layer of overlayPlan(this.overlayTracks, spansOf, t)) {
       const span = this.spanOfClip.get(layer.clip.id);
       if (!span) continue;
+      await this.fetchRemovalMatte(span, t);
       const frame = await this.readerFor(layer.asset).frameAt(sourceTimeAt(span, t));
       comp.drawIntoRect(
         frame,

@@ -85,6 +85,10 @@ type CreditPreflightInput = {
   // billed model differs from the request (a provider that pins its own model) must leave this off
   // and rely on the post-generation price resolution instead.
   enforceModelPrice?: boolean;
+  // The generation units the request will bill (the provider's own count, e.g. the matte
+  // segmenter's frame chunks). The affordability check multiplies the per-unit price by it, so
+  // a charge that scales with the input is held to the balance in full. Unset means one unit.
+  generationCount?: number;
 };
 
 export type RecordedInferenceUsage = {
@@ -320,8 +324,12 @@ async function assertModelIsAffordable(
   const rate = await resolveCreditRate(prisma, input.route, provider, model);
   // A DB rate override replaces the code pricing wholesale and carries no flat per-generation
   // price, so an overridden model falls back to the positive-balance gate above.
+  const generationCount = BigInt(
+    Math.max(1, Math.floor(input.generationCount ?? 1)),
+  );
   const generationCostMicros =
-    rate.providerPricing?.generationCostMicros ?? zeroCreditMicros;
+    (rate.providerPricing?.generationCostMicros ?? zeroCreditMicros) *
+    generationCount;
   if (
     generationCostMicros > zeroCreditMicros &&
     balanceMicros < generationCostMicros

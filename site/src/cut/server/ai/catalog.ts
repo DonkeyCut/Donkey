@@ -30,6 +30,7 @@ import { IMAGE_GEN_TOOLS } from "@/cut/components/ImageGenPanel.tools";
 import { INSPECTOR_TOOLS } from "@/cut/components/Inspector.tools";
 import { LIBRARY_TOOLS } from "@/cut/components/LibraryView.tools";
 import { PREVIEW_TOOLS } from "@/cut/components/Preview.tools";
+import { REMOVAL_TOOLS } from "@/cut/components/RemovalPanel.tools";
 import { SCENE_TOOLS } from "@/cut/components/SceneCard.tools";
 import { SIDE_PANEL_TOOLS } from "@/cut/components/SidePanel.tools";
 import { STOCK_TOOLS } from "@/cut/components/StockPanels.tools";
@@ -54,6 +55,7 @@ export const AI_TOOLS: AiToolDef[] = [
   ...PREVIEW_TOOLS,
   ...TIMELINE_TOOLS,
   ...INSPECTOR_TOOLS,
+  ...REMOVAL_TOOLS,
   ...ELEMENTS_TOOLS,
   ...EFFECTS_TOOLS,
   ...OVERLAY_ANIMATION_TOOLS,
@@ -93,6 +95,7 @@ Times are in seconds on the shared timeline. The playhead is currentTime; a skim
 - Resizes ripple the same way deletes do: while track 0 is the only video track, a track-0 trim or speed change slides everything past the clip's tail — clips, titles, captions, soundtrack — with the moved edge, in both directions, every existing gap keeping its width. With overlay video tracks present, growth pushes the track-0 run and a shrink leaves a gap.
 - set_speed sets a clip's playback rate; it changes the clip's timeline length and carries the timeline behind it like a trim.
 - set_transition joins a clip into the next one (0–2s, ${TRANSITION_STYLE_IDS.length} styles); set_animation animates one clip's own entrance/exit — read the transitions-and-fades skill before styling cuts. Splitting or deleting clears the affected transition. A transition is a bar on its own row at an absolute time, so an edit can leave one lining up with nothing: every timeline mutation reports those as \`parkedTransitions\`, and clearing them (remove_transition) is part of finishing the edit. Grading a clip's picture is the color tools (set_color_preset, set_color_grade, set_color_curves, set_color_wheels, set_color_hsl — read the color-grading skill); a stylized post treatment (grain, VHS, halation…) is add_effect, dropped over the stretch of timeline it covers — as is a treatment on the sound (echo, reverb, telephone…).
+- Cutting a clip's background away — the AI person matte, the green-screen chroma key, ink around the silhouette, a fill behind the subject — is the cutout suite (set_removal, set_removal_stroke, set_removal_background); read the background-removal skill.
 - split_at cuts the track-0 clip under that time into two clips at the exact frame. With a soundtrack or overlay clip selected it splits that instead.
 - The Media and Library panels take the same gestures: ⌘/⇧-click a tile, or sweep a rubber-band over the grid, and dragging any picked tile onto the timeline lays the whole set down one after another from the drop point.
 - The user can multi-select (⌘/⇧-click, or sweep a rubber-band over empty track space) across every kind at once — clips, audio, titles, cues. Deleting or copying acts on the whole selection, and dragging any member moves the set as one: every item shifts by the same time, relative spacing kept, while unselected items slide out of the way and flow back. A selection of one kind on the multi-row tracks (audio, titles) also retracks together on a vertical drag, one row past the end opening a new track. A hover chip on each video clip toggles its own audio.
@@ -123,6 +126,16 @@ Grade like a colorist: read the image, correct it, then style it — in that ord
 - match_color_grade — a reference exists (attached image or another clip): the grade is computed from the pixels (quantile-matched curves + saturation), then refine with the tools above. Matching adjacent clips for consistency is this too — match the odd clip to its neighbor.
 
 **Craft.** Skin lives around orange at modest saturation — check faces after strong saturation, hue, or wheel moves, and reach for protect_skin or a gentle orange-band correction rather than abandoning the look. Keep adjacent clips consistent: one preset + per-clip correction reads as one film; different presets per clip read as a slideshow. Strong looks sit better with contrast established first. Grades are per-clip — "grade the whole video" means every clip, same recipe.`,
+
+  "background-removal": `# Background removal (Cutout)
+Every video clip — any track, stills too — can carry a cutout, the Inspector's Cutout tab: the clip's picture keys to an alpha matte, the subject stays, and where the background was, lower tracks or the project background show through. Preview, timeline thumbnails, and export render the same matte.
+- set_removal mode "auto": the AI person matte. A free on-device pass lands in seconds, and a hosted quality pass (spends credits like generation) upgrades hair and edge detail in the background. The tool call starts the bake itself; in the panel, picking a mode only previews the live matte, and the user's Start (auto) or Apply (custom) press starts the bake — hand-instructions include that step. Each cutout clip reports under \`removal\` in editor_state videoTrack/overlayVideo — mode, matte readiness ("ready (quick)" / "ready (quality)" / "none"), and a live bake's progress — and wait_for_renders settles on bakes, so claims about a finished cutout come from there. Short of credits, the quick matte stands and the panel offers the upgrade.
+- set_removal mode "custom" with \`subject\`: an arbitrary object by description — "the dog", "the red car" — matted and tracked through the clip (spends credits, less than a brushed track). Every match of the words is kept, so "cut out the dog" is one call. Picking one exact instance among lookalikes is hands-on: the user picks Custom in the Cutout tab, paints it on the preview with the quick and manual brushes, and presses Apply — the hosted tracker follows those exact strokes; with a subject set too, the strokes refine which instance the words picked.
+- set_removal mode "chroma": the green-screen key. The key color plus intensity (tolerance), softness (edge rolloff), and spill (pulls key-colored fringe off the kept pixels); omitting color samples the footage's borders. Footage shot or generated over a solid backdrop keys cleanly and costs nothing.
+- set_removal_stroke draws ink around the kept silhouette — glow, hand-drawn, straight cut, solid, offset (a thrown silhouette copy placed with offset_x/offset_y), dotted — with color and width. The die-cut sticker look is a white solid or cut stroke.
+- set_removal_background fills in behind the subject inside the clip's own picture: a flat color or a project image. For new scenery behind a person, an image fill here or scenery on a lower track both read; the lower track keeps the scenery independently editable.
+Panel geography, for hand-instructions: the Cutout tab is labeled rows, and the Layer dropdown at the top switches the rows between Removal (the mode and its controls), Stroke, and Background (None / Color / Image; the Image grid lists pictures imported into Media). Say "set Layer to Background", never "under the Background settings".
+Recipes: "remove the background" on a person = auto. "Cut out the dog" = custom with subject "the dog". "Put me on a beach" = auto + the beach behind (background image or lower track). "Green screen" = chroma. Sticker/die-cut = auto + white cut stroke. A bold silhouette pop = offset stroke in a loud color. Turning the whole thing off = set_removal mode "off", which drops the stroke and background fill with it.`,
 
   "watching-and-cutting": `# Watching footage & cutting by content
 When a request depends on what the footage actually contains — "cut the dead air", "clip the best moment", "remove the boring part", "split where the scene changes" — watch it first. Never guess at content you haven't seen.

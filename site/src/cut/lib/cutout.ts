@@ -146,6 +146,84 @@ export function segmentSubjectAlpha(
   }
 }
 
+const TOUCH_MODEL = "/mediapipe/magic_touch.tflite";
+type TouchSegmenter = import("@mediapipe/tasks-vision").InteractiveSegmenterLegacy;
+
+let touchOnce: Promise<TouchSegmenter | null> | null = null;
+
+/** The shared interactive (tap-to-select) segmenter, created on first use.
+ * Null when the runtime assets are missing. */
+export function interactiveSegmenter(): Promise<TouchSegmenter | null> {
+  touchOnce ??= (async () => {
+    try {
+      const { FilesetResolver, InteractiveSegmenterLegacy } = await import(
+        "@mediapipe/tasks-vision"
+      );
+      const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
+      return await withQuietWasmLogs(() =>
+        InteractiveSegmenterLegacy.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath: TOUCH_MODEL },
+          outputCategoryMask: false,
+          outputConfidenceMasks: true,
+        })
+      );
+    } catch {
+      touchOnce = null;
+      return null;
+    }
+  })();
+  return touchOnce;
+}
+
+/**
+ * Segment the object under a tap (or a scribbled path) and return its alpha
+ * canvas at the mask's own resolution, white where the object is. Points are
+ * frame fractions. Null when nothing registers. The `source` should be small
+ * (≤ ~512px) — the model resamples anyway, and quick-brush strokes segment
+ * per pointer move.
+ */
+export function segmentTouchAlpha(
+  segmenter: TouchSegmenter,
+  source: HTMLCanvasElement,
+  points: { x: number; y: number }[]
+): HTMLCanvasElement | null {
+  if (points.length === 0) return null;
+  const roi =
+    points.length === 1
+      ? { keypoint: { x: points[0].x, y: points[0].y } }
+      : { scribble: points.map((p) => ({ x: p.x, y: p.y })) };
+  const result = segmenter.segment(source, roi);
+  try {
+    const masks = result.confidenceMasks;
+    if (!masks?.length) return null;
+    // Two masks: background first, the touched object second (mirroring the
+    // selfie model's layout). A single mask is the object itself.
+    const conf = masks.length > 1 ? masks[1].getAsFloat32Array() : masks[0].getAsFloat32Array();
+    const mw = masks[0].width;
+    const mh = masks[0].height;
+    const [out, ctx] = canvasOf(mw, mh);
+    const img = ctx.createImageData(mw, mh);
+    let kept = 0;
+    for (let i = 0; i < mw * mh; i++) {
+      const subject = conf[i];
+      const a =
+        subject > PERSON_THRESHOLD
+          ? Math.min(255, Math.round((subject - PERSON_THRESHOLD) * 4 * 255))
+          : 0;
+      img.data[i * 4] = 255;
+      img.data[i * 4 + 1] = 255;
+      img.data[i * 4 + 2] = 255;
+      img.data[i * 4 + 3] = a;
+      if (a > 128) kept++;
+    }
+    if (kept < mw * mh * 0.001) return null;
+    ctx.putImageData(img, 0, 0);
+    return out;
+  } finally {
+    result.close();
+  }
+}
+
 /** Person matting, fully on-device. Null when no person registers (callers
  * fall through to the hosted path). */
 export async function personCutout(blob: Blob): Promise<HTMLCanvasElement | null> {
