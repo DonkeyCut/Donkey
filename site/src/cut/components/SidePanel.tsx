@@ -1126,6 +1126,7 @@ function AssetCard({
             <video crossOrigin={MEDIA_CORS}
               ref={videoRef}
               src={`${asset.url}#t=0.1`}
+              poster={asset.thumbs?.[0]}
               preload="metadata"
               muted
               loop
