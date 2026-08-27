@@ -52,21 +52,15 @@ describe("planFilmstrip", () => {
     }
   });
 
-  test("zoomed out past the strip's sampling, no tile asks for a capture", () => {
-    const tiles = plan({ pps: 30 });
-    expect(tiles.every((t) => t.wantT === null && !t.exact)).toBe(true);
-  });
-
-  test("zoomed in, every tile asks for a capture at its own midpoint", () => {
+  test("every tile asks for a capture at its own midpoint, at every zoom", () => {
     // Half the capture grid is the whole allowance: a capture pulled further
     // toward a tile's edge lands on the neighboring scene whenever a cut sits
     // inside the tile, and the strip flips a whole tile early.
-    for (const pps of [120, 200, 300, 480, 800]) {
+    for (const pps of [30, 60, 120, 200, 300, 480, 800]) {
       const tiles = plan({ pps });
       for (const t of tiles) {
-        expect(t.wantT === null).toBe(false);
-        if (t.wantT! <= 0 || t.wantT! >= DURATION - 0.05) continue;
-        expect(Math.abs(t.wantT! - t.srcT)).toBeLessThanOrEqual(WANT_GRID_S / 2 + 1e-9);
+        if (t.wantT <= 0 || t.wantT >= DURATION - 0.05) continue;
+        expect(Math.abs(t.wantT - t.srcT)).toBeLessThanOrEqual(WANT_GRID_S / 2 + 1e-9);
         expect(t.exact).toBe(false);
       }
     }
@@ -78,7 +72,7 @@ describe("planFilmstrip", () => {
     // where scene cuts live, so a straddling tile stays on its midpoint's
     // side of the cut.
     for (const t of plan({ pps: 300 })) {
-      if (t.wantT === null || t.wantT <= 0 || t.wantT >= DURATION - 0.05) continue;
+      if (t.wantT <= 0 || t.wantT >= DURATION - 0.05) continue;
       const cells = t.wantT / WANT_GRID_S - 0.5;
       expect(Math.abs(cells - Math.round(cells))).toBeLessThan(1e-6);
     }
@@ -171,9 +165,22 @@ describe("planFilmstrip", () => {
     expect(tiles.map((t) => t.left).some((x) => Math.abs(x - 3.0 * pps) < 1e-6)).toBe(true);
   });
 
-  test("zoomed out, cuts split nothing", () => {
-    const zoomedOut = plan({ pps: 30, cuts: [3.0, 6.0, 9.0] });
-    expect(zoomedOut).toEqual(plan({ pps: 30 }));
+  test("zoomed out, cuts still become tile edges and each side captures its own scene", () => {
+    // Fast-cut footage keeps its scenes visible at the widest zoom: a scene
+    // shorter than the tile grid still gets its own tile and its own frame.
+    const pps = 30;
+    const cuts = [1.0, 3.0, 6.0, 9.0];
+    const tiles = plan({ pps, cuts });
+    const edges = tiles.map((t) => t.left);
+    for (const c of cuts) expect(edges.some((x) => Math.abs(x - c * pps) < 1e-6)).toBe(true);
+    for (const t of tiles) {
+      const a = t.left / pps;
+      const b = (t.left + t.width) / pps;
+      for (const c of cuts) {
+        if (b <= c + 1e-9) expect(t.wantT).toBeLessThan(c);
+        else if (a >= c - 1e-9) expect(t.wantT).toBeGreaterThan(c);
+      }
+    }
   });
 
   test("no cuts leaves the plan unchanged", () => {

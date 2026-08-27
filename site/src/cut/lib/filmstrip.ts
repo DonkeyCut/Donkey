@@ -4,27 +4,28 @@
  * Tiles sit on a source-time grid, so the strip holds still while a trimmed
  * edge sweeps across it. Each tile spans `stepT` seconds of source; the asset
  * carries a pre-sampled strip with one thumb every `thumbStep` seconds
- * (roughly two). While a tile spans at least that much, the nearest
- * pre-sampled thumb is a faithful picture of the tile's whole span.
+ * (roughly two). While a tile spans at least that much, it shows the thumb
+ * from the scene that owns most of its span, so a cut inside a wide tile
+ * leaves the tile picturing what mostly plays there.
  *
- * Zoomed past that, a tile spans a fraction of the sampling interval, and on
- * footage that cuts between scenes the nearest thumb can show a moment up to
- * `thumbStep / 2` away — a visibly wrong scene under the playhead. Those
- * tiles each name a capture time (`wantT`) for a true frame at their own
+ * Every tile also names a capture time (`wantT`) for a true frame at its own
  * moment: the tile's midpoint, on a fine fixed grid (tenths of a second) so
  * cache keys hold still through scrolls and trims. The midpoint is the one
  * time that keeps a tile on its own side of a scene cut — a capture pulled
  * toward the tile's edge lands on the neighboring scene whenever a cut sits
  * inside the tile, and the strip then flips a whole tile early. `exactFrame`
  * answers with captures already in hand; a tile without one keeps the nearest
- * pre-sampled thumb until its capture lands.
+ * pre-sampled thumb until its capture lands, so the strip sharpens in place
+ * at every zoom.
  *
- * Detected scene cuts (`cuts`, measured at import) become tile edges while
- * refining: each scene divides into even tiles as close to the grid width as
- * its span allows, so the strip changes picture at the cut's own pixel, the
+ * Detected scene cuts (`cuts`, measured at import) become tile edges at every
+ * zoom: each scene divides into even tiles as close to the grid width as its
+ * span allows, so the strip changes picture at the cut's own pixel, the
  * boundary area under the pointer shows what actually plays there, and tiles
  * between two cuts all share one width — a scene shorter than a tile is the
- * one place a narrow tile is the truth.
+ * one place a narrow tile is the truth. Fast-cut footage keeps its scenes
+ * visible zoomed all the way out; only a cut within a few pixels of another
+ * edge merges away.
  */
 
 export type FilmTile = {
@@ -34,9 +35,8 @@ export type FilmTile = {
   width: number;
   /** The tile's midpoint in source seconds. */
   srcT: number;
-  /** Capture time for a true frame; null while the pre-sampled strip is
-   * already finer than the tile grid. */
-  wantT: number | null;
+  /** Capture time for the tile's true frame. */
+  wantT: number;
   /** `src` is a true frame at `wantT`. */
   exact: boolean;
 };
@@ -124,7 +124,6 @@ export function planFilmstrip(p: {
   const imgW = natural * Math.ceil(cells / FILM_TILE_CAP);
   const stepT = (imgW / p.pps) * p.speed;
   const filmOut = p.filmIn + (p.w / p.pps) * p.speed;
-  const refine = stepT < p.thumbStep;
   // A tile narrower than a few pixels reads as a rendering artifact; a cut
   // that close to an edge already flips within that distance.
   const minSubT = (MIN_SUB_TILE_PX / p.pps) * p.speed;
@@ -132,10 +131,8 @@ export function planFilmstrip(p: {
   // the source and the zoom: scrolls and trims re-plan onto the same tiles.
   const end = Math.max(p.duration, filmOut);
   const seams = [0];
-  if (refine) {
-    for (const c of p.cuts ?? []) {
-      if (c >= seams[seams.length - 1] + minSubT && c <= end - minSubT) seams.push(c);
-    }
+  for (const c of p.cuts ?? []) {
+    if (c >= seams[seams.length - 1] + minSubT && c <= end - minSubT) seams.push(c);
   }
   seams.push(end);
   const tiles: FilmTile[] = [];
@@ -153,23 +150,20 @@ export function planFilmstrip(p: {
       const mid = (a + b) / 2;
       const idx = Math.min(p.thumbs.length - 1, Math.max(0, Math.floor(mid / p.thumbStep)));
       let src = p.thumbs[idx];
-      let wantT: number | null = null;
       let exact = false;
-      if (refine) {
-        // Grid centers, never grid boundaries: cuts sit on frame boundaries
-        // (whole and half seconds above all), and a capture that lands
-        // exactly on a cut decodes the next scene's first frame — a tile
-        // whose midpoint sits a hair before a cut would flip to the wrong
-        // side of it. A tile too narrow for a grid center inside it captures
-        // at its own midpoint.
-        const snapped = (Math.floor(mid / WANT_GRID_S) + 0.5) * WANT_GRID_S;
-        wantT = snapped > a && snapped < b ? snapped : mid;
-        wantT = Math.max(0, Math.min(p.duration - 0.05, wantT));
-        const hit = p.exactFrame?.(wantT) ?? null;
-        if (hit) {
-          src = hit;
-          exact = true;
-        }
+      // Grid centers, never grid boundaries: cuts sit on frame boundaries
+      // (whole and half seconds above all), and a capture that lands
+      // exactly on a cut decodes the next scene's first frame — a tile
+      // whose midpoint sits a hair before a cut would flip to the wrong
+      // side of it. A tile too narrow for a grid center inside it captures
+      // at its own midpoint.
+      const snapped = (Math.floor(mid / WANT_GRID_S) + 0.5) * WANT_GRID_S;
+      let wantT = snapped > a && snapped < b ? snapped : mid;
+      wantT = Math.max(0, Math.min(p.duration - 0.05, wantT));
+      const hit = p.exactFrame?.(wantT) ?? null;
+      if (hit) {
+        src = hit;
+        exact = true;
       }
       tiles.push({
         src,

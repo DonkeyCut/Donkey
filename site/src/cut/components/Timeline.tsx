@@ -4203,9 +4203,8 @@ function seedThumb(
  * tiles at each end). Tiles keep the asset's aspect until the box would blow
  * the tile cap; past that they widen by whole grid cells, still on the grid.
  * The first and last tiles pin to the segment's exact boundary frames once
- * captured; middle tiles show the nearest pre-sampled thumb until the zoom
- * outruns the strip's sampling, when each carries a true frame at its own
- * moment as its capture lands (see `planFilmstrip`). */
+ * captured; middle tiles show the nearest pre-sampled thumb until each one's
+ * true frame at its own moment lands (see `planFilmstrip`). */
 function filmstripFrames(
   asset: MediaAsset | undefined,
   filmIn: number,
@@ -4276,7 +4275,7 @@ function useTileFrames(
   useEffect(() => {
     tilesRef.current = tiles;
   });
-  const wanted = tiles.some((t) => t.wantT !== null);
+  const wanted = tiles.length > 0;
   useEffect(() => {
     const box = boxRef.current;
     const url = asset?.type === "video" ? asset.url : null;
@@ -4308,7 +4307,7 @@ function useTileFrames(
         hi = view.right - boxR.left + TILE_CAPTURE_MARGIN;
       }
       tilesRef.current.forEach((t, i) => {
-        if (t.wantT === null || t.exact) return;
+        if (t.exact) return;
         if (t.left + t.width < lo || t.left > hi) return;
         const key = `${i}:${t.wantT.toFixed(2)}`;
         if (asked.has(key)) return;

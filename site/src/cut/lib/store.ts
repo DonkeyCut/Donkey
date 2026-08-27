@@ -2166,6 +2166,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         if (patch.thumbs !== undefined) runtime.thumbs = patch.thumbs;
         if (patch.thumbStep !== undefined) runtime.thumbStep = patch.thumbStep;
         if (patch.peaks !== undefined) runtime.peaks = patch.peaks;
+        if (patch.sceneCuts !== undefined) runtime.sceneCuts = patch.sceneCuts;
         if (Object.keys(runtime).length === 0) return;
         hydrating = true;
         try {
@@ -4838,7 +4839,7 @@ export const docOverlays = (() => {
 export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
   return assets
     .filter((a) => !tabOnlyUpload(a))
-    .map(({ id, fileName, name, type, duration, width, height, origin, chatId, language, watch, speech, beats }) => ({
+    .map(({ id, fileName, name, type, duration, width, height, origin, chatId, language, watch, speech, beats, sceneCuts }) => ({
       id,
       fileName,
       name,
@@ -4852,6 +4853,7 @@ export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
       ...(watch !== undefined ? { watch } : {}),
       ...(speech !== undefined ? { speech } : {}),
       ...(beats !== undefined ? { beats } : {}),
+      ...(sceneCuts !== undefined ? { sceneCuts } : {}),
     }));
 }
 
