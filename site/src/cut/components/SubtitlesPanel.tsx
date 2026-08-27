@@ -28,6 +28,7 @@ import { useElapsed } from "@/cut/hooks/useElapsed";
 import { useCutCaps } from "@/cut/lib/backend/hooks";
 import { useActiveWork, useGenNotify } from "@/cut/lib/genNotify";
 import { TIMELINE_H_MIN, useEditor } from "@/cut/lib/store";
+import { usePanelView } from "@/cut/lib/panelViews";
 import { usePreviewSelector } from "@/cut/lib/playhead";
 import { PLATE_PAD_X, PLATE_PAD_Y, PLATE_RADIUS, plateFill } from "@/cut/lib/textRender";
 import {
@@ -94,7 +95,12 @@ export function SubtitlesPanel() {
   const error = useEditor((s) => s.subtitleError);
   const activeCues = laneCues(subtitles, lane);
   const hasCues = activeCues.length > 0;
-  const [tab, setTab] = useState<"content" | "styles" | "options">("content");
+  // The open tab holds for the session, so leaving the panel and coming back
+  // lands on the same one.
+  const [tab, setTab] = usePanelView<"content" | "styles" | "options">(
+    "subtitles-tab",
+    "content"
+  );
 
   const growTimeline = () => {
     const cur = useEditor.getState();

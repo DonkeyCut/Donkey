@@ -25,6 +25,7 @@ import {
 } from "@donkeycut/effects-kit";
 import { getPreviewCanvas, sampleClipFrameData } from "@/cut/lib/previewCanvas";
 import { useEditor } from "@/cut/lib/store";
+import { usePanelView } from "@/cut/lib/panelViews";
 import type { VideoClip } from "@/cut/lib/types";
 import { ResetButton, Row, useSliderCheckpoint } from "@/cut/components/panelBits";
 import { ColorWheel } from "@/cut/components/ColorWheel";
@@ -48,7 +49,12 @@ import { Switch } from "@/components/ui/switch";
  * numbers.
  */
 export function ColorPanel({ clip, onBack }: { clip: VideoClip; onBack: () => void }) {
-  const [view, setView] = useState<"presets" | "adjust">("presets");
+  // The open level holds for the session per clip, so deselecting and coming
+  // back lands on the same view.
+  const [view, setView] = usePanelView<"presets" | "adjust">(
+    `color-level:${clip.id}`,
+    "presets"
+  );
   if (view === "adjust") {
     return <AdjustView clip={clip} onBack={() => setView("presets")} />;
   }
@@ -367,7 +373,8 @@ function StandInScene({ filter, tint }: { filter: string; tint: string | null })
 /* ------------------------------------------------------------------ */
 
 function AdjustView({ clip, onBack }: { clip: VideoClip; onBack: () => void }) {
-  const [tool, setTool] = useState<Tool>("basic");
+  // The picked tool holds for the session, the same way the open level does.
+  const [tool, setTool] = usePanelView<Tool>(`color-tool:${clip.id}`, "basic");
   const { draft, commit } = useGradeWriter(clip);
   const grade = clip.grade;
   // Manual adjustments only — reset-all keeps the preset layer.
