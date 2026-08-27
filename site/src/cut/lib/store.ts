@@ -1326,6 +1326,28 @@ export function cutTranscribeSpec(
   };
 }
 
+/** The frame size the user chose most recently, across projects. A project
+ * whose doc carries no aspect opens at this size; the choice counts as
+ * deliberate, so the first-footage guess leaves it alone. */
+const LAST_ASPECT_KEY = "cut-last-aspect";
+
+function lastChosenAspect(): Aspect | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    return normalizeAspect(localStorage.getItem(LAST_ASPECT_KEY));
+  } catch {
+    return null;
+  }
+}
+
+function rememberAspect(a: Aspect) {
+  try {
+    if (typeof localStorage !== "undefined") localStorage.setItem(LAST_ASPECT_KEY, a);
+  } catch {
+    // Private-mode storage rejections leave the in-project choice intact.
+  }
+}
+
 export const useEditor = create<EditorState>((baseSet, get, api) => {
   // Normalizing is bolted onto setState itself, not onto a local helper the
   // actions happen to use: the store's own module-level helpers write through
@@ -1502,8 +1524,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       audioClips: [],
       overlays: [],
       templates: [],
-      aspect: "9:16",
-      aspectTouched: false,
+      aspect: lastChosenAspect() ?? "9:16",
+      aspectTouched: lastChosenAspect() !== null,
       fadeIn: 0,
       fadeOut: 0,
       background: DEFAULT_BACKGROUND,
@@ -1551,8 +1573,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     audioClips: [],
     overlays: [],
     templates: [],
-    aspect: "9:16",
-    aspectTouched: false,
+    aspect: lastChosenAspect() ?? "9:16",
+    aspectTouched: lastChosenAspect() !== null,
     fadeIn: 0,
     fadeOut: 0,
     background: DEFAULT_BACKGROUND,
@@ -1917,8 +1939,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           audioClips: merged.audioClips,
           overlays: withLooks.overlays,
           templates: doc.templates ?? [],
-          aspect: normalizeAspect(doc.aspect) ?? "9:16",
-          aspectTouched: doc.aspect !== undefined,
+          aspect: normalizeAspect(doc.aspect) ?? lastChosenAspect() ?? "9:16",
+          aspectTouched: doc.aspect !== undefined || lastChosenAspect() !== null,
           fadeIn: doc.fadeIn ?? 0,
           fadeOut: doc.fadeOut ?? 0,
           background: projectBackground(doc.background),
@@ -2129,7 +2151,9 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
 
     setAspect: (a) => {
       const n = normalizeAspect(a);
-      if (n) set({ aspect: n, aspectTouched: true });
+      if (!n) return;
+      rememberAspect(n);
+      set({ aspect: n, aspectTouched: true });
     },
     setProjectFade: (patch) => {
       const clamp = (v: number | undefined) =>
