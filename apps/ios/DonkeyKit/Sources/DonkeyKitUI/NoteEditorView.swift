@@ -46,12 +46,10 @@ struct NoteEditorView: View {
                         focused = nil
                         return
                     }
-                    let wasNew = ideas.draft?.isNew ?? true
                     guard ideas.saveDraft() != nil else {
                         ideas.closeEditor()
                         return
                     }
-                    app.show(toast: wasNew ? "Note saved" : "Note updated")
                 } label: {
                     Image(systemName: "checkmark")
                         .font(.title3.weight(.bold))
