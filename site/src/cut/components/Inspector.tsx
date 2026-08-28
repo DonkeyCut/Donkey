@@ -115,9 +115,10 @@ import {
 import { getPreviewCanvas } from "@/cut/lib/previewCanvas";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { InfoTip, ResetButton, Row, useSliderCheckpoint, Value } from "@/cut/components/panelBits";
+import { InfoTip, ResetButton, Row, Section, useSliderCheckpoint, Value } from "@/cut/components/panelBits";
 import { ColorPanel } from "@/cut/components/ColorPanel";
 import { RemovalPanel } from "@/cut/components/RemovalPanel";
+import { useMatteBakes } from "@/cut/lib/removal/bakeJobs";
 
 /** Where the animation panel is, for the panel that offers the way in. It is
  * held by the Inspector rather than by each panel because the animation panel
@@ -288,46 +289,6 @@ function SegToggle({
   );
 }
 
-/** Hoverable (i) explaining the control it follows. */
-/**
- * A named group of rows under a hairline. A section that owns a feature carries
- * the switch that turns it on and holds its rows back until it is, so the panel
- * reads as a short list of what the element actually has and grows only where
- * it was asked to. Pass no `onEnabledChange` for a group that is always open.
- */
-function Section({
-  title,
-  info,
-  enabled,
-  onEnabledChange,
-  aside,
-  children,
-}: {
-  title: string;
-  info?: React.ReactNode;
-  enabled?: boolean;
-  onEnabledChange?: (enabled: boolean) => void;
-  /** Controls that belong to the group as a whole, sat at the end of its title. */
-  aside?: React.ReactNode;
-  children?: React.ReactNode;
-}) {
-  const gated = !!onEnabledChange;
-  return (
-    <section className="mt-1.5 border-t border-border pt-1.5 first:mt-0 first:border-t-0">
-      <div className="flex min-h-9 items-center justify-between gap-2">
-        <span className="flex min-w-0 items-center gap-1 text-[13px] font-medium">
-          <span className="truncate">{title}</span>
-          {info && <InfoTip label={title}>{info}</InfoTip>}
-        </span>
-        {aside}
-        {gated && (
-          <Switch checked={!!enabled} onCheckedChange={onEnabledChange} aria-label={title} />
-        )}
-      </div>
-      {(!gated || enabled) && children}
-    </section>
-  );
-}
 
 /** Matches the store's MIN_LEN: the shortest a trim can leave a clip. */
 const MIN_TRIM = 0.1;
@@ -446,18 +407,23 @@ function ClipColumn({ clip }: { clip: VideoClip }) {
           )}
         </ScrollArea>
       )}
-      <ClipToolbar tab={tab} onPick={(t) => setTab(tab === t ? "main" : t)} />
+      <ClipToolbar clipId={clip.id} tab={tab} onPick={(t) => setTab(tab === t ? "main" : t)} />
     </div>
   );
 }
 
 function ClipToolbar({
+  clipId,
   tab,
   onPick,
 }: {
+  clipId: string;
   tab: ClipTab;
   onPick: (tab: Exclude<ClipTab, "main">) => void;
 }) {
+  // A running matte bake shows on the Cutout tab itself, so the work stays
+  // visible from any view.
+  const baking = useMatteBakes((s) => s.jobs[clipId]?.status === "running");
   return (
     <div className="flex shrink-0 border-t border-border bg-card">
       {CLIP_TABS.map(({ id, label, Icon }) => (
@@ -466,7 +432,7 @@ function ClipToolbar({
           type="button"
           aria-pressed={tab === id}
           className={cn(
-            `clip-tab-${id} flex flex-1 flex-col items-center justify-center gap-0.5 py-1 text-[10px] leading-none font-medium transition-colors`,
+            `clip-tab-${id} relative flex flex-1 flex-col items-center justify-center gap-0.5 py-1 text-[10px] leading-none font-medium transition-colors`,
             tab === id
               ? "bg-neutral-900 text-white"
               : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
@@ -475,6 +441,9 @@ function ClipToolbar({
         >
           <Icon className="size-3.5" strokeWidth={tab === id ? 2.25 : 2} />
           {label}
+          {id === "cutout" && baking && (
+            <Loader2 className="absolute top-1 right-1.5 size-2.5 animate-spin" />
+          )}
         </button>
       ))}
     </div>
@@ -529,7 +498,6 @@ function ClipAudioPanel({ clip, onBack }: { clip: VideoClip; onBack: () => void 
           <ValueSlider
             label="Volume"
             sliderClassName="clip-volume data-horizontal:w-24"
-  const panCk = useSliderCheckpoint();
             valueClassName="w-9 text-muted-foreground"
             value={volume}
             min={0}
@@ -547,25 +515,6 @@ function ClipAudioPanel({ clip, onBack }: { clip: VideoClip; onBack: () => void 
         </Row>
         <Row label="Mute audio">
           <Switch
-  // Which axes the crop window can travel on: the picture hangs past the box
-  // there, so pan has somewhere to go. Measured in frame pixels, the same
-  // geometry the preview's grey outline draws.
-  const frPx = frameOf(aspect);
-  const boxPx = { x: rect.x * frPx.w, y: rect.y * frPx.h, w: rect.w * frPx.w, h: rect.h * frPx.h };
-  const picPx =
-    asset?.width && asset?.height
-      ? contentRect(
-          boxPx,
-          asset.width,
-          asset.height,
-          clipCovers(clip),
-          clipZoom(clip),
-          clip.panX ?? 0,
-          clip.panY ?? 0
-        )
-      : boxPx;
-  const panXFree = picPx.w - boxPx.w > 1;
-  const panYFree = picPx.h - boxPx.h > 1;
             checked={clip.muted}
             onCheckedChange={(v) => updateClip(clip.id, { muted: v })}
           />
@@ -589,6 +538,7 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
   const aspect = useEditor((s) => s.aspect);
   const updateClip = useEditor((s) => s.updateClip);
   const zoomCk = useSliderCheckpoint();
+  const panCk = useSliderCheckpoint();
   const turnCk = useSliderCheckpoint();
   const fadeCk = useSliderCheckpoint();
   const [speedDraft, setSpeedDraft] = useState<number | null>(null);
@@ -606,6 +556,25 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
       : null;
   const snugMoves =
     !!snug && (["x", "y", "w", "h"] as const).some((k) => Math.abs(snug[k] - rect[k]) > 1e-3);
+  // Which axes the crop window can travel on: the picture hangs past the box
+  // there, so pan has somewhere to go. Measured in frame pixels, the same
+  // geometry the preview's grey outline draws.
+  const frPx = frameOf(aspect);
+  const boxPx = { x: rect.x * frPx.w, y: rect.y * frPx.h, w: rect.w * frPx.w, h: rect.h * frPx.h };
+  const picPx =
+    asset?.width && asset?.height
+      ? contentRect(
+          boxPx,
+          asset.width,
+          asset.height,
+          clipCovers(clip),
+          clipZoom(clip),
+          clip.panX ?? 0,
+          clip.panY ?? 0
+        )
+      : boxPx;
+  const panXFree = picPx.w - boxPx.w > 1;
+  const panYFree = picPx.h - boxPx.h > 1;
   return (
     <>
       <div className="flex flex-col gap-1 px-3.5 pb-4">

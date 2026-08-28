@@ -52,6 +52,8 @@ import { waveGain } from "@/cut/lib/waveform";
 import { track0Clips, laneGapAt, sameLane, type LaneRef, clipLen, clipSpeed, getClipSpans, overlayLaneOrder, overlayLayers, projectDuration, resolveTransitions, rippleInsert, useEditor } from "@/cut/lib/store";
 import type { VideoTrackPlacement } from "@/cut/lib/store";
 import { playheadAt, setSkim, skimAt, subscribePlayhead, usePlayhead, useSkim } from "@/cut/lib/playhead";
+import { useBrushUi } from "@/cut/lib/removal/brushUi";
+import { useMatteBakes } from "@/cut/lib/removal/bakeJobs";
 import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
 import { EFFECT_LABELS, type EffectId } from "@donkeycut/effects-kit";
@@ -3731,6 +3733,7 @@ function ClipView({
   const lane: LaneKind = clip.track === 0 ? "clip" : "overlayClip";
   const spine = lane === "clip";
   const loading = useEditor((s) => s.loadingMedia.has(asset.fileName));
+  const baking = useMatteBakes((s) => s.jobs[clip.id]?.status === "running");
   const speed = clipSpeed(clip);
   // Every box is its clip's whole footprint. Clips never overlap — a
   // transition is a render-time blend at the cut, drawn as the bar above the
@@ -3844,6 +3847,15 @@ function ClipView({
         // glance, not just from the thin border.
         <div className="pointer-events-none absolute inset-0 z-[1] bg-[#0a84ff]/25" />
       )}
+      {baking && !drag && (
+        // The bake announces itself where the hover controls live, so it
+        // yields to them: gone while the pointer is on the clip, back when it
+        // leaves. A clip too narrow for the word keeps the spinner and "C…".
+        <span className="tl-cutting-chip pointer-events-none absolute top-1 left-1 z-2 flex items-center gap-1 rounded-[5px] bg-black/65 px-1.5 py-px font-mono text-[10px] text-white transition-opacity group-hover:opacity-0">
+          <Loader2 className="size-2.5 shrink-0 animate-spin" />
+          {barW >= 96 ? "Cutting…" : "C…"}
+        </span>
+      )}
       {mention &&
         (drag ? (
           <span className="tl-dur-chip pointer-events-none absolute top-1 left-1 z-2 rounded-[5px] bg-black/65 px-1.5 py-px font-mono text-[10px] tabular-nums text-white">
@@ -3894,6 +3906,7 @@ function ClipView({
           ) : null}
         </ClipMenu>
       )}
+      <ClipStrokeMarks clip={clip} spanStart={span.start} speed={speed} pps={pps} barW={barW} />
       {/* Keys sit on the bar where they fall — pose and mask tracks both —
           so the animation is visible without opening the inspector. */}
       {(clip.kf ?? []).map((k) => (
@@ -3928,6 +3941,63 @@ function ClipView({
       boxH={hasWave ? VIDEO_H - 4 : FILM_H}
       hidden={!!drag}
     />
+    </>
+  );
+}
+
+/** The clip's brush-stroke frames, as red tabs hanging from the bar's top
+ * edge while its brush session is open. A stroke lives on the one frame it
+ * was drawn on — the stage overlay shows it only there — so each tab points
+ * at a frame that carries paint, and clicking one parks the playhead on it.
+ * Tabs, not diamonds or dots: diamonds are keyframes (interpolated values,
+ * which seeds aren't) and dots are the beat grid on the bottom edge. */
+function ClipStrokeMarks({
+  clip,
+  spanStart,
+  speed,
+  pps,
+  barW,
+}: {
+  clip: VideoClip;
+  spanStart: number;
+  speed: number;
+  pps: number;
+  barW: number;
+}) {
+  const open = useBrushUi((s) => s.clipId === clip.id);
+  const seeds = clip.removal?.seeds;
+  if (!open || clip.removal?.mode !== "custom") return null;
+  const times = Array.from(new Set((seeds?.paint ?? []).map((s) => s.t))).filter(
+    (t) => t >= clip.in - 0.05 && t <= clip.out + 0.05
+  );
+  if (times.length === 0) return null;
+  return (
+    <>
+      {times.map((t) => (
+        <span
+          key={`s${t}`}
+          className="tl-stroke-mark pointer-events-auto absolute top-0 z-5 flex h-3 w-3.5 cursor-pointer justify-center"
+          style={{
+            left: Math.min(barW - 4, Math.max(4, ((t - clip.in) / speed) * pps)),
+            transform: "translateX(-50%)",
+          }}
+          title="Brush stroke"
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            useEditor.getState().seek(spanStart + (t - clip.in) / speed);
+          }}
+        >
+          <span
+            className="h-0 w-0"
+            style={{
+              borderLeft: "4px solid transparent",
+              borderRight: "4px solid transparent",
+              borderTop: "5px solid #ff2244",
+            }}
+          />
+        </span>
+      ))}
     </>
   );
 }

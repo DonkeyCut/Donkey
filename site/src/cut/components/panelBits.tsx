@@ -4,6 +4,7 @@ import { useRef } from "react";
 import { Info, RotateCcw } from "lucide-react";
 import { useEditor } from "@/cut/lib/store";
 import { cn } from "@/lib/utils";
+import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 /**
@@ -96,5 +97,45 @@ export function ResetButton({ title, show, onClick }: { title: string; show: boo
     >
       <RotateCcw className="size-3" />
     </button>
+  );
+}
+
+/**
+ * A named group of rows under a hairline. A section that owns a feature carries
+ * the switch that turns it on and holds its rows back until it is, so the panel
+ * reads as a short list of what the element actually has and grows only where
+ * it was asked to. Pass no `onEnabledChange` for a group that is always open.
+ */
+export function Section({
+  title,
+  info,
+  enabled,
+  onEnabledChange,
+  aside,
+  children,
+}: {
+  title: string;
+  info?: React.ReactNode;
+  enabled?: boolean;
+  onEnabledChange?: (enabled: boolean) => void;
+  /** Controls that belong to the group as a whole, sat at the end of its title. */
+  aside?: React.ReactNode;
+  children?: React.ReactNode;
+}) {
+  const gated = !!onEnabledChange;
+  return (
+    <section className="mt-1.5 border-t border-border pt-1.5 first:mt-0 first:border-t-0">
+      <div className="flex min-h-9 items-center justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-1 text-[13px] font-medium">
+          <span className="truncate">{title}</span>
+          {info && <InfoTip label={title}>{info}</InfoTip>}
+        </span>
+        {aside}
+        {gated && (
+          <Switch checked={!!enabled} onCheckedChange={onEnabledChange} aria-label={title} />
+        )}
+      </div>
+      {(!gated || enabled) && children}
+    </section>
   );
 }

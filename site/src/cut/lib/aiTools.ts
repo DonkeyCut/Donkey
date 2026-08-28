@@ -29,6 +29,7 @@ import {
   type OverlayAnim,
   type OverlayAnimStyle,
   type OverlayLoopStyle,
+  STROKE_FEATHER_MAX,
   STROKE_OFFSET_MAX,
   STROKE_STYLES,
   STROKE_WIDTH_MAX,
@@ -100,7 +101,6 @@ import {
   matteBakesAvailable,
   useMatteBakes,
 } from "./removal/bakeJobs";
-import { clipKeyColor, suggestKeyColor } from "./removal/keyColor";
 import { blobToInlineAudio, refToInlineAudio, visualRefs, type InlineImage } from "./refMedia";
 import { characterPrompt, stockAspectDims, stockTitle } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
@@ -2059,74 +2059,61 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return { id: clip.id, boxStyle: boxStyle ?? null };
   },
 
-  set_removal: async (s, input) => {
+  set_removal: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
       const mode = String(input.mode ?? "");
       if (mode === "off") {
-        s.updateClip(clip.id, { removal: undefined });
-        return { id: clip.id, removal: null };
+        // Off keeps the removal and its baked matte on the clip — it just
+        // stops rendering and baking — so switching back on costs nothing.
+        if (!clip.removal) return { id: clip.id, removal: null };
+        s.updateClip(clip.id, { removal: { ...clip.removal, off: true } });
+        return { id: clip.id, mode, note: "The cutout is off; its matte and settings stay stored." };
       }
+      // Any on-mode clears a stored Off, whatever else it sets.
+      const prev = { ...clip.removal };
+      delete prev.off;
       const bakeNote = matteBakesAvailable
         ? "The cutout matte is baking in the background — wait_for_renders reports when it lands."
         : "The cutout is set; its matte bakes the next time the project is open in the editor.";
+      // The direction: `remove` "subject" inverts the cutout — the selection
+      // goes and the rest of the picture stays. Omitted, an existing
+      // direction holds; "background" clears it. The selection (and its
+      // baked matte) is the same either way, so flipping re-bakes nothing.
+      const dir =
+        input.remove === "subject"
+          ? { invert: true }
+          : input.remove === "background"
+            ? { invert: undefined }
+            : {};
       if (mode === "auto") {
-        // The tool call is the explicit start, so the bake is requested here
-        // the way the panel's Start button requests it.
-        s.updateClip(clip.id, { removal: { ...clip.removal, mode: "auto", requested: true } });
+        // The tool call is the explicit ask, so it carries `requested` — the
+        // panel's Apply press. `refine` asks for the hosted quality pass on
+        // top; that rung spends credits.
+        const refine = input.refine === true ? { refine: true } : {};
+        s.updateClip(clip.id, {
+          removal: { ...prev, mode: "auto", requested: true, ...refine, ...dir },
+        });
         ensureMatteBake(clip.id);
         return { id: clip.id, mode, note: bakeNote };
       }
-      if (mode === "custom") {
-        const subject = typeof input.subject === "string" ? input.subject.trim() : "";
-        if (!subject || subject.length > 100)
-          throw new ToolError('mode "custom" needs `subject` — what to keep, in a few words.');
-        // A named subject replaces any painted selection: the seeds point at
-        // whatever the user brushed before, and the words are the new ask.
-        s.updateClip(clip.id, {
-          removal: {
-            ...clip.removal,
-            mode: "custom",
-            subject,
-            seeds: { prompts: [] },
-            requested: true,
-          },
-        });
-        confirmMatteBake(clip.id);
-        return { id: clip.id, mode, subject, note: bakeNote };
-      }
-      if (mode !== "chroma")
-        throw new ToolError('mode must be "off", "auto", "custom", or "chroma".');
-      const prev = clip.removal?.chroma;
-      const explicit =
-        typeof input.color === "string" && /^#[0-9a-f]{6}$/i.test(input.color)
-          ? input.color.toLowerCase()
-          : null;
-      // The default key comes from the clip's own footage: the live frame
-      // when a decoder shows it, its decoded in-point frame when the clip is
-      // away from the playhead or the turn runs headless.
-      let color = explicit ?? prev?.color ?? suggestKeyColor(clip.id);
-      if (!color) {
-        const asset = s.assets.find((a) => a.id === clip.assetId);
-        color = asset ? await clipKeyColor(asset, clip) : null;
-      }
-      if (!color)
-        throw new ToolError(
-          "The clip's picture could not be read for a key suggestion — pass `color` as #rrggbb."
-        );
-      const chroma = {
-        color,
-        ...(isNum(input.intensity)
-          ? { intensity: clamp(input.intensity, 0, 1) }
-          : prev?.intensity !== undefined && { intensity: prev.intensity }),
-        ...(isNum(input.softness)
-          ? { softness: clamp(input.softness, 0, 1) }
-          : prev?.softness !== undefined && { softness: prev.softness }),
-        ...(isNum(input.spill)
-          ? { spill: clamp(input.spill, 0, 1) }
-          : prev?.spill !== undefined && { spill: prev.spill }),
-      };
-      s.updateClip(clip.id, { removal: { ...clip.removal, mode: "chroma", chroma } });
-      return { id: clip.id, mode, chroma };
+      if (mode !== "custom") throw new ToolError('mode must be "off", "auto", or "custom".');
+      const subject = typeof input.subject === "string" ? input.subject.trim() : "";
+      if (!subject || subject.length > 100)
+        throw new ToolError('mode "custom" needs `subject` — what to keep, in a few words.');
+      // A named subject replaces any painted selection: the seeds point at
+      // whatever the user brushed before, and the words are the new ask.
+      s.updateClip(clip.id, {
+        removal: {
+          ...prev,
+          mode: "custom",
+          subject,
+          seeds: { prompts: [] },
+          requested: true,
+          ...dir,
+        },
+      });
+      confirmMatteBake(clip.id);
+      return { id: clip.id, mode, subject, note: bakeNote };
   },
 
   set_removal_stroke: (s, input) => {
@@ -2154,6 +2141,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         ...(isNum(input.width)
           ? { width: clamp(input.width, 1, STROKE_WIDTH_MAX) }
           : prev?.width !== undefined && { width: prev.width }),
+        ...(isNum(input.feather)
+          ? input.feather !== 0 && { feather: clamp(input.feather, 0, STROKE_FEATHER_MAX) }
+          : prev?.feather !== undefined && { feather: prev.feather }),
         ...(isNum(input.offset_x)
           ? input.offset_x !== 0 && {
               offsetX: clamp(input.offset_x, -STROKE_OFFSET_MAX, STROKE_OFFSET_MAX),

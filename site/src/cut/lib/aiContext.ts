@@ -81,19 +81,16 @@ function describeRemoval(clip: VideoClip) {
   return {
     removal: {
       mode: rm.mode,
+      ...(rm.off ? { off: true } : {}),
+      removes: rm.invert ? "subject" : "background",
       ...(rm.subject ? { subject: rm.subject } : {}),
-      ...(rm.mode === "chroma" && rm.chroma ? { chroma: rm.chroma } : {}),
-      ...(rm.mode === "auto" || rm.mode === "custom"
+      matte: rm.matte ? `ready (${rm.matte.quality === "hq" ? "quality" : "quick"})` : "none",
+      ...(job
         ? {
-            matte: rm.matte ? `ready (${rm.matte.quality === "hq" ? "quality" : "quick"})` : "none",
-            ...(job
-              ? {
-                  bake:
-                    job.status === "running"
-                      ? `baking ${job.quality === "hq" ? "quality" : "quick"} (${Math.round(job.progress * 100)}%)`
-                      : `error: ${job.error ?? "failed"}`,
-                }
-              : {}),
+            bake:
+              job.status === "running"
+                ? `baking ${job.quality === "hq" ? "quality" : "quick"} (${Math.round(job.progress * 100)}%)`
+                : `error: ${job.error ?? "failed"}`,
           }
         : {}),
       ...(rm.stroke

@@ -9,7 +9,7 @@
 
 import { create } from "zustand";
 
-export type BrushTool = "quick" | "brush" | "quickErase" | "erase";
+export type BrushTool = "brush" | "erase";
 
 /** Brush diameter bounds, as a fraction of the frame's short side. */
 export const BRUSH_SIZE_MIN = 0.02;

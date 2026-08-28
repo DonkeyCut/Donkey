@@ -6,9 +6,10 @@
  * `ensureMatteBake` is idempotent — the panel and the doc sweep call it
  * whenever an AI-mode removal is on, and the store compares the clip's
  * fingerprint against the stored matte and the bake in flight, so it only
- * ever starts work the doc actually owes. The ladder: auto mode bakes the
- * free on-device matte first, then the hosted quality pass replaces it when
- * the account has credits; custom mode goes straight to the hosted tracker
+ * ever starts work the doc actually owes. Every rung starts from an explicit
+ * ask: `requested` (the panel's Apply, or the chat tool) starts auto mode's
+ * free on-device matte, the hosted quality pass (credits) replaces it once
+ * `refine` asks for it, and custom mode goes straight to the hosted tracker
  * (only it can follow a brushed object). A finished bake lands as a project
  * asset (origin "matte") and repoints `clip.removal.matte` through a
  * transient write: background landings stay off the undo stack, and the clip
@@ -36,6 +37,9 @@ export interface MatteBakeJob {
   /** When secondsLeft was stamped, so the panel counts it down between
    * progress steps. */
   etaAt?: number;
+  /** When the bake started, so the panel shows the running time while the
+   * estimate has nothing to stand on yet. */
+  startedAt?: number;
   error?: string;
 }
 
@@ -129,12 +133,11 @@ const clipOf = (clipId: string): VideoClip | undefined =>
  * owes no matte at all. */
 function owedFingerprint(clip: VideoClip | undefined): string | null {
   const r = clip?.removal;
-  if (!clip || !r || (r.mode !== "auto" && r.mode !== "custom")) return null;
-  // Bakes are explicitly started — the panel button or the chat tool sets
-  // `requested`. Picking a mode alone owes nothing.
+  if (!clip || !r || r.off) return null;
+  // Every bake waits for its explicit start — the panel's Apply or the chat
+  // tool sets `requested` — and a custom bake also needs something to
+  // follow: painted seeds or a described subject.
   if (!r.requested) return null;
-  // A custom removal with nothing selected yet owes nothing — the tracker
-  // needs painted seeds or a described subject to follow.
   if (
     r.mode === "custom" &&
     !r.seeds?.prompts.length &&
@@ -235,15 +238,16 @@ export function ensureMatteBake(clipId: string, opts: { whileBrushing?: boolean 
     return;
   }
   // What the ladder owes next. Custom tracks an arbitrary object, so only the
-  // hosted tracker can bake it; auto gets the free local matte immediately
-  // and the hosted pass upgrades it.
+  // hosted tracker can bake it; auto gets the free local matte immediately,
+  // and the hosted pass upgrades it once `refine` asks — the paid rung runs
+  // on that explicit click alone.
   const want: MatteQuality | null =
     r.mode === "custom"
       ? stored
         ? null
         : "hq"
       : stored
-        ? stored.quality === "local"
+        ? stored.quality === "local" && r.refine
           ? "hq"
           : null
         : "local";
@@ -268,7 +272,7 @@ export function ensureMatteBake(clipId: string, opts: { whileBrushing?: boolean 
   const ctl = new AbortController();
   running.set(clipId, { fp, quality: want, ctl });
   failed.delete(clipId);
-  setJob(clipId, { quality: want, status: "running", progress: 0 });
+  setJob(clipId, { quality: want, status: "running", progress: 0, startedAt: Date.now() });
   void runBake(clipId, fp, want, ctl).catch((e: unknown) => {
     if (running.get(clipId)?.ctl !== ctl) return;
     running.delete(clipId);
@@ -340,6 +344,7 @@ async function runBakeNow(
       progress: f,
       secondsLeft,
       etaAt: secondsLeft !== undefined ? Date.now() : undefined,
+      startedAt,
     });
   };
   const projectId = state.projectId;
@@ -385,7 +390,8 @@ async function runBakeNow(
   // the sweep collects it once nothing points at it.
   running.delete(clipId);
   setJob(clipId, null);
-  // Auto mode's local matte just landed: the quality pass is owed next.
+  // Re-settle: an auto matte that landed with `refine` set owes the quality
+  // pass next; anything else just clears its job.
   ensureMatteBake(clipId);
 }
 

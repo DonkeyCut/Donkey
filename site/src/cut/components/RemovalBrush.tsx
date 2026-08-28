@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useBrushUi } from "@/cut/lib/removal/brushUi";
-import { QuickSelectSession } from "@/cut/lib/removal/interactive";
-import { usePreviewSelector, useSkim } from "@/cut/lib/playhead";
+import { BrushSession } from "@/cut/lib/removal/brushSession";
+import { usePreviewSelector } from "@/cut/lib/playhead";
 import { decodeRasterImageUrl } from "@/cut/lib/raster";
 import { useEditor } from "@/cut/lib/store";
 import {
@@ -21,12 +21,11 @@ import {
 
 /**
  * The custom-removal brush on the stage: a pointer surface laid over the
- * selected clip's picture while its brush session is open. Smart-select strokes
- * run the on-device tap-to-select segmenter and preview the pick live under
- * the pointer; plain strokes paint the mask directly. The selection shows as a
- * red overlay, a loupe magnifies the pixels being worked, and every finished
- * stroke lands in the doc as a seed record — the prompts and paint the hosted
- * tracker replays across the whole clip. A size ring rides the pointer over
+ * selected clip's picture while its brush session is open. Strokes paint the
+ * mask directly. The selection shows as a red overlay, a loupe magnifies the
+ * pixels being worked, and every finished stroke lands in the doc as a seed
+ * record — the paint the hosted tracker replays across the whole clip. A
+ * size ring rides the pointer over
  * the picture, and over the panel's Size row so the slider shows the
  * diameter it is setting.
  */
@@ -35,8 +34,6 @@ const LOUPE_PX = 128;
 const LOUPE_ZOOM = 3;
 /** Pointer samples closer than this (frame fractions) fold into one point. */
 const MIN_STEP = 0.008;
-/** The most points one stroke stores as a tracker prompt. */
-const PROMPT_POINTS_MAX = 24;
 
 type Frac = { x: number; y: number };
 
@@ -50,14 +47,15 @@ export function RemovalBrush({ stage }: { stage: { w: number; h: number } }) {
   const selection = useEditor((s) => s.selection);
   const clips = useEditor((s) => s.clips);
   const assets = useEditor((s) => s.assets);
-  const skimTime = useSkim();
   const clip =
     brushClipId && selection?.kind === "clip" && selection.id === brushClipId
       ? clips.find((c) => c.id === brushClipId) ?? null
       : null;
   const armed = !!clip && clip.removal?.mode === "custom" && !clip.hidden;
+  // Preview time follows the skimmer, so the surface stays up while the
+  // pointer rides the timeline and the overlay tracks the frame on screen.
   const tLocal = usePreviewSelector((t) => (armed && clip ? t - clip.start : -1));
-  if (!armed || !clip || skimTime !== null) return null;
+  if (!armed || !clip) return null;
   const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
   const len = Math.max(0.1, (clip.out - clip.in) / speed);
   if (tLocal < 0 || tLocal >= len) return null;
@@ -79,7 +77,7 @@ function BrushSurface({
 }) {
   const tool = useBrushUi((s) => s.tool);
   const size = useBrushUi((s) => s.size);
-  const sessionRef = useRef<QuickSelectSession | null>(null);
+  const sessionRef = useRef<BrushSession | null>(null);
   const [sessionEpoch, setSessionEpoch] = useState(0);
   const overlayRef = useRef<HTMLCanvasElement | null>(null);
   const loupeRef = useRef<HTMLCanvasElement | null>(null);
@@ -106,16 +104,11 @@ function BrushSurface({
   /** The seeds object this surface last wrote, so the replay effect only
    * rebuilds the mask for outside writes — undo, redo, the panel's Reset. */
   const lastWritten = useRef<RemovalSeeds | undefined | null>(null);
-  const gesture = useRef<{
-    points: Frac[];
-    erase: boolean;
-    quick: boolean;
-    lastSeg: number;
-  } | null>(null);
+  const gesture = useRef<{ points: Frac[]; erase: boolean } | null>(null);
 
   useEffect(() => {
     let alive = true;
-    void QuickSelectSession.open().then((s) => {
+    void BrushSession.open().then((s) => {
       if (!alive) return;
       sessionRef.current = s;
       setSessionEpoch((e) => e + 1);
@@ -141,17 +134,32 @@ function BrushSurface({
 
   const srcT = () => clip.in + Math.max(0, tLocal) * (clip.speed && clip.speed > 0 ? clip.speed : 1);
 
-  // Outside writes to the seeds rebuild the working mask from them.
+  // The overlay shows the strokes recorded on the frame the preview shows:
+  // the mask rebuilds when the seeds change from outside (undo, redo, the
+  // panel's Reset) and when the displayed frame moves onto or off a stroke
+  // frame — parking on a painted frame brings its strokes back, any other
+  // frame clears them. Playback keeps the overlay down; replay decodes the
+  // stored paint, which has no place inside a frame tick.
   const seeds = clip.removal?.seeds;
+  const playing = useEditor((s) => s.playing);
+  const speedNow = clip.speed && clip.speed > 0 ? clip.speed : 1;
+  const srcNow = clip.in + Math.max(0, tLocal) * speedNow;
+  const activeT = playing
+    ? null
+    : ((seeds?.paint ?? []).find((p) => Math.abs(p.t - srcNow) < 0.05)?.t ?? null);
+  const lastActiveT = useRef<number | null | undefined>(undefined);
   useEffect(() => {
     const s = sessionRef.current;
-    if (!s || lastWritten.current === seeds) return;
-    lastWritten.current = seeds;
+    if (!s || gesture.current) return;
+    if (lastWritten.current === seeds && lastActiveT.current === activeT) return;
     if (!s.refreshFrame(clip.id)) return;
-    void s.replaySeeds(seeds, decodeSeed, srcT()).then(paintOverlay);
-    // srcT reads the frame the rebuild runs against; a playhead move alone
-    // must not re-replay, and the lastWritten guard above holds that line.
-  }, [seeds, sessionEpoch, clip.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    lastWritten.current = seeds;
+    lastActiveT.current = activeT;
+    void s.replaySeeds(seeds, decodeSeed, srcNow).then(paintOverlay);
+    // srcNow reads the frame the rebuild runs against; within one stroke
+    // bucket a playhead move alone must not re-replay, and the activeT dep
+    // holds that line.
+  }, [seeds, activeT, sessionEpoch, clip.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const paintLoupe = (p: Frac) => {
     const s = sessionRef.current;
@@ -201,27 +209,26 @@ function BrushSurface({
     const s = sessionRef.current;
     if (!s) return;
     const t = srcT();
-    if (g.quick) {
-      s.commitTentative();
-      paintOverlay();
-      if (!s.quickAvailable) return;
-      const label: 0 | 1 = g.erase ? 0 : 1;
-      const kept =
-        g.points.length <= PROMPT_POINTS_MAX
-          ? g.points
-          : g.points.filter(
-              (_, i) => i % Math.ceil(g.points.length / PROMPT_POINTS_MAX) === 0
-            );
-      writeSeeds((next) => {
-        const at = next.prompts.findIndex((p) => Math.abs(p.t - t) < 0.02);
-        const points = kept.map((p) => ({ x: p.x, y: p.y, label }));
-        if (at >= 0)
-          next.prompts[at] = { ...next.prompts[at], points: [...next.prompts[at].points, ...points] };
-        else next.prompts.push({ t, points });
-      });
+    paintOverlay();
+    // An erase that leaves the frame blank drops the frame's stored records
+    // whole — the timeline's stroke tabs leave with the paint, and no erase
+    // bitmap piles up over strokes that no longer exist.
+    if (g.erase && !s.hasSelection()) {
+      const cur = useEditor.getState().clips.find((c) => c.id === clip.id)?.removal;
+      const at = (ts: number) => Math.abs(ts - t) < 0.02;
+      const had =
+        !!cur?.seeds &&
+        (cur.seeds.prompts.some((p) => at(p.t)) || (cur.seeds.paint ?? []).some((p) => at(p.t)));
+      if (had) {
+        writeSeeds((next) => {
+          next.prompts = next.prompts.filter((p) => !at(p.t));
+          const paint = (next.paint ?? []).filter((p) => !at(p.t));
+          if (paint.length) next.paint = paint;
+          else delete next.paint;
+        });
+      }
       return;
     }
-    paintOverlay();
     void s.paintSeed(g.points, size / 2).then((url) => {
       writeSeeds((next) => {
         const field = g.erase ? "erase" : "add";
@@ -270,15 +277,10 @@ function BrushSurface({
     e.currentTarget.setPointerCapture(e.pointerId);
     s.refreshFrame(clip.id);
     const p = localPoint(e);
-    const erase = tool === "erase" || tool === "quickErase";
-    const quick = tool === "quick" || tool === "quickErase";
-    gesture.current = { points: [p], erase, quick, lastSeg: 0 };
-    if (quick) {
-      if (s.quickPreview([p], erase)) paintOverlay();
-    } else {
-      s.paintStroke([p], size / 2, erase);
-      paintOverlay();
-    }
+    const erase = tool === "erase";
+    gesture.current = { points: [p], erase };
+    s.paintStroke([p], size / 2, erase);
+    paintOverlay();
     updatePointer(p);
     setPainting(true);
     paintLoupe(p);
@@ -293,16 +295,8 @@ function BrushSurface({
     const last = g.points[g.points.length - 1];
     if (Math.hypot(p.x - last.x, p.y - last.y) < MIN_STEP) return;
     g.points.push(p);
-    if (g.quick) {
-      const now = performance.now();
-      if (now - g.lastSeg > 60) {
-        g.lastSeg = now;
-        if (s.quickPreview(g.points, g.erase)) paintOverlay();
-      }
-    } else {
-      s.paintStroke([last, p], size / 2, g.erase);
-      paintOverlay();
-    }
+    s.paintStroke([last, p], size / 2, g.erase);
+    paintOverlay();
     paintLoupe(p);
   };
 
@@ -312,7 +306,6 @@ function BrushSurface({
     setPainting(false);
     if (!g) return;
     if (commit) finishStroke(g);
-    else sessionRef.current?.dropTentative();
   };
 
   // The same geometry the compositor draws: the picture's rect inside the

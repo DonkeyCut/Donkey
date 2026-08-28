@@ -8,41 +8,38 @@
  */
 
 import {
-  CHROMA_DEFAULT_INTENSITY,
-  CHROMA_DEFAULT_SOFTNESS,
-  CHROMA_DEFAULT_SPILL,
   STROKE_DEFAULT_WIDTH,
+  STROKE_FEATHER_MAX,
   STROKE_OFFSET_MAX,
   STROKE_STYLE_LABELS,
   STROKE_STYLES,
   STROKE_WIDTH_MAX,
 } from "@donkeycut/effects-kit";
-import { num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
+import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 
 export const REMOVAL_TOOLS = [
   {
     name: "set_removal",
-    description: `Cut a video clip's background away — the Inspector's Cutout tab, on any track. Modes: "auto" mattes the person in the shot with AI; "custom" mattes whatever \`subject\` describes in a few words ("the dog") and tracks every match through the clip — picking one exact instance by hand is the panel's brush flow, so send the user there for that; "chroma" keys out a backdrop color (green screen) with intensity/softness/spill; "off" removes the whole cutout, stroke and background fill included. The AI mattes prepare in the background — wait_for_renders covers that work — and a long clip tracks in parts automatically, so length needs no special handling. Where the background was, lower tracks or the project background show through; set_removal_background fills that area within the clip itself. Read the background-removal skill for the full recipes.`,
+    description: `Cut part of a video clip's picture away — the Inspector's Cutout tab, on any track. \`remove\` picks the direction: "background" (default) keeps the selection and removes everything around it; "subject" removes the selection itself and keeps the rest. \`mode\` picks how the selection is found: "auto" mattes the person in the shot with the free on-device matte — this tool call starts it (in the panel the bake waits for the user's Apply press), and a green-screen or plain-backdrop shot needs nothing more, the matte keys it; "custom" mattes whatever \`subject\` describes in a few words ("the dog") and tracks every match through the clip — picking one exact instance by hand is the panel's brush flow, so send the user there for that; "off" switches the cutout off — the picture shows plain, but the baked matte and every setting stay on the clip, so switching back on is instant and re-bills nothing. The selection is the same in both directions, so flipping \`remove\` on an existing cutout re-bakes nothing. The AI mattes prepare in the background — wait_for_renders covers that work — and a long clip tracks in parts automatically, so length needs no special handling. Where pixels were removed, lower tracks or the project background show through; set_removal_background fills that area within the clip itself. Read the background-removal skill for the full recipes.`,
     inputSchema: obj(
       {
         clipId: str("Video clip id"),
         mode: {
           type: "string",
-          enum: ["off", "auto", "custom", "chroma"],
-          description: "Cutout mode",
+          enum: ["off", "auto", "custom"],
+          description: "How the selection is found",
         },
+        remove: {
+          type: "string",
+          enum: ["background", "subject"],
+          description:
+            'What goes: "background" (default) keeps the selection, "subject" removes it and keeps the rest of the picture',
+        },
+        refine: bool(
+          'Auto mode: also run the hosted quality pass for hair and edge detail once the free matte lands — spends credits like generation, so pass it only when the user asks for the upgrade (the panel\'s "Apply")'
+        ),
         subject: str(
           'Custom mode: what to keep, in a few words ("the dog", "the red car") — every match is matted and tracked'
-        ),
-        color: str(
-          'Chroma key color "#rrggbb" (omitted: sampled from the footage borders, where a backdrop lives)'
-        ),
-        intensity: num(
-          `Chroma tolerance 0..1 — how far from the key a color still keys out (default ${CHROMA_DEFAULT_INTENSITY})`
-        ),
-        softness: num(`Chroma edge rolloff 0..1 (default ${CHROMA_DEFAULT_SOFTNESS})`),
-        spill: num(
-          `Chroma spill suppression 0..1 — pulls key-colored fringe off the kept pixels (default ${CHROMA_DEFAULT_SPILL})`
         ),
       },
       ["clipId", "mode"]
@@ -62,6 +59,9 @@ export const REMOVAL_TOOLS = [
         color: str('Ink color "#rrggbb" (default white)'),
         width: num(
           `Ink thickness, design px at the 1080 short side, 1..${STROKE_WIDTH_MAX} (default ${STROKE_DEFAULT_WIDTH})`
+        ),
+        feather: num(
+          `Edge softness: the ink blurred by this many design px, 0..${STROKE_FEATHER_MAX} (default 0, crisp)`
         ),
         offset_x: num(
           `Offset style: silhouette displacement right, design px, -${STROKE_OFFSET_MAX}..${STROKE_OFFSET_MAX}`
