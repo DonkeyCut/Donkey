@@ -313,8 +313,22 @@ const FAMILY_STYLE: Record<
  * in `trimHandle` below; anything else drawn on a bar keeps clear of it. */
 const TRIM_W = 10;
 
-const trimHandle =
-  "tl-trim absolute top-0 bottom-0 z-3 w-[10px] cursor-ew-resize after:absolute after:top-1/2 after:left-[3px] after:h-[calc(100%-10px)] after:w-1 after:-translate-y-1/2 after:rounded-full after:bg-white after:opacity-0 after:shadow-[0_0_0_1px_rgba(0,0,0,0.35)] after:transition-opacity group-hover:after:opacity-90 hover:after:opacity-100";
+const trimBase =
+  "tl-trim absolute z-3 w-[10px] cursor-ew-resize after:absolute after:left-[3px] after:w-1 after:rounded-full after:bg-white after:opacity-0 after:shadow-[0_0_0_1px_rgba(0,0,0,0.35)] after:transition-opacity group-hover:after:opacity-90 hover:after:opacity-100";
+
+const trimHandle = cn(
+  trimBase,
+  "top-0 bottom-0 after:top-1/2 after:h-[calc(100%-10px)] after:-translate-y-1/2"
+);
+
+/** The trim zone for a bar `w` px wide. A bar too narrow to keep a grabbable
+ * middle swaps its full-height zones for short tabs centered on its edges, so
+ * the strips above and below stay the bar's own — a sliver still has
+ * somewhere to grab for a move. */
+const trimFor = (w: number) =>
+  w < TRIM_W * 3 + 4
+    ? cn(trimBase, "top-1/2 h-[max(30%,6px)] -translate-y-1/2 after:top-0 after:h-full")
+    : trimHandle;
 
 /** On-timeline length a dropped image occupies (it has no intrinsic duration). */
 const STILL_SECONDS = IMAGE_CLIP_SECONDS;
@@ -3897,11 +3911,11 @@ function ClipView({
           snaps to them either way. */}
       <BeatDots asset={asset} from={filmIn} to={filmOut} speed={speed} pps={pps} w={barW} />
       <span
-        className={cn(trimHandle, "tl-trim-l left-0")}
+        className={cn(trimFor(barW), "tl-trim-l left-0")}
         onPointerDown={(e) => startLaneTrim(e, lane, clip.id, "l", ui)}
       />
       <span
-        className={cn(trimHandle, "tl-trim-r right-0")}
+        className={cn(trimFor(barW), "tl-trim-r right-0")}
         onPointerDown={(e) => startLaneTrim(e, lane, clip.id, "r", ui)}
       />
     </div>
@@ -4989,11 +5003,11 @@ function AudioView({
         />
       )}
       <span
-        className={cn(trimHandle, "tl-trim-l left-0")}
+        className={cn(trimFor(barW), "tl-trim-l left-0")}
         onPointerDown={(e) => startLaneTrim(e, "audio", clip.id, "l", ui)}
       />
       <span
-        className={cn(trimHandle, "tl-trim-r right-0")}
+        className={cn(trimFor(barW), "tl-trim-r right-0")}
         onPointerDown={(e) => startLaneTrim(e, "audio", clip.id, "r", ui)}
       />
     </div>
@@ -5243,11 +5257,11 @@ function TextBar({
         onToggle={() => useEditor.getState().updateOverlay(o.id, { hidden: !o.hidden })}
       />
       <span
-        className={cn(trimHandle, "tl-trim-l left-0")}
+        className={cn(trimFor(barW), "tl-trim-l left-0")}
         onPointerDown={(e) => startLaneTrim(e, "overlay", o.id, "l", ui)}
       />
       <span
-        className={cn(trimHandle, "tl-trim-r right-0")}
+        className={cn(trimFor(barW), "tl-trim-r right-0")}
         onPointerDown={(e) => startLaneTrim(e, "overlay", o.id, "r", ui)}
       />
     </div>
@@ -5312,11 +5326,11 @@ function SubBar({
         {cue.text}
       </span>
       <span
-        className={cn(trimHandle, "tl-trim-l left-0")}
+        className={cn(trimFor(w - CLIP_GAP), "tl-trim-l left-0")}
         onPointerDown={(e) => startLaneTrim(e, "cue", cue.id, "l", ui)}
       />
       <span
-        className={cn(trimHandle, "tl-trim-r right-0")}
+        className={cn(trimFor(w - CLIP_GAP), "tl-trim-r right-0")}
         onPointerDown={(e) => startLaneTrim(e, "cue", cue.id, "r", ui)}
       />
     </div>
