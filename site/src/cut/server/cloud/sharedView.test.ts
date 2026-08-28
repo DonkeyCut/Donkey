@@ -48,4 +48,51 @@ describe("filterDocForShare", () => {
     expect(filterDocForShare(withRenders, features({ chat: true })).renders?.length).toBe(1);
     expect(filterDocForShare(withRenders, features({ media: true })).renders).toBeUndefined();
   });
+
+  test("what playback draws travels with the clip that uses it", () => {
+    const playback = {
+      ...doc,
+      assets: [
+        ...doc.assets,
+        { id: "m1", fileName: "m1.mp4", type: "video", duration: 1, origin: "matte" },
+        { id: "fill", fileName: "fill.png", type: "image", duration: 0 },
+        { id: "sticker", fileName: "s.png", type: "image", duration: 0, origin: "cutout" },
+        { id: "font1", fileName: "f.ttf", type: "font", duration: 0 },
+      ],
+      clips: [
+        {
+          ...(doc.clips[0] as object),
+          removal: {
+            mode: "auto",
+            matte: { assetId: "m1", fingerprint: "fp", quality: "local", in: 0 },
+            backdrop: { kind: "image", assetId: "fill" },
+          },
+        },
+      ],
+      overlays: [
+        { id: "o1", kind: "sticker", assetId: "sticker", start: 0, end: 1, x: 0, y: 0, w: 0.2 },
+        { id: "o2", kind: "text", text: "hi", font: "asset:font1", start: 0, end: 1, x: 0, y: 0 },
+      ],
+    } as unknown as ProjectDoc;
+    expect(ids(filterDocForShare(playback, features()))).toEqual([
+      "fill",
+      "font1",
+      "m1",
+      "placed",
+      "sticker",
+    ]);
+  });
+
+  test("a caption font travels only when subtitles are shared", () => {
+    const captioned = {
+      ...doc,
+      assets: [...doc.assets, { id: "font1", fileName: "f.ttf", type: "font", duration: 0 }],
+      subtitles: { cues: [], font: "asset:font1" },
+    } as unknown as ProjectDoc;
+    expect(ids(filterDocForShare(captioned, features({ subtitles: true })))).toEqual([
+      "font1",
+      "placed",
+    ]);
+    expect(ids(filterDocForShare(captioned, features()))).toEqual(["placed"]);
+  });
 });

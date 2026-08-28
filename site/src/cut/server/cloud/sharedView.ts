@@ -4,7 +4,7 @@
 // the content boundary: the filtered doc and the media allowlist are what
 // decide which bytes a viewer can reach; the client's tab hiding is
 // presentation only. Copying a share lives in copyQueue.ts.
-import type { ProjectDoc, StoredAsset } from "@/cut/lib/types";
+import { uploadedFontId, type ProjectDoc, type StoredAsset } from "@/cut/lib/types";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { readLadder } from "./ladderStore";
@@ -76,18 +76,33 @@ async function offeredFeatures(view: ShareView): Promise<ShareFeatures> {
   return threads > 0 ? view.features : { ...view.features, chat: false };
 }
 
-/** The asset set a viewer may see: everything playback needs (referenced by a
- * clip), plus each optional surface's assets when that surface is shared.
- * Untagged assets belong to the Media panel; origin-tagged ones to the
- * generate panels; chat-tagged ones to chat. The Library is never shared. */
+/** The asset set a viewer may see: everything playback needs, plus each
+ * optional surface's assets when that surface is shared. Playback references
+ * more than the clips' own sources: a removal's baked matte and fill image,
+ * sticker overlays' pictures, and uploaded fonts on text overlays and shared
+ * captions all draw into the frame, so each rides along with the clip that
+ * uses it. Untagged assets belong to the Media panel; origin-tagged ones to
+ * the generate panels; chat-tagged ones to chat. The Library is never
+ * shared. */
 function allowedAssets(doc: ProjectDoc, features: ShareFeatures): StoredAsset[] {
   const assets = Array.isArray(doc.assets) ? doc.assets : [];
+  const clips = Array.isArray(doc.clips) ? doc.clips : [];
   const referenced = new Set<string>([
-    ...(Array.isArray(doc.clips) ? doc.clips : []).map((c) => c.assetId),
+    ...clips.map((c) => c.assetId),
     ...(Array.isArray(doc.audioClips) ? doc.audioClips : []).map((c) => c.assetId),
   ]);
+  for (const c of clips) {
+    if (c.removal?.matte) referenced.add(c.removal.matte.assetId);
+    if (c.removal?.backdrop?.assetId) referenced.add(c.removal.backdrop.assetId);
+  }
+  const fonts = new Set<string>();
+  for (const o of Array.isArray(doc.overlays) ? doc.overlays : []) {
+    if (o.kind === "sticker" && o.assetId) referenced.add(o.assetId);
+    if (o.kind === "text") fonts.add(o.font);
+  }
+  if (features.subtitles && doc.subtitles?.font) fonts.add(doc.subtitles.font);
   return assets.filter((a) => {
-    if (referenced.has(a.id)) return true;
+    if (referenced.has(a.id) || fonts.has(uploadedFontId(a.id))) return true;
     if (a.chatId) return features.chat;
     if (a.origin) return features.genai;
     return features.media;
