@@ -14,7 +14,7 @@ export type SuSurface = {
   label: string;
   icon: typeof UserRound;
   title: string;
-  description: string;
+  description?: string;
   Action?: ComponentType;
 };
 
@@ -46,7 +46,6 @@ export const SU_NAV: SuSurface[] = [
     label: "Outreach",
     icon: Mail,
     title: "Outreach",
-    description: "Free accounts spending credits, and where each conversation stands.",
     Action: ScanOutreachButton,
   },
   {

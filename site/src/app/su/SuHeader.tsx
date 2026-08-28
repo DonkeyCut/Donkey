@@ -13,7 +13,11 @@ export function SuHeader() {
     <div className="sticky top-0 z-20 mx-auto flex w-full max-w-6xl shrink-0 items-start justify-between gap-4 bg-background px-10 pt-9 pb-5">
       <div>
         <h1 className="text-lg font-semibold tracking-tight">{section.title}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{section.description}</p>
+        {section.description ? (
+          <p className="mt-1 text-sm text-muted-foreground">
+            {section.description}
+          </p>
+        ) : null}
       </div>
       {section.Action ? <section.Action /> : null}
     </div>

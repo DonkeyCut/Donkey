@@ -95,6 +95,7 @@ function RowBadges({ row }: { row: OutreachRow }) {
 
 export default function SuOutreachPage() {
   const [status, setStatus] = useState<OutreachStatus>("todo");
+  const [query, setQuery] = useState("");
   const [sendTarget, setSendTarget] = useState<OutreachRow | null>(null);
   const [source, setSource] = useState(BLANK);
   const [subject, setSubject] = useState("");
@@ -102,7 +103,14 @@ export default function SuOutreachPage() {
   const [templateName, setTemplateName] = useState("");
   const [naming, setNaming] = useState(false);
   const bodyField = useRef<HTMLTextAreaElement>(null);
-  const list = useOutreach(status);
+  // Search runs in the browser across every tab, so all four lists stay
+  // mounted; each tab keeps its own rows and reports its own match count.
+  const lists = {
+    ignored: useOutreach("ignored"),
+    replied: useOutreach("replied"),
+    sent: useOutreach("sent"),
+    todo: useOutreach("todo"),
+  };
   const counts = useOutreachCounts().data?.counts;
   const act = useOutreachAction();
   const busy = useBusyOutreachIds();
@@ -277,7 +285,16 @@ export default function SuOutreachPage() {
     );
   };
 
-  const rows = list.data?.rows ?? [];
+  const needle = query.trim().toLowerCase();
+  const matches = (row: OutreachRow) =>
+    needle === "" ||
+    row.name.toLowerCase().includes(needle) ||
+    row.email.toLowerCase().includes(needle);
+  const rowsFor = (of: OutreachStatus) =>
+    (lists[of].data?.rows ?? []).filter(matches);
+
+  const list = lists[status];
+  const rows = rowsFor(status);
   const sending = sendTarget !== null && busy.has(sendTarget.id);
   // A failed send keeps its dialog open, so the reason belongs in there with
   // the words that still need fixing.
@@ -285,6 +302,14 @@ export default function SuOutreachPage() {
 
   return (
     <div className="space-y-4 pb-9">
+      <Input
+        className="max-w-sm"
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Search name or email"
+        type="search"
+        value={query}
+      />
+
       <div className="flex flex-wrap items-center gap-2">
         {FILTERS.map((filter) => (
           <Button
@@ -294,7 +319,11 @@ export default function SuOutreachPage() {
             variant={status === filter.status ? "default" : "outline"}
           >
             {filter.label}
-            {counts ? (
+            {needle !== "" ? (
+              <span className="tabular-nums opacity-60">
+                {rowsFor(filter.status).length}
+              </span>
+            ) : counts ? (
               <span className="tabular-nums opacity-60">
                 {counts[filter.status]}
               </span>
@@ -369,7 +398,11 @@ export default function SuOutreachPage() {
           </ul>
         ) : (
           <p className="p-5 text-sm text-muted-foreground">
-            {list.isPending ? "Loading…" : "Nothing here. Run a scan to refresh."}
+            {list.isPending
+              ? "Loading…"
+              : needle !== ""
+                ? "No matches."
+                : "Nothing here. Run a scan to refresh."}
           </p>
         )}
       </div>
