@@ -184,6 +184,28 @@ function whiteSilhouette(silhouette: CanvasImageSource, w: number, h: number): H
   return sil;
 }
 
+/** Everything around the silhouette as white fill — the stamp source for
+ * inset ink, where the band grows inward from the boundary. */
+let compCanvas: HTMLCanvasElement | null = null;
+function whiteComplement(silhouette: CanvasImageSource, w: number, h: number): HTMLCanvasElement {
+  const comp = (compCanvas = sizedScratch(compCanvas, w, h));
+  const ctx = comp.getContext("2d")!;
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, w, h);
+  ctx.globalCompositeOperation = "destination-out";
+  ctx.drawImage(silhouette, 0, 0, w, h);
+  ctx.globalCompositeOperation = "source-over";
+  return comp;
+}
+
+/** Trim what this paint laid down to the silhouette's own pixels. */
+function trimToSilhouette(ctx: Canvas2D, silhouette: CanvasImageSource, w: number, h: number) {
+  ctx.globalCompositeOperation = "destination-in";
+  ctx.drawImage(silhouette, 0, 0, w, h);
+  ctx.globalCompositeOperation = "source-over";
+}
+
 /** Stamp `sil` at `count` points around a circle of radius `r`. */
 function stampAround(ctx: Canvas2D, sil: CanvasImageSource, r: number, count = DILATE_STAMPS) {
   for (let k = 0; k < count; k++) {
@@ -212,6 +234,18 @@ function contoursOf(silhouette: CanvasImageSource, w: number, h: number): Contou
  * `w`×`h` frame the silhouette was drawn at. `scale` converts the stroke's
  * design px (1080 short side); `t` is the layer's local seconds, driving the
  * hand style's boil.
+ *
+ * The silhouette is always the selection. `inset` flips which side of its
+ * boundary the dilate styles grow toward: plain, the band grows outward and
+ * the interior hides behind the kept subject; inset (a removal that cuts the
+ * selection out), the band grows inward and is trimmed to the selection, so
+ * the ink rims the hole instead of flooding it. The contour styles walk the
+ * boundary itself and need no flip. `ctx` must hold only this ink — the
+ * inset trim clears everything else.
+ *
+ * `feather` softens the finished ink's edge: the styles paint crisp into a
+ * scratch and the blurred scratch lands in `ctx`, so every style feathers
+ * the same way and the host's colorize pass keeps the soft alpha.
  */
 export function paintStrokeInk(
   ctx: Canvas2D,
@@ -220,7 +254,53 @@ export function paintStrokeInk(
   h: number,
   stroke: RemovalStroke,
   t: number,
-  scale: number
+  scale: number,
+  inset = false
+): void {
+  const feather = Math.max(0, (stroke.feather ?? 0) * scale);
+  if (feather >= 0.5) {
+    const fc = (featherCanvas = sizedScratch(featherCanvas, w, h));
+    const fctx = fc.getContext("2d")!;
+    fctx.setTransform(1, 0, 0, 1, 0, 0);
+    fctx.globalCompositeOperation = "source-over";
+    fctx.clearRect(0, 0, w, h);
+    paintInkCore(fctx, silhouette, w, h, stroke, t, scale, inset);
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = "source-over";
+    if ("filter" in ctx) {
+      ctx.filter = `blur(${(feather / 2).toFixed(1)}px)`;
+      ctx.drawImage(fc, 0, 0);
+      ctx.filter = "none";
+    } else {
+      // No blur available (a bare context): fade the edge by stamping the
+      // ink at rings of falling alpha, the way the glow style degrades.
+      const bare = ctx as Canvas2D;
+      bare.globalAlpha = 0.55;
+      bare.drawImage(fc, 0, 0);
+      for (let ring = 1; ring <= 3; ring++) {
+        bare.globalAlpha = 0.3 / ring;
+        stampAround(bare, fc, (feather * ring) / 3);
+      }
+      bare.globalAlpha = 1;
+    }
+    ctx.restore();
+    return;
+  }
+  paintInkCore(ctx, silhouette, w, h, stroke, t, scale, inset);
+}
+
+let featherCanvas: HTMLCanvasElement | null = null;
+
+function paintInkCore(
+  ctx: Canvas2D,
+  silhouette: CanvasImageSource,
+  w: number,
+  h: number,
+  stroke: RemovalStroke,
+  t: number,
+  scale: number,
+  inset: boolean
 ): void {
   const width = Math.max(1, (stroke.width ?? STROKE_DEFAULT_WIDTH) * scale);
   ctx.save();
@@ -229,12 +309,18 @@ export function paintStrokeInk(
   ctx.fillStyle = "#ffffff";
   ctx.strokeStyle = "#ffffff";
   if (stroke.style === "solid") {
-    stampAround(ctx, whiteSilhouette(silhouette, w, h), width);
+    if (inset) {
+      stampAround(ctx, whiteComplement(silhouette, w, h), width);
+      trimToSilhouette(ctx, silhouette, w, h);
+    } else {
+      stampAround(ctx, whiteSilhouette(silhouette, w, h), width);
+    }
   } else if (stroke.style === "offset") {
     const sil = whiteSilhouette(silhouette, w, h);
     ctx.drawImage(sil, (stroke.offsetX ?? 0) * scale, (stroke.offsetY ?? 0) * scale);
+    if (inset) trimToSilhouette(ctx, silhouette, w, h);
   } else if (stroke.style === "glow") {
-    const sil = whiteSilhouette(silhouette, w, h);
+    const sil = inset ? whiteComplement(silhouette, w, h) : whiteSilhouette(silhouette, w, h);
     if ("filter" in ctx) {
       ctx.filter = `blur(${Math.max(1, width).toFixed(1)}px)`;
       // Twice, so the halo reads against bright footage too.
@@ -251,6 +337,7 @@ export function paintStrokeInk(
       }
       bare.globalAlpha = 1;
     }
+    if (inset) trimToSilhouette(ctx, silhouette, w, h);
   } else {
     // Contour styles.
     const rings = contoursOf(silhouette, w, h);

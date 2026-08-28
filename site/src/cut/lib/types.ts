@@ -555,10 +555,10 @@ export interface VideoClip {
   kf?: OverlayKey[];
   /** Rounded corners and a border stroke on the clip's box; absent = plain. */
   boxStyle?: BoxStyle;
-  /** Background removal: keys the clip's picture to an alpha matte (chroma
-   * key, or an AI matte baked to a grayscale video asset), with an optional
-   * stroke around the silhouette and a backdrop filled in behind it (see the
-   * kit's removal.ts). Absent = the whole picture shows. */
+  /** Background removal: keys the clip's picture to an AI matte baked to a
+   * grayscale video asset, with an optional stroke around the silhouette and
+   * a backdrop filled in behind it (see the kit's removal.ts). Absent = the
+   * whole picture shows. */
   removal?: ClipRemoval;
 }
 
@@ -577,7 +577,6 @@ export {
   STROKE_STYLES,
 } from "@donkeycut/effects-kit";
 export type {
-  ChromaKey,
   ClipRemoval,
   RemovalBackdrop,
   RemovalMode,

@@ -10,7 +10,7 @@
  * channel, which is why the layer travels as a pair.
  */
 
-import { matteLumaToAlpha } from "@donkeycut/effects-kit";
+import { matteLumaToAlpha, removalActive } from "@donkeycut/effects-kit";
 import { openCanvasVideo, scaledEvenSize } from "./canvasVideo";
 import { FrameCompositor, type Frame } from "./composite";
 import { createRasterCanvas, decodeRasterImageUrl, type RasterSurface } from "./raster";
@@ -68,10 +68,9 @@ export async function renderRemovalPieces(
   opts: { fps: number; maxShort: number; bakeLook: boolean }
 ): Promise<RemovalPieces | null> {
   const r = clip.removal;
-  if (!r) return null;
+  if (!removalActive(r) || !r) return null;
   const matteAsset = r.matte ? assets.find((a) => a.id === r.matte!.assetId) : undefined;
-  const ai = r.mode === "auto" || r.mode === "custom";
-  if (ai && !matteAsset) return null;
+  if (!matteAsset) return null;
 
   const speed = clipSpeed(clip);
   const still = asset.type === "image";

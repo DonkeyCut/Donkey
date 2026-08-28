@@ -19,8 +19,7 @@
  * it was reached by playing there or by rendering the 135th frame.
  */
 
-import { applyLutToImageData, applyMaskToCanvas, buildGradeLut, chromaAlphaInto, gradeKey, gradeNeedsLut, gradeTint, gradeToCssFilter, grainTile, isNeutralGrade, lookCssFilter, lookPost, maskComposite, paintStrokeInk, removalActive, type GradeLut } from "@donkeycut/effects-kit";
-import { chromaKeyGpu } from "./chromaGpu";
+import { applyLutToImageData, applyMaskToCanvas, buildGradeLut, gradeKey, gradeNeedsLut, gradeTint, gradeToCssFilter, grainTile, isNeutralGrade, lookCssFilter, lookPost, maskComposite, paintStrokeInk, removalActive, type GradeLut } from "@donkeycut/effects-kit";
 import { applyLutGpu } from "./gradeGpu";
 import { createRasterCanvas } from "./raster";
 import { clipCovers, clipPosed, clipPoseAt, clipZoom, contentRect, DEFAULT_BACKGROUND, isFullRect, rectOf, shadowInk } from "./types";
@@ -338,9 +337,9 @@ export class FrameCompositor {
   }
 
   /**
-   * The clip's graded picture with its background removal applied: the key
-   * multiplies an alpha into the frame (a chroma key computed here, or the
-   * baked AI matte the host provides), the stroke's ink goes down behind the
+   * The clip's graded picture with its background removal applied: the baked
+   * AI matte the host provides multiplies an alpha into the frame, the
+   * stroke's ink goes down behind the
    * silhouette, and the backdrop fills in behind everything. Runs in the
    * clip's source pixel space, before the fit/fill draw, so the keyed layer
    * rides zoom, pan, masks, poses and transitions like any other picture.
@@ -394,9 +393,8 @@ export class FrameCompositor {
     // The matte answers before any scratch is staged: while the bake is still
     // running the picture stays plain — the stroke and backdrop wait with it —
     // and a full-frame clear and composite per tick would be pure waste.
-    const matte =
-      r.mode === "chroma" ? null : clip ? (this.removalMatteProvider?.(clip, at) ?? null) : null;
-    if (r.mode !== "chroma" && !matte) return base;
+    const matte = clip ? (this.removalMatteProvider?.(clip, at) ?? null) : null;
+    if (!matte) return base;
     const { surface } = this.scratch("removalScratch", w, h);
     const ctx = surface.getContext("2d") as Ctx | null;
     if (!ctx) return base;
@@ -405,28 +403,18 @@ export class FrameCompositor {
     ctx.globalCompositeOperation = "source-over";
     ctx.clearRect(0, 0, w, h);
 
-    // 1. The key: alpha into the picture.
-    if (r.mode === "chroma" && r.chroma) {
-      const gpu = chromaKeyGpu(base, w, h, r.chroma);
-      if (gpu) {
-        ctx.drawImage(gpu as CanvasImageSource, 0, 0, w, h);
-      } else {
-        ctx.drawImage(base, 0, 0, w, h);
-        const img = ctx.getImageData(0, 0, w, h);
-        chromaAlphaInto(img.data, r.chroma);
-        ctx.putImageData(img, 0, 0);
-      }
-    } else {
-      ctx.drawImage(base, 0, 0, w, h);
-      const { surface: cover } = this.scratch("removalMatte", w, h);
-      const cctx = cover.getContext("2d") as Ctx | null;
-      if (cctx) {
-        cctx.setTransform(1, 0, 0, 1, 0, 0);
-        cctx.clearRect(0, 0, w, h);
-        cctx.imageSmoothingEnabled = true;
-        cctx.drawImage(matte!, 0, 0, w, h);
-        maskComposite(ctx, cover as CanvasImageSource, false);
-      }
+    // 1. The key: alpha into the picture. `invert` flips the direction — the
+    // selection is removed and the rest of the picture stays.
+    const inv = !!r.invert;
+    ctx.drawImage(base, 0, 0, w, h);
+    const { surface: cover } = this.scratch("removalMatte", w, h);
+    const cctx = cover.getContext("2d") as Ctx | null;
+    if (cctx) {
+      cctx.setTransform(1, 0, 0, 1, 0, 0);
+      cctx.clearRect(0, 0, w, h);
+      cctx.imageSmoothingEnabled = true;
+      cctx.drawImage(matte, 0, 0, w, h);
+      maskComposite(ctx, cover as CanvasImageSource, inv);
     }
 
     const tLocal = Math.max(0, at - (clip?.start ?? 0));
@@ -435,7 +423,10 @@ export class FrameCompositor {
     // size wherever the clip lands.
     const ds = Math.min(w, h) / 1080;
 
-    // 2. Stroke ink around the keyed silhouette, behind the picture.
+    // 2. Stroke ink around the selection's silhouette, behind the picture.
+    // The ink always traces the selection — inverted, that is the hole the
+    // removal cut, whose boundary is the same curve, and the ink paints
+    // inset so it rims the hole where it shows through.
     if (r.stroke) {
       const { surface: sil } = this.scratch("removalSil", w, h);
       const sctx = sil.getContext("2d") as Ctx | null;
@@ -445,7 +436,11 @@ export class FrameCompositor {
         sctx.setTransform(1, 0, 0, 1, 0, 0);
         sctx.globalCompositeOperation = "source-over";
         sctx.clearRect(0, 0, w, h);
-        sctx.drawImage(surface, 0, 0);
+        if (!inv) {
+          sctx.drawImage(surface, 0, 0);
+        } else {
+          sctx.drawImage(cover as CanvasImageSource, 0, 0);
+        }
         sctx.globalCompositeOperation = "source-in";
         sctx.fillStyle = "#ffffff";
         sctx.fillRect(0, 0, w, h);
@@ -453,7 +448,7 @@ export class FrameCompositor {
         ictx.setTransform(1, 0, 0, 1, 0, 0);
         ictx.globalCompositeOperation = "source-over";
         ictx.clearRect(0, 0, w, h);
-        paintStrokeInk(ictx, sil as CanvasImageSource, w, h, r.stroke, tLocal, ds);
+        paintStrokeInk(ictx, sil as CanvasImageSource, w, h, r.stroke, tLocal, ds, inv);
         // Color the white ink, then lay it under the picture.
         ictx.globalCompositeOperation = "source-in";
         ictx.fillStyle = r.stroke.color;

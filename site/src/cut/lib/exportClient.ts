@@ -16,7 +16,7 @@ import { renderRemovalPieces } from "./removalVideo";
 import { createRasterCanvas, rasterCanvasToPng } from "./raster";
 import { clipSpeed, getClipSpans, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
-import { chromaAlphaInto, isMaskAnimated, isOverlayAnimated, matteLumaToAlpha, normalizeGrade, paintMaskLuma, paintStrokeInk } from "@donkeycut/effects-kit";
+import { isMaskAnimated, isOverlayAnimated, matteLumaToAlpha, normalizeGrade, paintMaskLuma, paintStrokeInk } from "@donkeycut/effects-kit";
 import { renderElementFrames, renderElementPng } from "./textRender";
 import { clipCovers, clipKeyed, clipPosed, clipPoseAt, clipZoom, contentRect, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, regionPx, removalActive, shadowInk, subjectMasked } from "./types";
 import { liveReader } from "./liveReader";
@@ -319,9 +319,11 @@ function removalShadowSilhouette(
   // a thick or offset stroke moves the shadow's edge with it.
   const ink = createRasterCanvas(2, 2);
   const inkCtx = ink.getContext("2d") as CanvasRenderingContext2D | null;
-  const withStroke = (w: number, h: number, tLocal: number): CanvasImageSource => {
+  // The ink paints from the selection (inset when the selection is the hole),
+  // before any complement, so it rims what the stroke really shows.
+  const paintInk = (w: number, h: number, tLocal: number): boolean => {
     const stroke = r!.stroke;
-    if (!stroke || !inkCtx) return canvas as CanvasImageSource;
+    if (!stroke || !inkCtx) return false;
     if (ink.width !== w || ink.height !== h) {
       ink.width = w;
       ink.height = h;
@@ -329,39 +331,18 @@ function removalShadowSilhouette(
     inkCtx.setTransform(1, 0, 0, 1, 0, 0);
     inkCtx.globalCompositeOperation = "source-over";
     inkCtx.clearRect(0, 0, w, h);
-    paintStrokeInk(inkCtx, canvas as CanvasImageSource, w, h, stroke, tLocal, Math.min(w, h) / 1080);
-    ctx.globalCompositeOperation = "destination-over";
-    ctx.drawImage(ink, 0, 0);
-    ctx.globalCompositeOperation = "source-over";
-    return canvas as CanvasImageSource;
+    paintStrokeInk(
+      inkCtx,
+      canvas as CanvasImageSource,
+      w,
+      h,
+      stroke,
+      tLocal,
+      Math.min(w, h) / 1080,
+      !!r!.invert
+    );
+    return true;
   };
-  if (r!.mode === "chroma") {
-    const key = r!.chroma;
-    if (!key) return null;
-    const reader = liveReader(asset);
-    return {
-      at: async (tLocal) => {
-        const frame = await reader.frameAt(still ? 0 : clip.in + tLocal * speed);
-        if (frame.kind !== "ready") return null;
-        // Sampled small — the silhouette blurs into a shadow anyway.
-        const s = Math.min(1, 480 / Math.max(1, Math.min(frame.width, frame.height)));
-        const w = Math.max(2, Math.round(frame.width * s));
-        const h = Math.max(2, Math.round(frame.height * s));
-        stage(w, h);
-        ctx.drawImage(frame.image, 0, 0, w, h);
-        const px = ctx.getImageData(0, 0, w, h);
-        chromaAlphaInto(px.data, key);
-        for (let i = 0; i < px.data.length; i += 4) {
-          px.data[i] = 255;
-          px.data[i + 1] = 255;
-          px.data[i + 2] = 255;
-        }
-        ctx.putImageData(px, 0, 0);
-        return withStroke(w, h, tLocal);
-      },
-      dispose: () => reader.dispose(),
-    };
-  }
   const matte = r!.matte ? assets.find((a) => a.id === r!.matte!.assetId) : undefined;
   if (!matte) return null;
   const reader = liveReader(matte);
@@ -378,7 +359,19 @@ function removalShadowSilhouette(
       const px = ctx.getImageData(0, 0, frame.width, frame.height);
       matteLumaToAlpha(px.data);
       ctx.putImageData(px, 0, 0);
-      return withStroke(frame.width, frame.height, tLocal);
+      const inked = paintInk(frame.width, frame.height, tLocal);
+      // Inverted, the clip shows everything around the matte, so the shadow's
+      // silhouette is the complement.
+      if (r!.invert) {
+        for (let i = 3; i < px.data.length; i += 4) px.data[i] = 255 - px.data[i];
+        ctx.putImageData(px, 0, 0);
+      }
+      if (inked) {
+        ctx.globalCompositeOperation = "destination-over";
+        ctx.drawImage(ink, 0, 0);
+        ctx.globalCompositeOperation = "source-over";
+      }
+      return canvas as CanvasImageSource;
     },
     dispose: () => reader.dispose(),
   };
@@ -406,7 +399,7 @@ async function renderClipShadowPictures(
   const sh = clip.boxStyle?.shadow;
   if (!sh) return undefined;
   // A cutout's shadow falls from the keyed subject, sampled per frame from
-  // the matte (or the chroma key), the way the preview casts it.
+  // the matte, the way the preview casts it.
   const silhouette = removalShadowSilhouette(clip, assets);
   const scale = Math.min(W, H) / 1080;
   const frame = { width: W, height: H, scale };
