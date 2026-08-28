@@ -968,7 +968,16 @@ export async function assetFromProjectFile(
   name: string,
   backend: CutBackend = getBackend()
 ): Promise<MediaAsset> {
-  const url = mediaUrl(projectId, fileName, backend);
+  // The file lands where a dropped file lands: on this browser's own copy when
+  // the store holds one, else on the signed media origin — the one origin the
+  // chunk cache keeps. The route URL re-signs and redirects on every range
+  // read, so a clip left on it plays through an uncached round trip per read.
+  const url =
+    (await localMediaUrl(projectId, fileName)) ??
+    (await import("./mediaLinks")
+      .then((m) => m.mintLandedUrl(projectId, fileName))
+      .catch(() => null)) ??
+    mediaUrl(projectId, fileName, backend);
   const asset: MediaAsset = {
     id: uid(),
     fileName,

@@ -119,12 +119,14 @@ export function refreshSignedUrls(force = false): Promise<void> {
 
 /** Mint the signed URL for one just-landed file, so an import moves straight
  * onto the media origin — the origin the chunk cache keeps and a playing clip
- * reads from. Null when the project has no signed batch (its route URLs serve
- * as they are) or the mint comes back empty; the route URL stands in and the
- * scheduled machinery rotates it later. */
+ * reads from. A project that loaded with no media has no batch yet; the first
+ * file to land starts one, so its refresh timer runs from here on. Null when
+ * the batch belongs to another project or the mint comes back empty; the
+ * route URL stands in and the scheduled machinery rotates it later. */
 export async function mintLandedUrl(projectId: string, fileName: string): Promise<string | null> {
-  if (!batch || batch.projectId !== projectId) return null;
+  if (batch && batch.projectId !== projectId) return null;
   const minted = await fetchSignedMediaUrls(projectId, [fileName]);
+  if (!batch && minted.expiresAt !== null) markSignedBatch(projectId, minted.expiresAt);
   return minted.urls.get(fileName) ?? null;
 }
 
