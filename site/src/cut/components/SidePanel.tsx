@@ -818,7 +818,7 @@ function ProjectFilesPanel({
                 mediaSrc={(f) => mediaUrl(projectId, f)}
                 drag={{ scope: "project", template: t }}
                 addTitle="Add to timeline"
-                onAdd={() => addProjectTemplateToTimeline(projectId, t)}
+                onAdd={() => void addProjectTemplateToTimeline(projectId, t)}
                 onRename={(name) => useEditor.getState().renameTemplate(t.id, name)}
                 onDelete={() => useEditor.getState().removeTemplate(t.id)}
                 onRefDrop={(r) => {

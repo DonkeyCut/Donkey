@@ -32,6 +32,7 @@ import {
   renameLocalMedia,
   stashCloudMedia,
   stashUnclaimedMedia,
+  storedMediaUrl,
 } from "./mediaSync";
 import {
   createRasterCanvas,
@@ -323,10 +324,10 @@ export async function uploadProjectImage(
     if (!res.ok || !body.fileName) {
       throw new Error(quotaErrorMessage(res.status, body) ?? body.error ?? failMessage);
     }
-    return { ...body, url: mediaUrl(projectId, body.fileName, backend) };
+    return { ...body, url: await storedMediaUrl(projectId, body.fileName, backend) };
   }
   const stored = await uploadProjectMediaTo(backend, projectId, file, fileName);
-  const url = mediaUrl(projectId, stored, backend);
+  const url = await storedMediaUrl(projectId, stored, backend);
   const dims = await loadImageMeta(url);
   return {
     id: uid(),
@@ -968,16 +969,7 @@ export async function assetFromProjectFile(
   name: string,
   backend: CutBackend = getBackend()
 ): Promise<MediaAsset> {
-  // The file lands where a dropped file lands: on this browser's own copy when
-  // the store holds one, else on the signed media origin — the one origin the
-  // chunk cache keeps. The route URL re-signs and redirects on every range
-  // read, so a clip left on it plays through an uncached round trip per read.
-  const url =
-    (await localMediaUrl(projectId, fileName)) ??
-    (await import("./mediaLinks")
-      .then((m) => m.mintLandedUrl(projectId, fileName))
-      .catch(() => null)) ??
-    mediaUrl(projectId, fileName, backend);
+  const url = await storedMediaUrl(projectId, fileName, backend);
   const asset: MediaAsset = {
     id: uid(),
     fileName,

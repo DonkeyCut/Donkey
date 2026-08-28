@@ -105,6 +105,7 @@ import { blobToInlineAudio, refToInlineAudio, visualRefs, type InlineImage } fro
 import { characterPrompt, stockAspectDims, stockTitle } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
+import { storedMediaUrl } from "./mediaSync";
 import { applyOverlayPatchSettled, track0Clips, laneGapAt, getClipSpans, nextFreeStart, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt } from "./playhead";
 import { renderProjectFrame } from "./exportRender";
@@ -160,7 +161,6 @@ import {
   isTextOverlay,
   LAYOUTS,
   MAX_SUBTITLE_LANES,
-  mediaUrl,
   nearestAspect,
   normalizeAspect,
   overlayAnimStyle,
@@ -2269,7 +2269,11 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         if (!res.ok) throw new ToolError(made.error ?? "Could not render the freeze frame.");
         body = made;
       }
-      const asset: MediaAsset = { ...body, url: mediaUrl(projectId, body.fileName), origin: "freeze" };
+      const asset: MediaAsset = {
+        ...body,
+        url: await storedMediaUrl(projectId, body.fileName),
+        origin: "freeze",
+      };
       const cur = useEditor.getState();
       cur.addAsset(asset);
       cur.addClipFromAsset(asset.id); // lands at the end, selected
@@ -2851,7 +2855,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const chatId = chatOwner();
       const before = new Set(s.assets.map((a) => a.id));
       if (shelved) await addTemplateToProject(projectId, shelved);
-      else addProjectTemplateToTimeline(projectId, t);
+      else await addProjectTemplateToTimeline(projectId, t);
       // Chat-fetched media files under the asking thread, like stock/library
       // imports; the template's clips reference it, so it survives cleanup.
       for (const a of useEditor.getState().assets) {

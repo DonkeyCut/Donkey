@@ -12,7 +12,7 @@ import { bytesFromBase64 } from "./bytes";
 import { makeStickerCutout } from "./cutout";
 import { promptAndImages } from "./generate";
 import { hostedPost } from "./hosted";
-import { uploadProjectImage } from "./media";
+import { enrichAsset, uploadProjectImage } from "./media";
 import { useEditor } from "./store";
 import { mediaSlug, type MediaAsset } from "./types";
 
@@ -76,5 +76,6 @@ export async function createCustomSticker(
     origin: "sticker",
   });
   useEditor.getState().addAsset(asset);
+  void enrichAsset(asset);
   return asset;
 }

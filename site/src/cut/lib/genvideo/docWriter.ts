@@ -15,9 +15,10 @@
  */
 
 import { apiJson, getBackend, type CutBackend } from "../backend";
+import { storedMediaUrl } from "../mediaSync";
 import { projectBackend } from "../residency";
 import { footprints, nextFreeStart, placeInRun, RENDERS_CAP, storedAssets, useEditor } from "../store";
-import { mediaUrl, SPEED_MIN } from "../types";
+import { SPEED_MIN } from "../types";
 import type { AudioClip, MediaAsset, ProjectDoc, RenderRecord, VideoClip } from "../types";
 import { fillSlot } from "./fillSlot";
 
@@ -147,7 +148,9 @@ export async function findRunAsset(
   const doc = await apiJson<ProjectDoc>(res);
   if (!res.ok) return undefined;
   const stored = doc.assets.find((a) => a.id === assetId);
-  return stored ? { ...stored, url: mediaUrl(projectId, stored.fileName, backend) } : undefined;
+  return stored
+    ? { ...stored, url: await storedMediaUrl(projectId, stored.fileName, backend) }
+    : undefined;
 }
 
 /** placeGenClip against a doc: fill a [startSec, endSec)-sized slot on track 0,

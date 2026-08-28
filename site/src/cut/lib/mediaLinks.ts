@@ -130,6 +130,63 @@ export async function mintLandedUrl(projectId: string, fileName: string): Promis
   return minted.urls.get(fileName) ?? null;
 }
 
+const healingBlobs = new Set<string>();
+const blobHealedAt = new Map<string, number>();
+
+/** A blob URL the browser store minted failed to read. The URL was revoked
+ * under its readers, or the stored file it snapshots was rewritten or removed
+ * — either way every element and decoder on it is dead until the asset moves.
+ * Re-mint from the store's copy; when the store has none, or the fresh mint
+ * failed just as fast, move the asset onto a signed URL. The store swap
+ * repoints every reader. */
+export async function healBlobUrl(src: string): Promise<void> {
+  if (healingBlobs.has(src)) return;
+  healingBlobs.add(src);
+  try {
+    const { useEditor } = await import("./store");
+    const s = useEditor.getState();
+    const projectId = s.projectId;
+    if (!s.loaded || !projectId) return;
+    // A tab-scoped upload plays from bytes only this tab holds: nothing to
+    // re-mint from. A store-backed one has its file in the browser store.
+    const dead = s.assets.filter((a) => a.url === src && (!a.upload || a.upload.stored));
+    if (dead.length === 0) return;
+    const { forgetLocalMediaUrl, localMediaUrl, storedMediaUrl } = await import("./mediaSync");
+    const urls = new Map<string, string>();
+    const uploading = new Map<string, string>();
+    for (const a of dead) {
+      // A fresh mint that died just as fast means the stored file itself no
+      // longer reads: leave it forgotten and resolve past it.
+      const healedAt = blobHealedAt.get(a.fileName) ?? 0;
+      if (Date.now() - healedAt > ATTEMPT_RESET_MS) forgetLocalMediaUrl(projectId, a.fileName);
+      blobHealedAt.set(a.fileName, Date.now());
+      if (a.upload) {
+        // The object hasn't landed, so no signed URL would answer for it; the
+        // store copy is the only address, and the upload's own swap follows
+        // when the bytes arrive.
+        const local = await localMediaUrl(projectId, a.fileName);
+        if (local && local !== src) uploading.set(a.id, local);
+        continue;
+      }
+      urls.set(a.fileName, await storedMediaUrl(projectId, a.fileName));
+    }
+    const st = useEditor.getState();
+    if (st.projectId !== projectId || !st.loaded) return;
+    console.debug(
+      `[cut-media] blob re-mint: ${urls.size + uploading.size} url(s) moved after a failed read`
+    );
+    if (urls.size > 0) st.applyMediaUrls(urls);
+    for (const [id, url] of uploading) {
+      const a = st.assets.find((x) => x.id === id);
+      if (!a) continue;
+      const thumbs = a.type === "image" && a.thumbs?.every((t) => t === src) ? [url] : a.thumbs;
+      st.updateAsset(id, { url, ...(thumbs !== a.thumbs ? { thumbs } : {}) });
+    }
+  } finally {
+    healingBlobs.delete(src);
+  }
+}
+
 /** A URL whose access expires and can be re-minted: an edge media token
  * (`?e=<expiry>&s=<signature>`). It heals by re-minting the batch; anything
  * else does not. */
@@ -168,7 +225,11 @@ function retryElement(el: HTMLImageElement | HTMLMediaElement, src: string, atte
  * expired, and only a re-mint heals that. The store swap moves the pool's
  * source onto the new URL, which is what gets reads going again. */
 export function reportMediaUrlError(src: string) {
-  if (!src || src.startsWith("blob:") || src.startsWith("data:")) return;
+  if (!src || src.startsWith("data:")) return;
+  if (src.startsWith("blob:")) {
+    void healBlobUrl(src);
+    return;
+  }
   if (!isExpiringUrl(src)) return;
   if (Date.now() - lastForcedAt < FORCED_GAP_MS) return;
   lastForcedAt = Date.now();
@@ -185,7 +246,13 @@ export function reportMediaUrlError(src: string) {
  * element on screen until the tab is reloaded. */
 export function reportMediaElementError(el: HTMLImageElement | HTMLMediaElement) {
   const src = el instanceof HTMLImageElement ? el.src : el.currentSrc || el.src;
-  if (!src || src.startsWith("blob:") || src.startsWith("data:")) return;
+  if (!src || src.startsWith("data:")) return;
+  if (src.startsWith("blob:")) {
+    // No element reload: a dead blob URL stays dead. The store swap is what
+    // repoints the element, through the asset it renders.
+    void healBlobUrl(src);
+    return;
+  }
   const expiring = isExpiringUrl(src);
   if (expiring && Date.now() - lastForcedAt >= FORCED_GAP_MS) {
     lastForcedAt = Date.now();

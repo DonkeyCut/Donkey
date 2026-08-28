@@ -26,6 +26,7 @@ import {
   listedResidencies,
   type Residency,
 } from "./residency";
+import { storedMediaUrl } from "./mediaSync";
 import { useEditor } from "./store";
 import { playheadAt } from "./playhead";
 import type {
@@ -930,12 +931,13 @@ export async function addTemplateToProject(
   at?: number,
 ): Promise<void> {
   const media = await copyTemplateMediaToProject(projectId, template);
+  const urls = await Promise.all(media.map((m) => storedMediaUrl(projectId, m.fileName)));
 
   const s = useEditor.getState();
   // Each copied media file (in template.media order) becomes a project asset;
   // the layer/audio media indices resolve against this array. Enrichment gives
   // the new clips their filmstrip thumbnails and waveform peaks.
-  const assetIds = media.map((m) => {
+  const assetIds = media.map((m, i) => {
     const asset: MediaAsset = {
       id: crypto.randomUUID().slice(0, 8),
       fileName: m.fileName,
@@ -944,7 +946,7 @@ export async function addTemplateToProject(
       duration: m.duration,
       width: m.width,
       height: m.height,
-      url: mediaUrl(projectId, m.fileName),
+      url: urls[i],
     };
     s.addAsset(asset);
     void enrichAsset(asset);
@@ -975,13 +977,20 @@ export async function importTemplateToProject(
 /** Materialize a project template onto the timeline at the playhead. Its media
  * already live in the project; assets are matched by file name and re-registered
  * if the Media entry was removed. */
-export function addProjectTemplateToTimeline(
+export async function addProjectTemplateToTimeline(
   projectId: string,
   template: LibraryTemplate,
   at?: number,
 ) {
+  const urls = await Promise.all(
+    template.media.map((m) =>
+      useEditor.getState().assets.some((a) => a.fileName === m.fileName)
+        ? null
+        : storedMediaUrl(projectId, m.fileName)
+    )
+  );
   const s = useEditor.getState();
-  const assetIds = template.media.map((m) => {
+  const assetIds = template.media.map((m, i) => {
     const existing = s.assets.find((a) => a.fileName === m.fileName);
     if (existing) return existing.id;
     const asset: MediaAsset = {
@@ -992,7 +1001,7 @@ export function addProjectTemplateToTimeline(
       duration: m.duration,
       width: m.width,
       height: m.height,
-      url: mediaUrl(projectId, m.fileName),
+      url: urls[i] ?? mediaUrl(projectId, m.fileName),
     };
     s.addAsset(asset);
     void enrichAsset(asset);

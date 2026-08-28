@@ -2074,7 +2074,7 @@ export function Timeline() {
         }
         if (tpl && projectId) {
           e.preventDefault();
-          if (tpl.scope === "project") addProjectTemplateToTimeline(projectId, tpl.template, t);
+          if (tpl.scope === "project") void addProjectTemplateToTimeline(projectId, tpl.template, t);
           else void addTemplateToProject(projectId, tpl.template, t).catch(() => {});
           return;
         }

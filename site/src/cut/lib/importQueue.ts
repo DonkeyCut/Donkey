@@ -21,9 +21,8 @@
 import { getBackend, type CutBackend } from "./backend";
 import { resolveRegisteredBlob } from "./backend/browser/registry";
 import type { PendingImport } from "./media";
-import { localMediaUrl } from "./mediaSync";
+import { storedMediaUrl } from "./mediaSync";
 import { useEditor } from "./store";
-import { mediaUrl } from "./types";
 
 /** Blob URLs owned by the browser store's registry stay alive for the whole
  * session; only tab-scoped object URLs are this queue's to revoke. */
@@ -184,20 +183,11 @@ async function run(job: Job) {
     jobs.delete(asset.id);
     // The stored file takes over from the source bytes, under the name the
     // copy resolved to (a dropped file reserved it up front; a remote import
-    // learns it here). When the browser store holds the bytes the asset keeps
-    // playing from disk. Otherwise it lands on the media origin in one move:
-    // the signed URL is minted before the swap, because the route URL
-    // re-signs and redirects on every range read and sits on no origin the
-    // chunk cache keeps, and each move repoints every reader on the asset.
-    // Filmstrips are self-contained frames and survive the swap; a still's
-    // single "frame" is the source itself, so it repoints with the asset.
-    const local = await localMediaUrl(job.projectId, fileName);
-    const url =
-      local ??
-      (await import("./mediaLinks")
-        .then((m) => m.mintLandedUrl(job.projectId, fileName))
-        .catch(() => null)) ??
-      mediaUrl(job.projectId, fileName);
+    // learns it here), at the address every stored file plays from. Each move
+    // repoints every reader on the asset. Filmstrips are self-contained frames
+    // and survive the swap; a still's single "frame" is the source itself, so
+    // it repoints with the asset.
+    const url = await storedMediaUrl(job.projectId, fileName, job.backend);
     // The stored copy is the same bytes at a new key: what this session
     // already read under the source's key — the play so far, the waveform and
     // filmstrip decodes — carries over before anything opens the new address,

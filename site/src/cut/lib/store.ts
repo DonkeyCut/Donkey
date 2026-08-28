@@ -2245,7 +2245,13 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             // links that expire.
             if (a.upload || resolveRegisteredBlob(a.url)) return a;
             const url = urls.get(a.fileName);
-            return url && url !== a.url ? { ...a, url } : a;
+            if (!url || url === a.url) return a;
+            // A still's filmstrip is its source URL, so it moves with it.
+            const thumbs =
+              a.type === "image" && a.thumbs?.length && a.thumbs.every((t) => t === a.url)
+                ? [url]
+                : a.thumbs;
+            return { ...a, url, ...(thumbs !== a.thumbs ? { thumbs } : {}) };
           }),
         }));
       } finally {

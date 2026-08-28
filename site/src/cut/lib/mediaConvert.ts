@@ -45,6 +45,7 @@ import { getBackend, hasLocalCompute, type CutBackend } from "./backend";
 import { resolveRegisteredBlob } from "./backend/browser/registry";
 import { pollCloudJob } from "./cloudJob";
 import { enrichAsset, uploadProjectMediaTo } from "./media";
+import { storedMediaUrl } from "./mediaSync";
 import {
   audioTrackOf,
   hasUndecodableVideo,
@@ -54,7 +55,7 @@ import {
   withMedia,
 } from "./mediaRead";
 import { useEditor } from "./store";
-import { mediaUrl, type MediaAsset } from "./types";
+import type { MediaAsset } from "./types";
 
 /** One file in a project, as the converter addresses it. */
 export interface ConvertSource {
@@ -173,7 +174,7 @@ export async function convertAssetToMp4(
   const patch: Partial<MediaAsset> = {
     fileName: made.fileName,
     name: mp4DisplayName(asset.name),
-    url: mediaUrl(projectId, made.fileName, backend),
+    url: await storedMediaUrl(projectId, made.fileName, backend),
     duration: made.duration,
     ...(made.width !== undefined ? { width: made.width } : {}),
     ...(made.height !== undefined ? { height: made.height } : {}),

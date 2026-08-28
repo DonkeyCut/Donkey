@@ -37,9 +37,15 @@ import {
   writeFileAt,
   type PendingUpload,
 } from "./backend/browser/opfs";
-import { registerBlobFile, registeredUrl, revokeRegistered } from "./backend/browser/registry";
+import {
+  forgetRegistered,
+  registerBlobFile,
+  registeredUrl,
+  revokeRegistered,
+} from "./backend/browser/registry";
+import { getBackend, type CutBackend } from "./backend";
 import { dropChunksMatching, evictChunkBytes, prefetchChunks } from "./chunkCache";
-import type { AssetType } from "./types";
+import { mediaUrl, type AssetType } from "./types";
 
 const mediaPath = (projectId: string, fileName: string) =>
   `/api/cut/projects/${projectId}/media/${encodeURIComponent(fileName)}`;
@@ -165,6 +171,35 @@ export async function localMediaUrl(projectId: string, fileName: string): Promis
   if (prior) return prior;
   const file = await localMediaFile(projectId, fileName);
   return file ? registerBlobFile(path, file) : null;
+}
+
+/** Forget the blob URL minted for a stored file. It failed to read, so the
+ * next resolve mints afresh from the file the store holds now. */
+export function forgetLocalMediaUrl(projectId: string, fileName: string): void {
+  forgetRegistered(mediaPath(projectId, fileName));
+}
+
+/** Where an asset plays a stored project file from, best address first: this
+ * browser's own copy, a signed link on the media origin (the one origin the
+ * chunk cache keeps), then the route URL, which re-signs and redirects on
+ * every read. Every asset that lands at rest — a drop, a generation, a freeze,
+ * a conversion, a template copy — is stamped through here, and a blob URL that
+ * failed to read is re-resolved through here, so a new kind of asset inherits
+ * the same address and the same healing. The engine serves its files itself. */
+export async function storedMediaUrl(
+  projectId: string,
+  fileName: string,
+  backend: CutBackend = getBackend()
+): Promise<string> {
+  if (backend.kind !== "local") {
+    const local = await localMediaUrl(projectId, fileName);
+    if (local) return local;
+    const signed = await import("./mediaLinks")
+      .then((m) => m.mintLandedUrl(projectId, fileName))
+      .catch(() => null);
+    if (signed) return signed;
+  }
+  return mediaUrl(projectId, fileName, backend);
 }
 
 /** A media delete's local half: the file, its chunks, its blob URL, its pin. */

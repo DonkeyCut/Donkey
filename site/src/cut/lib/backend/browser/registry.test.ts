@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   cancelRevoke,
+  forgetRegistered,
   holdRegistered,
   registerBlobFile,
   registeredUrl,
@@ -63,6 +64,19 @@ describe("blob-URL registry", () => {
     expect(registeredUrl(path)).toBe(url);
     revokeRegistered("/api/cut/projects/p5/");
     expect(registeredUrl(path)).toBe(null);
+  });
+
+  test("forgetting a path lands through a hold and frees it for a fresh mint", () => {
+    const path = "/api/cut/projects/p6/media/a.mp4";
+    const url = registerBlobFile(path, file("a.mp4"));
+    holdRegistered("/api/cut/projects/p6/");
+    forgetRegistered(path);
+    expect(registeredUrl(path)).toBe(null);
+    expect(resolveRegisteredBlob(url)).toBe(null);
+    const again = registerBlobFile(path, file("a.mp4"));
+    expect(again).not.toBe(url);
+    releaseRegistered("/api/cut/projects/p6/");
+    revokeRegistered(path);
   });
 
   test("unregistered lookups answer null", () => {

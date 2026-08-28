@@ -82,6 +82,17 @@ function sweep(prefix: string): void {
   }
 }
 
+/** Forget one registration now. Its blob URL failed to read — the File behind
+ * it no longer serves anything, held or not — so the next ask for the path
+ * mints afresh from what the store holds. */
+export function forgetRegistered(path: string): void {
+  const entry = byPath.get(path);
+  if (!entry) return;
+  byPath.delete(path);
+  byUrl.delete(entry.url);
+  URL.revokeObjectURL(entry.url);
+}
+
 /** A subtree coming back into use (its project re-opened while a hold kept it
  * alive): a revoke still waiting on it no longer applies. */
 export function cancelRevoke(prefix: string): void {
