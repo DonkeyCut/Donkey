@@ -3640,20 +3640,20 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             if (mi == null) continue;
             // Track-0 clips re-materialize onto track 0 (asClip), so a template
             // stands up its own video instead of an empty timeline.
-            layers.push({ media: mi, start: sp.start - start0, in: sp.clip.in, out: sp.clip.out, ...framingOf(sp.clip), muted: sp.clip.muted, speed: sp.clip.speed, track: 1, asClip: true });
+            layers.push({ media: mi, start: sp.start - start0, in: sp.clip.in, out: sp.clip.out, ...framingOf(sp.clip), muted: sp.clip.muted, speed: sp.clip.speed, sound: sp.clip.sound, track: 1, asClip: true });
           } else {
             const c = s.clips.find((x) => x.id === sel.id);
             if (!c) continue;
             const mi = mediaFor(c.assetId);
             if (mi == null) continue;
-            layers.push({ media: mi, start: c.start - start0, in: c.in, out: c.out, ...framingOf(c), muted: c.muted, speed: c.speed, track: c.track + 1 });
+            layers.push({ media: mi, start: c.start - start0, in: c.in, out: c.out, ...framingOf(c), muted: c.muted, speed: c.speed, sound: c.sound, track: c.track + 1 });
           }
         } else if (sel.kind === "audio") {
           const c = s.audioClips.find((x) => x.id === sel.id);
           if (!c) continue;
           const mi = mediaFor(c.assetId);
           if (mi == null) continue;
-          audio.push({ media: mi, start: c.start - start0, in: c.in, out: c.out, volume: c.volume, fadeIn: c.fadeIn, fadeOut: c.fadeOut, speed: c.speed, duck: c.duck, lane: c.lane });
+          audio.push({ media: mi, start: c.start - start0, in: c.in, out: c.out, volume: c.volume, fadeIn: c.fadeIn, fadeOut: c.fadeOut, speed: c.speed, sound: c.sound, duck: c.duck, lane: c.lane });
         } else if (sel.kind === "overlay") {
           const o = s.overlays.find((x) => x.id === sel.id);
           // Asset-backed stickers stay out: a template copies only the media
@@ -3783,6 +3783,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           muted: l.muted,
           ...templateFraming(l),
           ...(l.speed ? { speed: l.speed } : {}),
+          ...(l.sound ? { sound: l.sound } : {}),
         }));
       const topTrack = Math.max(0, ...overlayLayers(get().clips).map((c) => c.track));
       // Template layers store `track` as the source track + 1 (so a track-1
@@ -3800,6 +3801,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         muted: l.muted,
         ...templateFraming(l),
         ...(l.speed ? { speed: l.speed } : {}),
+        ...(l.sound ? { sound: l.sound } : {}),
       }));
       const newAudio: AudioClip[] = template.audio
         .filter((a) => assetIds[a.media])
@@ -3813,6 +3815,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           ...(a.fadeIn ? { fadeIn: a.fadeIn } : {}),
           ...(a.fadeOut ? { fadeOut: a.fadeOut } : {}),
           ...(a.speed ? { speed: a.speed } : {}),
+          ...(a.sound ? { sound: a.sound } : {}),
           ...(a.duck !== undefined && a.duck < 1 ? { duck: a.duck } : {}),
           ...(a.lane ? { lane: a.lane } : {}),
         }));

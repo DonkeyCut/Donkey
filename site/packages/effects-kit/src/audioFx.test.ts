@@ -5,6 +5,11 @@ import {
   audioFxBars,
   audioFxFilters,
   audioFxRecipe,
+  normalizeSound,
+  SOUND_EQ_BANDS,
+  SOUND_PRESETS,
+  soundFilters,
+  soundRecipe,
 } from "./audioFx";
 import { ALL_EFFECT_IDS, EFFECT_IDS, EFFECT_LABELS } from "./effects";
 
@@ -20,6 +25,8 @@ const LGPL_AUDIO_FILTERS = new Set([
   "equalizer",
   "tremolo",
   "acrusher",
+  "acompressor",
+  "alimiter",
   "volume",
 ]);
 
@@ -90,6 +97,59 @@ describe("audio effect recipes", () => {
     // Out-of-range amounts clamp rather than invert the recipe.
     expect(audioFxRecipe("echo", 5)!.taps[0].gain).toBe(loud.taps[0].gain);
     expect(audioFxRecipe("echo", -1)!.taps[0].gain).toBeGreaterThan(0);
+  });
+});
+
+describe("clip sound", () => {
+  test("a neutral treatment stores as absence", () => {
+    expect(normalizeSound(undefined)).toBeUndefined();
+    expect(normalizeSound({})).toBeUndefined();
+    expect(normalizeSound({ eq: [0, 0, 0, 0, 0, 0, 0] })).toBeUndefined();
+    expect(
+      normalizeSound({ compressor: { threshold: -18, ratio: 1, attack: 10, release: 80 } })
+    ).toBeUndefined();
+    expect(normalizeSound({ limiter: { ceiling: 0 } })).toBeUndefined();
+    expect(soundRecipe({})).toBeNull();
+    expect(soundFilters(undefined)).toBeNull();
+  });
+
+  test("the equalizer keeps one value per band and clamps it", () => {
+    const s = normalizeSound({ eq: [40, -40, 1] })!;
+    expect(s.eq).toHaveLength(SOUND_EQ_BANDS.length);
+    expect(s.eq![0]).toBe(12);
+    expect(s.eq![1]).toBe(-12);
+    expect(s.eq![2]).toBe(1);
+    expect(s.eq![6]).toBe(0);
+    // A flat band builds no section.
+    expect(soundRecipe(s)!.bands).toHaveLength(3);
+  });
+
+  test("every preset spells a chain from filters the shipped ffmpeg has", () => {
+    for (const p of SOUND_PRESETS) {
+      const chain = soundFilters(p.sound);
+      if (!p.sound) {
+        expect(chain).toBeNull();
+        continue;
+      }
+      expect(chain).toBeTruthy();
+      for (const name of filterNamesOf(chain!)) {
+        expect(LGPL_AUDIO_FILTERS.has(name)).toBe(true);
+      }
+    }
+  });
+
+  test("the voice preset runs a shelf, peaks, a shelf, then level control", () => {
+    const chain = soundFilters(SOUND_PRESETS.find((p) => p.id === "clear-voice")!.sound)!;
+    const names = filterNamesOf(chain);
+    expect(names[0]).toBe("lowshelf");
+    // The shelves carry the slope Web Audio's shelf nodes run at.
+    expect(chain).toContain("lowshelf=f=100:width_type=s:w=1:g=2");
+    expect(names[names.length - 3]).toBe("highshelf");
+    expect(names[names.length - 2]).toBe("acompressor");
+    expect(names[names.length - 1]).toBe("alimiter");
+    // Thresholds go to ffmpeg as linear amplitude.
+    expect(chain).toContain("acompressor=threshold=0.126:ratio=3:attack=10:release=80");
+    expect(chain).toContain("alimiter=limit=0.891");
   });
 });
 

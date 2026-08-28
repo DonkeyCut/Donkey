@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { AudioBuffer, OfflineAudioContext } from "node-web-audio-api";
-import { AUDIO_EFFECT_IDS, audioFxRecipe, buildAudioFx } from "./audioFx";
+import {
+  AUDIO_EFFECT_IDS,
+  audioFxRecipe,
+  buildAudioFx,
+  SOUND_PRESETS,
+  soundRecipe,
+  type AudioFxRecipe,
+} from "./audioFx";
 
 /**
  * What the recipes have to be: audible.
@@ -49,12 +56,13 @@ function voice(): AudioBuffer {
 
 const SOURCE = voice();
 
-async function render(effect: string | null): Promise<Float32Array> {
+async function render(effect: string | AudioFxRecipe | null): Promise<Float32Array> {
   const ctx = new OfflineAudioContext(1, Math.round(SECONDS * RATE), RATE);
   const node = ctx.createBufferSource();
   node.buffer = SOURCE;
   if (effect) {
-    const chain = buildAudioFx(ctx, audioFxRecipe(effect)!, 0);
+    const recipe = typeof effect === "string" ? audioFxRecipe(effect)! : effect;
+    const chain = buildAudioFx(ctx, recipe, 0);
     node.connect(chain.input);
     chain.output.connect(ctx.destination);
   } else {
@@ -146,6 +154,22 @@ describe("every audio effect is audible at the strength a drop places", () => {
 
     // A wobble that only grazes the level is heard as nothing at all.
     expect(swing(await render("wobble")) - swing(dry)).toBeGreaterThan(4);
+  });
+
+  test("the voice preset is audible and holds its ceiling", async () => {
+    const dry = await render(null);
+    const recipe = soundRecipe(SOUND_PRESETS.find((p) => p.id === "clear-voice")!.sound)!;
+    const wet = await render(recipe);
+    expect(change(wet, dry)).toBeGreaterThan(-26);
+    // The limiter's ceiling is −1 dBFS; nothing gets past it by more than the
+    // node's own overshoot.
+    let peak = 0;
+    for (const v of wet) peak = Math.max(peak, Math.abs(v));
+    expect(dB(peak)).toBeLessThan(0);
+    // A compressor flattens the syllables: the loud ones come down toward
+    // the quiet ones, so the level swing narrows.
+    const flat = await render({ ...recipe, limiter: undefined, bands: [] });
+    expect(swing(flat)).toBeLessThan(swing(dry));
   });
 
   test("the rooms are still sounding after the sound that made them stops", async () => {

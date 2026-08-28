@@ -509,6 +509,7 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
         start: sp.start,
         volume: sp.clip.volume ?? 1,
         speed: sp.clip.speed,
+        sound: sp.clip.sound,
         muted: sp.clip.muted || assetIsSilent(sp.asset),
         fadeIn: ramps[i].head,
         fadeOut: ramps[i].tail,
@@ -531,6 +532,7 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
       speed: a.speed,
       fadeIn: a.fadeIn,
       fadeOut: a.fadeOut,
+      sound: a.sound,
       duck: a.duck,
     });
   }
@@ -548,6 +550,7 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
             muted: sp.clip.muted || !!sp.clip.hidden || assetIsSilent(sp.asset),
             speed: sp.clip.speed,
             volume: sp.clip.volume,
+            sound: sp.clip.sound,
             transition: sp.transitionOut,
             soundCross: sp.soundOut,
             soundBack: sp.soundBack,

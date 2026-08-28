@@ -17,7 +17,13 @@
  * words that the exported audio says at another time.
  */
 
-import { AUDIO_FX_RAMP, audioFxRecipe, buildAudioFx } from "@donkeycut/effects-kit";
+import {
+  AUDIO_FX_RAMP,
+  audioFxRecipe,
+  buildAudioFx,
+  soundRecipe,
+  type ClipSound,
+} from "@donkeycut/effects-kit";
 import { decodeAudioSpan } from "./mediaRead";
 import { timeStretch } from "./timeStretch";
 
@@ -31,6 +37,8 @@ export interface MixClip {
   speed?: number;
   /** Gain on the clip's own audio; absent = 1. */
   volume?: number;
+  /** The clip's own treatment, run on its sound before the fades. */
+  sound?: ClipSound;
   /** Cross-dissolve overlap into the next clip, timeline seconds. */
   transition?: number;
   /** Half the cross dissolve into the next clip, timeline seconds: the two
@@ -64,6 +72,7 @@ export interface MixItem {
   muted?: boolean;
   fadeIn?: number;
   fadeOut?: number;
+  sound?: ClipSound;
   /** While this item is audible, everything else drops to this gain. */
   duck?: number;
 }
@@ -377,18 +386,29 @@ export async function renderMix(spec: MixSpec, opts: MixOptions): Promise<AudioB
 
   // Each buffer holds exactly the span its entry plays, already fitted to the
   // time that entry occupies, so it starts at its own zero and runs at 1.
+  // The entry's own treatment runs on its sound alone, between the source and
+  // the gain that carries its level, fades and crossings — the order the
+  // preview's voice and the ffmpeg stanza both keep.
   const play = (
     buf: AudioBuffer,
     at: number,
     duration: number,
     into: AudioNode,
+    sound: ClipSound | undefined,
     shape: (gain: GainNode) => void
   ) => {
     const src = ctx.createBufferSource();
     src.buffer = buf;
     const gain = ctx.createGain();
     shape(gain);
-    src.connect(gain);
+    const recipe = soundRecipe(sound);
+    if (recipe) {
+      const fx = buildAudioFx(ctx, recipe, Math.max(0, at));
+      src.connect(fx.input);
+      fx.output.connect(gain);
+    } else {
+      src.connect(gain);
+    }
     gain.connect(into);
     src.start(Math.max(0, at), 0, Math.max(0, duration));
   };
@@ -400,7 +420,7 @@ export async function renderMix(spec: MixSpec, opts: MixOptions): Promise<AudioB
     if (!buf) continue; // muted, silent, or a gap spacer: only shapes time
     const from = g.at - g.back;
     const end = g.at + g.dur;
-    play(fitted(key, buf, speedOf(c.speed)), from, g.dur + g.back + g.ahead, ducked, (gain) => {
+    play(fitted(key, buf, speedOf(c.speed)), from, g.dur + g.back + g.ahead, ducked, c.sound, (gain) => {
       const level = Math.max(0, c.volume ?? 1);
       gain.gain.value = level;
       // A crossing and a fade never share an edge — the cut carries one
@@ -431,7 +451,7 @@ export async function renderMix(spec: MixSpec, opts: MixOptions): Promise<AudioB
     // A voiceover that ducks everything else is not itself ducked; it still
     // lands on the bus, so the effect elements treat it with the rest.
     const into = a.duck !== undefined && a.duck < 1 ? bus : ducked;
-    play(fitted(key, buf, speedOf(a.speed)), a.start - back, dur + back + ahead, into, (gain) => {
+    play(fitted(key, buf, speedOf(a.speed)), a.start - back, dur + back + ahead, into, a.sound, (gain) => {
       const level = Math.max(0, a.volume);
       gain.gain.value = level;
       const fIn = Math.min(a.fadeIn ?? 0, dur);

@@ -321,6 +321,53 @@ describe("export filtergraph timebases", () => {
   });
 });
 
+describe("clip sound in the filtergraph", () => {
+  const sound = {
+    eq: [2, 1, -2, -1, 1.5, 1, -1],
+    compressor: { threshold: -18, ratio: 3, attack: 10, release: 80 },
+    limiter: { ceiling: -1 },
+  };
+
+  test("a treated track-0 clip runs its chain before its level, pad and fades", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { sound, volume: 0.8, animOut: { style: "fade", seconds: 0.4 } })],
+    });
+    const stanza = g.find((f) => f.startsWith("[0:a]"))!;
+    expect(stanza).toBeTruthy();
+    const at = (s: string) => stanza.indexOf(s);
+    expect(at("lowshelf=f=100")).toBeGreaterThan(at("aformat="));
+    expect(at("acompressor=")).toBeGreaterThan(at("highshelf="));
+    expect(at("alimiter=")).toBeGreaterThan(at("acompressor="));
+    expect(at("volume=0.8")).toBeGreaterThan(at("alimiter="));
+    expect(at("apad=")).toBeGreaterThan(at("volume=0.8"));
+    expect(at("afade=t=out")).toBeGreaterThan(at("apad="));
+  });
+
+  test("a treated soundtrack clip and overlay clip carry the same chain", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4")],
+      overlayVideos: [
+        { file: "ov.mp4", in: 0, out: 2, start: 1, track: 1, muted: false, sound },
+      ],
+      audio: [{ file: "music.mp3", in: 0, out: 5, start: 0, volume: 0.8, sound }],
+    });
+    const treated = g.filter((f) => f.includes("alimiter="));
+    expect(treated).toHaveLength(2);
+    // Every stanza treats the resampled stream, so one clip's treatment
+    // sounds the same whichever list it came from.
+    for (const f of treated) {
+      expect(f.indexOf("alimiter=")).toBeLessThan(f.indexOf("adelay="));
+      expect(f.indexOf("aformat=")).toBeLessThan(f.indexOf("lowshelf="));
+    }
+  });
+
+  test("an untreated clip spells no dynamics filter", async () => {
+    const g = await graphFor({ clips: [clip("a.mp4", { sound: { eq: [0, 0, 0, 0, 0, 0, 0] } })] });
+    expect(g.join(";")).not.toContain("acompressor=");
+    expect(g.join(";")).not.toContain("equalizer=");
+  });
+});
+
 describe("clip masks in the filtergraph", () => {
   test("a masked track-0 clip trims onto a black base and keeps the join sound", async () => {
     const g = await graphFor({

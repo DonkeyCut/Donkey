@@ -594,6 +594,7 @@ export async function buildExportPayload(
     out: sp.clip.out,
     muted: sp.clip.muted,
     volume: sp.clip.volume ?? 1,
+    sound: sp.clip.sound,
     fit: sp.clip.fit ?? "fit",
     zoom: clipZoom(sp.clip),
     panX: sp.clip.panX ?? 0,
@@ -801,6 +802,7 @@ export async function buildExportPayload(
           panY: c.panY ?? 0,
           muted: c.muted,
           volume: c.volume,
+          sound: c.sound,
           speed: c.speed,
           image: assetById.get(c.assetId)!.type === "image",
           grade: normalizeGrade(c.grade),
@@ -899,6 +901,7 @@ export async function buildExportPayload(
       fadeIn: a.fadeIn ?? 0,
       fadeOut: a.fadeOut ?? 0,
       speed: a.speed,
+      sound: a.sound,
       duck: a.duck,
     }));
 

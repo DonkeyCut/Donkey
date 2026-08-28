@@ -5,6 +5,7 @@ import {
   stampOverlayKinds,
   stripDefaultOverlayKinds,
   type ClipRemoval,
+  type ClipSound,
   type ColorGrade,
   type EffectOverlay,
   type LookStyle,
@@ -508,6 +509,9 @@ export interface VideoClip {
   muted: boolean;
   /** Gain on the clip's own audio, 0..3; absent = 1 (unchanged). */
   volume?: number;
+  /** The clip's own sound treatment — equalizer, compressor, limiter — run
+   * on its sound alone, before its fades; absent = untouched. */
+  sound?: ClipSound;
   /** How the clip meets its region: letterboxed ("fit", default) or scaled to
    * cover it ("fill", cropping the overflow). */
   fit?: "fit" | "fill";
@@ -576,7 +580,7 @@ export interface VideoClip {
 // Color grading (the dual-renderer math) lives in the effects kit; the model
 // types and ranges re-export here so doc-model consumers keep one import.
 export { GRADE_BASIC_FIELDS, GRADE_HUE_MAX, GRADE_MAX, HSL_BANDS } from "@donkeycut/effects-kit";
-export type { ColorGrade, GradePresetRef, HslBand } from "@donkeycut/effects-kit";
+export type { ClipSound, ColorGrade, GradePresetRef, HslBand } from "@donkeycut/effects-kit";
 
 // Background removal follows the same split: math and model in the kit, the
 // doc-model types re-exported here.
@@ -969,6 +973,8 @@ export interface AudioClip {
   volume: number; // 0..3
   fadeIn?: number; // seconds, ramp up from the clip start
   fadeOut?: number; // seconds, ramp down into the clip end
+  /** Equalizer, compressor, limiter on this clip's sound; absent = untouched. */
+  sound?: ClipSound;
   /** Muted from the final mix but kept on the timeline (grayed). */
   hidden?: boolean;
   /** Playback rate, default 1 (absent). Set only when audio was detached from
@@ -1013,6 +1019,7 @@ export interface TemplateLayer {
   opacity?: number;
   muted: boolean;
   speed?: number;
+  sound?: ClipSound;
   track: number;
   /** Came from video track 0 — re-materializes as a timeline clip, not an
    * overlay, so a template stands up its own footage. */
@@ -1027,6 +1034,7 @@ export interface TemplateAudio {
   fadeIn?: number;
   fadeOut?: number;
   speed?: number;
+  sound?: ClipSound;
   duck?: number;
   lane?: number;
 }
@@ -1041,6 +1049,10 @@ export interface LibraryTemplate {
   audio: TemplateAudio[];
   texts: Overlay[];
   cues: SubtitleCue[];
+  /** A saved sound treatment: a template carrying only this is a sound
+   * preset (see soundPresets.ts), listed in the audio inspector and kept
+   * off the template shelf. */
+  sound?: ClipSound;
 }
 /** What the client sends to save a selection (media are project file names). */
 export type TemplateSaveInput = Omit<LibraryTemplate, "id" | "addedAt">;

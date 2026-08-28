@@ -35,7 +35,13 @@
  * chain runs them in.
  */
 
-import { audioFxRecipe, buildAudioFx, type AudioFxNodes } from "@donkeycut/effects-kit";
+import {
+  audioFxRecipe,
+  buildAudioFx,
+  soundRecipe,
+  type AudioFxNodes,
+  type ClipSound,
+} from "@donkeycut/effects-kit";
 import type { WrappedAudioBuffer } from "mediabunny";
 import { assembleAudio, decodeAudioSpan, openAudioWalk, type AudioWalk } from "./mediaRead";
 import { timeStretch } from "./timeStretch";
@@ -80,6 +86,9 @@ export interface Voice {
   speed: number;
   /** Everything the frame plan says about how loud it is right now. */
   gain: number;
+  /** The clip's own treatment, run on this voice alone before it joins the
+   * bus. */
+  sound?: ClipSound;
 }
 
 interface Scheduled {
@@ -94,7 +103,18 @@ interface LiveVoice {
   in: number;
   out: number;
   start: number;
+  /** Where this voice's scheduled windows land. The clip's own treatment
+   * runs between here and the gain, so it hears the clip at its recorded
+   * level — the same place the fold and the ffmpeg stanza run it, ahead of
+   * the level, fades and duck the gain carries. */
+  head: GainNode;
   gain: GainNode;
+  /** The treatment's chain, and what it was built from, so a frame that
+   * changes nothing about it touches no nodes. Rebuilt in place when the
+   * treatment changes: the windows already scheduled play on through the
+   * new chain, since they are connected to the head rather than to it. */
+  fx: AudioFxNodes | null;
+  soundKey: string;
   /** Windows already handed to the context, oldest first. */
   windows: Scheduled[];
   /** Timeline time everything scheduled so far runs out at. */
@@ -553,6 +573,7 @@ export class PreviewMixer {
       const live = this.voices.get(v.id) ?? this.open(v, t);
       if (!live) continue;
       live.gain.gain.value = Math.max(0, Math.min(3, v.gain));
+      this.treat(live, v.sound);
       // A read that hangs holds the voice as surely as one that fails, and it
       // holds it quietly: nothing else would ever notice, and the voice would
       // wait on it for the rest of the play.
@@ -611,6 +632,7 @@ export class PreviewMixer {
       const live = this.voices.get(v.id) ?? this.open(v, t);
       if (!live) continue;
       live.gain.gain.value = 0;
+      this.treat(live, v.sound);
       const from = Math.max(v.start, t);
       if (live.scheduled !== from) this.reaim(live, from);
       const source = live.in + (from - live.start) * live.speed;
@@ -678,13 +700,18 @@ export class PreviewMixer {
     const gain = ctx.createGain();
     gain.gain.value = 0;
     gain.connect(this.bus);
+    const head = ctx.createGain();
+    head.connect(gain);
     const live: LiveVoice = {
       url: v.url,
       speed: v.speed,
       in: v.in,
       out: v.out,
       start: v.start,
+      head,
       gain,
+      fx: null,
+      soundKey: "",
       windows: [],
       // Scheduling begins where the playhead is: a voice opened mid-clip —
       // playback started inside it, or the clip edited while audible — decodes
@@ -706,7 +733,43 @@ export class PreviewMixer {
   private release(live: LiveVoice): void {
     this.stopWindows(live);
     this.moved(live);
+    live.head.disconnect();
     live.gain.disconnect();
+    if (live.fx) {
+      live.fx.input.disconnect();
+      live.fx.output.disconnect();
+      live.fx = null;
+    }
+  }
+
+  /**
+   * Put the clip's sound treatment between the voice's gain and the bus, or
+   * take it out when the clip has none. Keyed on the treatment itself, so
+   * every frame that leaves it alone costs a string compare and nothing
+   * else, and a slider drag rebuilds a chain a few nodes long.
+   */
+  private treat(live: LiveVoice, sound: ClipSound | undefined): void {
+    const ctx = this.ctx;
+    const bus = this.bus;
+    if (!ctx || !bus) return;
+    const key = sound ? JSON.stringify(sound) : "";
+    if (key === live.soundKey) return;
+    live.soundKey = key;
+    live.head.disconnect();
+    if (live.fx) {
+      live.fx.input.disconnect();
+      live.fx.output.disconnect();
+      live.fx = null;
+    }
+    const recipe = soundRecipe(sound);
+    if (!recipe) {
+      live.head.connect(live.gain);
+      return;
+    }
+    const fx = buildAudioFx(ctx, recipe, ctx.currentTime);
+    live.head.connect(fx.input);
+    fx.output.connect(live.gain);
+    live.fx = fx;
   }
 
   private stopVoices(): void {
@@ -794,7 +857,7 @@ export class PreviewMixer {
       }
       const node = this.ctx.createBufferSource();
       node.buffer = buffer;
-      node.connect(live.gain);
+      node.connect(live.head);
       const at = this.anchor.ctx + (from - this.anchor.timeline);
       const now = this.ctx.currentTime;
       if (at >= now) {

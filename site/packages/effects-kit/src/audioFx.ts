@@ -64,13 +64,22 @@ export interface AudioBandSpec {
   db?: number;
 }
 
+/** Downward compression: everything over `thresholdDb` is pulled toward it
+ * by `ratio`, reacting over `attackMs` and letting go over `releaseMs`. */
+export interface AudioCompressorSpec {
+  thresholdDb: number;
+  ratio: number;
+  attackMs: number;
+  releaseMs: number;
+}
+
 /**
  * What an audio effect does, in the terms both renderers can build.
  *
  * The delay taps are a finite echo: the dry signal plus each tap's delayed
  * copy at its own gain, which is exactly what ffmpeg's `aecho` computes, so
- * one description drives both. Bands, tremolo, bit crush and makeup gain run
- * after the taps, in that order.
+ * one description drives both. Bands, tremolo, bit crush, the compressor, the
+ * limiter and makeup gain run after the taps, in that order.
  */
 export interface AudioFxRecipe {
   /** Gain on the untreated signal that the taps are added to. */
@@ -83,8 +92,161 @@ export interface AudioFxRecipe {
   tremolo?: { hz: number; depth: number };
   /** Bit-depth reduction, and how much of the crushed signal is heard. */
   crush?: { bits: number; mix: number };
+  /** Level control after the filters. */
+  compressor?: AudioCompressorSpec;
+  /** A ceiling in dBFS the signal is held under. */
+  limiter?: { ceilingDb: number };
   /** Makeup gain on the finished chain; absent = 1. */
   gain?: number;
+}
+
+/* ------------------------------------------------------- clip sound */
+
+/**
+ * A clip's own sound treatment — the Inspector's Sound quality section.
+ *
+ * Where an effect element treats the mix under a window, this rides one clip
+ * and runs on that clip's sound alone, before its fades and the duck. Every
+ * stage is optional and a fully neutral treatment is stored as absence, so a
+ * clip that was never touched carries nothing.
+ */
+export interface ClipSound {
+  /** Gain in dB per `SOUND_EQ_BANDS` entry, in that order. Absent = flat. */
+  eq?: number[];
+  /** dB, ratio (:1), attack ms, release ms. */
+  compressor?: { threshold: number; ratio: number; attack: number; release: number };
+  /** Ceiling in dBFS. */
+  limiter?: { ceiling: number };
+}
+
+/** The fixed band layout of the clip equalizer: a shelf at each end and
+ * peaks between, spaced where speech lives. Fixed frequencies keep a preset
+ * to seven numbers, which is what the sliders, the tool schema and a saved
+ * preset all carry. */
+export const SOUND_EQ_BANDS: {
+  hz: number;
+  type: AudioBandSpec["type"];
+  label: string;
+  /** The region of the spectrum the band sits in, named the way a mixer
+   * names it. */
+  group: "Low" | "Mids" | "Presence" | "Highs";
+}[] = [
+  { hz: 100, type: "lowshelf", label: "100 Hz", group: "Low" },
+  { hz: 200, type: "peaking", label: "200 Hz", group: "Low" },
+  { hz: 400, type: "peaking", label: "400 Hz", group: "Mids" },
+  { hz: 1000, type: "peaking", label: "1 kHz", group: "Mids" },
+  { hz: 3000, type: "peaking", label: "3 kHz", group: "Presence" },
+  { hz: 5000, type: "peaking", label: "5 kHz", group: "Presence" },
+  { hz: 10000, type: "highshelf", label: "10 kHz", group: "Highs" },
+];
+
+/** A peak's width: about an octave and a half, wide enough that two adjacent
+ * bands moved together read as one shape. */
+const SOUND_EQ_Q = 1.0;
+
+export const SOUND_EQ_DB_RANGE = 12;
+/** What the stage sliders offer. A ratio of 1:1 and a ceiling of 0 dBFS are
+ * the stage doing nothing, and `normalizeSound` stores them as absence, so
+ * the ranges stop short of both — dragging to an endpoint shapes the sound
+ * rather than deleting the stage mid-gesture. Switching the section off is
+ * how a stage goes away. */
+export const SOUND_COMPRESSOR_RANGE = {
+  threshold: { min: -60, max: -1 },
+  ratio: { min: 1.5, max: 20 },
+  attack: { min: 0.1, max: 200 },
+  release: { min: 5, max: 1000 },
+};
+export const SOUND_LIMITER_RANGE = { ceiling: { min: -20, max: -0.1 } };
+
+/** The settings a compressor or limiter opens at when its switch is turned
+ * on — the voice preset's numbers, since that is what the switch is for. */
+export const SOUND_COMPRESSOR_DEFAULT = { threshold: -18, ratio: 3, attack: 10, release: 80 };
+export const SOUND_LIMITER_DEFAULT = { ceiling: -1 };
+
+/** The treatments shipped with the editor. `sound` undefined is the flat one. */
+export const SOUND_PRESETS: { id: string; name: string; sound: ClipSound | undefined }[] = [
+  { id: "flat", name: "Flat", sound: undefined },
+  {
+    id: "clear-voice",
+    name: "Clear voice",
+    sound: {
+      eq: [2, 1, -2, -1, 1.5, 1, -1],
+      compressor: SOUND_COMPRESSOR_DEFAULT,
+      limiter: SOUND_LIMITER_DEFAULT,
+    },
+  },
+];
+
+export const soundPresetById = (id: string) => SOUND_PRESETS.find((p) => p.id === id);
+
+const clampTo = (v: number, r: { min: number; max: number }) =>
+  Math.max(r.min, Math.min(r.max, v));
+
+/**
+ * A sound with every stage clamped into range and every neutral stage
+ * dropped, or undefined when nothing is left: the one shape the doc stores.
+ * A flat equalizer, a compressor at 1:1 and a limiter at 0 dB all do nothing,
+ * so they are not kept.
+ */
+export function normalizeSound(sound: ClipSound | undefined | null): ClipSound | undefined {
+  if (!sound) return undefined;
+  const out: ClipSound = {};
+  if (sound.eq) {
+    const eq = SOUND_EQ_BANDS.map((_, i) => {
+      const v = Number(sound.eq![i] ?? 0);
+      return Number.isFinite(v) ? clampTo(v, { min: -SOUND_EQ_DB_RANGE, max: SOUND_EQ_DB_RANGE }) : 0;
+    });
+    if (eq.some((v) => Math.abs(v) > 1e-3)) out.eq = eq;
+  }
+  if (sound.compressor) {
+    const c = sound.compressor;
+    const r = SOUND_COMPRESSOR_RANGE;
+    if (Number.isFinite(c.ratio) && c.ratio > 1 + 1e-3) {
+      out.compressor = {
+        threshold: clampTo(c.threshold, r.threshold),
+        ratio: clampTo(c.ratio, r.ratio),
+        attack: clampTo(c.attack, r.attack),
+        release: clampTo(c.release, r.release),
+      };
+    }
+  }
+  if (sound.limiter) {
+    const raw = sound.limiter.ceiling;
+    if (Number.isFinite(raw) && raw < -1e-3) {
+      out.limiter = { ceiling: clampTo(raw, SOUND_LIMITER_RANGE.ceiling) };
+    }
+  }
+  return out.eq || out.compressor || out.limiter ? out : undefined;
+}
+
+/** The recipe a clip's sound builds, or null when it is neutral. */
+export function soundRecipe(sound: ClipSound | undefined | null): AudioFxRecipe | null {
+  const s = normalizeSound(sound);
+  if (!s) return null;
+  const bands: AudioBandSpec[] = [];
+  if (s.eq) {
+    SOUND_EQ_BANDS.forEach((b, i) => {
+      const db = s.eq![i];
+      if (Math.abs(db) < 1e-3) return;
+      bands.push({ type: b.type, hz: b.hz, db, ...(b.type === "peaking" ? { q: SOUND_EQ_Q } : {}) });
+    });
+  }
+  return {
+    dry: 1,
+    taps: [],
+    bands,
+    ...(s.compressor
+      ? {
+          compressor: {
+            thresholdDb: s.compressor.threshold,
+            ratio: s.compressor.ratio,
+            attackMs: s.compressor.attack,
+            releaseMs: s.compressor.release,
+          },
+        }
+      : {}),
+    ...(s.limiter ? { limiter: { ceilingDb: s.limiter.ceiling } } : {}),
+  };
 }
 
 /** How long the treated signal takes to come in and go out at an effect
@@ -221,14 +383,20 @@ function bandFilter(b: AudioBandSpec): string {
       return `lowpass=f=${fmt(b.hz)}:width_type=q:w=${fmt(q)}`;
     case "highpass":
       return `highpass=f=${fmt(b.hz)}:width_type=q:w=${fmt(q)}`;
+    // Web Audio's shelf nodes ignore Q and run at slope S=1; ffmpeg defaults
+    // to a Q width of 0.5, which is a different curve at the corner. Spelling
+    // the slope out is what keeps the preview and the export on one sound.
     case "lowshelf":
-      return `lowshelf=f=${fmt(b.hz)}:g=${fmt(b.db ?? 0)}`;
+      return `lowshelf=f=${fmt(b.hz)}:width_type=s:w=1:g=${fmt(b.db ?? 0)}`;
     case "highshelf":
-      return `highshelf=f=${fmt(b.hz)}:g=${fmt(b.db ?? 0)}`;
+      return `highshelf=f=${fmt(b.hz)}:width_type=s:w=1:g=${fmt(b.db ?? 0)}`;
     case "peaking":
       return `equalizer=f=${fmt(b.hz)}:width_type=q:w=${fmt(q)}:g=${fmt(b.db ?? 0)}`;
   }
 }
+
+/** dBFS as the linear amplitude ffmpeg's dynamics filters take. */
+const linear = (db: number) => Math.pow(10, db / 20);
 
 /**
  * The effect as one ffmpeg audio chain — comma-joined filters, no stream
@@ -238,7 +406,17 @@ function bandFilter(b: AudioBandSpec): string {
  */
 export function audioFxFilters(effect: string, amount?: number): string | null {
   const r = audioFxRecipe(effect, amount);
-  if (!r) return null;
+  return r ? recipeFilters(r) : null;
+}
+
+/** A clip's sound as one ffmpeg chain, or null when it is neutral. */
+export function soundFilters(sound: ClipSound | undefined | null): string | null {
+  const r = soundRecipe(sound);
+  return r ? recipeFilters(r) : null;
+}
+
+/** One recipe spelled as ffmpeg filters, in the order the graph builds them. */
+export function recipeFilters(r: AudioFxRecipe): string | null {
   const steps: string[] = [];
   if (r.taps.length > 0) {
     // aecho computes in_gain*dry + out_gain*Σ decay_i·delayed_i, which is the
@@ -256,6 +434,20 @@ export function audioFxFilters(effect: string, amount?: number): string | null {
   for (const b of r.bands) steps.push(bandFilter(b));
   if (r.tremolo) steps.push(`tremolo=f=${fmt(r.tremolo.hz)}:d=${fmt(r.tremolo.depth)}`);
   if (r.crush) steps.push(`acrusher=bits=${fmt(r.crush.bits)}:mix=${fmt(r.crush.mix)}:mode=lin`);
+  if (r.compressor) {
+    const c = r.compressor;
+    // acompressor's threshold is linear amplitude; attack and release are ms.
+    // No makeup, so the two sides agree: the Web Audio node adds none either.
+    steps.push(
+      `acompressor=threshold=${fmt(linear(c.thresholdDb))}:ratio=${fmt(c.ratio)}` +
+        `:attack=${fmt(c.attackMs)}:release=${fmt(c.releaseMs)}:knee=2:makeup=1`
+    );
+  }
+  if (r.limiter) {
+    // A lookahead of a few milliseconds, the same as the browser's dynamics
+    // node carries, and no automatic level: the ceiling is the whole point.
+    steps.push(`alimiter=limit=${fmt(linear(r.limiter.ceilingDb))}:attack=5:release=50:level=false`);
+  }
   if (r.gain !== undefined && r.gain !== 1) steps.push(`volume=${fmt(r.gain)}`);
   return steps.length > 0 ? steps.join(",") : null;
 }
@@ -360,6 +552,31 @@ export function buildAudioFx(
     node.connect(clean);
     clean.connect(mixed);
     node = mixed;
+  }
+
+  if (recipe.compressor) {
+    const c = recipe.compressor;
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = c.thresholdDb;
+    comp.ratio.value = Math.max(1, Math.min(20, c.ratio));
+    comp.knee.value = 2;
+    comp.attack.value = c.attackMs / 1000;
+    comp.release.value = c.releaseMs / 1000;
+    node.connect(comp);
+    node = comp;
+  }
+
+  if (recipe.limiter) {
+    // Web Audio has no limiter node; a hard-knee compressor at the steepest
+    // ratio the node takes, reacting at once, holds the ceiling the same way.
+    const lim = ctx.createDynamicsCompressor();
+    lim.threshold.value = recipe.limiter.ceilingDb;
+    lim.ratio.value = 20;
+    lim.knee.value = 0;
+    lim.attack.value = 0.001;
+    lim.release.value = 0.05;
+    node.connect(lim);
+    node = lim;
   }
 
   if (recipe.gain !== undefined && recipe.gain !== 1) {

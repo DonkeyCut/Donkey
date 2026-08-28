@@ -4,7 +4,7 @@ import path from "node:path";
 import { atempoChain, hasStream, num, videoColorInfo } from "./util";
 import { assertGraphSafe, fexpr } from "./filterGraph";
 import { CLIP_MAX_ZOOM, projectFadeSeconds, regionPx, TRANSITION_XFADE, TRANSITION_ZOOM, type ColorGrade, type TransitionStyle } from "../lib/types";
-import { audioFxFilters, buildGradeLut, effectFilterLines, gradeKey, gradeNeedsLut, gradeToFfmpegFilter, isAudioEffect, lookFilterLines, lutToCube, shortestTurn, sortedKeys, type OverlayKey } from "@donkeycut/effects-kit";
+import { audioFxFilters, buildGradeLut, effectFilterLines, gradeKey, gradeNeedsLut, gradeToFfmpegFilter, isAudioEffect, lookFilterLines, lutToCube, shortestTurn, sortedKeys, soundFilters, type ClipSound, type OverlayKey } from "@donkeycut/effects-kit";
 
 // The render pipeline itself: spec in, finished mp4 out. Shared by the local
 // engine's job registry (jobs.ts) and the cloud render worker, which stage
@@ -40,6 +40,14 @@ function crossFilters(exprs: string[]): string {
   return `,asetnsamples=n=256:p=0,volume=volume=${fexpr(live.join("*"))}:eval=frame`;
 }
 
+/** A clip's own sound treatment as a chain fragment ending in a comma, or
+ * nothing: spliced into the clip's stanza ahead of its level, fades and
+ * crossings — where the preview's voice and the browser fold run it too. */
+const soundChain = (sound: ClipSound | undefined): string => {
+  const chain = soundFilters(sound);
+  return chain ? `${chain},` : "";
+};
+
 export interface ExportSpec {
   projectId: string;
   /** Where the render lands instead of a stamped file in exports/: "hls" is the
@@ -68,6 +76,8 @@ export interface ExportSpec {
     muted: boolean;
     /** Gain on the clip's own audio, 0..3; absent = 1 (unchanged). */
     volume?: number;
+    /** The clip's own sound treatment — the kit builds the chain from it. */
+    sound?: ClipSound;
     /** "fit" letterboxes (default); "fill" covers the region and crops. */
     fit?: "fit" | "fill";
     /** How far the picture zooms past the size its box fits it to (1 = none).
@@ -163,6 +173,7 @@ export interface ExportSpec {
     muted: boolean;
     /** Gain on the clip's own audio, 0..3; absent = 1 (unchanged). */
     volume?: number;
+    sound?: ClipSound;
     speed?: number;
     /** Transition ramps, timeline seconds from this overlay's head/tail. On
      * an upper track a fade is an alpha fade (the tracks beneath show
@@ -224,6 +235,7 @@ export interface ExportSpec {
     fadeOut?: number;
     /** Playback rate (detached-audio clips inherit their video clip's speed). */
     speed?: number;
+    sound?: ClipSound;
     /** Voiceover ducking: while this clip plays, every other sound drops to
      * this gain (0..1). Ducking clips never duck each other. */
     duck?: number;
@@ -1308,7 +1320,7 @@ export async function runExport(
     }
     if (!c.muted && !c.hidden && audioPresence.get(c.file)) {
       const tempo = speed !== 1 ? `${atempoChain(speed)},` : "";
-      const vol = (c.volume ?? 1) !== 1 ? `volume=${num(c.volume ?? 1)},` : "";
+      const vol = `${soundChain(c.sound)}${(c.volume ?? 1) !== 1 ? `volume=${num(c.volume ?? 1)},` : ""}`;
       // The picture's fade edges carry the sound with them; zoom edges don't.
       const afades =
         (ahf > 0.01 ? `,afade=t=in:st=0:d=${num(ahf)}` : "") +
@@ -1426,8 +1438,9 @@ export async function runExport(
     filters.push(
       `[${inputIndex.get(src.file)!}:a]atrim=${num(from)}:${num(from + seconds * rate)},` +
         `asetpts=PTS-STARTPTS,${rate !== 1 ? `${atempoChain(rate)},` : ""}` +
-        `aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo` +
-        `${(src.volume ?? 1) !== 1 ? `,volume=${num(src.volume ?? 1)}` : ""}${crossFilters([expr])},` +
+        `aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,` +
+        `${soundChain(src.sound)}` +
+        `${(src.volume ?? 1) !== 1 ? `volume=${num(src.volume ?? 1)},` : ""}anull${crossFilters([expr])},` +
         `adelay=${Math.max(0, Math.round(at * 1000))}:all=1[${lab}]`
     );
     crossHandleLabels.push(lab);
@@ -1716,8 +1729,9 @@ export async function runExport(
       const lab = `ovs${k}`;
       filters.push(
         `[${idx}:a]atrim=${num(oc.in - back * ospeed)}:${num(oc.out + ahead * ospeed)},` +
-          `asetpts=PTS-STARTPTS,${tempo}${vol}${afades}` +
-          `aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo` +
+          `asetpts=PTS-STARTPTS,${tempo}` +
+          `aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,` +
+          `${soundChain(oc.sound)}${vol}${afades}anull` +
           `${crosses},adelay=${delayMs}:all=1[${lab}]`
       );
       overlaySoundLabels.push(lab);
@@ -1881,7 +1895,7 @@ export async function runExport(
     filters.push(
       `[${idx}:a]atrim=${num(a.in)}:${num(a.out)},asetpts=PTS-STARTPTS,${tempo}` +
         `aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,` +
-        `volume=${num(a.volume)},` +
+        `${soundChain(a.sound)}volume=${num(a.volume)},` +
         (fades.length ? fades.join(",") + "," : "") +
         `adelay=${delayMs}:all=1[snd${k}]`
     );

@@ -142,6 +142,7 @@ const voiceSpan = (sp: ClipSpan) => {
     in: sp.clip.in - sp.soundBack * speed,
     out: sp.clip.out + sp.soundAhead * speed,
     speed,
+    sound: sp.clip.sound,
   };
 };
 
@@ -549,6 +550,7 @@ class Engine {
         out: a.out,
         speed,
         gain: a.volume * g * dg,
+        sound: a.sound,
       });
     }
     return out;
