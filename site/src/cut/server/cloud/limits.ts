@@ -24,9 +24,15 @@ const FREE: CutLimits = { storageBytes: FREE_STORAGE_BYTES, renderJobsPerDay: 10
 const PRO: CutLimits = { storageBytes: 100 * 1024 ** 3, renderJobsPerDay: 200 };
 const UNLIMITED: CutLimits = { storageBytes: null, renderJobsPerDay: null };
 
+/** The limits an account's tier earns. Super users are unlimited. */
+export function cutLimitsForTier(tier: { superUser: boolean; pro: boolean }): CutLimits {
+  if (tier.superUser) return UNLIMITED;
+  return tier.pro ? PRO : FREE;
+}
+
 export async function cutLimitsFor(userId: string): Promise<CutLimits> {
   if (await isDonkeySuperUser(userId)) return UNLIMITED;
-  return (await getActiveProSubscription(userId)) ? PRO : FREE;
+  return cutLimitsForTier({ superUser: false, pro: !!(await getActiveProSubscription(userId)) });
 }
 
 /** 429 when another counted render job would break the daily cap, else null. */
