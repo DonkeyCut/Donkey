@@ -60,6 +60,7 @@ import {
   useLocalCompute,
 } from "@/cut/lib/backend/hooks";
 import { dropCachedDoc, seedNewProjectDoc } from "@/cut/lib/docCache";
+import { lastChosenAspect } from "@/cut/lib/store";
 import {
   backendFor,
   patchProjects,
@@ -380,14 +381,17 @@ export function ProjectsHome() {
   // for a document we can describe in full.
   const openNewProject = async (r: Residency, pname: string, folderId: string | null) => {
     if (!live(r)) return;
+    // The frame the editor would open this project at is written into the doc
+    // at creation, so the card shows that shape before the editor's first save.
+    const aspect = lastChosenAspect() ?? undefined;
     const res = await backendFor(r).fetch("/api/cut/projects", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: pname, folderId }),
+      body: JSON.stringify({ name: pname, folderId, aspect }),
     });
     const project = (await res.json()) as ProjectSummary;
     patch(r, (s) => ({ ...s, projects: [project, ...s.projects] }));
-    seedNewProjectDoc(project.id, project.name, r);
+    seedNewProjectDoc(project.id, project.name, r, aspect);
     track("project_created", { source: "projects_home" });
     router.push(projectHref(base, project.id, "projects", folderId));
   };

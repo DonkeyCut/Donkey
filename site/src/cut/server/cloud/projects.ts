@@ -138,10 +138,15 @@ export const projectsCloud = {
 
   async create(userId: string, req: Request) {
     try {
-      const { name, folderId } = (await req.json()) as { name?: string; folderId?: string | null };
+      const { name, folderId, aspect } = (await req.json()) as {
+        name?: string;
+        folderId?: string | null;
+        aspect?: string;
+      };
       const folder = folderId
         ? await prisma.cutFolder.findFirst({ where: { id: folderId, userId, scope: "project" } })
         : null;
+      const frame = normalizeAspect(aspect);
       const now = Date.now();
       const doc: ProjectDoc = {
         version: 1,
@@ -152,6 +157,7 @@ export const projectsCloud = {
         clips: [],
         audioClips: [],
         overlays: [],
+        ...(frame ? { aspect: frame } : {}),
       };
       const row = await prisma.cutProject.create({
         data: { userId, name: doc.name, doc: asJson(doc), folderId: folder?.id ?? null },

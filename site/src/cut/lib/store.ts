@@ -1331,7 +1331,7 @@ export function cutTranscribeSpec(
  * deliberate, so the first-footage guess leaves it alone. */
 const LAST_ASPECT_KEY = "cut-last-aspect";
 
-function lastChosenAspect(): Aspect | null {
+export function lastChosenAspect(): Aspect | null {
   try {
     if (typeof localStorage === "undefined") return null;
     return normalizeAspect(localStorage.getItem(LAST_ASPECT_KEY));

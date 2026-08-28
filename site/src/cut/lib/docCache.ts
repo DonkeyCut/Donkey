@@ -21,7 +21,7 @@
 import { getBackend } from "./backend";
 import type { CutMode } from "./backend/types";
 import { dropSnapshot, readSnapshot, snapshotKey, writeSnapshot } from "./cache";
-import type { ProjectDoc } from "./types";
+import type { Aspect, ProjectDoc } from "./types";
 
 /** Reuse a stored batch only with this much life left, so a project opened on
  * a snapshot is never handed links that expire while it is being edited. */
@@ -147,11 +147,17 @@ export function writeCachedMediaLinks(
  * else. Seeding it lets the editor the user is about to land in open on the
  * first frame instead of waiting out a round trip for a document we can
  * already describe in full. */
-export function seedNewProjectDoc(projectId: string, name: string, kind: CutMode) {
+export function seedNewProjectDoc(
+  projectId: string,
+  name: string,
+  kind: CutMode,
+  aspect?: Aspect
+) {
   writeCachedDoc(
     projectId,
     {
       name,
+      ...(aspect ? { aspect } : {}),
       assets: [],
       clips: [],
       audioClips: [],

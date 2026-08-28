@@ -37,11 +37,16 @@ async function listSummaries(): Promise<Response> {
 
 async function createProject(req: Request): Promise<Response> {
   try {
-    const { name, folderId } = (await req.json()) as { name?: string; folderId?: string | null };
+    const { name, folderId, aspect } = (await req.json()) as {
+      name?: string;
+      folderId?: string | null;
+      aspect?: string;
+    };
     const id = crypto.randomUUID().slice(0, 10);
     const displayName = (name ?? "Untitled").trim() || "Untitled";
     const folders = (await store.readIndex()).folders;
     const folder = folderId && folders.some((f) => f.id === folderId) ? folderId : null;
+    const frame = normalizeAspect(aspect);
     const now = Date.now();
     const doc: ProjectDoc = {
       version: 1,
@@ -53,6 +58,7 @@ async function createProject(req: Request): Promise<Response> {
       clips: [],
       audioClips: [],
       overlays: [],
+      ...(frame ? { aspect: frame } : {}),
       ...(folder ? { folderId: folder } : {}),
     };
     await store.writeDoc(id, doc);

@@ -1,7 +1,7 @@
 import fsSync from "node:fs";
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { ProjectDoc, ProjectFolder, ProjectSummary } from "@/cut/lib/types";
+import type { Aspect, ProjectDoc, ProjectFolder, ProjectSummary } from "@/cut/lib/types";
 import { cutDataRoot } from "./dataDir";
 import { assertLocalRuntime } from "./local-only";
 import { exists, uniqueName, writeJsonAtomic } from "./util";
@@ -347,7 +347,8 @@ export async function writeProject(id: string, doc: ProjectDoc) {
 
 export async function createProject(
   name: string,
-  folderId: string | null = null
+  folderId: string | null = null,
+  aspect: Aspect | null = null
 ): Promise<ProjectSummary> {
   const id = crypto.randomUUID().slice(0, 10);
   const displayName = name.trim() || "Untitled";
@@ -370,6 +371,7 @@ export async function createProject(
     clips: [],
     audioClips: [],
     overlays: [],
+    ...(aspect ? { aspect } : {}),
     ...(folder ? { folderId: folder } : {}),
   };
   await writeJsonAtomic(path.join(dir, "project.json"), doc);

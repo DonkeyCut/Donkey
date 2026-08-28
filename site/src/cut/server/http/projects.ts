@@ -83,11 +83,14 @@ export const projectsApi = {
 
   async create(req: Request) {
     try {
-      const { name, folderId } = (await req.json()) as {
+      const { name, folderId, aspect } = (await req.json()) as {
         name?: string;
         folderId?: string | null;
+        aspect?: string;
       };
-      return Response.json(await createProject(name ?? "Untitled", folderId ?? null));
+      return Response.json(
+        await createProject(name ?? "Untitled", folderId ?? null, normalizeAspect(aspect))
+      );
     } catch (e) {
       return caught(e, "Could not create project.");
     }
