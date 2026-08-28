@@ -2968,6 +2968,53 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       throw new ToolError('`to` must be "media" or "library".');
   },
 
+  media_organize: (s, input) => {
+      const folderOf = (id: string) => {
+        const f = s.mediaFolders.find((x) => x.id === id);
+        if (!f) throw new ToolError(`No Media folder with id ${id}.`);
+        return f;
+      };
+      const assetIds = () => {
+        const ids = Array.isArray(input.asset_ids) ? input.asset_ids.map(String) : [];
+        for (const id of ids) requireItem(s.assets, id, "project asset");
+        return ids;
+      };
+      switch (String(input.action ?? "")) {
+        case "create_folder": {
+          const name = String(input.name ?? "").trim();
+          if (!name) throw new ToolError("A folder name is required.");
+          const ids = assetIds();
+          const folderId = s.addMediaFolder(name, ids);
+          return { folderId, name, ...(ids.length > 0 ? { filed: ids.length } : {}) };
+        }
+        case "rename_folder": {
+          const name = String(input.name ?? "").trim();
+          if (!name) throw new ToolError("A folder name is required.");
+          const f = folderOf(String(input.folder_id ?? ""));
+          s.renameMediaFolder(f.id, name);
+          return { renamed: true, name };
+        }
+        case "delete_folder": {
+          const f = folderOf(String(input.folder_id ?? ""));
+          s.removeMediaFolder(f.id);
+          return { deleted: true, note: "Its files moved to the Media panel's top level." };
+        }
+        case "move_asset": {
+          const folderId =
+            typeof input.folder_id === "string" && input.folder_id
+              ? folderOf(input.folder_id).id
+              : null;
+          const ids = assetIds();
+          if (ids.length === 0)
+            throw new ToolError("asset_ids is required — the media to file.");
+          s.moveAssetsToMediaFolder(ids, folderId);
+          return { moved: ids.length, folderId };
+        }
+        default:
+          throw new ToolError(`Unknown action "${String(input.action)}".`);
+      }
+  },
+
   convert_media: async (s, input) => {
       const projectId = s.projectId;
       if (!projectId) throw new ToolError("No project open.");

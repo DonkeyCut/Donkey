@@ -137,6 +137,9 @@ import { SubTabs } from "./SubTabs";
 
 // Drag a library clip onto a folder tile to file it (side panel, single card).
 const LIBRARY_MOVE_MIME = "application/x-cut-library-move";
+// A Project Files selection dragged onto a folder tile or the crumb: the
+// payload is the picked asset ids, so one drop files the whole selection.
+const MEDIA_MOVE_MIME = "application/x-cut-media-move";
 import { PlatformPreviewDialog, type ExportItem } from "./PlatformPreview";
 import { SubtitlesPanel } from "./SubtitlesPanel";
 
@@ -160,7 +163,7 @@ export function SidePanel({
   importing,
 }: {
   projectId: string;
-  onImport: (files: FileList | File[], opts?: { mediaOnly?: boolean }) => void;
+  onImport: (files: FileList | File[], opts?: { mediaOnly?: boolean; folderId?: string }) => void;
   importing: boolean;
 }) {
   // A shared view shows only the surfaces the share opted in; the Library is
@@ -626,7 +629,7 @@ function MediaPanel({
   importing,
 }: {
   projectId: string;
-  onImport: (files: FileList | File[], opts?: { mediaOnly?: boolean }) => void;
+  onImport: (files: FileList | File[], opts?: { mediaOnly?: boolean; folderId?: string }) => void;
   importing: boolean;
 }) {
   // A shared view shows only the project's own files — the Library is the
@@ -662,7 +665,14 @@ function MediaPanel({
         </div>
       )}
       {view === "project" ? (
-        <ProjectFilesPanel projectId={projectId} onImport={onImport} importing={importing} />
+        <ProjectFilesPanel
+          // Which folder is open is remembered per project and read once, at
+          // mount, so the panel starts fresh when another project opens.
+          key={projectId}
+          projectId={projectId}
+          onImport={onImport}
+          importing={importing}
+        />
       ) : (
         <LibraryPanel projectId={projectId} />
       )}
@@ -676,7 +686,7 @@ function ProjectFilesPanel({
   importing,
 }: {
   projectId: string;
-  onImport: (files: FileList | File[], opts?: { mediaOnly?: boolean }) => void;
+  onImport: (files: FileList | File[], opts?: { mediaOnly?: boolean; folderId?: string }) => void;
   importing: boolean;
 }) {
   const caps = useCutCaps();
@@ -686,11 +696,43 @@ function ProjectFilesPanel({
   // Fonts are project assets (their bytes live in media/) but they belong to
   // the text inspector's font menu, never the Media grid.
   const assets = useEditor((s) => s.assets).filter((a) => a.origin == null && a.type !== "font");
+  // The panel's folders, plus which one is open; the grid shows the open
+  // folder's files, or the unfiled ones at the root.
+  const folders = useEditor((s) => s.mediaFolders);
+  // Folders are the project's own, so which one is open is remembered under
+  // the project's own key: opening a second project leaves the first one's
+  // place standing.
+  const [storedFolder, setOpenFolder] = useLocalPref<string | null>(
+    `cut-media-folder:${projectId}`,
+    null,
+    (v) => v === null || typeof v === "string"
+  );
+  // A remembered folder may have been deleted since — here or on another
+  // machine. Once the doc is in, an id no folder answers for reads as the
+  // root, without writing that back over what is remembered.
+  const projectLoaded = useEditor((s) => s.loaded);
+  const openFolder =
+    storedFolder !== null && projectLoaded && !folders.some((f) => f.id === storedFolder)
+      ? null
+      : storedFolder;
+  const shown = assets.filter((a) => (a.folderId ?? null) === openFolder);
   // Which tiles are picked, so a sweep or a ⇧-click can hand the timeline a
   // run of media in one drag. Anything that leaves the grid leaves the pick.
-  const { picked, setPicked, pick } = useTilePicks(assets.map((a) => a.id));
+  const { picked, setPicked, pick } = useTilePicks(shown.map((a) => a.id));
   // Built once for the whole grid; each card hands the same array on.
   const pickedIds = [...picked];
+  // The name field of a folder being made: [] from the empty-space menu, the
+  // picked ids when the selection menu starts one — those file into the
+  // folder the moment its name is committed.
+  const [creatingIds, setCreatingIds] = useState<string[] | null>(null);
+  // The right-click menu at the cursor: `ids` carries the selection it acts
+  // on, null means the empty-space menu (just "New folder").
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; ids: string[] | null } | null>(
+    null
+  );
+  // A selection delete that would also take timeline clips waits on this
+  // confirm; ids whose media is unused delete without one.
+  const [deletingIds, setDeletingIds] = useState<string[] | null>(null);
   const templates = useEditor((s) => s.templates);
   const exportOpen = useEditor((s) => s.exportOpen);
   // A render that finishes in the background (dialog closed) drops a new file in
@@ -720,10 +762,17 @@ function ProjectFilesPanel({
   // recording) dropped here moves into Media. It lights up for both.
   const { active: dropActive, attachTarget, targetProps } = useAssetDrop(
     (ref) => {
+      // Filed straight into the open folder, so the drop lands where the eye is.
       if (ref.scope === "project")
-        useEditor.getState().updateAsset(ref.id, { origin: undefined, chatId: undefined });
+        useEditor.getState().updateAsset(ref.id, {
+          origin: undefined,
+          chatId: undefined,
+          folderId: openFolder ?? undefined,
+        });
     },
-    readOnly ? undefined : (files) => onImport(files, { mediaOnly: true })
+    readOnly
+      ? undefined
+      : (files) => onImport(files, { mediaOnly: true, folderId: openFolder ?? undefined })
   );
   const inputRef = useRef<HTMLInputElement>(null);
   const [exports, setExports] = useState<ExportItem[]>([]);
@@ -771,6 +820,41 @@ function ProjectFilesPanel({
     if (preview && !list.some((e) => e.file === preview.file)) setPreview(null);
   };
 
+  // The selection menu's delete: unused media goes straight away; media on
+  // the timeline waits on the confirm below, which names what goes with it.
+  const removeMany = (ids: string[]) => {
+    const s = useEditor.getState();
+    const gone = new Set(ids);
+    const uses =
+      s.clips.filter((c) => gone.has(c.assetId)).length +
+      s.audioClips.filter((c) => gone.has(c.assetId)).length;
+    if (uses > 0) setDeletingIds(ids);
+    else for (const id of ids) s.removeAsset(id);
+  };
+
+  // Right-click: over a card, the selection menu (the card joins the pick if
+  // it wasn't in it); over empty panel space at the root, the New-folder menu.
+  const onPanelContextMenu = (e: React.MouseEvent) => {
+    if (readOnly) return;
+    const t = e.target as HTMLElement;
+    // Controls, folder tiles, and the crumb keep their own menus and clicks.
+    if (t.closest("button,a,input,textarea,[role='button'],[role='menuitem'],[data-no-marquee]"))
+      return;
+    const card = t.closest<HTMLElement>("[data-sel-id]");
+    if (card) {
+      const id = card.dataset.selId!;
+      if (!shown.some((a) => a.id === id)) return;
+      e.preventDefault();
+      const ids = picked.has(id) ? [id, ...pickedIds.filter((x) => x !== id)] : [id];
+      if (!picked.has(id)) setPicked(new Set([id]));
+      setCtxMenu({ x: e.clientX, y: e.clientY, ids });
+      return;
+    }
+    if (openFolder !== null) return;
+    e.preventDefault();
+    setCtxMenu({ x: e.clientX, y: e.clientY, ids: null });
+  };
+
   return (
     <div
       ref={attachTarget}
@@ -787,6 +871,7 @@ function ProjectFilesPanel({
         dropActive &&
           "rounded-xl bg-[#0a84ff]/5 outline-2 outline-dashed outline-offset-[-4px] outline-[#0a84ff]/60"
       )}
+      onContextMenu={onPanelContextMenu}
     >
       {/* An export in flight spins on the Media rail tile, not here. */}
       {!readOnly && (
@@ -801,15 +886,65 @@ function ProjectFilesPanel({
             multiple
             hidden
             onChange={(e) => {
-              if (e.target.files?.length) onImport(e.target.files);
+              if (e.target.files?.length)
+                onImport(e.target.files, { folderId: openFolder ?? undefined });
               e.target.value = "";
             }}
           />
         </div>
       )}
 
-      <ScrollArea className="min-h-0 flex-1" contentClassName="pb-3.5">
-        {templates.length > 0 && (
+      {openFolder !== null && (
+        <div className="flex h-9 shrink-0 items-center px-2 pb-1.5">
+          <FolderCrumb
+            className="text-sm"
+            root="Project Files"
+            name={folders.find((f) => f.id === openFolder)?.name ?? "Folder"}
+            mime={MEDIA_MOVE_MIME}
+            onBack={() => setOpenFolder(null)}
+            onDropOut={(ids) => useEditor.getState().moveAssetsToMediaFolder(ids, null)}
+          />
+        </div>
+      )}
+      {openFolder === null && (folders.length > 0 || creatingIds !== null) && (
+        <div className="shrink-0 px-3.5">
+          <FolderShelf
+            rows
+            folders={readOnly ? folders.map((f) => ({ ...f, locked: true })) : folders}
+            mime={MEDIA_MOVE_MIME}
+            statOf={(id) => ({ count: assets.filter((a) => a.folderId === id).length })}
+            onOpen={(id) => setOpenFolder(id)}
+            onCreate={(name) => {
+              useEditor.getState().addMediaFolder(name, creatingIds ?? undefined);
+            }}
+            onRename={(id, name) => useEditor.getState().renameMediaFolder(id, name)}
+            onDelete={(id) => useEditor.getState().removeMediaFolder(id)}
+            onDropIds={(ids, fid) => useEditor.getState().moveAssetsToMediaFolder(ids, fid)}
+            onDropFiles={
+              readOnly
+                ? undefined
+                : (files, fid) => onImport(files, { mediaOnly: true, folderId: fid })
+            }
+            onRefDrop={(ref, fid) => {
+              // Media made elsewhere — a generation, a recording, a timeline
+              // clip's asset — dropped on a folder tile joins Media filed there.
+              if (ref.scope !== "project") return;
+              useEditor.getState().updateAsset(ref.id, {
+                origin: undefined,
+                chatId: undefined,
+                folderId: fid,
+              });
+            }}
+            creating={creatingIds !== null}
+            onCreatingChange={(c) => {
+              if (!c) setCreatingIds(null);
+            }}
+          />
+        </div>
+      )}
+
+      <ScrollArea className="min-h-0 flex-1" contentClassName="pt-1 pb-3.5">
+        {openFolder === null && templates.length > 0 && (
           <div className="flex flex-col gap-1.5 px-3.5 pb-3">
             {templates.map((t) => (
               <TemplateCard
@@ -833,15 +968,21 @@ function ProjectFilesPanel({
             ))}
           </div>
         )}
-        {assets.length === 0 && !importing ? (
-          <div className="px-2 py-7 text-center text-xs leading-relaxed text-balance text-muted-foreground">
-            <div className="mb-3 flex justify-center gap-3.5">
-              <Film className="size-5" />
-              <Music className="size-5" />
+        {shown.length === 0 && !importing ? (
+          openFolder !== null ? (
+            <div className="px-3.5 py-6 text-center text-xs text-muted-foreground">
+              Empty folder
             </div>
-            Drop videos, audio and images assets here. They are only available in
-            this project.
-          </div>
+          ) : assets.length === 0 && folders.length === 0 ? (
+            <div className="px-2 py-7 text-center text-xs leading-relaxed text-balance text-muted-foreground">
+              <div className="mb-3 flex justify-center gap-3.5">
+                <Film className="size-5" />
+                <Music className="size-5" />
+              </div>
+              Drop videos, audio and images assets here. They are only available in
+              this project.
+            </div>
+          ) : null
         ) : (
           <Marquee
             scope="self"
@@ -850,14 +991,15 @@ function ProjectFilesPanel({
             selected={picked}
             setSelected={setPicked}
           >
-            {assets.map((a) => (
+            {shown.map((a) => (
               <AssetCard
                 key={a.id}
                 asset={a}
                 projectId={projectId}
                 selected={picked.has(a.id)}
-                onSelect={(e) => pick(e, a.id, assets.map((x) => x.id))}
+                onSelect={(e) => pick(e, a.id, shown.map((x) => x.id))}
                 dragGroup={pickedIds}
+                onDragLanded={() => setPicked(new Set())}
               />
             ))}
             {importing && (
@@ -871,7 +1013,7 @@ function ProjectFilesPanel({
           </Marquee>
         )}
 
-        {exports.length + exporting.length > 0 && (
+        {openFolder === null && exports.length + exporting.length > 0 && (
           <div className="mt-5 px-3.5">
             <div className="mb-2 text-[13px] font-semibold tracking-tight">Exports</div>
             <div className="flex flex-col gap-1.5">
@@ -981,6 +1123,88 @@ function ProjectFilesPanel({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* The right-click menu: the same dropdown the cards' "…" button uses,
+          anchored to the pointer. */}
+      <DropdownMenu open={ctxMenu !== null} onOpenChange={(o) => !o && setCtxMenu(null)}>
+        {ctxMenu && (
+          <DropdownMenuContent
+            className="w-48"
+            sideOffset={0}
+            anchor={{
+              getBoundingClientRect: () => new DOMRect(ctxMenu.x, ctxMenu.y, 0, 0),
+            }}
+            // No focus return on close — there is no trigger to go back to,
+            // and reclaiming focus would blur the folder-name field the "New
+            // folder" items open, whose blur cancels the creation.
+            finalFocus={false}
+          >
+            {ctxMenu.ids === null ? (
+              <DropdownMenuItem
+                onClick={() => {
+                  setCreatingIds([]);
+                  setCtxMenu(null);
+                }}
+              >
+                <FolderPlus /> New folder
+              </DropdownMenuItem>
+            ) : (
+              <>
+                <DropdownMenuItem
+                  onClick={() => {
+                    // The name field opens on the root shelf; the picked ids
+                    // file into the folder when the name is committed.
+                    setCreatingIds(ctxMenu.ids);
+                    setOpenFolder(null);
+                    setCtxMenu(null);
+                  }}
+                >
+                  <FolderPlus /> New folder
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={() => {
+                    removeMany(ctxMenu.ids!);
+                    setCtxMenu(null);
+                  }}
+                >
+                  <Trash2 /> Delete
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        )}
+      </DropdownMenu>
+
+      <AlertDialog open={deletingIds !== null} onOpenChange={(o) => !o && setDeletingIds(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {deletingIds !== null && deletingIds.length > 1
+                ? `Remove ${deletingIds.length} files from the project?`
+                : "Remove this file from the project?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Timeline clips made from them are removed too.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive/10 text-destructive hover:bg-destructive/20"
+              onClick={(e) => {
+                e.preventDefault();
+                const s = useEditor.getState();
+                for (const id of deletingIds ?? []) s.removeAsset(id);
+                setDeletingIds(null);
+              }}
+            >
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -1024,6 +1248,7 @@ function AssetCard({
   selected,
   onSelect,
   dragGroup,
+  onDragLanded,
 }: {
   asset: MediaAsset;
   projectId: string;
@@ -1034,6 +1259,8 @@ function AssetCard({
   onSelect?: (e: React.MouseEvent) => void;
   /** Everything picked right now, so dragging one card drags them all. */
   dragGroup?: string[];
+  /** A drop that landed leaves nothing to keep picked. */
+  onDragLanded?: () => void;
 }) {
   const caps = useCutCaps();
   const [saved, setSaved] = useState(false);
@@ -1097,7 +1324,15 @@ function AssetCard({
       onClick={onSelect}
       onDragStart={(e) => {
         setAssetDragData(e, asset.id, dragGroup);
-        setObjectDragImage(e);
+        // The same selection as a folder-move payload, so a folder tile or
+        // the crumb can take the drop; the ghost gathers the picked cards
+        // into one stack under the cursor, counted.
+        const ids =
+          selected && dragGroup?.includes(asset.id)
+            ? [asset.id, ...dragGroup.filter((x) => x !== asset.id)]
+            : [asset.id];
+        e.dataTransfer.setData(MEDIA_MOVE_MIME, JSON.stringify(ids));
+        setObjectDragImage(e, ids.length, ids, onDragLanded);
       }}
       onDragEnd={clearAssetDrag}
       onMouseEnter={() => {
@@ -1441,7 +1676,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
     const ids = picked.has(a.id) ? [a.id, ...[...picked].filter((id) => id !== a.id)] : [a.id];
     e.dataTransfer.setData(LIBRARY_MOVE_MIME, JSON.stringify(ids));
     e.dataTransfer.effectAllowed = "copyMove";
-    setObjectDragImage(e);
+    setObjectDragImage(e, ids.length, ids, () => setPicked(new Set()));
   };
 
   const bothShelves = availableResidencies().length > 1;
@@ -1600,7 +1835,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
           </div>
         ) : null
       ) : (
-        <ScrollArea className="min-h-0 flex-1" contentClassName="pb-3.5">
+        <ScrollArea className="min-h-0 flex-1" contentClassName="pt-1 pb-3.5">
           <Marquee
             scope="self"
             rootClassName="relative min-h-full px-3.5"

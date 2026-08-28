@@ -204,6 +204,17 @@ export interface StoredAsset {
   /** For origin "chat": the chat thread that made it. Deleting that thread
    * deletes the assets it still owns (see chatAssets.ts). */
   chatId?: string;
+  /** Media panel folder this file is filed in (see ProjectDoc.mediaFolders);
+   * absent/null = the panel's top level. */
+  folderId?: string | null;
+}
+
+/** A folder in the Media panel's Project Files view — a flat, project-local
+ * grouping of user imports; assets point at one via `folderId`. */
+export interface MediaFolder {
+  id: string;
+  name: string;
+  createdAt: number;
 }
 
 /** Most labels one note may wear. Both clients hold the line at this — the
@@ -1410,6 +1421,8 @@ export interface ProjectDoc {
   /** Templates saved in this project (their media reference project files by
    * name). Adding one to the shared Library copies its media out. */
   templates?: LibraryTemplate[];
+  /** The Media panel's folders; assets file into them via their `folderId`. */
+  mediaFolders?: MediaFolder[];
   /** Which project folder this belongs to (null/absent = ungrouped). */
   folderId?: string | null;
   /** In-progress or finished brief-to-video run (genvideo). Persisted so a

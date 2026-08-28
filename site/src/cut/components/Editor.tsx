@@ -597,6 +597,7 @@ export function Editor({
         docOverlays(s.overlays) !== (last.overlays as unknown) ||
         s.transitions !== lastBars ||
         s.templates !== (last.templates as unknown) ||
+        s.mediaFolders !== (last.mediaFolders as unknown) ||
         s.subtitles !== (last.subtitles as unknown) ||
         s.aspect !== last.aspect ||
         s.fadeIn !== (last.fadeIn ?? 0) ||
@@ -669,6 +670,9 @@ export function Editor({
          * when every one of them is busy there — what a paste means by "here".
          * Without it the file takes track 0's next free slot. */
         atFirstFit?: boolean;
+        /** Media folder the import files into — the one open in the Media
+         * panel when the upload started. */
+        folderId?: string;
       }
     ) => {
       const list = Array.from(files);
@@ -694,6 +698,7 @@ export function Editor({
           // but never in the Media panel (reserved for user imports).
           if (opts?.origin) asset.origin = opts.origin;
           if (opts?.name) asset.name = opts.name;
+          if (opts?.folderId) asset.folderId = opts.folderId;
           const s = useEditor.getState();
           // Probing, naming and (for a pasted frame) rendering all outlive a
           // project switch. The asset was prepared against `projectId` and its

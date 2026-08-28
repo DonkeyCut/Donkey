@@ -46,6 +46,25 @@ export const SIDE_PANEL_TOOLS = [
     }, ["asset_ids"]),
   },
   {
+    name: "media_organize",
+    description:
+      "Organize the Media panel's Project Files with folders (this project only; the shared Library has library_organize): create_folder / rename_folder / delete_folder (a deleted folder's files drop back to the top level), move_asset files user-imported media into a folder (omit folder_id for the top level). Folders and each asset's folderId are in `media` / `mediaFolders` from get_state. create_folder can take asset_ids to file into the new folder in the same call.",
+    inputSchema: obj({
+      action: {
+        type: "string",
+        enum: ["create_folder", "rename_folder", "delete_folder", "move_asset"],
+        description: "The organize operation",
+      },
+      name: str("Folder name (create_folder, rename_folder)"),
+      folder_id: str("Media folder id (rename_folder, delete_folder, move_asset destination — omit for the top level)"),
+      asset_ids: {
+        type: "array",
+        items: { type: "string" },
+        description: "Project asset ids to file (move_asset; optional on create_folder)",
+      },
+    }, ["action"]),
+  },
+  {
     name: "delete_asset",
     description:
       "Remove a project asset and every timeline clip that uses it — the Media panel's trash. Removed media does not come back with undo, so call it only when the user explicitly asked to remove that media, and report how many clips went with it.",

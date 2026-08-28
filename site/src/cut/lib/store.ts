@@ -22,6 +22,7 @@ import type {
   ClipSpan,
   LibraryTemplate,
   MediaAsset,
+  MediaFolder,
   Overlay,
   OverlayKind,
   OverlayPatch,
@@ -206,6 +207,15 @@ export const PPS_MIN = 0.01;
 export const PPS_MAX = 800;
 const clampPps = (v: number) =>
   Number.isFinite(v) ? Math.max(PPS_MIN, Math.min(PPS_MAX, v)) : 60;
+/** An asset filed into a Media folder. The Media panel shows what the user put
+ * there — assets with no `origin` — so filing a created clip (a render, a
+ * voiceover, a recording) is also its move out of the place that made it. */
+const filedInMedia = (a: MediaAsset, folderId: string | null): MediaAsset => ({
+  ...a,
+  folderId: folderId ?? undefined,
+  origin: undefined,
+  chatId: undefined,
+});
 /** Tallest the timeline may grow: the window height less room for the top bar
  * and a usable preview. The constant covers code running without a window. */
 export const timelineHMax = () =>
@@ -686,6 +696,16 @@ export interface EditorState {
   addTemplate: (input: TemplateSaveInput) => LibraryTemplate;
   renameTemplate: (id: string, name: string) => void;
   removeTemplate: (id: string) => void;
+  /** The Media panel's folders (ProjectDoc.mediaFolders). Like the asset
+   * list, they sit outside the undo history. */
+  mediaFolders: MediaFolder[];
+  /** Create a Media folder, filing `assetIds` into it; returns the new id. */
+  addMediaFolder: (name: string, assetIds?: string[]) => string;
+  renameMediaFolder: (id: string, name: string) => void;
+  /** Delete a Media folder; its assets drop back to the panel's top level. */
+  removeMediaFolder: (id: string) => void;
+  /** File assets into a Media folder (null = back to the top level). */
+  moveAssetsToMediaFolder: (ids: string[], folderId: string | null) => void;
   /** Append a project asset to a template as one more part at its end. */
   addAssetToTemplate: (templateId: string, assetId: string) => void;
   select: (sel: Selection) => void;
@@ -1191,6 +1211,7 @@ const DOC_KEYS = [
   "audioClips",
   "overlays",
   "templates",
+  "mediaFolders",
   "aspect",
   "fadeIn",
   "fadeOut",
@@ -1545,6 +1566,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       audioClips: [],
       overlays: [],
       templates: [],
+      mediaFolders: [],
       aspect: lastChosenAspect() ?? "9:16",
       aspectTouched: lastChosenAspect() !== null,
       fadeIn: 0,
@@ -1594,6 +1616,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     audioClips: [],
     overlays: [],
     templates: [],
+    mediaFolders: [],
     aspect: lastChosenAspect() ?? "9:16",
     aspectTouched: lastChosenAspect() !== null,
     fadeIn: 0,
@@ -1960,6 +1983,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           audioClips: merged.audioClips,
           overlays: withLooks.overlays,
           templates: doc.templates ?? [],
+          mediaFolders: doc.mediaFolders ?? [],
           aspect: normalizeAspect(doc.aspect) ?? lastChosenAspect() ?? "9:16",
           aspectTouched: doc.aspect !== undefined || lastChosenAspect() !== null,
           fadeIn: doc.fadeIn ?? 0,
@@ -3662,6 +3686,42 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
 
     removeTemplate: (id) => set({ templates: get().templates.filter((t) => t.id !== id) }),
 
+    addMediaFolder: (name, assetIds) => {
+      const folder: MediaFolder = {
+        id: crypto.randomUUID().slice(0, 10),
+        name,
+        createdAt: Date.now(),
+      };
+      const file = new Set(assetIds ?? []);
+      set((s) => ({
+        mediaFolders: [...s.mediaFolders, folder],
+        ...(file.size > 0
+          ? { assets: s.assets.map((a) => (file.has(a.id) ? filedInMedia(a, folder.id) : a)) }
+          : {}),
+      }));
+      return folder.id;
+    },
+
+    renameMediaFolder: (id, name) =>
+      set((s) => ({
+        mediaFolders: s.mediaFolders.map((f) => (f.id === id ? { ...f, name } : f)),
+      })),
+
+    removeMediaFolder: (id) =>
+      set((s) => ({
+        mediaFolders: s.mediaFolders.filter((f) => f.id !== id),
+        assets: s.assets.map((a) =>
+          a.folderId === id ? { ...a, folderId: undefined } : a
+        ),
+      })),
+
+    moveAssetsToMediaFolder: (ids, folderId) => {
+      const move = new Set(ids);
+      set((s) => ({
+        assets: s.assets.map((a) => (move.has(a.id) ? filedInMedia(a, folderId) : a)),
+      }));
+    },
+
     addAssetToTemplate: (templateId, assetId) => {
       const s = get();
       const t = s.templates.find((x) => x.id === templateId);
@@ -4896,7 +4956,7 @@ export const docOverlays = (() => {
 export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
   return assets
     .filter((a) => !tabOnlyUpload(a))
-    .map(({ id, fileName, name, type, duration, width, height, origin, chatId, language, watch, speech, beats, sceneCuts }) => ({
+    .map(({ id, fileName, name, type, duration, width, height, origin, chatId, folderId, language, watch, speech, beats, sceneCuts }) => ({
       id,
       fileName,
       name,
@@ -4906,6 +4966,7 @@ export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
       ...(height !== undefined ? { height } : {}),
       ...(origin !== undefined ? { origin } : {}),
       ...(chatId !== undefined ? { chatId } : {}),
+      ...(folderId != null ? { folderId } : {}),
       ...(language !== undefined ? { language } : {}),
       ...(watch !== undefined ? { watch } : {}),
       ...(speech !== undefined ? { speech } : {}),
@@ -4923,6 +4984,7 @@ export function serializeDoc(s: {
   audioClips: AudioClip[];
   overlays: Overlay[];
   templates: LibraryTemplate[];
+  mediaFolders: MediaFolder[];
   aspect: Aspect;
   fadeIn: number;
   fadeOut: number;
@@ -4944,6 +5006,7 @@ export function serializeDoc(s: {
     // serialize byte-identical to the pre-union shape.
     overlays: docOverlays(s.overlays),
     templates: s.templates,
+    mediaFolders: s.mediaFolders,
     aspect: s.aspect,
     fadeIn: s.fadeIn,
     fadeOut: s.fadeOut,

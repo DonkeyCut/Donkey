@@ -250,12 +250,18 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
         .filter((a) => a.type === "font")
         .map((a) => ({ id: uploadedFontId(a.id), label: a.name })),
     ],
+    // The Media panel's folders, when the project has any; each filed asset
+    // carries its folderId below (media_organize moves them).
+    ...(s.mediaFolders.length > 0
+      ? { mediaFolders: s.mediaFolders.map((f) => ({ id: f.id, name: f.name })) }
+      : {}),
     media: shownAssets.map((a) => ({
       id: a.id,
       name: a.name,
       type: a.type,
       duration: r(a.duration),
       ...(a.origin ? { origin: a.origin } : {}),
+      ...(a.folderId != null ? { folderId: a.folderId } : {}),
       // Source spans whose frame map exists (persisted with the project):
       // distinct-moment times and cut candidates recorded by an earlier watch
       // or by the background sweep. The map aims a watch — it is not seen
