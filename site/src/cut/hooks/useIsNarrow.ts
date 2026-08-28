@@ -33,3 +33,20 @@ export function useIsNarrow(): boolean | null {
   }, []);
   return narrow;
 }
+
+/**
+ * The viewport's narrowness measured once, when the component opens — null
+ * only on the server. For mount decisions that must hold for the visit: the
+ * share view picks its surface (player or editor) by this, and a desktop
+ * window resized across the threshold keeps the surface it opened with —
+ * following the live width would tear down a playing editor and reload the
+ * whole project mid-drag.
+ */
+export function useIsNarrowAtOpen(): boolean | null {
+  const [narrow] = useState<boolean | null>(() =>
+    typeof window === "undefined"
+      ? null
+      : window.matchMedia(`(max-width: ${NARROW_MAX_WIDTH - 1}px)`).matches
+  );
+  return narrow;
+}

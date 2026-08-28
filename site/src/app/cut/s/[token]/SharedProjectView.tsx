@@ -7,7 +7,7 @@ import { authHrefFor } from "@/app/_components/landing/useAppEntryHref";
 import { Button } from "@/components/ui/button";
 import { Editor } from "@/cut/components/Editor";
 import { MobileShare } from "@/cut/components/share/MobileShare";
-import { useIsNarrow } from "@/cut/hooks/useIsNarrow";
+import { useIsNarrowAtOpen } from "@/cut/hooks/useIsNarrow";
 import { bindCutMode } from "@/cut/lib/backend";
 import { bindSharedBackend } from "@/cut/lib/backend/shared";
 import { holdThreadsInMemory } from "@/cut/lib/chatThreads";
@@ -33,7 +33,7 @@ export function SharedProject() {
   const { token } = useParams<{ token: string }>();
   const [gate, setGate] = useState<Gate>({ state: "loading" });
   const { data: session } = authClient.useSession();
-  const narrow = useIsNarrow();
+  const narrow = useIsNarrowAtOpen();
 
   useEffect(() => {
     let alive = true;
