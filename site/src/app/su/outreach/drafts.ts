@@ -9,6 +9,7 @@ import { useLocalPref } from "@/cut/lib/uiState";
 // timestamps for a conversation, never the words. The two send toggles ride
 // along, so a start point recalls how it went out as well as what it said.
 export type OutreachDraft = {
+  id: string;
   subject: string;
   body: string;
   unsubscribeLink: boolean;
@@ -16,9 +17,12 @@ export type OutreachDraft = {
   savedAt: string;
 };
 
-// The toggles are optional on disk: entries written before they existed read
-// as off, which is how those notes went out.
+// The toggles and the id are optional on disk. Entries written before the
+// toggles existed read as on: every note back then carried the opt-out footer
+// and the tracked reply alias. An entry without an id is identified by its
+// timestamp.
 type StoredDraft = {
+  id?: string;
   subject: string;
   body: string;
   unsubscribeLink?: boolean;
@@ -37,6 +41,7 @@ function isDraft(value: unknown): value is StoredDraft {
     typeof draft.subject === "string" &&
     typeof draft.body === "string" &&
     typeof draft.savedAt === "string" &&
+    (draft.id === undefined || typeof draft.id === "string") &&
     (draft.unsubscribeLink === undefined ||
       typeof draft.unsubscribeLink === "boolean") &&
     (draft.trackReplies === undefined || typeof draft.trackReplies === "boolean")
@@ -54,8 +59,8 @@ export function useLastOutreachStart(): [string | null, (id: string) => void] {
 
 export function useOutreachDrafts(): {
   drafts: OutreachDraft[];
-  remember: (draft: Omit<OutreachDraft, "savedAt">) => string;
-  forget: (savedAt: string) => void;
+  remember: (draft: Omit<OutreachDraft, "id" | "savedAt">) => string;
+  forget: (id: string) => void;
 } {
   const [stored, setStored] = useLocalPref<StoredDraft[]>(KEY, [], (value) =>
     Array.isArray(value) && value.every(isDraft),
@@ -63,37 +68,46 @@ export function useOutreachDrafts(): {
 
   const drafts: OutreachDraft[] = stored.map((draft) => ({
     ...draft,
-    trackReplies: draft.trackReplies ?? false,
-    unsubscribeLink: draft.unsubscribeLink ?? false,
+    id: draft.id ?? draft.savedAt,
+    trackReplies: draft.trackReplies ?? true,
+    unsubscribeLink: draft.unsubscribeLink ?? true,
   }));
 
   const remember = useCallback(
-    ({ body, subject, trackReplies, unsubscribeLink }: Omit<OutreachDraft, "savedAt">) => {
-      // Sending the same note twice moves the entry up rather than doubling it.
-      const rest = stored.filter(
-        (draft) =>
-          draft.subject !== subject ||
-          draft.body !== body ||
-          (draft.unsubscribeLink ?? false) !== unsubscribeLink ||
-          (draft.trackReplies ?? false) !== trackReplies,
-      );
+    ({
+      body,
+      subject,
+      trackReplies,
+      unsubscribeLink,
+    }: Omit<OutreachDraft, "id" | "savedAt">) => {
+      const id = crypto.randomUUID();
       const savedAt = new Date().toISOString();
-      setStored(
-        [{ body, savedAt, subject, trackReplies, unsubscribeLink }, ...rest].slice(
-          0,
-          LIMIT,
-        ),
-      );
-      return savedAt;
+      setStored((current) => {
+        // Sending the same note twice moves the entry up rather than doubling it.
+        const rest = current.filter(
+          (draft) =>
+            draft.subject !== subject ||
+            draft.body !== body ||
+            (draft.unsubscribeLink ?? true) !== unsubscribeLink ||
+            (draft.trackReplies ?? true) !== trackReplies,
+        );
+        return [
+          { body, id, savedAt, subject, trackReplies, unsubscribeLink },
+          ...rest,
+        ].slice(0, LIMIT);
+      });
+      return id;
     },
-    [stored, setStored],
+    [setStored],
   );
 
   const forget = useCallback(
-    (savedAt: string) => {
-      setStored(stored.filter((draft) => draft.savedAt !== savedAt));
+    (id: string) => {
+      setStored((current) =>
+        current.filter((draft) => (draft.id ?? draft.savedAt) !== id),
+      );
     },
-    [stored, setStored],
+    [setStored],
   );
 
   return { drafts, forget, remember };

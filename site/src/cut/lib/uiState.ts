@@ -69,7 +69,7 @@ export function useLocalPref<T>(
   key: string,
   fallback: T,
   accept: (v: unknown) => boolean
-): [T, (v: T) => void] {
+): [T, (v: T | ((prev: T) => T)) => void] {
   const [value, setValue] = useState<T>(() => {
     if (typeof window === "undefined") return fallback;
     try {
@@ -81,14 +81,19 @@ export function useLocalPref<T>(
       return fallback;
     }
   });
+  // Updater form goes through the live previous value, so two writers in the
+  // same tick both land instead of the second clobbering the first.
   const set = useCallback(
-    (v: T) => {
-      setValue(v);
-      try {
-        localStorage.setItem(key, JSON.stringify(v));
-      } catch {
-        // Private-mode quota — the choice just won't stick across reloads.
-      }
+    (v: T | ((prev: T) => T)) => {
+      setValue((prev) => {
+        const next = typeof v === "function" ? (v as (prev: T) => T)(prev) : v;
+        try {
+          localStorage.setItem(key, JSON.stringify(next));
+        } catch {
+          // Private-mode quota — the choice just won't stick across reloads.
+        }
+        return next;
+      });
     },
     [key]
   );

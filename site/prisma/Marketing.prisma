@@ -48,8 +48,8 @@ model OutreachTemplate {
   body      String
   // The send toggles the template opens with: the opt-out footer, and routing
   // replies through the signed alias that marks the row replied.
-  unsubscribeLink Boolean @default(false)
-  trackReplies    Boolean @default(false)
+  unsubscribeLink Boolean @default(true)
+  trackReplies    Boolean @default(true)
   // The super user who last saved it.
   actorUserId String?
   createdAt DateTime @default(now())
