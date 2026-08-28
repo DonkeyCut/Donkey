@@ -635,6 +635,17 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       ...(typeof input.invert === "boolean" ? { invert: input.invert || undefined } : {}),
       ...(isNum(input.radius) ? { radius: clamp(input.radius, 0, 400) || undefined } : {}),
     };
+    // An element newly masked by the person starts behind them — the common
+    // ask — unless the call named a direction; invert false shows it only on
+    // the person. Clips keep the plain direction (Subject keeps the person).
+    if (
+      o &&
+      mask.kind === "subject" &&
+      current?.kind !== "subject" &&
+      typeof input.invert !== "boolean"
+    ) {
+      mask.invert = true;
+    }
     // A circle with no explicit h is a perfect circle: w and h are fractions
     // of different frame edges, so round means unequal fractions.
     if (mask.kind === "circle" && !isNum(input.h)) {

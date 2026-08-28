@@ -2530,6 +2530,11 @@ interface MaskTarget {
   /** Timeline window for the keyframe row and playhead-local time. */
   element: { start: number; end: number };
   mask?: Mask;
+  /** Picking Subject starts inverted — behind the person. Elements set this:
+   * a shape or title masked by the person is almost always meant to sit
+   * behind them, and the Invert toggle flips it to on-person. Clips keep the
+   * plain direction, where Subject means keep the person. */
+  subjectStartsBehind?: boolean;
   /** Replace the mask outright (or remove it), as one undo step. */
   set: (mask: Mask | undefined) => void;
   /** Live-drag mask update, no undo entry. */
@@ -2668,6 +2673,7 @@ function OverlayMaskSection({ overlay: o }: { overlay: Overlay }) {
       target={{
         element: o,
         mask: o.mask,
+        subjectStartsBehind: true,
         set: (mask) => st().updateOverlay(o.id, { mask }),
         setTransient: (mask) => st().updateOverlayTransient(o.id, { mask }),
         setKey: (t, patch, opts) => st().setOverlayMaskKey(o.id, t, patch, opts),
@@ -2950,7 +2956,9 @@ function MaskSection({ target }: { target: MaskTarget }) {
                         const w = m.w ?? 0.5;
                         return { w, h: (w * fr.w) / fr.h };
                       })()
-                    : {};
+                    : kind === "subject" && m.kind !== "subject" && target.subjectStartsBehind
+                      ? { invert: true }
+                      : {};
                 target.set({ ...m, ...patch, kind: kind as MaskKind });
               }}
             >
