@@ -13,6 +13,7 @@ import { matteLumaToAlpha } from "@donkeycut/effects-kit";
 import { interactiveSegmenter, segmentTouchAlpha } from "../cutout";
 import { sampleClipSource } from "../previewCanvas";
 import { createRasterCanvas, rasterCanvasToDataUrl, type RasterSurface } from "../raster";
+import type { WandScratch } from "./touchMask";
 import type { RemovalSeeds } from "../types";
 
 /** Working-mask short side: enough for a crisp overlay, cheap to re-segment
@@ -38,6 +39,10 @@ export class QuickSelectSession {
   private w = 2;
   private h = 2;
   private seg: Awaited<ReturnType<typeof interactiveSegmenter>> = null;
+  /** The working frame's pixels and the wand's tone field, read once per
+   * frame and shared across a stroke's per-move re-segmentations. */
+  private frameRgba: Uint8ClampedArray | null = null;
+  private wandScratch: WandScratch = {};
 
   private constructor() {
     this.work = createRasterCanvas(2, 2);
@@ -89,14 +94,29 @@ export class QuickSelectSession {
     const ctx = this.work.getContext("2d") as CanvasRenderingContext2D | null;
     if (!ctx) return false;
     ctx.drawImage(src, 0, 0, w, h);
+    this.frameRgba = null;
+    this.wandScratch = {};
     return true;
+  }
+
+  /** The working frame's pixels, read once per refreshed frame. */
+  private rgbaOf(): Uint8ClampedArray | undefined {
+    if (!this.frameRgba) {
+      const ctx = this.work.getContext("2d") as CanvasRenderingContext2D | null;
+      if (!ctx) return undefined;
+      this.frameRgba = ctx.getImageData(0, 0, this.w, this.h).data;
+    }
+    return this.frameRgba;
   }
 
   /** Run tap-to-select over the stroke and fold the result into the mask.
    * `erase` subtracts the picked object. True when something registered. */
   quickStroke(points: Point[], erase: boolean): boolean {
     if (!this.seg || points.length === 0) return false;
-    const alpha = segmentTouchAlpha(this.seg, this.work as HTMLCanvasElement, points);
+    const alpha = segmentTouchAlpha(this.seg, this.work as HTMLCanvasElement, points, {
+      rgba: this.rgbaOf(),
+      scratch: this.wandScratch,
+    });
     if (!alpha) return false;
     const ctx = this.mask.getContext("2d") as CanvasRenderingContext2D | null;
     if (!ctx) return false;
@@ -112,7 +132,10 @@ export class QuickSelectSession {
    * `commitTentative`. */
   quickPreview(points: Point[], erase: boolean): boolean {
     if (!this.seg || points.length === 0) return false;
-    const alpha = segmentTouchAlpha(this.seg, this.work as HTMLCanvasElement, points);
+    const alpha = segmentTouchAlpha(this.seg, this.work as HTMLCanvasElement, points, {
+      rgba: this.rgbaOf(),
+      scratch: this.wandScratch,
+    });
     const ctx = this.tentative.getContext("2d") as CanvasRenderingContext2D | null;
     if (!ctx) return false;
     ctx.clearRect(0, 0, this.w, this.h);

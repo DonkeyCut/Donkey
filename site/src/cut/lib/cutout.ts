@@ -21,6 +21,7 @@ import {
   withOutline,
 } from "@donkeycut/effects-kit";
 import { hostedPost } from "./hosted";
+import { touchAlpha, wandAlpha, type WandScratch } from "./removal/touchMask";
 import { decodeRasterImage, rasterCanvasToDataUrl, rasterCanvasToPng } from "./raster";
 import { geminiModelRoles } from "@/lib/inference/gemini-models";
 
@@ -175,17 +176,39 @@ export function interactiveSegmenter(): Promise<TouchSegmenter | null> {
   return touchOnce;
 }
 
+/** White canvas carrying `alpha`, or null when nearly nothing survived. */
+function alphaToCanvas(alpha: Uint8ClampedArray, w: number, h: number): HTMLCanvasElement | null {
+  const [out, ctx] = canvasOf(w, h);
+  const img = ctx.createImageData(w, h);
+  let kept = 0;
+  for (let i = 0; i < w * h; i++) {
+    img.data[i * 4] = 255;
+    img.data[i * 4 + 1] = 255;
+    img.data[i * 4 + 2] = 255;
+    img.data[i * 4 + 3] = alpha[i];
+    if (alpha[i] > 128) kept++;
+  }
+  if (kept < w * h * 0.001) return null;
+  ctx.putImageData(img, 0, 0);
+  return out;
+}
+
 /**
- * Segment the object under a tap (or a scribbled path) and return its alpha
- * canvas at the mask's own resolution, white where the object is. Points are
- * frame fractions. Null when nothing registers. The `source` should be small
- * (≤ ~512px) — the model resamples anyway, and quick-brush strokes segment
- * per pointer move.
+ * Select what sits under a tap (or a scribbled path) and return its alpha
+ * canvas, white where the pick is. Points are frame fractions. The model's
+ * object pick leads; where it refuses to anchor on the touched spot — a
+ * backdrop, not an object to it — or anchors on too few pixels to hold a
+ * selection, the geodesic color wand takes the stroke instead, so flat
+ * regions select as cleanly as subjects. Null when nothing registers. The
+ * `source` should be small (≤ ~512px) — the model resamples anyway, and
+ * quick-brush strokes segment per pointer move; a caller re-segmenting the
+ * same frame can pass its pixels and a wand scratch to skip the re-reads.
  */
 export function segmentTouchAlpha(
   segmenter: TouchSegmenter,
   source: HTMLCanvasElement,
-  points: { x: number; y: number }[]
+  points: { x: number; y: number }[],
+  opts: { rgba?: Uint8ClampedArray; scratch?: WandScratch } = {}
 ): HTMLCanvasElement | null {
   if (points.length === 0) return null;
   const roi =
@@ -193,35 +216,32 @@ export function segmentTouchAlpha(
       ? { keypoint: { x: points[0].x, y: points[0].y } }
       : { scribble: points.map((p) => ({ x: p.x, y: p.y })) };
   const result = segmenter.segment(source, roi);
+  let picked: HTMLCanvasElement | null = null;
   try {
     const masks = result.confidenceMasks;
-    if (!masks?.length) return null;
-    // Two masks: background first, the touched object second (mirroring the
-    // selfie model's layout). A single mask is the object itself.
-    const conf = masks.length > 1 ? masks[1].getAsFloat32Array() : masks[0].getAsFloat32Array();
-    const mw = masks[0].width;
-    const mh = masks[0].height;
-    const [out, ctx] = canvasOf(mw, mh);
-    const img = ctx.createImageData(mw, mh);
-    let kept = 0;
-    for (let i = 0; i < mw * mh; i++) {
-      const subject = conf[i];
-      const a =
-        subject > PERSON_THRESHOLD
-          ? Math.min(255, Math.round((subject - PERSON_THRESHOLD) * 4 * 255))
-          : 0;
-      img.data[i * 4] = 255;
-      img.data[i * 4 + 1] = 255;
-      img.data[i * 4 + 2] = 255;
-      img.data[i * 4 + 3] = a;
-      if (a > 128) kept++;
+    if (masks?.length) {
+      // Two masks: background first, the touched object second (mirroring
+      // the selfie model's layout). A single mask is the object itself.
+      const conf = masks.length > 1 ? masks[1].getAsFloat32Array() : masks[0].getAsFloat32Array();
+      const mw = masks[0].width;
+      const mh = masks[0].height;
+      const alpha = touchAlpha(conf, mw, mh, points);
+      picked = alpha ? alphaToCanvas(alpha, mw, mh) : null;
     }
-    if (kept < mw * mh * 0.001) return null;
-    ctx.putImageData(img, 0, 0);
-    return out;
   } finally {
     result.close();
   }
+  if (picked) return picked;
+  const sw = source.width;
+  const sh = source.height;
+  let rgba = opts.rgba;
+  if (!rgba) {
+    const sctx = source.getContext("2d");
+    if (!sctx) return null;
+    rgba = sctx.getImageData(0, 0, sw, sh).data;
+  }
+  const wand = wandAlpha(rgba, sw, sh, points, opts.scratch);
+  return wand ? alphaToCanvas(wand, sw, sh) : null;
 }
 
 /** Person matting, fully on-device. Null when no person registers (callers
