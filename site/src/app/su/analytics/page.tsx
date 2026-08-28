@@ -42,6 +42,20 @@ function formatMicros(micros: bigint): string {
   return `$${(Number(micros) / 1e6).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 }
 
+function formatGb(bytes: number): string {
+  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+}
+
+// Storage colored by how close the account sits to its quota: orange from
+// 80% up, red at or past the ceiling. Unlimited accounts stay neutral.
+function storageTone(bytes: number, quotaBytes: number | null | undefined): string {
+  if (quotaBytes === null || quotaBytes === undefined || quotaBytes <= 0) return "";
+  const ratio = bytes / quotaBytes;
+  if (ratio >= 1) return "text-red-600 dark:text-red-500";
+  if (ratio >= 0.8) return "text-orange-600 dark:text-orange-400";
+  return "";
+}
+
 // Activity is null for a day the pipeline never extracted: the masks are
 // empty because there was nothing to read, which is not the same as a day
 // nobody worked. Those days leave a gap in the charts and an unknown dot in
@@ -531,6 +545,19 @@ function ActivityGrid({
                       <span className="text-emerald-700 dark:text-emerald-500">
                         {" "}
                         · paid {formatMicros(BigInt(user.fundedMicros))}
+                      </span>
+                    )}
+                    {user.storageBytes !== undefined && (
+                      <span
+                        className={storageTone(Number(user.storageBytes), user.storageQuotaBytes)}
+                        title={
+                          user.storageQuotaBytes == null
+                            ? "unlimited storage"
+                            : `of ${formatGb(user.storageQuotaBytes)}`
+                        }
+                      >
+                        {" "}
+                        · {formatGb(Number(user.storageBytes))}
                       </span>
                     )}
                   </span>

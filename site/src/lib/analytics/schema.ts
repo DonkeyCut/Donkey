@@ -80,6 +80,9 @@ export const analyticsSnapshotFileSchema = z.object({
     }),
   ),
   balances: z.array(z.object({ userId: z.string(), balanceMicros: z.string() })),
+  // Cloud storage counters: bytes held in R2 per user, as decimal strings.
+  // Absent from snapshots written before this shipped.
+  storage: z.array(z.object({ userId: z.string(), bytes: z.string() })).optional(),
   // Every Donkey Pro subscription row, whatever its Stripe status.
   subscriptions: z.array(
     z.object({
@@ -164,6 +167,10 @@ export const analyticsRollupSchema = z.object({
       // All-time paid Stripe grants, BigInt micros as a decimal string. Absent
       // for users who never paid and in rollups written before this shipped.
       fundedMicros: z.string().optional(),
+      // Cloud storage held in R2, and the account's quota at consolidation
+      // (null = unlimited). Absent from rollups written before this shipped.
+      storageBytes: z.string().optional(),
+      storageQuotaBytes: z.number().nullable().optional(),
       // True for accounts with the super-user role.
       superUser: z.boolean().optional(),
       // One mask per entry of days; a dot is mask !== 0.

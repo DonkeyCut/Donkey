@@ -23,6 +23,7 @@ import {
   type AnalyticsSnapshotFile,
   utcDayOf,
 } from "@/lib/analytics/schema";
+import { cutLimitsForTier } from "@/cut/server/cloud/limits";
 import { isActiveProStatus } from "@/lib/billing/pro-subscription";
 import { REFERRAL_SOURCES } from "@/lib/onboarding/sequence";
 import { prisma } from "@/lib/prisma";
@@ -233,6 +234,20 @@ async function writeSnapshot(): Promise<AnalyticsSnapshotFile> {
     userId: account.userId,
   }));
 
+  // CutStorageUsage keys on userId, so it pages on that column.
+  const storage: { bytes: string; userId: string }[] = [];
+  for (let cursor: string | undefined; ; ) {
+    const page = await prisma.cutStorageUsage.findMany({
+      orderBy: { userId: "asc" },
+      select: { bytes: true, userId: true },
+      take: SNAPSHOT_PAGE_SIZE,
+      ...(cursor === undefined ? {} : { cursor: { userId: cursor }, skip: 1 }),
+    });
+    storage.push(...page.map((row) => ({ bytes: row.bytes.toString(), userId: row.userId })));
+    if (page.length < SNAPSHOT_PAGE_SIZE) break;
+    cursor = page[page.length - 1].userId;
+  }
+
   const subscriptions = (
     await fetchAllPages((cursorArgs) =>
       prisma.proSubscription.findMany({
@@ -269,6 +284,7 @@ async function writeSnapshot(): Promise<AnalyticsSnapshotFile> {
     balances,
     generatedAt: new Date().toISOString(),
     payments,
+    storage,
     subscriptions,
     users,
     version: 1,
@@ -334,9 +350,14 @@ async function consolidate(
       (fundedByUser.get(payment.userId) ?? BigInt(0)) + BigInt(payment.amountMicros),
     );
   }
+  const storageByUser = new Map((snapshot.storage ?? []).map((s) => [s.userId, s.bytes]));
+  const proUsers = new Set(
+    snapshot.subscriptions.filter((sub) => isActiveProStatus(sub.status)).map((sub) => sub.userId),
+  );
   const users = snapshot.users
     .map((u) => {
       const funded = fundedByUser.get(u.id);
+      const limits = cutLimitsForTier({ superUser: u.superUser === true, pro: proUsers.has(u.id) });
       return {
         activity: masks.get(u.id) ?? days.map(() => 0),
         balanceMicros: balanceByUser.get(u.id) ?? "0",
@@ -345,6 +366,8 @@ async function consolidate(
         id: u.id,
         name: u.name,
         registeredAt: u.createdAt,
+        storageBytes: storageByUser.get(u.id) ?? "0",
+        storageQuotaBytes: limits.storageBytes,
         ...(u.superUser ? { superUser: true } : {}),
       };
     })
