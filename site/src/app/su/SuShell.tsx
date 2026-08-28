@@ -56,7 +56,10 @@ export function SuShell({ children }: { children: ReactNode }) {
             <SuHeader />
             <div className="min-h-0 flex-1">
               <div className="mx-auto h-full w-full max-w-6xl px-10">
-                <div className="h-full p-px">{children}</div>
+                {/* The header is sticky and opaque, so the top of the gap
+                    below it lives here: a focus ring on the first control
+                    needs room that the header cannot paint over. */}
+                <div className="h-full px-px pt-1 pb-px">{children}</div>
               </div>
             </div>
           </main>
