@@ -1384,10 +1384,13 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
 
   /** Apply a history snapshot, re-attaching the render-owned clips it omitted so
    * an undo/redo never disturbs a background run's placements. The live gen
-   * clips are read at restore time, so the set is always current. */
+   * clips are read at restore time, so the set is always current. The
+   * selection survives when what it points at still exists in the restored
+   * doc — an undo mid-session (a brush stroke, a panel edit) keeps the panel
+   * and its stage gizmos on the clip being worked. */
   const restoreDoc = (snap: DocSnapshot) => {
     const { beats, ...doc } = snap;
-    const { clips, audioClips, assets } = get();
+    const { clips, audioClips, assets, selection, multiSelection } = get();
     const genClips = clips.filter((c) => genClipIds.has(c.id));
     const genAudio = audioClips.filter((c) => genAudioIds.has(c.id));
     // Beat grids go back onto the assets they came off. An asset imported
@@ -1397,13 +1400,31 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       grids.has(a.id) && grids.get(a.id) !== a.beats ? { ...a, beats: grids.get(a.id) } : a
     );
     const beatsMoved = withBeats.some((a, i) => a !== assets[i]);
+    const nextClips = [...doc.clips, ...genClips].sort((a, b) => a.start - b.start);
+    const nextAudio = [...doc.audioClips, ...genAudio];
+    const survives = (sel: Selection): boolean => {
+      if (!sel) return false;
+      switch (sel.kind) {
+        case "clip":
+          return nextClips.some((c) => c.id === sel.id);
+        case "audio":
+          return nextAudio.some((c) => c.id === sel.id);
+        case "overlay":
+          return doc.overlays.some((o) => o.id === sel.id);
+        case "cue":
+          return doc.subtitles.cues.some((c) => c.id === sel.id);
+        case "transition":
+          return doc.transitions.some((t) => t.id === sel.id);
+      }
+    };
+    const nextMulti = multiSelection.filter(survives);
     set({
       ...doc,
-      clips: [...doc.clips, ...genClips].sort((a, b) => a.start - b.start),
-      audioClips: [...doc.audioClips, ...genAudio],
+      clips: nextClips,
+      audioClips: nextAudio,
       ...(beatsMoved ? { assets: withBeats } : {}),
-      selection: null,
-      multiSelection: [],
+      selection: survives(selection) ? selection : nextMulti[nextMulti.length - 1] ?? null,
+      multiSelection: nextMulti,
     });
   };
 

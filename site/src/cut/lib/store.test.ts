@@ -100,6 +100,52 @@ beforeEach(() => {
   });
 });
 
+describe("brush stroke history", () => {
+  // The removal brush writes each finished stroke as pushHistory + a
+  // transient seeds update; one undo steps back exactly one stroke.
+  test("each stroke is one undo step", () => {
+    const clip = vclip({ removal: { mode: "custom" } });
+    useEditor.setState({ clips: [clip] });
+    const stroke = (t: number) => {
+      const st = useEditor.getState();
+      const cur = st.clips[0].removal!;
+      st.pushHistory();
+      st.updateClipTransient(clip.id, {
+        removal: {
+          ...cur,
+          seeds: {
+            prompts: [
+              ...(cur.seeds?.prompts ?? []),
+              { t, points: [{ x: 0.5, y: 0.5, label: 1 as const }] },
+            ],
+          },
+        },
+      });
+    };
+    useEditor.setState({ selection: { kind: "clip", id: clip.id } });
+    stroke(0);
+    stroke(1);
+    expect(useEditor.getState().clips[0].removal?.seeds?.prompts.length).toBe(2);
+    useEditor.getState().undo();
+    expect(useEditor.getState().clips[0].removal?.seeds?.prompts.length).toBe(1);
+    // The clip survived the restore, so the brush session's selection holds
+    // and the stage keeps its overlay.
+    expect(useEditor.getState().selection).toEqual({ kind: "clip", id: clip.id });
+    useEditor.getState().undo();
+    expect(useEditor.getState().clips[0].removal?.seeds?.prompts ?? []).toHaveLength(0);
+  });
+
+  test("undoing an add drops the selection with the clip", () => {
+    useEditor.setState({ clips: [], selection: null, multiSelection: [] });
+    useEditor.getState().pushHistory();
+    const clip = vclip({});
+    useEditor.setState({ clips: [clip], selection: { kind: "clip", id: clip.id } });
+    useEditor.getState().undo();
+    expect(useEditor.getState().clips).toHaveLength(0);
+    expect(useEditor.getState().selection).toBeNull();
+  });
+});
+
 describe("the document projection", () => {
   // Autosave tells an edit from a re-read by comparing this projection's
   // identity. A projection that rebuilt itself on every read would mark the
