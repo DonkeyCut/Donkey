@@ -10,7 +10,7 @@ import { exportsDir, readFileAt, saveExport } from "./backend/browser/opfs";
 import { holdRegistered, registerBlobFile, releaseRegistered } from "./backend/browser/registry";
 import { quotaErrorMessage } from "./backend/cloud";
 import { downloadFromUrl } from "./download";
-import { ClipReader, renderProjectToMp4 } from "./exportRender";
+import { renderProjectToMp4 } from "./exportRender";
 import { putSigned } from "./media";
 import { renderRemovalPieces } from "./removalVideo";
 import { createRasterCanvas, rasterCanvasToPng } from "./raster";
@@ -19,6 +19,7 @@ import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitle
 import { chromaAlphaInto, isMaskAnimated, isOverlayAnimated, matteLumaToAlpha, normalizeGrade, paintMaskLuma, paintStrokeInk } from "@donkeycut/effects-kit";
 import { renderElementFrames, renderElementPng } from "./textRender";
 import { clipCovers, clipKeyed, clipPosed, clipPoseAt, clipZoom, contentRect, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, regionPx, removalActive, shadowInk, subjectMasked } from "./types";
+import { liveReader } from "./liveReader";
 import type {
   Aspect,
   AudioClip,
@@ -337,7 +338,7 @@ function removalShadowSilhouette(
   if (r!.mode === "chroma") {
     const key = r!.chroma;
     if (!key) return null;
-    const reader = new ClipReader(asset, () => asset.url);
+    const reader = liveReader(asset);
     return {
       at: async (tLocal) => {
         const frame = await reader.frameAt(still ? 0 : clip.in + tLocal * speed);
@@ -363,7 +364,7 @@ function removalShadowSilhouette(
   }
   const matte = r!.matte ? assets.find((a) => a.id === r!.matte!.assetId) : undefined;
   if (!matte) return null;
-  const reader = new ClipReader(matte, () => matte.url);
+  const reader = liveReader(matte);
   const mdur = Math.max(0.1, matte.duration || 0.1);
   return {
     at: async (tLocal) => {

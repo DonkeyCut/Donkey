@@ -13,10 +13,10 @@
 import { matteLumaToAlpha } from "@donkeycut/effects-kit";
 import { openCanvasVideo, scaledEvenSize } from "./canvasVideo";
 import { FrameCompositor, type Frame } from "./composite";
-import { ClipReader } from "./exportRender";
 import { createRasterCanvas, decodeRasterImageUrl, type RasterSurface } from "./raster";
 import { clipSpeed } from "./store";
 import type { MediaAsset, VideoClip } from "./types";
+import { liveReader } from "./liveReader";
 
 export interface RemovalPieces {
   rgb: Blob;
@@ -79,8 +79,8 @@ export async function renderRemovalPieces(
   const frames = Math.max(1, Math.ceil(dur * opts.fps));
   const baked = clip.removal!.matte;
 
-  const reader = new ClipReader(asset, () => asset.url);
-  const matteReader = matteAsset ? new ClipReader(matteAsset, () => matteAsset.url) : null;
+  const reader = liveReader(asset);
+  const matteReader = matteAsset ? liveReader(matteAsset) : null;
   try {
     const first = await reader.frameAt(still ? 0 : clip.in);
     if (first.kind !== "ready") throw new Error("The removal clip's picture could not be read.");

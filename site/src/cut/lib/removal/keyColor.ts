@@ -1,9 +1,9 @@
 "use client";
 
-import { ClipReader } from "../exportRender";
 import { sampleClipFrameData } from "../previewCanvas";
 import { createRasterCanvas } from "../raster";
 import type { MediaAsset, VideoClip } from "../types";
+import { liveReader } from "../liveReader";
 
 const SAMPLE_W = 96;
 const SAMPLE_H = 54;
@@ -45,7 +45,7 @@ export function suggestKeyColor(clipId: string): string | null {
  * for callers with no live decoder on the clip (the chat tool, a clip away
  * from the playhead). Null when the picture can't be read. */
 export async function clipKeyColor(asset: MediaAsset, clip: VideoClip): Promise<string | null> {
-  const reader = new ClipReader(asset, () => asset.url);
+  const reader = liveReader(asset);
   try {
     const frame = await reader.frameAt(asset.type === "image" ? 0 : Math.max(0, clip.in));
     if (frame.kind !== "ready") return null;

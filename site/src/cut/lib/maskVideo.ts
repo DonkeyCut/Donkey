@@ -28,6 +28,7 @@ import type { ExportDoc } from "./exportClient";
 import { createRasterCanvas } from "./raster";
 import { getClipSpans } from "./store";
 import { clipCovers, frameOf, isEffectOverlay, isTextOverlay, rectOf, subjectMasked, type ClipSpan, type MediaAsset } from "./types";
+import { liveReader } from "./liveReader";
 
 /** Encoded mask rate — the server's fps filter duplicates frames up to the
  * output rate, and a person moves little in 1/15s. */
@@ -100,7 +101,7 @@ export async function renderSubjectMask(
   const readers = new Map<string, ClipReader>();
   const readerFor = (asset: MediaAsset) => {
     let r = readers.get(asset.id);
-    if (!r) readers.set(asset.id, (r = new ClipReader(asset, () => asset.url)));
+    if (!r) readers.set(asset.id, (r = liveReader(asset)));
     return r;
   };
 

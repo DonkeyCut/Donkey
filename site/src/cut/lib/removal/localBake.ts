@@ -12,9 +12,9 @@
 import { MATTE_BITRATE, MATTE_FPS, MATTE_SHORT } from "@donkeycut/effects-kit";
 import { openCanvasVideo, scaledEvenSize } from "../canvasVideo";
 import { personSegmenter, segmentSubjectAlpha } from "../cutout";
-import { ClipReader } from "../exportRender";
 import { createRasterCanvas } from "../raster";
 import type { MediaAsset, VideoClip } from "../types";
+import { liveReader } from "../liveReader";
 
 export class MatteBakeCancelled extends Error {
   constructor() {
@@ -42,7 +42,7 @@ export async function localBakeMatte(
   const seconds = Math.max(1 / MATTE_FPS, to - from);
   const frames = still ? 1 : Math.max(1, Math.ceil(seconds * MATTE_FPS));
 
-  const reader = new ClipReader(asset, () => asset.url);
+  const reader = liveReader(asset);
   try {
     const first = await reader.frameAt(from);
     if (first.kind !== "ready") throw new Error("The clip's picture could not be read.");
