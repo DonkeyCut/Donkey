@@ -9,7 +9,10 @@ import {
   HSL_BANDS,
   matchGrade,
   normalizeGrade,
+  normalizeSound,
   semanticMasterCurve,
+  SOUND_PRESETS,
+  type ClipSound,
   type ColorStats,
   type CurvePoint,
   type EffectId,
@@ -106,6 +109,8 @@ import { characterPrompt, stockAspectDims, stockTitle } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
 import { storedMediaUrl } from "./mediaSync";
+import { isSoundPresetTemplate, listSoundPresets, saveSoundPreset } from "./soundPresets";
+import { isStylePresetTemplate } from "./stylePresets";
 import { applyOverlayPatchSettled, track0Clips, laneGapAt, getClipSpans, nextFreeStart, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt } from "./playhead";
 import { renderProjectFrame } from "./exportRender";
@@ -1481,6 +1486,79 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return { id: clip.id, hidden: Boolean(input.hidden) };
   },
 
+  set_clip_sound: async (s, input) => {
+      const target = soundTarget(s, input.clipId);
+      let next: ClipSound | undefined;
+      if (typeof input.preset === "string" && input.preset.trim()) {
+        const wanted = input.preset.trim().toLowerCase();
+        // The dropdown labels the shipped presets by name, so a name is what
+        // the user says; the ids are what the catalog lists.
+        const shipped = SOUND_PRESETS.find(
+          (p) => p.id === wanted || p.name.toLowerCase() === wanted
+        );
+        if (shipped) {
+          next = shipped.sound;
+        } else {
+          const saved = (await listSoundPresets()).find(
+            (p) => p.name.toLowerCase() === wanted || p.id === input.preset
+          );
+          if (!saved)
+            throw new ToolError(
+              `No sound preset called "${String(input.preset)}". Shipped: ${SOUND_PRESETS.map((p) => p.name).join(", ")}.`
+            );
+          next = saved.sound;
+        }
+      } else {
+        const patch: ClipSound = { ...(target.current ?? {}) };
+        if ("eq" in input) {
+          if (input.eq === null) delete patch.eq;
+          else if (Array.isArray(input.eq)) patch.eq = input.eq.map((v) => (isNum(v) ? v : 0));
+          else throw new ToolError("eq must be an array of dB values, one per band.");
+        }
+        if ("compressor" in input) {
+          const c = input.compressor as Record<string, unknown> | null;
+          if (c === null) delete patch.compressor;
+          else if (c && isNum(c.threshold) && isNum(c.ratio) && isNum(c.attack) && isNum(c.release))
+            patch.compressor = { threshold: c.threshold, ratio: c.ratio, attack: c.attack, release: c.release };
+          else throw new ToolError("compressor needs threshold, ratio, attack and release.");
+        }
+        if ("limiter" in input) {
+          const l = input.limiter as Record<string, unknown> | null;
+          if (l === null) delete patch.limiter;
+          else if (l && isNum(l.ceiling)) patch.limiter = { ceiling: l.ceiling };
+          else throw new ToolError("limiter needs a ceiling.");
+        }
+        for (const stage of Array.isArray(input.clear) ? input.clear : []) {
+          if (stage === "eq") delete patch.eq;
+          else if (stage === "compressor") delete patch.compressor;
+          else if (stage === "limiter") delete patch.limiter;
+          else throw new ToolError(`clear takes eq, compressor or limiter; got "${String(stage)}".`);
+        }
+        if (
+          !("eq" in input) &&
+          !("compressor" in input) &&
+          !("limiter" in input) &&
+          !Array.isArray(input.clear)
+        )
+          throw new ToolError("Pass a preset, a clear list, or eq / compressor / limiter.");
+        next = patch;
+      }
+      const sound = normalizeSound(next);
+      target.write(sound);
+      return { id: target.id, kind: target.kind, sound: soundTarget(useEditor.getState(), target.id).current ?? null };
+  },
+
+  save_sound_preset: async (s, input) => {
+      const target = soundTarget(s, input.clipId);
+      const name = typeof input.name === "string" ? input.name.trim() : "";
+      if (!name) throw new ToolError("name is required.");
+      if (!target.current) throw new ToolError("That clip's sound is flat; shape it first.");
+      if (!s.projectId) throw new ToolError("No open project.");
+      const saved = await saveSoundPreset(s.projectId, name, target.current);
+      if (!saved) throw new ToolError("The preset could not be saved.");
+      return { id: saved.id, name: saved.name, residency: saved.residency, sound: saved.sound };
+  },
+
   reorder_track: (s, input) => {
       if (!isNum(input.from) || !isNum(input.to) || input.from < 0 || input.to < 0)
         throw new ToolError("from and to must be 0 or higher.");
@@ -2781,7 +2859,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           // "inspiration" = saved from the phone's Ideas tab.
           ...(a.origin ? { origin: a.origin } : {}),
         })),
-        templates: lib.templates.map((t) => ({
+        templates: lib.templates
+          .filter((t) => !isSoundPresetTemplate(t) && !isStylePresetTemplate(t))
+          .map((t) => ({
           id: t.id,
           name: t.name,
           duration: round2(t.duration),
@@ -4045,6 +4125,32 @@ async function listenToSource(
     throw new ToolError(body.error ?? "Could not read the audio.");
   }
   return blobToInlineAudio(await res.blob());
+}
+
+/** The clip a sound tool names — a video clip or a soundtrack clip, whichever
+ * carries the id — with its current treatment and the store write that
+ * lands a new one. */
+function soundTarget(s: Editor, id: unknown) {
+  const key = typeof id === "string" ? id.trim() : "";
+  const clip = s.clips.find((c) => c.id === key);
+  if (clip) {
+    return {
+      id: clip.id,
+      kind: "clip" as const,
+      current: clip.sound,
+      write: (sound: ClipSound | undefined) => s.updateClip(clip.id, { sound }),
+    };
+  }
+  const audio = s.audioClips.find((a) => a.id === key);
+  if (audio) {
+    return {
+      id: audio.id,
+      kind: "audio" as const,
+      current: audio.sound,
+      write: (sound: ClipSound | undefined) => s.updateAudio(audio.id, { sound }),
+    };
+  }
+  throw new ToolError(`No video or soundtrack clip with id "${key}".`);
 }
 
 function requireItem<T extends { id: string }>(pool: T[], id: unknown, label: string): T {

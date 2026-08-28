@@ -13,6 +13,11 @@ import {
   GRADE_PRESET_IDS,
   gradePresetCatalogText,
   HSL_BANDS,
+  SOUND_COMPRESSOR_RANGE,
+  SOUND_EQ_BANDS,
+  SOUND_EQ_DB_RANGE,
+  SOUND_LIMITER_RANGE,
+  SOUND_PRESETS,
 } from "@donkeycut/effects-kit";
 import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 
@@ -174,6 +179,52 @@ export const INSPECTOR_TOOLS = [
     name: "set_clip_volume",
     description: "Set the gain on a video clip's own audio (soundtrack clips use update_audio).",
     inputSchema: obj({ clipId: str("Video clip id"), volume: num("0..3 (1 = unchanged, up to 3 boosts the clip's own sound)") }, ["clipId", "volume"]),
+  },
+  {
+    name: "set_clip_sound",
+    description:
+      `Shape a clip's own sound — video clip or soundtrack clip — with the Sound quality section's three stages: a ${SOUND_EQ_BANDS.length}-band equalizer, a compressor, and a limiter. Each stage runs on that clip alone, before its fades and any ducking, in the preview and every export. Pass \`preset\` to apply a shipped treatment (${SOUND_PRESETS.map((p) => `"${p.name}"`).join(", ")}) or one the user saved, by name or id; or set the stages directly, leaving out the ones that stay as they are. \`clear\` names stages to remove, and the "Off" preset removes all three. Read the clip's current treatment from editor_state before a partial change.`,
+    inputSchema: obj(
+      {
+        clipId: str("Video clip id or soundtrack clip id"),
+        preset: str(
+          `A preset by name or id: shipped are ${SOUND_PRESETS.map((p) => `"${p.name}" (${p.id})`).join(", ")}, plus whatever the user has saved. "Clear voice" is the podcast/voice treatment: warmth below 200 Hz, mud pulled out at 400 Hz, presence at 3–5 kHz, 3:1 compression at −18 dB and a −1 dB ceiling. "Off" leaves the clip's sound as it came.`
+        ),
+        clear: {
+          type: "array",
+          description: "Stages to remove from the clip's treatment.",
+          items: { type: "string", enum: ["eq", "compressor", "limiter"] },
+        },
+        eq: {
+          type: "array",
+          description: `Gain in dB per band, −${SOUND_EQ_DB_RANGE}..+${SOUND_EQ_DB_RANGE}, in this order: ${SOUND_EQ_BANDS.map((b) => b.label).join(", ")} (the first band is a low shelf, the last a high shelf, the rest peaks). Fewer values leave the remaining bands flat.`,
+          items: { type: "number" },
+        },
+        compressor: obj(
+          {
+            threshold: num(`dB, ${SOUND_COMPRESSOR_RANGE.threshold.min}..${SOUND_COMPRESSOR_RANGE.threshold.max}`),
+            ratio: num(`${SOUND_COMPRESSOR_RANGE.ratio.min}..${SOUND_COMPRESSOR_RANGE.ratio.max} (:1)`),
+            attack: num(`ms, ${SOUND_COMPRESSOR_RANGE.attack.min}..${SOUND_COMPRESSOR_RANGE.attack.max}`),
+            release: num(`ms, ${SOUND_COMPRESSOR_RANGE.release.min}..${SOUND_COMPRESSOR_RANGE.release.max}`),
+          },
+          ["threshold", "ratio", "attack", "release"]
+        ),
+        limiter: obj(
+          { ceiling: num(`dBFS ceiling, ${SOUND_LIMITER_RANGE.ceiling.min}..${SOUND_LIMITER_RANGE.ceiling.max}`) },
+          ["ceiling"]
+        ),
+      },
+      ["clipId"]
+    ),
+  },
+  {
+    name: "save_sound_preset",
+    description:
+      "Save a clip's current sound treatment (equalizer, compressor, limiter) to the user's Library under a name, so set_clip_sound can apply it to other clips by that name and the Sound quality section offers it in its preset dropdown.",
+    inputSchema: obj(
+      { clipId: str("Video clip id or soundtrack clip id whose treatment to save"), name: str("Preset name") },
+      ["clipId", "name"]
+    ),
   },
   {
     name: "detach_audio",

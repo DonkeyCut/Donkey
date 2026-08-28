@@ -1,6 +1,6 @@
 "use client";
 
-import { hasOverlayAnim } from "@donkeycut/effects-kit";
+import { hasOverlayAnim, type ClipSound } from "@donkeycut/effects-kit";
 import { chatOwner } from "./chatAssets";
 import { useGenerate } from "./generate";
 import { useMatteBakes } from "./removal/bakeJobs";
@@ -333,6 +333,9 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
       sourceDuration: r(sp.asset.type === "image" ? sp.len : sp.asset.duration),
       muted: sp.clip.muted,
       ...(sp.clip.hidden ? { hidden: true } : {}),
+      // The clip's own equalizer/compressor/limiter, set through
+      // set_clip_sound; absent when its sound is untouched.
+      ...(sp.clip.sound ? { sound: sp.clip.sound } : {}),
       framing: sp.clip.fit ?? "fit",
       speed: r(sp.clip.speed ?? 1),
       // The generated scene shot this clip came from — sceneShot is the
@@ -450,7 +453,7 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
 }
 
 function describeAudio(
-  a: { assetId: string; start: number; in: number; out: number; volume: number; fadeIn?: number; fadeOut?: number; speed?: number; duck?: number; lane?: number; hidden?: boolean },
+  a: { assetId: string; start: number; in: number; out: number; volume: number; fadeIn?: number; fadeOut?: number; speed?: number; sound?: ClipSound; duck?: number; lane?: number; hidden?: boolean },
   assets: Map<string, { name: string }>
 ) {
   const speed = a.speed && a.speed > 0 ? a.speed : 1;
@@ -463,6 +466,7 @@ function describeAudio(
     volume: r(a.volume),
     fadeIn: r(a.fadeIn ?? 0),
     fadeOut: r(a.fadeOut ?? 0),
+    ...(a.sound ? { sound: a.sound } : {}),
     ...(speed !== 1 ? { speed: r(speed) } : {}),
     ...(a.lane ? { lane: a.lane } : {}),
     ...(a.hidden ? { hidden: true } : {}),
@@ -483,6 +487,7 @@ function describeOverlayClip(c: VideoClip, assets: Map<string, { name: string }>
     out: r(c.out),
     muted: c.muted,
     ...(c.hidden ? { hidden: true } : {}),
+    ...(c.sound ? { sound: c.sound } : {}),
     // The frame region this layer occupies: Full covers the frame; Top/Bottom/
     // Left/Right split it; PiP floats inside it.
     layout: regionLabel(rect),
