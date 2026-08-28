@@ -22,8 +22,7 @@ import { num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 export const REMOVAL_TOOLS = [
   {
     name: "set_removal",
-    description:
-      'Cut a video clip\'s background away — the Inspector\'s Cutout tab, on any track. Modes: "auto" mattes the person in the shot with AI; "custom" mattes whatever `subject` describes in a few words ("the dog") and tracks every match through the clip — picking one exact instance by hand is the panel\'s brush flow, so send the user there for that; "chroma" keys out a backdrop color (green screen) with intensity/softness/spill; "off" removes the whole cutout, stroke and background fill included. The AI mattes bake in the background — wait_for_renders covers the bake. Where the background was, lower tracks or the project background show through; set_removal_background fills that area within the clip itself. Read the background-removal skill for the full recipes.',
+    description: `Cut a video clip's background away — the Inspector's Cutout tab, on any track. Modes: "auto" mattes the person in the shot with AI; "custom" mattes whatever \`subject\` describes in a few words ("the dog") and tracks every match through the clip — picking one exact instance by hand is the panel's brush flow, so send the user there for that; "chroma" keys out a backdrop color (green screen) with intensity/softness/spill; "off" removes the whole cutout, stroke and background fill included. The AI mattes prepare in the background — wait_for_renders covers that work — and a long clip tracks in parts automatically, so length needs no special handling. Where the background was, lower tracks or the project background show through; set_removal_background fills that area within the clip itself. Read the background-removal skill for the full recipes.`,
     inputSchema: obj(
       {
         clipId: str("Video clip id"),

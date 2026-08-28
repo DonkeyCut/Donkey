@@ -20,7 +20,7 @@ import { importFileToProject } from "../media";
 import { useEditor } from "../store";
 import { removalFingerprint, type ClipRemoval, type VideoClip } from "../types";
 import { useBrushUi } from "./brushUi";
-import { hostedBakeMatte, MatteTrackFailed, type HostedBakeTicket } from "./hostedBake";
+import { hostedBakeMatte, type HostedBakeTicket } from "./hostedBake";
 import { localBakeMatte, MatteBakeCancelled } from "./localBake";
 
 type MatteQuality = "local" | "hq";
@@ -64,10 +64,11 @@ const running = new Map<string, { fp: string; quality: MatteQuality; ctl: AbortC
 
 // The hosted bake bills at submit, so its poll ticket persists per browser: a
 // reload re-attaches to the paid track through it and pays nothing new. One
-// record per clip. A ticket outlives cancellation — clearing a cutout and
-// undoing it comes back to the same fingerprint, and the undo resumes the
-// paid track. Landing or terminal failure drops it; the sweep retires the
-// rest: a changed selection, a clip gone from the doc, or plain age.
+// record per clip. A ticket outlives cancellation and failure — clearing a
+// cutout and undoing it comes back to the same fingerprint, and the undo
+// resumes the paid track; a dead track forgets only its own part inside the
+// run. Landing drops the record; the sweep retires the rest: a changed
+// selection, a clip gone from the doc, or plain age.
 const TICKETS_KEY = "cut-matte-bake-tickets";
 const TICKET_TTL_MS = 48 * 60 * 60 * 1000;
 type PersistedTicket = {
@@ -275,9 +276,9 @@ export function ensureMatteBake(clipId: string, opts: { whileBrushing?: boolean 
       setJob(clipId, null);
       return;
     }
-    // A dead track's ticket has nothing to resume — drop it so Retry submits
-    // fresh. A transient failure keeps it, and the retry re-attaches.
-    if (e instanceof MatteTrackFailed) dropTicket(clipId);
+    // The ticket stands through failure: the run already forgot any part
+    // whose track settled dead, so Retry resumes the paid parts and re-buys
+    // only what died.
     failed.set(clipId, { fp, quality: want });
     setJob(clipId, {
       quality: want,

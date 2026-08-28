@@ -212,6 +212,11 @@ export function chromaAlphaOf(d: number, p: ChromaParams): number {
 export const MATTE_FPS = 15;
 export const MATTE_SHORT = 480;
 export const MATTE_BITRATE = 1_000_000;
+/** The longest span one hosted tracking part covers. Each uploaded segment
+ * rides a fixed byte budget, so past a few minutes its bitrate — and the
+ * tracker's masks with it — collapse; a longer clip's bake splits its span
+ * into parts of at most this length and tracks each on its own budget. */
+export const MATTE_MAX_S = 180;
 
 /** Turn a decoded matte frame's luma into alpha coverage, in place: alpha
  * becomes the red channel's luma and the ink turns white, so the result
