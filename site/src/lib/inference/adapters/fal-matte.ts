@@ -16,21 +16,26 @@ import {
   type StoredGenerationForProvider,
 } from "@/lib/inference/providers";
 
-// The matte provider: a queue-hosted segmenter for kind="matte". One
-// call takes a clip segment (by URL — the route resolves the caller's stored
-// blob into a read link) plus a text description of what to keep, click
-// prompts, or both together — points sharing an object id refine what the
-// words detected — and returns a mask video. The prediction is async: submit
-// here, poll through refresh; the charge bills at submit, counted in the
-// segmenter's own unit.
+// The matte provider: queue-hosted matting for kind="matte", one model per
+// job. The segmenter takes a clip segment (by URL — the route resolves the
+// caller's stored blob into a read link) plus a text description of what to
+// keep, click prompts, or both together — points sharing an object id refine
+// what the words detected — and returns a mask video. The removal model
+// takes only the segment and masks the foreground subject whole, returning
+// the mask as a grayscale "alpha" h264 video. Predictions are async: submit
+// here, poll through refresh; the charge bills at submit, counted in each
+// model's own unit.
 const providerID = "fal";
 
 const QUEUE_BASE = "https://queue.fal.run";
 
-// The segmenter meters per 16 processed frames, so the charge counts the same
-// unit: the submitted segment is probed for its frame count and each started
-// chunk of 16 bills one generation at the per-chunk price.
-const CHUNK_FRAMES = 16;
+// Each model meters per processed-frame chunk of its own size, so the charge
+// counts the same unit: the submitted segment is probed for its frame count
+// and each started chunk bills one generation at the model's per-chunk price.
+const matteChunkFrames: Record<FalMatteModel, number> = {
+  [falMatteModels.segmenter]: 16,
+  [falMatteModels.removal]: 30,
+};
 
 // The billable chunk count of the segment at `videoUrl` — the server's own
 // count, so the charge never rides a client-supplied number. The frame count
@@ -40,7 +45,7 @@ const CHUNK_FRAMES = 16;
 // billing path. An unreadable segment stops the submit.
 const RATE_SAMPLE_PACKETS = 100;
 
-async function billableChunks(videoUrl: string): Promise<number> {
+async function billableChunks(videoUrl: string, chunkFrames: number): Promise<number> {
   const input = new Input({ source: new UrlSource(videoUrl), formats: ALL_FORMATS });
   try {
     const track = await input.getPrimaryVideoTrack();
@@ -49,7 +54,7 @@ async function billableChunks(videoUrl: string): Promise<number> {
       const rate = (await track.computePacketStats(RATE_SAMPLE_PACKETS)).averagePacketRate;
       const frames = Math.round(duration * rate);
       if (frames > 0) {
-        return Math.ceil(frames / CHUNK_FRAMES);
+        return Math.ceil(frames / chunkFrames);
       }
     }
   } catch {
@@ -73,28 +78,27 @@ export function createFalMatteProvider(
   const token = environment.FAL_KEY?.trim();
   const configured = Boolean(token);
   const defaultModel: FalMatteModel = falMatteModels.segmenter;
+  const matteModels = Object.values(falMatteModels) as string[];
 
   async function listModels(modalities: InferenceModality[]): Promise<InferenceModel[]> {
     if (!modalities.includes("matte")) {
       return [];
     }
-    return [
-      {
-        id: defaultModel,
-        name: defaultModel,
-        provider: providerID,
-        inputModalities: ["video"],
-        outputModalities: ["video"],
-        contextLength: null,
-        pricing: null,
-        metadata: { provider: providerID },
-      },
-    ];
+    return matteModels.map((id) => ({
+      id,
+      name: id,
+      provider: providerID,
+      inputModalities: ["video"],
+      outputModalities: ["video"],
+      contextLength: null,
+      pricing: null,
+      metadata: { provider: providerID },
+    }));
   }
 
-  function resolveModel(requested?: string): string {
+  function resolveModel(requested?: string): FalMatteModel {
     const model = requested?.trim() || defaultModel;
-    if (model !== defaultModel) {
+    if (!matteModels.includes(model)) {
       throw new InferenceProviderError("Unknown matte model.", {
         statusCode: 400,
         code: "unknown_matte_model",
@@ -108,7 +112,7 @@ export function createFalMatteProvider(
         { statusCode: 500, code: "matte_model_not_priced", details: { model } },
       );
     }
-    return model;
+    return model as FalMatteModel;
   }
 
   async function api(url: string, init?: RequestInit): Promise<JsonValue> {
@@ -146,7 +150,7 @@ export function createFalMatteProvider(
   }
 
   // The route's pre-preflight count: the chunks this segment will bill, read
-  // from the resolved segment itself.
+  // from the resolved segment itself in the resolved model's own unit.
   async function assetGenerationCountFor(
     request: AssetGenerationProviderRequest["request"],
   ): Promise<number> {
@@ -157,7 +161,7 @@ export function createFalMatteProvider(
         code: "unsupported_asset_kind",
       });
     }
-    return billableChunks(segmentUrl(request));
+    return billableChunks(segmentUrl(request), matteChunkFrames[resolveModel(request.model)]);
   }
 
   async function generateAsset({
@@ -187,26 +191,44 @@ export function createFalMatteProvider(
     const parameters = toJsonObject(request.parameters ?? {});
     const prompt = matteConceptPrompt(parameters.prompt);
     const points = mattePointPrompts(parameters.points);
-    if (!prompt && points.length === 0) {
-      throw new InferenceProviderError("A matte needs a text prompt or point prompts.", {
-        statusCode: 400,
-        code: "empty_matte_prompts",
-      });
-    }
-    // The segmenter takes object ids as integers; each named brush object
-    // maps to a stable one in prompt order.
-    const objectIds = new Map<string, number>();
-    const objectId = (name: string) => {
-      const held = objectIds.get(name);
-      if (held !== undefined) return held;
-      const next = objectIds.size + 1;
-      objectIds.set(name, next);
-      return next;
-    };
 
-    const submitted = await api(`${QUEUE_BASE}/${model}`, {
-      method: "POST",
-      body: JSON.stringify({
+    let body: Record<string, unknown>;
+    if (model === falMatteModels.removal) {
+      // The removal model finds the foreground subject on its own; prompts
+      // have nowhere to land, so a prompted request is a caller bug.
+      if (prompt || points.length > 0) {
+        throw new InferenceProviderError("The removal model takes no selection prompts.", {
+          statusCode: 400,
+          code: "matte_prompts_unsupported",
+        });
+      }
+      body = {
+        video_url: videoUrl,
+        // h264 returns the mask alone as a grayscale "alpha" video — the
+        // matte contract's shape; vp9 would fold it into an alpha channel
+        // WebCodecs cannot read back.
+        output_codec: "h264",
+        refine_foreground_edges: true,
+        subject_is_person: true,
+      };
+    } else {
+      if (!prompt && points.length === 0) {
+        throw new InferenceProviderError("A matte needs a text prompt or point prompts.", {
+          statusCode: 400,
+          code: "empty_matte_prompts",
+        });
+      }
+      // The segmenter takes object ids as integers; each named brush object
+      // maps to a stable one in prompt order.
+      const objectIds = new Map<string, number>();
+      const objectId = (name: string) => {
+        const held = objectIds.get(name);
+        if (held !== undefined) return held;
+        const next = objectIds.size + 1;
+        objectIds.set(name, next);
+        return next;
+      };
+      body = {
         video_url: videoUrl,
         // The mask video, without the source picture under it.
         apply_mask: false,
@@ -222,7 +244,12 @@ export function createFalMatteProvider(
               })),
             }
           : {}),
-      }),
+      };
+    }
+
+    const submitted = await api(`${QUEUE_BASE}/${model}`, {
+      method: "POST",
+      body: JSON.stringify(body),
     });
     const requestId =
       isJsonObject(submitted) && typeof submitted.request_id === "string"
@@ -328,7 +355,10 @@ export function createFalMatteProvider(
   };
 }
 
-// The finished run's mask video URL.
+// The finished run's mask video URL. The segmenter returns one video object;
+// the removal model returns a file list where the mask is the entry named
+// "alpha" (verified against the live endpoint — h264 returns the alpha video
+// alone, at the segment's own size and rate).
 function maskUrl(result: JsonValue): string | null {
   if (!isJsonObject(result)) {
     return null;
@@ -336,6 +366,17 @@ function maskUrl(result: JsonValue): string | null {
   const video = result.video;
   if (isJsonObject(video) && typeof video.url === "string" && video.url.startsWith("https://")) {
     return video.url;
+  }
+  if (Array.isArray(video)) {
+    const files = video.filter(
+      (f): f is { url: string; file_name?: string } =>
+        isJsonObject(f) && typeof f.url === "string" && f.url.startsWith("https://"),
+    );
+    const alpha = files.find((f) =>
+      `${typeof f.file_name === "string" ? f.file_name : ""} ${f.url}`.toLowerCase().includes("alpha"),
+    );
+    if (alpha) return alpha.url;
+    if (files.length === 1) return files[0].url;
   }
   return null;
 }

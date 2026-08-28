@@ -2,12 +2,13 @@
 
 /**
  * The quality matte bake: the clip's trimmed segment goes to the hosted
- * tracker (credits), which propagates the subject across every frame; the
- * returned mask video is refined here against the source pixels with the
- * kit's guided filter and encoded as the final matte asset. Auto mode seeds
- * the tracker from the on-device person matte; custom mode seeds it from the
- * brush's stored prompts and paint. Driven by the page or the cloud worker —
- * the local engine only ever consumes the stored matte.
+ * matting service (credits) and the returned mask video is refined here
+ * against the source pixels with the kit's guided filter and encoded as the
+ * final matte asset. One model per job: auto mode sends the segment to the
+ * background-removal model, which masks the foreground subject on its own;
+ * custom mode sends it to the promptable tracker, seeded by the described
+ * subject and the brush's stored prompts and paint. Driven by the page or
+ * the cloud worker — the local engine only ever consumes the stored matte.
  *
  * A long clip tracks in parts: the span splits into pieces of at most
  * `MATTE_MAX_S`, each rendered, uploaded, and tracked on its own upload
@@ -33,6 +34,7 @@ import { NO_CREDITS_MESSAGE } from "../credits";
 import { ClipReader } from "../exportRender";
 import { hostedPost } from "../hosted";
 import { storeHostedBlob } from "../hostedBlobs";
+import { falMatteModels } from "@/lib/inference/matte-models";
 import { createRasterCanvas, decodeRasterImageUrl, type RasterSurface } from "../raster";
 import type { MediaAsset, RemovalSeeds, VideoClip } from "../types";
 import { liveReader } from "../liveReader";
@@ -450,8 +452,10 @@ export async function hostedBakeMatte(
   const nParts = Math.max(1, Math.ceil(totalFrames / maxFrames));
   const perPart = Math.ceil(totalFrames / nParts);
 
-  const painted = r.mode === "custom" && !!(r.seeds?.prompts.length || r.seeds?.paint?.length);
-  const concept = r.mode === "custom" ? (r.subject ?? "").trim() : "person";
+  const custom = r.mode === "custom";
+  const painted = custom && !!(r.seeds?.prompts.length || r.seeds?.paint?.length);
+  const concept = custom ? (r.subject ?? "").trim() : "";
+  const model = custom ? falMatteModels.segmenter : falMatteModels.removal;
 
   const gens = [...ticketParts(opts.resume, nParts, from, to)];
   const ticket = (upto: number): HostedBakeTicket => ({
@@ -478,12 +482,13 @@ export async function hostedBakeMatte(
         const segment = await renderSegment(srcReader, still, partFrom, partTo, frames, opts.signal, (f) =>
           frac(0.02 + f * 0.13)
         );
-        // The words and the strokes ride together: auto mode and a described
-        // subject send a text prompt, painted seeds send point prompts, and a
-        // custom removal with both sends both — the segmenter's points refine
-        // what the words detected. A painted part with no strokes of its own
-        // takes the handoff points from the previous part's final mask, so the
-        // picked selection crosses the seam. The route picks the segmenter.
+        // Custom mode's words and strokes ride together: a described subject
+        // sends a text prompt, painted seeds send point prompts, and a
+        // removal with both sends both — the segmenter's points refine what
+        // the words detected. A painted part with no strokes of its own
+        // takes the handoff points from the previous part's final mask, so
+        // the picked selection crosses the seam. Auto mode sends the segment
+        // alone — the removal model finds the subject itself.
         let points = painted ? await seedPoints(r.seeds!, segment, segment.from) : [];
         if (painted && points.length === 0 && carry.length > 0) {
           points = carry.map((c) => ({
@@ -494,7 +499,7 @@ export async function hostedBakeMatte(
             object: "carry",
           }));
         }
-        if (!concept && points.length === 0) {
+        if (custom && !concept && points.length === 0) {
           throw p === 0
             ? new Error("No selection to track.")
             : new MatteTrackFailed("The selection was lost at a part boundary.");
@@ -511,7 +516,10 @@ export async function hostedBakeMatte(
 
         const submit = await hostedPost("/api/inference/assets", {
           kind: "matte",
-          prompt: "Track the selected subject through the clip.",
+          model,
+          prompt: custom
+            ? "Track the selected subject through the clip."
+            : "Remove the clip's background.",
           inputs: { video: { blobRef, blobField: "url", blobUrl: true, mimeType: "video/mp4" } },
           parameters,
         });

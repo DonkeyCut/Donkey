@@ -332,10 +332,13 @@ function geminiOmniCreditPricing(model: string): ProviderCreditPricing | undefin
 
 // The matte segmenter bills upstream per 16 processed frames ($0.005 a
 // chunk); the adapter counts the submitted segment's frames and charges the
-// same unit, generationCount = started chunks. Keyed by FalMatteModel, so
-// adding a segmenter id without a price fails the build.
+// same unit, generationCount = started chunks. Each model meters its own
+// chunk size (the adapter's matteChunkFrames): the segmenter per 16 frames,
+// the removal model per 30 frames with edge refinement on. Keyed by
+// FalMatteModel, so adding a matte id without a price fails the build.
 const falMatteModelPricing: Record<FalMatteModel, ProviderCreditPricing> = {
   [falMatteModels.segmenter]: { generationCostMicros: usdWithMargin("0.005") },
+  [falMatteModels.removal]: { generationCostMicros: usdWithMargin("0.0225") },
 };
 
 function falMatteCreditPricing(model: string): ProviderCreditPricing | undefined {
