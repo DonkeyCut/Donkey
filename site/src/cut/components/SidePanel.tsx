@@ -85,6 +85,7 @@ import {
   availableResidencies,
   type Residency,
 } from "@/cut/lib/residency";
+import { isSoundPresetTemplate } from "@/cut/lib/soundPresets";
 import { isStylePresetTemplate } from "@/cut/lib/stylePresets";
 import { retryUpload } from "@/cut/lib/importQueue";
 import {
@@ -1515,10 +1516,10 @@ function LibraryPanel({ projectId }: { projectId: string }) {
   const loaded = library.data !== undefined || library.isError;
   const assets = (library.data?.assets ?? []).filter((a) => reachable(a.residency));
   const folders = (library.data?.folders ?? []).filter((f) => reachable(f.residency));
-  // Saved text styles ride the template rails but are not templates: they
-  // belong to the text inspector, not this shelf.
+  // Saved text styles and sound presets ride the template rails but are not
+  // templates: they belong to their inspectors, not this shelf.
   const templates = (library.data?.templates ?? []).filter(
-    (t) => reachable(t.residency) && !isStylePresetTemplate(t)
+    (t) => reachable(t.residency) && !isStylePresetTemplate(t) && !isSoundPresetTemplate(t)
   );
   const patch = useCallback(
     (fn: (prev: LibraryData) => LibraryData) => patchLibrary(client, fn),

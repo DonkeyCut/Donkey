@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { ClipSound } from "@donkeycut/effects-kit";
 import { cutDataRoot } from "./dataDir";
 import { assertLocalRuntime } from "./local-only";
 import { mediaPath as projectMediaPath, readProject } from "./projects";
@@ -78,6 +79,7 @@ export interface TemplateLayer {
   opacity?: number;
   muted: boolean;
   speed?: number;
+  sound?: ClipSound;
   track: number;
   asClip?: boolean; // re-materializes as a track-0 timeline clip rather than an overlay
 }
@@ -90,6 +92,7 @@ export interface TemplateAudio {
   fadeIn?: number;
   fadeOut?: number;
   speed?: number;
+  sound?: ClipSound;
 }
 export interface LibraryTemplate {
   id: string;
@@ -102,6 +105,8 @@ export interface LibraryTemplate {
   audio: TemplateAudio[];
   texts: unknown[]; // opaque TextOverlay[] round-tripped for the client
   cues: unknown[]; // opaque SubtitleCue[]
+  /** A template carrying only this is a saved sound preset. */
+  sound?: ClipSound;
 }
 
 interface LibraryIndex {
@@ -447,7 +452,13 @@ export interface TemplateInput {
   audio: TemplateAudio[];
   texts: unknown[];
   cues: unknown[];
+  sound?: LibraryTemplate["sound"];
 }
+
+/** A template with nothing on it saves nothing; a sound preset is a template
+ * carrying only its treatment. */
+const templateEmpty = (input: TemplateInput) =>
+  !input.media?.length && !input.texts?.length && !input.cues?.length && !input.sound;
 
 export async function listTemplates(): Promise<LibraryTemplate[]> {
   const idx = await readIndex();
@@ -467,9 +478,7 @@ export async function importTemplate(
   input: TemplateInput & { folderId?: string | null },
   files: File[],
 ): Promise<LibraryTemplate> {
-  if (!input.media?.length && !input.texts?.length && !input.cues?.length) {
-    throw new Error("Nothing to add.");
-  }
+  if (templateEmpty(input)) throw new Error("Nothing to add.");
   await mkdir(libMedia(), { recursive: true });
   const media: TemplateMedia[] = [];
   for (const [i, m] of (input.media ?? []).entries()) {
@@ -489,6 +498,7 @@ export async function importTemplate(
     audio: input.audio ?? [],
     texts: input.texts ?? [],
     cues: input.cues ?? [],
+    ...(input.sound ? { sound: input.sound } : {}),
     folderId: input.folderId ?? null,
   };
   await mutateIndex((idx) => {
@@ -502,9 +512,7 @@ export async function saveTemplate(
   input: TemplateInput,
 ): Promise<LibraryTemplate> {
   if (!(await readProject(projectId))) throw new Error("Project not found.");
-  if (!input.media?.length && !input.texts?.length && !input.cues?.length) {
-    throw new Error("Nothing to save.");
-  }
+  if (templateEmpty(input)) throw new Error("Nothing to save.");
   await mkdir(libMedia(), { recursive: true });
   const media: TemplateMedia[] = [];
   for (const m of input.media) {
@@ -532,6 +540,7 @@ export async function saveTemplate(
     audio: input.audio ?? [],
     texts: input.texts ?? [],
     cues: input.cues ?? [],
+    ...(input.sound ? { sound: input.sound } : {}),
   };
   await mutateIndex((idx) => {
     idx.templates = [...(idx.templates ?? []), template];

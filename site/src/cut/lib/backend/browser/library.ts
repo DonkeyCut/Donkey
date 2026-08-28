@@ -411,7 +411,13 @@ type TemplateInput = {
   audio: TemplateAudio[];
   texts: LibraryTemplate["texts"];
   cues: LibraryTemplate["cues"];
+  sound?: LibraryTemplate["sound"];
 };
+
+/** A template with nothing on it saves nothing; a sound preset is a template
+ * carrying only its treatment. */
+const templateEmpty = (input: TemplateInput) =>
+  !input.media?.length && !input.texts?.length && !input.cues?.length && !input.sound;
 
 async function saveTemplate(req: Request): Promise<Response> {
   try {
@@ -420,9 +426,7 @@ async function saveTemplate(req: Request): Promise<Response> {
     } & TemplateInput;
     if (!(await store.readDoc(projectId)))
       return err("Project not found.", 404);
-    if (!input.media?.length && !input.texts?.length && !input.cues?.length) {
-      return err("Nothing to save.", 500);
-    }
+    if (templateEmpty(input)) return err("Nothing to save.", 500);
     const media: TemplateMedia[] = [];
     for (const m of input.media ?? []) {
       media.push({
@@ -440,6 +444,7 @@ async function saveTemplate(req: Request): Promise<Response> {
       audio: input.audio ?? [],
       texts: input.texts ?? [],
       cues: input.cues ?? [],
+      ...(input.sound ? { sound: input.sound } : {}),
     };
     await mutateIndex((idx) => {
       idx.templates.push(template);
@@ -484,6 +489,7 @@ async function importTemplate(req: Request): Promise<Response> {
       audio: input.audio ?? [],
       texts: input.texts ?? [],
       cues: input.cues ?? [],
+      ...(input.sound ? { sound: input.sound } : {}),
       folderId: input.folderId ?? null,
     };
     await mutateIndex((idx) => {

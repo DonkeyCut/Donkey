@@ -62,7 +62,13 @@ interface TemplateDoc {
   audio: TemplateAudio[];
   texts: unknown[];
   cues: unknown[];
+  sound?: LibraryTemplate["sound"];
 }
+
+/** A template with nothing on it saves nothing; a sound preset is a template
+ * carrying only its treatment. */
+const templateEmpty = (input: TemplateInput) =>
+  !input.media?.length && !input.texts?.length && !input.cues?.length && !input.sound;
 
 type MediaObjectRow = {
   id: string;
@@ -120,6 +126,7 @@ function templateView(row: {
     audio: doc.audio ?? [],
     texts: doc.texts ?? [],
     cues: doc.cues ?? [],
+    ...(doc.sound ? { sound: doc.sound } : {}),
   };
 }
 
@@ -752,9 +759,7 @@ export const libraryCloud = {
       } & TemplateInput;
       if (!(await getProject(userId, projectId)))
         throw new Error("Project not found.");
-      if (!input.media?.length && !input.texts?.length && !input.cues?.length) {
-        throw new Error("Nothing to save.");
-      }
+      if (templateEmpty(input)) throw new Error("Nothing to save.");
       const taken = await takenLibraryNames(userId);
       const media: TemplateMedia[] = [];
       for (const m of input.media) {
@@ -778,6 +783,7 @@ export const libraryCloud = {
         audio: input.audio ?? [],
         texts: input.texts ?? [],
         cues: input.cues ?? [],
+        ...(input.sound ? { sound: input.sound } : {}),
       };
       const row = await prisma.cutTemplate.create({
         data: {
@@ -800,9 +806,7 @@ export const libraryCloud = {
         keys?: string[];
         folderId?: string | null;
       };
-      if (!input.media?.length && !input.texts?.length && !input.cues?.length) {
-        throw new Error("Nothing to add.");
-      }
+      if (templateEmpty(input)) throw new Error("Nothing to add.");
       const media: TemplateMedia[] = [];
       for (const [i, m] of (input.media ?? []).entries()) {
         const key = keys?.[i];
@@ -837,6 +841,7 @@ export const libraryCloud = {
         audio: input.audio ?? [],
         texts: input.texts ?? [],
         cues: input.cues ?? [],
+        ...(input.sound ? { sound: input.sound } : {}),
       };
       const row = await prisma.cutTemplate.create({
         data: {
