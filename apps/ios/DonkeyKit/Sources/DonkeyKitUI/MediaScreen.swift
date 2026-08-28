@@ -207,11 +207,11 @@ struct WiFiBanner: View {
     var body: some View {
         Label("On cellular — videos upload on Wi-Fi", systemImage: "wifi")
             .font(.footnote.weight(.semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(.black)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 20)
-            .padding(.vertical, 8)
-            .background(Color(hex: "#3c4043").ignoresSafeArea(edges: [.top, .horizontal]))
+            .padding(.bottom, 6)
+            .background(Color.white.ignoresSafeArea(edges: [.top, .horizontal]))
     }
 }
 
