@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { OutreachStatus } from "@/lib/marketing/campaigns";
@@ -47,14 +48,16 @@ const FILTERS: { status: OutreachStatus; label: string }[] = [
 const BLANK = "blank";
 
 // A place a note can start from: a saved template, or something this browser
-// already sent. Both are starting points; whatever ends up in the fields is
-// what goes out.
+// already sent. Both are starting points; whatever ends up in the dialog —
+// words and send toggles alike — is what goes out.
 type StartPoint = {
   id: string;
   title: string;
   meta: string;
   subject: string;
   body: string;
+  unsubscribeLink: boolean;
+  trackReplies: boolean;
   at: number;
   remove?: () => void;
   busy?: boolean;
@@ -108,6 +111,8 @@ export default function SuOutreachPage() {
   const deleteTemplate = useDeleteOutreachTemplate();
   const { drafts, forget, remember } = useOutreachDrafts();
   const [lastStart, setLastStart] = useLastOutreachStart();
+  const [unsubscribeLink, setUnsubscribeLink] = useState(false);
+  const [trackReplies, setTrackReplies] = useState(false);
 
   const saved = templates.data?.templates ?? [];
 
@@ -130,6 +135,8 @@ export default function SuOutreachPage() {
         }),
       subject: template.subject,
       title: template.name,
+      trackReplies: template.trackReplies,
+      unsubscribeLink: template.unsubscribeLink,
     })),
     ...drafts.map((draft) => ({
       at: new Date(draft.savedAt).getTime(),
@@ -142,11 +149,22 @@ export default function SuOutreachPage() {
       },
       subject: draft.subject,
       title: draft.subject,
+      trackReplies: draft.trackReplies,
+      unsubscribeLink: draft.unsubscribeLink,
     })),
   ].sort((a, b) => b.at - a.at);
 
   const sources: StartPoint[] = [
-    { at: 0, body: "", id: BLANK, meta: "", subject: "", title: "Blank" },
+    {
+      at: 0,
+      body: "",
+      id: BLANK,
+      meta: "",
+      subject: "",
+      title: "Blank",
+      trackReplies: false,
+      unsubscribeLink: false,
+    },
     ...starts,
   ];
 
@@ -161,6 +179,8 @@ export default function SuOutreachPage() {
     setSource(id);
     setSubject(picked.subject);
     setBody(picked.body);
+    setUnsubscribeLink(picked.unsubscribeLink);
+    setTrackReplies(picked.trackReplies);
     setNaming(false);
   };
 
@@ -173,6 +193,8 @@ export default function SuOutreachPage() {
     setSource(start.id);
     setSubject(start.subject);
     setBody(start.body);
+    setUnsubscribeLink(start.unsubscribeLink);
+    setTrackReplies(start.trackReplies);
     setNaming(false);
     setSendTarget(row);
   };
@@ -181,13 +203,17 @@ export default function SuOutreachPage() {
     const name = templateName.trim();
     if (name === "" || !sendable) return;
     saveTemplate.mutate(
-      { body, name, subject },
+      { body, name, subject, trackReplies, unsubscribeLink },
       {
         onSuccess: (result) => {
-          // The words now live in a template, so the sent copy of them stops
+          // The note now lives in a template, so the sent copy of it stops
           // being a second entry saying the same thing.
           const same = drafts.find(
-            (draft) => draft.subject === subject && draft.body === body,
+            (draft) =>
+              draft.subject === subject &&
+              draft.body === body &&
+              draft.unsubscribeLink === unsubscribeLink &&
+              draft.trackReplies === trackReplies,
           );
           if (same) {
             forget(same.savedAt);
@@ -219,15 +245,30 @@ export default function SuOutreachPage() {
   const submitSend = () => {
     const target = sendTarget;
     if (!target || subject.trim() === "" || body.trim() === "") return;
-    // Sending a start point word for word is that start point; only edited
-    // words become an entry of their own.
+    // Sending a start point exactly as it is stays that start point; a change
+    // to its words or its toggles becomes an entry of its own.
     const from = sources.find((option) => option.id === source);
-    const edited = from?.subject !== subject || from.body !== body;
+    const edited =
+      from?.subject !== subject ||
+      from.body !== body ||
+      from.unsubscribeLink !== unsubscribeLink ||
+      from.trackReplies !== trackReplies;
     act.mutate(
-      { action: "send", body, outreachId: target.id, subject },
+      {
+        action: "send",
+        body,
+        outreachId: target.id,
+        subject,
+        trackReplies,
+        unsubscribeLink,
+      },
       {
         onSuccess: () => {
-          setLastStart(edited ? `draft:${remember({ body, subject })}` : source);
+          setLastStart(
+            edited
+              ? `draft:${remember({ body, subject, trackReplies, unsubscribeLink })}`
+              : source,
+          );
           // A send in flight leaves the dialog free for the next row, so only
           // close it if that row is still the one on screen.
           setSendTarget((current) => (current?.id === target.id ? null : current));
@@ -347,8 +388,10 @@ export default function SuOutreachPage() {
           <DialogHeader>
             <DialogTitle>Email {sendTarget?.name}</DialogTitle>
             <DialogDescription>
-              Goes to {sendTarget?.email}. Replies come back to your inbox and mark
-              this row replied.
+              Goes to {sendTarget?.email}.{" "}
+              {trackReplies
+                ? "Replies come back to your inbox and mark this row replied."
+                : "Replies come straight back to your own address."}
             </DialogDescription>
           </DialogHeader>
 
@@ -493,6 +536,19 @@ export default function SuOutreachPage() {
           </div>
 
           <DialogFooter>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:mr-auto">
+              <Label className="gap-2 font-normal text-muted-foreground">
+                <Switch
+                  checked={unsubscribeLink}
+                  onCheckedChange={setUnsubscribeLink}
+                />
+                Add unsubscribe link
+              </Label>
+              <Label className="gap-2 font-normal text-muted-foreground">
+                <Switch checked={trackReplies} onCheckedChange={setTrackReplies} />
+                Track replies
+              </Label>
+            </div>
             <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
             <Button disabled={sending || !sendable} onClick={submitSend}>
               {sending ? "Sending…" : "Send"}

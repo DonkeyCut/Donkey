@@ -12,6 +12,8 @@ const saveSchema = z
     body: z.string().trim().min(1).max(5000),
     name: z.string().trim().min(1).max(80),
     subject: z.string().trim().min(1).max(200),
+    trackReplies: z.boolean(),
+    unsubscribeLink: z.boolean(),
   })
   .strict();
 
@@ -20,6 +22,8 @@ const templateSelect = {
   id: true,
   name: true,
   subject: true,
+  trackReplies: true,
+  unsubscribeLink: true,
   updatedAt: true,
 } as const;
 
@@ -28,6 +32,8 @@ type TemplateRow = {
   id: string;
   name: string;
   subject: string;
+  trackReplies: boolean;
+  unsubscribeLink: boolean;
   updatedAt: Date;
 };
 
@@ -37,6 +43,8 @@ function serialize(row: TemplateRow) {
     id: row.id,
     name: row.name,
     subject: row.subject,
+    trackReplies: row.trackReplies,
+    unsubscribeLink: row.unsubscribeLink,
     updatedAt: row.updatedAt.toISOString(),
   };
 }
@@ -66,11 +74,24 @@ export const POST = withSuperUser(async (request) => {
     );
   }
 
-  const { body, name, subject } = parsed.data;
+  const { body, name, subject, trackReplies, unsubscribeLink } = parsed.data;
   const template = await prisma.outreachTemplate.upsert({
-    create: { actorUserId: request.donkey.userId, body, name, subject },
+    create: {
+      actorUserId: request.donkey.userId,
+      body,
+      name,
+      subject,
+      trackReplies,
+      unsubscribeLink,
+    },
     select: templateSelect,
-    update: { actorUserId: request.donkey.userId, body, subject },
+    update: {
+      actorUserId: request.donkey.userId,
+      body,
+      subject,
+      trackReplies,
+      unsubscribeLink,
+    },
     where: { name },
   });
   return NextResponse.json({ template: serialize(template) });

@@ -9,6 +9,8 @@ export type SavedTemplate = {
   name: string;
   subject: string;
   body: string;
+  unsubscribeLink: boolean;
+  trackReplies: boolean;
   updatedAt: string;
 };
 
@@ -27,7 +29,13 @@ export function useOutreachTemplates() {
 export function useSaveOutreachTemplate() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: { name: string; subject: string; body: string }) =>
+    mutationFn: (input: {
+      name: string;
+      subject: string;
+      body: string;
+      unsubscribeLink: boolean;
+      trackReplies: boolean;
+    }) =>
       apiFetch<{ template: SavedTemplate }>("/api/marketing/templates", {
         body: JSON.stringify(input),
         method: "POST",

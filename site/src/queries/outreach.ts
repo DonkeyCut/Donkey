@@ -56,7 +56,14 @@ export function useOutreachCounts() {
 }
 
 type OutreachAction =
-  | { action: "send"; outreachId: string; subject: string; body: string }
+  | {
+      action: "send";
+      outreachId: string;
+      subject: string;
+      body: string;
+      unsubscribeLink: boolean;
+      trackReplies: boolean;
+    }
   | { action: "ignore" | "unignore" | "replied"; outreachId: string };
 
 const outreachActionKey = ["outreach", "action"] as const;

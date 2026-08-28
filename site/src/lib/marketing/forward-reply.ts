@@ -27,7 +27,8 @@ type ReceivedEmail = {
   subject: string;
 };
 
-// Handles an inbound reply to an outreach note: flips the row to replied and
+// Handles an inbound reply to a note that carried the signed reply alias —
+// one sent with reply tracking on. Flips the row to replied and
 // forwards the message on so it can be answered from a normal inbox. The
 // forward goes out as a fresh send rather than Resend's own forward call
 // because only a send takes a reply-to — that is what makes hitting reply in

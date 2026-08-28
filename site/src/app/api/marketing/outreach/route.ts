@@ -26,6 +26,8 @@ const actionSchema = z.union([
       body: z.string().trim().min(1).max(5000),
       outreachId: z.string().trim().min(1),
       subject: z.string().trim().min(1).max(200),
+      trackReplies: z.boolean(),
+      unsubscribeLink: z.boolean(),
     })
     .strict(),
   z
@@ -146,6 +148,8 @@ export const POST = withSuperUser(async (request) => {
         body: parsed.data.body,
         outreachId: outreach.id,
         subject: parsed.data.subject,
+        trackReplies: parsed.data.trackReplies,
+        unsubscribeLink: parsed.data.unsubscribeLink,
         user: outreach.user,
         vars: {
           balance: creditMicrosToString(outreach.balanceMicros),

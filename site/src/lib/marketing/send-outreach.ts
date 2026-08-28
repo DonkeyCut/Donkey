@@ -31,24 +31,36 @@ type SendOutreachInput = {
   subject: string;
   body: string;
   vars: OutreachVars;
+  // Whether the note carries the opt-out footer. The operator decides per
+  // send; the unsubscribed check above the send always runs.
+  unsubscribeLink: boolean;
+  // Whether replies route through the row's signed alias, which forwards them
+  // to the operator's inbox and marks the row replied. Off puts the sending
+  // address itself on the wire, so the note reads like any personal thread and
+  // the row is filed with the list's "Mark replied" button.
+  trackReplies: boolean;
 };
 
 // One person writing to one person, so the message goes out as text/plain with
 // no markup, no template shell, and no bulk-mail headers. A mail provider reads
 // an HTML body or a `List-Unsubscribe` header as a mailing list and files the
-// note under promotions; the opt-out still rides along as a line of text and
-// the send still checks it first.
-function outreachText(body: string, unsubscribeUrl: string): string {
-  return `${body.trim()}\n\n--\nUnsubscribe from product emails: ${unsubscribeUrl}\n`;
+// note under promotions. When the operator turns the opt-out footer on, it
+// rides along as a line of text.
+function outreachText(body: string, unsubscribeUrl: string | null): string {
+  const trimmed = body.trim();
+  if (!unsubscribeUrl) return `${trimmed}\n`;
+  return `${trimmed}\n\n--\nUnsubscribe from product emails: ${unsubscribeUrl}\n`;
 }
 
-// Sends one outreach note. The reply-to is the row's own address: a reply comes
-// back through Resend Inbound and finds its row without matching on the sender.
+// Sends one outreach note. The reply target is the operator's call per send:
+// the row's own signed alias, or the sending address itself.
 export async function sendOutreachEmail({
   attempt,
   body,
   outreachId,
   subject,
+  trackReplies,
+  unsubscribeLink,
   user,
   vars,
 }: SendOutreachInput): Promise<void> {
@@ -79,9 +91,12 @@ export async function sendOutreachEmail({
     {
       from,
       to: user.email,
-      replyTo: outreachReplyAddress(outreachId),
+      replyTo: trackReplies ? outreachReplyAddress(outreachId) : undefined,
       subject: filledSubject,
-      text: outreachText(filledBody, unsubscribePageUrl(user.id)),
+      text: outreachText(
+        filledBody,
+        unsubscribeLink ? unsubscribePageUrl(user.id) : null,
+      ),
     },
     { idempotencyKey: `outreach:${outreachId}:${attempt}` },
   );
