@@ -1796,7 +1796,7 @@ export function Timeline() {
   // no frames yet reads as a landing spot rather than a black bar.
   const dropSegment = (t: number, len: number, h: number, ghost?: DropGhost) => (
     <div
-      className="tl-asset-drop-slot pointer-events-none absolute top-0.5 z-20 overflow-hidden rounded-[5px] bg-[#0a84ff]/10 opacity-90 shadow-2xl ring-[1.5px] ring-[#0a84ff]/70 transition-[left] duration-100 ease-out"
+      className="tl-asset-drop-slot pointer-events-none absolute top-0.5 z-20 overflow-hidden rounded-[2.5px] bg-[#0a84ff]/10 opacity-90 shadow-2xl ring-[1.5px] ring-[#0a84ff]/70 transition-[left] duration-100 ease-out"
       style={{ left: t * pps, width: Math.max(10, len * pps - CLIP_GAP), height: h }}
     >
       {ghost && (
@@ -1819,7 +1819,7 @@ export function Timeline() {
         dropSegment(overlayDrop!.t, overlayDrop!.len, h, overlayDrop!.ghost)
       ) : (
         <div
-          className="pointer-events-none absolute top-0.5 rounded-[5px] bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4)] transition-[left] duration-150 ease-out"
+          className="pointer-events-none absolute top-0.5 rounded-[2.5px] bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4)] transition-[left] duration-150 ease-out"
           style={{
             left: overlayDrop!.t * pps,
             width: Math.max(10, overlayDrop!.len * pps - CLIP_GAP),
@@ -1854,7 +1854,7 @@ export function Timeline() {
   const gapHighlight = (lane: LaneRef, h: number, top = 0) =>
     gapMenu && sameLane(gapMenu.lane, lane) ? (
       <div
-        className="pointer-events-none absolute z-10 rounded-[5px] bg-red-500/15"
+        className="pointer-events-none absolute z-10 rounded-[2.5px] bg-red-500/15"
         style={{
           left: gapMenu.gap.start * pps,
           width: Math.max(2, gapMenu.gap.len * pps - CLIP_GAP),
@@ -2375,7 +2375,7 @@ export function Timeline() {
                     <>
                       <div
                         className={cn(
-                          "pointer-events-none absolute inset-x-0 rounded-md border border-dashed",
+                          "pointer-events-none absolute inset-x-0 rounded-[3px] border border-dashed",
                           FAMILY_STYLE[family].row
                         )}
                         style={{ top: elementDrop.row * TEXT_H + 2, height: TEXT_H - 6 }}
@@ -2383,7 +2383,7 @@ export function Timeline() {
                       {/* The slot the drop takes on its row... */}
                       <div
                         className={cn(
-                          "pointer-events-none absolute rounded-md",
+                          "pointer-events-none absolute rounded-[3px]",
                           FAMILY_STYLE[family].slot
                         )}
                         style={{
@@ -2397,7 +2397,7 @@ export function Timeline() {
                           way a bar drag's ghost rides. */}
                       <div
                         className={cn(
-                          "pointer-events-none absolute z-20 flex items-center overflow-hidden rounded-md opacity-80 shadow-2xl",
+                          "pointer-events-none absolute z-20 flex items-center overflow-hidden rounded-[3px] opacity-80 shadow-2xl",
                           FAMILY_STYLE[family].bar
                         )}
                         style={{
@@ -2420,7 +2420,7 @@ export function Timeline() {
               {topRowShift > 0 && (
                 <div
                   className={cn(
-                    "pointer-events-none absolute inset-x-0 rounded-md border border-dashed",
+                    "pointer-events-none absolute inset-x-0 rounded-[3px] border border-dashed",
                     FAMILY_STYLE[draggedFamily].row
                   )}
                   style={{ top: 2, height: TEXT_H - 6 }}
@@ -2431,7 +2431,7 @@ export function Timeline() {
                   <div
                     key={r}
                     className={cn(
-                      "pointer-events-none absolute inset-x-0 rounded-md border border-dashed transition-colors",
+                      "pointer-events-none absolute inset-x-0 rounded-[3px] border border-dashed transition-colors",
                       r === laneDrag.targetRow
                         ? FAMILY_STYLE[draggedFamily].row
                         : FAMILY_STYLE[draggedFamily].rowIdle
@@ -2446,7 +2446,7 @@ export function Timeline() {
                   rowH={TEXT_H}
                   barH={TEXT_H - 6}
                   shift={topRowShift}
-                  className={cn("rounded-md", FAMILY_STYLE[draggedFamily].slot)}
+                  className={cn("rounded-[3px]", FAMILY_STYLE[draggedFamily].slot)}
                 />
               )}
               {overlays.map((o) => {
@@ -2500,7 +2500,7 @@ export function Timeline() {
                   return (
                     <div
                       key={`xzone-${a.kind}-${a.clipId}`}
-                      className="pointer-events-none absolute rounded-md bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4)]"
+                      className="pointer-events-none absolute rounded-[3px] bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4)]"
                       style={{
                         left: anchorBarStart(a, len, style) * pps,
                         top: 2,
@@ -2517,7 +2517,7 @@ export function Timeline() {
                   const len = anchorLen(jointDrop, style);
                   return (
                     <div
-                      className="pointer-events-none absolute rounded-md bg-[#0a84ff]/25 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.85)]"
+                      className="pointer-events-none absolute rounded-[3px] bg-[#0a84ff]/25 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.85)]"
                       style={{
                         left: anchorBarStart(jointDrop, len, style) * pps,
                         top: 2,
@@ -2538,7 +2538,7 @@ export function Timeline() {
                     tabIndex={0}
                     title={`${x.label} ${x.t.seconds.toFixed(1)}s — drag it anywhere along the row; it plays where it lines up with a cut or a clip edge`}
                     className={cn(
-                      "tl-xfade-bar group absolute flex cursor-grab items-center gap-1 overflow-hidden rounded-md px-1.5 text-[10.5px] font-medium text-white shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
+                      "tl-xfade-bar group absolute flex cursor-grab items-center gap-1 overflow-hidden rounded-[3px] px-1.5 text-[10.5px] font-medium text-white shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
                       // A parked bar reads muted: it is on the row but playing
                       // nothing until a boundary lines up with it.
                       playing ? "bg-[#2B6FD4]" : "bg-muted-foreground/50",
@@ -2623,7 +2623,7 @@ export function Timeline() {
                   pps={pps}
                   rowH={rowH}
                   barH={rowH - 4}
-                  className="rounded-[5px] bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4)]"
+                  className="rounded-[2.5px] bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4)]"
                 />
               )}
               {trackSpans.map((span) => (
@@ -2689,7 +2689,7 @@ export function Timeline() {
                 pps={pps}
                 rowH={rowH0}
                 barH={rowH0 - 4}
-                className="rounded-[5px] bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4),inset_0_2px_10px_rgba(10,60,140,0.08)]"
+                className="rounded-[2.5px] bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4),inset_0_2px_10px_rgba(10,60,140,0.08)]"
               />
             )}
             {assetDrop &&
@@ -2757,7 +2757,7 @@ export function Timeline() {
                   <div
                     key={r}
                     className={cn(
-                      "pointer-events-none absolute inset-x-0 rounded-[5px] border border-dashed transition-colors",
+                      "pointer-events-none absolute inset-x-0 rounded-[2.5px] border border-dashed transition-colors",
                       r === laneDrag.targetRow
                         ? "border-emerald-500/70 bg-emerald-500/5"
                         : "border-emerald-500/25"
@@ -2767,7 +2767,7 @@ export function Timeline() {
                 ))}
               {audioDrop && (
                 <div
-                  className="tl-audio-drop-slot pointer-events-none absolute rounded-[5px] border-[1.5px] border-dashed border-emerald-500/80 bg-emerald-500/10 transition-[left] duration-150 ease-out"
+                  className="tl-audio-drop-slot pointer-events-none absolute rounded-[2.5px] border-[1.5px] border-dashed border-emerald-500/80 bg-emerald-500/10 transition-[left] duration-150 ease-out"
                   style={{
                     left: audioDrop.t * pps,
                     top: audioDrop.row * AUDIO_H + 2,
@@ -2782,7 +2782,7 @@ export function Timeline() {
                   pps={pps}
                   rowH={AUDIO_H}
                   barH={AUDIO_H - 4}
-                  className="rounded-[5px] bg-emerald-500/10 shadow-[inset_0_0_0_1.5px_rgba(16,185,129,0.5)]"
+                  className="rounded-[2.5px] bg-emerald-500/10 shadow-[inset_0_0_0_1.5px_rgba(16,185,129,0.5)]"
                 />
               )}
               {audioClips.map((a) => {
@@ -2832,7 +2832,7 @@ export function Timeline() {
                 // A cue belongs to its language track, so that one row is the
                 // whole landing area while the ghost floats free.
                 <div
-                  className="pointer-events-none absolute inset-x-0 rounded-[5px] border border-dashed border-amber-500/50"
+                  className="pointer-events-none absolute inset-x-0 rounded-[2.5px] border border-dashed border-amber-500/50"
                   style={{ top: laneDrag.targetRow * SUB_H + 1, height: SUB_H - 4 }}
                 />
               )}
@@ -2842,7 +2842,7 @@ export function Timeline() {
                   pps={pps}
                   rowH={SUB_H}
                   barH={SUB_H - 4}
-                  className="rounded-[5px] bg-amber-400/15 shadow-[inset_0_0_0_1.5px_rgba(245,158,11,0.55)]"
+                  className="rounded-[2.5px] bg-amber-400/15 shadow-[inset_0_0_0_1.5px_rgba(245,158,11,0.55)]"
                 />
               )}
               {subtitles.cues.map((c) => (
@@ -3792,7 +3792,7 @@ function ClipView({
     <>
     <div
       className={cn(
-        "tl-clip group absolute top-0.5 cursor-grab overflow-hidden rounded-[5px] bg-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
+        "tl-clip group absolute top-0.5 cursor-grab overflow-hidden rounded-[2.5px] bg-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
         selected && SELECTED_SHADOW,
         clip.hidden && "opacity-40 grayscale",
         drag
@@ -4938,7 +4938,7 @@ function AudioView({
   return (
     <div
       className={cn(
-        "tl-audio-clip group absolute cursor-grab overflow-hidden rounded-[5px] bg-gradient-to-b from-emerald-500 to-emerald-600 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
+        "tl-audio-clip group absolute cursor-grab overflow-hidden rounded-[2.5px] bg-gradient-to-b from-emerald-500 to-emerald-600 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
         selected && SELECTED_SHADOW,
         clip.hidden && "opacity-40 grayscale",
         drag
@@ -5213,7 +5213,7 @@ function TextBar({
   return (
     <div
       className={cn(
-        "tl-text-bar group absolute flex cursor-grab items-center overflow-hidden rounded-md shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
+        "tl-text-bar group absolute flex cursor-grab items-center overflow-hidden rounded-[3px] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]",
         FAMILY_STYLE[overlayFamily(o)].bar,
         o.hidden && "opacity-40 grayscale",
         selected && SELECTED_SHADOW,
@@ -5303,7 +5303,7 @@ function SubBar({
   return (
     <div
       className={cn(
-        "tl-sub-bar group absolute flex cursor-grab items-center overflow-hidden rounded-[5px] bg-gradient-to-b from-amber-300 to-amber-400 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
+        "tl-sub-bar group absolute flex cursor-grab items-center overflow-hidden rounded-[2.5px] bg-gradient-to-b from-amber-300 to-amber-400 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
         dimmed && "opacity-40 grayscale",
         selected && SELECTED_SHADOW,
         drag
