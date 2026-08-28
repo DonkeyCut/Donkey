@@ -11,7 +11,7 @@ import {
   usePreviewSelector,
   useSkim,
 } from "@/cut/lib/playhead";
-import { getClipSpans, projectDuration, useEditor } from "@/cut/lib/store";
+import { projectDuration, useEditor } from "@/cut/lib/store";
 import { copyStageFrame, primeStageFrame, stageHasFrame } from "@/cut/lib/stageFrame";
 import {
   capturePoster,
@@ -20,7 +20,7 @@ import {
   readPoster,
 } from "@/cut/lib/posterCache";
 import { resizePreviewSurface, setPreviewCanvas } from "@/cut/lib/previewCanvas";
-import { CLIP_MAX_ZOOM, clipCovers, clipKeyed, clipPoseAt, clipZoom, contentRect, frameOf, isFullRect, rectOf, REGION_MAX_SCALE, type Aspect, type ClipSpan, type FrameRect, type MediaAsset, type VideoClip } from "@/cut/lib/types";
+import { CLIP_MAX_ZOOM, clipCovers, clipKeyed, clipPoseAt, clipZoom, contentRect, frameOf, isFullRect, rectOf, REGION_MAX_SCALE, type VideoClip } from "@/cut/lib/types";
 import { hasMaskKeys, type MaskKey } from "@donkeycut/effects-kit";
 import { cn } from "@/lib/utils";
 import { MaskGizmoCore, OverlayChromeHost, OverlayLayer, StagePress } from "./OverlayLayer";
@@ -32,26 +32,6 @@ import {
   stageSliceStructure,
   useEffectLanes,
 } from "./StageEffects";
-
-/** How far a clip's picture hangs past its box, in the box's units. Zero on an
- * axis with nothing to spare. */
-function overflowOf(
-  clip: VideoClip,
-  asset: { width?: number; height?: number },
-  box: FrameRect
-): { ox: number; oy: number } {
-  if (!asset.width || !asset.height) return { ox: 0, oy: 0 };
-  const pic = contentRect(
-    box,
-    asset.width,
-    asset.height,
-    clipCovers(clip),
-    clipZoom(clip),
-    clip.panX ?? 0,
-    clip.panY ?? 0
-  );
-  return { ox: Math.max(0, pic.w - box.w), oy: Math.max(0, pic.h - box.h) };
-}
 
 /** A stationary click on the stage: the first click clears whatever is
  * selected; with nothing selected it plays or pauses, rewinding first when
@@ -66,21 +46,6 @@ function stageClick() {
   if (!total) return;
   if (!s.playing && playheadAt() >= total - 0.01) s.seek(0);
   s.setPlaying(!s.playing);
-}
-
-/** The clip under the playhead, when its picture overflows the whole frame —
- * covering it or zoomed into it. A regioned clip is panned from its own
- * preview handle instead. */
-function pannableSpan(
-  s: { clips: VideoClip[]; assets: MediaAsset[]; aspect: Aspect },
-  t: number
-): ClipSpan | null {
-  const spans = getClipSpans(s.clips, s.assets);
-  const span = spans.find((sp) => t >= sp.start && sp.start + sp.len > t) ?? spans[spans.length - 1];
-  if (!span || !isFullRect(rectOf(span.clip))) return null;
-  const frame = frameOf(s.aspect);
-  const { ox, oy } = overflowOf(span.clip, span.asset, { x: 0, y: 0, w: frame.w, h: frame.h });
-  return ox > 1 || oy > 1 ? span : null;
 }
 
 /** Paint the picture this project's preview last showed, then hand the canvas
@@ -205,9 +170,6 @@ export function Preview() {
   // center carries the pan back out of it.
   const rawRef = useRef({ x: 0, y: 0 });
   const [centered, setCentered] = useState({ x: false, y: false });
-  // The same for a fill clip's crop: which axis the picture inside the frame
-  // is parked on center in, drawn as a guide over the stage.
-  const [cropCentered, setCropCentered] = useState({ x: false, y: false });
   const boxRef = useRef<HTMLDivElement>(null);
   // Whether the picture has left the pane entirely. Every camera move funnels
   // through applyPan, so that is where it gets decided; the geometry it reads
@@ -520,62 +482,13 @@ export function Preview() {
     });
   };
 
-  // Drag a selected fill-mode clip inside the frame to choose the visible crop.
-  // The clip has to be the selection: an unselected picture is something to
-  // grab and move around the pane, and that press goes to the camera.
-  const panDrag = (e: React.PointerEvent, onTap: () => void = stageClick) => {
-    const s = useEditor.getState();
-    const span = pannableSpan(s, previewAt());
-    if (!span || s.selection?.kind !== "clip" || s.selection.id !== span.clip.id) return false;
-    const fr = frameOf(s.aspect);
-    const { ox, oy } = overflowOf(span.clip, span.asset, { x: 0, y: 0, w: fr.w, h: fr.h });
-    const clipId = span.clip.id;
-    const panX0 = span.clip.panX ?? 0;
-    const panY0 = span.clip.panY ?? 0;
-    const toFrame = fr.w / stage.w; // screen px → frame px
-    // History opens only once the pointer actually travels; a stationary press
-    // is a stage click, which deselects.
-    let began = false;
-    startDrag(e, {
-      onMove: (dx, dy, ev) => {
-        if (!began) {
-          if (Math.abs(dx) <= 3 && Math.abs(dy) <= 3) return;
-          began = true;
-          useEditor.getState().pushHistory();
-        }
-        // Content follows the pointer; pan is the crop-window position. Each
-        // axis pulls onto the middle of the picture as it passes, so a crop
-        // lands centered on purpose. ⌘/Ctrl passes straight through.
-        const free = ev.metaKey || ev.ctrlKey;
-        const near = (v: number, over: number) =>
-          !free && (Math.abs(v) * (over / 2) * stage.w) / fr.w <= PAN_SNAP_PX;
-        const rawX = ox > 1 ? Math.max(-1, Math.min(1, panX0 - (dx * toFrame) / (ox / 2))) : 0;
-        const rawY = oy > 1 ? Math.max(-1, Math.min(1, panY0 - (dy * toFrame) / (oy / 2))) : 0;
-        const sx = ox > 1 && near(rawX, ox);
-        const sy = oy > 1 && near(rawY, oy);
-        setCropCentered((c) => (c.x === sx && c.y === sy ? c : { x: sx, y: sy }));
-        useEditor.getState().updateClipTransient(clipId, {
-          panX: sx ? 0 : rawX,
-          panY: sy ? 0 : rawY,
-        });
-      },
-      // startDrag suppresses the click event, so a stationary press on a
-      // pannable clip runs the stage click here instead: clear the selection
-      // first, play or pause once nothing is selected.
-      onUp: (_dx, _dy, moved) => {
-        setCropCentered((c) => (c.x || c.y ? { x: false, y: false } : c));
-        if (!moved) onTap();
-      },
-    });
-    return true;
-  };
-
   /** A press that landed on something drawn over the picture the user has not
-   * selected — a title, a caption. It belongs to the picture: the drag pans,
-   * exactly as it would on bare footage, and a press that never travels runs
-   * `onTap`, which is where the thing under the pointer gets selected. */
+   * selected — a title, a caption. It belongs to the picture: the drag moves
+   * the camera, exactly as it would on bare footage, and a press that never
+   * travels runs `onTap`, which is where the thing under the pointer gets
+   * selected. */
   const stagePress = (e: React.PointerEvent, onTap: () => void) => {
-    if (!panDrag(e, onTap)) cameraDrag(e, onTap);
+    cameraDrag(e, onTap);
   };
 
   // The topmost regioned clip under a stage point at the playhead — clicking
@@ -668,7 +581,7 @@ export function Preview() {
               // A press over a regioned clip belongs to the click handler
               // below (select it); a pan gesture here would swallow the click.
               if (clipAtPoint(e)) return;
-              if (!panDrag(e)) cameraDrag(e, stageClick);
+              cameraDrag(e, stageClick);
             }
           }}
           // Every other press starts a drag, and a drag swallows its own
@@ -722,14 +635,6 @@ export function Preview() {
           className="pointer-events-none absolute inset-0"
           style={{ "--stage-radius": `${stageRadius(stage.w, stage.h)}px` } as React.CSSProperties}
         />
-        {/* A crop parked on the middle of its picture shows the axis it is
-            centered on, drawn across the frame it sits in. */}
-        {cropCentered.x && (
-          <div className="pointer-events-none absolute inset-y-0 left-1/2 z-20 w-px bg-neutral-400/80" />
-        )}
-        {cropCentered.y && (
-          <div className="pointer-events-none absolute inset-x-0 top-1/2 z-20 h-px bg-neutral-400/80" />
-        )}
         <ClipMaskGizmo stage={stage} />
         <RemovalBrush stage={stage} />
         <ClipTransformGizmo stage={stage} />
@@ -890,15 +795,15 @@ function ZoomHud({
 
 /**
  * Direct manipulation for the selected video clip, on any track and at any
- * size: drag the blue box to move it, a corner to scale it whole, a side to
- * pull one edge, the button above to turn it. Every gesture writes the clip's
- * own `frame`/`rotation`, and the gizmo shows only while the clip is live under
- * the playhead so it lines up with what the compositor draws.
+ * size: a drag anywhere on the blue box moves it, a corner scales it whole, a
+ * side pulls one edge, the button above turns it. Every gesture writes the
+ * clip's own `frame`/`rotation`, and the gizmo shows only while the clip is
+ * live under the playhead so it lines up with what the compositor draws.
  *
  * The grey outline beside it is the picture itself — where the source lands
  * once its box has fitted or cropped it. When it overflows, its corners zoom
- * and its interior pans, which is how a landscape shot gets framed for a
- * vertical cut.
+ * and the outline itself — the part hanging past the box — drags to pan the
+ * crop, which is how a landscape shot gets framed for a vertical cut.
  */
 /** How close (screen px) a box edge pulls onto a snap line while dragging. */
 const SNAP_PX = 8;
@@ -970,7 +875,7 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
   const patch = (p: Partial<VideoClip>) => st().updateClipTransient(clip.id, p);
   /**
    * A drag on one of the gizmo's large surfaces — the box body, the picture's
-   * interior. The history checkpoint waits for real travel; a press that
+   * grey outline. The history checkpoint waits for real travel; a press that
    * never travels is a stage click, which here clears the clip's selection
    * (playback stays put — something was selected).
    */
@@ -1193,14 +1098,25 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
   const onPanPicture = (e: React.PointerEvent) => {
     const panX0 = clip.panX ?? 0;
     const panY0 = clip.panY ?? 0;
-    // Content follows the pointer; pan is the crop window's position.
-    surfaceDrag(e, (rawX, rawY) => {
-      const { dx, dy } = unturn(rawX, rawY);
-      patch({
-        panX: ox > 1 ? Math.max(-1, Math.min(1, panX0 - dx / (ox / 2))) : 0,
-        panY: oy > 1 ? Math.max(-1, Math.min(1, panY0 - dy / (oy / 2))) : 0,
-      });
-    });
+    // Content follows the pointer; pan is the crop window's position. Each
+    // axis pulls onto the middle of the picture as it passes, so a crop lands
+    // centered on purpose, with a guide through the box while it holds.
+    surfaceDrag(
+      e,
+      (rawX, rawY) => {
+        const { dx, dy } = unturn(rawX, rawY);
+        const vx = ox > 1 ? Math.max(-1, Math.min(1, panX0 - dx / (ox / 2))) : 0;
+        const vy = oy > 1 ? Math.max(-1, Math.min(1, panY0 - dy / (oy / 2))) : 0;
+        const sx = ox > 1 && Math.abs(vx) * (ox / 2) <= PAN_SNAP_PX;
+        const sy = oy > 1 && Math.abs(vy) * (oy / 2) <= PAN_SNAP_PX;
+        setGuides({
+          x: sx && !rotation ? r.x + r.w / 2 : null,
+          y: sy && !rotation ? r.y + r.h / 2 : null,
+        });
+        patch({ panX: sx ? 0 : vx, panY: sy ? 0 : vy });
+      },
+      () => setGuides({ x: null, y: null })
+    );
   };
 
   // Everything draws in the pane's own space, so an oversized picture's outline
@@ -1231,11 +1147,18 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
     >
       <div className="absolute inset-0" style={turn}>
         {/* The picture as the source really lands it: grey where the frame
-            throws it away, so a crop is something you can see and grab. */}
+            throws it away, so a crop is something you can see and grab —
+            dragging the discarded part slides the crop; the box above keeps
+            every press inside itself. */}
         {showPicture && (
           <div
-            className="absolute rounded-[3px] border border-dashed border-white/70 shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
+            className={cn(
+              "absolute rounded-[3px] border border-dashed border-white/70 shadow-[0_0_0_1px_rgba(0,0,0,0.35)]",
+              overflows && "pointer-events-auto cursor-grab active:cursor-grabbing"
+            )}
             style={picBox}
+            title={overflows ? "Drag to pan the picture" : undefined}
+            onPointerDown={overflows ? onPanPicture : undefined}
           >
             {overflows && (
               <TransformHandles
@@ -1255,14 +1178,6 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
           style={box}
           onPointerDown={onMoveBox}
         >
-          {/* An overflowing picture pans from the interior; the ring at the
-              border moves the box, the grips resize it. */}
-          {overflows && (
-            <div
-              className="absolute inset-2 cursor-grab active:cursor-grabbing"
-              onPointerDown={onPanPicture}
-            />
-          )}
           <TransformHandles
             color="#0a84ff"
             className="z-20"

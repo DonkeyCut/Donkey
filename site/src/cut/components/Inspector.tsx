@@ -51,7 +51,7 @@ import {
 import { clipWindow, useEditor, type EditorState } from "@/cut/lib/store";
 import { usePanelView } from "@/cut/lib/panelViews";
 import { usePreviewTime } from "@/cut/lib/playhead";
-import { CLIP_MAX_ZOOM, clipKeyed, clipPoseAt, clipZoom, contentRect } from "@/cut/lib/types";
+import { CLIP_MAX_ZOOM, clipCovers, clipKeyed, clipPoseAt, clipZoom, contentRect } from "@/cut/lib/types";
 import { AnimationCard, AnimationTiles } from "@/cut/components/AnimationTiles";
 import { ColorField } from "@/cut/components/ColorField";
 import { wordTimesFor } from "@/cut/lib/textWords";
@@ -529,6 +529,7 @@ function ClipAudioPanel({ clip, onBack }: { clip: VideoClip; onBack: () => void 
           <ValueSlider
             label="Volume"
             sliderClassName="clip-volume data-horizontal:w-24"
+  const panCk = useSliderCheckpoint();
             valueClassName="w-9 text-muted-foreground"
             value={volume}
             min={0}
@@ -546,6 +547,25 @@ function ClipAudioPanel({ clip, onBack }: { clip: VideoClip; onBack: () => void 
         </Row>
         <Row label="Mute audio">
           <Switch
+  // Which axes the crop window can travel on: the picture hangs past the box
+  // there, so pan has somewhere to go. Measured in frame pixels, the same
+  // geometry the preview's grey outline draws.
+  const frPx = frameOf(aspect);
+  const boxPx = { x: rect.x * frPx.w, y: rect.y * frPx.h, w: rect.w * frPx.w, h: rect.h * frPx.h };
+  const picPx =
+    asset?.width && asset?.height
+      ? contentRect(
+          boxPx,
+          asset.width,
+          asset.height,
+          clipCovers(clip),
+          clipZoom(clip),
+          clip.panX ?? 0,
+          clip.panY ?? 0
+        )
+      : boxPx;
+  const panXFree = picPx.w - boxPx.w > 1;
+  const panYFree = picPx.h - boxPx.h > 1;
             checked={clip.muted}
             onCheckedChange={(v) => updateClip(clip.id, { muted: v })}
           />
@@ -724,16 +744,42 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
             onClick={() => updateClip(clip.id, { zoom: undefined, panX: 0, panY: 0 })}
           />
         </Row>
-        {((clip.panX ?? 0) !== 0 || (clip.panY ?? 0) !== 0) && (
-          <Row label="Position">
-            <button
-              className="clip-recenter rounded-md border border-input px-2 py-0.5 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground"
-              onClick={() => updateClip(clip.id, { panX: 0, panY: 0 })}
-            >
-              Center
-            </button>
-          </Row>
-        )}
+        {(["panX", "panY"] as const).map((axis) => {
+          const free = axis === "panX" ? panXFree : panYFree;
+          const value = clip[axis] ?? 0;
+          if (!free && value === 0) return null;
+          return (
+            <Row key={axis} label={axis === "panX" ? "Pan X" : "Pan Y"}>
+              <ValueSlider
+                label={axis === "panX" ? "Pan X" : "Pan Y"}
+                sliderClassName="clip-pan data-horizontal:w-24"
+                valueClassName="w-9 text-muted-foreground"
+                value={value}
+                min={-1}
+                max={1}
+                step={0.01}
+                snap={[0]}
+                keyStep={0.05}
+                format={formatPercent}
+                parse={parsePercentInput}
+                onDraft={(v) => {
+                  panCk.begin();
+                  useEditor.getState().updateClipTransient(clip.id, { [axis]: v });
+                }}
+                onCommit={(v) => {
+                  panCk.begin();
+                  updateClip(clip.id, { [axis]: v });
+                  panCk.end();
+                }}
+              />
+              <ResetButton
+                title="Center"
+                show={value !== 0}
+                onClick={() => updateClip(clip.id, { [axis]: 0 })}
+              />
+            </Row>
+          );
+        })}
         <Row label="Rotation">
           <ValueSlider
             label="Rotation"

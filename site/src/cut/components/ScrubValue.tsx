@@ -245,9 +245,9 @@ export function parseSecondsInput(raw: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
-/** "80", "80%" → fraction 0.8. */
+/** "80", "80%", "-25%" → fraction 0.8 / -0.25. */
 export function parsePercentInput(raw: string): number | null {
-  const m = raw.trim().match(/^(\d*\.?\d+)%?$/);
+  const m = raw.trim().match(/^(-?\d*\.?\d+)%?$/);
   return m ? Number(m[1]) / 100 : null;
 }
 
