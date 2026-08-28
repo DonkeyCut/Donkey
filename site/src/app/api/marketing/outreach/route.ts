@@ -14,7 +14,8 @@ import {
 import { prisma } from "@/lib/prisma";
 
 const listQuerySchema = z.object({
-  status: z.enum(OUTREACH_STATUSES).default("todo"),
+  q: z.string().trim().min(1).max(200).optional(),
+  status: z.enum(OUTREACH_STATUSES).optional(),
 });
 
 // Two shapes: start a conversation with a user who is on the list, or file a
@@ -89,11 +90,53 @@ function serialize(row: OutreachRow) {
 // The list is whatever the nightly outreach-scan job wrote, so this reads one
 // table and touches no credit data.
 export const GET = withSuperUser(async (request) => {
+  const params = new URL(request.url).searchParams;
   const parsed = listQuerySchema.safeParse({
-    status: new URL(request.url).searchParams.get("status") ?? undefined,
+    q: params.get("q") ?? undefined,
+    status: params.get("status") ?? undefined,
   });
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid status" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid query" }, { status: 400 });
+  }
+
+  // A search matches name and email in the database, so an account buried
+  // past the page cap is still found. The counts say how many matches every
+  // status holds; the rows are the first page of them, one status when the
+  // client pins a tab.
+  if (parsed.data.q !== undefined) {
+    const matching = {
+      campaign: CREDIT_SPENDERS_CAMPAIGN,
+      user: {
+        OR: [
+          { email: { contains: parsed.data.q, mode: "insensitive" as const } },
+          { name: { contains: parsed.data.q, mode: "insensitive" as const } },
+        ],
+      },
+    };
+    const [rows, grouped] = await Promise.all([
+      prisma.userOutreach.findMany({
+        orderBy: { lastActiveAt: { nulls: "last", sort: "desc" } },
+        select: rowSelect,
+        take: 200,
+        where: parsed.data.status
+          ? { ...matching, status: parsed.data.status }
+          : matching,
+      }),
+      prisma.userOutreach.groupBy({
+        _count: true,
+        by: ["status"],
+        where: matching,
+      }),
+    ]);
+    const counts = Object.fromEntries(
+      OUTREACH_STATUSES.map((status) => [status, 0]),
+    ) as Record<(typeof OUTREACH_STATUSES)[number], number>;
+    for (const group of grouped) {
+      if (group.status in counts) {
+        counts[group.status as keyof typeof counts] = group._count;
+      }
+    }
+    return NextResponse.json({ counts, rows: rows.map(serialize) });
   }
 
   // Each list is about a different moment: when they last used the product,
@@ -104,12 +147,13 @@ export const GET = withSuperUser(async (request) => {
     sent: { lastSentAt: "desc" },
     todo: { lastActiveAt: "desc" },
   } as const;
+  const status = parsed.data.status ?? "todo";
 
   const rows = await prisma.userOutreach.findMany({
-    orderBy: orderBy[parsed.data.status],
+    orderBy: orderBy[status],
     select: rowSelect,
     take: 200,
-    where: { campaign: CREDIT_SPENDERS_CAMPAIGN, status: parsed.data.status },
+    where: { campaign: CREDIT_SPENDERS_CAMPAIGN, status },
   });
 
   return NextResponse.json({ rows: rows.map(serialize) });

@@ -1,7 +1,7 @@
 "use client";
 
 import { XIcon } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   useLastOutreachStart,
@@ -30,6 +30,7 @@ import {
   useOutreach,
   useOutreachAction,
   useOutreachCounts,
+  useOutreachSearch,
   type OutreachRow,
 } from "@/queries/outreach";
 import {
@@ -73,10 +74,11 @@ function ago(iso: string | null): string {
 
 // The list carries the numbers the scan wrote; the badges say what they mean
 // without a second read.
-function RowBadges({ row }: { row: OutreachRow }) {
+function RowBadges({ row, group }: { row: OutreachRow; group?: string }) {
   const broke = Number(row.balance) <= 0;
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1.5">
+      {group ? <Badge>{group}</Badge> : null}
       <Badge variant="secondary">${row.spent} spent</Badge>
       <Badge variant={broke ? "destructive" : "outline"}>
         {broke ? `$0 left · ${ago(row.ranOutAt)}` : `$${row.balance} left`}
@@ -96,6 +98,9 @@ function RowBadges({ row }: { row: OutreachRow }) {
 export default function SuOutreachPage() {
   const [status, setStatus] = useState<OutreachStatus>("todo");
   const [query, setQuery] = useState("");
+  // A search starts wide — matches from every tab in one list — and clicking
+  // a tab pins it to that group until the next search begins.
+  const [scoped, setScoped] = useState(false);
   const [sendTarget, setSendTarget] = useState<OutreachRow | null>(null);
   const [source, setSource] = useState(BLANK);
   const [subject, setSubject] = useState("");
@@ -103,14 +108,20 @@ export default function SuOutreachPage() {
   const [templateName, setTemplateName] = useState("");
   const [naming, setNaming] = useState(false);
   const bodyField = useRef<HTMLTextAreaElement>(null);
-  // Search runs in the browser across every tab, so all four lists stay
-  // mounted; each tab keeps its own rows and reports its own match count.
-  const lists = {
-    ignored: useOutreach("ignored"),
-    replied: useOutreach("replied"),
-    sent: useOutreach("sent"),
-    todo: useOutreach("todo"),
-  };
+  // The needle trails the field by a beat, so a search fires once per pause
+  // in typing; clearing the field (handled in the input's onChange) brings
+  // the plain list back at once.
+  const [needle, setNeedle] = useState("");
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (trimmed === "") return;
+    const timer = setTimeout(() => setNeedle(trimmed), 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+  const list = useOutreach(status);
+  // Search matches in the database across every tab, so a hit past the page
+  // cap is still found and every tab reports its true match count.
+  const search = useOutreachSearch(needle, scoped ? status : undefined);
   const counts = useOutreachCounts().data?.counts;
   const act = useOutreachAction();
   const busy = useBusyOutreachIds();
@@ -119,8 +130,8 @@ export default function SuOutreachPage() {
   const deleteTemplate = useDeleteOutreachTemplate();
   const { drafts, forget, remember } = useOutreachDrafts();
   const [lastStart, setLastStart] = useLastOutreachStart();
-  const [unsubscribeLink, setUnsubscribeLink] = useState(false);
-  const [trackReplies, setTrackReplies] = useState(false);
+  const [unsubscribeLink, setUnsubscribeLink] = useState(true);
+  const [trackReplies, setTrackReplies] = useState(true);
 
   const saved = templates.data?.templates ?? [];
 
@@ -149,11 +160,11 @@ export default function SuOutreachPage() {
     ...drafts.map((draft) => ({
       at: new Date(draft.savedAt).getTime(),
       body: draft.body,
-      id: `draft:${draft.savedAt}`,
+      id: `draft:${draft.id}`,
       meta: `Sent ${ago(draft.savedAt)}`,
       remove: () => {
-        forget(draft.savedAt);
-        dropSource(`draft:${draft.savedAt}`);
+        forget(draft.id);
+        dropSource(`draft:${draft.id}`);
       },
       subject: draft.subject,
       title: draft.subject,
@@ -170,8 +181,8 @@ export default function SuOutreachPage() {
       meta: "",
       subject: "",
       title: "Blank",
-      trackReplies: false,
-      unsubscribeLink: false,
+      trackReplies: true,
+      unsubscribeLink: true,
     },
     ...starts,
   ];
@@ -214,18 +225,14 @@ export default function SuOutreachPage() {
       { body, name, subject, trackReplies, unsubscribeLink },
       {
         onSuccess: (result) => {
-          // The note now lives in a template, so the sent copy of it stops
-          // being a second entry saying the same thing.
+          // The note now lives in a template, so the sent copy of the same
+          // words stops being a second entry saying the same thing.
           const same = drafts.find(
-            (draft) =>
-              draft.subject === subject &&
-              draft.body === body &&
-              draft.unsubscribeLink === unsubscribeLink &&
-              draft.trackReplies === trackReplies,
+            (draft) => draft.subject === subject && draft.body === body,
           );
           if (same) {
-            forget(same.savedAt);
-            if (lastStart === `draft:${same.savedAt}`) {
+            forget(same.id);
+            if (lastStart === `draft:${same.id}`) {
               setLastStart(`tpl:${result.template.id}`);
             }
           }
@@ -285,16 +292,21 @@ export default function SuOutreachPage() {
     );
   };
 
-  const needle = query.trim().toLowerCase();
-  const matches = (row: OutreachRow) =>
-    needle === "" ||
-    row.name.toLowerCase().includes(needle) ||
-    row.email.toLowerCase().includes(needle);
-  const rowsFor = (of: OutreachStatus) =>
-    (lists[of].data?.rows ?? []).filter(matches);
-
-  const list = lists[status];
-  const rows = rowsFor(status);
+  const searching = needle !== "";
+  const allTabs = searching && !scoped;
+  const rows = searching ? (search.data?.rows ?? []) : (list.data?.rows ?? []);
+  const loading = searching ? search.isPending : list.isPending;
+  // Badges show the server's numbers: match counts while searching, list
+  // totals otherwise; while either is still loading they show nothing.
+  const tabCounts = searching ? search.data?.counts : counts;
+  // The rows are one page of the matches; when there are more, the list says
+  // so instead of passing a page off as the whole answer.
+  const matchTotal = search.data
+    ? scoped
+      ? search.data.counts[status]
+      : FILTERS.reduce((sum, filter) => sum + search.data.counts[filter.status], 0)
+    : 0;
+  const truncated = searching && matchTotal > rows.length;
   const sending = sendTarget !== null && busy.has(sendTarget.id);
   // A failed send keeps its dialog open, so the reason belongs in there with
   // the words that still need fixing.
@@ -303,8 +315,15 @@ export default function SuOutreachPage() {
   return (
     <div className="space-y-4 pb-9">
       <Input
+        aria-label="Search name or email"
         className="max-w-sm"
-        onChange={(event) => setQuery(event.target.value)}
+        onChange={(event) => {
+          if (query.trim() === "" || event.target.value.trim() === "") {
+            setScoped(false);
+          }
+          if (event.target.value.trim() === "") setNeedle("");
+          setQuery(event.target.value);
+        }}
         placeholder="Search name or email"
         type="search"
         value={query}
@@ -314,18 +333,19 @@ export default function SuOutreachPage() {
         {FILTERS.map((filter) => (
           <Button
             key={filter.status}
-            onClick={() => setStatus(filter.status)}
+            onClick={() => {
+              setStatus(filter.status);
+              setScoped(true);
+            }}
             size="sm"
-            variant={status === filter.status ? "default" : "outline"}
+            variant={
+              !allTabs && status === filter.status ? "default" : "outline"
+            }
           >
             {filter.label}
-            {needle !== "" ? (
+            {tabCounts ? (
               <span className="tabular-nums opacity-60">
-                {rowsFor(filter.status).length}
-              </span>
-            ) : counts ? (
-              <span className="tabular-nums opacity-60">
-                {counts[filter.status]}
+                {tabCounts[filter.status]}
               </span>
             ) : null}
           </Button>
@@ -337,7 +357,7 @@ export default function SuOutreachPage() {
           <ul className="divide-y">
             {rows.map((row) => (
               <li
-                key={row.id}
+                key={`${row.status}-${row.id}`}
                 className="flex flex-wrap items-start justify-between gap-3 p-5"
               >
                 <div className="min-w-0">
@@ -347,7 +367,14 @@ export default function SuOutreachPage() {
                       {row.email}
                     </span>
                   </div>
-                  <RowBadges row={row} />
+                  <RowBadges
+                    group={
+                      allTabs
+                        ? FILTERS.find((f) => f.status === row.status)?.label
+                        : undefined
+                    }
+                    row={row}
+                  />
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {row.status === "sent" ? (
@@ -398,14 +425,21 @@ export default function SuOutreachPage() {
           </ul>
         ) : (
           <p className="p-5 text-sm text-muted-foreground">
-            {list.isPending
+            {loading
               ? "Loading…"
-              : needle !== ""
+              : searching
                 ? "No matches."
                 : "Nothing here. Run a scan to refresh."}
           </p>
         )}
       </div>
+
+      {truncated ? (
+        <p className="text-sm text-muted-foreground">
+          Showing the first {rows.length} of {matchTotal} matches. Narrow the
+          search to see the rest.
+        </p>
+      ) : null}
 
       {act.isError && !sendFailed ? (
         <p className="text-sm text-destructive">
@@ -424,7 +458,7 @@ export default function SuOutreachPage() {
               Goes to {sendTarget?.email}.{" "}
               {trackReplies
                 ? "Replies come back to your inbox and mark this row replied."
-                : "Replies come straight back to your own address."}
+                : "Replies come straight back to your own address; the Mark replied button files the row."}
             </DialogDescription>
           </DialogHeader>
 
@@ -569,7 +603,9 @@ export default function SuOutreachPage() {
           </div>
 
           <DialogFooter>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:mr-auto">
+            {/* The footer column is reversed below sm, so ordering the toggles
+                last keeps them painted above the send buttons there. */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 max-sm:order-last sm:mr-auto">
               <Label className="gap-2 font-normal text-muted-foreground">
                 <Switch
                   checked={unsubscribeLink}

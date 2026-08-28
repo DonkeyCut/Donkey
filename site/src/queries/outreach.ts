@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  keepPreviousData,
   useMutation,
   useMutationState,
   useQuery,
@@ -38,6 +39,27 @@ export function useOutreach(status: OutreachStatus) {
     queryFn: () =>
       apiFetch<{ rows: OutreachRow[] }>(`/api/marketing/outreach?status=${status}`),
     queryKey: outreachQueryKey(status),
+  });
+}
+
+export const outreachSearchQueryKey = (q: string, status?: OutreachStatus) =>
+  ["outreach", "search", q, status ?? "all"] as const;
+
+// Super-user only: the rows matching a search, across every status or pinned
+// to one, with per-status match counts. Matching runs in the database, so a
+// hit past any list's page cap is still found. The previous result stays on
+// screen while the next needle loads, so the badges never blink to zero.
+export function useOutreachSearch(q: string, status?: OutreachStatus) {
+  return useQuery({
+    enabled: q !== "",
+    placeholderData: keepPreviousData,
+    queryFn: () =>
+      apiFetch<{ counts: Record<OutreachStatus, number>; rows: OutreachRow[] }>(
+        `/api/marketing/outreach?q=${encodeURIComponent(q)}${
+          status ? `&status=${status}` : ""
+        }`,
+      ),
+    queryKey: outreachSearchQueryKey(q, status),
   });
 }
 
