@@ -117,7 +117,13 @@ export function segmentSubjectAlpha(
 ): HTMLCanvasElement | null {
   const result = segmenter.segment(source);
   try {
-    const mask = result.confidenceMasks?.[0];
+    // The person confidence rides the LAST mask: tasks-vision 1.x emits a
+    // single foreground mask for the selfie model, and 0.10's
+    // [background, person] pair ends on the person. Verified against the
+    // bundled model — reading index 0 as background inverts every matte
+    // under 1.x.
+    const masks = result.confidenceMasks;
+    const mask = masks?.[masks.length - 1];
     if (!mask) return null;
     const conf = mask.getAsFloat32Array();
     const mw = mask.width;
@@ -126,8 +132,7 @@ export function segmentSubjectAlpha(
     const img = ctx.createImageData(mw, mh);
     let kept = 0;
     for (let i = 0; i < mw * mh; i++) {
-      // The selfie model's first confidence mask is background; subject = 1-bg.
-      const subject = 1 - conf[i];
+      const subject = conf[i];
       const a =
         subject > PERSON_THRESHOLD
           ? Math.min(255, Math.round((subject - PERSON_THRESHOLD) * 4 * 255))
@@ -157,16 +162,17 @@ export async function personCutout(blob: Blob): Promise<HTMLCanvasElement | null
   ctx.drawImage(img.source, 0, 0);
   const result = segmenter.segment(canvas);
   try {
-    const mask = result.confidenceMasks?.[0];
+    // Person confidence is the last mask — see segmentSubjectAlpha.
+    const masks = result.confidenceMasks;
+    const mask = masks?.[masks.length - 1];
     if (!mask) return null;
     const conf = mask.getAsFloat32Array();
     const mw = mask.width;
     const mh = mask.height;
-    // The selfie model's first confidence mask is background; subject = 1-bg.
     const ok = applyAlpha(ctx, w, h, (i) => {
       const x = Math.min(mw - 1, Math.round(((i % w) * mw) / w));
       const y = Math.min(mh - 1, Math.round((Math.floor(i / w) * mh) / h));
-      const subject = 1 - conf[y * mw + x];
+      const subject = conf[y * mw + x];
       return subject > PERSON_THRESHOLD ? Math.min(1, (subject - PERSON_THRESHOLD) * 4) : 0;
     });
     return ok ? canvas : null;

@@ -78,8 +78,17 @@ export interface ClipRemoval {
    * covering the clip's trimmed source range, white keeps the pixel. `in` is
    * the source second the matte's own zero maps to, so a later retrim keeps
    * reading the right frames; the fingerprint records what the matte was
-   * baked from, so edits re-bake. */
-  matte?: { assetId: string; fingerprint: string; quality: "local" | "hq"; in: number };
+   * baked from, so edits re-bake. `bake` is the local bake format that
+   * produced a "local" matte — a local matte from another format re-bakes
+   * (free), while hq mattes never read it, so a bake-format fix never
+   * re-bills a hosted pass. */
+  matte?: {
+    assetId: string;
+    fingerprint: string;
+    quality: "local" | "hq";
+    in: number;
+    bake?: number;
+  };
   /** Custom-mode selection. */
   seeds?: RemovalSeeds;
   /** The bake was explicitly started — the panel's Apply button or the chat
@@ -129,6 +138,11 @@ export function removalFingerprint(
   for (let i = 0; i < body.length; i++) hash = ((hash << 5) + hash + body.charCodeAt(i)) >>> 0;
   return hash.toString(36);
 }
+
+/** The local person-matte bake format. Bumped when the bake's output changes
+ * meaning — format 2 fixed mattes baked with the segmenter's mask direction
+ * read backwards — so stored local mattes from older formats re-bake. */
+export const LOCAL_MATTE_BAKE = 2;
 
 /** The baked-matte contract every producer and reader shares: encoded matte
  * rate (coverage moves little in 1/15s, and every consumer's fps filter or

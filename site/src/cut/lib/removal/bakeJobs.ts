@@ -17,6 +17,7 @@
  */
 
 import { create } from "zustand";
+import { LOCAL_MATTE_BAKE } from "@donkeycut/effects-kit";
 import { importFileToProject } from "../media";
 import { useEditor } from "../store";
 import { removalFingerprint, type ClipRemoval, type VideoClip } from "../types";
@@ -148,6 +149,13 @@ function owedFingerprint(clip: VideoClip | undefined): string | null {
   return removalFingerprint(clip.assetId, r);
 }
 
+/** Whether a stored matte's pixels still mean what the renderer reads: hq
+ * mattes always do, and a local matte must carry the current bake format —
+ * an older one re-bakes for free. */
+function matteFresh(matte: NonNullable<ClipRemoval["matte"]>): boolean {
+  return matte.quality !== "local" || matte.bake === LOCAL_MATTE_BAKE;
+}
+
 /** Whether the stored matte's baked range still spans the clip's trims —
  * a matte wider than the clip plays is fine; one the trim reached past
  * wants a re-bake. Stills always cover. */
@@ -174,7 +182,7 @@ function twinMatte(
     if (c.id === clipId) continue;
     const m = c.removal?.matte;
     if (!m || m.fingerprint !== fp || !s.assets.some((a) => a.id === m.assetId)) continue;
-    if (!matteCovers(m, clip)) continue;
+    if (!matteFresh(m) || !matteCovers(m, clip)) continue;
     if (m.quality === "hq") return m;
     found ??= m;
   }
@@ -225,7 +233,8 @@ export function ensureMatteBake(clipId: string, opts: { whileBrushing?: boolean 
   // Settled: the stored matte matches the clip and its asset is still around
   // (an undo can revive a matte pointer whose asset was collected).
   const matte = r.matte;
-  const stored = matte?.fingerprint === fp && matteCovers(matte, clip) ? matte : null;
+  const stored =
+    matte?.fingerprint === fp && matteFresh(matte) && matteCovers(matte, clip) ? matte : null;
   // A split or a paste leaves two clips owing the same selection. A twin
   // matte another clip already carries is adopted whole — same asset, one
   // bake, one bill — as long as its baked range spans this clip's trims. A
@@ -383,7 +392,13 @@ async function runBakeNow(
 
   const removal: ClipRemoval = {
     ...latest.removal!,
-    matte: { assetId: matteAsset.id, fingerprint: fp, quality, in: baked.in },
+    matte: {
+      assetId: matteAsset.id,
+      fingerprint: fp,
+      quality,
+      in: baked.in,
+      ...(quality === "local" ? { bake: LOCAL_MATTE_BAKE } : {}),
+    },
   };
   editor.updateClipTransient(clipId, { removal });
   // The matte this replaced may still be another clip's (a split, a paste);
