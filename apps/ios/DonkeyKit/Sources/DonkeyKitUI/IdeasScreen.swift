@@ -31,18 +31,18 @@ struct IdeasScreen: View {
                     WiFiBanner()
                 }
                 ScreenHeader(title: "Ideas", app: app, auth: auth)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        filterChips
-                        content
-                    }
+                filterChips
                     .padding(.horizontal, 20)
                     .padding(.top, 14)
-                    .padding(.bottom, 24)
+                // Each filter is a page, so a swipe moves between Notes and
+                // Inspiration and the chips ride the same selection.
+                TabView(selection: $ideas.filter) {
+                    page { notesContent }
+                        .tag(IdeasFilter.notes)
+                    page { inspirationContent }
+                        .tag(IdeasFilter.inspiration)
                 }
-                // The phone pulls on its own clock; this is the same pass on
-                // the reader's word.
-                .refreshable { await media.sync?.refreshNow() }
+                .tabViewStyle(.page(indexDisplayMode: .never))
             }
             .navigationDestination(for: NoteFolder.self) { folder in
                 NoteFolderScreen(
@@ -109,9 +109,9 @@ struct IdeasScreen: View {
 
     private var addMenu: some View {
         Menu {
+            Button("New note", systemImage: "note.text") { ideas.openEditor() }
             Button("Paste link", systemImage: "link") { showsLinkSheet = true }
             Button("Camera roll", systemImage: "photo") { openCameraRoll() }
-            Button("New note", systemImage: "note.text") { ideas.openEditor() }
             Button("New folder", systemImage: "folder.badge.plus") { folderPrompt = .create }
         } label: {
             Image(systemName: "plus")
@@ -151,39 +151,36 @@ struct IdeasScreen: View {
     /// The notes at the top level; the ones inside folders are shown there.
     private var loose: [Note] { ideas.notes(in: nil) }
 
-    @ViewBuilder private var content: some View {
-        switch ideas.filter {
-        case .all:
-            if ideas.notes.isEmpty && ideas.folders.isEmpty && ideas.inspiration.isEmpty {
-                EmptyState(
-                    title: "Nothing here yet",
-                    message: "Add a note or save some inspiration to get started."
-                )
-            } else {
-                if !ideas.notes.isEmpty || !ideas.folders.isEmpty {
-                    sectionLabel("Notes")
-                    notesSection
-                }
-                if !ideas.inspiration.isEmpty {
-                    sectionLabel("Inspiration")
-                    inspirationGrid
-                }
+    /// One page of the pager: its own scroll, with the same pull-to-refresh
+    /// pass on the reader's word the phone runs on its own clock.
+    private func page(@ViewBuilder _ content: () -> some View) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                content()
             }
-        case .notes:
-            if ideas.notes.isEmpty && ideas.folders.isEmpty {
-                EmptyState(title: "No notes yet", message: "Tap the note button to capture an idea.")
-            } else {
-                notesSection
-            }
-        case .inspiration:
-            if ideas.inspiration.isEmpty {
-                EmptyState(
-                    title: "Nothing saved yet",
-                    message: "Save posts and clips you like and they'll show up here."
-                )
-            } else {
-                inspirationGrid
-            }
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
+            .padding(.bottom, 24)
+        }
+        .refreshable { await media.sync?.refreshNow() }
+    }
+
+    @ViewBuilder private var notesContent: some View {
+        if ideas.notes.isEmpty && ideas.folders.isEmpty {
+            EmptyState(title: "No notes yet", message: "Tap the note button to capture an idea.")
+        } else {
+            notesSection
+        }
+    }
+
+    @ViewBuilder private var inspirationContent: some View {
+        if ideas.inspiration.isEmpty {
+            EmptyState(
+                title: "Nothing saved yet",
+                message: "Save posts and clips you like and they'll show up here."
+            )
+        } else {
+            inspirationGrid
         }
     }
 
@@ -195,12 +192,6 @@ struct IdeasScreen: View {
             onDelete: { ideas.deleteFolder(id: $0.id) }
         )
         NotesGrid(notes: loose, ideas: ideas, onMove: { moving = $0 })
-    }
-
-    private func sectionLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.footnote.weight(.bold))
-            .foregroundStyle(.secondary)
     }
 
     // Cards keep their media's shape, so the two columns run at their own

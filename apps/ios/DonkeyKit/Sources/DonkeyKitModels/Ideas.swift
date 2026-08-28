@@ -294,7 +294,7 @@ public protocol InspirationStreaming: AnyObject, Sendable {
 }
 
 nonisolated public enum IdeasFilter: String, CaseIterable, Sendable {
-    case all, notes, inspiration
+    case notes, inspiration
 }
 
 @Observable
@@ -303,7 +303,7 @@ public final class IdeasModel {
     public private(set) var folders: [NoteFolder] = []
     public private(set) var labels: [NoteLabel] = []
     public private(set) var inspiration: [InspirationItem] = []
-    public var filter: IdeasFilter = .all
+    public var filter: IdeasFilter = .notes
 
     /// The note open in the editor; nil when the editor is closed.
     public var draft: NoteDraft?
