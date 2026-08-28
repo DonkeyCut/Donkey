@@ -44,7 +44,7 @@ export async function generateMetadata({
   const base = await origin();
   const url = `${base}${sharePath(token)}`;
   const card = (kind: "gif" | "jpg") => `${url}/card/${kind}?v=${meta.version}`;
-  const description = `A video project shared from Donkey Cut. Watch ${meta.name} in the browser.`;
+  const description = `Watch ${meta.name} in the browser.`;
   // The GIF leads: the platforms that animate it play the opening seconds, and
   // the rest fall back to its first frame — the same picture the JPEG carries
   // for anything that would rather not take a multi-megabyte image. Either URL
