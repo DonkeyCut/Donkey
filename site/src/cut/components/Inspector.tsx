@@ -1,5 +1,6 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, Frame, Italic, Loader2, Palette, Scissors, Smile, Trash2, Type, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -31,6 +40,15 @@ import {
   OVERLAY_ANIM_DEFAULT_SECONDS,
   OVERLAY_ANIM_MAX_SECONDS,
   OVERLAY_ANIM_MIN_SECONDS,
+  normalizeSound,
+  SOUND_COMPRESSOR_DEFAULT,
+  SOUND_COMPRESSOR_RANGE,
+  SOUND_EQ_BANDS,
+  SOUND_EQ_DB_RANGE,
+  SOUND_LIMITER_DEFAULT,
+  SOUND_LIMITER_RANGE,
+  SOUND_PRESETS,
+  type ClipSound,
   ZOOM_LEVELS,
   ZOOM_RAMP_MAX,
   zoomRampOf,
@@ -74,6 +92,13 @@ import {
   saveStylePreset,
   type StylePreset,
 } from "@/cut/lib/stylePresets";
+import {
+  deleteSoundPreset,
+  saveSoundPreset,
+  soundPresetOf,
+  type SoundPreset,
+} from "@/cut/lib/soundPresets";
+import { patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
 import { writeTextStyle } from "@/cut/lib/textStyle";
 import { formatTime } from "@/cut/lib/time";
 import {
@@ -490,6 +515,16 @@ function ClipAudioPanel({ clip, onBack }: { clip: VideoClip; onBack: () => void 
   const updateClip = useEditor((s) => s.updateClip);
   const [volumeDraft, setVolumeDraft] = useState<number | null>(null);
   const volume = volumeDraft ?? clip.volume ?? 1;
+  const ck = useSliderCheckpoint();
+  const writeSound = (sound: ClipSound | undefined, phase: "draft" | "commit") => {
+    ck.begin();
+    useEditor.getState().updateClipTransient(clip.id, { sound });
+    if (phase === "commit") ck.end();
+  };
+  const [view, setView] = usePanelView<"main" | "sound">(`clip-audio:${clip.id}`, "main");
+  if (view === "sound") {
+    return <SoundQualityPanel sound={clip.sound} write={writeSound} onBack={() => setView("main")} />;
+  }
   return (
     <>
       <SubviewHead title="Audio" onBack={onBack} />
@@ -527,12 +562,430 @@ function ClipAudioPanel({ clip, onBack }: { clip: VideoClip; onBack: () => void 
             <BeatsControl asset={asset} />
           </Row>
         )}
+        {asset && !assetIsSilent(asset) && (
+          <SoundQualityRow sound={clip.sound} onOpen={() => setView("sound")} />
+        )}
         <ClipGeneratedAudio clip={clip} />
       </div>
     </>
   );
 }
 
+const formatDb = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(1)} dB`;
+const parseDbInput = (raw: string) =>
+  parseNumberInput(raw.replace(/\s*dB$/i, "").replace(/^\+/, ""));
+
+/** The equalizer's bands read as one ladder: each row keeps its slider and
+ * readout but sits at two thirds of a panel row's height. */
+const EQ_ROWS = "[&>div]:min-h-6";
+/** The regions in band order, each named once. */
+const EQ_GROUPS = [...new Set(SOUND_EQ_BANDS.map((b) => b.group))];
+
+/** Whether two treatments are the same sound, neutral stages dropped. */
+const sameSound = (a: ClipSound | undefined, b: ClipSound | undefined) =>
+  JSON.stringify(normalizeSound(a) ?? null) ===
+  JSON.stringify(normalizeSound(b) ?? null);
+
+/**
+ * The Sound quality sections on one clip's own sound: the presets, a
+ * seven-band equalizer, a compressor and a limiter. `write` lands a
+ * treatment on the clip — drafts stream through it while a slider moves and
+ * the commit closes the drag's one undo step — and every write goes through
+ * the kit's normalizer, so a section switched off or returned to flat stores
+ * as absence.
+ */
+function SoundQualitySections({
+  sound,
+  write,
+}: {
+  sound: ClipSound | undefined;
+  write: (sound: ClipSound | undefined, phase: "draft" | "commit") => void;
+}) {
+  const set = (next: ClipSound | undefined, phase: "draft" | "commit") =>
+    write(normalizeSound(next), phase);
+  const eq = SOUND_EQ_BANDS.map((_, i) => sound?.eq?.[i] ?? 0);
+  const setBand = (i: number, v: number, phase: "draft" | "commit") => {
+    const next = [...eq];
+    next[i] = v;
+    set({ ...sound, eq: next }, phase);
+  };
+  const comp = sound?.compressor;
+  const setComp = (
+    patch: Partial<NonNullable<ClipSound["compressor"]>>,
+    phase: "draft" | "commit",
+  ) =>
+    set(
+      {
+        ...sound,
+        compressor: { ...(comp ?? SOUND_COMPRESSOR_DEFAULT), ...patch },
+      },
+      phase,
+    );
+  const cr = SOUND_COMPRESSOR_RANGE;
+  const dbRow = (
+    label: string,
+    value: number,
+    range: { min: number; max: number },
+    onDraft: (v: number) => void,
+    onCommit: (v: number) => void,
+    format: (v: number) => string = formatDb,
+    parse: (raw: string) => number | null = parseDbInput,
+    step = 0.5,
+    snap?: number[],
+  ) => (
+    <Row key={label} label={label}>
+      <ValueSlider
+        label={label}
+        sliderClassName="data-horizontal:w-24"
+        valueClassName="w-14 text-muted-foreground"
+        value={value}
+        min={range.min}
+        max={range.max}
+        step={step}
+        snap={snap}
+        format={format}
+        parse={parse}
+        onDraft={onDraft}
+        onCommit={onCommit}
+      />
+    </Row>
+  );
+  return (
+    <>
+      <SoundPresetsRow sound={sound} onApply={(s) => set(s, "commit")} />
+      <Section
+        title="Equalizer"
+        aside={
+          <ResetButton
+            title="Flatten equalizer"
+            show={!!sound?.eq}
+            onClick={() => set({ ...sound, eq: undefined }, "commit")}
+          />
+        }
+      >
+        {/* The bands as four short ladders, one per region of the spectrum:
+            the region's name over its rows, the rows close together, and a
+            breath between one region and the next. */}
+        <div className="flex flex-col gap-3 pt-0.5 pb-1">
+          {EQ_GROUPS.map((group) => (
+            <div key={group}>
+              <div className="mb-0.5 text-[9.5px] leading-none tracking-wider text-muted-foreground/50 uppercase">
+                {group}
+              </div>
+              <div className={EQ_ROWS}>
+                {SOUND_EQ_BANDS.map((b, i) =>
+                  b.group === group
+                    ? dbRow(
+                        b.label,
+                        eq[i],
+                        { min: -SOUND_EQ_DB_RANGE, max: SOUND_EQ_DB_RANGE },
+                        (v) => setBand(i, v, "draft"),
+                        (v) => setBand(i, v, "commit"),
+                        formatDb,
+                        parseDbInput,
+                        0.5,
+                        [0],
+                      )
+                    : null,
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Section>
+      <Section
+        title="Compressor"
+        enabled={!!comp}
+        onEnabledChange={(on) =>
+          set(
+            {
+              ...sound,
+              compressor: on ? SOUND_COMPRESSOR_DEFAULT : undefined,
+            },
+            "commit",
+          )
+        }
+      >
+        {comp && (
+          <>
+            {dbRow(
+              "Threshold",
+              comp.threshold,
+              cr.threshold,
+              (v) => setComp({ threshold: v }, "draft"),
+              (v) => setComp({ threshold: v }, "commit"),
+            )}
+            {dbRow(
+              "Ratio",
+              comp.ratio,
+              cr.ratio,
+              (v) => setComp({ ratio: v }, "draft"),
+              (v) => setComp({ ratio: v }, "commit"),
+              (v) => `${v.toFixed(1)}:1`,
+              (raw) => parseNumberInput(raw.replace(/\s*:\s*1$/, "")),
+              0.1,
+            )}
+            {dbRow(
+              "Attack",
+              comp.attack,
+              cr.attack,
+              (v) => setComp({ attack: v }, "draft"),
+              (v) => setComp({ attack: v }, "commit"),
+              (v) => `${v < 1 ? v.toFixed(1) : Math.round(v)} ms`,
+              (raw) => parseNumberInput(raw.replace(/\s*ms$/i, "")),
+              0.5,
+            )}
+            {dbRow(
+              "Release",
+              comp.release,
+              cr.release,
+              (v) => setComp({ release: v }, "draft"),
+              (v) => setComp({ release: v }, "commit"),
+              (v) => `${Math.round(v)} ms`,
+              (raw) => parseNumberInput(raw.replace(/\s*ms$/i, "")),
+              5,
+            )}
+          </>
+        )}
+      </Section>
+      <Section
+        title="Limiter"
+        enabled={!!sound?.limiter}
+        onEnabledChange={(on) =>
+          set(
+            { ...sound, limiter: on ? SOUND_LIMITER_DEFAULT : undefined },
+            "commit",
+          )
+        }
+      >
+        {sound?.limiter &&
+          dbRow(
+            "Ceiling",
+            sound.limiter.ceiling,
+            SOUND_LIMITER_RANGE.ceiling,
+            (v) => set({ ...sound, limiter: { ceiling: v } }, "draft"),
+            (v) => set({ ...sound, limiter: { ceiling: v } }, "commit"),
+          )}
+      </Section>
+    </>
+  );
+}
+
+/** What a clip's treatment reads as on the row that opens it. */
+const soundSummary = (sound: ClipSound | undefined) => {
+  const s = normalizeSound(sound);
+  if (!s) return "Off";
+  return SOUND_PRESETS.find((p) => p.sound && sameSound(p.sound, s))?.name ?? "On";
+};
+
+/** The row on an audio panel that opens the Sound quality view, reading
+ * what the clip carries. */
+function SoundQualityRow({ sound, onOpen }: { sound: ClipSound | undefined; onOpen: () => void }) {
+  return (
+    <Row label="Sound quality">
+      <button
+        type="button"
+        className="sound-quality-open flex h-8 items-center gap-1 rounded-md border border-input px-2.5 text-[11.5px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+        onClick={onOpen}
+      >
+        {soundSummary(sound)}
+        <ChevronRight className="size-3.5 shrink-0" />
+      </button>
+    </Row>
+  );
+}
+
+/** The Sound quality view, pushed over an audio panel. */
+function SoundQualityPanel({
+  sound,
+  write,
+  onBack,
+}: {
+  sound: ClipSound | undefined;
+  write: (sound: ClipSound | undefined, phase: "draft" | "commit") => void;
+  onBack: () => void;
+}) {
+  return (
+    <>
+      <SubviewHead title="Sound quality" onBack={onBack} />
+      <div className="flex flex-col gap-1 px-3.5 pb-4">
+        <SoundQualitySections sound={sound} write={write} />
+      </div>
+    </>
+  );
+}
+
+/** The presets as one dropdown — the shipped voice treatment and the user's
+ * saved ones, with "Custom" standing in when the clip's treatment matches
+ * none of them — plus saving the current treatment under a name and
+ * deleting the saved one that is selected. */
+function SoundPresetsRow({
+  sound,
+  onApply,
+}: {
+  sound: ClipSound | undefined;
+  onApply: (sound: ClipSound | undefined) => void;
+}) {
+  const [naming, setNaming] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  // The shelf everything else reads: the library query is cached across the
+  // session, so opening this view costs no listing and the dropdown is
+  // filled the moment it draws.
+  const client = useQueryClient();
+  const library = useLibrary();
+  const saved = useMemo(
+    () =>
+      (library.data?.templates ?? [])
+        .map(soundPresetOf)
+        .filter((p): p is SoundPreset => p !== null),
+    [library.data]
+  );
+
+  const save = async () => {
+    const projectId = useEditor.getState().projectId;
+    const trimmed = name.trim();
+    if (!projectId || !trimmed || busy || !sound) return;
+    setBusy(true);
+    try {
+      const p = await saveSoundPreset(projectId, trimmed, sound);
+      if (p) {
+        setPicked(`${p.residency}:${p.id}`);
+        await refetchLibrary(client);
+      }
+      setNaming(false);
+      setName("");
+    } catch {
+      // Signed out or offline shelf — the list just doesn't gain one.
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const options: {
+    key: string;
+    label: string;
+    sound: ClipSound | undefined;
+    saved?: SoundPreset;
+  }[] = [
+    // Flat is the shipped "nothing applied" treatment; it reads as Off.
+    ...SOUND_PRESETS.map((p) => ({
+      key: `shipped:${p.id}`,
+      label: p.sound ? p.name : "Off",
+      sound: p.sound,
+    })),
+    ...saved.map((p) => ({
+      key: `${p.residency}:${p.id}`,
+      label: p.name,
+      sound: p.sound,
+      saved: p,
+    })),
+  ];
+  // Two presets can hold the same settings — one saved while another was
+  // applied — so the one the user picked stays selected for as long as the
+  // clip still matches it; the first match stands in otherwise.
+  const [picked, setPicked] = useState<string | null>(null);
+  const current =
+    options.find((o) => o.key === picked && sameSound(o.sound, sound)) ??
+    options.find((o) => sameSound(o.sound, sound));
+  const CUSTOM = "custom";
+  const value = current?.key ?? CUSTOM;
+  const items = Object.fromEntries([
+    ...options.map((o) => [o.key, o.label]),
+    [CUSTOM, "Custom"],
+  ]);
+
+  return (
+    <>
+      <Row label="Preset">
+        <Select
+          value={value}
+          items={items}
+          onValueChange={(key) => {
+            const o = options.find((x) => x.key === key);
+            if (!o) return;
+            setPicked(o.key);
+            onApply(o.sound);
+          }}
+        >
+          <SelectTrigger className="h-8 w-36 text-[12px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {options.map((o) => (
+              <SelectItem key={o.key} value={o.key} className="text-[12px]">
+                {o.label}
+              </SelectItem>
+            ))}
+            <SelectItem
+              value={CUSTOM}
+              className="text-[12px]"
+              disabled={value !== CUSTOM}
+            >
+              Custom
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        {current?.saved ? (
+          <button
+            type="button"
+            title={`Delete ${current.label}`}
+            aria-label={`Delete preset ${current.label}`}
+            className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground transition-colors hover:text-foreground"
+            onClick={() => {
+              const p = current.saved!;
+              void deleteSoundPreset(p).catch(() => {});
+              patchLibrary(client, (prev) => ({
+                ...prev,
+                templates: prev.templates.filter(
+                  (t) => !(t.id === p.id && t.residency === p.residency)
+                ),
+              }));
+            }}
+          >
+            <Trash2 className="size-3" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            title="Save preset"
+            className="shrink-0 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+            disabled={!sound}
+            onClick={() => setNaming(true)}
+          >
+            Save
+          </button>
+        )}
+      </Row>
+      <Dialog open={naming} onOpenChange={(o) => !o && setNaming(false)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Save sound preset</DialogTitle>
+          </DialogHeader>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void save();
+            }}
+          >
+            <Input
+              autoFocus
+              placeholder="Preset name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+            <DialogFooter className="mt-4">
+              <Button type="submit" disabled={busy || !name.trim()} className="w-full">
+                {busy && <Loader2 className="animate-spin" data-icon="inline-start" />}
+                Save preset
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
 function ClipPanel({ clip }: { clip: VideoClip }) {
   const asset = useEditor((s) => s.assets.find((a) => a.id === clip.assetId));
   const aspect = useEditor((s) => s.aspect);
@@ -950,14 +1403,16 @@ function BeatsControl({ asset }: { asset: MediaAsset }) {
         {busy && <Loader2 className="size-3.5 animate-spin" />}
         Detect
       </Button>
-      <ResetButton
-        title="Clear beats"
-        show={!!grid}
-        onClick={() => {
-          useEditor.getState().pushHistory();
-          useEditor.getState().updateAsset(asset.id, { beats: undefined });
-        }}
-      />
+      {grid && (
+        <ResetButton
+          title="Clear beats"
+          show
+          onClick={() => {
+            useEditor.getState().pushHistory();
+            useEditor.getState().updateAsset(asset.id, { beats: undefined });
+          }}
+        />
+      )}
     </>
   );
 }
@@ -981,6 +1436,16 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
     setAudio(patch);
     ck.end();
   };
+  const [view, setView] = usePanelView<"main" | "sound">(`audio-sound:${clip.id}`, "main");
+  if (view === "sound") {
+    return (
+      <SoundQualityPanel
+        sound={clip.sound}
+        write={(sound, phase) => (phase === "commit" ? commitAudio({ sound }) : setAudio({ sound }))}
+        onBack={() => setView("main")}
+      />
+    );
+  }
   return (
     <>
       <div className="flex flex-col gap-1 px-3.5 pb-4">
@@ -1133,6 +1598,7 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
             onCheckedChange={(v) => useEditor.getState().updateAudio(clip.id, { hidden: v })}
           />
         </Row>
+        <SoundQualityRow sound={clip.sound} onOpen={() => setView("sound")} />
       </div>
     </>
   );
