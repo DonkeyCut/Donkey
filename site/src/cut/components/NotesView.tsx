@@ -18,7 +18,8 @@ import {
 import { homeHref, useCutBase } from "@/cut/lib/nav";
 import { notesKey, patchNotes, useNotes } from "@/cut/lib/queries";
 import { cn } from "@/lib/utils";
-import { buildDragGhost, FolderCrumb, FolderShelf, Marquee } from "./desktopFolders";
+import { setObjectDragImage } from "@/cut/lib/assetDrag";
+import { FolderCrumb, FolderShelf, Marquee } from "./desktopFolders";
 import { NoteComposer, noteChanged, type NoteDraft } from "./NoteComposer";
 
 // The note paper's ink, matching the iOS app.
@@ -380,12 +381,7 @@ export function NotesView() {
     if (!selected.has(id)) setSelected(new Set([id]));
     e.dataTransfer.setData(NOTES_MOVE_MIME, JSON.stringify(ids));
     e.dataTransfer.effectAllowed = "move";
-    if (ids.length > 1) {
-      const ghost = buildDragGhost(ids.length, `${ids.length} notes`);
-      document.body.appendChild(ghost);
-      e.dataTransfer.setDragImage(ghost, 18, 16);
-      setTimeout(() => ghost.remove(), 0);
-    }
+    setObjectDragImage(e, ids.length, ids, () => setSelected(new Set()));
   };
 
   const hasContent = list.length > 0 || folders.length > 0;

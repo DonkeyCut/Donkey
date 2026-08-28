@@ -175,11 +175,9 @@ const CARD_GHOST_MAX = 72;
  * lives off-screen just long enough for the browser to snapshot it. */
 /** Ready a clone for ghost duty: drop `data-drag-omit` nodes (badges riding on
  * the picture) and bake live `<video>`/`<canvas>` frames into canvases, since
- * clones of those paint blank. Reports whether anything was dropped, which
- * decides whether the ghost keeps the object's height or takes its own. */
-function bakeGhostClone(src: HTMLElement, clone: HTMLElement): { trimmed: boolean } {
-  const omitted = clone.querySelectorAll("[data-drag-omit]");
-  omitted.forEach((n) => n.remove());
+ * clones of those paint blank. */
+function bakeGhostClone(src: HTMLElement, clone: HTMLElement): void {
+  clone.querySelectorAll("[data-drag-omit]").forEach((n) => n.remove());
   // Skip media inside omitted nodes so both lists pair up by index.
   const srcMedia = Array.from(src.querySelectorAll<HTMLElement>("video, canvas")).filter(
     (n) => !n.closest("[data-drag-omit]")
@@ -188,6 +186,19 @@ function bakeGhostClone(src: HTMLElement, clone: HTMLElement): { trimmed: boolea
     const from = srcMedia[i];
     if (!from) return;
     const r = from.getBoundingClientRect();
+    // A video with no decoded frame yet paints nothing; its poster is what the
+    // page is showing, so the ghost shows the poster too.
+    if (from instanceof HTMLVideoElement && from.readyState < 2 && from.poster) {
+      const img = document.createElement("img");
+      img.src = from.poster;
+      img.className = node.className;
+      img.style.cssText = node.style.cssText;
+      img.style.width = `${r.width}px`;
+      img.style.height = `${r.height}px`;
+      img.style.objectFit = "cover";
+      node.replaceWith(img);
+      return;
+    }
     const c = document.createElement("canvas");
     c.width = Math.max(1, Math.round(r.width * devicePixelRatio));
     c.height = Math.max(1, Math.round(r.height * devicePixelRatio));
@@ -218,7 +229,7 @@ function bakeGhostClone(src: HTMLElement, clone: HTMLElement): { trimmed: boolea
       }
     }
     node.replaceWith(c);
-  });  return { trimmed: omitted.length > 0 };
+  });
 }
 
 export function setCardDragImage(e: React.DragEvent, host: HTMLElement) {
@@ -261,15 +272,25 @@ export function setCardDragImage(e: React.DragEvent, host: HTMLElement) {
  * (marked `data-segment-drop`, e.g. the timeline with its track-segment
  * ghost) the object shrinks away and hands over, then returns if the drag
  * leaves again. */
-/** Longest side of an object drag ghost, px: a small sticker rides at its own
- * size, a panel-width media tile shrinks to a carryable ghost. */
-const OBJECT_GHOST_MAX = 120;
+/** Uniform drag-ghost unit, px: every drag rides the same square marker, the
+ * grabbed tile's picture covering it edge to edge — center-cropped to fill,
+ * so no aspect leaves bars. */
+const OBJECT_GHOST_UNIT = 48;
 
-export function setObjectDragImage(e: React.DragEvent) {
+export function setObjectDragImage(
+  e: React.DragEvent,
+  count = 1,
+  gatherIds?: string[],
+  /** Runs when the drop lands on a surface that accepted it — the moment the
+   * carried items have a new home, so the source clears its selection. A dead
+   * release flies the pick home and leaves the selection standing. */
+  onLanded?: () => void
+) {
   const host = e.currentTarget as HTMLElement;
   const el = host.querySelector<HTMLElement>("[data-drag-object]") ?? host;
   const rect = el.getBoundingClientRect();
-  const fit = Math.min(1, OBJECT_GHOST_MAX / Math.max(rect.width, rect.height));
+  if (!rect.width || !rect.height) return;
+  const unit = OBJECT_GHOST_UNIT;
 
   const blank = document.createElement("canvas");
   blank.width = blank.height = 1;
@@ -282,52 +303,205 @@ export function setObjectDragImage(e: React.DragEvent) {
   root.style.cssText =
     "position:fixed;left:0;top:0;z-index:1000;pointer-events:none;will-change:transform;";
   const object = el.cloneNode(true) as HTMLElement;
-  // A ghost that drops part of the object — a name strip under a figure, a
-  // badge on a picture — is shorter than what it was cloned from, so it
-  // measures itself instead of being held to the object's height.
-  const { trimmed } = bakeGhostClone(el, object);
+  bakeGhostClone(el, object);
   object.style.width = `${rect.width}px`;
-  if (!trimmed) object.style.height = `${rect.height}px`;
+  object.style.height = `${rect.height}px`;
   object.style.margin = "0";
-  object.style.opacity = "0.85";
-  // The ghost floats free of the page, so its edge is drawn at twice the
-  // strength the card wears in the grid: a pale tile lifted over a pale
-  // backdrop has no shape otherwise.
-  const edge = getComputedStyle(el).borderTopColor;
-  if (edge) object.style.borderColor = `color-mix(in oklab, ${edge}, black 50%)`;
-  object.style.transition = "opacity 150ms ease, transform 150ms ease";
-  root.appendChild(object);
+  // The clone keeps the tile's grid classes; inside the tiny frame those
+  // clamp it (max-w-full reads the 48px frame as the containing block), so
+  // the explicit on-screen size is pinned open.
+  object.style.maxWidth = "none";
+  object.style.maxHeight = "none";
+  object.style.minWidth = "0";
+  object.style.minHeight = "0";
+  // Center the full-size clone in the unit and scale it to cover: the picture
+  // fills the square and the long dimension crops away.
+  const cover = Math.max(unit / rect.width, unit / rect.height);
+  object.style.position = "absolute";
+  object.style.left = `${(unit - rect.width) / 2}px`;
+  object.style.top = `${(unit - rect.height) / 2}px`;
+  object.style.transform = `scale(${cover})`;
+  object.style.transformOrigin = "center";
+  const frame = document.createElement("div");
+  frame.style.cssText =
+    "position:absolute;inset:0;overflow:hidden;border-radius:8px;" +
+    "box-shadow:0 8px 24px rgba(0,0,0,0.35);";
+  // The tile's own fill backs the picture while it loads.
+  const fill = getComputedStyle(el).backgroundColor;
+  frame.style.background =
+    fill && fill !== "rgba(0, 0, 0, 0)" ? fill : "rgba(30,30,38,0.9)";
+  // The ghost floats free of the page, so a tile that wears an edge in the
+  // grid gets it drawn at twice the strength: a pale tile lifted over a pale
+  // backdrop has no shape otherwise. A borderless tile stays borderless.
+  const tile = getComputedStyle(el);
+  if (parseFloat(tile.borderTopWidth) > 0)
+    frame.style.border = `1px solid color-mix(in oklab, ${tile.borderTopColor}, black 50%)`;
+  frame.appendChild(object);
+  const bundle = document.createElement("div");
+  bundle.style.cssText =
+    `position:relative;width:${unit}px;height:${unit}px;opacity:0.85;` +
+    "transition:opacity 150ms ease, transform 150ms ease;";
+
+  // A multi-selection reads as one thing in hand: a stack gathered behind the
+  // grabbed card, counted on its corner.
+  if (count > 1) {
+    for (const [dx, dy, rot] of [
+      [6, 6, 4],
+      [3, 3, 2],
+    ]) {
+      const back = document.createElement("div");
+      back.style.cssText =
+        `position:absolute;inset:0;transform:translate(${dx}px,${dy}px) rotate(${rot}deg);` +
+        "border-radius:8px;background:rgba(30,30,38,0.55);";
+      bundle.appendChild(back);
+    }
+  }
+  bundle.appendChild(frame);
+  if (count > 1) {
+    const badge = document.createElement("span");
+    badge.textContent = String(count);
+    badge.style.cssText =
+      "position:absolute;top:-8px;right:-8px;z-index:1;min-width:20px;height:20px;padding:0 5px;" +
+      "display:grid;place-items:center;border-radius:10px;background:#0a84ff;color:#fff;" +
+      "font:600 11px/1 ui-sans-serif,system-ui,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,0.35);";
+    bundle.appendChild(badge);
+  }
+  root.appendChild(bundle);
   document.body.appendChild(root);
 
-  // Hold the object where the pointer grabbed it; a grab outside the object
-  // (on the card around it, or on the part the ghost dropped) holds the
-  // nearest edge of what is actually floating.
-  const held = object.getBoundingClientRect().height || rect.height;
-  const ox = Math.min(Math.max(e.clientX - rect.left, 0), rect.width);
-  const oy = Math.min(Math.max(e.clientY - rect.top, 0), held);
-  object.style.transformOrigin = `${ox}px ${oy}px`;
-  object.style.transform = `scale(${fit})`;
+  // Hold the ghost where the pointer grabbed the card, mapped onto the unit;
+  // a grab outside the object holds the nearest edge.
+  const gx = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1) * unit;
+  const gy = Math.min(Math.max((e.clientY - rect.top) / rect.height, 0), 1) * unit;
+  bundle.style.transformOrigin = `${gx}px ${gy}px`;
 
   const position = (x: number, y: number) => {
-    root.style.transform = `translate(${x - ox}px, ${y - oy}px)`;
+    root.style.transform = `translate(${x - gx}px, ${y - gy}px)`;
   };
   position(e.clientX, e.clientY);
 
+  // The rest of the selection gathers into the stack: each picked card
+  // flies from its grid spot to the ghost, shrinking away as it lands. A
+  // huge selection animates only its first few — the count badge carries the
+  // rest. Every flier is tracked so a release removes them on the spot.
+  const flies: HTMLElement[] = [];
+  if (count > 1 && gatherIds) {
+    for (const id of gatherIds.slice(0, 8)) {
+      const src = document.querySelector<HTMLElement>(`[data-sel-id="${CSS.escape(id)}"]`);
+      if (!src || src === host || src.contains(el)) continue;
+      const from = src.querySelector<HTMLElement>("[data-drag-object]") ?? src;
+      const r = from.getBoundingClientRect();
+      if (!r.width || !r.height) continue;
+      const fly = from.cloneNode(true) as HTMLElement;
+      bakeGhostClone(from, fly);
+      fly.style.cssText +=
+        `;position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;` +
+        "margin:0;pointer-events:none;z-index:999;opacity:0.9;transform-origin:top left;" +
+        "transition:transform 240ms ease, opacity 240ms ease;";
+      document.body.appendChild(fly);
+      flies.push(fly);
+      const tx = e.clientX - gx - r.left;
+      const ty = e.clientY - gy - r.top;
+      requestAnimationFrame(() => {
+        fly.style.transform = `translate(${tx}px, ${ty}px) scale(${unit / Math.max(r.width, r.height)})`;
+        fly.style.opacity = "0";
+      });
+      setTimeout(() => fly.remove(), 300);
+    }
+  }
+
+  // Whether the pointer is over a spot that will take the drop. By the time
+  // `dragover` bubbles to the document a real target has already claimed the
+  // event, so its `defaultPrevented` is the tell.
+  let overValid = false;
   const onOver = (ev: DragEvent) => {
+    // A real target has already claimed this event by the time it reaches the
+    // document, so its `defaultPrevented` is what says the spot takes a drop.
+    overValid = ev.defaultPrevented;
+    // Dead space accepts the drag too, which keeps the native snap-back
+    // animation from holding `dragend` — and the ghost — for a beat after a
+    // release nothing wanted. The cursor still reads as no-drop, and the
+    // capture-phase `drop` below swallows the event so no page handler sees a
+    // landing it never accepted.
+    if (!overValid && ev.dataTransfer) ev.dataTransfer.dropEffect = "none";
+    ev.preventDefault();
     position(ev.clientX, ev.clientY);
     const handedOver = !!(ev.target as Element | null)?.closest?.("[data-segment-drop]");
-    object.style.opacity = handedOver ? "0" : "0.85";
-    object.style.transform = `scale(${handedOver ? fit * 0.3 : fit})`;
+    bundle.style.opacity = handedOver ? "0" : "0.85";
+    bundle.style.transform = handedOver ? "scale(0.3)" : "";
   };
-  const end = () => {
-    root.remove();
+  // A release nothing accepted sends the pick home: the stack shrinks away
+  // and each carried card flies from the release point back to its spot in
+  // the grid, dissolving onto the original as it lands.
+  const flyHome = (x: number, y: number) => {
+    bundle.style.opacity = "0";
+    bundle.style.transform = "scale(0.5)";
+    setTimeout(() => root.remove(), 160);
+    const homes: HTMLElement[] = [];
+    if (count > 1 && gatherIds) {
+      for (const id of gatherIds.slice(0, 8)) {
+        const src = document.querySelector<HTMLElement>(`[data-sel-id="${CSS.escape(id)}"]`);
+        if (src) homes.push(src.querySelector<HTMLElement>("[data-drag-object]") ?? src);
+      }
+    } else {
+      homes.push(el);
+    }
+    for (const home of homes) {
+      const r = home.getBoundingClientRect();
+      if (!r.width || !r.height) continue;
+      const back = home.cloneNode(true) as HTMLElement;
+      bakeGhostClone(home, back);
+      back.style.cssText +=
+        `;position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;` +
+        "max-width:none;max-height:none;min-width:0;min-height:0;" +
+        "margin:0;pointer-events:none;z-index:999;opacity:0.9;transform-origin:top left;" +
+        `transform:translate(${x - gx - r.left}px, ${y - gy - r.top}px) scale(${unit / Math.max(r.width, r.height)});` +
+        "transition:transform 260ms ease, opacity 120ms ease 160ms;";
+      document.body.appendChild(back);
+      requestAnimationFrame(() => {
+        back.style.transform = "";
+        back.style.opacity = "0";
+      });
+      setTimeout(() => back.remove(), 320);
+    }
+  };
+  // Letting go settles the ghost at once — flyers still gathering in clear
+  // with it. A landing removes everything on the spot; a release nothing
+  // accepted sends the pick home. `dragend` is the backstop: it fires for
+  // every drag, including one released outside the window and one whose
+  // target stopped the drop from bubbling.
+  const detach = () => {
+    for (const fly of flies) fly.remove();
     document.removeEventListener("dragover", onOver);
-    window.removeEventListener("dragend", end, true);
-    window.removeEventListener("drop", end, true);
+    document.removeEventListener("drop", onDead, true);
+    window.removeEventListener("drop", onLand);
+    window.removeEventListener("dragend", onEnd, true);
+  };
+  const onEnd = () => {
+    detach();
+    root.remove();
+  };
+  // Capture at the document, ahead of every element handler: a release over a
+  // spot that never accepted the drag is swallowed here, so the drop the
+  // `dragover` above made possible reaches nothing that would act on it.
+  const onDead = (ev: DragEvent) => {
+    if (overValid) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    detach();
+    flyHome(ev.clientX, ev.clientY);
+  };
+  // Bubble at the window, behind every element handler: the drop landed and
+  // the target has already read it, so the source can drop its selection.
+  const onLand = () => {
+    detach();
+    root.remove();
+    onLanded?.();
   };
   document.addEventListener("dragover", onOver);
-  window.addEventListener("dragend", end, true);
-  window.addEventListener("drop", end, true);
+  document.addEventListener("drop", onDead, true);
+  window.addEventListener("drop", onLand);
+  window.addEventListener("dragend", onEnd, true);
 }
 
 /** A small chip as the drag image, so the cursor carries a compact marker

@@ -125,7 +125,6 @@ import {
 } from "@/cut/lib/fontSpecimen";
 import { AudioCardFace } from "./AudioPanel";
 import {
-  buildDragGhost,
   FolderCrumb,
   FolderShelf,
   formatBytes,
@@ -655,14 +654,7 @@ export function LibraryView() {
 
   const onCardDragExtra = (e: React.DragEvent, a: LibraryAsset) => {
     const ids = dragSelection(e, a.id);
-    if (ids.length > 1) {
-      const ghost = buildDragGhost(ids.length, `${ids.length} items`);
-      document.body.appendChild(ghost);
-      e.dataTransfer.setDragImage(ghost, 18, 16);
-      setTimeout(() => ghost.remove(), 0);
-    } else {
-      setObjectDragImage(e);
-    }
+    setObjectDragImage(e, ids.length, ids, () => setSelected(new Set()));
   };
 
   const bothShelves = listed.length > 1;

@@ -89,7 +89,8 @@ import {
   type ProjectSummary,
 } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
-import { buildDragGhost, FolderCrumb, FolderShelf, formatBytes, Marquee } from "./desktopFolders";
+import { setObjectDragImage } from "@/cut/lib/assetDrag";
+import { FolderCrumb, FolderShelf, formatBytes, Marquee } from "./desktopFolders";
 
 type View = "gallery" | "list";
 
@@ -581,10 +582,7 @@ export function ProjectsHome() {
     if (!selected.has(p.id)) setSelected(new Set([p.id]));
     e.dataTransfer.setData(PROJECT_MIME, JSON.stringify(ids));
     e.dataTransfer.effectAllowed = "move";
-    const ghost = buildDragGhost(ids.length, ids.length > 1 ? `${ids.length} projects` : p.name);
-    document.body.appendChild(ghost);
-    e.dataTransfer.setDragImage(ghost, 18, 16);
-    setTimeout(() => ghost.remove(), 0);
+    setObjectDragImage(e, ids.length, ids, () => setSelected(new Set()));
   };
 
   const toggleSelect = (id: string) =>
