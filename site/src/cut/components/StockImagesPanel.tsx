@@ -74,7 +74,7 @@ export function StockImagesPanel() {
         </span>
       </div>
 
-      <ScrollArea className="min-h-0 flex-1" contentClassName="flex flex-col gap-3 px-3.5 pb-4">
+      <ScrollArea className="min-h-0 flex-1" contentClassName="flex flex-col gap-3 px-3.5 pt-1 pb-4">
         <label className="flex shrink-0 items-center gap-2 rounded-lg border border-input px-2.5 py-1.5 focus-within:border-ring">
           <Search className="size-3.5 shrink-0 text-muted-foreground" />
           <input

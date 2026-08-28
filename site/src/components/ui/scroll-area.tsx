@@ -39,7 +39,7 @@ function ScrollArea({
         ref={viewportRef}
         onScroll={onViewportScroll}
         className={cn(
-          "size-full rounded-[inherit] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
+          "size-full rounded-[inherit] outline-none",
           viewportClassName
         )}
       >

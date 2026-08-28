@@ -47,28 +47,6 @@ export function readDragIds(e: React.DragEvent, mime: string): string[] {
   }
 }
 
-/** A drag ghost mirroring the collection under the cursor: one card, or a small
- * stack labelled with the count. Lives off-screen just long enough for the
- * browser to snapshot it as the drag image. */
-export function buildDragGhost(count: number, label: string): HTMLElement {
-  const el = document.createElement("div");
-  el.style.cssText = "position:absolute;top:-1000px;left:-1000px;pointer-events:none;";
-  if (count > 1) {
-    const back = document.createElement("div");
-    back.style.cssText =
-      "position:absolute;inset:0;transform:translate(7px,7px);border-radius:11px;background:rgba(30,30,38,0.55);";
-    el.appendChild(back);
-  }
-  const card = document.createElement("div");
-  card.textContent = label;
-  card.style.cssText =
-    "position:relative;padding:7px 13px;border-radius:11px;background:rgba(18,18,24,0.94);color:#fff;" +
-    "font:600 12px/1.2 ui-sans-serif,system-ui,sans-serif;white-space:nowrap;max-width:220px;overflow:hidden;" +
-    "text-overflow:ellipsis;box-shadow:0 8px 24px rgba(0,0,0,0.4);";
-  el.appendChild(card);
-  return el;
-}
-
 /** Folder tile glyph: the Lucide folder, filled blue. */
 export function FolderGlyph({ className }: { className?: string }) {
   return <Folder className={cn("fill-[#8cc5ff] text-[#8cc5ff]", className)} aria-hidden="true" />;
@@ -117,9 +95,13 @@ export function useTilePicks(shown?: readonly string[]) {
 }
 
 // Elements a press should not turn into a rubber-band: the cards themselves
-// (they drag), folder tiles / breadcrumbs, and any interactive control.
+// (they drag), folder tiles / breadcrumbs, anything else draggable sharing the
+// scroll region (template and export rows), the scrollbar, and any
+// interactive control.
 const MARQUEE_SKIP =
-  "[data-sel-id],[data-no-marquee],button,a,input,textarea,select,[role='button'],[role='menuitem'],[contenteditable='true']";
+  "[data-sel-id],[data-no-marquee],[draggable='true'],button,a,input,textarea,select," +
+  "[role='button'],[role='menuitem'],[contenteditable='true']," +
+  "[data-slot='scroll-area-scrollbar'],[data-slot='scroll-area-thumb']";
 
 /** Rubber-band selection like a desktop: press-drag on empty space to sweep a
  * rectangle, and every tile (marked `data-sel-id`) it touches is selected. Armed
@@ -139,9 +121,10 @@ export function Marquee({
    * column it is in. */
   rootClassName?: string;
   /** Where a press starts a sweep. "page" arms the whole content arena, so a
-   * press anywhere beside the grid begins one; "self" keeps it inside this
-   * box, which is what a side panel wants — a press in the preview or the
-   * timeline is not a sweep of the panel's tiles. */
+   * press anywhere beside the grid begins one; "self" arms the scroll region
+   * this box sits in, which is what a side panel wants — the empty space
+   * under the grid sweeps, while the preview and the timeline are left
+   * alone. */
   scope?: "page" | "self";
   selected: Set<string>;
   setSelected: (s: Set<string>) => void;
@@ -149,7 +132,9 @@ export function Marquee({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const selectedRef = useRef(selected);
-  selectedRef.current = selected;
+  useEffect(() => {
+    selectedRef.current = selected;
+  });
   const [rect, setRect] = useState<{ left: number; top: number; width: number; height: number } | null>(
     null
   );
@@ -157,7 +142,7 @@ export function Marquee({
   useEffect(() => {
     const arena =
       scope === "self"
-        ? ref.current
+        ? (ref.current?.closest<HTMLElement>("[data-slot='scroll-area-viewport']") ?? ref.current)
         : (ref.current?.closest("main") ?? ref.current?.parentElement);
     if (!arena) return;
     const onPointerDown = (e: PointerEvent) => {
@@ -187,16 +172,42 @@ export function Marquee({
         });
         setSelected(hit);
       };
-      const onUp = () => {
+      const done = () => {
         window.removeEventListener("pointermove", onMove);
-        if (!moved && !additive) setSelected(new Set());
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("dragstart", onDrag, true);
         setRect(null);
       };
+      const onUp = () => {
+        done();
+        if (!moved && !additive) setSelected(new Set());
+      };
+      // A press that turns into a native drag gets no pointerup at all, so the
+      // sweep stands down when the drag takes over.
+      const onDrag = () => done();
       window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", onUp, { once: true });
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("dragstart", onDrag, true);
     };
     arena.addEventListener("pointerdown", onPointerDown);
-    return () => arena.removeEventListener("pointerdown", onPointerDown);
+    // A plain press anywhere beyond the arena lets the selection go too — the
+    // desktop's rule: only a card, a control, or an open menu or dialog (which
+    // acts on the pick) holds it.
+    const onDocDown = (e: PointerEvent) => {
+      if (e.button !== 0 || e.shiftKey || e.metaKey || e.ctrlKey) return;
+      const t = e.target as HTMLElement;
+      if (
+        t.closest(MARQUEE_SKIP) ||
+        t.closest("[role='menu'],[role='dialog'],[role='alertdialog']")
+      )
+        return;
+      if (selectedRef.current.size) setSelected(new Set());
+    };
+    document.addEventListener("pointerdown", onDocDown);
+    return () => {
+      arena.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("pointerdown", onDocDown);
+    };
   }, [setSelected, scope]);
 
   return (
