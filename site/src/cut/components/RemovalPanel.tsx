@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Ban, ChevronLeft, Loader2 } from "lucide-react";
+import { Ban, ChevronLeft, Loader2, WandSparkles } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -25,6 +25,7 @@ import {
 import { clipKeyColor, suggestKeyColor } from "@/cut/lib/removal/keyColor";
 import { HostedErrorText } from "@/cut/components/hostedError";
 import { useEditor } from "@/cut/lib/store";
+import { playheadAt } from "@/cut/lib/playhead";
 import { usePanelView } from "@/cut/lib/panelViews";
 import {
   CHROMA_DEFAULT_INTENSITY,
@@ -51,6 +52,12 @@ import { parseNumberInput } from "@/cut/components/ScrubValue";
 import { ValueSlider } from "@/cut/components/ValueSlider";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 /**
  * The clip panel's Cutout view: labeled inspector rows. Layer picks what the
@@ -74,13 +81,6 @@ const MODES: { id: RemovalMode | "off"; label: string }[] = [
   { id: "custom", label: "Custom" },
   { id: "chroma", label: "Chroma" },
   { id: "off", label: "Off" },
-];
-
-const BRUSH_TOOLS: { id: BrushTool; label: string }[] = [
-  { id: "quick", label: "Quick brush" },
-  { id: "brush", label: "Brush" },
-  { id: "quickErase", label: "Quick erase" },
-  { id: "erase", label: "Erase" },
 ];
 
 /** Shared write path: transiently while a gesture is live, committed at its
@@ -283,7 +283,7 @@ function RemovalView({ clip }: { clip: VideoClip }) {
   return (
     <>
       <ModeRow clip={clip} />
-      {mode === "custom" && <CustomControls />}
+      {mode === "custom" && <CustomControls clip={clip} />}
       {mode === "chroma" && removal?.chroma && (
         <ChromaControls removal={removal} draft={draft} commit={commit} />
       )}
@@ -295,8 +295,8 @@ function BakeStatus({ clipId, job }: { clipId: string; job: MatteBakeJob | undef
   if (!job) return null;
   if (job.status === "error")
     return (
-      <div className="flex items-center justify-between gap-2 pt-1 text-[11.5px] text-muted-foreground">
-        <span className="min-w-0 truncate" title={job.error}>
+      <div className="flex items-start justify-between gap-2 pt-1 text-[11.5px] text-muted-foreground">
+        <span className="min-w-0">
           <HostedErrorText error={job.error ?? "The cutout could not be prepared."} />
         </span>
         <button
@@ -334,33 +334,102 @@ function TickingEta({ secondsLeft, etaAt }: { secondsLeft: number; etaAt: number
   return `, ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
 }
 
-function CustomControls() {
+function CustomControls({ clip }: { clip: VideoClip }) {
   const tool = useBrushUi((s) => s.tool);
   const size = useBrushUi((s) => s.size);
+  // The four tools are two axes: what a stroke does (keep or erase) and how
+  // it lands (smart object pick or plain paint).
+  const erasing = tool === "erase" || tool === "quickErase";
+  const smart = tool === "quick" || tool === "quickErase";
+  const pick = (erase: boolean, sm: boolean): BrushTool =>
+    sm ? (erase ? "quickErase" : "quick") : erase ? "erase" : "brush";
+  // Strokes live on the frames they were drawn on, so after playing away the
+  // overlay looks empty — this seeks back to a stroke frame, cycling through
+  // them when several frames carry paint.
+  const seeds = clip.removal?.seeds;
+  const strokeTimes = Array.from(
+    new Set([...(seeds?.prompts ?? []), ...(seeds?.paint ?? [])].map((s) => s.t))
+  ).sort((a, b) => a - b);
+  const showStrokes = () => {
+    if (!strokeTimes.length) return;
+    const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
+    const srcNow = clip.in + Math.max(0, playheadAt() - clip.start) * speed;
+    const next = strokeTimes.find((t) => t > srcNow + 0.05) ?? strokeTimes[0];
+    useEditor.getState().seek(clip.start + (next - clip.in) / speed);
+  };
   return (
     <>
-      <RowSelect
-        label="Tool"
-        value={tool}
-        options={BRUSH_TOOLS}
-        onChange={(t) => useBrushUi.getState().setTool(t)}
-        hook="clip-brush-tool"
-      />
-      <Row label="Size">
-        <ValueSlider
-          label="Size"
-          sliderClassName="clip-brush-size data-horizontal:w-24"
-          valueClassName="w-12 text-muted-foreground"
-          value={Math.round(size * 1080)}
-          min={Math.round(BRUSH_SIZE_MIN * 1080)}
-          max={Math.round(BRUSH_SIZE_MAX * 1080)}
-          step={1}
-          format={(v) => `${Math.round(v)}px`}
-          parse={parseNumberInput}
-          onDraft={(v) => useBrushUi.getState().setSize(v / 1080)}
-          onCommit={(v) => useBrushUi.getState().setSize(v / 1080)}
-        />
+      <Row label="Tool">
+        <div className="clip-brush-tool flex rounded-lg border border-input p-0.5">
+          {([false, true] as const).map((erase) => (
+            <button
+              key={String(erase)}
+              type="button"
+              className={cn(
+                `clip-brush-tool-${erase ? "erase" : "brush"} rounded-md px-2.5 py-1 text-[11.5px] font-medium transition-colors`,
+                erasing === erase
+                  ? "bg-neutral-900 text-white"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              aria-pressed={erasing === erase}
+              onClick={() => useBrushUi.getState().setTool(pick(erase, smart))}
+            >
+              {erase ? "Erase" : "Brush"}
+            </button>
+          ))}
+        </div>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  className={cn(
+                    "clip-brush-smart grid size-[30px] place-items-center rounded-lg border transition-colors",
+                    smart
+                      ? "border-neutral-900 bg-neutral-900 text-white"
+                      : "border-input text-muted-foreground hover:text-foreground"
+                  )}
+                  aria-pressed={smart}
+                  aria-label="Smart select"
+                  onClick={() => useBrushUi.getState().setTool(pick(erasing, !smart))}
+                >
+                  <WandSparkles className="size-3.5" />
+                </button>
+              }
+            />
+            <TooltipContent side="bottom">Smart select</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </Row>
+      <div className="clip-brush-size-row">
+        <Row label="Size">
+          <ValueSlider
+            label="Size"
+            sliderClassName="clip-brush-size data-horizontal:w-24"
+            valueClassName="w-12 text-muted-foreground"
+            value={Math.round(size * 1080)}
+            min={Math.round(BRUSH_SIZE_MIN * 1080)}
+            max={Math.round(BRUSH_SIZE_MAX * 1080)}
+            step={1}
+            format={(v) => `${Math.round(v)}px`}
+            parse={parseNumberInput}
+            onDraft={(v) => useBrushUi.getState().setSize(v / 1080)}
+            onCommit={(v) => useBrushUi.getState().setSize(v / 1080)}
+          />
+        </Row>
+      </div>
+      {strokeTimes.length > 0 && (
+        <Row label="Strokes">
+          <button
+            type="button"
+            className="clip-brush-strokes rounded-md border border-input px-2 py-0.5 text-[11.5px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+            onClick={showStrokes}
+          >
+            Show
+          </button>
+        </Row>
+      )}
       <p className="pt-1 text-[12px] text-muted-foreground">
         Paint on the preview to pick what stays.
       </p>

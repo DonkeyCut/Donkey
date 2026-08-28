@@ -29,9 +29,9 @@ interface BrushUi {
 
 export const useBrushUi = create<BrushUi>((set) => ({
   clipId: null,
-  tool: "quick",
+  tool: "brush",
   size: BRUSH_SIZE_DEFAULT,
-  open: (clipId) => set({ clipId, tool: "quick" }),
+  open: (clipId) => set({ clipId, tool: "brush" }),
   close: () => set({ clipId: null }),
   setTool: (tool) => set({ tool }),
   setSize: (size) => set({ size: Math.min(BRUSH_SIZE_MAX, Math.max(BRUSH_SIZE_MIN, size)) }),

@@ -21,14 +21,14 @@ import {
 
 /**
  * The custom-removal brush on the stage: a pointer surface laid over the
- * selected clip's picture while its brush session is open. Quick strokes run
- * the on-device tap-to-select segmenter and preview the pick live under the
- * pointer; manual strokes paint the mask directly. The selection shows as a
+ * selected clip's picture while its brush session is open. Smart-select strokes
+ * run the on-device tap-to-select segmenter and preview the pick live under
+ * the pointer; plain strokes paint the mask directly. The selection shows as a
  * red overlay, a loupe magnifies the pixels being worked, and every finished
  * stroke lands in the doc as a seed record — the prompts and paint the hosted
- * tracker replays across the whole clip. A size ring rides the pointer the
- * whole session — over the picture, the stage margins, and the settings
- * panel — so the brush's reach is visible while the slider moves.
+ * tracker replays across the whole clip. A size ring rides the pointer over
+ * the picture, and over the panel's Size row so the slider shows the
+ * diameter it is setting.
  */
 
 const LOUPE_PX = 128;
@@ -234,11 +234,31 @@ function BrushSurface({
     });
   };
 
+  // Pointer → picture fraction, measured from the anchor's client position.
+  // A 0×0 element's rect stays pinned under its own rotate/scale, so the
+  // anchor reads true through the stage's zoom pan, where offsetX drifts.
+  const anchorRef = useRef<HTMLDivElement | null>(null);
   const localPoint = (e: React.PointerEvent<HTMLDivElement>): Frac => {
-    const el = e.currentTarget;
+    const a = anchorRef.current?.getBoundingClientRect();
+    if (!a) return { x: 0, y: 0 };
+    let vx = e.clientX - a.left;
+    let vy = e.clientY - a.top;
+    if (rot) {
+      const rad = (-rot * Math.PI) / 180;
+      const c = Math.cos(rad);
+      const s = Math.sin(rad);
+      const rx = vx * c - vy * s;
+      const ry = vx * s + vy * c;
+      vx = rx;
+      vy = ry;
+    }
+    if (scl !== 1) {
+      vx /= scl;
+      vy /= scl;
+    }
     return {
-      x: Math.min(1, Math.max(0, e.nativeEvent.offsetX / Math.max(1, el.clientWidth))),
-      y: Math.min(1, Math.max(0, e.nativeEvent.offsetY / Math.max(1, el.clientHeight))),
+      x: Math.min(1, Math.max(0, (vx - (pic.x - ax)) / Math.max(1, pic.w))),
+      y: Math.min(1, Math.max(0, (vy - (pic.y - ay)) / Math.max(1, pic.h))),
     };
   };
 
@@ -320,18 +340,20 @@ function BrushSurface({
   useEffect(() => {
     ringGeom.current = { w: pic.w, h: pic.h, px: brushPx };
   });
-  // Off the picture the ring keeps following the pointer — over the stage
-  // margins and the settings panel — positioned in viewport pixels from a
-  // window listener; over the picture the surface's own ring takes over.
+  // Over the panel's Size row the ring follows the pointer too — positioned
+  // in viewport pixels from a window listener — so the slider shows the
+  // diameter it is setting; everywhere else off the picture it hides.
   const freeRingRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
       const el = freeRingRef.current;
       if (!el) return;
-      const onSurface = e.target instanceof Element && !!e.target.closest(".clip-removal-brush");
-      el.style.display = onSurface ? "none" : "block";
-      el.style.left = `${e.clientX - brushPx / 2}px`;
-      el.style.top = `${e.clientY - brushPx / 2}px`;
+      const onSize = e.target instanceof Element && !!e.target.closest(".clip-brush-size-row");
+      el.style.display = onSize ? "block" : "none";
+      if (onSize) {
+        el.style.left = `${e.clientX - brushPx / 2}px`;
+        el.style.top = `${e.clientY - brushPx / 2}px`;
+      }
     };
     window.addEventListener("pointermove", onMove);
     return () => window.removeEventListener("pointermove", onMove);
@@ -340,6 +362,7 @@ function BrushSurface({
   return (
     <>
       <div
+        ref={anchorRef}
         className="pointer-events-none absolute"
         style={{
           left: ax,
