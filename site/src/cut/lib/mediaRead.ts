@@ -302,6 +302,10 @@ export interface FrameSinkOptions {
    * in bursts with stalls between them. Batch readers leave it off and keep
    * the deeper pipeline's throughput. */
   lowLatency?: boolean;
+  /** Prefer the software decoder. Hardware decoder sessions are a finite
+   * machine resource; a reader rebuilt after losing one asks for software,
+   * which always opens. */
+  software?: boolean;
 }
 
 export type FrameSinkFactory = (
@@ -310,12 +314,17 @@ export type FrameSinkFactory = (
   opts?: FrameSinkOptions
 ) => FrameCanvasSink;
 
-const canvasSinkFactory: FrameSinkFactory = (track, size, opts) =>
-  new CanvasSink(track, {
+const canvasSinkFactory: FrameSinkFactory = (track, size, opts) => {
+  const decoderOptions = {
+    ...(opts?.lowLatency ? { optimizeForLatency: true } : {}),
+    ...(opts?.software ? { hardwareAcceleration: "prefer-software" as const } : {}),
+  };
+  return new CanvasSink(track, {
     ...size,
     ...(opts?.poolSize ? { poolSize: opts.poolSize } : {}),
-    ...(opts?.lowLatency ? { decoderOptions: { optimizeForLatency: true } } : {}),
+    ...(Object.keys(decoderOptions).length ? { decoderOptions } : {}),
   });
+};
 
 let sinkFactory: FrameSinkFactory = canvasSinkFactory;
 

@@ -39,7 +39,7 @@ import { backdropStill, loadBackdropStill } from "./backdropStills";
 import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
 import { createRasterCanvas, type RasterSurface } from "./raster";
 import { renderElementPng } from "./textRender";
-import { assetIsSilent, behindSubjectOverlay, clipCovers, frameOf, frontSubjectOverlay, isEffectOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, projectFadeSeconds, rectOf } from "./types";
+import { assetIsSilent, behindSubjectOverlay, clipCovers, frameOf, frontSubjectOverlay, isEffectOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, projectFadeSeconds, rectOf, removalActive } from "./types";
 import type { ClipSpan, EffectOverlay, MediaAsset, Overlay, StickerOverlay } from "./types";
 import type { ExportDoc, ExportSettings } from "./exportClient";
 
@@ -145,7 +145,14 @@ export class ClipReader {
   private sink: ClipSink | null = null;
   private still: Frame | null = null;
   private opened: Promise<ClipSink | null> | null = null;
-  private reopened = false;
+  /** Reads that failed in a row, each off a freshly rebuilt reader. Any
+   * successful read clears it. */
+  private failStreak = 0;
+  /** Set after the first decode failure: hardware decoder sessions are a
+   * finite machine resource, and a reader that lost one keeps losing while
+   * the preview holds the rest — the rebuilt reader decodes in software,
+   * which always opens. */
+  private software = false;
 
   constructor(
     private asset: MediaAsset,
@@ -180,7 +187,10 @@ export class ClipReader {
       this.input = input;
       // A small pool keeps the render's canvas allocation flat over thousands
       // of frames.
-      this.sink = frameSink(track, undefined, { poolSize: 4 });
+      this.sink = frameSink(track, undefined, {
+        poolSize: 4,
+        ...(this.software ? { software: true } : {}),
+      });
       return this.sink;
     })());
   }
@@ -189,33 +199,40 @@ export class ClipReader {
    * source has none — a still-less video, or a time past its end. A render
    * never reports `pending`: it waits for the decode instead of moving on. */
   async frameAt(at: number): Promise<Frame> {
-    const sink = await this.open();
+    let sink = await this.open();
     if (this.still) return this.still;
     if (!sink) return MISSING_FRAME;
-    let wrapped;
-    try {
-      wrapped = await sink.getCanvas(Math.max(0, at));
-    } catch (err) {
-      // A long render can outlive the signed link it opened with. Reopening
-      // resolves the URL again, which is enough when the link was simply
-      // re-minted; a second failure is a real one and stops the render.
-      if (this.reopened) throw err;
-      this.reopened = true;
-      this.input?.dispose();
-      this.input = null;
-      this.sink = null;
-      this.opened = null;
-      const reopened = await this.open();
-      if (!reopened) throw err;
-      wrapped = await reopened.getCanvas(Math.max(0, at));
+    for (;;) {
+      try {
+        const wrapped = await sink.getCanvas(Math.max(0, at));
+        this.failStreak = 0;
+        if (!wrapped) return MISSING_FRAME;
+        return {
+          kind: "ready",
+          image: wrapped.canvas,
+          width: wrapped.canvas.width,
+          height: wrapped.canvas.height,
+        };
+      } catch (err) {
+        // Decoders die mid-job for reasons that pass: a signed link that
+        // expired under a long render (reopening resolves the URL again), a
+        // hardware decoder wedged by contention ("Decoding error."). A fresh
+        // reader recovers both, so rebuild and re-read the same frame, with a
+        // breath between tries for the decoder to come back. Only a source
+        // that keeps failing straight off fresh decoders is truly
+        // unreadable, and that stops the job.
+        if (++this.failStreak > 3) throw err;
+        this.software = true;
+        await new Promise((r) => setTimeout(r, 250 * this.failStreak));
+        this.input?.dispose();
+        this.input = null;
+        this.sink = null;
+        this.opened = null;
+        const reopened = await this.open();
+        if (!reopened) throw err;
+        sink = reopened;
+      }
     }
-    if (!wrapped) return MISSING_FRAME;
-    return {
-      kind: "ready",
-      image: wrapped.canvas,
-      width: wrapped.canvas.width,
-      height: wrapped.canvas.height,
-    };
   }
 
   dispose() {
@@ -895,10 +912,10 @@ export class FramePainter {
 
   /** Pull a removal clip's baked matte frame for timeline time `t` and stage
    * it, luma turned to alpha, where the compositor's provider reads. A clip
-   * with no matte (chroma, or a bake still owed) stages nothing. */
+   * whose bake is still owed stages nothing. */
   private async fetchRemovalMatte(span: ClipSpan, t: number): Promise<void> {
     const clip = span.clip;
-    const m = clip.removal?.matte;
+    const m = removalActive(clip.removal) ? clip.removal?.matte : undefined;
     this.matteFrames.delete(clip.id);
     if (!m) return;
     const asset = this.doc.assets.find((a) => a.id === m.assetId);
