@@ -151,6 +151,14 @@ export function walkClaim(w: {
   landed: boolean;
   /** Whether the ring holds `t` already. */
   covered: boolean;
+  /** Whether the ring holds any frame at or before `t`. A walk keeping its
+   * lookahead leaves the frame on screen behind it, so this is true for the
+   * whole of an ordinary play. It is false when the reader has come back to a
+   * moment the walk left behind long ago — a montage replayed from the top,
+   * a clip re-entered from an earlier point — where every frame the ring
+   * holds is ahead of the reader and the walk, which only moves forward, is
+   * never going to land the one it needs. */
+  heldBefore: boolean;
   /** How long it has been coming, in seconds. */
   comingS: number;
   /** Whether the reader is moving with the clock. A paused one is served by
@@ -162,9 +170,13 @@ export function walkClaim(w: {
 }): WalkClaim {
   // The frame is in hand. Nothing about the walk can improve on that.
   if (w.covered) return "hold";
-  // The reader is somewhere the walk was never sent for. A walk only moves
-  // forward, so it is never going to arrive there.
-  const behind = w.playing && w.t < w.walkFor - SAME;
+  // The reader is somewhere the walk was never sent for, or somewhere it has
+  // been and gone with nothing left of it in the ring. A walk only moves
+  // forward, so it is never going to arrive there. The tail is measured with
+  // the lookahead's slack so a walk merely holding its lead is left alone.
+  const behind =
+    w.playing &&
+    (w.t < w.walkFor - SAME || (!w.heldBefore && w.t < w.tail - DECODE_AHEAD_S));
   if (!w.landed) {
     // Nothing landed means the walk is still doing the only work that can
     // produce a picture — finding the keyframe before its anchor, fetching the
@@ -389,6 +401,11 @@ export class FrameRing<T extends Timed> {
     return this.items.some(
       (i) => t >= i.timestamp - SAME && t < i.timestamp + Math.max(i.duration, SAME) + SAME
     );
+  }
+
+  /** Whether any frame held starts at or before `t`. */
+  hasAtOrBefore(t: number): boolean {
+    return this.items.some((i) => i.timestamp <= t + SAME);
   }
 
   /** How many frames held start at or after `t`. */
@@ -978,6 +995,7 @@ export class ClipFrameSource {
         tail: this.streamTail,
         landed: !this.walkFirst,
         covered: this.ring.covers(t),
+        heldBefore: this.ring.hasAtOrBefore(t),
         comingS: (performance.now() - this.walkAt) / 1000,
         playing,
       });

@@ -229,8 +229,10 @@ describe("mappingKey", () => {
 
 describe("walkClaim", () => {
   /** A walk that has landed frames from `from` to `tail`, asked for `t`. */
-  const landed = (t: number, from: number, tail: number, covered = false) =>
-    walkClaim({ t, walkFor: from, from, tail, landed: true, covered, comingS: 5, playing: true });
+  const landed = (t: number, from: number, tail: number, covered = false, heldBefore = true) =>
+    walkClaim({
+      t, walkFor: from, from, tail, landed: true, covered, heldBefore, comingS: 5, playing: true,
+    });
 
   test("playback inside the walk keeps it", () => {
     // The ordinary tick: the playhead is a beat behind the walk's tail and the
@@ -258,12 +260,22 @@ describe("walkClaim", () => {
     expect(landed(1, 0, 8)).toBe("hold");
   });
 
+  test("a reader re-entering behind everything the walk left restarts it", () => {
+    // A montage replayed from the top: the walk from the last pass sits at the
+    // clip's end, the ring holds only its final frames, and the reader asks
+    // for the clip's head — the moment the walk was first sent for. Held, the
+    // clip shows its last frame for the whole pass while the sound plays on.
+    expect(landed(0, 0, 8, false, false)).toBe("restart");
+    // The same walk holding no more than its lookahead is left to land it.
+    expect(landed(7.8, 0, 8, false, false)).toBe("hold");
+  });
+
   test("a walk aimed ahead is kept while the reader catches up to it", () => {
     // A hop anchors ahead of the reader by what reaching a frame costs. The
     // reader is behind the anchor by construction, and that is not the walk
     // going past it — it is the walk about to be right.
     const lead = {
-      t: 4, walkFor: 4, from: 4.5, tail: 4.6, landed: true, covered: false, playing: true,
+      t: 4, walkFor: 4, from: 4.5, tail: 4.6, landed: true, covered: false, heldBefore: true, playing: true,
     };
     expect(walkClaim({ ...lead, comingS: 5 })).toBe("hold");
     expect(walkClaim({ ...lead, t: 4.4, comingS: 5 })).toBe("hold");
@@ -277,7 +289,7 @@ describe("walkClaim", () => {
     // frame from the keyframe forward are all in flight. Starting another asks
     // for the whole thing again, which on a reader short of bytes is the
     // difference between a walk that lands and one that never does.
-    const coming = { walkFor: 2, from: 2, tail: 2, landed: false, covered: false, playing: true };
+    const coming = { walkFor: 2, from: 2, tail: 2, landed: false, covered: false, heldBefore: false, playing: true };
     expect(walkClaim({ ...coming, t: 2.5, comingS: 0.5 })).toBe("hold");
     expect(walkClaim({ ...coming, t: 9, comingS: 1.5 })).toBe("hold");
     // Past the lag it was meant to cure, at a reader that has run beyond it,
@@ -292,13 +304,13 @@ describe("walkClaim", () => {
 
   test("a frame in hand beats every other rule", () => {
     expect(walkClaim({
-      t: 0, walkFor: 5, from: 5, tail: 9, landed: true, covered: true, comingS: 9, playing: true,
+      t: 0, walkFor: 5, from: 5, tail: 9, landed: true, covered: true, heldBefore: false, comingS: 9, playing: true,
     })).toBe("hold");
 
     // A paused reader is served by the backward cache and by the single-frame
     // fetch, so a walk it cannot use is left where it is.
     expect(walkClaim({
-      t: 1, walkFor: 5, from: 5, tail: 6, landed: true, covered: false, comingS: 9, playing: false,
+      t: 1, walkFor: 5, from: 5, tail: 6, landed: true, covered: false, heldBefore: false, comingS: 9, playing: false,
     })).toBe("hold");
   });
 });
@@ -480,6 +492,56 @@ describe("ClipFrameSource retarget", () => {
     expect(src.frameAt(0.1)).not.toBeNull();
     expect(inputs[0].disposed).toBe(false);
     expect(inputs[inputs.length - 1].disposed).toBe(true);
+    src.close();
+  });
+});
+
+describe("ClipFrameSource replay", () => {
+  test("a playing reader back at a clip's head gets a fresh walk", async () => {
+    // The cut played once: the walk read the clip from 2s to its end at 5s and
+    // stopped there, holding its lookahead. The play button then seeks to zero
+    // and starts the clock in the same turn, so the clip is asked for 2s again
+    // while playing — behind everything the ring holds. A held walk here is
+    // the report of a picture that stops while the sound plays on.
+    inputs.length = 0;
+    sinkWalks.length = 0;
+    gates.clear();
+    const src = new ClipFrameSource(asset("replay"), 360);
+    src.want(2, true);
+    await settle();
+    for (let t = 2; t <= 5; t += 0.1) {
+      src.want(+t.toFixed(3), true);
+      await settle(50);
+    }
+    expect(src.frameAt(5)?.timestamp).toBeGreaterThanOrEqual(5 - 1e-3);
+    expect(src.hasExact(2)).toBe(false);
+    const walksBefore = sinkWalks.length;
+    src.want(2, true);
+    await settle();
+    expect(sinkWalks.length).toBe(walksBefore + 1);
+    expect(sinkWalks[sinkWalks.length - 1].from).toBeCloseTo(2, 3);
+    expect(src.hasExact(2)).toBe(true);
+    expect(src.frameAt(2)?.timestamp).toBeCloseTo(2, 3);
+    src.close();
+  });
+
+  test("an ordinary tick never restarts the walk", async () => {
+    // The same play, watched tick by tick: the reader is always a beat behind
+    // the walk's tail with the frame on screen in hand, and one walk carries
+    // the whole clip.
+    inputs.length = 0;
+    sinkWalks.length = 0;
+    gates.clear();
+    const src = new ClipFrameSource(asset("steady"), 360);
+    src.want(2, true);
+    await settle();
+    const walks = sinkWalks.length;
+    for (let t = 2; t <= 5; t += 1 / 60) {
+      src.want(+t.toFixed(4), true);
+      await settle(50);
+      expect(src.frameAt(t)).not.toBeNull();
+    }
+    expect(sinkWalks.length).toBe(walks);
     src.close();
   });
 });
