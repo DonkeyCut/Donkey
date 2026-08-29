@@ -188,7 +188,7 @@ export const INSPECTOR_TOOLS = [
       {
         clipId: str("Video clip id or soundtrack clip id"),
         preset: str(
-          `A preset by name or id: shipped are ${SOUND_PRESETS.map((p) => `"${p.name}" (${p.id})`).join(", ")}, plus whatever the user has saved. "Clear voice" is the podcast/voice treatment: warmth below 200 Hz, mud pulled out at 400 Hz, presence at 3–5 kHz, 3:1 compression at −18 dB and a −1 dB ceiling. "Off" leaves the clip's sound as it came.`
+          `A preset by name or id: shipped are ${SOUND_PRESETS.map((p) => `"${p.name}" (${p.id})`).join(", ")}, plus whatever the user has saved. "Clear voice" is the podcast/voice treatment: warmth below 200 Hz, mud pulled out at 400 Hz, presence at 3–5 kHz, 3:1 compression at −18 dB and a −1 dB ceiling. "Studio" is the studio voice treatment with the same shape. "Off" leaves the clip's sound as it came.`
         ),
         clear: {
           type: "array",

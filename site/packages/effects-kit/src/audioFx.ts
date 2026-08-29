@@ -175,6 +175,15 @@ export const SOUND_PRESETS: { id: string; name: string; sound: ClipSound | undef
       limiter: SOUND_LIMITER_DEFAULT,
     },
   },
+  {
+    id: "studio",
+    name: "Studio",
+    sound: {
+      eq: [2, 1, -2, -1, 1.5, 1, -1],
+      compressor: { threshold: -18, ratio: 3, attack: 10, release: 80 },
+      limiter: { ceiling: -1 },
+    },
+  },
 ];
 
 export const soundPresetById = (id: string) => SOUND_PRESETS.find((p) => p.id === id);
