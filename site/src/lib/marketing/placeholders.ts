@@ -13,6 +13,8 @@ export type OutreachVars = {
   spent: string;
   /** USD left on the account. */
   balance: string;
+  /** Cloud media the account is holding, already in reading units ("120 MB"). */
+  storage: string;
 };
 
 export const OUTREACH_PLACEHOLDERS = [
@@ -21,6 +23,7 @@ export const OUTREACH_PLACEHOLDERS = [
   "email",
   "spent",
   "balance",
+  "storage",
 ] as const satisfies readonly (keyof OutreachVars)[];
 
 const PLACEHOLDER = /\{\{\s*([a-zA-Z]+)\s*\}\}/g;

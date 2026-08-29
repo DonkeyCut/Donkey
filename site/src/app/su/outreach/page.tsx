@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { formatBytes } from "@/lib/bytes";
 import { cn } from "@/lib/utils";
 import type { OutreachStatus } from "@/lib/marketing/campaigns";
 import { OUTREACH_PLACEHOLDERS } from "@/lib/marketing/placeholders";
@@ -72,10 +73,12 @@ function ago(iso: string | null): string {
   return `${Math.floor(mins / (60 * 24))}d ago`;
 }
 
-// The list carries the numbers the scan wrote; the badges say what they mean
-// without a second read.
+// The numbers the scan wrote plus the cloud bytes read live; the badges say
+// what they mean without a second read. Storage shows only when there is any,
+// so a row with the badge is someone with media parked in the cloud.
 function RowBadges({ row, group }: { row: OutreachRow; group?: string }) {
   const broke = Number(row.balance) <= 0;
+  const stored = Number(row.storageBytes);
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1.5">
       {group ? <Badge>{group}</Badge> : null}
@@ -83,6 +86,9 @@ function RowBadges({ row, group }: { row: OutreachRow; group?: string }) {
       <Badge variant={broke ? "destructive" : "outline"}>
         {broke ? `$0 left · ${ago(row.ranOutAt)}` : `$${row.balance} left`}
       </Badge>
+      {stored > 0 ? (
+        <Badge variant="secondary">{formatBytes(stored)} stored</Badge>
+      ) : null}
       <Badge variant="outline">active {ago(row.lastActiveAt)}</Badge>
       <Badge variant="outline">joined {ago(row.signedUpAt)}</Badge>
       {row.sentCount > 0 ? (
