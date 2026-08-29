@@ -17,7 +17,7 @@ import { useCloudUsage } from "@/cut/lib/backend/hooks";
 import { useUpgradeToPro } from "@/cut/lib/proUpgrade";
 import { cn } from "@/lib/utils";
 import { useProSubscription } from "@/queries/billing";
-import { formatBytes } from "./desktopFolders";
+import { formatBytes } from "@/lib/bytes";
 import { usageLabel } from "./StoragePill";
 
 export function NavStorage() {

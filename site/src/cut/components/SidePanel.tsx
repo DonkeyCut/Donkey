@@ -56,7 +56,7 @@ import {
 import { useElapsed } from "@/cut/hooks/useElapsed";
 import { useInView } from "@/cut/hooks/useInView";
 import { useMediaFileSize } from "@/cut/hooks/useMediaFileSize";
-import { formatBytes } from "@/cut/components/desktopFolders";
+import { formatBytes } from "@/lib/bytes";
 import {
   addAssetToLibraryTemplate,
   addLibraryAssetToProject,

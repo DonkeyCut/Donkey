@@ -90,7 +90,8 @@ import {
 } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
-import { FolderCrumb, FolderShelf, formatBytes, Marquee } from "./desktopFolders";
+import { FolderCrumb, FolderShelf, Marquee } from "./desktopFolders";
+import { formatBytes } from "@/lib/bytes";
 
 type View = "gallery" | "list";
 

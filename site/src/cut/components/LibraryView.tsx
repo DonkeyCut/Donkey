@@ -124,12 +124,8 @@ import {
   SPECIMEN_META,
 } from "@/cut/lib/fontSpecimen";
 import { AudioCardFace } from "./AudioPanel";
-import {
-  FolderCrumb,
-  FolderShelf,
-  formatBytes,
-  Marquee,
-} from "./desktopFolders";
+import { FolderCrumb, FolderShelf, Marquee } from "./desktopFolders";
+import { formatBytes } from "@/lib/bytes";
 import { useMediaFileSize } from "@/cut/hooks/useMediaFileSize";
 
 // A dragged library selection travels as a JSON array of asset ids, so a whole

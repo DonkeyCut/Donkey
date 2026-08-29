@@ -22,7 +22,7 @@ import {
 import { daysUntil } from "@/cut/lib/time";
 import { track } from "@/lib/analytics";
 import { useProSubscription } from "@/queries/billing";
-import { formatBytes } from "./desktopFolders";
+import { formatBytes } from "@/lib/bytes";
 
 export function StorageUpgradeDialog() {
   const [detail, setDetail] = useState<StorageQuotaDetail | null>(null);
