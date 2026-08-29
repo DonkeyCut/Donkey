@@ -456,7 +456,7 @@ const SHOT_INS = Array.from({ length: SHOTS }, (_, i) => {
  * CPU runs out of first. Measuring only the bare one leaves the cost that
  * shows up in the reports unmeasured.
  */
-const seedMontage = (dressed = false) => async (page: Page): Promise<Fixture> =>
+const seedMontage = (dressed = false, shots = SHOTS) => async (page: Page): Promise<Fixture> =>
   page.evaluate(
     async ({ ins, shot, srcDuration, dressed }) => {
       const dev = (window as unknown as {
@@ -501,7 +501,7 @@ const seedMontage = (dressed = false) => async (page: Page): Promise<Fixture> =>
         duration: +(ins.length * shot).toFixed(3),
       };
     },
-    { ins: SHOT_INS, shot: SHOT_S, srcDuration: MONTAGE_SRC_S, dressed }
+    { ins: SHOT_INS.slice(0, shots), shot: SHOT_S, srcDuration: MONTAGE_SRC_S, dressed }
   );
 
 /** Where the scene-cut fixture changes scene: every three seconds. */
@@ -1272,6 +1272,162 @@ const montageCase = (name: string, passes: number, dressed = false): EvalCase =>
 });
 
 /**
+ * A montage played to the end and then replayed the way the play button does
+ * it: the playhead is parked at the end of the cut, and one press seeks to
+ * zero and starts the clock in the same turn.
+ *
+ * `playPasses` rewinds paused, which fetches every clip's first frame before
+ * the clock runs. This one never pauses at zero, so every clip's walk from the
+ * pass before is still sitting at that clip's end when the reader comes back
+ * for its head — the arrangement that once held every walk and played the
+ * whole second pass over one frame per clip. The montage is cut to fewer
+ * clips than the decoder budget, so no source is stood down between the
+ * passes and every walk really is still there.
+ */
+const replayCase = (name: string): EvalCase => ({
+  name,
+  bucket: "playback",
+  transitions: false,
+  seed: seedMontage(false, 6),
+  run: async (page, fx) => {
+    await rewind(page);
+    await playThrough(page, fx.duration);
+    await settle(page);
+    await startTrace(page);
+    await page.evaluate(() => {
+      const dev = (window as unknown as {
+        __cutDev: { useEditor: { getState(): { seek(t: number): void; setPlaying(p: boolean): void } } };
+      }).__cutDev;
+      const s = dev.useEditor.getState();
+      s.seek(0);
+      s.setPlaying(true);
+    });
+    await playThrough(page, fx.duration);
+    await setPlaying(page, false);
+    return judgePlay(page, name, 1, (p) => {
+      const into = p.t % SHOT_S;
+      return p.t > 0.4 && p.t < fx.duration - 0.3 && into > 0.15 && into < SHOT_S - 0.05;
+    });
+  },
+});
+
+// ── A real project ──────────────────────────────────────────────────────────
+//
+// A phone video (HEVC, 1080x1920, keyframes about a second apart) cut into six
+// clips with the pauses between them removed, every clip graded — the cut a
+// report of "the sound plays but the picture stops" came from. It plays as
+// cloud media, read over the link through the chunk cache. The file itself is
+// not in the repo: drop it at dist/cut-perf/user-zoomout.mov and the cases
+// run; without it they are skipped.
+
+const USER_FILE = "user-zoomout.mov";
+const USER_DURATION = 51.368333333333333;
+/** [start, in, out] per clip, in seconds. */
+const USER_CLIPS: [number, number, number][] = [
+  [0, 6.5784781344751835, 12.114029563707037],
+  [5.5355514292318535, 14.010703110360856, 15.057247679302492],
+  [6.58209599817349, 17.553272729961172, 18.885413010018503],
+  [7.914236278230822, 24.860363545532163, 31.04203023069868],
+  [14.095902963397338, 35.05948300955267, 36.56053642157465],
+  [15.596956375419317, 46.250525923023304, 49.50146423467007],
+];
+
+const seedUserProject = async (page: Page): Promise<Fixture> =>
+  page.evaluate(
+    async ({ url, duration, clips }) => {
+      const dev = (window as unknown as {
+        __cutDev: {
+          useEditor: { setState(p: unknown): void };
+          markSignedBatch?: (projectId: string, expiresAt: number | null) => void;
+          prefetchCloudMedia?: (
+            projectId: string,
+            files: { fileName: string; url: string; type?: string }[]
+          ) => void;
+        };
+      }).__cutDev;
+      const name = url.split("/").pop()!.split("?")[0];
+      dev.useEditor.setState({
+        assets: [
+          { id: "user", name, fileName: name, type: "video", url, duration, width: 1080, height: 1920 },
+        ],
+        clips: clips.map(([start, inPoint, out], i) => ({
+          id: `u-${i}`,
+          assetId: "user",
+          track: 0,
+          start,
+          in: inPoint,
+          out,
+          grade: { preset: { id: "teal-orange" } },
+        })),
+        audioClips: [],
+        overlays: [],
+        transitions: [],
+        aspect: "9:16",
+        loaded: true,
+      });
+      dev.markSignedBatch?.("", null);
+      await new Promise((r) => setTimeout(r, 200));
+      dev.prefetchCloudMedia?.("perf-eval", [{ fileName: name, url, type: "video" }]);
+      const last = clips[clips.length - 1];
+      return {
+        cuts: clips.slice(1).map(([start]) => start),
+        duration: last[0] + last[2] - last[1],
+      };
+    },
+    { url: mediaUrl(USER_FILE), duration: USER_DURATION, clips: USER_CLIPS }
+  );
+
+/** Presented frames that belong to playing a clip rather than opening one:
+ * a beat inside every cut, off both ends of the cut. */
+const userSteady = (fx: Fixture) => (p: PresentRecord) =>
+  p.t > 0.4 &&
+  p.t < fx.duration - 0.3 &&
+  fx.cuts.every((c) => p.t < c - 0.05 || p.t > c + 0.15);
+
+/** The user's cut on its very first play, with nothing resident. */
+const userColdCase: EvalCase = {
+  name: "play-user-project-cold",
+  bucket: "playback",
+  transitions: false,
+  minKbps: LONG_KBPS * 3,
+  seed: seedUserProject,
+  run: async (page, fx) => {
+    await rewind(page);
+    await settle(page);
+    await startTrace(page);
+    await playThrough(page, fx.duration);
+    await setPlaying(page, false);
+    return judgePlay(page, "play-user-project-cold", 1, userSteady(fx));
+  },
+};
+
+/** The user's cut played to the end, then replayed from the play button. */
+const userReplayCase: EvalCase = {
+  name: "play-user-project-replay",
+  bucket: "playback",
+  transitions: false,
+  minKbps: LONG_KBPS * 3,
+  seed: seedUserProject,
+  run: async (page, fx) => {
+    await rewind(page);
+    await playThrough(page, fx.duration);
+    await settle(page);
+    await startTrace(page);
+    await page.evaluate(() => {
+      const dev = (window as unknown as {
+        __cutDev: { useEditor: { getState(): { seek(t: number): void; setPlaying(p: boolean): void } } };
+      }).__cutDev;
+      const s = dev.useEditor.getState();
+      s.seek(0);
+      s.setPlaying(true);
+    });
+    await playThrough(page, fx.duration);
+    await setPlaying(page, false);
+    return judgePlay(page, "play-user-project-replay", 1, userSteady(fx));
+  },
+};
+
+/**
  * One long clip, played straight through more than once.
  *
  * Three things this shape measures that a montage cannot. A single walk runs
@@ -1701,6 +1857,8 @@ const CASES: EvalCase[] = [
   playbackCase("play-with-transitions", true),
   montageCase("play-fast-cuts", 1),
   montageCase("play-fast-cuts-long", 4),
+  replayCase("play-replay-from-end"),
+  ...(existsSync(path.join(OUT, USER_FILE)) ? [userColdCase, userReplayCase] : []),
   // One file on the timeline, which is what most projects are. Warm first, so
   // this one is about decode alone.
   longClipCase("play-one-long-clip", { fps: 30 }),
