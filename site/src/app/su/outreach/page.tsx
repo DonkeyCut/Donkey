@@ -73,9 +73,9 @@ function ago(iso: string | null): string {
   return `${Math.floor(mins / (60 * 24))}d ago`;
 }
 
-// The numbers the scan wrote plus the cloud bytes read live; the badges say
-// what they mean without a second read. Storage shows only when there is any,
-// so a row with the badge is someone with media parked in the cloud.
+// The list carries the numbers the scan wrote; the badges say what they mean
+// without a second read. Storage shows only when there is any, so a row with
+// the badge is someone with media parked in the cloud.
 function RowBadges({ row, group }: { row: OutreachRow; group?: string }) {
   const broke = Number(row.balance) <= 0;
   const stored = Number(row.storageBytes);

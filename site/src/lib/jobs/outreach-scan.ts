@@ -108,24 +108,19 @@ export const outreachScanJob = defineJob(z.object({}).strict(), async () => {
           where: { ...marketable, id: { in: cloudIds } },
         })
       : [];
-  // Working in the cloud is not the same as keeping anything there; the list
-  // wants the people holding media.
-  const holding =
-    cloudCandidates.length > 0
-      ? await prisma.cutStorageUsage.findMany({
-          select: { userId: true },
-          where: {
-            bytes: { gt: BigInt(0) },
-            userId: { in: cloudCandidates.map((user) => user.id) },
-          },
-        })
-      : [];
-  const holdingIds = new Set(holding.map((row) => row.userId));
+  // What everyone in view is holding. It does two jobs: the number the row
+  // carries, and the line between working in the cloud and keeping something
+  // there — the list wants the people holding media.
+  const stored = await prisma.cutStorageUsage.findMany({
+    select: { bytes: true, userId: true },
+    where: { userId: { in: [...spenderIds, ...cloudCandidates.map((user) => user.id)] } },
+  });
+  const storedBy = new Map(stored.map((row) => [row.userId, row.bytes]));
 
   const accounts = [
     ...spenders,
     ...cloudCandidates
-      .filter((user) => holdingIds.has(user.id))
+      .filter((user) => (storedBy.get(user.id) ?? BigInt(0)) > BigInt(0))
       .map((user) => ({
         balanceMicros: user.creditAccount?.balanceMicros ?? zeroCreditMicros,
         lifetimeChargedMicros: user.creditAccount?.lifetimeChargedMicros ?? zeroCreditMicros,
@@ -175,6 +170,7 @@ export const outreachScanJob = defineJob(z.object({}).strict(), async () => {
       ranOutAt: ranOutBy.get(account.userId) ?? null,
       scannedAt: startedAt,
       spentMicros: account.lifetimeChargedMicros,
+      storageBytes: storedBy.get(account.userId) ?? BigInt(0),
     };
     const prior = existingBy.get(account.userId);
     // A contacted row rests for OUTREACH_RECONTACT_DAYS, then comes back

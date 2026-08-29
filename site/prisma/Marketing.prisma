@@ -23,6 +23,8 @@ model UserOutreach {
   // The scan's snapshot, so the list renders from this table alone.
   spentMicros  BigInt   @default(0)
   balanceMicros BigInt  @default(0)
+  // Cloud media the account was holding when the scan ran.
+  storageBytes BigInt   @default(0)
   lastActiveAt DateTime?
   // When the balance last reached zero; null for an account still in credit.
   ranOutAt     DateTime?

@@ -51,6 +51,7 @@ const rowSelect = {
   sentCount: true,
   spentMicros: true,
   status: true,
+  storageBytes: true,
   user: { select: { createdAt: true, email: true, id: true, name: true } },
 } as const;
 
@@ -65,24 +66,13 @@ type OutreachRow = {
   sentCount: number;
   spentMicros: bigint;
   status: string;
+  storageBytes: bigint;
   user: { createdAt: Date; email: string; id: string; name: string };
 };
 
-// Cloud media held by each of these accounts. Storage is read live: an upload
-// is the thing being checked, and it moves between scans. Absent row means
-// nothing stored.
-async function storageByUser(userIds: string[]): Promise<Map<string, bigint>> {
-  if (userIds.length === 0) return new Map();
-  const rows = await prisma.cutStorageUsage.findMany({
-    select: { bytes: true, userId: true },
-    where: { userId: { in: userIds } },
-  });
-  return new Map(rows.map((row) => [row.userId, row.bytes]));
-}
-
 // Micros and byte counts are BigInt and dates are Date; the client wants
 // neither.
-function serialize(row: OutreachRow, storage: Map<string, bigint>) {
+function serialize(row: OutreachRow) {
   return {
     balance: creditMicrosToString(row.balanceMicros),
     email: row.user.email,
@@ -97,18 +87,13 @@ function serialize(row: OutreachRow, storage: Map<string, bigint>) {
     signedUpAt: row.user.createdAt.toISOString(),
     spent: creditMicrosToString(row.spentMicros),
     status: row.status,
-    storageBytes: (storage.get(row.user.id) ?? BigInt(0)).toString(),
+    storageBytes: row.storageBytes.toString(),
     userId: row.user.id,
   };
 }
 
-// One row and the storage that goes with it.
-async function serializeOne(row: OutreachRow) {
-  return serialize(row, await storageByUser([row.user.id]));
-}
-
-// The list is whatever the nightly outreach-scan job wrote, plus each
-// account's cloud bytes; no credit data is touched here.
+// The list is whatever the nightly outreach-scan job wrote, so this reads one
+// table and touches no credit data.
 export const GET = withSuperUser(async (request) => {
   const params = new URL(request.url).searchParams;
   const parsed = listQuerySchema.safeParse({
@@ -156,11 +141,7 @@ export const GET = withSuperUser(async (request) => {
         counts[group.status as keyof typeof counts] = group._count;
       }
     }
-    const storage = await storageByUser(rows.map((row) => row.user.id));
-    return NextResponse.json({
-      counts,
-      rows: rows.map((row) => serialize(row, storage)),
-    });
+    return NextResponse.json({ counts, rows: rows.map(serialize) });
   }
 
   // Each list is about a different moment: when they last used the product,
@@ -180,8 +161,7 @@ export const GET = withSuperUser(async (request) => {
     where: { campaign: CREDIT_SPENDERS_CAMPAIGN, status },
   });
 
-  const storage = await storageByUser(rows.map((row) => row.user.id));
-  return NextResponse.json({ rows: rows.map((row) => serialize(row, storage)) });
+  return NextResponse.json({ rows: rows.map(serialize) });
 });
 
 export const POST = withSuperUser(async (request) => {
@@ -211,7 +191,6 @@ export const POST = withSuperUser(async (request) => {
   const actorUserId = request.donkey.userId;
 
   if (parsed.data.action === "send") {
-    const storage = await storageByUser([outreach.user.id]);
     try {
       await sendOutreachEmail({
         attempt: outreach.sentCount + 1,
@@ -227,7 +206,7 @@ export const POST = withSuperUser(async (request) => {
           firstName: outreach.user.name.trim().split(/\s+/)[0] || outreach.user.name,
           name: outreach.user.name,
           spent: creditMicrosToString(outreach.spentMicros),
-          storage: formatBytes(Number(storage.get(outreach.user.id) ?? BigInt(0))),
+          storage: formatBytes(Number(outreach.storageBytes)),
         },
       });
     } catch (error) {
@@ -250,7 +229,7 @@ export const POST = withSuperUser(async (request) => {
       select: rowSelect,
       where: { id: outreach.id },
     });
-    return NextResponse.json({ row: serialize(row, storage) });
+    return NextResponse.json({ row: serialize(row) });
   }
 
   const data =
@@ -265,5 +244,5 @@ export const POST = withSuperUser(async (request) => {
     select: rowSelect,
     where: { id: outreach.id },
   });
-  return NextResponse.json({ row: await serializeOne(row) });
+  return NextResponse.json({ row: serialize(row) });
 });

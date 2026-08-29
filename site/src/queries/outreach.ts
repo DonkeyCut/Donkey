@@ -21,8 +21,8 @@ export type OutreachRow = {
   // USD strings, as the credits API returns them everywhere else.
   spent: string;
   balance: string;
-  // Cloud media the account is holding, in bytes. A BigInt on the server, so
-  // it travels as a decimal string.
+  // Cloud media the account held when the scan ran, in bytes. A BigInt on the
+  // server, so it travels as a decimal string.
   storageBytes: string;
   lastActiveAt: string | null;
   ranOutAt: string | null;
