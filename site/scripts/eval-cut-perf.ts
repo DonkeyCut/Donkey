@@ -2287,15 +2287,35 @@ async function open(page: Page, projectId: string): Promise<void> {
  * what is being measured is the engine from a cold start, the isolation has to
  * be real, and a process is the only boundary that has proved to be.
  */
+const PROJECT_NAME = "cut-perf eval";
+
 /** A fresh project on the dev account for one run to seed into. */
 async function newProject(): Promise<string> {
   const res = await fetch(`${BASE}/api/cut/projects?u=${DEV_USER}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: "cut-perf eval" }),
+    body: JSON.stringify({ name: PROJECT_NAME }),
   });
   if (!res.ok) throw new Error(`create project failed: ${res.status} (is next dev running?)`);
   return ((await res.json()) as { id: string }).id;
+}
+
+async function deleteProject(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/api/cut/projects/${id}?u=${DEV_USER}`, { method: "DELETE" });
+  if (!res.ok && res.status !== 404) console.log(`[cleanup] delete ${id} failed: ${res.status}`);
+}
+
+/**
+ * Remove every eval project left on the dev account. A run that crashed or
+ * was killed mid-case leaves its project behind, and the home page fills with
+ * identical tiles; the next run clears them before it makes its own.
+ */
+async function sweepProjects(): Promise<void> {
+  const res = await fetch(`${BASE}/api/cut/projects?u=${DEV_USER}`);
+  if (!res.ok) return;
+  const stale = ((await res.json()) as { id: string; name: string }[]).filter((p) => p.name === PROJECT_NAME);
+  for (const p of stale) await deleteProject(p.id);
+  if (stale.length) console.log(`[cleanup] removed ${stale.length} leftover project${stale.length === 1 ? "" : "s"}`);
 }
 
 async function fanOut(names: string[]): Promise<CaseResult[]> {
@@ -2365,6 +2385,7 @@ async function main(): Promise<void> {
   // Without a single case named, this run is the coordinator: it drives one
   // child per case and merges what they report.
   if (!ONLY) {
+    await sweepProjects();
     const results = await fanOut(cases.map((c) => c.name));
     await writeReport(results);
     return;
@@ -2389,10 +2410,18 @@ async function main(): Promise<void> {
           ? Math.max(MACHINE.netKbps, c.minKbps)
           : MACHINE.netKbps;
       const projectId = await newProject();
-      await open(page, projectId);
-      const fx = await (c.seed ? c.seed(page) : seed(page, files, c.transitions));
-      await settle(page);
-      const r = await c.run(page, fx);
+      let r: CaseResult;
+      try {
+        await open(page, projectId);
+        const fx = await (c.seed ? c.seed(page) : seed(page, files, c.transitions));
+        await settle(page);
+        r = await c.run(page, fx);
+      } finally {
+        // Leave the page on the home route first: an editor still open on the
+        // project would keep writing to a doc the engine has just removed.
+        await page.goto("about:blank").catch(() => {});
+        await deleteProject(projectId);
+      }
       results.push(r);
       const mark = r.pass ? "ok  " : "FAIL";
       console.log(`[${mark}] ${c.name.padEnd(24)} ${detailOf(r)}${r.notes.length ? ` — ${r.notes.join("; ")}` : ""}`);
