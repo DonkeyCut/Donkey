@@ -159,30 +159,94 @@ export const SOUND_COMPRESSOR_RANGE = {
 export const SOUND_LIMITER_RANGE = { ceiling: { min: -20, max: -0.1 } };
 
 /** The settings a compressor or limiter opens at when its switch is turned
- * on — the voice preset's numbers, since that is what the switch is for. */
+ * on — the voice presets' shared numbers, since that is what the switch is for. */
 export const SOUND_COMPRESSOR_DEFAULT = { threshold: -18, ratio: 3, attack: 10, release: 80 };
 export const SOUND_LIMITER_DEFAULT = { ceiling: -1 };
 
-/** The treatments shipped with the editor. `sound` undefined is the flat one. */
-export const SOUND_PRESETS: { id: string; name: string; sound: ClipSound | undefined }[] = [
-  { id: "flat", name: "Flat", sound: undefined },
+/** A voice preset's dynamics: the shared attack and release with its own
+ * ratio and threshold, held under the −1 dB ceiling. */
+const voiceDynamics = (ratio: number, threshold: number) => ({
+  compressor: { ...SOUND_COMPRESSOR_DEFAULT, ratio, threshold },
+  limiter: SOUND_LIMITER_DEFAULT,
+});
+
+/**
+ * The treatments shipped with the editor. `sound` undefined is the flat one.
+ * `character` is the one-line description the picker and the chat catalog
+ * both read, so the two describe a preset the same way.
+ */
+export const SOUND_PRESETS: {
+  id: string;
+  name: string;
+  character: string;
+  sound: ClipSound | undefined;
+}[] = [
+  { id: "flat", name: "Flat", character: "Untouched", sound: undefined },
   {
     id: "clear-voice",
     name: "Clear voice",
-    sound: {
-      eq: [2, 1, -2, -1, 1.5, 1, -1],
-      compressor: SOUND_COMPRESSOR_DEFAULT,
-      limiter: SOUND_LIMITER_DEFAULT,
-    },
+    character: "Warm, clear podcast voice",
+    sound: { eq: [2, 1, -2, -1, 1.5, 1, -1], ...voiceDynamics(3, -18) },
+  },
+  {
+    id: "warm-rich",
+    name: "Warm & Rich",
+    character: "Deep, smooth, expensive-sounding",
+    sound: { eq: [2, 1, -2, -1, 0.5, 1, -1], ...voiceDynamics(3, -18) },
+  },
+  {
+    id: "crisp-clear",
+    name: "Crisp & Clear",
+    character: "Bright, clean, highly intelligible",
+    sound: { eq: [-1.5, -1, -2, 0, 2, 3, 1], ...voiceDynamics(2.5, -18) },
+  },
+  {
+    id: "broadcast",
+    name: "Broadcast",
+    character: "Polished podcast/radio voice, more compressed",
+    sound: { eq: [1.5, 2, -2, -1, 1, 2, -0.5], ...voiceDynamics(4, -20) },
+  },
+  {
+    id: "natural",
+    name: "Natural",
+    character: "Balanced, close to the real voice",
+    sound: { eq: [0.5, 0, -1, 0, 1, 1, 0], ...voiceDynamics(2, -18) },
+  },
+  {
+    id: "deep-voice",
+    name: "Deep Voice",
+    character: "Darker, heavier, deeper without turning muddy",
+    sound: { eq: [3, 2, -2, -1, 0, 1, -2], ...voiceDynamics(3, -18) },
+  },
+  {
+    id: "airy",
+    name: "Airy",
+    character: "Bright, open, modern creator voice",
+    sound: { eq: [-0.5, -1, -1, 0, 1, 2, 2.5], ...voiceDynamics(2.5, -18) },
   },
   {
     id: "studio",
     name: "Studio",
-    sound: {
-      eq: [2, 1, -2, -1, 1.5, 1, -1],
-      compressor: { threshold: -18, ratio: 3, attack: 10, release: 80 },
-      limiter: { ceiling: -1 },
-    },
+    character: "Warm, clear, controlled, professional — the talking-head default",
+    sound: { eq: [1.5, 1, -2, -1, 1, 2, 0.5], ...voiceDynamics(3, -18) },
+  },
+  {
+    id: "phone",
+    name: "Phone / Lo-Fi",
+    character: "Narrow, mid-heavy, phone-like; for skits, flashbacks and transitions",
+    sound: { eq: [-10, -3, 1, 2, 3, 2, -9] },
+  },
+  {
+    id: "cinematic",
+    name: "Cinematic",
+    character: "Warm, dark, intimate storytelling voice",
+    sound: { eq: [2.5, 1, -2, -1, 0.5, 0, -2.5], ...voiceDynamics(3, -20) },
+  },
+  {
+    id: "close-asmr",
+    name: "Close / ASMR",
+    character: "Intimate, close, detailed",
+    sound: { eq: [2.5, 2, -1, 0, 1, 1, 1.5], ...voiceDynamics(3, -20) },
   },
 ];
 
