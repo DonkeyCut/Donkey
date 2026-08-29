@@ -36,6 +36,7 @@ import { projectDuration, useEditor } from "@/cut/lib/store";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { ASPECT_PRESETS, aspectLabel, aspectOrientation, normalizeAspect, parseRatio, type Aspect } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
+import { CreditsPill } from "./CreditsPill";
 import { RecordDialog, type RecordMode } from "./RecordDialog";
 import { ShareDialog } from "./ShareDialog";
 import { StoragePill } from "./StoragePill";
@@ -73,8 +74,8 @@ export function TopBar({
   const [draft, setDraft] = useState("");
   const [recordMode, setRecordMode] = useState<RecordMode | null>(null);
   // The right-hand actions step down as the bar tightens: full labels →
-  // icon-only Share/Cloud/Export → everything in a … menu. The storage pill
-  // never folds. Which step fits is measured against hidden copies of the
+  // icon-only Share/Cloud/Export → everything in a … menu. The credits and
+  // storage pills never fold. Which step fits is measured against hidden copies of the
   // full and compact rows, because the visible row can't report a width it
   // isn't showing. Every measured box is content-sized — none of them depend
   // on the chosen step — so the measurement can't feed back into itself.
@@ -374,7 +375,6 @@ export function TopBar({
         <Upload data-icon={compact ? undefined : "inline-start"} />
         {!compact && "Export"}
       </Button>
-      <div aria-hidden className="h-4 w-px bg-border" />
       <Button
         variant={aiOpen ? "default" : "outline"}
         size="sm"
@@ -614,7 +614,8 @@ export function TopBar({
           sight. Clipping would only shave the focus ring off the last
           button. */}
       <div className="flex shrink-0 items-center gap-2 pr-3">
-        <div ref={pillRef} className="flex items-center">
+        <div ref={pillRef} className="flex items-center gap-2">
+          <CreditsPill />
           <StoragePill />
         </div>
         <div className="relative flex items-center">

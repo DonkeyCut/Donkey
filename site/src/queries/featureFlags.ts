@@ -10,11 +10,15 @@ export type AccountFlag = {
   id: string;
   title: string;
   description: string;
+  group: "editor" | "early";
   enabled: boolean;
 };
 
-export function useAccountFlags() {
+// `enabled` is for the signed-out case: the editor's top bar mounts this above
+// its own account check, and the route answers 401 without a session.
+export function useAccountFlags(options?: { enabled?: boolean }) {
   return useQuery({
+    enabled: options?.enabled ?? true,
     queryFn: async () => {
       const body = await apiFetch<{ flags: AccountFlag[] }>(
         "/api/account/feature-flags",

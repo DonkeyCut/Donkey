@@ -8,8 +8,8 @@ import { useAccountFlags, useSetAccountFlag } from "@/queries/featureFlags";
 // account like everything else here. With no flags shipping there is nothing to
 // say, so the section isn't there at all.
 export function FeatureFlagsSection() {
-  const { data: flags } = useAccountFlags();
   const set = useSetAccountFlag();
+  const flags = useAccountFlags().data?.filter((f) => f.group === "early");
 
   if (!flags?.length) return null;
 
