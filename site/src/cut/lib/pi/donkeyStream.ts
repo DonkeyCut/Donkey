@@ -10,6 +10,7 @@ import {
   type ToolCall,
   type Usage,
 } from "@earendil-works/pi-ai";
+import { reportBalance } from "../hosted";
 
 // The transport adapter: pi Context in, Donkey's hosted Responses route out.
 // Every model call the agent makes flows through here — pi's own providers are
@@ -164,7 +165,13 @@ async function readStream(
         else if (line.startsWith("data: ")) data += line.slice(6);
       }
       if (!data || data === "[DONE]") continue;
-      let event: { type?: string; delta?: string; response?: ResponseBody; message?: string };
+      let event: {
+        type?: string;
+        delta?: string;
+        response?: ResponseBody;
+        message?: string;
+        creditsRemaining?: string;
+      };
       try {
         event = JSON.parse(data) as typeof event;
       } catch {
@@ -175,6 +182,7 @@ async function readStream(
         onDelta(event.delta);
       } else if (event.type === "response.completed" && event.response) {
         completed = event.response;
+        reportBalance(event.creditsRemaining);
       }
     }
   }

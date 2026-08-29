@@ -39,9 +39,31 @@ function setOut(out: boolean) {
   }
 }
 
+/** The balance as the hosted routes last reported it, in dollars, as a
+ * subscription. A charged call answers with the balance it left behind — in a
+ * header, or in the terminal frame of a stream — so the top bar's credits
+ * readout follows every call without a request of its own. `settled` counts
+ * calls that answered with no balance, for which the readout asks the balance
+ * route once the charge has had a moment to land. */
+export const useHostedBalance = create<{ balance: string | null; settled: number }>(() => ({
+  balance: null,
+  settled: 0,
+}));
+
+export function reportBalance(balance: string | undefined) {
+  if (balance === undefined) {
+    useHostedBalance.setState((s) => ({ settled: s.settled + 1 }));
+    return;
+  }
+  useHostedBalance.setState({ balance });
+}
+
 async function noteBalance(res: Response) {
   if (res.ok) {
     setOut(false);
+    // A stream reports from its terminal frame; the header is on the rest.
+    if (res.headers.get("Content-Type")?.startsWith("text/event-stream")) return;
+    reportBalance(res.headers.get("X-Donkey-Credits-Remaining") ?? undefined);
     return;
   }
   if (res.status !== 402) return;

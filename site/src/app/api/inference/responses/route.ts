@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { creditMicrosToString } from "@/lib/credits/amounts";
+
 import {
   creditErrorResponse,
   creditUsageHeaders,
@@ -107,8 +109,12 @@ export const POST = withDonkeyAuth(async (request) => {
               // Bill from the terminal usage before the terminal event goes
               // out: the invocation lives only as long as the stream, so the
               // usage row must land before the client can stop reading.
+              // The balance after the charge rides the terminal frame — the
+              // headers went out before the charge existed — so the page's
+              // credits readout moves the moment the reply lands.
+              let creditsRemaining: string | undefined;
               if (!bypassCredits) {
-                await recordInferenceUsage({
+                const recorded = await recordInferenceUsage({
                   clientId: client.clientId,
                   conversationId: request.donkey.conversationId,
                   model: streamed.model,
@@ -119,8 +125,9 @@ export const POST = withDonkeyAuth(async (request) => {
                   usage: event.usage,
                   userId: request.donkey.userId,
                 });
+                creditsRemaining = creditMicrosToString(recorded.remainingBalanceMicros);
               }
-              send({ type: "response.completed", response: event.body });
+              send({ type: "response.completed", response: event.body, creditsRemaining });
             }
             controller.enqueue(encoder.encode("data: [DONE]\n\n"));
           } catch (error) {
