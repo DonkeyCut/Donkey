@@ -929,12 +929,15 @@ interface ScrubShape {
   /** How the gesture moves. */
   gesture: (page: Page, fx: Fixture) => Promise<void>;
   budget: { p50: number; p95: number };
+  /** The project the gesture runs on; the montage of stock clips when unset. */
+  seed?: (page: Page) => Promise<Fixture>;
 }
 
 const scrubCase = (shape: ScrubShape): EvalCase => ({
   name: shape.name,
   bucket: "scrub",
   transitions: shape.transitions,
+  seed: shape.seed,
   run: async (page, fx) => {
     await setPlaying(page, false);
     // A pass before the trace opens the decoders and lets the dev build settle,
@@ -948,6 +951,16 @@ const scrubCase = (shape: ScrubShape): EvalCase => ({
     if (!trace) return { name: shape.name, bucket: "scrub", pass: false, notes: ["no trace"] };
     const answered = trace.seeks.filter((s) => s.latencyMs !== null).map((s) => s.latencyMs!);
     const unanswered = trace.seeks.length - answered.length;
+    if (has("--detail")) {
+      const slow = [...trace.seeks]
+        .filter((s) => s.latencyMs !== null)
+        .sort((a, b) => b.latencyMs! - a.latencyMs!)
+        .slice(0, 8)
+        .map((s) => `${s.t.toFixed(2)}s=${s.latencyMs!.toFixed(1)}ms`);
+      console.log(`[seeks] slowest: ${slow.join(" ")}`);
+      const missed = trace.seeks.filter((s) => s.latencyMs === null).map((s) => s.t.toFixed(2));
+      if (missed.length) console.log(`[seeks] unanswered: ${missed.join(" ")}`);
+    }
     const a = agg(answered);
     // Superseded seeks never resolve and that is correct — but a gesture that
     // waits a frame per step should answer nearly all of them.
@@ -1831,6 +1844,31 @@ const CASES: EvalCase[] = [
     name: "drag-within-a-clip",
     transitions: false,
     gesture: (page, fx) => sweep(page, fx, 0.4, 2, 40),
+    budget: { p50: GATE.scrubP50Ms, p95: GATE.scrubP95Ms },
+  }),
+  // The same drag the other way. Frames decode forward from a keyframe, so a
+  // pointer moving against that direction is served from a cache of the span
+  // it is backing through; the drag has to feel the same as the forward one.
+  scrubCase({
+    name: "drag-backward-within-a-clip",
+    transitions: false,
+    gesture: (page, fx) => sweep(page, fx, 2.4, -2, 40),
+    budget: { p50: GATE.scrubP50Ms, p95: GATE.scrubP95Ms },
+  }),
+  scrubCase({
+    name: "drag-backward-across-a-cut",
+    transitions: false,
+    gesture: (page, fx) => sweep(page, fx, fx.cuts[0] + 1, -2, 40),
+    budget: { p50: GATE.scrubP50Ms, p95: GATE.scrubP95Ms },
+  }),
+  // Backward through a long file read as cloud media: keyframes two seconds
+  // apart, bytes off the link through the chunk cache, which is what a
+  // project's own footage looks like.
+  scrubCase({
+    name: "drag-backward-long-clip",
+    transitions: false,
+    seed: seedLongClip(30, true),
+    gesture: (page, fx) => sweep(page, fx, 12, -4, 80),
     budget: { p50: GATE.scrubP50Ms, p95: GATE.scrubP95Ms },
   }),
   scrubCase({
