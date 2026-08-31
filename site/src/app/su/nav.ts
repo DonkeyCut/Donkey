@@ -24,7 +24,6 @@ export const SU_NAV: SuSurface[] = [
     label: "Analytics",
     icon: ChartColumn,
     title: "Analytics",
-    description: "Product analytics.",
     Action: RunAnalyticsButton,
   },
   {
