@@ -33,18 +33,34 @@ nonisolated public enum NoteColor: Int, CaseIterable, Codable, Sendable {
 /// A folder notes are filed in. Ids are minted by whichever client makes the
 /// folder — the phone here, the desktop in its Notes tab — and the cloud
 /// stores the folder under that id, so a folder made offline pushes as itself.
+/// Folders file into folders the way notes do; `parentId` nil is the top level.
 nonisolated public struct NoteFolder: Identifiable, Equatable, Hashable, Sendable {
     public var id: UUID
     public var name: String
+    public var parentId: UUID?
     public var createdAt: Date
     public var updatedAt: Date
 
-    public init(id: UUID = UUID(), name: String, createdAt: Date = .now, updatedAt: Date = .now) {
+    public init(
+        id: UUID = UUID(),
+        name: String,
+        parentId: UUID? = nil,
+        createdAt: Date = .now,
+        updatedAt: Date = .now
+    ) {
         self.id = id
         self.name = name
+        self.parentId = parentId
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
+}
+
+/// One folder in the tree laid out as a list: the folder and how deep it sits.
+nonisolated public struct NoteFolderTreeRow: Identifiable, Equatable, Sendable {
+    public var folder: NoteFolder
+    public var depth: Int
+    public var id: UUID { folder.id }
 }
 
 /// A label notes carry. Like folders, ids are minted by whichever client
@@ -267,8 +283,8 @@ public protocol IdeasStoring: AnyObject {
     func deleteNote(id: UUID) throws
     func loadNoteFolders() throws -> [NoteFolder]
     func upsert(_ folder: NoteFolder) throws
-    /// Delete a folder. Its notes come back to the top level rather than
-    /// going with it — the same line the cloud draws.
+    /// Delete a folder. What it held — its notes and the folders inside it —
+    /// comes up one level, the same line the cloud draws.
     func deleteNoteFolder(id: UUID) throws
     func loadNoteLabels() throws -> [NoteLabel]
     func upsert(_ label: NoteLabel) throws
@@ -323,10 +339,18 @@ public final class IdeasModel {
         reloadFromStore()
     }
 
-    /// Re-read what the store holds — how a cloud merge lands on screen.
+    /// Re-read what the store holds — how a cloud merge lands on screen. A
+    /// folder whose parent the store does not hold reads as top level, so
+    /// nothing on screen hangs off a folder nobody can open.
     public func reloadFromStore() {
         notes = (try? store.loadNotes()) ?? []
-        folders = (try? store.loadNoteFolders()) ?? []
+        let loaded = (try? store.loadNoteFolders()) ?? []
+        let known = Set(loaded.map(\.id))
+        folders = loaded.map { folder in
+            var folder = folder
+            if let parent = folder.parentId, !known.contains(parent) { folder.parentId = nil }
+            return folder
+        }
         labels = (try? store.loadNoteLabels()) ?? []
         inspiration = (try? store.loadInspiration()) ?? []
     }
@@ -337,22 +361,82 @@ public final class IdeasModel {
         notes.filter { $0.folderId == folderId }
     }
 
+    /// The folders filed in one folder, or at the top level when `parentId`
+    /// is nil.
+    public func folders(in parentId: UUID?) -> [NoteFolder] {
+        folders.filter { $0.parentId == parentId }
+    }
+
     public func folder(_ id: UUID?) -> NoteFolder? {
         guard let id else { return nil }
         return folders.first { $0.id == id }
     }
 
+    /// Whether `folderId` is `ancestorId` or filed somewhere under it.
+    public func folder(_ folderId: UUID?, isWithin ancestorId: UUID) -> Bool {
+        var cur = folderId
+        var steps = 0
+        while let id = cur, steps <= folders.count {
+            if id == ancestorId { return true }
+            cur = folder(id)?.parentId
+            steps += 1
+        }
+        return false
+    }
+
+    /// The folders from the top level down to `folderId`, the open one last.
+    public func trail(to folderId: UUID?) -> [NoteFolder] {
+        var trail: [NoteFolder] = []
+        var cur = folder(folderId)
+        while let here = cur, trail.count <= folders.count {
+            trail.insert(here, at: 0)
+            cur = folder(here.parentId)
+        }
+        return trail
+    }
+
+    /// The whole tree as one list, parents before their children, each row
+    /// saying how deep it sits. A folder named in `excluding` is left out with
+    /// everything under it — the picker for moving a folder never offers the
+    /// folder itself.
+    public func folderTree(excluding: UUID? = nil) -> [NoteFolderTreeRow] {
+        var rows: [NoteFolderTreeRow] = []
+        func walk(_ parentId: UUID?, depth: Int) {
+            guard depth <= folders.count else { return }
+            for folder in folders(in: parentId) where folder.id != excluding {
+                rows.append(NoteFolderTreeRow(folder: folder, depth: depth))
+                walk(folder.id, depth: depth + 1)
+            }
+        }
+        walk(nil, depth: 0)
+        return rows
+    }
+
     // MARK: Folders
 
     @discardableResult
-    public func addFolder(named name: String) -> NoteFolder? {
+    public func addFolder(named name: String, in parentId: UUID? = nil) -> NoteFolder? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        let folder = NoteFolder(name: trimmed)
+        let folder = NoteFolder(name: trimmed, parentId: folder(parentId)?.id)
         try? store.upsert(folder)
         folders.append(folder)
         onLocalChange?()
         return folder
+    }
+
+    /// File a folder in a folder, or at the top level. A folder never files
+    /// into itself or into anything under it.
+    public func moveFolder(id: UUID, to parentId: UUID?) {
+        guard var moving = folders.first(where: { $0.id == id }), moving.parentId != parentId else { return }
+        if let parentId {
+            guard folder(parentId) != nil, !folder(parentId, isWithin: id) else { return }
+        }
+        moving.parentId = parentId
+        moving.updatedAt = .now
+        try? store.upsert(moving)
+        if let index = folders.firstIndex(where: { $0.id == id }) { folders[index] = moving }
+        onLocalChange?()
     }
 
     public func renameFolder(id: UUID, to name: String) {
@@ -365,7 +449,7 @@ public final class IdeasModel {
         onLocalChange?()
     }
 
-    /// Delete a folder. Its notes come back to the top level.
+    /// Delete a folder. What it held comes up one level.
     public func deleteFolder(id: UUID) {
         try? store.deleteNoteFolder(id: id)
         reloadFromStore()

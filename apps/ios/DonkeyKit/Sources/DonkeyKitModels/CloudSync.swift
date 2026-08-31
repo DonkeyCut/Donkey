@@ -131,12 +131,15 @@ nonisolated public struct RemoteNote: Equatable, Sendable {
 nonisolated public struct RemoteNoteFolder: Equatable, Sendable {
     public var id: UUID
     public var name: String
+    /// The folder this one is filed in; nil is the top level.
+    public var parentId: UUID?
     public var updatedAt: Date
     public var createdAt: Date
 
-    public init(id: UUID, name: String, updatedAt: Date, createdAt: Date) {
+    public init(id: UUID, name: String, parentId: UUID? = nil, updatedAt: Date, createdAt: Date) {
         self.id = id
         self.name = name
+        self.parentId = parentId
         self.updatedAt = updatedAt
         self.createdAt = createdAt
     }
@@ -312,7 +315,7 @@ public protocol CloudSyncServicing: AnyObject {
     /// Returns the winning version — this write, or a newer one already there.
     func putNote(_ note: RemoteNote) async throws -> RemoteNote
     func deleteNote(id: UUID) async throws
-    /// Create or rename one folder under the id the phone gave it.
+    /// Create, rename or move one folder under the id the phone gave it.
     func putNoteFolder(_ folder: RemoteNoteFolder) async throws
     func deleteNoteFolder(id: UUID) async throws
     /// Create or rename one label under the id the phone gave it.

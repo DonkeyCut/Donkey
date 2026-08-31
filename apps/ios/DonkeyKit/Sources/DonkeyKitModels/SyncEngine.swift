@@ -422,13 +422,16 @@ public final class SyncEngine {
     private func syncNotes() async {
         guard online else { return }
         // Folders go up before the notes that name them, so a note filed in a
-        // folder made offline never reaches a cloud that has no such folder.
-        for folder in (try? journal.dirtyNoteFolders()) ?? [] {
+        // folder made offline never reaches a cloud that has no such folder —
+        // and a folder goes up after the folder it is filed in, for the same
+        // reason.
+        for folder in Self.pushOrder((try? journal.dirtyNoteFolders()) ?? []) {
             do {
                 try await service.putNoteFolder(
                     RemoteNoteFolder(
                         id: folder.id,
                         name: folder.name,
+                        parentId: folder.parentId,
                         updatedAt: folder.updatedAt,
                         createdAt: folder.createdAt
                     )
@@ -494,6 +497,28 @@ public final class SyncEngine {
         }
     }
 
+    /// The dirty folders with every parent ahead of its children. The cloud
+    /// files a folder whose parent it does not know at the top level, so a
+    /// folder moved into one made after it has to wait for that one to land.
+    nonisolated static func pushOrder(_ folders: [NoteFolder]) -> [NoteFolder] {
+        var waiting = folders
+        var ordered: [NoteFolder] = []
+        while !waiting.isEmpty {
+            let held = Set(waiting.map(\.id))
+            let ready = waiting.filter { folder in
+                guard let parent = folder.parentId else { return true }
+                return !held.contains(parent)
+            }
+            // Only a loop leaves nothing ready; the rest go as they are and
+            // the cloud files them where it can.
+            let batch = ready.isEmpty ? waiting : ready
+            ordered.append(contentsOf: batch)
+            let sent = Set(batch.map(\.id))
+            waiting.removeAll { sent.contains($0.id) }
+        }
+        return ordered
+    }
+
     /// Folders carry no tombstone in the cloud, so the listing is the truth:
     /// what it holds is applied, and a folder this phone has clean that the
     /// listing does not name was deleted on the other side.
@@ -516,6 +541,7 @@ public final class SyncEngine {
                 NoteFolder(
                     id: folder.id,
                     name: folder.name,
+                    parentId: folder.parentId,
                     createdAt: folder.createdAt,
                     updatedAt: folder.updatedAt
                 )

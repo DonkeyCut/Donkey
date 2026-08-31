@@ -432,6 +432,7 @@ extension CutCloudClient: CloudSyncServicing {
     private struct NoteFolderDTO: Decodable {
         var id: String
         var name: String
+        var parentId: String?
         var updatedAt: Double
         var createdAt: Double
     }
@@ -471,6 +472,7 @@ extension CutCloudClient: CloudSyncServicing {
                 return RemoteNoteFolder(
                     id: id,
                     name: dto.name,
+                    parentId: dto.parentId.flatMap(UUID.init(uuidString:)),
                     updatedAt: Date(timeIntervalSince1970: dto.updatedAt / 1000),
                     createdAt: Date(timeIntervalSince1970: dto.createdAt / 1000)
                 )
@@ -508,11 +510,13 @@ extension CutCloudClient: CloudSyncServicing {
     }
 
     func putNoteFolder(_ folder: RemoteNoteFolder) async throws {
+        var body: [String: Any] = ["name": folder.name]
+        body["parentId"] = folder.parentId.map { $0.uuidString.lowercased() } ?? NSNull()
         _ = try await send(
             try request(
                 "PUT",
                 "/api/cut-cloud/notes/folders/\(folder.id.uuidString.lowercased())",
-                body: ["name": folder.name]
+                body: body
             )
         )
     }

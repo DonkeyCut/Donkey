@@ -57,6 +57,8 @@ final class NoteRecord {
 final class NoteFolderRecord {
     @Attribute(.unique) var id: UUID
     var name: String
+    /// The folder this one is filed in; nil is the top level.
+    var parentId: UUID?
     var createdAt: Date
     var updatedAt: Date
     var dirty: Bool
@@ -64,13 +66,14 @@ final class NoteFolderRecord {
     init(_ folder: NoteFolder, dirty: Bool) {
         id = folder.id
         name = folder.name
+        parentId = folder.parentId
         createdAt = folder.createdAt
         updatedAt = folder.updatedAt
         self.dirty = dirty
     }
 
     var folder: NoteFolder {
-        NoteFolder(id: id, name: name, createdAt: createdAt, updatedAt: updatedAt)
+        NoteFolder(id: id, name: name, parentId: parentId, createdAt: createdAt, updatedAt: updatedAt)
     }
 }
 
@@ -309,6 +312,7 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
         let descriptor = FetchDescriptor<NoteFolderRecord>(predicate: #Predicate { $0.id == id })
         if let existing = try context.fetch(descriptor).first {
             existing.name = folder.name
+            existing.parentId = folder.parentId
             existing.updatedAt = folder.updatedAt
             existing.dirty = true
         } else {
@@ -318,17 +322,32 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
     }
 
     public func deleteNoteFolder(id: UUID) throws {
+        let parentId = try noteFolderParent(id)
         try context.delete(model: NoteFolderRecord.self, where: #Predicate { $0.id == id })
-        // The notes stay; they come back to the top level, and each one is a
-        // write of its own so the cloud files them there too.
-        let descriptor = FetchDescriptor<NoteRecord>(predicate: #Predicate { $0.folderId == id })
-        for record in try context.fetch(descriptor) {
-            record.folderId = nil
+        // What the folder held stays and comes up one level. Each note is a
+        // write of its own so the cloud files it there too, and so is each
+        // folder.
+        let notes = FetchDescriptor<NoteRecord>(predicate: #Predicate { $0.folderId == id })
+        for record in try context.fetch(notes) {
+            record.folderId = parentId
+            record.updatedAt = .now
+            record.dirty = true
+        }
+        let folders = FetchDescriptor<NoteFolderRecord>(predicate: #Predicate { $0.parentId == id })
+        for record in try context.fetch(folders) {
+            record.parentId = parentId
             record.updatedAt = .now
             record.dirty = true
         }
         context.insert(TombstoneRecord(kind: SyncTombstone.Kind.noteFolder.rawValue, remoteId: id.uuidString, stamp: .now))
         try context.save()
+    }
+
+    /// Where a folder is filed, read before it goes so what it held can
+    /// follow.
+    private func noteFolderParent(_ id: UUID) throws -> UUID? {
+        let descriptor = FetchDescriptor<NoteFolderRecord>(predicate: #Predicate { $0.id == id })
+        return try context.fetch(descriptor).first?.parentId
     }
 
     public func loadNoteLabels() throws -> [NoteLabel] {
@@ -497,6 +516,7 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
         if let existing = try context.fetch(descriptor).first {
             guard !existing.dirty else { return }
             existing.name = folder.name
+            existing.parentId = folder.parentId
             existing.updatedAt = folder.updatedAt
         } else {
             context.insert(NoteFolderRecord(folder, dirty: false))
@@ -520,10 +540,17 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
     }
 
     public func removeNoteFolderFromCloudDelete(id: UUID) throws {
+        // The cloud filed what the folder held one level up; the listing
+        // already carried the folders, and the notes follow here.
+        let parentId = try noteFolderParent(id)
         try context.delete(model: NoteFolderRecord.self, where: #Predicate { $0.id == id })
-        let descriptor = FetchDescriptor<NoteRecord>(predicate: #Predicate { $0.folderId == id })
-        for record in try context.fetch(descriptor) where record.dirty != true {
-            record.folderId = nil
+        let notes = FetchDescriptor<NoteRecord>(predicate: #Predicate { $0.folderId == id })
+        for record in try context.fetch(notes) where record.dirty != true {
+            record.folderId = parentId
+        }
+        let folders = FetchDescriptor<NoteFolderRecord>(predicate: #Predicate { $0.parentId == id })
+        for record in try context.fetch(folders) {
+            record.parentId = parentId
         }
         try context.save()
     }

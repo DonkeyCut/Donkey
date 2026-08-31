@@ -308,16 +308,24 @@ import Testing
             notes[id] = nil
         }
 
+        /// The site files a folder whose parent it does not know at the top
+        /// level.
         func putNoteFolder(_ folder: RemoteNoteFolder) async throws {
-            folders[folder.id] = folder
+            var stored = folder
+            if let parent = folder.parentId, folders[parent] == nil { stored.parentId = nil }
+            folders[folder.id] = stored
         }
 
+        /// What the folder held comes up one level, the way the site files it.
         func deleteNoteFolder(id: UUID) async throws {
             deletedFolders.append(id)
+            let parent = folders[id]?.parentId
             folders[id] = nil
             for (noteId, note) in notes where note.folderId == id {
-                notes[noteId]?.folderId = nil
-                _ = noteId
+                notes[noteId]?.folderId = parent
+            }
+            for (folderId, folder) in folders where folder.parentId == id {
+                folders[folderId]?.parentId = parent
             }
         }
 
@@ -675,6 +683,67 @@ import Testing
         await rig.engine.run()
         #expect(rig.cloud.deletedFolders == [folder.id])
         #expect(try rig.store.tombstones().isEmpty)
+    }
+
+    @Test func folderPushesAfterTheFolderItMovedInto() async throws {
+        let rig = try makeRig()
+        let first = try #require(rig.ideas.addFolder(named: "Scripts"))
+        let second = try #require(rig.ideas.addFolder(named: "Series"))
+        // Made first, so it sits first in the push; it has to wait for the
+        // folder it now names, or the cloud files it at the top level.
+        rig.ideas.moveFolder(id: first.id, to: second.id)
+        await rig.engine.run()
+        #expect(rig.cloud.folders[first.id]?.parentId == second.id)
+        #expect(rig.ideas.folders(in: second.id).map(\.id) == [first.id])
+        #expect(rig.ideas.trail(to: first.id).map(\.id) == [second.id, first.id])
+    }
+
+    @Test func aFolderNeverFilesUnderItself() throws {
+        let rig = try makeRig()
+        let parent = try #require(rig.ideas.addFolder(named: "Scripts"))
+        let child = try #require(rig.ideas.addFolder(named: "Drafts", in: parent.id))
+        rig.ideas.moveFolder(id: parent.id, to: child.id)
+        rig.ideas.moveFolder(id: parent.id, to: parent.id)
+        #expect(rig.ideas.folder(parent.id)?.parentId == nil)
+        #expect(rig.ideas.folder(child.id)?.parentId == parent.id)
+        #expect(rig.ideas.folderTree().map(\.depth) == [0, 1])
+        #expect(rig.ideas.folderTree(excluding: parent.id).isEmpty)
+    }
+
+    @Test func deletingAFolderLiftsWhatItHeld() async throws {
+        let rig = try makeRig()
+        let parent = try #require(rig.ideas.addFolder(named: "Scripts"))
+        let child = try #require(rig.ideas.addFolder(named: "Drafts", in: parent.id))
+        let grandchild = try #require(rig.ideas.addFolder(named: "Old", in: child.id))
+        rig.ideas.openEditor(in: child.id)
+        rig.ideas.draft?.body = "filed"
+        let note = try #require(rig.ideas.saveDraft())
+        await rig.engine.run()
+        rig.ideas.deleteFolder(id: child.id)
+        #expect(rig.ideas.folder(grandchild.id)?.parentId == parent.id)
+        #expect(rig.ideas.notes(in: parent.id).map(\.id) == [note.id])
+        await rig.engine.run()
+        #expect(rig.cloud.deletedFolders == [child.id])
+        #expect(rig.cloud.folders[grandchild.id]?.parentId == parent.id)
+        #expect(rig.cloud.notes[note.id]?.folderId == parent.id)
+    }
+
+    @Test func folderDeletedInTheCloudLiftsWhatItHeldHere() async throws {
+        let rig = try makeRig()
+        let parent = try #require(rig.ideas.addFolder(named: "Scripts"))
+        let child = try #require(rig.ideas.addFolder(named: "Drafts", in: parent.id))
+        let grandchild = try #require(rig.ideas.addFolder(named: "Old", in: child.id))
+        rig.ideas.openEditor(in: child.id)
+        rig.ideas.draft?.body = "filed"
+        let note = try #require(rig.ideas.saveDraft())
+        await rig.engine.run()
+        // Deleted at the desk: the listing no longer names it, and what it
+        // held is filed a level up there. The notes keep their stamps.
+        try await rig.cloud.deleteNoteFolder(id: child.id)
+        await rig.engine.run()
+        #expect(rig.ideas.folder(child.id) == nil)
+        #expect(rig.ideas.folder(grandchild.id)?.parentId == parent.id)
+        #expect(rig.ideas.notes(in: parent.id).map(\.id) == [note.id])
     }
 
     @Test func labelPushesAheadOfTheNoteWearingIt() async throws {

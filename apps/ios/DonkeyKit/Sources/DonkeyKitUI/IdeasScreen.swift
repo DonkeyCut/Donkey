@@ -2,10 +2,44 @@
 import AVFoundation
 import AVKit
 import Combine
+import CoreTransferable
 import Photos
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 import DonkeyKitModels
+
+/// What a drag on the Ideas screen carries: one note or one folder, by id.
+/// Dropped on a folder row it is filed there. The move sheet names its
+/// subject the same way.
+nonisolated struct NotesDragItem: Codable, Identifiable, Transferable {
+    enum Kind: String, Codable {
+        case note, folder
+    }
+
+    var kind: Kind
+    var id: UUID
+
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .donkeyNotesItem)
+    }
+}
+
+extension UTType {
+    nonisolated static let donkeyNotesItem = UTType(exportedAs: "com.donkeycut.notes-item")
+}
+
+extension IdeasModel {
+    /// File what a drop carried in `folderId`, or at the top level.
+    func file(_ items: [NotesDragItem], in folderId: UUID?) {
+        for item in items {
+            switch item.kind {
+            case .note: move(noteId: item.id, to: folderId)
+            case .folder: moveFolder(id: item.id, to: folderId)
+            }
+        }
+    }
+}
 
 struct IdeasScreen: View {
     @Bindable var app: AppModel
@@ -18,7 +52,7 @@ struct IdeasScreen: View {
     @State private var showsPhotoPicker = false
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var folderPrompt: FolderPrompt?
-    @State private var moving: Note?
+    @State private var moving: NotesDragItem?
     /// The inspiration item open full screen. A card is a tile; the media
     /// plays in the viewer, the way a Library clip does.
     @State private var viewing: InspirationItem?
@@ -66,8 +100,8 @@ struct IdeasScreen: View {
             LinkSheet(app: app, ideas: ideas)
                 .presentationDetents([.medium])
         }
-        .sheet(item: $moving) { note in
-            MoveToFolderSheet(ideas: ideas, note: note)
+        .sheet(item: $moving) { item in
+            MoveToFolderSheet(ideas: ideas, item: item)
         }
         .fullScreenCover(item: $viewing) { item in
             InspirationViewer(item: item, ideas: ideas)
@@ -112,7 +146,7 @@ struct IdeasScreen: View {
             Button("New note", systemImage: "note.text") { ideas.openEditor() }
             Button("Paste link", systemImage: "link") { showsLinkSheet = true }
             Button("Camera roll", systemImage: "photo") { openCameraRoll() }
-            Button("New folder", systemImage: "folder.badge.plus") { folderPrompt = .create }
+            Button("New folder", systemImage: "folder.badge.plus") { folderPrompt = .create(in: nil) }
         } label: {
             Image(systemName: "plus")
                 .font(.title2.weight(.bold))
@@ -186,10 +220,11 @@ struct IdeasScreen: View {
 
     @ViewBuilder private var notesSection: some View {
         FolderList(
-            folders: ideas.folders,
-            count: { ideas.notes(in: $0).count },
+            ideas: ideas,
+            folders: ideas.folders(in: nil),
             onRename: { folderPrompt = .rename($0) },
-            onDelete: { ideas.deleteFolder(id: $0.id) }
+            onDelete: { ideas.deleteFolder(id: $0.id) },
+            onMove: { moving = $0 }
         )
         NotesGrid(notes: loose, ideas: ideas, onMove: { moving = $0 })
     }
@@ -249,50 +284,79 @@ func mediaPixelSize(at url: URL, isVideo: Bool) async -> (width: Int, height: In
     return (Int(abs(rect.width).rounded()), Int(abs(rect.height).rounded()))
 }
 
-/// One folder's notes, pushed from the Ideas screen.
+/// One folder, pushed from the Ideas screen or from the folder above it. It
+/// works the way the top level does: the folders filed here on a list, the
+/// notes filed here on the grid, and a plus that makes either. Nothing above
+/// this folder shows here; a note or folder leaves through the move sheet.
 struct NoteFolderScreen: View {
     @Bindable var ideas: IdeasModel
     var media: MediaModel
     let folder: NoteFolder
-    let onMove: (Note) -> Void
+    let onMove: (NotesDragItem) -> Void
+
+    @State private var folderPrompt: FolderPrompt?
 
     private var notes: [Note] { ideas.notes(in: folder.id) }
+    private var subfolders: [NoteFolder] { ideas.folders(in: folder.id) }
 
     var body: some View {
         ScrollView {
-            if notes.isEmpty {
-                EmptyState(
-                    title: "This folder is empty",
-                    message: "Notes you move here — or write here — show up in this folder."
+            VStack(alignment: .leading, spacing: 18) {
+                FolderList(
+                    ideas: ideas,
+                    folders: subfolders,
+                    onRename: { folderPrompt = .rename($0) },
+                    onDelete: { ideas.deleteFolder(id: $0.id) },
+                    onMove: onMove
                 )
-                .padding(.top, 40)
-            } else {
-                NotesGrid(notes: notes, ideas: ideas, onMove: onMove)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 14)
-                    .padding(.bottom, 24)
+                if notes.isEmpty && subfolders.isEmpty {
+                    EmptyState(
+                        title: "This folder is empty",
+                        message: "Notes you move here — or write here — show up in this folder."
+                    )
+                    .padding(.top, 20)
+                } else {
+                    NotesGrid(notes: notes, ideas: ideas, onMove: onMove)
+                }
             }
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
+            .padding(.bottom, 24)
         }
         .refreshable { await media.sync?.refreshNow() }
         .navigationTitle(ideas.folder(folder.id)?.name ?? folder.name)
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button("New note", systemImage: "square.and.pencil") {
-                    ideas.openEditor(in: folder.id)
+                Menu {
+                    Button("New note", systemImage: "square.and.pencil") {
+                        ideas.openEditor(in: folder.id)
+                    }
+                    Button("New folder", systemImage: "folder.badge.plus") {
+                        folderPrompt = .create(in: folder.id)
+                    }
+                } label: {
+                    Image(systemName: "plus")
                 }
+                .accessibilityLabel("Add")
             }
         }
+        .folderPrompt($folderPrompt, ideas: ideas)
     }
 }
 
 /// The Apple-standard folder list: a row per folder with its count, opened by
-/// a tap, renamed or deleted by a swipe or a long press.
+/// a tap, renamed, moved or deleted by a long press. Each row takes a dragged
+/// note or folder and files it inside, and each row is itself draggable.
 struct FolderList: View {
+    var ideas: IdeasModel
     let folders: [NoteFolder]
-    let count: (UUID) -> Int
     let onRename: (NoteFolder) -> Void
     let onDelete: (NoteFolder) -> Void
+    let onMove: (NotesDragItem) -> Void
+
+    /// The row a drag is held over.
+    @State private var targeted: UUID?
 
     var body: some View {
         if !folders.isEmpty {
@@ -306,7 +370,7 @@ struct FolderList: View {
                             Text(folder.name)
                                 .foregroundStyle(.primary)
                             Spacer(minLength: 8)
-                            Text("\(count(folder.id))")
+                            Text("\(ideas.notes(in: folder.id).count + ideas.folders(in: folder.id).count)")
                                 .foregroundStyle(.secondary)
                                 .monospacedDigit()
                             Image(systemName: "chevron.right")
@@ -317,8 +381,17 @@ struct FolderList: View {
                         .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
+                    .listRowHighlight(targeted == folder.id)
+                    .draggable(NotesDragItem(kind: .folder, id: folder.id))
+                    .dropDestination(for: NotesDragItem.self) { items, _ in
+                        ideas.file(items, in: folder.id)
+                        return true
+                    } isTargeted: { targeted = $0 ? folder.id : (targeted == folder.id ? nil : targeted) }
                     .contextMenu {
                         Button("Rename", systemImage: "pencil") { onRename(folder) }
+                        Button("Move to Folder…", systemImage: "folder") {
+                            onMove(NotesDragItem(kind: .folder, id: folder.id))
+                        }
                         Button("Delete", systemImage: "trash", role: .destructive) {
                             onDelete(folder)
                         }
@@ -334,10 +407,17 @@ struct FolderList: View {
     }
 }
 
+extension View {
+    /// The tint a folder row takes while a drag is held over it.
+    fileprivate func listRowHighlight(_ on: Bool) -> some View {
+        background(on ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
 struct NotesGrid: View {
     let notes: [Note]
     var ideas: IdeasModel
-    let onMove: (Note) -> Void
+    let onMove: (NotesDragItem) -> Void
 
     var body: some View {
         LazyVGrid(columns: ideaColumns, spacing: 14) {
@@ -348,8 +428,11 @@ struct NotesGrid: View {
                     NoteCard(note: note, labels: ideas.labels(on: note))
                 }
                 .buttonStyle(.plain)
+                .draggable(NotesDragItem(kind: .note, id: note.id))
                 .contextMenu {
-                    Button("Move to Folder…", systemImage: "folder") { onMove(note) }
+                    Button("Move to Folder…", systemImage: "folder") {
+                        onMove(NotesDragItem(kind: .note, id: note.id))
+                    }
                     Button("Delete", systemImage: "trash", role: .destructive) {
                         ideas.deleteNote(id: note.id)
                     }
@@ -360,53 +443,67 @@ struct NotesGrid: View {
     }
 }
 
-/// Where a note is filed, chosen from the folders that exist — or a new one
-/// named on the spot.
+/// Where a note or a folder is filed, chosen from the tree of folders that
+/// exist — or a new one named on the spot, made beside where the item sits
+/// now. A folder being moved is offered nothing under itself.
 struct MoveToFolderSheet: View {
     var ideas: IdeasModel
-    let note: Note
+    let item: NotesDragItem
 
     @State private var prompt: FolderPrompt?
     @Environment(\.dismiss) private var dismiss
+
+    /// Where the item is filed now.
+    private var currentParent: UUID? {
+        switch item.kind {
+        case .note: ideas.notes.first { $0.id == item.id }?.folderId
+        case .folder: ideas.folder(item.id)?.parentId
+        }
+    }
+
+    private var rows: [NoteFolderTreeRow] {
+        ideas.folderTree(excluding: item.kind == .folder ? item.id : nil)
+    }
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    row(name: "Notes", systemImage: "note.text", folderId: nil)
-                    ForEach(ideas.folders) { folder in
-                        row(name: folder.name, systemImage: "folder", folderId: folder.id)
+                    row(name: "Notes", systemImage: "note.text", folderId: nil, depth: 0)
+                    ForEach(rows) { row in
+                        self.row(name: row.folder.name, systemImage: "folder", folderId: row.folder.id, depth: row.depth)
                     }
                 }
                 Section {
-                    Button("New Folder…", systemImage: "folder.badge.plus") { prompt = .create }
+                    Button("New Folder…", systemImage: "folder.badge.plus") { prompt = .create(in: currentParent) }
                 }
             }
-            .navigationTitle("Move Note")
+            .navigationTitle(item.kind == .note ? "Move Note" : "Move Folder")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
             }
-            // A folder made here takes the note with it.
+            // A folder made here takes the item with it.
             .folderPrompt($prompt, ideas: ideas) { folder in
-                ideas.move(noteId: note.id, to: folder.id)
+                ideas.file([item], in: folder.id)
                 dismiss()
             }
         }
         .presentationDetents([.medium, .large])
     }
 
-    private func row(name: String, systemImage: String, folderId: UUID?) -> some View {
+    private func row(name: String, systemImage: String, folderId: UUID?, depth: Int) -> some View {
         Button {
-            ideas.move(noteId: note.id, to: folderId)
+            ideas.file([item], in: folderId)
             dismiss()
         } label: {
             HStack {
                 Label(name, systemImage: systemImage)
+                    .padding(.leading, CGFloat(depth) * 20)
                 Spacer()
-                if note.folderId == folderId {
+                if currentParent == folderId {
                     Image(systemName: "checkmark")
                         .foregroundStyle(.tint)
                 }
@@ -416,10 +513,10 @@ struct MoveToFolderSheet: View {
     }
 }
 
-/// Naming a folder: the standard alert with a text field, for a new folder or
-/// a rename.
+/// Naming a folder: the standard alert with a text field, for a new folder
+/// made inside `in` (nil for the top level) or a rename.
 enum FolderPrompt: Identifiable {
-    case create
+    case create(in: UUID?)
     case rename(NoteFolder)
 
     var id: String {
@@ -469,8 +566,8 @@ private struct FolderPromptModifier: ViewModifier {
                 Button("Cancel", role: .cancel) {}
                 Button("Save") {
                     switch prompt {
-                    case .create:
-                        if let folder = ideas.addFolder(named: name) { onCreate(folder) }
+                    case .create(let parentId):
+                        if let folder = ideas.addFolder(named: name, in: parentId) { onCreate(folder) }
                     case .rename(let folder):
                         ideas.renameFolder(id: folder.id, to: name)
                     }
