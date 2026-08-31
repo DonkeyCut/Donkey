@@ -51,16 +51,21 @@ const videoTrackOf = (async (input: FakeInput) => {
   return track;
 }) as never;
 
-/** Every walk a fake sink was asked for, with the address it reads. */
-const sinkWalks: { url: string; from: number }[] = [];
+/** Every walk a fake sink was asked for, with the address it reads and the
+ * height it decodes at. */
+const sinkWalks: { url: string; from: number; height: number }[] = [];
+/** Hold every walk on sinks of this height until released, to stand in for a
+ * decoder that cannot keep up with the pointer. */
+let stall: { height: number; promise: Promise<void> } | null = null;
 const frame = (track: FakeTrack, timestamp: number) => ({
   canvas: { width: 640, height: 360 },
   timestamp,
   duration: 1 / 30,
 });
-const frameSink = ((track: FakeTrack) => ({
+const frameSink = ((track: FakeTrack, size?: { height?: number }) => ({
   async *canvases(from: number) {
-    sinkWalks.push({ url: track.url, from });
+    sinkWalks.push({ url: track.url, from, height: size?.height ?? 0 });
+    if (stall && size?.height === stall.height) await stall.promise;
     for (let i = 0; ; i++) {
       const timestamp = from + i / 30;
       if (timestamp > 10) return;
@@ -79,9 +84,8 @@ const keyframeTimeAt = (async (_track: unknown, t: number) => Math.max(0, Math.f
 const media = await import("./mediaRead");
 mock.module("./mediaRead", () => ({ ...media, openMedia, videoTrackOf, frameSink, keyframeTimeAt }));
 
-const { ClipFrameSource, FrameRing, FrameSourcePool, mappingKey, walkClaim } = await import(
-  "./frameSource"
-);
+const { BACK_WINDOW, ClipFrameSource, FrameRing, FrameSourcePool, mappingKey, walkClaim } =
+  await import("./frameSource");
 
 /** Let the opens, walks and drains the last call set going run out. */
 const settle = async (rounds = 400) => {
@@ -155,7 +159,7 @@ describe("FrameRing", () => {
   });
 
   test("nearer merges two rings' answers under at()'s own policy", () => {
-    // The backward-skim cache and the main ring each answer separately; the
+    // The backward walk's windows and the main ring each answer separately; the
     // frame served is the one a single ring holding both would have picked.
     const a = f(1);
     const b = f(2);
@@ -307,7 +311,7 @@ describe("walkClaim", () => {
       t: 0, walkFor: 5, from: 5, tail: 9, landed: true, covered: true, heldBefore: false, comingS: 9, playing: true,
     })).toBe("hold");
 
-    // A paused reader is served by the backward cache and by the single-frame
+    // A paused reader is served by the backward walk and by the single-frame
     // fetch, so a walk it cannot use is left where it is.
     expect(walkClaim({
       t: 1, walkFor: 5, from: 5, tail: 6, landed: true, covered: false, heldBefore: false, comingS: 9, playing: false,
@@ -543,5 +547,145 @@ describe("ClipFrameSource replay", () => {
     }
     expect(sinkWalks.length).toBe(walks);
     src.close();
+  });
+});
+
+describe("ClipFrameSource backward walk", () => {
+  const reset = () => {
+    inputs.length = 0;
+    sinkWalks.length = 0;
+    gates.clear();
+    stall = null;
+  };
+  const dt = 1 / 30;
+
+  test("a creep backward is answered from windows landed below the pointer", async () => {
+    // The report: dragging the playhead backward stutters. Frames decode
+    // forward from a keyframe, so each backward step used to cost a keyframe
+    // walk of its own, thrown away by the next step. Here the pointer backs
+    // through two seconds a frame at a time and finds each frame already in
+    // hand: one keyframe decode per window of frames, the next window landed
+    // while the pointer crosses the current one.
+    reset();
+    const src = new ClipFrameSource(asset("back"), 360);
+    src.want(6, false);
+    await settle();
+    expect(src.hasExact(6)).toBe(true);
+    const walksBefore = sinkWalks.length;
+    let waited = 0;
+    for (let t = 6 - dt; t >= 4; t -= dt) {
+      const at = +t.toFixed(4);
+      src.want(at, false);
+      if (!src.hasExact(at)) waited++;
+      await settle(60);
+      expect(src.hasExact(at)).toBe(true);
+      expect(Math.abs(src.frameAt(at)!.timestamp - at)).toBeLessThan(dt);
+    }
+    // Only the first step waits on a fill; every later one lands inside a
+    // window already there.
+    expect(waited).toBeLessThanOrEqual(1);
+    // Sixty frames back is six windows, plus the ones clamped at a keyframe.
+    const walks = sinkWalks.length - walksBefore;
+    expect(walks).toBeLessThanOrEqual(60 / BACK_WINDOW + 4);
+    src.close();
+  });
+
+  test("a drag that outruns the windows still has a picture near the pointer", async () => {
+    // The fine windows are held back, as a decoder that cannot keep up would
+    // hold them; the coarse spread over the keyframe span lands regardless
+    // and stands in near the pointer until the window arrives.
+    reset();
+    const src = new ClipFrameSource(asset("fast"), 720);
+    src.want(7.5, false);
+    await settle();
+    let release!: () => void;
+    stall = { height: 720, promise: new Promise<void>((r) => (release = r)) };
+    src.want(7.4, false);
+    await settle(60);
+    src.want(7.05, false);
+    await settle(60);
+    expect(src.hasExact(7.05)).toBe(false);
+    const near = src.frameAt(7.05);
+    expect(near).not.toBeNull();
+    expect(Math.abs(near!.timestamp - 7.05)).toBeLessThan(0.1);
+    release();
+    stall = null;
+    await settle();
+    // The walk catches up: the window ending at the pointer lands.
+    expect(src.hasExact(7.05)).toBe(true);
+    expect(Math.abs(src.frameAt(7.05)!.timestamp - 7.05)).toBeLessThan(dt);
+    src.close();
+  });
+
+  test("turning forward again rides the forward walk", async () => {
+    reset();
+    const src = new ClipFrameSource(asset("turn"), 360);
+    src.want(5, false);
+    await settle();
+    for (let t = 5 - dt; t >= 4.5; t -= dt) {
+      src.want(+t.toFixed(4), false);
+      await settle(60);
+    }
+    const walksBefore = sinkWalks.length;
+    for (let t = 4.5 + dt; t <= 5.5; t += dt) {
+      const at = +t.toFixed(4);
+      src.want(at, false);
+      await settle(60);
+      expect(src.hasExact(at)).toBe(true);
+    }
+    // Back through the windows costs nothing; past them, one walk creeps on.
+    expect(sinkWalks.length - walksBefore).toBeLessThanOrEqual(2);
+    src.close();
+  });
+
+  test("playing lets the backward frames go", async () => {
+    reset();
+    const src = new ClipFrameSource(asset("play"), 360);
+    src.want(5, false);
+    await settle();
+    src.want(5 - dt, false);
+    await settle();
+    expect(src.debugState().back).not.toBeNull();
+    src.want(5 - dt, true);
+    await settle();
+    expect(src.debugState().back).toBeNull();
+    src.close();
+  });
+
+  test("only the sources this frame reads hold backward frames", async () => {
+    // Backward frames are two sinks' worth of canvases. A montage backed
+    // through would keep a set per clip crossed; the pool keeps them on what
+    // this frame reads — the pointer's clip and the neighbour warmed under it
+    // — and a clip the pointer has left lets its go the moment another walk
+    // starts.
+    reset();
+    const pool = new FrameSourcePool(4);
+    pool.beginFrame();
+    const a = pool.get("a", asset("a"), 360);
+    a.want(5, false);
+    await settle();
+    a.want(5 - dt, false);
+    await settle();
+    expect(a.debugState().back).not.toBeNull();
+    pool.beginFrame();
+    const b = pool.get("b", asset("b"), 360);
+    b.want(5, false);
+    await settle();
+    b.want(5 - dt, false);
+    await settle();
+    expect(b.debugState().back).not.toBeNull();
+    expect(a.debugState().back).toBeNull();
+    // Both read in one frame — the pointer's clip and the one warmed below
+    // it — keep theirs together.
+    pool.beginFrame();
+    pool.get("a", asset("a"), 360);
+    pool.get("b", asset("b"), 360);
+    a.want(5, false);
+    await settle();
+    a.want(5 - dt, false);
+    await settle();
+    expect(a.debugState().back).not.toBeNull();
+    expect(b.debugState().back).not.toBeNull();
+    pool.closeAll();
   });
 });

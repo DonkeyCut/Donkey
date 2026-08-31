@@ -175,6 +175,12 @@ class Engine {
   private trailingSince = 0;
   private playSince = 0;
   private wasPlaying = false;
+  /** The last paused moment drawn, and whether the reader is heading down the
+   * timeline. A paused reader's direction is a fact about the gesture, known
+   * here and passed to every source read, since a source only ever sees its
+   * own asks. */
+  private lastRead: number | null = null;
+  private readBackward = false;
   private lastWalkCost = 0;
   /** Whether the tick being drawn is a playing one — read by the matte
    * provider, which the compositor calls mid-frame. */
@@ -393,7 +399,7 @@ class Engine {
     const src = this.pool.get(keyOf(span.clip, span.asset), span.asset, this.decodeHeight());
     this.used.add(src);
     const st = sourceTimeOf(span.clip, t);
-    src.want(st, playing);
+    src.want(st, playing, this.readBackward);
     // A failed source that already decoded frames keeps showing the nearest
     // one it holds — a transient blip (a network drop, a signed URL mid
     // re-mint) reads as a held frame, and only a source with nothing at all
@@ -430,6 +436,27 @@ class Engine {
     for (const track of new Set(overlayLayers(s.clips).map((c) => c.track))) {
       lists.push(getClipSpans(s.clips, s.assets, track));
     }
+    // A pointer backing down the timeline arrives at the previous clip's last
+    // frame, so that clip's tail is landed backward ahead of it: the cut is
+    // crossed onto windows already there.
+    if (this.readBackward) {
+      for (const spans of lists) {
+        for (const sp of spans) {
+          const end = sp.start + sp.len;
+          if (end > t || t - end > WARM_STREAM_S) continue;
+          const src = this.pool.get(keyOf(sp.clip, sp.asset), sp.asset, this.decodeHeight());
+          if (this.used.has(src)) continue;
+          this.used.add(src);
+          const tail = Math.max(sp.clip.in, sourceTimeOf(sp.clip, end) - 0.001);
+          src.want(tail, false, true);
+        }
+      }
+    }
+    // The clips ahead are for a reader moving that way. One backing down the
+    // timeline is leaving them, and a walk started for the nearest — sent as
+    // if playing — would take the decoder the backward walk is using and let
+    // go of the frames it landed.
+    if (this.readBackward) return;
     for (const spans of lists) {
       for (const sp of spans) {
         if (sp.start <= t || sp.start > t + WARM_HORIZON_S) continue;
@@ -717,6 +744,18 @@ class Engine {
         this.writeHead(0);
       }
       return;
+    }
+
+    // Which way a paused reader is going, before anything reads a source on
+    // its behalf. The direction is the last move's: a pointer at rest is
+    // still heading the way it was, and the frames landed under it stay.
+    if (playing) {
+      this.readBackward = false;
+      this.lastRead = null;
+    } else {
+      if (this.lastRead !== null && Math.abs(t - this.lastRead) > 1e-4)
+        this.readBackward = t < this.lastRead;
+      this.lastRead = t;
     }
 
     const master = spans.find((sp) => t >= sp.start && t < sp.start + sp.len);
