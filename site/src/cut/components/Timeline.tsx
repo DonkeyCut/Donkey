@@ -58,7 +58,7 @@ import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
 import { EFFECT_LABELS, type EffectId } from "@donkeycut/effects-kit";
 import { assetIsSilent, emptySubtitles, IMAGE_CLIP_SECONDS, isAudioTransition, SHAPE_LABELS, TRANSITION_MAX, TRANSITION_STYLE_LABELS, transitionBarStart, transitionDefaultSeconds, type ShapeKind } from "@/cut/lib/types";
-import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, Selection, StickerOverlay, SubtitleCue, TimelineTransition, TransitionStyle, VideoClip } from "@/cut/lib/types";
+import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, Selection, StickerOverlay, SubtitleCue, TimelineTransition, TransitionBoundaryKind, TransitionStyle, VideoClip } from "@/cut/lib/types";
 import { isLottieAsset } from "@/cut/lib/lottieAssets";
 import { gradeCssApprox } from "@donkeycut/effects-kit";
 import { cn } from "@/lib/utils";
@@ -1212,6 +1212,23 @@ export function Timeline() {
    * everything else ends on the boundary. */
   const anchorBarStart = (a: Anchor, len: number, style: TransitionStyle) =>
     transitionBarStart(style, a.kind, a.at, len);
+  /** The box a bar draws in. Its window is [start, start+seconds], but the box
+   * floors at a readable width, so it is pinned to the instant it claims: a
+   * cross dissolve stays centered on the cut it straddles, an entrance keeps
+   * its head on the boundary, everything else keeps its tail there. */
+  const barBox = (
+    t: Pick<TimelineTransition, "start" | "seconds" | "style">,
+    kind: TransitionBoundaryKind
+  ) => {
+    const width = Math.max(14, t.seconds * pps - CLIP_GAP);
+    const left =
+      kind === "in"
+        ? t.start * pps
+        : isAudioTransition(t.style)
+          ? (t.start + t.seconds / 2) * pps - width / 2
+          : (t.start + t.seconds) * pps - width;
+    return { left, width };
+  };
 
   /** The bar already playing this anchor's boundary, if any — through any of
    * its roles, so a bar serving several same-instant boundaries is the
@@ -2504,9 +2521,8 @@ export function Timeline() {
                       key={`xzone-${a.kind}-${a.clipId}`}
                       className="pointer-events-none absolute rounded-[3px] bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4)]"
                       style={{
-                        left: anchorBarStart(a, len, style) * pps,
+                        ...barBox({ start: anchorBarStart(a, len, style), seconds: len, style }, a.kind),
                         top: 2,
-                        width: Math.max(14, len * pps - CLIP_GAP),
                         height: TEXT_H - 6,
                       }}
                     />
@@ -2521,9 +2537,11 @@ export function Timeline() {
                     <div
                       className="pointer-events-none absolute rounded-[3px] bg-[#0a84ff]/25 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.85)]"
                       style={{
-                        left: anchorBarStart(jointDrop, len, style) * pps,
+                        ...barBox(
+                          { start: anchorBarStart(jointDrop, len, style), seconds: len, style },
+                          jointDrop.kind
+                        ),
                         top: 2,
-                        width: Math.max(14, len * pps - CLIP_GAP),
                         height: TEXT_H - 6,
                       }}
                     />
@@ -2551,9 +2569,8 @@ export function Timeline() {
                       x === transitionDrag && "opacity-75"
                     )}
                     style={{
-                      left: x.t.start * pps,
+                      ...barBox(x.t, x.role?.kind ?? "cut"),
                       top: 2,
-                      width: Math.max(14, x.t.seconds * pps - CLIP_GAP),
                       height: TEXT_H - 6,
                     }}
                     data-tl-sel={`transition:${x.t.id}`}
