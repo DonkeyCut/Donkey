@@ -1,12 +1,15 @@
 import { z } from "zod";
 
 import { ACTIVE_PRO_STATUSES } from "@/lib/billing/pro-subscription";
-import { zeroCreditMicros } from "@/lib/credits/amounts";
+import { creditStringToMicros, zeroCreditMicros } from "@/lib/credits/amounts";
 import { defineJob } from "@/lib/jobs/registry";
 import {
   CREDIT_SPENDERS_CAMPAIGN,
   OUTREACH_ACTIVE_WINDOW_DAYS,
+  OUTREACH_MIN_SPENT_CREDITS,
+  OUTREACH_MIN_STORAGE_BYTES,
   OUTREACH_RECONTACT_DAYS,
+  OUTREACH_RETURN_DAYS,
 } from "@/lib/marketing/campaigns";
 import { prisma } from "@/lib/prisma";
 
@@ -22,6 +25,13 @@ function newest(...dates: (Date | null | undefined)[]): Date | null {
   return best;
 }
 
+type Candidate = {
+  balanceMicros: bigint;
+  lifetimeChargedMicros: bigint;
+  signedUpAt: Date;
+  userId: string;
+};
+
 // Rolls product usage into the outreach list. Runs nightly from
 // /api/marketing/outreach/scan and by hand from the Outreach tab's Scan now
 // button. Everything the Outreach tab shows is written here or read alongside
@@ -31,6 +41,7 @@ export const outreachScanJob = defineJob(z.object({}).strict(), async () => {
   const since = new Date(startedAt.getTime() - OUTREACH_ACTIVE_WINDOW_DAYS * DAY_MS);
   const recontactBefore = new Date(startedAt.getTime() - OUTREACH_RECONTACT_DAYS * DAY_MS);
   const campaign = CREDIT_SPENDERS_CAMPAIGN;
+  const minSpentMicros = creditStringToMicros(OUTREACH_MIN_SPENT_CREDITS);
 
   // A free account that has not opted out of marketing.
   const marketable = {
@@ -44,13 +55,18 @@ export const outreachScanJob = defineJob(z.object({}).strict(), async () => {
     },
   };
 
-  const [spenders, uploaded, edited] = await Promise.all([
-    // Accounts that have spent credits and are still warm. Any amount of spend
-    // qualifies; what is left is a column on the row, not a filter.
+  const [spenderAccounts, heavy] = await Promise.all([
+    // Accounts that have spent a real share of their credits and are still
+    // warm. What is left is a column on the row; the floor is on what went out.
     prisma.userCreditAccount.findMany({
-      select: { balanceMicros: true, lifetimeChargedMicros: true, userId: true },
+      select: {
+        balanceMicros: true,
+        lifetimeChargedMicros: true,
+        user: { select: { createdAt: true } },
+        userId: true,
+      },
       where: {
-        lifetimeChargedMicros: { gt: zeroCreditMicros },
+        lifetimeChargedMicros: { gte: minSpentMicros },
         user: {
           ...marketable,
           inferenceUsageEvents: {
@@ -59,87 +75,81 @@ export const outreachScanJob = defineJob(z.object({}).strict(), async () => {
         },
       },
     }),
-    // Media a person put in the cloud inside the window. Uploading costs no
-    // credits, so these people are invisible to the spend query and are
-    // exactly who this campaign would otherwise miss. Starter media is
-    // quotaExempt and seeded by the signup, so it names nobody.
-    prisma.cutMediaObject.groupBy({
-      _max: { createdAt: true },
-      by: ["userId"],
-      where: {
-        createdAt: { gte: since },
-        quotaExempt: false,
-        uploadState: "complete",
-      },
-    }),
-    // Cloud projects edited inside the window.
-    prisma.cutProject.groupBy({
-      _max: { updatedAt: true },
-      by: ["userId"],
-      where: { updatedAt: { gte: since } },
+    // Accounts holding most of the free quota. Uploading costs no credits, so
+    // these people are invisible to the spend query. Starter media is
+    // quotaExempt and never counted, so it names nobody.
+    prisma.cutStorageUsage.findMany({
+      select: { userId: true },
+      where: { bytes: { gte: OUTREACH_MIN_STORAGE_BYTES } },
     }),
   ]);
-
-  // When each account last worked in the cloud by hand. Housekeeping writes
-  // the storage counter on its own — GC sweeps, copy jobs, the render worker —
-  // so its timestamp says nothing about a person being there; an upload and a
-  // project edit are the ones they did themselves.
-  const cloudActiveBy = new Map<string, Date>();
-  for (const row of uploaded) {
-    if (row._max.createdAt) cloudActiveBy.set(row.userId, row._max.createdAt);
-  }
-  for (const row of edited) {
-    const at = newest(row._max.updatedAt, cloudActiveBy.get(row.userId));
-    if (at) cloudActiveBy.set(row.userId, at);
-  }
-
+  const spenders: Candidate[] = spenderAccounts.map((account) => ({
+    balanceMicros: account.balanceMicros,
+    lifetimeChargedMicros: account.lifetimeChargedMicros,
+    signedUpAt: account.user.createdAt,
+    userId: account.userId,
+  }));
   const spenderIds = new Set(spenders.map((account) => account.userId));
-  const cloudIds = [...cloudActiveBy.keys()].filter((userId) => !spenderIds.has(userId));
+  const heavyIds = heavy.map((row) => row.userId).filter((userId) => !spenderIds.has(userId));
   // Opt-out and Pro come off first, so nothing further is read for an account
   // that can never be mailed. A credit account is provisioned at signup, so
   // the zero fallback is for a row that never landed.
-  const cloudCandidates =
-    cloudIds.length > 0
-      ? await prisma.user.findMany({
-          select: {
-            creditAccount: { select: { balanceMicros: true, lifetimeChargedMicros: true } },
-            id: true,
-          },
-          where: { ...marketable, id: { in: cloudIds } },
-        })
+  const holders: Candidate[] =
+    heavyIds.length > 0
+      ? (
+          await prisma.user.findMany({
+            select: {
+              createdAt: true,
+              creditAccount: { select: { balanceMicros: true, lifetimeChargedMicros: true } },
+              id: true,
+            },
+            where: { ...marketable, id: { in: heavyIds } },
+          })
+        ).map((user) => ({
+          balanceMicros: user.creditAccount?.balanceMicros ?? zeroCreditMicros,
+          lifetimeChargedMicros: user.creditAccount?.lifetimeChargedMicros ?? zeroCreditMicros,
+          signedUpAt: user.createdAt,
+          userId: user.id,
+        }))
       : [];
-  // What everyone in view is holding. It does two jobs: the number the row
-  // carries, and the line between working in the cloud and keeping something
-  // there — the list wants the people holding media.
-  const stored = await prisma.cutStorageUsage.findMany({
-    select: { bytes: true, userId: true },
-    where: { userId: { in: [...spenderIds, ...cloudCandidates.map((user) => user.id)] } },
-  });
-  const storedBy = new Map(stored.map((row) => [row.userId, row.bytes]));
 
-  const accounts = [
-    ...spenders,
-    ...cloudCandidates
-      .filter((user) => (storedBy.get(user.id) ?? BigInt(0)) > BigInt(0))
-      .map((user) => ({
-        balanceMicros: user.creditAccount?.balanceMicros ?? zeroCreditMicros,
-        lifetimeChargedMicros: user.creditAccount?.lifetimeChargedMicros ?? zeroCreditMicros,
-        userId: user.id,
-      })),
-  ];
-  const userIds = accounts.map((account) => account.userId);
-  if (userIds.length === 0) {
-    const { count: dropped } = await prisma.userOutreach.deleteMany({
+  const retire = async () => {
+    // Anything this run did not touch no longer qualifies — unsubscribed, went
+    // Pro, went cold, or never came back. Only untouched candidates go; a
+    // contacted row is history and stays.
+    const { count } = await prisma.userOutreach.deleteMany({
       where: { campaign, scannedAt: { lt: startedAt }, status: "todo" },
     });
-    return { added: 0, dropped, scanned: 0 };
+    return count;
+  };
+  const userIds = [...spenders, ...holders].map((account) => account.userId);
+  if (userIds.length === 0) {
+    return { added: 0, dropped: await retire(), scanned: 0 };
   }
 
-  const [lastActive, ranOut, existing] = await Promise.all([
+  const [billed, uploaded, edited, stored, ranOut, existing] = await Promise.all([
     prisma.inferenceUsageEvent.groupBy({
       _max: { createdAt: true },
       by: ["userId"],
       where: { billingStatus: "charged", userId: { in: userIds } },
+    }),
+    // Cloud work the person did by hand: media they put up and projects they
+    // edited. Housekeeping writes the storage counter on its own — GC sweeps,
+    // copy jobs, the render worker — so its timestamp says nothing about a
+    // person being there.
+    prisma.cutMediaObject.groupBy({
+      _max: { createdAt: true },
+      by: ["userId"],
+      where: { quotaExempt: false, uploadState: "complete", userId: { in: userIds } },
+    }),
+    prisma.cutProject.groupBy({
+      _max: { updatedAt: true },
+      by: ["userId"],
+      where: { userId: { in: userIds } },
+    }),
+    prisma.cutStorageUsage.findMany({
+      select: { bytes: true, userId: true },
+      where: { userId: { in: userIds } },
     }),
     // The moment the balance last hit zero. Absent for an account still in
     // credit, which is exactly what the list wants to show.
@@ -154,19 +164,40 @@ export const outreachScanJob = defineJob(z.object({}).strict(), async () => {
     }),
   ]);
 
-  const lastActiveBy = new Map(lastActive.map((row) => [row.userId, row._max.createdAt]));
+  // Model work and cloud editing are both use of the product, so either one
+  // keeps an account looking as recent as it is.
+  const lastActiveBy = new Map<string, Date>();
+  const touch = (userId: string, at: Date | null) => {
+    const best = newest(at, lastActiveBy.get(userId));
+    if (best) lastActiveBy.set(userId, best);
+  };
+  for (const row of billed) touch(row.userId, row._max.createdAt);
+  for (const row of uploaded) touch(row.userId, row._max.createdAt);
+  for (const row of edited) touch(row.userId, row._max.updatedAt);
+  const storedBy = new Map(stored.map((row) => [row.userId, row.bytes]));
   const ranOutBy = new Map(ranOut.map((row) => [row.userId, row._max.createdAt]));
   const existingBy = new Map(existing.map((row) => [row.userId, row]));
+
+  // Spenders have to have come back: latest activity a clear day past signup.
+  // One sitting on signup day is a look, and the row never lands.
+  const returned = spenders.filter((account) => {
+    const lastActiveAt = lastActiveBy.get(account.userId);
+    return (
+      lastActiveAt !== undefined &&
+      lastActiveAt.getTime() - account.signedUpAt.getTime() >= OUTREACH_RETURN_DAYS * DAY_MS
+    );
+  });
+  // Holders have to be warm: something of theirs moved inside the window.
+  const warm = holders.filter((account) => {
+    const lastActiveAt = lastActiveBy.get(account.userId);
+    return lastActiveAt !== undefined && lastActiveAt >= since;
+  });
+  const accounts = [...returned, ...warm];
 
   const writes = accounts.map((account) => {
     const snapshot = {
       balanceMicros: account.balanceMicros,
-      // Model work and cloud editing are both use of the product, so either
-      // one keeps an account looking as recent as it is.
-      lastActiveAt: newest(
-        lastActiveBy.get(account.userId),
-        cloudActiveBy.get(account.userId),
-      ),
+      lastActiveAt: lastActiveBy.get(account.userId) ?? null,
       ranOutAt: ranOutBy.get(account.userId) ?? null,
       scannedAt: startedAt,
       spentMicros: account.lifetimeChargedMicros,
@@ -188,16 +219,9 @@ export const outreachScanJob = defineJob(z.object({}).strict(), async () => {
     await prisma.$transaction(writes.slice(i, i + BATCH));
   }
 
-  // Anything this run did not touch no longer qualifies — unsubscribed, went
-  // Pro, or went cold. Only untouched candidates go; a contacted row is
-  // history and stays.
-  const { count: dropped } = await prisma.userOutreach.deleteMany({
-    where: { campaign, scannedAt: { lt: startedAt }, status: "todo" },
-  });
-
   return {
-    added: accounts.length - existingBy.size,
-    dropped,
+    added: accounts.filter((account) => !existingBy.has(account.userId)).length,
+    dropped: await retire(),
     scanned: accounts.length,
   };
 });
