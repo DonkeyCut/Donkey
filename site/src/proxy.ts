@@ -1,7 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { allowedOrigin, corsHeaders, preflightHeaders } from "@/cut/server/cors";
-import { DONKEYCUT_CANONICAL, isDonkeycutHost, isSuHost } from "@/cut/lib/hosts";
+import {
+  DONKEYCUT_CANONICAL,
+  SU_APP_ORIGIN,
+  SU_ORIGIN,
+  isDonkeycutHost,
+  isSuHost,
+} from "@/cut/lib/hosts";
 
 // Cut (the video editor, publicly "Donkey Cut") lives under /cut in this single
 // site app: the marketing landing at /cut and the app under /cut/app. The
@@ -75,12 +81,47 @@ const passesThrough = (pathname: string) =>
   PASSTHROUGH.some((p) => underPath(pathname, p));
 
 // The super-user host serves one section and nothing else: /su/… for pages,
-// the shared /api handlers for their data. Nothing here belongs in a search
-// index, so every page response carries the header that says so.
+// the shared /api handlers for their data.
+//
+// The role gate lives here, ahead of the route. A page's document preloads
+// the client code of every segment on its path whether or not that segment
+// renders, so a gate inside the route tree would still hand the section's
+// bundle — the charts, the tables, the shell — to whoever asked for the
+// address. Here the proxy asks the account route who is calling (the session
+// cookie is scoped to the apex, so it reads the same on this host) and only a
+// super user reaches a page; everyone else gets a redirect and no document.
+// Sign-in lives on the app's host, so a signed-out visitor leaves for it with
+// this address as the post-auth callback, and a signed-in visitor without the
+// role is sent to the app. The routes the pages call are withSuperUser and
+// enforce the role again on every request.
+//
+// Nothing here belongs in a search index, so every page response carries the
+// header that says so.
 const SU_ROOT = "/su";
 
-function suHost(req: NextRequest, pathname: string): NextResponse {
+async function suHost(req: NextRequest, pathname: string): Promise<NextResponse> {
   if (underPath(pathname, "/api")) return NextResponse.next();
+
+  const account = await fetch(`${SU_APP_ORIGIN}/api/account/me`, {
+    cache: "no-store",
+    headers: { cookie: req.headers.get("cookie") ?? "" },
+  });
+  if (account.status === 401) {
+    // The callback has to carry the exact origin sign-in trusts (src/lib/auth.ts),
+    // so hosted names it from the constant; dev's su.localhost is plain http on
+    // whatever host the browser asked for.
+    const origin = HOSTED ? SU_ORIGIN : `http://${req.headers.get("host")}`;
+    const here = `${origin}${pathname}${req.nextUrl.search}`;
+    return NextResponse.redirect(
+      `${SU_APP_ORIGIN}/sign-in?callbackURL=${encodeURIComponent(here)}`,
+    );
+  }
+  if (!account.ok) {
+    return new NextResponse("The super-user gate is unavailable.", { status: 503 });
+  }
+  const { superUser } = (await account.json()) as { superUser: boolean };
+  if (superUser !== true) return NextResponse.redirect(`${SU_APP_ORIGIN}/app`);
+
   const url = req.nextUrl.clone();
   url.pathname = `${SU_ROOT}${pathname === "/" ? "" : pathname}`;
   const res = NextResponse.rewrite(url);

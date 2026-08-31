@@ -4,9 +4,11 @@ import type { ReactNode } from "react";
 import { SuShell } from "@/app/su/SuShell";
 
 // The super-user section, served on its own host (src/proxy.ts maps
-// su.donkeycut.com onto this tree). It sits outside the Cut app's layout so
-// none of the product shell — the engine connection gate, the exports dock,
-// the welcome sequence — mounts on an admin page.
+// su.donkeycut.com onto this tree, and only for a super user: the proxy checks
+// the session and the role before the route runs, so nothing here renders —
+// or ships its client code — to anyone else). It sits outside the Cut app's
+// layout so none of the product shell — the engine connection gate, the
+// exports dock, the welcome sequence — mounts on an admin page.
 export const metadata: Metadata = {
   robots: { follow: false, index: false },
   title: "Super user",
