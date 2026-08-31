@@ -75,10 +75,19 @@ export const INFERENCE_PREFIX = "cut/inference/";
 export const inferenceBlobKey = (userId: string, sha256: string, ext: string) =>
   `${INFERENCE_PREFIX}${userId}/${sha256}.${ext}`;
 
-export function presignPut(key: string, mime: string): Promise<string> {
+/** A time-limited PUT URL. `bytes` pins the object size into the signature:
+ * the claim the quota was checked against is the most R2 will accept, and a
+ * larger body is a 403 at the bucket. Left out only for transient inputs the
+ * quota never sees. */
+export function presignPut(key: string, mime: string, bytes?: number): Promise<string> {
   return getSignedUrl(
     r2(),
-    new PutObjectCommand({ Bucket: R2_BUCKET, Key: key, ContentType: mime }),
+    new PutObjectCommand({
+      Bucket: R2_BUCKET,
+      Key: key,
+      ContentType: mime,
+      ...(bytes !== undefined ? { ContentLength: bytes } : {}),
+    }),
     { expiresIn: PUT_EXPIRY_SECONDS }
   );
 }

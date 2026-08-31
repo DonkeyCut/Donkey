@@ -364,7 +364,7 @@ export const libraryCloud = {
           if (row.uploadState === "complete") {
             return Response.json({ fileName: row.fileName, key: row.r2Key, done: true });
           }
-          const url = await presignPut(row.r2Key, body.mime ?? "application/octet-stream");
+          const url = await presignPut(row.r2Key, body.mime ?? "application/octet-stream", Number(row.bytes));
           return Response.json({ fileName: row.fileName, key: row.r2Key, url });
         }
       }
@@ -375,17 +375,15 @@ export const libraryCloud = {
         await takenLibraryNames(userId),
       );
       const key = libraryKey(userId, fileName);
-      const url = await presignPut(
-        key,
-        body.mime ?? "application/octet-stream",
-      );
+      const bytes = Math.round(body.bytes);
+      const url = await presignPut(key, body.mime ?? "application/octet-stream", bytes);
       await prisma.cutMediaObject.create({
         data: {
           userId,
           r2Key: key,
           fileName,
           mime: body.mime ?? "",
-          bytes: BigInt(Math.round(body.bytes)),
+          bytes: BigInt(bytes),
           kind: "library",
           uploadState: "pending",
         },

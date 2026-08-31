@@ -84,7 +84,7 @@ export const mediaCloud = {
           if (row.uploadState === "complete") {
             return Response.json({ fileName: row.fileName, key: row.r2Key, done: true });
           }
-          const url = await presignPut(row.r2Key, body.mime ?? "application/octet-stream");
+          const url = await presignPut(row.r2Key, body.mime ?? "application/octet-stream", Number(row.bytes));
           return Response.json({ fileName: row.fileName, key: row.r2Key, url });
         }
       }
@@ -101,7 +101,8 @@ export const mediaCloud = {
         new Set([...(await takenMediaNames(userId, projectId)), ...avoid])
       );
       const key = projectMediaKey(userId, projectId, fileName);
-      const url = await presignPut(key, body.mime ?? "application/octet-stream");
+      const bytes = Math.round(body.bytes);
+      const url = await presignPut(key, body.mime ?? "application/octet-stream", bytes);
       await prisma.cutMediaObject.create({
         data: {
           userId,
@@ -109,7 +110,7 @@ export const mediaCloud = {
           r2Key: key,
           fileName,
           mime: body.mime ?? "",
-          bytes: BigInt(Math.round(body.bytes)),
+          bytes: BigInt(bytes),
           kind: "media",
           uploadState: "pending",
         },

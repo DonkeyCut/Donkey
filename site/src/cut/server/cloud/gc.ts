@@ -10,9 +10,8 @@ import { collectable, listSweepableLadders, pruneLadder, readLadder } from "./la
 import { deleteLibraryAssetCascade } from "./library";
 import { deleteProjectCascade } from "./projects";
 import { del, deletePrefix, INFERENCE_PREFIX, listOlderThan, projectHlsRoot } from "./r2";
-import { addUsage } from "./usage";
+import { addUsage, PENDING_CLAIM_MAX_AGE_MS } from "./usage";
 
-const PENDING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 // Scratch media a hosted inference call carried. No row tracks these — they are
 // found by prefix and live only as long as the calls that might reuse them.
 const SCRATCH_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -233,7 +232,7 @@ export async function runGc(): Promise<Response> {
   const pending = await prisma.cutMediaObject.findMany({
     where: {
       uploadState: "pending",
-      createdAt: { lt: new Date(Date.now() - PENDING_MAX_AGE_MS) },
+      createdAt: { lt: new Date(Date.now() - PENDING_CLAIM_MAX_AGE_MS) },
     },
     select: { id: true, r2Key: true },
   });
