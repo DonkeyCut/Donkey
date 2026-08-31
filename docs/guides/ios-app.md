@@ -52,9 +52,11 @@ fails writes that reason on the item, so a card can never spin on a request
 nothing is making any more. Notes merge both ways by last-writer-wins on the edit stamp,
 with tombstones so a delete made offline on either side still lands on the
 other. The folders notes file into travel with them, under ids whichever
-device made them chose; a folder carries no tombstone, so a folder the cloud
-listing no longer names was deleted elsewhere and its notes come back to the
-top level. Labels follow the same rule as folders: a note's labels ride its
+device made them chose. Folders file into folders the same way, and a folder
+goes up after the folder it sits in, so the cloud never meets a child before
+its parent. A folder carries no tombstone, so a folder the cloud listing no
+longer names was deleted elsewhere, and what it held — its notes and the
+folders inside it — comes up one level, on both sides. Labels follow the same rule as folders: a note's labels ride its
 own write, and a label the listing no longer names comes off every note that
 wore it. A note wears twenty labels at most, and both pickers stop offering
 more at that count — the write past it is refused rather than trimmed, so a
