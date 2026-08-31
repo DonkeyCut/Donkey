@@ -8,6 +8,7 @@
 // client-generated like note ids, so a phone can make one offline and push it
 // under the id it already filed notes against. Folders file into folders the
 // same way, through `parentId`; the top level is null.
+import { resolveParent } from "@/cut/lib/folderTree";
 import { NOTE_LABELS_MAX } from "@/cut/lib/types";
 import { prisma } from "@/lib/prisma";
 import { caught, err } from "./util";
@@ -103,27 +104,15 @@ async function resolveFolder(userId: string, folderId: unknown): Promise<string 
   return row?.id ?? null;
 }
 
-/** The folder a folder may be filed in: one of this account's note folders
- * that is neither the folder itself nor anything filed under it, or the top
- * level. An id naming nothing files the folder at the top level rather than
- * failing the write — the parent may have been deleted on the other device
- * while this one was offline — and so does one that would close a loop, which
- * two devices moving folders into each other offline can ask for. */
-async function resolveParent(userId: string, id: string, parentId: unknown): Promise<string | null> {
-  if (typeof parentId !== "string" || !parentId || parentId === id) return null;
+/** The folder a note folder may be filed in, by the rules every folder table
+ * shares (folderTree.ts), against this account's note folders. */
+async function resolveNoteParent(userId: string, id: string, parentId: unknown): Promise<string | null> {
+  if (typeof parentId !== "string" || !parentId) return null;
   const folders = await prisma.cutFolder.findMany({
     where: { userId, scope: "note" },
     select: { id: true, parentId: true },
   });
-  const parentOf = new Map(folders.map((f) => [f.id, f.parentId]));
-  if (!parentOf.has(parentId)) return null;
-  // Walk up from the asked parent; reaching `id` means the move would loop.
-  let cur: string | null | undefined = parentId;
-  for (let steps = 0; cur && steps <= folders.length; steps++) {
-    if (cur === id) return null;
-    cur = parentOf.get(cur);
-  }
-  return parentId;
+  return resolveParent(folders, id, parentId);
 }
 
 /** The labels a note may carry: the ids among `labelIds` that name one of
@@ -253,7 +242,7 @@ export const notesCloud = {
       const parentId =
         body.parentId === undefined
           ? (existing?.parentId ?? null)
-          : await resolveParent(userId, id, body.parentId);
+          : await resolveNoteParent(userId, id, body.parentId);
       if (!existing) {
         const row = await prisma.cutFolder.create({
           data: { id, userId, name, parentId, scope: "note" },

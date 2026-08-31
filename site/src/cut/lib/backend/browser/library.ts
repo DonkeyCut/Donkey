@@ -11,6 +11,7 @@
 // video off a link, so that import runs on the cloud worker and the bytes are
 // adopted afterwards (`lib/library.ts`); those paths fall through to the
 // hosted twin.
+import { resolveParent, settleParents } from "../../folderTree";
 import type {
   AssetType,
   LibraryTemplate,
@@ -54,7 +55,14 @@ type StoredAsset = {
   posterFile?: string;
 };
 
-type StoredFolder = { id: string; name: string; createdAt: number };
+type StoredFolder = {
+  id: string;
+  name: string;
+  /** The folder this one is filed in; null (or absent, from before nesting)
+   * is the top level. */
+  parentId?: string | null;
+  createdAt: number;
+};
 
 type LibraryIndex = {
   version: 1;
@@ -142,7 +150,7 @@ async function list(): Promise<Response> {
   }
   return json({
     assets: [...idx.assets].sort((a, b) => b.addedAt - a.addedAt),
-    folders: [...idx.folders].sort((a, b) => a.createdAt - b.createdAt),
+    folders: settleParents(idx.folders).sort((a, b) => a.createdAt - b.createdAt),
     templates: [...idx.templates].sort((a, b) => b.addedAt - a.addedAt),
   });
 }
@@ -280,48 +288,68 @@ async function move(req: Request): Promise<Response> {
 
 async function createFolder(req: Request): Promise<Response> {
   try {
-    const { name } = (await req.json()) as { name?: string };
+    const { name, parentId } = (await req.json()) as {
+      name?: string;
+      parentId?: string | null;
+    };
     const trimmed = (name ?? "").trim();
     if (!trimmed) return err("Folder name required.", 500);
-    const folder: StoredFolder = {
-      id: crypto.randomUUID().slice(0, 8),
-      name: trimmed.slice(0, 80),
-      createdAt: Date.now(),
-    };
-    await mutateIndex((idx) => {
-      idx.folders.push(folder);
-    });
-    return json(folder);
+    const id = crypto.randomUUID().slice(0, 8);
+    return json(
+      await mutateIndex((idx) => {
+        const folder: StoredFolder = {
+          id,
+          name: trimmed.slice(0, 80),
+          parentId: resolveParent(idx.folders, id, parentId),
+          createdAt: Date.now(),
+        };
+        idx.folders.push(folder);
+        return folder;
+      }),
+    );
   } catch (e) {
     return caught(e, "Could not create folder.");
   }
 }
 
-async function renameFolder(req: Request, id: string): Promise<Response> {
+/** Rename a folder, file it under another (null for the top level), or
+ * both; a key left out keeps what the folder has. */
+async function updateFolder(req: Request, id: string): Promise<Response> {
   try {
-    const { name } = (await req.json()) as { name?: string };
-    const trimmed = (name ?? "").trim();
-    if (!trimmed) return err("Folder name required.", 500);
+    const { name, parentId } = (await req.json()) as {
+      name?: string;
+      parentId?: string | null;
+    };
+    const trimmed = name?.trim();
+    if (name !== undefined && !trimmed) return err("Folder name required.", 500);
     return json(
       await mutateIndex((idx) => {
         const folder = idx.folders.find((f) => f.id === id);
         if (!folder) throw new Error("Folder not found.");
-        folder.name = trimmed.slice(0, 80);
+        if (trimmed) folder.name = trimmed.slice(0, 80);
+        if (parentId !== undefined) {
+          folder.parentId = resolveParent(idx.folders, id, parentId);
+        }
         return folder;
       }),
     );
   } catch (e) {
-    return caught(e, "Could not rename folder.");
+    return caught(e, "Could not update folder.");
   }
 }
 
+/** Delete a folder. What it held — its items and the folders inside it —
+ * comes up one level, filed where the folder was. */
 async function deleteFolder(id: string): Promise<Response> {
   try {
     await mutateIndex((idx) => {
+      const gone = idx.folders.find((f) => f.id === id);
+      if (!gone) return;
+      const up = gone.parentId ?? null;
       idx.folders = idx.folders.filter((f) => f.id !== id);
-      // Items in the folder fall back to ungrouped rather than vanishing.
-      for (const a of idx.assets) if (a.folderId === id) a.folderId = null;
-      for (const t of idx.templates) if (t.folderId === id) t.folderId = null;
+      for (const f of idx.folders) if ((f.parentId ?? null) === id) f.parentId = up;
+      for (const a of idx.assets) if (a.folderId === id) a.folderId = up;
+      for (const t of idx.templates) if (t.folderId === id) t.folderId = up;
     });
     return json({ ok: true });
   } catch (e) {
@@ -624,7 +652,7 @@ export async function dispatchLibraryRoute(
   if (rest[0] === "folders") {
     if (rest.length === 1 && method === "POST") return createFolder(req());
     if (rest.length === 2 && method === "PUT")
-      return renameFolder(req(), rest[1]);
+      return updateFolder(req(), rest[1]);
     if (rest.length === 2 && method === "DELETE") return deleteFolder(rest[1]);
     return err("Not found.", 404);
   }

@@ -1,5 +1,6 @@
 // Cloud twin of the engine's project CRUD (server/projects.ts + http/projects.ts):
 // docs and metadata in Postgres, media bytes in R2. Every query scopes by userId.
+import { resolveParent } from "@/cut/lib/folderTree";
 import { normalizeAspect, type ProjectDoc, type ProjectFolder, type ProjectSummary } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -8,6 +9,18 @@ import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl } from "./mediaCdn";
 import { del, deletePrefix, projectExportKey, projectHlsRoot, projectMediaKey } from "./r2";
 import { addUsage } from "./usage";
 import { caught, decodeFileParam, err, redirect } from "./util";
+
+const projectFolderView = (row: {
+  id: string;
+  name: string;
+  parentId: string | null;
+  createdAt: Date;
+}): ProjectFolder => ({
+  id: row.id,
+  name: row.name,
+  parentId: row.parentId,
+  createdAt: row.createdAt.getTime(),
+});
 
 type ProjectRow = {
   id: string;
@@ -282,56 +295,77 @@ export const projectsCloud = {
       where: { userId, scope: "project" },
       orderBy: { createdAt: "asc" },
     });
-    const folders: ProjectFolder[] = rows.map((f) => ({
-      id: f.id,
-      name: f.name,
-      createdAt: f.createdAt.getTime(),
-    }));
-    return Response.json(folders);
+    return Response.json(rows.map(projectFolderView));
   },
 
   async createFolder(userId: string, req: Request) {
     try {
-      const { name } = (await req.json()) as { name?: string };
+      const { name, parentId } = (await req.json()) as { name?: string; parentId?: string | null };
       const trimmed = (name ?? "").trim();
       if (!trimmed) return err("Folder name required.", 500);
-      const row = await prisma.cutFolder.create({
-        data: { userId, name: trimmed.slice(0, 80), scope: "project" },
+      const folders = await prisma.cutFolder.findMany({
+        where: { userId, scope: "project" },
+        select: { id: true, parentId: true },
       });
-      return Response.json({ id: row.id, name: row.name, createdAt: row.createdAt.getTime() });
+      const row = await prisma.cutFolder.create({
+        data: {
+          userId,
+          name: trimmed.slice(0, 80),
+          scope: "project",
+          parentId: resolveParent(folders, "", parentId),
+        },
+      });
+      return Response.json(projectFolderView(row));
     } catch (e) {
       return caught(e, "Could not create folder.");
     }
   },
 
-  async renameFolder(userId: string, id: string, req: Request) {
+  /** Rename a folder, file it under another (null for the top level), or
+   * both; a key left out keeps what the folder has. */
+  async updateFolder(userId: string, id: string, req: Request) {
     try {
-      const { name } = (await req.json()) as { name?: string };
-      const trimmed = (name ?? "").trim();
-      if (!trimmed) return err("Folder name required.", 500);
-      const row = await prisma.cutFolder.findFirst({ where: { id, userId, scope: "project" } });
-      if (!row) return err("Folder not found.", 500);
+      const { name, parentId } = (await req.json()) as { name?: string; parentId?: string | null };
+      const trimmed = name?.trim();
+      if (name !== undefined && !trimmed) return err("Folder name required.", 500);
+      const folders = await prisma.cutFolder.findMany({
+        where: { userId, scope: "project" },
+        select: { id: true, parentId: true },
+      });
+      if (!folders.some((f) => f.id === id)) return err("Folder not found.", 500);
       const updated = await prisma.cutFolder.update({
         where: { id },
-        data: { name: trimmed.slice(0, 80) },
+        data: {
+          ...(trimmed ? { name: trimmed.slice(0, 80) } : {}),
+          ...(parentId !== undefined ? { parentId: resolveParent(folders, id, parentId) } : {}),
+        },
       });
-      return Response.json({
-        id: updated.id,
-        name: updated.name,
-        createdAt: updated.createdAt.getTime(),
-      });
+      return Response.json(projectFolderView(updated));
     } catch (e) {
-      return caught(e, "Could not rename folder.");
+      return caught(e, "Could not update folder.");
     }
   },
 
+  /** Delete a folder. What it held — its projects and the folders inside it —
+   * comes up one level, filed where the folder was. */
   async deleteFolder(userId: string, id: string) {
     try {
-      await prisma.$transaction([
-        prisma.cutFolder.deleteMany({ where: { id, userId, scope: "project" } }),
-        // Projects in the folder fall back to ungrouped rather than disappearing.
-        prisma.cutProject.updateMany({ where: { userId, folderId: id }, data: { folderId: null } }),
-      ]);
+      await prisma.$transaction(async (tx) => {
+        const gone = await tx.cutFolder.findFirst({
+          where: { id, userId, scope: "project" },
+          select: { parentId: true },
+        });
+        if (!gone) return;
+        await tx.cutFolder.delete({ where: { id } });
+        await tx.cutProject.updateMany({
+          where: { userId, folderId: id },
+          data: { folderId: gone.parentId },
+        });
+        await tx.cutFolder.updateMany({
+          where: { userId, scope: "project", parentId: id },
+          data: { parentId: gone.parentId },
+        });
+      });
       return Response.json({ ok: true });
     } catch (e) {
       return caught(e, "Could not delete folder.");

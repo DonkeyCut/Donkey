@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -78,7 +78,7 @@ import {
   carryAssetTo,
   carryTemplateTo,
   moveLibraryItem,
-  renameLibraryFolder,
+  updateLibraryFolder,
   renameTemplate,
   uploadToLibrary,
   type ImportStage,
@@ -124,6 +124,7 @@ import {
   SPECIMEN_META,
 } from "@/cut/lib/fontSpecimen";
 import { AudioCardFace } from "./AudioPanel";
+import { childrenOf, folderTrail, folderWithin, parentOf } from "@/cut/lib/folderTree";
 import { FolderCrumb, FolderShelf, Marquee } from "./desktopFolders";
 import { formatBytes } from "@/lib/bytes";
 import { useMediaFileSize } from "@/cut/hooks/useMediaFileSize";
@@ -131,6 +132,8 @@ import { useMediaFileSize } from "@/cut/hooks/useMediaFileSize";
 // A dragged library selection travels as a JSON array of asset ids, so a whole
 // marquee-selected collection can be dropped onto a folder at once.
 const LIBRARY_MOVE_MIME = "application/x-cut-library-move";
+// A dragged folder tile, filed into another folder or back out to a crumb.
+const LIBRARY_FOLDER_MOVE_MIME = "application/x-cut-library-folder";
 
 /** What an arriving item is doing right now. An upload is one push from this
  * browser; a link is fetched by whichever shelf is taking it, and comes down
@@ -366,7 +369,8 @@ export function LibraryView() {
   // Phone camera recordings have their own home tab (Camera Roll); the
   // Library grid lists everything else.
   const all = (library.data?.assets ?? []).filter((a) => a.origin !== "camera");
-  const folders = library.data?.folders ?? [];
+  const folderList = library.data?.folders;
+  const folders = useMemo(() => folderList ?? [], [folderList]);
   const templates = library.data?.templates ?? [];
   const patch = useCallback(
     (fn: (prev: LibraryData) => LibraryData) => patchLibrary(client, fn),
@@ -636,6 +640,35 @@ export function LibraryView() {
     ).catch(() => void reload());
   };
 
+  // File folders under a folder (or out to the root, parentId null). A folder
+  // files only beside itself: under a folder on its own shelf, never under
+  // itself or anything inside it.
+  const moveFolders = async (ids: string[], parentId: string | null) => {
+    const target = parentId
+      ? folders.find((f) => f.id === parentId)?.residency
+      : null;
+    if (parentId && !target) return;
+    const moving = folders.filter(
+      (f) =>
+        ids.includes(f.id) &&
+        live(f.residency) &&
+        (!target || f.residency === target) &&
+        parentOf(f) !== parentId &&
+        !folderWithin(folders, parentId, f.id),
+    );
+    if (moving.length === 0) return;
+    const idset = new Set(moving.map((f) => f.id));
+    patch((d) => ({
+      ...d,
+      folders: d.folders.map((f) =>
+        idset.has(f.id) ? { ...f, parentId } : f,
+      ),
+    }));
+    await Promise.all(
+      moving.map((f) => updateLibraryFolder(f.residency, f.id, { parentId })),
+    ).catch(() => void reload());
+  };
+
   // Carry the current selection (or just this card) as a folder-move payload,
   // with a ghost — alongside the timeline-drag payload the card already sets.
   // A single card drags as itself; a multi-selection keeps the counted stack.
@@ -688,7 +721,23 @@ export function LibraryView() {
   const shownTemplates = templates.filter(
     (t) => (t.folderId ?? null) === openFolder,
   );
-  const openFolderName = folders.find((f) => f.id === openFolder)?.name;
+  // The way down to the open folder, and what is filed right here.
+  const trail = useMemo(() => folderTrail(folders, openFolder), [folders, openFolder]);
+  const shownFolders = useMemo(() => childrenOf(folders, openFolder), [folders, openFolder]);
+  // Where a new folder goes: inside the open folder on its shelf, or at the
+  // top level of the shelf new items go to — the rule `landing` applies to
+  // items, spelled out here so the render stays pure.
+  const openOwner = openFolder
+    ? folders.find((f) => f.id === openFolder)?.residency
+    : null;
+  const newShelf = openOwner && live(openOwner) ? openOwner : target;
+  const newParent = openOwner === newShelf ? openFolder : null;
+  // A folder the URL names and no shelf answers for — deleted elsewhere —
+  // goes back to the top level.
+  const staleFolder = !!openFolder && !!library.data && trail.length === 0;
+  useEffect(() => {
+    if (staleFolder) router.replace(homeHref(base, "library"));
+  }, [staleFolder, router, base]);
   const hasContent =
     all.length > 0 ||
     folders.length > 0 ||
@@ -741,14 +790,16 @@ export function LibraryView() {
           ) : (
             <FolderCrumb
               root="Library"
-              trail={[{ id: openFolder, name: openFolderName ?? "Folder" }]}
+              trail={trail}
               mime={LIBRARY_MOVE_MIME}
-              onGo={() => gotoFolder(null)}
-              onDrop={(ids) => void moveItems(ids, null)}
+              folderMime={LIBRARY_FOLDER_MOVE_MIME}
+              onGo={gotoFolder}
+              onDrop={(ids, id) => void moveItems(ids, id)}
+              onDropFolders={(ids, id) => void moveFolders(ids, id)}
             />
           )}
           <div className="flex items-center gap-2">
-            {openFolder === null && (
+            {(openFolder === null || newParent) && (
               <Button variant="outline" onClick={() => setFolderCreating(true)}>
                 <FolderPlus data-icon="inline-start" /> New folder
               </Button>
@@ -773,18 +824,20 @@ export function LibraryView() {
           />
         </div>
 
-        {/* Folders live at the root and nowhere else, so an open folder shows
-          only what is filed in it. */}
-        {openFolder === null && (folders.length > 0 || folderCreating) ? (
+        {/* The folders filed at this level, at the top and inside any folder
+          alike. A new one is made here and a dropped one is filed here. */}
+        {shownFolders.length > 0 || folderCreating ? (
           <FolderShelf
-            folders={folders}
+            folders={shownFolders}
             mime={LIBRARY_MOVE_MIME}
+            folderMime={LIBRARY_FOLDER_MOVE_MIME}
             creating={folderCreating}
             onCreatingChange={setFolderCreating}
             statOf={(id) => ({
               count:
                 all.filter((a) => (a.folderId ?? null) === id).length +
-                templates.filter((t) => (t.folderId ?? null) === id).length,
+                templates.filter((t) => (t.folderId ?? null) === id).length +
+                childrenOf(folders, id).length,
             })}
             badgeOf={(id) => {
               const r = folders.find((f) => f.id === id)?.residency;
@@ -794,8 +847,8 @@ export function LibraryView() {
             }}
             onOpen={gotoFolder}
             onCreate={async (name) => {
-              if (!live(target)) return;
-              const f = await createLibraryFolder(name, target);
+              if (!live(newShelf)) return;
+              const f = await createLibraryFolder(name, newShelf, newParent);
               patch((d) => ({ ...d, folders: [...d.folders, f] }));
             }}
             onRename={async (id, name) => {
@@ -807,24 +860,29 @@ export function LibraryView() {
                   f.id === id ? { ...f, name } : f,
                 ),
               }));
-              await renameLibraryFolder(r, id, name).catch(() => void reload());
+              await updateLibraryFolder(r, id, { name }).catch(() => void reload());
             }}
             onDelete={async (id) => {
-              const r = folders.find((f) => f.id === id)?.residency;
-              if (!r || !live(r)) return;
+              // What the folder held comes up one level, the way the shelf
+              // files it.
+              const gone = folders.find((f) => f.id === id);
+              if (!gone || !live(gone.residency)) return;
+              const up = parentOf(gone);
               patch((d) => ({
-                folders: d.folders.filter((f) => f.id !== id),
+                folders: d.folders
+                  .filter((f) => f.id !== id)
+                  .map((f) => (parentOf(f) === id ? { ...f, parentId: up } : f)),
                 assets: d.assets.map((a) =>
-                  a.folderId === id ? { ...a, folderId: null } : a,
+                  a.folderId === id ? { ...a, folderId: up } : a,
                 ),
                 templates: d.templates.map((t) =>
-                  t.folderId === id ? { ...t, folderId: null } : t,
+                  t.folderId === id ? { ...t, folderId: up } : t,
                 ),
               }));
-              if (openFolder === id) router.replace(homeHref(base, "library"));
-              await deleteLibraryFolder(r, id).catch(() => void reload());
+              await deleteLibraryFolder(gone.residency, id).catch(() => void reload());
             }}
             onDropIds={(ids, fid) => void moveItems(ids, fid)}
+            onDropFolders={(ids, fid) => void moveFolders(ids, fid)}
             onDropFiles={(files, fid) => void upload(files, fid)}
           />
         ) : null}

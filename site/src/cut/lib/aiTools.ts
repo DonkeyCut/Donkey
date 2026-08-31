@@ -63,6 +63,7 @@ import { refFromAsset, refFromStockVideo, type AssetRef } from "./assetRef";
 import { chatOwner, tagChatAsset } from "./chatAssets";
 import { applyOwnership, useGenerate, type VideoAttempt, type VideoGenOptions } from "./generate";
 import { useGenScene } from "./genScene";
+import { folderWithin } from "./folderTree";
 import { anchorRefused } from "./genvideo/shotAttempts";
 import {
   addProjectTemplateToTimeline,
@@ -74,7 +75,7 @@ import {
   fetchLibrary,
   importLibraryAsset,
   moveLibraryItem,
-  renameLibraryFolder,
+  updateLibraryFolder,
   saveAssetToLibrary,
 } from "./library";
 import { fetchNotes } from "./notes";
@@ -2844,7 +2845,11 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   library_list: async () => {
       const lib = await fetchLibrary();
       return {
-        folders: lib.folders.map((f) => ({ id: f.id, name: f.name })),
+        folders: lib.folders.map((f) => ({
+          id: f.id,
+          name: f.name,
+          ...(f.parentId ? { parentId: f.parentId } : {}),
+        })),
         assets: lib.assets.map((a) => ({
           id: a.id,
           name: a.name,
@@ -2875,7 +2880,11 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const folderName = new Map(folders.map((f) => [f.id, f.name]));
       const labelName = new Map(labels.map((l) => [l.id, l.name]));
       return {
-        folders: folders.map((f) => ({ id: f.id, name: f.name })),
+        folders: folders.map((f) => ({
+          id: f.id,
+          name: f.name,
+          ...(f.parentId ? { parentId: f.parentId } : {}),
+        })),
         labels: labels.map((l) => l.name),
         notes: notes.map((n) => {
           const worn = n.labelIds
@@ -2983,8 +2992,13 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         case "create_folder": {
           const name = String(input.name ?? "").trim();
           if (!name) throw new ToolError("A folder name is required.");
-          const f = await createLibraryFolder(name);
-          return { folderId: f.id, name: f.name };
+          // Inside a parent, the folder lands on the parent's shelf.
+          const parentId =
+            typeof input.parent_id === "string" && input.parent_id ? input.parent_id : null;
+          const r = parentId ? folderShelf(parentId) : undefined;
+          if (parentId && !r) throw new ToolError(`No library folder with id ${parentId}.`);
+          const f = await createLibraryFolder(name, r, parentId);
+          return { folderId: f.id, name: f.name, ...(f.parentId ? { parentId: f.parentId } : {}) };
         }
         case "rename_folder": {
           const name = String(input.name ?? "").trim();
@@ -2992,15 +3006,30 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           const id = String(input.folder_id ?? "");
           const r = folderShelf(id);
           if (!r) throw new ToolError(`No library folder with id ${id}.`);
-          await renameLibraryFolder(r, id, name);
+          await updateLibraryFolder(r, id, { name });
           return { renamed: true, name };
+        }
+        case "move_folder": {
+          const id = String(input.folder_id ?? "");
+          const r = folderShelf(id);
+          if (!r) throw new ToolError(`No library folder with id ${id}.`);
+          const parentId =
+            typeof input.parent_id === "string" && input.parent_id ? input.parent_id : null;
+          if (parentId && folderShelf(parentId) !== r) {
+            throw new ToolError("That folder is on a different library shelf.");
+          }
+          if (parentId && folderWithin(lib.folders, parentId, id)) {
+            throw new ToolError("A folder can't move into itself or a folder inside it.");
+          }
+          const moved = await updateLibraryFolder(r, id, { parentId });
+          return { moved: true, parentId: moved.parentId ?? null };
         }
         case "delete_folder": {
           const id = String(input.folder_id ?? "");
           const r = folderShelf(id);
           if (!r) throw new ToolError(`No library folder with id ${id}.`);
           await deleteLibraryFolder(r, id);
-          return { deleted: true, note: "Its assets moved to the Library root." };
+          return { deleted: true, note: "What it held moved up one level." };
         }
         case "move_asset": {
           const folderId =

@@ -69,7 +69,7 @@ import {
   importTemplateToProject,
   libraryMediaUrl,
   moveLibraryItem,
-  renameLibraryFolder,
+  updateLibraryFolder,
   renameTemplate,
   saveAssetToLibrary,
   saveTemplate,
@@ -121,6 +121,7 @@ import { useRevealEffect, useRevealFlash } from "@/cut/lib/refReveal";
 import { usePanelRequestEffect } from "@/cut/lib/panelRequest";
 import { CopyNameLabel } from "./AssetRefs";
 import { AudioCardFace, AudioPanel } from "./AudioPanel";
+import { childrenOf, folderTrail, folderWithin, parentOf } from "@/cut/lib/folderTree";
 import { FolderCrumb, FolderShelf, Marquee, useTilePicks } from "./desktopFolders";
 import { TemplateCard } from "./TemplateCard";
 import { GenerateVideoPanel } from "./GeneratePanel";
@@ -138,6 +139,8 @@ import { SubTabs } from "./SubTabs";
 
 // Drag a library clip onto a folder tile to file it (side panel, single card).
 const LIBRARY_MOVE_MIME = "application/x-cut-library-move";
+// A dragged folder row, filed into another folder or back out to a crumb.
+const LIBRARY_FOLDER_MOVE_MIME = "application/x-cut-library-folder";
 // A Project Files selection dragged onto a folder tile or the crumb: the
 // payload is the picked asset ids, so one drop files the whole selection.
 const MEDIA_MOVE_MIME = "application/x-cut-media-move";
@@ -1684,24 +1687,49 @@ function LibraryPanel({ projectId }: { projectId: string }) {
 
   const bothShelves = availableResidencies().length > 1;
   const shownTemplates = templates.filter((t) => (t.folderId ?? null) === openFolder);
-  // The Camera Roll tile leads the shelf while the phone has synced anything.
+  // The shelf at this level: the folders filed here. At the top the Camera
+  // Roll tile leads it while the phone has synced anything; the roll itself
+  // holds no folders.
+  const cameraRoll: LibraryFolder & { locked?: boolean } = {
+    id: CAMERA_ROLL_FOLDER,
+    name: "Camera Roll",
+    createdAt: 0,
+    residency: "cloud",
+    locked: true,
+  };
   const shelfFolders: (LibraryFolder & { locked?: boolean })[] =
-    cameraCount > 0
-      ? [
-          {
-            id: CAMERA_ROLL_FOLDER,
-            name: "Camera Roll",
-            createdAt: 0,
-            residency: "cloud",
-            locked: true,
-          },
-          ...folders,
-        ]
-      : folders;
-  const openFolderName =
-    openFolder === CAMERA_ROLL_FOLDER
-      ? "Camera Roll"
-      : folders.find((f) => f.id === openFolder)?.name;
+    openFolder === null
+      ? [...(cameraCount > 0 ? [cameraRoll] : []), ...childrenOf(folders, null)]
+      : openFolder === CAMERA_ROLL_FOLDER
+        ? []
+        : childrenOf(folders, openFolder);
+  const trail =
+    openFolder === CAMERA_ROLL_FOLDER ? [cameraRoll] : folderTrail(folders, openFolder);
+
+  // File folders under a folder (or out to the root, parentId null). A folder
+  // files only beside itself: under a folder on its own shelf, never under
+  // itself or anything inside it.
+  const moveFolders = async (ids: string[], parentId: string | null) => {
+    if (parentId === CAMERA_ROLL_FOLDER) return;
+    const target = parentId ? folders.find((f) => f.id === parentId)?.residency : null;
+    if (parentId && !target) return;
+    const moving = folders.filter(
+      (f) =>
+        ids.includes(f.id) &&
+        (!target || f.residency === target) &&
+        parentOf(f) !== parentId &&
+        !folderWithin(folders, parentId, f.id)
+    );
+    if (moving.length === 0) return;
+    const idset = new Set(moving.map((f) => f.id));
+    patch((d) => ({
+      ...d,
+      folders: d.folders.map((f) => (idset.has(f.id) ? { ...f, parentId } : f)),
+    }));
+    await Promise.all(
+      moving.map((f) => updateLibraryFolder(f.residency, f.id, { parentId }))
+    ).catch(() => void reload());
+  };
 
   return (
     <div
@@ -1718,23 +1746,27 @@ function LibraryPanel({ projectId }: { projectId: string }) {
           <FolderCrumb
             className="text-sm"
             root="Library"
-            trail={[{ id: openFolder, name: openFolderName ?? "Folder" }]}
+            trail={trail}
             mime={LIBRARY_MOVE_MIME}
-            onGo={() => setOpenFolder(null)}
-            onDrop={(ids) => ids.forEach((id) => void move(id, null))}
+            folderMime={LIBRARY_FOLDER_MOVE_MIME}
+            onGo={setOpenFolder}
+            onDrop={(ids, id) => ids.forEach((fid) => void move(fid, id))}
+            onDropFolders={(ids, id) => void moveFolders(ids, id)}
           />
         </div>
       )}
-      {openFolder === null && shelfFolders.length > 0 ? (
+      {shelfFolders.length > 0 ? (
         <div className="shrink-0 px-3.5">
           <FolderShelf
             rows
             folders={shelfFolders}
             mime={LIBRARY_MOVE_MIME}
+            folderMime={LIBRARY_FOLDER_MOVE_MIME}
             statOf={(id) => ({
               count:
                 all.filter((a) => folderOf(a) === id).length +
-                templates.filter((t) => (t.folderId ?? null) === id).length,
+                templates.filter((t) => (t.folderId ?? null) === id).length +
+                childrenOf(folders, id).length,
             })}
             badgeOf={(id) => {
               const r = folders.find((f) => f.id === id)?.residency;
@@ -1748,24 +1780,29 @@ function LibraryPanel({ projectId }: { projectId: string }) {
                 ...d,
                 folders: d.folders.map((f) => (f.id === id ? { ...f, name } : f)),
               }));
-              await renameLibraryFolder(r, id, name).catch(() => void reload());
+              await updateLibraryFolder(r, id, { name }).catch(() => void reload());
             }}
             onDelete={async (id) => {
-              const r = folders.find((f) => f.id === id)?.residency;
-              if (!r) return;
+              // What the folder held comes up one level, the way the shelf
+              // files it.
+              const gone = folders.find((f) => f.id === id);
+              if (!gone) return;
+              const up = parentOf(gone);
               patch((d) => ({
-                folders: d.folders.filter((f) => f.id !== id),
+                folders: d.folders
+                  .filter((f) => f.id !== id)
+                  .map((f) => (parentOf(f) === id ? { ...f, parentId: up } : f)),
                 assets: d.assets.map((a) =>
-                  a.folderId === id ? { ...a, folderId: null } : a
+                  a.folderId === id ? { ...a, folderId: up } : a
                 ),
                 templates: d.templates.map((t) =>
-                  t.folderId === id ? { ...t, folderId: null } : t
+                  t.folderId === id ? { ...t, folderId: up } : t
                 ),
               }));
-              if (openFolder === id) setOpenFolder(null);
-              await deleteLibraryFolder(r, id).catch(() => void reload());
+              await deleteLibraryFolder(gone.residency, id).catch(() => void reload());
             }}
             onDropIds={(ids, fid) => ids.forEach((id) => void move(id, fid))}
+            onDropFolders={(ids, fid) => void moveFolders(ids, fid)}
             onRefDrop={(ref, fid) => {
               // Project media dropped on a folder tile (a Media card or a
               // timeline clip): save it to the library, filed in that folder.

@@ -1476,10 +1476,13 @@ export interface RenderRecord {
   assetId?: string;
 }
 
-/** A named group of projects on the home screen. */
+/** A named group of projects on the home screen. Folders file into folders
+ * through `parentId`; null (or absent, on an index from before nesting) is
+ * the top level. */
 export interface ProjectFolder {
   id: string;
   name: string;
+  parentId?: string | null;
   createdAt: number;
 }
 

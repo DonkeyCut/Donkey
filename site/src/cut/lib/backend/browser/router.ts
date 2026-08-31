@@ -6,6 +6,7 @@
 // Owned here: projects CRUD + folders, media bytes, image import, presign-get
 // (answered with blob URLs), exports, the export-jobs feed, and the library
 // shelf (./library.ts). Everything else is the driver's cloud proxy.
+import { resolveParent, settleParents } from "../../folderTree";
 import { normalizeAspect, type ProjectDoc, type ProjectFolder } from "../../types";
 import {
   getBrowserExportJob,
@@ -156,50 +157,72 @@ async function moveProject(req: Request, id: string): Promise<Response> {
 
 async function createFolder(req: Request): Promise<Response> {
   try {
-    const { name } = (await req.json()) as { name?: string };
+    const { name, parentId } = (await req.json()) as { name?: string; parentId?: string | null };
     const trimmed = (name ?? "").trim();
     if (!trimmed) return err("Folder name required.", 500);
-    const folder: ProjectFolder = {
-      id: crypto.randomUUID().slice(0, 8),
-      name: trimmed.slice(0, 80),
-      createdAt: Date.now(),
-    };
-    await store.updateIndex((idx) => ({ ...idx, folders: [...idx.folders, folder] }));
+    const id = crypto.randomUUID().slice(0, 8);
+    let folder: ProjectFolder | null = null;
+    await store.updateIndex((idx) => {
+      folder = {
+        id,
+        name: trimmed.slice(0, 80),
+        parentId: resolveParent(idx.folders, id, parentId),
+        createdAt: Date.now(),
+      };
+      return { ...idx, folders: [...idx.folders, folder] };
+    });
     return json(folder);
   } catch (e) {
     return caught(e, "Could not create folder.");
   }
 }
 
-async function renameFolder(req: Request, fid: string): Promise<Response> {
+/** Rename a folder, file it under another (null for the top level), or
+ * both; a key left out keeps what the folder has. */
+async function updateFolder(req: Request, fid: string): Promise<Response> {
   try {
-    const { name } = (await req.json()) as { name?: string };
-    const trimmed = (name ?? "").trim();
-    if (!trimmed) return err("Folder name required.", 500);
-    let renamed: ProjectFolder | null = null;
+    const { name, parentId } = (await req.json()) as { name?: string; parentId?: string | null };
+    const trimmed = name?.trim();
+    if (name !== undefined && !trimmed) return err("Folder name required.", 500);
+    let updated: ProjectFolder | null = null;
     await store.updateIndex((idx) => ({
       ...idx,
       folders: idx.folders.map((f) =>
-        f.id === fid ? (renamed = { ...f, name: trimmed.slice(0, 80) }) : f
+        f.id === fid
+          ? (updated = {
+              ...f,
+              ...(trimmed ? { name: trimmed.slice(0, 80) } : {}),
+              ...(parentId !== undefined
+                ? { parentId: resolveParent(idx.folders, fid, parentId) }
+                : {}),
+            })
+          : f
       ),
     }));
-    return renamed ? json(renamed) : err("Folder not found.", 500);
+    return updated ? json(updated) : err("Folder not found.", 500);
   } catch (e) {
-    return caught(e, "Could not rename folder.");
+    return caught(e, "Could not update folder.");
   }
 }
 
+/** Delete a folder. What it held — its projects and the folders inside it —
+ * comes up one level, filed where the folder was. */
 async function deleteFolder(fid: string): Promise<Response> {
   try {
-    await store.updateIndex((idx) => ({
-      ...idx,
-      folders: idx.folders.filter((f) => f.id !== fid),
-    }));
-    // Projects in the folder fall back to ungrouped rather than disappearing.
+    let up: string | null = null;
+    await store.updateIndex((idx) => {
+      up = idx.folders.find((f) => f.id === fid)?.parentId ?? null;
+      return {
+        ...idx,
+        folders: idx.folders
+          .filter((f) => f.id !== fid)
+          .map((f) => ((f.parentId ?? null) === fid ? { ...f, parentId: up } : f)),
+      };
+    });
     for (const id of await store.listProjectIds()) {
       const doc = await store.readDoc(id);
       if (doc?.folderId === fid) {
-        doc.folderId = null;
+        doc.folderId = up;
         await store.writeDoc(id, doc);
       }
     }
@@ -343,13 +366,13 @@ export async function dispatchBrowserRoute(
       if (rest.length === 2) {
         if (method === "GET") {
           const { folders } = await store.readIndex();
-          return json([...folders].sort((a, b) => a.createdAt - b.createdAt));
+          return json(settleParents(folders).sort((a, b) => a.createdAt - b.createdAt));
         }
         if (method === "POST") return createFolder(req());
         return err("Method not allowed.", 405);
       }
       if (rest.length === 3) {
-        if (method === "PUT") return renameFolder(req(), rest[2]);
+        if (method === "PUT") return updateFolder(req(), rest[2]);
         if (method === "DELETE") return deleteFolder(rest[2]);
         return err("Method not allowed.", 405);
       }

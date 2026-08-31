@@ -90,6 +90,7 @@ import {
 } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
+import { childrenOf, folderTrail, folderWithin, parentOf } from "@/cut/lib/folderTree";
 import { FolderCrumb, FolderShelf, Marquee } from "./desktopFolders";
 import { formatBytes } from "@/lib/bytes";
 
@@ -117,6 +118,8 @@ type SectionData = {
 // A dragged selection is carried as a JSON array of project ids, so one drag can
 // move a whole marquee-selected collection into a folder.
 const PROJECT_MIME = "application/x-cut-project";
+// A dragged folder tile, filed into another folder or back out to a crumb.
+const PROJECT_FOLDER_MIME = "application/x-cut-project-folder";
 
 // The badge marks where one project lives, so it says that outright rather
 // than repeating the shelf heading it sits under. A local project the Donkey
@@ -267,6 +270,10 @@ export function ProjectsHome() {
   // The open folder lives in the URL (?folder=…) so project URLs can point
   // back into it and the browser's back button steps folder → root.
   const openFolder = useSearchParams().get("folder");
+  // Which section owns the open folder — in dual mode only that section shows.
+  const folderOwner: Residency | null = openFolder
+    ? (residencies.find((r) => data[r].folders.some((f) => f.id === openFolder)) ?? null)
+    : null;
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [view, setView] = useState<View>("gallery");
   // The residency the pending creation was launched for; null when the naming
@@ -295,6 +302,14 @@ export function ProjectsHome() {
     if (saved === "list" || saved === "gallery") setView(saved);
   }, []);
 
+  // A folder the URL names and no listed shelf answers for — deleted
+  // elsewhere — goes back to the top level.
+  const allSettled = residencies.every((r) => data[r].projects !== null || data[r].error);
+  const staleFolder = !!openFolder && allSettled && !folderOwner;
+  useEffect(() => {
+    if (staleFolder) router.replace(homeHref(base, "projects"));
+  }, [staleFolder, router, base]);
+
   const switchView = (v: View) => {
     setView(v);
     localStorage.setItem("cut-projects-view", v);
@@ -303,12 +318,12 @@ export function ProjectsHome() {
   // Each mutation below opens with the same guard: a shelf that isn't
   // answering takes no changes, and an optimistic patch would paint a rename
   // that never happened and then take it back on reconnect.
-  const createFolder = async (r: Residency, fname: string) => {
+  const createFolder = async (r: Residency, fname: string, parentId: string | null) => {
     if (!live(r)) return;
     const res = await backendFor(r).fetch("/api/cut/projects/folders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: fname }),
+      body: JSON.stringify({ name: fname, parentId }),
     });
     if (res.ok) {
       const f = (await res.json()) as ProjectFolder;
@@ -339,16 +354,49 @@ export function ProjectsHome() {
     router.push(homeHref(base, "projects", id));
   };
 
+  // What a deleted folder held comes up one level, the way the shelf files it.
   const deleteFolder = async (r: Residency, id: string) => {
     if (!live(r)) return;
+    const up = parentOf(data[r].folders.find((f) => f.id === id) ?? { id });
     patch(r, (s) => ({
-      folders: s.folders.filter((f) => f.id !== id),
-      projects: s.projects.map((p) => (p.folderId === id ? { ...p, folderId: null } : p)),
+      folders: s.folders
+        .filter((f) => f.id !== id)
+        .map((f) => (parentOf(f) === id ? { ...f, parentId: up } : f)),
+      projects: s.projects.map((p) => (p.folderId === id ? { ...p, folderId: up } : p)),
     }));
-    if (openFolder === id) router.replace(homeHref(base, "projects"));
     await backendFor(r)
       .fetch(`/api/cut/projects/folders/${id}`, { method: "DELETE" })
       .catch(() => void refresh(r));
+  };
+
+  // File folders under a folder (or out to the root, parentId null). A folder
+  // files only beside itself: under a folder on its own shelf, never under
+  // itself or anything inside it. Each shelf moves its own.
+  const moveFolders = async (ids: string[], parentId: string | null) => {
+    for (const r of residencies) {
+      if (!live(r)) continue;
+      const own = data[r].folders;
+      if (parentId && !own.some((f) => f.id === parentId)) continue;
+      const moving = own.filter(
+        (f) =>
+          ids.includes(f.id) && parentOf(f) !== parentId && !folderWithin(own, parentId, f.id)
+      );
+      if (moving.length === 0) continue;
+      const idset = new Set(moving.map((f) => f.id));
+      patch(r, (s) => ({
+        ...s,
+        folders: s.folders.map((f) => (idset.has(f.id) ? { ...f, parentId } : f)),
+      }));
+      await Promise.all(
+        moving.map((f) =>
+          backendFor(r).fetch(`/api/cut/projects/folders/${f.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ parentId }),
+          })
+        )
+      ).catch(() => void refresh(r));
+    }
   };
 
   // Move a collection of projects into a folder (or out to the root, folderId
@@ -544,13 +592,8 @@ export function ProjectsHome() {
     }
   };
 
-  // Which section owns the open folder — in dual mode only that section shows.
-  const folderOwner: Residency | null = openFolder
-    ? (residencies.find((r) => data[r].folders.some((f) => f.id === openFolder)) ?? null)
-    : null;
-  const openFolderName = folderOwner
-    ? data[folderOwner].folders.find((f) => f.id === openFolder)?.name
-    : undefined;
+  // The way down to the open folder, for the crumb.
+  const trail = folderOwner ? folderTrail(data[folderOwner].folders, openFolder) : [];
   // A folder pins where a new project lands, but only a shelf that answers can
   // take one: inside a folder on an unreachable shelf, New project goes where
   // the picker points instead.
@@ -565,9 +608,15 @@ export function ProjectsHome() {
 
   // One flat surface: every residency's folders on one shelf and projects in
   // one grid, newest edits first — the per-card badge says where each lives.
+  // Inside a folder, the shelf holds the folders filed there, on its shelf.
   const residencyOfFolder = (id: string): Residency =>
     residencies.find((r) => data[r].folders.some((f) => f.id === id)) ?? homeMode;
-  const mergedFolders = residencies.flatMap((r) => data[r].folders);
+  const shownFolders =
+    openFolder === null
+      ? residencies.flatMap((r) => childrenOf(data[r].folders, null))
+      : folderOwner
+        ? childrenOf(data[folderOwner].folders, openFolder)
+        : [];
   const mergedShown = residencies
     .flatMap((r) =>
       (data[r].projects ?? [])
@@ -598,23 +647,33 @@ export function ProjectsHome() {
   // PROJECT_MIME and are handled by the folder tiles and breadcrumb instead.
   const isFileDrag = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes("Files");
 
+  // Where a new folder goes: the open folder's shelf, or the picker's at the
+  // top level — the same shelf a new project would land on.
+  const folderTarget = pinnedTarget ?? target;
   const renderShelf = () => (
     <FolderShelf
-      folders={mergedFolders}
+      folders={shownFolders}
       mime={PROJECT_MIME}
+      folderMime={PROJECT_FOLDER_MIME}
       creating={folderCreating !== null}
-      onCreatingChange={(c) => setFolderCreating(c ? (folderCreating ?? target) : null)}
+      onCreatingChange={(c) => setFolderCreating(c ? (folderCreating ?? folderTarget) : null)}
       statOf={(id) => {
-        const items = (data[residencyOfFolder(id)].projects ?? []).filter(
-          (p) => (p.folderId ?? null) === id
-        );
-        return { count: items.length, size: items.reduce((n, p) => n + (p.sizeBytes ?? 0), 0) };
+        const r = residencyOfFolder(id);
+        const items = (data[r].projects ?? []).filter((p) => (p.folderId ?? null) === id);
+        return {
+          count: items.length + childrenOf(data[r].folders, id).length,
+          size: items.reduce((n, p) => n + (p.sizeBytes ?? 0), 0),
+        };
       }}
       onOpen={gotoFolder}
-      onCreate={(n) => void createFolder(folderCreating ?? target, n)}
+      onCreate={(n) => {
+        const r = folderCreating ?? folderTarget;
+        void createFolder(r, n, r === folderOwner ? openFolder : null);
+      }}
       onRename={(id, n) => void renameFolder(residencyOfFolder(id), id, n)}
       onDelete={(id) => void deleteFolder(residencyOfFolder(id), id)}
       onDropIds={(ids, fid) => void moveProjects(residencyOfFolder(fid), ids, fid)}
+      onDropFolders={(ids, fid) => void moveFolders(ids, fid)}
       // File imports run on the globally bound backend, so only its folders
       // can receive the files themselves; drops on another residency's folder
       // land at the root, like drops on the page surface.
@@ -854,17 +913,23 @@ export function ProjectsHome() {
           ) : (
             <FolderCrumb
               root="Projects"
-              trail={[{ id: openFolder, name: openFolderName ?? "Folder" }]}
+              trail={trail}
               mime={PROJECT_MIME}
-              onGo={() => gotoFolder(null)}
-              onDrop={(ids) => void moveProjects(folderOwner ?? r0, ids, null)}
+              folderMime={PROJECT_FOLDER_MIME}
+              onGo={gotoFolder}
+              onDrop={(ids, id) =>
+                void moveProjects(id ? residencyOfFolder(id) : (folderOwner ?? r0), ids, id)
+              }
+              onDropFolders={(ids, id) => void moveFolders(ids, id)}
             />
           )}
           <div className="flex items-center gap-2">
             {/* A folder lands where a project would: New project owns that
-                choice for the whole page, so this asks nothing of its own. */}
-            {openFolder === null && (
-              <Button variant="outline" onClick={() => setFolderCreating(target)}>
+                choice for the whole page, so this asks nothing of its own.
+                Inside a folder it lands there, so the folder's shelf has to
+                be answering. */}
+            {(openFolder === null || pinnedTarget) && (
+              <Button variant="outline" onClick={() => setFolderCreating(folderTarget)}>
                 <FolderPlus data-icon="inline-start" /> New folder
               </Button>
             )}
@@ -940,9 +1005,7 @@ export function ProjectsHome() {
                 </p>
               )
           )}
-          {openFolder === null &&
-            (mergedFolders.length > 0 || folderCreating !== null) &&
-            renderShelf()}
+          {(shownFolders.length > 0 || folderCreating !== null) && renderShelf()}
           {view === "gallery" ? renderGallery(mergedShown) : renderList(mergedShown)}
         </>
       )}

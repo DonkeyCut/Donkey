@@ -12,7 +12,7 @@ export const LIBRARY_TOOLS = [
   {
     name: "library_list",
     description:
-      "List the shared Library — reusable media saved across projects: folders, assets (video/audio/image, and the account's own font files), and templates (saved arrangements of clips, overlays, titles, and captions). An asset's `origin` says it came from the user's iOS app: \"camera\" is a clip they recorded on their phone (their Camera Roll), \"inspiration\" a reference they saved to the Inspiration folder. Library items live outside the project: library_add imports an asset, template_add re-materializes a template.",
+      "List the shared Library — reusable media saved across projects: folders (nested; a folder's parentId names the folder it sits in), assets (video/audio/image, and the account's own font files), and templates (saved arrangements of clips, overlays, titles, and captions). An asset's `origin` says it came from the user's iOS app: \"camera\" is a clip they recorded on their phone (their Camera Roll), \"inspiration\" a reference they saved to the Inspiration folder. Library items live outside the project: library_add imports an asset, template_add re-materializes a template.",
     inputSchema: obj({}),
   },
   {
@@ -57,15 +57,16 @@ export const LIBRARY_TOOLS = [
   {
     name: "library_organize",
     description:
-      "Organize the shared Library: create_folder / rename_folder / delete_folder (a deleted folder's items drop to the root), move_asset files an asset or template into a folder (omit folder_id for the root), delete_asset / delete_template remove an item. Deletes are permanent — projects keep their own copies, but delete only what the user explicitly asked to remove. Deleting an asset with origin \"camera\" or \"inspiration\" takes it off the user's phone as well.",
+      "Organize the shared Library. Folders nest: create_folder makes one at the root or inside parent_id, rename_folder renames, move_folder files a folder under another (omit parent_id for the root; never into itself or a folder inside it), delete_folder removes one (what it held — items and folders — moves up one level). move_asset files an asset or template into a folder (omit folder_id for the root), delete_asset / delete_template remove an item. Deletes are permanent — projects keep their own copies, but delete only what the user explicitly asked to remove. Deleting an asset with origin \"camera\" or \"inspiration\" takes it off the user's phone as well.",
     inputSchema: obj({
       action: {
         type: "string",
-        enum: ["create_folder", "rename_folder", "delete_folder", "move_asset", "delete_asset", "delete_template"],
+        enum: ["create_folder", "rename_folder", "move_folder", "delete_folder", "move_asset", "delete_asset", "delete_template"],
         description: "The organize operation",
       },
       name: str("Folder name (create_folder, rename_folder)"),
-      folder_id: str("Folder id (rename_folder, delete_folder, move_asset destination — omit for root)"),
+      folder_id: str("Folder id (rename_folder, move_folder, delete_folder, move_asset destination — omit for root)"),
+      parent_id: str("The folder to file a folder inside (create_folder, move_folder) — omit for the root"),
       id: str("Library asset or template id (move_asset, delete_asset, delete_template)"),
     }, ["action"]),
   },

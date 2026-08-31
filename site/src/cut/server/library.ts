@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ClipSound } from "@donkeycut/effects-kit";
+import { resolveParent, settleParents } from "@/cut/lib/folderTree";
 import { cutDataRoot } from "./dataDir";
 import { assertLocalRuntime } from "./local-only";
 import { mediaPath as projectMediaPath, readProject } from "./projects";
@@ -45,6 +46,9 @@ export interface LibraryAsset {
 export interface LibraryFolder {
   id: string;
   name: string;
+  /** The folder this one is filed in; null (or absent, from before nesting)
+   * is the top level. */
+  parentId?: string | null;
   createdAt: number;
 }
 
@@ -374,48 +378,64 @@ export function getAsset(id: string) {
   return readIndex().then((idx) => idx.assets.find((a) => a.id === id));
 }
 
-// --- Folders: a flat set of named groups; assets carry a folderId. ---
+// --- Folders: named groups that file into each other; assets carry a
+// folderId, folders a parentId. ---
 
 export async function listFolders(): Promise<LibraryFolder[]> {
   const idx = await readIndex();
-  return (idx.folders ?? []).slice().sort((a, b) => a.createdAt - b.createdAt);
+  return settleParents(idx.folders ?? []).sort((a, b) => a.createdAt - b.createdAt);
 }
 
-export async function createFolder(name: string): Promise<LibraryFolder> {
-  const trimmed = name.trim();
-  if (!trimmed) throw new Error("Folder name required.");
-  const folder: LibraryFolder = {
-    id: crypto.randomUUID().slice(0, 8),
-    name: trimmed.slice(0, 80),
-    createdAt: Date.now(),
-  };
-  await mutateIndex((idx) => {
-    idx.folders = [...(idx.folders ?? []), folder];
-  });
-  return folder;
-}
-
-export async function renameFolder(
-  id: string,
+export async function createFolder(
   name: string,
+  parentId: string | null = null,
 ): Promise<LibraryFolder> {
   const trimmed = name.trim();
   if (!trimmed) throw new Error("Folder name required.");
+  const id = crypto.randomUUID().slice(0, 8);
   return mutateIndex((idx) => {
-    const folder = (idx.folders ?? []).find((f) => f.id === id);
-    if (!folder) throw new Error("Folder not found.");
-    folder.name = trimmed.slice(0, 80);
+    const folder: LibraryFolder = {
+      id,
+      name: trimmed.slice(0, 80),
+      parentId: resolveParent(idx.folders ?? [], id, parentId),
+      createdAt: Date.now(),
+    };
+    idx.folders = [...(idx.folders ?? []), folder];
     return folder;
   });
 }
 
+/** Rename a folder, file it under another (null for the top level), or
+ * both; a key left undefined keeps what the folder has. */
+export async function updateFolder(
+  id: string,
+  patch: { name?: string; parentId?: string | null },
+): Promise<LibraryFolder> {
+  const trimmed = patch.name?.trim();
+  if (patch.name !== undefined && !trimmed) throw new Error("Folder name required.");
+  return mutateIndex((idx) => {
+    const folder = (idx.folders ?? []).find((f) => f.id === id);
+    if (!folder) throw new Error("Folder not found.");
+    if (trimmed) folder.name = trimmed.slice(0, 80);
+    if (patch.parentId !== undefined) {
+      folder.parentId = resolveParent(idx.folders ?? [], id, patch.parentId);
+    }
+    return folder;
+  });
+}
+
+/** Delete a folder. What it held — its items and the folders inside it —
+ * comes up one level, filed where the folder was. */
 export async function deleteFolder(id: string) {
   await mutateIndex((idx) => {
+    const gone = (idx.folders ?? []).find((f) => f.id === id);
+    if (!gone) return;
+    const up = gone.parentId ?? null;
     idx.folders = (idx.folders ?? []).filter((f) => f.id !== id);
-    // Items in the folder fall back to ungrouped rather than vanishing.
-    for (const a of idx.assets) if (a.folderId === id) a.folderId = null;
+    for (const f of idx.folders) if ((f.parentId ?? null) === id) f.parentId = up;
+    for (const a of idx.assets) if (a.folderId === id) a.folderId = up;
     for (const t of idx.templates ?? [])
-      if (t.folderId === id) t.folderId = null;
+      if (t.folderId === id) t.folderId = up;
   });
 }
 

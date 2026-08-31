@@ -17,7 +17,7 @@ import {
   moveProjectToFolder,
   previewPath,
   readProject,
-  renameProjectFolder,
+  updateProjectFolder,
   saveMedia,
   sweepOrphanMedia,
   writeProject,
@@ -45,19 +45,20 @@ export const projectsApi = {
 
   async createFolder(req: Request) {
     try {
-      const { name } = (await req.json()) as { name?: string };
-      return Response.json(await createProjectFolder(name ?? ""));
+      const { name, parentId } = (await req.json()) as { name?: string; parentId?: string | null };
+      return Response.json(await createProjectFolder(name ?? "", parentId ?? null));
     } catch (e) {
       return caught(e, "Could not create folder.");
     }
   },
 
-  async renameFolder(req: Request, { id }: { id: string }) {
+  /** Rename a folder, move it under another, or both. */
+  async updateFolder(req: Request, { id }: { id: string }) {
     try {
-      const { name } = (await req.json()) as { name?: string };
-      return Response.json(await renameProjectFolder(id, name ?? ""));
+      const { name, parentId } = (await req.json()) as { name?: string; parentId?: string | null };
+      return Response.json(await updateProjectFolder(id, { name, parentId }));
     } catch (e) {
-      return caught(e, "Could not rename folder.");
+      return caught(e, "Could not update folder.");
     }
   },
 

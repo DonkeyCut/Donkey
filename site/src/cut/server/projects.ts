@@ -1,6 +1,7 @@
 import fsSync from "node:fs";
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { resolveParent, settleParents } from "@/cut/lib/folderTree";
 import type { Aspect, ProjectDoc, ProjectFolder, ProjectSummary } from "@/cut/lib/types";
 import { cutDataRoot } from "./dataDir";
 import { assertLocalRuntime } from "./local-only";
@@ -444,8 +445,8 @@ async function summarize(id: string, doc: ProjectDoc): Promise<ProjectSummary> {
   };
 }
 
-// --- Project folders: a flat set of named groups; each project's doc carries
-// its folderId, so grouping travels with the project. ---
+// --- Project folders: named groups that file into each other; each project's
+// doc carries its folderId, so grouping travels with the project. ---
 
 async function readFolders(): Promise<ProjectFolder[]> {
   try {
@@ -462,39 +463,60 @@ async function writeFolders(folders: ProjectFolder[]) {
 }
 
 export async function listProjectFolders(): Promise<ProjectFolder[]> {
-  return (await readFolders()).sort((a, b) => a.createdAt - b.createdAt);
+  return settleParents(await readFolders()).sort((a, b) => a.createdAt - b.createdAt);
 }
 
-export async function createProjectFolder(name: string): Promise<ProjectFolder> {
-  const trimmed = name.trim();
-  if (!trimmed) throw new Error("Folder name required.");
-  const folder: ProjectFolder = {
-    id: crypto.randomUUID().slice(0, 8),
-    name: trimmed.slice(0, 80),
-    createdAt: Date.now(),
-  };
-  await writeFolders([...(await readFolders()), folder]);
-  return folder;
-}
-
-export async function renameProjectFolder(id: string, name: string): Promise<ProjectFolder> {
+export async function createProjectFolder(
+  name: string,
+  parentId: string | null = null
+): Promise<ProjectFolder> {
   const trimmed = name.trim();
   if (!trimmed) throw new Error("Folder name required.");
   const folders = await readFolders();
+  const id = crypto.randomUUID().slice(0, 8);
+  const folder: ProjectFolder = {
+    id,
+    name: trimmed.slice(0, 80),
+    parentId: resolveParent(folders, id, parentId),
+    createdAt: Date.now(),
+  };
+  await writeFolders([...folders, folder]);
+  return folder;
+}
+
+/** Rename a folder, file it under another (null for the top level), or
+ * both; a key left undefined keeps what the folder has. */
+export async function updateProjectFolder(
+  id: string,
+  patch: { name?: string; parentId?: string | null }
+): Promise<ProjectFolder> {
+  const trimmed = patch.name?.trim();
+  if (patch.name !== undefined && !trimmed) throw new Error("Folder name required.");
+  const folders = await readFolders();
   const folder = folders.find((f) => f.id === id);
   if (!folder) throw new Error("Folder not found.");
-  folder.name = trimmed.slice(0, 80);
+  if (trimmed) folder.name = trimmed.slice(0, 80);
+  if (patch.parentId !== undefined) folder.parentId = resolveParent(folders, id, patch.parentId);
   await writeFolders(folders);
   return folder;
 }
 
+/** Delete a folder. What it held — its projects and the folders inside it —
+ * comes up one level, filed where the folder was. */
 export async function deleteProjectFolder(id: string) {
-  await writeFolders((await readFolders()).filter((f) => f.id !== id));
-  // Projects in the folder fall back to ungrouped rather than disappearing.
+  const folders = await readFolders();
+  const gone = folders.find((f) => f.id === id);
+  if (!gone) return;
+  const up = gone.parentId ?? null;
+  await writeFolders(
+    folders
+      .filter((f) => f.id !== id)
+      .map((f) => ((f.parentId ?? null) === id ? { ...f, parentId: up } : f))
+  );
   await Promise.all(
     (await readProjectEntries()).map(async ({ id: projectId, doc }) => {
       if (doc.folderId === id) {
-        doc.folderId = null;
+        doc.folderId = up;
         await writeProject(projectId, doc);
       }
     })

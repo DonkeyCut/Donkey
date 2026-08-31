@@ -12,7 +12,10 @@
  * offline, and the one PUT creates, renames and moves.
  */
 
+import { settleParents } from "./folderTree";
 import { backendFor } from "./residency";
+
+export { folderTrail, folderWithin } from "./folderTree";
 
 export interface CutNote {
   id: string;
@@ -80,46 +83,11 @@ export async function fetchNotes(): Promise<NotesData> {
   const res = await notesFetch("/api/cut/notes");
   if (!res.ok) throw new Error("Could not load notes.");
   const body = (await res.json()) as Partial<NotesData>;
-  const folders = body.folders ?? [];
-  const known = new Set(folders.map((f) => f.id));
   return {
     notes: (body.notes ?? []).filter((n) => n.deletedAt === null),
-    folders: folders.map((f) => ({
-      ...f,
-      parentId: f.parentId && known.has(f.parentId) ? f.parentId : null,
-    })),
+    folders: settleParents(body.folders ?? []),
     labels: body.labels ?? [],
   };
-}
-
-/** Whether `folderId` is `ancestorId` or filed somewhere under it. */
-export function folderWithin(
-  folders: readonly CutNoteFolder[],
-  folderId: string | null,
-  ancestorId: string,
-): boolean {
-  const parentOf = new Map(folders.map((f) => [f.id, f.parentId]));
-  let cur = folderId;
-  for (let steps = 0; cur && steps <= folders.length; steps++) {
-    if (cur === ancestorId) return true;
-    cur = parentOf.get(cur) ?? null;
-  }
-  return false;
-}
-
-/** The folders from the top level down to `folderId`, the open one last. */
-export function folderTrail(
-  folders: readonly CutNoteFolder[],
-  folderId: string | null,
-): CutNoteFolder[] {
-  const byId = new Map(folders.map((f) => [f.id, f]));
-  const trail: CutNoteFolder[] = [];
-  let cur = folderId ? byId.get(folderId) : undefined;
-  while (cur && trail.length <= folders.length) {
-    trail.unshift(cur);
-    cur = cur.parentId ? byId.get(cur.parentId) : undefined;
-  }
-  return trail;
 }
 
 /** Write one note. The server answers with the winning version — this write,

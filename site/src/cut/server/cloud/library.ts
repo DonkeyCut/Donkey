@@ -11,6 +11,7 @@ import type {
   TemplateLayer,
   TemplateMedia,
 } from "../library";
+import { resolveParent } from "@/cut/lib/folderTree";
 import type { StoredAsset } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -282,6 +283,18 @@ async function deleteLibraryObject(userId: string, fileName: string) {
   await del([row.r2Key]);
 }
 
+const libraryFolderView = (row: {
+  id: string;
+  name: string;
+  parentId: string | null;
+  createdAt: Date;
+}): LibraryFolder => ({
+  id: row.id,
+  name: row.name,
+  parentId: row.parentId,
+  createdAt: row.createdAt.getTime(),
+});
+
 export const libraryCloud = {
   /** The shelf. `?deleted=1` adds the tombstoned ids — the phone asks for
    * them to mirror a delete made here onto its Camera Roll, and it is the
@@ -321,11 +334,7 @@ export const libraryCloud = {
         return obj ? assetView(r, obj) : null;
       })
       .filter((a): a is LibraryAsset => a !== null);
-    const folders: LibraryFolder[] = folderRows.map((f) => ({
-      id: f.id,
-      name: f.name,
-      createdAt: f.createdAt.getTime(),
-    }));
+    const folders: LibraryFolder[] = folderRows.map(libraryFolderView);
     const templates = templateRows.map(templateView);
     // Assets someone deleted, for a client that holds its own copy of them:
     // the iOS app deletes the matching clip on the phone.
@@ -679,55 +688,79 @@ export const libraryCloud = {
 
   async createFolder(userId: string, req: Request) {
     try {
-      const { name } = (await req.json()) as { name?: string };
+      const { name, parentId } = (await req.json()) as {
+        name?: string;
+        parentId?: string | null;
+      };
       const trimmed = (name ?? "").trim();
       if (!trimmed) throw new Error("Folder name required.");
+      const folders = await prisma.cutFolder.findMany({
+        where: { userId, scope: "library" },
+        select: { id: true, parentId: true },
+      });
       const row = await prisma.cutFolder.create({
-        data: { userId, name: trimmed.slice(0, 80), scope: "library" },
+        data: {
+          userId,
+          name: trimmed.slice(0, 80),
+          scope: "library",
+          parentId: resolveParent(folders, "", parentId),
+        },
       });
-      return Response.json({
-        id: row.id,
-        name: row.name,
-        createdAt: row.createdAt.getTime(),
-      });
+      return Response.json(libraryFolderView(row));
     } catch (e) {
       return caught(e, "Could not create folder.");
     }
   },
 
-  async renameFolder(userId: string, id: string, req: Request) {
+  /** Rename a folder, file it under another (null for the top level), or
+   * both; a key left out keeps what the folder has. */
+  async updateFolder(userId: string, id: string, req: Request) {
     try {
-      const { name } = (await req.json()) as { name?: string };
-      const trimmed = (name ?? "").trim();
-      if (!trimmed) throw new Error("Folder name required.");
-      const row = await prisma.cutFolder.findFirst({
-        where: { id, userId, scope: "library" },
+      const { name, parentId } = (await req.json()) as {
+        name?: string;
+        parentId?: string | null;
+      };
+      const trimmed = name?.trim();
+      if (name !== undefined && !trimmed) throw new Error("Folder name required.");
+      const folders = await prisma.cutFolder.findMany({
+        where: { userId, scope: "library" },
+        select: { id: true, parentId: true },
       });
-      if (!row) throw new Error("Folder not found.");
+      if (!folders.some((f) => f.id === id)) throw new Error("Folder not found.");
       const updated = await prisma.cutFolder.update({
         where: { id },
-        data: { name: trimmed.slice(0, 80) },
+        data: {
+          ...(trimmed ? { name: trimmed.slice(0, 80) } : {}),
+          ...(parentId !== undefined
+            ? { parentId: resolveParent(folders, id, parentId) }
+            : {}),
+        },
       });
-      return Response.json({
-        id: updated.id,
-        name: updated.name,
-        createdAt: updated.createdAt.getTime(),
-      });
+      return Response.json(libraryFolderView(updated));
     } catch (e) {
-      return caught(e, "Could not rename folder.");
+      return caught(e, "Could not update folder.");
     }
   },
 
+  /** Delete a folder. What it held — its items and the folders inside it —
+   * comes up one level, filed where the folder was. */
   async deleteFolder(userId: string, id: string) {
     try {
       await prisma.$transaction(async (tx) => {
-        await tx.cutFolder.deleteMany({
+        const gone = await tx.cutFolder.findFirst({
           where: { id, userId, scope: "library" },
+          select: { parentId: true },
         });
-        // Items in the folder fall back to ungrouped rather than vanishing.
+        if (!gone) return;
+        const up = gone.parentId;
+        await tx.cutFolder.delete({ where: { id } });
+        await tx.cutFolder.updateMany({
+          where: { userId, scope: "library", parentId: id },
+          data: { parentId: up },
+        });
         await tx.cutLibraryAsset.updateMany({
           where: { userId, folderId: id },
-          data: { folderId: null },
+          data: { folderId: up },
         });
         const templates = await tx.cutTemplate.findMany({ where: { userId } });
         for (const t of templates) {
@@ -735,7 +768,7 @@ export const libraryCloud = {
           if (doc.folderId === id) {
             await tx.cutTemplate.update({
               where: { id: t.id },
-              data: { doc: asJson({ ...doc, folderId: null }) },
+              data: { doc: asJson({ ...doc, folderId: up }) },
             });
           }
         }

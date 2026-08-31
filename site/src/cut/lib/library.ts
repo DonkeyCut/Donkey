@@ -77,6 +77,9 @@ export interface LibraryAsset {
 export interface LibraryFolder {
   id: string;
   name: string;
+  /** The folder this one is filed in; null is the top level. Folders nest
+   * only within their own shelf. */
+  parentId?: string | null;
   createdAt: number;
   residency: Residency;
 }
@@ -415,36 +418,44 @@ async function importUrlThroughCloud(
   return landed;
 }
 
+/** Make a folder on a shelf, filed under `parentId` there (null for the
+ * top level). */
 export async function createLibraryFolder(
   name: string,
   residency: Residency = activeResidency(),
+  parentId: string | null = null,
 ): Promise<LibraryFolder> {
   const res = await backendFor(residency).fetch("/api/cut/library/folders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, parentId }),
   });
   const body = await apiJson<LibraryFolder>(res);
   if (!res.ok) throw new Error(body.error ?? "Could not create folder.");
   return { ...body, residency };
 }
 
-export async function renameLibraryFolder(
+/** Rename a folder, move it under another (null for the top level), or
+ * both. A key left out keeps what the folder has. The shelf answers with the
+ * folder as stored: a parent it could not honor reads back as the top level. */
+export async function updateLibraryFolder(
   residency: Residency,
   id: string,
-  name: string,
-): Promise<void> {
+  patch: { name?: string; parentId?: string | null },
+): Promise<LibraryFolder> {
   const res = await backendFor(residency).fetch(
     `/api/cut/library/folders/${id}`,
     {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify(patch),
     },
   );
-  if (!res.ok) throw new Error("Could not rename folder.");
+  if (!res.ok) throw new Error("Could not update folder.");
+  return { ...((await res.json()) as Omit<LibraryFolder, "residency">), residency };
 }
 
+/** Delete a folder. What it held comes up one level. */
 export async function deleteLibraryFolder(
   residency: Residency,
   id: string,
