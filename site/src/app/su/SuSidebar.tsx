@@ -4,17 +4,22 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
-import { SU_NAV } from "@/app/su/nav";
+import { SU_NAV, suSurfaceAt } from "@/app/su/nav";
 import { SU_APP_ORIGIN } from "@/cut/lib/hosts";
 import { cn } from "@/lib/utils";
 
 const itemClass =
   "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground";
 
+// A section's tabs sit beneath it, inset to the label's column.
+const tabClass =
+  "flex items-center rounded-lg py-1.5 pl-[38px] pr-2.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground";
+
 // The super-user section's left rail: same shell as the app sidebar, with the
 // admin surfaces as tabs and a way back to the app pinned to the bottom.
 export function SuSidebar() {
   const pathname = usePathname();
+  const here = suSurfaceAt(pathname);
 
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-card px-3 py-4">
@@ -32,17 +37,33 @@ export function SuSidebar() {
       </div>
 
       <nav className="flex flex-col gap-0.5">
-        {SU_NAV.map(({ href, label, icon: Icon }) => {
-          const active = pathname === href;
+        {SU_NAV.map((surface) => {
+          const { href, label, icon: Icon, tabs } = surface;
+          const active = here.surface === surface;
           return (
-            <Link
-              key={label}
-              href={href}
-              className={cn(itemClass, active && "bg-muted text-foreground")}
-            >
-              <Icon className="size-4" />
-              {label}
-            </Link>
+            <div key={label} className="flex flex-col gap-0.5">
+              <Link
+                href={href}
+                className={cn(itemClass, active && !tabs && "bg-muted text-foreground")}
+              >
+                <Icon className="size-4" />
+                {label}
+              </Link>
+              {tabs && active
+                ? tabs.map((tab) => (
+                    <Link
+                      key={tab.href}
+                      href={tab.href}
+                      className={cn(
+                        tabClass,
+                        here.tab === tab && "bg-muted font-medium text-foreground",
+                      )}
+                    >
+                      {tab.label}
+                    </Link>
+                  ))
+                : null}
+            </div>
           );
         })}
       </nav>
