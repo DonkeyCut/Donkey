@@ -540,7 +540,7 @@ export function FolderShelf<F extends DeskFolder>({
                 "size-7 shrink-0 drop-shadow-sm transition-transform",
                 isOver && "scale-105 brightness-110"
               )}
-              data-drag-object
+              data-drag-object="bare"
             />
             <div className="min-w-0 flex-1">
               <div className="truncate text-xs font-medium">{f.name}</div>
@@ -559,7 +559,7 @@ export function FolderShelf<F extends DeskFolder>({
           >
             <div
               className={cn("grid place-items-center transition-transform", isOver && "scale-105")}
-              data-drag-object
+              data-drag-object="bare"
             >
               <FolderGlyph className={cn("size-[40px] drop-shadow-sm", isOver && "brightness-110")} />
             </div>

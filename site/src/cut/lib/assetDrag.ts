@@ -274,7 +274,9 @@ export function setCardDragImage(e: React.DragEvent, host: HTMLElement) {
  * leaves again. */
 /** Uniform drag-ghost unit, px: every drag rides the same square marker, the
  * grabbed tile's picture covering it edge to edge — center-cropped to fill,
- * so no aspect leaves bars. */
+ * so no aspect leaves bars. A node marked `data-drag-object="bare"` — a
+ * folder glyph — is the marker itself: fitted whole into the unit, with no
+ * frame, fill or shadow around it. */
 const OBJECT_GHOST_UNIT = 48;
 
 export function setObjectDragImage(
@@ -291,6 +293,7 @@ export function setObjectDragImage(
   const rect = el.getBoundingClientRect();
   if (!rect.width || !rect.height) return;
   const unit = OBJECT_GHOST_UNIT;
+  const bare = el.dataset.dragObject === "bare";
 
   const blank = document.createElement("canvas");
   blank.width = blank.height = 1;
@@ -315,27 +318,32 @@ export function setObjectDragImage(
   object.style.minWidth = "0";
   object.style.minHeight = "0";
   // Center the full-size clone in the unit and scale it to cover: the picture
-  // fills the square and the long dimension crops away.
-  const cover = Math.max(unit / rect.width, unit / rect.height);
+  // fills the square and the long dimension crops away. A bare object is
+  // fitted whole instead.
+  const cover = bare
+    ? Math.min(unit / rect.width, unit / rect.height)
+    : Math.max(unit / rect.width, unit / rect.height);
   object.style.position = "absolute";
   object.style.left = `${(unit - rect.width) / 2}px`;
   object.style.top = `${(unit - rect.height) / 2}px`;
   object.style.transform = `scale(${cover})`;
   object.style.transformOrigin = "center";
   const frame = document.createElement("div");
-  frame.style.cssText =
-    "position:absolute;inset:0;overflow:hidden;border-radius:8px;" +
-    "box-shadow:0 8px 24px rgba(0,0,0,0.35);";
-  // The tile's own fill backs the picture while it loads.
-  const fill = getComputedStyle(el).backgroundColor;
-  frame.style.background =
-    fill && fill !== "rgba(0, 0, 0, 0)" ? fill : "rgba(30,30,38,0.9)";
-  // The ghost floats free of the page, so a tile that wears an edge in the
-  // grid gets it drawn at twice the strength: a pale tile lifted over a pale
-  // backdrop has no shape otherwise. A borderless tile stays borderless.
-  const tile = getComputedStyle(el);
-  if (parseFloat(tile.borderTopWidth) > 0)
-    frame.style.border = `1px solid color-mix(in oklab, ${tile.borderTopColor}, black 50%)`;
+  frame.style.cssText = "position:absolute;inset:0;";
+  if (!bare) {
+    frame.style.cssText +=
+      "overflow:hidden;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.35);";
+    // The tile's own fill backs the picture while it loads.
+    const fill = getComputedStyle(el).backgroundColor;
+    frame.style.background =
+      fill && fill !== "rgba(0, 0, 0, 0)" ? fill : "rgba(30,30,38,0.9)";
+    // The ghost floats free of the page, so a tile that wears an edge in the
+    // grid gets it drawn at twice the strength: a pale tile lifted over a pale
+    // backdrop has no shape otherwise. A borderless tile stays borderless.
+    const tile = getComputedStyle(el);
+    if (parseFloat(tile.borderTopWidth) > 0)
+      frame.style.border = `1px solid color-mix(in oklab, ${tile.borderTopColor}, black 50%)`;
+  }
   frame.appendChild(object);
   const bundle = document.createElement("div");
   bundle.style.cssText =
