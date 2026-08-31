@@ -9,11 +9,14 @@ import {
   deleteNote,
   deleteNoteFolder,
   deleteNoteLabel,
+  folderTrail,
+  folderWithin,
   noteColor,
   saveNote,
   saveNoteFolder,
   saveNoteLabel,
   type CutNote,
+  type CutNoteFolder,
 } from "@/cut/lib/notes";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
 import { notesKey, patchNotes, useNotes } from "@/cut/lib/queries";
@@ -28,6 +31,8 @@ const NOTE_INK = "#201a0d";
 // A dragged selection of notes, the same shape the library and the projects
 // home carry: a JSON array of ids under this page's own MIME type.
 const NOTES_MOVE_MIME = "application/x-donkey-notes";
+// A dragged folder tile, filed into another folder or back out to a crumb.
+const NOTE_FOLDERS_MOVE_MIME = "application/x-donkey-note-folders";
 
 /** Write a note out. The list shows it the moment it is written, and the
  * server's answer — this write, or a newer one from the phone — replaces it.
@@ -110,7 +115,9 @@ const draftOf = (n: CutNote): NoteDraft => ({
 /** Synced notes: written on the phone or here, merged by last writer wins.
  * The phone reads these into its teleprompter, so a script drafted at the
  * desk is on the camera by the time the phone is in hand. Notes file into
- * folders on the desktop-style shelf the library uses. */
+ * folders on the desktop-style shelf the library uses, and folders file into
+ * folders: every level has the shelf, the New folder button and the grid the
+ * top level has. */
 export function NotesView() {
   const client = useQueryClient();
   const base = useCutBase();
@@ -137,7 +144,10 @@ export function NotesView() {
   const params = useSearchParams();
   const openFolder = params.get("folder");
   const openNoteId = params.get("note");
-  const openFolderName = folders.find((f) => f.id === openFolder)?.name;
+  // The way down to the open folder, for the crumb; and what is filed right
+  // here: the folders and the notes this level holds.
+  const trail = folderTrail(folders, openFolder);
+  const shownFolders = folders.filter((f) => f.parentId === openFolder);
   const shown = list.filter((n) => (n.folderId ?? null) === openFolder);
   // What the composer shows: the buffer while it belongs to the note the URL
   // names, and the stored note otherwise. A note nobody has typed into has no
@@ -337,6 +347,43 @@ export function NotesView() {
     }));
   };
 
+  /** File a set of folders into a folder (or back to the top level). A folder
+   * never files into itself or into anything under it; the shelf and the
+   * crumb only ever offer siblings and ancestors, and this is the check
+   * behind them. */
+  const moveFolders = async (ids: string[], parentId: string | null) => {
+    const moving = folders.filter(
+      (f) =>
+        ids.includes(f.id) &&
+        f.parentId !== parentId &&
+        !folderWithin(folders, parentId, f.id),
+    );
+    if (moving.length === 0) return;
+    const movingIds = new Set(moving.map((f) => f.id));
+    patchNotes(client, (prev) => ({
+      ...prev,
+      folders: prev.folders.map((f) => (movingIds.has(f.id) ? { ...f, parentId } : f)),
+    }));
+    await Promise.all([...movingIds, parentId].map(settleFolder));
+    const saved = await Promise.all(
+      moving.map((f) =>
+        saveNoteFolder(f.id, { name: f.name, parentId }).catch(() => null),
+      ),
+    );
+    const landed = saved.filter((f): f is CutNoteFolder => f !== null);
+    if (landed.length !== moving.length) {
+      reload();
+      return;
+    }
+    // The server answers with where each folder is filed, so a parent that
+    // is gone shows its folders back at the top level right away.
+    const byId = new Map(landed.map((f) => [f.id, f]));
+    patchNotes(client, (prev) => ({
+      ...prev,
+      folders: prev.folders.map((f) => byId.get(f.id) ?? f),
+    }));
+  };
+
   // The same write, reachable from the listeners below, which outlive any one
   // render.
   const closing = useRef<() => void>(() => {});
@@ -367,12 +414,18 @@ export function NotesView() {
   }, []);
 
   // A note the URL names and nothing answers for — deleted from another
-  // device, or a reload of one never written — leaves the list behind.
+  // device, or a reload of one never written — leaves the list behind. A
+  // folder the URL names and nothing answers for goes back to the top level.
   const stale = !!openNoteId && !draft && !!notes.data;
   const listHref = notesHref(openFolder);
   useEffect(() => {
     if (stale) window.history.replaceState(null, "", listHref);
   }, [stale, listHref]);
+  const staleFolder = !!openFolder && !!notes.data && trail.length === 0;
+  const rootHref = homeHref(base, "notes");
+  useEffect(() => {
+    if (staleFolder) window.history.replaceState(null, "", rootHref);
+  }, [staleFolder, rootHref]);
 
   // Carry the selection (or just this card) as a folder-move payload, with a
   // ghost for a multi-note drag.
@@ -416,40 +469,44 @@ export function NotesView() {
         ) : (
           <FolderCrumb
             root="Notes"
-            name={openFolderName ?? "Folder"}
+            trail={trail}
             mime={NOTES_MOVE_MIME}
-            onBack={() => gotoFolder(null)}
-            onDropOut={(ids) => void moveNotes(ids, null)}
+            folderMime={NOTE_FOLDERS_MOVE_MIME}
+            onGo={gotoFolder}
+            onDrop={(ids, id) => void moveNotes(ids, id)}
+            onDropFolders={(ids, id) => void moveFolders(ids, id)}
           />
         )}
         <div className="flex items-center gap-2">
-          {openFolder === null && (
-            <Button variant="outline" onClick={() => setFolderCreating(true)}>
-              <FolderPlus data-icon="inline-start" /> New folder
-            </Button>
-          )}
+          <Button variant="outline" onClick={() => setFolderCreating(true)}>
+            <FolderPlus data-icon="inline-start" /> New folder
+          </Button>
           <Button onClick={openNew}>
             <Plus data-icon="inline-start" /> New note
           </Button>
         </div>
       </div>
 
-      {/* Folders live at the root and nowhere else, so an open folder shows
-        only what is filed in it. */}
-      {openFolder === null && (folders.length > 0 || folderCreating) ? (
+      {/* The folders filed at this level, at the top and inside any folder
+        alike. A new one is made here and a dropped one is filed here. */}
+      {shownFolders.length > 0 || folderCreating ? (
         <FolderShelf
-          folders={folders}
+          folders={shownFolders}
           mime={NOTES_MOVE_MIME}
+          folderMime={NOTE_FOLDERS_MOVE_MIME}
           creating={folderCreating}
           onCreatingChange={setFolderCreating}
           statOf={(id) => ({
-            count: list.filter((n) => (n.folderId ?? null) === id).length,
+            count:
+              list.filter((n) => (n.folderId ?? null) === id).length +
+              folders.filter((f) => f.parentId === id).length,
           })}
           onOpen={gotoFolder}
           onCreate={async (name) => {
-            const folder = {
+            const folder: CutNoteFolder = {
               id: crypto.randomUUID(),
               name,
+              parentId: openFolder,
               updatedAt: Date.now(),
               createdAt: Date.now(),
             };
@@ -457,7 +514,11 @@ export function NotesView() {
               ...prev,
               folders: [...prev.folders, folder],
             }));
-            const write = saveNoteFolder(folder.id, name).catch(() => reload());
+            // The parent's own write may still be in flight; it lands first,
+            // so the server knows it by the time this one names it.
+            const write = settleFolder(openFolder)
+              .then(() => saveNoteFolder(folder.id, { name, parentId: openFolder }))
+              .catch(() => reload());
             folderWrites.current.set(folder.id, write);
             try {
               await write;
@@ -466,25 +527,32 @@ export function NotesView() {
             }
           }}
           onRename={async (id, name) => {
+            const parentId = folders.find((f) => f.id === id)?.parentId ?? null;
             patchNotes(client, (prev) => ({
               ...prev,
               folders: prev.folders.map((f) => (f.id === id ? { ...f, name } : f)),
             }));
-            await saveNoteFolder(id, name).catch(() => reload());
+            await settleFolder(id);
+            await saveNoteFolder(id, { name, parentId }).catch(() => reload());
           }}
           onDelete={async (id) => {
+            // What the folder held comes up one level, the way the server
+            // files it.
+            const parentId = folders.find((f) => f.id === id)?.parentId ?? null;
             patchNotes(client, (prev) => ({
               ...prev,
-              folders: prev.folders.filter((f) => f.id !== id),
+              folders: prev.folders
+                .filter((f) => f.id !== id)
+                .map((f) => (f.parentId === id ? { ...f, parentId } : f)),
               notes: prev.notes.map((n) =>
-                n.folderId === id ? { ...n, folderId: null } : n,
+                n.folderId === id ? { ...n, folderId: parentId } : n,
               ),
             }));
-            if (openFolder === id)
-              window.history.replaceState(null, "", homeHref(base, "notes"));
+            await settleFolder(id);
             await deleteNoteFolder(id).catch(() => reload());
           }}
           onDropIds={(ids, folderId) => void moveNotes(ids, folderId)}
+          onDropFolders={(ids, folderId) => void moveFolders(ids, folderId)}
         />
       ) : null}
 

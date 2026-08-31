@@ -900,10 +900,12 @@ function ProjectFilesPanel({
           <FolderCrumb
             className="text-sm"
             root="Project Files"
-            name={folders.find((f) => f.id === openFolder)?.name ?? "Folder"}
+            trail={[
+              { id: openFolder, name: folders.find((f) => f.id === openFolder)?.name ?? "Folder" },
+            ]}
             mime={MEDIA_MOVE_MIME}
-            onBack={() => setOpenFolder(null)}
-            onDropOut={(ids) => useEditor.getState().moveAssetsToMediaFolder(ids, null)}
+            onGo={() => setOpenFolder(null)}
+            onDrop={(ids) => useEditor.getState().moveAssetsToMediaFolder(ids, null)}
           />
         </div>
       )}
@@ -1716,10 +1718,10 @@ function LibraryPanel({ projectId }: { projectId: string }) {
           <FolderCrumb
             className="text-sm"
             root="Library"
-            name={openFolderName ?? "Folder"}
+            trail={[{ id: openFolder, name: openFolderName ?? "Folder" }]}
             mime={LIBRARY_MOVE_MIME}
-            onBack={() => setOpenFolder(null)}
-            onDropOut={(ids) => ids.forEach((id) => void move(id, null))}
+            onGo={() => setOpenFolder(null)}
+            onDrop={(ids) => ids.forEach((id) => void move(id, null))}
           />
         </div>
       )}

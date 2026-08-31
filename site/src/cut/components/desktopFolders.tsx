@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { setObjectDragImage } from "@/cut/lib/assetDrag";
 import type { AssetRef } from "@/cut/lib/assetRef";
 import { formatBytes } from "@/lib/bytes";
 import { RefDropZone } from "./RefDropZone";
@@ -42,8 +43,10 @@ export function readDragIds(e: React.DragEvent, mime: string): string[] {
 }
 
 /** Folder tile glyph: the Lucide folder, filled blue. */
-export function FolderGlyph({ className }: { className?: string }) {
-  return <Folder className={cn("fill-[#8cc5ff] text-[#8cc5ff]", className)} aria-hidden="true" />;
+export function FolderGlyph({ className, ...rest }: { className?: string } & Record<string, unknown>) {
+  return (
+    <Folder className={cn("fill-[#8cc5ff] text-[#8cc5ff]", className)} aria-hidden="true" {...rest} />
+  );
 }
 
 /**
@@ -217,69 +220,138 @@ export function Marquee({
   );
 }
 
-/** Root breadcrumb shown while a folder is open. The root label is itself a drop
- * target, so a selection can be dragged back out to the top level. */
+/** One step of the breadcrumb that can be gone back to: a button, and a drop
+ * target for an item selection under `mime` and, when the host nests folders,
+ * for folders under `folderMime`. */
+function CrumbStep({
+  label,
+  mime,
+  folderMime,
+  onGo,
+  onDrop,
+  onDropFolders,
+}: {
+  label: string;
+  mime: string;
+  folderMime?: string;
+  onGo: () => void;
+  onDrop: (ids: string[]) => void;
+  onDropFolders?: (ids: string[]) => void;
+}) {
+  const [over, setOver] = useState(false);
+  const carried = (e: React.DragEvent) => {
+    const types = Array.from(e.dataTransfer.types);
+    if (types.includes(mime)) return "items";
+    if (folderMime && onDropFolders && types.includes(folderMime)) return "folders";
+    return null;
+  };
+  return (
+    <button
+      className={cn(
+        "rounded-md px-1.5 py-0.5 text-muted-foreground transition-colors hover:text-foreground",
+        over && "bg-primary/15 text-primary"
+      )}
+      onClick={onGo}
+      onDragOver={(e) => {
+        if (!carried(e)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        const kind = carried(e);
+        if (!kind) return;
+        e.preventDefault();
+        setOver(false);
+        if (kind === "folders") onDropFolders?.(readDragIds(e, folderMime!));
+        else onDrop(readDragIds(e, mime));
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+/** The breadcrumb shown while a folder is open: the root, then every folder
+ * on the way down to the open one. Each step above the open folder is a
+ * button and a drop target, so a selection can be dragged back out to any
+ * level. `id` is null for the root. */
 export function FolderCrumb({
   root,
-  name,
+  trail,
   mime,
-  onBack,
-  onDropOut,
+  folderMime,
+  onGo,
+  onDrop,
+  onDropFolders,
   className,
 }: {
   root: string;
-  name: string;
+  /** The folders from the top level down to the open one, the open one last. */
+  trail: { id: string; name: string }[];
   mime: string;
-  onBack: () => void;
-  onDropOut: (ids: string[]) => void;
+  /** Set when folders themselves are dragged; steps then take those drops too. */
+  folderMime?: string;
+  onGo: (id: string | null) => void;
+  onDrop: (ids: string[], id: string | null) => void;
+  onDropFolders?: (ids: string[], id: string | null) => void;
   className?: string;
 }) {
-  const [over, setOver] = useState(false);
+  const open = trail[trail.length - 1];
   return (
     <div
-      className={cn("flex items-center gap-2 text-lg font-semibold tracking-tight", className)}
+      className={cn("flex min-w-0 items-center gap-2 text-lg font-semibold tracking-tight", className)}
       data-no-marquee
     >
-      <button
-        className={cn(
-          "rounded-md px-1.5 py-0.5 text-muted-foreground transition-colors hover:text-foreground",
-          over && "bg-primary/15 text-primary"
-        )}
-        onClick={onBack}
-        onDragOver={(e) => {
-          if (!Array.from(e.dataTransfer.types).includes(mime)) return;
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "move";
-          setOver(true);
-        }}
-        onDragLeave={() => setOver(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setOver(false);
-          onDropOut(readDragIds(e, mime));
-        }}
-      >
-        {root}
-      </button>
-      <span className="text-muted-foreground/50">/</span>
-      <span className="truncate">{name}</span>
+      <CrumbStep
+        label={root}
+        mime={mime}
+        folderMime={folderMime}
+        onGo={() => onGo(null)}
+        onDrop={(ids) => onDrop(ids, null)}
+        onDropFolders={onDropFolders && ((ids) => onDropFolders(ids, null))}
+      />
+      {trail.slice(0, -1).map((f) => (
+        <Fragment key={f.id}>
+          <span className="text-muted-foreground/50">/</span>
+          <CrumbStep
+            label={f.name}
+            mime={mime}
+            folderMime={folderMime}
+            onGo={() => onGo(f.id)}
+            onDrop={(ids) => onDrop(ids, f.id)}
+            onDropFolders={onDropFolders && ((ids) => onDropFolders(ids, f.id))}
+          />
+        </Fragment>
+      ))}
+      {open && (
+        <>
+          <span className="text-muted-foreground/50">/</span>
+          <span className="truncate">{open.name}</span>
+        </>
+      )}
     </div>
   );
 }
 
-/** The desktop-style folder shelf at the root: each folder as a blue folder
- * icon and a drop target for dragged items. Folder creation is driven by the
- * host (e.g. a header button) through `creating`/`onCreatingChange`. */
+/** The desktop-style folder shelf: each folder as a blue folder icon and a
+ * drop target for dragged items. Folder creation is driven by the host (e.g.
+ * a header button) through `creating`/`onCreatingChange`. A host that nests
+ * folders passes `folderMime`; tiles are then draggable, carrying their own
+ * id under it, and every other tile takes that drop. */
 export function FolderShelf<F extends DeskFolder>({
   folders,
   statOf,
   badgeOf,
   mime,
+  folderMime,
   onOpen,
   onCreate,
   onRename,
   onDelete,
   onDropIds,
+  onDropFolders,
   onDropFiles,
   onRefDrop,
   creating = false,
@@ -292,11 +364,15 @@ export function FolderShelf<F extends DeskFolder>({
    * a folder is on. */
   badgeOf?: (id: string) => React.ReactNode;
   mime: string;
+  /** The MIME a dragged folder tile carries its id under. */
+  folderMime?: string;
   onOpen: (id: string) => void;
   onCreate?: (name: string) => void | Promise<void>;
   onRename: (id: string, name: string) => void | Promise<void>;
   onDelete: (id: string) => void | Promise<void>;
   onDropIds: (ids: string[], folderId: string) => void;
+  /** Folders dropped onto a folder tile — filed inside it. */
+  onDropFolders?: (ids: string[], folderId: string) => void;
   /** Desktop files dropped onto a folder tile — dropped straight into it. */
   onDropFiles?: (files: FileList, folderId: string) => void;
   /** When set, folder tiles also take media drops from cards and timeline
@@ -308,11 +384,18 @@ export function FolderShelf<F extends DeskFolder>({
    * subtext — for narrow panels; default is the desktop tile grid. */
   rows?: boolean;
 }) {
-  // A folder tile accepts both an internal selection (its MIME) and, when the
-  // host wires it up, OS files dragged from the desktop.
+  // A folder tile accepts an internal selection (its MIME), another folder
+  // tile when the host nests folders, and, when the host wires it up, OS
+  // files dragged from the desktop.
   const dragTypes = (e: React.DragEvent) => Array.from(e.dataTransfer.types);
-  const accepts = (e: React.DragEvent) =>
-    dragTypes(e).includes(mime) || (!!onDropFiles && dragTypes(e).includes("Files"));
+  const nests = !!folderMime && !!onDropFolders;
+  // The tile being dragged, so it does not light up as its own target. The
+  // payload is drop-only, which is why the id is held here.
+  const [dragging, setDragging] = useState<string | null>(null);
+  const accepts = (e: React.DragEvent, target: string) =>
+    dragTypes(e).includes(mime) ||
+    (nests && dragTypes(e).includes(folderMime) && dragging !== target) ||
+    (!!onDropFiles && dragTypes(e).includes("Files"));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [over, setOver] = useState<string | null>(null);
@@ -369,14 +452,14 @@ export function FolderShelf<F extends DeskFolder>({
                   setEditingId(f.id);
                 },
                 onDragOver: (e: React.DragEvent) => {
-                  if (!accepts(e)) return;
+                  if (!accepts(e, f.id)) return;
                   e.preventDefault();
-                  e.dataTransfer.dropEffect = dragTypes(e).includes(mime) ? "move" : "copy";
+                  e.dataTransfer.dropEffect = dragTypes(e).includes("Files") ? "copy" : "move";
                   setOver(f.id);
                 },
                 onDragLeave: () => setOver((o: string | null) => (o === f.id ? null : o)),
                 onDrop: (e: React.DragEvent) => {
-                  if (!accepts(e)) return;
+                  if (!accepts(e, f.id)) return;
                   e.preventDefault();
                   setOver(null);
                   // Files land in this folder; stop the drop bubbling to the page's
@@ -386,8 +469,26 @@ export function FolderShelf<F extends DeskFolder>({
                     onDropFiles(e.dataTransfer.files, f.id);
                     return;
                   }
+                  if (nests && dragTypes(e).includes(folderMime)) {
+                    onDropFolders(readDragIds(e, folderMime), f.id);
+                    return;
+                  }
                   onDropIds(readDragIds(e, mime), f.id);
                 },
+                // The tile itself is what a nesting host drags: its own id,
+                // with the glyph as the ghost.
+                ...(nests
+                  ? {
+                      draggable: true,
+                      onDragStart: (e: React.DragEvent) => {
+                        e.dataTransfer.setData(folderMime, JSON.stringify([f.id]));
+                        e.dataTransfer.effectAllowed = "move";
+                        setDragging(f.id);
+                        setObjectDragImage(e, 1, [f.id]);
+                      },
+                      onDragEnd: () => setDragging(null),
+                    }
+                  : {}),
               }),
         };
         const menu = f.locked ? null : (
@@ -439,6 +540,7 @@ export function FolderShelf<F extends DeskFolder>({
                 "size-7 shrink-0 drop-shadow-sm transition-transform",
                 isOver && "scale-105 brightness-110"
               )}
+              data-drag-object
             />
             <div className="min-w-0 flex-1">
               <div className="truncate text-xs font-medium">{f.name}</div>
@@ -455,7 +557,10 @@ export function FolderShelf<F extends DeskFolder>({
             className="group/f relative flex w-[92px] cursor-pointer flex-col items-start rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-muted/60"
             {...interact}
           >
-            <div className={cn("grid place-items-center transition-transform", isOver && "scale-105")}>
+            <div
+              className={cn("grid place-items-center transition-transform", isOver && "scale-105")}
+              data-drag-object
+            >
               <FolderGlyph className={cn("size-[40px] drop-shadow-sm", isOver && "brightness-110")} />
             </div>
             <span className="mt-0.5 line-clamp-2 max-w-full text-xs font-medium leading-tight">

@@ -6,7 +6,8 @@
 // Notes file into folders — CutFolder rows with scope "note", the same table
 // the library and the projects home keep their folders in. Folder ids are
 // client-generated like note ids, so a phone can make one offline and push it
-// under the id it already filed notes against.
+// under the id it already filed notes against. Folders file into folders the
+// same way, through `parentId`; the top level is null.
 import { NOTE_LABELS_MAX } from "@/cut/lib/types";
 import { prisma } from "@/lib/prisma";
 import { caught, err } from "./util";
@@ -26,6 +27,7 @@ export interface NoteView {
 export interface NoteFolderView {
   id: string;
   name: string;
+  parentId: string | null;
   updatedAt: number;
   createdAt: number;
 }
@@ -62,11 +64,13 @@ const view = (row: {
 const folderView = (row: {
   id: string;
   name: string;
+  parentId: string | null;
   updatedAt: Date;
   createdAt: Date;
 }): NoteFolderView => ({
   id: row.id,
   name: row.name,
+  parentId: row.parentId,
   updatedAt: row.updatedAt.getTime(),
   createdAt: row.createdAt.getTime(),
 });
@@ -97,6 +101,29 @@ async function resolveFolder(userId: string, folderId: unknown): Promise<string 
     select: { id: true },
   });
   return row?.id ?? null;
+}
+
+/** The folder a folder may be filed in: one of this account's note folders
+ * that is neither the folder itself nor anything filed under it, or the top
+ * level. An id naming nothing files the folder at the top level rather than
+ * failing the write — the parent may have been deleted on the other device
+ * while this one was offline — and so does one that would close a loop, which
+ * two devices moving folders into each other offline can ask for. */
+async function resolveParent(userId: string, id: string, parentId: unknown): Promise<string | null> {
+  if (typeof parentId !== "string" || !parentId || parentId === id) return null;
+  const folders = await prisma.cutFolder.findMany({
+    where: { userId, scope: "note" },
+    select: { id: true, parentId: true },
+  });
+  const parentOf = new Map(folders.map((f) => [f.id, f.parentId]));
+  if (!parentOf.has(parentId)) return null;
+  // Walk up from the asked parent; reaching `id` means the move would loop.
+  let cur: string | null | undefined = parentId;
+  for (let steps = 0; cur && steps <= folders.length; steps++) {
+    if (cur === id) return null;
+    cur = parentOf.get(cur);
+  }
+  return parentId;
 }
 
 /** The labels a note may carry: the ids among `labelIds` that name one of
@@ -208,38 +235,57 @@ export const notesCloud = {
 
   // --- Folders (scope "note") ---
 
-  /** Create or rename one folder under a client-chosen id. One call serves
-   * both, so a phone that made the folder offline pushes it with the request
-   * a rename uses. */
+  /** Create, rename or move one folder under a client-chosen id. One call
+   * serves all three, so a phone that made the folder offline pushes it with
+   * the request a rename uses. A write that says nothing about `parentId`
+   * keeps the parent the folder has; the response is the folder as stored,
+   * which is where a parent the server could not honor shows up. */
   async putFolder(userId: string, id: string, req: Request) {
     try {
       if (!NOTE_ID.test(id)) return err("Invalid folder id.", 400);
-      const body = (await req.json()) as { name?: string };
+      const body = (await req.json()) as { name?: string; parentId?: string | null };
       const name = String(body.name ?? "").trim().slice(0, 120);
       if (!name) return err("Folder name required.", 400);
       const existing = await prisma.cutFolder.findFirst({
         where: { id, userId, scope: "note" },
-        select: { id: true },
+        select: { id: true, parentId: true },
       });
+      const parentId =
+        body.parentId === undefined
+          ? (existing?.parentId ?? null)
+          : await resolveParent(userId, id, body.parentId);
       if (!existing) {
-        const row = await prisma.cutFolder.create({ data: { id, userId, name, scope: "note" } });
+        const row = await prisma.cutFolder.create({
+          data: { id, userId, name, parentId, scope: "note" },
+        });
         return Response.json(folderView(row));
       }
-      const row = await prisma.cutFolder.update({ where: { id }, data: { name } });
+      const row = await prisma.cutFolder.update({ where: { id }, data: { name, parentId } });
       return Response.json(folderView(row));
     } catch (e) {
       return caught(e, "Could not save the folder.");
     }
   },
 
-  /** Delete one folder. Its notes fall back to the top level rather than
-   * going with it. */
+  /** Delete one folder. What it held — its notes and the folders inside it —
+   * comes up one level, filed where the folder was. */
   async removeFolder(userId: string, id: string) {
     try {
       await prisma.$transaction(async (tx) => {
-        const { count } = await tx.cutFolder.deleteMany({ where: { id, userId, scope: "note" } });
-        if (!count) return;
-        await tx.cutNote.updateMany({ where: { userId, folderId: id }, data: { folderId: null } });
+        const gone = await tx.cutFolder.findFirst({
+          where: { id, userId, scope: "note" },
+          select: { parentId: true },
+        });
+        if (!gone) return;
+        await tx.cutFolder.delete({ where: { id } });
+        await tx.cutNote.updateMany({
+          where: { userId, folderId: id },
+          data: { folderId: gone.parentId },
+        });
+        await tx.cutFolder.updateMany({
+          where: { userId, scope: "note", parentId: id },
+          data: { parentId: gone.parentId },
+        });
       });
       return Response.json({ ok: true });
     } catch (e) {

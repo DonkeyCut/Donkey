@@ -61,6 +61,8 @@ model CutFolder {
   userId    String
   name      String
   scope     String   @default("project") // project | library | note
+  // The folder this one is filed in; null is the top level. Note folders nest.
+  parentId  String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

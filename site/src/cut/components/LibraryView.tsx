@@ -741,10 +741,10 @@ export function LibraryView() {
           ) : (
             <FolderCrumb
               root="Library"
-              name={openFolderName ?? "Folder"}
+              trail={[{ id: openFolder, name: openFolderName ?? "Folder" }]}
               mime={LIBRARY_MOVE_MIME}
-              onBack={() => gotoFolder(null)}
-              onDropOut={(ids) => void moveItems(ids, null)}
+              onGo={() => gotoFolder(null)}
+              onDrop={(ids) => void moveItems(ids, null)}
             />
           )}
           <div className="flex items-center gap-2">

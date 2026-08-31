@@ -854,10 +854,10 @@ export function ProjectsHome() {
           ) : (
             <FolderCrumb
               root="Projects"
-              name={openFolderName ?? "Folder"}
+              trail={[{ id: openFolder, name: openFolderName ?? "Folder" }]}
               mime={PROJECT_MIME}
-              onBack={() => gotoFolder(null)}
-              onDropOut={(ids) => void moveProjects(folderOwner ?? r0, ids, null)}
+              onGo={() => gotoFolder(null)}
+              onDrop={(ids) => void moveProjects(folderOwner ?? r0, ids, null)}
             />
           )}
           <div className="flex items-center gap-2">
