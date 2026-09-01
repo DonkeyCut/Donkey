@@ -5039,6 +5039,12 @@ export function clipLen(c: VideoClip | AudioClip) {
   return Math.max(MIN_LEN, eff);
 }
 
+/** The longest fade a clip takes: half its footprint, so a fade in and a
+ * fade out never overlap. Tenths of a second, like the controls that set it. */
+export function maxClipFade(c: VideoClip | AudioClip) {
+  return Math.max(0.1, Math.round((clipLen(c) / 2) * 10) / 10);
+}
+
 /** How closely two starts/ends must agree to count as the same cut. */
 const TOUCH_EPS = 0.02;
 

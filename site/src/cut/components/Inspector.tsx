@@ -66,7 +66,7 @@ import {
   type OverlayLoopStyle,
   type WordEffectId,
 } from "@donkeycut/effects-kit";
-import { clipWindow, useEditor, type EditorState } from "@/cut/lib/store";
+import { clipWindow, maxClipFade, useEditor, type EditorState } from "@/cut/lib/store";
 import { usePanelView } from "@/cut/lib/panelViews";
 import { usePreviewTime } from "@/cut/lib/playhead";
 import { CLIP_MAX_ZOOM, clipCovers, clipKeyed, clipPoseAt, clipZoom, contentRect } from "@/cut/lib/types";
@@ -1428,8 +1428,7 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
   // Detached audio can carry a playback rate; its timeline length is (out-in)/speed.
   const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
   const len = (clip.out - clip.in) / speed;
-  // A fade can take at most half the clip so in+out never overlap.
-  const maxFade = Math.max(0.1, Math.round((len / 2) * 10) / 10);
+  const maxFade = maxClipFade(clip);
   // Commit closes the checkpoint setAudio opened (or opens+closes one for a
   // typed entry), so any adjustment lands as a single undo step.
   const commitAudio = (patch: Partial<AudioClip>) => {
