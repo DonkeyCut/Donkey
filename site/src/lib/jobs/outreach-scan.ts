@@ -9,7 +9,6 @@ import {
   OUTREACH_MIN_SPENT_CREDITS,
   OUTREACH_MIN_STORAGE_BYTES,
   OUTREACH_RECONTACT_DAYS,
-  OUTREACH_RETURN_DAYS,
 } from "@/lib/marketing/campaigns";
 import { prisma } from "@/lib/prisma";
 
@@ -28,7 +27,6 @@ function newest(...dates: (Date | null | undefined)[]): Date | null {
 type Candidate = {
   balanceMicros: bigint;
   lifetimeChargedMicros: bigint;
-  signedUpAt: Date;
   userId: string;
 };
 
@@ -59,12 +57,7 @@ export const outreachScanJob = defineJob(z.object({}).strict(), async () => {
     // Accounts that have spent a real share of their credits and are still
     // warm. What is left is a column on the row; the floor is on what went out.
     prisma.userCreditAccount.findMany({
-      select: {
-        balanceMicros: true,
-        lifetimeChargedMicros: true,
-        user: { select: { createdAt: true } },
-        userId: true,
-      },
+      select: { balanceMicros: true, lifetimeChargedMicros: true, userId: true },
       where: {
         lifetimeChargedMicros: { gte: minSpentMicros },
         user: {
@@ -83,12 +76,7 @@ export const outreachScanJob = defineJob(z.object({}).strict(), async () => {
       where: { bytes: { gte: OUTREACH_MIN_STORAGE_BYTES } },
     }),
   ]);
-  const spenders: Candidate[] = spenderAccounts.map((account) => ({
-    balanceMicros: account.balanceMicros,
-    lifetimeChargedMicros: account.lifetimeChargedMicros,
-    signedUpAt: account.user.createdAt,
-    userId: account.userId,
-  }));
+  const spenders: Candidate[] = spenderAccounts;
   const spenderIds = new Set(spenders.map((account) => account.userId));
   const heavyIds = heavy.map((row) => row.userId).filter((userId) => !spenderIds.has(userId));
   // Opt-out and Pro come off first, so nothing further is read for an account
@@ -99,7 +87,6 @@ export const outreachScanJob = defineJob(z.object({}).strict(), async () => {
       ? (
           await prisma.user.findMany({
             select: {
-              createdAt: true,
               creditAccount: { select: { balanceMicros: true, lifetimeChargedMicros: true } },
               id: true,
             },
@@ -108,7 +95,6 @@ export const outreachScanJob = defineJob(z.object({}).strict(), async () => {
         ).map((user) => ({
           balanceMicros: user.creditAccount?.balanceMicros ?? zeroCreditMicros,
           lifetimeChargedMicros: user.creditAccount?.lifetimeChargedMicros ?? zeroCreditMicros,
-          signedUpAt: user.createdAt,
           userId: user.id,
         }))
       : [];
@@ -178,21 +164,14 @@ export const outreachScanJob = defineJob(z.object({}).strict(), async () => {
   const ranOutBy = new Map(ranOut.map((row) => [row.userId, row._max.createdAt]));
   const existingBy = new Map(existing.map((row) => [row.userId, row]));
 
-  // Spenders have to have come back: latest activity a clear day past signup.
-  // One sitting on signup day is a look, and the row never lands.
-  const returned = spenders.filter((account) => {
-    const lastActiveAt = lastActiveBy.get(account.userId);
-    return (
-      lastActiveAt !== undefined &&
-      lastActiveAt.getTime() - account.signedUpAt.getTime() >= OUTREACH_RETURN_DAYS * DAY_MS
-    );
-  });
-  // Holders have to be warm: something of theirs moved inside the window.
+  // Spenders billed a call inside the window, so they are warm by
+  // construction. Holders have to be warm: something of theirs moved inside
+  // the window.
   const warm = holders.filter((account) => {
     const lastActiveAt = lastActiveBy.get(account.userId);
     return lastActiveAt !== undefined && lastActiveAt >= since;
   });
-  const accounts = [...returned, ...warm];
+  const accounts = [...spenders, ...warm];
 
   const writes = accounts.map((account) => {
     const snapshot = {
