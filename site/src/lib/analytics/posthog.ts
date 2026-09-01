@@ -30,6 +30,30 @@ export function isPosthogQueryConfigured(): boolean {
   return posthogProjectId() !== undefined && Boolean(process.env.POSTHOG_PERSONAL_API_KEY);
 }
 
+// PostHog's query cluster turns requests away when it is busy (503, 429). A
+// busy answer is momentary, so the run waits and asks again before giving the
+// day up to the next night's backfill.
+const BUSY_STATUSES = new Set([429, 502, 503, 504]);
+// Two waits per day keep a five-day backfill inside the worker's 300 s budget.
+const RETRY_DELAYS_MS = [10_000, 30_000];
+
+async function postQuery(projectId: number, apiKey: string, query: string): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`${POSTHOG_HOST}/api/projects/${projectId}/query`, {
+      body: JSON.stringify({ query: { kind: "HogQLQuery", query } }),
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      method: "POST",
+    });
+    if (res.ok) return res;
+    const detail = (await res.text().catch(() => "")).slice(0, 300);
+    const delay = RETRY_DELAYS_MS[attempt];
+    if (!BUSY_STATUSES.has(res.status) || delay === undefined) {
+      throw new Error(`PostHog query failed (${res.status}): ${detail}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+}
+
 /** distinct_ids that fired app_loaded during the UTC day. app_loaded fires
  * only after posthog.identify(user.id), so these are app user ids plus
  * whatever anonymous ids a shared browser aliased in. */
@@ -46,15 +70,7 @@ export async function fetchActiveDistinctIds(day: string): Promise<string[]> {
     `AND timestamp < toDateTime('${addUtcDays(day, 1)} 00:00:00', 'UTC')`,
     "LIMIT 10000",
   ].join(" ");
-  const res = await fetch(`${POSTHOG_HOST}/api/projects/${projectId}/query`, {
-    body: JSON.stringify({ query: { kind: "HogQLQuery", query } }),
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    method: "POST",
-  });
-  if (!res.ok) {
-    const detail = (await res.text().catch(() => "")).slice(0, 300);
-    throw new Error(`PostHog query failed (${res.status}): ${detail}`);
-  }
+  const res = await postQuery(projectId, apiKey, query);
   const data = (await res.json()) as { results?: unknown[][] };
   const ids = new Set<string>();
   for (const row of data.results ?? []) {
