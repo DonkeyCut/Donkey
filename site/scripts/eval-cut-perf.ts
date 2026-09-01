@@ -722,7 +722,7 @@ async function seed(page: Page, files: string[], transitions: boolean): Promise<
  * hand, captures still to earn. */
 const seedTimeCoded = (src: string, cuts: number[]) => async (page: Page): Promise<Fixture> =>
   page.evaluate(
-    async ({ duration, src, cuts }) => {
+    async ({ duration, src, cuts, width, height }) => {
       const dev = (window as unknown as {
         __cutDev: {
           useEditor: {
@@ -756,7 +756,7 @@ const seedTimeCoded = (src: string, cuts: number[]) => async (page: Page): Promi
       await dev.enrichAsset(dev.useEditor.getState().assets[0]);
       return { cuts, duration };
     },
-    { duration: RAMP_S, src, cuts }
+    { duration: RAMP_S, src, cuts, width: 1280, height: 720 }
   );
 
 const startTrace = (page: Page) =>
