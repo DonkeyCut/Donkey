@@ -6,7 +6,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { deleteLadder } from "./ladderStore";
 import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl } from "./mediaCdn";
-import { del, deletePrefix, projectExportKey, projectHlsRoot, projectMediaKey } from "./r2";
+import { del, deletePrefix, projectExportKey, projectPrefix, projectMediaKey } from "./r2";
 import { addUsage } from "./usage";
 import { caught, decodeFileParam, err, redirect } from "./util";
 
@@ -126,15 +126,16 @@ export async function deleteProjectCascade(userId: string, id: string): Promise<
     await addUsage(tx, userId, -freed);
   });
   await del(objects.map((o) => o.r2Key));
-  // The HLS ladders have no media rows at all — they are found by prefix and
-  // recorded in KV — so both have to be cleared by hand here. Neither affects
-  // `freed`: a ladder never counted toward the quota.
+  // Then the whole tree, rows or no rows: the HLS ladders (found by prefix and
+  // recorded in KV), an export a tab uploaded and never registered, a proxy
+  // whose registration failed after its upload. None of it affects `freed`;
+  // nothing without a row ever counted toward the quota.
   //
-  // The bytes go before the record does. A long 4K cut runs to tens of
+  // The bytes go before the ladder record does. A long 4K cut runs to tens of
   // thousands of objects, so this pages rather than listing once; and pruning
   // the record first would leave anything the delete missed with no index that
   // could ever find it again.
-  await deletePrefix(projectHlsRoot(userId, id)).catch(() => 0);
+  await deletePrefix(projectPrefix(userId, id)).catch(() => 0);
   await deleteLadder(id);
   return freed;
 }

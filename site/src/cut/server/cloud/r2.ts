@@ -40,8 +40,13 @@ function r2(): S3Client {
 
 // --- Key scheme: everything a user owns lives under cut/<userId>/. ---
 
+/** Everything a project owns in the bucket — media, exports, the hover proxy,
+ * the card, every ladder — lives under this one prefix, so a project delete
+ * can sweep it whole. */
+export const projectPrefix = (userId: string, projectId: string) =>
+  `cut/${userId}/projects/${projectId}/`;
 export const projectMediaKey = (userId: string, projectId: string, fileName: string) =>
-  `cut/${userId}/projects/${projectId}/media/${fileName}`;
+  `${projectPrefix(userId, projectId)}media/${fileName}`;
 export const projectExportKey = (userId: string, projectId: string, fileName: string) =>
   `cut/${userId}/projects/${projectId}/exports/${fileName}`;
 export const projectPreviewKey = (userId: string, projectId: string) =>
@@ -62,8 +67,13 @@ export const projectCardKey = (userId: string, projectId: string, ext: "jpg" | "
   `cut/${userId}/projects/${projectId}/card.${ext}`;
 export const libraryKey = (userId: string, fileName: string) =>
   `cut/${userId}/library/${fileName}`;
+/** Per-user root of the bucket, and the overlay tree under it. `overlayPrefix`
+ * is what the sweep walks: one listing per user that has any objects, found
+ * through `listCommonPrefixes(USER_ROOT)`. */
+export const USER_ROOT = "cut/";
+export const overlayPrefix = (userId: string) => `cut/${userId}/overlays/`;
 export const overlayKey = (userId: string, batchId: string, name: string) =>
-  `cut/${userId}/overlays/${batchId}/${name}`;
+  `${overlayPrefix(userId)}${batchId}/${name}`;
 
 /** Scratch media a hosted inference call carries — reference sheets, keyframes,
  * chat attachments. Keyed by the SHA-256 of the bytes, so a sheet that rides
@@ -203,6 +213,28 @@ export async function listObjectsWithDates(
       if (o.Key && o.LastModified) out.push({ key: o.Key, lastModified: o.LastModified });
       if (out.length >= limit) return out;
     }
+    token = res.IsTruncated ? res.NextContinuationToken : undefined;
+  } while (token);
+  return out;
+}
+
+/** The "directories" directly under `prefix` — one entry per distinct next
+ * path segment, without listing the objects inside. A sweep that walks every
+ * user's tree starts here instead of from a table scan. */
+export async function listCommonPrefixes(prefix: string): Promise<string[]> {
+  const out: string[] = [];
+  let token: string | undefined;
+  do {
+    const res = await r2().send(
+      new ListObjectsV2Command({
+        Bucket: R2_BUCKET,
+        Prefix: prefix,
+        Delimiter: "/",
+        ContinuationToken: token,
+        MaxKeys: 1000,
+      })
+    );
+    for (const p of res.CommonPrefixes ?? []) if (p.Prefix) out.push(p.Prefix);
     token = res.IsTruncated ? res.NextContinuationToken : undefined;
   } while (token);
   return out;

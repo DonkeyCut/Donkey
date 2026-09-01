@@ -6,7 +6,17 @@ import { R2NotConfiguredError } from "./r2";
 export const err = (message: string, status: number) =>
   Response.json({ error: message }, { status });
 
+/** A refusal raised deep inside a helper — a quota wall met halfway through a
+ * copy — carrying the exact response the route should answer with, so the
+ * wall reads the same wherever it is hit. `caught` unwraps it. */
+export class HttpResponseError extends Error {
+  constructor(public readonly response: Response) {
+    super(`HTTP ${response.status}`);
+  }
+}
+
 export const caught = (e: unknown, fallback: string, status = 500) => {
+  if (e instanceof HttpResponseError) return e.response;
   if (e instanceof R2NotConfiguredError) return err(e.message, 500);
   // The real reason belongs in the server's logs, not in a response an
   // anonymous share viewer reads: it names the environment variable to set.

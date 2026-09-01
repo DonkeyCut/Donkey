@@ -19,16 +19,7 @@ import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl, mediaUrlLifetime } from "./medi
 import { getProject, takenMediaNames } from "./projects";
 import { copy, del, head, libraryKey, presignPut, projectMediaKey } from "./r2";
 import { addUsage, quotaCheck } from "./usage";
-import {
-  caught,
-  decodeFileParam,
-  dedupeName,
-  err,
-  inspirationFolderId,
-  redirect,
-  safeFileName,
-  typeOf,
-} from "./util";
+import { caught, decodeFileParam, dedupeName, err, HttpResponseError, inspirationFolderId, redirect, safeFileName, typeOf } from "./util";
 
 /** Cap on one signed-URL batch, matching the project media batch. */
 const PRESIGN_GET_BATCH_MAX = 500;
@@ -168,6 +159,9 @@ async function copyIntoLibrary(
   src: MediaObjectRow,
   taken: Set<string>,
 ): Promise<string> {
+  // A copy is new bytes on the account, held to the quota like an upload.
+  const over = await quotaCheck(userId, Number(src.bytes));
+  if (over) throw new HttpResponseError(over);
   const dest = dedupeName(safeFileName(src.fileName), taken);
   taken.add(dest);
   const key = libraryKey(userId, dest);
@@ -249,6 +243,8 @@ async function copyIntoProject(
 ): Promise<string> {
   const src = await libraryMediaObject(userId, libFileName);
   if (!src) throw new Error("Library asset not found.");
+  const over = await quotaCheck(userId, Number(src.bytes));
+  if (over) throw new HttpResponseError(over);
   const dest = dedupeName(safeFileName(libFileName), taken);
   taken.add(dest);
   const key = projectMediaKey(userId, projectId, dest);
@@ -791,20 +787,39 @@ export const libraryCloud = {
       if (!(await getProject(userId, projectId)))
         throw new Error("Project not found.");
       if (templateEmpty(input)) throw new Error("Nothing to save.");
+      // Every source is resolved and the whole batch checked against the quota
+      // before the first copy, so the wall is met with nothing written; a
+      // copy that still fails takes the ones before it back with it, since a
+      // library object no template names is one nothing could ever find.
+      const sources = await Promise.all(
+        input.media.map(async (m) => {
+          const src = await projectMediaObject(userId, projectId, m.fileName);
+          if (!src) throw new Error("Media file not found in project.");
+          return { m, src };
+        }),
+      );
+      const over = await quotaCheck(
+        userId,
+        sources.reduce((sum, { src }) => sum + Number(src.bytes), 0),
+      );
+      if (over) throw new HttpResponseError(over);
       const taken = await takenLibraryNames(userId);
       const media: TemplateMedia[] = [];
-      for (const m of input.media) {
-        const src = await projectMediaObject(userId, projectId, m.fileName);
-        if (!src) throw new Error("Media file not found in project.");
-        const dest = await copyIntoLibrary(userId, src, taken);
-        media.push({
-          fileName: dest,
-          name: m.name,
-          type: m.type,
-          duration: m.duration,
-          width: m.width,
-          height: m.height,
-        });
+      try {
+        for (const { m, src } of sources) {
+          const dest = await copyIntoLibrary(userId, src, taken);
+          media.push({
+            fileName: dest,
+            name: m.name,
+            type: m.type,
+            duration: m.duration,
+            width: m.width,
+            height: m.height,
+          });
+        }
+      } catch (e) {
+        for (const done of media) await deleteLibraryObject(userId, done.fileName).catch(() => {});
+        throw e;
       }
       const doc: TemplateDoc = {
         folderId: null,
@@ -897,6 +912,17 @@ export const libraryCloud = {
       const row = await findTemplate(userId, id);
       if (!row) throw new Error("Template not found.");
       const template = templateView(row);
+      // The whole batch against the quota before the first copy; a project
+      // copy that still fails is unreferenced project media, which the sweep
+      // reclaims.
+      let incoming = 0;
+      for (const m of template.media) {
+        const src = await libraryMediaObject(userId, m.fileName);
+        if (!src) throw new Error("Library asset not found.");
+        incoming += Number(src.bytes);
+      }
+      const over = await quotaCheck(userId, incoming);
+      if (over) throw new HttpResponseError(over);
       const taken = await takenMediaNames(userId, projectId);
       const media: TemplateMedia[] = [];
       for (const m of template.media) {

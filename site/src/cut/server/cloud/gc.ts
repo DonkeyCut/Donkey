@@ -9,7 +9,15 @@ import { cutLimitsFor, FREE_STORAGE_BYTES } from "./limits";
 import { collectable, listSweepableLadders, pruneLadder, readLadder } from "./ladderStore";
 import { deleteLibraryAssetCascade } from "./library";
 import { deleteProjectCascade } from "./projects";
-import { del, deletePrefix, INFERENCE_PREFIX, listOlderThan, projectHlsRoot } from "./r2";
+import {
+  del,
+  deletePrefix,
+  INFERENCE_PREFIX,
+  listCommonPrefixes,
+  listOlderThan,
+  projectHlsRoot,
+  USER_ROOT,
+} from "./r2";
 import { addUsage, PENDING_CLAIM_MAX_AGE_MS } from "./usage";
 
 // Scratch media a hosted inference call carried. No row tracks these — they are
@@ -21,7 +29,11 @@ const JOB_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 // clip off the phone. A phone that has not synced in a season has a bigger
 // problem than a missed delete, so the row goes after that.
 const LIBRARY_TOMBSTONE_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
-const TERMINAL_STATES = ["done", "error", "canceled"];
+const TERMINAL_STATES = ["done", "error", "canceled", "dismissed"];
+// Overlay PNGs are single-use render inputs the worker deletes when their job
+// settles. Ones presigned for a job that was never queued have no row and no
+// job, so age is what makes them garbage; two days is far past any render.
+const OVERLAY_MAX_AGE_MS = 2 * 24 * 60 * 60 * 1000;
 // Reclamation converges over daily runs rather than risking one long one.
 const RECLAIM_SCAN_LIMIT = 500;
 const RECLAIM_MAX_USERS = 10;
@@ -228,6 +240,33 @@ async function reclaimOverQuota() {
   return out;
 }
 
+/** Overlay inputs older than any render could still be waiting on: presigned
+ * uploads whose export never started. Walks the bucket's user trees rather
+ * than the user table, so it touches only accounts that hold objects. */
+async function sweepStaleOverlays(): Promise<number> {
+  const before = new Date(Date.now() - OVERLAY_MAX_AGE_MS);
+  // A job still waiting to be claimed — through a wake outage, say — reads its
+  // overlays when it finally runs, however old they are by then.
+  const live = await prisma.cutRenderJob.findMany({
+    where: { state: { in: ["queued", "running"] } },
+    select: { spec: true },
+  });
+  const held = new Set(
+    live.flatMap((j) => {
+      const overlays = (j.spec as { overlays?: { key?: unknown }[] } | null)?.overlays ?? [];
+      return overlays.map((o) => o?.key).filter((k): k is string => typeof k === "string");
+    })
+  );
+  let removed = 0;
+  for (const user of await listCommonPrefixes(USER_ROOT)) {
+    if (user === INFERENCE_PREFIX) continue;
+    const keys = (await listOlderThan(`${user}overlays/`, before)).filter((k) => !held.has(k));
+    await del(keys);
+    removed += keys.length;
+  }
+  return removed;
+}
+
 export async function runGc(): Promise<Response> {
   const pending = await prisma.cutMediaObject.findMany({
     where: {
@@ -327,6 +366,12 @@ export async function runGc(): Promise<Response> {
   ).catch(() => [] as string[]);
   await del(scratch);
 
+  // Stale overlays, one listing per user tree that exists in the bucket.
+  const overlays = await sweepStaleOverlays().catch((e: unknown) => {
+    console.error("[cut-gc] overlay sweep failed:", e instanceof Error ? e.message : e);
+    return 0;
+  });
+
   // Guarded like the prefix sweeps above it: the ladder store is optional
   // infrastructure whose loss costs a re-render, so a missing token or an
   // unreachable KV must not take down the run that reclaims storage.
@@ -347,6 +392,7 @@ export async function runGc(): Promise<Response> {
     pendingObjects: pending.length,
     orphanedMedia: orphans.length,
     inferenceScratch: scratch.length,
+    staleOverlays: overlays,
     renderJobs: jobs.count,
     libraryTombstones: tombstones.count,
     staleLadderProjects: ladders.projects,
