@@ -196,6 +196,7 @@ class Engine {
   private unsubscribe: () => void;
   private unwatch: () => void;
   private sizeWatch: MutationObserver;
+  private onHidden: () => void;
 
   constructor(private canvas: HTMLCanvasElement) {
     this.comp = new FrameCompositor(canvas);
@@ -214,6 +215,27 @@ class Engine {
     // document edit — so the attributes themselves are the wake signal.
     this.sizeWatch = new MutationObserver(() => this.wake());
     this.sizeWatch.observe(canvas, { attributes: true, attributeFilter: ["width", "height"] });
+    // An editor left in a background tab keeps everything it was holding: the
+    // frame loop is where sources are stood down, and a hidden tab is given
+    // almost no frames to do it in. So the memory an editing session builds up
+    // — decoders, the canvases behind them, the bytes they were decoded from —
+    // stays out of the machine's reach for as long as the tab sits there,
+    // which is exactly when the person has gone to do something else with it.
+    // Letting go costs one keyframe seek per visible clip on return.
+    this.onHidden = () => {
+      if (document.visibilityState !== "hidden" || useEditor.getState().playing) return;
+      engineLog(`engine ${this.serial} backgrounded, releasing`);
+      this.pool.closeAll();
+      this.behind.clear();
+      this.matteAlpha.clear();
+      this.mixer.releaseCaches();
+      // The canvas keeps showing the frame it last painted, so nothing is
+      // blank while the tab is away. The wake is for the return: it books the
+      // repaint that reopens the sources, and a hidden tab runs it when it is
+      // hidden no longer.
+      this.wake();
+    };
+    document.addEventListener("visibilitychange", this.onHidden);
     engineLog(`engine ${this.serial} constructed`);
     this.wake();
   }
@@ -226,7 +248,9 @@ class Engine {
     this.unsubscribe();
     this.unwatch();
     this.sizeWatch.disconnect();
-    this.pool.closeAll();
+    document.removeEventListener("visibilitychange", this.onHidden);
+    this.pool.dispose();
+    this.behind.dispose();
     this.mixer.dispose();
   }
 
