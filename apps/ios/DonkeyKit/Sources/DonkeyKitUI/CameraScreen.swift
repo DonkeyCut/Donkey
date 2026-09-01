@@ -236,7 +236,12 @@ struct CameraScreen<CameraPreview: View>: View {
                 }
                 .glassEffect(.regular.interactive())
                 .popover(isPresented: $showsZoomPicker, arrowEdge: .leading) {
-                    zoomPicker.presentationCompactAdaptation(.popover)
+                    zoomPicker
+                        .presentationCompactAdaptation(.popover)
+                        // Camera chrome is dark over the picture in every
+                        // appearance, so the popover keeps the stage's dark.
+                        .preferredColorScheme(.dark)
+                        .presentationBackground(Color.black.opacity(0.78))
                 }
 
                 Button {
@@ -294,7 +299,10 @@ struct CameraScreen<CameraPreview: View>: View {
                 }
                 .glassEffect(.regular.interactive())
                 .popover(isPresented: $showsQualityPopover, arrowEdge: .leading) {
-                    qualityPopover.presentationCompactAdaptation(.popover)
+                    qualityPopover
+                        .presentationCompactAdaptation(.popover)
+                        .preferredColorScheme(.dark)
+                        .presentationBackground(Color.black.opacity(0.78))
                 }
                 .disabled(camera.isRecording)
             }
