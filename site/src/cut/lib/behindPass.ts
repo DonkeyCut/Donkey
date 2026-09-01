@@ -19,6 +19,7 @@ import {
   wordSampleWindows,
 } from "@donkeycut/effects-kit";
 import { personSegmenter, segmentSubjectAlpha } from "./cutout";
+import { holdMemory } from "./memoryBudget";
 import { createRasterCanvas } from "./raster";
 import { renderElementPng } from "./textRender";
 import {
@@ -121,11 +122,32 @@ export class SubjectMaskCompositor {
 
   private segmenter: Segmenter | null = null;
   private segKicked = false;
-  // One picture per element, and one per emphasized word when the element
-  // lights its words as they are said — keyed by the element object, so an
-  // edit hands back a fresh picture rather than a stale one.
-  private rasters = new WeakMap<Overlay, Map<number, ImageBitmap>>();
-  private pending = new WeakMap<Overlay, Set<number>>();
+  /**
+   * One picture per element, and one per emphasized word when the element
+   * lights its words as they are said.
+   *
+   * Filed under the element's id and stamped with the element object the
+   * picture was drawn from. The store hands back a new object for every edit,
+   * so a stamp that no longer matches is a picture of an element that has since
+   * changed: it closes and redraws. Keying on the object itself would say the
+   * same thing, and would leave every superseded picture holding pixels outside
+   * the heap that only `close()` gives back, with a keystroke's worth minted
+   * per keystroke.
+   *
+   * `pending` rides in the entry so it is dropped whenever the pictures are.
+   * It marks a draw already asked for, and a marker outliving the picture it
+   * was asked for would leave the element blank for good.
+   */
+  private rasters = new Map<
+    string,
+    { of: Overlay; byWord: Map<number, ImageBitmap>; pending: Set<number> }
+  >();
+  private readonly releaseMemory = holdMemory("pictures", () => {
+    let n = 0;
+    for (const e of this.rasters.values())
+      for (const b of e.byWord.values()) n += b.width * b.height * 4;
+    return n;
+  });
   private person: HTMLCanvasElement | null = null;
   private small: HTMLCanvasElement | null = null;
   private mask: { at: number; alpha: HTMLCanvasElement | null } = { at: -1e9, alpha: null };
@@ -143,6 +165,23 @@ export class SubjectMaskCompositor {
     });
   }
 
+  /** This element's entry, emptied first when the pictures in it were drawn
+   * from an older version of the element. */
+  private entryFor(o: Overlay) {
+    let entry = this.rasters.get(o.id);
+    if (entry && entry.of !== o) {
+      for (const b of entry.byWord.values()) b.close();
+      entry.byWord.clear();
+      entry.pending.clear();
+      entry.of = o;
+    }
+    if (!entry) {
+      entry = { of: o, byWord: new Map(), pending: new Set() };
+      this.rasters.set(o.id, entry);
+    }
+    return entry;
+  }
+
   private rasterFor(
     o: Overlay,
     w: number,
@@ -150,12 +189,11 @@ export class SubjectMaskCompositor {
     assets: MediaAsset[],
     word: number
   ): ImageBitmap | null {
-    const hit = this.rasters.get(o)?.get(word);
+    const entry = this.entryFor(o);
+    const hit = entry.byWord.get(word);
     if (hit) return hit;
-    const inFlight = this.pending.get(o) ?? new Set<number>();
-    if (!inFlight.has(word)) {
-      inFlight.add(word);
-      this.pending.set(o, inFlight);
+    if (!entry.pending.has(word)) {
+      entry.pending.add(word);
       // Neutral picture: position aside, the per-frame pose owns rotation and
       // opacity, so baking them here would apply each of them twice.
       void this.drawRaster(o, w, h, assets, word).catch(() => {});
@@ -182,9 +220,29 @@ export class SubjectMaskCompositor {
       assets
     );
     const bmp = await createImageBitmap(png);
-    const byWord = this.rasters.get(o) ?? new Map<number, ImageBitmap>();
-    byWord.set(word, bmp);
-    this.rasters.set(o, byWord);
+    // The element may have been edited, or the pictures released, while this
+    // one was being drawn; either way its entry is gone or stamped with a
+    // different object, and this picture is of the wrong thing.
+    const entry = this.rasters.get(o.id);
+    if (!entry || entry.of !== o) {
+      bmp.close();
+      return;
+    }
+    entry.byWord.get(word)?.close();
+    entry.byWord.set(word, bmp);
+  }
+
+  /** Give back every picture this pass is holding. The pass stays usable and
+   * draws them again when it is next asked. */
+  clear(): void {
+    for (const e of this.rasters.values()) for (const b of e.byWord.values()) b.close();
+    this.rasters.clear();
+  }
+
+  /** Give the pictures back and stop reporting what this pass holds. */
+  dispose(): void {
+    this.clear();
+    this.releaseMemory();
   }
 
   /** Export path: everything resident before the first frame draws. */
@@ -199,7 +257,7 @@ export class SubjectMaskCompositor {
         // An element that lights its words needs one picture per word, all of
         // them resident before the first frame draws.
         rasterSlices(o).map(async (word) => {
-          if (this.rasters.get(o)?.has(word)) return;
+          if (this.entryFor(o).byWord.has(word)) return;
           try {
             await this.drawRaster(o, w, h, assets, word);
           } catch {
@@ -342,6 +400,18 @@ export class SubjectMaskCompositor {
     t: number,
     opts: { minMaskInterval?: number } = {}
   ): void {
+    // A deleted element's picture has nothing left to draw it. Filing by id
+    // means the entry outlives the element, so the document's own list is what
+    // says which entries are still owed — checked only when there are more of
+    // them than elements, which is the only way one can be stale.
+    if (this.rasters.size > overlays.length) {
+      const ids = new Set(overlays.map((o) => o.id));
+      for (const [id, e] of this.rasters) {
+        if (ids.has(id)) continue;
+        for (const b of e.byWord.values()) b.close();
+        this.rasters.delete(id);
+      }
+    }
     const active = behindOverlaysAt(overlays, t);
     const wantsMatte = overlays.some(
       (o) => frontSubjectOverlay(o) && drawable(o) && t >= o.start && t <= o.end

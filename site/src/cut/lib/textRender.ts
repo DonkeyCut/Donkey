@@ -13,6 +13,7 @@ import {
   type WordDraw,
 } from "@donkeycut/effects-kit";
 import type { CSSProperties } from "react";
+import { holdMemory } from "./memoryBudget";
 import { createRasterCanvas, decodeRasterImage, rasterCanvasToPng } from "./raster";
 import { fontStack, type MediaAsset, type Overlay } from "./types";
 
@@ -78,6 +79,16 @@ export function wordDrawCss(d: WordDraw, lineHeight = LINE_HEIGHT): CSSPropertie
 /** Decoded sticker images by asset id, shared across one page's renders. An
  * <img> decode handles SVG too (createImageBitmap on an SVG blob does not). */
 const stickerCache = new Map<string, Promise<StickerImage | null>>();
+/** What each decoded sticker costs, filled in as they land. The cache above
+ * holds promises, which cannot be asked their size; this is what makes the
+ * pictures the page is holding countable. */
+const stickerBytes = new Map<string, number>();
+
+holdMemory("pictures", () => {
+  let n = 0;
+  for (const bytes of stickerBytes.values()) n += bytes;
+  return n;
+});
 
 function decodeSticker(url: string): Promise<StickerImage | null> {
   return fetch(url)
@@ -105,6 +116,7 @@ export function cutRenderEnv(assets: MediaAsset[]): RenderEnv {
         hit = decodeSticker(asset.url).then((img) => {
           // A failed decode is not worth pinning; the next render retries.
           if (!img) stickerCache.delete(asset.id);
+          else stickerBytes.set(asset.id, img.width * img.height * 4);
           return img;
         });
         stickerCache.set(asset.id, hit);

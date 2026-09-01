@@ -389,6 +389,34 @@ describe("FrameSourcePool", () => {
     expect(big.map((s) => s.suspended)).toEqual([true, true, true, true, false, false]);
   });
 
+  test("says what it is holding, live sources included", () => {
+    const pool = new FrameSourcePool(4);
+    expect(pool.decoderBytes).toBe(0);
+    expect(pool.canvasBytes).toBe(0);
+    pool.beginFrame();
+    pool.get("a", asset("a", 3840, 2160), 2160);
+    // A live 4K decoder holds sixteen planar frames: about two hundred
+    // megabytes, none of which the warm shelf's own number would ever show.
+    expect(Math.round(pool.decoderBytes / 2 ** 20)).toBe(190);
+    expect(pool.warmPixels).toBe(0);
+    expect(pool.canvasBytes).toBeGreaterThan(0);
+    // One 4K source is well inside the budget, so nothing stands down.
+    for (let i = 0; i < 200; i++) pool.beginFrame();
+    pool.evict();
+    expect(pool.decoderBytes).toBeGreaterThan(0);
+
+    // Standing down gives the decoder back and keeps the canvases, which is
+    // the whole point of the warm shelf.
+    const tight = new FrameSourcePool(0);
+    tight.beginFrame();
+    tight.get("a", asset("a", 1920, 1080), 1080);
+    const canvases = tight.canvasBytes;
+    for (let i = 0; i < 200; i++) tight.beginFrame();
+    tight.evict();
+    expect(tight.decoderBytes).toBe(0);
+    expect(tight.canvasBytes).toBe(canvases);
+  });
+
   test("standing down costs a decoder, not a source", () => {
     const pool = new FrameSourcePool(1);
     pool.beginFrame();

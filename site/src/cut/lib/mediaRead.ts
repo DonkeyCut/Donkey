@@ -44,6 +44,7 @@ import {
 import { confirmEngine, engineConnected, isEngineUrl } from "./api";
 import { resolveRegisteredBlob } from "./backend/browser/registry";
 import { chunkSourceOptions } from "./chunkCache";
+import { allowance, holdMemory } from "./memoryBudget";
 
 /** What a file turns out to be, read from its container. */
 export interface MediaProbe {
@@ -176,22 +177,72 @@ function trackedFetch(url: string): typeof fetch {
  * ranged fetches of blob URLs are unreliable across browsers. Signed cloud
  * media reads through the chunk cache (chunkCache.ts), so bytes touched once
  * are on disk for the next read of the same object. */
+/**
+ * Readers open at once, at the busiest the editor gets.
+ *
+ * The preview's decoder pool, the timeline's edge readers, and a render's
+ * per-clip readers all hold one each. The number is what a per-reader cache has
+ * to be divided by for the total to stay inside the tab's share: sizing each
+ * cache as if it were the only one is how a cache with a sensible-looking limit
+ * becomes a gigabyte.
+ */
+const READERS = 16;
+/** Bytes of the file one reader keeps in memory. Enough that a walk reading
+ * forward never re-fetches what it just read, and small enough that the
+ * readers together stay inside the tab's ceiling. */
+const READ_CACHE = 32 * 2 ** 20;
+
+/** Chunked readers open right now, for the memory report. */
+let openReaders = 0;
+
+/** Decided on the first open and held: the ceiling does not move, so asking
+ * again would return the same number and re-record the same pressure. Reading
+ * what the readers hold must not itself count as a request for room. */
+let readCache = 0;
+const readCacheSize = (): number =>
+  (readCache ||= Math.round(allowance("reads", READ_CACHE * READERS) / READERS));
+
+holdMemory("reads", () => openReaders * readCacheSize());
+
 export function openMedia(src: string | Blob): Input {
   const blob = typeof src === "string" ? resolveRegisteredBlob(src) ?? src : src;
   let source;
+  let chunkedRead = false;
   if (typeof blob === "string") {
     const chunked = chunkSourceOptions(blob);
     source = chunked
-      ? new CustomSource({ ...chunked, prefetchProfile: "network", maxCacheSize: 64 * 2 ** 20 })
+      ? new CustomSource({
+          ...chunked,
+          prefetchProfile: "network",
+          maxCacheSize: readCacheSize(),
+        })
       : new UrlSource(blob, {
           parallelism: urlParallelism(blob),
           getRetryDelay: urlRetryDelay,
           fetchFn: trackedFetch(blob),
         });
+    chunkedRead = !!chunked;
   } else {
     source = new BlobSource(blob);
   }
-  return new Input({ formats: ALL_FORMATS, source });
+  const input = new Input({ formats: ALL_FORMATS, source });
+  // The cache lives inside the source, where nothing can ask it how big it has
+  // grown. Counting the readers that own one is what makes the total
+  // reportable, and the count is only right if it is taken where the reader is
+  // let go — so the dispose every caller already makes is where it is taken.
+  if (chunkedRead) {
+    openReaders++;
+    const dispose = input.dispose.bind(input);
+    let closed = false;
+    input.dispose = () => {
+      if (!closed) {
+        closed = true;
+        openReaders--;
+      }
+      return dispose();
+    };
+  }
+  return input;
 }
 
 /** Run `fn` against an open input and dispose it however that ends. */

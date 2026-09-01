@@ -32,6 +32,7 @@ import { renderMix, type MixClip, type MixItem, type MixSpec } from "./audioMix"
 import { FrameCompositor, MISSING_FRAME, type Frame } from "./composite";
 import { overlayPlan, trackZeroPlan } from "./framePlan";
 import { frameSink, openMedia, videoTrackOf } from "./mediaRead";
+import { allowance, canvasBytes } from "./memoryBudget";
 import { getClipSpans, overlayLayers, projectDuration, spanSequence } from "./store";
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
 import { applyEffectToCanvas, evalOverlayFrame, grainTile, isAudioEffect, isMaskAnimated, isOverlayAnimated, maskFrameAt, MATTE_FPS, matteLumaToAlpha, planAnimatedLayers, type LottieHandle, type OverlayAnim, type PaintPhase } from "@donkeycut/effects-kit";
@@ -126,6 +127,18 @@ export function bitrateFor(settings: ExportSettings): number {
 /** The frame reader for one open video source. */
 type ClipSink = ReturnType<typeof frameSink>;
 
+/** Canvases one clip reader cycles. Small: a render draws one frame at a time
+ * and never looks back, so the pool only has to keep the frame being drawn
+ * clear of the frame being decoded. */
+const READER_POOL = 4;
+/** Readers a render keeps open when memory is not the constraint. A cut drawn
+ * from more files than this reopens the ones it comes back to. */
+const READERS_TUNED = 12;
+/** Frames a reader may go unasked-for before it is a candidate to close. One
+ * frame's own readers are never candidates, so what a join or a stack of
+ * layers needs together is never taken away from the frame needing it. */
+const READER_GRACE = 2;
+
 /** A clip's source time at timeline time `t`. */
 function sourceTimeAt(span: ClipSpan, t: number): number {
   const speed = span.clip.speed && span.clip.speed > 0 ? span.clip.speed : 1;
@@ -153,6 +166,20 @@ export class ClipReader {
    * the preview holds the rest — the rebuilt reader decodes in software,
    * which always opens. */
   private software = false;
+  /** The frame number this reader was last asked for, for the painter's
+   * between-frames eviction. */
+  usedAt = 0;
+
+  /**
+   * Pixels in a frame of the source.
+   *
+   * The sink is opened with no size, so its canvases are the file's own — a
+   * 4K clip in a 1080p render still cycles 4K canvases. Sizing the budget off
+   * the render's canvas would under-count that by the ratio between them.
+   */
+  get sourcePixels(): number {
+    return (this.asset.width ?? 1920) * (this.asset.height ?? 1080);
+  }
 
   constructor(
     private asset: MediaAsset,
@@ -188,7 +215,7 @@ export class ClipReader {
       // A small pool keeps the render's canvas allocation flat over thousands
       // of frames.
       this.sink = frameSink(track, undefined, {
-        poolSize: 4,
+        poolSize: READER_POOL,
         ...(this.software ? { software: true } : {}),
       });
       return this.sink;
@@ -826,6 +853,8 @@ export class FramePainter {
   private comp: FrameCompositor;
   private stamps: StampCache;
   private readers = new Map<string, ClipReader>();
+  /** Frames drawn, which is the clock the readers' eviction order runs on. */
+  private frameNo = 0;
   private behind: SubjectMaskCompositor | null = null;
   private fxScratch: RasterSurface | null = null;
   /** This frame's removal mattes, one alpha image per keyed clip — fetched
@@ -907,10 +936,56 @@ export class FramePainter {
       for (const sp of list) this.spanOfClip.set(sp.clip.id, sp);
   }
 
+  /**
+   * The reader for one asset, opening it if this frame is the first to ask.
+   *
+   * Readers are kept between frames because a render walks time forward and
+   * asks the same clip for thousands of consecutive frames; reopening one per
+   * frame would pay a keyframe seek for every one of them. They are not kept
+   * forever: each holds a decoder and a pool of canvases at the render size, so
+   * a cut drawing from a hundred files would otherwise finish the render
+   * holding a hundred decoders. Past the budget the least recently drawn are
+   * let go, which costs one reopen if the cut returns to them.
+   */
   private readerFor(asset: MediaAsset): ClipReader {
     let r = this.readers.get(asset.id);
     if (!r) this.readers.set(asset.id, (r = new ClipReader(asset, () => this.resolve(asset))));
+    r.usedAt = this.frameNo;
     return r;
+  }
+
+  /**
+   * Close the readers this cut has moved on from.
+   *
+   * Readers are kept between frames because a render walks time forward and
+   * asks the same clip for thousands of consecutive frames; reopening one per
+   * frame would pay a keyframe seek for every one. They are not kept forever:
+   * each holds a decoder and a pool of canvases at the *source's* own size, so
+   * a cut drawing from a hundred files would otherwise end the render holding a
+   * hundred decoders.
+   *
+   * This runs between frames, before anything has been asked for, and spares
+   * everything the last couple of frames used. A frame reaches for several
+   * readers at once — a join's two sides, a backdrop, a matte, every overlay
+   * layer — and closing one the frame is midway through would leave the
+   * compositor drawing from a disposed decoder. Closing them here, past the
+   * grace, cannot.
+   */
+  private evictReaders(): void {
+    const cost = (r: ClipReader) => canvasBytes(READER_POOL * r.sourcePixels);
+    const cap = allowance("canvases", READERS_TUNED * canvasBytes(READER_POOL * 1920 * 1080));
+    let held = 0;
+    for (const r of this.readers.values()) held += cost(r);
+    if (held <= cap) return;
+    const old = [...this.readers.entries()]
+      .filter(([, r]) => this.frameNo - r.usedAt > READER_GRACE)
+      .sort((a, b) => a[1].usedAt - b[1].usedAt);
+    for (const [id, r] of old) {
+      if (held <= cap) break;
+      held -= cost(r);
+      this.readers.delete(id);
+      r.dispose();
+    }
   }
 
   /** Pull a removal clip's baked matte frame for timeline time `t` and stage
@@ -952,6 +1027,8 @@ export class FramePainter {
 
   /** Draw the whole cut at timeline time `t` onto the canvas. */
   async drawAt(t: number): Promise<void> {
+    this.frameNo++;
+    this.evictReaders();
     const { canvas, comp, doc, stamps } = this;
     const W = canvas.width;
     const H = canvas.height;
@@ -1047,6 +1124,7 @@ export class FramePainter {
 
   dispose(): void {
     this.stamps.dispose();
+    this.behind?.dispose();
     for (const r of this.readers.values()) r.dispose();
     this.readers.clear();
   }

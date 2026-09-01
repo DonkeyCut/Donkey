@@ -44,6 +44,7 @@ import {
 } from "@donkeycut/effects-kit";
 import type { WrappedAudioBuffer } from "mediabunny";
 import { assembleAudio, decodeAudioSpan, openAudioWalk, type AudioWalk } from "./mediaRead";
+import { allowance, holdMemory } from "./memoryBudget";
 import { meterAudioLate, meterClockJump } from "./perfTrace";
 import { timeStretch } from "./timeStretch";
 
@@ -67,6 +68,21 @@ const GROUP_PULLS = 128;
 /** A stretched window is resynthesised on the main thread, so it is kept short
  * enough that the work lands inside a frame or two. */
 const WINDOW_STRETCHED_S = 4;
+/**
+ * Stretched windows kept in hand.
+ *
+ * Two dozen four-second windows of stereo at 48kHz — enough that stepping back
+ * over a cut replays what it just played, and bounded because everything older
+ * than that is a full decode away regardless.
+ */
+const STRETCH_CACHE_BYTES = 24 * WINDOW_STRETCHED_S * 48_000 * 2 * 4;
+
+/** What a set of decoded windows costs: float samples, one per channel. */
+const decodedBytes = (held: Map<string, AudioBuffer>): number => {
+  let n = 0;
+  for (const b of held.values()) n += b.length * b.numberOfChannels * 4;
+  return n;
+};
 /** Schedule more of a voice once the playhead is this close to running out.
  * The scheduling runs on the main thread, and what is scheduled is all the
  * sound there is while that thread is blocked — a delete that takes seconds
@@ -219,6 +235,7 @@ export class PreviewMixer {
    * scheduled is placed against this. */
   private anchor: { timeline: number; ctx: number; wall: number } | null = null;
   private decoded = new Map<string, AudioBuffer>();
+  private readonly releaseMemory = holdMemory("audio", () => decodedBytes(this.decoded));
 
   /** Whether the clock is running. */
   get running(): boolean {
@@ -694,6 +711,11 @@ export class PreviewMixer {
     }
   }
 
+  /** Let go of every decoded window. The next play decodes them again. */
+  releaseCaches(): void {
+    this.decoded.clear();
+  }
+
   /** Drop the decode cache for a source that has been replaced. */
   private forget(url: string): void {
     for (const key of [...this.decoded.keys()]) {
@@ -707,6 +729,7 @@ export class PreviewMixer {
     this.teardownFx();
     this.fxKey = "";
     this.decoded.clear();
+    this.releaseMemory();
     void this.ctx?.close();
     this.ctx = null;
     this.master = null;
@@ -956,8 +979,18 @@ export class PreviewMixer {
     const raw = await decodeAudioSpan(live.url, sourceFrom, sourceTo);
     if (!raw) return null;
     const buffer = this.stretch(raw, 1 / live.speed);
-    if (this.decoded.size > 24) this.decoded.clear();
+    // Oldest first until the cache is back inside its share. Emptying the
+    // whole cache would throw away the window the playhead is standing on along
+    // with the ones it has finished, and the next frame would pay a full decode
+    // for sound it was already holding.
     this.decoded.set(key, buffer);
+    const cap = allowance("audio", STRETCH_CACHE_BYTES);
+    let cached = decodedBytes(this.decoded);
+    for (const [oldest, buf] of this.decoded) {
+      if (cached <= cap || this.decoded.size <= 1) break;
+      cached -= buf.length * buf.numberOfChannels * 4;
+      this.decoded.delete(oldest);
+    }
     return buffer;
   }
 

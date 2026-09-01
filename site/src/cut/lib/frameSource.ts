@@ -25,6 +25,7 @@
 
 import type { Input, InputVideoTrack, WrappedCanvas } from "mediabunny";
 import { frameSink, keyframeTimeAt, openMedia, videoTrackOf, type FrameCanvasSink } from "./mediaRead";
+import { allowance, canvasBytes, decodedFrameBytes, holdMemory } from "./memoryBudget";
 import { meterPull, meterSource, meterWalk } from "./perfTrace";
 import type { MediaAsset } from "./types";
 
@@ -305,6 +306,16 @@ const WARM_KEEP_MAX = 32;
  * at 1080p and holds four at 4K.
  */
 const LIVE_PIXELS = 34e6;
+/**
+ * Decoded frames a live decoder is holding at once.
+ *
+ * The patched decode pump gives a stream a head start of this many packets and
+ * counts what has gone in against what has come back out, so a stream that is
+ * not being read stops here, short of the platform decoder. It is
+ * the multiplier that turns a source's frame size into what its decoder costs
+ * — see `site/patches/mediabunny+1.55.5.patch`.
+ */
+const DECODER_FRAMES = 16;
 /** A failed open tries again this much later, growing per attempt over the
  * first `RETRIES` tries, so a network blip heals within seconds. */
 const RETRY_MS = 1000;
@@ -651,11 +662,36 @@ export class ClipFrameSource {
     return POOL * width * this.height;
   }
 
+  /**
+   * Every canvas this source is holding.
+   *
+   * `keptPixels` answers what a stood-down source would still cost, which is
+   * what the warm shelf is filled by. A source being read holds that same pool
+   * and, while a backward gesture is on it, two more: the fine windows at the
+   * decode size and the coarse span at half of it. Those are the biggest thing
+   * in the tab during a scrub, so a report of what the editor holds has to
+   * count them.
+   */
+  get canvasPixels(): number {
+    const one = this.keptPixels / POOL;
+    return (
+      this.keptPixels +
+      (this.backSink ? one * BACK_POOL : 0) +
+      (this.backCoarseSink ? (one / 4) * BACK_COARSE_POOL : 0)
+    );
+  }
+
   /** Pixels in a frame of the file, which is what its decoder's held frames
    * cost whatever size the picture is drawn at. */
   get decodePixels(): number {
     if (this.asset.type === "image") return 0;
     return (this.asset.width ?? 1920) * (this.asset.height ?? 1080);
+  }
+
+  /** What this source's decoder is holding in the platform's decoder, which is
+   * nothing at all once it has stood down. */
+  get decoderBytes(): number {
+    return this.asleep ? 0 : decodedFrameBytes(this.decodePixels) * DECODER_FRAMES;
   }
 
   /** The URL this source is reading. The pool compares it against the store's
@@ -1645,10 +1681,19 @@ export class FrameSourcePool {
   private sources = new Map<string, ClipFrameSource>();
   private tick = 0;
 
+  private readonly release: () => void;
+
   constructor(
     private budget = 10,
     private readonly onFrame: () => void = () => {}
-  ) {}
+  ) {
+    const stopDecoders = holdMemory("decoders", () => this.decoderBytes);
+    const stopCanvases = holdMemory("canvases", () => this.canvasBytes);
+    this.release = () => {
+      stopDecoders();
+      stopCanvases();
+    };
+  }
 
   /** Advance the clock the eviction order is measured on. */
   beginFrame(): void {
@@ -1715,6 +1760,28 @@ export class FrameSourcePool {
     return n;
   }
 
+  /** What the live decoders are holding in the platform's decoder. */
+  get decoderBytes(): number {
+    let n = 0;
+    for (const s of this.sources.values()) n += s.decoderBytes;
+    return n;
+  }
+
+  /**
+   * Canvas backing behind every source, live and stood down.
+   *
+   * The warm shelf's own budget counts only the stood-down ones, because those
+   * are the only ones it may close. This counts all of them, because all of
+   * them are memory the machine has to find — a scrub holding two backward
+   * windows open is the largest the number ever gets, and a report that left
+   * it out would say the editor was idle at its busiest moment.
+   */
+  get canvasBytes(): number {
+    let n = 0;
+    for (const s of this.sources.values()) n += s.canvasPixels;
+    return canvasBytes(n);
+  }
+
   /** Every open source and what it is doing, for the perf eval's pool dump. */
   debugState(): Record<string, unknown>[] {
     return [...this.sources.entries()].map(([id, s]) => ({ id, tick: this.tick, ...s.debugState() }));
@@ -1757,14 +1824,17 @@ export class FrameSourcePool {
       live--;
     }
 
-    // Then by pixels: the live decoders are kept most recently read first
-    // until the source budget runs out, and the idle ones past it stand down.
-    let livePixels = 0;
+    // Then by what those decoders hold: the live ones are kept most recently
+    // read first until the budget runs out, and the idle ones past it stand
+    // down. The budget is the smaller of what the preview was tuned to want
+    // and this machine's share, so a laptop sheds decoders a desktop keeps.
+    const decoderCap = allowance("decoders", decodedFrameBytes(LIVE_PIXELS) * DECODER_FRAMES);
+    let liveBytes = 0;
     for (const [id, src] of [...this.sources.entries()].sort((a, b) => b[1].touched - a[1].touched)) {
       if (src.suspended) continue;
-      livePixels += src.decodePixels;
-      if (livePixels <= LIVE_PIXELS || this.tick - src.touched < EVICT_GRACE) continue;
-      poolLog(`pool suspend ${id} (pixels)`);
+      liveBytes += src.decoderBytes;
+      if (liveBytes <= decoderCap || this.tick - src.touched < EVICT_GRACE) continue;
+      poolLog(`pool suspend ${id} (memory)`);
       src.suspend();
     }
 
@@ -1772,13 +1842,14 @@ export class FrameSourcePool {
     // the canvas budget runs out, and what does not fit closes for real. Only
     // stood-down sources are on the shelf, so nothing holding a decoder — and
     // nothing the picture is being drawn from — is ever closed here.
-    let pixels = 0;
+    const warmCap = allowance("canvases", canvasBytes(WARM_PIXELS));
+    let held = 0;
     let warm = 0;
     for (const [id, src] of [...this.sources.entries()].sort((a, b) => b[1].touched - a[1].touched)) {
       if (!src.suspended) continue;
-      pixels += src.keptPixels;
+      held += canvasBytes(src.keptPixels);
       warm++;
-      if (pixels <= WARM_PIXELS && warm <= WARM_KEEP_MAX) continue;
+      if (held <= warmCap && warm <= WARM_KEEP_MAX) continue;
       poolLog(`pool close ${id}`);
       src.close();
       this.sources.delete(id);
@@ -1789,6 +1860,12 @@ export class FrameSourcePool {
     poolLog(`pool closeAll (${this.sources.size})`);
     for (const s of this.sources.values()) s.close();
     this.sources.clear();
+  }
+
+  /** Close every source and stop reporting what this pool holds. */
+  dispose(): void {
+    this.closeAll();
+    this.release();
   }
 }
 
