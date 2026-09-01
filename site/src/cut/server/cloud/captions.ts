@@ -39,6 +39,10 @@ const MODEL = geminiModelRoles.chat;
 
 const MAX_FRAMES = 24;
 const MAX_BODY_BYTES = 4 * 1024 * 1024; // stay inside the hosted body limit
+// One credit check covers the whole run, and the run is one model call per
+// batch of cues, so the cue count is what bounds the spend behind that check.
+// Transcripts run to about thirty cues a minute; this holds a three-hour lane.
+const MAX_CUES = 6000;
 
 type GeminiPart = { text: string } | { inlineData: { mimeType: string; data: string } };
 
@@ -173,7 +177,9 @@ export const captionsCloud = {
     let style = "clean";
     let translateTo = "";
     try {
-      const body = (await req.json()) as {
+      const text = await req.text();
+      if (text.length > MAX_BODY_BYTES) return err("Too many cues.", 413);
+      const body = JSON.parse(text) as {
         cues?: CaptionInput[];
         style?: string;
         translateTo?: string;
@@ -181,6 +187,7 @@ export const captionsCloud = {
       cues = Array.isArray(body.cues)
         ? body.cues.filter((c) => c && typeof c.text === "string")
         : [];
+      if (cues.length > MAX_CUES) return err("Too many cues.", 413);
       if (typeof body.style === "string") style = body.style;
       if (typeof body.translateTo === "string") translateTo = body.translateTo;
     } catch {

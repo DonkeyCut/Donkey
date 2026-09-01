@@ -26,6 +26,7 @@ import { geminiModelRoles } from "@/lib/inference/gemini-models";
 import { toJsonValue } from "@/lib/inference/json";
 import type { JsonValue } from "@/lib/inference/providers";
 import { prisma } from "@/lib/prisma";
+import { cutLimitsFor } from "./limits";
 import { err } from "./util";
 
 const ROUTE = "/api/cut-cloud/library/title";
@@ -41,6 +42,23 @@ const FRAME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 /** Long enough that a hovering card can hand the whole line over, short enough
  * that the tile reads at a glance. */
 const MAX_TITLE_CHARS = 60;
+/** Whether one more title fits today's allowance — titles are on the house,
+ * so the tier sets a daily ceiling, and past it the tile shows the file name
+ * until tomorrow. Counted from the route's own usage events so the ledger is
+ * the tracker. */
+async function withinTitleAllowance(userId: string): Promise<boolean> {
+  const { titlesPerDay } = await cutLimitsFor(userId);
+  if (titlesPerDay === null) return true;
+  const used = await prisma.inferenceUsageEvent.count({
+    where: {
+      userId,
+      route: ROUTE,
+      status: "succeeded",
+      createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+    },
+  });
+  return used < titlesPerDay;
+}
 
 type GeminiPart = { text: string } | { inlineData: { mimeType: string; data: string } };
 
@@ -138,6 +156,7 @@ export const clipTitleCloud = {
     // shelf, a listing that arrived before the write — gets the title back
     // without spending a model call on it.
     if (meta.title) return Response.json({ title: meta.title });
+    if (!(await withinTitleAllowance(userId))) return err("Titling is paused for today.", 429);
 
     const clientConfig = geminiClientConfig(process.env);
     if (!clientConfig.configured) return err("Titling is not configured on this deployment.", 500);

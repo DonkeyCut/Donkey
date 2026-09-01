@@ -27,9 +27,12 @@ import { toJsonValue } from "@/lib/inference/json";
 import type { JsonValue } from "@/lib/inference/providers";
 import { err } from "./util";
 
-// The client sends sub-megabyte chunks of 16-bit mono PCM; anything bigger is
-// not ours and would blow past inline-audio comfort anyway.
-const MAX_AUDIO_BYTES = 4 * 1024 * 1024;
+// The client sends 16 kHz 16-bit mono PCM in chunks of at most 20 seconds; the
+// allowance below counts chunks, so the chunk itself is held to that length
+// (with a little room), or an oversized chunk would be minutes on the house.
+const PCM_BYTES_PER_SECOND = 32_000;
+const MAX_CHUNK_SECONDS = 30;
+const MAX_AUDIO_BYTES = 44 + MAX_CHUNK_SECONDS * PCM_BYTES_PER_SECOND;
 const ROUTE = "/api/cut-cloud/transcribe/";
 const PROVIDER = "gemini";
 // The registry's chat flash: multimodal, takes inline audio, priced in
@@ -188,7 +191,7 @@ export const transcribeCloud = {
 
     // Seconds of 16 kHz s16 mono after the 44-byte RIFF header — the clamp
     // ceiling for cue times the model may overshoot.
-    const audioSeconds = Math.max(1, (audio.size - 44) / 32000);
+    const audioSeconds = Math.max(1, (audio.size - 44) / PCM_BYTES_PER_SECOND);
     const wavBase64 = Buffer.from(await audio.arrayBuffer()).toString("base64");
 
     let raw: unknown;
