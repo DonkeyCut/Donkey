@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
+import { additiveClick } from "@/cut/lib/hostKeys";
 import type { AssetRef } from "@/cut/lib/assetRef";
 import { formatBytes } from "@/lib/bytes";
 import { RefDropZone } from "./RefDropZone";
@@ -146,7 +147,7 @@ export function Marquee({
       if (e.button !== 0 || (e.target as HTMLElement).closest(MARQUEE_SKIP)) return;
       const startX = e.clientX;
       const startY = e.clientY;
-      const additive = e.shiftKey || e.metaKey;
+      const additive = additiveClick(e);
       const base = new Set(additive ? selectedRef.current : []);
       let moved = false;
 

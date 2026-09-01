@@ -30,6 +30,7 @@
 import type React from "react";
 import { refFromAsset, startPointerRefDrag } from "./assetRef";
 import { startDrag } from "./drag";
+import { additiveClick, snapHeldOff } from "./hostKeys";
 import { track0Clips, clipLen, getClipSpans, moveOverlayGroup, nextFreeStart, overlayLaneOrder, overlayLayers, projectDuration, reanchorTransitions, startTrimRipple, useEditor } from "./store";
 import { playheadAt } from "./playhead";
 import type {
@@ -678,7 +679,7 @@ function startGroupMove(
       dt = Math.max(-minStart, effDx / ui.pps);
       // Snap the grabbed item's edges; the whole set follows its delta.
       let guide: number | null = null;
-      if (!ev.metaKey) {
+      if (!snapHeldOff(ev)) {
         const start = grabbed.start + dt;
         const end = start + grabbed.len;
         let best = { d: tol, dt, px: null as number | null };
@@ -816,7 +817,7 @@ export function startLaneMove<V = unknown>(
   }
   settleSnapBack();
   const s = useEditor.getState();
-  if (e.metaKey || e.shiftKey) {
+  if (additiveClick(e)) {
     s.toggleSelect({ kind: laneSelectionKind(kind), id });
     return;
   }
@@ -1023,7 +1024,7 @@ export function startLaneMove<V = unknown>(
       // Snap whichever edge of the moving item lands nearest a logical time.
       let start = ds;
       let guide: number | null = null;
-      if (!ev.metaKey) {
+      if (!snapHeldOff(ev)) {
         const end = start + len;
         let best = { d: tol, start, px: null as number | null };
         for (const T of targets) {
@@ -1256,7 +1257,7 @@ export function startLaneTrim(
         if (desired >= free) {
           // Room to the left: grow freely, snapping to logical times.
           start = desired;
-          const hit = ev.metaKey ? null : nearestSnap(start, targets, tol);
+          const hit = snapHeldOff(ev) ? null : nearestSnap(start, targets, tol);
           if (hit !== null && hit >= free && hit <= maxStart) {
             start = hit;
             ui.onSnap(leftGuide(hit, ui.pps));
@@ -1375,7 +1376,7 @@ export function startLaneTrim(
       if (desired <= ceil) {
         // Room to grow: snap to logical times within the ceiling.
         end = desired;
-        const hit = ev.metaKey ? null : nearestSnap(end, targets, tol);
+        const hit = snapHeldOff(ev) ? null : nearestSnap(end, targets, tol);
         if (hit !== null && hit > minEnd && hit <= ceil) {
           end = hit;
           ui.onSnap(rightGuide(end, ui.pps));

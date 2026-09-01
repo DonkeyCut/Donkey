@@ -45,6 +45,7 @@ import {
 import { originalSettings, type ExportDoc } from "@/cut/lib/exportClient";
 import { useExports } from "@/cut/lib/exportStore";
 import { isDragActive, startDrag, subscribeDragActive } from "@/cut/lib/drag";
+import { additiveClick } from "@/cut/lib/hostKeys";
 import { CLIP_GAP, laneDragFor, laneDragParts, startLaneMove, startLaneTrim, type LaneDrag, type LaneKind } from "@/cut/lib/laneTracks";
 import { downloadMedia, ensurePeaks, importImage, importStockMusic, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia, stripFailedFor, subscribeStripStatus } from "@/cut/lib/media";
 import { planFilmstrip, type FilmTile } from "@/cut/lib/filmstrip";
@@ -1266,8 +1267,8 @@ export function Timeline() {
     e.stopPropagation();
     const s = useEditor.getState();
     if (s.readOnly) return;
-    // ⌘/⇧-click folds the bar into the multi-selection, like any lane bar.
-    const additive = e.metaKey || e.shiftKey;
+    // ⌘/Ctrl/⇧-click folds the bar into the multi-selection, like any lane bar.
+    const additive = additiveClick(e);
     let landing: { start: number; anchor: Anchor | null } | null = null;
     startDrag(e, {
       onMove: (dx) => {
@@ -1405,7 +1406,7 @@ export function Timeline() {
     const st = useEditor.getState();
     if (st.playing) st.setPlaying(false);
     st.seek(Math.max(0, timeAt(e.clientX)));
-    const additive = e.shiftKey || e.metaKey;
+    const additive = additiveClick(e);
     const base = additive
       ? st.multiSelection.filter((m): m is NonNullable<Selection> => !!m)
       : [];

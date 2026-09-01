@@ -50,6 +50,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { additiveClick } from "@/cut/lib/hostKeys";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { capturePosterWhenReady, readPoster } from "@/cut/lib/posterCache";
 import { quotaErrorMessage } from "@/cut/lib/backend/cloud";
@@ -714,7 +715,7 @@ export function ProjectsHome() {
           draggable={live(r)}
           onDragStart={(e) => onProjectDragStart(e, p)}
           onClick={(e) => {
-            if (e.shiftKey || e.metaKey) {
+            if (additiveClick(e)) {
               e.preventDefault();
               toggleSelect(p.id);
               return;
@@ -798,7 +799,7 @@ export function ProjectsHome() {
           draggable={live(r)}
           onDragStart={(e) => onProjectDragStart(e, p)}
           onClick={(e) => {
-            if (e.shiftKey || e.metaKey) {
+            if (additiveClick(e)) {
               e.preventDefault();
               toggleSelect(p.id);
               return;
