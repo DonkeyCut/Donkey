@@ -6,6 +6,7 @@ import { cloudBackend } from "./backend/cloud";
 import { pollCloudJob } from "./cloudJob";
 import { quotaErrorMessage } from "./backend/cloud";
 import { encodeWav } from "./cloudTranscribe";
+import { allowance, canvasBytes, holdMemory } from "./memoryBudget";
 import { normalizeLink } from "./link";
 import { downloadFromUrl } from "./download";
 import { startUpload, uploadInFlight } from "./importQueue";
@@ -44,7 +45,7 @@ import {
 } from "./raster";
 import { pickThumbTimes, type ThumbProbe } from "./filmstrip";
 import { reportSwallowed } from "./report";
-import { useEditor } from "./store";
+import { assetIdsInUse, useEditor } from "./store";
 import type { AssetBeats, AssetType, AudioClip, MediaAsset, ProjectSummary, StoredAsset, VideoClip, WatchKeepReason } from "./types";
 import { contentRect, IMAGE_CLIP_SECONDS, mediaUrl } from "./types";
 import { createDedupSelector, DEDUP_TUNING } from "./watch/dedupSelector";
@@ -2080,6 +2081,106 @@ async function refineSceneCuts(assetId: string, url: string, duration: number) {
 // handle already is come back without re-reading the file — which is the whole
 // difference between this and re-opening the source per request.
 const EDGE_CACHE_CAP = 300;
+/** Canvases one strip sink cycles, and strip heights a reader keeps sinks
+ * for — a zoom in and the height it came from, so a wobble between two levels
+ * rebuilds neither. */
+const EDGE_SINK_POOL = 4;
+const EDGE_SINK_HEIGHTS = 2;
+
+/**
+ * What the timeline's own pictures cost.
+ *
+ * The captured frames are JPEG data URLs — text, two bytes a character in the
+ * heap — and each open reader cycles a pool of canvases per strip height it
+ * has been asked for. Both are held for as long as the timeline is on screen,
+ * so a report of what the tab holds counts them. The readers are counted from
+ * the sinks they actually opened: a reader asked for two heights holds two
+ * pools, and at 16:9 a pool's canvas is about twice its height across.
+ */
+const stripBytes = (): number => {
+  let n = 0;
+  for (const url of edgeCache.values()) n += url.length * 2;
+  for (const open of openEdgeReaders)
+    for (const h of open.sinks.keys()) n += canvasBytes(EDGE_SINK_POOL * h * h * 2);
+  return n;
+};
+
+/** Readers whose sinks have opened, for the count above. A reader still
+ * opening holds nothing yet. */
+const openEdgeReaders = new Set<{ sinks: Map<number, unknown> }>();
+
+/**
+ * What the derived pictures on the assets themselves cost.
+ *
+ * A strip's thumbnails and a waveform's peaks are read once and then live on
+ * the asset for the session: a couple of dozen JPEG data URLs and up to sixty
+ * thousand samples apiece, which on a project of a hundred files is more than
+ * the decoders are allowed between them. Both have a disk cache behind them,
+ * so this is memory standing in front of storage.
+ */
+const derivedBytes = (): number => {
+  let n = 0;
+  for (const a of useEditor.getState().assets) {
+    for (const t of a.thumbs ?? []) n += t.length * 2;
+    n += (a.peaks?.length ?? 0) * 8;
+  }
+  return n;
+};
+
+/**
+ * Give back the strips and waveforms of the files nothing in the cut is using.
+ *
+ * A library entry that was imported and never placed still carries everything
+ * the timeline drew for it once. Every one of those reads back from its own
+ * IndexedDB cache the moment a tile asks again, so holding them is a choice
+ * about latency; under memory pressure it is the wrong one. Assets a clip
+ * points at keep what they have, so nothing on the timeline ever redraws.
+ */
+/** What the strips and waveforms of unplaced library entries cost — the part
+ * of the total that a release could actually give back. */
+function unusedDerivedBytes(): number {
+  const s = useEditor.getState();
+  const used = assetIdsInUse(s);
+  let n = 0;
+  for (const a of s.assets) {
+    if (used.has(a.id)) continue;
+    for (const t of a.thumbs ?? []) n += t.length * 2;
+    n += (a.peaks?.length ?? 0) * 8;
+  }
+  return n;
+}
+
+function releaseUnusedDerived(): void {
+  const s = useEditor.getState();
+  const used = assetIdsInUse(s);
+  for (const a of s.assets) {
+    if (used.has(a.id) || (!a.thumbs?.length && !a.peaks?.length)) continue;
+    s.updateAsset(a.id, { thumbs: undefined, peaks: undefined });
+  }
+}
+
+/** Derived pictures the assets may carry between them. */
+const DERIVED_MAX = 128 * 2 ** 20;
+/** Least time between two sweeps. A capture lands many times a second while a
+ * strip fills, and the answer cannot have changed between two of them. */
+const DERIVED_SWEEP_MS = 5_000;
+let derivedSweptAt = 0;
+
+/**
+ * Give the unplaced library entries' pictures back, at most now and then.
+ *
+ * The test is what a release would recover, so a project whose placed clips
+ * are themselves over the budget asks once and finds nothing, in place of
+ * sweeping every asset on every captured frame and stripping entries a tile
+ * has just read back.
+ */
+function sweepDerived(): void {
+  const now = Date.now();
+  if (now - derivedSweptAt < DERIVED_SWEEP_MS) return;
+  derivedSweptAt = now;
+  const cap = allowance("pictures", DERIVED_MAX);
+  if (derivedBytes() > cap && unusedDerivedBytes() > 0) releaseUnusedDerived();
+}
 const EDGE_POOL_CAP = 4;
 
 type EdgeRequest = {
@@ -2096,6 +2197,7 @@ type EdgeRequest = {
 type EdgeReader = {
   input: ReturnType<typeof openMedia>;
   sinkFor: (height: number) => ReturnType<typeof frameSink>;
+  sinks: Map<number, ReturnType<typeof frameSink>>;
 };
 
 const edgeCache = new Map<string, string>();
@@ -2104,6 +2206,9 @@ const edgeQueue = new Map<string, EdgeRequest>();
  * so a trim drag's frames land first while a zoomed strip fills in behind. */
 const edgeBackQueue = new Map<string, EdgeRequest>();
 const edgePool = new Map<string, Promise<EdgeReader>>();
+
+holdMemory("pictures", stripBytes);
+holdMemory("pictures", derivedBytes);
 let edgePumping = false;
 
 function edgeKey(url: string, time: number, height: number) {
@@ -2165,22 +2270,37 @@ function edgeReader(url: string): Promise<EdgeReader> {
     }
     // A pool of canvases each sink cycles through, so a drag that reads
     // hundreds of frames keeps its allocation flat.
+    // One sink per strip height, because a zoomed timeline asks for a
+    // different one. Only the heights still on screen are worth keeping: each
+    // holds its own pool of canvases, and a drag through a dozen zoom levels
+    // would otherwise leave a dozen pools behind it.
     const sinks = new Map<number, ReturnType<typeof frameSink>>();
     const sinkFor = (height: number) => {
       let sink = sinks.get(height);
-      if (!sink) {
-        sink = frameSink(track, { height }, { poolSize: 4, lowLatency: true });
+      if (sink) {
+        sinks.delete(height);
         sinks.set(height, sink);
+        return sink;
       }
+      sink = frameSink(track, { height }, { poolSize: EDGE_SINK_POOL, lowLatency: true });
+      sinks.set(height, sink);
+      while (sinks.size > EDGE_SINK_HEIGHTS) sinks.delete(sinks.keys().next().value!);
       return sink;
     };
-    return { input, sinkFor };
+    const reader = { input, sinkFor, sinks };
+    openEdgeReaders.add(reader);
+    return reader;
   })();
   edgePool.set(url, opening);
   while (edgePool.size > EDGE_POOL_CAP) {
     const [oldUrl, old] = edgePool.entries().next().value!;
     edgePool.delete(oldUrl);
-    old.then((r) => r.input.dispose()).catch(() => {});
+    old
+      .then((r) => {
+        openEdgeReaders.delete(r);
+        r.input.dispose();
+      })
+      .catch(() => {});
   }
   return opening;
 }
@@ -2203,9 +2323,20 @@ async function pumpEdgeFrames() {
           if (!frame) throw new Error("No frame at that time.");
           src = await rasterCanvasToDataUrl(frame.canvas, "image/jpeg", 0.92);
           edgeCache.set(req.key, src);
-          while (edgeCache.size > EDGE_CACHE_CAP) {
-            edgeCache.delete(edgeCache.keys().next().value!);
+          // Oldest first, by count and by what they cost. A count on its own
+          // says nothing about the size of what is counted: three hundred
+          // frames of a phone video are a different number of megabytes from
+          // three hundred of a screen recording.
+          const cap = allowance("pictures", canvasBytes(EDGE_CACHE_CAP * THUMB_H * THUMB_H * 2));
+          let bytes = stripBytes();
+          while (edgeCache.size > EDGE_CACHE_CAP || (edgeCache.size > 1 && bytes > cap)) {
+            const oldest = edgeCache.keys().next().value!;
+            bytes -= (edgeCache.get(oldest)?.length ?? 0) * 2;
+            edgeCache.delete(oldest);
           }
+          // The strips and waveforms sitting on unused library entries are the
+          // other half of this bucket, and they come back off disk.
+          sweepDerived();
         } catch {
           src = null;
         }
