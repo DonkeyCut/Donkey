@@ -1536,6 +1536,30 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
         useEditor.getState().updateAsset(asset.id, { thumbs: [src], thumbStep: IMAGE_CLIP_SECONDS });
       }
     } else if (asset.type === "video") {
+      // The clip box draws the sound under the picture, so a video enriches
+      // waveform peaks alongside its filmstrip. The two are separate reads of
+      // the file, so the peaks decode starts here and runs beside the strip's
+      // sweep: the sound band lands the moment its own read is done, however
+      // long a source's frame grabs take. `[]` is an answer too — a silent
+      // file — and stops the strip from re-decoding every open.
+      const peaksRun =
+        asset.peaks === undefined
+          ? loadPeaks(asset, held ?? src, (partial) =>
+              useEditor.getState().updateAsset(asset.id, { peaks: partial })
+            )
+              .then((peaks) => {
+                if (peaks) useEditor.getState().updateAsset(asset.id, { peaks });
+              })
+              .catch((err: unknown) => {
+                // The strip paints on its own; a peaks failure (an expired
+                // signed URL, an undecodable track) never marks it failed.
+                // What the walk had published comes off the asset, so the
+                // next open reads the file again in place of keeping a
+                // strip that stops partway.
+                useEditor.getState().updateAsset(asset.id, { peaks: undefined });
+                reportSwallowed(`[cut] peaks failed for ${asset.fileName}`, err);
+              })
+          : undefined;
       if (!stripComplete(asset)) {
         setStripFailed(asset.id, false);
         const key = stripCacheKey(useEditor.getState().projectId, asset.id);
@@ -1568,23 +1592,19 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
           reportSwallowed(`[cut] scene probe failed for ${asset.fileName}`, err);
         });
       }
-      // The clip box draws the sound under the picture, so a video enriches
-      // waveform peaks alongside its filmstrip. `[]` is an answer too — a
-      // silent file — and stops the strip from re-decoding every open.
-      if (asset.peaks === undefined) {
-        try {
-          const peaks = await loadPeaks(asset, held ?? src);
-          if (peaks) useEditor.getState().updateAsset(asset.id, { peaks });
-        } catch (err) {
-          // The strip above already painted; a peaks failure (an expired
-          // signed URL, an undecodable track) never marks it failed.
-          reportSwallowed(`[cut] peaks failed for ${asset.fileName}`, err);
-        }
-      }
+      await peaksRun;
       enrichRetries.delete(asset.id);
     } else if (asset.type === "audio" && !asset.peaks?.length) {
-      const peaks = await loadPeaks(asset, held ?? src);
-      if (peaks) useEditor.getState().updateAsset(asset.id, { peaks });
+      const publish = (peaks: number[]) => useEditor.getState().updateAsset(asset.id, { peaks });
+      try {
+        const peaks = await loadPeaks(asset, held ?? src, publish);
+        if (peaks) publish(peaks);
+      } catch (err) {
+        // A walk that published partway comes off the asset before the retry
+        // below, so the retry reads the file again.
+        useEditor.getState().updateAsset(asset.id, { peaks: undefined });
+        throw err;
+      }
       enrichRetries.delete(asset.id);
     }
   } catch (err) {
@@ -1659,13 +1679,15 @@ export async function detectAssetBeats(asset: MediaAsset): Promise<AssetBeats> {
 /** Waveform peaks on demand — e.g. when a video clip's audio is detached
  * onto the soundtrack track (video assets don't get peaks at import). */
 export async function ensurePeaks(asset: MediaAsset) {
+  if (asset.peaks?.length) return;
+  const publish = (peaks: number[]) => useEditor.getState().updateAsset(asset.id, { peaks });
   try {
-    if (!asset.peaks?.length) {
-      const peaks = await loadPeaks(asset);
-      if (peaks?.length) useEditor.getState().updateAsset(asset.id, { peaks });
-    }
+    const peaks = await loadPeaks(asset, asset.url, publish);
+    if (peaks?.length) publish(peaks);
   } catch (err) {
-    // Waveforms are decorative; editing works without them.
+    // Waveforms are decorative; editing works without them. A walk that
+    // published partway comes off the asset, so the next read starts clean.
+    useEditor.getState().updateAsset(asset.id, { peaks: undefined });
     reportSwallowed(`[cut] peaks failed for ${asset.fileName}`, err);
   }
 }
@@ -1755,12 +1777,16 @@ async function readCachedPeaks(key: string, duration: number): Promise<number[] 
  * decoded — a real audio decode otherwise. Empty peaks are an answer (a file
  * with no audible track) and cache like any other. A headless runtime returns
  * undefined so the browser decodes on its next open. */
-async function loadPeaks(asset: MediaAsset, src: string | Blob = asset.url): Promise<number[] | undefined> {
+async function loadPeaks(
+  asset: MediaAsset,
+  src: string | Blob = asset.url,
+  onPartial?: (peaks: number[]) => void
+): Promise<number[] | undefined> {
   if (typeof AudioDecoder === "undefined") return undefined;
   const key = peaksCacheKey(useEditor.getState().projectId, asset.id);
   const cached = await readCachedPeaks(key, asset.duration);
   if (cached) return cached;
-  const peaks = await makePeaks(src, asset.duration);
+  const peaks = await makePeaks(src, asset.duration, onPartial);
   writeCache(key, { peaks, duration: asset.duration, at: Date.now() });
   return peaks;
 }
@@ -2202,10 +2228,14 @@ const PEAKS_PER_SECOND = 200;
  * source into each bar the further in it is zoomed. */
 const PEAKS_MAX = 60_000;
 
-function makePeaks(src: string | Blob, duration: number): Promise<number[]> {
+function makePeaks(
+  src: string | Blob,
+  duration: number,
+  onPartial?: (peaks: number[]) => void
+): Promise<number[]> {
   const buckets =
     duration > 0
       ? Math.min(PEAKS_MAX, Math.max(400, Math.round(duration * PEAKS_PER_SECOND)))
       : 1600;
-  return audioPeaks(src, buckets);
+  return audioPeaks(src, buckets, onPartial);
 }

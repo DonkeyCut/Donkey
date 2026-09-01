@@ -578,14 +578,27 @@ export function openAudioWalk(src: string | Blob, from = 0, to?: number): AudioW
   };
 }
 
+/** How often a running peaks decode publishes what it has folded so far. */
+const PEAKS_PUBLISH_MS = 250;
+
 /**
  * Normalized 0..1 waveform peaks across the whole file, `buckets` wide.
  *
  * Folded chunk by chunk, so the cost is the decode rather than the decode plus
  * a copy of the file in memory — an hour of audio used to mean holding an hour
  * of float samples to draw a strip a few hundred pixels wide.
+ *
+ * The decode walks the file front to back, and a file that has to come over
+ * the network walks at the link's pace, so `onPartial` hands out the buckets
+ * folded so far as the walk runs: the strip is the full width from the first
+ * chunk — the moments the walk has not reached yet sit flat — and fills in
+ * left to right until the returned array is the whole read.
  */
-export async function audioPeaks(src: string | Blob, buckets: number): Promise<number[]> {
+export async function audioPeaks(
+  src: string | Blob,
+  buckets: number,
+  onPartial?: (peaks: number[]) => void
+): Promise<number[]> {
   // Peaks are a real decode; a headless runtime skips them and the waveform
   // enriches the next time a browser holds the asset.
   if (typeof AudioDecoder === "undefined") return [];
@@ -600,6 +613,7 @@ export async function audioPeaks(src: string | Blob, buckets: number): Promise<n
     if (!(duration > 0)) return [];
 
     const peaks = new Array<number>(buckets).fill(0);
+    let published = 0;
     for await (const { buffer, timestamp } of new AudioBufferSink(track).buffers()) {
       const data = buffer.getChannelData(0);
       const rate = buffer.sampleRate;
@@ -610,6 +624,11 @@ export async function audioPeaks(src: string | Blob, buckets: number): Promise<n
         const bucket = Math.min(buckets - 1, Math.max(0, Math.floor(at * buckets)));
         if (v > peaks[bucket]) peaks[bucket] = v;
       }
+      if (!onPartial) continue;
+      const now = Date.now();
+      if (now - published < PEAKS_PUBLISH_MS) continue;
+      published = now;
+      onPartial(peaks.slice());
     }
     return peaks;
   } finally {
