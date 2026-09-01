@@ -29,6 +29,8 @@
  * which control was pressed — see perfTrace's meter for what is kept out.
  */
 
+import { heapBytes, mb, memoryCeiling, memoryTotalCached, memoryUsage } from "./memoryBudget";
+
 export interface PerfLogRecord {
   /** Monotonic across page loads on this machine, so a batch sent twice —
    * once by a beacon that did land, once by the next open that could not
@@ -49,6 +51,12 @@ export interface PerfLogRecord {
   activity: string;
   input: string;
   inputAgoMs: number;
+  /** What the editor was holding when the frame blocked, modeled in megabytes.
+   * A machine short of memory stalls for a page fault, which looks from here
+   * exactly like a machine short of processor — this is what tells them
+   * apart. Absent on records a build before this one wrote and left in
+   * storage. */
+  memMb?: number;
 }
 
 export interface PerfLogBatch {
@@ -60,6 +68,11 @@ export interface PerfLogBatch {
   records: PerfLogRecord[];
   cores: number;
   memoryGb: number;
+  /** What the editor is holding as this sends, what it is allowed to hold on
+   * this machine, and what the JavaScript heap says — see `memoryBudget`. */
+  memMb: number;
+  memCeilingMb: number;
+  heapMb: number;
 }
 
 /** Why a session uploads: it drew the sample, or it saw trouble. */
@@ -160,10 +173,10 @@ function scheduleWrite(): void {
 }
 
 /** Keep one frame. Cheap enough to call from a performance observer. */
-export function logPerfRecord(rec: Omit<PerfLogRecord, "id" | "open">): void {
+export function logPerfRecord(rec: Omit<PerfLogRecord, "id" | "open" | "memMb">): void {
   if (typeof window === "undefined") return;
   const s = load();
-  s.records.push({ ...rec, open: openedAt, id: s.nextId++ });
+  s.records.push({ ...rec, open: openedAt, id: s.nextId++, memMb: mb(memoryTotalCached()) });
   if (s.records.length > CAP) s.records.splice(0, s.records.length - CAP);
   scheduleWrite();
 }
@@ -201,6 +214,7 @@ export function drainPerfLog(): void {
   const of = Math.ceil(pending.length / BATCH);
   const cores = navigator.hardwareConcurrency || 0;
   const memoryGb = (navigator as unknown as { deviceMemory?: number }).deviceMemory ?? 0;
+  const usage = memoryUsage();
   for (let i = 0; i < of; i++) {
     sink({
       batch: i + 1,
@@ -209,6 +223,9 @@ export function drainPerfLog(): void {
       records: pending.slice(i * BATCH, (i + 1) * BATCH),
       cores,
       memoryGb,
+      memMb: mb(usage.total),
+      memCeilingMb: mb(memoryCeiling()),
+      heapMb: mb(heapBytes()),
     });
   }
   s.sentThrough = pending[pending.length - 1].id;

@@ -1,5 +1,14 @@
 "use client";
 
+import {
+  heapBytes,
+  mb,
+  memoryCeiling,
+  memoryUsage,
+  takeMemoryPressure,
+  type MemoryBucket,
+  type MemoryUsage,
+} from "./memoryBudget";
 import { logPerfRecord, notePerfTrouble, perfUploadReason, type PerfUploadReason } from "./perfLog";
 
 /**
@@ -83,6 +92,9 @@ export interface Trace {
   /** Megabytes of canvas backing on the warm shelf — the stood-down sources,
    * which is the part the pool's memory budget governs. */
   warmMb: number[];
+  /** Megabytes the whole editor is modeled to hold, sampled per present:
+   * decoders, canvases, the bytes behind them, sound and pictures. */
+  memMb: number[];
   /**
    * Seconds the picture is held behind the graph's clock, and seconds the
    * output device says it holds, sampled per present.
@@ -141,6 +153,7 @@ export function startTrace(): void {
     liveSources: [],
     keptSources: [],
     warmMb: [],
+    memMb: [],
     audioLead: [],
     audioLatency: [],
     startedAt: performance.now(),
@@ -223,7 +236,14 @@ export function markLiveSources(active: number, kept: number, warmPixels: number
   keep(trace.liveSources, active);
   keep(trace.keptSources, kept);
   keep(trace.warmMb, Math.round(warmPixels * 4e-6));
+  // Reading the total walks every cache that reports one, and this runs on
+  // every present. Sampled on the meter's cadence, for the meter's reason: a
+  // trace is what the perf eval judges, and a measurement that costs a frame
+  // has changed the thing it was measuring.
+  if (++traceMemTick % MEM_EVERY === 0) keep(trace.memMb, mb(memoryUsage().total));
 }
+
+let traceMemTick = 0;
 
 /** A trace boiled down to the numbers that name a stutter. */
 export interface TraceReport {
@@ -252,6 +272,9 @@ export interface TraceReport {
   sources: number;
   held: number;
   warmMb: number;
+  /** The most the editor was modeled to be holding, in megabytes, across every
+   * cache that reports one. */
+  memMb: number;
   /** The longest the main thread was blocked, in milliseconds. */
   longTaskMs: number;
 }
@@ -295,6 +318,7 @@ export function traceReport(t: Trace): TraceReport {
     sources: maxOf(t.liveSources),
     held: maxOf(t.liveSamples),
     warmMb: maxOf(t.warmMb),
+    memMb: maxOf(t.memMb),
     longTaskMs: Math.round(maxOf(t.longTasks.map((l) => l.ms))),
   };
 }
@@ -410,6 +434,23 @@ export interface PerfSample {
   decodeHeight: number;
   canvasHeight: number;
   dpr: number;
+  /**
+   * The worst the memory got during the window, modeled in megabytes: the
+   * total, where it went, and what this machine allows. A preview that
+   * stutters against a total sitting on its ceiling is a different fault from
+   * one that stutters with room to spare, and only the pair says which.
+   */
+  memMb: number;
+  memCeilingMb: number;
+  decoderMb: number;
+  canvasMb: number;
+  readMb: number;
+  audioMb: number;
+  pictureMb: number;
+  /** The JavaScript heap at its worst, where the browser reports one. */
+  heapMb: number;
+  /** Buckets the ceiling sized: the machine is what is holding them down. */
+  memBound: string;
   /** What the machine brought. */
   cores: number;
   memoryGb: number;
@@ -461,6 +502,10 @@ interface Meter {
   sources: number;
   held: number;
   warmMb: number;
+  memBytes: number;
+  usage: MemoryUsage;
+  heapBytes: number;
+  bound: Set<MemoryBucket>;
   longTaskMs: number;
   longTasks: number;
   clips: number;
@@ -499,6 +544,10 @@ const emptyMeter = (): Meter => ({
   sources: 0,
   held: 0,
   warmMb: 0,
+  memBytes: 0,
+  usage: { decoders: 0, canvases: 0, reads: 0, audio: 0, pictures: 0, total: 0 },
+  heapBytes: 0,
+  bound: new Set(),
   longTaskMs: 0,
   longTasks: 0,
   clips: 0,
@@ -559,7 +608,23 @@ export function meterState(state: {
   meter.clips = Math.max(meter.clips, state.clips);
   meter.decodeHeight = state.decodeHeight;
   meter.canvasHeight = state.canvasHeight;
+  // Every caller of this is on the frame path, and reading the memory total
+  // walks every cache that reports one. Twice a second is often enough to
+  // catch a peak that lasts long enough to matter and rare enough that the
+  // walk never shows up in a frame.
+  if (++memTick % MEM_EVERY) return;
+  for (const b of takeMemoryPressure()) meter.bound.add(b);
+  const usage = memoryUsage();
+  if (usage.total > meter.memBytes) {
+    meter.memBytes = usage.total;
+    meter.usage = usage;
+  }
+  meter.heapBytes = Math.max(meter.heapBytes, heapBytes());
 }
+
+/** Frames between memory reads — see `meterState`. */
+const MEM_EVERY = 30;
+let memTick = 0;
 
 /** A walk was anchored, and — once it lands — what reaching its first frame
  * cost. Counted only while playing, since a scrub anchors walks by design. */
@@ -669,6 +734,15 @@ export function flushMeter(): void {
     sources: m.sources,
     heldFrames: m.held,
     warmMb: m.warmMb,
+    memMb: mb(m.memBytes),
+    memCeilingMb: mb(memoryCeiling()),
+    decoderMb: mb(m.usage.decoders),
+    canvasMb: mb(m.usage.canvases),
+    readMb: mb(m.usage.reads),
+    audioMb: mb(m.usage.audio),
+    pictureMb: mb(m.usage.pictures),
+    heapMb: mb(m.heapBytes),
+    memBound: [...m.bound].join(","),
     longTaskMs: m.longTaskMs,
     longTasks: m.longTasks,
     clips: m.clips,

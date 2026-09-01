@@ -236,6 +236,12 @@ const BASE_GATE = {
   // churn for memory, and this is the side of that trade a change could
   // quietly blow.
   warmMb: 400,
+  // Everything the editor is modeled to be holding, not the shelf alone:
+  // decoders, every canvas behind them, the file bytes they were decoded from,
+  // sound and pictures. The shelf's own number says nothing about a change
+  // that moves memory from the shelf into a cache beside it, and this is the
+  // total a machine actually has to find.
+  memMb: 1600,
 };
 
 /** The budget this run is judged against: the tight one, with the picture-lag
@@ -298,6 +304,7 @@ interface Trace {
   liveSources: number[];
   keptSources: number[];
   warmMb: number[];
+  memMb: number[];
   audioLead: number[];
   audioLatency: number[];
   startedAt: number;
@@ -858,6 +865,8 @@ interface CaseResult {
   longTasks?: Agg;
   liveSamples?: number;
   liveSources?: number;
+  /** What the editor was modeled to be holding at its peak, in megabytes. */
+  memMb?: number;
   /** Sources the pool kept, and the canvas backing on its warm shelf. */
   keptSources?: number;
   warmMb?: number;
@@ -1227,6 +1236,8 @@ async function judgePlay(
   }
   const warmMb = Math.max(0, ...trace.warmMb);
   if (warmMb > GATE.warmMb) notes.push(`warm shelf holding ${warmMb}MB of canvas`);
+  const memMb = Math.max(0, ...(trace.memMb ?? []));
+  if (memMb > GATE.memMb) notes.push(`editor holding ${memMb}MB`);
   // Long tasks are reported, not gated: this case judges sync, decay and
   // memory, and the stray dev-build hiccup that leaves every frame exact is
   // not a fail.
@@ -1246,6 +1257,7 @@ async function judgePlay(
     liveSources: Math.max(0, ...trace.liveSources),
     keptSources: Math.max(0, ...trace.keptSources),
     warmMb,
+    memMb,
     decoders: decoders ?? undefined,
     machine: MACHINE.name,
   };
@@ -2400,7 +2412,7 @@ const detailOf = (r: CaseResult) =>
       : r.idleTicks !== undefined
         ? `ticks=${r.idleTicks}`
         : r.lag
-          ? `late=${r.drops}/${r.presented} lagP95=${r.lag.p95}s hitch=${((r.stallShare ?? 0) * 100).toFixed(1)}% lagMax=${r.lag.max}s sources=${r.liveSources} sw=${r.decoders?.softwarePeak ?? "-"}/${r.decoders?.software ?? "-"} busy=${r.decoders?.busyPeak ?? "-"} clock=${Math.round((r.clock?.lead ?? 0) * 1000)}/${Math.round((r.clock?.reported ?? 0) * 1000)}ms warm=${r.warmMb}MB decay=${r.decay?.first}→${r.decay?.last}`
+          ? `late=${r.drops}/${r.presented} lagP95=${r.lag.p95}s hitch=${((r.stallShare ?? 0) * 100).toFixed(1)}% lagMax=${r.lag.max}s sources=${r.liveSources} sw=${r.decoders?.softwarePeak ?? "-"}/${r.decoders?.software ?? "-"} busy=${r.decoders?.busyPeak ?? "-"} clock=${Math.round((r.clock?.lead ?? 0) * 1000)}/${Math.round((r.clock?.reported ?? 0) * 1000)}ms warm=${r.warmMb}MB mem=${r.memMb}MB decay=${r.decay?.first}→${r.decay?.last}`
           : `late=${r.drops}/${r.presented} atCut=${r.boundaryDrops}`;
 
 async function main(): Promise<void> {
