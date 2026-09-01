@@ -36,7 +36,9 @@ import { syncLinkedLibrary } from "@/cut/lib/linkedLibrary";
 import { reportActivity } from "@/cut/lib/tabActivity";
 import { TabStatus } from "./TabStatus";
 import { installDevHooks } from "@/cut/lib/devHooks";
-import { meterPerf, stopMeter } from "@/cut/lib/perfTrace";
+import { startPerfLog, stopPerfLog } from "@/cut/lib/perfLog";
+import { meterMainThread, meterPerf, stopMainThreadMeter, stopMeter } from "@/cut/lib/perfTrace";
+import { isDragActive } from "@/cut/lib/drag";
 import { track } from "@/lib/analytics";
 import { ensureCloudThreads } from "@/cut/lib/chatCloud";
 import { readProjectThreads, writeActiveChat } from "@/cut/lib/chatThreads";
@@ -93,22 +95,33 @@ export function Editor({
   viewer?: boolean;
 }) {
   useEffect(() => installDevHooks(), []);
-  // Preview diagnostics, for accounts that turned them on in settings: the
-  // engine counts what its frames did and sends a summary every half minute of
-  // playback. Off — and costing a null check — for everyone else.
+  // Diagnostics: the engine counts what its frames did, the main thread
+  // reports the frames it was blocked in — with the script that ran them —
+  // and a local log keeps those frames. All of it is a handful of counters
+  // and a browser-side observer, so it runs from the first frame for every
+  // account, which is what catches a freeze on open. What leaves the machine
+  // is perfLog's decision: a session that saw trouble, and a small random
+  // sample for the baseline.
   useEffect(() => {
-    let live = true;
-    void fetch("/api/account/feature-flags")
-      .then((r) => (r.ok ? (r.json() as Promise<{ flags: { id: string; enabled: boolean }[] }>) : null))
-      .then((body) => {
-        if (!live || !body) return;
-        const on = body.flags.some((f) => f.id === "preview_diagnostics" && f.enabled);
-        if (on) meterPerf((sample) => track("cut_preview_perf", sample));
-      })
-      .catch(() => {});
+    startPerfLog((batch) => track("cut_perf_log", batch));
+    meterPerf((sample) => track("cut_preview_perf", sample));
+    meterMainThread(
+      (sample) => track("cut_main_thread", sample),
+      () => {
+        const st = useEditor.getState();
+        return {
+          activity: st.playing ? "playing" : isDragActive() ? "dragging" : "idle",
+          clips: st.clips.length,
+          audioClips: st.audioClips.length,
+          overlays: st.overlays.length,
+          assets: st.assets.length,
+        };
+      }
+    );
     return () => {
-      live = false;
       stopMeter();
+      stopMainThreadMeter();
+      stopPerfLog();
     };
   }, []);
   const back = backTarget(useCutBase(), from, folder);

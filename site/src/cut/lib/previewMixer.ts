@@ -44,6 +44,7 @@ import {
 } from "@donkeycut/effects-kit";
 import type { WrappedAudioBuffer } from "mediabunny";
 import { assembleAudio, decodeAudioSpan, openAudioWalk, type AudioWalk } from "./mediaRead";
+import { meterAudioLate, meterClockJump } from "./perfTrace";
 import { timeStretch } from "./timeStretch";
 
 /** How much of a voice is pulled off its walk and scheduled at once, in source
@@ -76,6 +77,13 @@ const AHEAD_S = 5;
  * device claims. Well past a Bluetooth headset, and short of anything that
  * would read as the playhead refusing to move. */
 const MAX_LATENCY_S = 0.4;
+/** Sound late by more than this, mid-play, is a hole the listener hears: the
+ * scheduling runs seconds ahead, so a window that misses its moment means the
+ * thread was gone for that long. A voice's first window is a different thing
+ * — it is read while the play is already running, by design — so only a long
+ * one counts there. */
+const LATE_GAP_S = 0.05;
+const LATE_FIRST_S = 0.5;
 
 /** One audible thing on the timeline: a clip's own sound, or a soundtrack item. */
 export interface Voice {
@@ -302,6 +310,7 @@ export class PreviewMixer {
       // moving would leave those windows playing the wrong moment for up to
       // their full length, so they stop here and the next update refills from
       // where the clock now stands.
+      meterClockJump();
       this.restart(wall);
       return this.heard(wall);
     }
@@ -599,6 +608,12 @@ export class PreviewMixer {
     }
   }
 
+  /** A window that missed its moment. Reported to the diagnostics meter once
+   * it is past what the first read of a voice costs by design. */
+  private noteLate(live: LiveVoice, lateS: number): void {
+    if (lateS > (live.windows.length ? LATE_GAP_S : LATE_FIRST_S)) meterAudioLate(lateS);
+  }
+
   /**
    * Get the sound ready for a play that has not started.
    *
@@ -852,6 +867,7 @@ export class PreviewMixer {
       if (!current() || live.scheduled !== from) return;
       const until = from + buffer.duration;
       if (until <= tNow) {
+        this.noteLate(live, tNow - from);
         // The read outlived the moment it was for — a long wait on bytes, a
         // tab in the background. Where it left the walk is behind the clock
         // now, so the voice re-aims at the clock and gives up the stretch in
@@ -868,7 +884,8 @@ export class PreviewMixer {
         node.start(at);
       } else {
         // Late: start where the clock actually is, so the sound stays lined up
-        // with the picture instead of replaying what has already gone by.
+        // with the picture and skips what has already gone by.
+        this.noteLate(live, now - at);
         node.start(now, now - at);
       }
       live.windows.push({ node, until });

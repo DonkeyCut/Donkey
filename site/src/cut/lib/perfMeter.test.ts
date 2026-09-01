@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { notePerfTrouble, perfUploadReason } from "./perfLog";
 import {
   flushMeter,
   meterAudioClock,
+  meterAudioLate,
+  meterClockJump,
   meterFrame,
   meterPerf,
   meterPull,
@@ -14,7 +17,35 @@ import {
 } from "./perfTrace";
 
 describe("preview diagnostics meter", () => {
+  test("a smooth play in a session with no reason to send sends nothing", () => {
+    const out: PerfSample[] = [];
+    meterPerf((s) => out.push(s));
+    for (let i = 0; i < 300; i++) meterFrame(i < 30 ? 0.3 : 0, false);
+    flushMeter();
+    expect(out).toHaveLength(0);
+    expect(perfUploadReason()).toBeNull();
+    stopMeter();
+  });
+
+  test("sound starting late is trouble, and the summary says so", () => {
+    const out: PerfSample[] = [];
+    meterPerf((s) => out.push(s));
+    for (let i = 0; i < 300; i++) meterFrame(0, false);
+    meterAudioLate(0.4);
+    meterAudioLate(1.2);
+    meterAudioLate(0.3);
+    meterClockJump();
+    flushMeter();
+    expect(out).toHaveLength(1);
+    expect(out[0].reason).toBe("trouble");
+    expect(out[0].audioLate).toBe(3);
+    expect(out[0].audioLateMaxS).toBe(1.2);
+    expect(out[0].clockJumps).toBe(1);
+    stopMeter();
+  });
+
   test("a play's frames become one summary", () => {
+    notePerfTrouble();
     const out: PerfSample[] = [];
     meterPerf((s) => out.push(s));
     expect(metering()).toBe(true);
@@ -42,6 +73,7 @@ describe("preview diagnostics meter", () => {
 
     expect(out).toHaveLength(1);
     const s = out[0];
+    expect(s.reason).toBe("trouble");
     expect(s.frames).toBe(300);
     expect(s.lateShare).toBe(0.1);
     expect(s.staleShare).toBe(0.033);
@@ -71,6 +103,23 @@ describe("preview diagnostics meter", () => {
     for (let i = 0; i < 20; i++) meterFrame(0.5, false);
     flushMeter();
     expect(out).toHaveLength(0);
+    stopMeter();
+  });
+
+  test("a hitching play is trouble, and sends from then on", () => {
+    const out: PerfSample[] = [];
+    meterPerf((s) => out.push(s));
+    // A quarter of the frames a hitch behind.
+    for (let i = 0; i < 300; i++) meterFrame(i < 75 ? 0.3 : 0, false);
+    flushMeter();
+    expect(out).toHaveLength(1);
+    expect(out[0].reason).toBe("trouble");
+    expect(out[0].hitchShare).toBe(0.25);
+    // The next window is smooth and still sends: the session has its reason.
+    for (let i = 0; i < 300; i++) meterFrame(0, false);
+    flushMeter();
+    expect(out).toHaveLength(2);
+    expect(perfUploadReason()).toBe("trouble");
     stopMeter();
   });
 

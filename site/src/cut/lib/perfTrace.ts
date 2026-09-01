@@ -1,5 +1,7 @@
 "use client";
 
+import { logPerfRecord, notePerfTrouble, perfUploadReason, type PerfUploadReason } from "./perfLog";
+
 /**
  * What the preview actually did, frame by frame.
  *
@@ -328,6 +330,8 @@ export interface DecodeCaps {
 }
 
 export interface PerfSample {
+  /** Why this session is sending — see perfLog. */
+  reason: PerfUploadReason;
   /** Which summary this is in the session, and how long the editor had been
    * open when it closed — a preview that is smooth for a minute and choppy
    * after ten is two samples that say so. */
@@ -353,6 +357,16 @@ export interface PerfSample {
    * second is a picture running that far ahead of its own audio. */
   audioLeadS: number;
   audioLatencyS: number;
+  /**
+   * Sound that missed its moment: windows the mixer had to start late, and
+   * the worst by how much; and the times the clock re-anchored because the
+   * audio graph fell away from the wall — an output that dropped out, a
+   * device that stalled under load. A picture that keeps time while these
+   * climb is the "audio cuts out" that no frame count shows.
+   */
+  audioLate: number;
+  audioLateMaxS: number;
+  clockJumps: number;
   /**
    * Walks the preview started while playing, and the worst one's cost.
    *
@@ -411,9 +425,17 @@ const SAMPLE_FRAMES = 1800;
 const SAMPLE_MIN_FRAMES = 240;
 /** Summaries one editor session will send. A day-long session is interesting
  * for its first few, and this is not a firehose. */
-const SAMPLE_CAP = 40;
+const SAMPLE_CAP = 8;
 /** A frame this far behind is a hitch a person would name. */
 const HITCH_S = 0.25;
+/** A play with this share of hitches, or a picture this far behind its sound,
+ * is trouble the session sends about — see perfLog for what that starts. */
+const TROUBLE_HITCH_SHARE = 0.2;
+const TROUBLE_LAG_S = 1;
+/** Sound starting late this many times in one window, or the clock
+ * re-anchoring this many, is trouble too. */
+const TROUBLE_AUDIO_LATE = 3;
+const TROUBLE_CLOCK_JUMPS = 2;
 
 interface Meter {
   frames: number;
@@ -433,6 +455,9 @@ interface Meter {
   srcCodec: string;
   audioLead: number;
   audioLatency: number;
+  audioLate: number;
+  audioLateMax: number;
+  clockJumps: number;
   sources: number;
   held: number;
   warmMb: number;
@@ -446,7 +471,6 @@ interface Meter {
 
 let meter: Meter | null = null;
 let sink: ((sample: PerfSample) => void) | null = null;
-let meterObserver: PerformanceObserver | null = null;
 let sampleCount = 0;
 let openedAt = 0;
 let caps: DecodeCaps = { h264: false, hevc: false, vp9: false, av1: false };
@@ -469,6 +493,9 @@ const emptyMeter = (): Meter => ({
   srcCodec: "",
   audioLead: 0,
   audioLatency: 0,
+  audioLate: 0,
+  audioLateMax: 0,
+  clockJumps: 0,
   sources: 0,
   held: 0,
   warmMb: 0,
@@ -495,25 +522,10 @@ export function meterPerf(report: (sample: PerfSample) => void): void {
   openedAt = performance.now();
   meter = emptyMeter();
   void probeDecodeCaps();
-  if (typeof PerformanceObserver === "undefined") return;
-  try {
-    meterObserver = new PerformanceObserver((list) => {
-      for (const entry of list.getEntries()) {
-        if (!meter) return;
-        meter.longTasks++;
-        meter.longTaskMs = Math.max(meter.longTaskMs, Math.round(entry.duration));
-      }
-    });
-    meterObserver.observe({ entryTypes: ["longtask"] });
-  } catch {
-    meterObserver = null;
-  }
 }
 
 /** Stop counting and forget the sink. */
 export function stopMeter(): void {
-  meterObserver?.disconnect();
-  meterObserver = null;
   meter = null;
   sink = null;
 }
@@ -589,6 +601,20 @@ export function meterAudioClock(lead: number, reported: number): void {
   meter.audioLatency = Math.max(meter.audioLatency, reported);
 }
 
+/** A window of sound started after the moment it was for, by `lateS`. */
+export function meterAudioLate(lateS: number): void {
+  if (!meter) return;
+  meter.audioLate++;
+  meter.audioLateMax = Math.max(meter.audioLateMax, lateS);
+}
+
+/** The mixer re-anchored its clock: the audio graph had fallen away from the
+ * wall, and everything scheduled was torn down and refilled. */
+export function meterClockJump(): void {
+  if (!meter) return;
+  meter.clockJumps++;
+}
+
 /**
  * Send what has been counted and start a fresh count.
  *
@@ -600,10 +626,23 @@ export function flushMeter(): void {
   const m = meter;
   if (!m || !sink) return;
   meter = emptyMeter();
-  if (m.frames < SAMPLE_MIN_FRAMES || sampleCount >= SAMPLE_CAP) return;
+  // Trouble is read before the window is judged too short to report. A play
+  // that froze draws few frames — the thread was blocked — so the shortest
+  // windows are the ones carrying the worst news.
+  if (
+    (m.frames > 0 && m.hitches / m.frames >= TROUBLE_HITCH_SHARE) ||
+    m.lagMax >= TROUBLE_LAG_S ||
+    m.audioLate >= TROUBLE_AUDIO_LATE ||
+    m.clockJumps >= TROUBLE_CLOCK_JUMPS
+  )
+    notePerfTrouble();
+  if (m.frames < SAMPLE_MIN_FRAMES) return;
+  const reason = perfUploadReason();
+  if (!reason || sampleCount >= SAMPLE_CAP) return;
   const seconds = (performance.now() - m.startedAt) / 1000;
   const round = (n: number, places = 3) => +n.toFixed(places);
   sink({
+    reason,
     sample: ++sampleCount,
     openedForS: Math.round((performance.now() - openedAt) / 1000),
     seconds: round(seconds, 1),
@@ -616,6 +655,9 @@ export function flushMeter(): void {
     lagMaxS: round(m.lagMax),
     audioLeadS: round(m.audioLead),
     audioLatencyS: round(m.audioLatency),
+    audioLate: m.audioLate,
+    audioLateMaxS: round(m.audioLateMax),
+    clockJumps: m.clockJumps,
     walks: m.walks,
     walkMs: m.walkMs,
     pullMaxMs: Math.round(m.pullMax),
@@ -673,4 +715,362 @@ async function probeDecodeCaps(): Promise<void> {
     ask("av01.0.09M.08"),
   ]);
   caps = { h264, hevc, vp9, av1 };
+}
+
+/**
+ * The main thread's report card, for the freezes that happen between plays.
+ *
+ * The meter above counts what the preview did per played frame, so it says
+ * nothing about a delete that took two seconds to land or an import that
+ * froze the page. This watches the thread itself: every animation frame the
+ * browser reports as long, with the script that ran it and what it was
+ * invoked by — the one attribution a person's own machine can give, since the
+ * profiler is never open when it happens.
+ *
+ * Long animation frames are Chromium's. Where the API is missing the long
+ * task list stands in, which names the cost and nothing about its cause.
+ *
+ * Nothing here reads the project. The script names are the page's own
+ * bundle; the "input" beside a frame is which control was pressed — a button's
+ * label, a key's name — and a key pressed into a text field is reported as
+ * text, never as the character.
+ */
+export interface MainThreadSample {
+  /** Why this session is sending — see perfLog. */
+  reason: PerfUploadReason;
+  sample: number;
+  openedForS: number;
+  /** Wall seconds this summary covers. */
+  seconds: number;
+  /** Frames the thread was blocked in, milliseconds blocked across them, and
+   * the longest of them. */
+  longFrames: number;
+  blockedMs: number;
+  worstMs: number;
+  /** The worst frame: how it split between script and layout, what invoked
+   * the script, and where in the bundle it lives. */
+  worstScriptMs: number;
+  worstLayoutMs: number;
+  worstInvoker: string;
+  worstFn: string;
+  worstSrc: string;
+  worstChar: number;
+  /** What the editor was doing when the worst frame hit, and what was pressed
+   * last, how long before. */
+  worstActivity: MainThreadActivity;
+  worstInput: string;
+  worstInputAgoMs: number;
+  /** The three scripts that blocked longest across the window, as
+   * "invoker>function:ms", pipe-separated. */
+  top: string;
+  /** The size of the cut at flush time. */
+  clips: number;
+  audioClips: number;
+  overlays: number;
+  assets: number;
+  cores: number;
+  memoryGb: number;
+}
+
+export type MainThreadActivity = "playing" | "dragging" | "idle";
+
+/** What the editor tells the meter about itself when a frame lands. */
+export interface MainThreadContext {
+  activity: MainThreadActivity;
+  clips: number;
+  audioClips: number;
+  overlays: number;
+  assets: number;
+}
+
+/** A long-animation-frame entry, as Chromium reports it. The lib has no
+ * type for it yet. */
+interface LongFrameEntry extends PerformanceEntry {
+  blockingDuration?: number;
+  renderStart?: number;
+  styleAndLayoutStart?: number;
+  scripts?: LongFrameScript[];
+}
+
+interface LongFrameScript {
+  duration: number;
+  invoker?: string;
+  sourceURL?: string;
+  sourceFunctionName?: string;
+  sourceCharPosition?: number;
+}
+
+interface WorstFrame {
+  ms: number;
+  scriptMs: number;
+  layoutMs: number;
+  invoker: string;
+  fn: string;
+  src: string;
+  char: number;
+  activity: MainThreadActivity;
+  input: string;
+  inputAgoMs: number;
+}
+
+interface ThreadMeter {
+  longFrames: number;
+  blockedMs: number;
+  worst: WorstFrame | null;
+  /** Blocked milliseconds per "invoker>function", for the top list. */
+  byScript: Map<string, number>;
+  startedAt: number;
+}
+
+/** A window this long is one summary. */
+const THREAD_FLUSH_MS = 30_000;
+/** A window whose worst frame is under this reports nothing, and a frame
+ * under it is not kept in the log: a page that is merely busy is not the
+ * complaint. */
+const THREAD_REPORT_MS = 100;
+/** Summaries one editor session will send. */
+const THREAD_SAMPLE_CAP = 8;
+/** A single frame this long, or a window blocked for this long in total, is
+ * trouble the session sends about — see perfLog for what that starts. */
+const TROUBLE_FRAME_MS = 1_000;
+const TROUBLE_WINDOW_MS = 3_000;
+/** An input older than this is not what a frame is answering. */
+const INPUT_RECENT_MS = 5_000;
+
+let threadMeter: ThreadMeter | null = null;
+let threadSink: ((sample: MainThreadSample) => void) | null = null;
+let threadContext: (() => MainThreadContext) | null = null;
+let threadObserver: PerformanceObserver | null = null;
+let threadTimer: ReturnType<typeof setInterval> | null = null;
+let threadSamples = 0;
+let threadOpenedAt = 0;
+let lastInput: { at: number; what: string } | null = null;
+let removeInputWatch: (() => void) | null = null;
+
+const emptyThreadMeter = (): ThreadMeter => ({
+  longFrames: 0,
+  blockedMs: 0,
+  worst: null,
+  byScript: new Map(),
+  startedAt: performance.now(),
+});
+
+/** The last path segment of a bundle URL — the chunk's name, which is what a
+ * source map resolves against. */
+const chunkName = (url: string | undefined): string => {
+  if (!url) return "";
+  const path = url.split(/[?#]/)[0];
+  return path.slice(path.lastIndexOf("/") + 1);
+};
+
+/**
+ * Which control an input landed on, read from the page's structure: a
+ * timeline selection's kind, the component slots around it, the tag and an
+ * input's type — every one of them a literal in this codebase.
+ *
+ * Nothing the page displays goes in. A label or a button's text carries what
+ * the person named, wrote, or was shown — a file name, a project, another
+ * user's email — and a performance record is no place for any of it.
+ */
+function describeTarget(target: EventTarget | null): string {
+  const el = target instanceof Element ? target : null;
+  if (!el) return "";
+  const sel = el.closest<HTMLElement>("[data-tl-sel]");
+  if (sel) return `timeline:${(sel.dataset.tlSel ?? "").split(":")[0]}`;
+  const self = el instanceof HTMLInputElement ? `input:${el.type}` : el.tagName.toLowerCase();
+  const slots: string[] = [];
+  for (let node: Element | null = el; node && slots.length < 2; node = node.parentElement) {
+    const slot = node instanceof HTMLElement ? node.dataset.slot : undefined;
+    if (slot) slots.unshift(slot);
+  }
+  return slots.length ? `${slots.join(">")} ${self}` : self;
+}
+
+const isTextEntry = (target: EventTarget | null): boolean => {
+  const el = target instanceof HTMLElement ? target : null;
+  return (
+    !!el &&
+    (el.tagName === "TEXTAREA" ||
+      el.isContentEditable ||
+      (el.tagName === "INPUT" &&
+        !["checkbox", "radio", "range", "button", "file"].includes((el as HTMLInputElement).type)))
+  );
+};
+
+function watchInputs(): () => void {
+  const onPointer = (e: PointerEvent) => {
+    lastInput = { at: performance.now(), what: `press ${describeTarget(e.target)}` };
+  };
+  const onKey = (e: KeyboardEvent) => {
+    const mods = [e.ctrlKey && "ctrl", e.metaKey && "cmd", e.altKey && "alt", e.shiftKey && "shift"]
+      .filter(Boolean)
+      .join("+");
+    const key = isTextEntry(e.target) ? "text" : e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    lastInput = { at: performance.now(), what: `key ${mods ? `${mods}+` : ""}${key}` };
+  };
+  window.addEventListener("pointerdown", onPointer, true);
+  window.addEventListener("keydown", onKey, true);
+  return () => {
+    window.removeEventListener("pointerdown", onPointer, true);
+    window.removeEventListener("keydown", onKey, true);
+  };
+}
+
+function noteLongFrame(entry: LongFrameEntry): void {
+  const m = threadMeter;
+  if (!m) return;
+  const ms = entry.duration;
+  const blocked = entry.blockingDuration ?? Math.max(0, ms - 50);
+  m.longFrames++;
+  m.blockedMs += blocked;
+  if (meter) {
+    meter.longTasks++;
+    meter.longTaskMs = Math.max(meter.longTaskMs, Math.round(ms));
+  }
+  const scripts = entry.scripts ?? [];
+  let scriptMs = 0;
+  let lead: LongFrameScript | null = null;
+  for (const s of scripts) {
+    scriptMs += s.duration;
+    if (!lead || s.duration > lead.duration) lead = s;
+    const fn = s.sourceFunctionName || chunkName(s.sourceURL);
+    const key = `${s.invoker ?? ""}>${fn}`;
+    m.byScript.set(key, (m.byScript.get(key) ?? 0) + s.duration);
+  }
+  const end = entry.startTime + ms;
+  const layoutMs =
+    entry.styleAndLayoutStart && entry.styleAndLayoutStart > 0 ? end - entry.styleAndLayoutStart : 0;
+  if (ms < THREAD_REPORT_MS && m.worst) return;
+  const at = performance.now();
+  const recent = lastInput && at - lastInput.at <= INPUT_RECENT_MS + ms ? lastInput : null;
+  const frame: WorstFrame = {
+    ms,
+    scriptMs,
+    layoutMs,
+    invoker: lead?.invoker ?? "",
+    fn: lead?.sourceFunctionName ?? "",
+    src: chunkName(lead?.sourceURL),
+    char: lead?.sourceCharPosition ?? -1,
+    activity: threadContext?.().activity ?? "idle",
+    input: recent?.what ?? "",
+    inputAgoMs: recent ? Math.max(0, Math.round(entry.startTime - recent.at)) : -1,
+  };
+  if (ms >= TROUBLE_FRAME_MS) notePerfTrouble();
+  if (ms >= THREAD_REPORT_MS) {
+    logPerfRecord({
+      at: Math.round(performance.timeOrigin + entry.startTime),
+      ms: Math.round(ms),
+      blockedMs: Math.round(blocked),
+      scriptMs: Math.round(scriptMs),
+      layoutMs: Math.round(layoutMs),
+      invoker: frame.invoker,
+      fn: frame.fn,
+      src: frame.src,
+      char: frame.char,
+      activity: frame.activity,
+      input: frame.input,
+      inputAgoMs: frame.inputAgoMs,
+    });
+  }
+  if (!m.worst || ms > m.worst.ms) m.worst = frame;
+}
+
+/** Whether the main thread is being watched. */
+export const meteringMainThread = (): boolean => threadMeter !== null;
+
+/**
+ * Start watching the main thread, sending each summary to `report` with what
+ * `context` says the editor was doing. Calling again replaces both and leaves
+ * the counts alone.
+ */
+export function meterMainThread(
+  report: (sample: MainThreadSample) => void,
+  context: () => MainThreadContext
+): void {
+  threadSink = report;
+  threadContext = context;
+  if (threadMeter) return;
+  if (typeof PerformanceObserver === "undefined") return;
+  const types = PerformanceObserver.supportedEntryTypes ?? [];
+  const type = types.includes("long-animation-frame")
+    ? "long-animation-frame"
+    : types.includes("longtask")
+      ? "longtask"
+      : null;
+  if (!type) return;
+  threadOpenedAt = performance.now();
+  threadMeter = emptyThreadMeter();
+  try {
+    threadObserver = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) noteLongFrame(entry as LongFrameEntry);
+    });
+    threadObserver.observe({ type });
+  } catch {
+    threadObserver = null;
+    threadMeter = null;
+    return;
+  }
+  removeInputWatch = watchInputs();
+  threadTimer = setInterval(flushMainThreadMeter, THREAD_FLUSH_MS);
+}
+
+/** Send what has been counted and start a fresh window. A window with no
+ * frame worth naming sends nothing. */
+export function flushMainThreadMeter(): void {
+  const m = threadMeter;
+  if (!m || !threadSink) return;
+  threadMeter = emptyThreadMeter();
+  // A window blocked for seconds is trouble however it got there: one long
+  // frame, or a hundred medium ones that never reach the reporting bar.
+  if (m.blockedMs >= TROUBLE_WINDOW_MS) notePerfTrouble();
+  const worst = m.worst;
+  if (!worst || worst.ms < THREAD_REPORT_MS) return;
+  const reason = perfUploadReason();
+  if (!reason || threadSamples >= THREAD_SAMPLE_CAP) return;
+  const ctx = threadContext?.() ?? { activity: "idle", clips: 0, audioClips: 0, overlays: 0, assets: 0 };
+  const top = [...m.byScript.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([key, ms]) => `${key}:${Math.round(ms)}`)
+    .join(" | ");
+  threadSink({
+    reason,
+    sample: ++threadSamples,
+    openedForS: Math.round((performance.now() - threadOpenedAt) / 1000),
+    seconds: +((performance.now() - m.startedAt) / 1000).toFixed(1),
+    longFrames: m.longFrames,
+    blockedMs: Math.round(m.blockedMs),
+    worstMs: Math.round(worst.ms),
+    worstScriptMs: Math.round(worst.scriptMs),
+    worstLayoutMs: Math.round(worst.layoutMs),
+    worstInvoker: worst.invoker,
+    worstFn: worst.fn,
+    worstSrc: worst.src,
+    worstChar: worst.char,
+    worstActivity: worst.activity,
+    worstInput: worst.input,
+    worstInputAgoMs: worst.inputAgoMs,
+    top,
+    clips: ctx.clips,
+    audioClips: ctx.audioClips,
+    overlays: ctx.overlays,
+    assets: ctx.assets,
+    cores: navigator.hardwareConcurrency || 0,
+    memoryGb: (navigator as unknown as { deviceMemory?: number }).deviceMemory ?? 0,
+  });
+}
+
+/** Stop watching, sending the window in hand first. */
+export function stopMainThreadMeter(): void {
+  flushMainThreadMeter();
+  if (threadTimer) clearInterval(threadTimer);
+  threadTimer = null;
+  threadObserver?.disconnect();
+  threadObserver = null;
+  removeInputWatch?.();
+  removeInputWatch = null;
+  threadMeter = null;
+  threadSink = null;
+  threadContext = null;
+  lastInput = null;
 }

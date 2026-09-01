@@ -23,14 +23,6 @@ export const ACCOUNT_FEATURE_FLAGS: AccountFeatureFlag[] = [
     group: "editor",
     defaultEnabled: true,
   },
-  {
-    id: "preview_diagnostics",
-    title: "Share diagnostics",
-    description:
-      "Help us diagnose playback issues. Your video, audio, and project stay in your browser.",
-    group: "early",
-    defaultEnabled: false,
-  },
 ];
 
 export const isKnownFeatureFlag = (id: string) =>

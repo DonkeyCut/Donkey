@@ -1,7 +1,8 @@
 import posthog from "posthog-js";
 import { useEffect } from "react";
 
-import type { PerfSample } from "@/cut/lib/perfTrace";
+import type { PerfLogBatch } from "@/cut/lib/perfLog";
+import type { MainThreadSample, PerfSample } from "@/cut/lib/perfTrace";
 import type {
   OnboardingRun,
   ReferralSource,
@@ -35,6 +36,12 @@ export type AnalyticsEvents = {
   // half minute of playback. Numbers only — see `PerfSample` in the Cut
   // preview's perfTrace for what each one means and why it is here.
   cut_preview_perf: PerfSample;
+  // Main-thread freezes from the same account, one summary per half minute
+  // that held one — see `MainThreadSample` in perfTrace for the fields.
+  cut_main_thread: MainThreadSample;
+  // The blocked frames themselves, kept locally and sent at idle, on the page
+  // hiding, and on the next open — see perfLog for the record.
+  cut_perf_log: PerfLogBatch;
   // Billing (settings).
   pro_checkout_started: void;
   billing_portal_opened: void;
