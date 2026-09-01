@@ -50,7 +50,7 @@ import { CLIP_GAP, laneDragFor, laneDragParts, startLaneMove, startLaneTrim, typ
 import { downloadMedia, ensurePeaks, importImage, importStockMusic, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia, stripFailedFor, subscribeStripStatus } from "@/cut/lib/media";
 import { planFilmstrip, type FilmTile } from "@/cut/lib/filmstrip";
 import { waveGain } from "@/cut/lib/waveform";
-import { track0Clips, laneGapAt, sameLane, type LaneRef, clipLen, clipSpeed, getClipSpans, overlayLaneOrder, overlayLayers, projectDuration, resolveTransitions, rippleInsert, useEditor } from "@/cut/lib/store";
+import { track0Clips, laneGapAt, sameLane, type LaneRef, clipLen, clipSpeed, getClipSpans, maxClipFade, overlayLaneOrder, overlayLayers, projectDuration, resolveTransitions, rippleInsert, useEditor } from "@/cut/lib/store";
 import type { VideoTrackPlacement } from "@/cut/lib/store";
 import { playheadAt, setSkim, skimAt, subscribePlayhead, usePlayhead, useSkim } from "@/cut/lib/playhead";
 import { useBrushUi } from "@/cut/lib/removal/brushUi";
@@ -5018,6 +5018,15 @@ function AudioView({
   // it measures against that.
   const barW = Math.max(10, w - CLIP_GAP);
   const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
+  // The fade being dragged, held here rather than in the grip: the ramp line
+  // and the waveform's clip both follow it, so all three move as one.
+  const [liveFade, setLiveFade] = useState<{ side: "in" | "out"; v: number } | null>(null);
+  const fadeIn = liveFade?.side === "in" ? liveFade.v : (clip.fadeIn ?? 0);
+  const fadeOut = liveFade?.side === "out" ? liveFade.v : (clip.fadeOut ?? 0);
+  // Both ramps stay inside the bar and clear of each other, even if an older
+  // doc carries fades that outgrew a since-trimmed clip.
+  const fadeInPx = Math.max(0, Math.min(barW, fadeIn * pps));
+  const fadeOutPx = Math.max(0, Math.min(barW - fadeInPx, fadeOut * pps));
 
   if (!asset) return null;
 
@@ -5053,20 +5062,16 @@ function AudioView({
         startLaneMove(e, "audio", clip.id, ui);
       }}
     >
-      <WaveformCanvas asset={asset} from={clip.in} to={clip.out} w={barW} h={AUDIO_H - 8} className="inset-x-0 inset-y-1" />
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{ clipPath: fadeClipPath(fadeInPx, fadeOutPx, barW) }}
+      >
+        <WaveformCanvas asset={asset} from={clip.in} to={clip.out} w={barW} h={AUDIO_H - 8} className="inset-x-0 inset-y-1" />
+      </div>
       <BeatDots asset={asset} from={clip.in} to={clip.out} speed={speed} pps={pps} w={barW} />
-      {(clip.fadeIn ?? 0) > 0 && (
-        <div
-          className="tl-fade-in pointer-events-none absolute inset-y-0 left-0 bg-gradient-to-r from-black/45 to-transparent"
-          style={{ width: Math.min(w, (clip.fadeIn ?? 0) * pps) }}
-        />
-      )}
-      {(clip.fadeOut ?? 0) > 0 && (
-        <div
-          className="tl-fade-out pointer-events-none absolute inset-y-0 right-0 bg-gradient-to-l from-black/45 to-transparent"
-          style={{ width: Math.min(w, (clip.fadeOut ?? 0) * pps) }}
-        />
-      )}
+      <FadeEnvelope inPx={fadeInPx} outPx={fadeOutPx} barW={barW} />
+      <FadeGrip clip={clip} side="in" pps={pps} barW={barW} fade={fadeIn} live={liveFade?.side === "in"} onLive={setLiveFade} />
+      <FadeGrip clip={clip} side="out" pps={pps} barW={barW} fade={fadeOut} live={liveFade?.side === "out"} onLive={setLiveFade} />
       <span
         className={cn(
           "pointer-events-none absolute top-[3px] left-2 text-[9.5px] whitespace-nowrap text-white/90 transition-opacity [text-shadow:0_1px_2px_rgba(0,0,0,0.35)]",
@@ -5099,6 +5104,149 @@ function AudioView({
         onPointerDown={(e) => startLaneTrim(e, "audio", clip.id, "r", ui)}
       />
     </div>
+  );
+}
+
+/** Width of the fade grab zone at the ramp's inner end. */
+const FADE_W = 14;
+
+/** The ramp's height inside the bar: `TOP` is full volume, `BOT` is silence.
+ * Both the drawn line and the waveform's clip measure from these, so the sound
+ * always sits exactly under the line. They clear the waveform's own inset, so
+ * an untouched end keeps its full peaks. */
+const FADE_TOP_Y = 1;
+const FADE_BOT_Y = AUDIO_H - 5;
+
+/**
+ * The bar's waveform clip: the region under the volume ramp. The envelope
+ * climbs from silence to full across the fade in, holds, then falls back to
+ * silence across the fade out — so the drawn sound is cut to the shape it
+ * actually plays at. No fade leaves the waveform whole.
+ */
+function fadeClipPath(inPx: number, outPx: number, barW: number): string | undefined {
+  if (inPx <= 0 && outPx <= 0) return undefined;
+  const pts = [
+    `0px ${FADE_BOT_Y}px`,
+    `${inPx}px ${FADE_TOP_Y}px`,
+    `${barW - outPx}px ${FADE_TOP_Y}px`,
+    `${barW}px ${FADE_BOT_Y}px`,
+    `${barW}px 100%`,
+    `0px 100%`,
+  ];
+  return `polygon(${pts.join(", ")})`;
+}
+
+/** The ramp itself, drawn over the sound it cuts: up from the bottom-left
+ * across the fade in, down to the bottom-right across the fade out. */
+function FadeEnvelope({ inPx, outPx, barW }: { inPx: number; outPx: number; barW: number }) {
+  if (inPx <= 0 && outPx <= 0) return null;
+  return (
+    <svg
+      className="pointer-events-none absolute inset-0 z-2"
+      width={barW}
+      height={AUDIO_H - 4}
+      style={{ filter: "drop-shadow(0 1px 1px rgba(0,0,0,0.55))" }}
+      aria-hidden
+    >
+      <g fill="none" stroke="white" strokeOpacity={0.95} strokeWidth={1.5} strokeLinecap="round">
+        {inPx > 0 && <path className="tl-fade-in" d={`M 0 ${FADE_BOT_Y} L ${inPx} ${FADE_TOP_Y}`} />}
+        {outPx > 0 && (
+          <path className="tl-fade-out" d={`M ${barW - outPx} ${FADE_TOP_Y} L ${barW} ${FADE_BOT_Y}`} />
+        )}
+      </g>
+    </svg>
+  );
+}
+
+/**
+ * The grab at a ramp's full-volume end — a dot at the top, over a full-height
+ * column so the drag is easy to catch. Dragging it sets the fade's length:
+ * right from the head for the fade in, left from the tail for the fade out.
+ * With no fade yet the dot waits at the clip's edge and shows on hover, so the
+ * corner reads as a grip. It sits below the bar's chips (z-3, the trim
+ * handles' layer) so a mute or a menu the ramp reaches still takes its own
+ * click, and it writes the same field the Inspector's slider does, capped at
+ * half the clip, as one undo step.
+ */
+function FadeGrip({
+  clip,
+  side,
+  pps,
+  barW,
+  fade,
+  live,
+  onLive,
+}: {
+  clip: AudioClip;
+  side: "in" | "out";
+  pps: number;
+  barW: number;
+  /** The fade this grip shows, the in-flight value while it is the one dragging. */
+  fade: number;
+  live: boolean;
+  onLive: (v: { side: "in" | "out"; v: number } | null) => void;
+}) {
+  const px = Math.min(barW, fade * pps);
+  // The grip keeps clear of the trim grab at its own end, so an edge grab still trims.
+  const at = Math.max(TRIM_W + 2, px);
+  const field = side === "in" ? "fadeIn" : "fadeOut";
+  const edge = side === "in" ? "left" : "right";
+
+  const grab = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    const s = useEditor.getState();
+    if (s.readOnly) return;
+    if (s.playing) s.setPlaying(false);
+    s.select({ kind: "audio", id: clip.id });
+    s.pushHistory();
+    const f0 = (side === "in" ? clip.fadeIn : clip.fadeOut) ?? 0;
+    const max = maxClipFade(clip);
+    let v = f0;
+    startDrag(e, {
+      cursor: () => "ew-resize",
+      onMove: (dx) => {
+        const raw = side === "in" ? f0 + dx / pps : f0 - dx / pps;
+        // Tenths, the step the Inspector's slider and its readout both use.
+        v = Math.min(max, Math.max(0, Math.round(raw * 10) / 10));
+        onLive({ side, v });
+        useEditor.getState().updateAudioTransient(clip.id, { [field]: v > 0 ? v : undefined });
+      },
+      onUp: () => {
+        onLive(null);
+        useEditor.getState().updateAudioTransient(clip.id, { [field]: v > 0 ? v : undefined });
+      },
+    });
+  };
+
+  return (
+    <>
+      <span
+        className={cn(
+          "tl-fade-grip absolute inset-y-0 z-3 cursor-ew-resize",
+          side === "in" ? "tl-fade-grip-in" : "tl-fade-grip-out"
+        )}
+        style={{ width: FADE_W, [edge]: at - FADE_W / 2 }}
+        title={side === "in" ? "Drag to set the fade in" : "Drag to set the fade out"}
+        onPointerDown={grab}
+      >
+        <span
+          className={cn(
+            "absolute top-px left-1/2 size-[7px] -translate-x-1/2 rounded-full bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.45)] transition-opacity",
+            // A set fade keeps its grip in view; an unset one only hints on hover.
+            fade > 0 ? "opacity-90" : "opacity-0 group-hover:opacity-70",
+            live && "opacity-100"
+          )}
+        />
+      </span>
+      {live && (
+        <span
+          className="pointer-events-none absolute top-1/2 z-5 -translate-y-1/2 rounded-[4px] bg-black/75 px-1 font-mono text-[10px] leading-4 text-white"
+          style={{ [edge]: at + FADE_W / 2 }}
+        >
+          {fade.toFixed(1)}s
+        </span>
+      )}
+    </>
   );
 }
 
