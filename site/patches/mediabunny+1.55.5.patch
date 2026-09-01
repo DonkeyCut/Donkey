@@ -1,0 +1,175 @@
+diff --git a/node_modules/mediabunny/dist/bundles/mediabunny.cjs b/node_modules/mediabunny/dist/bundles/mediabunny.cjs
+index 3c514ad..66faf6a 100644
+--- a/node_modules/mediabunny/dist/bundles/mediabunny.cjs
++++ b/node_modules/mediabunny/dist/bundles/mediabunny.cjs
+@@ -23941,7 +23941,7 @@ var Mediabunny = (() => {
+     }
+   };
+   var computeMaxQueueSize = (decodedSampleQueueSize) => {
+-    return decodedSampleQueueSize === 0 ? 40 : 8;
++    return decodedSampleQueueSize === 0 ? 16 : 8;
+   };
+   var VideoDecoderWrapper = class extends DecoderWrapper {
+     constructor(onSample, onError, codec, decoderConfig, rotation, timeResolution) {
+@@ -23954,6 +23954,7 @@ var Mediabunny = (() => {
+       this.customDecoder = null;
+       this.customDecoderCallSerializer = new CallSerializer();
+       this.customDecoderQueueSize = 0;
++      this.inFlight = 0; // Packets sent to the decoder whose frames have not come back yet.
+       this.inputTimestamps = [];
+       // Timestamps input into the decoder, sorted.
+       this.sampleQueue = [];
+@@ -24031,6 +24032,7 @@ var Mediabunny = (() => {
+         const stack = new Error("Decoding error").stack;
+         this.decoder = new VideoDecoder({
+           output: (frame) => {
++            this.inFlight = Math.max(0, this.inFlight - 1);
+             try {
+               colorHandler(frame);
+             } catch (error) {
+@@ -24050,10 +24052,7 @@ var Mediabunny = (() => {
+         return this.customDecoderQueueSize;
+       } else {
+         assert(this.decoder);
+-        return Math.max(
+-          this.decoder.decodeQueueSize,
+-          this.alphaDecoder?.decodeQueueSize ?? 0
+-        );
++        return Math.max(this.inFlight, this.alphaDecoder?.decodeQueueSize ?? 0);
+       }
+     }
+     decode(packet) {
+@@ -24098,6 +24097,7 @@ var Mediabunny = (() => {
+             }
+           }
+         }
++        this.inFlight++;
+         this.decoder.decode(packet.toEncodedVideoChunk());
+         this.decodeAlphaData(packet);
+       }
+@@ -24265,6 +24265,7 @@ var Mediabunny = (() => {
+         }
+         this.sampleQueue.length = 0;
+       }
++      this.inFlight = 0;
+       this.currentPacketIndex = 0;
+       this.raslSkipped = false;
+     }
+diff --git a/node_modules/mediabunny/dist/bundles/mediabunny.mjs b/node_modules/mediabunny/dist/bundles/mediabunny.mjs
+index 9a62e92..5abfb37 100644
+--- a/node_modules/mediabunny/dist/bundles/mediabunny.mjs
++++ b/node_modules/mediabunny/dist/bundles/mediabunny.mjs
+@@ -23784,7 +23784,7 @@ var BaseMediaSampleSink = class {
+   }
+ };
+ var computeMaxQueueSize = (decodedSampleQueueSize) => {
+-  return decodedSampleQueueSize === 0 ? 40 : 8;
++  return decodedSampleQueueSize === 0 ? 16 : 8;
+ };
+ var VideoDecoderWrapper = class extends DecoderWrapper {
+   constructor(onSample, onError, codec, decoderConfig, rotation, timeResolution) {
+@@ -23797,6 +23797,7 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
+     this.customDecoder = null;
+     this.customDecoderCallSerializer = new CallSerializer();
+     this.customDecoderQueueSize = 0;
++    this.inFlight = 0; // Packets sent to the decoder whose frames have not come back yet.
+     this.inputTimestamps = [];
+     // Timestamps input into the decoder, sorted.
+     this.sampleQueue = [];
+@@ -23874,6 +23875,7 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
+       const stack = new Error("Decoding error").stack;
+       this.decoder = new VideoDecoder({
+         output: (frame) => {
++          this.inFlight = Math.max(0, this.inFlight - 1);
+           try {
+             colorHandler(frame);
+           } catch (error) {
+@@ -23893,10 +23895,7 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
+       return this.customDecoderQueueSize;
+     } else {
+       assert(this.decoder);
+-      return Math.max(
+-        this.decoder.decodeQueueSize,
+-        this.alphaDecoder?.decodeQueueSize ?? 0
+-      );
++      return Math.max(this.inFlight, this.alphaDecoder?.decodeQueueSize ?? 0);
+     }
+   }
+   decode(packet) {
+@@ -23941,6 +23940,7 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
+           }
+         }
+       }
++      this.inFlight++;
+       this.decoder.decode(packet.toEncodedVideoChunk());
+       this.decodeAlphaData(packet);
+     }
+@@ -24108,6 +24108,7 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
+       }
+       this.sampleQueue.length = 0;
+     }
++    this.inFlight = 0;
+     this.currentPacketIndex = 0;
+     this.raslSkipped = false;
+   }
+diff --git a/node_modules/mediabunny/dist/modules/src/media-sink.js b/node_modules/mediabunny/dist/modules/src/media-sink.js
+index da1cc3a..28c15d3 100644
+--- a/node_modules/mediabunny/dist/modules/src/media-sink.js
++++ b/node_modules/mediabunny/dist/modules/src/media-sink.js
+@@ -650,10 +650,11 @@ export class BaseMediaSampleSink {
+     }
+ }
+ const computeMaxQueueSize = (decodedSampleQueueSize) => {
+-    // If we have decoded samples lying around, limit the total queue size to a small value (decoded samples can use up
+-    // a lot of memory). If not, we're fine with a much bigger queue of encoded packets waiting to be decoded. In fact,
+-    // some decoders only start flushing out decoded chunks when the packet queue is large enough.
+-    return decodedSampleQueueSize === 0 ? 40 : 8;
++    // Decoded frames are large, and a video decoder holds every packet it has been handed until the frame comes out. So
++    // the pump counts frames in flight together with the decoded ones waiting, and keeps the total small: enough of a
++    // head start for a decoder that reorders frames, and no more, so a consumer that stops reading pins a bounded
++    // number of decoded frames.
++    return decodedSampleQueueSize === 0 ? 16 : 8;
+ };
+ class VideoDecoderWrapper extends DecoderWrapper {
+     constructor(onSample, onError, codec, decoderConfig, rotation, timeResolution) {
+@@ -666,6 +667,7 @@ class VideoDecoderWrapper extends DecoderWrapper {
+         this.customDecoder = null;
+         this.customDecoderCallSerializer = new CallSerializer();
+         this.customDecoderQueueSize = 0;
++        this.inFlight = 0; // Packets sent to the decoder whose frames have not come back yet.
+         this.inputTimestamps = []; // Timestamps input into the decoder, sorted.
+         this.sampleQueue = []; // Safari-specific thing, check usage.
+         this.currentPacketIndex = 0;
+@@ -756,6 +758,7 @@ class VideoDecoderWrapper extends DecoderWrapper {
+             const stack = new Error('Decoding error').stack;
+             this.decoder = new VideoDecoder({
+                 output: (frame) => {
++                    this.inFlight = Math.max(0, this.inFlight - 1);
+                     try {
+                         colorHandler(frame);
+                     }
+@@ -777,7 +780,7 @@ class VideoDecoderWrapper extends DecoderWrapper {
+         }
+         else {
+             assert(this.decoder);
+-            return Math.max(this.decoder.decodeQueueSize, this.alphaDecoder?.decodeQueueSize ?? 0);
++            return Math.max(this.inFlight, this.alphaDecoder?.decodeQueueSize ?? 0);
+         }
+     }
+     decode(packet) {
+@@ -835,6 +838,7 @@ class VideoDecoderWrapper extends DecoderWrapper {
+                     }
+                 }
+             }
++            this.inFlight++;
+             this.decoder.decode(packet.toEncodedVideoChunk());
+             this.decodeAlphaData(packet);
+         }
+@@ -1042,6 +1046,7 @@ class VideoDecoderWrapper extends DecoderWrapper {
+             }
+             this.sampleQueue.length = 0;
+         }
++        this.inFlight = 0;
+         this.currentPacketIndex = 0;
+         this.raslSkipped = false;
+     }
