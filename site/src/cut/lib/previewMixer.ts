@@ -66,8 +66,12 @@ const GROUP_PULLS = 128;
 /** A stretched window is resynthesised on the main thread, so it is kept short
  * enough that the work lands inside a frame or two. */
 const WINDOW_STRETCHED_S = 4;
-/** Schedule more of a voice once the playhead is this close to running out. */
-const AHEAD_S = 2;
+/** Schedule more of a voice once the playhead is this close to running out.
+ * The scheduling runs on the main thread, and what is scheduled is all the
+ * sound there is while that thread is blocked — a delete that takes seconds
+ * to land, an import decoding — so the lead is longer than the freezes a slow
+ * machine has been measured to take. */
+const AHEAD_S = 5;
 /** Most the picture will be held back for the output device, whatever the
  * device claims. Well past a Bluetooth headset, and short of anything that
  * would read as the playhead refusing to move. */
