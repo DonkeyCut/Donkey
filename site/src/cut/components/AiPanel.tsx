@@ -916,10 +916,15 @@ function ChatSession({
       window.clearTimeout(saveTimer.current);
       saveTimer.current = null;
     }
-    const rest = readThreads(projectId).filter((t) => t.id !== thread.id);
-    writeThreads(projectId, [thread, ...rest]);
+    const stored = readThreads(projectId);
+    // The pi transcript is held for the recent threads only; a thread whose
+    // session has been let go reads back as undefined, and writing that would
+    // erase the tool-call context the stored one still has. What is on disk
+    // stands until a live session replaces it.
+    const merged = { ...thread, pi: thread.pi ?? stored.find((t) => t.id === thread.id)?.pi };
+    writeThreads(projectId, [merged, ...stored.filter((t) => t.id !== thread.id)]);
     // Cloud projects mirror the thread server-side (debounced while it streams).
-    queueCloudThreadSave(projectId, slimForStorage([thread])[0]);
+    queueCloudThreadSave(projectId, slimForStorage([merged])[0]);
   }, [projectId]);
   useEffect(() => {
     if (messages.length === 0) return;

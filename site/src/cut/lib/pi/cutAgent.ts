@@ -61,6 +61,23 @@ export interface CutAgentDeps {
 // and read back by the save path. Live for the page's lifetime.
 
 const sessions = new Map<string, AgentMessage[]>();
+/**
+ * Threads whose context is kept in hand.
+ *
+ * A session is one thread's transcript, and a page that visits threads all day
+ * would hold every one it opened for as long as it stayed open. Keeping the
+ * recent ones is enough: `sessionFor` rebuilds a missing session out of the
+ * thread's own messages, so an evicted thread costs one reconstruction on the
+ * next ask and nothing else.
+ */
+const SESSIONS_KEPT = 8;
+
+/** Remember a thread's context, letting go of the ones left longest ago. */
+function keepSession(threadId: string, messages: AgentMessage[]): void {
+  sessions.delete(threadId);
+  sessions.set(threadId, messages);
+  while (sessions.size > SESSIONS_KEPT) sessions.delete(sessions.keys().next().value!);
+}
 
 /** The budget-extension steer is turn-local scaffolding; this prefix marks it
  * so the save path can keep it out of the stored session. */
@@ -156,7 +173,7 @@ function sanitizeSession(messages: AgentMessage[]): AgentMessage[] {
 }
 
 export function hydratePiSession(threadId: string, messages: AgentMessage[] | undefined): void {
-  if (messages && !sessions.has(threadId)) sessions.set(threadId, sanitizeSession(messages));
+  if (messages && !sessions.has(threadId)) keepSession(threadId, sanitizeSession(messages));
 }
 
 export function readPiSession(threadId: string): AgentMessage[] | undefined {
@@ -533,7 +550,7 @@ export function streamCutChat({
           rounds: number;
           send: (chunk: Record<string, unknown>) => void;
         }) => {
-          sessions.set(threadId, sanitizeSession(run.agent.state.messages));
+          keepSession(threadId, sanitizeSession(run.agent.state.messages));
           // The step-limit handoff guarantee: a turn that ends at the ceiling
           // with the model still requesting tools closes with readable text —
           // the terminated batch alone would leave the reply on blocked tool
