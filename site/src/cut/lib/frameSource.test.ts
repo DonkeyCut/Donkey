@@ -367,6 +367,28 @@ describe("FrameSourcePool", () => {
     expect(pool.get("old", asset("a"), 480)).toBe(old);
   });
 
+  test("idle decoders stand down by the pixels they cover", () => {
+    const uhd = (id: string) => asset(id, 3840, 2160);
+    const hd = (id: string) => asset(id, 1920, 1080);
+    const ids = ["a", "b", "c", "d", "e", "f"];
+    const pool = new FrameSourcePool(12);
+    const big = ids.map((id) => {
+      pool.beginFrame();
+      return pool.get(id, uhd(id), 480);
+    });
+    const small = ids.map((id) => {
+      pool.beginFrame();
+      return pool.get(`${id}-hd`, hd(id), 480);
+    });
+    for (let i = 0; i < 200; i++) pool.beginFrame();
+    pool.evict();
+    // Twelve decoders are inside the count. The six 1080p files are read
+    // most recently and fit the pixel budget together; behind them the 4K
+    // files fill what is left, and the oldest stand down.
+    expect(small.map((s) => s.suspended)).toEqual(ids.map(() => false));
+    expect(big.map((s) => s.suspended)).toEqual([true, true, true, true, false, false]);
+  });
+
   test("standing down costs a decoder, not a source", () => {
     const pool = new FrameSourcePool(1);
     pool.beginFrame();

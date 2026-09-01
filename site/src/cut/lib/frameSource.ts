@@ -293,6 +293,18 @@ const WARM_PIXELS = 96e6;
 /** Stood-down sources kept regardless of the pixel budget, so a project of
  * tiny frames cannot leave hundreds of parsed files open. */
 const WARM_KEEP_MAX = 32;
+/**
+ * Source pixels the live decoders may cover between them.
+ *
+ * A decoder costs the file's own frame size, whatever size the picture is
+ * drawn at: the hardware decodes every frame at full resolution and holds a
+ * dozen or so of them between the file and the canvas. At 4K that is hundreds
+ * of megabytes a decoder, and a dozen of them is most of a laptop's memory.
+ * So under the decoder count, idle decoders also stand down by the pixels
+ * they cover, most recently read kept first. The budget fits the whole count
+ * at 1080p and holds four at 4K.
+ */
+const LIVE_PIXELS = 34e6;
 /** A failed open tries again this much later, growing per attempt over the
  * first `RETRIES` tries, so a network blip heals within seconds. */
 const RETRY_MS = 1000;
@@ -637,6 +649,13 @@ export class ClipFrameSource {
       this.asset.width && this.asset.height ? this.asset.width / this.asset.height : 16 / 9;
     const width = Math.min(Math.round(this.height * aspect), this.asset.width ?? Infinity);
     return POOL * width * this.height;
+  }
+
+  /** Pixels in a frame of the file, which is what its decoder's held frames
+   * cost whatever size the picture is drawn at. */
+  get decodePixels(): number {
+    if (this.asset.type === "image") return 0;
+    return (this.asset.width ?? 1920) * (this.asset.height ?? 1080);
   }
 
   /** The URL this source is reading. The pool compares it against the store's
@@ -1736,6 +1755,17 @@ export class FrameSourcePool {
       poolLog(`pool suspend ${id}`);
       src.suspend();
       live--;
+    }
+
+    // Then by pixels: the live decoders are kept most recently read first
+    // until the source budget runs out, and the idle ones past it stand down.
+    let livePixels = 0;
+    for (const [id, src] of [...this.sources.entries()].sort((a, b) => b[1].touched - a[1].touched)) {
+      if (src.suspended) continue;
+      livePixels += src.decodePixels;
+      if (livePixels <= LIVE_PIXELS || this.tick - src.touched < EVICT_GRACE) continue;
+      poolLog(`pool suspend ${id} (pixels)`);
+      src.suspend();
     }
 
     // Then the memory. The warm shelf is filled most-recently-read first until
