@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { R2NotConfiguredError } from "@/cut/server/cloud/r2";
 import { InvalidDayError, runAnalyticsDaily } from "@/lib/analytics/pipeline";
+import { PosthogConfigError } from "@/lib/analytics/posthog";
 import { defineJob, JobFailure } from "@/lib/jobs/registry";
 
 // The nightly analytics run, also retriggerable by hand. An empty payload is
@@ -21,9 +22,13 @@ export const analyticsDailyJob = defineJob(
     try {
       return await runAnalyticsDaily(payload);
     } catch (e) {
-      // Both are permanent: retrying an unconfigured store or an impossible
-      // day can never succeed.
-      if (e instanceof R2NotConfiguredError || e instanceof InvalidDayError) {
+      // All three are permanent: retrying an unconfigured store, a bad
+      // PostHog project id, or an impossible day can never succeed.
+      if (
+        e instanceof R2NotConfiguredError ||
+        e instanceof InvalidDayError ||
+        e instanceof PosthogConfigError
+      ) {
         throw new JobFailure(e.message);
       }
       throw e;

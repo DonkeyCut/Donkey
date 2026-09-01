@@ -7,14 +7,27 @@ import { addUtcDays } from "@/lib/analytics/schema";
 
 const POSTHOG_HOST = "https://us.posthog.com";
 
-// The numeric project id from PostHog → Settings → Project.
-function posthogProjectId(): number {
-  const id = Number(process.env.POSTHOG_PROJECT_ID);
-  return Number.isInteger(id) && id > 0 ? id : 0;
+/** A POSTHOG_PROJECT_ID that is not a project id. Permanent: no retry fixes a
+ * bad env value. */
+export class PosthogConfigError extends Error {}
+
+// The numeric project id from PostHog → Settings → Project. Unset leaves this
+// deployment without PostHog. A malformed value raises: a typo here once cost
+// the pipeline months of PostHog data while every run reported success.
+function posthogProjectId(): number | undefined {
+  const raw = process.env.POSTHOG_PROJECT_ID?.trim();
+  if (!raw) return undefined;
+  const id = Number(raw);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new PosthogConfigError(
+      `POSTHOG_PROJECT_ID must be the numeric project id from PostHog → Settings → Project; got "${raw}".`,
+    );
+  }
+  return id;
 }
 
 export function isPosthogQueryConfigured(): boolean {
-  return posthogProjectId() > 0 && Boolean(process.env.POSTHOG_PERSONAL_API_KEY);
+  return posthogProjectId() !== undefined && Boolean(process.env.POSTHOG_PERSONAL_API_KEY);
 }
 
 /** distinct_ids that fired app_loaded during the UTC day. app_loaded fires
@@ -23,7 +36,7 @@ export function isPosthogQueryConfigured(): boolean {
 export async function fetchActiveDistinctIds(day: string): Promise<string[]> {
   const apiKey = process.env.POSTHOG_PERSONAL_API_KEY;
   const projectId = posthogProjectId();
-  if (!apiKey || projectId <= 0) {
+  if (!apiKey || projectId === undefined) {
     throw new Error("PostHog query access is not configured.");
   }
   const query = [
