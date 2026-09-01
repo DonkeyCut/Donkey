@@ -72,14 +72,25 @@ function rateLimitBuckets() {
   return globalWithBuckets[globalBucketsKey];
 }
 
+let prunedAt = 0;
+
+/**
+ * Drop buckets whose window is long gone.
+ *
+ * This walks the whole map, and every authenticated request that opens a new
+ * window would otherwise call it: with a few thousand users that is a full
+ * scan on a large share of requests, most of them finding nothing stale.
+ * Once per window is enough — nothing can go stale faster than that.
+ */
 function pruneBuckets(
   buckets: Map<string, RateLimitBucket>,
   now: number,
   windowMs: number,
 ) {
-  if (buckets.size < 1_000) {
+  if (buckets.size < 1_000 || now - prunedAt < windowMs) {
     return;
   }
+  prunedAt = now;
 
   const staleBefore = now - windowMs * 2;
   for (const [key, bucket] of buckets) {
