@@ -5,11 +5,13 @@ import type { ReactNode } from "react";
 import { NoSessionReplay } from "@/app/_components/NoSessionReplay";
 import { SuHeader } from "@/app/su/SuHeader";
 import { SuSidebar } from "@/app/su/SuSidebar";
+import { useWarmAnalyticsRollup } from "@/queries/analytics";
 
 // The section's two-pane shell. It mounts only for a super user: the proxy
 // (src/proxy.ts) has already checked the session and the role before the
 // route runs.
 export function SuShell({ children }: { children: ReactNode }) {
+  useWarmAnalyticsRollup();
   // The section paints the white product surface. `app-surface` is what
   // repoints the --background token for the whole document (see globals.css),
   // so it belongs on the outermost element here.
