@@ -40,8 +40,24 @@ const SWEEP_EVERY_MS = 15_000;
 // going when it closes.
 const DRAIN_MS = 13 * 60_000;
 
+/** The longest a job of each kind may run. Everything else about a job's cost
+ * is bounded when it is queued; this bounds the one thing that isn't — a
+ * render that keeps ffmpeg talking forever holds a billed container. */
+const MAX_RUNTIME_MS: Record<string, number> = {
+  export: 60 * 60_000,
+  preview: 20 * 60_000,
+  card: 10 * 60_000,
+  hls: 3 * 60 * 60_000,
+  import_url: 20 * 60_000,
+  convert: 60 * 60_000,
+  agent_turn: 20 * 60_000,
+};
+const DEFAULT_MAX_RUNTIME_MS = 60 * 60_000;
+
 interface ActiveJob {
   handle: RenderHandle;
+  kind: string;
+  startedAt: number;
   canceled: boolean;
   /** This job goes back on the queue rather than settling here — swept out
    * from under us after a heartbeat gap, or still rendering when a shutdown
@@ -110,6 +126,16 @@ function watchJob(id: string, entry: ActiveJob): ReturnType<typeof setInterval> 
   return setInterval(() => {
     void (async () => {
       try {
+        if (Date.now() - entry.startedAt > (MAX_RUNTIME_MS[entry.kind] ?? DEFAULT_MAX_RUNTIME_MS)) {
+          entry.canceled = true; // suppress the run's own row writes
+          entry.handle.error = "Ran too long.";
+          entry.handle.proc?.kill("SIGKILL");
+          await prisma.cutRenderJob.updateMany({
+            where: { id, state: "running" },
+            data: { state: "error", error: "The job ran too long and was stopped." },
+          });
+          return;
+        }
         const row = await prisma.cutRenderJob.findUnique({
           where: { id },
           select: { state: true },
@@ -140,7 +166,13 @@ function watchJob(id: string, entry: ActiveJob): ReturnType<typeof setInterval> 
 
 async function runJob(job: ClaimedJob): Promise<void> {
   const handle: RenderHandle = { tmpDir: "", outPath: "", progress: 0, log: [] };
-  const entry: ActiveJob = { handle, canceled: false, retry: false };
+  const entry: ActiveJob = {
+    handle,
+    kind: job.kind,
+    startedAt: Date.now(),
+    canceled: false,
+    retry: false,
+  };
   active.set(job.id, entry);
   const watcher = watchJob(job.id, entry);
   try {

@@ -189,7 +189,7 @@ model CutRenderJob {
   userId    String
   projectId String?
   kind      String // export | preview | hls | import_url
-  state     String    @default("queued") // queued | running | done | error | canceled
+  state     String    @default("queued") // queued | running | done | error | canceled | dismissed
   progress  Float     @default(0)
   spec      Json
   outputKey String?

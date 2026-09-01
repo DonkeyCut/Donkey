@@ -5,6 +5,7 @@
 // a time per project — and the generic /jobs/:jobId route serves the poll.
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import { cutLimitsFor, liveJobCheck } from "./limits";
 import { getProject } from "./projects";
 import { caught, err } from "./util";
 import { wakeRenderWorker } from "./wake";
@@ -22,6 +23,18 @@ export const turnsCloud = {
   async queue(userId: string, projectId: string, req: Request) {
     try {
       if (!(await getProject(userId, projectId))) return err("Project not found.", 404);
+      const capped = await liveJobCheck(userId);
+      if (capped) return capped;
+      // Turns run one per project; across projects an account holds its
+      // tier's count at once, so opening projects by the hundred earns a wait.
+      const { liveTurns: maxTurns } = await cutLimitsFor(userId);
+      if (maxTurns !== null) {
+        const liveTurns = await prisma.cutRenderJob.count({
+          where: { userId, kind: "agent_turn", state: { in: ["queued", "running"] } },
+        });
+        if (liveTurns >= maxTurns)
+          return err("Too many turns are running on this account. Wait for one to finish.", 429);
+      }
       const text = await req.text();
       if (text.length > MAX_TURN_BYTES) return err("Turn too large.", 413);
       const body = JSON.parse(text) as Partial<AgentTurnSpec>;

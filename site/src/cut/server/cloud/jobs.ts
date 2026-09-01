@@ -3,12 +3,12 @@
 // shapes byte-match the engine's export routes (http/export.ts + server/jobs.ts).
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { EXPORT_QUOTA_MARGIN, renderJobCheck } from "./limits";
+import { cutLimitsFor, EXPORT_QUOTA_MARGIN, renderJobCheck } from "./limits";
 import { wakeRenderWorker } from "./wake";
 import { getProject } from "./projects";
 import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl } from "./mediaCdn";
-import { head, overlayKey, presignPut, projectExportKey } from "./r2";
-import { addUsage, quotaCheck } from "./usage";
+import { del, head, overlayKey, presignPut, projectExportKey } from "./r2";
+import { addUsage, quotaCheck, reservedBytes, usageBytes } from "./usage";
 import { caught, err, redirect } from "./util";
 
 /** How long finished jobs stay in the export-jobs feed — the engine's registry
@@ -19,6 +19,28 @@ const FEED_WINDOW_MS = 24 * 60 * 60 * 1000;
  * as a tab that went away. Generous next to the ten-minute cut the client will
  * take on, because the wall-clock cost of a render depends on the machine. */
 const CLIENT_RENDER_WINDOW_MS = 2 * 60 * 60 * 1000;
+
+// The spec goes straight to ffmpeg, so these are the largest frame, rate, and
+// length a render may ask for: a 4K cut at 60 fps, four hours long, is already
+// far past anything the editor produces.
+const MAX_RENDER_EDGE = 4096;
+const MAX_RENDER_FPS = 60;
+const MAX_RENDER_SECONDS = 4 * 60 * 60;
+const MAX_RENDER_CLIPS = 2000;
+
+// Overlay uploads are transient render inputs the quota never sees, so their
+// size is bounded here instead: per file, per batch, and by count. A render
+// carries one PNG per caption cue and one per frame of every animated
+// element, so the count and the batch run to a long, busy cut.
+const MAX_OVERLAY_FILES = 20_000;
+const MAX_OVERLAY_BYTES = 256 * 1024 ** 2;
+const MAX_OVERLAY_BATCH_BYTES = 8 * 1024 ** 3;
+
+// The largest download an import may land, holding for unlimited tiers too.
+const IMPORT_MAX_BYTES = 2 * 1024 ** 3;
+
+// A running job writes its row every second. One this quiet lost its worker.
+const HEARTBEAT_QUIET_MS = 30_000;
 
 type JobRow = {
   id: string;
@@ -32,7 +54,56 @@ type JobRow = {
   error: string | null;
   claimedAt: Date | null;
   createdAt: Date;
+  updatedAt: Date;
 };
+
+/** Why a client-supplied render spec cannot run, or null when it can. */
+function specRefusal(spec: Record<string, unknown>): string | null {
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : NaN);
+  const inRange = (v: unknown, lo: number, hi: number) => n(v) >= lo && n(v) <= hi;
+  if (!inRange(spec.width, 2, MAX_RENDER_EDGE) || !inRange(spec.height, 2, MAX_RENDER_EDGE))
+    return "Render size is out of range.";
+  if (!inRange(spec.fps, 1, MAX_RENDER_FPS)) return "Frame rate is out of range.";
+  if (!(n(spec.duration) > 0) || n(spec.duration) > MAX_RENDER_SECONDS)
+    return "Render length is out of range.";
+  if (Array.isArray(spec.clips) && spec.clips.length > MAX_RENDER_CLIPS) return "Too many clips.";
+  return null;
+}
+
+/** Whether a job's row needs the container started: it is waiting to be
+ * claimed, or it is marked running and its heartbeat has gone quiet — a worker
+ * that died mid-job, which the woken replacement sweeps back to queued. A
+ * healthy running job needs nothing, and a browser render (running with no
+ * claim) is never a worker's. */
+function needsWorker(row: JobRow): boolean {
+  if (row.state === "queued") return true;
+  return (
+    row.state === "running" &&
+    row.claimedAt !== null &&
+    Date.now() - row.updatedAt.getTime() > HEARTBEAT_QUIET_MS
+  );
+}
+
+/** The most bytes an import may bring in: what is left of the account's
+ * storage, under the hard ceiling. */
+async function importByteCeiling(userId: string): Promise<number> {
+  const limits = await cutLimitsFor(userId);
+  if (limits.storageBytes === null) return IMPORT_MAX_BYTES;
+  const [stored, reserved] = await Promise.all([usageBytes(userId), reservedBytes(userId)]);
+  return Math.max(0, Math.min(IMPORT_MAX_BYTES, limits.storageBytes - stored - reserved));
+}
+
+/** Drop the file a browser render uploaded for a row that never registered
+ * it: the bytes have no media row, so nothing else would ever find them. */
+async function dropUnregisteredExport(userId: string, row: JobRow): Promise<void> {
+  if (!row.projectId || !row.outName) return;
+  const key = projectExportKey(userId, row.projectId, row.outName);
+  const registered = await prisma.cutMediaObject.findUnique({
+    where: { r2Key: key },
+    select: { id: true },
+  });
+  if (!registered) await del([key]);
+}
 
 /** Engine job status ("queued" | "running" | "done" | "error") from a row's
  * state; a canceled row reads as the engine's canceled-export error. */
@@ -61,8 +132,11 @@ async function exportName(
       where: { userId, projectId, kind: "export" },
       select: { fileName: true },
     }),
+    // A dismissed row stays for the day's count, and nothing sits behind its
+    // name: a released browser render never uploaded, a dismissed finished one
+    // is already in `files`.
     tx.cutRenderJob.findMany({
-      where: { userId, projectId, kind: "export" },
+      where: { userId, projectId, kind: "export", state: { not: "dismissed" } },
       select: { outName: true },
     }),
   ]);
@@ -86,8 +160,28 @@ export const jobsCloud = {
    * Anything else is a 403 at R2. */
   async exportPresign(userId: string, req: Request) {
     try {
-      const { files } = (await req.json()) as { files?: { name?: string; bytes?: number }[] };
+      const { files, target } = (await req.json()) as {
+        files?: { name?: string; bytes?: number }[];
+        target?: string;
+      };
       if (!Array.isArray(files) || files.length === 0) return err("files is required.", 400);
+      if (files.length > MAX_OVERLAY_FILES) return err("Too many overlays.", 400);
+      // The overlays exist for a render, so the gates that render passes apply
+      // here too: a user's export meets the daily and live caps, the editor's
+      // own renders (proxy, card, ladder) only the storage margin.
+      if (target === undefined || target === "export") {
+        const capped = await renderJobCheck(userId);
+        if (capped) return capped;
+      }
+      const over = await quotaCheck(userId, 0, EXPORT_QUOTA_MARGIN);
+      if (over) return over;
+      let total = 0;
+      for (const f of files) {
+        if (!Number.isInteger(f.bytes) || f.bytes! < 1 || f.bytes! > MAX_OVERLAY_BYTES)
+          return err("Every overlay needs its size.", 400);
+        total += f.bytes!;
+      }
+      if (total > MAX_OVERLAY_BATCH_BYTES) return err("Overlays are too large.", 413);
       const batchId = crypto.randomUUID().slice(0, 12);
       const out = await Promise.all(
         files.map(async (f) => {
@@ -95,7 +189,8 @@ export const jobsCloud = {
           if (!name) throw new Error("Every overlay needs a name.");
           const key = overlayKey(userId, batchId, name);
           const type = name.toLowerCase().endsWith(".mp4") ? "video/mp4" : "image/png";
-          return { name, key, type, url: await presignPut(key, type) };
+          // The size is in the signature: a larger body is a 403 at the bucket.
+          return { name, key, type, url: await presignPut(key, type, f.bytes) };
         })
       );
       return Response.json({ files: out });
@@ -138,42 +233,47 @@ export const jobsCloud = {
         body.spec.target === "hls"
           ? body.spec.target
           : "export";
+      const refused = specRefusal(body.spec as Record<string, unknown>);
+      if (refused) return err(refused, 400);
+      // Every render lands bytes, so every target passes the storage margin.
+      // The finished file's size isn't knowable until it renders; what is
+      // knowable is whether this account is already too far past its quota to
+      // be handed more, so that is the gate. The daily and live caps count
+      // renders the user asked for; the editor's own renders are held to one
+      // running and one queued per project below.
       if (target === "export") {
         const capped = await renderJobCheck(userId);
         if (capped) return capped;
-        // The finished file is registered like any other object, so an export
-        // grows storage. The output's size isn't knowable until it renders;
-        // what is knowable is whether this account is already too far past its
-        // quota to be handed more, so that is the gate. Previews and share
-        // cards are the editor's own small internal renders and skip it.
-        const over = await quotaCheck(userId, 0, EXPORT_QUOTA_MARGIN);
-        if (over) return over;
       }
+      const over = await quotaCheck(userId, 0, EXPORT_QUOTA_MARGIN);
+      if (over) return over;
       const jobSpec = {
         spec: body.spec,
         overlays: body.overlays ?? [],
         ...(target === "hls" ? { burnedSubtitles: body.burnedSubtitles === true } : {}),
       } as unknown as Prisma.InputJsonValue;
 
-      if (target === "hls") {
-        // A ladder is only worth rendering for a project someone can actually
-        // open: it is fired by the editor rather than asked for, so without
-        // this an unshared project would burn a render slot on a stream with no
-        // viewer.
-        const shared = await prisma.cutProjectShare.findUnique({
-          where: { projectId },
-          select: { id: true },
-        });
-        if (!shared) return Response.json({ id: null, skipped: "not-shared" });
+      if (target !== "export") {
+        if (target === "hls") {
+          // A ladder is only worth rendering for a project someone can actually
+          // open: it is fired by the editor rather than asked for, so without
+          // this an unshared project would burn a render slot on a stream with no
+          // viewer.
+          const shared = await prisma.cutProjectShare.findUnique({
+            where: { projectId },
+            select: { id: true },
+          });
+          if (!shared) return Response.json({ id: null, skipped: "not-shared" });
+        }
 
-        // A ladder re-encodes the whole cut once per rung and holds a render
-        // slot for the duration, so at most one runs and one waits. The waiting
-        // one is REPLACED rather than kept: what matters is that the newest doc
-        // renders last, and returning the in-flight job's id instead — as this
-        // once did — silently dropped every edit made while one was running,
-        // leaving the share streaming a pre-edit cut indefinitely.
+        // The editor's own renders re-encode the cut and hold a render slot
+        // for the duration, so per project at most one runs and one waits. The
+        // waiting one is REPLACED rather than kept: what matters is that the
+        // newest doc renders last, and returning the in-flight job's id instead
+        // — as this once did — silently dropped every edit made while one was
+        // running, leaving the share streaming a pre-edit cut indefinitely.
         const queued = await prisma.cutRenderJob.findFirst({
-          where: { userId, projectId, kind: "hls", state: "queued" },
+          where: { userId, projectId, kind: target, state: "queued" },
           orderBy: { createdAt: "desc" },
           select: { id: true },
         });
@@ -245,9 +345,7 @@ export const jobsCloud = {
   async exportStatus(userId: string, jobId: string) {
     const row = await findJob(userId, jobId);
     if (!row) return err("Unknown export.", 404);
-    // "running" wakes too: if the worker died mid-job, the woken replacement
-    // sweeps the stale row back to queued and picks it up.
-    if (row.state === "queued" || row.state === "running") wakeRenderWorker();
+    if (needsWorker(row)) wakeRenderWorker();
     const { status, error } = engineStatus(row);
     return Response.json({
       status,
@@ -263,11 +361,13 @@ export const jobsCloud = {
       where: { id: jobId, userId, state: { in: ["queued", "running"] } },
       data: { state: "canceled" },
     });
-    // A settled row is being dismissed from the dock: drop it from the feed
-    // for good. A finished file survives as the project's export media object.
+    // A settled row is being dismissed from the dock: it leaves the feed and
+    // stays on the books, so the day's render count still sees it. A finished
+    // file survives as the project's export media object.
     if (canceled.count === 0) {
-      await prisma.cutRenderJob.deleteMany({
+      await prisma.cutRenderJob.updateMany({
         where: { id: jobId, userId, state: { in: ["done", "error", "canceled"] } },
+        data: { state: "dismissed" },
       });
     }
     return Response.json({ ok: true });
@@ -382,15 +482,22 @@ export const jobsCloud = {
   /**
    * Give back a name a browser render claimed but will not use.
    *
-   * The row is deleted rather than marked canceled: nothing rendered, so there
+   * The row is dismissed rather than marked canceled: nothing rendered, so there
    * is nothing to report, and a canceled row would put a failure card in the
-   * dock for a render the user themselves stopped.
+   * dock for a render the user themselves stopped. It stays on the books for
+   * the day's count, and anything the tab already uploaded under the claimed
+   * name goes with it.
    */
   async exportClientRelease(userId: string, jobId: string) {
     try {
-      await prisma.cutRenderJob.deleteMany({
-        where: { id: jobId, userId, kind: "export", state: { in: ["running", "queued"] } },
-      });
+      const row = await findJob(userId, jobId);
+      if (row && row.kind === "export" && (row.state === "running" || row.state === "queued")) {
+        await dropUnregisteredExport(userId, row);
+        await prisma.cutRenderJob.updateMany({
+          where: { id: row.id, state: { in: ["running", "queued"] } },
+          data: { state: "dismissed" },
+        });
+      }
       return Response.json({ ok: true });
     } catch (e) {
       return caught(e, "Could not release the export.");
@@ -420,22 +527,28 @@ export const jobsCloud = {
     // claims those rows, so nothing else would ever release them, and each one
     // left behind holds a name and a render slot for good. Any that have been
     // running longer than a render plausibly takes are swept here, on the poll
-    // that would have displayed them.
-    await prisma.cutRenderJob
-      .deleteMany({
-        where: {
-          userId,
-          kind: "export",
-          state: "running",
-          claimedAt: null,
-          updatedAt: { lt: new Date(Date.now() - CLIENT_RENDER_WINDOW_MS) },
-        },
-      })
-      .catch(() => {});
+    // that would have displayed them: the row is dismissed (kept for the day's
+    // count) and a file the tab uploaded without registering goes.
+    const stale = await prisma.cutRenderJob.findMany({
+      where: {
+        userId,
+        kind: "export",
+        state: "running",
+        claimedAt: null,
+        updatedAt: { lt: new Date(Date.now() - CLIENT_RENDER_WINDOW_MS) },
+      },
+    });
+    for (const row of stale) {
+      await dropUnregisteredExport(userId, row).catch(() => {});
+      await prisma.cutRenderJob
+        .updateMany({ where: { id: row.id, state: "running" }, data: { state: "dismissed" } })
+        .catch(() => {});
+    }
     const rows = await prisma.cutRenderJob.findMany({
       where: {
         userId,
         kind: "export",
+        state: { not: "dismissed" },
         OR: [
           { state: { in: ["queued", "running"] } },
           { createdAt: { gte: new Date(Date.now() - FEED_WINDOW_MS) } },
@@ -476,12 +589,21 @@ export const jobsCloud = {
       if (!(await getProject(userId, projectId))) return err("Project not found.", 404);
       const capped = await renderJobCheck(userId);
       if (capped) return capped;
+      // What lands counts against storage, so an account with none left gets
+      // no download, and the worker downloads no more than what is left.
+      const over = await quotaCheck(userId, 0);
+      if (over) return over;
+      const maxBytes = await importByteCeiling(userId);
       const row = await prisma.cutRenderJob.create({
         data: {
           userId,
           projectId,
           kind: "import_url",
-          spec: { url, ...(audio === true ? { audio: true } : {}) } as unknown as Prisma.InputJsonValue,
+          spec: {
+            url,
+            maxBytes,
+            ...(audio === true ? { audio: true } : {}),
+          } as unknown as Prisma.InputJsonValue,
         },
       });
       wakeRenderWorker();
@@ -504,12 +626,16 @@ export const jobsCloud = {
       if (!url) return err("No URL provided.", 400);
       const capped = await renderJobCheck(userId);
       if (capped) return capped;
+      const over = await quotaCheck(userId, 0);
+      if (over) return over;
+      const maxBytes = await importByteCeiling(userId);
       const row = await prisma.cutRenderJob.create({
         data: {
           userId,
           kind: "import_url",
           spec: {
             url,
+            maxBytes,
             target: "library",
             ...(audio === true ? { audio: true } : {}),
             // An inspiration link's downloads land in the Inspiration folder,
@@ -532,6 +658,8 @@ export const jobsCloud = {
       const { file, maxHeight } = (await req.json()) as { file?: string; maxHeight?: number };
       if (!file) return err("file is required.", 400);
       if (!(await getProject(userId, projectId))) return err("Project not found.", 404);
+      const over = await quotaCheck(userId, 0, EXPORT_QUOTA_MARGIN);
+      if (over) return over;
       const source = await prisma.cutMediaObject.findFirst({
         where: { userId, projectId, fileName: file, kind: "media" },
         select: { id: true },
@@ -558,7 +686,7 @@ export const jobsCloud = {
   async status(userId: string, jobId: string) {
     const row = await findJob(userId, jobId);
     if (!row) return err("Unknown job.", 404);
-    if (row.state === "queued" || row.state === "running") wakeRenderWorker();
+    if (needsWorker(row)) wakeRenderWorker();
     return Response.json({
       id: row.id,
       kind: row.kind,

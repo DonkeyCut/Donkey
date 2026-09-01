@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { Prisma } from "@/generated/prisma/client";
@@ -35,12 +35,19 @@ export async function runImportUrlJob(
   job: ClaimedJob,
   isCanceled: () => boolean
 ): Promise<ImportUrlResult | LibraryImportResult> {
-  const { url, target, origin, audio } = (job.spec ?? {}) as {
+  const { url, target, origin, audio, maxBytes } = (job.spec ?? {}) as {
     url?: string;
     target?: string;
     origin?: string;
     audio?: boolean;
+    /** What is left of the account's storage when the job was queued; the
+     * route always sets it. Everything that came down is measured against it
+     * before any byte is uploaded — the one place every rung and every
+     * conversion passes through. */
+    maxBytes?: number;
   };
+  if (typeof maxBytes !== "number" || !(maxBytes > 0))
+    throw new Error("There is no storage left on this account for an import.");
   if (!url || !/^https?:\/\//i.test(url.trim())) throw new Error("Enter a valid http(s) URL.");
   const toLibrary = target === "library";
   const projectId = job.projectId;
@@ -62,6 +69,13 @@ export async function runImportUrlJob(
   try {
     const dl = await download(url.trim(), tmp, { audio: audio === true });
     if (isCanceled()) throw new Error("Import canceled.");
+    let landing = 0;
+    for (const f of dl.files) {
+      landing += (await stat(f.file)).size;
+      if (f.poster) landing += (await stat(f.poster)).size;
+    }
+    if (landing > maxBytes)
+      throw new Error("The download is larger than the storage left on this account.");
 
     const rows = await prisma.cutMediaObject.findMany({
       where: toLibrary ? { userId: job.userId, kind: "library" } : { projectId, kind: "media" },

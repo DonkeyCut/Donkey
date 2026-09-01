@@ -1091,6 +1091,7 @@ async function postExport(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         files: payload.pngs.map((p) => ({ name: p.name, bytes: p.blob.size })),
+        target: (payload.spec as { target?: string }).target ?? "export",
       }),
     });
     const preBody =

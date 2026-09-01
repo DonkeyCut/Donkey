@@ -8,6 +8,13 @@ import { CUT_WORKER_WAKE_URL } from "@/cut/lib/hosts";
 
 const wakeSecret = () => process.env.CUT_RENDER_WAKE_SECRET;
 
+// A wake is idempotent on the Worker side, and the clients poll their jobs
+// several times a second, so one wake per window per process is all the
+// container ever needs. Without this, one status loop starts every replica
+// on every poll.
+const WAKE_WINDOW_MS = 5_000;
+let lastWakeAt = 0;
+
 // A wake that never lands strands every render — the container is not started
 // and jobs queue forever — and retrying can't help, because the address itself
 // is wrong. Nothing waits on the result, so the log is the only place it can
@@ -15,6 +22,9 @@ const wakeSecret = () => process.env.CUT_RENDER_WAKE_SECRET;
 export function wakeRenderWorker(): void {
   const secret = wakeSecret();
   if (!secret) return;
+  const now = Date.now();
+  if (now - lastWakeAt < WAKE_WINDOW_MS) return;
+  lastWakeAt = now;
   void fetch(CUT_WORKER_WAKE_URL, {
     method: "POST",
     headers: { authorization: `Bearer ${secret}` },
