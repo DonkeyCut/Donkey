@@ -2,7 +2,7 @@
 
 import { useGenerate } from "./generate";
 import { usePreviewAudio } from "./previewAudio";
-import { useEditor } from "./store";
+import { assetIdsInUse, useEditor } from "./store";
 
 // Chat-created media belongs to its thread. The files live in the project's
 // media folder like every other asset (drag-to-timeline and previews need
@@ -62,9 +62,7 @@ export function threadOwnsAssets(threadId: string): boolean {
  * deletion. */
 export function deleteChatAssets(threadId: string) {
   const s = useEditor.getState();
-  const inUse = new Set(
-    [...s.clips, ...s.audioClips].map((c) => c.assetId)
-  );
+  const inUse = assetIdsInUse(s);
   const owned = s.assets.filter(
     (a) => a.origin === "chat" && a.chatId === threadId && !inUse.has(a.id)
   );

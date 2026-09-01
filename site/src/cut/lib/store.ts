@@ -71,7 +71,7 @@ import { useGenNotify } from "./genNotify";
 import { clampPlayhead, playheadAt, previewAt, setPlayhead, setSkim } from "./playhead";
 import { engineTranscribeSamples, withEngineStt } from "./localStt";
 import { laneCues, subtitleLaneCount, trackLocale } from "./subtitles";
-import { ANIM_STYLE_IDS, animStyleOfTransition, assetIsSilent, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isAudioTransition, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionBarAt, transitionBarStart, transitionStyleOfAnim, type TransitionBoundaryKind } from "./types";
+import { ANIM_STYLE_IDS, animStyleOfTransition, assetIsSilent, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isAudioTransition, fontAssetId, isEffectOverlay, isStickerOverlay, isTextOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionBarAt, transitionBarStart, transitionStyleOfAnim, type TransitionBoundaryKind } from "./types";
 import { liftMoveTracks } from "./textMotion";
 import { readTextStyle } from "./textStyle";
 import { loadUiState, saveUiState, type ProjectUiState } from "./uiState";
@@ -6018,6 +6018,41 @@ let durClips: VideoClip[] | null = null;
 let durAudio: AudioClip[] | null = null;
 let durOverlays: Overlay[] | null = null;
 let durValue = 0;
+
+/**
+ * Every asset the document points at.
+ *
+ * A clip names one, and so do the places that are easy to miss: a removal
+ * clip's baked matte and its backdrop, a sticker element's picture, and the
+ * uploaded font behind a title or a caption, which a text element names
+ * through the font registry instead of by asset. Anything reading this to
+ * decide what an asset is still needed for has to see all of them — dropping
+ * what a sticker draws from is as visible as dropping a clip's.
+ */
+export function assetIdsInUse(s: {
+  clips: VideoClip[];
+  audioClips: AudioClip[];
+  overlays: Overlay[];
+  subtitles?: { font?: string } | null;
+}): Set<string> {
+  const used = new Set<string>();
+  const font = (id: string | undefined) => {
+    const asset = id ? fontAssetId(id) : null;
+    if (asset) used.add(asset);
+  };
+  for (const c of s.clips) {
+    if (c.assetId) used.add(c.assetId);
+    if (c.removal?.matte?.assetId) used.add(c.removal.matte.assetId);
+    if (c.removal?.backdrop?.assetId) used.add(c.removal.backdrop.assetId);
+  }
+  for (const c of s.audioClips) if (c.assetId) used.add(c.assetId);
+  for (const o of s.overlays) {
+    if (isStickerOverlay(o) && o.assetId) used.add(o.assetId);
+    if (isTextOverlay(o)) font(o.font);
+  }
+  font(s.subtitles?.font);
+  return used;
+}
 
 export function projectDuration(s: {
   clips: VideoClip[];

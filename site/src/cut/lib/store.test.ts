@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { groupRemap } from "@donkeycut/effects-kit";
-import { adoptTransitionFields, clipLen, cutTranscribeSpec, deriveTransitionFields, docOverlays, getClipSpans, liftClipLooks, moveOverlayGroup, overlayLaneOrder, normalizeElementLanes, parkedTransitions, placeInRun, projectDuration, separateOverlaps, serializeDoc, startTrimRipple, useEditor } from "./store";
+import { adoptTransitionFields, assetIdsInUse, clipLen, cutTranscribeSpec, deriveTransitionFields, docOverlays, getClipSpans, liftClipLooks, moveOverlayGroup, overlayLaneOrder, normalizeElementLanes, parkedTransitions, placeInRun, projectDuration, separateOverlaps, serializeDoc, startTrimRipple, useEditor } from "./store";
 import { playheadAt, setPlayhead, setSkim } from "./playhead";
-import { emptySubtitles } from "./types";
+import { emptySubtitles, uploadedFontId } from "./types";
 import type { AudioClip, MediaAsset, SubtitleCue, TextOverlay, VideoClip } from "./types";
 
 /**
@@ -1887,5 +1887,39 @@ describe("transcribe spec", () => {
       overlays: [],
     })!;
     expect(spec.audio.some((a) => a.file === still.fileName)).toBe(false);
+  });
+});
+
+describe("assetIdsInUse", () => {
+  const clip = (id: string, extra: Partial<VideoClip> = {}) =>
+    ({ id, assetId: id, track: 0, start: 0, in: 0, out: 1, ...extra }) as VideoClip;
+
+  test("counts what a clip names and what its removal names", () => {
+    const used = assetIdsInUse({
+      clips: [clip("v1", { removal: { matte: { assetId: "m1" }, backdrop: { assetId: "b1" } } } as Partial<VideoClip>)],
+      audioClips: [{ id: "a1", assetId: "snd" } as AudioClip],
+      overlays: [],
+    });
+    expect([...used].sort()).toEqual(["b1", "m1", "snd", "v1"]);
+  });
+
+  test("counts a sticker's picture and an uploaded font, and neither built-in", () => {
+    // A chat-made image placed as a sticker, and a chat-made font a title is
+    // set in, are both still needed by a document no clip points at.
+    const used = assetIdsInUse({
+      clips: [],
+      audioClips: [],
+      overlays: [
+        { id: "o1", kind: "sticker", assetId: "pic" } as unknown as TextOverlay,
+        { id: "o2", kind: "text", font: uploadedFontId("fnt") } as unknown as TextOverlay,
+        { id: "o3", kind: "text", font: "inter" } as unknown as TextOverlay,
+      ],
+      subtitles: { font: uploadedFontId("capfnt") },
+    });
+    expect([...used].sort()).toEqual(["capfnt", "fnt", "pic"]);
+  });
+
+  test("says nothing is in use for an empty document", () => {
+    expect(assetIdsInUse({ clips: [], audioClips: [], overlays: [] }).size).toBe(0);
   });
 });

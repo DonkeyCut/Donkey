@@ -1114,6 +1114,12 @@ export function allFonts(): FontDef[] {
 /** The registry id an uploaded font asset answers to. */
 export const uploadedFontId = (assetId: string) => `asset:${assetId}`;
 
+/** The asset behind a registry font id, or null for one of the built-in
+ * families. The inverse of `uploadedFontId`, kept beside it so the shape of
+ * the id is written down once. */
+export const fontAssetId = (fontId: string): string | null =>
+  fontId.startsWith("asset:") ? fontId.slice("asset:".length) : null;
+
 /** Subscribe to registry changes (UI font menus re-render on registration). */
 export function onFontsChanged(cb: () => void): () => void {
   fontListeners.add(cb);
