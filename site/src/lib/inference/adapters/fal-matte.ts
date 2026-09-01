@@ -115,7 +115,17 @@ export function createFalMatteProvider(
     return model as FalMatteModel;
   }
 
+  // The key goes to the queue host and nowhere else. A poll URL arrives on
+  // the refresh request as a client field, so the address is checked here,
+  // at the one place the key is attached, and an address off the queue is
+  // refused before any request goes out.
   async function api(url: string, init?: RequestInit): Promise<JsonValue> {
+    if (new URL(url).origin !== new URL(QUEUE_BASE).origin) {
+      throw new InferenceProviderError("The matte poll address is off the queue host.", {
+        statusCode: 400,
+        code: "matte_poll_url_rejected",
+      });
+    }
     const res = await fetchImpl(url, {
       ...init,
       headers: {
