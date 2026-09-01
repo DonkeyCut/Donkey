@@ -21,8 +21,6 @@ export const creditGrantUnit = "credit";
 export const inferenceUsageRoutes = {
   assets: "/api/inference/assets/",
   assetsRefresh: "/api/inference/assets/refresh/",
-  browserRun: "/api/browser/run/",
-  chatCompletions: "/api/inference/chat/completions/",
   responses: "/api/inference/responses/",
 } as const;
 

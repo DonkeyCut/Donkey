@@ -16,7 +16,6 @@ import {
   type GeminiOmniModel,
   type GeminiTtsModel,
 } from "@/lib/inference/gemini-models";
-import { browserUsePerStepUsd } from "@/lib/browser/pricing";
 import { falMatteModels, type FalMatteModel } from "@/lib/inference/matte-models";
 
 export type ProviderCreditPricing = {
@@ -71,21 +70,8 @@ export function providerCreditPricing(
   if (normalizedProvider === "fal") {
     return falMatteCreditPricing(normalizedModel);
   }
-  if (normalizedProvider === "browser-use") {
-    return browserUseCreditPricing();
-  }
 
   return undefined;
-}
-
-function browserUseCreditPricing(): ProviderCreditPricing {
-  // Browser Use Cloud bills ~$0.01/task init + a per-step LLM fee, and the API
-  // exposes stepCount (not a USD cost), so we price per step. The per-step rate
-  // (which folds in the init fee) lives with the spend cap in browser/pricing.ts;
-  // usdWithMargin adds the 1.3x. Charged as generationCount = stepCount.
-  return {
-    generationCostMicros: usdWithMargin(browserUsePerStepUsd),
-  };
 }
 
 function openAICreditPricing(model: string): ProviderCreditPricing | undefined {
