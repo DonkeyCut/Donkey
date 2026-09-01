@@ -359,7 +359,6 @@ type ProbedMeta = {
   duration: number;
   width?: number;
   height?: number;
-  peaks?: number[];
 };
 
 /** Read a media source's kind/duration/dimensions from its container. The
@@ -390,11 +389,11 @@ async function probeMedia(type: AssetType, src: string | Blob): Promise<ProbedMe
     }
   }
   const meta = await probeMediaFile(src);
-  if (!meta.hasVideo) {
-    // The waveform rides along with the probe: the file is open and its audio
-    // is being read either way, so enrichAsset has nothing left to do.
-    return { type: "audio", duration: meta.duration, peaks: await makePeaks(src, meta.duration) };
-  }
+  // The waveform is a decode of the whole file, and it comes after the asset
+  // has landed: enrichAsset reads the peaks behind the editor, from the bytes
+  // the import kept, so a song is on the timeline the moment its container
+  // has been read.
+  if (!meta.hasVideo) return { type: "audio", duration: meta.duration };
   return { type: "video", duration: meta.duration, width: meta.width, height: meta.height };
 }
 
@@ -493,15 +492,16 @@ export async function prepareImport(
     }
     const localUrl = storedUrl ?? objectUrl;
     if (storedUrl) URL.revokeObjectURL(objectUrl);
+    const id = uid();
+    keepImportedBytes(id, file);
     const asset: MediaAsset = {
-      id: uid(),
+      id,
       fileName,
       name: file.name,
       type: meta.type,
       duration: meta.duration,
       ...(meta.width !== undefined ? { width: meta.width } : {}),
       ...(meta.height !== undefined ? { height: meta.height } : {}),
-      ...(meta.peaks ? { peaks: meta.peaks } : {}),
       url: localUrl,
       upload: { progress: 0, ...(storedUrl ? { stored: true } : {}) },
     };
@@ -658,15 +658,16 @@ export async function importFileToProject(
     return probeMedia(type, mediaUrl(projectId, fileName, backend));
   });
   const url = mediaUrl(projectId, fileName, backend);
+  const id = uid();
+  keepImportedBytes(id, file);
   return {
-    id: uid(),
+    id,
     fileName,
     name,
     type: meta.type,
     duration: meta.duration,
     ...(meta.width !== undefined ? { width: meta.width } : {}),
     ...(meta.height !== undefined ? { height: meta.height } : {}),
-    ...(meta.peaks ? { peaks: meta.peaks } : {}),
     url,
   };
 }
@@ -1499,6 +1500,26 @@ function stripComplete(asset: MediaAsset) {
  * one and refine against it. */
 const enrichInFlight = new Set<string>();
 
+/**
+ * Bytes an asset was just made from, held until its waveform is read.
+ *
+ * Peaks are a decode of the whole file and they run after the asset lands, so
+ * the file that was in hand a moment ago would otherwise be read back out of
+ * storage — a second pass over local disk, and a download on the cloud. The
+ * entry is a reference to the file already in memory, taken by the first
+ * enrich and dropped there; a handful is kept in case none ever comes.
+ */
+const importedBytes = new Map<string, Blob>();
+const IMPORTED_BYTES_CAP = 8;
+
+export function keepImportedBytes(assetId: string, bytes: Blob): void {
+  importedBytes.set(assetId, bytes);
+  for (const id of importedBytes.keys()) {
+    if (importedBytes.size <= IMPORTED_BYTES_CAP) break;
+    importedBytes.delete(id);
+  }
+}
+
 /** Generate filmstrip thumbnails / waveform peaks and merge them into the
  * store. Safe to call repeatedly; skips assets that are already enriched.
  * `src` overrides where the frames are read from — an import still uploading
@@ -1506,6 +1527,8 @@ const enrichInFlight = new Set<string>();
 export async function enrichAsset(asset: MediaAsset, src = asset.url) {
   if (enrichInFlight.has(asset.id)) return;
   enrichInFlight.add(asset.id);
+  const held = importedBytes.get(asset.id);
+  importedBytes.delete(asset.id);
   try {
     if (asset.type === "image") {
       // A still is its own filmstrip: one frame, tiled across the clip.
@@ -1550,7 +1573,7 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
       // silent file — and stops the strip from re-decoding every open.
       if (asset.peaks === undefined) {
         try {
-          const peaks = await loadPeaks(asset, src);
+          const peaks = await loadPeaks(asset, held ?? src);
           if (peaks) useEditor.getState().updateAsset(asset.id, { peaks });
         } catch (err) {
           // The strip above already painted; a peaks failure (an expired
@@ -1560,7 +1583,7 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
       }
       enrichRetries.delete(asset.id);
     } else if (asset.type === "audio" && !asset.peaks?.length) {
-      const peaks = await loadPeaks(asset, src);
+      const peaks = await loadPeaks(asset, held ?? src);
       if (peaks) useEditor.getState().updateAsset(asset.id, { peaks });
       enrichRetries.delete(asset.id);
     }
@@ -1732,7 +1755,7 @@ async function readCachedPeaks(key: string, duration: number): Promise<number[] 
  * decoded — a real audio decode otherwise. Empty peaks are an answer (a file
  * with no audible track) and cache like any other. A headless runtime returns
  * undefined so the browser decodes on its next open. */
-async function loadPeaks(asset: MediaAsset, src = asset.url): Promise<number[] | undefined> {
+async function loadPeaks(asset: MediaAsset, src: string | Blob = asset.url): Promise<number[] | undefined> {
   if (typeof AudioDecoder === "undefined") return undefined;
   const key = peaksCacheKey(useEditor.getState().projectId, asset.id);
   const cached = await readCachedPeaks(key, asset.duration);
