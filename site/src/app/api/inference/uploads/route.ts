@@ -11,7 +11,10 @@ import {
   validationErrorResponse,
 } from "@/lib/inference/responses";
 import { inferenceUploadRequestSchema } from "@/lib/inference/schemas";
-import { withDonkeyAuth } from "@/lib/donkey-api-auth";
+import {
+  INFERENCE_RATE_LIMIT,
+  withDonkeyAuth,
+} from "@/lib/donkey-api-auth";
 
 // Media a hosted inference call carries rides object storage rather than the
 // request body (see lib/inference/blobs.ts). This mints the upload URLs: one
@@ -80,4 +83,4 @@ export const POST = withDonkeyAuth(async (request) => {
     }
     throw error;
   }
-}, { allowRunner: true });
+}, { allowRunner: true, rateLimit: INFERENCE_RATE_LIMIT });

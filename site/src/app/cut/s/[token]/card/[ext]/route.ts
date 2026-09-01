@@ -23,6 +23,9 @@ export async function GET(
   { params }: { params: Promise<{ token: string; ext: string }> }
 ) {
   const { token, ext } = await params;
+  // Two card kinds exist. Anything else is a miss, answered before any
+  // lookup or render is spent on it.
+  if (ext !== "gif" && ext !== "jpg") return new Response("Not found.", { status: 404 });
   const view = await resolveShare(token, request);
   if (view instanceof Response) return view;
   const target = { userId: view.share.userId, projectId: view.share.projectId };
@@ -33,10 +36,8 @@ export async function GET(
       }
     : { "Cache-Control": "private, no-store" };
 
-  if (ext === "gif" || ext === "jpg") {
-    const url = await cardUrl(target, ext as CardKind);
-    if (url) return new Response(null, { status: 302, headers: { ...headers, Location: url } });
-  }
+  const url = await cardUrl(target, ext as CardKind);
+  if (url) return new Response(null, { status: 302, headers: { ...headers, Location: url } });
 
   // No card yet — draw one so the link never unfurls blank. Kept on a short
   // leash so the rendered card takes over as soon as it exists.

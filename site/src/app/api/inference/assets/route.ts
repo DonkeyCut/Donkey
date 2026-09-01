@@ -20,7 +20,10 @@ import {
   validationErrorResponse,
 } from "@/lib/inference/responses";
 import { assetGenerationRequestSchema } from "@/lib/inference/schemas";
-import { withDonkeyAuth } from "@/lib/donkey-api-auth";
+import {
+  INFERENCE_RATE_LIMIT,
+  withDonkeyAuth,
+} from "@/lib/donkey-api-auth";
 import { resolveInferenceBlobs } from "@/lib/inference/blobs";
 import { InferenceProviderError, type JsonObject } from "@/lib/inference/providers";
 import { toJsonObject, toJsonValue } from "@/lib/inference/json";
@@ -223,4 +226,4 @@ export const POST = withDonkeyAuth(async (request) => {
 
     throw error;
   }
-}, { allowRunner: true });
+}, { allowRunner: true, rateLimit: INFERENCE_RATE_LIMIT });

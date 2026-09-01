@@ -3,7 +3,10 @@ import { NextResponse } from "next/server";
 import { createProviderRegistry } from "@/lib/inference/router";
 import { requireInferenceClientId } from "@/lib/inference/responses";
 import { parseRequestedModalities } from "@/lib/inference/schemas";
-import { withDonkeyAuth } from "@/lib/donkey-api-auth";
+import {
+  INFERENCE_RATE_LIMIT,
+  withDonkeyAuth,
+} from "@/lib/donkey-api-auth";
 
 export const GET = withDonkeyAuth(async (request) => {
   const client = requireInferenceClientId(request.donkey.clientId);
@@ -20,4 +23,4 @@ export const GET = withDonkeyAuth(async (request) => {
   return NextResponse.json({
     data: models,
   });
-});
+}, { rateLimit: INFERENCE_RATE_LIMIT });

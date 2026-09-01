@@ -55,7 +55,7 @@ export function rateLimitResponse(retryAfterSeconds: number) {
   return NextResponse.json(
     {
       error: "rate_limited",
-      message: "Too many screenshot parse requests. Please retry shortly.",
+      message: "Too many requests. Please retry shortly.",
     },
     {
       headers: {

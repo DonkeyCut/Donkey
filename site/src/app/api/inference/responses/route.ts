@@ -22,6 +22,7 @@ import {
 import { InferenceProviderError } from "@/lib/inference/providers";
 import { responseCreateRequestSchema } from "@/lib/inference/schemas";
 import {
+  INFERENCE_RATE_LIMIT,
   shouldBypassDonkeyInferenceCredits,
   withDonkeyAuth,
 } from "@/lib/donkey-api-auth";
@@ -244,4 +245,4 @@ export const POST = withDonkeyAuth(async (request) => {
 
     throw error;
   }
-}, { allowRunner: true });
+}, { allowRunner: true, rateLimit: INFERENCE_RATE_LIMIT });

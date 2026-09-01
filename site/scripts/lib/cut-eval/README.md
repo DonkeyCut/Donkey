@@ -9,7 +9,8 @@ npm run eval:cut-chat -- [--runs N] [--only <case>] [--bucket chat|single-tool|m
 ```
 
 It replays real composer turns against the live chat model through the dev
-server's hosted Responses route. Start `next dev` on :3000 first. Auth is the
+server's hosted Responses route. Start `next dev` on :3000 first, with
+`DONKEY_DEV_AUTH_BYPASS=1` in its env (`.env.example` carries it). Auth is the
 dev bypass header, so runs spend no credits. The spoken fixture is synthesized
 with macOS `say`, so runs need a Mac.
 

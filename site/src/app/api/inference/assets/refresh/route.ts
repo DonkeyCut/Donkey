@@ -13,7 +13,10 @@ import {
   validationErrorResponse,
 } from "@/lib/inference/responses";
 import { storedGenerationForProviderSchema } from "@/lib/inference/schemas";
-import { withDonkeyAuth } from "@/lib/donkey-api-auth";
+import {
+  INFERENCE_RATE_LIMIT,
+  withDonkeyAuth,
+} from "@/lib/donkey-api-auth";
 import { InferenceProviderError } from "@/lib/inference/providers";
 
 export const POST = withDonkeyAuth(async (request) => {
@@ -82,4 +85,4 @@ export const POST = withDonkeyAuth(async (request) => {
 
     throw error;
   }
-}, { allowRunner: true });
+}, { allowRunner: true, rateLimit: INFERENCE_RATE_LIMIT });

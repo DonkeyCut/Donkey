@@ -1,3 +1,4 @@
+import { checkInMemoryRateLimit, rateLimitResponse } from "@/lib/inference/rate-limit";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { type NextRequest, NextResponse } from "next/server";
 
@@ -26,6 +27,10 @@ export type DonkeyAuthOptions = {
   // Accept a `dk_live_` bearer key as the user. Off by default: only routes
   // that opt in (the Cut API surface) take machine callers.
   allowApiKey?: boolean;
+  // Requests one user may make through this handler per window. The default
+  // fits an editor polling several jobs at once; routes that run a model per
+  // call set a tighter one.
+  rateLimit?: { limit: number; windowMs: number };
   // Accept the Cut runner's shared-secret grant. Off by default: only the
   // routes the worker actually calls back (the Cut API surface and hosted
   // inference) opt in, so a leaked secret stays contained to them.
@@ -79,6 +84,9 @@ export type DonkeyAuthHandler<
 const clientIdHeader = "x-donkey-client-id";
 const conversationIdHeader = "x-donkey-conversation-id";
 const devAuthBypassHeader = "x-donkey-dev-auth-bypass";
+const DEFAULT_RATE_LIMIT = { limit: 900, windowMs: 60_000 };
+/** For handlers that run a model per request. */
+export const INFERENCE_RATE_LIMIT = { limit: 300, windowMs: 60_000 };
 const devAuthBypassUserID = "donkey-dev-auth-bypass";
 
 function conversationIdFromHeaders(headers: Headers): string | null {
@@ -197,8 +205,14 @@ function runnerAuthContext(headers: Headers): DonkeyAuthContext | null {
   };
 }
 
+// The bypass is a dev-server switch: it has to be turned on in the server's
+// own environment as well as asked for by the caller, so a build that merely
+// forgot NODE_ENV never answers the header. Production refuses it outright.
 function devAuthBypassContext(headers: Headers): DonkeyAuthContext | null {
   if (process.env.NODE_ENV === "production") {
+    return null;
+  }
+  if (process.env.DONKEY_DEV_AUTH_BYPASS !== "1") {
     return null;
   }
   if (headers.get(devAuthBypassHeader)?.trim() !== "1") {
@@ -244,6 +258,19 @@ export function withDonkeyAuth<
       !(await isDonkeySuperUser(authContext.userId))
     ) {
       return forbiddenResponse();
+    }
+
+    // Every authenticated handler is paced per user. Buckets live in this
+    // process, so the ceiling is per instance; it still turns a hot loop
+    // against one route into 429s instead of a bill.
+    const pace = options.rateLimit ?? DEFAULT_RATE_LIMIT;
+    const limited = checkInMemoryRateLimit({
+      key: `${authContext.userId}:${pace.limit}:${pace.windowMs}`,
+      limit: pace.limit,
+      windowMs: pace.windowMs,
+    });
+    if (!limited.ok) {
+      return rateLimitResponse(limited.retryAfterSeconds);
     }
 
     const authenticatedRequest = Object.assign(request, {
