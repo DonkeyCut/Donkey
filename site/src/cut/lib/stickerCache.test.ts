@@ -3,9 +3,9 @@ import { setRasterFactory } from "./raster";
 import { cutRenderEnv } from "./textRender";
 import type { MediaAsset } from "./types";
 
-// A sticker this big costs four megabytes decoded, so two of them fill the
-// share the stickers hold at the test ceiling and a third pushes one out.
-const SIDE = 1000;
+// A sticker this big costs about seven megabytes decoded, so two of them fill
+// the share the stickers hold at the test ceiling and a third pushes one out.
+const SIDE = 1300;
 
 let decodes = 0;
 setRasterFactory({

@@ -67,20 +67,26 @@ const SHARES: Record<MemoryBucket, number> = {
  * The ceiling covers the tab and the decoder process working for it, which
  * between them are one of several things the machine is running: the
  * operating system, the browser's other processes, the person's other tabs.
- * An eighth of what the browser reports leaves those the rest. Past that the
+ * A quarter of what the browser reports leaves those the rest. Past that the
  * machine starts swapping, and a swapping machine previews worse than one
  * decoding at half the size — the picture stops for a page fault, which no
- * amount of decode headroom recovers. An 18GB laptop reports sixteen and
- * gets two gigabytes, which is where the tuned sizes below start to bind.
+ * amount of decode headroom recovers.
+ *
+ * The number the browser reports is capped at eight, so eight is the largest
+ * ceiling this can be a quarter of: two gigabytes, which is the figure the
+ * sizes below are tuned against. Taking a smaller fraction would mean no
+ * machine ever runs at those sizes, since none can report more.
  */
-const CEILING_SHARE = 0.125;
+const CEILING_SHARE = 0.25;
 /**
  * What to assume when the browser does not say.
  *
  * `deviceMemory` is Chrome and Edge only; Safari and Firefox report nothing.
- * Chrome rounds to a power of two and reports sixteen on the machines that
- * have it, so eight is the figure for a machine of ordinary size — assuming
- * it for the browsers that stay silent puts them on that footing.
+ * What it reports is rounded down to a power of two and capped at eight, so
+ * eight already means "eight or more" — a laptop with that much and a
+ * workstation with sixty-four say the same thing. Assuming it for the
+ * browsers that stay silent puts them on the same footing as the machines we
+ * can see, which are overwhelmingly the same machines.
  */
 const ASSUMED_GB = 8;
 /** The smallest ceiling worth honouring: below this the editor cannot hold a
@@ -93,10 +99,11 @@ const GB = 2 ** 30;
 /**
  * Bytes the editor may hold.
  *
- * `deviceMemory` is coarse by design — it rounds to a power of two — which is
- * enough to tell the machines that need protecting from the machines that do
- * not, and it is the only figure a page is given. It is read each time it is
- * asked for: the figure never moves, and the read is a property lookup.
+ * `deviceMemory` is coarse by design — it rounds to a power of two and caps at
+ * eight — which is enough to tell the machines that need protecting from the
+ * machines that do not, and it is the only figure a page is given. It is read
+ * each time it is asked for: the figure never moves, and the read is a
+ * property lookup.
  */
 export function memoryCeiling(): number {
   const reported =

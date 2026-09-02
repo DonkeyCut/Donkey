@@ -363,10 +363,10 @@ describe("walkClaim", () => {
 describe("FrameSourcePool", () => {
   // The pool's budgets are the smaller of what it was tuned to want and this
   // machine's share, and these tests are about the tuning: they put the pool
-  // on a machine with room, which is what a sixteen-gigabyte report is, and
-  // hand the machine back after.
+  // on a machine with room, which is the most a browser will report, and hand
+  // the machine back after.
   beforeEach(() => {
-    Object.defineProperty(navigator, "deviceMemory", { value: 16, configurable: true });
+    Object.defineProperty(navigator, "deviceMemory", { value: 8, configurable: true });
   });
   afterEach(() => {
     delete (navigator as { deviceMemory?: number }).deviceMemory;

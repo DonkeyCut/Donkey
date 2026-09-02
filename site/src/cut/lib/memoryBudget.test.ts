@@ -30,8 +30,8 @@ describe("the ceiling", () => {
   test("is a share of the machine", () => {
     // The environment the tests run in reports no `deviceMemory`, which is the
     // same silence Safari and Firefox give a real page: the assumed size
-    // stands in, and an eighth of it is the tab's.
-    expect(memoryCeiling()).toBe(2 ** 30);
+    // stands in, and a quarter of it is the tab's.
+    expect(memoryCeiling()).toBe(2 * 2 ** 30);
     expect(memoryCeiling()).toBe(memoryCeiling());
   });
 
