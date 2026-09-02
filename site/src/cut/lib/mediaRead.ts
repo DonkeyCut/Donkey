@@ -43,7 +43,7 @@ import {
 } from "mediabunny";
 import { confirmEngine, engineConnected, isEngineUrl } from "./api";
 import { resolveRegisteredBlob } from "./backend/browser/registry";
-import { chunkSourceOptions } from "./chunkCache";
+import { CHUNK_SIZE, chunkSourceOptions } from "./chunkCache";
 import { allowance, holdMemory } from "./memoryBudget";
 
 /** What a file turns out to be, read from its container. */
@@ -87,13 +87,14 @@ export class UnreadableMediaError extends Error {
  * looking at. So the local engine and any other plain-HTTP origin keep the
  * library's pair, and so does a link that says it is slow or metered. The
  * width is for multiplexed cloud media over a real network. */
-function urlParallelism(url: string, cache: number): number {
-  // Room decides first. A ranged reader grows each worker's region ahead of
-  // itself up to PREFETCH_REGION, so a source running more workers than its
-  // cache has room for spends the width refetching what the other workers
-  // just evicted. The pair is the floor: below that a walk stops overlapping
-  // its own reads at all.
-  const afforded = Math.max(2, Math.floor(cache / PREFETCH_REGION));
+export function urlParallelism(url: string, cache: number): number {
+  // Room decides first. Each worker holds the chunk it is reading in the
+  // source's one cache, so the width a source can afford is how many of those
+  // fit: past that the workers evict each other's reads and the width buys
+  // refetches. The pair is the floor — below that a walk stops overlapping its
+  // own reads at all — and the cache is sized by the memory budget, so a
+  // machine with less room reads narrower rather than thrashing.
+  const afforded = Math.max(2, Math.floor(cache / CHUNK_SIZE));
   if (!/^https:/i.test(url)) return 2;
   const conn =
     typeof navigator === "undefined"
@@ -102,10 +103,6 @@ function urlParallelism(url: string, cache: number): number {
   if (conn?.saveData || /(^|-)2g$|^3g$/.test(conn?.effectiveType ?? "")) return 2;
   return Math.min(8, afforded);
 }
-
-/** How far ahead of itself one ranged worker reads before it stops growing
- * its region (mediabunny's network prefetch profile). */
-const PREFETCH_REGION = 8 * 2 ** 20;
 
 /** Backoff, in seconds, for a URL read whose request failed outright. The
  * list ends, so a URL that is genuinely gone still fails — the preview's
