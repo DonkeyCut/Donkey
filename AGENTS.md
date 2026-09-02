@@ -9,6 +9,15 @@ when changing supported behavior.
 
 Never infer semantic intent by string matching raw user input. Do not add phrase lists, prefixes, suffixes, regexes, app-name checks, greeting/help classifiers, or other natural-language command-text matching to decide what the user wants. Raw user text has too many variations to handle reliably. Pass the turn through an LLM or another typed model/runtime boundary first, get structured output, then do deterministic matching only on that structured output or on non-semantic technical fields.
 
+## Performance
+
+Performance comes first. Everything we ship has to be fast on the machines people edit on, and a change that makes the preview, the timeline, or the app slower is a regression whatever else it adds.
+
+- Work scales with what is on screen and what the person is doing, never with the size of the project. Draw and decode the visible part, queue the rest behind it, and skip what nothing shows.
+- Keep the main thread and the frame loop clear: one animation frame per tick, no synchronous decodes or layout reads inside a hot path, no allocation per frame.
+- Every cache is bounded in bytes through the memory budget (`site/src/cut/lib/memoryBudget.ts`), and every reader, decoder and canvas is closed by the code that opened it.
+- Measure. A preview or timeline change runs the perf evals (`npm run eval:cut-perf`, `eval:cut-perf-lowend`) before it ships, and the summary says what moved.
+
 ## Site Project
 
 Before changing `site/` UI, routes, API handlers, or data access patterns:
