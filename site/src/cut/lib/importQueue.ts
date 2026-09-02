@@ -80,13 +80,15 @@ const storeBacked = (job: Job) => job.pending.asset.upload?.stored === true;
 
 /** The `upload` patch for a job, keeping `stored` so a progress tick can't
  * demote a store-backed asset to tab-scoped (which would strip it from the
- * saved document). `updateAsset` merges shallowly; `upload` is replaced whole. */
+ * saved document), and `server` so the indicator keeps calling a copy a copy.
+ * `updateAsset` merges shallowly; `upload` is replaced whole. */
 function uploadPatch(job: Job, progress: number, error?: string) {
   return {
     upload: {
       progress,
       ...(error !== undefined ? { error } : {}),
       ...(storeBacked(job) ? { stored: true as const } : {}),
+      ...(job.pending.asset.upload?.server ? { server: true as const } : {}),
     },
   };
 }

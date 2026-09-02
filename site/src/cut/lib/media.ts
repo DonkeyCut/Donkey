@@ -692,6 +692,9 @@ type RemoteImportInit = {
   width?: number;
   height?: number;
   origin?: StoredAsset["origin"];
+  /** The copy runs server-side, so the save indicator reports a copy, not an
+   * upload. */
+  server?: boolean;
 };
 
 /** Copy attempts ride out transient blips before the queue marks the asset
@@ -740,7 +743,7 @@ export function importRemote(
     ...(init.height !== undefined ? { height: init.height } : {}),
     ...(init.origin ? { origin: init.origin } : {}),
     url: init.url,
-    upload: { progress: 0 },
+    upload: { progress: 0, ...(init.server ? { server: true } : {}) },
   };
   useEditor.getState().addAsset(asset);
   void enrichAsset(asset);

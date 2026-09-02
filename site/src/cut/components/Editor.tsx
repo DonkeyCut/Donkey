@@ -182,14 +182,18 @@ export function Editor({
   });
   const [importing, setImporting] = useState(0);
   // Files being probed and named, plus the ones already placed whose bytes are
-  // still going out — both are work the save indicator reports.
+  // still going out — both are work the save indicator reports. A library file
+  // copying shelf-side is reported as the copy it is.
   const sending = useEditor((s) =>
-    s.assets.reduce((n, a) => (a.upload && !a.upload.error ? n + 1 : n), 0)
+    s.assets.reduce((n, a) => (a.upload && !a.upload.error && !a.upload.server ? n + 1 : n), 0)
+  );
+  const copying = useEditor((s) =>
+    s.assets.reduce((n, a) => (a.upload && !a.upload.error && a.upload.server ? n + 1 : n), 0)
   );
   // Bytes moving into the project are work the tab should show.
   useEffect(() => {
-    reportActivity("import", importing + sending > 0);
-  }, [importing, sending]);
+    reportActivity("import", importing + sending + copying > 0);
+  }, [importing, sending, copying]);
 
   // Uploaded fonts become live FontFaces the moment their assets exist (and
   // drop out when deleted), so titles set in them never measure a fallback.
@@ -1127,6 +1131,7 @@ export function Editor({
             from={from}
             folder={folder}
             uploading={importing + sending}
+            copying={copying}
           />
         )}
         <div

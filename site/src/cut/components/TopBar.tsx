@@ -52,6 +52,7 @@ export function TopBar({
   from,
   folder,
   uploading = 0,
+  copying = 0,
 }: {
   onImport: (files: File[], opts?: { origin?: "recording" }) => void;
   from?: string | null;
@@ -60,6 +61,9 @@ export function TopBar({
    * reports them ("Uploading") — those are real network uploads, not local
    * disk copies. */
   uploading?: number;
+  /** Library files copying into the project on the cloud's own shelf; the
+   * bytes never touch this browser, so the indicator calls it a copy. */
+  copying?: number;
 }) {
   const base = useCutBase();
   const back = backTarget(base, from, folder);
@@ -247,7 +251,16 @@ export function TopBar({
   const canMoveToCloud = cutMode === "local" || cutMode === "browser";
   // Cloud imports are real uploads worth reporting; local imports are instant
   // disk copies, so they report nothing.
-  const cloudUploading = uploading > 0 && cutMode === "cloud";
+  const cloudUploading = (uploading > 0 || copying > 0) && cutMode === "cloud";
+  const transferLabel =
+    uploading > 0
+      ? uploading === 1
+        ? "Uploading"
+        : `Uploading ${uploading} files`
+      : copying === 1
+        ? "Copying"
+        : `Copying ${copying} files`;
+  const finishingLabel = uploading > 0 ? "Finishing uploads…" : "Finishing copies…";
   // An import whose bytes never landed is absent from the saved document, so
   // its clip disappears on the next open. The Media panel shows this for a
   // dropped file, but a stock or library import lives on the timeline and has
@@ -361,7 +374,7 @@ export function TopBar({
           failedImports > 0
             ? "Retry the failed imports first"
             : cloudUploading
-              ? "Finishing uploads…"
+              ? finishingLabel
               : compact
                 ? "Export"
                 : undefined
@@ -463,7 +476,7 @@ export function TopBar({
           ) : cloudUploading ? (
             <>
               <Loader2 className="size-3 animate-spin" />{" "}
-              {uploading === 1 ? "Uploading" : `Uploading ${uploading} files`}
+              {transferLabel}
             </>
           ) : saveState === "saving" || saveState === "dirty" ? (
             <>
@@ -665,7 +678,7 @@ export function TopBar({
                     s.setExportOpen(true);
                   }}
                 >
-                  <Upload /> {cloudUploading ? "Finishing uploads…" : "Export"}
+                  <Upload /> {cloudUploading ? finishingLabel : "Export"}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => {

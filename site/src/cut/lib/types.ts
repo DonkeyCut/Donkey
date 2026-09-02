@@ -247,6 +247,9 @@ export interface AssetUpload {
   /** The bytes are held durably in the browser store, so the asset is safe to
    * save and the upload safe to resume after a reload. */
   stored?: boolean;
+  /** The bytes move server-side, shelf to project, and nothing leaves the
+   * browser: a library file landing in a project on its own shelf. */
+  server?: boolean;
 }
 
 /** Runtime asset: stored fields plus derived/browser-only data. */

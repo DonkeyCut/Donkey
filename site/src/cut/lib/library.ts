@@ -661,6 +661,10 @@ export async function deleteFromLibrary(residency: Residency, id: string) {
   if (!res.ok) throw new Error("Could not delete.");
 }
 
+/** Whether a library file on this shelf lands in the open project by a
+ * server-side copy: the project's own backend holds both ends. */
+const sameShelf = (residency: Residency) => residency === getBackend().kind;
+
 /** Land one library file in the open project and return its stored name.
  *
  * On the project's own shelf the server does the copy without the bytes ever
@@ -675,7 +679,7 @@ async function copyLibraryFileToProject(
   opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal },
 ): Promise<string> {
   const target = getBackend();
-  if (assetId && residency === target.kind) {
+  if (assetId && sameShelf(residency)) {
     const res = await target.fetch("/api/cut/library/use", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -724,6 +728,7 @@ export async function importLibraryAsset(
       duration: lib.duration,
       width: lib.width,
       height: lib.height,
+      server: sameShelf(lib.residency),
     },
     (opts) =>
       copyLibraryFileToProject(
