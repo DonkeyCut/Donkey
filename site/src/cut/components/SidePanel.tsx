@@ -25,7 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
-import { apiFetch, apiUrl } from "@/cut/lib/backend";
+import { apiFetch } from "@/cut/lib/backend";
 import { useCutCaps, useLocalCompute } from "@/cut/lib/backend/hooks";
 import {
   clearAssetDrag,
@@ -44,7 +44,7 @@ import {
 } from "@/cut/lib/assetRef";
 import { useRefCopy } from "@/cut/lib/refCopy";
 import { RefDropZone } from "./RefDropZone";
-import { deleteExport, downloadProjectExport, revealExport } from "@/cut/lib/exportClient";
+import { deleteExport, downloadProjectExport, exportFileUrl, revealExport } from "@/cut/lib/exportClient";
 import {
   exportCancelable,
   exportInFlight,
@@ -1042,7 +1042,7 @@ function ProjectFilesPanel({
                       muted
                       playsInline
                       preload="metadata"
-                      src={`${apiUrl(`/api/cut/projects/${projectId}/exports/${encodeURIComponent(it.file)}`)}#t=0.1`}
+                      src={`${exportFileUrl(projectId, it)}#t=0.1`}
                       className="h-11 w-[25px] shrink-0 rounded-[4px] bg-black object-cover"
                     />
                     <span className="min-w-0 flex-1">
@@ -1076,7 +1076,7 @@ function ProjectFilesPanel({
                         size="icon-xs"
                         aria-label="Download export"
                         title="Download"
-                        onClick={() => downloadProjectExport(projectId, it.file)}
+                        onClick={() => downloadProjectExport(projectId, it)}
                       >
                         <Download />
                       </Button>

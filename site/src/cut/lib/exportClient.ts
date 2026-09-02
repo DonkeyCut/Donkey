@@ -146,14 +146,23 @@ export async function revealExport(
   );
 }
 
-/** Download a rendered export by file name — what stands in for revealExport
- * when the backend has no Finder (the cloud route 302s to a signed R2 URL with
- * attachment disposition). */
-export function downloadProjectExport(projectId: string, file: string) {
-  downloadFromUrl(
-    getBackend().url(`/api/cut/projects/${projectId}/exports/${encodeURIComponent(file)}`),
-    file
+/** A finished export's file, by name and modification time.
+ *
+ * The time is part of the URL. An export name comes free again when its file
+ * is deleted, and the next render under that name lands on the same path, so
+ * a URL of the path alone would answer with whatever the browser and the edge
+ * still hold from the earlier file. The time changes with every render, so
+ * each one has a URL of its own. */
+export function exportFileUrl(projectId: string, item: { file: string; mtime: number }): string {
+  return getBackend().url(
+    `/api/cut/projects/${projectId}/exports/${encodeURIComponent(item.file)}?v=${item.mtime}`
   );
+}
+
+/** Download a rendered export — what stands in for revealExport when the
+ * backend has no Finder (the cloud route 302s to a signed R2 URL). */
+export function downloadProjectExport(projectId: string, item: { file: string; mtime: number }) {
+  downloadFromUrl(exportFileUrl(projectId, item), item.file);
 }
 
 /** Delete a rendered export from the project folder. Throws on failure so the

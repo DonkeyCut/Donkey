@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
-import { apiUrl } from "@/cut/lib/backend";
+import { exportFileUrl } from "@/cut/lib/exportClient";
 import {
   Bookmark,
   Camera,
@@ -86,7 +86,7 @@ export function PlatformPreviewDialog({
     else v.pause();
   };
 
-  const url = apiUrl(`/api/cut/projects/${projectId}/exports/${encodeURIComponent(item.file)}`);
+  const url = exportFileUrl(projectId, item);
   const handle = publish.handle.trim().replace(/^@+/, "") || "you";
   const caption = publish.caption.trim();
   const tagsLine = normalizeTags(publish.tags);

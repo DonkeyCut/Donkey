@@ -6,7 +6,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { deleteLadder } from "./ladderStore";
 import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl } from "./mediaCdn";
-import { del, deletePrefix, projectExportKey, projectPrefix, projectMediaKey } from "./r2";
+import { del, deletePrefix, projectPrefix, projectMediaKey } from "./r2";
 import { addUsage } from "./usage";
 import { caught, decodeFileParam, err, redirect } from "./util";
 
@@ -428,11 +428,19 @@ export const projectsCloud = {
   async serveExport(userId: string, id: string, file: string, download = false) {
     try {
       const fileName = decodeFileParam(file);
-      const key = projectExportKey(userId, id, fileName);
-      // Export names are reserved once (exportName), so the mapping is
-      // write-once and the redirect is cacheable.
+      const row = await prisma.cutMediaObject.findFirst({
+        where: { userId, projectId: id, kind: "export", fileName, uploadState: "complete" },
+        select: { r2Key: true, updatedAt: true },
+      });
+      if (!row) return new Response("Not found.", { status: 404 });
+      // A deleted export frees its name, and the next render under that name
+      // writes the same key. The edge caches an object by key and version, so
+      // the version is what keeps a re-render from serving the earlier bytes.
       return redirect(
-        mediaObjectUrl(key, download ? { downloadName: fileName } : undefined),
+        mediaObjectUrl(row.r2Key, {
+          version: String(row.updatedAt.getTime()),
+          ...(download ? { downloadName: fileName } : {}),
+        }),
         MEDIA_REDIRECT_HEADERS
       );
     } catch (e) {
