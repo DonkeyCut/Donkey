@@ -1,5 +1,7 @@
 "use client";
 
+import { retimeOf } from "@donkeycut/effects-kit";
+
 /**
  * Background writes to a project that is NOT open in the editor. A scene run
  * outlives the open project: when the user switches away, its placements,
@@ -175,10 +177,7 @@ export function docPlaceGenClip(
       : 0;
   const { out, speed } = fillSlot(asset.type, Math.max(MIN_LEN, asset.duration - srcIn), slot, SPEED_MIN);
   const row = doc.clips.filter((c) => c.track === 0);
-  const spans = row.map((c) => {
-    const sp = c.speed && c.speed > 0 ? c.speed : 1;
-    return { id: c.id, start: c.start, end: c.start + (c.out - c.in) / sp };
-  });
+  const spans = row.map((c) => ({ id: c.id, start: c.start, end: c.start + retimeOf(c).len }));
   const anchorIds = new Set(opts?.anchorAfterIds ?? []);
   const prevEnd = spans.filter((s) => anchorIds.has(s.id)).reduce((m, s) => Math.max(m, s.end), -1);
   const len = speed !== undefined && speed > 0 ? out / speed : out;

@@ -1,5 +1,7 @@
 "use client";
 
+import type { Retime } from "@donkeycut/effects-kit";
+
 /**
  * Frames for the preview, decoded straight off the file.
  *
@@ -148,6 +150,9 @@ export type WalkClaim = "hold" | "hop" | "restart";
 export function walkClaim(w: {
   /** The moment being asked for. */
   t: number;
+  /** Source seconds the walk is kept ahead of the reader, for the clip's
+   * rate; the 1× lookahead when absent. */
+  ahead?: number;
   /** Where the reader stood when this walk was sent — at or behind `from`. */
   walkFor: number;
   /** Where the walk was anchored. */
@@ -183,7 +188,7 @@ export function walkClaim(w: {
   // the lookahead's slack so a walk merely holding its lead is left alone.
   const behind =
     w.playing &&
-    (w.t < w.walkFor - SAME || (!w.heldBefore && w.t < w.tail - DECODE_AHEAD_S));
+    (w.t < w.walkFor - SAME || (!w.heldBefore && w.t < w.tail - (w.ahead ?? DECODE_AHEAD_S)));
   if (!w.landed) {
     // Nothing landed means the walk is still doing the only work that can
     // produce a picture — finding the keyframe before its anchor, fetching the
@@ -532,6 +537,8 @@ export class ClipFrameSource {
    * has since left. */
   private aim = 0;
   private closed = false;
+  /** Source seconds the walk keeps ahead of the reader, for the clip's rate. */
+  private ahead = DECODE_AHEAD_S;
   /** Set when the file turns out to hold no picture this browser can read. */
   private unreadable = false;
   /** Failed opens so far, and the timer that will clear `unreadable` for the
@@ -849,8 +856,12 @@ export class ClipFrameSource {
    * pointer backing into a clip arrives at its last frame, which is above
    * everything that source was ever asked for.
    */
-  want(t: number, playing: boolean, backward = false): void {
+  want(t: number, playing: boolean, backward = false, rate = 1): void {
     if (this.closed || this.unreadable) return;
+    // The lookahead is source seconds tuned for a clip playing at 1×. A clip
+    // running faster eats the ring that much sooner, so the walk stays the
+    // same timeline distance ahead; the ring's own bound still caps it.
+    this.ahead = DECODE_AHEAD_S * Math.max(1, rate);
     // Being read is what wakes a stood-down source; the walk below is what
     // gives it a decoder again.
     this.asleep = false;
@@ -1169,6 +1180,7 @@ export class ClipFrameSource {
     if (this.starting || this.stream) {
       const claim = walkClaim({
         t,
+        ahead: this.ahead,
         walkFor: this.walkFor,
         from: this.streamFrom,
         tail: this.streamTail,
@@ -1486,7 +1498,7 @@ export class ClipFrameSource {
           // or past `t` fill the ring — pushing another would drop one that is
           // still wanted. Only the walk's frames count: leftovers from other
           // gestures merely age out of the cache as the walk pushes.
-          if (this.streamTail >= t + DECODE_AHEAD_S) break;
+          if (this.streamTail >= t + this.ahead) break;
           if (this.ring.between(Math.max(t, this.streamFrom), this.streamTail) >= RING - 1) break;
           const pullAt = performance.now();
           this.nextStartedAt = pullAt;
@@ -1879,14 +1891,19 @@ export class FrameSourcePool {
 
 /**
  * The decode identity of a clip: the frames it shows are a function of its
- * file, its speed, and where its source time stands at timeline zero. Two clips
- * agreeing on all three show the same picture at every instant.
+ * file, its rate, and where its source time stands at timeline zero. Two clips
+ * agreeing on all three show the same picture at every instant. A clip whose
+ * rate changes through the footage is its own map: its curve and its start.
  */
 export function mappingKey(
   assetId: string,
-  speed: number,
+  retime: Retime,
   inPoint: number,
   start: number
 ): string {
-  return `${assetId}|${speed}|${(inPoint - start * speed).toFixed(3)}`;
+  if (retime.uniform) {
+    const speed = retime.rate;
+    return `${assetId}|${speed}|${(inPoint - start * speed).toFixed(3)}`;
+  }
+  return `${assetId}|${retime.key}|${inPoint.toFixed(3)}|${start.toFixed(3)}`;
 }

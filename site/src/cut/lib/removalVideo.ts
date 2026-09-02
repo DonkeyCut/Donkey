@@ -10,11 +10,10 @@
  * channel, which is why the layer travels as a pair.
  */
 
-import { matteLumaToAlpha, removalActive } from "@donkeycut/effects-kit";
+import { matteLumaToAlpha, removalActive, retimeOf } from "@donkeycut/effects-kit";
 import { openCanvasVideo, scaledEvenSize } from "./canvasVideo";
 import { FrameCompositor, type Frame } from "./composite";
 import { createRasterCanvas, decodeRasterImageUrl, type RasterSurface } from "./raster";
-import { clipSpeed } from "./store";
 import type { MediaAsset, VideoClip } from "./types";
 import { liveReader } from "./liveReader";
 
@@ -72,9 +71,9 @@ export async function renderRemovalPieces(
   const matteAsset = r.matte ? assets.find((a) => a.id === r.matte!.assetId) : undefined;
   if (!matteAsset) return null;
 
-  const speed = clipSpeed(clip);
+  const rt = retimeOf(clip);
   const still = asset.type === "image";
-  const dur = Math.max(0.1, (clip.out - clip.in) / speed);
+  const dur = Math.max(0.1, rt.len);
   const frames = Math.max(1, Math.ceil(dur * opts.fps));
   const baked = clip.removal!.matte;
 
@@ -143,7 +142,7 @@ export async function renderRemovalPieces(
 
     for (let i = 0; i < frames; i++) {
       const s = Math.min(dur - 1 / (opts.fps * 2), i / opts.fps);
-      const srcT = still ? 0 : clip.in + s * speed;
+      const srcT = still ? 0 : rt.srcAt(s);
       const frame = await reader.frameAt(srcT);
       if (frame.kind !== "ready") {
         rgbCtx.fillStyle = "#000000";

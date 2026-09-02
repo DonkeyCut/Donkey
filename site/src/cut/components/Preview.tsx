@@ -11,7 +11,7 @@ import {
   usePreviewSelector,
   useSkim,
 } from "@/cut/lib/playhead";
-import { projectDuration, useEditor } from "@/cut/lib/store";
+import { clipLen, projectDuration, useEditor } from "@/cut/lib/store";
 import { copyStageFrame, primeStageFrame, stageHasFrame } from "@/cut/lib/stageFrame";
 import {
   capturePoster,
@@ -505,8 +505,7 @@ export function Preview() {
       if (c.hidden) continue;
       const r = rectOf(c);
       if (isFullRect(r)) continue;
-      const speed = c.speed && c.speed > 0 ? c.speed : 1;
-      const len = Math.max(0.1, (c.out - c.in) / speed);
+      const len = clipLen(c);
       if (t < c.start || t >= c.start + len) continue;
       if (px < r.x || px > r.x + r.w || py < r.y || py > r.y + r.h) continue;
       if (!best || c.track > best.track) best = { id: c.id, track: c.track };
@@ -858,8 +857,7 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
   const brushClipId = useBrushUi((s) => s.clipId);
   const live = usePreviewSelector((t) => {
     if (!selectedClip) return false;
-    const speed = selectedClip.speed && selectedClip.speed > 0 ? selectedClip.speed : 1;
-    const len = Math.max(0.1, (selectedClip.out - selectedClip.in) / speed);
+    const len = clipLen(selectedClip);
     return t >= selectedClip.start && t < selectedClip.start + len;
   });
   // While hover-scrubbing the preview shows the skimmer's frame, where the
@@ -1238,8 +1236,7 @@ function ClipMaskGizmo({ stage }: { stage: { w: number; h: number } }) {
   if (skimTime !== null) return null;
   const clip = masked;
   if (!armed || !clip?.mask) return null;
-  const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
-  const len = Math.max(0.1, (clip.out - clip.in) / speed);
+  const len = clipLen(clip);
   if (tLocal < 0 || tLocal >= len) return null;
   const rect = rectOf(clip);
   const pose = clipKeyed(clip) ? clipPoseAt(clip, tLocal) : null;

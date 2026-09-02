@@ -818,7 +818,7 @@ export function selectionRefTokens(s: EntitySources & {
   audioClips: AudioClip[];
   selection: Selection;
   multiSelection: Selection[];
-  selectedKey: { kind: "overlay" | "clip"; id: string; t: number; track: "pose" | "mask" } | null;
+  selectedKey: { kind: "overlay" | "clip"; id: string; t: number; track: "pose" | "mask" | "speed" } | null;
 }): string | null {
   const entities = entityRefs(s);
 

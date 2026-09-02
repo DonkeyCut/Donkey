@@ -27,6 +27,7 @@ import {
   STROKE_FEATHER_MAX,
   STROKE_OFFSET_MAX,
   STROKE_WIDTH_MAX,
+  retimeOf,
 } from "@donkeycut/effects-kit";
 import {
   removalActive,
@@ -368,13 +369,13 @@ function CustomControls({ clip }: { clip: VideoClip }) {
     .sort((a, b) => a - b);
   const showStrokes = () => {
     if (!strokeTimes.length) return;
-    const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
-    const srcNow = clip.in + Math.max(0, playheadAt() - clip.start) * speed;
+    const rt = retimeOf(clip);
+    const srcNow = rt.srcAt(Math.max(0, playheadAt() - clip.start));
     const next = strokeTimes.find((t) => t > srcNow + 0.05) ?? strokeTimes[0];
-    const end = clip.start + (clip.out - clip.in) / speed;
+    const end = clip.start + rt.len;
     useEditor
       .getState()
-      .seek(Math.min(Math.max(clip.start, clip.start + (next - clip.in) / speed), end - 0.001));
+      .seek(Math.min(Math.max(clip.start, clip.start + rt.tAt(next)), end - 0.001));
   };
   return (
     <>

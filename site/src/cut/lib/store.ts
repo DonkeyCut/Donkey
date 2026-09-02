@@ -8,10 +8,14 @@ import {
   lineLikeShape,
   maskKeyAt,
   removeKeyAt,
+  retimeOf,
+  speedCurveOf,
+  speedCurvePreset,
   upsertKey,
   type EffectId,
   type MaskKey,
   type OverlayKey,
+  type SpeedNode,
 } from "@donkeycut/effects-kit";
 import { create } from "zustand";
 import type {
@@ -299,8 +303,9 @@ export interface EditorState {
   selectedKey: {
     kind: "overlay" | "clip";
     id: string;
+    /** The key's time; for a speed node, the source second it sits on. */
     t: number;
-    track: "pose" | "mask";
+    track: "pose" | "mask" | "speed";
   } | null;
   playing: boolean;
   /** Set while a play is held at a standstill because the cut has nothing to
@@ -439,6 +444,12 @@ export interface EditorState {
   /** Set a clip's playback rate (0.25–4). The footprint change carries the
    * timeline behind it the way a trim does (see resizeClipFootprint). */
   setClipSpeed: (id: string, speed: number) => void;
+  /** Replace a clip's speed curve (undefined clears it back to a uniform rate
+   * at the curve's average). Nodes are [source second, rate]; the footprint
+   * change carries the timeline like setClipSpeed does. */
+  setClipSpeedCurve: (id: string, nodes: SpeedNode[] | undefined) => void;
+  /** Lay a preset ramp over the clip's trimmed span. */
+  setClipSpeedPreset: (id: string, preset: string) => void;
   /** Set a clip's source trim points. While track 0 is the only video track,
    * a track-0 resize ripples: everything past the clip's tail rides the moved
    * edge both directions, gaps keeping their width. Otherwise the run rules
@@ -815,7 +826,7 @@ const touches = (patch: object, keys: readonly string[]) => keys.some((k) => k i
  */
 function settleClipFootprint(id: string, patch: Partial<VideoClip>) {
   const moved = touches(patch, ["start", "track"]);
-  if (!moved && !touches(patch, ["in", "out", "speed"])) return;
+  if (!moved && !touches(patch, ["in", "out", "speed", "speedCurve"])) return;
   const st = useEditor.getState();
   const clip = st.clips.find((c) => c.id === id);
   if (!clip) return;
@@ -1300,6 +1311,7 @@ export function cutTranscribeSpec(
       start: a.start,
       volume: a.volume,
       speed: a.speed,
+      speedCurve: a.speedCurve,
     }))
     .concat(
       overlayLayers(s.clips)
@@ -1318,6 +1330,7 @@ export function cutTranscribeSpec(
           start: c.start,
           volume: 1,
           speed: c.speed,
+          speedCurve: c.speedCurve,
         }))
     );
   if (spans.length === 0 && audio.length === 0) return null;
@@ -1339,6 +1352,7 @@ export function cutTranscribeSpec(
               out: sp.clip.out,
               muted: sp.clip.muted || assetIsSilent(sp.asset),
               speed: clipSpeed(sp.clip),
+              speedCurve: sp.clip.speedCurve,
               // The clamped cross-dissolve overlap, so the mix overlaps clip
               // audio the same way the timeline does and cues stay in sync.
               transition: sp.transitionOut,
@@ -2567,7 +2581,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       if (
         get().transitions.length &&
         !touches(patch, ["start", "track"]) &&
-        touches(patch, ["in", "out", "speed"])
+        touches(patch, ["in", "out", "speed", "speedCurve"])
       )
         set((s) => ({ transitions: reanchorTransitions(before, s.clips, s.transitions) }));
     },
@@ -2576,15 +2590,49 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const clip = get().clips.find((c) => c.id === id);
       if (!clip) return;
       const clamped = Math.max(SPEED_FLOOR, speed);
-      if (Math.abs(clamped - clipSpeed(clip)) < 1e-4) return;
-      resizeClipFootprint(clip, { speed: clamped }, Math.max(MIN_LEN, (clip.out - clip.in) / clamped));
+      // A uniform rate replaces any curve the clip carried.
+      if (!clip.speedCurve && Math.abs(clamped - clipSpeed(clip)) < 1e-4) return;
+      resizeClipFootprint(
+        clip,
+        { speed: clamped, speedCurve: undefined },
+        Math.max(MIN_LEN, (clip.out - clip.in) / clamped)
+      );
+    },
+
+    setClipSpeedCurve: (id, nodes) => {
+      const clip = get().clips.find((c) => c.id === id);
+      if (!clip) return;
+      const cleaned = nodes ? speedCurveOf({ speedCurve: nodes }) : undefined;
+      if (!cleaned) {
+        if (!clip.speedCurve) return;
+        // Leaving curve mode keeps the clip's length: the uniform rate is the
+        // curve's average.
+        const avg = Math.max(SPEED_FLOOR, retimeOf(clip).rate);
+        resizeClipFootprint(clip, { speed: avg, speedCurve: undefined }, Math.max(MIN_LEN, retimeOf({ ...clip, speed: avg, speedCurve: undefined }).len));
+        return;
+      }
+      const next = { ...clip, speedCurve: cleaned };
+      if (retimeOf(next).key === retimeOf(clip).key) return;
+      resizeClipFootprint(clip, { speedCurve: cleaned }, Math.max(MIN_LEN, retimeOf(next).len));
+    },
+
+    setClipSpeedPreset: (id, preset) => {
+      const clip = get().clips.find((c) => c.id === id);
+      if (!clip) return;
+      const nodes = speedCurvePreset(preset, clip.in, clip.out);
+      if (!nodes) return;
+      get().setClipSpeedCurve(id, nodes);
     },
 
     setClipTrim: (id, nextIn, nextOut) => {
       const clip = get().clips.find((c) => c.id === id);
       if (!clip) return;
       if (Math.abs(nextIn - clip.in) < 1e-6 && Math.abs(nextOut - clip.out) < 1e-6) return;
-      resizeClipFootprint(clip, { in: nextIn, out: nextOut }, (nextOut - nextIn) / clipSpeed(clip));
+      resizeClipFootprint(
+        clip,
+        { in: nextIn, out: nextOut },
+        retimeOf({ ...clip, in: nextIn, out: nextOut }).len
+      );
     },
 
     setClipTransition: (id, seconds, style) => {
@@ -2951,7 +2999,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     setClipMaskKey: (id, tLocal, patch, opts) => {
       const c = get().clips.find((x) => x.id === id);
       if (!c?.mask) return;
-      const len = Math.max(0.1, (c.out - c.in) / clipSpeed(c));
+      const len = clipLen(c);
       const t = Math.max(0, Math.min(tLocal, len));
       const existing = c.mask.kf?.find((k) => Math.abs(k.t - t) <= KEY_EPSILON);
       const next = { ...(existing ?? maskKeyAt(c.mask, t)), ...patch, t };
@@ -3289,6 +3337,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         // Carry the clip's rate so the detached track keeps the muted picture's
         // length and stays in sync (an AudioClip plays at its own `speed`).
         ...(clipSpeed(clip) !== 1 ? { speed: clipSpeed(clip) } : {}),
+        ...(clip.speedCurve ? { speedCurve: clip.speedCurve } : {}),
       };
       set((s) => ({
         audioClips: [...s.audioClips, audio],
@@ -3325,11 +3374,11 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       if (selection?.kind === "clip") {
         const c = get().clips.find((x) => x.id === selection.id);
         if (c && c.track !== 0) {
-          const sp = c.speed && c.speed > 0 ? c.speed : 1;
-          const eff = (c.out - c.in) / sp;
+          const rt = retimeOf(c);
+          const eff = rt.len;
           if (t > c.start + 0.05 && t < c.start + eff - 0.05) {
             push();
-            const cutIn = c.in + (t - c.start) * sp;
+            const cutIn = rt.srcAt(t - c.start);
             // The left half hard-cuts into the right; the right keeps the
             // original dissolve into whatever came after (same as track 0).
             // The cut lands mid-footage, so the edges it creates stay plain:
@@ -3403,8 +3452,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       );
       if (!span) return;
       push();
-      // Source time advances `speed`× faster than timeline time.
-      const cutAt = span.clip.in + (t - span.start) * clipSpeed(span.clip);
+      // The clip's own map says which source second plays at `t`.
+      const cutAt = retimeOf(span.clip).srcAt(t - span.start);
       // The left half hard-cuts into the right; the right keeps the original
       // dissolve into whatever came after. Both halves stay in place. The cut
       // lands mid-footage, so the edges it creates stay plain: the exit
@@ -3425,6 +3474,18 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       // A picked keyframe is the smaller thing under the cursor: Delete takes
       // the key and leaves the item it belongs to alone.
       const key = st.selectedKey;
+      if (key?.track === "speed") {
+        // A speed node is the whole of this branch: its times are source
+        // seconds, so falling through to the pose track would delete a
+        // keyframe that merely shares the number.
+        set({ selectedKey: null });
+        const clip = st.clips.find((x) => x.id === key.id);
+        const nodes = clip ? speedCurveOf(clip) : undefined;
+        if (nodes && nodes.length > 1 && nodes.some((nd) => Math.abs(nd[0] - key.t) <= KEY_EPSILON)) {
+          st.setClipSpeedCurve(key.id, nodes.filter((nd) => Math.abs(nd[0] - key.t) > KEY_EPSILON));
+        }
+        return;
+      }
       if (key) {
         set({ selectedKey: null });
         const item =
@@ -3596,10 +3657,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             // A layer clip carries no span (spans are track 0); use its
             // own footprint.
             const c = s.clips.find((x) => x.id === sel.id);
-            if (c) {
-              const speed = c.speed && c.speed > 0 ? c.speed : 1;
-              add(c.start, c.start + Math.max(0.1, (c.out - c.in) / speed));
-            }
+            if (c) add(c.start, c.start + clipLen(c));
           }
         } else if (sel.kind === "audio") {
           const c = s.audioClips.find((x) => x.id === sel.id);
@@ -3650,20 +3708,20 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             if (mi == null) continue;
             // Track-0 clips re-materialize onto track 0 (asClip), so a template
             // stands up its own video instead of an empty timeline.
-            layers.push({ media: mi, start: sp.start - start0, in: sp.clip.in, out: sp.clip.out, ...framingOf(sp.clip), muted: sp.clip.muted, speed: sp.clip.speed, sound: sp.clip.sound, track: 1, asClip: true });
+            layers.push({ media: mi, start: sp.start - start0, in: sp.clip.in, out: sp.clip.out, ...framingOf(sp.clip), muted: sp.clip.muted, speed: sp.clip.speed, speedCurve: sp.clip.speedCurve, sound: sp.clip.sound, track: 1, asClip: true });
           } else {
             const c = s.clips.find((x) => x.id === sel.id);
             if (!c) continue;
             const mi = mediaFor(c.assetId);
             if (mi == null) continue;
-            layers.push({ media: mi, start: c.start - start0, in: c.in, out: c.out, ...framingOf(c), muted: c.muted, speed: c.speed, sound: c.sound, track: c.track + 1 });
+            layers.push({ media: mi, start: c.start - start0, in: c.in, out: c.out, ...framingOf(c), muted: c.muted, speed: c.speed, speedCurve: c.speedCurve, sound: c.sound, track: c.track + 1 });
           }
         } else if (sel.kind === "audio") {
           const c = s.audioClips.find((x) => x.id === sel.id);
           if (!c) continue;
           const mi = mediaFor(c.assetId);
           if (mi == null) continue;
-          audio.push({ media: mi, start: c.start - start0, in: c.in, out: c.out, volume: c.volume, fadeIn: c.fadeIn, fadeOut: c.fadeOut, speed: c.speed, sound: c.sound, duck: c.duck, lane: c.lane });
+          audio.push({ media: mi, start: c.start - start0, in: c.in, out: c.out, volume: c.volume, fadeIn: c.fadeIn, fadeOut: c.fadeOut, speed: c.speed, speedCurve: c.speedCurve, sound: c.sound, duck: c.duck, lane: c.lane });
         } else if (sel.kind === "overlay") {
           const o = s.overlays.find((x) => x.id === sel.id);
           // Asset-backed stickers stay out: a template copies only the media
@@ -3793,6 +3851,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           muted: l.muted,
           ...templateFraming(l),
           ...(l.speed ? { speed: l.speed } : {}),
+          ...(l.speedCurve ? { speedCurve: l.speedCurve } : {}),
           ...(l.sound ? { sound: l.sound } : {}),
         }));
       const topTrack = Math.max(0, ...overlayLayers(get().clips).map((c) => c.track));
@@ -3811,6 +3870,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         muted: l.muted,
         ...templateFraming(l),
         ...(l.speed ? { speed: l.speed } : {}),
+        ...(l.speedCurve ? { speedCurve: l.speedCurve } : {}),
         ...(l.sound ? { sound: l.sound } : {}),
       }));
       const newAudio: AudioClip[] = template.audio
@@ -3825,6 +3885,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           ...(a.fadeIn ? { fadeIn: a.fadeIn } : {}),
           ...(a.fadeOut ? { fadeOut: a.fadeOut } : {}),
           ...(a.speed ? { speed: a.speed } : {}),
+          ...(a.speedCurve ? { speedCurve: a.speedCurve } : {}),
           ...(a.sound ? { sound: a.sound } : {}),
           ...(a.duck !== undefined && a.duck < 1 ? { duck: a.duck } : {}),
           ...(a.lane ? { lane: a.lane } : {}),
@@ -4036,6 +4097,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             out: sp.clip.out,
             muted: false,
             speed: clipSpeed(sp.clip),
+            speedCurve: sp.clip.speedCurve,
             transition: 0,
           },
         ],
@@ -5035,18 +5097,17 @@ export function serializeDoc(s: {
   };
 }
 
-/** Effective playback rate of a video clip (>0, default 1). */
+/** A clip's uniform playback rate (>0, default 1). A clip carrying a speed
+ * curve has no single rate; read `retimeOf(c)` for its map. */
 export function clipSpeed(c: VideoClip) {
   const s = c.speed ?? 1;
   return s > 0 ? s : 1;
 }
 
+/** Timeline footprint of a clip: its source span through its rate, or through
+ * its speed curve when it carries one (see retimeOf). */
 export function clipLen(c: VideoClip | AudioClip) {
-  const src = c.out - c.in;
-  // Video clips play their source at `speed`, so the timeline footprint is
-  // shorter/longer than the source. Audio clips have no speed.
-  const eff = "speed" in c && c.speed && c.speed > 0 ? src / c.speed : src;
-  return Math.max(MIN_LEN, eff);
+  return Math.max(MIN_LEN, retimeOf(c).len);
 }
 
 /** The longest fade a clip takes: half its footprint, so a fade in and a
@@ -5504,8 +5565,8 @@ function buildClipSpans(clips: VideoClip[], assets: MediaAsset[], track: number)
       len,
       transitionOut: onSound ? 0 : overlap,
       soundOut,
-      soundAhead: handleSeconds(soundOut, asset.duration - clip.out, clip),
-      soundBack: handleSeconds(prevSound, clip.in, clip),
+      soundAhead: handleSeconds(soundOut, asset.duration - clip.out, clip, "tail"),
+      soundBack: handleSeconds(prevSound, clip.in, clip, "head"),
     });
   }
   return spans;
@@ -5513,9 +5574,18 @@ function buildClipSpans(clips: VideoClip[], assets: MediaAsset[], track: number)
 
 /** How far a cross dissolve reaches into a clip's handle: the ramp half it
  * wants, capped by the source seconds actually there, in timeline seconds. */
-function handleSeconds(want: number, sourceLeft: number, clip: VideoClip): number {
+function handleSeconds(
+  want: number,
+  sourceLeft: number,
+  clip: VideoClip,
+  edge: "head" | "tail"
+): number {
   if (want <= 0.01) return 0;
-  return Math.max(0, Math.min(want, Math.max(0, sourceLeft) / clipSpeed(clip)));
+  // The handle plays at the pace of the footage beside the edge: a source
+  // second past `out` lasts as long as the last source second inside it.
+  const rt = retimeOf(clip);
+  const edgeRate = rt.rateAtSrc(edge === "head" ? clip.in : clip.out);
+  return Math.max(0, Math.min(want, Math.max(0, sourceLeft) / edgeRate));
 }
 
 /** One row of the timeline, whichever kind of thing sits on it. Video rows are

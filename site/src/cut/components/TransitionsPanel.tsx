@@ -138,7 +138,7 @@ function useCutFrames(): { a: string | null; b: string | null } {
       if (dist >= bestDist) continue;
       bestDist = dist;
       best = {
-        a: { asset: out.asset, srcT: out.clip.in + out.len * (out.clip.speed ?? 1) },
+        a: { asset: out.asset, srcT: out.clip.out },
         b: { asset: inc.asset, srcT: inc.clip.in },
       };
     }

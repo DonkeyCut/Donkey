@@ -35,7 +35,7 @@ import { frameSink, openMedia, videoTrackOf } from "./mediaRead";
 import { allowance, canvasBytes, holdMemory } from "./memoryBudget";
 import { getClipSpans, overlayLayers, projectDuration, spanSequence } from "./store";
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
-import { applyEffectToCanvas, evalOverlayFrame, grainTile, isAudioEffect, isMaskAnimated, isOverlayAnimated, maskFrameAt, MATTE_FPS, matteLumaToAlpha, planAnimatedLayers, type LottieHandle, type OverlayAnim, type PaintPhase } from "@donkeycut/effects-kit";
+import { applyEffectToCanvas, evalOverlayFrame, retimeOf, grainTile, isAudioEffect, isMaskAnimated, isOverlayAnimated, maskFrameAt, MATTE_FPS, matteLumaToAlpha, planAnimatedLayers, type LottieHandle, type OverlayAnim, type PaintPhase } from "@donkeycut/effects-kit";
 import { backdropStill, loadBackdropStill } from "./backdropStills";
 import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
 import { createRasterCanvas, type RasterSurface } from "./raster";
@@ -141,8 +141,7 @@ const READER_GRACE = 2;
 
 /** A clip's source time at timeline time `t`. */
 function sourceTimeAt(span: ClipSpan, t: number): number {
-  const speed = span.clip.speed && span.clip.speed > 0 ? span.clip.speed : 1;
-  return span.clip.in + Math.max(0, t - span.start) * speed;
+  return retimeOf(span.clip).srcAt(Math.max(0, t - span.start));
 }
 
 /**
@@ -536,6 +535,7 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
         start: sp.start,
         volume: sp.clip.volume ?? 1,
         speed: sp.clip.speed,
+        speedCurve: sp.clip.speedCurve,
         sound: sp.clip.sound,
         muted: sp.clip.muted || assetIsSilent(sp.asset),
         fadeIn: ramps[i].head,
@@ -557,6 +557,7 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
       start: a.start,
       volume: a.volume,
       speed: a.speed,
+      speedCurve: a.speedCurve,
       fadeIn: a.fadeIn,
       fadeOut: a.fadeOut,
       sound: a.sound,
@@ -576,6 +577,7 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
             out: sp.clip.out,
             muted: sp.clip.muted || !!sp.clip.hidden || assetIsSilent(sp.asset),
             speed: sp.clip.speed,
+            speedCurve: sp.clip.speedCurve,
             volume: sp.clip.volume,
             sound: sp.clip.sound,
             transition: sp.transitionOut,

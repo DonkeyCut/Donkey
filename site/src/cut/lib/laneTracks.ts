@@ -1,5 +1,7 @@
 "use client";
 
+import { retimeOf } from "@donkeycut/effects-kit";
+
 /**
  * The lane-track coordinator: the one place for how items on the timeline's
  * free-positioned tracks behave. Audio, titles, upper video layers, and
@@ -121,8 +123,6 @@ interface LaneAdapter<T> {
   afterMove?(raw: T, delta: number): void;
 }
 
-const speedOf = (c: { speed?: number }) => (c.speed && c.speed > 0 ? c.speed : 1);
-
 /** The asset's beats inside a media item's trimmed range, in timeline
  * seconds. Beats live on the asset in source seconds, so every clip showing
  * the source maps its own window of them. */
@@ -132,9 +132,9 @@ function mediaBeatTimes(
 ): number[] {
   const beats = s.assets.find((a) => a.id === c.assetId)?.beats?.beats;
   if (!beats?.length) return [];
-  const speed = speedOf(c);
+  const rt = retimeOf(c);
   const times: number[] = [];
-  for (const b of beats) if (b >= c.in && b <= c.out) times.push(c.start + (b - c.in) / speed);
+  for (const b of beats) if (b >= c.in && b <= c.out) times.push(c.start + rt.tAt(b));
   return times;
 }
 
@@ -142,7 +142,7 @@ function videoMaxLen(s: S, c: VideoClip): number {
   const a = s.assets.find((x) => x.id === c.assetId);
   // A still has no source length, so its clip can stretch to any duration.
   if (a?.type === "image") return Infinity;
-  return ((a?.duration ?? c.out) - c.in) / speedOf(c);
+  return retimeOf({ ...c, out: a?.duration ?? c.out }).len;
 }
 
 const clipAdapter: LaneAdapter<VideoClip> = {
@@ -156,17 +156,17 @@ const clipAdapter: LaneAdapter<VideoClip> = {
   movePatch: (c, start) => ({ id: c.id, patch: { start } }),
   trimLeftPatch: (c, newStart) => ({
     id: c.id,
-    patch: { start: newStart, in: c.in + (newStart - c.start) * speedOf(c) },
+    patch: { start: newStart, in: retimeOf(c).srcAt(newStart - c.start) },
   }),
   trimRightPatch: (c, newEnd) => ({
     id: c.id,
-    patch: { out: c.in + (newEnd - c.start) * speedOf(c) },
+    patch: { out: retimeOf(c).srcAt(newEnd - c.start) },
   }),
   revealLeftPatch: (c, start, reveal) => ({
     id: c.id,
-    patch: { start, in: c.in + (reveal - c.start) * speedOf(c) },
+    patch: { start, in: retimeOf(c).srcAt(reveal - c.start) },
   }),
-  leftFloor: (c) => Math.max(0, c.start - c.in / speedOf(c)),
+  leftFloor: (c) => Math.max(0, c.start + retimeOf(c).tAt(0)),
   maxLen: videoMaxLen,
   closesGap: true,
   assetOf: (s, c) => s.assets.find((x) => x.id === c.assetId),
@@ -183,19 +183,19 @@ const audioAdapter: LaneAdapter<AudioClip> = {
   movePatch: (a, start) => ({ id: a.id, patch: { start } }),
   trimLeftPatch: (a, newStart) => ({
     id: a.id,
-    patch: { start: newStart, in: a.in + (newStart - a.start) * speedOf(a) },
+    patch: { start: newStart, in: retimeOf(a).srcAt(newStart - a.start) },
   }),
   trimRightPatch: (a, newEnd) => ({
     id: a.id,
-    patch: { out: a.in + (newEnd - a.start) * speedOf(a) },
+    patch: { out: retimeOf(a).srcAt(newEnd - a.start) },
   }),
   revealLeftPatch: (a, start, reveal) => ({
     id: a.id,
-    patch: { start, in: a.in + (reveal - a.start) * speedOf(a) },
+    patch: { start, in: retimeOf(a).srcAt(reveal - a.start) },
   }),
-  leftFloor: (a) => Math.max(0, a.start - a.in / speedOf(a)),
+  leftFloor: (a) => Math.max(0, a.start + retimeOf(a).tAt(0)),
   maxLen: (s, a) =>
-    ((s.assets.find((x) => x.id === a.assetId)?.duration ?? a.out) - a.in) / speedOf(a),
+    retimeOf({ ...a, out: s.assets.find((x) => x.id === a.assetId)?.duration ?? a.out }).len,
   lanePatch: (a, lane) => ({ id: a.id, patch: { lane: lane > 0 ? lane : undefined } }),
   assetOf: (s, a) => s.assets.find((x) => x.id === a.assetId),
   beatTimes: mediaBeatTimes,
@@ -227,17 +227,17 @@ const overlayClipAdapter: LaneAdapter<VideoClip> = {
   movePatch: (c, start) => ({ id: c.id, patch: { start } }),
   trimLeftPatch: (c, newStart) => ({
     id: c.id,
-    patch: { start: newStart, in: c.in + (newStart - c.start) * speedOf(c) },
+    patch: { start: newStart, in: retimeOf(c).srcAt(newStart - c.start) },
   }),
   trimRightPatch: (c, newEnd) => ({
     id: c.id,
-    patch: { out: c.in + (newEnd - c.start) * speedOf(c) },
+    patch: { out: retimeOf(c).srcAt(newEnd - c.start) },
   }),
   revealLeftPatch: (c, start, reveal) => ({
     id: c.id,
-    patch: { start, in: c.in + (reveal - c.start) * speedOf(c) },
+    patch: { start, in: retimeOf(c).srcAt(reveal - c.start) },
   }),
-  leftFloor: (c) => Math.max(0, c.start - c.in / speedOf(c)),
+  leftFloor: (c) => Math.max(0, c.start + retimeOf(c).tAt(0)),
   maxLen: videoMaxLen,
   closesGap: true,
   assetOf: (s, c) => s.assets.find((x) => x.id === c.assetId),

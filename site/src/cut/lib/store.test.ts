@@ -1874,6 +1874,19 @@ describe("transcribe spec", () => {
     expect(spec.clips.find((c) => c.file === video.fileName)?.muted).toBe(false);
   });
 
+  test("a curved clip ships its curve, so the mix lays it at the length it plays", () => {
+    const video = asset(6);
+    const clip = vclip({ assetId: video.id, start: 0, in: 0, out: 4, speedCurve: [[0, 0.5], [4, 0.5]] });
+    const spec = cutTranscribeSpec({
+      clips: [clip],
+      assets: [video],
+      audioClips: [],
+      overlays: [],
+    })!;
+    expect(spec.clips[0].speedCurve).toEqual([[0, 0.5], [4, 0.5]]);
+    expect(spec.duration).toBeCloseTo(8, 3);
+  });
+
   test("leaves a still on an upper track out of the audio items", () => {
     const video = asset(6);
     const still = { ...asset(0, "image"), fileName: "still.png" };
@@ -1921,5 +1934,86 @@ describe("assetIdsInUse", () => {
 
   test("says nothing is in use for an empty document", () => {
     expect(assetIdsInUse({ clips: [], audioClips: [], overlays: [] }).size).toBe(0);
+  });
+});
+
+describe("speed curves", () => {
+  test("a curve that lengthens a track-0 clip pushes the run behind it", () => {
+    const a = asset(4);
+    const c1 = vclip({ assetId: a.id, start: 0, in: 0, out: 2 });
+    const c2 = vclip({ assetId: a.id, start: 2, in: 0, out: 2 });
+    useEditor.setState({ assets: [a], clips: [c1, c2] });
+    useEditor.getState().setClipSpeedCurve(c1.id, [
+      [0, 0.5],
+      [2, 0.5],
+    ]);
+    const s = useEditor.getState();
+    expect(clipLen(s.clips[0])).toBeCloseTo(4, 3);
+    expect(s.clips[1].start).toBeCloseTo(4, 3);
+    // Leaving curve mode keeps the length as a uniform rate.
+    useEditor.getState().setClipSpeedCurve(c1.id, undefined);
+    const t = useEditor.getState();
+    expect(t.clips[0].speedCurve).toBeUndefined();
+    expect(t.clips[0].speed).toBeCloseTo(0.5, 3);
+    expect(t.clips[1].start).toBeCloseTo(4, 3);
+  });
+
+  test("a crossing's handles read the rate at their own edge", () => {
+    const a = asset(10);
+    // Trimmed the same distance from both ends, so an edge picked by the
+    // amount of source left would read the wrong one.
+    const c1 = vclip({
+      assetId: a.id,
+      start: 0,
+      in: 2,
+      out: 8,
+      speedCurve: [[2, 1], [8, 4]],
+    });
+    // The next clip abuts, so there is a cut for the crossing to play on.
+    const c2 = vclip({ assetId: a.id, start: clipLen(c1), in: 2, out: 8 });
+    useEditor.setState({ assets: [a], clips: [c1, c2] });
+    useEditor.getState().setClipTransition(c1.id, 1.4, "audiocross");
+    const s = useEditor.getState();
+    const [sp] = getClipSpans(s.clips, s.assets);
+    // Two source seconds past the out point, played at the tail's 4x: half a
+    // timeline second, short of the 0.7 the crossing wanted.
+    expect(sp.soundAhead).toBeCloseTo(0.5, 3);
+  });
+
+  test("a picked speed node that is gone leaves the clip's pose keys alone", () => {
+    const a = asset(4);
+    const c1 = vclip({
+      assetId: a.id,
+      start: 0,
+      in: 0,
+      out: 2,
+      kf: [{ t: 1, x: 0.5, y: 0.5, scale: 1.2, rotation: 0, opacity: 1 }],
+    });
+    useEditor.setState({
+      assets: [a],
+      clips: [c1],
+      selection: { kind: "clip", id: c1.id },
+      // The strip left this behind; the clip carries no curve any more.
+      selectedKey: { kind: "clip", id: c1.id, t: 1, track: "speed" },
+    });
+    useEditor.getState().deleteSelection();
+    const s = useEditor.getState();
+    expect(s.clips).toHaveLength(1);
+    expect(s.clips[0].kf).toHaveLength(1);
+  });
+
+  test("Delete takes a picked node, never the clip", () => {
+    const a = asset(4);
+    const c1 = vclip({ assetId: a.id, start: 0, in: 0, out: 2, speedCurve: [[0, 1], [1, 2], [2, 1]] });
+    useEditor.setState({
+      assets: [a],
+      clips: [c1],
+      selection: { kind: "clip", id: c1.id },
+      selectedKey: { kind: "clip", id: c1.id, t: 1, track: "speed" },
+    });
+    useEditor.getState().deleteSelection();
+    const s = useEditor.getState();
+    expect(s.clips).toHaveLength(1);
+    expect(s.clips[0].speedCurve?.map((n) => n[0])).toEqual([0, 2]);
   });
 });

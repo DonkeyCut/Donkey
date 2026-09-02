@@ -1,5 +1,7 @@
 "use client";
 
+import { retimeOf } from "@donkeycut/effects-kit";
+
 /**
  * What the cut looks like at one instant, worked out from the document alone.
  *
@@ -194,8 +196,7 @@ export function duckGainAt(audioClips: AudioClip[], t: number): number {
   let g = 1;
   for (const a of audioClips) {
     if (a.hidden || a.duck === undefined || a.duck >= 1) continue;
-    const speed = a.speed && a.speed > 0 ? a.speed : 1;
-    const len = Math.max(0.1, (a.out - a.in) / speed);
+    const len = Math.max(0.1, retimeOf(a).len);
     if (t >= a.start && t < a.start + len) g = Math.min(g, Math.max(0, a.duck));
   }
   return g;

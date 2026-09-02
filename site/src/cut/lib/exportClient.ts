@@ -16,7 +16,7 @@ import { renderRemovalPieces } from "./removalVideo";
 import { createRasterCanvas, rasterCanvasToPng } from "./raster";
 import { clipSpeed, getClipSpans, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
-import { isMaskAnimated, isOverlayAnimated, matteLumaToAlpha, normalizeGrade, paintMaskLuma, paintStrokeInk } from "@donkeycut/effects-kit";
+import { isMaskAnimated, isOverlayAnimated, matteLumaToAlpha, normalizeGrade, paintMaskLuma, paintStrokeInk, retimeOf, type SpeedNode } from "@donkeycut/effects-kit";
 import { renderElementFrames, renderElementPng } from "./textRender";
 import { clipCovers, clipKeyed, clipPosed, clipPoseAt, clipZoom, contentRect, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, regionPx, removalActive, shadowInk, subjectMasked } from "./types";
 import { liveReader } from "./liveReader";
@@ -300,7 +300,7 @@ function removalShadowSilhouette(
   if (r!.backdrop && r!.backdrop.kind !== "none") return null;
   const asset = assets.find((a) => a.id === clip.assetId);
   if (!asset) return null;
-  const speed = clipSpeed(clip);
+  const rt = retimeOf(clip);
   const still = asset.type === "image";
   const canvas = createRasterCanvas(2, 2);
   const ctx = canvas.getContext("2d", {
@@ -349,7 +349,7 @@ function removalShadowSilhouette(
   const mdur = Math.max(0.1, matte.duration || 0.1);
   return {
     at: async (tLocal) => {
-      const srcT = still ? 0 : clip.in + tLocal * speed;
+      const srcT = still ? 0 : rt.srcAt(tLocal);
       const frame = await reader.frameAt(
         Math.min(Math.max(0, srcT - r!.matte!.in), mdur - 0.001)
       );
@@ -601,6 +601,7 @@ export async function buildExportPayload(
     panY: sp.clip.panY ?? 0,
     frame: sp.clip.frame,
     speed: clipSpeed(sp.clip),
+    speedCurve: sp.clip.speedCurve,
     transition: sp.transitionOut,
     // A cross dissolve carries its own window: the picture cuts, so the
     // server's blend must not see one. The handles are what the crossing
@@ -633,7 +634,7 @@ export async function buildExportPayload(
   // opacity, since opacity ships as coverage luma.
   for (let i = 0; i < spans.length; i++) {
     const c = posed(spans[i].clip);
-    const dur = Math.max(0.1, (c.out - c.in) / clipSpeed(c));
+    const dur = Math.max(0.1, retimeOf(c).len);
     const pictures = await renderClipMaskPictures(
       c,
       { x: 0, y: 0, w: settings.width, h: settings.height },
@@ -804,6 +805,7 @@ export async function buildExportPayload(
           volume: c.volume,
           sound: c.sound,
           speed: c.speed,
+          speedCurve: c.speedCurve,
           image: assetById.get(c.assetId)!.type === "image",
           grade: normalizeGrade(c.grade),
           look: c.look,
@@ -830,8 +832,7 @@ export async function buildExportPayload(
     const box = region
       ? { x: region.rx, y: region.ry, w: region.rw, h: region.rh }
       : { x: 0, y: 0, w: settings.width, h: settings.height };
-    const ospeed = c.speed && c.speed > 0 ? c.speed : 1;
-    const olen = Math.max(0.1, (c.out - c.in) / ospeed);
+    const olen = Math.max(0.1, retimeOf(c).len);
     const pictures = await renderClipMaskPictures(
       c,
       box,
@@ -901,6 +902,7 @@ export async function buildExportPayload(
       fadeIn: a.fadeIn ?? 0,
       fadeOut: a.fadeOut ?? 0,
       speed: a.speed,
+      speedCurve: a.speedCurve,
       sound: a.sound,
       duck: a.duck,
     }));
@@ -1411,14 +1413,16 @@ const CARD_SECONDS = 5;
  * for the share card, which is a five-second window onto the opening rather
  * than a render of the whole project. */
 export function docFirstSeconds(doc: ExportDoc, seconds: number): ExportDoc {
-  // A clip's timeline footprint is (out - in) / speed, so the trim that ends
-  // it at `seconds` scales back through the speed.
-  const clampOut = <T extends { start: number; in: number; out: number; speed?: number }>(
+  // The trim that ends a clip at `seconds` goes back through the clip's own
+  // map, so a curved clip cuts at the source second really playing there.
+  const clampOut = <
+    T extends { start: number; in: number; out: number; speed?: number; speedCurve?: SpeedNode[] },
+  >(
     clip: T
   ): T => {
-    const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
-    const room = (seconds - clip.start) * speed;
-    return clip.out - clip.in <= room ? clip : { ...clip, out: clip.in + room };
+    const rt = retimeOf(clip);
+    const room = seconds - clip.start;
+    return rt.len <= room ? clip : { ...clip, out: rt.srcAt(room) };
   };
   const starts = <T extends { start: number }>(item: T) => item.start < seconds;
   return {

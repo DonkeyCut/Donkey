@@ -1,5 +1,7 @@
 "use client";
 
+import { retimeOf } from "@donkeycut/effects-kit";
+
 /**
  * The person-matte video for the ffmpeg export path. The page — the only
  * place that can run segmentation — composes the video layers over the
@@ -37,10 +39,8 @@ export const MASK_FPS = 15;
 const MASK_SHORT = 480;
 
 /** Timeline second inside a span mapped to its source second. */
-const sourceTimeAt = (sp: ClipSpan, t: number) => {
-  const speed = sp.clip.speed && sp.clip.speed > 0 ? sp.clip.speed : 1;
-  return Math.min(sp.clip.out, sp.clip.in + Math.max(0, t - sp.start) * speed);
-};
+const sourceTimeAt = (sp: ClipSpan, t: number) =>
+  Math.min(sp.clip.out, retimeOf(sp.clip).srcAt(Math.max(0, t - sp.start)));
 
 /** A clip whose picture trims by the person matte (either direction). */
 const subjectClip = (c: { mask?: { kind: string } }) => c.mask?.kind === "subject";

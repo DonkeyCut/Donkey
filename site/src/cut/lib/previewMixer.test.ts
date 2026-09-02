@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
+import { retimeOf } from "@donkeycut/effects-kit";
 import { AudioBuffer } from "node-web-audio-api";
 
 /**
@@ -254,7 +255,7 @@ const voice = {
   start: 0,
   in: 0,
   out: CLIP_S,
-  speed: 1,
+  retime: retimeOf({ in: 0, out: CLIP_S, speed: 1 }),
   gain: 1,
 };
 

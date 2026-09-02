@@ -1,5 +1,7 @@
 "use client";
 
+import { retimeOf } from "@donkeycut/effects-kit";
+
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useBrushUi } from "@/cut/lib/removal/brushUi";
@@ -56,8 +58,7 @@ export function RemovalBrush({ stage }: { stage: { w: number; h: number } }) {
   // pointer rides the timeline and the overlay tracks the frame on screen.
   const tLocal = usePreviewSelector((t) => (armed && clip ? t - clip.start : -1));
   if (!armed || !clip) return null;
-  const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
-  const len = Math.max(0.1, (clip.out - clip.in) / speed);
+  const len = Math.max(0.1, retimeOf(clip).len);
   if (tLocal < 0 || tLocal >= len) return null;
   const asset = assets.find((a) => a.id === clip.assetId);
   if (!asset?.width || !asset?.height) return null;
@@ -132,7 +133,7 @@ function BrushSurface({
     if (ctx) s.paintOverlay(ctx, c.width, c.height);
   };
 
-  const srcT = () => clip.in + Math.max(0, tLocal) * (clip.speed && clip.speed > 0 ? clip.speed : 1);
+  const srcT = () => retimeOf(clip).srcAt(Math.max(0, tLocal));
 
   // The overlay shows the strokes recorded on the frame the preview shows:
   // the mask rebuilds when the seeds change from outside (undo, redo, the
@@ -142,8 +143,7 @@ function BrushSurface({
   // stored paint, which has no place inside a frame tick.
   const seeds = clip.removal?.seeds;
   const playing = useEditor((s) => s.playing);
-  const speedNow = clip.speed && clip.speed > 0 ? clip.speed : 1;
-  const srcNow = clip.in + Math.max(0, tLocal) * speedNow;
+  const srcNow = retimeOf(clip).srcAt(Math.max(0, tLocal));
   const activeT = playing
     ? null
     : ((seeds?.paint ?? []).find((p) => Math.abs(p.t - srcNow) < 0.05)?.t ?? null);

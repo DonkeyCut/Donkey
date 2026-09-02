@@ -1,14 +1,14 @@
 "use client";
 
+
 import { useEffect, type RefObject } from "react";
 import {
-  clipSpeed,
   getClipSpans,
   overlayLayers,
   projectDuration,
   useEditor,
 } from "@/cut/lib/store";
-import { matteLumaToAlpha } from "@donkeycut/effects-kit";
+import { matteLumaToAlpha, retimeOf } from "@donkeycut/effects-kit";
 import { playheadAt, previewAt, setPlayhead, subscribePlayhead } from "@/cut/lib/playhead";
 import { assetIsSilent, clipCovers, projectFadeSeconds, rectOf } from "@/cut/lib/types";
 import type { ClipSpan, MediaAsset, VideoClip } from "@/cut/lib/types";
@@ -78,7 +78,7 @@ const DECODER_BUDGET = 12;
 
 /** Source time of a clip at timeline time `t`. */
 const sourceTimeOf = (clip: VideoClip, t: number) =>
-  clip.in + Math.max(0, t - clip.start) * clipSpeed(clip);
+  retimeOf(clip).srcAt(Math.max(0, t - clip.start));
 
 /**
  * When the preview gives up resolution to keep the picture with the sound.
@@ -110,7 +110,7 @@ const PLAY_SETTLE_MS = 6_000;
 
 /** The decode identity of a clip — see `mappingKey`. */
 const keyOf = (clip: VideoClip, asset: MediaAsset) =>
-  mappingKey(asset.id, clipSpeed(clip), clip.in, clip.start);
+  mappingKey(asset.id, retimeOf(clip), clip.in, clip.start);
 
 let engineSerial = 0;
 
@@ -135,13 +135,18 @@ export function engineLog(msg: string): void {
  * schedules one stable voice and the frame-by-frame gain is all that moves.
  */
 const voiceSpan = (sp: ClipSpan) => {
-  const speed = clipSpeed(sp.clip);
+  // The handles a crossing reaches into play at the pace of the footage
+  // beside them, so the voice's span widens through the clip's own map and
+  // its retime is rebuilt over the wider span.
+  const rt = retimeOf(sp.clip);
+  const wIn = rt.srcAt(-sp.soundBack);
+  const wOut = rt.srcAt(rt.len + sp.soundAhead);
   return {
     url: sp.asset.url,
     start: sp.start - sp.soundBack,
-    in: sp.clip.in - sp.soundBack * speed,
-    out: sp.clip.out + sp.soundAhead * speed,
-    speed,
+    in: wIn,
+    out: wOut,
+    retime: retimeOf({ in: wIn, out: wOut, speed: sp.clip.speed, speedCurve: sp.clip.speedCurve }),
     sound: sp.clip.sound,
   };
 };
@@ -376,12 +381,12 @@ class Engine {
     // alpha read below is a per-frame pixel pass; capping the matte's decode
     // keeps that pass off the frame budget.
     const src = this.pool.get(
-      mappingKey(asset.id, clipSpeed(clip), m.in, clip.start),
+      mappingKey(asset.id, retimeOf(clip), m.in, clip.start),
       asset,
       Math.min(this.decodeHeight(), 480)
     );
     this.used.add(src);
-    src.want(mt, this.renderPlaying);
+    src.want(mt, this.renderPlaying, false, retimeOf(clip).rateAt(at - clip.start));
     const frame = src.frameAt(mt, 0, dur);
     if (!frame) return null;
     const held = this.matteAlpha.get(clip.id);
@@ -423,7 +428,7 @@ class Engine {
     const src = this.pool.get(keyOf(span.clip, span.asset), span.asset, this.decodeHeight());
     this.used.add(src);
     const st = sourceTimeOf(span.clip, t);
-    src.want(st, playing, this.readBackward);
+    src.want(st, playing, this.readBackward, retimeOf(span.clip).rateAt(t - span.start));
     // A failed source that already decoded frames keeps showing the nearest
     // one it holds — a transient blip (a network drop, a signed URL mid
     // re-mint) reads as a held frame, and only a source with nothing at all
@@ -581,8 +586,8 @@ class Engine {
     for (const a of s.audioClips) {
       const asset = s.assets.find((x) => x.id === a.assetId);
       if (!asset || a.hidden || assetIsSilent(asset)) continue;
-      const speed = a.speed && a.speed > 0 ? a.speed : 1;
-      const len = Math.max(0.1, (a.out - a.in) / speed);
+      const rt = retimeOf(a);
+      const len = Math.max(0.1, rt.len);
       if (t < a.start || t >= a.start + len) continue;
       // Fade envelope: linear ramps at either end of the clip.
       const rel = t - a.start;
@@ -599,7 +604,7 @@ class Engine {
         start: a.start,
         in: a.in,
         out: a.out,
-        speed,
+        retime: rt,
         gain: a.volume * g * dg,
         sound: a.sound,
       });

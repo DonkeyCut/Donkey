@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import type { Timed } from "./frameSource";
+import { retimeOf } from "@donkeycut/effects-kit";
+import { DECODE_AHEAD_S, type Timed } from "./frameSource";
 import type { MediaAsset } from "./types";
 
 // ── the files a source reads, stood in for ──────────────────────────────────
@@ -238,26 +239,36 @@ describe("FrameRing", () => {
 });
 
 describe("mappingKey", () => {
+  const uniform = (speed: number, inPoint: number, out = 100) =>
+    retimeOf({ in: inPoint, out, speed });
   test("clips showing identical pictures share a decoder", () => {
     // A plain split: same file, same speed, and the same source time at
     // timeline zero. One decoder reads straight across the cut.
-    const left = mappingKey("a", 1, 0, 0);
-    const right = mappingKey("a", 1, 4, 4);
+    const left = mappingKey("a", uniform(1, 0), 0, 0);
+    const right = mappingKey("a", uniform(1, 4), 4, 4);
     expect(left).toBe(right);
   });
 
   test("different trims of one file keep their own decoders", () => {
     // Both live at timeline 4, showing different moments — a same-source
     // dissolve has to blend two distinct frames.
-    expect(mappingKey("a", 1, 0, 4)).not.toBe(mappingKey("a", 1, 8, 4));
+    expect(mappingKey("a", uniform(1, 0), 0, 4)).not.toBe(mappingKey("a", uniform(1, 8), 8, 4));
   });
 
   test("a speed change is a different mapping", () => {
-    expect(mappingKey("a", 1, 0, 0)).not.toBe(mappingKey("a", 2, 0, 0));
+    expect(mappingKey("a", uniform(1, 0), 0, 0)).not.toBe(mappingKey("a", uniform(2, 0), 0, 0));
+  });
+
+  test("a speed curve is its own mapping, keyed on the curve and the start", () => {
+    const curved = (start: number) =>
+      mappingKey("a", retimeOf({ in: 0, out: 10, speedCurve: [[0, 1], [10, 4]] }), 0, start);
+    expect(curved(0)).toBe(curved(0));
+    expect(curved(0)).not.toBe(curved(2));
+    expect(curved(0)).not.toBe(mappingKey("a", uniform(1, 0), 0, 0));
   });
 
   test("different files never share", () => {
-    expect(mappingKey("a", 1, 0, 0)).not.toBe(mappingKey("b", 1, 0, 0));
+    expect(mappingKey("a", uniform(1, 0), 0, 0)).not.toBe(mappingKey("b", uniform(1, 0), 0, 0));
   });
 });
 
@@ -265,7 +276,7 @@ describe("walkClaim", () => {
   /** A walk that has landed frames from `from` to `tail`, asked for `t`. */
   const landed = (t: number, from: number, tail: number, covered = false, heldBefore = true) =>
     walkClaim({
-      t, walkFor: from, from, tail, landed: true, covered, heldBefore, comingS: 5, playing: true,
+      t, ahead: DECODE_AHEAD_S, walkFor: from, from, tail, landed: true, covered, heldBefore, comingS: 5, playing: true,
     });
 
   test("playback inside the walk keeps it", () => {
@@ -309,7 +320,7 @@ describe("walkClaim", () => {
     // reader is behind the anchor by construction, and that is not the walk
     // going past it — it is the walk about to be right.
     const lead = {
-      t: 4, walkFor: 4, from: 4.5, tail: 4.6, landed: true, covered: false, heldBefore: true, playing: true,
+      t: 4, ahead: DECODE_AHEAD_S, walkFor: 4, from: 4.5, tail: 4.6, landed: true, covered: false, heldBefore: true, playing: true,
     };
     expect(walkClaim({ ...lead, comingS: 5 })).toBe("hold");
     expect(walkClaim({ ...lead, t: 4.4, comingS: 5 })).toBe("hold");

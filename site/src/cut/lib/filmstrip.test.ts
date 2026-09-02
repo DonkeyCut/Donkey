@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { retimeOf } from "@donkeycut/effects-kit";
 import {
   FILM_TILE_CAP,
   MIN_SUB_TILE_PX,
@@ -294,5 +295,59 @@ describe("pickThumbTimes", () => {
       expect(t).toBeLessThan((k + 1) * 2);
     });
     for (let i = 1; i < times.length; i++) expect(times[i]).toBeGreaterThan(times[i - 1]);
+  });
+});
+
+describe("a curved clip's strips agree", () => {
+  // The speed curve editor draws the same clip as the timeline bar, at its own
+  // width. Both plan through the clip's map, so a point the same fraction
+  // along each of them pictures the same moment of the footage — which is what
+  // makes a node in the graph sit over the frame it retimes.
+  const clip = { in: 0, out: DURATION, speedCurve: [[0, 2], [DURATION, 0.25]] as [number, number][] };
+  const retime = retimeOf(clip);
+  const stripFor = (w: number) =>
+    planFilmstrip({
+      thumbs,
+      thumbStep: THUMB_STEP,
+      duration: DURATION,
+      aspect: 16 / 9,
+      filmIn: clip.in,
+      w,
+      pps: w / retime.len,
+      speed: retime.rate,
+      retime,
+      tileH: 60,
+      minTileW: 26,
+    });
+
+  test("the graph's picture is the bar's picture", () => {
+    const bar = stripFor(1400);
+    const graph = stripFor(700);
+    expect(bar.length).toBeGreaterThan(2);
+    expect(graph.length).toBeGreaterThan(2);
+    const at = (tiles: typeof bar, w: number, f: number) => {
+      const x = f * w;
+      return tiles.find((t) => x >= t.left && x < t.left + t.width) ?? tiles[tiles.length - 1];
+    };
+    for (const f of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+      const a = at(bar, 1400, f);
+      const b = at(graph, 700, f);
+      // Within a tile of each other: the two widths cut the same map into
+      // different numbers of tiles, so the moments agree, not the boundaries.
+      const tileSpan = retime.srcAt(retime.len * (b.width / 700 + f)) - retime.srcAt(retime.len * f);
+      expect(Math.abs(a.srcT - b.srcT)).toBeLessThanOrEqual(Math.abs(tileSpan) + 0.5);
+    }
+  });
+
+  test("both walk the footage forward across the whole box", () => {
+    for (const w of [700, 1400]) {
+      const tiles = stripFor(w);
+      for (let i = 1; i < tiles.length; i++) expect(tiles[i].srcT).toBeGreaterThan(tiles[i - 1].srcT);
+      // The clip opens at 2x, so its first tile already covers seconds of
+      // footage; what matters is that the strip starts inside the opening
+      // stretch and ends on the tail.
+      expect(tiles[0].srcT).toBeLessThan(retime.srcAt(retime.len * 0.25));
+      expect(tiles[tiles.length - 1].srcT).toBeGreaterThan(DURATION - 2);
+    }
   });
 });

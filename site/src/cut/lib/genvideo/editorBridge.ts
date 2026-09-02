@@ -1,5 +1,7 @@
 "use client";
 
+import { retimeOf, type SpeedNode } from "@donkeycut/effects-kit";
+
 /**
  * The real EditorBridge: the orchestrator's typed hands on the live Cut
  * timeline. It is the single frames↔seconds conversion boundary — the plan
@@ -35,10 +37,9 @@ export const GEN_FPS = 30;
 
 const toSec = (frames: number) => frames / GEN_FPS;
 
-/** Effective timeline footprint of a clip (seconds), honoring speed. */
-function footprintSec(c: { in: number; out: number; speed?: number }): number {
-  const src = c.out - c.in;
-  return c.speed && c.speed > 0 ? src / c.speed : src;
+/** Effective timeline footprint of a clip (seconds), through its rate. */
+function footprintSec(c: { in: number; out: number; speed?: number; speedCurve?: SpeedNode[] }): number {
+  return retimeOf(c).len;
 }
 
 export class StoreEditorBridge implements EditorBridge {
@@ -131,16 +132,14 @@ export class StoreEditorBridge implements EditorBridge {
     if ((await this.mode()) === "store") {
       const clip = useEditor.getState().clips.find((c) => c.id === clipId);
       if (!clip) return;
-      // Trim the tail so the footprint matches, at whatever speed the clip carries.
-      const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
-      useEditor.getState().setClipTrim(clipId, clip.in, clip.in + toSec(durationFrames) * speed);
+      // Trim the tail so the footprint matches, at whatever rate the clip carries.
+      useEditor.getState().setClipTrim(clipId, clip.in, retimeOf(clip).srcAt(toSec(durationFrames)));
       return;
     }
     await withProjectDoc(this.projectId, (doc) => {
       doc.clips = doc.clips.map((c) => {
         if (c.id !== clipId) return c;
-        const speed = c.speed && c.speed > 0 ? c.speed : 1;
-        return { ...c, out: c.in + toSec(durationFrames) * speed };
+        return { ...c, out: retimeOf(c).srcAt(toSec(durationFrames)) };
       });
     });
   }

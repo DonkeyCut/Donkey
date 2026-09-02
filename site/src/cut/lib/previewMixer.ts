@@ -41,12 +41,13 @@ import {
   soundRecipe,
   type AudioFxNodes,
   type ClipSound,
+  type Retime,
 } from "@donkeycut/effects-kit";
 import type { WrappedAudioBuffer } from "mediabunny";
 import { assembleAudio, decodeAudioSpan, openAudioWalk, type AudioWalk } from "./mediaRead";
 import { allowance, holdMemory } from "./memoryBudget";
 import { meterAudioLate, meterClockJump } from "./perfTrace";
-import { timeStretch } from "./timeStretch";
+import { timeStretch, type StretchSchedule } from "./timeStretch";
 
 /** How much of a voice is pulled off its walk and scheduled at once, in source
  * seconds. Long enough that a stretch of sound is one scheduling decision;
@@ -111,7 +112,8 @@ export interface Voice {
   start: number;
   in: number;
   out: number;
-  speed: number;
+  /** The map from this voice's timeline span onto its source span. */
+  retime: Retime;
   /** Everything the frame plan says about how loud it is right now. */
   gain: number;
   /** The clip's own treatment, run on this voice alone before it joins the
@@ -127,7 +129,7 @@ interface Scheduled {
 
 interface LiveVoice {
   url: string;
-  speed: number;
+  retime: Retime;
   in: number;
   out: number;
   start: number;
@@ -452,7 +454,7 @@ export class PreviewMixer {
         // read aims the walk and pulls the bytes it sits in — the primer a
         // parked playhead uses — so the release finds an open file already
         // read where the first window starts.
-        const source = live.in + (from - live.start) * live.speed;
+        const source = live.retime.srcAt(from - live.start);
         if (!live.filling && source < live.out - 1e-3) void this.prime(live, source);
       }
     }
@@ -580,7 +582,7 @@ export class PreviewMixer {
         (prev.start !== v.start ||
           prev.in !== v.in ||
           prev.out !== v.out ||
-          prev.speed !== v.speed)
+          prev.retime.key !== v.retime.key)
       ) {
         this.release(prev);
         this.voices.delete(v.id);
@@ -660,7 +662,7 @@ export class PreviewMixer {
           prev.start !== v.start ||
           prev.in !== v.in ||
           prev.out !== v.out ||
-          prev.speed !== v.speed)
+          prev.retime.key !== v.retime.key)
       ) {
         this.release(prev);
         this.voices.delete(v.id);
@@ -671,7 +673,7 @@ export class PreviewMixer {
       this.treat(live, v.sound);
       const from = Math.max(v.start, t);
       if (live.scheduled !== from) this.reaim(live, from);
-      const source = live.in + (from - live.start) * live.speed;
+      const source = live.retime.srcAt(from - live.start);
       // Already reading, at the end of its source, or standing close enough
       // that the play's first read is the one it was going to make anyway.
       if (live.filling || source >= live.out - 1e-3) continue;
@@ -746,7 +748,7 @@ export class PreviewMixer {
     head.connect(gain);
     const live: LiveVoice = {
       url: v.url,
-      speed: v.speed,
+      retime: v.retime,
       in: v.in,
       out: v.out,
       start: v.start,
@@ -843,7 +845,7 @@ export class PreviewMixer {
     const current = () => this.voices.get(id) === live && live.gen === gen;
     try {
       const from = live.scheduled;
-      const sourceFrom = live.in + (from - live.start) * live.speed;
+      const sourceFrom = live.retime.srcAt(from - live.start);
       if (sourceFrom >= live.out - 1e-3) {
         live.ended = true;
         return;
@@ -855,7 +857,7 @@ export class PreviewMixer {
         // waiting. The first window is short so the sound joins it now.
         const group = live.windows.length ? GROUP_S : FIRST_GROUP_S;
         buffer =
-          Math.abs(live.speed - 1) > 1e-3
+          !live.retime.uniform || Math.abs(live.retime.rate - 1) > 1e-3
             ? await this.stretchedWindow(live, sourceFrom)
             : await this.walkGroup(live, sourceFrom, current, group);
       } catch {
@@ -972,13 +974,25 @@ export class PreviewMixer {
    * everything older is a full decode away anyway.
    */
   private async stretchedWindow(live: LiveVoice, sourceFrom: number): Promise<AudioBuffer | null> {
-    const sourceTo = Math.min(live.out, sourceFrom + WINDOW_STRETCHED_S * live.speed);
-    const key = `${live.url}|${sourceFrom.toFixed(3)}|${sourceTo.toFixed(3)}|${live.speed}`;
+    const rt = live.retime;
+    const tFrom = rt.tAt(sourceFrom);
+    const sourceTo = Math.min(live.out, rt.srcAt(tFrom + WINDOW_STRETCHED_S));
+    const key = `${live.url}|${sourceFrom.toFixed(3)}|${sourceTo.toFixed(3)}|${rt.key}`;
     const held = this.decoded.get(key);
     if (held) return held;
     const raw = await decodeAudioSpan(live.url, sourceFrom, sourceTo);
     if (!raw) return null;
-    const buffer = this.stretch(raw, 1 / live.speed);
+    // A curve's window is laid by the clip's own map from where the window
+    // starts, so its length is exactly the timeline the picture spends on it.
+    const buffer = this.stretch(
+      raw,
+      rt.uniform
+        ? 1 / rt.rate
+        : {
+            factorAt: (sec) => 1 / rt.rateAtSrc(sourceFrom + sec),
+            outLength: Math.round((rt.tAt(sourceFrom + raw.duration) - tFrom) * raw.sampleRate),
+          }
+    );
     // Oldest first until the cache is back inside its share. Emptying the
     // whole cache would throw away the window the playhead is standing on along
     // with the ones it has finished, and the next frame would pay a full decode
@@ -1011,7 +1025,7 @@ export class PreviewMixer {
     live.filling = false;
     live.ended = false;
     live.scheduled = timeline;
-    live.walk?.seek(live.in + (timeline - live.start) * live.speed);
+    live.walk?.seek(live.retime.srcAt(timeline - live.start));
   }
 
   /** A read that failed, came back empty, or stopped answering. The voice
@@ -1038,7 +1052,7 @@ export class PreviewMixer {
   }
 
   /** Re-lay a buffer at a different length, keeping its pitch. */
-  private stretch(buffer: AudioBuffer, factor: number): AudioBuffer {
+  private stretch(buffer: AudioBuffer, factor: number | StretchSchedule): AudioBuffer {
     const channels: Float32Array[] = [];
     for (let c = 0; c < buffer.numberOfChannels; c++) channels.push(buffer.getChannelData(c));
     const out = timeStretch(channels, buffer.sampleRate, factor);

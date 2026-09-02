@@ -33,7 +33,7 @@ import { refFromTemplate, useAssetDrop, type AssetRef } from "@/cut/lib/assetRef
 import { useRefCopy } from "@/cut/lib/refCopy";
 import { cardIconButton } from "@/cut/components/iconButton";
 import { formatTime } from "@/cut/lib/time";
-import { EFFECT_LABELS } from "@donkeycut/effects-kit";
+import { EFFECT_LABELS, retimeOf, type SpeedNode } from "@donkeycut/effects-kit";
 import { SHAPE_LABELS } from "@/cut/lib/types";
 import type { LibraryTemplate, TemplateMedia } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
@@ -105,8 +105,8 @@ export function TemplateCard({
 
   // The contents, one row per item, in save order: clips and stills, sounds,
   // titles, then a caption count.
-  const speedLen = (x: { in: number; out: number; speed?: number }) =>
-    (x.out - x.in) / (x.speed && x.speed > 0 ? x.speed : 1);
+  const speedLen = (x: { in: number; out: number; speed?: number; speedCurve?: SpeedNode[] }) =>
+    retimeOf(x).len;
   const parts: {
     icon: typeof Film;
     label: string;

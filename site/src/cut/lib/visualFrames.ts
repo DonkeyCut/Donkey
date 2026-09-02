@@ -1,5 +1,7 @@
 "use client";
 
+import { retimeOf } from "@donkeycut/effects-kit";
+
 import { framesAt } from "./mediaRead";
 import { rasterCanvasToDataUrl } from "./raster";
 import type { ClipSpan } from "./types";
@@ -76,8 +78,7 @@ export async function captureTimelineFrames(spans: ClipSpan[]): Promise<Captured
     const at = ((i + 0.5) * total) / count;
     const span = visible.find((sp) => at >= sp.start && at < sp.start + sp.len);
     if (!span) continue;
-    const speed = span.clip.speed && span.clip.speed > 0 ? span.clip.speed : 1;
-    const srcTime = Math.max(0, span.clip.in + (at - span.start) * speed);
+    const srcTime = Math.max(0, retimeOf(span.clip).srcAt(at - span.start));
     const group = bySource.get(span.asset.url) ?? { url: span.asset.url, moments: [] };
     group.moments.push({ at, srcTime });
     bySource.set(span.asset.url, group);
