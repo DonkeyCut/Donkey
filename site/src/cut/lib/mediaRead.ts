@@ -451,7 +451,33 @@ export function frameSink(
   size?: FrameSize,
   opts?: FrameSinkOptions
 ): FrameCanvasSink {
-  return sinkFactory(track, capToTrack(track, size), opts);
+  return fromFirstFrame(track, sinkFactory(track, capToTrack(track, size), opts));
+}
+
+/**
+ * A sink whose point reads never fall off the front of the track.
+ *
+ * A phone recording's first video frame often sits a few hundredths of a
+ * second after zero, and the underlying sink answers a timestamp before the
+ * first frame with null. A clip at the head of the timeline would then draw
+ * nothing for its first frames and pop in late, which the preview never
+ * shows because it streams from the nearest frame. Clamping the ask up to the
+ * first frame makes a read at the head land on the head.
+ */
+function fromFirstFrame(track: InputVideoTrack, sink: FrameCanvasSink): FrameCanvasSink {
+  let first: Promise<number> | null = null;
+  const floor = () => (first ??= track.getFirstTimestamp().catch(() => 0));
+  const clamp = async (t: number) => Math.max(await floor(), t);
+  return {
+    getCanvas: async (t) => sink.getCanvas(await clamp(t)),
+    canvases: (start, end) => sink.canvases(start, end),
+    canvasesAtTimestamps: (times) =>
+      sink.canvasesAtTimestamps(
+        (async function* () {
+          for await (const t of times) yield await clamp(t);
+        })()
+      ),
+  };
 }
 
 function capToTrack(track: InputVideoTrack, size?: FrameSize): FrameSize | undefined {
