@@ -216,7 +216,11 @@ export class SubjectMaskCompositor {
     if (held <= cap) return;
     for (const [id, e] of [...this.rasters].sort((a, b) => a[1].usedAt - b[1].usedAt)) {
       if (held <= cap) break;
-      if (e.usedAt >= this.pass) continue;
+      // The sweep runs at the head of a pass, before anything this frame is
+      // stamped, so the frame's own pictures are the ones the pass before it
+      // drew. Dropping those would close bitmaps the next draw asks for and
+      // decode them again.
+      if (e.usedAt >= this.pass - 1) continue;
       held -= entryBytes(e);
       for (const b of e.byWord.values()) b.close();
       this.rasters.delete(id);
