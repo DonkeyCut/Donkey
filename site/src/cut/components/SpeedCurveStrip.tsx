@@ -331,7 +331,10 @@ function Strip({ clip }: { clip: VideoClip }) {
           title="Flatten to 1×"
           onClick={() => {
             pick(null);
-            commit(flatSpeedCurve({ in: clip.in, out: clip.out, speed: 1 }));
+            setDraft(null);
+            // Back to a plain clip at 1×: the curve goes with the rate, so the
+            // timeline's rail and badge go with it.
+            useEditor.getState().setClipSpeed(clip.id, 1);
           }}
         >
           <RotateCcw className="size-3.5" />
