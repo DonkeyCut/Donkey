@@ -1,10 +1,11 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { stat, writeFile } from "node:fs/promises";
+import { readFile, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { atempoChain, hasStream, num, videoColorInfo } from "./util";
 import { assertGraphSafe, fexpr } from "./filterGraph";
+import { bakeRetimedAudio, setptsExpr, type BakedAudio } from "./retimeAudio";
 import { CLIP_MAX_ZOOM, projectFadeSeconds, regionPx, TRANSITION_XFADE, TRANSITION_ZOOM, type ColorGrade, type TransitionStyle } from "../lib/types";
-import { audioFxFilters, buildGradeLut, effectFilterLines, gradeKey, gradeNeedsLut, gradeToFfmpegFilter, isAudioEffect, lookFilterLines, lutToCube, shortestTurn, sortedKeys, soundFilters, type ClipSound, type OverlayKey } from "@donkeycut/effects-kit";
+import { audioFxFilters, buildGradeLut, effectFilterLines, gradeKey, gradeNeedsLut, gradeToFfmpegFilter, isAudioEffect, lookFilterLines, lutToCube, retimeOf, shortestTurn, sortedKeys, soundFilters, type ClipSound, type OverlayKey, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
 
 // The render pipeline itself: spec in, finished mp4 out. Shared by the local
 // engine's job registry (jobs.ts) and the cloud render worker, which stage
@@ -88,6 +89,9 @@ export interface ExportSpec {
     /** Region of the frame this clip fills; absent = full frame. */
     frame?: { x: number; y: number; w: number; h: number };
     speed?: number; // playback rate, default 1
+    /** A rate that changes through the footage: [source second, rate] nodes
+     * (see retimeOf); present, `speed` is ignored. */
+    speedCurve?: SpeedNode[];
     /** Transition into the next clip, in timeline seconds (overlap). */
     transition?: number;
     /** Half the cross dissolve into the next clip, in timeline seconds: the
@@ -175,6 +179,9 @@ export interface ExportSpec {
     volume?: number;
     sound?: ClipSound;
     speed?: number;
+    /** A rate that changes through the footage: [source second, rate] nodes
+     * (see retimeOf); present, `speed` is ignored. */
+    speedCurve?: SpeedNode[];
     /** Transition ramps, timeline seconds from this overlay's head/tail. On
      * an upper track a fade is an alpha fade (the tracks beneath show
      * through); a cross transition arrives as the incoming clip's headFade
@@ -235,6 +242,9 @@ export interface ExportSpec {
     fadeOut?: number;
     /** Playback rate (detached-audio clips inherit their video clip's speed). */
     speed?: number;
+    /** A rate that changes through the footage: [source second, rate] nodes
+     * (see retimeOf); present, `speed` is ignored. */
+    speedCurve?: SpeedNode[];
     sound?: ClipSound;
     /** Voiceover ducking: while this clip plays, every other sound drops to
      * this gain (0..1). Ducking clips never duck each other. */
@@ -377,9 +387,14 @@ function ffColor(hex: string | undefined): string {
   return m ? `0x${m[1].toUpperCase()}` : "black";
 }
 
-function clipRate(c: ExportSpec["clips"][number]) {
-  return c.speed && c.speed > 0 ? c.speed : 1;
-}
+/** The `setpts` that lays a trimmed span at its rate: the plain division for
+ * one rate, the map's polyline for a curve (quoted: it carries commas). */
+const retimedPts = (rt: Retime) =>
+  rt.uniform ? `(PTS-STARTPTS)/${num(rt.rate)}` : fexpr(setptsExpr(rt));
+
+/** Timeline length of a media clip's span through its rate or curve. */
+const spanLen = (c: { in: number; out: number; speed?: number; speedCurve?: SpeedNode[] }) =>
+  Math.max(0.1, retimeOf(c).len);
 
 /** A clip's frame region in even pixels, or null when it fills the whole frame
  * (the common case, which keeps the plain full-frame filter path). */
@@ -446,13 +461,15 @@ export function runFfmpeg(
 export interface ExportPipelineIO {
   stat: typeof stat;
   writeFile: typeof writeFile;
+  readFile: typeof readFile;
+  unlink: typeof unlink;
   hasStream: typeof hasStream;
   videoColorInfo: typeof videoColorInfo;
   h264Encoder: () => Promise<"libx264" | "h264_videotoolbox">;
   runFfmpeg: typeof runFfmpeg;
 }
 
-const realIO: ExportPipelineIO = { stat, writeFile, hasStream, videoColorInfo, h264Encoder, runFfmpeg };
+const realIO: ExportPipelineIO = { stat, writeFile, readFile, unlink, hasStream, videoColorInfo, h264Encoder, runFfmpeg };
 
 /** Render `spec` into `job.outPath`. `mediaPathFor` maps a spec media file
  * name to its staged path on disk (the engine reads the project folder; the
@@ -599,15 +616,14 @@ export async function runExport(
   for (let j = 0; j < spec.clips.length; j++) {
     const c = spec.clips[j];
     if (!c.image || !c.file) continue;
-    const dur = Math.max(0.1, (c.out - c.in) / clipRate(c));
+    const dur = spanLen(c);
     imageClipInput.set(j, nInputs++);
     inputs.push("-loop", "1", "-t", num(dur), "-framerate", String(fps), "-i", await resolveMedia(io.stat, mediaPathFor, c.file));
   }
   const imageOverlayInput = new Map<(typeof overlayVideos)[number], number>();
   for (const oc of overlayVideos) {
     if (!oc.image) continue;
-    const ospeed = oc.speed && oc.speed > 0 ? oc.speed : 1;
-    const olen = Math.max(0.1, (oc.out - oc.in) / ospeed);
+    const olen = spanLen(oc);
     imageOverlayInput.set(oc, nInputs++);
     inputs.push("-loop", "1", "-t", num(olen), "-framerate", String(fps), "-i", await resolveMedia(io.stat, mediaPathFor, oc.file));
   }
@@ -644,7 +660,7 @@ export async function runExport(
   for (let j = 0; j < spec.clips.length; j++) {
     const c = spec.clips[j];
     if (!c.mask) continue;
-    const dur = c.file ? Math.max(0.1, (c.out - c.in) / clipRate(c)) : Math.max(0, c.out - c.in);
+    const dur = c.file ? spanLen(c) : Math.max(0, c.out - c.in);
     const idx = await maskInput(c.mask, dur, `mask_clip_${j}`);
     if (idx !== undefined) clipMaskInput.set(j, idx);
   }
@@ -652,8 +668,7 @@ export async function runExport(
   for (let k = 0; k < overlayVideos.length; k++) {
     const oc = overlayVideos[k];
     if (!oc.mask) continue;
-    const ospeed = oc.speed && oc.speed > 0 ? oc.speed : 1;
-    const olen = Math.max(0.1, (oc.out - oc.in) / ospeed);
+    const olen = spanLen(oc);
     const idx = await maskInput(oc.mask, olen, `mask_ovl_${k}`);
     if (idx !== undefined) overlayMaskInput.set(oc, idx);
   }
@@ -663,7 +678,7 @@ export async function runExport(
   for (let j = 0; j < spec.clips.length; j++) {
     const c = spec.clips[j];
     if (!c.shadow) continue;
-    const dur = c.file ? Math.max(0.1, (c.out - c.in) / clipRate(c)) : Math.max(0, c.out - c.in);
+    const dur = c.file ? spanLen(c) : Math.max(0, c.out - c.in);
     const idx = await maskInput(c.shadow, dur, `shadow_clip_${j}`);
     if (idx !== undefined) clipShadowInput.set(j, idx);
   }
@@ -671,10 +686,9 @@ export async function runExport(
   for (let k = 0; k < overlayVideos.length; k++) {
     const oc = overlayVideos[k];
     if (!oc.shadow) continue;
-    const ospeed = oc.speed && oc.speed > 0 ? oc.speed : 1;
     // An overlay's shadow lands on the timeline beside the clip, so it plays
     // for the clip's whole window rather than the segment's local clock.
-    const olen = Math.max(0.1, (oc.out - oc.in) / ospeed);
+    const olen = spanLen(oc);
     const idx = await maskInput(oc.shadow, olen, `shadow_ovl_${k}`);
     if (idx !== undefined) overlayShadowInput.set(oc, idx);
   }
@@ -688,14 +702,13 @@ export async function runExport(
   for (let j = 0; j < spec.clips.length; j++) {
     const c = spec.clips[j];
     if (!c.border) continue;
-    const dur = c.file ? Math.max(0.1, (c.out - c.in) / clipRate(c)) : Math.max(0, c.out - c.in);
+    const dur = c.file ? spanLen(c) : Math.max(0, c.out - c.in);
     clipBorderInput.set(j, borderStill(c.border, dur));
   }
   const overlayBorderInput = new Map<(typeof overlayVideos)[number], number>();
   for (const oc of overlayVideos) {
     if (!oc.border) continue;
-    const ospeed = oc.speed && oc.speed > 0 ? oc.speed : 1;
-    const olen = Math.max(0.1, (oc.out - oc.in) / ospeed);
+    const olen = spanLen(oc);
     overlayBorderInput.set(oc, borderStill(oc.border, olen));
   }
 
@@ -785,7 +798,70 @@ export async function runExport(
   // land everything after the gap later than the timeline shows, drifting
   // burned-in captions off the picture.
   const clipDur = (c: ExportSpec["clips"][number]) =>
-    c.file ? Math.max(0.1, (c.out - c.in) / clipRate(c)) : Math.max(0, c.out - c.in);
+    c.file ? spanLen(c) : Math.max(0, c.out - c.in);
+
+  // A clip whose rate changes through its footage gets its sound baked ahead
+  // of the graph (retimeAudio.ts): the span plus the handles a crossing can
+  // reach into, laid in timeline seconds. The WAV joins the inputs and every
+  // audio read of that clip comes from it, needing no tempo.
+  type Sounding = {
+    file: string;
+    in: number;
+    out: number;
+    speed?: number;
+    speedCurve?: SpeedNode[];
+    soundBack?: number;
+    soundAhead?: number;
+    muted?: boolean;
+    hidden?: boolean;
+    image?: boolean;
+  };
+  const baked = new Map<Sounding, BakedAudio & { idx: number }>();
+  const bakeTargets: { c: Sounding; tag: string }[] = [
+    ...spec.clips.map((c, j) => ({ c, tag: `clip_${j}` })),
+    ...overlayVideos.map((oc, k) => ({ c: oc, tag: `ovl_${k}` })),
+    ...spec.audio.map((a, k) => ({ c: a, tag: `snd_${k}` })),
+  ];
+  for (const { c, tag } of bakeTargets) {
+    const rt = retimeOf(c);
+    if (rt.uniform || !c.file || c.image || c.muted || c.hidden || !audioPresence.get(c.file)) continue;
+    const file = path.join(job.tmpDir, `retime_${tag}.wav`);
+    const src = await resolveMedia(io.stat, mediaPathFor, c.file);
+    const bake = await bakeRetimedAudio(
+      {
+        ffmpeg: (args) => io.runFfmpeg(job, args),
+        readFile: (p) => io.readFile(p),
+        writeFile: (p, data) => io.writeFile(p, data),
+        unlink: (p) => io.unlink(p),
+      },
+      src,
+      rt,
+      c.soundBack ?? 0,
+      c.soundAhead ?? 0,
+      file
+    );
+    const idx = nInputs++;
+    inputs.push("-i", file);
+    baked.set(c, { ...bake, idx });
+  }
+  /**
+   * The head of an audio chain reading a clip's sound over the timeline-local
+   * window `[fromT, toT]` (seconds from the clip's head; negative reaches
+   * into the back handle): the input, its trim, and the tempo that lays it
+   * at the clip's rate. A baked clip is read from its WAV in timeline seconds
+   * and needs none.
+   */
+  const audioRead = (c: Sounding, fromT: number, toT: number): string => {
+    const b = baked.get(c);
+    if (b) {
+      return `[${b.idx}:a]atrim=${num(Math.max(0, b.back + fromT))}:${num(Math.max(0, b.back + toT))},asetpts=PTS-STARTPTS,`;
+    }
+    const rt = retimeOf(c);
+    const tempo = rt.rate !== 1 ? `${atempoChain(rt.rate)},` : "";
+    return `[${inputIndex.get(c.file)!}:a]atrim=${num(rt.srcAt(fromT))}:${num(rt.srcAt(toT))},asetpts=PTS-STARTPTS,${tempo}`;
+  };
+  /** Timeline seconds of source a clip has before its head, at its own pace. */
+  const headRoom = (c: Sounding) => Math.max(0, -retimeOf(c).tAt(0));
   // Where each track-0 segment lands on the joined timeline: transitions
   // pad their overlap, so the layout is the plain running sum of durations.
   const clipStarts: number[] = [];
@@ -1092,7 +1168,7 @@ export async function runExport(
   // Per-clip normalized video + audio segments for the join below.
   spec.clips.forEach((c, j) => {
     const idx = c.image ? imageClipInput.get(j)! : inputIndex.get(c.file)!;
-    const speed = clipRate(c);
+    const rt = retimeOf(c);
     const dur = clipDur(c);
     const prevC = spec.clips[j - 1];
     const nextC = spec.clips[j + 1];
@@ -1148,7 +1224,7 @@ export async function runExport(
     } else {
       timebase = c.image
         ? `[${idx}:v]setpts=PTS-STARTPTS`
-        : `[${idx}:v]trim=${num(c.in)}:${num(c.out)},setpts=(PTS-STARTPTS)/${num(speed)}`;
+        : `[${idx}:v]trim=${num(c.in)}:${num(c.out)},setpts=${retimedPts(rt)}`;
     }
     if ((c.image || rmIn || videoPresence.get(c.file)) && !c.hidden) {
       const region = regionPx(c.frame, W, H);
@@ -1319,7 +1395,6 @@ export async function runExport(
       );
     }
     if (!c.muted && !c.hidden && audioPresence.get(c.file)) {
-      const tempo = speed !== 1 ? `${atempoChain(speed)},` : "";
       const vol = `${soundChain(c.sound)}${(c.volume ?? 1) !== 1 ? `volume=${num(c.volume ?? 1)},` : ""}`;
       // The picture's fade edges carry the sound with them; zoom edges don't.
       const afades =
@@ -1333,7 +1408,7 @@ export async function runExport(
           crossExpr(dur, crossHalf[j + 1] ?? 0, false),
         ]);
       filters.push(
-        `[${idx}:a]atrim=${num(c.in)}:${num(c.out)},asetpts=PTS-STARTPTS,${tempo}` +
+        audioRead(c, 0, dur) +
           `aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,${vol}` +
           `apad=whole_dur=${num(dur)},atrim=0:${num(dur)}${afades}[a${j}]`
       );
@@ -1426,18 +1501,16 @@ export async function runExport(
   const handleStream = (
     src: (typeof spec.clips)[number],
     key: string,
-    from: number,
-    seconds: number,
+    fromT: number,
+    toT: number,
     at: number,
     expr: string
   ) => {
-    if (seconds <= 0.01 || src.muted || src.hidden || src.image) return;
+    if (toT - fromT <= 0.01 || src.muted || src.hidden || src.image) return;
     if (!audioPresence.get(src.file)) return;
-    const rate = clipRate(src);
     const lab = `xh${key}`;
     filters.push(
-      `[${inputIndex.get(src.file)!}:a]atrim=${num(from)}:${num(from + seconds * rate)},` +
-        `asetpts=PTS-STARTPTS,${rate !== 1 ? `${atempoChain(rate)},` : ""}` +
+      audioRead(src, fromT, toT) +
         `aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,` +
         `${soundChain(src.sound)}` +
         `${(src.volume ?? 1) !== 1 ? `volume=${num(src.volume ?? 1)},` : ""}anull${crossFilters([expr])},` +
@@ -1453,11 +1526,12 @@ export async function runExport(
     const ahead = Math.min(prevC.soundAhead ?? 0, half);
     // Never reach past the head of the source: a handle is what the trim left
     // behind, and there is none before zero.
-    const back = Math.min(c.soundBack ?? 0, half, c.in / clipRate(c));
+    const back = Math.min(c.soundBack ?? 0, half, headRoom(c));
     // The outgoing clip, still sounding past its out point.
-    handleStream(prevC, `a${j}`, prevC.out, ahead, cut, crossExpr(0, half, false));
+    const prevDur = clipDur(prevC);
+    handleStream(prevC, `a${j}`, prevDur, prevDur + ahead, cut, crossExpr(0, half, false));
     // The incoming clip, already sounding before its in point.
-    handleStream(c, `b${j}`, c.in - back * clipRate(c), back, cut - back, crossExpr(back, half, true));
+    handleStream(c, `b${j}`, -back, 0, cut - back, crossExpr(back, half, true));
   });
 
   // Join the segments. Clips abut — a transition claims no layout — so every
@@ -1520,8 +1594,8 @@ export async function runExport(
     const orIn = overlayRemovalInput.get(oc);
     if (!oc.image && !orIn && !videoPresence.get(oc.file)) return onto;
     const idx = oc.image ? imageOverlayInput.get(oc)! : inputIndex.get(oc.file)!;
-    const ospeed = oc.speed && oc.speed > 0 ? oc.speed : 1;
-    const olen = Math.max(0.1, (oc.out - oc.in) / ospeed);
+    const ort = retimeOf(oc);
+    const olen = spanLen(oc);
     const end = Math.min(oc.start + olen, spec.duration);
     const region = regionPx(oc.frame, W, H);
     const cover = oc.fit === "fill" || (oc.fit == null && !region);
@@ -1588,7 +1662,7 @@ export async function runExport(
     } else {
       timebase = oc.image
         ? `[${idx}:v]setpts=PTS-STARTPTS`
-        : `[${idx}:v]trim=${num(oc.in)}:${num(oc.out)},setpts=(PTS-STARTPTS)/${num(ospeed)}`;
+        : `[${idx}:v]trim=${num(oc.in)}:${num(oc.out)},setpts=${retimedPts(ort)}`;
     }
     let core = `${timebase},fps=${fps},${framing},setsar=1,${orIn ? "" : colorFix.get(oc.file) ?? ""}${gradeChain(orIn ? undefined : oc.grade)}format=${orIn ? "yuva420p" : lookFmt}`;
     // Looks bake into footage overlays only: an image may carry alpha, which
@@ -1706,12 +1780,11 @@ export async function runExport(
       filters.push(`[${onto}][${seg}]overlay=${pos}:${enable}:eof_action=pass[${next}]`);
     }
     if (!oc.muted && audioPresence.get(oc.file)) {
-      const tempo = ospeed !== 1 ? `${atempoChain(ospeed)},` : "";
       const vol = (oc.volume ?? 1) !== 1 ? `volume=${num(oc.volume ?? 1)},` : "";
       // A cross dissolve reaches into the handle either side of its cut, so
       // this stream starts before the clip's own head and runs past its tail;
       // everything timed inside it shifts by that head reach.
-      const back = Math.min(oc.soundBack ?? 0, hs, oc.in / ospeed);
+      const back = Math.min(oc.soundBack ?? 0, hs, headRoom(oc));
       const ahead = Math.min(oc.soundAhead ?? 0, ts);
       // The picture's fade edges carry the sound with them; zoom edges don't.
       // A cross dissolve's ramps are equal-power and reach half level on the
@@ -1728,8 +1801,7 @@ export async function runExport(
       const delayMs = Math.max(0, Math.round((oc.start - back) * 1000));
       const lab = `ovs${k}`;
       filters.push(
-        `[${idx}:a]atrim=${num(oc.in - back * ospeed)}:${num(oc.out + ahead * ospeed)},` +
-          `asetpts=PTS-STARTPTS,${tempo}` +
+        audioRead(oc, -back, olen + ahead) +
           `aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,` +
           `${soundChain(oc.sound)}${vol}${afades}anull` +
           `${crosses},adelay=${delayMs}:all=1[${lab}]`
@@ -1843,8 +1915,7 @@ export async function runExport(
   const duckWindows = spec.audio
     .filter((a) => a.duck !== undefined && a.duck < 1)
     .map((a) => {
-      const speed = a.speed && a.speed > 0 ? a.speed : 1;
-      const len = Math.max(0.1, (a.out - a.in) / speed);
+      const len = spanLen(a);
       return { from: a.start, to: a.start + len, gain: Math.max(0, a.duck!) };
     });
   // Flatten to non-overlapping segments at the lowest covering gain: chained
@@ -1880,20 +1951,17 @@ export async function runExport(
   // Soundtrack clips: trim, gain, shift into place, mix with clip audio.
   const soundLabels: string[] = [];
   spec.audio.forEach((a, k) => {
-    const idx = inputIndex.get(a.file)!;
     if (!audioPresence.get(a.file)) return;
-    const speed = a.speed && a.speed > 0 ? a.speed : 1;
     const delayMs = Math.max(0, Math.round(a.start * 1000));
     // Timeline length after any speed change; fade offsets are in these
-    // (post-tempo) seconds, so atempo runs before the fades.
-    const len = Math.max(0.1, (a.out - a.in) / speed);
-    const tempo = speed !== 1 ? `${atempoChain(speed)},` : "";
+    // (post-tempo) seconds, so the tempo runs before the fades.
+    const len = spanLen(a);
     const fades: string[] = [];
     if (a.fadeIn && a.fadeIn > 0.01) fades.push(`afade=t=in:st=0:d=${num(a.fadeIn)}`);
     if (a.fadeOut && a.fadeOut > 0.01)
       fades.push(`afade=t=out:st=${num(Math.max(0, len - a.fadeOut))}:d=${num(a.fadeOut)}`);
     filters.push(
-      `[${idx}:a]atrim=${num(a.in)}:${num(a.out)},asetpts=PTS-STARTPTS,${tempo}` +
+      audioRead(a, 0, len) +
         `aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,` +
         `${soundChain(a.sound)}volume=${num(a.volume)},` +
         (fades.length ? fades.join(",") + "," : "") +

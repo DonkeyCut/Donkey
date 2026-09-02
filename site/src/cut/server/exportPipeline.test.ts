@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { retimeOf } from "@donkeycut/effects-kit";
 import {
   runExport,
   type ExportPipelineIO,
@@ -14,6 +15,8 @@ const graphFor = async (over: Partial<ExportSpec>): Promise<string[]> => {
   const io: ExportPipelineIO = {
     stat: (async () => ({ isFile: () => true })) as unknown as ExportPipelineIO["stat"],
     writeFile: (async () => {}) as unknown as ExportPipelineIO["writeFile"],
+    readFile: (async () => new Uint8Array(0)) as unknown as ExportPipelineIO["readFile"],
+    unlink: (async () => {}) as unknown as ExportPipelineIO["unlink"],
     hasStream: async () => true,
     videoColorInfo: async () => null,
     h264Encoder: async () => "libx264",
@@ -29,10 +32,7 @@ const graphFor = async (over: Partial<ExportSpec>): Promise<string[]> => {
     fps: 30,
     crf: 24,
     preset: "veryfast",
-    duration: clips.reduce(
-      (s, c) => s + (c.out - c.in) / (c.speed && c.speed > 0 ? c.speed : 1),
-      0
-    ),
+    duration: clips.reduce((s, c) => s + retimeOf(c).len, 0),
     clips,
     audio: [],
     overlays: [],
@@ -45,7 +45,7 @@ const graphFor = async (over: Partial<ExportSpec>): Promise<string[]> => {
     log: [],
   };
   await runExport(job, spec, (f) => `/media/${f}`, io);
-  const enc = ffmpegCalls[0];
+  const enc = ffmpegCalls.find((a) => a.includes("-filter_complex"))!;
   return enc[enc.indexOf("-filter_complex") + 1].split(";");
 };
 
@@ -318,6 +318,24 @@ describe("export filtergraph timebases", () => {
     });
     expect(g.join(";")).toContain("xfade=");
     expect(xfadeMismatches(g)).toEqual([]);
+  });
+});
+
+describe("a speed curve in the filtergraph", () => {
+  test("a curved clip lays its picture through the map and reads baked sound", async () => {
+    const curved = clip("a.mp4", { speedCurve: [[0, 1], [4, 4]] });
+    const g = await graphFor({ clips: [curved, clip("b.mp4")] });
+    const video = g.find((f) => f.startsWith("[0:v]trim="))!;
+    expect(video).toContain("setpts='(clip(T-STARTT");
+    expect(video).not.toContain("(PTS-STARTPTS)/");
+    // The baked WAV joins the inputs after the two media files, and the
+    // clip's sound is read from it in timeline seconds with no tempo.
+    const audio = g.find((f) => f.startsWith("[2:a]atrim="))!;
+    expect(audio).toBeTruthy();
+    expect(audio).not.toContain("atempo");
+    expect(audio).toContain(`apad=whole_dur=${retimeOf(curved).len.toFixed(3)}`);
+    // The plain clip still reads its own input at source seconds.
+    expect(g.some((f) => f.startsWith("[1:a]atrim=0.000:4.000"))).toBe(true);
   });
 });
 

@@ -83,6 +83,7 @@ export interface TemplateLayer {
   opacity?: number;
   muted: boolean;
   speed?: number;
+  speedCurve?: [number, number][];
   sound?: ClipSound;
   track: number;
   asClip?: boolean; // re-materializes as a track-0 timeline clip rather than an overlay
@@ -96,6 +97,7 @@ export interface TemplateAudio {
   fadeIn?: number;
   fadeOut?: number;
   speed?: number;
+  speedCurve?: [number, number][];
   sound?: ClipSound;
 }
 export interface LibraryTemplate {

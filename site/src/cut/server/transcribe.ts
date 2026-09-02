@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { alignCues } from "../lib/cueAlign";
@@ -7,6 +7,8 @@ import { assertGraphSafe } from "./filterGraph";
 import { assertLocalRuntime } from "./local-only";
 import { createJobRegistry } from "./jobRegistry";
 import { mediaPath, readProject } from "./projects";
+import { retimeOf, type SpeedNode } from "@donkeycut/effects-kit";
+import { bakeRetimedAudio, type BakedAudio } from "./retimeAudio";
 import { atempoChain, findOnPath, hasStream, num, round } from "./util";
 
 /** The audible slice of the cut, in timeline time (mirrors ExportSpec). */
@@ -20,10 +22,19 @@ export interface TranscribeSpec {
     out: number;
     muted: boolean;
     speed?: number;
+    speedCurve?: SpeedNode[];
     /** Cross-dissolve overlap into the next clip, timeline seconds. */
     transition?: number;
   }[];
-  audio: { file: string; in: number; out: number; start: number; volume: number; speed?: number }[];
+  audio: {
+    file: string;
+    in: number;
+    out: number;
+    start: number;
+    volume: number;
+    speed?: number;
+    speedCurve?: SpeedNode[];
+  }[];
 }
 
 interface Word {
@@ -341,17 +352,47 @@ async function runTranscribe(job: TranscribeJob, spec: TranscribeSpec) {
     // so the transcript's cue times line up with what the user sees. A gap
     // spacer (no file) keeps its exact length — flooring it at 0.1s would
     // land every cue after the gap late.
-    const clipDur = (c: TranscribeSpec["clips"][number]) => {
-      const speed = c.speed && c.speed > 0 ? c.speed : 1;
-      return c.file ? Math.max(0.1, (c.out - c.in) / speed) : Math.max(0, c.out - c.in);
+    const clipDur = (c: TranscribeSpec["clips"][number]) =>
+      c.file ? Math.max(0.1, retimeOf(c).len) : Math.max(0, c.out - c.in);
+    // A clip whose rate changes through its footage is baked to a WAV in
+    // timeline seconds first (the same stretch the export and the preview
+    // use), so its words land where they play.
+    type Sounding = { file: string; in: number; out: number; speed?: number; speedCurve?: SpeedNode[] };
+    const baked = new Map<Sounding, BakedAudio & { idx: number }>();
+    const bakeIO = {
+      ffmpeg: async (args: string[]) => {
+        await run("ffmpeg", args);
+      },
+      readFile: (p: string) => readFile(p),
+      writeFile: (p: string, data: Uint8Array) => writeFile(p, data),
+      unlink: (p: string) => unlink(p),
+    };
+    const curved: { c: Sounding; tag: string }[] = [
+      ...spec.clips.filter((c) => !c.muted).map((c, j) => ({ c, tag: `clip_${j}` })),
+      ...spec.audio.map((a, k) => ({ c: a, tag: `snd_${k}` })),
+    ];
+    for (const { c, tag } of curved) {
+      const rt = retimeOf(c);
+      if (rt.uniform || !c.file || !audible.get(c.file)) continue;
+      const file = path.join(tmpDir, `retime_${tag}.wav`);
+      const bake = await bakeRetimedAudio(bakeIO, mediaPath(spec.projectId, c.file), rt, 0, 0, file);
+      const idx = inputs.length / 2;
+      inputs.push("-i", file);
+      baked.set(c, { ...bake, idx });
+    }
+    /** The head of a chain reading a clip's sound over its whole span. */
+    const audioRead = (c: Sounding, len: number) => {
+      const b = baked.get(c);
+      if (b) return `[${b.idx}:a]atrim=${num(b.back)}:${num(b.back + len)},asetpts=PTS-STARTPTS,`;
+      const rate = retimeOf(c).rate;
+      const tempo = rate !== 1 ? `${atempoChain(rate)},` : "";
+      return `[${inputIndex.get(c.file)}:a]atrim=${num(c.in)}:${num(c.out)},asetpts=PTS-STARTPTS,${tempo}`;
     };
     spec.clips.forEach((c, j) => {
-      const speed = c.speed && c.speed > 0 ? c.speed : 1;
       const dur = clipDur(c);
       if (!c.muted && audible.get(c.file)) {
-        const tempo = speed !== 1 ? `${atempoChain(speed)},` : "";
         filters.push(
-          `[${inputIndex.get(c.file)}:a]atrim=${num(c.in)}:${num(c.out)},asetpts=PTS-STARTPTS,${tempo}` +
+          audioRead(c, dur) +
             `aresample=16000,aformat=sample_fmts=s16:channel_layouts=mono,` +
             `apad=whole_dur=${num(dur)},atrim=0:${num(dur)}[a${j}]`
         );
@@ -391,10 +432,8 @@ async function runTranscribe(job: TranscribeJob, spec: TranscribeSpec) {
     const soundLabels: string[] = [];
     spec.audio.forEach((a, k) => {
       if (!audible.get(a.file)) return;
-      const speed = a.speed && a.speed > 0 ? a.speed : 1;
-      const tempo = speed !== 1 ? `${atempoChain(speed)},` : "";
       filters.push(
-        `[${inputIndex.get(a.file)}:a]atrim=${num(a.in)}:${num(a.out)},asetpts=PTS-STARTPTS,${tempo}` +
+        audioRead(a, Math.max(0.1, retimeOf(a).len)) +
           `aresample=16000,aformat=sample_fmts=s16:channel_layouts=mono,` +
           `volume=${num(a.volume)},adelay=${Math.max(0, Math.round(a.start * 1000))}:all=1[snd${k}]`
       );
