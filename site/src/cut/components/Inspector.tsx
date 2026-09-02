@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, Frame, Italic, Loader2, Palette, Scissors, Smile, Trash2, Type, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useSpeedCurveUi } from "@/cut/lib/speedCurveUi";
 import { EmojiPicker } from "@/cut/components/EmojiPicker";
 import { FontPicker } from "@/cut/components/FontPicker";
 import {
@@ -65,6 +66,9 @@ import {
   type OverlayAnimStyle,
   type OverlayLoopStyle,
   type WordEffectId,
+  retimeOf,
+  flatSpeedCurve,
+  hasSpeedCurve,
 } from "@donkeycut/effects-kit";
 import { clipWindow, maxClipFade, useEditor, type EditorState } from "@/cut/lib/store";
 import { usePanelView } from "@/cut/lib/panelViews";
@@ -995,8 +999,11 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
   const turnCk = useSliderCheckpoint();
   const fadeCk = useSliderCheckpoint();
   const [speedDraft, setSpeedDraft] = useState<number | null>(null);
-  const speed = speedDraft ?? clip.speed ?? 1;
-  const speedLen = (clip.out - clip.in) / (speed > 0 ? speed : 1);
+  const curved = hasSpeedCurve(clip);
+  const speed = speedDraft ?? (curved ? retimeOf(clip).rate : (clip.speed ?? 1));
+  const speedLen =
+    curved && speedDraft === null ? retimeOf(clip).len : (clip.out - clip.in) / (speed > 0 ? speed : 1);
+  const curveOpen = useSpeedCurveUi((s) => s.clipId === clip.id);
   // Typing can trim out to the source's end but no further; an image has no
   // intrinsic duration, so its clip can be any length.
   const maxOut = asset && asset.type !== "image" ? asset.duration : Infinity;
@@ -1100,12 +1107,38 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
           />
           <ResetButton
             title="Reset speed"
-            show={Math.abs(speed - 1) > 1e-4}
+            show={curved || Math.abs(speed - 1) > 1e-4}
             onClick={() => {
               useEditor.getState().setClipSpeed(clip.id, 1);
               setSpeedDraft(null);
             }}
           />
+        </Row>
+        <Row label="Speed Curve">
+          <Button
+            variant={curveOpen ? "secondary" : "outline"}
+            size="sm"
+            className="h-6 px-2 text-[11px]"
+            title="Shape the speed across the footage with nodes"
+            onClick={() => {
+              const ui = useSpeedCurveUi.getState();
+              if (curveOpen) {
+                ui.close();
+                return;
+              }
+              if (!curved) {
+                useEditor.getState().setClipSpeedCurve(clip.id, flatSpeedCurve(clip));
+              }
+              ui.open(clip.id);
+            }}
+          >
+            {curveOpen ? "Editing" : curved ? "Edit" : "Add"}
+          </Button>
+          {curved && (
+            <span className="text-[11px] tabular-nums text-muted-foreground">
+              {clip.speedCurve!.length} nodes
+            </span>
+          )}
         </Row>
 
         {/* Picture */}
@@ -1322,7 +1355,7 @@ function ClipGeneratedAudio({ clip }: { clip: VideoClip }) {
     );
     return s.audioClips
       .filter((a) => {
-        const len = (a.out - a.in) / (a.speed && a.speed > 0 ? a.speed : 1);
+        const len = retimeOf(a).len;
         return (
           voiceAssets.has(a.assetId) && a.start < sp.start + sp.len && a.start + len > sp.start
         );
@@ -1425,9 +1458,11 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
     ck.begin();
     updateAudioTransient(clip.id, patch);
   };
-  // Detached audio can carry a playback rate; its timeline length is (out-in)/speed.
-  const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
-  const len = (clip.out - clip.in) / speed;
+  // Detached audio carries the picture's rate, so its length goes through it;
+  // the slider shows one number — the average under a curve — and setting it
+  // makes the rate uniform.
+  const len = retimeOf(clip).len;
+  const speed = retimeOf(clip).rate;
   const maxFade = maxClipFade(clip);
   // Commit closes the checkpoint setAudio opened (or opens+closes one for a
   // typed entry), so any adjustment lands as a single undo step.
@@ -1506,13 +1541,13 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
             scrubMax={Infinity}
             format={formatSpeed}
             parse={parseSpeedInput}
-            onDraft={(v) => setAudio({ speed: Math.abs(v - 1) < 1e-4 ? undefined : v })}
-            onCommit={(v) => commitAudio({ speed: Math.abs(v - 1) < 1e-4 ? undefined : v })}
+            onDraft={(v) => setAudio({ speed: Math.abs(v - 1) < 1e-4 ? undefined : v, speedCurve: undefined })}
+            onCommit={(v) => commitAudio({ speed: Math.abs(v - 1) < 1e-4 ? undefined : v, speedCurve: undefined })}
           />
           <ResetButton
             title="Reset speed"
-            show={Math.abs(speed - 1) > 1e-4}
-            onClick={() => commitAudio({ speed: undefined })}
+            show={Math.abs(speed - 1) > 1e-4 || !!clip.speedCurve}
+            onClick={() => commitAudio({ speed: undefined, speedCurve: undefined })}
           />
         </Row>
         <Row label="Volume">

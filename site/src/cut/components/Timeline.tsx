@@ -58,7 +58,7 @@ import { useBrushUi } from "@/cut/lib/removal/brushUi";
 import { useMatteBakes } from "@/cut/lib/removal/bakeJobs";
 import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
-import { EFFECT_LABELS, type EffectId } from "@donkeycut/effects-kit";
+import { EFFECT_LABELS, hasSpeedCurve, retimeOf, SPEED_CURVE_MAX, SPEED_CURVE_MIN, type EffectId, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
 import { assetIsSilent, emptySubtitles, IMAGE_CLIP_SECONDS, isAudioTransition, SHAPE_LABELS, TRANSITION_MAX, TRANSITION_STYLE_LABELS, transitionBarStart, transitionDefaultSeconds, type ShapeKind } from "@/cut/lib/types";
 import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, Selection, StickerOverlay, SubtitleCue, TimelineTransition, TransitionBoundaryKind, TransitionStyle, VideoClip } from "@/cut/lib/types";
 import { isLottieAsset } from "@/cut/lib/lottieAssets";
@@ -623,7 +623,7 @@ export function Timeline() {
   // A row whose clips carry mask keys grows by the rail band, so the diamonds
   // sit fully below the clips with the usual row gap kept under them.
   const railFor = (list: { clip: VideoClip }[]) =>
-    list.some((sp) => sp.clip.mask?.kf?.length) ? KEYRAIL_EXTRA : 0;
+    list.some((sp) => sp.clip.mask?.kf?.length || hasSpeedCurve(sp.clip)) ? KEYRAIL_EXTRA : 0;
   const rail0 = railFor(spans);
   const rowH0 = videoRowH(spans);
   // Per-upper-track spans: each track carries its own transitions, so its row
@@ -3757,7 +3757,7 @@ function ClipView({
   const spine = lane === "clip";
   const loading = useEditor((s) => s.loadingMedia.has(asset.fileName));
   const baking = useMatteBakes((s) => s.jobs[clip.id]?.status === "running");
-  const speed = clipSpeed(clip);
+  const rt = retimeOf(clip);
   // Every box is its clip's whole footprint. Clips never overlap — a
   // transition is a render-time blend at the cut, drawn as the bar above the
   // tracks — so a box's width is the clip's own length, whatever joins it.
@@ -3766,7 +3766,7 @@ function ClipView({
   // out inside it — the strip, the dots — measures against this, not `w`.
   const barW = Math.max(10, w - CLIP_GAP);
   const filmIn = clip.in;
-  const filmOut = filmIn + span.len * speed;
+  const filmOut = clip.out;
 
   const startFrame = useEdgeFrame(asset, filmIn, `${clip.id}:in`);
   const endFrame = useEdgeFrame(asset, filmOut, `${clip.id}:out`);
@@ -3795,16 +3795,16 @@ function ClipView({
         filmIn,
         w,
         pps,
-        speed,
+        rt,
         FILM_H,
         26,
         { start: startFrame, end: endFrame },
         view
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [asset, filmIn, w, pps, speed, startFrame, endFrame, filmGen, view]
+    [asset, filmIn, w, pps, rt, startFrame, endFrame, filmGen, view]
   );
-  useTileFrames(boxRef, clip.id, asset, filmstrip, filmIn, w, pps, speed, onTileFrame);
+  useTileFrames(boxRef, clip.id, asset, filmstrip, filmIn, w, pps, rt.key, onTileFrame);
 
   // The move gesture is the shared lane behavior (parting, snapping); its
   // verticality is the video placement system — the other tracks and the new
@@ -3862,7 +3862,7 @@ function ClipView({
         const rect = e.currentTarget.getBoundingClientRect();
         onFrameMenu(e, {
           asset,
-          srcT: filmIn + ((e.clientX - rect.left) / pps) * speed,
+          srcT: rt.srcAt((e.clientX - rect.left) / pps),
           from: { x: e.clientX, top: rect.top, height: rect.height },
         });
       }}
@@ -3875,7 +3875,7 @@ function ClipView({
           className="tl-clip-wave pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-b from-[#59c09d] to-[#43b18d]"
           style={{ height: WAVE_H }}
         >
-          <WaveformCanvas asset={asset} from={filmIn} to={filmOut} w={barW} h={WAVE_H - 4} className="inset-x-0 inset-y-0.5" />
+          <WaveformCanvas asset={asset} from={filmIn} to={filmOut} w={barW} h={WAVE_H - 4} map={rt.uniform ? undefined : (px) => rt.srcAt(px / pps)} className="inset-x-0 inset-y-0.5" />
         </div>
       )}
       {selected && (
@@ -3910,13 +3910,22 @@ function ClipView({
           onToggle={() => useEditor.getState().updateClip(clip.id, { muted: !clip.muted })}
         />
       )}
-      {(clip.speed ?? 1) !== 1 && (
+      {!rt.uniform ? (
         <span
           className="tl-speed-chip absolute right-[30px] bottom-1 z-2 rounded-[5px] bg-black/70 px-1 py-px font-mono text-[9.5px] tabular-nums text-white"
-          title={`${clip.speed}× speed`}
+          title={`Speed curve · ${+rt.rate.toFixed(2)}× on average`}
         >
-          {+(clip.speed ?? 1).toFixed(2)}×
+          ∿ {+rt.rate.toFixed(1)}×
         </span>
+      ) : (
+        rt.rate !== 1 && (
+          <span
+            className="tl-speed-chip absolute right-[30px] bottom-1 z-2 rounded-[5px] bg-black/70 px-1 py-px font-mono text-[9.5px] tabular-nums text-white"
+            title={`${rt.rate}× speed`}
+          >
+            {+rt.rate.toFixed(2)}×
+          </span>
+        )
       )}
       {!loading && (
         <HideChip
@@ -3942,7 +3951,7 @@ function ClipView({
           ) : null}
         </ClipMenu>
       )}
-      <ClipStrokeMarks clip={clip} spanStart={span.start} speed={speed} pps={pps} barW={barW} />
+      <ClipStrokeMarks clip={clip} spanStart={span.start} retime={rt} pps={pps} barW={barW} />
       {/* Keys sit on the bar where they fall — pose and mask tracks both —
           so the animation is visible without opening the inspector. */}
       {(clip.kf ?? []).map((k) => (
@@ -3958,7 +3967,7 @@ function ClipView({
       {/* Drawn wherever the source has a grid: on the band when there is one,
           along the bar's bottom edge when the clip plays silent. Every edge
           snaps to them either way. */}
-      <BeatDots asset={asset} from={filmIn} to={filmOut} speed={speed} pps={pps} w={barW} />
+      <BeatDots asset={asset} from={filmIn} to={filmOut} retime={rt} pps={pps} w={barW} />
       <span
         className={cn(trimFor(barW), "tl-trim-l left-0")}
         onPointerDown={(e) => startLaneTrim(e, lane, clip.id, "l", ui)}
@@ -3977,7 +3986,76 @@ function ClipView({
       boxH={hasWave ? VIDEO_H - 4 : FILM_H}
       hidden={!!drag}
     />
+    <ClipSpeedRail
+      retime={rt}
+      start={span.start}
+      pps={pps}
+      w={w}
+      view={view}
+      boxH={hasWave ? VIDEO_H - 4 : FILM_H}
+      hidden={!!drag || offscreen || !!clip.mask?.kf?.length}
+    />
     </>
+  );
+}
+
+/** A curved clip's pace, drawn on the rail under its box: the rate through
+ * the clip's own timeline on a log scale, 1× as the dashed midline, so a
+ * ramp reads at a glance without opening the editor. It shares the rail with
+ * the mask keys and yields to them. */
+function ClipSpeedRail({
+  retime,
+  start,
+  pps,
+  w,
+  view,
+  boxH,
+  hidden,
+}: {
+  retime: Retime;
+  start: number;
+  pps: number;
+  w: number;
+  /** The stretch of the box the scroller shows — the sketch is drawn for
+   * that slice, so a long clip at a deep zoom costs what is on screen. */
+  view: { lo: number; hi: number };
+  boxH: number;
+  hidden: boolean;
+}) {
+  if (hidden || retime.uniform) return null;
+  const barW = Math.max(10, w - CLIP_GAP);
+  const from = Math.max(0, Math.min(barW, view.lo));
+  const to = Math.max(from, Math.min(barW, view.hi));
+  if (to - from < 1) return null;
+  const h = 14;
+  const lo = Math.log10(SPEED_CURVE_MIN);
+  const hi = Math.log10(SPEED_CURVE_MAX);
+  const yOf = (rate: number) => (1 - (Math.log10(rate) - lo) / (hi - lo)) * (h - 2) + 1;
+  const step = 3;
+  const pts: string[] = [];
+  for (let x = from; x <= to; x += step) {
+    pts.push(`${(x - from).toFixed(1)},${yOf(retime.rateAt(Math.min(retime.len, x / pps))).toFixed(1)}`);
+  }
+  const lastX = (to - from).toFixed(1);
+  pts.push(`${lastX},${yOf(retime.rateAt(Math.min(retime.len, to / pps))).toFixed(1)}`);
+  const mid = yOf(1).toFixed(1);
+  const width = to - from;
+  return (
+    <div
+      className="pointer-events-none absolute z-5"
+      style={{ left: start * pps + from, top: boxH + 3, width, height: h + 2 }}
+    >
+      <svg width={width} height={h + 2} className="overflow-visible">
+        <line x1={0} y1={mid} x2={width} y2={mid} stroke="currentColor" strokeOpacity={0.25} strokeDasharray="3 3" />
+        <polyline
+          points={`0,${h} ${pts.join(" ")} ${lastX},${h}`}
+          fill="#0a84ff"
+          fillOpacity={0.18}
+          stroke="none"
+        />
+        <polyline points={pts.join(" ")} fill="none" stroke="#0a84ff" strokeWidth={1.5} strokeLinejoin="round" />
+      </svg>
+    </div>
   );
 }
 
@@ -3990,13 +4068,13 @@ function ClipView({
 function ClipStrokeMarks({
   clip,
   spanStart,
-  speed,
+  retime,
   pps,
   barW,
 }: {
   clip: VideoClip;
   spanStart: number;
-  speed: number;
+  retime: Retime;
   pps: number;
   barW: number;
 }) {
@@ -4014,14 +4092,14 @@ function ClipStrokeMarks({
           key={`s${t}`}
           className="tl-stroke-mark pointer-events-auto absolute top-0 z-5 flex h-3 w-3.5 cursor-pointer justify-center"
           style={{
-            left: Math.min(barW - 4, Math.max(4, ((t - clip.in) / speed) * pps)),
+            left: Math.min(barW - 4, Math.max(4, retime.tAt(t) * pps)),
             transform: "translateX(-50%)",
           }}
           title="Brush stroke"
           onPointerDown={(e) => {
             e.stopPropagation();
             e.preventDefault();
-            useEditor.getState().seek(spanStart + (t - clip.in) / speed);
+            useEditor.getState().seek(spanStart + retime.tAt(t));
           }}
         >
           <span
@@ -4389,7 +4467,7 @@ function filmstripFrames(
   filmIn: number,
   w: number,
   pps: number,
-  speed: number,
+  retime: Retime,
   tileH: number,
   minTileW: number,
   edges?: { start: string | null; end: string | null },
@@ -4414,7 +4492,8 @@ function filmstripFrames(
     filmIn,
     w,
     pps,
-    speed,
+    speed: retime.rate,
+    retime,
     tileH,
     minTileW,
     cuts: asset.sceneCuts,
@@ -4451,7 +4530,8 @@ function useTileFrames(
   filmIn: number,
   w: number,
   pps: number,
-  speed: number,
+  /** The clip's map, as a key: a changed rate re-plans the tiles. */
+  mapKey: string,
   onFrame: () => void
 ) {
   // The landed-frame re-render hands this hook a fresh `tiles` array with the
@@ -4517,7 +4597,7 @@ function useTileFrames(
       scroller?.removeEventListener("scroll", schedule);
     };
     // Geometry names the plan; `tiles` itself rides the ref above.
-  }, [boxRef, clipId, asset, wanted, filmIn, w, pps, speed, onFrame]);
+  }, [boxRef, clipId, asset, wanted, filmIn, w, pps, mapKey, onFrame]);
 }
 
 /** The exact source frame at a clip edge. Returns null (the nearest sampled
@@ -4813,6 +4893,7 @@ function WaveformCanvas({
   to,
   w,
   h,
+  map,
   className,
 }: {
   asset: MediaAsset;
@@ -4820,6 +4901,9 @@ function WaveformCanvas({
   to: number;
   w: number;
   h: number;
+  /** Source second at a pixel across the strip, for a clip whose rate changes
+   * through the footage; absent, the strip runs linearly from `from` to `to`. */
+  map?: (px: number) => number;
   className?: string;
 }) {
   const peaks = asset.peaks;
@@ -4839,8 +4923,8 @@ function WaveformCanvas({
           peaks={peaks}
           gain={gain}
           duration={asset.duration}
-          from={from + (to - from) * (t.left / width)}
-          to={from + (to - from) * ((t.left + t.tw) / width)}
+          from={map ? map(t.left) : from + (to - from) * (t.left / width)}
+          to={map ? map(t.left + t.tw) : from + (to - from) * ((t.left + t.tw) / width)}
           left={t.left}
           tw={t.tw}
           h={h}
@@ -4944,15 +5028,14 @@ function writeBeats(assetId: string, edit: (beats: number[]) => number[]) {
 function addBeatAt(
   e: React.PointerEvent<HTMLElement>,
   asset: MediaAsset,
-  clip: { in: number; speed?: number },
+  clip: { in: number; out: number; speed?: number; speedCurve?: SpeedNode[] },
   pps: number
 ) {
   e.preventDefault();
   e.stopPropagation();
   const rect = e.currentTarget.getBoundingClientRect();
-  const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
   useEditor.getState().pushHistory();
-  writeBeats(asset.id, (list) => [...list, clip.in + ((e.clientX - rect.left) / pps) * speed]);
+  writeBeats(asset.id, (list) => [...list, retimeOf(clip).srcAt((e.clientX - rect.left) / pps)]);
 }
 
 /**
@@ -4965,8 +5048,7 @@ function BeatDot({
   assetId,
   duration,
   t,
-  from,
-  speed,
+  retime,
   pps,
   w,
 }: {
@@ -4975,9 +5057,8 @@ function BeatDot({
   duration: number;
   /** The beat, source seconds. */
   t: number;
-  /** The bar's own source window start and rate. */
-  from: number;
-  speed: number;
+  /** The bar's own map from its footage onto the timeline. */
+  retime: Retime;
   pps: number;
   /** Visible bar width, px, for parking the edge dots inside it. */
   w: number;
@@ -4986,7 +5067,7 @@ function BeatDot({
     <span
       className="tl-beat absolute bottom-0 z-5 grid h-3.5 w-3 cursor-ew-resize place-items-end justify-center pb-[3px]"
       style={{
-        left: Math.min(w - 4, Math.max(4, ((t - from) / speed) * pps)),
+        left: Math.min(w - 4, Math.max(4, retime.tAt(t) * pps)),
         transform: "translateX(-50%)",
       }}
       title="Drag to move, double-click to remove"
@@ -5004,7 +5085,9 @@ function BeatDot({
             }
             // Rounded the way the grid stores, so the moved beat is found again.
             const next =
-              Math.round(Math.min(duration, Math.max(0, t + (dx / pps) * speed)) * 1000) / 1000;
+              Math.round(
+                Math.min(duration, Math.max(0, retime.srcAt(retime.tAt(t) + dx / pps))) * 1000
+              ) / 1000;
             const at = live;
             writeBeats(assetId, (list) => list.map((b) => (b === at ? next : b)));
             live = next;
@@ -5028,14 +5111,14 @@ function BeatDots({
   asset,
   from,
   to,
-  speed,
+  retime,
   pps,
   w,
 }: {
   asset: MediaAsset;
   from: number;
   to: number;
-  speed: number;
+  retime: Retime;
   pps: number;
   w: number;
 }) {
@@ -5051,8 +5134,7 @@ function BeatDots({
             assetId={asset.id}
             duration={asset.duration}
             t={b}
-            from={from}
-            speed={speed}
+            retime={retime}
             pps={pps}
             w={w}
           />
@@ -5105,7 +5187,7 @@ function AudioView({
   // The bar is drawn a gutter narrower than the footprint; what sits inside
   // it measures against that.
   const barW = Math.max(10, w - CLIP_GAP);
-  const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
+  const rt = retimeOf(clip);
   // The fade being dragged, held here rather than in the grip: the ramp line
   // and the waveform's clip both follow it, so all three move as one.
   const [liveFade, setLiveFade] = useState<{ side: "in" | "out"; v: number } | null>(null);
@@ -5154,9 +5236,9 @@ function AudioView({
         className="pointer-events-none absolute inset-0"
         style={{ clipPath: fadeClipPath(fadeInPx, fadeOutPx, barW) }}
       >
-        <WaveformCanvas asset={asset} from={clip.in} to={clip.out} w={barW} h={AUDIO_H - 8} className="inset-x-0 inset-y-1" />
+        <WaveformCanvas asset={asset} from={clip.in} to={clip.out} w={barW} h={AUDIO_H - 8} map={rt.uniform ? undefined : (px) => rt.srcAt(px / pps)} className="inset-x-0 inset-y-1" />
       </div>
-      <BeatDots asset={asset} from={clip.in} to={clip.out} speed={speed} pps={pps} w={barW} />
+      <BeatDots asset={asset} from={clip.in} to={clip.out} retime={rt} pps={pps} w={barW} />
       <FadeEnvelope inPx={fadeInPx} outPx={fadeOutPx} barW={barW} />
       <FadeGrip clip={clip} side="in" pps={pps} barW={barW} fade={fadeIn} live={liveFade?.side === "in"} onLive={setLiveFade} />
       <FadeGrip clip={clip} side="out" pps={pps} barW={barW} fade={fadeOut} live={liveFade?.side === "out"} onLive={setLiveFade} />

@@ -74,6 +74,7 @@ import { Inspector } from "./Inspector";
 import { Lightbox } from "./Lightbox";
 import { Preview } from "./Preview";
 import { SidePanel } from "./SidePanel";
+import { SpeedCurveStrip } from "./SpeedCurveStrip";
 import { Timeline } from "./Timeline";
 import { StorageUpgradeDialog } from "./StorageUpgradeDialog";
 import { TopBar } from "./TopBar";
@@ -1122,7 +1123,7 @@ export function Editor({
     <div ref={shellRef} tabIndex={-1} className="flex h-full min-w-0 overflow-hidden outline-none">
       {/* The tab wears whatever is still running here. */}
       <TabStatus />
-      <div className="grid min-w-0 flex-1 grid-rows-[46px_minmax(0,1fr)_auto]">
+      <div className="grid min-w-0 flex-1 grid-rows-[46px_minmax(0,1fr)_auto_auto]">
         {viewer ? (
           <ViewerTopBar />
         ) : (
@@ -1148,6 +1149,7 @@ export function Editor({
           </div>
           {hasInspector && <Inspector />}
         </div>
+        <SpeedCurveStrip />
         <Timeline />
       </div>
       {aiOpen && (!viewer || sharedFeatures?.chat) && (
