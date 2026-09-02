@@ -4422,6 +4422,16 @@ function subscribeStripView(fn: () => void) {
   stripViewListeners.add(fn);
   return () => {
     stripViewListeners.delete(fn);
+    // The window is one module's memory of one scroller. With the last strip
+    // gone — the editor closed, another project opening — a pending frame has
+    // nobody to tell, and the measurement belongs to a scroller that no longer
+    // exists: the next editor would plan its first paint against it.
+    if (stripViewListeners.size === 0) {
+      if (stripViewFrame) cancelAnimationFrame(stripViewFrame);
+      stripViewFrame = 0;
+      stripView.left = 0;
+      stripView.width = 0;
+    }
   };
 }
 /** The strip plans and draws in stretches this wide on either side of the
