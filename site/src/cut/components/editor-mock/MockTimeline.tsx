@@ -72,7 +72,7 @@ export function MockTimeline({ project }: { project: MockProject }) {
                 "absolute top-0.5 overflow-hidden rounded-lg bg-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
                 c.selected && "z-10 ring-2 ring-[#0a84ff]"
               )}
-              style={{ left: c.left, width: c.width, height: c.muted ? VIDEO_H - 4 - WAVE_H : VIDEO_H - 4 }}
+              style={{ left: c.left, width: c.width, height: VIDEO_H - 4 }}
             >
               <div
                 className="absolute inset-x-0 top-0"
@@ -85,20 +85,21 @@ export function MockTimeline({ project }: { project: MockProject }) {
                   backgroundRepeat: "repeat-x",
                 }}
               />
-              {!c.muted && (
-                <div
-                  className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-b from-[#59c09d] to-[#43b18d] px-1"
-                  style={{ height: WAVE_H }}
-                >
-                  {Array.from({ length: Math.max(8, Math.floor(c.width / 5)) }, (_, i) => (
-                    <span
-                      key={i}
-                      className="w-[2px] rounded-full bg-white/85"
-                      style={{ height: `${WAVE[(i + c.label.length) % WAVE.length] * 0.7}%` }}
-                    />
-                  ))}
-                </div>
-              )}
+              <div
+                className={cn(
+                  "absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-b px-1",
+                  c.muted ? "from-[#9a9d9c] to-[#828785]" : "from-[#59c09d] to-[#43b18d]"
+                )}
+                style={{ height: WAVE_H }}
+              >
+                {Array.from({ length: Math.max(8, Math.floor(c.width / 5)) }, (_, i) => (
+                  <span
+                    key={i}
+                    className="w-[2px] rounded-full bg-white/85"
+                    style={{ height: `${WAVE[(i + c.label.length) % WAVE.length] * 0.7}%` }}
+                  />
+                ))}
+              </div>
               {c.muted && (
                 <span className="absolute bottom-1 left-1 grid size-[18px] place-items-center rounded-[5px] bg-black/70 text-white">
                   <VolumeX className="size-3" />

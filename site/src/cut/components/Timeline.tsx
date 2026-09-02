@@ -127,19 +127,19 @@ const AUDIO_H = 44;
 /** The sound band along a video clip box's bottom edge. */
 const WAVE_H = 24;
 /** The picture band above it — the filmstrip's height. A clip with nothing to
- * play in the band (an image, a muted or silent video) drops the band and its
- * box stops at the filmstrip's edge. */
+ * play in the band (an image, a silent video) drops the band and its box stops
+ * at the filmstrip's edge. */
 const FILM_H = VIDEO_H - 4 - WAVE_H;
-/** Whether a clip has a sound band to draw: a video carrying audio of its own,
- * playing unmuted. An image, a silent video, a muted or detached clip has
- * nothing to show there. */
-const hasSoundBand = (clip: { muted?: boolean }, asset: MediaAsset) =>
-  asset.type === "video" && !clip.muted && !!asset.peaks?.length;
-/** A video row's height. Rows whose clips all play silent lose the sound
- * band's worth, so the row ends where the filmstrips do. An empty row keeps
- * the full height: it is a drop target for clips that do have sound. */
+/** Whether a clip has a sound band to draw: a video carrying audio of its own.
+ * Muting greys the band down, so the clip keeps its shape and its waveform. An
+ * image or a silent video has nothing to show there. */
+const hasSoundBand = (asset: MediaAsset) =>
+  asset.type === "video" && !!asset.peaks?.length;
+/** A video row's height. Rows whose clips carry no audio lose the sound band's
+ * worth, so the row ends where the filmstrips do. An empty row keeps the full
+ * height: it is a drop target for clips that do have sound. */
 const videoRowH = (list: ClipSpan[]) =>
-  list.length > 0 && !list.some((sp) => hasSoundBand(sp.clip, sp.asset))
+  list.length > 0 && !list.some((sp) => hasSoundBand(sp.asset))
     ? VIDEO_H - WAVE_H
     : VIDEO_H;
 /** The `mt-1.5` every row carries, so a row drag knows what one row's worth of
@@ -938,21 +938,20 @@ export function Timeline() {
   const trackState = useMemo(() => {
     const m = new Map<
       number,
-      { total: number; hidden: number; sound: number; muted: number; band: number }
+      { total: number; hidden: number; sound: number; muted: number }
     >();
     const byId = new Map(assets.map((a) => [a.id, a]));
     for (const c of clips) {
-      const t = m.get(c.track) ?? { total: 0, hidden: 0, sound: 0, muted: 0, band: 0 };
+      const t = m.get(c.track) ?? { total: 0, hidden: 0, sound: 0, muted: 0 };
       t.total++;
       if (c.hidden) t.hidden++;
       const asset = byId.get(c.assetId);
       // Sound the track actually carries — a video with no audio of its own
-      // has nothing to mute, so its row shows no speaker. `band` is the part
-      // of it drawn on the clips right now, which is what sets the row height.
+      // has nothing to mute, so its row shows no speaker. It is also what sets
+      // the row height: every clip with sound draws a band, muted or not.
       if (asset && asset.type === "video" && !!asset.peaks?.length) {
         t.sound++;
         if (c.muted) t.muted++;
-        else t.band++;
       }
       m.set(c.track, t);
     }
@@ -2958,7 +2957,7 @@ export function Timeline() {
                 key={`vgrip-${track}`}
                 top={y}
                 height={h}
-                barH={(t && t.band === 0 ? VIDEO_H - WAVE_H : VIDEO_H) - 4}
+                barH={(t && t.sound === 0 ? VIDEO_H - WAVE_H : VIDEO_H) - 4}
                 enabled={gutterYs.video.length > 1}
                 onGrab={gripRow("video", row)}
               />
@@ -2991,7 +2990,7 @@ export function Timeline() {
             if (!t) return null;
             // Centered on the clip band, which is shorter on a row that draws
             // no sound.
-            const bandH = t.band > 0 ? VIDEO_H : VIDEO_H - WAVE_H;
+            const bandH = t.sound > 0 ? VIDEO_H : VIDEO_H - WAVE_H;
             const rows: React.ReactNode[] = [
               <GutterToggle
                 key={`v-${track}-hide`}
@@ -3777,9 +3776,9 @@ function ClipView({
   );
   const boxRef = useRef<HTMLDivElement>(null);
   // The clip's own sound, drawn in the box's band under the picture. Muting —
-  // detach included — takes the sound off the clip, so the band drops and the
-  // box stops at the filmstrip (a detached copy draws on the soundtrack row).
-  const hasWave = hasSoundBand(clip, asset);
+  // detach included — greys the band, so the clip's shape holds still and its
+  // waveform stays readable (a detached copy draws on the soundtrack row too).
+  const hasWave = hasSoundBand(asset);
   // Bumped as tile captures land, so the memo re-plans and picks them up.
   const [filmGen, onTileFrame] = useReducer((x: number) => x + 1, 0);
   // The strip draws the stretch of the box the scroller shows. The box's
@@ -3872,7 +3871,12 @@ function ClipView({
       </div>
       {hasWave && (
         <div
-          className="tl-clip-wave pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-b from-[#59c09d] to-[#43b18d]"
+          className={cn(
+            "tl-clip-wave pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-b",
+            clip.muted
+              ? "from-[#9a9d9c] to-[#828785]"
+              : "from-[#59c09d] to-[#43b18d]"
+          )}
           style={{ height: WAVE_H }}
         >
           <WaveformCanvas asset={asset} from={filmIn} to={filmOut} w={barW} h={WAVE_H - 4} map={rt.uniform ? undefined : (px) => rt.srcAt(px / pps)} className="inset-x-0 inset-y-0.5" />
