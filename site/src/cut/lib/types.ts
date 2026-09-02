@@ -2,6 +2,7 @@ import {
   behindSubjectMask,
   overlayKind,
   poseAt,
+  retimeOf,
   stampOverlayKinds,
   stripDefaultOverlayKinds,
   type ClipRemoval,
@@ -16,6 +17,7 @@ import {
   type OverlayPose,
   type ShapeKind,
   type ShapeOverlay,
+  type SpeedNode,
   type StickerOverlay,
   type TextOverlay as KitTextOverlay,
   type WordEffectId,
@@ -443,6 +445,7 @@ export function clipPoseAt(
     in: number;
     out: number;
     speed?: number;
+    speedCurve?: SpeedNode[];
     rotation?: number;
     opacity?: number;
     kf?: OverlayKey[];
@@ -450,7 +453,7 @@ export function clipPoseAt(
   tLocal: number
 ): OverlayPose {
   const rect = rectOf(clip);
-  const len = Math.max(0.1, (clip.out - clip.in) / (clip.speed && clip.speed > 0 ? clip.speed : 1));
+  const len = Math.max(0.1, retimeOf(clip).len);
   return poseAt(
     {
       start: 0,
@@ -539,6 +542,12 @@ export interface VideoClip {
   /** Playback rate, default 1 (absent). The source (out-in) seconds play in
    * (out-in)/speed timeline seconds, so >1 is faster and shorter. */
   speed?: number;
+  /** A rate that changes through the footage: nodes of [source second, rate]
+   * joined by a smooth curve, held flat past the outermost nodes. Present, it
+   * is the clip's rate and `speed` is ignored; the timeline footprint is the
+   * integral of the curve over the trim (see retimeOf). Nodes sit in source
+   * seconds, so trims and splits leave them where they are. */
+  speedCurve?: SpeedNode[];
   /** Transition into the next clip on this clip's track, in timeline seconds
    * (absent/0 = hard cut). Every style overlaps the two clips by this much,
    * so the cut shortens. On upper tracks a transition blends the incoming
@@ -583,7 +592,7 @@ export interface VideoClip {
 // Color grading (the dual-renderer math) lives in the effects kit; the model
 // types and ranges re-export here so doc-model consumers keep one import.
 export { GRADE_BASIC_FIELDS, GRADE_HUE_MAX, GRADE_MAX, HSL_BANDS } from "@donkeycut/effects-kit";
-export type { ClipSound, ColorGrade, GradePresetRef, HslBand } from "@donkeycut/effects-kit";
+export type { ClipSound, ColorGrade, GradePresetRef, HslBand, SpeedNode } from "@donkeycut/effects-kit";
 
 // Background removal follows the same split: math and model in the kit, the
 // doc-model types re-exported here.
@@ -984,6 +993,8 @@ export interface AudioClip {
    * a sped-up video clip, so it stays the same length and in sync with the
    * (now muted) picture. The timeline footprint is (out-in)/speed. */
   speed?: number;
+  /** The video clip's speed curve, carried along on detach for the same reason. */
+  speedCurve?: SpeedNode[];
   /** Voiceover ducking: while this clip is audible, every other sound (clip
    * audio and other soundtrack clips) drops to this gain, 0..1. Absent = no
    * ducking. Ducking clips never duck each other. */
@@ -1022,6 +1033,7 @@ export interface TemplateLayer {
   opacity?: number;
   muted: boolean;
   speed?: number;
+  speedCurve?: SpeedNode[];
   sound?: ClipSound;
   track: number;
   /** Came from video track 0 — re-materializes as a timeline clip, not an
@@ -1037,6 +1049,7 @@ export interface TemplateAudio {
   fadeIn?: number;
   fadeOut?: number;
   speed?: number;
+  speedCurve?: SpeedNode[];
   sound?: ClipSound;
   duck?: number;
   lane?: number;

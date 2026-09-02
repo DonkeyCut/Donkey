@@ -105,3 +105,22 @@ describe("timeStretch", () => {
     expect(timeStretch([], RATE, 0.5)).toEqual([]);
   });
 });
+
+describe("timeStretch with a schedule", () => {
+  test("lays a varying factor to the integral of the schedule, at pitch", () => {
+    // 1 s at 1×, then 1 s at half speed: 3 s out.
+    const [out] = timeStretch([sine(300, 2)], RATE, {
+      factorAt: (sec) => (sec < 1 ? 1 : 2),
+    });
+    expect(out.length).toBe(RATE * 3);
+    expect(pitchOf(out)).toBeCloseTo(300, -1);
+  });
+
+  test("honours the caller's output length", () => {
+    const [out] = timeStretch([sine(300, 2)], RATE, {
+      factorAt: (sec) => 1 + sec / 2,
+      outLength: 12345,
+    });
+    expect(out.length).toBe(12345);
+  });
+});

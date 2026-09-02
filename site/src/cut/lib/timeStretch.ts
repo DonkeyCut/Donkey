@@ -35,6 +35,15 @@ function hann(length: number): Float32Array {
   return w;
 }
 
+/** The output seconds a varying factor produces over `seconds` of input. */
+function integrateFactor(factorAt: (sec: number) => number, seconds: number): number {
+  const steps = Math.max(1, Math.ceil(seconds * 1000));
+  const dt = seconds / steps;
+  let sum = 0;
+  for (let i = 0; i < steps; i++) sum += factorAt((i + 0.5) * dt) * dt;
+  return sum;
+}
+
 /** Straight linear resample to `length` — the pitch-shifting behaviour, used
  * only where there is too little audio for a frame-based stretch to mean
  * anything. */
@@ -54,24 +63,51 @@ function resampleLinear(input: Float32Array, length: number): Float32Array {
 }
 
 /**
+ * A stretch that changes along the input: `factorAt` gives the output-over-
+ * input ratio at a second into the input, and `outLength` (samples) says how
+ * long the result must be — the caller integrates its own map for that, so
+ * the sound lands exactly where the picture's map says it does.
+ */
+export interface StretchSchedule {
+  factorAt(inSec: number): number;
+  outLength?: number;
+}
+
+/**
  * Stretch `channels` so the result is `factor` times as long, at the same pitch.
  *
  * `factor` is the output length over the input length: 0.5 makes a clip play in
- * half the time (a 2× speed-up), 2 makes it take twice as long. Every channel is
- * cut at the same points — choosing them per channel would move the two sides of
- * a stereo image independently and collapse it.
+ * half the time (a 2× speed-up), 2 makes it take twice as long. A schedule
+ * varies that along the input, which is how a speed curve's sound is laid: the
+ * synthesis hop stays fixed and the analysis hop follows the rate at each
+ * frame. Every channel is cut at the same points — choosing them per channel
+ * would move the two sides of a stereo image independently and collapse it.
  */
 export function timeStretch(
   channels: Float32Array[],
   sampleRate: number,
-  factor: number
+  factor: number | StretchSchedule
 ): Float32Array[] {
   if (channels.length === 0) return [];
-  if (!(factor > 0) || !Number.isFinite(factor)) return channels.map((c) => c.slice());
-  if (factor === 1) return channels.map((c) => c.slice());
-
   const inLength = channels[0].length;
-  const outLength = Math.max(1, Math.round(inLength * factor));
+  const schedule = typeof factor === "number" ? null : factor;
+  if (typeof factor === "number") {
+    if (!(factor > 0) || !Number.isFinite(factor)) return channels.map((c) => c.slice());
+    if (factor === 1) return channels.map((c) => c.slice());
+  }
+  const factorAt = schedule
+    ? (sec: number) => {
+        const f = schedule.factorAt(sec);
+        return f > 0 && Number.isFinite(f) ? f : 1;
+      }
+    : () => factor as number;
+  const outLength = Math.max(
+    1,
+    schedule?.outLength ??
+      (schedule
+        ? Math.round(integrateFactor(factorAt, inLength / sampleRate) * sampleRate)
+        : Math.round(inLength * (factor as number)))
+  );
   // An even frame keeps the synthesis hop exactly half of it, which is what
   // makes the windows sum to one.
   const frame = Math.max(4, Math.round(FRAME_SECONDS * sampleRate) & ~1);
@@ -80,7 +116,7 @@ export function timeStretch(
   }
 
   const hop = frame >> 1;
-  const analysisHop = Math.max(1, Math.round(hop / factor));
+  const analysisHopAt = (at: number) => Math.max(1, Math.round(hop / factorAt(at / sampleRate)));
   const search = Math.max(1, Math.round(SEARCH_SECONDS * sampleRate));
   const match = Math.max(2, Math.min(hop, Math.round(MATCH_SECONDS * sampleRate)));
   const window = hann(frame);
@@ -124,7 +160,7 @@ export function timeStretch(
     expected =
       nextFrom + match <= inLength ? guide.subarray(nextFrom, nextFrom + match) : null;
     outPos += hop;
-    analysis += analysisHop;
+    analysis += analysisHopAt(analysis);
   }
 
   // The first and last half-frame are only covered by one window, so they fade

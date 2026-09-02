@@ -34,6 +34,7 @@ import {
   normalizeGrade,
 } from "./colorGrade";
 import { GRADE_PRESETS } from "./gradePresets";
+import { monotoneCubic } from "./monotone";
 
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const luma = (r: number, g: number, b: number) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
@@ -48,64 +49,11 @@ const luma = (r: number, g: number, b: number) => 0.2126 * r + 0.7152 * g + 0.07
  * The curve holds flat outside its first and last points.
  */
 export function curveLut(points: CurvePoint[]): Float32Array {
-  const n = points.length;
   const xs = points.map((p) => p[0] / 255);
   const ys = points.map((p) => p[1] / 255);
+  const at = monotoneCubic(xs, ys);
   const out = new Float32Array(256);
-  if (n === 1) {
-    out.fill(clamp01(ys[0] ?? 0));
-    return out;
-  }
-  const h: number[] = [];
-  const d: number[] = [];
-  for (let i = 0; i < n - 1; i++) {
-    const dx = Math.max(1e-6, xs[i + 1] - xs[i]);
-    h.push(dx);
-    d.push((ys[i + 1] - ys[i]) / dx);
-  }
-  const m: number[] = [d[0]];
-  for (let i = 1; i < n - 1; i++) {
-    m.push(d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2);
-  }
-  m.push(d[n - 2]);
-  for (let i = 0; i < n - 1; i++) {
-    if (d[i] === 0) {
-      m[i] = 0;
-      m[i + 1] = 0;
-      continue;
-    }
-    const a = m[i] / d[i];
-    const b = m[i + 1] / d[i];
-    const s = a * a + b * b;
-    if (s > 9) {
-      const t = 3 / Math.sqrt(s);
-      m[i] = t * a * d[i];
-      m[i + 1] = t * b * d[i];
-    }
-  }
-  for (let s = 0; s < 256; s++) {
-    const x = s / 255;
-    if (x <= xs[0]) {
-      out[s] = clamp01(ys[0]);
-      continue;
-    }
-    if (x >= xs[n - 1]) {
-      out[s] = clamp01(ys[n - 1]);
-      continue;
-    }
-    let i = 0;
-    while (i < n - 2 && x > xs[i + 1]) i++;
-    const t = (x - xs[i]) / h[i];
-    const t2 = t * t;
-    const t3 = t2 * t;
-    out[s] =
-      clamp01(
-        ys[i] * (2 * t3 - 3 * t2 + 1) +
-          h[i] * m[i] * (t3 - 2 * t2 + t) +
-          ys[i + 1] * (-2 * t3 + 3 * t2) +
-          h[i] * m[i + 1] * (t3 - t2)
-      );
-  }
+  for (let s = 0; s < 256; s++) out[s] = clamp01(at(s / 255));
   return out;
 }
 
