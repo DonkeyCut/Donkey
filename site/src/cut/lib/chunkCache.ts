@@ -903,14 +903,6 @@ export async function dropChunksMatching(part: string): Promise<void> {
 // --- the seams ---
 
 /**
- * Open the object a route URL redirects to.
- *
- * The route answers a ranged read with a redirect to the signed object, and
- * the URL the bytes came from is the one the store keys on. One byte is
- * enough to learn it; the body is let go before the object opens, so the
- * open reads chunk 0 the way every open does.
- */
-/**
  * Route probes in the air, by route URL.
  *
  * Every reader on a file opens at once — the picture, the sound, the peaks,
@@ -932,6 +924,14 @@ function openThroughRoute(route: string): Promise<ObjState> {
   return probe;
 }
 
+/**
+ * Open the object a route URL redirects to.
+ *
+ * The route answers a ranged read with a redirect to the signed object, and
+ * the URL the bytes came from is the one the store keys on. One byte is
+ * enough to learn it; the body is let go before the object opens, so the
+ * open reads chunk 0 the way every open does.
+ */
 async function probeRoute(route: string): Promise<ObjState> {
   const res = await fetchRange(route, 0, 0);
   if (!res.ok) throw new Error(`Cloud media read failed (${res.status}).`);
