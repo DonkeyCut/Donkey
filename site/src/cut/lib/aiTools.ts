@@ -10,14 +10,20 @@ import {
   matchGrade,
   normalizeGrade,
   normalizeSound,
+  retimeOf,
   semanticMasterCurve,
   SOUND_PRESETS,
+  SPEED_CURVE_MAX,
+  SPEED_CURVE_MIN,
+  SPEED_CURVE_PRESET_IDS,
+  speedCurveOf,
   type ClipSound,
   type ColorStats,
   type CurvePoint,
   type EffectId,
   type GradeCurves,
   type HslBand,
+  type SpeedNode,
   type WheelTuple,
   type Mask,
   OVERLAY_ANIM_DEFAULT_SECONDS,
@@ -112,7 +118,7 @@ import { STOCK_VIDEOS } from "./stockVideoManifest";
 import { storedMediaUrl } from "./mediaSync";
 import { isSoundPresetTemplate, listSoundPresets, saveSoundPreset } from "./soundPresets";
 import { isStylePresetTemplate } from "./stylePresets";
-import { applyOverlayPatchSettled, track0Clips, laneGapAt, getClipSpans, nextFreeStart, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
+import { applyOverlayPatchSettled, clipLen, track0Clips, laneGapAt, getClipSpans, nextFreeStart, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt } from "./playhead";
 import { renderProjectFrame } from "./exportRender";
 import { renderStageFrame, storeStageStill } from "./stageFrame";
@@ -210,7 +216,7 @@ function tracksAfter() {
   const row = track0Clips(cur.clips).map((c) => ({
     id: c.id,
     start: round2(c.start),
-    len: round2((c.out - c.in) / (c.speed && c.speed > 0 ? c.speed : 1)),
+    len: round2(clipLen(c)),
   }));
   const lanes = cur.audioClips.map((a) => ({
     id: a.id,
@@ -576,8 +582,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     const clip = requireItem(s.clips, input.clipId, "video clip");
     const raw = input.keys;
     if (!Array.isArray(raw)) throw new ToolError("keys must be a list.");
-    const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
-    const dur = Math.max(0.1, (clip.out - clip.in) / speed);
+    const dur = clipLen(clip);
     let kf = clip.kf;
     if (raw.length === 0) {
       s.clearClipKeys(clip.id);
@@ -666,7 +671,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const st = useEditor.getState();
       const dur = o
         ? Math.max(0.1, o.end - o.start)
-        : Math.max(0.1, (clip!.out - clip!.in) / (clip!.speed && clip!.speed > 0 ? clip!.speed : 1));
+        : clipLen(clip!);
       if (raw.length === 0) {
         if (o) st.clearOverlayMaskKeys(o.id);
         else st.clearClipMaskKeys(clip!.id);
@@ -872,8 +877,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (clip) {
         speech = laneCues(s.subtitles, s.subtitleLane)
           .map((c) => ({
-            start: clip.in + (c.start - clip.start) * speed,
-            end: clip.in + (c.end - clip.start) * speed,
+            start: retimeOf(clip).srcAt(c.start - clip.start),
+            end: retimeOf(clip).srcAt(c.end - clip.start),
             text: c.text,
           }))
           .filter((c) => c.end > from && c.start < body.coveredTo);
@@ -922,7 +927,14 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
                 in: round2(clip.in),
                 out: round2(clip.out),
                 speed: round2(speed),
-                note: `timeline_t = ${round2(clip.start)} + (source_t - ${round2(clip.in)}) / ${round2(speed)}, for source_t in [${round2(clip.in)}, ${round2(clip.out)}]`,
+                ...(speedCurveOf(clip)
+                  ? {
+                      speedCurve: speedCurveOf(clip)!.map(([at, rate]) => [round2(at), round2(rate)]),
+                      note: `this clip has a speed curve (average ${round2(speed)}×): source_t maps to the timeline through the curve, with the clip occupying [${round2(clip.start)}, ${round2(clip.start + retimeOf(clip).len)}]; work in source seconds here`,
+                    }
+                  : {
+                      note: `timeline_t = ${round2(clip.start)} + (source_t - ${round2(clip.in)}) / ${round2(speed)}, for source_t in [${round2(clip.in)}, ${round2(clip.out)}]`,
+                    }),
               },
             }
           : {}),
@@ -1161,13 +1173,10 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   place_clip: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
       if (!isNum(input.start)) throw new ToolError("start (seconds) is required.");
-      const len = (clip.out - clip.in) / (clip.speed && clip.speed > 0 ? clip.speed : 1);
+      const len = clipLen(clip);
       const taken = s.clips
         .filter((c) => c.id !== clip.id && c.track === clip.track)
-        .map((c) => ({
-          start: c.start,
-          end: c.start + (c.out - c.in) / (c.speed && c.speed > 0 ? c.speed : 1),
-        }));
+        .map((c) => ({ start: c.start, end: c.start + clipLen(c) }));
       const at = nextFreeStart(taken, Math.max(0, input.start), len);
       // Closing a gap is this tool's main job, so the clip's blends travel
       // with it: a bar playing its head or its cut lands on the edge's new
@@ -1214,7 +1223,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         id: c.id,
         track: c.track,
         start: round2(c.start),
-        len: round2((c.out - c.in) / (c.speed && c.speed > 0 ? c.speed : 1)),
+        len: round2(clipLen(c)),
         layout: regionLabel(rectOf(c)),
       };
   },
@@ -1376,7 +1385,6 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // the air both sides wanted, so both give ground and the joint sits
       // inside that pause — reverting to the cut's own numbers is what put an
       // edge back on top of a word.
-      const spd = (c: VideoClip) => (c.speed && c.speed > 0 ? c.speed : 1);
       const rows = new Map<number, VideoClip[]>();
       for (const c of s.clips) rows.set(c.track, [...(rows.get(c.track) ?? []), c]);
       for (const row of rows.values()) {
@@ -1429,7 +1437,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             if (plan) {
               patch.in = plan.in;
               patch.out = plan.out;
-              delta += (plan.out - plan.in - (c.out - c.in)) / spd(c);
+              delta += retimeOf({ ...c, in: plan.in, out: plan.out }).len - retimeOf(c).len;
             }
             if (plan || patch.start !== undefined) patches.push({ id: c.id, patch });
           }
@@ -2053,8 +2061,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
 
   update_audio: (s, input) => {
       const a = requireItem(s.audioClips, input.id, "soundtrack clip");
-      const aSpeed = a.speed && a.speed > 0 ? a.speed : 1;
-      const len = (a.out - a.in) / aSpeed;
+      const len = retimeOf(a).len;
       const patch: Partial<AudioClip> = {};
       if (isNum(input.volume)) patch.volume = clamp(input.volume, 0, 3);
       if (isNum(input.fadeIn)) patch.fadeIn = clamp(input.fadeIn, 0, len / 2);
@@ -2289,10 +2296,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const span = spans.find((sp) => t >= sp.start && t < sp.start + sp.len) ?? spans[spans.length - 1];
       // Timeline seconds run at the clip's speed in source time, so a sped-up
       // clip freezes the frame the preview actually shows.
-      const srcTime =
-        span.clip.in +
-        (t - span.start) *
-          (span.clip.speed && span.clip.speed > 0 ? span.clip.speed : 1);
+      const srcTime = retimeOf(span.clip).srcAt(t - span.start);
       let body: MediaAsset;
       const freezeDur = Math.min(10, Math.max(0.5, isNum(input.duration) ? input.duration : 1));
       if (input.with_elements === true) {
@@ -3537,9 +3541,60 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   set_speed: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
       if (!isNum(input.speed)) throw new ToolError("speed is required (e.g. 1.5).");
+      const before = clipLen(clip);
       s.setClipSpeed(clip.id, input.speed);
       const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
-      return { id: next.id, speed: next.speed ?? 1 };
+      return {
+        id: next.id,
+        speed: next.speed ?? 1,
+        lenBefore: round2(before),
+        lenAfter: round2(clipLen(next)),
+        ...tracksAfter(),
+      };
+  },
+
+  set_speed_curve: (s, input) => {
+      const clip = requireItem(s.clips, input.clipId, "video clip");
+      const before = clipLen(clip);
+      if (typeof input.preset === "string") {
+        if (Array.isArray(input.nodes) && input.nodes.length > 0)
+          throw new ToolError(
+            "Pass either `preset` or `nodes`, not both — a preset lays its own nodes over the clip."
+          );
+        if (!SPEED_CURVE_PRESET_IDS.includes(input.preset))
+          throw new ToolError(
+            `Unknown preset "${input.preset}". One of: ${SPEED_CURVE_PRESET_IDS.join(", ")}.`
+          );
+        s.setClipSpeedPreset(clip.id, input.preset);
+      } else {
+        const raw = input.nodes;
+        if (!Array.isArray(raw))
+          throw new ToolError("nodes must be a list (empty clears the curve), or pass a preset.");
+        if (raw.length === 0) {
+          s.setClipSpeedCurve(clip.id, undefined);
+        } else {
+          const nodes: SpeedNode[] = (raw as Record<string, unknown>[]).map((n) => {
+            if (!isNum(n.at) || !isNum(n.speed))
+              throw new ToolError("Every node needs `at` (source seconds) and `speed`.");
+            if (n.at < clip.in - 1e-6 || n.at > clip.out + 1e-6)
+              throw new ToolError(
+                `Node at ${round2(n.at)}s is outside the clip's trim [${round2(clip.in)}, ${round2(clip.out)}] (source seconds).`
+              );
+            return [n.at, clamp(n.speed, SPEED_CURVE_MIN, SPEED_CURVE_MAX)];
+          });
+          s.setClipSpeedCurve(clip.id, nodes);
+        }
+      }
+      const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
+      const curve = speedCurveOf(next);
+      return {
+        id: next.id,
+        speed: round2(retimeOf(next).rate),
+        nodes: curve ? curve.map(([at, speed]) => ({ at: round2(at), speed: round2(speed) })) : [],
+        lenBefore: round2(before),
+        lenAfter: round2(clipLen(next)),
+        ...tracksAfter(),
+      };
   },
 
   set_color_grade: (s, input) => {
@@ -4013,7 +4068,7 @@ function resolveWatchTarget(
   input: Record<string, unknown>
 ): {
   asset: MediaAsset;
-  clip: { id: string; start: number; in: number; out: number; speed?: number } | null;
+  clip: { id: string; start: number; in: number; out: number; speed?: number; speedCurve?: SpeedNode[] } | null;
 } {
   if (input.clip_id !== undefined && input.clip_id !== null) {
     const id = String(input.clip_id);
@@ -4040,7 +4095,7 @@ function resolveWatchRange(
 ): {
   projectId: string;
   asset: MediaAsset;
-  clip: { id: string; start: number; in: number; out: number; speed?: number } | null;
+  clip: { id: string; start: number; in: number; out: number; speed?: number; speedCurve?: SpeedNode[] } | null;
   speed: number;
   from: number;
   to: number | undefined;
@@ -4048,7 +4103,7 @@ function resolveWatchRange(
   const projectId = s.projectId;
   if (!projectId) throw new ToolError("No project open.");
   const { asset, clip } = resolveWatchTarget(s, input);
-  const speed = clip?.speed && clip.speed > 0 ? clip.speed : 1;
+  const speed = clip ? retimeOf(clip).rate : 1;
   const dur = asset.duration > 0 ? asset.duration : Infinity;
   const from = clamp(isNum(input.from) ? input.from : clip ? clip.in : 0, 0, dur);
   // An unknown duration leaves `to` for the engine to probe.

@@ -707,6 +707,32 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       },
     },
     {
+      // A described ramp is a curve, laid in one call: the shape the user
+      // asked for lands as nodes over the clip's footage.
+      name: "speed-ramp-from-description",
+      bucket: "single-tool",
+      input: () => [
+        userTurn("ease the san francisco clip into slow motion at the end", { state: PARKED_STATE }),
+      ],
+      reply: /slow|ramp|curve|ease/i,
+      requiredTools: ["set_speed_curve"],
+      state: PARKED_STATE,
+      simulate: () => (name, args) => {
+        if (name === "set_speed_curve") {
+          return {
+            id: args.clipId ?? "c2",
+            nodes: [
+              { at: 0, speed: 1 },
+              { at: 6, speed: 0.4 },
+            ],
+            speed: 0.7,
+            len: 8.6,
+          };
+        }
+        return undefined;
+      },
+    },
+    {
       // Scope: "the grey ones" are the parked bars alone. The attached pair
       // keeps playing; clearing one of them is the over-rotation regression.
       name: "remove-grey-ones-scope",

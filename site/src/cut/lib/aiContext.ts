@@ -1,6 +1,6 @@
 "use client";
 
-import { hasOverlayAnim, type ClipSound } from "@donkeycut/effects-kit";
+import { hasOverlayAnim, retimeOf, speedCurveOf, type ClipSound, type SpeedNode } from "@donkeycut/effects-kit";
 import { chatOwner } from "./chatAssets";
 import { useGenerate } from "./generate";
 import { useMatteBakes } from "./removal/bakeJobs";
@@ -196,7 +196,7 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
           len: r(sp.len),
           muted: sp.clip.muted,
           ...(sp.clip.hidden ? { hidden: true } : {}),
-          speed: r(sp.clip.speed ?? 1),
+          ...describeRate(sp.clip),
         };
       }
       // A layer clip carries no span (spans are track 0); describe its
@@ -337,7 +337,7 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
       // set_clip_sound; absent when its sound is untouched.
       ...(sp.clip.sound ? { sound: sp.clip.sound } : {}),
       framing: sp.clip.fit ?? "fit",
-      speed: r(sp.clip.speed ?? 1),
+      ...describeRate(sp.clip),
       // The generated scene shot this clip came from — sceneShot is the
       // 1-based number regenerate_shot takes; heldStill marks a render that
       // fell back to its keyframe.
@@ -452,22 +452,35 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
   };
 }
 
+/** A clip's rate as the model reads it: one number, or the average plus the
+ * curve's nodes as [sourceSeconds, rate] when the rate changes through the
+ * footage. */
+function describeRate(c: { speed?: number; speedCurve?: SpeedNode[]; in: number; out: number }) {
+  const nodes = speedCurveOf(c);
+  if (!nodes) return { speed: r(c.speed ?? 1) };
+  return {
+    speed: r(retimeOf(c).rate),
+    speedCurve: nodes.map(([at, rate]) => [r(at), r(rate)]),
+  };
+}
+
 function describeAudio(
-  a: { assetId: string; start: number; in: number; out: number; volume: number; fadeIn?: number; fadeOut?: number; speed?: number; sound?: ClipSound; duck?: number; lane?: number; hidden?: boolean },
+  a: { assetId: string; start: number; in: number; out: number; volume: number; fadeIn?: number; fadeOut?: number; speed?: number; speedCurve?: SpeedNode[]; sound?: ClipSound; duck?: number; lane?: number; hidden?: boolean },
   assets: Map<string, { name: string }>
 ) {
-  const speed = a.speed && a.speed > 0 ? a.speed : 1;
+  const rt = retimeOf(a);
+  const speed = rt.rate;
   return {
     asset: assets.get(a.assetId)?.name ?? a.assetId,
     start: r(a.start),
-    len: r((a.out - a.in) / speed),
+    len: r(rt.len),
     in: r(a.in),
     out: r(a.out),
     volume: r(a.volume),
     fadeIn: r(a.fadeIn ?? 0),
     fadeOut: r(a.fadeOut ?? 0),
     ...(a.sound ? { sound: a.sound } : {}),
-    ...(speed !== 1 ? { speed: r(speed) } : {}),
+    ...(speed !== 1 || a.speedCurve ? describeRate(a) : {}),
     ...(a.lane ? { lane: a.lane } : {}),
     ...(a.hidden ? { hidden: true } : {}),
     // A voiceover: while it plays, other audio ducks to this gain.
@@ -476,13 +489,12 @@ function describeAudio(
 }
 
 function describeOverlayClip(c: VideoClip, assets: Map<string, { name: string }>) {
-  const speed = c.speed && c.speed > 0 ? c.speed : 1;
   const rect = rectOf(c);
   return {
     asset: assets.get(c.assetId)?.name ?? c.assetId,
     track: c.track,
     start: r(c.start),
-    len: r((c.out - c.in) / speed),
+    len: r(retimeOf(c).len),
     in: r(c.in),
     out: r(c.out),
     muted: c.muted,
@@ -500,7 +512,7 @@ function describeOverlayClip(c: VideoClip, assets: Map<string, { name: string }>
         : {}),
     ...(c.rotation ? { rotation: c.rotation } : {}),
     ...((c.opacity ?? 1) < 1 ? { opacity: r(c.opacity ?? 1) } : {}),
-    ...(speed !== 1 ? { speed: r(speed) } : {}),
+    ...(retimeOf(c).rate !== 1 || c.speedCurve ? describeRate(c) : {}),
     ...(c.grade ? { colorGrade: c.grade } : {}),
     ...(c.mask ? { mask: c.mask } : {}),
     ...(c.boxStyle ? { boxStyle: c.boxStyle } : {}),

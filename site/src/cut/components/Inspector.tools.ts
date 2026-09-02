@@ -18,6 +18,10 @@ import {
   SOUND_EQ_DB_RANGE,
   SOUND_LIMITER_RANGE,
   SOUND_PRESETS,
+  SPEED_CURVE_MAX,
+  SPEED_CURVE_MIN,
+  SPEED_CURVE_PRESET_IDS,
+  speedCurvePresetCatalogText,
 } from "@donkeycut/effects-kit";
 import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 
@@ -264,8 +268,35 @@ export const INSPECTOR_TOOLS = [
   {
     name: "set_speed",
     description:
-      "Set a video clip's playback speed. Faster shortens the clip on the timeline; slower stretches it. Later clips, titles, captions, and soundtrack shift to stay in sync.",
+      "Set a video clip's playback speed, one rate across the whole clip. Faster shortens the clip on the timeline; slower stretches it. Later clips, titles, captions, and soundtrack shift to stay in sync. A clip carrying a speed curve loses it: the rate becomes uniform again (set_speed_curve is the tool for a rate that changes through the footage).",
     inputSchema: obj({ clipId: str("Video clip id"), speed: num("Playback rate (1 = normal, no upper limit)") }, ["clipId", "speed"]),
+  },
+  {
+    name: "set_speed_curve",
+    description:
+      `Give a video clip (any track) a speed curve: its rate changes through the footage instead of being one number, so one clip can race through a walk, land on a beat, and hold on a face. Nodes are {at, speed}: \`at\` in SOURCE seconds inside the clip's trim — the unit detect_beats, trim_clip and watch_video speak, so beat times drop straight in — and speed ${SPEED_CURVE_MIN}–${SPEED_CURVE_MAX}×. The rate curves smoothly between nodes and holds flat past the outermost ones; the whole list replaces the clip's curve, and an empty list clears it (the clip keeps its length at one uniform rate). Or pass a preset to lay a named ramp over the trim: ${speedCurvePresetCatalogText()}. Technique: give a peak a beat of normal speed on either side or it reads as a glitch; below about 0.5× ordinary footage shows its own frame rate, so real slow motion wants high-frame-rate source (say so instead of shipping judder); sound stretches with its pitch kept, which holds up on speech to roughly 0.5–2×. The clip's timeline length becomes the integral of the curve and later items shift like a trim. Returns the resulting nodes, the clip's length before and after, and the rows that moved. In the UI the Speed Curve row opens the same graph over the timeline.`,
+    inputSchema: obj(
+      {
+        clipId: str("Video clip id"),
+        nodes: {
+          type: "array",
+          description: "The whole curve, any order; empty clears it",
+          items: obj(
+            {
+              at: num("Source seconds, inside the clip's trim"),
+              speed: num(`Rate at that moment, ${SPEED_CURVE_MIN}–${SPEED_CURVE_MAX}`),
+            },
+            ["at", "speed"]
+          ),
+        },
+        preset: {
+          type: "string",
+          enum: SPEED_CURVE_PRESET_IDS,
+          description: "A named ramp laid over the clip's trim, instead of nodes",
+        },
+      },
+      ["clipId"]
+    ),
   },
   {
     name: "set_color_grade",
