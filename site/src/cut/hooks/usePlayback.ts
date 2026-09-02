@@ -737,6 +737,12 @@ class Engine {
     // the playhead itself every playing frame, so a value it did not write is
     // someone seeking, and the clock re-anchors there rather than snapping the
     // playhead back.
+    // Pinned just inside the end: a time at exactly `total` lies past the final
+    // span, so a frame drawn there has no master clip and clears to the
+    // background. Playing, that was the last frame before the stop, a single
+    // dark frame the paused redraw painted over; paused, it is a skim off the
+    // right edge of the cut. Both hold the last frame.
+    const end = Math.max(0, total - 0.001);
     let t: number;
     if (playing) {
       const head = playheadAt();
@@ -744,12 +750,8 @@ class Engine {
         this.mixer.start(Math.min(head, total));
         this.written = head;
       }
-      t = Math.max(0, Math.min(this.mixer.now(), total));
+      t = Math.max(0, Math.min(this.mixer.now(), end));
     } else {
-      // Pinned just inside the end: a preview time at exactly `total` lies past
-      // the final span, and a skim off the right edge of the cut should hold
-      // the last frame rather than clear to black.
-      const end = Math.max(0, total - 0.001);
       t = Math.max(0, Math.min(previewAt(), end));
       if (this.mixer.running) {
         this.mixer.stop();
