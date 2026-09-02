@@ -48,6 +48,16 @@ import { requestSidePanel } from "@/cut/lib/panelRequest";
 import { reportSwallowed } from "@/cut/lib/report";
 import { resolveProjectPlacement } from "@/cut/lib/residency";
 import {
+  dialogOnTop,
+  isDeleteKey,
+  isPasteTarget,
+  isTyping,
+  noteKey,
+  reportDecline,
+  shortcutDecline,
+  shortcutReached,
+} from "@/cut/lib/shortcutGate";
+import {
   docAudioClips,
   docClips,
   docOverlays,
@@ -652,21 +662,37 @@ export function Editor({
     };
   }, [projectId, viewer]);
 
-  // Hand the keyboard back to the editor shell, unless the user is typing.
+  // Hand the keyboard back to the editor shell. Work that finishes on its own
+  // — an import landing — never interrupts a sentence, so a field being typed
+  // in keeps the keyboard here.
   const shellRef = useRef<HTMLDivElement>(null);
   const focusShell = useCallback(() => {
     const active = document.activeElement as HTMLElement | null;
-    if (active) {
-      const type = (active as HTMLInputElement).type;
-      const typing =
-        active.tagName === "TEXTAREA" ||
-        active.isContentEditable ||
-        (active.tagName === "INPUT" &&
-          !["checkbox", "radio", "range", "button", "file"].includes(type));
-      if (typing) return;
-      active.blur();
-    }
+    if (isTyping(active)) return;
+    active?.blur();
     shellRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  // A press on the timeline is different: the editor's keys are hostage to
+  // whatever holds focus, and a field typed in once would hold space, ⌫ and ⌘B
+  // for the rest of the session — the lane gestures call preventDefault, which
+  // stops the browser moving focus on its own. Reaching for the timeline is
+  // that person leaving the field, so the shell takes the keyboard back. Only
+  // the timeline: everywhere else a press may well belong to the field it sits
+  // beside (a composer's send button, an inspector's stepper). Capture, to
+  // land before the gesture that swallows the press.
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const shell = shellRef.current;
+      const target = e.target;
+      if (!shell || !(target instanceof Element) || !target.closest("[data-tl-scroll]")) return;
+      const active = document.activeElement;
+      if (isTyping(target) || !isTyping(active) || !(active instanceof HTMLElement)) return;
+      active.blur();
+      shell.focus({ preventScroll: true });
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    return () => window.removeEventListener("pointerdown", onDown, true);
   }, []);
 
   const importFiles = useCallback(
@@ -871,14 +897,8 @@ export function Editor({
       const s = useEditor.getState();
       if (e.defaultPrevented || s.readOnly) return;
       // A dialog on top owns the paste, the same way it owns the shortcuts.
-      if (s.exportOpen || document.querySelector('[data-slot="dialog-content"]')) return;
-      const target = e.target as HTMLElement | null;
-      const textEntry =
-        !!target &&
-        (target.tagName === "TEXTAREA" ||
-          target.tagName === "INPUT" ||
-          target.isContentEditable);
-      if (textEntry) return;
+      if (s.exportOpen || dialogOnTop()) return;
+      if (isPasteTarget(e.target)) return;
       const files = Array.from(e.clipboardData?.items ?? [])
         .filter((i) => i.kind === "file" && i.type.startsWith("image/"))
         .map((i) => i.getAsFile())
@@ -894,28 +914,27 @@ export function Editor({
   // Keyboard shortcuts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      const inputType = (target as HTMLInputElement).type;
-      const textEntry =
-        target.tagName === "TEXTAREA" ||
-        target.tagName === "SELECT" ||
-        target.isContentEditable ||
-        (target.tagName === "INPUT" &&
-          !["checkbox", "radio", "range", "button", "file"].includes(inputType));
-      if (textEntry) return;
+      noteKey();
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      const inputType = (target as HTMLInputElement | null)?.type;
+      const s = useEditor.getState();
+      const declined = shortcutDecline(e, { exportOpen: s.exportOpen });
+      if (declined) {
+        reportDecline(declined, e);
+        return;
+      }
       // Let native toggle/slider behavior win for focused controls.
       const controlFocused =
-        target.tagName === "INPUT" || target.closest('[role="switch"],[role="slider"]') !== null;
+        target?.tagName === "INPUT" ||
+        target?.closest('[role="switch"],[role="slider"]') != null;
       // Space is narrower: a checkbox or a switch flips on it, so it keeps the
       // key. A slider does not — it moves on the arrows — and neither does a
       // scrub bar, so focus left on one of those (the transport, the zoom
       // control, the seek bar the pointer last touched) must not swallow the
       // one key the whole editor is played with.
       const spaceTaken =
-        ["checkbox", "radio"].includes(inputType) ||
-        target.closest('[role="switch"],[role="checkbox"]') !== null;
-      const s = useEditor.getState();
-      if (s.exportOpen || document.querySelector('[data-slot="dialog-content"]')) return;
+        (!!inputType && ["checkbox", "radio"].includes(inputType)) ||
+        target?.closest('[role="switch"],[role="checkbox"]') != null;
 
       // A read-only view keeps playback keys; everything that edits is out.
       if (s.readOnly) {
@@ -927,21 +946,30 @@ export function Editor({
           ((e.metaKey || e.ctrlKey) &&
             e.key.toLowerCase() === "j" &&
             s.sharedFeatures?.chat === true);
-        if (!allowed) return;
+        if (!allowed) {
+          reportDecline("read-only", e);
+          return;
+        }
       }
+      shortcutReached();
+
+      // ⌘ on a Mac, Ctrl elsewhere — and never with Alt down: a Brazilian or
+      // European layout types its extra characters on AltGr, which Windows
+      // sends as ctrl+alt, so ⌘C on one of those keyboards is really ₢.
+      const mod = (e.metaKey || e.ctrlKey) && !e.altKey;
 
       if (e.code === "Space" && !spaceTaken) {
         e.preventDefault();
         if (!s.playing && playheadAt() >= projectDuration(s) - 0.01) s.seek(0);
         s.setPlaying(!s.playing);
-      } else if (e.key === "Backspace" || e.key === "Delete") {
+      } else if (isDeleteKey(e)) {
         e.preventDefault();
         s.deleteSelection();
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+      } else if (mod && e.key.toLowerCase() === "z") {
         e.preventDefault();
         if (e.shiftKey) s.redo();
         else s.undo();
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c") {
+      } else if (mod && e.key.toLowerCase() === "c") {
         // Selected page text keeps native ⌘C. Otherwise, alongside the
         // internal copy (for ⌘V back onto the timeline), the selection's
         // mention tokens go to the system clipboard, so a copied clip,
@@ -961,7 +989,7 @@ export function Editor({
           if (copied) clearCopiedFrame();
           if (copied || token) e.preventDefault();
         }
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "v") {
+      } else if (mod && e.key.toLowerCase() === "v") {
         // The timeline clipboard first; a frame copied off the preview canvas
         // lands as a still under the indicator. Where it lands is read at the
         // keystroke, so a still that waits on its draw or its upload still
@@ -983,7 +1011,7 @@ export function Editor({
             })
             .catch((err) => reportSwallowed("[cut] paste frame failed", err));
         }
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "g") {
+      } else if (mod && e.key.toLowerCase() === "g") {
         // ⌘G groups the multi-selected elements, ⇧⌘G dissolves the primary's
         // group — the panel's Group button is out of reach while a
         // multi-selection keeps the inspector closed.
@@ -997,16 +1025,16 @@ export function Editor({
         } else {
           s.groupSelectedOverlays();
         }
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
+      } else if (mod && e.key.toLowerCase() === "j") {
         e.preventDefault();
         s.setAiOpen(!s.aiOpen);
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
+      } else if (mod && e.key.toLowerCase() === "b") {
         e.preventDefault();
         // Cut at the skimmer when the mouse is over the timeline.
         s.splitAtPlayhead(skimAt() ?? undefined);
-      } else if (e.key.toLowerCase() === "s" && !e.metaKey && !e.ctrlKey) {
+      } else if (e.key.toLowerCase() === "s" && !e.metaKey && !e.ctrlKey && !e.altKey) {
         s.splitAtPlayhead(skimAt() ?? undefined);
-      } else if (e.key.toLowerCase() === "t" && !e.metaKey && !e.ctrlKey) {
+      } else if (e.key.toLowerCase() === "t" && !e.metaKey && !e.ctrlKey && !e.altKey) {
         s.addOverlay();
       } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !controlFocused) {
         e.preventDefault();

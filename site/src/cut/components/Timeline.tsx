@@ -45,6 +45,7 @@ import {
 import { originalSettings, type ExportDoc } from "@/cut/lib/exportClient";
 import { useExports } from "@/cut/lib/exportStore";
 import { isDragActive, startDrag, subscribeDragActive } from "@/cut/lib/drag";
+import { shortcutDecline } from "@/cut/lib/shortcutGate";
 import { additiveClick } from "@/cut/lib/hostKeys";
 import { CLIP_GAP, laneDragFor, laneDragParts, startLaneMove, startLaneTrim, type LaneDrag, type LaneKind } from "@/cut/lib/laneTracks";
 import { downloadMedia, ensurePeaks, importImage, importStockMusic, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia, stripFailedFor, subscribeStripStatus } from "@/cut/lib/media";
@@ -1530,16 +1531,16 @@ export function Timeline() {
   // Timeline-scoped keys: = / - zoom around the playhead, Home/End jump.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      if (
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.tagName === "SELECT" ||
-        target.isContentEditable ||
-        document.querySelector('[data-slot="dialog-content"]')
-      )
-        return;
+      // The editor's rule decides, plus one of this row's own: Home and End
+      // belong to a slider or a scrub bar that holds the keyboard.
+      const target = e.target instanceof HTMLElement ? e.target : null;
       const s = useEditor.getState();
+      if (shortcutDecline(e, { exportOpen: s.exportOpen }) || target?.tagName === "INPUT") return;
+      // All four are bare keys. Held with a modifier they are the window's own
+      // — ctrl+- and ctrl+= zoom the page, ctrl+Home and ctrl+End jump to its
+      // ends — and answering those here would move two things at once.
+      const bare = !e.metaKey && !e.ctrlKey && !e.altKey;
+      if (!bare) return;
       if (e.key === "=" || e.key === "+") {
         e.preventDefault();
         zoomTo(s.pxPerSec * 1.3);

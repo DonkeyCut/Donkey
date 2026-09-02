@@ -3,6 +3,7 @@ import { useEffect } from "react";
 
 import type { PerfLogBatch } from "@/cut/lib/perfLog";
 import type { MainThreadSample, PerfSample } from "@/cut/lib/perfTrace";
+import type { ShortcutDecline } from "@/cut/lib/shortcutGate";
 import type {
   OnboardingRun,
   ReferralSource,
@@ -42,6 +43,16 @@ export type AnalyticsEvents = {
   // The blocked frames themselves, kept locally and sent at idle, on the page
   // hiding, and on the next open — see perfLog for the record.
   cut_perf_log: PerfLogBatch;
+  // A page load where a chord the editor binds went nowhere three times over,
+  // held by a text field or a dialog — see shortcutGate. One report per page.
+  cut_keyboard_blocked: {
+    reason: ShortcutDecline;
+    seen: number;
+    declined: number;
+    key: string;
+    tag: string;
+    slot: string;
+  };
   // Billing (settings).
   pro_checkout_started: void;
   billing_portal_opened: void;

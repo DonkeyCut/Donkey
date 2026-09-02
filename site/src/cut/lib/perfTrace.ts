@@ -10,6 +10,7 @@ import {
   type MemoryUsage,
 } from "./memoryBudget";
 import { logPerfRecord, notePerfTrouble, perfUploadReason, type PerfUploadReason } from "./perfLog";
+import { isTextEntry } from "./shortcutGate";
 
 /**
  * What the preview actually did, frame by frame.
@@ -959,17 +960,6 @@ function describeTarget(target: EventTarget | null): string {
   }
   return slots.length ? `${slots.join(">")} ${self}` : self;
 }
-
-const isTextEntry = (target: EventTarget | null): boolean => {
-  const el = target instanceof HTMLElement ? target : null;
-  return (
-    !!el &&
-    (el.tagName === "TEXTAREA" ||
-      el.isContentEditable ||
-      (el.tagName === "INPUT" &&
-        !["checkbox", "radio", "range", "button", "file"].includes((el as HTMLInputElement).type)))
-  );
-};
 
 function watchInputs(): () => void {
   const onPointer = (e: PointerEvent) => {
