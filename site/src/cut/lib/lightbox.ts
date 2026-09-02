@@ -18,6 +18,9 @@ export interface LightboxItem {
   /** Width ÷ height, when known — sizes the viewer up front so it opens at the
    * media's own shape instead of collapsing until the file's metadata loads. */
   ratio?: number;
+  /** Length in seconds, when the catalog knows it — the transport reads it
+   * from the moment the viewer opens, before the file's metadata arrives. */
+  duration?: number;
   /** A cover image to show while the media loads: the source's own thumbnail
    * for an imported clip. */
   poster?: string;
@@ -41,6 +44,7 @@ export const lightboxItemFromRef = (ref: AssetRef): LightboxItem => ({
   name: ref.name,
   prompt: "",
   ...(ref.width && ref.height ? { ratio: ref.width / ref.height } : {}),
+  ...(ref.duration ? { duration: ref.duration } : {}),
   ...(ref.thumb ? { poster: ref.thumb } : {}),
   assetId: ref.scope === "project" ? ref.id : null,
   ...(ref.scope === "library" ? { libraryId: ref.id } : {}),
@@ -62,6 +66,7 @@ export const lightboxItemFromLibrary = (
   libraryId: a.id,
   ...(bare ? { bare: true } : {}),
   ...(a.width && a.height ? { ratio: a.width / a.height } : {}),
+  ...(a.duration ? { duration: a.duration } : {}),
   ...(libraryPosterUrl(a) ? { poster: libraryPosterUrl(a) } : {}),
 });
 

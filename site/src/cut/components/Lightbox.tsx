@@ -240,7 +240,7 @@ function VideoBody({
   // picture. The `play` event turns it on.
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const [duration, setDuration] = useState(item.duration ?? 0);
   const [muted, setMuted] = useState(false);
 
   const toggle = () => {
@@ -279,7 +279,7 @@ function VideoBody({
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
-        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
+        onLoadedMetadata={(e) => setDuration(loadedDuration(e.currentTarget, item))}
       />
       <MediaTransport
         playing={playing}
@@ -299,6 +299,15 @@ function VideoBody({
   );
 }
 
+/** The length the transport runs on once the file's metadata is in: what the
+ * element reports, unless it reports nothing usable — a source streamed
+ * without a length says Infinity — in which case the catalog's figure stands. */
+function loadedDuration(el: HTMLMediaElement, item: LightboxItem) {
+  return Number.isFinite(el.duration) && el.duration > 0
+    ? el.duration
+    : (item.duration ?? 0);
+}
+
 function AudioBody({ item }: { item: LightboxItem }) {
   const asset = useEditor((s) =>
     item.assetId ? s.assets.find((a) => a.id === item.assetId) : undefined,
@@ -306,7 +315,7 @@ function AudioBody({ item }: { item: LightboxItem }) {
   const audioEl = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const [duration, setDuration] = useState(item.duration ?? 0);
   // The big player takes over from any row/card preview, and closing the
   // lightbox stops it — a detached media element can keep playing otherwise.
   // The element renders with the body, so it exists by the time this runs.
@@ -329,7 +338,7 @@ function AudioBody({ item }: { item: LightboxItem }) {
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
-        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
+        onLoadedMetadata={(e) => setDuration(loadedDuration(e.currentTarget, item))}
         onEnded={() => setPlaying(false)}
       />
       <MediaTransport

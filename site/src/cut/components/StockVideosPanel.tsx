@@ -285,6 +285,7 @@ function StockTile({ item }: { item: StockVideo }) {
               kind: "video",
               src: item.file,
               ratio: aspectRatio(item.aspect),
+              duration: item.duration,
               name: stockTitle(item.id),
               prompt: item.prompt,
               assetId: null,

@@ -399,6 +399,10 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
             useLightbox.getState().open({
               kind: "video",
               src: asset.url,
+              ...(asset.width && asset.height
+                ? { ratio: asset.width / asset.height }
+                : {}),
+              duration: asset.duration,
               name: asset.name,
               prompt: job.prompt,
               assetId: asset.id,
