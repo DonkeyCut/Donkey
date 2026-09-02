@@ -2,7 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, Frame, Italic, Loader2, Palette, Scissors, Smile, Trash2, Type, Volume2 } from "lucide-react";
+import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, Frame, Italic, Link2, Link2Off, Loader2, Palette, Scissors, Smile, Trash2, Type, User, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSpeedCurveUi } from "@/cut/lib/speedCurveUi";
 import { EmojiPicker } from "@/cut/components/EmojiPicker";
@@ -69,6 +69,13 @@ import {
   retimeOf,
   flatSpeedCurve,
   hasSpeedCurve,
+  MASK_FEATHER_MAX,
+  MASK_RADIUS_MAX,
+  MASK_SHAPES,
+  maskHasRadius,
+  maskOutlinePathD,
+  maskSizeAxes,
+  restingMaskFrame,
 } from "@donkeycut/effects-kit";
 import { clipWindow, maxClipFade, useEditor, type EditorState } from "@/cut/lib/store";
 import { usePanelView } from "@/cut/lib/panelViews";
@@ -3015,14 +3022,26 @@ function KeyRow({
   );
 }
 
-const MASK_SHAPES: { id: MaskKind; label: string }[] = [
-  { id: "rect", label: "Rectangle" },
-  { id: "square", label: "Square" },
-  { id: "circle", label: "Circle" },
-  { id: "linear", label: "Linear" },
-  { id: "mirror", label: "Mirror" },
-  { id: "subject", label: "Subject" },
-];
+/** A mask kind's picker icon, drawn from the same outline the stage gizmo
+ * traces, so the tile shows the shape the mask cuts. A linear edge keeps its
+ * top half, a mirror its band; the person matte wears a figure. */
+function MaskShapeIcon({ kind }: { kind: MaskKind }) {
+  if (kind === "subject") return <User className="size-[18px]" strokeWidth={1.75} />;
+  const d = maskOutlinePathD({ kind }, 15, kind === "square" ? 15 : 12, 12, 2.5);
+  return (
+    <svg viewBox="-10 -10 20 20" className="size-[18px]" fill="none" stroke="currentColor" strokeWidth={1.5}>
+      {kind === "linear" && <path d="M-9 -8 L9 -3 V-9 H-9 Z" fill="currentColor" opacity={0.3} stroke="none" />}
+      {kind === "mirror" && <path d="M-9 -7 L9 -4 V4 L-9 7 Z" fill="currentColor" opacity={0.3} stroke="none" />}
+      {kind === "linear" ? (
+        <path d="M-9 -8 L9 -3" strokeDasharray="2.5 1.5" />
+      ) : kind === "mirror" ? (
+        <path d="M-9 -7 L9 -4 M-9 7 L9 4" strokeDasharray="2.5 1.5" />
+      ) : (
+        <path d={d} strokeLinejoin="round" />
+      )}
+    </svg>
+  );
+}
 
 /** How a panel's mask section reads and writes its owner's mask — the same
  * section serves overlay elements and video clips through this. */
@@ -3414,66 +3433,108 @@ function MaskSection({ target }: { target: MaskTarget }) {
   const rotationCk = useSliderCheckpoint();
   const featherCk = useSliderCheckpoint();
   const radiusCk = useSliderCheckpoint();
+  // Size link: scrubbing one axis carries the other so the shape keeps its
+  // pixel proportions. On for a circle, which starts round.
+  const [linked, setLinked] = useState<boolean | null>(null);
   const m = target.mask;
   const tLocal = localTimeOf(target.element, now);
   const geom = m ? maskFrameAt(m, tLocal) : null;
+  const sizeLinked = linked ?? m?.kind === "circle";
   const writeGeom = (patch: Partial<Omit<MaskKey, "t">>) => {
     if (!m) return;
     if (hasMaskKeys(m)) return target.setKey(tLocal, patch, { transient: true });
-    target.setTransient({ ...m, ...patch });
+    // A zero radius is no radius on the resting mask.
+    const next = { ...m, ...patch };
+    if (patch.radius === 0) delete next.radius;
+    target.setTransient(next);
   };
-  // Which size axes the shape has: a square has one side, a mirror band one
-  // height, linear none.
-  const sizeAxes: ("w" | "h")[] =
-    m?.kind === "rect" || m?.kind === "circle"
-      ? ["w", "h"]
-      : m?.kind === "square"
-        ? ["w"]
-        : m?.kind === "mirror"
-          ? ["h"]
-          : [];
+  // One axis moves, the other follows at the current pixel ratio.
+  const writeSize = (axis: "w" | "h", v: number) => {
+    if (!geom || !sizeLinked || sizeAxes.length < 2) return writeGeom({ [axis]: v });
+    const fr = frameOf(useEditor.getState().aspect);
+    const ratio = (geom.h * fr.h) / Math.max(1e-6, geom.w * fr.w);
+    if (axis === "w") return writeGeom({ w: v, h: Math.min(2, Math.max(0.01, (v * fr.w * ratio) / fr.h)) });
+    writeGeom({ h: v, w: Math.min(2, Math.max(0.01, (v * fr.h) / ratio / fr.w)) });
+  };
+  const sizeAxes = m ? maskSizeAxes(m.kind) : [];
   const subject = m?.kind === "subject";
+  // A circle at rest is round: w and h are fractions of different frame
+  // edges, so equal pixels means unequal fractions.
+  const roundCircle = (w: number) => {
+    const fr = frameOf(useEditor.getState().aspect);
+    return { w, h: (w * fr.w) / fr.h };
+  };
+  // Reset puts the geometry back where a fresh mask starts — centered, half
+  // frame, upright, hard-edged, square-cornered — keeping the kind, the
+  // invert and any keys: with keys the default lands on the key at the
+  // playhead.
+  const reset = () => {
+    if (!m) return;
+    const rest = restingMaskFrame({ kind: m.kind });
+    const geom = m.kind === "circle" ? { ...rest, ...roundCircle(rest.w) } : rest;
+    if (hasMaskKeys(m)) {
+      target.set({ ...m, radius: undefined });
+      target.setKey(tLocal, geom, { transient: true });
+      return;
+    }
+    setLinked(null);
+    target.set({ kind: m.kind, invert: m.invert, kf: m.kf, ...(subject ? {} : geom) });
+  };
   return (
     <Section
       title="Mask"
-      info="Trim the picture to a shape, or to the person in the shot (Subject). Feather softens the edge, and invert keeps what the shape leaves out — an inverted Subject mask sits the picture behind the speaker."
+      info="Trim the picture to a shape, or to the person in the shot (Subject). Drag the shape to move it, its grips to resize, the lollipop to rotate, the chevron under it to feather the edge, and the corner grip to round a box. Invert keeps what the shape leaves out — an inverted Subject mask sits the picture behind the speaker."
       enabled={!!m}
       onEnabledChange={(v) => target.set(v ? { kind: "rect" } : undefined)}
+      aside={
+        m && !subject ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-[12px] text-muted-foreground"
+            onClick={reset}
+          >
+            Reset
+          </Button>
+        ) : undefined
+      }
     >
       {m && geom && (
         <>
-          <Row label="Shape">
-            <Select
-              value={m.kind}
-              onValueChange={(kind) => {
-                // A fresh circle starts perfectly round: w and h are frame
-                // fractions, so equal pixels means unequal fractions. ⇧-drag
-                // on the stage keeps it round through resizes.
-                const patch =
-                  kind === "circle" && !hasMaskKeys(m)
-                    ? (() => {
-                        const fr = frameOf(useEditor.getState().aspect);
-                        const w = m.w ?? 0.5;
-                        return { w, h: (w * fr.w) / fr.h };
-                      })()
-                    : kind === "subject" && m.kind !== "subject" && target.subjectStartsBehind
-                      ? { invert: true }
-                      : {};
-                target.set({ ...m, ...patch, kind: kind as MaskKind });
-              }}
-            >
-              <SelectTrigger className="h-8 w-36 text-[12px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {MASK_SHAPES.map((s) => (
-                  <SelectItem key={s.id} value={s.id} className="text-[12px]">
-                    {s.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Row>
+          <div className="grid grid-cols-4 gap-1.5 py-1" role="radiogroup" aria-label="Mask shape">
+            {MASK_SHAPES.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                role="radio"
+                aria-checked={m.kind === s.id}
+                title={s.label}
+                className={cn(
+                  "flex flex-col items-center gap-1 rounded-md border px-1 pb-1 pt-2 text-[10px] leading-none transition-colors",
+                  m.kind === s.id
+                    ? "border-primary bg-primary/10 text-foreground"
+                    : "border-transparent bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+                onClick={() => {
+                  const kind = s.id;
+                  if (kind === m.kind) return;
+                  // A fresh circle starts perfectly round: w and h are frame
+                  // fractions, so equal pixels means unequal fractions. The
+                  // size link and ⇧-drag on the stage keep it round after.
+                  const patch =
+                    kind === "circle" && !hasMaskKeys(m)
+                      ? roundCircle(m.w ?? 0.5)
+                      : kind === "subject" && m.kind !== "subject" && target.subjectStartsBehind
+                        ? { invert: true }
+                        : {};
+                  target.set({ ...m, ...patch, kind });
+                }}
+              >
+                <MaskShapeIcon kind={s.id} />
+                <span className="w-full truncate text-center">{s.label}</span>
+              </button>
+            ))}
+          </div>
           {!subject && (
             <KeyRow
               element={target.element}
@@ -3517,8 +3578,21 @@ function MaskSection({ target }: { target: MaskTarget }) {
           )}
           {sizeAxes.length > 0 && (
             <Row label="Size">
-              {sizeAxes.map((axis) => (
+              {sizeAxes.map((axis, i) => (
                 <span key={axis} className="flex items-center gap-1">
+                  {i === 1 && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className={cn("size-6", sizeLinked ? "text-foreground" : "text-muted-foreground/60")}
+                      aria-label={sizeLinked ? "Unlink width and height" : "Link width and height"}
+                      aria-pressed={sizeLinked}
+                      title={sizeLinked ? "Sizes move together" : "Sizes move on their own"}
+                      onClick={() => setLinked(!sizeLinked)}
+                    >
+                      {sizeLinked ? <Link2 className="size-3.5" /> : <Link2Off className="size-3.5" />}
+                    </Button>
+                  )}
                   <span className="text-[11px] text-muted-foreground/70 uppercase">{axis}</span>
                   <ScrubValue
                     label={`Mask ${axis === "w" ? "width" : "height"}`}
@@ -3532,11 +3606,11 @@ function MaskSection({ target }: { target: MaskTarget }) {
                     parse={parseNumberInput}
                     onScrub={(v) => {
                       sizeCk.begin();
-                      writeGeom({ [axis]: v / 100 });
+                      writeSize(axis, v / 100);
                     }}
                     onCommit={(v) => {
                       sizeCk.begin();
-                      writeGeom({ [axis]: v / 100 });
+                      writeSize(axis, v / 100);
                       sizeCk.end();
                     }}
                   />
@@ -3576,7 +3650,7 @@ function MaskSection({ target }: { target: MaskTarget }) {
               valueClassName="w-9 text-muted-foreground"
               value={geom.feather}
               min={0}
-              max={120}
+              max={MASK_FEATHER_MAX}
               step={1}
               format={(v) => String(Math.round(v))}
               parse={parseNumberInput}
@@ -3591,27 +3665,25 @@ function MaskSection({ target }: { target: MaskTarget }) {
               }}
             />
           </Row>
-          {(m.kind === "rect" || m.kind === "square") && (
+          {maskHasRadius(m.kind) && (
             <Row label="Radius">
               <ValueSlider
                 label="Mask corner radius"
                 sliderClassName="data-horizontal:w-24"
                 valueClassName="w-9 text-muted-foreground"
-                value={m.radius ?? 0}
+                value={geom.radius}
                 min={0}
-                max={200}
+                max={MASK_RADIUS_MAX}
                 step={1}
                 format={(v) => String(Math.round(v))}
                 parse={parseNumberInput}
                 onDraft={(v) => {
                   radiusCk.begin();
-                  const radius = Math.round(v);
-                  target.setTransient({ ...m, radius: radius === 0 ? undefined : radius });
+                  writeGeom({ radius: Math.round(v) });
                 }}
                 onCommit={(v) => {
                   radiusCk.begin();
-                  const radius = Math.round(v);
-                  target.setTransient({ ...m, radius: radius === 0 ? undefined : radius });
+                  writeGeom({ radius: Math.round(v) });
                   radiusCk.end();
                 }}
               />

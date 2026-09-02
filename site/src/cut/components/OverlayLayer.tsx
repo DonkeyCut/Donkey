@@ -15,7 +15,7 @@ import {
   subtitleLaneCount,
   trackPos,
 } from "@/cut/lib/subtitles";
-import { evalOverlayFrame, glyphStateAt, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, maskFrameAt, overlayWords, paintMaskCoverage, resolveShadow, shapeMetrics, shapePathD, textStretch, WORD_ACCENT_DEFAULT, wordDrawsAt, type LottieHandle, type Mask, type MaskKey, type OverlayFrameState, type WordDraw } from "@donkeycut/effects-kit";
+import { evalOverlayFrame, glyphStateAt, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, MASK_FEATHER_MAX, MASK_RADIUS_MAX, maskFrameAt, maskHasRadius, maskOutlinePathD, maskSizeAxes, overlayWords, paintMaskCoverage, resolveShadow, shapeMetrics, shapePathD, textStretch, WORD_ACCENT_DEFAULT, wordDrawsAt, type LottieHandle, type Mask, type MaskKey, type OverlayFrameState, type WordDraw } from "@donkeycut/effects-kit";
 import {
   LINE_HEIGHT,
   PLATE_PAD_X,
@@ -1372,9 +1372,11 @@ function useMaskCss(
 /**
  * On-canvas mask editing, shared by elements and video clips: an amber
  * outline tracing the mask's edge — its interior moves the mask, a lollipop
- * above rotates it and a corner grip resizes it (the band height, for
- * mirror), with the same detents and red guide lines as the element's own
- * handles. Coordinates are local
+ * above rotates it, a corner grip resizes it (the band height, for mirror),
+ * a chevron grip under the shape pulls the feather out and a grip inside the
+ * top-left corner rounds a box's corners — with the same detents and red
+ * guide lines as the element's own handles. A translucent band along the
+ * edge shows how far the feather reaches. Coordinates are local
  * px around the layer's anchor — the mount point carries the layer's own
  * transform — and screen deltas are folded back through that transform via
  * `rotation`/`poseScale`, then through the mask's own angle for the resize.
@@ -1397,6 +1399,7 @@ export function MaskGizmoCore({
   tLocal: number;
   rotation: number;
   poseScale: number;
+  /** Keyed geometry: lands on the key at the playhead when keys exist. */
   writeGeom: (patch: Partial<Omit<MaskKey, "t">>) => void;
   begin: () => void;
 }) {
@@ -1414,6 +1417,10 @@ export function MaskGizmoCore({
   } | null>(null);
   /** The angle the readout shows while a rotate drag runs; null when idle. */
   const [spin, setSpin] = useState<number | null>(null);
+  /** The feather value shown while its grip drags; null when idle. */
+  const [soft, setSoft] = useState<number | null>(null);
+  /** The corner radius shown while its grip drags; null when idle. */
+  const [round, setRound] = useState<number | null>(null);
   const interiorRef = useRef<HTMLDivElement>(null);
   // Screen deltas → the box's local space (undo the element transform).
   const toLocal = (dx: number, dy: number) => {
@@ -1425,8 +1432,7 @@ export function MaskGizmoCore({
     };
   };
   const theta = (f.rotation * Math.PI) / 180;
-  const sizable =
-    m.kind === "rect" || m.kind === "square" || m.kind === "circle" || m.kind === "mirror";
+  const sizable = maskSizeAxes(m.kind).length > 0;
   // The outline traces the mask's hard edge in local px; a square's side is
   // `w` of the frame width on both axes (the painter's rule), and
   // linear/mirror edges run wider than any frame so they always cross it.
@@ -1450,6 +1456,14 @@ export function MaskGizmoCore({
   // the center onto dead center, within a couple percent of the frame.
   const snapTo = (v: number, target: number) => (Math.abs(v - target) < 0.02 ? target : v);
   const designScale = Math.min(stageWidth, stageHeight) / 1080;
+  const radiusPx = f.radius * designScale;
+  // The feather's reach on stage: the painter blurs the hard edge with
+  // σ = feather / 2, so the transition spans about the feather width centered
+  // on the edge; a mirror band's feather never exceeds the band.
+  const featherPx = Math.min(f.feather * designScale, m.kind === "mirror" ? h : Infinity);
+  const outlineD = maskOutlinePathD(m, w, h, span, radiusPx);
+  // Where the shape's bottom edge sits in its own frame, for the feather grip.
+  const bottom = m.kind === "linear" ? 0 : m.kind === "square" ? w / 2 : h / 2;
   const edge = {
     className: "pointer-events-none",
     fill: "none" as const,
@@ -1571,6 +1585,50 @@ export function MaskGizmoCore({
       onUp: () => setGuide(null),
     });
   };
+  // The chevron grip pulls the feather: dragging away from the shape along
+  // its own down axis softens the edge, back in hardens it. Feather is design
+  // px, so the stage delta divides by the design scale.
+  const featherMask = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    begin();
+    const g0 = f;
+    setSoft(Math.round(g0.feather));
+    startDrag(e, {
+      cursor: () => "ns-resize",
+      onMove: (dx, dy) => {
+        const l = toLocal(dx, dy);
+        const my = -l.x * Math.sin(theta) + l.y * Math.cos(theta);
+        const feather = Math.round(
+          Math.min(MASK_FEATHER_MAX, Math.max(0, g0.feather + my / designScale))
+        );
+        setSoft(feather);
+        writeGeom({ feather });
+      },
+      onUp: () => setSoft(null),
+    });
+  };
+  // The corner grip slides along the box's diagonal: inward rounds the
+  // corners, outward squares them.
+  const roundMask = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    begin();
+    const r0 = f.radius;
+    const side = m.kind === "square" ? w : h;
+    const cap = Math.min(MASK_RADIUS_MAX, Math.min(w, side) / 2 / designScale);
+    setRound(Math.round(r0));
+    startDrag(e, {
+      cursor: () => "nwse-resize",
+      onMove: (dx, dy) => {
+        const l = toLocal(dx, dy);
+        const mx = l.x * Math.cos(theta) + l.y * Math.sin(theta);
+        const my = -l.x * Math.sin(theta) + l.y * Math.cos(theta);
+        const radius = Math.round(Math.min(cap, Math.max(0, r0 + (mx + my) / 2 / designScale)));
+        setRound(radius);
+        writeGeom({ radius });
+      },
+      onUp: () => setRound(null),
+    });
+  };
   // The whole interior moves the mask, so a drag can start anywhere inside
   // the outline; linear/mirror get a grabbable strip along their edge line.
   const grabW = m.kind === "linear" || m.kind === "mirror" ? span * 2 : w;
@@ -1586,8 +1644,11 @@ export function MaskGizmoCore({
           width: grabW,
           height: grabH,
           transform: `translate(-50%, -50%) rotate(${f.rotation}deg)`,
-          borderRadius:
-            m.kind === "circle" ? "50%" : (m.radius ?? 0) * designScale,
+          // The grab area is the shape itself: a box's rounded corners, an
+          // ellipse, or the polygon's own outline.
+          ...(m.kind === "linear" || m.kind === "mirror"
+            ? {}
+            : { clipPath: `path("${maskOutlinePathD(m, w, h, span, radiusPx, grabW / 2, grabH / 2)}")` }),
         }}
         onPointerDown={beginMove}
       />
@@ -1598,27 +1659,83 @@ export function MaskGizmoCore({
         style={{ left: `calc(50% + ${cx}px)`, top: `calc(50% + ${cy}px)` }}
       >
         <g transform={`rotate(${f.rotation})`}>
-          {m.kind === "rect" || m.kind === "square" ? (
-            <rect
-              x={-w / 2}
-              y={-h / 2}
-              width={w}
-              height={h}
-              rx={(m.radius ?? 0) * designScale}
-              {...edge}
+          {featherPx > 0 && (
+            <path
+              d={outlineD}
+              fill="none"
+              stroke="#ff9f0a"
+              strokeOpacity={0.22}
+              strokeWidth={featherPx}
+              strokeLinejoin="round"
             />
-          ) : m.kind === "circle" ? (
-            <ellipse cx={0} cy={0} rx={w / 2} ry={h / 2} {...edge} />
-          ) : m.kind === "linear" ? (
-            <line x1={-span} y1={0} x2={span} y2={0} {...edge} />
-          ) : m.kind === "mirror" ? (
-            <>
-              <line x1={-span} y1={-h / 2} x2={span} y2={-h / 2} {...edge} />
-              <line x1={-span} y1={h / 2} x2={span} y2={h / 2} {...edge} />
-            </>
-          ) : null}
+          )}
+          <path d={outlineD} {...edge} />
         </g>
       </svg>
+      <div
+        className="pointer-events-none absolute"
+        style={{
+          left: `calc(50% + ${cx}px)`,
+          top: `calc(50% + ${cy}px)`,
+          width: 0,
+          height: 0,
+          transform: `rotate(${f.rotation}deg)`,
+        }}
+      >
+        <div
+          className="absolute left-0"
+          style={{ top: bottom + featherPx / 2 + 22, transform: "translate(-50%, -50%)" }}
+        >
+          {soft !== null && (
+            <span
+              className="absolute left-1/2 top-full mt-1.5 rounded-full bg-black/55 px-2 py-0.5 text-[11px] font-medium tabular-nums text-white"
+              style={{ transform: `translateX(-50%) rotate(${-(rotation + f.rotation)}deg)` }}
+            >
+              {soft}
+            </span>
+          )}
+          {/* The grip wears the softness it controls: a ring that blurs
+              outward, in the mask's amber like every other mask grip. */}
+          <span
+            title="Drag to feather the edge"
+            onPointerDown={featherMask}
+            className="pointer-events-auto block size-[13px] cursor-ns-resize rounded-full border-[2.5px] bg-white"
+            style={{
+              borderColor: "#ff9f0a",
+              boxShadow: "0 0 0 3px rgba(255,159,10,0.35), 0 0 8px 4px rgba(255,159,10,0.3), 0 1px 4px rgba(0,0,0,0.4)",
+            }}
+          />
+        </div>
+        {maskHasRadius(m.kind) && (
+          <div
+            className="absolute"
+            style={{
+              left: -w / 2 + radiusPx * 0.3 + 14,
+              top: -(m.kind === "square" ? w : h) / 2 + radiusPx * 0.3 + 14,
+              transform: "translate(-50%, -50%)",
+            }}
+          >
+            {round !== null && (
+              <span
+                className="absolute bottom-full left-1/2 mb-1.5 rounded-full bg-black/55 px-2 py-0.5 text-[11px] font-medium tabular-nums text-white"
+                style={{ transform: `translateX(-50%) rotate(${-(rotation + f.rotation)}deg)` }}
+              >
+                {round}
+              </span>
+            )}
+            <span
+              title="Drag to round the corners"
+              onPointerDown={roundMask}
+              className="pointer-events-auto grid size-[16px] cursor-nwse-resize place-items-center rounded-full border-[2.5px] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.4)]"
+              style={{ borderColor: "#ff9f0a" }}
+            >
+              <svg viewBox="0 0 10 10" className="size-[7px]" fill="none" stroke="#ff9f0a" strokeWidth={2}>
+                <path d="M1 9 V5 A4 4 0 0 1 5 1 H9" />
+              </svg>
+            </span>
+          </div>
+        )}
+      </div>
       {guide && (
         <svg
           className="pointer-events-none absolute z-10 overflow-visible"

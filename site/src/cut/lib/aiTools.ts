@@ -42,6 +42,10 @@ import {
   STROKE_OFFSET_MAX,
   STROKE_STYLES,
   STROKE_WIDTH_MAX,
+  MASK_FEATHER_MAX,
+  MASK_KINDS,
+  MASK_RADIUS_MAX,
+  maskHasRadius,
   type RemovalStroke,
   type StrokeStyleId,
 } from "@donkeycut/effects-kit";
@@ -625,27 +629,30 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       setMask(undefined);
       return { id: input.id, mask: null };
     }
-    const kinds = ["rect", "square", "circle", "linear", "mirror", "subject"];
     const kind =
       typeof input.kind === "string"
         ? input.kind
         : (current?.kind ?? "rect");
-    if (!kinds.includes(kind)) throw new ToolError(`Unknown mask kind. Use one of: ${kinds.join(", ")}, none.`);
+    if (!(MASK_KINDS as string[]).includes(kind))
+      throw new ToolError(`Unknown mask kind. Use one of: ${MASK_KINDS.join(", ")}, none.`);
     const geom = (k: Record<string, unknown>) => ({
       ...(isNum(k.x) ? { x: clamp(k.x, -1, 1) } : {}),
       ...(isNum(k.y) ? { y: clamp(k.y, -1, 1) } : {}),
       ...(isNum(k.w) ? { w: clamp(k.w, 0.01, 2) } : {}),
       ...(isNum(k.h) ? { h: clamp(k.h, 0.01, 2) } : {}),
       ...(isNum(k.rotation) ? { rotation: clamp(Math.round(k.rotation), -180, 180) } : {}),
-      ...(isNum(k.feather) ? { feather: clamp(k.feather, 0, 200) } : {}),
+      ...(isNum(k.feather) ? { feather: clamp(k.feather, 0, MASK_FEATHER_MAX) } : {}),
+      ...(isNum(k.radius) ? { radius: clamp(k.radius, 0, MASK_RADIUS_MAX) } : {}),
     });
     const mask: Mask = {
       ...(current ?? {}),
       ...geom(input),
       kind: kind as Mask["kind"],
       ...(typeof input.invert === "boolean" ? { invert: input.invert || undefined } : {}),
-      ...(isNum(input.radius) ? { radius: clamp(input.radius, 0, 400) || undefined } : {}),
+      ...(isNum(input.radius) ? { radius: clamp(input.radius, 0, MASK_RADIUS_MAX) || undefined } : {}),
     };
+    // A radius belongs to a box; a shape that has no corners to round drops it.
+    if (!maskHasRadius(mask.kind)) delete mask.radius;
     // An element newly masked by the person starts behind them — the common
     // ask — unless the call named a direction; invert false shows it only on
     // the person. Clips keep the plain direction (Subject keeps the person).
@@ -663,15 +670,13 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const fr = frameOf(s.aspect);
       mask.h = clamp(((mask.w ?? 0.5) * fr.w) / fr.h, 0.01, 2);
     }
+    const dur = o ? Math.max(0.1, o.end - o.start) : clipLen(clip!);
     setMask(mask);
     // Keys layer on after the mask lands, so each one captures against the
     // geometry the call just set.
     const raw = input.keys;
     if (Array.isArray(raw)) {
       const st = useEditor.getState();
-      const dur = o
-        ? Math.max(0.1, o.end - o.start)
-        : clipLen(clip!);
       if (raw.length === 0) {
         if (o) st.clearOverlayMaskKeys(o.id);
         else st.clearClipMaskKeys(clip!.id);

@@ -22,6 +22,9 @@ import {
   SPEED_CURVE_MIN,
   SPEED_CURVE_PRESET_IDS,
   speedCurvePresetCatalogText,
+  MASK_FEATHER_MAX,
+  MASK_KINDS,
+  MASK_RADIUS_MAX,
 } from "@donkeycut/effects-kit";
 import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 
@@ -101,12 +104,12 @@ export const INSPECTOR_TOOLS = [
   {
     name: "set_mask",
     description:
-      "Mask an overlay element or a video clip — trim its picture to a shape or to the person in the shot. Kinds: rect (rounded box), square (rounded square, side = w of the frame width), circle (ellipse; w and h are frame fractions, so a perfect circle needs w × frame width = h × frame height — omitting h gives you that circle), linear (half-plane: at rotation 0 the top side stays), mirror (band across the item), subject (the person matte: invert true sits the item behind the speaker; invert false keeps it only on the person — an element newly masked as subject defaults to behind, a clip to on-person). Position is the mask center's offset from the item's own center (a clip's region center), in frame fractions; w/h size it in frame fractions; feather softens the edge; invert keeps what the shape leaves out. Subject masks use only feather and invert. Pass kind \"none\" to remove the mask. `keys` animates the geometry over time — each key is the full geometry at a moment, moving linearly between keys; pass an empty list to clear the keys and keep the mask still.",
+      "Mask an overlay element or a video clip — trim its picture to a shape or to the person in the shot. Kinds: rect (rounded box), square (rounded square, side = w of the frame width), circle (ellipse; w and h are frame fractions, so a perfect circle needs w × frame width = h × frame height — omitting h gives you that circle), linear (half-plane: at rotation 0 the top side stays), mirror (band across the item), heart / star / triangle / diamond / hexagon (the outline filled into the w × h box, point up), subject (the person matte: invert true sits the item behind the speaker; invert false keeps it only on the person — an element newly masked as subject defaults to behind, a clip to on-person). Position is the mask center's offset from the item's own center (a clip's region center), in frame fractions; w/h size it in frame fractions; feather softens the edge; invert keeps what the shape leaves out; radius rounds a rect or square's corners. Subject masks use only feather and invert. Pass kind \"none\" to remove the mask. `keys` animates the geometry over time — each key is the full geometry at a moment, moving linearly between keys; pass an empty list to clear the keys and keep the mask still.",
     inputSchema: obj({
       id: str("Overlay element id or video clip id"),
       kind: {
         type: "string",
-        enum: ["rect", "square", "circle", "linear", "mirror", "subject", "none"],
+        enum: [...MASK_KINDS, "none"],
         description: 'Mask shape, the person matte ("subject"), or "none" to remove the mask',
       },
       x: num("Center offset x from the element center, fraction of frame width (default 0)"),
@@ -114,9 +117,9 @@ export const INSPECTOR_TOOLS = [
       w: num("Width, fraction of frame width (default 0.5; square: the side; linear ignores)"),
       h: num("Height, fraction of frame height (mirror: band height; square/linear ignore)"),
       rotation: num("Degrees clockwise, -180..180"),
-      feather: num("Edge softness, px at the 1080 design short side (0..200)"),
+      feather: num(`Edge softness, px at the 1080 design short side (0..${MASK_FEATHER_MAX})`),
       invert: bool("Keep the pixels outside the shape"),
-      radius: num("Rect corner radius, px at 1080 short side"),
+      radius: num(`Rect or square corner radius, px at 1080 short side (0..${MASK_RADIUS_MAX})`),
       keys: {
         type: "array",
         description:
@@ -130,6 +133,7 @@ export const INSPECTOR_TOOLS = [
             h: num("Height, fraction of frame height"),
             rotation: num("Degrees clockwise, -180..180"),
             feather: num("Edge softness, px at 1080 short side"),
+            radius: num("Rect or square corner radius, px at 1080 short side"),
           },
           ["t"]
         ),
