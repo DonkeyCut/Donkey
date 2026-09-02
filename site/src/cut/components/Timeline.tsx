@@ -544,6 +544,7 @@ export function Timeline() {
       const scrolled = el.scrollLeft > 0;
       gutterFaceRef.current?.toggleAttribute("data-scrolled", scrolled);
       gutterShadowRef.current?.toggleAttribute("data-scrolled", scrolled);
+      publishStripView(el);
     };
     sync();
     el.addEventListener("scroll", sync);
@@ -1521,7 +1522,10 @@ export function Timeline() {
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const measure = () => setViewportW(el.clientWidth);
+    const measure = () => {
+      setViewportW(el.clientWidth);
+      publishStripView(el);
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
@@ -3778,14 +3782,27 @@ function ClipView({
   const hasWave = hasSoundBand(clip, asset);
   // Bumped as tile captures land, so the memo re-plans and picks them up.
   const [filmGen, onTileFrame] = useReducer((x: number) => x + 1, 0);
+  // The strip draws the stretch of the box the scroller shows. The box's
+  // left in scroll coordinates is where it is drawn, behind the content's
+  // side padding.
+  const boxLeft = PAD_SIDE + (drag ? drag.ghostX : (partAt ?? span.start) * pps);
+  const view = useStripView(boxLeft, w);
+  const offscreen = view.hi <= view.lo;
   const filmstrip = useMemo(
     () =>
-      filmstripFrames(asset, filmIn, w, pps, speed, FILM_H, 26, {
-        start: startFrame,
-        end: endFrame,
-      }),
+      filmstripFrames(
+        asset,
+        filmIn,
+        w,
+        pps,
+        speed,
+        FILM_H,
+        26,
+        { start: startFrame, end: endFrame },
+        view
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [asset, filmIn, w, pps, speed, startFrame, endFrame, filmGen]
+    [asset, filmIn, w, pps, speed, startFrame, endFrame, filmGen, view]
   );
   useTileFrames(boxRef, clip.id, asset, filmstrip, filmIn, w, pps, speed, onTileFrame);
 
@@ -3851,7 +3868,7 @@ function ClipView({
       }}
     >
       <div className="pointer-events-none absolute inset-x-0 top-0" style={{ height: FILM_H }}>
-        <Filmstrip frames={filmstrip} grade={clip.grade} failed={stripFailed} />
+        <Filmstrip frames={filmstrip} grade={clip.grade} failed={stripFailed} hidden={offscreen} />
       </div>
       {hasWave && (
         <div
@@ -4300,14 +4317,73 @@ function seedThumb(
   return seed ? [seed] : [];
 }
 
-/** Sample a clip's filmstrip tiles across its drawn width. Tiles sit on a
- * source-time grid: the strip holds still while a trimmed edge sweeps across
- * it, hiding frames under the handle (the box's overflow clips the partial
- * tiles at each end). Tiles keep the asset's aspect until the box would blow
- * the tile cap; past that they widen by whole grid cells, still on the grid.
- * The first and last tiles pin to the segment's exact boundary frames once
- * captured; middle tiles show the nearest pre-sampled thumb until each one's
- * true frame at its own moment lands (see `planFilmstrip`). */
+/**
+ * The scroller's window, for the strips: where the view starts in scroll
+ * coordinates and how wide it is, published once per frame from the
+ * scroller's own scroll and resize. Every clip box reads its own slice of it
+ * through `useStripView`, quantized to chunks, so a scroll re-renders a strip
+ * only when the window crosses into tiles it has not drawn, and a box off
+ * screen draws none.
+ */
+const stripView = { left: 0, width: 0 };
+const stripViewListeners = new Set<() => void>();
+let stripViewFrame = 0;
+function publishStripView(el: HTMLElement) {
+  const left = el.scrollLeft;
+  const width = el.clientWidth;
+  if (left === stripView.left && width === stripView.width) return;
+  stripView.left = left;
+  stripView.width = width;
+  if (stripViewFrame) return;
+  stripViewFrame = requestAnimationFrame(() => {
+    stripViewFrame = 0;
+    for (const fn of stripViewListeners) fn();
+  });
+}
+function subscribeStripView(fn: () => void) {
+  stripViewListeners.add(fn);
+  return () => {
+    stripViewListeners.delete(fn);
+  };
+}
+/** The strip plans and draws in stretches this wide on either side of the
+ * view, on boundaries this wide: a scroll inside the stretch changes
+ * nothing, and the next stretch is drawn before it comes into view. */
+const STRIP_VIEW_CHUNK = 512;
+
+/** Before the scroller has measured — the first render, and the server's —
+ * a strip draws this much of its box from the left: a screen's worth, so
+ * the first paint is bounded and the measured window replaces it a frame
+ * later. */
+const STRIP_VIEW_UNMEASURED = 4096;
+
+/** The slice of a box its strip draws, px from the box's left: the
+ * scroller's window plus a chunk each side, on chunk boundaries, clamped to
+ * the box. Empty (`hi <= lo`) for a box off screen. */
+function useStripView(boxLeft: number, w: number): { lo: number; hi: number } {
+  const snapshot = () => {
+    if (!stripView.width) return `0:${Math.min(w, STRIP_VIEW_UNMEASURED)}`;
+    const c = STRIP_VIEW_CHUNK;
+    const lo = Math.max(0, Math.floor((stripView.left - boxLeft) / c - 1) * c);
+    const hi = Math.min(w, Math.ceil((stripView.left + stripView.width - boxLeft) / c + 1) * c);
+    return hi > lo ? `${lo}:${hi}` : "0:0";
+  };
+  const key = useSyncExternalStore(subscribeStripView, snapshot, snapshot);
+  return useMemo(() => {
+    const [lo, hi] = key.split(":").map(Number);
+    return { lo, hi };
+  }, [key]);
+}
+
+/** Sample a clip's filmstrip tiles across the stretch of its box in view.
+ * Tiles sit on a source-time grid: the strip holds still while a trimmed
+ * edge sweeps across it, hiding frames under the handle (the box's overflow
+ * clips the partial tiles at each end). Tiles keep the asset's aspect at
+ * every zoom; only the ones inside `view` are planned, so a long clip zoomed
+ * in costs a screen's worth. The clip's first and last tiles pin to the
+ * segment's exact boundary frames once captured; middle tiles show the
+ * nearest pre-sampled thumb until each one's true frame at its own moment
+ * lands (see `planFilmstrip`). */
 function filmstripFrames(
   asset: MediaAsset | undefined,
   filmIn: number,
@@ -4316,7 +4392,8 @@ function filmstripFrames(
   speed: number,
   tileH: number,
   minTileW: number,
-  edges?: { start: string | null; end: string | null }
+  edges?: { start: string | null; end: string | null },
+  view?: { lo: number; hi: number }
 ): FilmTile[] {
   if (!asset) return [];
   // Before the pre-sampled strip exists — a fresh import, a library clip
@@ -4342,10 +4419,16 @@ function filmstripFrames(
     minTileW,
     cuts: asset.sceneCuts,
     exactFrame: asset.type === "video" ? (t) => peekEdgeFrame(asset.url, t) : undefined,
+    view,
   });
-  if (edges?.start) frames[0] = { ...frames[0], src: edges.start };
-  if (edges?.end && frames.length > 1) {
-    frames[frames.length - 1] = { ...frames[frames.length - 1], src: edges.end };
+  // The window may start past the clip's first tile or end before its last;
+  // only the tiles at the clip's own edges wear the edge frames.
+  if (edges?.start && frames.length && frames[0].left <= 0.5) {
+    frames[0] = { ...frames[0], src: edges.start };
+  }
+  const last = frames.length - 1;
+  if (edges?.end && frames.length > 1 && frames[last].left + frames[last].width >= w - 0.5) {
+    frames[last] = { ...frames[last], src: edges.end };
   }
   return frames;
 }
@@ -4409,13 +4492,13 @@ function useTileFrames(
         lo = view.left - boxR.left - TILE_CAPTURE_MARGIN;
         hi = view.right - boxR.left + TILE_CAPTURE_MARGIN;
       }
-      tilesRef.current.forEach((t, i) => {
+      tilesRef.current.forEach((t) => {
         if (t.exact) return;
         if (t.left + t.width < lo || t.left > hi) return;
-        const key = `${i}:${t.wantT.toFixed(2)}`;
+        const key = `${t.id}:${t.wantT.toFixed(2)}`;
         if (asked.has(key)) return;
         asked.add(key);
-        void requestEdgeFrame(`${clipId}:tile:${i}`, url, t.wantT, undefined, {
+        void requestEdgeFrame(`${clipId}:tile:${t.id}`, url, t.wantT, undefined, {
           background: true,
         }).then((src) => {
           if (live && src) landed();
@@ -4467,6 +4550,7 @@ function Filmstrip({
   frames,
   grade,
   failed,
+  hidden,
 }: {
   frames: { src: string; left: number; width: number }[];
   grade?: ColorGrade;
@@ -4474,11 +4558,14 @@ function Filmstrip({
    * An endless pulse reads as loading forever, and animating a clip-width
    * element burns paint time for the life of the timeline. */
   failed?: boolean;
+  /** The box is off screen: nothing to draw, and nothing to animate. */
+  hidden?: boolean;
 }) {
   // The filmstrip is a 40px always-on surface: the grade renders as a CSS
   // approximation (exact for the scalar sliders and the preset's scalars;
   // curves/wheels/hue bands show in the preview and exports).
   const { filter, tint } = gradeCssApprox(grade);
+  if (hidden) return <div className="tl-filmstrip pointer-events-none absolute inset-0" />;
   // No thumbs yet — the media is still streaming into the browser store. A
   // placeholder slab fills the box until the strip can draw real frames.
   if (!frames.length) {

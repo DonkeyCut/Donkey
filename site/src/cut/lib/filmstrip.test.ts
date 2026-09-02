@@ -120,6 +120,56 @@ describe("planFilmstrip", () => {
     expect(tiles.length).toBeLessThanOrEqual(FILM_TILE_CAP + 1);
   });
 
+  describe("a window", () => {
+    // A long clip zoomed in: 600s at 800px/s is 480,000px of box.
+    const long = { pps: 800, duration: 600, w: 600 * 800, thumbStep: 600 / 24 };
+
+    test("plans only the tiles inside it, at the strip's own aspect", () => {
+      const tiles = plan({ ...long, view: { lo: 100_000, hi: 102_000 } });
+      const natural = Math.round(60 * (16 / 9));
+      expect(tiles.length).toBeGreaterThan(0);
+      expect(tiles.length).toBeLessThan(2_000 / natural + 3);
+      for (const t of tiles) {
+        expect(Math.abs(t.width - natural)).toBeLessThan(0.01);
+        expect(t.left + t.width).toBeGreaterThanOrEqual(100_000);
+        expect(t.left).toBeLessThanOrEqual(102_000);
+      }
+    });
+
+    test("a scrolled window plans the same tiles at the same places", () => {
+      const a = plan({ ...long, view: { lo: 100_000, hi: 104_000 } });
+      const b = plan({ ...long, view: { lo: 102_000, hi: 106_000 } });
+      const byId = new Map(a.map((t) => [t.id, t]));
+      let shared = 0;
+      for (const t of b) {
+        const twin = byId.get(t.id);
+        if (!twin) continue;
+        shared++;
+        expect(twin.left).toBe(t.left);
+        expect(twin.wantT).toBe(t.wantT);
+      }
+      expect(shared).toBeGreaterThan(0);
+    });
+
+    test("a zoom re-aims the same ids at new moments", () => {
+      const a = plan({ ...long, view: { lo: 0, hi: 2_000 } });
+      const b = plan({ ...long, pps: 400, w: 600 * 400, view: { lo: 0, hi: 2_000 } });
+      expect(a[1].id).toBe(b[1].id);
+      expect(a[1].wantT).not.toBe(b[1].wantT);
+    });
+
+    test("an empty window plans nothing", () => {
+      expect(plan({ ...long, view: { lo: 0, hi: 0 } })).toEqual([]);
+      expect(plan({ ...long, view: { lo: 500, hi: 100 } })).toEqual([]);
+    });
+
+    test("the whole box is the window when none is given", () => {
+      const all = plan({ pps: 60 });
+      const windowed = plan({ pps: 60, view: { lo: 0, hi: DURATION * 60 } });
+      expect(windowed.map((t) => t.id)).toEqual(all.map((t) => t.id));
+    });
+  });
+
   test("an empty strip plans nothing", () => {
     expect(plan({ thumbs: [] })).toEqual([]);
   });
