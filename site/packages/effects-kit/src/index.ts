@@ -6,6 +6,7 @@ export * from "./motion/evaluate";
 export * from "./motion/catalog";
 export * from "./keys";
 export * from "./mask";
+export * from "./shapePath";
 export * from "./render";
 export * from "./registry";
 export * from "./cutout";
