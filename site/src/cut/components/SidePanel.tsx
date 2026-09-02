@@ -580,10 +580,10 @@ function ExportPulse({ file }: { file: string }) {
  * here. One row for both kinds of work — a job the engine or the render worker
  * owns, and a render this tab is doing itself, which is how a cloud or browser
  * project exports and which carries its progress on its own local row. */
-function ExportingRow({ row }: { row: ExportRow }) {
+function ExportingRow({ row, settling = false }: { row: ExportRow; settling?: boolean }) {
   const { status } = row.data;
-  const running = status === "running" || status === "rendering";
-  const cancelable = exportCancelable(row);
+  const running = !settling && (status === "running" || status === "rendering");
+  const cancelable = !settling && exportCancelable(row);
   const startedAt = row.kind === "job" ? row.data.startedAt ?? null : row.data.createdAt;
   const elapsed = useElapsed(running ? startedAt : null);
   const progress = row.kind === "job" ? row.data.progress : (row.data.progress ?? 0);
@@ -596,11 +596,13 @@ function ExportingRow({ row }: { row: ExportRow }) {
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[11.5px] font-medium">Exporting…</span>
         <span className="block text-[10.5px] text-muted-foreground tabular-nums">
-          {running
-            ? `${pct}%${elapsed ? ` · ${elapsed}` : ""}`
-            : status === "preparing"
-              ? "Preparing…"
-              : "Queued"}
+          {settling
+            ? "Finishing…"
+            : running
+              ? `${pct}%${elapsed ? ` · ${elapsed}` : ""}`
+              : status === "preparing"
+                ? "Preparing…"
+                : "Queued"}
         </span>
       </span>
       {cancelable && (
@@ -780,6 +782,12 @@ function ProjectFilesPanel({
   );
   const inputRef = useRef<HTMLInputElement>(null);
   const [exports, setExports] = useState<ExportItem[]>([]);
+  // Rows that just left the in-flight set. The file they produced is on disk
+  // before the list below has re-read the folder, so they stay on screen as
+  // "Finishing…" until that read lands; otherwise the section empties for a
+  // beat and pops back with the new file.
+  const [settling, setSettling] = useState<ExportRow[]>([]);
+  const lastExporting = useRef<ExportRow[]>([]);
   const [preview, setPreview] = useState<ExportItem | null>(null);
   const [deletingExport, setDeletingExport] = useState<ExportItem | null>(null);
 
@@ -796,15 +804,27 @@ function ProjectFilesPanel({
   // Refresh the list on open, when the export dialog closes, and when a
   // background render settles (done/error) or finishes in this tab.
   useEffect(() => {
+    const gone = lastExporting.current.filter(
+      (r) => r.data.projectId === projectId && !exporting.some((x) => x.data.id === r.data.id)
+    );
+    lastExporting.current = exporting;
+    if (gone.length > 0) setSettling((s) => [...s, ...gone]);
     if (exportOpen) return;
     let alive = true;
     void apiFetch(`/api/cut/projects/${projectId}/exports`)
       .then((r) => (r.ok ? (r.json() as Promise<ExportItem[]>) : []))
-      .then((list) => alive && setExports(list))
-      .catch(() => {});
+      .catch(() => [] as ExportItem[])
+      .then((list) => {
+        if (!alive) return;
+        setExports(list);
+        setSettling([]);
+      });
     return () => {
       alive = false;
     };
+    // The trigger keys stand in for `exporting`, whose array identity changes
+    // on every poll tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, exportOpen, exportsSettled, exportingKey]);
 
   const removeExport = async () => {
@@ -1019,13 +1039,18 @@ function ProjectFilesPanel({
           </Marquee>
         )}
 
-        {openFolder === null && exports.length + exporting.length > 0 && (
+        {openFolder === null && exports.length + exporting.length + settling.length > 0 && (
           <div className="mt-5 px-3.5">
             <div className="mb-2 text-[13px] font-semibold tracking-tight">Exports</div>
             <div className="flex flex-col gap-1.5">
               {exporting.map((row) => (
                 <ExportingRow key={row.data.id} row={row} />
               ))}
+              {settling
+                .filter((row) => !exporting.some((x) => x.data.id === row.data.id))
+                .map((row) => (
+                  <ExportingRow key={row.data.id} row={row} settling />
+                ))}
               {exports.map((it) => (
                 <div
                   key={it.file}
