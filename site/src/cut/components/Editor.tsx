@@ -223,7 +223,7 @@ export function Editor({
           // so marking the mount opened here can never show the editor
           // against leftover state.
           // loadProject sweeps the enrich caches itself, once per paint.
-          void useEditor.getState().loadProject(projectId);
+          void useEditor.getState().loadProject(projectId, { viewer });
           setOpened(true);
           return;
         }
@@ -351,7 +351,7 @@ export function Editor({
             const showing = loadedDocVersion(projectId);
             if (version && showing && version !== showing) {
               const at = playheadAt();
-              await useEditor.getState().loadProject(projectId, { inPlace: true });
+              await useEditor.getState().loadProject(projectId, { inPlace: true, viewer });
               useEditor.getState().seek(at);
             }
           }
@@ -377,7 +377,7 @@ export function Editor({
     const onConflict = (e: Event) => {
       const detail = (e as CustomEvent<{ projectId: string }>).detail;
       if (!detail || detail.projectId !== projectId) return;
-      void useEditor.getState().loadProject(projectId, { inPlace: true });
+      void useEditor.getState().loadProject(projectId, { inPlace: true, viewer });
       setConflictReloaded(true);
     };
     window.addEventListener("cut-cloud-doc-conflict", onConflict);

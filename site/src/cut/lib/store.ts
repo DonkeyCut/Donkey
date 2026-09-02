@@ -348,8 +348,9 @@ export interface EditorState {
   /** Load a project into the store. `inPlace` is for re-reading a project the
    * editor is already showing (the viewer's change poll, a conflict reload):
    * the stored copy has moved on, so the head-start snapshot is skipped and
-   * only the live document is applied. */
-  loadProject: (id: string, opts?: { inPlace?: boolean }) => Promise<void>;
+   * only the live document is applied. `viewer` is a share view opening, the
+   * one kind of open that refuses edits; every other open clears the flag. */
+  loadProject: (id: string, opts?: { inPlace?: boolean; viewer?: boolean }) => Promise<void>;
   /** Apply one project document to the store: the legacy migrations and the
    * state swap, shared by every hydration path — the snapshot paint, the live
    * load, a conflict reload, and a headless open. */
@@ -1535,7 +1536,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
 
   /** Reset to an empty, loading project and drain any background doc writes
    * still queued for it, so no open ever reads a half-written document. */
-  const resetForOpen = async (id: string) => {
+  const resetForOpen = async (id: string, viewer: boolean) => {
     // Blob URLs minted for the project being left go with it; the next open
     // of that project re-registers what its store holds. A re-open of the
     // same project keeps them — its state still points at them.
@@ -1559,6 +1560,15 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       loadError: null,
       saveState: "saved",
       resumePush: false,
+      // A share view is the one that refuses edits, and the surface opening
+      // the project is what knows it is one. Every other open clears the flag:
+      // left standing, it follows a tab out of a share link and back into that
+      // person's own projects, where a read-only editor keeps the mouse and
+      // loses the keyboard — which reads as a keyboard that has stopped
+      // working.
+      readOnly: viewer,
+      sharedFeatures: viewer ? get().sharedFeatures : null,
+      selectedKey: null,
       assets: [],
       loadingMedia: new Set<string>(),
       clips: [],
@@ -1652,7 +1662,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       // clicking back in — is not a re-read, and gets the snapshot's head
       // start like any other open.
       const inPlace = opts?.inPlace === true;
-      await resetForOpen(id);
+      await resetForOpen(id, opts?.viewer === true);
 
       // One shape of hydration, used by both the snapshot painted below and
       // the live document that replaces it, so the legacy migrations happen
@@ -2023,7 +2033,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     },
 
     openProjectDoc: async (id, doc, assets) => {
-      await resetForOpen(id);
+      await resetForOpen(id, false);
       get().applyDocState(doc, assets, {});
     },
 
