@@ -87,15 +87,25 @@ export class UnreadableMediaError extends Error {
  * looking at. So the local engine and any other plain-HTTP origin keep the
  * library's pair, and so does a link that says it is slow or metered. The
  * width is for multiplexed cloud media over a real network. */
-function urlParallelism(url: string): number {
+function urlParallelism(url: string, cache: number): number {
+  // Room decides first. A ranged reader grows each worker's region ahead of
+  // itself up to PREFETCH_REGION, so a source running more workers than its
+  // cache has room for spends the width refetching what the other workers
+  // just evicted. The pair is the floor: below that a walk stops overlapping
+  // its own reads at all.
+  const afforded = Math.max(2, Math.floor(cache / PREFETCH_REGION));
   if (!/^https:/i.test(url)) return 2;
   const conn =
     typeof navigator === "undefined"
       ? undefined
       : (navigator as { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
   if (conn?.saveData || /(^|-)2g$|^3g$/.test(conn?.effectiveType ?? "")) return 2;
-  return 8;
+  return Math.min(8, afforded);
 }
+
+/** How far ahead of itself one ranged worker reads before it stops growing
+ * its region (mediabunny's network prefetch profile). */
+const PREFETCH_REGION = 8 * 2 ** 20;
 
 /** Backoff, in seconds, for a URL read whose request failed outright. The
  * list ends, so a URL that is genuinely gone still fails — the preview's
@@ -187,12 +197,17 @@ function trackedFetch(url: string): typeof fetch {
  * becomes a gigabyte.
  */
 const READERS = 16;
-/** Bytes of the file one reader keeps in memory. Enough that a walk reading
- * forward never re-fetches what it just read, and small enough that the
- * readers together stay inside the tab's ceiling. */
-const READ_CACHE = 32 * 2 ** 20;
+/**
+ * Bytes of the file one reader keeps for itself: the reads its own walk just
+ * made, so a demuxer stepping back over a header it read a moment ago has it
+ * in hand. The bytes every reader on a file shares are held once, in the
+ * chunk cache's memory (chunkCache.ts), so this is only what a walk needs
+ * ahead of and behind its own position. Sixteen of these and the chunk memory
+ * together fill the reads share.
+ */
+const READ_CACHE = 8 * 2 ** 20;
 
-/** Chunked readers open right now, for the memory report. */
+/** Readers open right now, for the memory report. */
 let openReaders = 0;
 
 /** Decided on the first open and held: the ceiling does not move, so asking
@@ -200,49 +215,93 @@ let openReaders = 0;
  * what the readers hold must not itself count as a request for room. */
 let readCache = 0;
 const readCacheSize = (): number =>
-  (readCache ||= Math.round(allowance("reads", READ_CACHE * READERS) / READERS));
+  (readCache ||= Math.round(
+    allowance("readerCaches", READ_CACHE * READERS) / READERS
+  ));
 
-holdMemory("reads", () => openReaders * readCacheSize());
+holdMemory("readerCaches", () => openReaders * readCacheSize());
 
 export function openMedia(src: string | Blob): Input {
   const blob = typeof src === "string" ? resolveRegisteredBlob(src) ?? src : src;
   let source;
-  let chunkedRead = false;
+  // Every source keeps a cache of what it read, and every one of them is
+  // given the same size: a reader on this Mac's engine or on a store-minted
+  // blob holds file bytes in this tab the same as one on the cloud does. A
+  // cache this small is safe on a URL source because every server the page
+  // reads a file from answers a range with 206 — the engine's own file route
+  // and the media origin both do — so a chunk dropped is a chunk refetched;
+  // it is a server that ignores ranges that puts the source into the
+  // sequential mode where a read behind the cache throws.
+  const maxCacheSize = readCacheSize();
   if (typeof blob === "string") {
     const chunked = chunkSourceOptions(blob);
     source = chunked
       ? new CustomSource({
           ...chunked,
           prefetchProfile: "network",
-          maxCacheSize: readCacheSize(),
+          maxCacheSize,
         })
       : new UrlSource(blob, {
-          parallelism: urlParallelism(blob),
+          parallelism: urlParallelism(blob, maxCacheSize),
           getRetryDelay: urlRetryDelay,
           fetchFn: trackedFetch(blob),
+          maxCacheSize,
         });
-    chunkedRead = !!chunked;
   } else {
-    source = new BlobSource(blob);
+    source = new BlobSource(blob, { maxCacheSize });
   }
   const input = new Input({ formats: ALL_FORMATS, source });
   // The cache lives inside the source, where nothing can ask it how big it has
   // grown. Counting the readers that own one is what makes the total
   // reportable, and the count is only right if it is taken where the reader is
   // let go — so the dispose every caller already makes is where it is taken.
-  if (chunkedRead) {
-    openReaders++;
-    const dispose = input.dispose.bind(input);
-    let closed = false;
-    input.dispose = () => {
-      if (!closed) {
-        closed = true;
-        openReaders--;
-      }
-      return dispose();
-    };
-  }
+  openReaders++;
+  const dispose = input.dispose.bind(input);
+  let closed = false;
+  input.dispose = () => {
+    if (!closed) {
+      closed = true;
+      openReaders--;
+    }
+    return dispose();
+  };
   return input;
+}
+
+/**
+ * One reader per file, shared by everything reading it.
+ *
+ * A cut of forty segments from one recording asks for forty sources, and
+ * each would otherwise parse the same file and keep its own cache of the
+ * same bytes. Holders on a URL share one input — the parse, the reader's
+ * cache, the open file — and the last to let go closes it. The sinks and
+ * decoders stay per holder: a track serves any number of them. A store
+ * blob URL is a URL here too, since it names one file for as long as it is
+ * registered. A holder releases exactly once; a second release is nothing.
+ */
+export type MediaHandle = { input: Input; release: () => void };
+
+const sharedInputs = new Map<string, { input: Input; refs: number }>();
+
+export function openMediaShared(src: string): MediaHandle {
+  let entry = sharedInputs.get(src);
+  if (!entry) {
+    entry = { input: openMedia(src), refs: 0 };
+    sharedInputs.set(src, entry);
+  }
+  const held = entry;
+  held.refs++;
+  let released = false;
+  return {
+    input: held.input,
+    release: () => {
+      if (released) return;
+      released = true;
+      if (--held.refs > 0) return;
+      if (sharedInputs.get(src) === held) sharedInputs.delete(src);
+      held.input.dispose();
+    },
+  };
 }
 
 /** Run `fn` against an open input and dispose it however that ends. */
@@ -577,7 +636,13 @@ export interface AudioWalk {
  * container parse and one decoder serve a whole clip.
  */
 export function openAudioWalk(src: string | Blob, from = 0, to?: number): AudioWalk {
-  const input = openMedia(src);
+  // A voice on a URL reads the file its picture's source already holds open.
+  const handle =
+    typeof src === "string"
+      ? openMediaShared(src)
+      : { input: openMedia(src), release: () => void 0 };
+  const input = handle.input;
+  const close = typeof src === "string" ? handle.release : () => input.dispose();
   let closed = false;
   let finding: Promise<InputAudioTrack | null> | null = null;
   let reader: AsyncGenerator<WrappedAudioBuffer, void, unknown> | null = null;
@@ -624,7 +689,7 @@ export function openAudioWalk(src: string | Blob, from = 0, to?: number): AudioW
       // answering is waiting on exactly one of those.
       stop(reader);
       reader = null;
-      input.dispose();
+      close();
     },
   };
 }

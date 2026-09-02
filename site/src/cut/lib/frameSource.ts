@@ -23,8 +23,15 @@
  * capacity and the pool size move together, and that is the whole memory story.
  */
 
-import type { Input, InputVideoTrack, WrappedCanvas } from "mediabunny";
-import { frameSink, keyframeTimeAt, openMedia, videoTrackOf, type FrameCanvasSink } from "./mediaRead";
+import type { InputVideoTrack, WrappedCanvas } from "mediabunny";
+import {
+  frameSink,
+  keyframeTimeAt,
+  openMediaShared,
+  videoTrackOf,
+  type FrameCanvasSink,
+  type MediaHandle,
+} from "./mediaRead";
 import { allowance, canvasBytes, decodedFrameBytes, holdMemory } from "./memoryBudget";
 import { meterPull, meterSource, meterWalk } from "./perfTrace";
 import type { MediaAsset } from "./types";
@@ -512,7 +519,8 @@ interface BackWalk {
  * show two distinct frames.
  */
 export class ClipFrameSource {
-  private input: Input | null = null;
+  /** The file, shared with every other source and voice reading it. */
+  private reader: MediaHandle | null = null;
   private track: InputVideoTrack | null = null;
   private sink: FrameCanvasSink | null = null;
   private ring = new FrameRing<WrappedCanvas>(RING);
@@ -968,8 +976,8 @@ export class ClipFrameSource {
     // A still's bitmap holds real memory the GC can't see the size of.
     if (this.still && this.still.image instanceof ImageBitmap) this.still.image.close();
     this.still = null;
-    this.input?.dispose();
-    this.input = null;
+    this.reader?.release();
+    this.reader = null;
     this.track = null;
     this.sink = null;
   }
@@ -994,7 +1002,7 @@ export class ClipFrameSource {
     if (this.closed || asset.type === "image") return;
     const aim = ++this.aim;
     // Nothing open and nothing opening: the next ask opens the new address.
-    if (!this.input && !this.opening) return;
+    if (!this.reader && !this.opening) return;
     void (async () => {
       // An open in flight built its stack for the old address; it settles
       // first, so the swap below replaces a stack that has stopped moving.
@@ -1002,12 +1010,12 @@ export class ClipFrameSource {
         await this.opening;
       } catch {}
       if (this.closed || this.aim !== aim) return;
-      const input = openMedia(this.asset.url);
+      const reader = openMediaShared(this.asset.url);
       try {
-        const track = await videoTrackOf(input);
-        if (this.closed || this.aim !== aim) return input.dispose();
+        const track = await videoTrackOf(reader.input);
+        if (this.closed || this.aim !== aim) return reader.release();
         if (!track) {
-          input.dispose();
+          reader.release();
           this.fail();
           return;
         }
@@ -1018,15 +1026,15 @@ export class ClipFrameSource {
         // canvases, so they hold still, and they are what answers until the
         // first walk on the new stack lands. The old file is let go once the
         // old walk's drain has let go of it.
-        const oldInput = this.input;
-        this.input = input;
+        const oldReader = this.reader;
+        this.reader = reader;
         this.track = track;
         this.sink = sink;
         this.opening = Promise.resolve();
         this.dropBack(true);
         this.stopStream();
         await this.drainRun;
-        oldInput?.dispose();
+        oldReader?.release();
         if (this.closed || this.aim !== aim) return;
         // Walk bookkeeping belongs to the stack that is gone; the new one
         // starts clean, quick retries and all.
@@ -1039,7 +1047,7 @@ export class ClipFrameSource {
         // sends its ask to the new stack.
         this.onFrame();
       } catch {
-        input.dispose();
+        reader.release();
         // The old stack stays installed and keeps serving its ring; the
         // failure books the usual retries, and the retry's open reads the
         // current address.
@@ -1078,20 +1086,20 @@ export class ClipFrameSource {
   private open(): Promise<void> {
     if (this.opening) return this.opening;
     this.opening = (async () => {
-      const input = openMedia(this.asset.url);
+      const reader = openMediaShared(this.asset.url);
       try {
-        const track = await videoTrackOf(input);
+        const track = await videoTrackOf(reader.input);
         if (!track) {
-          input.dispose();
+          reader.release();
           this.unreadable = true;
           return;
         }
         if (this.closed) {
-          input.dispose();
+          reader.release();
           return;
         }
-        this.input?.dispose();
-        this.input = input;
+        this.reader?.release();
+        this.reader = reader;
         this.track = track;
         // Not awaited: it reads metadata the sink is about to read anyway, and
         // the first frame should not wait behind it. Until it answers, the
@@ -1110,7 +1118,7 @@ export class ClipFrameSource {
         // the quick retries again.
         this.attempts = 0;
       } catch {
-        input.dispose();
+        reader.release();
         this.fail();
       }
     })();
@@ -1687,8 +1695,8 @@ export class FrameSourcePool {
     private budget = 10,
     private readonly onFrame: () => void = () => {}
   ) {
-    const stopDecoders = holdMemory("decoders", () => this.decoderBytes);
-    const stopCanvases = holdMemory("canvases", () => this.canvasBytes);
+    const stopDecoders = holdMemory("previewDecoders", () => this.decoderBytes);
+    const stopCanvases = holdMemory("previewCanvases", () => this.canvasBytes);
     this.release = () => {
       stopDecoders();
       stopCanvases();
@@ -1828,7 +1836,7 @@ export class FrameSourcePool {
     // read first until the budget runs out, and the idle ones past it stand
     // down. The budget is the smaller of what the preview was tuned to want
     // and this machine's share, so a laptop sheds decoders a desktop keeps.
-    const decoderCap = allowance("decoders", decodedFrameBytes(LIVE_PIXELS) * DECODER_FRAMES);
+    const decoderCap = allowance("previewDecoders", decodedFrameBytes(LIVE_PIXELS) * DECODER_FRAMES);
     let liveBytes = 0;
     for (const [id, src] of [...this.sources.entries()].sort((a, b) => b[1].touched - a[1].touched)) {
       if (src.suspended) continue;
@@ -1842,7 +1850,7 @@ export class FrameSourcePool {
     // the canvas budget runs out, and what does not fit closes for real. Only
     // stood-down sources are on the shelf, so nothing holding a decoder — and
     // nothing the picture is being drawn from — is ever closed here.
-    const warmCap = allowance("canvases", canvasBytes(WARM_PIXELS));
+    const warmCap = allowance("previewCanvases", canvasBytes(WARM_PIXELS));
     let held = 0;
     let warm = 0;
     for (const [id, src] of [...this.sources.entries()].sort((a, b) => b[1].touched - a[1].touched)) {

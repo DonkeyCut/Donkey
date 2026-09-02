@@ -235,7 +235,7 @@ export class PreviewMixer {
    * scheduled is placed against this. */
   private anchor: { timeline: number; ctx: number; wall: number } | null = null;
   private decoded = new Map<string, AudioBuffer>();
-  private readonly releaseMemory = holdMemory("audio", () => decodedBytes(this.decoded));
+  private readonly releaseMemory = holdMemory("mixerAudio", () => decodedBytes(this.decoded));
 
   /** Whether the clock is running. */
   get running(): boolean {
@@ -984,7 +984,7 @@ export class PreviewMixer {
     // with the ones it has finished, and the next frame would pay a full decode
     // for sound it was already holding.
     this.decoded.set(key, buffer);
-    const cap = allowance("audio", STRETCH_CACHE_BYTES);
+    const cap = allowance("mixerAudio", STRETCH_CACHE_BYTES);
     let cached = decodedBytes(this.decoded);
     for (const [oldest, buf] of this.decoded) {
       if (cached <= cap || this.decoded.size <= 1) break;

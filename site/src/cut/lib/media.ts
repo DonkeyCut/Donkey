@@ -20,9 +20,11 @@ import {
   framesAt,
   frameSink,
   openMedia,
+  openMediaShared,
   probeMediaFile,
   UnreadableMediaError,
   videoTrackOf,
+  type MediaHandle,
 } from "./mediaRead";
 import {
   clearPendingUpload,
@@ -2181,7 +2183,7 @@ function sweepDerived(): void {
   const now = Date.now();
   if (now - derivedSweptAt < DERIVED_SWEEP_MS) return;
   derivedSweptAt = now;
-  const cap = allowance("pictures", DERIVED_MAX);
+  const cap = allowance("libraryPictures", DERIVED_MAX);
   if (derivedBytes() > cap && unusedDerivedBytes() > 0) releaseUnusedDerived();
 }
 const EDGE_POOL_CAP = 4;
@@ -2198,7 +2200,7 @@ type EdgeRequest = {
  * height — trim edges and tile previews read different sizes from the same
  * warm reader. */
 type EdgeReader = {
-  input: ReturnType<typeof openMedia>;
+  reader: MediaHandle;
   sinkFor: (height: number) => ReturnType<typeof frameSink>;
   sinks: Map<number, ReturnType<typeof frameSink>>;
 };
@@ -2210,8 +2212,8 @@ const edgeQueue = new Map<string, EdgeRequest>();
 const edgeBackQueue = new Map<string, EdgeRequest>();
 const edgePool = new Map<string, Promise<EdgeReader>>();
 
-holdMemory("pictures", stripBytes);
-holdMemory("pictures", derivedBytes);
+holdMemory("edgeFrames", stripBytes);
+holdMemory("libraryPictures", derivedBytes);
 let edgePumping = false;
 
 function edgeKey(url: string, time: number, height: number) {
@@ -2265,10 +2267,10 @@ function edgeReader(url: string): Promise<EdgeReader> {
     return hit;
   }
   const opening = (async () => {
-    const input = openMedia(url);
-    const track = await videoTrackOf(input);
+    const handle = openMediaShared(url);
+    const track = await videoTrackOf(handle.input);
     if (!track) {
-      input.dispose();
+      handle.release();
       throw new UnreadableMediaError("This file has no readable video.");
     }
     // A pool of canvases each sink cycles through, so a drag that reads
@@ -2290,7 +2292,7 @@ function edgeReader(url: string): Promise<EdgeReader> {
       while (sinks.size > EDGE_SINK_HEIGHTS) sinks.delete(sinks.keys().next().value!);
       return sink;
     };
-    const reader = { input, sinkFor, sinks };
+    const reader = { reader: handle, sinkFor, sinks };
     openEdgeReaders.add(reader);
     return reader;
   })();
@@ -2301,7 +2303,7 @@ function edgeReader(url: string): Promise<EdgeReader> {
     old
       .then((r) => {
         openEdgeReaders.delete(r);
-        r.input.dispose();
+        r.reader.release();
       })
       .catch(() => {});
   }
@@ -2330,7 +2332,10 @@ async function pumpEdgeFrames() {
           // says nothing about the size of what is counted: three hundred
           // frames of a phone video are a different number of megabytes from
           // three hundred of a screen recording.
-          const cap = allowance("pictures", canvasBytes(EDGE_CACHE_CAP * THUMB_H * THUMB_H * 2));
+          const cap = allowance(
+            "edgeFrames",
+            canvasBytes(EDGE_CACHE_CAP * THUMB_H * THUMB_H * 2)
+          );
           let bytes = stripBytes();
           while (edgeCache.size > EDGE_CACHE_CAP || (edgeCache.size > 1 && bytes > cap)) {
             const oldest = edgeCache.keys().next().value!;

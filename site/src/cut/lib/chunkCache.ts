@@ -26,6 +26,18 @@
  * closing the editor stops the downloads while one decoder disposing mid-run
  * leaves another's bytes coming.
  *
+ * The bytes are held in this tab once. Every reader on a file — the
+ * picture's walk, the sound's, the peaks, the filmstrip — reads through the
+ * same chunk memory here, sized from the tab's reads share, so a chunk one
+ * of them just pulled off disk or the network serves the rest from memory
+ * and none of them keeps a copy of its own past the few megabytes its walk
+ * is standing on.
+ *
+ * A route URL — the page's own `/api/cut-cloud/.../media/...` address, which
+ * an asset carries while it has no signed link — opens here too: the route
+ * answers with a redirect to the signed object, and the object is what the
+ * store keys on, so a reader on either address finds the same chunks.
+ *
  * Everything here is a cache. A quota refusal, a torn write, or a browser
  * with no OPFS costs the network read it always cost; a read that cannot
  * reach the network at all is the one failure that propagates, and the
@@ -40,6 +52,7 @@ import {
   writeFileAt,
 } from "./backend/browser/opfs";
 import { CUT_MEDIA_ORIGIN } from "./hosts";
+import { allowance, holdMemory } from "./memoryBudget";
 
 export const CHUNK_SIZE = 2 * 1024 * 1024;
 /** Longest single ranged request, in chunks, when a read needs a missing run. */
@@ -187,6 +200,105 @@ export function decodeResident(b64: string, total: number): Set<number> {
 
 const chunkCount = (size: number) => Math.ceil(size / CHUNK_SIZE);
 const chunkLen = (idx: number, size: number) => Math.min(CHUNK_SIZE, size - idx * CHUNK_SIZE);
+
+/**
+ * The page's own media routes: a project's file or a library file on the
+ * cloud surface, and a shared view's project file, which reaches the owner's
+ * bytes through a share token.
+ *
+ * Both redirect to the media origin, which is the address the store holds an
+ * object under, so someone reading a cut shared with them holds the file once
+ * for every reader on it, the way its owner does.
+ */
+const ROUTE_MEDIA_PATH =
+  /^\/api\/cut-(?:cloud|shared\/[^/]+)\/(?:projects\/[^/]+|library)\/media\/[^/]+$/;
+
+/** A route URL as this page would fetch it, or null for any other address.
+ * Relative routes resolve against the page; an absolute one has to be the
+ * page's own origin, since that is the only server that answers them. */
+export function routeMediaUrl(
+  url: string,
+  origin = typeof location === "undefined" ? "" : location.origin
+): string | null {
+  if (!origin) return null;
+  let u: URL;
+  try {
+    u = new URL(url, origin);
+  } catch {
+    return null;
+  }
+  if (u.origin !== origin || !ROUTE_MEDIA_PATH.test(u.pathname)) return null;
+  return u.href;
+}
+
+// --- memory ---
+
+/**
+ * Chunks held in memory, once each, for every reader on the object.
+ *
+ * Least recently touched goes first when the cap is reached. A chunk is keyed
+ * by the object version it belongs to, so two versions of one object never
+ * answer for each other, and forgetting a version drops everything it held.
+ */
+export class ChunkMemory {
+  private chunks = new Map<string, Uint8Array>();
+  private bytes = 0;
+
+  constructor(private readonly cap: () => number) {}
+
+  /** Bytes held right now. */
+  get held(): number {
+    return this.bytes;
+  }
+
+  recall(scope: string, idx: number): Uint8Array | null {
+    const k = `${scope}/${idx}`;
+    const hit = this.chunks.get(k);
+    if (!hit) return null;
+    this.chunks.delete(k);
+    this.chunks.set(k, hit);
+    return hit;
+  }
+
+  remember(scope: string, idx: number, bytes: Uint8Array): void {
+    const k = `${scope}/${idx}`;
+    const prior = this.chunks.get(k);
+    if (prior) {
+      this.bytes -= prior.length;
+      this.chunks.delete(k);
+    }
+    const cap = this.cap();
+    if (bytes.length > cap) return;
+    this.chunks.set(k, bytes);
+    this.bytes += bytes.length;
+    while (this.bytes > cap) {
+      const oldest = this.chunks.keys().next().value!;
+      this.bytes -= this.chunks.get(oldest)!.length;
+      this.chunks.delete(oldest);
+    }
+  }
+
+  forget(scope: string): void {
+    for (const [k, bytes] of this.chunks) {
+      if (k.startsWith(`${scope}/`)) {
+        this.bytes -= bytes.length;
+        this.chunks.delete(k);
+      }
+    }
+  }
+}
+
+/** What the chunk memory was tuned to hold: a minute of a phone recording,
+ * which is the stretch the picture, the sound and the peaks are all reading
+ * from at once. */
+const MEMORY_TUNED = 128 * 2 ** 20;
+/** Decided once: the ceiling does not move, and every ask re-records the
+ * same pressure. */
+let memoryCap = 0;
+const memory = new ChunkMemory(
+  () => (memoryCap ||= allowance("chunkMemory", MEMORY_TUNED))
+);
+holdMemory("chunkMemory", () => memory.held);
 
 // --- open ---
 
@@ -568,30 +680,45 @@ async function readRange(state: ObjState, start: number, end: number): Promise<U
     const to = Math.min(end, base + bytes.length);
     if (to > from) out.set(bytes.subarray(from - base, to - base), from - start);
   };
-  // Plan first: pin the fetches already in the air, then open one run per
-  // consecutive stretch that has to touch the network.
+  // Plan first: serve what memory holds, pin the fetches already in the air,
+  // then open one run per consecutive stretch that has to touch the network.
+  const scope = stateKey(state.id);
   const have = new Map<number, Promise<Uint8Array>>();
+  const served = new Set<number>();
   const need: number[] = [];
   for (let i = c0; i <= c1; i++) {
-    const flying = state.inflight.get(i);
-    if (flying) have.set(i, flying);
-    else if (!state.resident.has(i) && !(i === 0 && state.probe0)) need.push(i);
+    const mem = memory.recall(scope, i);
+    if (mem) {
+      // Already in memory: copied out here, so nothing holds the chunk open
+      // while the rest of the read waits on the network.
+      place(i, mem);
+      served.add(i);
+    } else {
+      const flying = state.inflight.get(i);
+      if (flying) have.set(i, flying);
+      else if (!state.resident.has(i) && !(i === 0 && state.probe0)) need.push(i);
+    }
   }
   for (const [a, b] of chunkRuns(need, MAX_RUN)) {
     const runPromises = startRun(state, a, b);
     for (let i = a; i <= b; i++) have.set(i, runPromises[i - a]);
   }
+  const keep = (idx: number, bytes: Uint8Array) => {
+    memory.remember(scope, idx, bytes);
+    return bytes;
+  };
   await Promise.all(
     Array.from({ length: c1 - c0 + 1 }, async (_, k) => {
       const idx = c0 + k;
+      if (served.has(idx)) return;
       const planned = have.get(idx);
-      if (planned) return place(idx, await planned);
+      if (planned) return place(idx, keep(idx, await planned));
       if (idx === 0 && state.probe0 && !state.resident.has(0)) return place(0, state.probe0);
       const disk = await residentBytes(state, idx);
-      if (disk) return place(idx, disk);
+      if (disk) return place(idx, keep(idx, disk));
       // The disk copy vanished under us (evicted mid-read); fetch it alone.
       const [refetch] = startRun(state, idx, idx);
-      place(idx, await refetch);
+      place(idx, keep(idx, await refetch));
     })
   );
   return out;
@@ -730,6 +857,7 @@ async function removeVersion(keyHash: string, versionTag: string, bytes: number)
     return 0;
   }
   const k = `${keyHash}/${versionTag}`;
+  memory.forget(k);
   const live = states.get(k);
   if (live) {
     states.delete(k);
@@ -774,10 +902,50 @@ export async function dropChunksMatching(part: string): Promise<void> {
 
 // --- the seams ---
 
-/** CustomSource callbacks over the chunk store for a signed cloud media URL,
- * or null when the URL is not cloud media or this browser holds no store —
- * the caller falls back to a plain URL source. `dispose` releases the object,
- * which cancels its requests once nothing else is reading it. */
+/**
+ * Open the object a route URL redirects to.
+ *
+ * The route answers a ranged read with a redirect to the signed object, and
+ * the URL the bytes came from is the one the store keys on. One byte is
+ * enough to learn it; the body is let go before the object opens, so the
+ * open reads chunk 0 the way every open does.
+ */
+/**
+ * Route probes in the air, by route URL.
+ *
+ * Every reader on a file opens at once — the picture, the sound, the peaks,
+ * the filmstrip — and each learns the object's address only from its own
+ * probe, so without this each would spend a round trip through the route
+ * (which signs a URL, and for a share resolves the share) before `states`
+ * could hold them together. The memo is dropped the moment the probe settles,
+ * so a reader opening later still asks the route for a freshly signed URL.
+ */
+const probes = new Map<string, Promise<ObjState>>();
+
+function openThroughRoute(route: string): Promise<ObjState> {
+  const flying = probes.get(route);
+  if (flying) return flying;
+  const probe = probeRoute(route).finally(() => {
+    if (probes.get(route) === probe) probes.delete(route);
+  });
+  probes.set(route, probe);
+  return probe;
+}
+
+async function probeRoute(route: string): Promise<ObjState> {
+  const res = await fetchRange(route, 0, 0);
+  if (!res.ok) throw new Error(`Cloud media read failed (${res.status}).`);
+  await res.body?.cancel().catch(() => {});
+  const id = chunkIdentity(res.url);
+  if (!id) throw new Error("Cloud media route did not land on the media origin.");
+  return openObject(id, res.url);
+}
+
+/** CustomSource callbacks over the chunk store for a signed cloud media URL
+ * or the page's own route to one, or null when the URL is neither or this
+ * browser holds no store — the caller falls back to a plain URL source.
+ * `dispose` releases the object, which cancels its requests once nothing else
+ * is reading it. */
 export function chunkSourceOptions(url: string): {
   getSize: () => Promise<number>;
   read: (start: number, end: number) => Promise<Uint8Array>;
@@ -785,11 +953,12 @@ export function chunkSourceOptions(url: string): {
 } | null {
   if (!supportsBrowserStore()) return null;
   const id = chunkIdentity(url);
-  if (!id) return null;
+  const route = id ? null : routeMediaUrl(url);
+  if (!id && !route) return null;
   let opened: Promise<ObjState> | null = null;
   let disposed = false;
   const open = () =>
-    (opened ??= openObject(id, url).then((s) => {
+    (opened ??= (id ? openObject(id, url) : openThroughRoute(route!)).then((s) => {
       if (disposed) throw new DOMException("Aborted", "AbortError");
       acquire(s);
       return s;

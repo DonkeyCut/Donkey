@@ -64,21 +64,23 @@ const SHARES: Record<MemoryBucket, number> = {
 /**
  * The tab's share of the machine.
  *
- * A quarter of what the browser reports leaves the operating system, the
- * browser's own processes and the person's other tabs the rest. Past that the
+ * The ceiling covers the tab and the decoder process working for it, which
+ * between them are one of several things the machine is running: the
+ * operating system, the browser's other processes, the person's other tabs.
+ * An eighth of what the browser reports leaves those the rest. Past that the
  * machine starts swapping, and a swapping machine previews worse than one
  * decoding at half the size — the picture stops for a page fault, which no
- * amount of decode headroom recovers.
+ * amount of decode headroom recovers. An 18GB laptop reports sixteen and
+ * gets two gigabytes, which is where the tuned sizes below start to bind.
  */
-const CEILING_SHARE = 0.25;
+const CEILING_SHARE = 0.125;
 /**
  * What to assume when the browser does not say.
  *
  * `deviceMemory` is Chrome and Edge only; Safari and Firefox report nothing.
- * Eight is also the largest number Chrome will report, so it already means
- * "eight or more" — assuming it for the browsers that stay silent puts them
- * on the same footing as the machines we can see, which are overwhelmingly
- * the same machines.
+ * Chrome rounds to a power of two and reports sixteen on the machines that
+ * have it, so eight is the figure for a machine of ordinary size — assuming
+ * it for the browsers that stay silent puts them on that footing.
  */
 const ASSUMED_GB = 8;
 /** The smallest ceiling worth honouring: below this the editor cannot hold a
@@ -88,30 +90,76 @@ const CEILING_MIN = 384 * 2 ** 20;
 
 const GB = 2 ** 30;
 
-let ceiling = 0;
-
 /**
- * Bytes the editor may hold, decided once.
+ * Bytes the editor may hold.
  *
- * `deviceMemory` is coarse by design — it rounds to a power of two and caps at
- * eight — which is enough to tell the machines that need protecting from the
- * machines that do not, and it is the only figure a page is given.
+ * `deviceMemory` is coarse by design — it rounds to a power of two — which is
+ * enough to tell the machines that need protecting from the machines that do
+ * not, and it is the only figure a page is given. It is read each time it is
+ * asked for: the figure never moves, and the read is a property lookup.
  */
 export function memoryCeiling(): number {
-  if (ceiling) return ceiling;
   const reported =
     typeof navigator === "undefined"
       ? 0
       : ((navigator as unknown as { deviceMemory?: number }).deviceMemory ?? 0);
   const gb = reported > 0 ? reported : ASSUMED_GB;
-  ceiling = Math.max(CEILING_MIN, Math.round(gb * GB * CEILING_SHARE));
-  return ceiling;
+  return Math.max(CEILING_MIN, Math.round(gb * GB * CEILING_SHARE));
 }
 
-/** Bytes a holder in `bucket` may stand on: the smaller of the size it was
- * tuned to want and its share of the ceiling. */
-export function allowance(bucket: MemoryBucket, tuned: number): number {
-  const share = Math.round(memoryCeiling() * SHARES[bucket]);
+/**
+ * Everything that stands in a bucket, and how much of the bucket each may
+ * stand on.
+ *
+ * The split lives here, in one table. A fraction typed into one file cannot
+ * see the fractions typed into the others, and the sum is the whole point: two
+ * caches that each ask for their bucket's share stand on twice it. Every holder is named here, the ones that only report what they
+ * hold included — room reserved for a cache that never asks is room the asking
+ * caches must not be handed. The fractions in a bucket sum to one, and a test
+ * says so.
+ */
+const HOLDERS = {
+  /** Frames the live decoders behind the preview are holding. */
+  previewDecoders: { bucket: "decoders", portion: 1 },
+  /** The preview pool: the ring each live source lands frames on, and the
+   * shelf of canvases kept for the sources that have stood down. */
+  previewCanvases: { bucket: "canvases", portion: 0.75 },
+  /** Readers a render keeps open between frames, each with its own pool of
+   * canvases at the source's size. */
+  exportReaders: { bucket: "canvases", portion: 0.25 },
+  /** File bytes held once for every reader on a cloud file. */
+  chunkMemory: { bucket: "reads", portion: 0.5 },
+  /** What each open reader keeps of its own walk through a file. */
+  readerCaches: { bucket: "reads", portion: 0.5 },
+  /** Decoded sound waiting for the mixer to schedule it. */
+  mixerAudio: { bucket: "audio", portion: 1 },
+  /** Filmstrips and waveforms drawn for shelf entries. */
+  libraryPictures: { bucket: "pictures", portion: 0.45 },
+  /** Captured frames behind trim edges and filmstrip tiles. */
+  edgeFrames: { bucket: "pictures", portion: 0.3 },
+  /** Decoded sticker images, shared across the page's renders. */
+  stickers: { bucket: "pictures", portion: 0.15 },
+  /** Element pictures the behind-the-person pass draws from. */
+  overlayRasters: { bucket: "pictures", portion: 0.1 },
+} as const satisfies Record<string, { bucket: MemoryBucket; portion: number }>;
+
+/** A named cache in the budget. */
+export type MemoryHolder = keyof typeof HOLDERS;
+
+/** The table itself, for the report that names what each cache holds and for
+ * the test that adds each bucket's portions up. */
+export const memoryHolders = HOLDERS as Record<
+  MemoryHolder,
+  { bucket: MemoryBucket; portion: number }
+>;
+
+/**
+ * Bytes a holder may stand on: the smaller of the size it was tuned to want
+ * and its portion of its bucket's share of the ceiling.
+ */
+export function allowance(holder: MemoryHolder, tuned: number): number {
+  const { bucket, portion } = HOLDERS[holder];
+  const share = Math.round(memoryCeiling() * SHARES[bucket] * portion);
   if (share < tuned) bound[bucket] = true;
   return Math.min(tuned, share);
 }
@@ -146,7 +194,8 @@ const holders = new Map<MemoryBucket, Set<Reporter>>();
  * allocation eventually forgets one, and the number it forgot is the number a
  * report needs. Returns the way to stop reporting.
  */
-export function holdMemory(bucket: MemoryBucket, bytes: Reporter): () => void {
+export function holdMemory(holder: MemoryHolder, bytes: Reporter): () => void {
+  const { bucket } = HOLDERS[holder];
   let set = holders.get(bucket);
   if (!set) holders.set(bucket, (set = new Set()));
   set.add(bytes);

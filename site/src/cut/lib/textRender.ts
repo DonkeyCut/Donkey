@@ -13,7 +13,7 @@ import {
   type WordDraw,
 } from "@donkeycut/effects-kit";
 import type { CSSProperties } from "react";
-import { holdMemory } from "./memoryBudget";
+import { allowance, holdMemory } from "./memoryBudget";
 import { createRasterCanvas, decodeRasterImage, rasterCanvasToPng } from "./raster";
 import { fontStack, type MediaAsset, type Overlay } from "./types";
 
@@ -76,19 +76,50 @@ export function wordDrawCss(d: WordDraw, lineHeight = LINE_HEIGHT): CSSPropertie
   return css;
 }
 
-/** Decoded sticker images by asset id, shared across one page's renders. An
- * <img> decode handles SVG too (createImageBitmap on an SVG blob does not). */
+/** Decoded sticker images by asset id, shared across one page's renders, in
+ * the order they were last asked for. An <img> decode handles SVG too
+ * (createImageBitmap on an SVG blob does not). */
 const stickerCache = new Map<string, Promise<StickerImage | null>>();
 /** What each decoded sticker costs, filled in as they land. The cache above
  * holds promises, which cannot be asked their size; this is what makes the
  * pictures the page is holding countable. */
 const stickerBytes = new Map<string, number>();
 
-holdMemory("pictures", () => {
+/** What the decoded stickers may stand on: a cut whose clips carry different
+ * stickers holds every one it has drawn, and a sticker is a full-size picture
+ * however small it is placed. */
+const STICKER_TUNED = 24 * 2 ** 20;
+
+const stickersHeld = (): number => {
   let n = 0;
   for (const bytes of stickerBytes.values()) n += bytes;
   return n;
-});
+};
+
+holdMemory("stickers", stickersHeld);
+
+/**
+ * Drop the stickers a render has gone longest without asking for, once the
+ * decoded ones are past their share.
+ *
+ * The one just asked for is never dropped, and neither is a decode still in
+ * the air — a sticker on screen is asked for again on the next frame, and
+ * dropping it would decode it once a frame. What is dropped is a picture no
+ * frame has reached for since, and it decodes again the moment one does.
+ */
+function sweepStickers(asked: string): void {
+  const cap = allowance("stickers", STICKER_TUNED);
+  let held = stickersHeld();
+  if (held <= cap) return;
+  for (const id of [...stickerCache.keys()]) {
+    if (held <= cap) break;
+    const bytes = stickerBytes.get(id);
+    if (id === asked || bytes === undefined) continue;
+    stickerCache.delete(id);
+    stickerBytes.delete(id);
+    held -= bytes;
+  }
+}
 
 function decodeSticker(url: string): Promise<StickerImage | null> {
   return fetch(url)
@@ -112,15 +143,21 @@ export function cutRenderEnv(assets: MediaAsset[]): RenderEnv {
       const asset = assets.find((a) => a.id === assetId);
       if (!asset) return Promise.resolve(null);
       let hit = stickerCache.get(asset.id);
-      if (!hit) {
+      if (hit) {
+        // Asked for again: move it to the young end of the cache.
+        stickerCache.delete(asset.id);
+      } else {
         hit = decodeSticker(asset.url).then((img) => {
           // A failed decode is not worth pinning; the next render retries.
           if (!img) stickerCache.delete(asset.id);
-          else stickerBytes.set(asset.id, img.width * img.height * 4);
+          else {
+            stickerBytes.set(asset.id, img.width * img.height * 4);
+            sweepStickers(asset.id);
+          }
           return img;
         });
-        stickerCache.set(asset.id, hit);
       }
+      stickerCache.set(asset.id, hit);
       return hit;
     },
   };

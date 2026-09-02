@@ -19,7 +19,7 @@ import {
   wordSampleWindows,
 } from "@donkeycut/effects-kit";
 import { personSegmenter, segmentSubjectAlpha } from "./cutout";
-import { holdMemory } from "./memoryBudget";
+import { allowance, holdMemory } from "./memoryBudget";
 import { createRasterCanvas } from "./raster";
 import { renderElementPng } from "./textRender";
 import {
@@ -115,6 +115,19 @@ export function subjectMatteSnapshot(): { canvas: HTMLCanvasElement | null; at: 
  * headless they are server canvases with the same 2D interface. */
 const scratchCanvas = () => createRasterCanvas(1, 1) as HTMLCanvasElement;
 
+/** Element pictures the pass may hold: the elements live on one frame are a
+ * handful of full-size pictures, and a play through the cut reaches every
+ * element in it. */
+const RASTER_TUNED = 48 * 2 ** 20;
+
+/** What one element's pictures cost: one per word it lights, four bytes a
+ * pixel, at the size of the frame they are drawn on. */
+const entryBytes = (e: { byWord: Map<number, ImageBitmap> }): number => {
+  let n = 0;
+  for (const b of e.byWord.values()) n += b.width * b.height * 4;
+  return n;
+};
+
 export class SubjectMaskCompositor {
   /** `publishes` marks the live preview's instance, the one whose matte the
    * DOM layer reads. */
@@ -140,12 +153,15 @@ export class SubjectMaskCompositor {
    */
   private rasters = new Map<
     string,
-    { of: Overlay; byWord: Map<number, ImageBitmap>; pending: Set<number> }
+    { of: Overlay; byWord: Map<number, ImageBitmap>; pending: Set<number>; usedAt: number }
   >();
-  private readonly releaseMemory = holdMemory("pictures", () => {
+  /** Frames this pass has drawn, which is the clock the pictures are given
+   * back on: an element drawn on the frame being composited is the one the
+   * next frame will ask for again. */
+  private pass = 0;
+  private readonly releaseMemory = holdMemory("overlayRasters", () => {
     let n = 0;
-    for (const e of this.rasters.values())
-      for (const b of e.byWord.values()) n += b.width * b.height * 4;
+    for (const e of this.rasters.values()) n += entryBytes(e);
     return n;
   });
   private person: HTMLCanvasElement | null = null;
@@ -176,10 +192,35 @@ export class SubjectMaskCompositor {
       entry.of = o;
     }
     if (!entry) {
-      entry = { of: o, byWord: new Map(), pending: new Set() };
+      entry = { of: o, byWord: new Map(), pending: new Set(), usedAt: this.pass };
       this.rasters.set(o.id, entry);
     }
+    entry.usedAt = this.pass;
     return entry;
+  }
+
+  /**
+   * Give back the pictures of the elements this pass has gone longest without
+   * drawing, once what it holds is past its share.
+   *
+   * A picture is one full-size frame per element, so a play through a cut
+   * whose elements come and go leaves the pass holding every one it has ever
+   * drawn. What a frame is drawing was drawn on the frame before it, so the
+   * live ones are the youngest and stay; an element the playhead has left
+   * draws again from scratch when it is next reached.
+   */
+  private sweepRasters(): void {
+    const cap = allowance("overlayRasters", RASTER_TUNED);
+    let held = 0;
+    for (const e of this.rasters.values()) held += entryBytes(e);
+    if (held <= cap) return;
+    for (const [id, e] of [...this.rasters].sort((a, b) => a[1].usedAt - b[1].usedAt)) {
+      if (held <= cap) break;
+      if (e.usedAt >= this.pass) continue;
+      held -= entryBytes(e);
+      for (const b of e.byWord.values()) b.close();
+      this.rasters.delete(id);
+    }
   }
 
   private rasterFor(
@@ -404,6 +445,7 @@ export class SubjectMaskCompositor {
     // means the entry outlives the element, so the document's own list is what
     // says which entries are still owed — checked only when there are more of
     // them than elements, which is the only way one can be stale.
+    this.pass++;
     if (this.rasters.size > overlays.length) {
       const ids = new Set(overlays.map((o) => o.id));
       for (const [id, e] of this.rasters) {
@@ -412,6 +454,7 @@ export class SubjectMaskCompositor {
         this.rasters.delete(id);
       }
     }
+    this.sweepRasters();
     const active = behindOverlaysAt(overlays, t);
     const wantsMatte = overlays.some(
       (o) => frontSubjectOverlay(o) && drawable(o) && t >= o.start && t <= o.end

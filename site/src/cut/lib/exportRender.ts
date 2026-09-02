@@ -32,7 +32,7 @@ import { renderMix, type MixClip, type MixItem, type MixSpec } from "./audioMix"
 import { FrameCompositor, MISSING_FRAME, type Frame } from "./composite";
 import { overlayPlan, trackZeroPlan } from "./framePlan";
 import { frameSink, openMedia, videoTrackOf } from "./mediaRead";
-import { allowance, canvasBytes } from "./memoryBudget";
+import { allowance, canvasBytes, holdMemory } from "./memoryBudget";
 import { getClipSpans, overlayLayers, projectDuration, spanSequence } from "./store";
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
 import { applyEffectToCanvas, evalOverlayFrame, grainTile, isAudioEffect, isMaskAnimated, isOverlayAnimated, maskFrameAt, MATTE_FPS, matteLumaToAlpha, planAnimatedLayers, type LottieHandle, type OverlayAnim, type PaintPhase } from "@donkeycut/effects-kit";
@@ -853,6 +853,13 @@ export class FramePainter {
   private comp: FrameCompositor;
   private stamps: StampCache;
   private readers = new Map<string, ClipReader>();
+  /** What the open readers are standing on, so a render in the tab shows up
+   * beside the preview's own pictures in the memory report. */
+  private readonly releaseMemory = holdMemory("exportReaders", () => {
+    let n = 0;
+    for (const r of this.readers.values()) n += canvasBytes(READER_POOL * r.sourcePixels);
+    return n;
+  });
   /** Frames drawn, which is the clock the readers' eviction order runs on. */
   private frameNo = 0;
   private behind: SubjectMaskCompositor | null = null;
@@ -973,7 +980,10 @@ export class FramePainter {
    */
   private evictReaders(): void {
     const cost = (r: ClipReader) => canvasBytes(READER_POOL * r.sourcePixels);
-    const cap = allowance("canvases", READERS_TUNED * canvasBytes(READER_POOL * 1920 * 1080));
+    const cap = allowance(
+      "exportReaders",
+      READERS_TUNED * canvasBytes(READER_POOL * 1920 * 1080)
+    );
     let held = 0;
     for (const r of this.readers.values()) held += cost(r);
     if (held <= cap) return;
@@ -1127,6 +1137,7 @@ export class FramePainter {
     this.behind?.dispose();
     for (const r of this.readers.values()) r.dispose();
     this.readers.clear();
+    this.releaseMemory();
   }
 }
 

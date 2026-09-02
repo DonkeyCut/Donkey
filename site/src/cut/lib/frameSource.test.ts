@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { Timed } from "./frameSource";
 import type { MediaAsset } from "./types";
 
@@ -82,7 +82,37 @@ const frameSink = ((track: FakeTrack, size?: { height?: number }) => ({
 const keyframeTimeAt = (async (_track: unknown, t: number) => Math.max(0, Math.floor(t))) as never;
 
 const media = await import("./mediaRead");
-mock.module("./mediaRead", () => ({ ...media, openMedia, videoTrackOf, frameSink, keyframeTimeAt }));
+// The shared open, over the fake files: one input per URL, closed by the
+// last holder to let go, the way the real one is.
+const shared = new Map<string, { input: FakeInput; refs: number }>();
+const openMediaShared = (src: string) => {
+  let entry = shared.get(src);
+  if (!entry) {
+    entry = { input: (openMedia as unknown as (s: string) => FakeInput)(src), refs: 0 };
+    shared.set(src, entry);
+  }
+  const held = entry;
+  held.refs++;
+  let released = false;
+  return {
+    input: held.input,
+    release() {
+      if (released) return;
+      released = true;
+      if (--held.refs > 0) return;
+      if (shared.get(src) === held) shared.delete(src);
+      held.input.dispose();
+    },
+  };
+};
+mock.module("./mediaRead", () => ({
+  ...media,
+  openMedia,
+  openMediaShared,
+  videoTrackOf,
+  frameSink,
+  keyframeTimeAt,
+}));
 
 const { BACK_WINDOW, ClipFrameSource, FrameRing, FrameSourcePool, mappingKey, walkClaim } =
   await import("./frameSource");
@@ -320,6 +350,17 @@ describe("walkClaim", () => {
 });
 
 describe("FrameSourcePool", () => {
+  // The pool's budgets are the smaller of what it was tuned to want and this
+  // machine's share, and these tests are about the tuning: they put the pool
+  // on a machine with room, which is what a sixteen-gigabyte report is, and
+  // hand the machine back after.
+  beforeEach(() => {
+    Object.defineProperty(navigator, "deviceMemory", { value: 16, configurable: true });
+  });
+  afterEach(() => {
+    delete (navigator as { deviceMemory?: number }).deviceMemory;
+  });
+
   test("one source per mapping and size, reused across frames", () => {
     const pool = new FrameSourcePool(4);
     pool.beginFrame();

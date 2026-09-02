@@ -7,6 +7,7 @@ import {
   holdMemory,
   mb,
   memoryCeiling,
+  memoryHolders,
   memoryUsage,
   takeMemoryPressure,
 } from "./memoryBudget";
@@ -14,9 +15,11 @@ import {
 const MB = 2 ** 20;
 
 const drops: (() => void)[] = [];
-const hold = (bucket: Parameters<typeof holdMemory>[0], bytes: number) => {
-  drops.push(holdMemory(bucket, () => bytes));
+const hold = (holder: Parameters<typeof holdMemory>[0], bytes: number) => {
+  drops.push(holdMemory(holder, () => bytes));
 };
+
+const holderNames = Object.keys(memoryHolders) as (keyof typeof memoryHolders)[];
 
 afterEach(() => {
   for (const drop of drops.splice(0)) drop();
@@ -24,26 +27,61 @@ afterEach(() => {
 });
 
 describe("the ceiling", () => {
-  test("is a share of the machine, decided once", () => {
+  test("is a share of the machine", () => {
     // The environment the tests run in reports no `deviceMemory`, which is the
     // same silence Safari and Firefox give a real page: the assumed size
-    // stands in, and a quarter of it is the tab's.
-    expect(memoryCeiling()).toBe(2 * 2 ** 30);
+    // stands in, and an eighth of it is the tab's.
+    expect(memoryCeiling()).toBe(2 ** 30);
     expect(memoryCeiling()).toBe(memoryCeiling());
+  });
+
+  test("splits a bucket between the holders that share it", () => {
+    const huge = 99 * 2 ** 30;
+    // The reads share is the chunk memory's and the readers' own caches',
+    // half each, so the two of them together stand on the bucket and not
+    // twice it.
+    const half = Math.round(memoryCeiling() * 0.25 * 0.5);
+    expect(allowance("chunkMemory", huge)).toBe(half);
+    expect(allowance("readerCaches", huge)).toBe(half);
+    expect(allowance("chunkMemory", huge) + allowance("readerCaches", huge)).toBe(
+      Math.round(memoryCeiling() * 0.25)
+    );
+    // A tuning under the portion is still left alone.
+    expect(allowance("readerCaches", 4 * MB)).toBe(4 * MB);
+  });
+
+  test("every holder of a bucket together ask for the whole of it, once", () => {
+    // Nothing outside this table can hand a cache room, so a bucket whose
+    // portions sum past one has promised memory twice, and a bucket that sums
+    // under it is leaving room no one may use.
+    const sums = new Map<string, number>();
+    for (const name of holderNames) {
+      const { bucket, portion } = memoryHolders[name];
+      sums.set(bucket, (sums.get(bucket) ?? 0) + portion);
+    }
+    // Every bucket is stood in by someone, and the fractions come to one.
+    expect([...sums.keys()].sort()).toEqual([
+      "audio",
+      "canvases",
+      "decoders",
+      "pictures",
+      "reads",
+    ]);
+    for (const [, sum] of sums) expect(Math.abs(sum - 1)).toBeLessThan(1e-9);
   });
 
   test("hands a bucket the smaller of its tuning and its share", () => {
     // A size the machine can afford is left alone, so a preview tuned on a
     // machine with room behaves there exactly as it was tuned to.
     const small = 4 * MB;
-    expect(allowance("decoders", small)).toBe(small);
+    expect(allowance("previewDecoders", small)).toBe(small);
     expect(takeMemoryPressure()).toEqual([]);
 
     // A size it cannot is cut to the share, and the cut is recorded: the
     // machine is deciding, not the tuning.
     const huge = 99 * 2 ** 30;
-    expect(allowance("decoders", huge)).toBeLessThan(huge);
-    expect(allowance("decoders", huge)).toBe(Math.round(memoryCeiling() * 0.4));
+    expect(allowance("previewDecoders", huge)).toBeLessThan(huge);
+    expect(allowance("previewDecoders", huge)).toBe(Math.round(memoryCeiling() * 0.4));
     expect(takeMemoryPressure()).toEqual(["decoders"]);
     // Reading the pressure clears it, so a later window reports its own.
     expect(takeMemoryPressure()).toEqual([]);
@@ -51,12 +89,7 @@ describe("the ceiling", () => {
 
   test("splits the whole ceiling between the buckets and no more", () => {
     const huge = 99 * 2 ** 30;
-    const shares =
-      allowance("decoders", huge) +
-      allowance("canvases", huge) +
-      allowance("reads", huge) +
-      allowance("audio", huge) +
-      allowance("pictures", huge);
+    const shares = holderNames.reduce((n, name) => n + allowance(name, huge), 0);
     expect(shares).toBeLessThanOrEqual(memoryCeiling());
     expect(shares).toBeGreaterThan(memoryCeiling() * 0.99);
   });
@@ -64,21 +97,25 @@ describe("the ceiling", () => {
 
 describe("what is being held", () => {
   test("adds up what every cache reports, by bucket", () => {
-    hold("decoders", 10 * MB);
-    hold("decoders", 5 * MB);
-    hold("reads", 3 * MB);
+    // Against what the modules loaded beside this one are already reporting:
+    // every cache in the editor registers itself the moment it is imported.
+    const before = memoryUsage();
+    hold("previewDecoders", 10 * MB);
+    hold("previewDecoders", 5 * MB);
+    hold("chunkMemory", 3 * MB);
     const usage = memoryUsage();
-    expect(mb(usage.decoders)).toBe(15);
-    expect(mb(usage.reads)).toBe(3);
-    expect(mb(usage.canvases)).toBe(0);
-    expect(mb(usage.total)).toBe(18);
+    expect(mb(usage.decoders - before.decoders)).toBe(15);
+    expect(mb(usage.reads - before.reads)).toBe(3);
+    expect(mb(usage.canvases - before.canvases)).toBe(0);
+    expect(mb(usage.total - before.total)).toBe(18);
   });
 
   test("forgets a cache that has been let go", () => {
-    hold("audio", 8 * MB);
-    expect(mb(memoryUsage().audio)).toBe(8);
+    const before = memoryUsage().audio;
+    hold("mixerAudio", 8 * MB);
+    expect(mb(memoryUsage().audio - before)).toBe(8);
     drops.pop()!();
-    expect(memoryUsage().audio).toBe(0);
+    expect(memoryUsage().audio).toBe(before);
   });
 
   test("reports nothing rather than guessing when the browser is silent", () => {

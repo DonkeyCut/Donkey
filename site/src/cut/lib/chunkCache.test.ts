@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   CHUNK_SIZE,
+  ChunkMemory,
   chunkIdentity,
   chunkRuns,
   collect,
   decodeResident,
   encodeResident,
+  routeMediaUrl,
   streamRun,
 } from "./chunkCache";
 
@@ -52,6 +54,80 @@ describe("chunkIdentity", () => {
     expect(a?.keyHash).not.toBe(b?.keyHash);
     expect(/^[0-9a-f]{16}$/.test(a?.keyHash ?? "")).toBe(true);
     expect(/^[0-9a-f]{8}$/.test(a?.versionTag ?? "")).toBe(true);
+  });
+});
+
+describe("routeMediaUrl", () => {
+  const page = "https://donkeycut.com";
+
+  test("takes the page's own media routes, relative or absolute", () => {
+    expect(routeMediaUrl("/api/cut-cloud/projects/p1/media/a%20b.mp4", page)).toBe(
+      "https://donkeycut.com/api/cut-cloud/projects/p1/media/a%20b.mp4"
+    );
+    expect(routeMediaUrl(`${page}/api/cut-cloud/library/media/a.mp4`, page)).toBe(
+      `${page}/api/cut-cloud/library/media/a.mp4`
+    );
+  });
+
+  test("takes a shared view's media route, so a viewer holds the file once", () => {
+    // A share reads the owner's bytes through its token, and the route
+    // redirects to the same media origin the owner's own route lands on.
+    expect(routeMediaUrl("/api/cut-shared/tok3n/projects/p1/media/a.mp4", page)).toBe(
+      `${page}/api/cut-shared/tok3n/projects/p1/media/a.mp4`
+    );
+  });
+
+  test("answers null for anything that is not a route to media", () => {
+    expect(routeMediaUrl("https://example.com/api/cut-cloud/projects/p1/media/a.mp4", page)).toBe(null);
+    expect(routeMediaUrl("http://localhost:41417/api/cut/projects/p/media/a.mp4", page)).toBe(null);
+    expect(routeMediaUrl(`${page}/api/cut-cloud/projects/p1`, page)).toBe(null);
+    expect(routeMediaUrl(`${page}/api/cut-shared/tok3n/projects/p1`, page)).toBe(null);
+    expect(routeMediaUrl("https://media.donkeycut.com/cut/u1/library/a.mp4?e=1&s=x", page)).toBe(null);
+    expect(routeMediaUrl("/api/cut-cloud/projects/p1/media/a.mp4", "")).toBe(null);
+  });
+});
+
+describe("ChunkMemory", () => {
+  const bytes = (n: number, fill = 1) => new Uint8Array(n).fill(fill);
+
+  test("holds a chunk once for every reader and counts what it holds", () => {
+    const m = new ChunkMemory(() => 10);
+    m.remember("a", 0, bytes(4));
+    m.remember("a", 0, bytes(4, 2));
+    expect(m.held).toBe(4);
+    expect(m.recall("a", 0)?.[0]).toBe(2);
+    expect(m.recall("a", 1)).toBe(null);
+    expect(m.recall("b", 0)).toBe(null);
+  });
+
+  test("lets the least recently touched chunk go at the cap", () => {
+    const m = new ChunkMemory(() => 10);
+    m.remember("a", 0, bytes(4));
+    m.remember("a", 1, bytes(4));
+    m.recall("a", 0);
+    m.remember("a", 2, bytes(4));
+    expect(m.held).toBe(8);
+    expect(m.recall("a", 1)).toBe(null);
+    expect(m.recall("a", 0)).not.toBe(null);
+    expect(m.recall("a", 2)).not.toBe(null);
+  });
+
+  test("refuses a chunk larger than the whole cap", () => {
+    const m = new ChunkMemory(() => 3);
+    m.remember("a", 0, bytes(4));
+    expect(m.held).toBe(0);
+    expect(m.recall("a", 0)).toBe(null);
+  });
+
+  test("forgets a version whole and leaves the others", () => {
+    const m = new ChunkMemory(() => 100);
+    m.remember("k/v1", 0, bytes(4));
+    m.remember("k/v1", 1, bytes(4));
+    m.remember("k/v2", 0, bytes(4));
+    m.forget("k/v1");
+    expect(m.held).toBe(4);
+    expect(m.recall("k/v1", 0)).toBe(null);
+    expect(m.recall("k/v2", 0)).not.toBe(null);
   });
 });
 
