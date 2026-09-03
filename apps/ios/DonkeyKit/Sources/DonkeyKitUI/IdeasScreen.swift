@@ -746,12 +746,9 @@ struct InspirationCard: View {
                 .contextMenu {
                     InspirationActions(item: item, shareURL: item.link) { confirmingDelete = true }
                 }
-                .confirmationDialog(
-                    "Delete this?",
-                    isPresented: $confirmingDelete,
-                    titleVisibility: .visible
-                ) {
+                .alert("Delete this?", isPresented: $confirmingDelete) {
                     Button("Delete", role: .destructive) { ideas.deleteInspiration(id: item.id) }
+                    Button("Cancel", role: .cancel) {}
                 } message: {
                     Text("It goes from this phone and from your cloud library.")
                 }
@@ -870,11 +867,12 @@ struct InspirationViewer: View {
             chrome
         }
         .statusBarHidden()
-        .confirmationDialog("Delete this?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+        .alert("Delete this?", isPresented: $confirmingDelete) {
             Button("Delete", role: .destructive) {
                 ideas.deleteInspiration(id: item.id)
                 dismiss()
             }
+            Button("Cancel", role: .cancel) {}
         } message: {
             Text("It goes from this phone and from your cloud library.")
         }

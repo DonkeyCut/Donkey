@@ -71,10 +71,9 @@ struct MediaScreen: View {
         .onChange(of: media.recordings.isEmpty) { _, empty in
             if empty { endSelecting() }
         }
-        .confirmationDialog(
+        .alert(
             selection.count == 1 ? "Delete Video?" : "Delete \(selection.count) Videos?",
-            isPresented: $confirmingDelete,
-            titleVisibility: .visible
+            isPresented: $confirmingDelete
         ) {
             Button("Delete", role: .destructive) { deleteSelected() }
             Button("Cancel", role: .cancel) {}
