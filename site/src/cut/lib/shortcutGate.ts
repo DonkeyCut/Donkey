@@ -66,6 +66,17 @@ export const isPasteTarget = (el: EventTarget | null): boolean =>
   (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
 
 /**
+ * Hand the keyboard to the editor. A gesture on the editor's own surface — a
+ * drop on the timeline — is where the person's attention is now, so a text
+ * field still holding the focus from before it lets go. A drop moves no focus
+ * on its own, and a composer left focused swallows every ⌫ and ⌘B that follows.
+ */
+export function keyboardToEditor(): void {
+  const el = document.activeElement;
+  if (isTextEntry(el)) (el as HTMLElement).blur();
+}
+
+/**
  * Whether a dialog stands over the editor, which owns the keyboard while it is
  * open. A popup keeps its element through its exit animation, and on a machine
  * dropping frames that runs long; Base UI marks those `data-closed`, and a

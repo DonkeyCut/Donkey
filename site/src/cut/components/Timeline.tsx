@@ -45,7 +45,7 @@ import {
 import { originalSettings, type ExportDoc } from "@/cut/lib/exportClient";
 import { useExports } from "@/cut/lib/exportStore";
 import { isDragActive, startDrag, subscribeDragActive } from "@/cut/lib/drag";
-import { shortcutDecline } from "@/cut/lib/shortcutGate";
+import { keyboardToEditor, shortcutDecline } from "@/cut/lib/shortcutGate";
 import { additiveClick } from "@/cut/lib/hostKeys";
 import { CLIP_GAP, laneDragFor, laneDragParts, startLaneMove, startLaneTrim, type LaneDrag, type LaneKind } from "@/cut/lib/laneTracks";
 import { downloadMedia, ensurePeaks, importImage, importStockMusic, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia, stripFailedFor, subscribeStripStatus } from "@/cut/lib/media";
@@ -3282,6 +3282,23 @@ function HoverLine({
 }) {
   const skimTime = useSkim();
   useEffect(() => () => setSkim(null), []);
+  // A drag fires no pointer events, so a drop leaves the pointer over the
+  // timeline with the skimmer wherever it was before the drag began. The drop
+  // is the pointer's position: the skimmer moves there, so ⌘B cuts the clip
+  // that just landed, and the keyboard comes to the editor with it.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const land = (e: DragEvent) => {
+      const inner = innerRef.current;
+      if (!inner) return;
+      const t = (e.clientX - inner.getBoundingClientRect().left) / useEditor.getState().pxPerSec;
+      if (!hold) setSkim(Math.max(0, t));
+      keyboardToEditor();
+    };
+    el.addEventListener("drop", land, { capture: true });
+    return () => el.removeEventListener("drop", land, { capture: true });
+  }, [scrollRef, innerRef, hold]);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || hold) return;
