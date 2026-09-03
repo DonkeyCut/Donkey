@@ -1,11 +1,11 @@
-// Hosted transcription: one short 16 kHz mono WAV chunk in, cue-level
-// timestamps out. The client renders the timeline's audible mix, chunks it
-// short enough to bound the model's timing drift, and stitches the results
-// (lib/cloudTranscribe.ts); this route only turns one chunk of speech into
-// cues with Gemini. Each account's allowance of chunks is included (Pro per
-// billing period, free per month — see withinFreeAllowance); chunks past
-// that meter against the user's inference credits like every /api/inference
-// route.
+// Hosted transcription: one short 16 kHz mono WAV chunk in, word-timed cues
+// out. The client renders the timeline's audible mix, chunks it, and stitches
+// the results (lib/cloudTranscribe.ts); this route only turns one chunk of
+// speech into cues with the Gemini speech model, which returns every word
+// with its own start and end. Each account's allowance of chunks is included
+// (Pro per billing period, free per month — see withinFreeAllowance); chunks
+// past that meter against the user's inference credits like every
+// /api/inference route.
 import {
   creditErrorResponse,
   recordFailedInferenceUsage,
@@ -23,7 +23,7 @@ import {
   stringValue,
 } from "@/lib/inference/adapters/gemini-client";
 import { geminiModelRoles } from "@/lib/inference/gemini-models";
-import { toJsonValue } from "@/lib/inference/json";
+import { isJsonObject, toJsonValue } from "@/lib/inference/json";
 import type { JsonValue } from "@/lib/inference/providers";
 import { err } from "./util";
 
@@ -35,15 +35,14 @@ const MAX_CHUNK_SECONDS = 30;
 const MAX_AUDIO_BYTES = 44 + MAX_CHUNK_SECONDS * PCM_BYTES_PER_SECOND;
 const ROUTE = "/api/cut-cloud/transcribe/";
 const PROVIDER = "gemini";
-// The registry's chat flash: multimodal, takes inline audio, priced in
-// provider-pricing.ts. No dedicated STT role exists, so speech-to-text rides
-// the chat model.
-const MODEL = geminiModelRoles.chat;
+// The registry's speech model: audio in, the words with their timings out,
+// priced in provider-pricing.ts.
+const MODEL = geminiModelRoles.transcription;
 
 // Each account's first chunks in its allowance window are on the house, so
 // transcripts fill in for every project — the background sweep included —
 // before any charge appears. A chunk is at most 20 seconds of speech-bearing
-// audio (silent chunks never reach this route), at about $0.004 provider
+// audio (silent chunks never reach this route), at about $0.001 provider
 // cost each. Pro includes 2 hours per billing period, aligned to the
 // subscription's own cycle; a free account gets 30 minutes per UTC calendar
 // month. Past the allowance, chunks bill the credit balance as usual; a
@@ -89,59 +88,137 @@ async function withinFreeAllowance(userId: string, sweep: boolean): Promise<bool
   return sweepUsed < Math.floor(cap / 2);
 }
 
+interface WireWord {
+  t0: number;
+  t1: number;
+  w: string;
+}
+
 interface WireCue {
   start: number;
   end: number;
   text: string;
+  words: WireWord[];
 }
 
-const transcribePrompt = (locale: string) =>
-  [
-    "Transcribe the speech in this audio verbatim, in the language actually spoken" +
-      (locale ? ` (expected: ${locale})` : "") +
-      ".",
-    'Return ONLY a JSON array of cues: [{"start": <seconds>, "end": <seconds>, "text": "<words>"}].',
-    "Times are seconds from the start of this audio.",
-    "Keep cues short — at most 7 words each — and in spoken order.",
-    "Return [] when there is no speech.",
-  ].join(" ");
+// The speech model detects the language itself; a locale the caller expects
+// rides along as a hint when it is one the model lists. Bare languages map to
+// the model's default region for that language, and a language the model does
+// not list sends no hint (auto-detect).
+const TRANSCRIBE_LANGUAGE_CODES = new Set([
+  "af-ZA", "am-ET", "ar-EG", "as-IN", "az-AZ", "be-BY", "bg-BG", "bn-BD", "bn-IN",
+  "bs-BA", "ca-ES", "ceb", "cmn-Hans-CN", "cs-CZ", "da-DK", "de-DE", "el-GR",
+  "en-AU", "en-GB", "en-IN", "en-US", "es-419", "es-ES", "es-US", "et-EE", "fa-IR",
+  "fi-FI", "fil-PH", "fr-CA", "fr-FR", "gl-ES", "gu-IN", "ha-NG", "he-IL", "hi-IN",
+  "hr-HR", "hu-HU", "hy-AM", "id-ID", "is-IS", "it-IT", "ja-JP", "jv-ID", "ka-GE",
+  "kea-CV", "kk-KZ", "km-KH", "kn-IN", "ko-KR", "ky-KG", "ln-CD", "lt-LT", "lv-LV",
+  "mk-MK", "ml-IN", "mn-MN", "mr-IN", "ms-MY", "mt-MT", "my-MM", "nb-NO", "ne-NP",
+  "nl-NL", "or-IN", "pa-Guru-IN", "pa-IN", "pl-PL", "pt-BR", "pt-PT", "ro-RO",
+  "ru-RU", "rup-BG", "sd-Arab-IN", "sk-SK", "sl-SI", "sr-RS", "sv-SE", "sw-KE",
+  "te-IN", "tg-TJ", "th-TH", "tr-TR", "uk-UA", "uz-UZ", "vi-VN", "yue-Hant-HK",
+]);
+const TRANSCRIBE_LANGUAGE_DEFAULTS: Record<string, string> = {
+  af: "af-ZA", am: "am-ET", ar: "ar-EG", as: "as-IN", az: "az-AZ", be: "be-BY",
+  bg: "bg-BG", bn: "bn-IN", bs: "bs-BA", ca: "ca-ES", ceb: "ceb", cmn: "cmn-Hans-CN",
+  cs: "cs-CZ", da: "da-DK", de: "de-DE", el: "el-GR", en: "en-US", es: "es-ES",
+  et: "et-EE", fa: "fa-IR", fi: "fi-FI", fil: "fil-PH", fr: "fr-FR", gl: "gl-ES",
+  gu: "gu-IN", ha: "ha-NG", he: "he-IL", hi: "hi-IN", hr: "hr-HR", hu: "hu-HU",
+  hy: "hy-AM", id: "id-ID", is: "is-IS", it: "it-IT", ja: "ja-JP", jv: "jv-ID",
+  ka: "ka-GE", kk: "kk-KZ", km: "km-KH", kn: "kn-IN", ko: "ko-KR", ky: "ky-KG",
+  ln: "ln-CD", lt: "lt-LT", lv: "lv-LV", mk: "mk-MK", ml: "ml-IN", mn: "mn-MN",
+  mr: "mr-IN", ms: "ms-MY", mt: "mt-MT", my: "my-MM", nb: "nb-NO", ne: "ne-NP",
+  nl: "nl-NL", no: "nb-NO", or: "or-IN", pa: "pa-IN", pl: "pl-PL", pt: "pt-BR",
+  ro: "ro-RO", ru: "ru-RU", sd: "sd-Arab-IN", sk: "sk-SK", sl: "sl-SI", sr: "sr-RS",
+  sv: "sv-SE", sw: "sw-KE", te: "te-IN", tg: "tg-TJ", th: "th-TH", tr: "tr-TR",
+  uk: "uk-UA", uz: "uz-UZ", vi: "vi-VN", yue: "yue-Hant-HK", zh: "cmn-Hans-CN",
+};
 
-/** The model's cue array, parsed defensively: code fences stripped, the
- * outermost [...] recovered from surrounding prose, entries validated and
- * clamped to the chunk. Null when no JSON array can be read at all. */
-function parseCues(raw: string, maxEnd: number): WireCue[] | null {
-  const cleaned = raw
-    .trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/```\s*$/, "")
-    .trim();
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
-    const s = cleaned.indexOf("[");
-    const e = cleaned.lastIndexOf("]");
-    if (s < 0 || e <= s) return null;
-    try {
-      parsed = JSON.parse(cleaned.slice(s, e + 1));
-    } catch {
-      return null;
+/** The model's language code for a caller locale, or undefined to let the
+ * model detect the language. */
+export function transcribeLanguageCode(locale: string): string | undefined {
+  const parts = locale.trim().split(/[-_]/).filter(Boolean);
+  if (parts.length === 0) return undefined;
+  const lang = parts[0].toLowerCase();
+  if (parts.length > 1) {
+    const region = parts[parts.length - 1];
+    const exact = `${lang}-${region.length === 2 ? region.toUpperCase() : region}`;
+    if (TRANSCRIBE_LANGUAGE_CODES.has(exact)) return exact;
+  }
+  return TRANSCRIBE_LANGUAGE_DEFAULTS[lang];
+}
+
+/** "1.250s" → 1.25; null for anything else. */
+function offsetSeconds(value: JsonValue | undefined): number | null {
+  const text = stringValue(value);
+  if (!text) return null;
+  const n = Number.parseFloat(text.replace(/s$/i, ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Every timed word the response carries, in spoken order, clamped to the
+ * chunk. Null when the response holds text but no timed words — the model
+ * answered in a shape this route cannot time. */
+function readWords(raw: JsonValue, maxEnd: number): WireWord[] | null {
+  const parts = geminiCandidateParts(geminiCandidates(raw)[0]);
+  const words: WireWord[] = [];
+  let sawText = false;
+  for (const part of parts) {
+    const transcription = part.audioTranscription;
+    if (!isJsonObject(transcription)) {
+      if (stringValue(part.text)?.trim()) sawText = true;
+      continue;
+    }
+    if (stringValue(transcription.text)?.trim()) sawText = true;
+    const list = transcription.words;
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      if (!isJsonObject(item)) continue;
+      const w = stringValue(item.word)?.trim();
+      const t0 = offsetSeconds(item.startOffset);
+      const t1 = offsetSeconds(item.endOffset);
+      if (!w || t0 === null || t1 === null) continue;
+      const s = Math.max(0, Math.min(t0, maxEnd));
+      const e = Math.max(s, Math.min(t1, maxEnd));
+      words.push({ t0: s, t1: e, w });
     }
   }
-  if (!Array.isArray(parsed)) return null;
+  if (words.length === 0 && sawText) return null;
+  return words.sort((a, b) => a.t0 - b.t0);
+}
+
+// Words become short captions: at most this many per cue, a new cue on a
+// pause longer than this, and a new cue after a sentence ends.
+const CUE_MAX_WORDS = 7;
+const CUE_BREAK_GAP_SECONDS = 0.6;
+
+/** Timed words grouped into cues the caption track can show as they are. */
+export function groupWordsIntoCues(words: WireWord[]): WireCue[] {
   const cues: WireCue[] = [];
-  for (const item of parsed) {
-    if (!item || typeof item !== "object") continue;
-    const { start, end, text } = item as Record<string, unknown>;
-    if (typeof start !== "number" || typeof end !== "number" || typeof text !== "string") continue;
-    if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
-    const s = Math.max(0, Math.min(start, maxEnd));
-    const e = Math.max(0, Math.min(end, maxEnd));
-    const t = text.trim();
-    if (!t || e <= s) continue;
-    cues.push({ start: s, end: e, text: t });
+  let current: WireWord[] = [];
+  const flush = () => {
+    if (current.length === 0) return;
+    cues.push({
+      start: current[0].t0,
+      end: current[current.length - 1].t1,
+      text: current.map((w) => w.w).join(" "),
+      words: current,
+    });
+    current = [];
+  };
+  for (const word of words) {
+    const prev = current[current.length - 1];
+    if (
+      prev &&
+      (current.length >= CUE_MAX_WORDS ||
+        word.t0 - prev.t1 > CUE_BREAK_GAP_SECONDS ||
+        /[.!?]["'”’)]*$/.test(prev.w))
+    ) {
+      flush();
+    }
+    current.push(word);
   }
-  return cues.sort((a, b) => a.start - b.start);
+  flush();
+  return cues;
 }
 
 export const transcribeCloud = {
@@ -197,19 +274,23 @@ export const transcribeCloud = {
     let raw: unknown;
     try {
       const client = defaultGeminiClientFactory(clientConfig.options);
+      const languageCode = transcribeLanguageCode(locale);
       raw = await client.models.generateContent({
         model: MODEL,
         contents: [
           {
             role: "user",
-            parts: [
-              { inlineData: { mimeType: "audio/wav", data: wavBase64 } },
-              { text: transcribePrompt(locale) },
-            ],
+            parts: [{ inlineData: { mimeType: "audio/wav", data: wavBase64 } }],
           },
         ],
-        // JSON mode without a schema — constrained decoding degrades output.
-        config: { responseMimeType: "application/json", temperature: 0 },
+        // The speech model takes no prompt, system instruction, or output
+        // schema; the transcription config is the whole request.
+        config: {
+          audioTranscriptionConfig: {
+            wordTimestamp: true,
+            ...(languageCode ? { languageCodes: [languageCode] } : {}),
+          },
+        },
       });
     } catch (error) {
       await recordFailedInferenceUsage({
@@ -249,13 +330,10 @@ export const transcribeCloud = {
       throw error;
     }
 
-    const text = geminiCandidateParts(geminiCandidates(raw as JsonValue)[0])
-      .map((p) => stringValue(p.text) ?? "")
-      .join("");
-    const cues = parseCues(text, audioSeconds);
-    if (cues === null) {
-      return err("The transcription model returned an unreadable response — try again.", 502);
+    const words = readWords(raw as JsonValue, audioSeconds);
+    if (words === null) {
+      return err("The transcription model returned no word timings — try again.", 502);
     }
-    return Response.json({ cues });
+    return Response.json({ cues: groupWordsIntoCues(words) });
   },
 };

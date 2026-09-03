@@ -7,9 +7,9 @@
 // result is the cut's audible mix in timeline time — whether it then goes to
 // this Mac (localStt.ts) or to the hosted route, which includes each
 // account's first chunks and meters the rest. The hosted path
-// chunks it as 16 kHz mono WAV, POSTs each chunk, stitches the cues back into
-// timeline time, and interpolates per-word timings. Mic dictation reuses the
-// same chunk/post/stitch core on a MediaRecorder capture.
+// chunks it as 16 kHz mono WAV, POSTs each chunk, and stitches the cues — each
+// word carrying its own timing — back into timeline time. Mic dictation reuses
+// the same chunk/post/stitch core on a MediaRecorder capture.
 
 import { renderMix as mixAudio } from "./audioMix";
 import { apiFetch } from "./backend";
@@ -33,11 +33,10 @@ export interface CloudTranscribeSpec {
 }
 
 const RATE = 16000; // the wire format the hosted route expects
-// The hosted model reads times off the audio by ear, and its clock drifts as a
-// chunk runs on — cues open in sync and land seconds late by the end of a long
-// one. Every chunk boundary re-anchors that clock at a known offset, so the
-// chunk length is what bounds the drift: short enough to keep it inside the
-// alignment pass's snap window, long enough that a sentence keeps its context.
+// The hosted route's included allowance counts chunks and holds each to this
+// length (its MAX_CHUNK_SECONDS leaves a little room), so the chunk is the
+// unit of accounting: short enough that a few round trips overlap, long
+// enough that a sentence keeps its context.
 const CHUNK_SECONDS = 20;
 const OVERLAP_SECONDS = 3; // audio shared across chunk seams for stitching
 const POSTS_IN_FLIGHT = 4; // short chunks mean more round-trips; overlap them
@@ -105,6 +104,8 @@ interface WireCue {
   start: number;
   end: number;
   text: string;
+  /** Per-word timings, seconds from the start of the chunk. */
+  words?: { t0: number; t1: number; w: string }[];
 }
 
 // The route's error code for an account whose included chunks are used up.
@@ -153,25 +154,6 @@ async function postChunk(
       Number.isFinite(c.start) &&
       Number.isFinite(c.end)
   );
-}
-
-/** Proportional word timings inside a cue: split the text into words and
- * distribute [start, end] by each word's share of the characters. */
-function interpolateWords(
-  text: string,
-  start: number,
-  end: number
-): { t0: number; t1: number; w: string }[] {
-  const parts = text.split(/\s+/).filter(Boolean);
-  const total = parts.reduce((n, w) => n + w.length, 0) || 1;
-  const span = Math.max(0, end - start);
-  let at = start;
-  return parts.map((w) => {
-    const d = (w.length / total) * span;
-    const word = { t0: round(at), t1: round(at + d), w };
-    at += d;
-    return word;
-  });
 }
 
 /** Chunk mono 16 kHz samples, transcribe each chunk, and stitch: cue times
@@ -226,12 +208,21 @@ export async function transcribeSamples(
       const text = c.text.trim();
       const mid = (start + end) / 2;
       if (!text || end <= start || mid < from || mid >= to) continue;
+      // Word timings ride along when the route sends them; a cue that arrives
+      // without them still shows, it just doesn't highlight word by word.
+      const words = (Array.isArray(c.words) ? c.words : [])
+        .filter((w) => typeof w?.t0 === "number" && typeof w?.t1 === "number" && typeof w?.w === "string")
+        .map((w) => ({
+          t0: round(Math.max(start, Math.min(w.t0 + offset, end))),
+          t1: round(Math.max(start, Math.min(w.t1 + offset, end))),
+          w: w.w,
+        }));
       cues.push({
         id: uid(),
         start: round(start),
         end: round(end),
         text,
-        words: interpolateWords(text, start, end),
+        ...(words.length > 0 ? { words } : {}),
       });
     }
   }
