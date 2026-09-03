@@ -187,7 +187,7 @@ export const clipTitleCloud = {
         model: MODEL,
         contents: [{ role: "user", parts }],
         // JSON mode without a schema — constrained decoding degrades output.
-        config: { responseMimeType: "application/json", temperature: 0.4 },
+        config: { responseMimeType: "application/json" },
       });
     } catch (error) {
       await recordFailedInferenceUsage({

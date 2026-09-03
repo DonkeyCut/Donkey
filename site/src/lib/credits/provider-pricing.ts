@@ -10,10 +10,12 @@ import {
   geminiModels,
   geminiMusicModels,
   geminiOmniModels,
+  geminiTranscribeModels,
   geminiTtsModels,
   type GeminiModel,
   type GeminiMusicModel,
   type GeminiOmniModel,
+  type GeminiTranscribeModel,
   type GeminiTtsModel,
 } from "@/lib/inference/gemini-models";
 import { falMatteModels, type FalMatteModel } from "@/lib/inference/matte-models";
@@ -239,7 +241,7 @@ const openAITextCreditRates: {
   { model: "o4-mini", input: "1.1", cachedInput: "0.275", output: "4.4" },
 ];
 
-// gemini-3.7-flash launch pricing runs through 2026-12-31; standard pricing
+// gemini-3.8-flash launch pricing runs through 2026-12-31; standard pricing
 // starts 2027-01-01 UTC. Audio input bills at the text rate. The record entry
 // is a getter, so every lookup reads the clock and the switch happens on
 // schedule without a deploy.
@@ -271,9 +273,9 @@ const geminiModelPricing: Record<GeminiModel, ProviderCreditPricing> = {
     output: "1.5",
     inputAudio: "0.5",
   }),
-  // Generative image editing/generation ("nano banana") bills per output image:
-  // ~1290 output tokens at $30/1M ≈ $0.039 each.
-  [geminiModels.flashImage]: { generationCostMicros: usdWithMargin("0.039") },
+  // Generative image editing/generation ("nano banana 2") bills per output
+  // image: $0.045 at 1K, the size the scripts render.
+  [geminiModels.flashImage]: { generationCostMicros: usdWithMargin("0.045") },
   // "Nano banana pro" bills per output image by resolution: $0.134 at 1K/2K, $0.24 at
   // 4K. Our per-image price can't vary by resolution, so this charges the 1K/2K rate
   // (the default is 2K); 4K currently under-bills. Make billing resolution-aware before
@@ -292,15 +294,31 @@ function geminiTtsCreditPricing(model: string): ProviderCreditPricing | undefine
   return geminiTtsModelPricing[model as GeminiTtsModel];
 }
 
+// Speech-to-text (Gemini Transcribe) bills by tokens: $2/1M audio in (about
+// $0.003 a minute) and $12/1M text out. It runs on the plain "gemini" provider
+// through generateContent, so the lookup rides geminiCreditPricing. The Record
+// is keyed by GeminiTranscribeModel, so adding an id without a price fails the
+// build.
+const geminiTranscribeModelPricing: Record<GeminiTranscribeModel, ProviderCreditPricing> = {
+  [geminiTranscribeModels.file]: textAudioTokenPricing({
+    input: "2",
+    output: "12",
+    inputAudio: "2",
+  }),
+};
+
 // Unified video generation (Gemini Omni Flash). The provider bills by tokens —
-// $1.50/1M input, $17.50/1M output, and a rendered second of 720p video is
-// 5,792 output tokens — but the render is async: the submit response carries no
-// token counts, and charging on the completing poll instead would let one
-// balance launch unbounded concurrent renders. So a clip charges FLAT at
-// submit (usage {generationCount: 1}): ~10s × 5,792 tokens/s × $17.5/1M ≈
-// $1.02, the model's fixed-length output. The token rates stay for the rare
-// interaction that completes synchronously with real counts. The Record is
-// keyed by GeminiOmniModel, so adding an Omni id without a price fails the build.
+// $1.50/1M input, $17.50/1M output, and a rendered second of video costs a
+// fixed number of output tokens per resolution (geminiOmniTokensPerSecond) —
+// but the render is async: the submit response carries no token counts, and
+// charging on the completing poll instead would let one balance launch
+// unbounded concurrent renders. So a clip charges at submit in units of one
+// second of 360p video (1,931 output tokens ≈ $0.034): the adapter counts the
+// units the requested length and resolution add up to (a 10s 720p clip is 30,
+// a 10s 4k clip 90), the preflight holds the balance to that count, and the
+// same count bills. The token rates stay for the rare interaction that
+// completes synchronously with real counts. The Record is keyed by
+// GeminiOmniModel, so adding an Omni id without a price fails the build.
 const geminiOmniModelPricing: Record<GeminiOmniModel, ProviderCreditPricing> = {
   [geminiOmniModels.flashVideo]: {
     ...textTokenPricing({
@@ -308,7 +326,8 @@ const geminiOmniModelPricing: Record<GeminiOmniModel, ProviderCreditPricing> = {
       input: "1.5",
       output: "17.5",
     }),
-    generationCostMicros: usdWithMargin("1.02"),
+    // One unit is a second of 360p: 1,931 output tokens at $17.50/1M.
+    generationCostMicros: usdWithMargin("0.033793"),
   },
 };
 
@@ -358,14 +377,17 @@ function geminiCreditPricing(model: string): ProviderCreditPricing | undefined {
   // Exact match wins, so a specific id is never shadowed by a broader prefix entry (e.g. an image
   // model "…-flash-image" under the "…-flash" text prefix). For dated/snapshot ids that only match
   // by prefix, try the longest (most specific) key first for the same reason.
-  const exact = geminiModelPricing[model as GeminiModel];
+  const exact =
+    geminiModelPricing[model as GeminiModel] ??
+    geminiTranscribeModelPricing[model as GeminiTranscribeModel];
   if (exact) {
     return exact;
   }
 
-  const byLongestPrefix = Object.entries(geminiModelPricing).sort(
-    ([a], [b]) => b.length - a.length,
-  );
+  const byLongestPrefix = [
+    ...Object.entries(geminiModelPricing),
+    ...Object.entries(geminiTranscribeModelPricing),
+  ].sort(([a], [b]) => b.length - a.length);
   for (const [id, pricing] of byLongestPrefix) {
     if (modelMatches(model, id)) {
       return pricing;

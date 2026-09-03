@@ -671,25 +671,17 @@ function thinkingLevelFromBody(body: JsonObject): ThinkingLevel | undefined {
 }
 
 function generationConfigFromBody(body: JsonObject): Partial<GenerateContentConfig> {
+  // Sampling knobs (temperature, top_p, top_k) are not forwarded: the Gemini
+  // 3.x line ignores them, and the models are tuned for their defaults.
   const config: Partial<GenerateContentConfig> = {};
-  const temperature = numberValue(body.temperature);
-  if (temperature !== undefined) {
-    config.temperature = temperature;
-  }
-
-  const topP = numberValue(body.top_p) ?? numberValue(body.topP);
-  if (topP !== undefined) {
-    config.topP = topP;
-  }
-
   const maxOutputTokens = numberValue(body.max_output_tokens) ?? numberValue(body.maxOutputTokens);
   if (maxOutputTokens !== undefined) {
     config.maxOutputTokens = maxOutputTokens;
   }
   // Bound reasoning so thinking tokens (which count against maxOutputTokens) can't starve the
   // structured output. Callers driving tight per-turn loops pass a small budget; 0 disables thinking.
-  // Gemini 3.x models (e.g. gemini-3.7-flash) take thinking_level (minimal|low|medium|high), NOT the
-  // integer thinking_budget — passing the budget to them is silently ignored. Prefer the level when the
+  // Gemini 3.x models (e.g. gemini-3.8-flash) take thinking_level (low|medium|high; minimal on the
+  // models that still accept it); the integer thinking_budget is silently ignored there. Prefer the level when the
   // caller sets it; the two are mutually exclusive. Older 2.x models still use thinking_budget. In both
   // cases request the thought summary so callers can persist the reasoning (the normalized response
   // separates it from output_text).
