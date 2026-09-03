@@ -199,6 +199,31 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       },
     },
     {
+      // A size and a length in the ask ride the tool's own knobs: the call
+      // carries resolution and duration_seconds.
+      name: "video-ask-with-size-and-length",
+      bucket: "single-tool",
+      input: () => [userTurn("generate a 6 second 1080p video of a paper boat drifting across a puddle")],
+      reply: /video|render|boat|minute/i,
+      requiredTools: ["generate_video"],
+      maxToolCalls: 2,
+      simulate: () => (name, args) => {
+        if (name !== "generate_video") return undefined;
+        if (args.resolution !== "1080p")
+          throw new Error(`generate_video resolution must be "1080p", got ${JSON.stringify(args.resolution)}`);
+        if (args.duration_seconds !== 6)
+          throw new Error(`generate_video duration_seconds must be 6, got ${JSON.stringify(args.duration_seconds)}`);
+        return {
+          kind: "video",
+          started: true,
+          jobId: "job-boat",
+          addToTimeline: false,
+          note:
+            "Rendering — it previews in this chat when it lands, in a minute or two. It stays in the chat until the user places it.",
+        };
+      },
+    },
+    {
       // The screenshot regression: iterating on an existing clip ("make me a
       // better version / closer to the original / a different take") ADDS a
       // fresh generation and leaves the clip in place. Without an explicit
@@ -429,10 +454,10 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       },
     },
     {
-      // A treatment on the SOUND is the same effect element as a treatment on
-      // the picture: "sound like a phone call" over a clip is one add_effect
-      // with the telephone id spanning that clip. Reaching for the per-clip
-      // audio knobs (volume, fades, duck) instead misses the ask.
+      // "Sound like a phone" on one clip has two shipped treatments and either
+      // is the ask done in one call: the telephone effect element spanning
+      // that clip, or the clip's own Sound quality "Phone / Lo-Fi" preset.
+      // The per-clip level knobs (volume, fades, duck) miss it.
       name: "audio-effect-single-tool",
       bucket: "single-tool",
       input: () => [
@@ -440,11 +465,17 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
           state: TWO_CLIP_STATE,
         }),
       ],
-      reply: /phone|telephone|effect/i,
-      requiredTools: ["add_effect"],
+      reply: /phone|telephone|effect|lo-fi/i,
+      anyTools: ["add_effect", "set_clip_sound"],
       maxToolCalls: 3,
       state: TWO_CLIP_STATE,
       simulate: () => (name, args) => {
+        if (name === "set_clip_sound") {
+          if (args.clipId !== "c2") throw new Error(`set_clip_sound on ${args.clipId} — the second clip is c2`);
+          if (!/phone/i.test(String(args.preset ?? "")))
+            throw new Error(`set_clip_sound preset ${JSON.stringify(args.preset)} — expected the Phone / Lo-Fi preset`);
+          return { id: "c2", preset: "phone" };
+        }
         if (name !== "add_effect") return undefined;
         if (args.effect !== "telephone") throw new Error(`effect ${args.effect} — expected telephone`);
         const start = Number(args.start ?? 0);

@@ -24,6 +24,10 @@ export const SAFE_TOOLS = new Set([
   "detect_silence",
   "detect_beats",
   "listen_audio",
+  // The model's own memory of a source and the user's synced notes: reading
+  // notes and writing down a look are bookkeeping, never a project edit.
+  "note_source",
+  "notes_list",
   "read_color_stats",
   "library_list",
   "stock_search",
@@ -492,6 +496,10 @@ export function makeTimelineSim(base: typeof FILLER_STATE) {
   });
   return (name: string, args: Record<string, unknown>): unknown => {
     if (name === "get_state") return snapshot();
+    // A caption refresh after the cut: the fixture's cues already sit on the
+    // speech, so the pass moves nothing.
+    if (name === "align_to_audio")
+      return { target: "captions", track: 0, count: cues.length, moved: 0, note: "Every caption edge already sits on the speech." };
     if (name === "refine_speech_cuts") {
       const ids = Array.isArray(args.clip_ids) ? args.clip_ids.map(String) : [];
       const missing = ids.filter((id) => !clips.some((c) => c.id === id));
@@ -620,6 +628,7 @@ export function serveSafeTool(name: string, state: unknown): unknown {
   }
   if (name === "list_skills") return { skills: AI_SKILL_INDEX };
   if (name === "library_list") return { folders: [], assets: [], templates: [] };
+  if (name === "notes_list") return { notes: [], folders: [], labels: [] };
   if (name === "detect_silence") return { silences: [] };
   if (name === "detect_beats") return { bpm: 0, beats: [] };
   return { ok: true };
