@@ -160,9 +160,11 @@ export function createFalMatteProvider(
   }
 
   // The route's pre-preflight count: the chunks this segment will bill, read
-  // from the resolved segment itself in the resolved model's own unit.
+  // from the resolved segment itself in the resolved model's own unit. The
+  // count needs the media, so this is the provider that pulls the resolver.
   async function assetGenerationCountFor(
     request: AssetGenerationProviderRequest["request"],
+    resolveInputs: () => Promise<AssetGenerationProviderRequest["request"]>,
   ): Promise<number> {
     ensureConfigured(configured);
     if (request.kind !== "matte") {
@@ -171,7 +173,8 @@ export function createFalMatteProvider(
         code: "unsupported_asset_kind",
       });
     }
-    return billableChunks(segmentUrl(request), matteChunkFrames[resolveModel(request.model)]);
+    const resolved = await resolveInputs();
+    return billableChunks(segmentUrl(resolved), matteChunkFrames[resolveModel(resolved.model)]);
   }
 
   async function generateAsset({

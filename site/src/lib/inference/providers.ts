@@ -145,12 +145,18 @@ export type InferenceProvider = {
   // which is what lets the preflight price the generation. Throws the same way generateAsset would
   // for an unpriced model, only sooner.
   assetModelFor?: (request: AssetGenerationRequest) => string;
-  // How many generation units this request will bill, for a provider whose
-  // charge scales with the input (the matte segmenter's frame chunks). The
-  // route calls it with resolved inputs before the credit preflight, so the
-  // balance check covers the whole charge, and hands the count back through
-  // generateAsset's generationCount.
-  assetGenerationCountFor?: (request: AssetGenerationRequest) => Promise<number>;
+  // How many generation units this request will bill. The route calls it
+  // before the credit preflight, so the balance check covers the whole charge,
+  // and hands the count back through generateAsset's generationCount. Reading
+  // the inputs costs whole objects out of storage, so the request arrives
+  // unresolved and `resolveInputs` fetches them: a provider counting off the
+  // media (the matte segmenter's frame chunks) awaits it, one counting off the
+  // parameters alone (the video renderer's seconds) never does, and an empty
+  // balance is refused before anything leaves storage.
+  assetGenerationCountFor?: (
+    request: AssetGenerationRequest,
+    resolveInputs: () => Promise<AssetGenerationRequest>,
+  ) => Promise<number>;
   generateAsset?: (
     request: AssetGenerationProviderRequest,
   ) => Promise<AssetGenerationProviderResult>;

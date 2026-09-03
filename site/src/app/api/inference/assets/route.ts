@@ -50,10 +50,12 @@ export const POST = withDonkeyAuth(async (request) => {
   // length), so asking the provider is the only way the preflight sees the id that gets charged.
   // Reference pictures and seed frames ride storage, not the request body — they become inline
   // data on the server-to-server leg. That resolution reads whole objects out of storage, so it
-  // waits for the balance to clear; only a provider whose charge scales with the input (the matte
-  // segmenter's frame chunks) resolves ahead of the preflight, because its count is read from the
-  // resolved media.
-  const resolveRequest = async () => {
+  // waits for the balance to clear; a provider whose count is read from the resolved media (the
+  // matte segmenter's frame chunks) pulls it ahead of the preflight through the resolver it is
+  // handed. The promise is memoized, so the request resolves at most once either way.
+  let resolving: Promise<typeof parsed.data> | undefined;
+  const resolveRequest = () => (resolving ??= resolveRequestOnce());
+  const resolveRequestOnce = async () => {
     const inputs: JsonObject | undefined = parsed.data.inputs
       ? toJsonObject(
           await resolveInferenceBlobs(
@@ -73,8 +75,7 @@ export const POST = withDonkeyAuth(async (request) => {
     model = provider.assetModelFor?.(parsed.data) ?? parsed.data.model;
     generationRequest = parsed.data;
     if (provider.assetGenerationCountFor) {
-      generationRequest = await resolveRequest();
-      generationCount = await provider.assetGenerationCountFor(generationRequest);
+      generationCount = await provider.assetGenerationCountFor(parsed.data, resolveRequest);
     }
   } catch (error) {
     // A rejected request still leaves its diagnostic trail, same as a
@@ -116,7 +117,7 @@ export const POST = withDonkeyAuth(async (request) => {
   const failedUsageProvider = provider.id;
 
   try {
-    if (!provider.assetGenerationCountFor) generationRequest = await resolveRequest();
+    generationRequest = await resolveRequest();
     const generationId = generationIDForRequest(parsed.data);
     const generation = {
       id: generationId,
