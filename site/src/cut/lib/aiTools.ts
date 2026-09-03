@@ -2054,6 +2054,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   update_overlay: (s, input) => {
       const o = requireItem(s.overlays, input.id, "overlay element");
       s.updateOverlay(o.id, overlayPatch(input, o.kind ?? "text"));
+      if (typeof input.follows_clip === "boolean") s.setOverlayFollows(o.id, input.follows_clip);
       const next = useEditor.getState().overlays.find((x) => x.id === o.id)!;
       return {
         id: next.id,
@@ -2061,6 +2062,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         ...(isTextOverlay(next) ? { text: next.text, color: next.color, size: next.size } : {}),
         start: round2(next.start),
         end: round2(next.end),
+        ...(next.hostClipId ? { host: next.hostClipId } : {}),
       };
   },
 

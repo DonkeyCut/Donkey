@@ -48,6 +48,7 @@ import type {
   VideoClip,
 } from "./types";
 import type { VideoProject } from "./genvideo/types";
+import { adoptOverlayHosts, hostClipFor, settleOverlayHosts } from "./overlayHosts";
 import { fillSlot } from "./genvideo/fillSlot";
 import { apiFetch, apiJson, getBackend, hasLocalCompute } from "./backend";
 import { fetchSignedMediaUrls, pinDocBase } from "./backend/cloud";
@@ -726,6 +727,9 @@ export interface EditorState {
   groupSelectedOverlays: () => void;
   /** Dissolve a group; the members stay, ungrouped. */
   ungroupOverlays: (groupId: string) => void;
+  /** Whether an element rides the clip under it: on homes it to that clip,
+   * off frees it where it is. */
+  setOverlayFollows: (id: string, on: boolean) => void;
   /** ⌘/⇧-click: add the item to the selection (or remove it if already in),
    * making it the new primary. */
   toggleSelect: (sel: NonNullable<Selection>) => void;
@@ -974,6 +978,13 @@ export function moveOverlayGroup(anchor: Overlay, delta: number) {
  * elements being pushed keep their own order and spacing. */
 function pushOverlaysClearOf(ids: Set<string>) {
   const overlays = useEditor.getState().overlays;
+  const cleared = overlaysClearOf(overlays, ids);
+  if (cleared !== overlays) useEditor.setState({ overlays: cleared });
+}
+
+/** `overlays` with everything outside `ids` slid clear of the set, as a new
+ * array; the same array back when nothing had to move. */
+function overlaysClearOf(overlays: Overlay[], ids: Set<string>): Overlay[] {
   const moved = overlays.filter((o) => ids.has(o.id));
   const shifted = new Map<string, number>();
   for (const lane of new Set(moved.map((o) => o.lane ?? 0))) {
@@ -994,13 +1005,11 @@ function pushOverlaysClearOf(ids: Set<string>) {
       floor = start + len;
     }
   }
-  if (shifted.size === 0) return;
-  useEditor.setState((s) => ({
-    overlays: s.overlays.map((o) => {
-      const by = shifted.get(o.id);
-      return by ? { ...o, start: o.start + by, end: o.end + by } : o;
-    }),
-  }));
+  if (shifted.size === 0) return overlays;
+  return overlays.map((o) => {
+    const by = shifted.get(o.id);
+    return by ? { ...o, start: o.start + by, end: o.end + by } : o;
+  });
 }
 
 /** Resize a clip's footprint to `newLen` (a trim or speed change) and carry
@@ -1235,6 +1244,9 @@ const DOC_KEYS = [
   "renders",
 ] as const;
 let hydrating = false;
+// An undo restore writes a document that was consistent when it was taken;
+// homing elements against it would only re-derive what it already says.
+let restoring = false;
 
 /**
  * The invariants every write to the store passes through, wherever it comes
@@ -1259,6 +1271,26 @@ function normalizeWrite(prev: EditorState, incoming: Partial<EditorState>): Part
     const clips = next.clips ?? prev.clips;
     const derived = deriveTransitionFields(clips, next.transitions ?? prev.transitions);
     if (derived !== clips) next = { ...next, clips: derived };
+  }
+  // Elements ride the frames under them: a write that moved or retimed
+  // clips carries every hosted element over the same footage, and one that
+  // placed an element homes it to the clip beneath. Carried elements keep
+  // their exact place; the rest of their row parts clear of them.
+  if (!hydrating && !restoring && (next.clips || next.overlays)) {
+    const settled = settleOverlayHosts(
+      prev.clips,
+      next.clips ?? prev.clips,
+      prev.overlays,
+      next.overlays ?? prev.overlays
+    );
+    if (settled) {
+      next = {
+        ...next,
+        overlays: settled.carried.size
+          ? overlaysClearOf(settled.overlays, settled.carried)
+          : settled.overlays,
+      };
+    }
   }
   // The playhead cannot outlive the timeline. Deleting the last of a long
   // row shortens the project under a playhead standing past the new end,
@@ -1454,14 +1486,19 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       }
     };
     const nextMulti = multiSelection.filter(survives);
-    set({
-      ...doc,
-      clips: nextClips,
-      audioClips: nextAudio,
-      ...(beatsMoved ? { assets: withBeats } : {}),
-      selection: survives(selection) ? selection : nextMulti[nextMulti.length - 1] ?? null,
-      multiSelection: nextMulti,
-    });
+    restoring = true;
+    try {
+      set({
+        ...doc,
+        clips: nextClips,
+        audioClips: nextAudio,
+        ...(beatsMoved ? { assets: withBeats } : {}),
+        selection: survives(selection) ? selection : nextMulti[nextMulti.length - 1] ?? null,
+        multiSelection: nextMulti,
+      });
+    } finally {
+      restoring = false;
+    }
   };
 
   /** Seal the deferred checkpoint: commit it to history only if the doc
@@ -2005,7 +2042,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             sanitizeTransitions(doc.transitions)
           ),
           audioClips: merged.audioClips,
-          overlays: withLooks.overlays,
+          // Elements from before they had hosts home to the clips under them.
+          overlays: adoptOverlayHosts(withLooks.clips, withLooks.overlays),
           templates: doc.templates ?? [],
           mediaFolders: doc.mediaFolders ?? [],
           aspect: normalizeAspect(doc.aspect) ?? lastChosenAspect() ?? "9:16",
@@ -3904,6 +3942,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         start: o.start + shift,
         end: o.end + shift,
         ...regroup(o),
+        // A template's element homes to whatever sits under where it lands.
+        ...(typeof o.hostClipId === "string" ? { hostClipId: undefined } : {}),
       }));
       const newCues: SubtitleCue[] = template.cues.map((c) => ({
         ...c,
@@ -3950,6 +3990,15 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       get().updateOverlaysTransient(ids.map((id) => ({ id, patch: { groupId } })));
     },
 
+    setOverlayFollows: (id, on) => {
+      if (!get().overlays.some((o) => o.id === id)) return;
+      push();
+      set((s) => ({
+        overlays: s.overlays.map((o) =>
+          o.id === id ? { ...o, hostClipId: on ? hostClipFor(s.clips, o)?.id : null } : o
+        ),
+      }));
+    },
     ungroupOverlays: (groupId) => {
       const members = get().overlays.filter((o) => o.groupId === groupId);
       if (members.length === 0) return;
@@ -4866,6 +4915,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
               start,
               end: start + len,
               ...regroup(cb.item),
+              // A copy homes to whatever sits under where it lands.
+              ...(typeof cb.item.hostClipId === "string" ? { hostClipId: undefined } : {}),
             };
             overlays = [...overlays, item];
             newSel.push({ kind: "overlay", id: item.id });

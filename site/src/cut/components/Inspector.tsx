@@ -2035,6 +2035,7 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
         </Section>
         <OverlayMaskSection overlay={o} />
         <TransformRows overlay={o} />
+        <FollowRow overlay={o} />
         <GroupRow overlay={o} />
         <AnimationSection
           overlay={o}
@@ -2702,6 +2703,22 @@ function AnimationToolbar({ overlay: o, slot }: { overlay: Overlay; slot: AnimSl
 /** Group / Ungroup, shown when the selection can form one or the element is
  * in one. Grouping is shallow by design: select-one-selects-all, and gestures
  * apply member-relative deltas. */
+/** Whether the element rides the clip under it. On, the store homes it to
+ * that clip and carries it with the clip's frames; off, it stays free. */
+function FollowRow({ overlay: o }: { overlay: Overlay }) {
+  return (
+    <Row
+      label="Follows clip"
+      info="The element moves and retimes with the frames of the video clip under it. Off keeps it where it is whatever the clip does."
+    >
+      <Switch
+        checked={o.hostClipId !== null}
+        onCheckedChange={(v) => useEditor.getState().setOverlayFollows(o.id, v)}
+      />
+    </Row>
+  );
+}
+
 function GroupRow({ overlay: o }: { overlay: Overlay }) {
   const selectedOverlays = useEditor(
     (s) => s.multiSelection.filter((x) => x?.kind === "overlay").length
@@ -3829,6 +3846,7 @@ function ShapePanel({ overlay: o }: { overlay: ShapeOverlay }) {
         )}
         <OverlayMaskSection overlay={o} />
         <TransformRows overlay={o} />
+        <FollowRow overlay={o} />
         <GroupRow overlay={o} />
         <AnimationSection
           overlay={o}
@@ -3876,6 +3894,7 @@ function EffectPanel({ overlay: o }: { overlay: EffectOverlay }) {
           </Row>
         )}
         <HiddenRow overlay={o} />
+        <FollowRow overlay={o} />
         <GroupRow overlay={o} />
       </div>
     </>
@@ -4055,6 +4074,7 @@ function StickerPanel({ overlay: o }: { overlay: StickerOverlay }) {
         </Row>
         <OverlayMaskSection overlay={o} />
         <TransformRows overlay={o} />
+        <FollowRow overlay={o} />
         <GroupRow overlay={o} />
         <AnimationSection
           overlay={o}

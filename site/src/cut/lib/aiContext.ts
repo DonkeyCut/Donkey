@@ -538,6 +538,7 @@ function describeOverlay(o: Overlay) {
     ...(o.mask ? { mask: o.mask } : {}),
     ...(o.lane ? { lane: o.lane } : {}),
     ...(o.hidden ? { hidden: true } : {}),
+    ...(o.hostClipId ? { host: o.hostClipId } : o.hostClipId === null ? { free: true } : {}),
   };
   if (o.kind === "shape") {
     return {
