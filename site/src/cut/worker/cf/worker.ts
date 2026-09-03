@@ -8,6 +8,7 @@
 import { Container, getContainer } from "@cloudflare/containers";
 import { CUT_MEDIA_HOST, CUT_WORKER_HOST } from "../../lib/hosts";
 import { serveMedia, type MediaEnv } from "./media";
+import { MAX_REPLICAS, replicasToStart, type WakeBody } from "./wakeSize";
 
 type WorkerEnv = MediaEnv & {
   CUT_RENDER_WORKER: unknown;
@@ -32,12 +33,13 @@ type QueueMessage = {
 };
 type QueueBatch = { queue: string; messages: QueueMessage[] };
 
-// How many container replicas the render pool runs. Each one takes a single
+// The most container replicas the render pool runs. Each one takes a single
 // job at a time, so this is also the number of renders that can be in flight
-// at once. Keep it in step with max_instances in ../wrangler.jsonc; a replica
-// with nothing to claim drains out on its own (IDLE_EXIT_MS in ../main.ts),
-// so waking the whole pool costs idle poll time and nothing else.
-const REPLICAS = 4;
+// at once. Keep it in step with max_instances in ../wrangler.jsonc. A wake
+// starts only as many as the queue needs (wakeSize.ts): a replica bills
+// its whole 12 GiB for every second it is up, idle polling included, so one
+// started with nothing to claim is a minute of paid memory for no render.
+const REPLICAS = MAX_REPLICAS;
 
 const replicaName = (i: number) => `cut-render-${i}`;
 
@@ -83,12 +85,14 @@ export default {
       if (!env.CUT_WAKE_SECRET || auth !== `Bearer ${env.CUT_WAKE_SECRET}`) {
         return new Response("Unauthorized", { status: 401 });
       }
-      // Wake the whole pool: the queue is drained by whichever replicas are up,
-      // and each claim is atomic, so starting them all is how a burst of jobs
-      // renders in parallel instead of one at a time. start() is a no-op on a
-      // replica already running and a boot on one that slept.
+      // Start as many replicas as the queue needs, lowest index first. Each
+      // claim is atomic, so a burst of jobs still renders in parallel, one per
+      // replica; start() is a no-op on a replica already running and a boot
+      // on one that slept.
+      const body = (await request.json().catch(() => null)) as WakeBody | null;
+      const wanted = replicasToStart(body);
       const starts = await Promise.allSettled(
-        Array.from({ length: REPLICAS }, (_, i) =>
+        Array.from({ length: wanted }, (_, i) =>
           getContainer(env.CUT_RENDER_WORKER as never, replicaName(i)).start()
         )
       );

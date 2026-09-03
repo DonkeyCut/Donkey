@@ -4,6 +4,7 @@
 // route that serves it; the shared secret is the only environment input, and
 // holding it is the single switch that turns waking on. Unset (local dev), the
 // dev worker is run by hand and polls on its own.
+import { prisma } from "@/lib/prisma";
 import { CUT_WORKER_WAKE_URL } from "@/cut/lib/hosts";
 
 const wakeSecret = () => process.env.CUT_RENDER_WAKE_SECRET;
@@ -25,14 +26,27 @@ export function wakeRenderWorker(): void {
   const now = Date.now();
   if (now - lastWakeAt < WAKE_WINDOW_MS) return;
   lastWakeAt = now;
-  void fetch(CUT_WORKER_WAKE_URL, {
+  void wake(secret).catch((e: unknown) => {
+    console.error("[cut] render worker wake failed:", e instanceof Error ? e.message : e);
+  });
+}
+
+// The wake carries the queue's depth so the Worker starts as many replicas as
+// there is work for. A container bills its full provisioned memory for every
+// second it is up, idle included, so a replica started with nothing to claim is
+// the pool's one avoidable cost. Running jobs count too: each one holds a
+// replica, and the Worker starts past them so the queued work still lands on
+// an idle box. A burst that arrives inside the wake window is picked up by the
+// next status poll's wake, which counts again.
+async function wake(secret: string): Promise<void> {
+  const [queued, running] = await Promise.all([
+    prisma.cutRenderJob.count({ where: { state: "queued" } }),
+    prisma.cutRenderJob.count({ where: { state: "running" } }),
+  ]);
+  const res = await fetch(CUT_WORKER_WAKE_URL, {
     method: "POST",
-    headers: { authorization: `Bearer ${secret}` },
-  })
-    .then((res) => {
-      if (!res.ok) console.error(`[cut] render worker wake refused: HTTP ${res.status}`);
-    })
-    .catch((e: unknown) => {
-      console.error("[cut] render worker wake failed:", e instanceof Error ? e.message : e);
-    });
+    headers: { authorization: `Bearer ${secret}`, "content-type": "application/json" },
+    body: JSON.stringify({ queued, running }),
+  });
+  if (!res.ok) console.error(`[cut] render worker wake refused: HTTP ${res.status}`);
 }
