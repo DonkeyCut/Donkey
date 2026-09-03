@@ -15,7 +15,7 @@ project the engine doesn't store, user asks for subtitles
   │
   ├─ the app answered ──▶ on-device speech on the Mac — free, real word timings
   │                          │
-  └─ no app ────────────▶ hosted speech — credits, timings interpolated per cue
+  └─ no app ────────────▶ hosted speech — credits, real word timings
                              │
                              ▼
                        cues into the project's own document
@@ -29,7 +29,7 @@ Availability is the probe the client already runs — the app's engine answered 
 
 ## Speech
 
-The engine transcribes a rendered mix, and that is what makes this work for a project it doesn't store. The browser renders the mix itself — the same trims, speeds, volumes, and crossfades the engine's ffmpeg graph applies — and posts the audio to the Mac, which runs on-device speech over it and answers with cues. The engine reads nothing from the project's storage and learns nothing about the project.
+The engine transcribes a rendered mix, and that is what makes this work for a project it doesn't store. The browser renders the mix itself — the same trims, speeds, volumes, and crossfades the engine's ffmpeg graph applies — and posts the audio to the Mac, which runs on-device speech over it and answers with cues. The engine reads nothing from the project's storage and learns nothing about the project. Without the app, the same mix goes in short chunks to the hosted speech model, which answers with the words and their timings; the page stitches the chunks back into timeline time.
 
 Whoever transcribes, the cue times are checked against that same mix before they become captions. Every transcriber mistimes a caption in its own way — the on-device model hands the silence in front of a sentence to that sentence's first word, so a caption can appear a second before anyone speaks — and the audio settles it: a speech envelope says where each stretch of talking starts and stops, and a cue edge moves onto the edge it belongs to. Only edges the audio can testify to move. A caption boundary in the middle of a sentence, or a mix playing music under the whole cut, keeps the time the transcriber gave it, so the pass is an improvement or nothing.
 
