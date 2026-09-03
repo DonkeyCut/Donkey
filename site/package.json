@@ -31,6 +31,7 @@
     "eval:cut-perf-lowend": "bun run scripts/eval-cut-perf.ts --bucket playback --runs 3 --machine ryzen-5500u",
     "eval:cut-sync": "bun run scripts/eval-cut-sync.ts",
     "eval:cut-edges": "bun run scripts/eval-cut-edges.ts",
+    "eval:cut-keys": "bun run scripts/eval-cut-keys.ts",
     "eval:cut-export": "bun run scripts/eval-cut-export.ts"
   },
   "dependencies": {

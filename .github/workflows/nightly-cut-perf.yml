@@ -79,6 +79,10 @@ jobs:
         if: always()
         run: npm run eval:cut-perf -- --out /tmp/cut-perf.json | tee /tmp/cut-perf.log
 
+      - name: Keys after a drop
+        if: always()
+        run: npm run eval:cut-keys -- --out /tmp/cut-keys.json | tee /tmp/cut-keys.log
+
       - name: Summary
         if: always()
         run: |
@@ -86,6 +90,10 @@ jobs:
             echo '## Cut perf'
             echo '```'
             grep -E '^\[(ok|FAIL)' /tmp/cut-perf.log || true
+            echo '```'
+            echo '## Cut keys'
+            echo '```'
+            grep -E '^\[(ok|FAIL)' /tmp/cut-keys.log || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -98,6 +106,8 @@ jobs:
             /tmp/cut-perf-scrub.json
             /tmp/cut-perf.log
             /tmp/cut-perf-scrub.log
+            /tmp/cut-keys.json
+            /tmp/cut-keys.log
           if-no-files-found: ignore
 
       - name: Dev server log on failure
