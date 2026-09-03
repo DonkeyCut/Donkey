@@ -802,6 +802,26 @@ const frameMs = (page: Page) =>
       })
   );
 
+/**
+ * With `--dump-trace`, the raw material behind a case's numbers, beside the
+ * report: the trace itself, the engine's own log (walks sent, slow pulls,
+ * tick gaps) and the page's media requests, all on the page's clock.
+ */
+async function dumpCase(page: Page, name: string, trace: Trace): Promise<void> {
+  if (!has("--dump-trace")) return;
+  await writeFile(path.join(OUT, `trace-${name}.json`), JSON.stringify(trace));
+  const log = await page.evaluate(
+    () => (window as unknown as { __cutEngineLog?: unknown }).__cutEngineLog ?? []
+  );
+  await writeFile(path.join(OUT, `log-${name}.json`), JSON.stringify(log));
+  const net = await page.evaluate(() =>
+    performance
+      .getEntriesByType("resource")
+      .map((e) => ({ name: e.name, start: e.startTime, ms: e.duration, bytes: (e as PerformanceResourceTiming).transferSize }))
+  );
+  await writeFile(path.join(OUT, `net-${name}.json`), JSON.stringify(net));
+}
+
 const stopTrace = (page: Page) =>
   page.evaluate(
     () => (window as unknown as { __cutPerf: { stop(): Trace | null } }).__cutPerf.stop() as unknown
@@ -999,9 +1019,7 @@ const scrubCase = (shape: ScrubShape): EvalCase => ({
     const trace = await stopTrace(page);
     const notes: string[] = [];
     if (!trace) return { name: shape.name, bucket: "scrub", pass: false, notes: ["no trace"] };
-    // The raw trace beside the report, for reading which paint answered which
-    // seek when the aggregates say a step is slow.
-    if (has("--dump-trace")) await writeFile(path.join(OUT, `trace-${shape.name}.json`), JSON.stringify(trace));
+    await dumpCase(page, shape.name, trace);
     const answered = trace.seeks.filter((s) => s.latencyMs !== null);
     const unanswered = trace.seeks.length - answered.length;
     if (has("--detail")) {
@@ -1061,6 +1079,7 @@ const playbackCase = (name: string, transitions: boolean): EvalCase => ({
     const trace = await stopTrace(page);
     const notes: string[] = [];
     if (!trace) return { name, bucket: "playback", pass: false, notes: ["no trace"] };
+    await dumpCase(page, name, trace);
     const decoders = await page.evaluate(
       () =>
         (
@@ -1174,21 +1193,7 @@ async function judgePlay(
   const trace = await stopTrace(page);
   const notes: string[] = [];
   if (!trace) return { name, bucket: "playback", pass: false, notes: ["no trace"] };
-  if (has("--dump-trace")) {
-    await writeFile(path.join(OUT, `trace-${name}.json`), JSON.stringify(trace));
-    // The engine's own log beside it: walks sent, slow pulls, tick gaps.
-    const log = await page.evaluate(
-      () => (window as unknown as { __cutEngineLog?: unknown }).__cutEngineLog ?? []
-    );
-    await writeFile(path.join(OUT, `log-${name}.json`), JSON.stringify(log));
-    // And the media requests the page made, on the same clock.
-    const net = await page.evaluate(() =>
-      performance
-        .getEntriesByType("resource")
-        .map((e) => ({ name: e.name, start: e.startTime, ms: e.duration, bytes: (e as PerformanceResourceTiming).transferSize }))
-    );
-    await writeFile(path.join(OUT, `net-${name}.json`), JSON.stringify(net));
-  }
+  await dumpCase(page, name, trace);
   const decoders = await page.evaluate(
     () =>
       (
