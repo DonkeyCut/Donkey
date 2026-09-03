@@ -12,7 +12,11 @@
 
 import type { UIMessage } from "ai";
 import { AI_SKILLS } from "../../../src/cut/server/ai/catalog";
-import { geminiModelRoles } from "../../../src/lib/inference/gemini-models";
+import {
+  geminiModelRoleNames,
+  geminiModelRoles,
+  resolveGeminiModel,
+} from "../../../src/lib/inference/gemini-models";
 import { streamCutChat, dropPiSession, type CutAgentDeps } from "../../../src/cut/lib/pi/cutAgent";
 import type { TurnIntent } from "../../../src/cut/lib/turnIntent";
 import { EDITOR_STATE, SAFE_TOOLS, serveSafeTool } from "./fixtures";
@@ -32,12 +36,13 @@ export interface RunConfig {
   judgeModel: string | null;
 }
 
-/** Production's config: the three-way gate routes between the two chat roles. */
+/** Production's config: the three-way gate routes between the two chat roles,
+ * named the way the page names them so the route resolves the ids. */
 export const defaultRunConfig = (base: string): RunConfig => ({
   base,
-  simpleModel: geminiModelRoles.chatSimple,
-  complexModel: geminiModelRoles.chat,
-  gateModel: geminiModelRoles.fastDecision,
+  simpleModel: geminiModelRoleNames.chatSimple,
+  complexModel: geminiModelRoleNames.chat,
+  gateModel: geminiModelRoleNames.fastDecision,
   judgeModel: geminiModelRoles.fastDecision,
 });
 
@@ -279,7 +284,7 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
     notes,
     judgeNote,
     intent,
-    roundModel: intent === "simple" ? cfg.simpleModel : cfg.complexModel,
+    roundModel: resolveGeminiModel(intent === "simple" ? cfg.simpleModel : cfg.complexModel),
     timings,
   };
 }

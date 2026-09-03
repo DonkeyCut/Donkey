@@ -33,7 +33,12 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { geminiModelRoles, geminiModels } from "../src/lib/inference/gemini-models";
+import {
+  geminiModelRoleNames,
+  geminiModelRoles,
+  geminiModels,
+  resolveGeminiModel,
+} from "../src/lib/inference/gemini-models";
 import { cases, type Bucket, type EvalCase } from "./lib/cut-eval/cases";
 import { makeFixtureAudio } from "./lib/cut-eval/fixtures";
 import { runCase, type RunConfig } from "./lib/cut-eval/harness";
@@ -93,8 +98,12 @@ const DEFAULT_OUT = join(
 const OUT = OUT_ARG ? resolve(OUT_ARG) : ONLY || BUCKET ? null : resolve(DEFAULT_OUT);
 
 /** A registry key (flash, flashLite, …) or a raw model id. */
+// A registry key becomes its id; a role name or a raw id goes out as given —
+// the responses route resolves a role, the way it does for the page.
 const resolveModel = (v: string): string =>
   (geminiModels as Record<string, string>)[v] ?? v;
+// Reports name ids, whatever the config sent.
+const idOf = resolveGeminiModel;
 
 const ms = (v: number | null | undefined) => (typeof v === "number" ? `${v}ms` : "—");
 const pct = (v: number) => `${Math.round(v * 100)}%`;
@@ -113,11 +122,10 @@ async function runConfig(
   cfg: RunConfig,
   selected: EvalCase[]
 ): Promise<ConfigReport> {
-  const chatDesc =
-    cfg.simpleModel === cfg.complexModel
-      ? cfg.simpleModel
-      : `${cfg.simpleModel} | complex→${cfg.complexModel}`;
-  console.log(`\n== ${label}  chat=${chatDesc}  gate=${cfg.gateModel}`);
+  const simpleId = idOf(cfg.simpleModel);
+  const complexId = idOf(cfg.complexModel);
+  const chatDesc = simpleId === complexId ? simpleId : `${simpleId} | complex→${complexId}`;
+  console.log(`\n== ${label}  chat=${chatDesc}  gate=${idOf(cfg.gateModel)}`);
   const caseReports: CaseReport[] = [];
   for (const c of selected) {
     const runs: RunReport[] = [];
@@ -147,7 +155,7 @@ async function runConfig(
   return {
     label,
     chatModel: chatDesc,
-    gateModel: cfg.gateModel,
+    gateModel: idOf(cfg.gateModel),
     buckets: buildBucketSummaries(caseReports),
     cases: caseReports,
   };
@@ -184,12 +192,14 @@ async function main() {
           cfg: {
             base: BASE,
             simpleModel: resolveModel(
-              argValue("--simple-model") ?? both ?? geminiModelRoles.chatSimple
+              argValue("--simple-model") ?? both ?? geminiModelRoleNames.chatSimple
             ),
             complexModel: resolveModel(
-              argValue("--complex-model") ?? both ?? geminiModelRoles.chat
+              argValue("--complex-model") ?? both ?? geminiModelRoleNames.chat
             ),
-            gateModel: resolveModel(argValue("--gate-model") ?? geminiModelRoles.fastDecision),
+            gateModel: resolveModel(
+              argValue("--gate-model") ?? geminiModelRoleNames.fastDecision
+            ),
             judgeModel,
           },
         },
