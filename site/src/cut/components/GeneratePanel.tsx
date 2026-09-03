@@ -28,8 +28,11 @@ import { useVideoGen } from "@/cut/lib/videoGen";
 import {
   VIDEO_ASPECT_LABEL,
   VIDEO_MODELS,
+  VIDEO_RESOLUTION_LABEL,
   type VideoAspect,
   type VideoModelOption,
+  type VideoResolution,
+  DEFAULT_VIDEO_RESOLUTION,
 } from "@/cut/lib/videoModels";
 import { cn } from "@/lib/utils";
 import { CopyHandlePill, MentionTextarea, RefChips } from "./AssetRefs";
@@ -58,7 +61,7 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
   const allJobs = useGenerate((s) => s.jobs);
   // Panel renders only — a chat- or scene-owned job lives on its chat card.
   const jobs = allJobs.filter((j) => j.projectId === projectId && j.kind === "video" && !j.chatId);
-  const { prompt, refs, character, aspect } = useVideoGen();
+  const { prompt, refs, character, aspect, resolution, durationSeconds } = useVideoGen();
   const candidates = useRefCandidates();
   // OS files handed to the panel — dropped on it or pasted into the prompt —
   // attach as references (media files import into the project on the way;
@@ -81,6 +84,21 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
   // supports, so a stored pick from another model can never reach the API.
   const model = VIDEO_MODELS.find((m) => m.tier === tier) ?? VIDEO_MODELS[0];
   const effAspect = nearestAspect(aspect, model.aspects);
+  const effResolution: VideoResolution = model.resolutions.includes(resolution)
+    ? resolution
+    : (model.resolutions.find((r) => r === DEFAULT_VIDEO_RESOLUTION) ?? model.resolutions[0]);
+  const { min: minSeconds, max: maxSeconds } = model.durationSeconds;
+  const effDuration =
+    durationSeconds !== null && durationSeconds >= minSeconds && durationSeconds <= maxSeconds
+      ? durationSeconds
+      : null;
+  const durationOptions = [
+    { value: "auto", label: "Auto length" },
+    ...Array.from({ length: maxSeconds - minSeconds + 1 }, (_, i) => {
+      const s = minSeconds + i;
+      return { value: String(s), label: `${s} seconds` };
+    }),
+  ];
 
   // Default the shape to the project's own orientation when the panel opens,
   // same as the image panel (the user can still pick the other one). A custom
@@ -102,6 +120,8 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
     const seedRefs = character ? [refFromStockVideo(character)] : all;
     void useGenerate.getState().generateVideo(projectId, composed, {
       aspect: effAspect,
+      resolution: effResolution,
+      ...(effDuration !== null ? { durationSeconds: effDuration } : {}),
       refs: seedRefs,
       // The character's poster seed is the point — the same person must
       // deliver the line — so free-form prompts alone get the ref rewrite.
@@ -188,8 +208,8 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
         </div>
 
         {/* Which model renders the clip — a dropdown, since the catalog grows.
-            The model renders the whole clip with audio in one pass and picks
-            its own length, so aspect below is the only other knob. */}
+            The model renders the whole clip with audio in one pass; the knobs
+            below are its shape, its output size, and its length. */}
         <PillSelect
           className="h-7 shrink-0"
           title="Model"
@@ -215,6 +235,32 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
             label: VIDEO_ASPECT_LABEL[a],
           }))}
           onChange={(v) => useVideoGen.getState().setAspect(v)}
+        />
+
+        {/* Output size: 720p is native, the larger sizes are upscaled and
+            cost more per second. */}
+        <PillSelect
+          className="h-7 shrink-0"
+          title="Resolution"
+          value={effResolution}
+          display={VIDEO_RESOLUTION_LABEL[effResolution]}
+          options={model.resolutions.map((r) => ({
+            value: r,
+            label: VIDEO_RESOLUTION_LABEL[r],
+          }))}
+          onChange={(v) => useVideoGen.getState().setResolution(v)}
+        />
+
+        {/* Length: a fixed number of seconds, or the model's own pick. */}
+        <PillSelect
+          className="h-7 shrink-0"
+          title="Length"
+          value={effDuration === null ? "auto" : String(effDuration)}
+          display={effDuration === null ? "Auto" : `${effDuration}s`}
+          options={durationOptions}
+          onChange={(v) =>
+            useVideoGen.getState().setDurationSeconds(v === "auto" ? null : Number(v))
+          }
         />
 
         <Button

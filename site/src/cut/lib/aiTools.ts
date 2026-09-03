@@ -159,7 +159,7 @@ import { synthesizeMusic } from "./audioGen";
 import { composeMusicPrompt } from "./composeGen";
 import { stockAssetInDoc } from "./genvideo/docWriter";
 import { resolveVoice, synthesizeSpeech, SPEECH_VOICES } from "./tts";
-import { defaultVideoAspects } from "./videoModels";
+import { clampVideoDuration, defaultVideoAspects, videoResolutionOf } from "./videoModels";
 import { DUCK_DEFAULT, generateSubtitlesReadout } from "./voiceover";
 import {
   allFonts,
@@ -2449,10 +2449,17 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // Audio references carry no picture: they ride in `refs` for the compose
       // pass to hear, while anchor rungs take the first ref that has a frame.
       const anchors = visualRefs(refs);
-      // The model renders the whole clip with audio in one pass and picks its
-      // own length (up to ~10s) — aspect is the only knob.
+      // The model renders the whole clip with audio in one pass; the knobs
+      // are the shape, the output size, and an optional length (unset lets
+      // the model pick).
+      const resolution = videoResolutionOf(input.resolution);
+      const durationSeconds = clampVideoDuration(
+        typeof input.duration_seconds === "number" ? input.duration_seconds : undefined
+      );
       const baseOpts: Omit<VideoGenOptions, "onDone"> = {
         ...(input.aspect === "16:9" || input.aspect === "9:16" ? { aspect: input.aspect } : {}),
+        ...(resolution ? { resolution } : {}),
+        ...(durationSeconds !== undefined ? { durationSeconds } : {}),
       };
       // A one-off render walks the same identity ladder as a scene shot:
       // seed image first (the strongest anchor), the picture as an identity

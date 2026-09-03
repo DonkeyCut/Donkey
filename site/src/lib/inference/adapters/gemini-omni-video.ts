@@ -11,7 +11,16 @@ import {
   type AdapterEnvironment,
 } from "@/lib/inference/adapters/gemini-client";
 import { providerCreditPricing } from "@/lib/credits/provider-pricing";
-import { geminiOmniMaxReferenceImages, geminiOmniModels } from "@/lib/inference/gemini-models";
+import {
+  geminiOmniDefaultResolution,
+  geminiOmniDurationSeconds,
+  geminiOmniMaxReferenceImages,
+  geminiOmniModels,
+  geminiOmniResolutions,
+  geminiOmniTokensPerSecond,
+  geminiOmniUnitTokens,
+  type GeminiOmniResolution,
+} from "@/lib/inference/gemini-models";
 import { ensureConfigured } from "@/lib/inference/http";
 import { isJsonObject, toJsonObject } from "@/lib/inference/json";
 import {
@@ -28,10 +37,10 @@ import {
 
 // The video generation provider (Gemini Omni Flash) on the Interactions API:
 // one call takes text plus optional seed/reference images and renders a clip
-// with audio in a single pass. It submits a background interaction and the
+// with audio in a single pass at the resolution asked for, at the length asked
+// for or the model's own pick. It submits a background interaction and the
 // caller polls refresh until it lands; the provider id keeps that refresh
-// routing separate from the synchronous image adapter. The model decides the
-// clip length (up to ~10s of 720p) — there is no duration knob to pass.
+// routing separate from the synchronous image adapter.
 const providerID = "gemini-omni";
 
 // Verified live against Vertex: `response_modalities` is rejected outright
@@ -91,8 +100,62 @@ export function createGeminiOmniVideoAssetProvider(
     return model;
   }
 
+  // The output size and length a request asks for, validated against the
+  // registry: an unknown resolution or an out-of-range length is a caller bug,
+  // refused before anything bills.
+  function renderShape(parameters: JsonObject): {
+    resolution: GeminiOmniResolution;
+    durationSeconds: number | undefined;
+  } {
+    const asked = parameters.resolution;
+    const resolutionRaw =
+      asked === undefined || asked === null ? geminiOmniDefaultResolution : asked;
+    if (
+      typeof resolutionRaw !== "string" ||
+      !(geminiOmniResolutions as readonly string[]).includes(resolutionRaw)
+    ) {
+      throw new InferenceProviderError("Unsupported video resolution.", {
+        statusCode: 400,
+        code: "unsupported_video_resolution",
+        details: { resolution: resolutionRaw, supported: [...geminiOmniResolutions] },
+      });
+    }
+    const durationRaw = parameters.durationSeconds;
+    let durationSeconds: number | undefined;
+    if (durationRaw !== undefined && durationRaw !== null) {
+      const { min, max } = geminiOmniDurationSeconds;
+      if (
+        typeof durationRaw !== "number" ||
+        !Number.isInteger(durationRaw) ||
+        durationRaw < min ||
+        durationRaw > max
+      ) {
+        throw new InferenceProviderError(
+          `Video length must be a whole number of seconds from ${min} to ${max}.`,
+          { statusCode: 400, code: "unsupported_video_duration", details: { durationSeconds: durationRaw } },
+        );
+      }
+      durationSeconds = durationRaw;
+    }
+    return { resolution: resolutionRaw as GeminiOmniResolution, durationSeconds };
+  }
+
+  // Billing units for a request: seconds of 360p-equivalent output, from the
+  // length (the model's ceiling when unset) times the resolution's tokens per
+  // second. The route holds the balance to this count before the submit, and
+  // the submit bills the same count.
+  function generationUnits(parameters: JsonObject): number {
+    const { resolution, durationSeconds } = renderShape(parameters);
+    const seconds = durationSeconds ?? geminiOmniDurationSeconds.max;
+    return Math.max(
+      1,
+      Math.ceil((seconds * geminiOmniTokensPerSecond[resolution]) / geminiOmniUnitTokens),
+    );
+  }
+
   async function generateAsset({
     request,
+    generationCount,
   }: AssetGenerationProviderRequest): Promise<AssetGenerationProviderResult> {
     ensureConfigured(configured);
 
@@ -152,6 +215,17 @@ export function createGeminiOmniVideoAssetProvider(
         ? "reference_to_video"
         : "text_to_video";
     const aspectRatio = stringValue(parameters.aspectRatio);
+    const { resolution, durationSeconds } = renderShape(parameters);
+    // The route settles the count through assetGenerationCountFor and the
+    // preflight holds the balance to it; a submit that recounted here would
+    // bill a charge no preflight covered.
+    const units = Math.floor(generationCount ?? 0);
+    if (units < 1) {
+      throw new InferenceProviderError("The video charge was not counted before submit.", {
+        statusCode: 500,
+        code: "video_charge_uncounted",
+      });
+    }
 
     const client = clientFactory(clientConfig.options);
     let interaction: Interaction;
@@ -164,6 +238,8 @@ export function createGeminiOmniVideoAssetProvider(
         generation_config: { video_config: { task } } as never,
         response_format: {
           type: "video",
+          resolution,
+          ...(durationSeconds !== undefined ? { duration: `${durationSeconds}s` } : {}),
           ...(aspectRatio === "16:9" || aspectRatio === "9:16" ? { aspect_ratio: aspectRatio } : {}),
         } as never,
         background: true,
@@ -178,11 +254,12 @@ export function createGeminiOmniVideoAssetProvider(
       return settled;
     }
 
-    // In progress: the clip is committed, so the flat clip price bills now —
-    // generationCount is the billing unit (provider-pricing.ts), since the
-    // async submit carries no token counts and the polls that follow are free.
-    // Only the submit carries it; a refresh poll's in-progress result must not.
-    return { ...inProgressResult(interaction.id, model), usage: { generationCount: 1 } };
+    // In progress: the clip is committed, so its price bills now — the unit
+    // count the requested length and resolution add up to (provider-pricing.ts),
+    // since the async submit carries no token counts and the polls that follow
+    // are free. Only the submit carries it; a refresh poll's in-progress result
+    // must not.
+    return { ...inProgressResult(interaction.id, model), usage: { generationCount: units } };
   }
 
   async function refreshAsset(
@@ -287,6 +364,10 @@ export function createGeminiOmniVideoAssetProvider(
     capabilities: ["video"],
     listModels,
     assetModelFor: (request) => resolveModel(request.model),
+    // Seconds of output, read off the parameters alone: the resolver goes
+    // untouched so a seed frame never leaves storage before the balance clears.
+    assetGenerationCountFor: async (request) =>
+      generationUnits(toJsonObject(request.parameters ?? {})),
     generateAsset,
     refreshAsset,
   };

@@ -25,7 +25,13 @@ import { useGenNotify } from "./genNotify";
 import { IMAGE_ASPECTS, useImageGen } from "./imageGen";
 import { useEditor } from "./store";
 import { mediaSlug, nearestAspect, type MediaAsset, type RenderRecord } from "./types";
-import { aspectFramingNote, defaultVideoAspects, videoModel } from "./videoModels";
+import {
+  DEFAULT_VIDEO_RESOLUTION,
+  aspectFramingNote,
+  defaultVideoAspects,
+  videoModel,
+  type VideoResolution,
+} from "./videoModels";
 import { walkLadder, type VideoAttempt } from "./videoLadder";
 
 // AI generation jobs, held outside the panels so a tab switch (which unmounts
@@ -161,6 +167,11 @@ interface GenerateState {
 export interface VideoGenOptions {
   /** Composition shape; defaults to the project's orientation. */
   aspect?: "16:9" | "9:16";
+  /** Output size; defaults to the registry's default (720p). */
+  resolution?: VideoResolution;
+  /** Clip length in whole seconds, within the registry's range; unset lets
+   * the model pick. */
+  durationSeconds?: number;
   /** What the render must avoid — the wrong medium's tells, letterbox bars,
    * on-screen text. The model has no negative-prompt parameter, so the
    * adapter folds this into the prompt as an avoid clause. */
@@ -657,6 +668,8 @@ export const useGenerate = create<GenerateState>((set, get) => {
             : {}),
         parameters: {
           aspectRatio,
+          resolution: opts?.resolution ?? DEFAULT_VIDEO_RESOLUTION,
+          ...(opts?.durationSeconds !== undefined ? { durationSeconds: opts.durationSeconds } : {}),
           ...(opts?.negativePrompt ? { negativePrompt: opts.negativePrompt } : {}),
         },
       });

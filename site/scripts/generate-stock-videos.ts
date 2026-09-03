@@ -164,7 +164,7 @@ async function generateOne(client: GoogleGenAI, authClient: JWT, item: CatalogIt
     model: MODEL,
     input: `${item.prompt} Avoid: ${NEGATIVE_PROMPT}.`,
     generation_config: { video_config: { task: "text_to_video" } } as never,
-    response_format: { type: "video", aspect_ratio: item.aspect } as never,
+    response_format: { type: "video", aspect_ratio: item.aspect, resolution: "720p" } as never,
     background: true,
   });
   // requires_action is a non-terminal state too (same treatment the

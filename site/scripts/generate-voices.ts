@@ -1,6 +1,6 @@
 // Renders the hosted voice-persona assets the Cut voice picker shows: one
 // square portrait and one spoken sample clip per prebuilt speech voice. Both are
-// produced with the same Vertex models the app uses — gemini-2.5-flash-image for
+// produced with the same Vertex models the app uses — gemini-3.1-flash-image for
 // the portrait, the Gemini TTS model for the sample — and written into
 // public/cut/voices as <id>.webp and <id>.mp3 (lowercased ids, matching
 // voicePortraitUrl / voiceSampleUrl). Idempotent: a voice whose portrait and

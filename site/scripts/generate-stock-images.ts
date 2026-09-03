@@ -1,5 +1,5 @@
 // Generates the bundled Cut stock-image catalog with the same Vertex image model
-// the app uses (gemini-2.5-flash-image), then writes the typed manifest the
+// the app uses (gemini-3.1-flash-image), then writes the typed manifest the
 // editor imports. Idempotent: items whose file already exists are skipped, so
 // re-running fills gaps or picks up new catalog entries only.
 //

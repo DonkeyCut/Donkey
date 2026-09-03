@@ -37,7 +37,7 @@ import { useGenerate, videoJobSettlement } from "../../generate";
 import { enrichAsset } from "../../media";
 import { useEditor } from "../../store";
 import { DEFAULT_VOICE, synthesizeSpeech } from "../../tts";
-import { videoModel } from "../../videoModels";
+import { clampVideoDuration, videoModel } from "../../videoModels";
 import { reportActivity } from "../activity";
 import { findRunAsset, stockAssetInDoc } from "../docWriter";
 import { buildShotAttempts } from "../shotAttempts";
@@ -58,6 +58,10 @@ async function refsToAssetRefs(projectId: string, refs: RefAsset[]): Promise<Ass
   }
   return out;
 }
+
+// Seconds a scene take renders beyond its slot, so the dailies review has a
+// window to choose inside and rounding never leaves the slot short.
+const SLOT_HEADROOM_SECONDS = 1;
 
 export function makeImageRole(projectId: string, chatId?: string): ImageRole {
   return {
@@ -98,8 +102,20 @@ export function makeVideoRole(projectId: string, chatId?: string): VideoRole {
       // The shot's stable identity, stamped on every job this render starts so
       // a resumed run re-adopts exactly its own in-flight take.
       const genKey = input.shotId ? `${projectId}:${input.shotId}` : undefined;
+      // The shot renders at the length its slot needs, rounded up and given a
+      // second of headroom, clamped onto what the model renders. Up covers the
+      // slot: a take shorter than its slot gets speed-stretched to fill it
+      // (fillSlot), which drags the burned-in narration down with it. The
+      // headroom is what the dailies review picks its window inside — the
+      // placement clamps the chosen start to what the take has spare, so a
+      // take cut exactly to the slot leaves the review nothing to choose.
+      const durationSeconds =
+        input.durationSec === undefined
+          ? undefined
+          : clampVideoDuration(Math.ceil(input.durationSec) + SLOT_HEADROOM_SECONDS);
       const base = {
         aspect: input.aspect,
+        ...(durationSeconds !== undefined ? { durationSeconds } : {}),
         ...(input.negativePrompt ? { negativePrompt: input.negativePrompt } : {}),
       };
       // The seed keyframe resolves wherever the run's project lives — the

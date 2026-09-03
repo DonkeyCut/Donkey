@@ -2,7 +2,13 @@
 // Pure data + lookups (no store, no browser), so the genvideo self-test can
 // exercise everything that reads constraints from here.
 
-import { geminiOmniMaxReferenceImages } from "@/lib/inference/gemini-models";
+import {
+  geminiOmniDefaultResolution,
+  geminiOmniDurationSeconds,
+  geminiOmniMaxReferenceImages,
+  geminiOmniResolutions,
+  type GeminiOmniResolution,
+} from "@/lib/inference/gemini-models";
 
 /** The shape the next generated clip is composed in — landscape or portrait. */
 export type VideoAspect = "16:9" | "9:16";
@@ -12,11 +18,23 @@ export const VIDEO_ASPECT_LABEL: Record<VideoAspect, string> = {
   "9:16": "Portrait (9:16)",
 };
 
+/** The output size a generated clip is rendered at. */
+export type VideoResolution = GeminiOmniResolution;
+
+export const VIDEO_RESOLUTION_LABEL: Record<VideoResolution, string> = {
+  "360p": "360p draft",
+  "720p": "720p",
+  "1080p": "1080p",
+  "4k": "4K",
+};
+
+export const DEFAULT_VIDEO_RESOLUTION: VideoResolution = geminiOmniDefaultResolution;
+
 /** A selectable video model. Every render runs on the unified Omni renderer:
  * one pass takes text plus optional seed/reference images and returns the
- * whole clip with audio — the model picks the length (up to ~10s of 720p), so
- * there is no duration or resolution knob. Adding a model here is the whole
- * client-side change. */
+ * whole clip with audio at the resolution asked for, at the length asked for
+ * or the model's own pick. Adding a model here is the whole client-side
+ * change. */
 export type VideoTier = "omni";
 
 export interface VideoModelOption {
@@ -28,6 +46,10 @@ export interface VideoModelOption {
   /** Identity reference images a render accepts alongside the prompt. */
   maxReferenceImages: number;
   aspects: VideoAspect[];
+  resolutions: readonly VideoResolution[];
+  /** Whole seconds a render can be asked for; a render with no length lets
+   * the model pick. */
+  durationSeconds: { min: number; max: number };
 }
 
 export const VIDEO_MODELS: VideoModelOption[] = [
@@ -37,8 +59,25 @@ export const VIDEO_MODELS: VideoModelOption[] = [
     model: "Omni Flash",
     maxReferenceImages: geminiOmniMaxReferenceImages,
     aspects: ["16:9", "9:16"],
+    resolutions: geminiOmniResolutions,
+    durationSeconds: geminiOmniDurationSeconds,
   },
 ];
+
+/** A requested length clamped onto what the default model renders, in whole
+ * seconds; undefined stays undefined (the model's own pick). */
+export function clampVideoDuration(seconds: number | null | undefined): number | undefined {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return undefined;
+  const { min, max } = VIDEO_MODELS[0].durationSeconds;
+  return Math.max(min, Math.min(max, Math.round(seconds)));
+}
+
+/** A requested resolution if the default model renders it. */
+export function videoResolutionOf(value: unknown): VideoResolution | undefined {
+  return (VIDEO_MODELS[0].resolutions as readonly string[]).includes(String(value))
+    ? (value as VideoResolution)
+    : undefined;
+}
 
 /** The registry entry for a tier — the single source of truth for what that
  * model supports. Any code that generates video (the panel, the scene pipeline)
