@@ -206,6 +206,12 @@ const PAD_END = 320;
  * one doubles as the gutter — the strip that stays put while the timeline
  * scrolls under it — so widening this widens the column controls will sit in. */
 const PAD_SIDE = 20;
+// Where the playhead sits after a page turn while following, and how long the
+// turn's glide takes. A reduced-motion setting turns the page in one step.
+const FOLLOW_MARGIN = 80;
+const FOLLOW_GLIDE_MS = 420;
+const reducedMotion = () =>
+  typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** Zoom range, in timeline pixels per second of media. */
 const ZOOM_MIN = 12;
@@ -3605,6 +3611,12 @@ function Playhead({
   // scroll-event echo against the value it just wrote.
   const manualUntil = useRef(0);
   const followWrote = useRef<number | null>(null);
+  // Following pages rather than pans: the playhead runs across the view and at
+  // the edge the view turns to the next page, the playhead at its left margin.
+  // The turn is a short eased glide written from the same playhead callback
+  // and re-aimed each frame at where the playhead is now, so it lands with the
+  // playhead at the margin however far it moved during the glide.
+  const glide = useRef<{ from: number; t0: number } | null>(null);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -3614,6 +3626,7 @@ function Playhead({
         return;
       }
       followWrote.current = null;
+      glide.current = null;
       manualUntil.current = performance.now() + 5000;
     };
     el.addEventListener("scroll", onScroll);
@@ -3639,14 +3652,27 @@ function Playhead({
       // the last frame reaches the right edge: a project that fits the
       // viewport never scrolls, and the end of a long one lands flush.
       const maxFollow = Math.max(0, total * pps + PAD_SIDE * 2 - view);
-      if (sx < scroller.scrollLeft + 24 || sx > scroller.scrollLeft + view - 80) {
-        const want = Math.min(maxFollow, Math.max(0, sx - 80));
-        if (Math.abs(want - scroller.scrollLeft) > 0.5) {
-          scroller.scrollLeft = want;
-          followWrote.current = scroller.scrollLeft; // read back: the browser clamps
-        }
+      const margin = () => Math.min(maxFollow, Math.max(0, sx - FOLLOW_MARGIN));
+      const write = (left: number) => {
+        scroller.scrollLeft = left;
+        followWrote.current = scroller.scrollLeft; // read back: the browser clamps
+      };
+      const now = performance.now();
+      if (glide.current) {
+        const p = Math.min(1, (now - glide.current.t0) / FOLLOW_GLIDE_MS);
+        const eased = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+        write(glide.current.from + (margin() - glide.current.from) * eased);
+        if (p >= 1) glide.current = null;
+        return;
+      }
+      if (sx < scroller.scrollLeft + 24 || sx > scroller.scrollLeft + view - FOLLOW_MARGIN) {
+        const want = margin();
+        if (Math.abs(want - scroller.scrollLeft) <= 0.5) return;
+        if (reducedMotion()) write(want);
+        else glide.current = { from: scroller.scrollLeft, t0: now };
       }
     };
+    glide.current = null;
     move();
     return subscribePlayhead(move);
   }, [pps, total, playing, scrollRef]);
