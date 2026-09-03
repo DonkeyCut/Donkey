@@ -8,9 +8,11 @@
  * engine's own frame trace (`window.__cutPerf`, installed by devHooks.ts). Two
  * numbers come out of it:
  *
- *   scrub-to-pixel — from the moment a time is asked for to the moment a frame
- *                    for that time is painted. Held or black frames don't count;
- *                    only real pixels answer a scrub.
+ *   scrub-to-pixel — whether the first frame painted after a time is asked for
+ *                    shows that time, counted in frames missed. Held or black
+ *                    frames don't count; only real pixels answer a scrub. Frames
+ *                    rather than milliseconds, so the report reads the same on
+ *                    a sixty-hertz and a hundred-and-twenty-hertz display.
  *   frames at a cut — every boundary in the fixture is crossed while playing and
  *                    the trace is checked for a source frame shown twice or
  *                    skipped over.
@@ -31,19 +33,24 @@
  * Fixtures build deterministically into dist/cut-perf/ (gitignored) from the
  * bundled stock clips, so the montage's cut times are known exactly.
  *
- * Needs `next dev` on :3000 and the dev auth bypass user. Spends no credits.
+ * Needs `next dev` on :3000, the dev auth bypass user, and `openssl` on the
+ * path for the fixture server's certificate. Spends no credits.
  *
  *   npm run eval:cut-perf [--only <case>] [--runs N] [--out path]
- *                         [--enforce-budgets] [--headed]
+ *                         [--enforce-budgets] [--headed] [--dump-trace]
  *                         [--machine desktop|laptop|ryzen-5500u|potato] [--cpu N]
  *                         [--net <kbps>] [--rtt <ms>]
  */
 
-import { chromium, type Browser, type Page, type Request, type Route } from "playwright";
-import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { chromium, type Browser, type Page } from "playwright";
+import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
+import { createReadStream, existsSync } from "node:fs";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 import path from "node:path";
+import { promisify } from "node:util";
 import { CUT_MEDIA_ORIGIN } from "../src/cut/lib/hosts";
 
 const SITE = path.resolve(import.meta.dir, "..");
@@ -205,14 +212,14 @@ const DEV_USER = "donkey-dev-auth-bypass";
 // overhead. A production build has less of it; the gate is set where the dev
 // build can hold it under ordinary machine load.
 const BASE_GATE = {
-  // Every step of a drag lands inside one frame at 60Hz, tail included. That is
-  // the whole claim.
-  scrubP50Ms: 10,
-  scrubP95Ms: 16.7,
+  // Every step of a drag is on the next frame painted, and the tail is at
+  // most one frame behind it. That is the whole claim, in frames missed.
+  scrubLateP50: 0,
+  scrubLateP95: 1,
   // A jump lands where no buffer could have reached, so it pays for a decode
   // from the nearest keyframe. Held to what that honestly costs.
-  jumpP50Ms: 20,
-  jumpP95Ms: 32,
+  jumpLateP50: 1,
+  jumpLateP95: 2,
   // The one that has to be exact: crossing a join must never show a frame that
   // does not belong at that instant.
   boundaryDrops: 0,
@@ -259,14 +266,14 @@ const GATE = {
   // the same thing.
   longTaskMs: BASE_GATE.longTaskMs * MACHINE.cpu,
   // A step of a drag is the same work on any machine: read the ring, compose,
-  // paint. What changes is how long a millisecond of it takes, so the budgets
-  // scale with the throttle for the same reason the long-task one does — a
-  // tenth of a machine answering a drag in a tenth of the rate is the drag
-  // behaving, and a fixed number would only say the profile is slow.
-  scrubP50Ms: BASE_GATE.scrubP50Ms * MACHINE.cpu,
-  scrubP95Ms: BASE_GATE.scrubP95Ms * MACHINE.cpu,
-  jumpP50Ms: BASE_GATE.jumpP50Ms * MACHINE.cpu,
-  jumpP95Ms: BASE_GATE.jumpP95Ms * MACHINE.cpu,
+  // paint. What changes is how long a millisecond of it takes, so the frames a
+  // step may miss scale with the throttle for the same reason the long-task
+  // budget does — a tenth of a machine answering a drag in a tenth of the rate
+  // is the drag behaving, and a fixed number would only say the profile is slow.
+  scrubLateP50: Math.ceil(BASE_GATE.scrubLateP50 * MACHINE.cpu),
+  scrubLateP95: Math.ceil(BASE_GATE.scrubLateP95 * MACHINE.cpu),
+  jumpLateP50: Math.ceil(BASE_GATE.jumpLateP50 * MACHINE.cpu),
+  jumpLateP95: Math.ceil(BASE_GATE.jumpLateP95 * MACHINE.cpu),
 };
 
 /** How far behind the sound the picture has to be for that frame to read as a
@@ -294,6 +301,7 @@ interface SeekRecord {
   t: number;
   at: number;
   latencyMs: number | null;
+  lateFrames: number | null;
 }
 interface Trace {
   presents: PresentRecord[];
@@ -767,7 +775,32 @@ const seedTimeCoded = (src: string, cuts: number[]) => async (page: Page): Promi
   );
 
 const startTrace = (page: Page) =>
-  page.evaluate(() => (window as unknown as { __cutPerf: { start(): void } }).__cutPerf.start());
+  page.evaluate(() => {
+    // Room for every media request a long play makes, so the dump below can
+    // put the walk's waits beside the requests they waited on.
+    performance.setResourceTimingBufferSize(5000);
+    (window as unknown as { __cutPerf: { start(): void } }).__cutPerf.start();
+  });
+
+/** The display's frame period as the page sees it: the median gap between
+ * animation frames. Reported beside the frame counts so a reader can put
+ * milliseconds to them. */
+const frameMs = (page: Page) =>
+  page.evaluate(
+    () =>
+      new Promise<number>((resolve) => {
+        const ts: number[] = [];
+        const step = (t: number) => {
+          ts.push(t);
+          if (ts.length < 30) requestAnimationFrame(step);
+          else {
+            const d = ts.slice(1).map((v, i) => v - ts[i]).sort((a, b) => a - b);
+            resolve(+d[Math.floor(d.length / 2)].toFixed(2));
+          }
+        };
+        requestAnimationFrame(step);
+      })
+  );
 
 const stopTrace = (page: Page) =>
   page.evaluate(
@@ -857,6 +890,12 @@ interface CaseResult {
   bucket: Bucket;
   pass: boolean;
   notes: string[];
+  /** Frames each step of a drag missed before its picture was painted. */
+  late?: Agg;
+  /** The display's frame period during the case, in milliseconds. */
+  frameMs?: number;
+  /** Milliseconds from the ask to the answering paint. Carries the wait for the
+   * next frame, so it reads with `frameMs` beside it. */
   scrub?: Agg;
   drops?: number;
   presented?: number;
@@ -937,6 +976,7 @@ interface ScrubShape {
   transitions: boolean;
   /** How the gesture moves. */
   gesture: (page: Page, fx: Fixture) => Promise<void>;
+  /** Frames a step may miss, at the median and at the tail. */
   budget: { p50: number; p95: number };
   /** The project the gesture runs on; the montage of stock clips when unset. */
   seed?: (page: Page) => Promise<Fixture>;
@@ -952,25 +992,29 @@ const scrubCase = (shape: ScrubShape): EvalCase => ({
     // A pass before the trace opens the decoders and lets the dev build settle,
     // so the numbers describe scrubbing rather than first load.
     await sweep(page, fx, 0, fx.duration - 0.05, 8);
+    const frame = await frameMs(page);
     await startTrace(page);
     await shape.gesture(page, fx);
     if (has("--detail")) await dumpDetail(page, 0);
     const trace = await stopTrace(page);
     const notes: string[] = [];
     if (!trace) return { name: shape.name, bucket: "scrub", pass: false, notes: ["no trace"] };
-    const answered = trace.seeks.filter((s) => s.latencyMs !== null).map((s) => s.latencyMs!);
+    // The raw trace beside the report, for reading which paint answered which
+    // seek when the aggregates say a step is slow.
+    if (has("--dump-trace")) await writeFile(path.join(OUT, `trace-${shape.name}.json`), JSON.stringify(trace));
+    const answered = trace.seeks.filter((s) => s.latencyMs !== null);
     const unanswered = trace.seeks.length - answered.length;
     if (has("--detail")) {
-      const slow = [...trace.seeks]
-        .filter((s) => s.latencyMs !== null)
-        .sort((a, b) => b.latencyMs! - a.latencyMs!)
+      const slow = [...answered]
+        .sort((a, b) => b.lateFrames! - a.lateFrames! || b.latencyMs! - a.latencyMs!)
         .slice(0, 8)
-        .map((s) => `${s.t.toFixed(2)}s=${s.latencyMs!.toFixed(1)}ms`);
+        .map((s) => `${s.t.toFixed(2)}s=${s.lateFrames}f/${s.latencyMs!.toFixed(1)}ms`);
       console.log(`[seeks] slowest: ${slow.join(" ")}`);
       const missed = trace.seeks.filter((s) => s.latencyMs === null).map((s) => s.t.toFixed(2));
       if (missed.length) console.log(`[seeks] unanswered: ${missed.join(" ")}`);
     }
-    const a = agg(answered);
+    const late = agg(answered.map((s) => s.lateFrames!));
+    const ms = agg(answered.map((s) => s.latencyMs!));
     // Superseded seeks never resolve and that is correct — but a gesture that
     // waits a frame per step should answer nearly all of them.
     if (unanswered > trace.seeks.length * 0.2) {
@@ -978,14 +1022,16 @@ const scrubCase = (shape: ScrubShape): EvalCase => ({
     }
     const lt = agg(trace.longTasks.map((l) => l.ms));
     if (lt.max > GATE.longTaskMs) notes.push(`long task ${lt.max}ms`);
-    if (a.p95 > shape.budget.p95) notes.push(`p95 ${a.p95}ms over ${shape.budget.p95}ms`);
-    if (a.p50 > shape.budget.p50) notes.push(`p50 ${a.p50}ms over ${shape.budget.p50}ms`);
+    if (late.p95 > shape.budget.p95) notes.push(`p95 ${late.p95} frames late over ${shape.budget.p95}`);
+    if (late.p50 > shape.budget.p50) notes.push(`p50 ${late.p50} frames late over ${shape.budget.p50}`);
     return {
       name: shape.name,
       bucket: "scrub",
       pass: notes.length === 0,
       notes,
-      scrub: a,
+      late,
+      frameMs: frame,
+      scrub: ms,
       longTasks: lt,
       liveSamples: Math.max(0, ...trace.liveSamples),
       machine: MACHINE.name,
@@ -1128,6 +1174,21 @@ async function judgePlay(
   const trace = await stopTrace(page);
   const notes: string[] = [];
   if (!trace) return { name, bucket: "playback", pass: false, notes: ["no trace"] };
+  if (has("--dump-trace")) {
+    await writeFile(path.join(OUT, `trace-${name}.json`), JSON.stringify(trace));
+    // The engine's own log beside it: walks sent, slow pulls, tick gaps.
+    const log = await page.evaluate(
+      () => (window as unknown as { __cutEngineLog?: unknown }).__cutEngineLog ?? []
+    );
+    await writeFile(path.join(OUT, `log-${name}.json`), JSON.stringify(log));
+    // And the media requests the page made, on the same clock.
+    const net = await page.evaluate(() =>
+      performance
+        .getEntriesByType("resource")
+        .map((e) => ({ name: e.name, start: e.startTime, ms: e.duration, bytes: (e as PerformanceResourceTiming).transferSize }))
+    );
+    await writeFile(path.join(OUT, `net-${name}.json`), JSON.stringify(net));
+  }
   const decoders = await page.evaluate(
     () =>
       (
@@ -1856,7 +1917,7 @@ const CASES: EvalCase[] = [
     name: "drag-within-a-clip",
     transitions: false,
     gesture: (page, fx) => sweep(page, fx, 0.4, 2, 40),
-    budget: { p50: GATE.scrubP50Ms, p95: GATE.scrubP95Ms },
+    budget: { p50: GATE.scrubLateP50, p95: GATE.scrubLateP95 },
   }),
   // The same drag the other way. Frames decode forward from a keyframe, so a
   // pointer moving against that direction is served from a cache of the span
@@ -1865,13 +1926,13 @@ const CASES: EvalCase[] = [
     name: "drag-backward-within-a-clip",
     transitions: false,
     gesture: (page, fx) => sweep(page, fx, 2.4, -2, 40),
-    budget: { p50: GATE.scrubP50Ms, p95: GATE.scrubP95Ms },
+    budget: { p50: GATE.scrubLateP50, p95: GATE.scrubLateP95 },
   }),
   scrubCase({
     name: "drag-backward-across-a-cut",
     transitions: false,
     gesture: (page, fx) => sweep(page, fx, fx.cuts[0] + 1, -2, 40),
-    budget: { p50: GATE.scrubP50Ms, p95: GATE.scrubP95Ms },
+    budget: { p50: GATE.scrubLateP50, p95: GATE.scrubLateP95 },
   }),
   // Backward through a long file read as cloud media: keyframes two seconds
   // apart, bytes off the link through the chunk cache, which is what a
@@ -1881,19 +1942,19 @@ const CASES: EvalCase[] = [
     transitions: false,
     seed: seedLongClip(30, true),
     gesture: (page, fx) => sweep(page, fx, 12, -4, 80),
-    budget: { p50: GATE.scrubP50Ms, p95: GATE.scrubP95Ms },
+    budget: { p50: GATE.scrubLateP50, p95: GATE.scrubLateP95 },
   }),
   scrubCase({
     name: "drag-across-a-cut",
     transitions: false,
     gesture: (page, fx) => sweep(page, fx, fx.cuts[0] - 1, 2, 40),
-    budget: { p50: GATE.scrubP50Ms, p95: GATE.scrubP95Ms },
+    budget: { p50: GATE.scrubLateP50, p95: GATE.scrubLateP95 },
   }),
   scrubCase({
     name: "drag-across-a-transition",
     transitions: true,
     gesture: (page, fx) => sweep(page, fx, fx.cuts[0] - 1, 2, 40),
-    budget: { p50: GATE.scrubP50Ms, p95: GATE.scrubP95Ms },
+    budget: { p50: GATE.scrubLateP50, p95: GATE.scrubLateP95 },
   }),
   // Landing somewhere else entirely costs a decode from the nearest keyframe,
   // which no arrangement of buffers can avoid. Budgeted for what that costs.
@@ -1901,7 +1962,7 @@ const CASES: EvalCase[] = [
     name: "jump-across-the-cut",
     transitions: false,
     gesture: (page, fx) => sweep(page, fx, 0, fx.duration - 0.05, 40),
-    budget: { p50: GATE.jumpP50Ms, p95: GATE.jumpP95Ms },
+    budget: { p50: GATE.jumpLateP50, p95: GATE.jumpLateP95 },
   }),
   playbackCase("play-hard-cuts", false),
   playbackCase("play-with-transitions", true),
@@ -1969,13 +2030,12 @@ const CASES: EvalCase[] = [
  */
 let linkKbps = MACHINE.netKbps;
 
-/** Pause for the profile's round trip, then for as long as the link takes to
- * carry `bytes`. Zero on either leaves the response alone, which is what keeps
- * the desktop baseline still. */
-const charge = (bytes: number): Promise<void> => {
-  const ms = MACHINE.rttMs + (linkKbps > 0 ? (bytes * 8) / linkKbps : 0);
-  return ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve();
-};
+/** Bytes handed to the page at a time over a paced link. Small enough that a
+ * reader waiting on the first chunk of a long run has it after a fraction of
+ * a second, the way a real server's stream delivers it. */
+const PIECE = 64 * 1024;
+
+const sleep = (ms: number) => (ms > 0 ? new Promise<void>((r) => setTimeout(r, ms)) : Promise.resolve());
 
 /** Headers a cross-origin media read needs back. The chunk cache reads
  * `Content-Range` to learn the object's size, and a browser hides it from a
@@ -1987,41 +2047,113 @@ const CORS = {
 };
 
 /**
- * One fixture file. A `Range` header is not a simple header, so a cross-origin
- * read preflights and that is answered here too.
+ * The fixture files, served by a real HTTP server on this machine.
  *
- * `paced` is what separates the two media residencies this serves. A file the
- * browser already holds — an import in OPFS, a local project's own bytes — is
- * a disk read, and that is every fixture addressed at `/__cutperf/`. Cloud
- * media is read over the wire, and only those reads are charged the profile's
- * link.
+ * A fulfilled route hands the page a body only once the whole of it is
+ * here, and a sixteen-megabyte run then reaches the reader waiting on its
+ * first chunk all at once, seconds after a stream would have delivered that
+ * chunk. The chunk cache is built for the stream: it settles each chunk of a
+ * run as its bytes land. So the files are served the way a server serves
+ * them, a range at a time as bytes, and the page's requests are pointed here
+ * by the route without the page knowing.
+ *
+ * `/disk/` is a file the browser already holds — an import in OPFS, a local
+ * project's own bytes — and is read as fast as the disk gives it. `/link/` is
+ * cloud media read over the wire, and only those reads are charged the
+ * profile's link: the round trip first, then the bytes at the link's rate,
+ * piece by piece, so the first piece arrives at the round trip and the last
+ * when the link has carried them all.
+ *
+ * A route may only send a request to a URL of the same protocol, and the
+ * page addresses local fixtures on its own http origin and cloud media on the
+ * https media origin, so the one handler listens on both: plain for the disk
+ * files, and behind a self-signed certificate the browser is told to accept
+ * for the link.
  */
-async function serveFixture(route: Route, request: Request, paced: boolean): Promise<void> {
-  if (request.method() === "OPTIONS") {
-    await route.fulfill({ status: 204, headers: CORS });
-    return;
+interface FixtureServers {
+  disk: Server;
+  link: Server;
+}
+
+async function fixtureCert(): Promise<{ key: Buffer; cert: Buffer }> {
+  const keyPath = path.join(OUT, "fixture-key.pem");
+  const certPath = path.join(OUT, "fixture-cert.pem");
+  if (!existsSync(keyPath) || !existsSync(certPath)) {
+    await promisify(execFile)("openssl", [
+      "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "3650",
+      "-subj", "/CN=127.0.0.1", "-keyout", keyPath, "-out", certPath,
+    ]);
   }
-  const name = path.basename(new URL(request.url()).pathname);
-  const body = await readFile(path.join(OUT, name));
-  const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers()["range"] ?? "");
-  const from = range ? Number(range[1]) : 0;
-  const to = range
-    ? range[2]
-      ? Math.min(Number(range[2]), body.length - 1)
-      : body.length - 1
-    : body.length - 1;
-  const slice = body.subarray(from, to + 1);
-  if (paced) await charge(slice.length);
-  await route.fulfill({
-    status: range ? 206 : 200,
-    body: slice,
-    headers: {
+  return { key: await readFile(keyPath), cert: await readFile(certPath) };
+}
+
+async function startFixtureServers(): Promise<FixtureServers> {
+  const listen = (server: Server) =>
+    new Promise<Server>((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve(server));
+      // The servers live as long as the browser does and must not keep the
+      // process up once the run is over.
+      server.unref();
+    });
+  const disk = await listen(createHttpServer(serveFixture));
+  const link = await listen(createHttpsServer(await fixtureCert(), serveFixture));
+  return { disk, link };
+}
+
+async function serveFixture(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  {
+    const url = new URL(req.url ?? "/", "http://fixture");
+    const [, kind, name] = url.pathname.split("/");
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, CORS);
+      res.end();
+      return;
+    }
+    const file = path.join(OUT, path.basename(name ?? ""));
+    const size = await stat(file)
+      .then((st) => st.size)
+      .catch(() => null);
+    if (size === null || (kind !== "disk" && kind !== "link")) {
+      res.writeHead(404, CORS);
+      res.end();
+      return;
+    }
+    const range = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range ?? "");
+    const from = range ? Number(range[1]) : 0;
+    const to = range ? (range[2] ? Math.min(Number(range[2]), size - 1) : size - 1) : size - 1;
+    res.writeHead(range ? 206 : 200, {
       ...CORS,
       "Content-Type": "video/mp4",
       "Accept-Ranges": "bytes",
-      ...(range ? { "Content-Range": `bytes ${from}-${to}/${body.length}` } : {}),
-    },
-  });
+      "Content-Length": String(to - from + 1),
+      ...(range ? { "Content-Range": `bytes ${from}-${to}/${size}` } : {}),
+    });
+    const paced = kind === "link" && (linkKbps > 0 || MACHINE.rttMs > 0);
+    const stream = createReadStream(file, { start: from, end: to, highWaterMark: paced ? PIECE : 1 << 20 });
+    try {
+      if (paced) await sleep(MACHINE.rttMs);
+      for await (const piece of stream) {
+        const bytes = piece as Buffer;
+        if (paced && linkKbps > 0) await sleep((bytes.length * 8) / linkKbps);
+        if (res.destroyed) break;
+        if (!res.write(bytes)) await once(res, "drain");
+      }
+    } catch {
+      // The page let go of the read; nothing to finish.
+    } finally {
+      stream.destroy();
+      res.end();
+    }
+  }
+}
+
+/** The server's address for one fixture, as the route sends the page there. */
+function fixtureUrl(servers: FixtureServers, kind: "disk" | "link", requestUrl: string): string {
+  const server = servers[kind];
+  const addr = server.address();
+  const port = typeof addr === "object" && addr ? addr.port : 0;
+  const scheme = kind === "link" ? "https" : "http";
+  return `${scheme}://127.0.0.1:${port}/${kind}/${path.basename(new URL(requestUrl).pathname)}`;
 }
 
 /** A browser with the fixture media served from disk and the session answered. */
@@ -2167,6 +2299,8 @@ async function launch(): Promise<{ browser: Browser; page: Page }> {
   const context = await browser.newContext({
     extraHTTPHeaders: { "x-donkey-dev-auth-bypass": "1" },
     viewport: { width: 1600, height: 1000 },
+    // The fixture server's certificate is its own.
+    ignoreHTTPSErrors: true,
   });
   // The shim is what enforces the slot limit as well as the per-frame cost, so
   // asking for slots on a profile that pays no CPU cost has to install it too.
@@ -2284,15 +2418,20 @@ async function launch(): Promise<{ browser: Browser; page: Page }> {
   // every seek to zero, which the filmstrip case's ground-truth probe relies
   // on being wrong about.
   //
-  // Cloud media's link is charged in the route rather than through CDP's
-  // network emulation, which throttles the whole context: the page, the dev
-  // build's module graph and the API all have to arrive at their usual speed,
-  // or every case measures Next's first load.
-  await context.route("**/__cutperf/*", (route, request) => serveFixture(route, request, false));
+  // Cloud media's link is charged by the fixture server rather than through
+  // CDP's network emulation, which throttles the whole context: the page, the
+  // dev build's module graph and the API all have to arrive at their usual
+  // speed, or every case measures Next's first load.
+  const fixtures = await startFixtureServers();
+  await context.route("**/__cutperf/*", (route, request) =>
+    route.continue({ url: fixtureUrl(fixtures, "disk", request.url()) })
+  );
   // The same files addressed as cloud media, which is the path a cloud project
   // actually plays: `chunkIdentity` claims this origin, so reads arrive as 2MB
   // ranged chunks through the chunk cache and land in OPFS as they do.
-  await context.route(`${CUT_MEDIA_ORIGIN}/**`, (route, request) => serveFixture(route, request, true));
+  await context.route(`${CUT_MEDIA_ORIGIN}/**`, (route, request) =>
+    route.continue({ url: fixtureUrl(fixtures, "link", request.url()) })
+  );
   const page = await context.newPage();
   if (MACHINE.cpu > 1 || MACHINE.softwareMs > 0 || arg("--slots")) {
     if (MACHINE.cpu > 1) {
@@ -2405,8 +2544,8 @@ async function fanOut(names: string[]): Promise<CaseResult[]> {
 }
 
 const detailOf = (r: CaseResult) =>
-  r.scrub
-    ? `p50=${r.scrub.p50}ms p95=${r.scrub.p95}ms max=${r.scrub.max}ms n=${r.scrub.n}`
+  r.late
+    ? `late p50=${r.late.p50} p95=${r.late.p95} max=${r.late.max} frames @${r.frameMs}ms (${r.scrub?.p50}/${r.scrub?.p95}ms) n=${r.late.n}`
     : r.tileErr
       ? `errP50=${r.tileErr.p50}s errMax=${r.tileErr.max}s n=${r.tileErr.n}`
       : r.idleTicks !== undefined

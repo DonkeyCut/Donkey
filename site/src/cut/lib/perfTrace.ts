@@ -67,9 +67,23 @@ export interface PresentRecord {
 export interface SeekRecord {
   t: number;
   at: number;
+  /** Engine ticks that had run when the time was asked for. The first tick
+   * after it is the first chance to paint the answer. */
+  tick: number;
   /** How long until a frame for this time was painted. Null while unresolved —
    * either still pending, or superseded by a later seek. */
   latencyMs: number | null;
+  /**
+   * Frames the answer missed: zero when the first paint after the ask showed
+   * it, one when it took the next.
+   *
+   * This is the measure a drag is judged on. The milliseconds above also
+   * count the wait for the next frame, and that wait is the display's — half
+   * a frame on average, eight milliseconds at a hundred and twenty hertz and
+   * sixteen at sixty — so the same engine reads twice as slow on one monitor
+   * as on another. Frames missed reads the same on both.
+   */
+  lateFrames: number | null;
 }
 
 export interface LongTaskRecord {
@@ -187,7 +201,7 @@ export function stopTrace(): Trace | null {
 /** A time was asked for — a scrub, a skim, a click on the ruler. */
 export function markSeek(t: number): void {
   if (!trace) return;
-  const rec: SeekRecord = { t, at: performance.now(), latencyMs: null };
+  const rec: SeekRecord = { t, at: performance.now(), tick: trace.ticks, latencyMs: null, lateFrames: null };
   keep(trace.seeks, rec);
   pendingSeek = rec;
 }
@@ -202,6 +216,9 @@ export function markPresent(rec: Omit<PresentRecord, "at">): void {
   // clock keeps running until the frame that belongs at that time is on screen.
   if (pendingSeek && rec.exact && !rec.stale && Math.abs(rec.t - pendingSeek.t) <= SAME_TIME) {
     pendingSeek.latencyMs = at - pendingSeek.at;
+    // A present runs inside a tick, after the tick has counted itself; the
+    // first tick after the ask is the one that could have answered it.
+    pendingSeek.lateFrames = Math.max(0, trace.ticks - pendingSeek.tick - 1);
     pendingSeek = null;
   }
 }
