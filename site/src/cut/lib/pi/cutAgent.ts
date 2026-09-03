@@ -4,7 +4,7 @@ import type { Message, UserMessage } from "@earendil-works/pi-ai";
 import { AI_TOOLS, attachedAssetsBlock, systemPrompt } from "@/cut/server/ai/catalog";
 import { parseTurnIntent, turnIntentInput, turnIntentPrompt, type TurnIntent } from "../turnIntent";
 import { enforceContextBudget } from "./contextBudget";
-import { donkeyModel } from "./donkeyModel";
+import { donkeyModel, type ChatThinkingLevel } from "./donkeyModel";
 import { ledgerText, recordCall, type LedgerRecord } from "./mutationLedger";
 import { makeDonkeyStream, type DonkeyToolDetails, type PostFn, type WireCarrier, type WirePart } from "./donkeyStream";
 import { toAgentTools, type ExecTool } from "./tools";
@@ -171,6 +171,14 @@ function sanitizeSession(messages: AgentMessage[]): AgentMessage[] {
     pruneStaleMedia(pruneStaleSnapshots(messages.filter((m) => !isBudgetSteer(m)))),
   );
 }
+
+// The complex role's rounds are tool orchestration over state the mutation
+// ledger already grounds, so they run at the low thinking budget: at its
+// default the model re-reads state after every edit and each round takes about
+// half again as long, with no gain on the chat eval. The simple role keeps its
+// default (the low budget slows that model and costs it a case), and so does a
+// chat-verdict turn, which answers a question with no tools to orchestrate.
+const COMPLEX_THINKING_LEVEL: ChatThinkingLevel = "low";
 
 export function hydratePiSession(threadId: string, messages: AgentMessage[] | undefined): void {
   if (messages && !sessions.has(threadId)) keepSession(threadId, sanitizeSession(messages));
@@ -399,12 +407,14 @@ export function streamCutChat({
          * finalizes only the run it keeps. */
         const runAgentTurn = async ({
           roundModel,
+          thinkingLevel,
           withTools,
           send,
           executionGate,
           onAgent,
         }: {
           roundModel: string;
+          thinkingLevel?: ChatThinkingLevel;
           withTools: boolean;
           send: (chunk: Record<string, unknown>) => void;
           /** Awaited before any tool executes; false ends the batch unrun. */
@@ -422,7 +432,7 @@ export function streamCutChat({
           const agent = new Agent({
             initialState: {
               systemPrompt: systemPrompt(),
-              model: donkeyModel(roundModel),
+              model: donkeyModel(roundModel, thinkingLevel),
               messages: sessionFor(threadId, messages.filter((m) => m !== lastUser)),
               tools: withTools ? toAgentTools(AI_TOOLS, deps.execTool) : [],
             },
@@ -630,6 +640,7 @@ export function streamCutChat({
           finalize(
             await runAgentTurn({
               roundModel: intent === "simple" ? deps.models.simple : model,
+              thinkingLevel: intent === "complex" ? COMPLEX_THINKING_LEVEL : undefined,
               withTools: intent !== "chat",
               send: emit,
             })

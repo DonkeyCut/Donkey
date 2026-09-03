@@ -11,6 +11,7 @@ import {
   type Usage,
 } from "@earendil-works/pi-ai";
 import { reportBalance } from "../hosted";
+import type { DonkeyModel } from "./donkeyModel";
 
 // The transport adapter: pi Context in, Donkey's hosted Responses route out.
 // Every model call the agent makes flows through here — pi's own providers are
@@ -261,6 +262,8 @@ export function makeDonkeyStream(deps: DonkeyStreamDeps) {
         input: serializeMessages(context.messages),
         stream: true,
       };
+      const thinkingLevel = (model as DonkeyModel).thinkingLevel;
+      if (thinkingLevel) payload.thinking_level = thinkingLevel;
       if (context.tools && context.tools.length > 0) {
         payload.tools = context.tools.map((t) => ({
           type: "function",
