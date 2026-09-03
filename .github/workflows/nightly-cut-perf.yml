@@ -1,0 +1,105 @@
+name: Nightly Cut Perf
+
+# Drives the preview performance eval (scripts/eval-cut-perf.ts) every night
+# in a real Chrome against a dev server, on a machine whose display and load
+# never change. The scrub cases are held to their budgets: they count frames
+# missed, which a virtual machine can hold. The playback cases run for the
+# record — a runner has no hardware decoder, so their lag budgets describe a
+# machine this is not — and the full report is kept as an artifact.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 10 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-cut-perf
+  cancel-in-progress: true
+
+jobs:
+  perf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+
+      # Placeholder values: the eval's project lives on the dev server's own
+      # disk and the page answers its session check itself, so nothing reads
+      # these — they only have to exist for the dev server to boot.
+      - name: Write placeholder env
+        run: |
+          for key in BETTER_AUTH_SECRET GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET \
+            R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY \
+            CUT_MEDIA_SIGNING_SECRET; do
+            echo "$key=placeholder" >> .env
+          done
+          echo "DATABASE_URL=postgresql://placeholder:placeholder@localhost:5432/placeholder" >> .env
+          echo "DIRECT_URL=postgresql://placeholder:placeholder@localhost:5432/placeholder" >> .env
+
+      - name: Start dev server
+        env:
+          DONKEY_DEV_AUTH_BYPASS: "1"
+        run: |
+          npm run dev > /tmp/next-dev.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null "http://localhost:3000/api/cut/projects?u=donkey-dev-auth-bypass"; then exit 0; fi
+            sleep 2
+          done
+          echo "dev server never answered" >&2
+          tail -50 /tmp/next-dev.log >&2
+          exit 1
+
+      - name: Scrub cases, held to budget
+        run: npm run eval:cut-perf -- --bucket scrub --enforce-budgets --out /tmp/cut-perf-scrub.json | tee /tmp/cut-perf-scrub.log
+
+      - name: Full eval, for the record
+        if: always()
+        run: npm run eval:cut-perf -- --out /tmp/cut-perf.json | tee /tmp/cut-perf.log
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '## Cut perf'
+            echo '```'
+            grep -E '^\[(ok|FAIL)' /tmp/cut-perf.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cut-perf-report
+          path: |
+            /tmp/cut-perf.json
+            /tmp/cut-perf-scrub.json
+            /tmp/cut-perf.log
+            /tmp/cut-perf-scrub.log
+          if-no-files-found: ignore
+
+      - name: Dev server log on failure
+        if: failure()
+        run: tail -100 /tmp/next-dev.log
