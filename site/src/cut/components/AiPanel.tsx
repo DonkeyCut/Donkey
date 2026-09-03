@@ -309,6 +309,7 @@ const SUGGESTIONS = [
 
 /** Chat provider bucket for a model id. */
 const provider = (id: string): string =>
+  (AI_MODELS.find((m) => m.id === id)?.provider ?? "") ||
   id.startsWith("claude")
     ? "claude"
     : id.startsWith("gemini")

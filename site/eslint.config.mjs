@@ -34,6 +34,33 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  {
+    // The page, the chat loop and the turn worker ship separately from the
+    // site's routes, so a model id baked into them outlives a registry bump.
+    // They name a role and the responses route resolves it.
+    files: ["src/cut/lib/**/*.ts", "src/cut/lib/**/*.tsx", "src/cut/components/**/*.tsx", "src/cut/components/**/*.ts", "src/cut/hooks/**/*.ts", "src/cut/worker/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "@/lib/inference/gemini-models",
+              importNames: [
+                "geminiModels",
+                "geminiModelRoles",
+                "geminiTtsModels",
+                "geminiOmniModels",
+                "geminiTranscribeModels",
+                "geminiMusicModels",
+              ],
+              message: "Name a model role (geminiModelRoleNames); the responses route resolves the id.",
+            },
+          ],
+        },
+      ],
+    },
+  },
 ]);
 
 export default eslintConfig;

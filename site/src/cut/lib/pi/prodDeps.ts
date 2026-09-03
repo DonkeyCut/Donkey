@@ -1,6 +1,6 @@
 "use client";
 
-import { geminiModelRoles } from "@/lib/inference/gemini-models";
+import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
 import { AI_SKILL_INDEX, AI_SKILLS } from "@/cut/server/ai/catalog";
 import { buildAiContext } from "../aiContext";
 import { runAiTool } from "../aiTools";
@@ -30,9 +30,9 @@ export function productionDeps(): CutAgentDeps {
       return runAiTool(name, args);
     },
     models: {
-      simple: geminiModelRoles.chatSimple,
-      complex: geminiModelRoles.chat,
-      gate: geminiModelRoles.fastDecision,
+      simple: geminiModelRoleNames.chatSimple,
+      complex: geminiModelRoleNames.chat,
+      gate: geminiModelRoleNames.fastDecision,
     },
     buildContext: () => buildAiContext(),
     resolveRefs: async (meta) => {

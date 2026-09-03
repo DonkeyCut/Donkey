@@ -1,4 +1,4 @@
-import { geminiModelRoles } from "@/lib/inference/gemini-models";
+import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
 import { AI_SKILL_INDEX, AI_SKILLS } from "@/cut/server/ai/catalog";
 import { buildAiContext } from "../aiContext";
 import { MEDIA_RUNTIME_TOOLS, runAiTool, UI_TOOLS } from "../aiTools";
@@ -45,9 +45,9 @@ export function headlessDeps(session: HeadlessSession): CutAgentDeps {
       return runAiTool(name, args);
     },
     models: {
-      simple: geminiModelRoles.chatSimple,
-      complex: geminiModelRoles.chat,
-      gate: geminiModelRoles.fastDecision,
+      simple: geminiModelRoleNames.chatSimple,
+      complex: geminiModelRoleNames.chat,
+      gate: geminiModelRoleNames.fastDecision,
     },
     buildContext: () => buildAiContext(),
     resolveRefs: async (meta) => {

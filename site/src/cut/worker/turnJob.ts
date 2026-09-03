@@ -1,5 +1,5 @@
 import type { UIMessage } from "ai";
-import { geminiModelRoles } from "@/lib/inference/gemini-models";
+import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
 import { openCloudProject, pushCloudProject } from "../lib/headless/docSession";
 import { dropPiSession, streamCutChat } from "../lib/pi/cutAgent";
 import { headlessDeps, type HeadlessSession } from "../lib/pi/serverDeps";
@@ -131,7 +131,7 @@ export async function runTurnJob(
   }, 1000);
   const reader = streamCutChat({
     threadId: piKey,
-    model: spec.model ?? geminiModelRoles.chat,
+    model: spec.model ?? geminiModelRoleNames.chat,
     messages: spec.messages as UIMessage[],
     abortSignal: abort.signal,
     deps,

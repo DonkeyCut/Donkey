@@ -12,6 +12,7 @@ import {
 } from "@/lib/credits/inference";
 import { createProviderRegistry } from "@/lib/inference/router";
 import { resolveInferenceBlobs } from "@/lib/inference/blobs";
+import { resolveGeminiModel } from "@/lib/inference/gemini-models";
 import { toJsonObject } from "@/lib/inference/json";
 import {
   inferenceErrorCode,
@@ -38,10 +39,13 @@ export const POST = withDonkeyAuth(async (request) => {
     return validationErrorResponse(parsed.error);
   }
 
-  const requestedModel =
+  // The body names a model role or an id; a role resolves here, so the page
+  // never carries an id that a registry bump can retire under it.
+  const resolvedModel =
     typeof parsed.data.body.model === "string" && parsed.data.body.model.trim()
-      ? parsed.data.body.model.trim()
-      : "unknown";
+      ? resolveGeminiModel(parsed.data.body.model.trim())
+      : undefined;
+  const requestedModel = resolvedModel ?? "unknown";
   const bypassCredits = shouldBypassDonkeyInferenceCredits(request.donkey);
   if (!bypassCredits) {
     const credits = await requireInferenceCredits({
@@ -63,7 +67,10 @@ export const POST = withDonkeyAuth(async (request) => {
     const data = {
       ...parsed.data,
       body: toJsonObject(
-        await resolveInferenceBlobs(parsed.data.body, request.donkey.userId),
+        await resolveInferenceBlobs(
+          resolvedModel === undefined ? parsed.data.body : { ...parsed.data.body, model: resolvedModel },
+          request.donkey.userId,
+        ),
       ),
     };
     const registry = createProviderRegistry();

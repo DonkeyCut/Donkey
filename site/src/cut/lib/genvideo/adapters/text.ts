@@ -14,7 +14,7 @@
  * construction, not by hoping two independent calls agree.
  */
 
-import { geminiModelRoles } from "@/lib/inference/gemini-models";
+import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
 import { hostedPost } from "../../hosted";
 import { NO_CREDITS_MESSAGE } from "../../credits";
 import { secToFrame, type RawShot } from "../coverage";
@@ -46,7 +46,7 @@ async function llmJson<T>(
     try {
       res = await hostedPost("/api/inference/responses", {
         donkeyProvider: "gemini",
-        model: geminiModelRoles.chat,
+        model: geminiModelRoleNames.chat,
         instructions,
         response_format: { type: "json_object" },
         input: [

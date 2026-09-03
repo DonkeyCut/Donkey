@@ -116,3 +116,19 @@ export const geminiModelRoles = {
   // Hosted speech-to-text: the recorded mix in, word-timed cues out.
   transcription: geminiTranscribeModels.file,
 } as const;
+
+/** The role names, for a caller that says what it needs and lets the server
+ * pick the id. The page and the turn worker ship separately from the site, so
+ * an id baked into their bundles outlives a registry bump; a role name never
+ * goes stale. */
+export type GeminiModelRole = keyof typeof geminiModelRoles;
+export const geminiModelRoleNames = Object.fromEntries(
+  Object.keys(geminiModelRoles).map((role) => [role, role]),
+) as { [K in GeminiModelRole]: K };
+
+/** A role name becomes its registry id; anything else is an id already. */
+export function resolveGeminiModel(value: string): string {
+  return Object.hasOwn(geminiModelRoles, value)
+    ? geminiModelRoles[value as GeminiModelRole]
+    : value;
+}

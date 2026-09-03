@@ -12,7 +12,7 @@
  * structured call.
  */
 
-import { geminiModelRoles } from "@/lib/inference/gemini-models";
+import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
 import { hostedPost } from "../../hosted";
 import { captureVideoFrames } from "../../visualFrames";
 import { findRunAsset } from "../docWriter";
@@ -97,7 +97,7 @@ The benchmark sheet — the artist to match:`,
       ];
       const res = await hostedPost("/api/inference/responses", {
         donkeyProvider: "gemini",
-        model: geminiModelRoles.review,
+        model: geminiModelRoleNames.review,
         instructions: FRAME_INSTRUCTIONS,
         response_format: { type: "json_object" },
         input: [{ role: "user", content }],
@@ -141,7 +141,7 @@ The look: ${input.style || "(none)"}`,
       if (seen.length < 2) return allOk();
       const res = await hostedPost("/api/inference/responses", {
         donkeyProvider: "gemini",
-        model: geminiModelRoles.review,
+        model: geminiModelRoleNames.review,
         instructions: STORYBOARD_INSTRUCTIONS,
         response_format: { type: "json_object" },
         input: [{ role: "user", content }],
@@ -220,7 +220,7 @@ The timeline slot needs ${input.slotSec.toFixed(1)}s of this take.`,
       }
       const res = await hostedPost("/api/inference/responses", {
         donkeyProvider: "gemini",
-        model: geminiModelRoles.review,
+        model: geminiModelRoleNames.review,
         instructions: REVIEW_INSTRUCTIONS,
         response_format: { type: "json_object" },
         input: [{ role: "user", content }],
@@ -276,7 +276,7 @@ The canonical design sheet for "${sheet.name}":`,
           }
           const idRes = await hostedPost("/api/inference/responses", {
             donkeyProvider: "gemini",
-            model: geminiModelRoles.review,
+            model: geminiModelRoleNames.review,
             instructions: IDENTITY_INSTRUCTIONS,
             response_format: { type: "json_object" },
             input: [{ role: "user", content: idContent }],

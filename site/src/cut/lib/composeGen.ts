@@ -1,6 +1,6 @@
 "use client";
 
-import { geminiModelRoles } from "@/lib/inference/gemini-models";
+import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
 import type { AssetRef } from "./assetRef";
 import { hostedPost } from "./hosted";
 import { readRefText, refsToParts, type InlineImage } from "./refMedia";
@@ -55,7 +55,7 @@ export async function composeGenPrompt(
     if (parts.length === 0) return null;
     const res = await hostedPost("/api/inference/responses", {
       donkeyProvider: "gemini",
-      model: geminiModelRoles.chat,
+      model: geminiModelRoleNames.chat,
       instructions: target === "video" ? VIDEO_INSTRUCTIONS : IMAGE_INSTRUCTIONS,
       response_format: { type: "json_object" },
       input: [{ role: "user", content: [...parts, { text: `Request: ${prompt}` }] }],
@@ -92,7 +92,7 @@ export async function composeMusicPrompt(
     if (parts.length === 0) return null;
     const res = await hostedPost("/api/inference/responses", {
       donkeyProvider: "gemini",
-      model: geminiModelRoles.chat,
+      model: geminiModelRoleNames.chat,
       instructions: MUSIC_INSTRUCTIONS,
       response_format: { type: "json_object" },
       input: [{ role: "user", content: [...parts, { text: `Request: ${prompt}` }] }],

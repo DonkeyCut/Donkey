@@ -1,6 +1,6 @@
 "use client";
 
-import { geminiModels } from "@/lib/inference/gemini-models";
+import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
 import { bytesFromBase64 } from "./bytes";
 import { NO_CREDITS_MESSAGE } from "./credits";
 import { hostedPost } from "./hosted";
@@ -135,7 +135,7 @@ export async function planVoiceover(
   try {
     const res = await hostedPost("/api/inference/responses", {
       donkeyProvider: "gemini",
-      model: geminiModels.flash,
+      model: geminiModelRoleNames.chat,
       instructions: PLAN_INSTRUCTIONS,
       input: [{ role: "user", content: [{ text: JSON.stringify({ direction, lines: texts }) }] }],
     });

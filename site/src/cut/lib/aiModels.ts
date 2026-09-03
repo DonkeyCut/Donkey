@@ -1,4 +1,4 @@
-import { geminiModels } from "@/lib/inference/gemini-models";
+import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
 
 export interface AiModel {
   id: string;
@@ -22,7 +22,7 @@ export const AI_MODELS: AiModel[] = [
   { id: "gpt-5.6-luna", label: "GPT-5.6 Luna", provider: "codex" },
   { id: "gpt-5.5", label: "GPT-5.5", provider: "codex" },
   { id: "gpt-5.4-mini", label: "GPT-5.4 Mini", provider: "codex" },
-  { id: geminiModels.flash, label: "Gemini Flash", provider: "gemini" },
+  { id: geminiModelRoleNames.chat, label: "Gemini Flash", provider: "gemini" },
   // Hermetic test provider for e2e runs — hidden unless enabled in the UI.
   { id: "cut-test", label: "Test model", provider: "test", hidden: true },
 ];

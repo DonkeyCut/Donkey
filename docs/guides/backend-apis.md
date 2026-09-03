@@ -78,6 +78,13 @@ Every inference route requires the `x-donkey-client-id` header. Provider request
 mapping lives behind the provider registry, so handlers import the registry and
 the neutral schemas, never an individual adapter.
 
+A caller that ships separately from the site — the editor page, the turn
+worker — names a model role (`chat`, `review`, `fastDecision`) and the
+responses route resolves it to the registry's current id. An id baked into
+their bundles would outlive a registry bump and fail pricing the moment the
+site deploys; a role never goes stale. A lint rule keeps the ids out of the
+page and worker source.
+
 **State stays on the client.** The backend can create or refresh a provider job and
 hand back job IDs, generation IDs, polling URLs, and output references, but it
 never persists prompts, generation records, provider output references, or

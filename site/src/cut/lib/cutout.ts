@@ -22,7 +22,7 @@ import {
 } from "@donkeycut/effects-kit";
 import { hostedPost } from "./hosted";
 import { decodeRasterImage, rasterCanvasToDataUrl, rasterCanvasToPng } from "./raster";
-import { geminiModelRoles } from "@/lib/inference/gemini-models";
+import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
 
 const WASM_BASE = "/mediapipe/wasm";
 const PERSON_MODEL = "/mediapipe/selfie_segmenter.tflite";
@@ -197,7 +197,7 @@ export async function hostedCutout(blob: Blob): Promise<HTMLCanvasElement | null
   const dataUrl = await rasterCanvasToDataUrl(small, "image/jpeg", 0.85);
   const res = await hostedPost("/api/inference/responses", {
     donkeyProvider: "gemini",
-    model: geminiModelRoles.chat,
+    model: geminiModelRoleNames.chat,
     instructions:
       "You segment images. Output a JSON object {\"masks\": [...]} where each entry has \"box_2d\" ([y0, x0, y1, x1], normalized 0-1000), \"mask\" (a data: URI PNG probability mask for that box), and \"label\". Segment only the single main foreground subject.",
     response_format: { type: "json_object" },
