@@ -571,6 +571,45 @@ export const libraryCloud = {
     }
   },
 
+  /** Fill in what a row was uploaded without: the duration and pixel size the
+   * page read from the file the first time it cut a clip from the asset. A
+   * value the row already holds stays. */
+  async updateMeta(userId: string, id: string, req: Request) {
+    try {
+      const body = (await req.json()) as {
+        duration?: number;
+        width?: number;
+        height?: number;
+      };
+      const asset = await prisma.cutLibraryAsset.findFirst({
+        where: { id, userId, deletedAt: null },
+      });
+      if (!asset) throw new Error("Library asset not found.");
+      const obj = await prisma.cutMediaObject.findUnique({
+        where: { id: asset.mediaObjectId },
+      });
+      if (!obj) throw new Error("Library asset not found.");
+      const positive = (v: unknown) =>
+        typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined;
+      const meta = { ...((asset.meta ?? {}) as AssetMeta) };
+      const duration = positive(body.duration);
+      const width = positive(body.width);
+      const height = positive(body.height);
+      if (duration !== undefined && !positive(meta.duration)) meta.duration = duration;
+      if (width !== undefined && height !== undefined && !positive(meta.width)) {
+        meta.width = width;
+        meta.height = height;
+      }
+      await prisma.cutLibraryAsset.update({
+        where: { id },
+        data: { meta: meta as unknown as Prisma.InputJsonValue },
+      });
+      return Response.json(assetView({ ...asset, meta }, obj));
+    } catch (e) {
+      return caught(e, "Could not update the library asset.");
+    }
+  },
+
   /** Move an item — asset or template — into a folder (or `null` to ungroup). */
   async move(userId: string, req: Request) {
     try {

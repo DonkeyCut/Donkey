@@ -381,6 +381,15 @@ export interface EditorState {
   setBackground: (hex: string) => void;
   addAsset: (asset: MediaAsset) => void;
   updateAsset: (id: string, patch: Partial<MediaAsset>) => void;
+  /** Give a video asset stored without a length the duration and size a probe
+   * read off its file, and open every zero-length clip cut from it to the
+   * footage — up to the next clip on its track, so nothing overlaps. A doc
+   * repair: no history checkpoint, and an asset that already has a length is
+   * left alone. */
+  repairAssetDuration: (
+    id: string,
+    meta: { duration: number; width?: number; height?: number }
+  ) => void;
   /** Swap asset URLs in place (fileName -> url), e.g. after re-minting an
    * expired signed batch. Runtime-only — the stored projection omits url —
    * and allowed in read-only shared views. */
@@ -2329,6 +2338,39 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       set((s) => ({
         assets: s.assets.map((a) => (a.id === id ? { ...a, ...patch } : a)),
       }));
+    },
+
+    repairAssetDuration: (id, meta) => {
+      const st = get();
+      const asset = st.assets.find((a) => a.id === id);
+      if (!asset || asset.type !== "video" || asset.duration > 0 || !(meta.duration > 0)) return;
+      if (st.readOnly) return;
+      const size = meta.width && meta.height ? { width: meta.width, height: meta.height } : {};
+      set((s) => {
+        const empty = (c: VideoClip) => c.assetId === id && c.out - c.in <= 0;
+        let clips = s.clips;
+        if (s.clips.some(empty)) {
+          clips = s.clips.map((c) => {
+            if (!empty(c)) return c;
+            // The whole footage, held short of the next clip on the track.
+            const next = s.clips.reduce(
+              (acc, o) =>
+                o.id !== c.id && o.track === c.track && o.start > c.start + 1e-9
+                  ? Math.min(acc, o.start)
+                  : acc,
+              Infinity
+            );
+            const room = next === Infinity ? meta.duration : next - c.start;
+            return { ...c, in: 0, out: Math.max(MIN_LEN, Math.min(meta.duration, room)) };
+          });
+        }
+        return {
+          assets: s.assets.map((a) =>
+            a.id === id ? { ...a, duration: meta.duration, ...size } : a
+          ),
+          ...(clips !== s.clips ? { clips } : {}),
+        };
+      });
     },
 
     applyMediaUrls: (urls) => {

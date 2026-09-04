@@ -27,7 +27,9 @@ import {
   listedResidencies,
   type Residency,
 } from "./residency";
+import { probeMediaFile } from "./mediaRead";
 import { storedMediaUrl } from "./mediaSync";
+import { reportSwallowed } from "./report";
 import { useEditor } from "./store";
 import { playheadAt } from "./playhead";
 import type {
@@ -720,6 +722,21 @@ export async function importLibraryAsset(
   // The project's media takes the name the shelf shows, so a phone
   // recording lands on the timeline under its title.
   const name = lib.title || lib.name;
+  // A row uploaded unmeasured — a phone's camera-roll import carries no
+  // length or size — is read here, before the clip is cut from it, so the
+  // clip takes the footage's true length and the row learns it.
+  let { duration, width, height } = lib;
+  if (lib.type === "video" && !(duration > 0)) {
+    const probe = await probeMediaFile(libraryMediaUrl(lib.fileName, lib.residency));
+    duration = probe.duration;
+    if (probe.width && probe.height) {
+      width = probe.width;
+      height = probe.height;
+    }
+    repairLibraryAssetMeta(lib, { duration, width, height }).catch((err: unknown) =>
+      reportSwallowed(`[cut] library meta repair failed for ${lib.fileName}`, err),
+    );
+  }
   // On this Mac the engine lands the file with a clone, and it is landed
   // before this returns: the asset registers at the project's own address
   // and plays from there. Registered on the shelf's address first, the
@@ -738,9 +755,9 @@ export async function importLibraryAsset(
       fileName,
       name,
       type: lib.type,
-      duration: lib.duration,
-      width: lib.width,
-      height: lib.height,
+      duration,
+      width,
+      height,
     });
   }
   return importRemote(
@@ -750,9 +767,9 @@ export async function importLibraryAsset(
       name,
       fileName: lib.fileName,
       type: lib.type,
-      duration: lib.duration,
-      width: lib.width,
-      height: lib.height,
+      duration,
+      width,
+      height,
       server: sameShelf(lib.residency),
     },
     (opts) =>
@@ -764,6 +781,24 @@ export async function importLibraryAsset(
         opts,
       ),
   );
+}
+
+/** Write the length and size a probe read off a file back onto the shelf row
+ * that was uploaded without them, so the card's time pill and the drop
+ * preview show the footage's real length from the next listing on. The
+ * browser shelf and the engine measure at ingest; only the cloud shelf takes
+ * unmeasured rows, from the phone. */
+async function repairLibraryAssetMeta(
+  lib: LibraryAsset,
+  meta: { duration: number; width?: number; height?: number },
+): Promise<void> {
+  if (lib.residency !== "cloud" || !(meta.duration > 0)) return;
+  const res = await cloudBackend.fetch(`/api/cut/library/${encodeURIComponent(lib.id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(meta),
+  });
+  if (!res.ok) throw new Error((await apiJson<unknown>(res)).error ?? "Could not update the library asset.");
 }
 
 /** Copy a library asset into the open project and add it to the timeline at

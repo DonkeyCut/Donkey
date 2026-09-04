@@ -2017,3 +2017,36 @@ describe("speed curves", () => {
     expect(s.clips[0].speedCurve?.map((n) => n[0])).toEqual([0, 2]);
   });
 });
+
+describe("repairAssetDuration", () => {
+  test("gives an unmeasured video its length and opens its zero-length clips to the footage", () => {
+    const a = asset(0);
+    const other = asset(4);
+    useEditor.setState({
+      assets: [a, other],
+      clips: [
+        vclip({ id: "empty", assetId: a.id, start: 0, in: 0, out: 0 }),
+        vclip({ id: "next", assetId: other.id, start: 3, in: 0, out: 2 }),
+        vclip({ id: "upper", assetId: a.id, track: 1, start: 0, in: 0, out: 0 }),
+      ],
+    });
+    s().repairAssetDuration(a.id, { duration: 10, width: 1080, height: 1920 });
+    const repaired = s().assets.find((x) => x.id === a.id)!;
+    expect(repaired.duration).toBe(10);
+    expect(repaired.width).toBe(1080);
+    expect(repaired.height).toBe(1920);
+    // Held short of the next clip on track 0; the whole footage on an open track.
+    expect(clipById("empty").out).toBe(3);
+    expect(clipById("upper").out).toBe(10);
+    expect(clipById("next").out).toBe(2);
+    expectLaneSound(videoLane(0));
+  });
+
+  test("leaves a measured asset and its clips alone", () => {
+    const a = asset(4);
+    useEditor.setState({ assets: [a], clips: [vclip({ id: "c", assetId: a.id, out: 2 })] });
+    s().repairAssetDuration(a.id, { duration: 10 });
+    expect(s().assets[0].duration).toBe(4);
+    expect(clipById("c").out).toBe(2);
+  });
+});

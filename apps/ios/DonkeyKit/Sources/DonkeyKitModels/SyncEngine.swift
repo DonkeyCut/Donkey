@@ -780,6 +780,8 @@ public final class SyncEngine {
                 name: fileName,
                 type: isVideo ? "video" : "image",
                 duration: 0,
+                width: item.localWidth,
+                height: item.localHeight,
                 origin: "inspiration",
                 resume: true
             )

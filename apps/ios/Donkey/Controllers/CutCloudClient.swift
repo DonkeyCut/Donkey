@@ -205,13 +205,17 @@ extension CutCloudClient: CloudSyncServicing {
         } else {
             nil
         }
+        // The row carries the footage's length and size: the desktop cuts
+        // clips to them and sizes the card from them. A camera-roll import
+        // arrives unmeasured, so the file itself answers here.
+        let measured = await Self.measure(upload)
         var meta: [String: Any] = [
             "name": upload.name,
             "type": upload.type,
-            "duration": upload.duration,
+            "duration": measured.duration,
             "origin": upload.origin,
         ]
-        if let width = upload.width, let height = upload.height {
+        if let width = measured.width, let height = measured.height {
             meta["width"] = width
             meta["height"] = height
         }
@@ -239,6 +243,39 @@ extension CutCloudClient: CloudSyncServicing {
             )
         )
         return try decode(PresignResponse.self, from: data)
+    }
+
+    private struct Measured {
+        var duration: TimeInterval
+        var width: Int?
+        var height: Int?
+    }
+
+    /// What the upload already says about its media, with the file filling in
+    /// whatever is missing: a video's length and its displayed size (rotation
+    /// applied), a photo's pixel size.
+    private static func measure(_ upload: LibraryUpload) async -> Measured {
+        var out = Measured(duration: upload.duration, width: upload.width, height: upload.height)
+        let needsSize = out.width == nil || out.height == nil
+        if upload.type == "video" {
+            let asset = AVURLAsset(url: upload.fileURL)
+            if out.duration <= 0,
+               let seconds = try? await asset.load(.duration).seconds,
+               seconds.isFinite, seconds > 0 {
+                out.duration = seconds
+            }
+            if needsSize,
+               let track = try? await asset.loadTracks(withMediaType: .video).first,
+               let (natural, transform) = try? await track.load(.naturalSize, .preferredTransform) {
+                let rect = CGRect(origin: .zero, size: natural).applying(transform)
+                out.width = Int(abs(rect.width).rounded())
+                out.height = Int(abs(rect.height).rounded())
+            }
+        } else if needsSize, let image = UIImage(contentsOfFile: upload.fileURL.localPath) {
+            out.width = Int((image.size.width * image.scale).rounded())
+            out.height = Int((image.size.height * image.scale).rounded())
+        }
+        return out
     }
 
     /// The recording's thumbnail goes up beside the movie so the desktop card

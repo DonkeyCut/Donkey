@@ -756,6 +756,13 @@ export function importRemote(
   if (init.type === "video") {
     void probeMediaFile(init.url)
       .then((m) => {
+        if (!(init.duration > 0)) {
+          useEditor.getState().repairAssetDuration(asset.id, {
+            duration: m.duration,
+            width: m.width,
+            height: m.height,
+          });
+        }
         if (m.hasVideo) {
           useEditor.getState().updateAsset(asset.id, { width: m.width, height: m.height });
         }
@@ -1683,6 +1690,20 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
       // A play is long enough to leave the project in it. Nothing this sweep
       // writes belongs to whatever is open now.
       if (useEditor.getState().projectId !== openProject) return;
+      // Footage stored without a length — a shelf row that was never measured
+      // — reads its own before anything is swept from it: a zero-length sweep
+      // has no tiles to place and no buckets to fill, and the clips cut from
+      // it open to the footage.
+      if (!(asset.duration > 0)) {
+        const probe = await probeMediaFile(held ?? src);
+        useEditor.getState().repairAssetDuration(asset.id, {
+          duration: probe.duration,
+          width: probe.width,
+          height: probe.height,
+        });
+        asset = useEditor.getState().assets.find((a) => a.id === asset.id) ?? asset;
+        if (!(asset.duration > 0)) throw new UnreadableMediaError("The video has no length.");
+      }
       // The clip box draws the sound under the picture, so a video enriches
       // waveform peaks alongside its filmstrip. The two are separate reads of
       // the file, so the peaks decode starts here and runs beside the strip's
