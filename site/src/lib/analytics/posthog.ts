@@ -79,3 +79,45 @@ export async function fetchActiveDistinctIds(day: string): Promise<string[]> {
   }
   return [...ids].sort();
 }
+
+const hogqlString = (value: string) => `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+
+const hogqlTime = (at: Date) => `toDateTime('${at.toISOString().slice(0, 19).replace("T", " ")}', 'UTC')`;
+
+// Each account carries its own cutoff, so the clauses go in an OR list rather
+// than one shared threshold; a chunk this size keeps the query well inside
+// PostHog's limits.
+const ID_CHUNK = 200;
+
+/** Which of these accounts fired the event at or after their own `since`.
+ * An account that fired it only before its cutoff is absent. */
+export async function fetchConvertedAfter(
+  event: string,
+  entries: { distinctId: string; since: Date }[],
+): Promise<Set<string>> {
+  const apiKey = process.env.POSTHOG_PERSONAL_API_KEY;
+  const projectId = posthogProjectId();
+  if (!apiKey || projectId === undefined) {
+    throw new Error("PostHog query access is not configured.");
+  }
+  const converted = new Set<string>();
+  for (let i = 0; i < entries.length; i += ID_CHUNK) {
+    const chunk = entries.slice(i, i + ID_CHUNK);
+    const clauses = chunk
+      .map((e) => `(distinct_id = ${hogqlString(e.distinctId)} AND timestamp >= ${hogqlTime(e.since)})`)
+      .join(" OR ");
+    const query = [
+      "SELECT DISTINCT distinct_id FROM events",
+      `WHERE event = ${hogqlString(event)}`,
+      `AND (${clauses})`,
+      `LIMIT ${ID_CHUNK}`,
+    ].join(" ");
+    const res = await postQuery(projectId, apiKey, query);
+    const data = (await res.json()) as { results?: unknown[][] };
+    for (const row of data.results ?? []) {
+      const id = row?.[0];
+      if (typeof id === "string" && id) converted.add(id);
+    }
+  }
+  return converted;
+}

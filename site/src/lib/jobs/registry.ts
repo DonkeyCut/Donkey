@@ -3,6 +3,7 @@ import type { z } from "zod";
 import type { Prisma } from "@/generated/prisma/client";
 import { analyticsDailyJob } from "@/lib/jobs/analytics-daily";
 import { deleteUserJob } from "@/lib/jobs/delete-user";
+import { experimentResultsJob } from "@/lib/jobs/experiment-results";
 import { outreachScanJob } from "@/lib/jobs/outreach-scan";
 
 // Thrown by an executor when the job can never succeed — the message lands on
@@ -27,5 +28,6 @@ export function defineJob<S extends z.ZodType<unknown>>(
 export const jobKinds: Record<string, JobKind> = {
   "analytics-daily": analyticsDailyJob,
   "delete-user": deleteUserJob,
+  "experiment-results": experimentResultsJob,
   "outreach-scan": outreachScanJob,
 };
