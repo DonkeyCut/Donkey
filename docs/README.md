@@ -20,6 +20,7 @@ Supported product and engineering guides live in `docs/guides/`. This list is th
 **Site and backend**
 
 - [Backend API Guide](guides/backend-apis.md) — the hosted routes the app and site call for model-backed work.
+- [Configuration and Experiments](guides/config-and-experiments.md) — the settings registry with its runtime override, and experiments with audiences, per-account overrides and computed verdicts.
 - [Frontend and Next.js Guidelines](guides/frontend-nextjs-guidelines.md) — route structure, server/client boundaries, styling, and data access in the site app.
 - [Backlit Icon](guides/backlit-icon.md) — the dark treatment that lights the donkey mark from behind: the layer stack, the tokens, and the rules that keep the mark clean.
 

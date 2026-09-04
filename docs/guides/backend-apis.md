@@ -49,10 +49,11 @@ credentials.
 - Don't wrap a handler in try/catch unless it can recover and return a different
   intentional response. Let unexpected errors surface to the framework.
 - `process.env` holds secrets only: API keys, credentials, and other sensitive
-  deploy values. Configuration — model ids, feature switches, tunables — is
-  code; write the value where it's used. An env-var fallback like
-  `process.env.SOME_MODEL ?? "default"` ships the feature dormant and hides the
-  real value from readers.
+  deploy values. Configuration is code: a constant where one value fits every
+  install, or a settings registry entry with a default and a schema when
+  operators tune it at runtime (see the configuration guide). An env-var
+  fallback like `process.env.SOME_MODEL ?? "default"` ships the feature dormant
+  and hides the real value from readers.
 
 ## Database
 
