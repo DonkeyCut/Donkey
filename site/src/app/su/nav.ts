@@ -1,4 +1,4 @@
-import { ChartColumn, CreditCard, ListChecks, Mail, UserRound } from "lucide-react";
+import { ChartColumn, CreditCard, FlaskConical, ListChecks, Mail, UserRound } from "lucide-react";
 import type { ComponentType } from "react";
 
 import { RunAnalyticsButton } from "@/app/su/analytics/RunAnalyticsButton";
@@ -57,6 +57,24 @@ export const SU_NAV: SuSurface[] = [
     icon: Mail,
     title: "Outreach",
     Action: ScanOutreachButton,
+  },
+  {
+    href: "/experiments",
+    label: "Experiments",
+    icon: FlaskConical,
+    title: "Experiments",
+    tabs: [
+      {
+        href: "/experiments/list",
+        label: "Experiments",
+        description: "Variants over settings, assigned once per account and kept.",
+      },
+      {
+        href: "/experiments/settings",
+        label: "Settings",
+        description: "Every runtime setting, with its default from code and its override here.",
+      },
+    ],
   },
   {
     href: "/jobs",
