@@ -751,54 +751,69 @@ function ChatSession({
     if (initialThread?.pi) hydratePiSession(threadId, initialThread.pi);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- initialThread is the mount-time snapshot
   }, [threadId]);
+  // The transport below is memoized per thread and reads the model at send
+  // time. The ref is kept current from an effect, and the transport reaches it
+  // and the other refs through these stable accessors, so nothing touches a
+  // ref while rendering.
   const modelRef = useRef(model);
-  modelRef.current = model;
+  useEffect(() => {
+    modelRef.current = model;
+  }, [model]);
+  const currentModel = useCallback(() => modelRef.current, []);
+  const sessionFor = useCallback((m: string) => providerSessions.current[provider(m)], []);
 
   // Gemini turns run their editor tools inside the transport loop (no engine
   // bridge); this flags them so onToolCall doesn't execute those calls again.
   const clientToolsRef = useRef(false);
+  const setClientTools = useCallback((on: boolean) => {
+    clientToolsRef.current = on;
+  }, []);
   const transport = useMemo<ChatTransport<UIMessage>>(() => {
-    const engine = new DefaultChatTransport<UIMessage>({
-      // The engine origin is discovered asynchronously; await it per request
-      // (not at mount) so an early send still targets the local engine rather
-      // than the hosted origin, where the Cut APIs 404. engineReady memoizes,
-      // so only the first request pays for discovery. CLI chat always runs on
-      // this Mac's engine — even for a cloud project — so the URL comes from
-      // localBackend (read after the origin resolves), which carries the
-      // account scope the engine requires on every data route.
-      prepareSendMessagesRequest: async ({ messages }) => {
-        await engineReady();
-        return {
-          api: localBackend.url("/api/cut/ai/chat"),
-          body: {
-            messages,
-            model: modelRef.current,
-            context: buildAiContext(),
-            providerSession: providerSessions.current[provider(modelRef.current)],
-          },
-        };
-      },
-    });
+    // Built on the first send: a request callback handed to a constructor
+    // here would count as running during render, and it reads the model.
+    let engineTransport: DefaultChatTransport<UIMessage> | null = null;
+    const engine = () =>
+      (engineTransport ??= new DefaultChatTransport<UIMessage>({
+        // The engine origin is discovered asynchronously; await it per request
+        // (not at mount) so an early send still targets the local engine rather
+        // than the hosted origin, where the Cut APIs 404. engineReady memoizes,
+        // so only the first request pays for discovery. CLI chat always runs on
+        // this Mac's engine — even for a cloud project — so the URL comes from
+        // localBackend (read after the origin resolves), which carries the
+        // account scope the engine requires on every data route.
+        prepareSendMessagesRequest: async ({ messages }) => {
+          await engineReady();
+          return {
+            api: localBackend.url("/api/cut/ai/chat"),
+            body: {
+              messages,
+              model: currentModel(),
+              context: buildAiContext(),
+              providerSession: sessionFor(currentModel()),
+            },
+          };
+        },
+      }));
     return {
       // Claude/Codex chat through the local engine; Gemini goes straight from
       // the page to Donkey's hosted inference with the user's session.
       sendMessages: async (options) => {
-        if (provider(modelRef.current) === "gemini") {
-          clientToolsRef.current = true;
+        if (provider(currentModel()) === "gemini") {
+          setClientTools(true);
           return streamCutChat({
             threadId,
-            model: modelRef.current,
+            model: currentModel(),
             messages: options.messages,
             abortSignal: options.abortSignal,
             deps: productionDeps(),
           });
         }
-        clientToolsRef.current = false;
-        return engine.sendMessages(options);
+        setClientTools(false);
+        return engine().sendMessages(options);
       },
-      reconnectToStream: (options) => engine.reconnectToStream(options),
+      reconnectToStream: (options) => engine().reconnectToStream(options),
     };
-  }, [threadId]);
+  }, [threadId, currentModel, sessionFor, setClientTools]);
 
   const { messages, sendMessage, stop, status, error, clearError } = useChat({
     id: threadId,
