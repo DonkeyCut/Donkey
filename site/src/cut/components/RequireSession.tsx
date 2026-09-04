@@ -8,8 +8,9 @@ import {
   rememberedEngineUser,
   setEngineUser,
 } from "@/cut/lib/api";
-import { useAppLoaded } from "@/lib/analytics";
+import { reportExposures, useAppLoaded } from "@/lib/analytics";
 import { authClient } from "@/lib/auth-client";
+import { useAccountConfig } from "@/queries/accountConfig";
 
 // Session gate for the whole Cut app surface. The landing CTAs already route
 // signed-out clicks through /sign-in (useAppEntryHref); this covers direct
@@ -25,6 +26,15 @@ export function RequireSession({ children }: { children: ReactNode }) {
   const userId = session?.user.id;
 
   useAppLoaded("cut", session?.user);
+
+  // The account's configuration — public settings after overrides and
+  // experiments — fetched behind the first paint, once the session is known.
+  // Reading it is exposure, reported after `identify` above has bound the id.
+  const config = useAccountConfig({ enabled: Boolean(userId) });
+  useEffect(() => {
+    if (!userId || !config.data) return;
+    reportExposures(config.data);
+  }, [userId, config.data]);
 
   // Paint first, verify behind: the account remembered from the last visit
   // opens the gate immediately, so a reload shows cached shelves while the

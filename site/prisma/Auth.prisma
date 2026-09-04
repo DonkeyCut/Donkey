@@ -27,6 +27,8 @@ model User {
   onboarding    UserOnboarding?
   emailSettings UserEmailSettings?
   outreach      UserOutreach[]
+  experimentAssignments ExperimentAssignment[]
+  experimentHoldout ExperimentHoldout?
 
   @@map("user")
 }

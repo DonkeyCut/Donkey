@@ -1,0 +1,68 @@
+// Runtime configuration and experiments. Every tunable is declared in code
+// (src/lib/config/registry.ts) with a default and a schema; a row here exists
+// only for a key a super user changed from su.donkeycut.com.
+
+model SettingOverride {
+  key         String   @id
+  value       Json
+  actorUserId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// An experiment is a set of variants, each carrying a full value for every
+// setting it changes, drawn by the accounts in its audience.
+model Experiment {
+  id          String    @id @default(cuid())
+  key         String    @unique
+  name        String
+  description String?
+  status      String    @default("draft") // draft | running | paused | ended
+  // [{ key, name, weight, config: { <settingKey>: <full value> } }]; the
+  // first variant is the control the others are measured against.
+  variants    Json
+  // Who can be enrolled (src/lib/config/audience.ts). {} admits everyone.
+  audience    Json      @default("{}")
+  // Share of the audience enrolled, 0..100.
+  percent     Int       @default(100)
+  // What the results job measures (src/lib/config/experiment.ts); the first
+  // metric decides the verdict.
+  metrics     Json      @default("[]")
+  // The last computed results and when (src/lib/config/results.ts).
+  results     Json?
+  resultsAt   DateTime?
+  startedAt   DateTime?
+  endedAt     DateTime?
+  actorUserId String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  assignments ExperimentAssignment[]
+}
+
+// Sticky: once a user is assigned, the row is what they read, whatever the
+// audience says later. A null variant holds the user out of this experiment.
+// A manual row was written from su and stands in place of the hash.
+model ExperimentAssignment {
+  id           String     @id @default(cuid())
+  experimentId String
+  experiment   Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  variant      String?
+  manual       Boolean    @default(false)
+  country      String?
+  assignedAt   DateTime   @default(now())
+  exposedAt    DateTime?
+
+  @@unique([experimentId, userId])
+  @@index([userId])
+}
+
+// Accounts kept out of every experiment: staff, testers, anyone who asked.
+model ExperimentHoldout {
+  userId      String   @id
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  note        String?
+  actorUserId String?
+  createdAt   DateTime @default(now())
+}

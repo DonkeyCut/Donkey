@@ -33,6 +33,9 @@ export type AnalyticsEvents = {
   cut_credits_pill_clicked: { dollars: number };
   cut_storage_upgrade_shown: { source: "quota-413" | "pill" };
   cut_grace_banner_shown: void;
+  // First exposure to an experiment variant; the same value rides every
+  // later event as a super property ($feature/<experiment>).
+  experiment_exposed: { experiment: string; variant: string; $set: Record<string, string> };
   // Preview timing from an account that turned diagnostics on, one summary per
   // half minute of playback. Numbers only — see `PerfSample` in the Cut
   // preview's perfTrace for what each one means and why it is here.
@@ -77,6 +80,46 @@ export function useAppLoaded(
     posthog.identify(id, email ? { email } : undefined);
     track("app_loaded", { app });
   }, [app, id, email]);
+}
+
+// Runs once per page load, after `identify`: every assignment becomes a super
+// property so any later event breaks down by variant, and a first exposure is
+// its own event with the variant pinned on the person. A property registered
+// on an earlier visit is dropped when the account no longer holds that
+// experiment, so an ended one stops tagging events.
+const REGISTERED_KEY = "dk-experiment-features";
+let exposuresReported = false;
+
+function readRegistered(): string[] {
+  try {
+    const raw = window.localStorage.getItem(REGISTERED_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((k): k is string => typeof k === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export function reportExposures(config: { experiments: Record<string, string>; exposed: string[] }): void {
+  if (exposuresReported) return;
+  exposuresReported = true;
+  const keys = Object.keys(config.experiments);
+  const features: Record<string, string> = {};
+  for (const [key, variant] of Object.entries(config.experiments)) features[`$feature/${key}`] = variant;
+  for (const stale of readRegistered()) {
+    if (!keys.includes(stale)) posthog.unregister(`$feature/${stale}`);
+  }
+  try {
+    window.localStorage.setItem(REGISTERED_KEY, JSON.stringify(keys));
+  } catch {
+    // A browser that refuses storage still reports this load correctly.
+  }
+  if (keys.length) posthog.register(features);
+  for (const key of config.exposed) {
+    const variant = config.experiments[key];
+    if (!variant) continue;
+    track("experiment_exposed", { experiment: key, variant, $set: { [`experiment_${key}`]: variant } });
+  }
 }
 
 export function track<Name extends keyof AnalyticsEvents>(
