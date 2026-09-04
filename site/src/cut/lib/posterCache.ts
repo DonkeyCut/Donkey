@@ -33,7 +33,7 @@ type PosterKind = "card" | "frame";
 const WIDTH: Record<PosterKind, number> = { card: 480, frame: 640 };
 const QUALITY = 0.72;
 
-// How long to keep asking a surface for its picture, and how often. A card
+// How long to keep asking a card for its picture, and how often. A card
 // element renders its poster frame without ever firing a reliable event — a
 // preload="metadata" video may never reach `loadeddata` — so the picture is
 // taken by asking rather than by listening.
@@ -97,8 +97,61 @@ export function capturePoster(
   }
 }
 
+// The stage says when it has drawn a real picture, so the preview's poster
+// is taken from a frame known to be there. Asking on a timer instead meant a
+// pixel readback of the stage every few hundred milliseconds for the first
+// twenty seconds of every open — each one a flush of the GPU work behind the
+// canvas, landing on the drop and the first play — for a picture the stage
+// could simply have announced.
+const pictureListeners = new Set<() => void>();
+
+/** The stage drew a paused frame with a picture in it. */
+export function noteStagePicture(): void {
+  for (const fn of pictureListeners) fn();
+}
+
+/** How long after a black picture the next one is read. A cut that opens on
+ * a fade from black draws pictures for a while before one has anything in it. */
+const RETRY_MS = 1_000;
+
+/** Keep the stage's picture once it has drawn one, reading the pixels off the
+ * draw the stage announces. A picture that reads back black is tried again a
+ * second later, for as long as the stage stays open. Returns a canceller for
+ * the caller's cleanup. */
+export function capturePosterOnPicture(
+  kind: PosterKind,
+  projectId: string,
+  source: () => HTMLCanvasElement | null,
+  scope?: CutMode
+): () => void {
+  let last = -Infinity;
+  let pending = 0;
+  const onPicture = () => {
+    if (pending || performance.now() - last < RETRY_MS) return;
+    // Off the stage's own tick: the readback waits for the frame to be
+    // handed over, so the draw that announced it is not held for it.
+    pending = window.setTimeout(() => {
+      pending = 0;
+      const el = source();
+      // No canvas this instant is a render between the draw and this read,
+      // which says nothing about the picture: wait for the next draw. Only a
+      // picture actually kept ends the listening.
+      if (!el) return;
+      last = performance.now();
+      if (capturePoster(kind, projectId, el, scope)) pictureListeners.delete(onPicture);
+    }, 0);
+  };
+  pictureListeners.add(onPicture);
+  return () => {
+    pictureListeners.delete(onPicture);
+    window.clearTimeout(pending);
+  };
+}
+
 /** Keep asking `source` for its picture until one is there to keep, then stop.
- * Returns a canceller for the caller's cleanup. */
+ * A card's video element renders its poster frame without ever firing a
+ * reliable event, so the picture is taken by asking. Returns a canceller for
+ * the caller's cleanup. */
 export function capturePosterWhenReady(
   kind: PosterKind,
   projectId: string,

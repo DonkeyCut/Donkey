@@ -15,7 +15,7 @@ import { clipLen, projectDuration, useEditor } from "@/cut/lib/store";
 import { copyStageFrame, primeStageFrame, stageHasFrame } from "@/cut/lib/stageFrame";
 import {
   capturePoster,
-  capturePosterWhenReady,
+  capturePosterOnPicture,
   paintPoster,
   readPoster,
 } from "@/cut/lib/posterCache";
@@ -69,7 +69,7 @@ function useCachedFirstFrame(canvasRef: RefObject<HTMLCanvasElement | null>) {
         void paintPoster(canvas, data);
       }
     });
-    const stop = capturePosterWhenReady("frame", projectId, () => canvasRef.current);
+    const stop = capturePosterOnPicture("frame", projectId, () => canvasRef.current);
     return () => {
       alive = false;
       stop();

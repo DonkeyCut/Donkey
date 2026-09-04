@@ -29,6 +29,11 @@
  *                    and for late frames rising from the first pass to the
  *                    last. This is the session-decay case: a preview that is
  *                    smooth for a minute and choppy after five fails here.
+ *   a big file, dropped — a 4K clip goes from the library shelf onto the
+ *                    timeline by the real drag, play is pressed as it lands,
+ *                    and the trace is checked for the picture arriving with
+ *                    the sound and for what held the thread in between. The
+ *                    one case that takes its media the way a person does.
  *
  * Fixtures build deterministically into dist/cut-perf/ (gitignored) from the
  * bundled stock clips, so the montage's cut times are known exactly.
@@ -39,7 +44,7 @@
  *   npm run eval:cut-perf [--only <case>] [--runs N] [--out path]
  *                         [--enforce-budgets] [--headed] [--dump-trace]
  *                         [--machine desktop|laptop|ryzen-5500u|potato] [--cpu N]
- *                         [--net <kbps>] [--rtt <ms>]
+ *                         [--net <kbps>] [--rtt <ms>] [--big-file <path>]
  */
 
 import { chromium, type Browser, type Page } from "playwright";
@@ -307,6 +312,16 @@ interface Trace {
   presents: PresentRecord[];
   seeks: SeekRecord[];
   longTasks: { at: number; ms: number }[];
+  /** The same stretches as frames, naming the script that held each one. */
+  longFrames: {
+    at: number;
+    ms: number;
+    blockedMs: number;
+    fn: string;
+    src: string;
+    invoker: string;
+    scriptMs: number;
+  }[];
   ticks: number;
   liveSamples: number[];
   liveSources: number[];
@@ -958,6 +973,9 @@ interface EvalCase {
   minKbps?: number;
   /** The project this case measures; the montage of stock clips when unset. */
   seed?: (page: Page) => Promise<Fixture>;
+  /** A file put on the library shelf before the editor opens, for a case
+   * that takes its media the way a person does. Removed after the run. */
+  shelf?: { file: () => Promise<string>; name: string };
   run: (page: Page, fx: Fixture) => Promise<CaseResult>;
 }
 
@@ -1188,7 +1206,9 @@ async function judgePlay(
   // the link's arithmetic, so counting them judges the fixture rather than the
   // preview. What such a case is for is whether the picture stayed with the
   // sound while it went short, which the lag and clock notes below still ask.
-  starved = false
+  starved = false,
+  // What a case asks of the trace beyond the questions every play shares.
+  extra?: (trace: Trace, notes: string[]) => void
 ): Promise<CaseResult> {
   const trace = await stopTrace(page);
   const notes: string[] = [];
@@ -1266,6 +1286,19 @@ async function judgePlay(
         .map(([id, r]) => `${id}:${Math.round((100 * r.stale) / r.n)}%/${Math.round(r.worst)}ms`);
       if (dark.length) console.log(`[detail]   dark ${dark.join(" ")}`);
     }
+    // What held the thread, worst first, with the script the browser blames.
+    // The frame's length and the blocking inside it are both here: a frame is
+    // long the moment its paint is, and only the blocking is time no one else
+    // could have used.
+    const held = [...(trace.longFrames ?? [])].sort((a, b) => b.blockedMs - a.blockedMs).slice(0, 6);
+    for (const l of held) {
+      const who = l.fn || l.src ? ` ${l.fn || "?"}@${l.src || "?"} (${l.invoker}, ${l.scriptMs}ms script)` : "";
+      console.log(
+        `[detail] blocked ${l.blockedMs}ms of a ${Math.round(l.ms)}ms frame at +${Math.round(
+          l.at - trace.presents[0].at
+        )}ms${who}`
+      );
+    }
   }
 
   // The plainest question this case asks, and the one a viewer would ask:
@@ -1307,6 +1340,7 @@ async function judgePlay(
   // Long tasks are reported, not gated: this case judges sync, decay and
   // memory, and the stray dev-build hiccup that leaves every frame exact is
   // not a fail.
+  extra?.(trace, notes);
   return {
     name,
     bucket: "playback",
@@ -1915,6 +1949,172 @@ const filmstripCutsCase: EvalCase = {
   },
 };
 
+// ── A big file dropped from the library ─────────────────────────────────────
+//
+// The complaint this case is written for: a long 4K file dragged from the
+// library shelf onto the timeline plays its sound and moves the playhead
+// while the picture sits on one frame. Every other playback case seeds the
+// store, which measures the engine on its own. This one takes the file the
+// way a person does — an upload to the shelf, the card dragged onto track 0,
+// play pressed the moment it lands — so everything the drop sets off in the
+// page (strip captures, waveform peaks, the poster) is on the clock beside
+// the engine, and the first seconds are the seconds judged.
+
+/** The big file: 4K at thirty frames, keyframes a second apart, at a phone
+ * recording's rate. H.264, which every machine the suite runs on decodes. */
+const BIG_S = 90;
+const BIG_KBPS = 40_000;
+/** The name the file carries on the shelf, which is how the card is found
+ * and how a crashed run's copy is swept. */
+const BIG_NAME = "cut-perf-4k.mp4";
+/** How much of the file is played. The report lives in the first stretch. */
+const BIG_PLAY_S = 20;
+/** How long the picture may take to arrive after play is pressed on a fresh
+ * drop, on the reference machine: the file opens, the first keyframe decodes,
+ * and the strip's own captures are competing for the same decoder. */
+const FIRST_PICTURE_S = 1.5;
+
+/** A file of one's own in the big file's place — the recording a report
+ * came with, or a shape the fixture is not (HEVC off a phone) — with
+ * `--big-file <path>`. The fixture is what the nightly measures. */
+async function buildBigClip(): Promise<string> {
+  const own = arg("--big-file");
+  if (own) return path.resolve(own);
+  const dst = path.join(OUT, "library-4k.mp4");
+  if (existsSync(dst)) return dst;
+  const src = path.join(STOCK, "animal-dog-sprint.mp4");
+  await run("ffmpeg", [
+    "-y", "-loglevel", "error",
+    "-stream_loop", "-1", "-i", src,
+    "-f", "lavfi", "-i", "sine=frequency=330:sample_rate=48000",
+    "-t", String(BIG_S),
+    "-map", "0:v:0", "-map", "1:a:0",
+    "-c:v", "libx264", "-preset", "ultrafast",
+    "-g", "30", "-keyint_min", "30",
+    "-b:v", `${BIG_KBPS}k`, "-maxrate", `${BIG_KBPS}k`, "-bufsize", `${BIG_KBPS * 2}k`,
+    "-r", "30", "-vf", "scale=3840:2160", "-pix_fmt", "yuv420p",
+    "-c:a", "aac", "-b:a", "128k",
+    "-shortest",
+    dst,
+  ]);
+  return dst;
+}
+
+/** Put a file on the dev account's library shelf, and hand back its id. */
+async function shelve(file: string, name: string): Promise<string> {
+  const form = new FormData();
+  form.set("file", new File([await readFile(file)], name, { type: "video/mp4" }));
+  const res = await fetch(`${BASE}/api/cut/library?u=${DEV_USER}`, { method: "POST", body: form });
+  if (!res.ok) throw new Error(`library upload failed: ${res.status}`);
+  return ((await res.json()) as { id: string }).id;
+}
+
+async function unshelve(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/api/cut/library/${id}?u=${DEV_USER}`, { method: "DELETE" });
+  if (!res.ok && res.status !== 404) console.log(`[cleanup] delete library ${id} failed: ${res.status}`);
+}
+
+/** Remove the shelf copies a crashed run left behind. */
+async function sweepShelf(): Promise<void> {
+  const res = await fetch(`${BASE}/api/cut/library?u=${DEV_USER}`);
+  if (!res.ok) return;
+  const { assets = [] } = (await res.json()) as { assets?: { id: string; name: string }[] };
+  const stale = assets.filter((a) => a.name === BIG_NAME);
+  for (const a of stale) await unshelve(a.id);
+  if (stale.length) console.log(`[cleanup] removed ${stale.length} leftover shelf cop${stale.length === 1 ? "y" : "ies"}`);
+}
+
+/** Bring the Library sub-tab of the Media panel up and hand back the card. */
+async function libraryCard(page: Page, name: string) {
+  const tab = page.getByText("Library", { exact: true }).first();
+  if (!(await tab.isVisible().catch(() => false))) {
+    await page.getByText("Media", { exact: true }).first().click();
+    await tab.waitFor({ state: "visible", timeout: 10_000 });
+  }
+  await tab.click();
+  const card = page.locator("[data-sel-id]").filter({ hasText: name.replace(/\.mp4$/, "") }).first();
+  await card.waitFor({ state: "visible", timeout: 30_000 });
+  return card;
+}
+
+/** The real gesture: drag the card onto track 0 and wait for the clip to land. */
+async function dropOnTrack(page: Page, card: Awaited<ReturnType<typeof libraryCard>>): Promise<void> {
+  const surface = page.locator("[data-segment-drop]").first();
+  const box = await surface.boundingBox();
+  if (!box) throw new Error("no timeline drop surface");
+  await card.dragTo(surface, { targetPosition: { x: 160, y: box.height - 60 } });
+  await page.waitForFunction(
+    () => {
+      const w = window as unknown as { __cutDev: { useEditor: { getState(): { clips: unknown[] } } } };
+      return w.__cutDev.useEditor.getState().clips.length > 0;
+    },
+    undefined,
+    { timeout: 30_000 }
+  );
+}
+
+const libraryDropCase: EvalCase = {
+  name: "play-4k-from-library",
+  bucket: "playback",
+  transitions: false,
+  shelf: { file: buildBigClip, name: BIG_NAME },
+  // The project stays empty: the file arrives by the gesture below.
+  seed: async () => ({ cuts: [], duration: BIG_S }),
+  run: async (page) => {
+    const card = await libraryCard(page, BIG_NAME);
+    // The trace opens before the drop, so the drop's own work is in it.
+    await startTrace(page);
+    await dropOnTrack(page, card);
+    const pressed = await page.evaluate(() => performance.now());
+    await setPlaying(page, true);
+    await page.waitForFunction(
+      (end: number) => {
+        const dev = (window as unknown as {
+          __cutDev: { playheadAt(): number; useEditor: { getState(): { playing: boolean } } };
+        }).__cutDev;
+        return dev.playheadAt() >= end || !dev.useEditor.getState().playing;
+      },
+      BIG_PLAY_S,
+      { timeout: BIG_PLAY_S * 6000, polling: 100 }
+    );
+    await setPlaying(page, false);
+    return judgePlay(
+      page,
+      "play-4k-from-library",
+      1,
+      (p) => p.t > FIRST_PICTURE_S * MACHINE.cpu && p.t < BIG_PLAY_S - 0.3,
+      false,
+      (trace, notes) => {
+        const first = trace.presents.find((p) => p.at >= pressed && p.exact && !p.stale && p.clipId);
+        const wait = first ? (first.at - pressed) / 1000 : Infinity;
+        if (wait > FIRST_PICTURE_S * MACHINE.cpu)
+          notes.push(`first picture ${Number.isFinite(wait) ? `${wait.toFixed(2)}s` : "never"} after play`);
+        // The play runs on the thread the picture is drawn from, and this is
+        // what that thread was doing once the picture was there. What comes
+        // before belongs to the drop's own render and to the open — the first
+        // 4K frame handed from the decoder to a canvas is a beat of GPU work
+        // on its own — and both are in the trace to be read.
+        //
+        // Blocked time rather than the task's own length, because a task is
+        // only reported at all once it passes fifty milliseconds: measured by
+        // length against a frame's budget, every long task there is fails,
+        // and the dev build's own overlay fails it as surely as the preview
+        // would. What is blocked is what nothing else could run in.
+        const from = first?.at ?? pressed;
+        const held = (trace.longFrames ?? [])
+          .filter((f) => f.at >= from)
+          .sort((a, b) => b.blockedMs - a.blockedMs)[0];
+        if (held && held.blockedMs > GATE.longTaskMs) {
+          notes.push(
+            `${held.blockedMs}ms of a ${Math.round(held.ms)}ms frame blocked the main thread` +
+              (held.fn || held.src ? ` (${held.fn || "?"}@${held.src || "?"})` : "")
+          );
+        }
+      }
+    );
+  },
+};
+
 const CASES: EvalCase[] = [
   // The gesture the complaint was about: the pointer slides along the timeline
   // and the picture has to keep up with it, frame by frame.
@@ -2019,6 +2219,7 @@ const CASES: EvalCase[] = [
   idleCase,
   filmstripCase,
   filmstripCutsCase,
+  libraryDropCase,
 ];
 
 // ── Run ─────────────────────────────────────────────────────────────────────
@@ -2580,6 +2781,7 @@ async function main(): Promise<void> {
   // child per case and merges what they report.
   if (!ONLY) {
     await sweepProjects();
+    await sweepShelf();
     const results = await fanOut(cases.map((c) => c.name));
     await writeReport(results);
     return;
@@ -2603,6 +2805,7 @@ async function main(): Promise<void> {
         c.minKbps && MACHINE.netKbps > 0
           ? Math.max(MACHINE.netKbps, c.minKbps)
           : MACHINE.netKbps;
+      const shelfId = c.shelf ? await shelve(await c.shelf.file(), c.shelf.name) : null;
       const projectId = await newProject();
       let r: CaseResult;
       try {
@@ -2615,6 +2818,7 @@ async function main(): Promise<void> {
         // project would keep writing to a doc the engine has just removed.
         await page.goto("about:blank").catch(() => {});
         await deleteProject(projectId);
+        if (shelfId) await unshelve(shelfId);
       }
       results.push(r);
       const mark = r.pass ? "ok  " : "FAIL";

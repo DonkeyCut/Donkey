@@ -91,10 +91,26 @@ export interface LongTaskRecord {
   ms: number;
 }
 
+/** A frame the browser reported as long, with the script it blames. */
+export interface LongFrameRecord {
+  at: number;
+  ms: number;
+  /** Of that, the part no other work could run in. */
+  blockedMs: number;
+  fn: string;
+  src: string;
+  invoker: string;
+  scriptMs: number;
+}
+
 export interface Trace {
   presents: PresentRecord[];
   seeks: SeekRecord[];
   longTasks: LongTaskRecord[];
+  /** The same stretches seen as frames, naming what held them. A long frame
+   * spans the task, the style pass, the layout and the paint, so its length
+   * is a different number from the task's and is read beside it. */
+  longFrames: LongFrameRecord[];
   /** rAF callbacks the engine ran, for checking that an idle editor is idle. */
   ticks: number;
   /** Decoded frames the sources are holding open, sampled per present. */
@@ -151,6 +167,7 @@ const SAME_TIME = 0.004;
 
 let trace: Trace | null = null;
 let observer: PerformanceObserver | null = null;
+let frameObserver: PerformanceObserver | null = null;
 /** The seek still waiting for its picture. A later seek replaces it, which is
  * what makes a fast drag measure the position it settled on. */
 let pendingSeek: SeekRecord | null = null;
@@ -163,6 +180,7 @@ export function startTrace(): void {
     presents: [],
     seeks: [],
     longTasks: [],
+    longFrames: [],
     ticks: 0,
     liveSamples: [],
     liveSources: [],
@@ -187,12 +205,40 @@ export function startTrace(): void {
     // run.
     observer = null;
   }
+  // Beside it, the same stretches as frames. A long task says a frame was
+  // held; a long animation frame says which script held it, which is the
+  // question a report leads to. They are kept apart because their lengths
+  // mean different things and the budgets are set against the task's.
+  try {
+    frameObserver = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        if (!trace) continue;
+        const lead = leadScript(entry as LongFrameEntry);
+        keep(trace.longFrames, {
+          at: entry.startTime,
+          ms: entry.duration,
+          blockedMs: Math.round((entry as LongFrameEntry).blockingDuration ?? 0),
+          fn: lead?.sourceFunctionName ?? "",
+          src: chunkName(lead?.sourceURL),
+          invoker: lead?.invoker ?? "",
+          scriptMs: Math.round(lead?.duration ?? 0),
+        });
+      }
+    });
+    frameObserver.observe({ type: "long-animation-frame", buffered: false });
+  } catch {
+    // Long animation frames are newer than long tasks; a browser without them
+    // still reports the task.
+    frameObserver = null;
+  }
 }
 
 export function stopTrace(): Trace | null {
   const out = trace;
   observer?.disconnect();
   observer = null;
+  frameObserver?.disconnect();
+  frameObserver = null;
   trace = null;
   pendingSeek = null;
   return out;
@@ -997,6 +1043,13 @@ function watchInputs(): () => void {
   };
 }
 
+/** The script that held a frame the longest, of those the browser named. */
+function leadScript(entry: LongFrameEntry): LongFrameScript | null {
+  let lead: LongFrameScript | null = null;
+  for (const s of entry.scripts ?? []) if (!lead || s.duration > lead.duration) lead = s;
+  return lead;
+}
+
 function noteLongFrame(entry: LongFrameEntry): void {
   const m = threadMeter;
   if (!m) return;
@@ -1010,10 +1063,9 @@ function noteLongFrame(entry: LongFrameEntry): void {
   }
   const scripts = entry.scripts ?? [];
   let scriptMs = 0;
-  let lead: LongFrameScript | null = null;
+  const lead = leadScript(entry);
   for (const s of scripts) {
     scriptMs += s.duration;
-    if (!lead || s.duration > lead.duration) lead = s;
     const fn = s.sourceFunctionName || chunkName(s.sourceURL);
     const key = `${s.invoker ?? ""}>${fn}`;
     m.byScript.set(key, (m.byScript.get(key) ?? 0) + s.duration);

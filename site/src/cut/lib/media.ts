@@ -24,8 +24,10 @@ import {
   probeMediaFile,
   UnreadableMediaError,
   videoTrackOf,
+  type IdleGate,
   type MediaHandle,
 } from "./mediaRead";
+import type { WrappedCanvas } from "mediabunny";
 import {
   clearPendingUpload,
   dropLocalMedia,
@@ -774,6 +776,53 @@ export function importRemote(
     localUrl: init.url,
     send: (opts) => withRetries(copy ?? download, opts),
   });
+  return asset;
+}
+
+/**
+ * Register media that has already landed in the project's storage as an
+ * asset, at the address it will always play from.
+ *
+ * The other way in, `importRemote`, plays from a source address while the
+ * bytes copy behind the editor and moves every reader once they land. A copy
+ * that was over before the asset existed has nothing to move: the first read
+ * opens the stored file, and no reader ever holds the file at two addresses.
+ */
+export async function registerLandedAsset(
+  projectId: string,
+  init: {
+    fileName: string;
+    name: string;
+    type: AssetType;
+    duration: number;
+    width?: number;
+    height?: number;
+  }
+): Promise<MediaAsset> {
+  const asset: MediaAsset = {
+    id: uid(),
+    fileName: init.fileName,
+    name: init.name,
+    type: init.type,
+    duration: init.duration,
+    ...(init.width !== undefined ? { width: init.width } : {}),
+    ...(init.height !== undefined ? { height: init.height } : {}),
+    url: await storedMediaUrl(projectId, init.fileName),
+  };
+  useEditor.getState().addAsset(asset);
+  void enrichAsset(asset);
+  // A shelf's dimensions are what it was told; the file's are what it has.
+  // Everything sized off the asset — the fit, the reader's budget, an export's
+  // source size — reads this, so the truth lands behind the placement.
+  if (init.type === "video") {
+    void probeMediaFile(asset.url)
+      .then((m) => {
+        if (m.hasVideo) {
+          useEditor.getState().updateAsset(asset.id, { width: m.width, height: m.height });
+        }
+      })
+      .catch(() => {});
+  }
   return asset;
 }
 
@@ -1526,6 +1575,91 @@ export function keepImportedBytes(assetId: string, bytes: Blob): void {
   }
 }
 
+/**
+ * Resolves once nothing is playing.
+ *
+ * The reads behind the editor — a waveform, a strip, a scene probe, a tile
+ * capture — open the same file the preview is playing from, and on a big
+ * file they take what the picture needs: decoder slots, the link's width, and
+ * the thread the frames are drawn on. A play is the urgent thing; this work
+ * waits for it to stop and picks up where it was. Cheap when nothing is
+ * playing, which is when it is awaited most.
+ */
+/** What a long read consults to know the preview wants the file back. */
+export const IDLE_GATE: IdleGate = {
+  busy: () => useEditor.getState().playing,
+  idle: () => idlePlayback(),
+};
+
+const idleWaiters = new Set<() => void>();
+let idleWatch: (() => void) | null = null;
+
+/** Wake `resolve` when the cut stops playing; the handle stops the wait. One
+ * store subscription serves every waiter, since it runs on every write the
+ * editor makes and a play is when the writes are busiest. */
+function waitForIdle(resolve: () => void): () => void {
+  idleWaiters.add(resolve);
+  idleWatch ??= useEditor.subscribe((s) => {
+    if (s.playing) return;
+    const woken = [...idleWaiters];
+    idleWaiters.clear();
+    idleWatch?.();
+    idleWatch = null;
+    for (const fn of woken) fn();
+  });
+  return () => {
+    idleWaiters.delete(resolve);
+    if (idleWaiters.size) return;
+    idleWatch?.();
+    idleWatch = null;
+  };
+}
+
+export function idlePlayback(): Promise<void> {
+  if (!useEditor.getState().playing) return Promise.resolve();
+  return new Promise((resolve) => void waitForIdle(resolve));
+}
+
+/** The same wait, with a handle for a caller that may stop wanting it — a
+ * wait left running holds its place in the set until the play ends. */
+export function idleWait(): { done: Promise<void>; cancel: () => void } {
+  if (!useEditor.getState().playing) return { done: Promise.resolve(), cancel: () => {} };
+  let cancel = () => {};
+  const done = new Promise<void>((resolve) => {
+    cancel = waitForIdle(resolve);
+  });
+  return { done, cancel };
+}
+
+/**
+ * `framesAt`, given back while the cut is playing.
+ *
+ * A sweep that merely stops pulling still holds everything it opened: the
+ * file, the decoder, and the frames the decode pump counts in flight — the
+ * slot the preview was short of. So a play ends the walk outright, which
+ * disposes the reader with it, and the times still owed are read by a fresh
+ * walk once the play stops.
+ */
+async function* idleFramesAt(
+  url: string,
+  times: number[],
+  size?: { height: number }
+): AsyncGenerator<WrappedCanvas | null> {
+  let from = 0;
+  while (from < times.length) {
+    await idlePlayback();
+    const before = from;
+    for await (const frame of framesAt(url, times.slice(from), size)) {
+      yield frame;
+      from++;
+      if (useEditor.getState().playing) break;
+    }
+    // A pass that answered nothing has nothing more to give — an unreadable
+    // file, a walk that died — and another would open it forever.
+    if (from === before) return;
+  }
+}
+
 /** Generate filmstrip thumbnails / waveform peaks and merge them into the
  * store. Safe to call repeatedly; skips assets that are already enriched.
  * `src` overrides where the frames are read from — an import still uploading
@@ -1542,6 +1676,13 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
         useEditor.getState().updateAsset(asset.id, { thumbs: [src], thumbStep: IMAGE_CLIP_SECONDS });
       }
     } else if (asset.type === "video") {
+      // A clip dropped and played at once is played first; the strip and the
+      // sound band fill in when the play stops.
+      const openProject = useEditor.getState().projectId;
+      await idlePlayback();
+      // A play is long enough to leave the project in it. Nothing this sweep
+      // writes belongs to whatever is open now.
+      if (useEditor.getState().projectId !== openProject) return;
       // The clip box draws the sound under the picture, so a video enriches
       // waveform peaks alongside its filmstrip. The two are separate reads of
       // the file, so the peaks decode starts here and runs beside the strip's
@@ -1601,6 +1742,9 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
       await peaksRun;
       enrichRetries.delete(asset.id);
     } else if (asset.type === "audio" && !asset.peaks?.length) {
+      const openProject = useEditor.getState().projectId;
+      await idlePlayback();
+      if (useEditor.getState().projectId !== openProject) return;
       const publish = (peaks: number[]) => useEditor.getState().updateAsset(asset.id, { peaks });
       try {
         const peaks = await loadPeaks(asset, held ?? src, publish);
@@ -1792,7 +1936,7 @@ async function loadPeaks(
   const key = peaksCacheKey(useEditor.getState().projectId, asset.id);
   const cached = await readCachedPeaks(key, asset.duration);
   if (cached) return cached;
-  const peaks = await makePeaks(src, asset.duration, onPartial);
+  const peaks = await makePeaks(src, asset.duration, onPartial, IDLE_GATE);
   writeCache(key, { peaks, duration: asset.duration, at: Date.now() });
   return peaks;
 }
@@ -1845,7 +1989,7 @@ async function g16Sweep(url: string, times: number[]): Promise<(Float32Array | n
   }) as CanvasRenderingContext2D | null;
   if (!ctx) return times.map(() => null);
   const out: (Float32Array | null)[] = [];
-  for await (const frame of framesAt(url, times, { height: SIGNATURE_SIZE })) {
+  for await (const frame of idleFramesAt(url, times, { height: SIGNATURE_SIZE })) {
     if (!frame) {
       out.push(null);
       continue;
@@ -1979,7 +2123,7 @@ async function makeThumbs(
     return thumbs;
   };
   let published = 0;
-  for await (const frame of framesAt(url, times, { height: THUMB_H })) {
+  for await (const frame of idleFramesAt(url, times, { height: THUMB_H })) {
     captured.push(frame ? await rasterCanvasToDataUrl(frame.canvas, "image/jpeg", 0.92) : null);
     if (!onTiles || captured.length >= times.length) continue;
     const now = Date.now();
@@ -2053,7 +2197,7 @@ async function refineSceneCuts(assetId: string, url: string, duration: number) {
     }
     const regrabbed = new Map<number, string>();
     let k = 0;
-    for await (const frame of framesAt(
+    for await (const frame of idleFramesAt(
       url,
       moved.map((m) => m.t),
       { height: THUMB_H }
@@ -2215,6 +2359,9 @@ const edgePool = new Map<string, Promise<EdgeReader>>();
 holdMemory("edgeFrames", stripBytes);
 holdMemory("libraryPictures", derivedBytes);
 let edgePumping = false;
+/** Wakes a pump holding the strip's captures for a play, when a clip-edge
+ * capture arrives that should not wait for it. */
+let edgeWake: (() => void) | null = null;
 
 function edgeKey(url: string, time: number, height: number) {
   return `${url}#${time.toFixed(2)}@${height}`;
@@ -2248,8 +2395,23 @@ export function requestEdgeFrame(
       prev?.resolvers.forEach((r) => r(null));
       queue.set(slot, { url, time, height, key, resolvers: [resolve] });
     }
+    if (!opts?.background) edgeWake?.();
     void pumpEdgeFrames();
   });
+}
+
+/** Let go of every queued capture whose slot starts with `prefix`: the
+ * surface that asked is gone, and a 4K keyframe decoded for a ghost that has
+ * already landed is a decoder taken from the clip it became. A capture
+ * mid-read finishes; only the queue empties. */
+export function dropEdgeFrames(prefix: string): void {
+  for (const queue of [edgeQueue, edgeBackQueue]) {
+    for (const [slot, req] of queue) {
+      if (!slot.startsWith(prefix)) continue;
+      queue.delete(slot);
+      req.resolvers.forEach((r) => r(null));
+    }
+  }
 }
 
 /** Captures still queued or mid-read. The filmstrip eval waits on zero to
@@ -2315,6 +2477,25 @@ async function pumpEdgeFrames() {
   edgePumping = true;
   try {
     for (;;) {
+      // Strip tiles read behind everything: behind every clip-edge capture,
+      // and behind a play. The timeline follows the playhead while it plays,
+      // and every scroll asks for the tiles that came into view — captures
+      // that would open a second decoder on the file being played and read
+      // its keyframes beside the walk. They land once the play stops. An
+      // edge capture arriving meanwhile wakes the pump for itself.
+      if (edgeQueue.size === 0 && edgeBackQueue.size > 0) {
+        const idle = idleWait();
+        await Promise.race([
+          idle.done,
+          new Promise<void>((resolve) => {
+            edgeWake = resolve;
+          }),
+        ]);
+        // Whichever won, the other is no longer wanted: a wait left in the
+        // set outlives every wake of a long play.
+        idle.cancel();
+        edgeWake = null;
+      }
       const queue = edgeQueue.size ? edgeQueue : edgeBackQueue;
       const next = queue.entries().next();
       if (next.done) break;
@@ -2370,11 +2551,12 @@ const PEAKS_MAX = 60_000;
 function makePeaks(
   src: string | Blob,
   duration: number,
-  onPartial?: (peaks: number[]) => void
+  onPartial?: (peaks: number[]) => void,
+  gate?: IdleGate
 ): Promise<number[]> {
   const buckets =
     duration > 0
       ? Math.min(PEAKS_MAX, Math.max(400, Math.round(duration * PEAKS_PER_SECOND)))
       : 1600;
-  return audioPeaks(src, buckets, onPartial);
+  return audioPeaks(src, buckets, onPartial, gate);
 }

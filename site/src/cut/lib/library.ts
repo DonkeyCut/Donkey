@@ -16,6 +16,7 @@ import {
   MAX_FONT_BYTES,
   presignedUpload,
   probeFileMeta,
+  registerLandedAsset,
   uploadProjectMediaTo,
 } from "./media";
 import {
@@ -716,13 +717,37 @@ export async function importLibraryAsset(
 ): Promise<MediaAsset> {
   if (lib.type === "font")
     throw new Error("Fonts are used from the font menu, not the timeline.");
+  // The project's media takes the name the shelf shows, so a phone
+  // recording lands on the timeline under its title.
+  const name = lib.title || lib.name;
+  // On this Mac the engine lands the file with a clone, and it is landed
+  // before this returns: the asset registers at the project's own address
+  // and plays from there. Registered on the shelf's address first, the
+  // preview would open the file there, then open it again at the project's
+  // once the copy reported — two readers and a walk restarted on a file
+  // whose every keyframe is a 4K decode — while the strip and the waveform
+  // went on reading the shelf's copy.
+  if (lib.residency === "local" && sameShelf(lib.residency)) {
+    const fileName = await copyLibraryFileToProject(
+      projectId,
+      lib.residency,
+      lib.fileName,
+      lib.id,
+    );
+    return registerLandedAsset(projectId, {
+      fileName,
+      name,
+      type: lib.type,
+      duration: lib.duration,
+      width: lib.width,
+      height: lib.height,
+    });
+  }
   return importRemote(
     projectId,
     {
       url: libraryMediaUrl(lib.fileName, lib.residency),
-      // The project's media takes the name the shelf shows, so a phone
-      // recording lands on the timeline under its title.
-      name: lib.title || lib.name,
+      name,
       fileName: lib.fileName,
       type: lib.type,
       duration: lib.duration,

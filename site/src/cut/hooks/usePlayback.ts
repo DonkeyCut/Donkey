@@ -2,6 +2,7 @@
 
 
 import { useEffect, type RefObject } from "react";
+import { noteStagePicture } from "@/cut/lib/posterCache";
 import {
   getClipSpans,
   overlayLayers,
@@ -200,6 +201,15 @@ class Engine {
   private lastRead: number | null = null;
   private readBackward = false;
   private lastWalkCost = 0;
+  /** Dev only: where a slow tick spent its time, phase by phase. */
+  private phases: string[] = [];
+  private phaseAt = 0;
+  private phase(label: string) {
+    if (process.env.NODE_ENV === "production") return;
+    const now = performance.now();
+    this.phases.push(`${label} ${Math.round(now - this.phaseAt)}`);
+    this.phaseAt = now;
+  }
   /** Whether the tick being drawn is a playing one — read by the matte
    * provider, which the compositor calls mid-frame. */
   private renderPlaying = false;
@@ -732,7 +742,16 @@ class Engine {
     // paint. Either way the loop stops as soon as there is nothing to do.
     if (playing || this.dirty) {
       this.dirty = false;
+      const at = performance.now();
+      this.phases.length = 0;
+      this.phaseAt = at;
       this.render(playing);
+      // A tick that held the thread past a few frames, with the phase that
+      // held it. The playhead write is where the timeline and the inspector
+      // re-render; the rest is the engine's own.
+      const ms = performance.now() - at;
+      if (process.env.NODE_ENV !== "production" && ms > 50)
+        engineLog(`engine ${this.serial} tick ${Math.round(ms)}ms: ${this.phases.join(", ")}`);
     }
     if (playing || this.dirty) this.schedule();
   }
@@ -741,6 +760,7 @@ class Engine {
     const s = useEditor.getState();
     const spans = getClipSpans(s.clips, s.assets);
     const total = projectDuration(s);
+    this.phase("spans");
     // The frame's color is the project's, read fresh each frame: every clear
     // and every letterbox below paints it, so a cut with no footage at all
     // still plays a picture.
@@ -817,6 +837,7 @@ class Engine {
     }
 
     const master = spans.find((sp) => t >= sp.start && t < sp.start + sp.len);
+    this.phase("clock");
 
     // Ask for the master's picture before clearing. A clip nothing has decoded
     // yet answers `pending`, and clearing on the strength of that would black
@@ -826,6 +847,7 @@ class Engine {
     // open can't freeze the playhead or carry playback past a stop mark.
     const masterFrame = master ? this.frameFor(master, t, playing, true) : MISSING_FRAME;
     const pendingMaster = masterFrame.kind === "pending";
+    this.phase("master");
     // A play whose master clip has decoded nothing has nothing to play: the
     // clock would carry the playhead across a stretch of the cut nobody saw or
     // heard, and land somewhere further on when the file finally opened. So it
@@ -859,11 +881,17 @@ class Engine {
       this.comp.subjectMatteProvider = (at) => this.behind.clipMatteOf(this.canvas, at);
       this.behind.draw(this.canvas, s.overlays, s.assets, t);
       this.comp.drawProjectFade(fadeGain);
+      // A paused draw is the picture standing still, which is when a
+      // readback of it costs nothing anyone is watching; a play's first
+      // frame is read back once the play stops and the frame is redrawn.
+      if (!playing && masterFrame.kind === "ready") noteStagePicture();
     }
+    this.phase("draw");
 
     // Decoders for what is about to arrive, and the ones nothing needs closed.
     this.warm(t, playing);
     this.pool.evict();
+    this.phase("warm");
 
     if (playing) {
       this.mixer.setMasterGain(fadeGain);
@@ -878,6 +906,7 @@ class Engine {
         }))
       );
       this.mixer.update(t, this.voicesAt(t, spans, master));
+      this.phase("audio");
       // A scoped effect preview auto-pauses at its stop mark; the end of the
       // cut stops playback outright.
       const stop = s.previewStopAt;
@@ -890,11 +919,13 @@ class Engine {
       } else {
         this.writeHead(t);
       }
+      this.phase("head");
     } else {
       // The sound's readers on the same footing as the picture's: the clip
       // under a parked playhead has its file open before the play begins,
       // rather than opening it once the clock is already running.
       this.mixer.warm(t, this.voicesAt(t, spans, master));
+      this.phase("audio");
     }
 
     if (tracing()) {

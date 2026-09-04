@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, constants, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ClipSound } from "@donkeycut/effects-kit";
 import { resolveParent, settleParents } from "@/cut/lib/folderTree";
@@ -84,6 +84,7 @@ export interface TemplateLayer {
   muted: boolean;
   speed?: number;
   speedCurve?: [number, number][];
+  reverse?: boolean;
   sound?: ClipSound;
   track: number;
   asClip?: boolean; // re-materializes as a track-0 timeline clip rather than an overlay
@@ -98,6 +99,7 @@ export interface TemplateAudio {
   fadeOut?: number;
   speed?: number;
   speedCurve?: [number, number][];
+  reverse?: boolean;
   sound?: ClipSound;
 }
 export interface LibraryTemplate {
@@ -361,7 +363,11 @@ export async function useInProject(
 
   const base = asset.fileName;
   const dest = await uniqueName(base, (n) => projectMediaPath(projectId, n));
-  await copyFile(libMediaPath(base), projectMediaPath(projectId, dest));
+  // A clone where the disk offers one: the project's file shares the
+  // shelf's blocks until either is written, so landing a multi-gigabyte
+  // recording is a metadata write, and the page reading the project's copy
+  // a moment later is not waiting behind the bytes.
+  await copyFile(libMediaPath(base), projectMediaPath(projectId, dest), constants.COPYFILE_FICLONE);
   return dest;
 }
 

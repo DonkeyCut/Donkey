@@ -1,5 +1,5 @@
 {
-  "at": "2026-09-03T10:17:17.872Z",
+  "at": "2026-09-04T11:49:57.661Z",
   "results": [
     {
       "name": "drop/selected",
@@ -10,8 +10,8 @@
     {
       "name": "drop/split",
       "what": "⌘B with the mouse still where it dropped cuts the new clip",
-      "ok": false,
-      "detail": "1 clips after ⌘B"
+      "ok": true,
+      "detail": ""
     },
     {
       "name": "drop/delete",
@@ -22,8 +22,8 @@
     {
       "name": "drop/typing",
       "what": "a chat composer focused before the drag lets go of the keys at the drop",
-      "ok": false,
-      "detail": "1 clips after ⌘B with DIV focused"
+      "ok": true,
+      "detail": ""
     }
   ]
 }

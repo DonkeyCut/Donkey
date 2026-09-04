@@ -733,44 +733,70 @@ const PEAKS_PUBLISH_MS = 250;
  * chunk — the moments the walk has not reached yet sit flat — and fills in
  * left to right until the returned array is the whole read.
  */
+/** What a long read consults to know something more urgent — a play of this
+ * same file — wants the decoder and the link back. */
+export interface IdleGate {
+  busy: () => boolean;
+  idle: () => Promise<void>;
+}
+
 export async function audioPeaks(
   src: string | Blob,
   buckets: number,
-  onPartial?: (peaks: number[]) => void
+  onPartial?: (peaks: number[]) => void,
+  gate?: IdleGate
 ): Promise<number[]> {
   // Peaks are a real decode; a headless runtime skips them and the waveform
   // enriches the next time a browser holds the asset.
   if (typeof AudioDecoder === "undefined") return [];
-  const input = openMedia(src);
-  try {
-    const track = await audioTrackOf(input);
-    if (!track) return [];
-    // Read the length first so each chunk can be folded into its bucket and
-    // dropped; without it the buckets aren't known until the last sample, and
-    // the whole file has to be held to place any of it.
-    const duration = await input.computeDuration();
-    if (!(duration > 0)) return [];
+  const peaks = new Array<number>(buckets).fill(0);
+  let published = 0;
+  // Where the next pass picks up. A play ends the walk rather than suspending
+  // it — a suspended walk keeps the file, the decoder and the buffers it had
+  // in flight, which is what the preview was short of — so the read resumes
+  // from the second it had reached.
+  let from = 0;
+  for (;;) {
+    await gate?.idle();
+    const input = openMedia(src);
+    let read = 0;
+    let done = true;
+    try {
+      const track = await audioTrackOf(input);
+      if (!track) return [];
+      // Read the length first so each chunk can be folded into its bucket and
+      // dropped; without it the buckets aren't known until the last sample, and
+      // the whole file has to be held to place any of it.
+      const duration = await input.computeDuration();
+      if (!(duration > 0)) return [];
 
-    const peaks = new Array<number>(buckets).fill(0);
-    let published = 0;
-    for await (const { buffer, timestamp } of new AudioBufferSink(track).buffers()) {
-      const data = buffer.getChannelData(0);
-      const rate = buffer.sampleRate;
-      // Every 8th sample, matching what the whole-file pass measured.
-      for (let i = 0; i < data.length; i += 8) {
-        const v = Math.abs(data[i]);
-        const at = (timestamp + i / rate) / duration;
-        const bucket = Math.min(buckets - 1, Math.max(0, Math.floor(at * buckets)));
-        if (v > peaks[bucket]) peaks[bucket] = v;
+      for await (const { buffer, timestamp } of new AudioBufferSink(track).buffers(from)) {
+        const data = buffer.getChannelData(0);
+        const rate = buffer.sampleRate;
+        // Every 8th sample, matching what the whole-file pass measured.
+        for (let i = 0; i < data.length; i += 8) {
+          const v = Math.abs(data[i]);
+          const at = (timestamp + i / rate) / duration;
+          const bucket = Math.min(buckets - 1, Math.max(0, Math.floor(at * buckets)));
+          if (v > peaks[bucket]) peaks[bucket] = v;
+        }
+        read++;
+        from = timestamp + buffer.duration;
+        if (gate?.busy()) {
+          done = false;
+          break;
+        }
+        if (!onPartial) continue;
+        const now = Date.now();
+        if (now - published < PEAKS_PUBLISH_MS) continue;
+        published = now;
+        onPartial(peaks.slice());
       }
-      if (!onPartial) continue;
-      const now = Date.now();
-      if (now - published < PEAKS_PUBLISH_MS) continue;
-      published = now;
-      onPartial(peaks.slice());
+    } finally {
+      input.dispose();
     }
-    return peaks;
-  } finally {
-    input.dispose();
+    // Read to the end, or a pass that got nothing — an unreadable file, a walk
+    // that died — which another pass would only repeat.
+    if (done || read === 0) return peaks;
   }
 }

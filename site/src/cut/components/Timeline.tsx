@@ -48,7 +48,8 @@ import { isDragActive, startDrag, subscribeDragActive } from "@/cut/lib/drag";
 import { keyboardToEditor, shortcutDecline } from "@/cut/lib/shortcutGate";
 import { additiveClick } from "@/cut/lib/hostKeys";
 import { CLIP_GAP, laneDragFor, laneDragParts, startLaneMove, startLaneTrim, type LaneDrag, type LaneKind } from "@/cut/lib/laneTracks";
-import { downloadMedia, ensurePeaks, importImage, importStockMusic, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia, stripFailedFor, subscribeStripStatus } from "@/cut/lib/media";
+import { reportSwallowed } from "@/cut/lib/report";
+import { downloadMedia, dropEdgeFrames, ensurePeaks, importImage, importStockMusic, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia, stripFailedFor, subscribeStripStatus } from "@/cut/lib/media";
 import { planFilmstrip, type FilmTile } from "@/cut/lib/filmstrip";
 import { waveGain } from "@/cut/lib/waveform";
 import { track0Clips, laneGapAt, sameLane, type LaneRef, clipLen, clipSpeed, getClipSpans, maxClipFade, overlayLaneOrder, overlayLayers, projectDuration, resolveTransitions, rippleInsert, useEditor } from "@/cut/lib/store";
@@ -1664,8 +1665,9 @@ export function Timeline() {
         if (only && !only(asset)) continue;
         const sticker = !!stickerOf(asset);
         placeAssetAt(asset.id, asset.type, next(asset, sticker), audioRow, place);
-      } catch {
+      } catch (err) {
         // A copy that fails leaves the rest of the run alone.
+        reportSwallowed(`[cut] library drop failed for ${item.fileName}`, err);
       }
     }
   };
@@ -4374,12 +4376,19 @@ function DropGhostFilm({
     for (let k = 0; k < count; k++) {
       const t = (k * imgW + imgW / 2) / pps;
       if (peekEdgeFrame(ghost.url, t)) continue;
-      void requestEdgeFrame(`drop-ghost:${k}`, ghost.url, t).then((src) => {
+      // Behind a play, like the strip's own tiles: a drag across the timeline
+      // while the cut plays would otherwise put a hundred keyframe decodes of
+      // a 4K file in front of the walk drawing the picture. The ghost shows
+      // its poster until the play stops.
+      void requestEdgeFrame(`drop-ghost:${k}`, ghost.url, t, undefined, {
+        background: true,
+      }).then((src) => {
         if (live && src) bump();
       });
     }
     return () => {
       live = false;
+      dropEdgeFrames("drop-ghost:");
     };
   }, [needsReads, ghost.url, count, imgW, pps]);
   if (ghost.kind === "image") {
