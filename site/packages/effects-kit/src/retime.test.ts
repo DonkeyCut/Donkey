@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   flatSpeedCurve,
+  mirrorRetimable,
   retimeOf,
   speedCurveOf,
   speedCurvePreset,
@@ -21,6 +22,59 @@ describe("retimeOf", () => {
       [0, 0],
       [6, 4],
     ]);
+  });
+
+  test("a reversed span mirrors the forward map and keeps its footprint", () => {
+    const f = retimeOf({ in: 2, out: 8, speed: 1.5 });
+    const r = retimeOf({ in: 2, out: 8, speed: 1.5, reverse: true });
+    expect(r.reverse).toBe(true);
+    expect(r.len).toBe(f.len);
+    expect(r.rate).toBe(f.rate);
+    expect(r.srcAt(0)).toBe(8);
+    expect(r.srcAt(r.len)).toBe(2);
+    expect(r.srcAt(1)).toBe(6.5);
+    expect(r.tAt(6.5)).toBe(1);
+    expect(r.knots).toEqual([
+      [0, 4],
+      [6, 0],
+    ]);
+    const curve: SpeedNode[] = [
+      [1, 0.25],
+      [3, 8],
+      [5, 1],
+    ];
+    const cf = retimeOf({ in: 1, out: 5, speedCurve: curve });
+    const cr = retimeOf({ in: 1, out: 5, speedCurve: curve, reverse: true });
+    expect(cr.len).toBe(cf.len);
+    for (let t = 0; t <= cf.len; t += cf.len / 53) {
+      expect(cr.srcAt(t)).toBeCloseTo(cf.srcAt(cf.len - t), 9);
+      expect(cr.rateAt(t)).toBeCloseTo(cf.rateAt(cf.len - t), 9);
+      expect(cr.tAt(cr.srcAt(t))).toBeCloseTo(t, 3);
+    }
+    let prev = Infinity;
+    for (const [, t] of cr.knots) {
+      expect(t).toBeLessThanOrEqual(prev);
+      prev = t;
+    }
+  });
+
+  test("a reversed span over turned media is the forward span over the copy", () => {
+    const curve: SpeedNode[] = [
+      [1, 0.25],
+      [3, 8],
+      [5, 1],
+    ];
+    const rev = retimeOf({ in: 1, out: 5, speedCurve: curve, reverse: true });
+    const turned = mirrorRetimable({ in: 1, out: 5, speedCurve: curve, reverse: true }, 6);
+    expect(turned.in).toBe(1);
+    expect(turned.out).toBe(5);
+    expect(turned.reverse).toBeUndefined();
+    const fwd = retimeOf(turned);
+    expect(fwd.reverse).toBe(false);
+    expect(fwd.len).toBeCloseTo(rev.len, 9);
+    for (let t = 0; t <= rev.len; t += rev.len / 41) {
+      expect(6 - fwd.srcAt(t)).toBeCloseTo(rev.srcAt(t), 6);
+    }
   });
 
   test("a flat curve equals the uniform map", () => {

@@ -36,7 +36,8 @@ const spanChanged = (a: VideoClip, b: VideoClip) =>
   a.in !== b.in ||
   a.out !== b.out ||
   a.speed !== b.speed ||
-  a.speedCurve !== b.speedCurve;
+  a.speedCurve !== b.speedCurve ||
+  a.reverse !== b.reverse;
 
 /** The element over the same source seconds of `host` that it covered of
  * `was`. The curve maps linearly past either end, so an element leading into
@@ -47,6 +48,9 @@ function ride(o: Overlay, was: VideoClip, host: VideoClip): Overlay {
   const to = retimeOf(host);
   let start = host.start + to.tAt(from.srcAt(o.start - was.start));
   let end = host.start + to.tAt(from.srcAt(o.end - was.start));
+  // A clip turned around plays those source seconds the other way, so the
+  // element's window lands mirrored.
+  if (end < start) [start, end] = [end, start];
   if (end - start < MIN_LEN) end = start + MIN_LEN;
   if (start < 0) {
     end -= start;

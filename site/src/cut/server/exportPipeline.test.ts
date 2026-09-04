@@ -10,8 +10,13 @@ import {
 // Builds the real encode filtergraph for a spec by running the pipeline with
 // its edges stubbed: media exists, every stream probes present, SDR color,
 // libx264, and ffmpeg runs are captured instead of spawned.
-const graphFor = async (over: Partial<ExportSpec>): Promise<string[]> => {
+/** Every ffmpeg run the pipeline made for a spec, in order; the graph is the
+ * one carrying `-filter_complex`. */
+const runsFor = async (over: Partial<ExportSpec>): Promise<string[][]> => {
   const ffmpegCalls: string[][] = [];
+  // Seconds each turned file was asked to produce, summed off the `-t` of the
+  // chunk runs that wrote its pieces, so the bake reads back a whole file.
+  const produced = new Map<string, number>();
   const io: ExportPipelineIO = {
     stat: (async () => ({ isFile: () => true })) as unknown as ExportPipelineIO["stat"],
     writeFile: (async () => {}) as unknown as ExportPipelineIO["writeFile"],
@@ -19,9 +24,14 @@ const graphFor = async (over: Partial<ExportSpec>): Promise<string[]> => {
     unlink: (async () => {}) as unknown as ExportPipelineIO["unlink"],
     hasStream: async () => true,
     videoColorInfo: async () => null,
+    videoDecodeCost: async () => null,
+    mediaDuration: async (file) => produced.get(file) ?? 0,
     h264Encoder: async () => "libx264",
     runFfmpeg: async (_job, args) => {
       ffmpegCalls.push(args);
+      const piece = args[args.length - 1].match(/^(.*)\.\d+\.(?:mov|wav)$/);
+      const len = args.indexOf("-t");
+      if (piece && len >= 0) produced.set(piece[1], (produced.get(piece[1]) ?? 0) + Number(args[len + 1]));
     },
   };
   const clips = over.clips ?? [];
@@ -45,7 +55,12 @@ const graphFor = async (over: Partial<ExportSpec>): Promise<string[]> => {
     log: [],
   };
   await runExport(job, spec, (f) => `/media/${f}`, io);
-  const enc = ffmpegCalls.find((a) => a.includes("-filter_complex"))!;
+  return ffmpegCalls;
+};
+
+const graphFor = async (over: Partial<ExportSpec>): Promise<string[]> => {
+  const runs = await runsFor(over);
+  const enc = runs.find((a) => a.includes("-filter_complex"))!;
   return enc[enc.indexOf("-filter_complex") + 1].split(";");
 };
 
@@ -702,5 +717,62 @@ describe("audio effects in the filtergraph", () => {
     expect(joined.indexOf("acrusher=")).toBeLessThan(joined.indexOf("aecho="));
     expect(joined).toContain("[afx0]asplit=3");
     expect(joined).toContain("concat=n=3:v=0:a=1[afx1]");
+  });
+});
+
+describe("a reversed clip in the filtergraph", () => {
+  const reversed = clip("a.mp4", { in: 2, out: 8, speed: 2, reverse: true, soundBack: 0.5, soundAhead: 0.25 });
+
+  test("is baked turned around in chunks and read forward off the copy", async () => {
+    const runs = await runsFor({ clips: [reversed, clip("b.mp4")] });
+    const graph = runs.find((a) => a.includes("-filter_complex"))!;
+    const bakes = runs.filter((a) => a.includes("-i") && a.includes("/media/a.mp4"));
+    // The reach: the trim plus the handles at the clip's rate, [1.5, 9].
+    // Three-second chunks from the top: [6, 9], [3, 6], [1.5, 3].
+    expect(bakes.map((a) => [a[a.indexOf("-ss") + 1], a[a.indexOf("-t") + 1]])).toEqual([
+      ["6.000", "3.000"],
+      ["3.000", "3.000"],
+      ["1.500", "1.500"],
+    ]);
+    for (const a of bakes) {
+      expect(a[a.indexOf("-vf") + 1]).toBe("reverse,format=yuv420p");
+      expect(a[a.indexOf("-af") + 1]).toBe("areverse");
+      expect(a.indexOf("-ss")).toBeLessThan(a.indexOf("-i"));
+      expect(a.indexOf("-t")).toBeLessThan(a.indexOf("-i"));
+    }
+    const join = runs.find((a) => a.includes("concat"))!;
+    expect(join).toContain("-c");
+    expect(join[join.indexOf("-c") + 1]).toBe("copy");
+    // The graph reads the copy, never the source, and trims the mirrored
+    // span: source [2, 8] under a pivot of 9 is [1, 7] in the copy.
+    const inputs = graph.slice(0, graph.indexOf("-filter_complex"));
+    expect(inputs).not.toContain("/media/a.mp4");
+    expect(inputs.some((p) => p.endsWith("turned_clip_0.mov"))).toBe(true);
+    const idx = inputs.filter((p, i) => inputs[i - 1] === "-i").findIndex((p) => p.endsWith("turned_clip_0.mov"));
+    const g = graph[graph.indexOf("-filter_complex") + 1].split(";");
+    const video = g.find((f) => f.startsWith(`[${idx}:v]trim=`))!;
+    expect(video).toContain("trim=1.000:7.000,setpts=(PTS-STARTPTS)/2");
+    expect(video).not.toContain("reverse");
+    const audio = g.find((f) => f.startsWith(`[${idx}:a]atrim=`))!;
+    expect(audio).toContain("atrim=1.000:7.000");
+    expect(audio).toContain("atempo");
+    expect(audio).not.toContain("areverse");
+  });
+
+  test("a reversed curve keeps its length and lands mirrored on the copy", async () => {
+    const curved = clip("a.mp4", {
+      in: 0,
+      out: 4,
+      speedCurve: [
+        [0, 1],
+        [4, 4],
+      ],
+      reverse: true,
+    });
+    const g = await graphFor({ clips: [curved, clip("b.mp4")] });
+    const video = g.find((f) => f.startsWith("[1:v]trim="))!;
+    expect(video).toContain("trim=0.000:4.000,setpts='(clip(T-STARTT");
+    const first = g.find((f) => f.includes("apad=whole_dur="))!;
+    expect(first).toContain(`apad=whole_dur=${retimeOf(curved).len.toFixed(3)}`);
   });
 });

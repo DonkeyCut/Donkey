@@ -857,6 +857,7 @@ export class ClipFrameSource {
    * everything that source was ever asked for.
    */
   want(t: number, playing: boolean, backward = false, rate = 1): void {
+    // `backward` while playing means the clip itself reads down its source.
     if (this.closed || this.unreadable) return;
     // The lookahead is source seconds tuned for a clip playing at 1×. A clip
     // running faster eats the ring that much sooner, so the walk stays the
@@ -870,7 +871,7 @@ export class ClipFrameSource {
       return;
     }
     void this.open();
-    if (playing) {
+    if (playing && !backward) {
       this.wanted = null;
       this.lastAsk = null;
       // Playback reads forward; the backward walk's frames are dead weight,
@@ -878,6 +879,9 @@ export class ClipFrameSource {
       this.dropBack(true);
       this.pumpStream(t, true);
     } else {
+      // A play down the source — a reversed clip — is the backward walk run
+      // as a clock: every frame asks a step lower, and the walk keeps the
+      // window under each ask landed before it arrives.
       const prev = this.lastAsk;
       this.lastAsk = t;
       const b = this.back;
@@ -1891,19 +1895,22 @@ export class FrameSourcePool {
 
 /**
  * The decode identity of a clip: the frames it shows are a function of its
- * file, its rate, and where its source time stands at timeline zero. Two clips
- * agreeing on all three show the same picture at every instant. A clip whose
- * rate changes through the footage is its own map: its curve and its start.
+ * file, its rate, which way it reads, and where its source time stands at
+ * timeline zero. Two clips agreeing on all four show the same picture at
+ * every instant. A clip whose rate changes through the footage is its own
+ * map: its curve and its start.
+ *
+ * `offset` shifts the source time a caller reads at, for a second file
+ * carried along by the clip's map — a removal matte, which the clip reads at
+ * `sourceTime − matte.in`. Two clips over one matte asset at different
+ * offsets read different seconds of it, so the offset is part of the
+ * identity; left out they would share a reader and fight over its position.
  */
-export function mappingKey(
-  assetId: string,
-  retime: Retime,
-  inPoint: number,
-  start: number
-): string {
+export function mappingKey(assetId: string, retime: Retime, start: number, offset = 0): string {
+  const shift = offset ? `|${offset.toFixed(3)}` : "";
   if (retime.uniform) {
-    const speed = retime.rate;
-    return `${assetId}|${speed}|${(inPoint - start * speed).toFixed(3)}`;
+    const speed = retime.reverse ? -retime.rate : retime.rate;
+    return `${assetId}|${speed}|${(retime.srcAt(-start) - offset).toFixed(3)}`;
   }
-  return `${assetId}|${retime.key}|${inPoint.toFixed(3)}|${start.toFixed(3)}`;
+  return `${assetId}|${retime.key}|${start.toFixed(3)}${shift}`;
 }

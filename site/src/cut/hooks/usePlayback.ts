@@ -8,7 +8,7 @@ import {
   projectDuration,
   useEditor,
 } from "@/cut/lib/store";
-import { matteLumaToAlpha, retimeOf } from "@donkeycut/effects-kit";
+import { headSrc, matteLumaToAlpha, retimeOf, srcSpan } from "@donkeycut/effects-kit";
 import { playheadAt, previewAt, setPlayhead, subscribePlayhead } from "@/cut/lib/playhead";
 import { assetIsSilent, clipCovers, projectFadeSeconds, rectOf } from "@/cut/lib/types";
 import type { ClipSpan, MediaAsset, VideoClip } from "@/cut/lib/types";
@@ -110,7 +110,15 @@ const PLAY_SETTLE_MS = 6_000;
 
 /** The decode identity of a clip — see `mappingKey`. */
 const keyOf = (clip: VideoClip, asset: MediaAsset) =>
-  mappingKey(asset.id, retimeOf(clip), clip.in, clip.start);
+  mappingKey(asset.id, retimeOf(clip), clip.start);
+
+/**
+ * Which way a clip's source is read at this moment: playing, a reversed clip
+ * reads down its source; paused, the reader's own direction along the
+ * timeline turns around on a reversed clip.
+ */
+const readsDown = (clip: VideoClip, playing: boolean, backward: boolean) =>
+  playing ? !!clip.reverse : backward !== !!clip.reverse;
 
 let engineSerial = 0;
 
@@ -139,14 +147,19 @@ const voiceSpan = (sp: ClipSpan) => {
   // beside them, so the voice's span widens through the clip's own map and
   // its retime is rebuilt over the wider span.
   const rt = retimeOf(sp.clip);
-  const wIn = rt.srcAt(-sp.soundBack);
-  const wOut = rt.srcAt(rt.len + sp.soundAhead);
+  const { lo, hi } = srcSpan(rt, -sp.soundBack, rt.len + sp.soundAhead);
   return {
     url: sp.asset.url,
     start: sp.start - sp.soundBack,
-    in: wIn,
-    out: wOut,
-    retime: retimeOf({ in: wIn, out: wOut, speed: sp.clip.speed, speedCurve: sp.clip.speedCurve }),
+    in: lo,
+    out: hi,
+    retime: retimeOf({
+      in: lo,
+      out: hi,
+      speed: sp.clip.speed,
+      speedCurve: sp.clip.speedCurve,
+      reverse: sp.clip.reverse,
+    }),
     sound: sp.clip.sound,
   };
 };
@@ -381,12 +394,17 @@ class Engine {
     // alpha read below is a per-frame pixel pass; capping the matte's decode
     // keeps that pass off the frame budget.
     const src = this.pool.get(
-      mappingKey(asset.id, retimeOf(clip), m.in, clip.start),
+      mappingKey(asset.id, retimeOf(clip), clip.start, m.in),
       asset,
       Math.min(this.decodeHeight(), 480)
     );
     this.used.add(src);
-    src.want(mt, this.renderPlaying, false, retimeOf(clip).rateAt(at - clip.start));
+    src.want(
+      mt,
+      this.renderPlaying,
+      readsDown(clip, this.renderPlaying, this.readBackward),
+      retimeOf(clip).rateAt(at - clip.start)
+    );
     const frame = src.frameAt(mt, 0, dur);
     if (!frame) return null;
     const held = this.matteAlpha.get(clip.id);
@@ -428,7 +446,12 @@ class Engine {
     const src = this.pool.get(keyOf(span.clip, span.asset), span.asset, this.decodeHeight());
     this.used.add(src);
     const st = sourceTimeOf(span.clip, t);
-    src.want(st, playing, this.readBackward, retimeOf(span.clip).rateAt(t - span.start));
+    src.want(
+      st,
+      playing,
+      readsDown(span.clip, playing, this.readBackward),
+      retimeOf(span.clip).rateAt(t - span.start)
+    );
     // A failed source that already decoded frames keeps showing the nearest
     // one it holds — a transient blip (a network drop, a signed URL mid
     // re-mint) reads as a held frame, and only a source with nothing at all
@@ -476,8 +499,12 @@ class Engine {
           const src = this.pool.get(keyOf(sp.clip, sp.asset), sp.asset, this.decodeHeight());
           if (this.used.has(src)) continue;
           this.used.add(src);
-          const tail = Math.max(sp.clip.in, sourceTimeOf(sp.clip, end) - 0.001);
-          src.want(tail, false, true);
+          // A reversed clip's tail is its source's `in`, and backing into it
+          // reads up the source from there.
+          const tail = sp.clip.reverse
+            ? sp.clip.in
+            : Math.max(sp.clip.in, sourceTimeOf(sp.clip, end) - 0.001);
+          src.want(tail, false, !sp.clip.reverse);
         }
       }
     }
@@ -502,7 +529,7 @@ class Engine {
         // reached gets a walk, and the ones behind it get the single frame that
         // lets a cut land on something.
         const imminent = sp.start - t <= WARM_STREAM_S;
-        src.want(sp.clip.in, playing || imminent);
+        src.want(headSrc(sp.clip), playing || imminent, !!sp.clip.reverse);
       }
     }
   }

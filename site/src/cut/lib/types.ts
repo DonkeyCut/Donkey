@@ -446,6 +446,7 @@ export function clipPoseAt(
     out: number;
     speed?: number;
     speedCurve?: SpeedNode[];
+    reverse?: boolean;
     rotation?: number;
     opacity?: number;
     kf?: OverlayKey[];
@@ -548,6 +549,10 @@ export interface VideoClip {
    * integral of the curve over the trim (see retimeOf). Nodes sit in source
    * seconds, so trims and splits leave them where they are. */
   speedCurve?: SpeedNode[];
+  /** Plays the footage backward: the head of the clip shows `out` and the
+   * tail shows `in`, picture and sound alike. The rate still applies, so the
+   * footprint is unchanged. */
+  reverse?: boolean;
   /** Transition into the next clip on this clip's track, in timeline seconds
    * (absent/0 = hard cut). Every style overlaps the two clips by this much,
    * so the cut shortens. On upper tracks a transition blends the incoming
@@ -995,6 +1000,9 @@ export interface AudioClip {
   speed?: number;
   /** The video clip's speed curve, carried along on detach for the same reason. */
   speedCurve?: SpeedNode[];
+  /** The video clip's reverse, carried along on detach so the sound keeps
+   * running backward with the picture. */
+  reverse?: boolean;
   /** Voiceover ducking: while this clip is audible, every other sound (clip
    * audio and other soundtrack clips) drops to this gain, 0..1. Absent = no
    * ducking. Ducking clips never duck each other. */
@@ -1034,6 +1042,7 @@ export interface TemplateLayer {
   muted: boolean;
   speed?: number;
   speedCurve?: SpeedNode[];
+  reverse?: boolean;
   sound?: ClipSound;
   track: number;
   /** Came from video track 0 — re-materializes as a timeline clip, not an
@@ -1050,6 +1059,7 @@ export interface TemplateAudio {
   fadeOut?: number;
   speed?: number;
   speedCurve?: SpeedNode[];
+  reverse?: boolean;
   sound?: ClipSound;
   duck?: number;
   lane?: number;

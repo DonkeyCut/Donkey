@@ -23,11 +23,12 @@ import {
   buildAudioFx,
   retimeOf,
   soundRecipe,
+  srcSpan,
   type ClipSound,
   type SpeedNode,
 } from "@donkeycut/effects-kit";
 import { decodeAudioSpan } from "./mediaRead";
-import { timeStretch } from "./timeStretch";
+import { fitSpan, retimeFits } from "./retimeFit";
 
 /** One track-0 clip's audio in the sequential fold. A spacer (no file) only
  * shapes time. */
@@ -38,6 +39,7 @@ export interface MixClip {
   muted: boolean;
   speed?: number;
   speedCurve?: SpeedNode[];
+  reverse?: boolean;
   /** Gain on the clip's own audio; absent = 1. */
   volume?: number;
   /** The clip's own treatment, run on its sound before the fades. */
@@ -66,6 +68,7 @@ export interface MixItem {
   volume: number;
   speed?: number;
   speedCurve?: SpeedNode[];
+  reverse?: boolean;
   /** Half the cross dissolve at this item's head and tail, with the handle
    * each side reaches into — an upper-track cut crosses the same way track
    * 0's does. */
@@ -158,22 +161,28 @@ export function foldClips(clips: MixClip[]) {
 
 /** How far each side of a clip reaches into its handle for a crossing, capped
  * by the ramp that crossing actually got. */
-const handles = (g: { clip: MixClip; crossIn: number; crossOut: number }) => ({
-  // Never past the head of the source: a handle is what the trim left behind.
-  back: Math.min(g.clip.soundBack ?? 0, g.crossIn, Math.max(0, -retimeOf(g.clip).tAt(0))),
-  ahead: Math.min(g.clip.soundAhead ?? 0, g.crossOut),
-});
+const handles = (g: { clip: MixClip; crossIn: number; crossOut: number }) => {
+  const rt = retimeOf(g.clip);
+  return {
+    // Never past the head of the source: a handle is what the trim left
+    // behind. A reversed clip's head reaches toward the source's end, and
+    // `soundBack` already stops at it.
+    back: Math.min(g.clip.soundBack ?? 0, g.crossIn, rt.reverse ? Infinity : Math.max(0, -rt.tAt(0))),
+    ahead: Math.min(g.clip.soundAhead ?? 0, g.crossOut),
+  };
+};
 
-/** The source span an entry decodes: its own trim, widened by the handle each
- * crossing at its edges reaches into. Timeline seconds go through the entry's
- * own map on the way into the source. */
+/** The source span an entry decodes, low end first: its own trim, widened by
+ * the handle each crossing at its edges reaches into. Timeline seconds go
+ * through the entry's own map on the way into the source. */
 const crossSpan = (
-  c: { file: string; in: number; out: number; speed?: number; speedCurve?: SpeedNode[] },
+  c: { file: string; in: number; out: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean },
   back = 0,
   ahead = 0
 ) => {
   const rt = retimeOf(c);
-  return { file: c.file, in: rt.srcAt(-back), out: rt.srcAt(rt.len + ahead) };
+  const { lo, hi } = srcSpan(rt, -back, rt.len + ahead);
+  return { file: c.file, in: lo, out: hi };
 };
 
 /**
@@ -366,15 +375,16 @@ export async function renderMix(spec: MixSpec, opts: MixOptions): Promise<AudioB
    * preview nor the engine's `atempo` does. So the buffer is stretched to the
    * length it needs first, and then played at its own rate.
    */
-  const stretched = new Map<string, AudioBuffer>();
+  const stretched = new Map<string, { buffer: AudioBuffer; shift: number }>();
   const fitted = (
     key: string,
     buf: AudioBuffer,
-    entry: { in: number; out: number; speed?: number; speedCurve?: SpeedNode[] },
-    from: number
-  ): AudioBuffer => {
+    entry: { in: number; out: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean },
+    from: number,
+    to: number
+  ): { buffer: AudioBuffer; shift: number } => {
     const rt = retimeOf(entry);
-    if (rt.uniform && rt.rate === 1) return buf;
+    if (!retimeFits(rt)) return { buffer: buf, shift: 0 };
     // A span used by more than one clip at the same rate is stretched once.
     const memo = `${key}@${rt.key}`;
     const hit = stretched.get(memo);
@@ -382,26 +392,18 @@ export async function renderMix(spec: MixSpec, opts: MixOptions): Promise<AudioB
     const channels = Array.from({ length: buf.numberOfChannels }, (_, c) =>
       buf.getChannelData(c)
     );
-    // `from` is the source second the buffer starts at; the schedule follows
-    // the clip's own map from there and lands exactly on its length.
-    const fit = timeStretch(
-      channels,
-      buf.sampleRate,
-      rt.uniform
-        ? 1 / rt.rate
-        : {
-            factorAt: (sec) => 1 / rt.rateAtSrc(from + sec),
-            outLength: Math.round((rt.tAt(from + buf.duration) - rt.tAt(from)) * buf.sampleRate),
-          }
-    );
+    // `from` is the source second the buffer starts at; the fit follows the
+    // clip's own map from there and lands exactly on its length.
+    const fit = fitSpan(channels, buf.sampleRate, rt, from, to);
     const out = new AudioBuffer({
-      length: Math.max(1, fit[0].length),
+      length: Math.max(1, fit.channels[0].length),
       numberOfChannels: buf.numberOfChannels,
       sampleRate: buf.sampleRate,
     });
-    fit.forEach((data, c) => out.getChannelData(c).set(data));
-    stretched.set(memo, out);
-    return out;
+    fit.channels.forEach((data, c) => out.getChannelData(c).set(data));
+    const fitted = { buffer: out, shift: fit.shift };
+    stretched.set(memo, fitted);
+    return fitted;
   };
 
   // Each buffer holds exactly the span its entry plays, already fitted to the
@@ -438,9 +440,10 @@ export async function renderMix(spec: MixSpec, opts: MixOptions): Promise<AudioB
     const key = spanKey(g.span);
     const buf = !c.muted && c.file ? buffers.get(key) : undefined;
     if (!buf) continue; // muted, silent, or a gap spacer: only shapes time
-    const from = g.at - g.back;
+    const fit = fitted(key, buf, c, Math.max(0, g.span.in), g.span.out);
+    const from = g.at - g.back + fit.shift;
     const end = g.at + g.dur;
-    play(fitted(key, buf, c, Math.max(0, g.span.in)), from, g.dur + g.back + g.ahead, ducked, c.sound, (gain) => {
+    play(fit.buffer, from, g.dur + g.back + g.ahead, ducked, c.sound, (gain) => {
       const level = Math.max(0, c.volume ?? 1);
       gain.gain.value = level;
       // A crossing and a fade never share an edge — the cut carries one
@@ -471,7 +474,9 @@ export async function renderMix(spec: MixSpec, opts: MixOptions): Promise<AudioB
     // A voiceover that ducks everything else is not itself ducked; it still
     // lands on the bus, so the effect elements treat it with the rest.
     const into = a.duck !== undefined && a.duck < 1 ? bus : ducked;
-    play(fitted(key, buf, a, Math.max(0, crossSpan(a, back, ahead).in)), a.start - back, dur + back + ahead, into, a.sound, (gain) => {
+    const reach = crossSpan(a, back, ahead);
+    const fit = fitted(key, buf, a, Math.max(0, reach.in), reach.out);
+    play(fit.buffer, a.start - back + fit.shift, dur + back + ahead, into, a.sound, (gain) => {
       const level = Math.max(0, a.volume);
       gain.gain.value = level;
       const fIn = Math.min(a.fadeIn ?? 0, dur);

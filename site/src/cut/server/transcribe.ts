@@ -23,6 +23,7 @@ export interface TranscribeSpec {
     muted: boolean;
     speed?: number;
     speedCurve?: SpeedNode[];
+    reverse?: boolean;
     /** Cross-dissolve overlap into the next clip, timeline seconds. */
     transition?: number;
   }[];
@@ -34,6 +35,7 @@ export interface TranscribeSpec {
     volume: number;
     speed?: number;
     speedCurve?: SpeedNode[];
+    reverse?: boolean;
   }[];
 }
 
@@ -357,7 +359,7 @@ async function runTranscribe(job: TranscribeJob, spec: TranscribeSpec) {
     // A clip whose rate changes through its footage is baked to a WAV in
     // timeline seconds first (the same stretch the export and the preview
     // use), so its words land where they play.
-    type Sounding = { file: string; in: number; out: number; speed?: number; speedCurve?: SpeedNode[] };
+    type Sounding = { file: string; in: number; out: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean };
     const baked = new Map<Sounding, BakedAudio & { idx: number }>();
     const bakeIO = {
       ffmpeg: async (args: string[]) => {

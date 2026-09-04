@@ -8,7 +8,9 @@ import {
   lineLikeShape,
   maskKeyAt,
   removeKeyAt,
+  headSrc,
   retimeOf,
+  tailSrc,
   speedCurveOf,
   speedCurvePreset,
   upsertKey,
@@ -451,6 +453,9 @@ export interface EditorState {
   setClipSpeedCurve: (id: string, nodes: SpeedNode[] | undefined) => void;
   /** Lay a preset ramp over the clip's trimmed span. */
   setClipSpeedPreset: (id: string, preset: string) => void;
+  /** Play the clip's footage backward (picture and sound); the footprint
+   * stays. */
+  setClipReverse: (id: string, reverse: boolean) => void;
   /** Set a clip's source trim points. While track 0 is the only video track,
    * a track-0 resize ripples: everything past the clip's tail rides the moved
    * edge both directions, gaps keeping their width. Otherwise the run rules
@@ -1332,6 +1337,7 @@ export function cutTranscribeSpec(
     .filter(
       (a) =>
         !a.hidden &&
+        !a.reverse &&
         a.start < duration &&
         assetById.has(a.assetId) &&
         !assetIsSilent(assetById.get(a.assetId)!)
@@ -1344,6 +1350,7 @@ export function cutTranscribeSpec(
       volume: a.volume,
       speed: a.speed,
       speedCurve: a.speedCurve,
+      reverse: a.reverse,
     }))
     .concat(
       overlayLayers(s.clips)
@@ -1351,6 +1358,7 @@ export function cutTranscribeSpec(
           (c) =>
             !c.hidden &&
             !c.muted &&
+            !c.reverse &&
             c.start < duration &&
             assetById.has(c.assetId) &&
             !assetIsSilent(assetById.get(c.assetId)!)
@@ -1363,6 +1371,7 @@ export function cutTranscribeSpec(
           volume: 1,
           speed: c.speed,
           speedCurve: c.speedCurve,
+          reverse: c.reverse,
         }))
     );
   if (spans.length === 0 && audio.length === 0) return null;
@@ -1382,7 +1391,9 @@ export function cutTranscribeSpec(
               file: sp.asset.fileName,
               in: sp.clip.in,
               out: sp.clip.out,
-              muted: sp.clip.muted || assetIsSilent(sp.asset),
+              // Sound played backward is not speech; the clip keeps its
+              // time in the mix as silence.
+              muted: sp.clip.muted || assetIsSilent(sp.asset) || !!sp.clip.reverse,
               speed: clipSpeed(sp.clip),
               speedCurve: sp.clip.speedCurve,
               // The clamped cross-dissolve overlap, so the mix overlaps clip
@@ -2662,6 +2673,12 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       get().setClipSpeedCurve(id, nodes);
     },
 
+    setClipReverse: (id, reverse) => {
+      const clip = get().clips.find((c) => c.id === id);
+      if (!clip || !!clip.reverse === reverse) return;
+      get().updateClip(id, { reverse: reverse || undefined });
+    },
+
     setClipTrim: (id, nextIn, nextOut) => {
       const clip = get().clips.find((c) => c.id === id);
       if (!clip) return;
@@ -3376,6 +3393,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         // length and stays in sync (an AudioClip plays at its own `speed`).
         ...(clipSpeed(clip) !== 1 ? { speed: clipSpeed(clip) } : {}),
         ...(clip.speedCurve ? { speedCurve: clip.speedCurve } : {}),
+        ...(clip.reverse ? { reverse: true } : {}),
       };
       set((s) => ({
         audioClips: [...s.audioClips, audio],
@@ -3394,9 +3412,10 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         const len = a ? clipLen(a) : 0;
         if (a && t > a.start + 0.05 && t < a.start + len - 0.05) {
           push();
-          const cutIn = a.in + (t - a.start);
-          const left: AudioClip = { ...a, out: cutIn };
-          const right: AudioClip = { ...a, id: uid(), start: t, in: cutIn };
+          const cutIn = retimeOf(a).srcAt(t - a.start);
+          const [head, tail] = splitTrims(a, cutIn);
+          const left: AudioClip = { ...a, ...head };
+          const right: AudioClip = { ...a, id: uid(), start: t, ...tail };
           set((s) => {
             const idx = s.audioClips.findIndex((c) => c.id === a.id);
             const next = [...s.audioClips];
@@ -3422,8 +3441,9 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             // The cut lands mid-footage, so the edges it creates stay plain:
             // the exit animation belongs to the right half's tail and the
             // entrance to the left half's head.
-            const left: VideoClip = { ...c, out: cutIn, transition: undefined, transitionStyle: undefined, animOut: undefined };
-            const right: VideoClip = { ...c, id: uid(), start: t, in: cutIn, animIn: undefined };
+            const [head, tail] = splitTrims(c, cutIn);
+            const left: VideoClip = { ...c, ...head, transition: undefined, transitionStyle: undefined, animOut: undefined };
+            const right: VideoClip = { ...c, id: uid(), start: t, ...tail, animIn: undefined };
             set((s) => {
               const idx = s.clips.findIndex((x) => x.id === c.id);
               const next = [...s.clips];
@@ -3497,8 +3517,9 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       // lands mid-footage, so the edges it creates stay plain: the exit
       // animation stays on the right half's tail, the entrance on the left's
       // head.
-      const left: VideoClip = { ...span.clip, out: cutAt, transition: undefined, transitionStyle: undefined, animOut: undefined };
-      const right: VideoClip = { ...span.clip, id: uid(), in: cutAt, start: t, animIn: undefined };
+      const [head, tail] = splitTrims(span.clip, cutAt);
+      const left: VideoClip = { ...span.clip, ...head, transition: undefined, transitionStyle: undefined, animOut: undefined };
+      const right: VideoClip = { ...span.clip, id: uid(), ...tail, start: t, animIn: undefined };
       set((s) => {
         const idx = s.clips.findIndex((c) => c.id === span.clip.id);
         const next = [...s.clips];
@@ -3746,20 +3767,20 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             if (mi == null) continue;
             // Track-0 clips re-materialize onto track 0 (asClip), so a template
             // stands up its own video instead of an empty timeline.
-            layers.push({ media: mi, start: sp.start - start0, in: sp.clip.in, out: sp.clip.out, ...framingOf(sp.clip), muted: sp.clip.muted, speed: sp.clip.speed, speedCurve: sp.clip.speedCurve, sound: sp.clip.sound, track: 1, asClip: true });
+            layers.push({ media: mi, start: sp.start - start0, in: sp.clip.in, out: sp.clip.out, ...framingOf(sp.clip), muted: sp.clip.muted, speed: sp.clip.speed, speedCurve: sp.clip.speedCurve, reverse: sp.clip.reverse, sound: sp.clip.sound, track: 1, asClip: true });
           } else {
             const c = s.clips.find((x) => x.id === sel.id);
             if (!c) continue;
             const mi = mediaFor(c.assetId);
             if (mi == null) continue;
-            layers.push({ media: mi, start: c.start - start0, in: c.in, out: c.out, ...framingOf(c), muted: c.muted, speed: c.speed, speedCurve: c.speedCurve, sound: c.sound, track: c.track + 1 });
+            layers.push({ media: mi, start: c.start - start0, in: c.in, out: c.out, ...framingOf(c), muted: c.muted, speed: c.speed, speedCurve: c.speedCurve, reverse: c.reverse, sound: c.sound, track: c.track + 1 });
           }
         } else if (sel.kind === "audio") {
           const c = s.audioClips.find((x) => x.id === sel.id);
           if (!c) continue;
           const mi = mediaFor(c.assetId);
           if (mi == null) continue;
-          audio.push({ media: mi, start: c.start - start0, in: c.in, out: c.out, volume: c.volume, fadeIn: c.fadeIn, fadeOut: c.fadeOut, speed: c.speed, speedCurve: c.speedCurve, sound: c.sound, duck: c.duck, lane: c.lane });
+          audio.push({ media: mi, start: c.start - start0, in: c.in, out: c.out, volume: c.volume, fadeIn: c.fadeIn, fadeOut: c.fadeOut, speed: c.speed, speedCurve: c.speedCurve, reverse: c.reverse, sound: c.sound, duck: c.duck, lane: c.lane });
         } else if (sel.kind === "overlay") {
           const o = s.overlays.find((x) => x.id === sel.id);
           // Asset-backed stickers stay out: a template copies only the media
@@ -3890,6 +3911,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           ...templateFraming(l),
           ...(l.speed ? { speed: l.speed } : {}),
           ...(l.speedCurve ? { speedCurve: l.speedCurve } : {}),
+          ...(l.reverse ? { reverse: true } : {}),
           ...(l.sound ? { sound: l.sound } : {}),
         }));
       const topTrack = Math.max(0, ...overlayLayers(get().clips).map((c) => c.track));
@@ -3909,6 +3931,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         ...templateFraming(l),
         ...(l.speed ? { speed: l.speed } : {}),
         ...(l.speedCurve ? { speedCurve: l.speedCurve } : {}),
+        ...(l.reverse ? { reverse: true } : {}),
         ...(l.sound ? { sound: l.sound } : {}),
       }));
       const newAudio: AudioClip[] = template.audio
@@ -3924,6 +3947,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           ...(a.fadeOut ? { fadeOut: a.fadeOut } : {}),
           ...(a.speed ? { speed: a.speed } : {}),
           ...(a.speedCurve ? { speedCurve: a.speedCurve } : {}),
+          ...(a.reverse ? { reverse: true } : {}),
           ...(a.sound ? { sound: a.sound } : {}),
           ...(a.duck !== undefined && a.duck < 1 ? { duck: a.duck } : {}),
           ...(a.lane ? { lane: a.lane } : {}),
@@ -4132,6 +4156,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const sp = clipWindow(s.clips, s.assets, clipId);
       if (!sp) throw new Error("The clip is no longer on the timeline.");
       if (assetIsSilent(sp.asset)) throw new Error("This clip is a still — it has no sound.");
+      if (sp.clip.reverse) throw new Error("This clip plays backward — its sound is not speech.");
       const lane = s.subtitleLane;
       const epoch = laneEpoch;
       // The clip's own sound, deliberately unmuted: this transcribes what the
@@ -5616,8 +5641,9 @@ function buildClipSpans(clips: VideoClip[], assets: MediaAsset[], track: number)
       len,
       transitionOut: onSound ? 0 : overlap,
       soundOut,
-      soundAhead: handleSeconds(soundOut, asset.duration - clip.out, clip, "tail"),
-      soundBack: handleSeconds(prevSound, clip.in, clip, "head"),
+      // A reversed clip's head faces the source's end and its tail its start.
+      soundAhead: handleSeconds(soundOut, clip.reverse ? clip.in : asset.duration - clip.out, clip, "tail"),
+      soundBack: handleSeconds(prevSound, clip.reverse ? asset.duration - clip.out : clip.in, clip, "head"),
     });
   }
   return spans;
@@ -5635,8 +5661,18 @@ function handleSeconds(
   // The handle plays at the pace of the footage beside the edge: a source
   // second past `out` lasts as long as the last source second inside it.
   const rt = retimeOf(clip);
-  const edgeRate = rt.rateAtSrc(edge === "head" ? clip.in : clip.out);
+  const edgeRate = rt.rateAtSrc(edge === "head" ? headSrc(clip) : tailSrc(clip));
   return Math.max(0, Math.min(want, Math.max(0, sourceLeft) / edgeRate));
+}
+
+/** The trims a split at source second `cut` leaves each half: the half
+ * playing first keeps the footage up to the cut on a forward item and the
+ * footage after it on a reversed one. */
+function splitTrims(
+  c: { in: number; out: number; reverse?: boolean },
+  cut: number
+): [{ in?: number; out?: number }, { in?: number; out?: number }] {
+  return c.reverse ? [{ in: cut }, { out: cut }] : [{ out: cut }, { in: cut }];
 }
 
 /** One row of the timeline, whichever kind of thing sits on it. Video rows are

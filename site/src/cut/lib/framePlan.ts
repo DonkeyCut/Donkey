@@ -1,6 +1,6 @@
 "use client";
 
-import { retimeOf } from "@donkeycut/effects-kit";
+import { headSrc, retimeOf } from "@donkeycut/effects-kit";
 
 /**
  * What the cut looks like at one instant, worked out from the document alone.
@@ -384,9 +384,9 @@ export function trackZeroPlan(master: ClipSpan, spans: ClipSpan[], t: number): T
   let backdrop: TrackZeroPlan["backdrop"] = null;
   if (!incoming) {
     if (abutPrev && animLive(master.clip.animIn, "in", rel, master.len)) {
-      backdrop = { span: prev, at: prev.clip.out - 0.05 };
+      backdrop = { span: prev, at: prev.clip.reverse ? prev.clip.in + 0.05 : prev.clip.out - 0.05 };
     } else if (abutNext && animLive(master.clip.animOut, "out", rel, master.len)) {
-      backdrop = { span: next, at: next.clip.in };
+      backdrop = { span: next, at: headSrc(next.clip) };
     }
   }
 

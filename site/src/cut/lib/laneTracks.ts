@@ -1,6 +1,6 @@
 "use client";
 
-import { retimeOf } from "@donkeycut/effects-kit";
+import { retimeOf, type Retimable, type SpeedNode } from "@donkeycut/effects-kit";
 
 /**
  * The lane-track coordinator: the one place for how items on the timeline's
@@ -101,7 +101,7 @@ interface LaneAdapter<T> {
    * keeps walking the source back and the tail grows. Media kinds only. */
   revealLeftPatch?(raw: T, start: number, reveal: number): Patch<T>;
   /** Earliest timeline start the left edge can reveal to (media source floor). */
-  leftFloor(raw: T): number;
+  leftFloor(s: S, raw: T): number;
   /** Longest timeline footprint the item can grow to (media source bound). */
   maxLen(s: S, raw: T): number;
   /** Write a committed lane number (multi-lane kinds only). */
@@ -128,7 +128,7 @@ interface LaneAdapter<T> {
  * the source maps its own window of them. */
 function mediaBeatTimes(
   s: S,
-  c: { assetId: string; start: number; in: number; out: number; speed?: number }
+  c: { assetId: string; start: number; in: number; out: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean }
 ): number[] {
   const beats = s.assets.find((a) => a.id === c.assetId)?.beats?.beats;
   if (!beats?.length) return [];
@@ -138,11 +138,32 @@ function mediaBeatTimes(
   return times;
 }
 
+/** The trim a media item's head edge writes when it lands on timeline second
+ * `tHead`: the source edge playing there — `in`, or `out` on a reversed
+ * item. */
+const headTrim = <T extends Retimable>(c: T, tHead: number, start: number): Partial<T> => {
+  const src = retimeOf(c).srcAt(tHead - start);
+  return (c.reverse ? { out: src } : { in: src }) as Partial<T>;
+};
+/** The trim the tail edge writes when it lands on `tEnd`. */
+const tailTrim = <T extends Retimable>(c: T, tEnd: number, start: number): Partial<T> => {
+  const src = retimeOf(c).srcAt(tEnd - start);
+  return (c.reverse ? { in: src } : { out: src }) as Partial<T>;
+};
+/** The earliest timeline second an item's head can reach: where the source's
+ * own head sits — second 0, or the source's end on a reversed item. */
+const headFloor = (c: Retimable & { start: number }, duration: number | undefined) =>
+  Math.max(0, c.start + retimeOf(c).tAt(c.reverse ? (duration ?? c.out) : 0));
+/** The longest an item can run: its trim opened to the source's far end,
+ * which a reversed item reaches by opening `in` toward 0. */
+const mediaMaxLen = (c: Retimable, duration: number | undefined) =>
+  retimeOf(c.reverse ? { ...c, in: 0 } : { ...c, out: duration ?? c.out }).len;
+
 function videoMaxLen(s: S, c: VideoClip): number {
   const a = s.assets.find((x) => x.id === c.assetId);
   // A still has no source length, so its clip can stretch to any duration.
   if (a?.type === "image") return Infinity;
-  return retimeOf({ ...c, out: a?.duration ?? c.out }).len;
+  return mediaMaxLen(c, a?.duration);
 }
 
 const clipAdapter: LaneAdapter<VideoClip> = {
@@ -156,17 +177,17 @@ const clipAdapter: LaneAdapter<VideoClip> = {
   movePatch: (c, start) => ({ id: c.id, patch: { start } }),
   trimLeftPatch: (c, newStart) => ({
     id: c.id,
-    patch: { start: newStart, in: retimeOf(c).srcAt(newStart - c.start) },
+    patch: { start: newStart, ...headTrim(c, newStart, c.start) },
   }),
   trimRightPatch: (c, newEnd) => ({
     id: c.id,
-    patch: { out: retimeOf(c).srcAt(newEnd - c.start) },
+    patch: tailTrim(c, newEnd, c.start),
   }),
   revealLeftPatch: (c, start, reveal) => ({
     id: c.id,
-    patch: { start, in: retimeOf(c).srcAt(reveal - c.start) },
+    patch: { start, ...headTrim(c, reveal, c.start) },
   }),
-  leftFloor: (c) => Math.max(0, c.start + retimeOf(c).tAt(0)),
+  leftFloor: (s, c) => headFloor(c, s.assets.find((x) => x.id === c.assetId)?.duration),
   maxLen: videoMaxLen,
   closesGap: true,
   assetOf: (s, c) => s.assets.find((x) => x.id === c.assetId),
@@ -183,19 +204,18 @@ const audioAdapter: LaneAdapter<AudioClip> = {
   movePatch: (a, start) => ({ id: a.id, patch: { start } }),
   trimLeftPatch: (a, newStart) => ({
     id: a.id,
-    patch: { start: newStart, in: retimeOf(a).srcAt(newStart - a.start) },
+    patch: { start: newStart, ...headTrim(a, newStart, a.start) },
   }),
   trimRightPatch: (a, newEnd) => ({
     id: a.id,
-    patch: { out: retimeOf(a).srcAt(newEnd - a.start) },
+    patch: tailTrim(a, newEnd, a.start),
   }),
   revealLeftPatch: (a, start, reveal) => ({
     id: a.id,
-    patch: { start, in: retimeOf(a).srcAt(reveal - a.start) },
+    patch: { start, ...headTrim(a, reveal, a.start) },
   }),
-  leftFloor: (a) => Math.max(0, a.start + retimeOf(a).tAt(0)),
-  maxLen: (s, a) =>
-    retimeOf({ ...a, out: s.assets.find((x) => x.id === a.assetId)?.duration ?? a.out }).len,
+  leftFloor: (s, a) => headFloor(a, s.assets.find((x) => x.id === a.assetId)?.duration),
+  maxLen: (s, a) => mediaMaxLen(a, s.assets.find((x) => x.id === a.assetId)?.duration),
   lanePatch: (a, lane) => ({ id: a.id, patch: { lane: lane > 0 ? lane : undefined } }),
   assetOf: (s, a) => s.assets.find((x) => x.id === a.assetId),
   beatTimes: mediaBeatTimes,
@@ -227,17 +247,17 @@ const overlayClipAdapter: LaneAdapter<VideoClip> = {
   movePatch: (c, start) => ({ id: c.id, patch: { start } }),
   trimLeftPatch: (c, newStart) => ({
     id: c.id,
-    patch: { start: newStart, in: retimeOf(c).srcAt(newStart - c.start) },
+    patch: { start: newStart, ...headTrim(c, newStart, c.start) },
   }),
   trimRightPatch: (c, newEnd) => ({
     id: c.id,
-    patch: { out: retimeOf(c).srcAt(newEnd - c.start) },
+    patch: tailTrim(c, newEnd, c.start),
   }),
   revealLeftPatch: (c, start, reveal) => ({
     id: c.id,
-    patch: { start, in: retimeOf(c).srcAt(reveal - c.start) },
+    patch: { start, ...headTrim(c, reveal, c.start) },
   }),
-  leftFloor: (c) => Math.max(0, c.start + retimeOf(c).tAt(0)),
+  leftFloor: (s, c) => headFloor(c, s.assets.find((x) => x.id === c.assetId)?.duration),
   maxLen: videoMaxLen,
   closesGap: true,
   assetOf: (s, c) => s.assets.find((x) => x.id === c.assetId),
@@ -1231,7 +1251,7 @@ export function startLaneTrim(
       .sort((a, b) => a.view.start - b.view.start);
     const prevEnd = leaders.reduce((m, l) => Math.max(m, l.view.start + l.view.len), 0);
     const runFloor = leaders.reduce((sum, l) => sum + l.view.len, 0);
-    const srcFloor = ad.leftFloor(raw0);
+    const srcFloor = ad.leftFloor(s, raw0);
     const floor = Math.max(runFloor, srcFloor);
     const free = Math.max(prevEnd, srcFloor);
     // With the edge pinned at the floor, a media item that still has source

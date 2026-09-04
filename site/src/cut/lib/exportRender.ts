@@ -31,7 +31,8 @@ import { audioFxSpans } from "./audioEffects";
 import { renderMix, type MixClip, type MixItem, type MixSpec } from "./audioMix";
 import { FrameCompositor, MISSING_FRAME, type Frame } from "./composite";
 import { overlayPlan, trackZeroPlan } from "./framePlan";
-import { frameSink, openMedia, videoTrackOf } from "./mediaRead";
+import { frameSink, keyframeTimeAt, openMedia, videoTrackOf } from "./mediaRead";
+import type { InputVideoTrack, WrappedCanvas } from "mediabunny";
 import { allowance, canvasBytes, holdMemory } from "./memoryBudget";
 import { getClipSpans, overlayLayers, projectDuration, spanSequence } from "./store";
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
@@ -138,6 +139,24 @@ const READERS_TUNED = 12;
  * frame's own readers are never candidates, so what a join or a stack of
  * layers needs together is never taken away from the frame needing it. */
 const READER_GRACE = 2;
+/**
+ * Canvas bytes a reader may hold for a clip read backward.
+ *
+ * A reversed clip asks for its frames in falling order, and a decoder only
+ * runs forward: each ask on its own would decode from the keyframe below it
+ * every time, most of a group of pictures per frame. So a step down decodes
+ * the window of frames ending at the ask in one pass and holds it, and the
+ * asks below are answered from it until it runs out. The window is as many
+ * frames as this buys at the source's size, so a 4K clip holds a few and a
+ * small one holds a dozen.
+ */
+const BACK_WINDOW_BYTES = 64 << 20;
+const BACK_WINDOW_MAX = 12;
+/** Canvases the reader's pools cycle, in frames: the forward pool plus the
+ * backward window and the two frames a fill needs around it. */
+export function readerPoolFrames(r: { backWindow: number }): number {
+  return READER_POOL + (r.backWindow > 0 ? r.backWindow + 2 : 0);
+}
 
 /** A clip's source time at timeline time `t`. */
 function sourceTimeAt(span: ClipSpan, t: number): number {
@@ -155,7 +174,15 @@ function sourceTimeAt(span: ClipSpan, t: number): number {
 export class ClipReader {
   private input: ReturnType<typeof openMedia> | null = null;
   private sink: ClipSink | null = null;
+  private track: InputVideoTrack | null = null;
   private still: Frame | null = null;
+  /** The source second last asked for; an ask below it is a step back. */
+  private lastAt = -Infinity;
+  /** The backward window: frames in rising order, on their own sink, and the
+   * frame length learned from them. */
+  private backSink: ClipSink | null = null;
+  private backFrames: WrappedCanvas[] = [];
+  private frameDt = 1 / 30;
   private opened: Promise<ClipSink | null> | null = null;
   /** Reads that failed in a row, each off a freshly rebuilt reader. Any
    * successful read clears it. */
@@ -178,6 +205,16 @@ export class ClipReader {
    */
   get sourcePixels(): number {
     return (this.asset.width ?? 1920) * (this.asset.height ?? 1080);
+  }
+
+  /** Frames the backward window holds once it is open, 0 while it is not. */
+  get backWindow(): number {
+    return this.backSink ? this.windowFrames : 0;
+  }
+
+  /** Frames a backward window holds at this source's size. */
+  private get windowFrames(): number {
+    return Math.max(2, Math.min(BACK_WINDOW_MAX, Math.floor(BACK_WINDOW_BYTES / canvasBytes(this.sourcePixels))));
   }
 
   constructor(
@@ -211,6 +248,7 @@ export class ClipReader {
         return null;
       }
       this.input = input;
+      this.track = track;
       // A small pool keeps the render's canvas allocation flat over thousands
       // of frames.
       this.sink = frameSink(track, undefined, {
@@ -228,9 +266,11 @@ export class ClipReader {
     let sink = await this.open();
     if (this.still) return this.still;
     if (!sink) return MISSING_FRAME;
+    const stepBack = at < this.lastAt - 1e-6;
+    this.lastAt = at;
     for (;;) {
       try {
-        const wrapped = await sink.getCanvas(Math.max(0, at));
+        const wrapped = (stepBack && (await this.backFrame(at))) || (await sink.getCanvas(Math.max(0, at)));
         this.failStreak = 0;
         if (!wrapped) return MISSING_FRAME;
         return {
@@ -253,6 +293,8 @@ export class ClipReader {
         this.input?.dispose();
         this.input = null;
         this.sink = null;
+        this.track = null;
+        this.dropBack();
         this.opened = null;
         const reopened = await this.open();
         if (!reopened) throw err;
@@ -261,10 +303,57 @@ export class ClipReader {
     }
   }
 
+  /**
+   * The frame covering `at` for a reader stepping down its source, out of
+   * the backward window — filled first when the window has run out: the
+   * frames from the keyframe below `at` (or as many as the window holds)
+   * up to `at`, decoded in one pass on the window's own sink. Null when the
+   * source has no frame there, and the ordinary read answers.
+   */
+  private async backFrame(at: number): Promise<WrappedCanvas | null> {
+    const covering = (f: WrappedCanvas) =>
+      f.timestamp <= at + 1e-4 && at < f.timestamp + Math.max(f.duration, 1e-4) + 1e-4;
+    const held = this.backFrames.find(covering);
+    if (held) return held;
+    if (!this.track) return null;
+    const kt = await keyframeTimeAt(this.track, Math.max(0, at));
+    if (kt === null) return null;
+    const window = this.windowFrames;
+    this.backSink ??= frameSink(this.track, undefined, {
+      poolSize: window + 2,
+      ...(this.software ? { software: true } : {}),
+    });
+    const start = Math.max(kt, at - (window - 1) * this.frameDt, 0);
+    const frames: WrappedCanvas[] = [];
+    const stream = this.backSink.canvases(start);
+    try {
+      for (;;) {
+        const { value, done } = await stream.next();
+        if (done || !value) break;
+        if (value.duration > 0) this.frameDt = value.duration;
+        if (value.timestamp > at + 1e-4) break;
+        frames.push(value);
+        if (frames.length > window) frames.shift();
+        if (value.timestamp + value.duration > at + 1e-4) break;
+      }
+    } finally {
+      void stream.return(undefined).catch(() => {});
+    }
+    this.backFrames = frames;
+    return frames.find(covering) ?? frames[frames.length - 1] ?? null;
+  }
+
+  private dropBack(): void {
+    this.backFrames = [];
+    this.backSink = null;
+  }
+
   dispose() {
     this.input?.dispose();
     this.input = null;
     this.sink = null;
+    this.track = null;
+    this.dropBack();
     if (this.still?.kind === "ready") (this.still.image as ImageBitmap).close?.();
     this.still = null;
   }
@@ -536,6 +625,7 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
         volume: sp.clip.volume ?? 1,
         speed: sp.clip.speed,
         speedCurve: sp.clip.speedCurve,
+        reverse: sp.clip.reverse,
         sound: sp.clip.sound,
         muted: sp.clip.muted || assetIsSilent(sp.asset),
         fadeIn: ramps[i].head,
@@ -558,6 +648,7 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
       volume: a.volume,
       speed: a.speed,
       speedCurve: a.speedCurve,
+      reverse: a.reverse,
       fadeIn: a.fadeIn,
       fadeOut: a.fadeOut,
       sound: a.sound,
@@ -578,6 +669,7 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
             muted: sp.clip.muted || !!sp.clip.hidden || assetIsSilent(sp.asset),
             speed: sp.clip.speed,
             speedCurve: sp.clip.speedCurve,
+            reverse: sp.clip.reverse,
             volume: sp.clip.volume,
             sound: sp.clip.sound,
             transition: sp.transitionOut,
@@ -859,7 +951,7 @@ export class FramePainter {
    * beside the preview's own pictures in the memory report. */
   private readonly releaseMemory = holdMemory("exportReaders", () => {
     let n = 0;
-    for (const r of this.readers.values()) n += canvasBytes(READER_POOL * r.sourcePixels);
+    for (const r of this.readers.values()) n += canvasBytes(readerPoolFrames(r) * r.sourcePixels);
     return n;
   });
   /** Frames drawn, which is the clock the readers' eviction order runs on. */
@@ -981,7 +1073,7 @@ export class FramePainter {
    * grace, cannot.
    */
   private evictReaders(): void {
-    const cost = (r: ClipReader) => canvasBytes(READER_POOL * r.sourcePixels);
+    const cost = (r: ClipReader) => canvasBytes(readerPoolFrames(r) * r.sourcePixels);
     const cap = allowance(
       "exportReaders",
       READERS_TUNED * canvasBytes(READER_POOL * 1920 * 1080)

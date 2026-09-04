@@ -38,7 +38,7 @@ export const GEN_FPS = 30;
 const toSec = (frames: number) => frames / GEN_FPS;
 
 /** Effective timeline footprint of a clip (seconds), through its rate. */
-function footprintSec(c: { in: number; out: number; speed?: number; speedCurve?: SpeedNode[] }): number {
+function footprintSec(c: { in: number; out: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean }): number {
   return retimeOf(c).len;
 }
 

@@ -12,8 +12,8 @@
  * export path promises.
  */
 
-import type { Retime } from "@donkeycut/effects-kit";
-import { timeStretch } from "../lib/timeStretch";
+import { srcSpan, type Retime } from "@donkeycut/effects-kit";
+import { fitSpan } from "../lib/retimeFit";
 import { num } from "./util";
 
 /** The bake's sample rate: what the graphs resample every input to. */
@@ -54,8 +54,9 @@ export async function bakeRetimedAudio(
   const rt = retime;
   // A handle cannot reach before the source's first sample; the head reach
   // is whatever the source really had.
-  const from = Math.max(0, rt.srcAt(-Math.max(0, back)));
-  const to = Math.max(from, rt.srcAt(rt.len + Math.max(0, ahead)));
+  const reach = srcSpan(rt, -Math.max(0, back), rt.len + Math.max(0, ahead));
+  const from = Math.max(0, reach.lo);
+  const to = Math.max(from, reach.hi);
   const pcm = `${outFile}.f32`;
   await io.ffmpeg([
     "-y",
@@ -92,16 +93,14 @@ export async function bakeRetimedAudio(
   // it here keeps the stretch from running beside a second copy of the span.
   raw = null;
   // The file may run short of `to` — the source ended first — so the output
-  // length follows the samples actually read, through the same map.
-  const inSec = frames / BAKE_RATE;
-  const tFrom = rt.tAt(from);
-  const outLength = Math.max(1, Math.round((rt.tAt(from + inSec) - tFrom) * BAKE_RATE));
-  const out = timeStretch(channels, BAKE_RATE, {
-    factorAt: (sec) => 1 / rt.rateAtSrc(from + sec),
-    outLength,
-  });
-  await io.writeFile(outFile, wavFloat32(out, BAKE_RATE));
-  return { file: outFile, back: -tFrom, len: outLength / BAKE_RATE };
+  // length follows the samples actually read, through the same map, and so
+  // does the head the fit reports: `from` on a forward clip, the far end of
+  // what was read on a reversed one.
+  const out = fitSpan(channels, BAKE_RATE, rt, from);
+  const tHead = rt.tAt(out.head);
+  const outLength = Math.max(1, out.channels[0]?.length ?? 1);
+  await io.writeFile(outFile, wavFloat32(out.channels, BAKE_RATE));
+  return { file: outFile, back: -tHead, len: outLength / BAKE_RATE };
 }
 
 /** A WAV container around float samples: what ffmpeg reads back as pcm_f32le. */

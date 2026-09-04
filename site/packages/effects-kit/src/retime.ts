@@ -26,6 +26,10 @@ export interface Retimable {
   out: number;
   speed?: number;
   speedCurve?: SpeedNode[];
+  /** The span plays backward: the head of the clip shows `out`, the tail
+   * shows `in`. The rate (one number or a curve) still describes the footage
+   * in source seconds, so the footprint is the same either way. */
+  reverse?: boolean;
 }
 
 export interface Retime {
@@ -37,9 +41,11 @@ export interface Retime {
   uniform: boolean;
   /** The uniform rate, or the span's average rate under a curve. */
   rate: number;
+  /** Source seconds fall as timeline seconds rise. */
+  reverse: boolean;
   /** Timeline offset from the span's head → absolute source second. Linear
    * past either end at the edge rate, so a handle reaching outside the span
-   * maps like the footage beside it. */
+   * maps like the footage beside it. Falls with `tLocal` on a reversed span. */
   srcAt(tLocal: number): number;
   /** Absolute source second → timeline offset from the span's head. */
   tAt(src: number): number;
@@ -48,8 +54,10 @@ export interface Retime {
   /** Rate at a source second. */
   rateAtSrc(src: number): number;
   /** The map as a reduced polyline of `[source seconds past in, timeline
-   * seconds past the head]`, first knot `[0, 0]`, last `[out − in, len]`.
-   * Renderers that cannot call a function (an ffmpeg expression) read this. */
+   * seconds past the head]`, ascending in source, first knot `[0, 0]`, last
+   * `[out − in, len]`. On a reversed span the timeline column runs the other
+   * way: first `[0, len]`, last `[out − in, 0]`. Renderers that cannot call
+   * a function (an ffmpeg expression) read this. */
   knots: [number, number][];
   /** Fingerprint of everything the map depends on. */
   key: string;
@@ -118,6 +126,7 @@ function uniformRetime(inS: number, outS: number, rate: number, key: string): Re
     len,
     uniform: true,
     rate,
+    reverse: false,
     srcAt: (t) => inS + t * rate,
     tAt: (s) => (s - inS) / rate,
     rateAt: () => rate,
@@ -214,6 +223,7 @@ function curvedRetime(inS: number, outS: number, nodes: SpeedNode[], key: string
     len,
     uniform: false,
     rate: len > 0 ? span / len : rateIn,
+    reverse: false,
     srcAt,
     tAt,
     rateAt: (t) => rate(srcAt(t)),
@@ -223,17 +233,41 @@ function curvedRetime(inS: number, outS: number, nodes: SpeedNode[], key: string
   };
 }
 
+/** The forward map turned around: the head of the span plays `out`, the tail
+ * plays `in`, and every timeline offset reads the forward map at `len − t`.
+ * The footprint, the average rate and the rate at each source second are the
+ * forward span's own. */
+function reversedRetime(f: Retime, key: string): Retime {
+  const len = f.len;
+  return {
+    in: f.in,
+    out: f.out,
+    len,
+    uniform: f.uniform,
+    rate: f.rate,
+    reverse: true,
+    srcAt: (t) => f.srcAt(len - t),
+    tAt: (s) => len - f.tAt(s),
+    rateAt: (t) => f.rateAt(len - t),
+    rateAtSrc: f.rateAtSrc,
+    knots: f.knots.map(([x, y]): [number, number] => [x, len - y]),
+    key,
+  };
+}
+
 /** The retime of a clip's span, memoized on everything it depends on. */
 export function retimeOf(c: Retimable): Retime {
   const nodes = speedCurveOf(c);
-  const key = nodes
+  const fwdKey = nodes
     ? `${c.in.toFixed(4)}|${c.out.toFixed(4)}|${nodes.map((nd) => `${nd[0].toFixed(4)}:${nd[1].toFixed(4)}`).join(",")}`
     : `${c.in}|${c.out}|u${uniformRate(c)}`;
+  const key = c.reverse ? `${fwdKey}|r` : fwdKey;
   const hit = memo.get(key);
   if (hit) return hit;
-  const built = nodes
-    ? curvedRetime(c.in, c.out, nodes, key)
-    : uniformRetime(c.in, c.out, uniformRate(c), key);
+  const forward = nodes
+    ? curvedRetime(c.in, c.out, nodes, fwdKey)
+    : uniformRetime(c.in, c.out, uniformRate(c), fwdKey);
+  const built = c.reverse ? reversedRetime(forward, key) : forward;
   memo.set(key, built);
   // Three Float64 tables per curved entry, plus the knots it kept.
   const bytes = nodes ? (built.knots.length + 1) * 16 + sampleCount(c.out - c.in) * 24 : 128;
@@ -251,6 +285,38 @@ export function retimeOf(c: Retimable): Retime {
 
 /** Timeline seconds a clip occupies. */
 export const retimeLen = (c: Retimable) => retimeOf(c).len;
+
+/** The source second at the head of a span: `in`, or `out` when it plays
+ * backward. */
+export const headSrc = (c: Pick<Retimable, "in" | "out" | "reverse">) => (c.reverse ? c.out : c.in);
+/** The source second at the tail of a span: `out`, or `in` when it plays
+ * backward. */
+export const tailSrc = (c: Pick<Retimable, "in" | "out" | "reverse">) => (c.reverse ? c.in : c.out);
+
+/** The source seconds a timeline window `[tFrom, tTo]` of the map reads,
+ * low end first whichever way the map runs. */
+export function srcSpan(rt: Retime, tFrom: number, tTo: number): { lo: number; hi: number } {
+  const a = rt.srcAt(tFrom);
+  const b = rt.srcAt(tTo);
+  return a <= b ? { lo: a, hi: b } : { lo: b, hi: a };
+}
+
+/**
+ * The same span over media that has been turned around: source second `s`
+ * of the original sits at `pivot − s` in the turned copy. A reversed clip
+ * over the original is a forward clip over the copy, with its curve's nodes
+ * carried to the moments they still describe.
+ */
+export function mirrorRetimable<T extends Retimable>(c: T, pivot: number): T {
+  const nodes = speedCurveOf(c);
+  return {
+    ...c,
+    in: pivot - c.out,
+    out: pivot - c.in,
+    speedCurve: nodes ? nodes.map(([at, rate]): SpeedNode => [pivot - at, rate]).reverse() : undefined,
+    reverse: undefined,
+  };
+}
 
 /** A flat curve at the clip's current rate, one node on each edge of the
  * span — what a clip starts from when it enters curve editing. */

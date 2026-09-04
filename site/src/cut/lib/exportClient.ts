@@ -611,6 +611,7 @@ export async function buildExportPayload(
     frame: sp.clip.frame,
     speed: clipSpeed(sp.clip),
     speedCurve: sp.clip.speedCurve,
+    reverse: sp.clip.reverse,
     transition: sp.transitionOut,
     // A cross dissolve carries its own window: the picture cuts, so the
     // server's blend must not see one. The handles are what the crossing
@@ -815,6 +816,7 @@ export async function buildExportPayload(
           sound: c.sound,
           speed: c.speed,
           speedCurve: c.speedCurve,
+          reverse: c.reverse,
           image: assetById.get(c.assetId)!.type === "image",
           grade: normalizeGrade(c.grade),
           look: c.look,
@@ -912,6 +914,7 @@ export async function buildExportPayload(
       fadeOut: a.fadeOut ?? 0,
       speed: a.speed,
       speedCurve: a.speedCurve,
+      reverse: a.reverse,
       sound: a.sound,
       duck: a.duck,
     }));
@@ -1425,13 +1428,16 @@ export function docFirstSeconds(doc: ExportDoc, seconds: number): ExportDoc {
   // The trim that ends a clip at `seconds` goes back through the clip's own
   // map, so a curved clip cuts at the source second really playing there.
   const clampOut = <
-    T extends { start: number; in: number; out: number; speed?: number; speedCurve?: SpeedNode[] },
+    T extends { start: number; in: number; out: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean },
   >(
     clip: T
   ): T => {
     const rt = retimeOf(clip);
     const room = seconds - clip.start;
-    return rt.len <= room ? clip : { ...clip, out: rt.srcAt(room) };
+    if (rt.len <= room) return clip;
+    // The cut-off lands on the source second playing there: the tail of a
+    // reversed clip is its `in`.
+    return clip.reverse ? { ...clip, in: rt.srcAt(room) } : { ...clip, out: rt.srcAt(room) };
   };
   const starts = <T extends { start: number }>(item: T) => item.start < seconds;
   return {

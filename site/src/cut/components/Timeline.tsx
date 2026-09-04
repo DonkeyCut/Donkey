@@ -58,7 +58,7 @@ import { useBrushUi } from "@/cut/lib/removal/brushUi";
 import { useMatteBakes } from "@/cut/lib/removal/bakeJobs";
 import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
-import { EFFECT_LABELS, hasSpeedCurve, retimeOf, SPEED_CURVE_MAX, SPEED_CURVE_MIN, type EffectId, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
+import { EFFECT_LABELS, hasSpeedCurve, headSrc, retimeOf, SPEED_CURVE_MAX, SPEED_CURVE_MIN, tailSrc, type EffectId, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
 import { assetIsSilent, emptySubtitles, IMAGE_CLIP_SECONDS, isAudioTransition, SHAPE_LABELS, TRANSITION_MAX, TRANSITION_STYLE_LABELS, transitionBarStart, transitionDefaultSeconds, type ShapeKind } from "@/cut/lib/types";
 import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, Selection, StickerOverlay, SubtitleCue, TimelineTransition, TransitionBoundaryKind, TransitionStyle, VideoClip } from "@/cut/lib/types";
 import { isLottieAsset } from "@/cut/lib/lottieAssets";
@@ -3807,8 +3807,9 @@ function ClipView({
   // The box is drawn a gutter narrower than the footprint, so everything laid
   // out inside it — the strip, the dots — measures against this, not `w`.
   const barW = Math.max(10, w - CLIP_GAP);
-  const filmIn = clip.in;
-  const filmOut = clip.out;
+  // The source seconds at the box's edges: a reversed clip opens on `out`.
+  const filmIn = headSrc(clip);
+  const filmOut = tailSrc(clip);
 
   const startFrame = useEdgeFrame(asset, filmIn, `${clip.id}:in`);
   const endFrame = useEdgeFrame(asset, filmOut, `${clip.id}:out`);
@@ -3922,7 +3923,7 @@ function ClipView({
           )}
           style={{ height: WAVE_H }}
         >
-          <WaveformCanvas asset={asset} from={filmIn} to={filmOut} w={barW} h={WAVE_H - 4} map={rt.uniform ? undefined : (px) => rt.srcAt(px / pps)} className="inset-x-0 inset-y-0.5" />
+          <WaveformCanvas asset={asset} from={clip.in} to={clip.out} w={barW} h={WAVE_H - 4} map={rt.uniform && !rt.reverse ? undefined : (px) => rt.srcAt(px / pps)} className="inset-x-0 inset-y-0.5" />
         </div>
       )}
       {selected && (
@@ -4014,7 +4015,7 @@ function ClipView({
       {/* Drawn wherever the source has a grid: on the band when there is one,
           along the bar's bottom edge when the clip plays silent. Every edge
           snaps to them either way. */}
-      <BeatDots asset={asset} from={filmIn} to={filmOut} retime={rt} pps={pps} w={barW} />
+      <BeatDots asset={asset} lo={clip.in} hi={clip.out} retime={rt} pps={pps} w={barW} />
       <span
         className={cn(trimFor(barW), "tl-trim-l left-0")}
         onPointerDown={(e) => startLaneTrim(e, lane, clip.id, "l", ui)}
@@ -5085,7 +5086,7 @@ function writeBeats(assetId: string, edit: (beats: number[]) => number[]) {
 function addBeatAt(
   e: React.PointerEvent<HTMLElement>,
   asset: MediaAsset,
-  clip: { in: number; out: number; speed?: number; speedCurve?: SpeedNode[] },
+  clip: { in: number; out: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean },
   pps: number
 ) {
   e.preventDefault();
@@ -5166,15 +5167,18 @@ function BeatDot({
  * source window `from..to`. */
 function BeatDots({
   asset,
-  from,
-  to,
+  lo,
+  hi,
   retime,
   pps,
   w,
 }: {
   asset: MediaAsset;
-  from: number;
-  to: number;
+  /** The stretch of source the clip holds, low second first. A clip that
+   * plays backward holds the same stretch and shows it in the other order,
+   * so the window it is picked out of reads the same way either way. */
+  lo: number;
+  hi: number;
   retime: Retime;
   pps: number;
   w: number;
@@ -5184,7 +5188,7 @@ function BeatDots({
   return (
     <>
       {beats
-        .filter((b) => b >= from && b <= to)
+        .filter((b) => b >= lo && b <= hi)
         .map((b) => (
           <BeatDot
             key={b}
@@ -5293,9 +5297,9 @@ function AudioView({
         className="pointer-events-none absolute inset-0"
         style={{ clipPath: fadeClipPath(fadeInPx, fadeOutPx, barW) }}
       >
-        <WaveformCanvas asset={asset} from={clip.in} to={clip.out} w={barW} h={AUDIO_H - 8} map={rt.uniform ? undefined : (px) => rt.srcAt(px / pps)} className="inset-x-0 inset-y-1" />
+        <WaveformCanvas asset={asset} from={clip.in} to={clip.out} w={barW} h={AUDIO_H - 8} map={rt.uniform && !rt.reverse ? undefined : (px) => rt.srcAt(px / pps)} className="inset-x-0 inset-y-1" />
       </div>
-      <BeatDots asset={asset} from={clip.in} to={clip.out} retime={rt} pps={pps} w={barW} />
+      <BeatDots asset={asset} lo={clip.in} hi={clip.out} retime={rt} pps={pps} w={barW} />
       <FadeEnvelope inPx={fadeInPx} outPx={fadeOutPx} barW={barW} />
       <FadeGrip clip={clip} side="in" pps={pps} barW={barW} fade={fadeIn} live={liveFade?.side === "in"} onLive={setLiveFade} />
       <FadeGrip clip={clip} side="out" pps={pps} barW={barW} fade={fadeOut} live={liveFade?.side === "out"} onLive={setLiveFade} />

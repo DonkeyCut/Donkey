@@ -1,11 +1,12 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { readFile, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { atempoChain, hasStream, num, videoColorInfo } from "./util";
+import { atempoChain, hasStream, mediaDuration, num, videoColorInfo, videoDecodeCost } from "./util";
 import { assertGraphSafe, fexpr } from "./filterGraph";
 import { bakeRetimedAudio, setptsExpr, type BakedAudio } from "./retimeAudio";
+import { bakeTurnedMedia } from "./turnMedia";
 import { CLIP_MAX_ZOOM, projectFadeSeconds, regionPx, TRANSITION_XFADE, TRANSITION_ZOOM, type ColorGrade, type TransitionStyle } from "../lib/types";
-import { audioFxFilters, buildGradeLut, effectFilterLines, gradeKey, gradeNeedsLut, gradeToFfmpegFilter, isAudioEffect, lookFilterLines, lutToCube, retimeOf, shortestTurn, sortedKeys, soundFilters, type ClipSound, type OverlayKey, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
+import { audioFxFilters, buildGradeLut, effectFilterLines, gradeKey, gradeNeedsLut, gradeToFfmpegFilter, isAudioEffect, lookFilterLines, lutToCube, mirrorRetimable, retimeOf, shortestTurn, srcSpan, sortedKeys, soundFilters, type ClipSound, type OverlayKey, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
 
 // The render pipeline itself: spec in, finished mp4 out. Shared by the local
 // engine's job registry (jobs.ts) and the cloud render worker, which stage
@@ -92,6 +93,7 @@ export interface ExportSpec {
     /** A rate that changes through the footage: [source second, rate] nodes
      * (see retimeOf); present, `speed` is ignored. */
     speedCurve?: SpeedNode[];
+    reverse?: boolean;
     /** Transition into the next clip, in timeline seconds (overlap). */
     transition?: number;
     /** Half the cross dissolve into the next clip, in timeline seconds: the
@@ -182,6 +184,7 @@ export interface ExportSpec {
     /** A rate that changes through the footage: [source second, rate] nodes
      * (see retimeOf); present, `speed` is ignored. */
     speedCurve?: SpeedNode[];
+    reverse?: boolean;
     /** Transition ramps, timeline seconds from this overlay's head/tail. On
      * an upper track a fade is an alpha fade (the tracks beneath show
      * through); a cross transition arrives as the incoming clip's headFade
@@ -245,6 +248,7 @@ export interface ExportSpec {
     /** A rate that changes through the footage: [source second, rate] nodes
      * (see retimeOf); present, `speed` is ignored. */
     speedCurve?: SpeedNode[];
+    reverse?: boolean;
     sound?: ClipSound;
     /** Voiceover ducking: while this clip plays, every other sound drops to
      * this gain (0..1). Ducking clips never duck each other. */
@@ -393,7 +397,7 @@ const retimedPts = (rt: Retime) =>
   rt.uniform ? `(PTS-STARTPTS)/${num(rt.rate)}` : fexpr(setptsExpr(rt));
 
 /** Timeline length of a media clip's span through its rate or curve. */
-const spanLen = (c: { in: number; out: number; speed?: number; speedCurve?: SpeedNode[] }) =>
+const spanLen = (c: { in: number; out: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean }) =>
   Math.max(0.1, retimeOf(c).len);
 
 /** A clip's frame region in even pixels, or null when it fills the whole frame
@@ -465,11 +469,24 @@ export interface ExportPipelineIO {
   unlink: typeof unlink;
   hasStream: typeof hasStream;
   videoColorInfo: typeof videoColorInfo;
+  videoDecodeCost: typeof videoDecodeCost;
+  mediaDuration: typeof mediaDuration;
   h264Encoder: () => Promise<"libx264" | "h264_videotoolbox">;
   runFfmpeg: typeof runFfmpeg;
 }
 
-const realIO: ExportPipelineIO = { stat, writeFile, readFile, unlink, hasStream, videoColorInfo, h264Encoder, runFfmpeg };
+const realIO: ExportPipelineIO = {
+  stat,
+  writeFile,
+  readFile,
+  unlink,
+  hasStream,
+  videoColorInfo,
+  videoDecodeCost,
+  mediaDuration,
+  h264Encoder,
+  runFfmpeg,
+};
 
 /** Render `spec` into `job.outPath`. `mediaPathFor` maps a spec media file
  * name to its staged path on disk (the engine reads the project folder; the
@@ -483,6 +500,67 @@ export async function runExport(
 ) {
   if (spec.clips.length === 0) throw new Error("Nothing to export.");
   const { width: W, height: H, fps } = spec;
+
+  // A clip that plays backward is rendered off a turned copy of its span,
+  // baked ahead of the graph in bounded chunks (turnMedia.ts): the clip
+  // becomes a forward clip over that file, its curve's nodes carried along,
+  // and everything below reads it like any other footage. The copy joins the
+  // inputs by its own path, past the project-folder lookup.
+  const turned = new Map<string, { video: boolean; audio: boolean }>();
+  const turn = async <
+    T extends {
+      file: string;
+      in: number;
+      out: number;
+      speed?: number;
+      speedCurve?: SpeedNode[];
+      reverse?: boolean;
+      soundBack?: number;
+      soundAhead?: number;
+      image?: boolean;
+    },
+  >(
+    c: T,
+    tag: string,
+    /** A soundtrack entry, whose picture the graph never reads. Detached from
+     * a video file it would otherwise have its whole span re-encoded backward
+     * frame by frame for nothing. */
+    soundOnly = false
+  ): Promise<T> => {
+    if (!c.reverse || !c.file || c.image) return c;
+    const src = await resolveMedia(io.stat, mediaPathFor, c.file);
+    const rt = retimeOf(c);
+    // The span plus the handles a crossing reaches into, so the copy holds
+    // what the sound of a cross dissolve needs on either side.
+    const reach = srcSpan(rt, -(c.soundBack ?? 0), rt.len + (c.soundAhead ?? 0));
+    const lo = Math.max(0, reach.lo);
+    const hi = Math.max(lo + 0.001, reach.hi);
+    const video = !soundOnly && (await io.hasStream(src, "v"));
+    const audio = await io.hasStream(src, "a");
+    const colorFix = video ? sdrConvert(await io.videoColorInfo(src)) : "";
+    const decodeCost = video ? ((await io.videoDecodeCost(src)) ?? 0) : 0;
+    const file = path.join(job.tmpDir, `turned_${tag}.${video ? "mov" : "wav"}`);
+    const pivot = await bakeTurnedMedia(
+      {
+        ffmpeg: (args) => io.runFfmpeg(job, args),
+        writeFile: (p, data) => io.writeFile(p, data),
+        h264Encoder: io.h264Encoder,
+        duration: io.mediaDuration,
+      },
+      src,
+      { lo, hi, video, audio, colorFix, decodeCost },
+      file
+    );
+    turned.set(file, { video, audio });
+    return { ...mirrorRetimable(c, pivot), file };
+  };
+  const turnedClips: ExportSpec["clips"] = [];
+  for (const [j, c] of spec.clips.entries()) turnedClips.push(await turn(c, `clip_${j}`));
+  const turnedOverlays: NonNullable<ExportSpec["overlayVideos"]> = [];
+  for (const [k, oc] of (spec.overlayVideos ?? []).entries()) turnedOverlays.push(await turn(oc, `ovl_${k}`));
+  const turnedAudio: ExportSpec["audio"] = [];
+  for (const [k, a] of spec.audio.entries()) turnedAudio.push(await turn(a, `snd_${k}`, true));
+  spec = { ...spec, clips: turnedClips, overlayVideos: turnedOverlays, audio: turnedAudio };
 
   // Tracks number 0..N bottom-up: track 0 folds sequentially into the base
   // picture, the rest overlay it in track order (highest last = frontmost).
@@ -537,7 +615,7 @@ export async function runExport(
         ...overlayVideos.filter((o) => !o.image),
       ]
         .map((c) => c.file)
-        .filter(Boolean)
+        .filter((f) => f && !turned.has(f))
     ),
   ];
   const audioPresence = new Map<string, boolean>();
@@ -572,6 +650,14 @@ export async function runExport(
       colorFix.set(f, sdrConvert(await io.videoColorInfo(paths[i])));
     })
   );
+  // The turned copies: already probed at the bake, already folded to SDR.
+  for (const [file, streams] of turned) {
+    inputIndex.set(file, nInputs++);
+    inputs.push("-i", file);
+    audioPresence.set(file, streams.audio);
+    videoPresence.set(file, streams.video);
+    colorFix.set(file, "");
+  }
   // Animated overlays: each is its own concat-demuxer slideshow (region-sized
   // frames with transparent filler around the element's window), the exact
   // mechanism the caption lanes use. Static overlays stay single PNG inputs.
@@ -810,6 +896,7 @@ export async function runExport(
     out: number;
     speed?: number;
     speedCurve?: SpeedNode[];
+    reverse?: boolean;
     soundBack?: number;
     soundAhead?: number;
     muted?: boolean;

@@ -1147,6 +1147,12 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
             </span>
           )}
         </Row>
+        <Row label="Reverse">
+          <Switch
+            checked={!!clip.reverse}
+            onCheckedChange={(v) => useEditor.getState().setClipReverse(clip.id, v)}
+          />
+        </Row>
 
         {/* Picture */}
         <div className="my-1.5 h-px bg-border" />
@@ -1555,6 +1561,12 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
             title="Reset speed"
             show={Math.abs(speed - 1) > 1e-4 || !!clip.speedCurve}
             onClick={() => commitAudio({ speed: undefined, speedCurve: undefined })}
+          />
+        </Row>
+        <Row label="Reverse">
+          <Switch
+            checked={!!clip.reverse}
+            onCheckedChange={(v) => commitAudio({ reverse: v || undefined })}
           />
         </Row>
         <Row label="Volume">

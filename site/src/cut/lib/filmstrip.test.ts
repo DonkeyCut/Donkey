@@ -351,3 +351,29 @@ describe("a curved clip's strips agree", () => {
     }
   });
 });
+
+describe("a reversed clip's strip", () => {
+  const clip = { in: 0, out: DURATION, speed: 1, reverse: true };
+  const retime = retimeOf(clip);
+  const tiles = planFilmstrip({
+    thumbs,
+    thumbStep: THUMB_STEP,
+    duration: DURATION,
+    aspect: 16 / 9,
+    filmIn: clip.out,
+    w: 1400,
+    pps: 1400 / retime.len,
+    speed: retime.rate,
+    retime,
+    tileH: 60,
+    minTileW: 26,
+  });
+
+  test("walks the footage backward across the box", () => {
+    expect(tiles.length).toBeGreaterThan(2);
+    for (let i = 1; i < tiles.length; i++) expect(tiles[i].srcT).toBeLessThan(tiles[i - 1].srcT);
+    expect(tiles[0].srcT).toBeGreaterThan(DURATION - 2);
+    expect(tiles[tiles.length - 1].srcT).toBeLessThan(2);
+    for (const t of tiles) expect(t.wantT).toBeGreaterThanOrEqual(0);
+  });
+});

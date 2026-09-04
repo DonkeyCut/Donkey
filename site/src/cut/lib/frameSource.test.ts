@@ -244,31 +244,60 @@ describe("mappingKey", () => {
   test("clips showing identical pictures share a decoder", () => {
     // A plain split: same file, same speed, and the same source time at
     // timeline zero. One decoder reads straight across the cut.
-    const left = mappingKey("a", uniform(1, 0), 0, 0);
-    const right = mappingKey("a", uniform(1, 4), 4, 4);
+    const left = mappingKey("a", uniform(1, 0), 0);
+    const right = mappingKey("a", uniform(1, 4), 4);
     expect(left).toBe(right);
   });
 
   test("different trims of one file keep their own decoders", () => {
     // Both live at timeline 4, showing different moments — a same-source
     // dissolve has to blend two distinct frames.
-    expect(mappingKey("a", uniform(1, 0), 0, 4)).not.toBe(mappingKey("a", uniform(1, 8), 8, 4));
+    expect(mappingKey("a", uniform(1, 0), 4)).not.toBe(mappingKey("a", uniform(1, 8), 4));
   });
 
   test("a speed change is a different mapping", () => {
-    expect(mappingKey("a", uniform(1, 0), 0, 0)).not.toBe(mappingKey("a", uniform(2, 0), 0, 0));
+    expect(mappingKey("a", uniform(1, 0), 0)).not.toBe(mappingKey("a", uniform(2, 0), 0));
+  });
+
+  test("a reversed clip is its own mapping", () => {
+    const rev = (inPoint: number, start: number) =>
+      mappingKey("a", retimeOf({ in: inPoint, out: inPoint + 4, speed: 1, reverse: true }), start);
+    expect(rev(0, 0)).not.toBe(mappingKey("a", uniform(1, 0, 4), 0));
+    // Two reversed halves of one span read straight across their cut too:
+    // the right half shows the lower source seconds.
+    expect(rev(4, 0)).toBe(rev(0, 4));
+    expect(rev(0, 0)).not.toBe(rev(4, 0));
   });
 
   test("a speed curve is its own mapping, keyed on the curve and the start", () => {
     const curved = (start: number) =>
-      mappingKey("a", retimeOf({ in: 0, out: 10, speedCurve: [[0, 1], [10, 4]] }), 0, start);
+      mappingKey("a", retimeOf({ in: 0, out: 10, speedCurve: [[0, 1], [10, 4]] }), start);
     expect(curved(0)).toBe(curved(0));
     expect(curved(0)).not.toBe(curved(2));
-    expect(curved(0)).not.toBe(mappingKey("a", uniform(1, 0), 0, 0));
+    expect(curved(0)).not.toBe(mappingKey("a", uniform(1, 0), 0));
   });
 
   test("different files never share", () => {
-    expect(mappingKey("a", uniform(1, 0), 0, 0)).not.toBe(mappingKey("b", uniform(1, 0), 0, 0));
+    expect(mappingKey("a", uniform(1, 0), 0)).not.toBe(mappingKey("b", uniform(1, 0), 0));
+  });
+
+  test("a second file read at an offset keys on that offset", () => {
+    // Two clips over one removal matte, each holding the matte from a
+    // different second. They read different pictures and need their own
+    // decoders; without the offset they would share one and fight over it.
+    const matte = (offset: number) => mappingKey("m", uniform(1, 0), 0, offset);
+    expect(matte(0)).toBe(mappingKey("m", uniform(1, 0), 0));
+    expect(matte(2)).not.toBe(matte(5));
+    // A curve keys the same way.
+    const curve = retimeOf({ in: 0, out: 10, speedCurve: [[0, 1], [10, 4]] });
+    expect(mappingKey("m", curve, 0, 2)).not.toBe(mappingKey("m", curve, 0, 5));
+    expect(mappingKey("m", curve, 0, 0)).toBe(mappingKey("m", curve, 0));
+  });
+
+  test("an offset lands on the mapping it shifts to", () => {
+    // Reading the matte two seconds back from source second 8 is the same
+    // picture as reading it straight from source second 6.
+    expect(mappingKey("m", uniform(1, 8), 0, 2)).toBe(mappingKey("m", uniform(1, 6), 0));
   });
 });
 

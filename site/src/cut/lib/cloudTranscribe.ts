@@ -26,10 +26,11 @@ export interface CloudTranscribeSpec {
     muted: boolean;
     speed?: number;
     speedCurve?: [number, number][];
+    reverse?: boolean;
     /** Cross-dissolve overlap into the next clip, timeline seconds. */
     transition?: number;
   }[];
-  audio: { file: string; in: number; out: number; start: number; volume: number; speed?: number; speedCurve?: [number, number][] }[];
+  audio: { file: string; in: number; out: number; start: number; volume: number; speed?: number; speedCurve?: [number, number][]; reverse?: boolean }[];
 }
 
 const RATE = 16000; // the wire format the hosted route expects

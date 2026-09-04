@@ -172,7 +172,7 @@ export const INSPECTOR_TOOLS = [
   {
     name: "update_audio",
     description:
-      "Update a soundtrack clip: volume (0..3), fadeIn/fadeOut seconds, start position, in/out trim, speed, hidden, or duck. `duck` is voiceover ducking — while this clip plays, ALL other audio (video-clip sound and other music) drops to that gain (0..1); pass 1 to clear ducking. Use it to make a voiceover sit over quieter music.",
+      "Update a soundtrack clip: volume (0..3), fadeIn/fadeOut seconds, start position, in/out trim, speed, reverse, hidden, or duck. `duck` is voiceover ducking — while this clip plays, ALL other audio (video-clip sound and other music) drops to that gain (0..1); pass 1 to clear ducking. Use it to make a voiceover sit over quieter music.",
     inputSchema: obj({
       id: str("Soundtrack clip id"),
       volume: num("0..3 (1 = unchanged, above 1 boosts)"),
@@ -182,6 +182,7 @@ export const INSPECTOR_TOOLS = [
       in: num("Source in s"),
       out: num("Source out s"),
       speed: num("Playback rate (1 = normal, no upper limit)"),
+      reverse: bool("Play the sound backward; false plays it forward again"),
       duck: num("Duck other audio to this gain while this clip plays, 0..1 (1 clears ducking)"),
       hidden: bool("Silence the clip without removing it (grayed on the timeline)"),
     }, ["id"]),
@@ -275,8 +276,8 @@ export const INSPECTOR_TOOLS = [
   {
     name: "set_speed",
     description:
-      "Set a video clip's playback speed, one rate across the whole clip. Faster shortens the clip on the timeline; slower stretches it. Later clips, titles, captions, and soundtrack shift to stay in sync. A clip carrying a speed curve loses it: the rate becomes uniform again (set_speed_curve is the tool for a rate that changes through the footage).",
-    inputSchema: obj({ clipId: str("Video clip id"), speed: num("Playback rate (1 = normal, no upper limit)") }, ["clipId", "speed"]),
+      "Set a video clip's playback speed, one rate across the whole clip, and/or play it backward. Faster shortens the clip on the timeline; slower stretches it. Later clips, titles, captions, and soundtrack shift to stay in sync. A clip carrying a speed curve loses it when speed is passed: the rate becomes uniform again (set_speed_curve is the tool for a rate that changes through the footage). `reverse: true` plays the clip's trim backward, picture and sound, at its rate — the clip keeps its length and its curve, and its head now shows source `out`; `reverse: false` turns it forward again.",
+    inputSchema: obj({ clipId: str("Video clip id"), speed: num("Playback rate (1 = normal, no upper limit)"), reverse: bool("Play the footage backward (true) or forward (false)") }, ["clipId"]),
   },
   {
     name: "set_speed_curve",

@@ -105,7 +105,7 @@ export function TemplateCard({
 
   // The contents, one row per item, in save order: clips and stills, sounds,
   // titles, then a caption count.
-  const speedLen = (x: { in: number; out: number; speed?: number; speedCurve?: SpeedNode[] }) =>
+  const speedLen = (x: { in: number; out: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean }) =>
     retimeOf(x).len;
   const parts: {
     icon: typeof Film;

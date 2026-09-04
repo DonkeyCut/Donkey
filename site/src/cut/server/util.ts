@@ -176,6 +176,82 @@ export function videoDimensions(
 }
 
 /**
+ * Bytes of decoded picture one second of a file's video comes to — width ×
+ * height × 1.5 for yuv420p, times the frame rate. A pass that has to hold a
+ * stretch of decoded frames at once sizes that stretch by this. Null when the
+ * probe fails or the file carries no picture.
+ */
+export function videoDecodeCost(file: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    const p = spawn("ffprobe", [
+      "-v", "error",
+      "-select_streams", "v:0",
+      "-show_entries", "stream=width,height,avg_frame_rate,r_frame_rate",
+      "-of", "json",
+      file,
+    ]);
+    let out = "";
+    const timer = setTimeout(() => {
+      p.kill("SIGKILL");
+      resolve(null);
+    }, 30_000);
+    timer.unref();
+    p.stdout.on("data", (d) => (out += d));
+    p.on("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) return resolve(null);
+      try {
+        const s = JSON.parse(out).streams?.[0];
+        const width = Number(s?.width);
+        const height = Number(s?.height);
+        if (!(width > 0) || !(height > 0)) return resolve(null);
+        const ratio = (v: unknown) => {
+          const [n, d] = String(v ?? "").split("/");
+          const fps = Number(n) / (Number(d) || 1);
+          return Number.isFinite(fps) && fps > 0 && fps < 1000 ? fps : 0;
+        };
+        const fps = ratio(s?.avg_frame_rate) || ratio(s?.r_frame_rate) || 30;
+        resolve(width * height * 1.5 * fps);
+      } catch {
+        resolve(null);
+      }
+    });
+    p.on("error", () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
+  });
+}
+
+/** How long a media file runs, in seconds, or null when the probe fails. */
+export function mediaDuration(file: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    const p = spawn("ffprobe", [
+      "-v", "error",
+      "-show_entries", "format=duration",
+      "-of", "csv=p=0",
+      file,
+    ]);
+    let out = "";
+    const timer = setTimeout(() => {
+      p.kill("SIGKILL");
+      resolve(null);
+    }, 30_000);
+    timer.unref();
+    p.stdout.on("data", (d) => (out += d));
+    p.on("close", (code) => {
+      clearTimeout(timer);
+      const seconds = Number(out.trim());
+      resolve(code === 0 && Number.isFinite(seconds) && seconds >= 0 ? seconds : null);
+    });
+    p.on("error", () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
+  });
+}
+
+/**
  * Whether a media file carries a stream of the given kind ("a" audio /
  * "v" video). Resolves false only when ffprobe reports no such stream; a
  * probe that errors is reported by `onProbeError` so callers can decide

@@ -47,7 +47,7 @@ import type { WrappedAudioBuffer } from "mediabunny";
 import { assembleAudio, decodeAudioSpan, openAudioWalk, type AudioWalk } from "./mediaRead";
 import { allowance, holdMemory } from "./memoryBudget";
 import { meterAudioLate, meterClockJump } from "./perfTrace";
-import { timeStretch, type StretchSchedule } from "./timeStretch";
+import { fitSpan, retimeFits } from "./retimeFit";
 
 /** How much of a voice is pulled off its walk and scheduled at once, in source
  * seconds. Long enough that a stretch of sound is one scheduling decision;
@@ -79,9 +79,18 @@ const WINDOW_STRETCHED_S = 4;
 const STRETCH_CACHE_BYTES = 24 * WINDOW_STRETCHED_S * 48_000 * 2 * 4;
 
 /** What a set of decoded windows costs: float samples, one per channel. */
-const decodedBytes = (held: Map<string, AudioBuffer>): number => {
+/** A window laid through a clip's map, with the source second its first
+ * sample really sits at — see `FittedSpan.head`. */
+interface FittedWindow {
+  buffer: AudioBuffer;
+  /** Seconds past where the window was asked for that its sound begins —
+   * see `FittedSpan.shift`. */
+  shift: number;
+}
+
+const decodedBytes = (held: Map<string, FittedWindow>): number => {
   let n = 0;
-  for (const b of held.values()) n += b.length * b.numberOfChannels * 4;
+  for (const { buffer: b } of held.values()) n += b.length * b.numberOfChannels * 4;
   return n;
 };
 /** Schedule more of a voice once the playhead is this close to running out.
@@ -191,6 +200,17 @@ const READ_RECHECK_MS = 10_000;
  * routinely runs a fraction short of the picture it came with. */
 const END_SLACK_S = 0.25;
 
+/** Whether `source` sits at or past the end of the span the voice plays —
+ * `out` on a voice reading forward, `in` on one reading backward — within
+ * `slack` seconds. */
+const atSpanEnd = (live: { retime: Retime; in: number; out: number }, source: number, slack = 1e-3) =>
+  live.retime.reverse ? source <= live.in + slack : source >= live.out - slack;
+
+/** A source second as progress through the voice: it rises as the voice
+ * plays, whichever way the voice reads. */
+const progress = (live: { retime: Retime }, source: number) =>
+  live.retime.reverse ? -source : source;
+
 /** One audio effect element the graph is carrying: its recipe's chain, and
  * the pair of gains that cross the mix between treated and untreated. */
 interface LiveFx {
@@ -236,7 +256,7 @@ export class PreviewMixer {
   /** Timeline time, context time and wall time of the same instant. Everything
    * scheduled is placed against this. */
   private anchor: { timeline: number; ctx: number; wall: number } | null = null;
-  private decoded = new Map<string, AudioBuffer>();
+  private decoded = new Map<string, FittedWindow>();
   private readonly releaseMemory = holdMemory("mixerAudio", () => decodedBytes(this.decoded));
 
   /** Whether the clock is running. */
@@ -455,7 +475,7 @@ export class PreviewMixer {
         // parked playhead uses — so the release finds an open file already
         // read where the first window starts.
         const source = live.retime.srcAt(from - live.start);
-        if (!live.filling && source < live.out - 1e-3) void this.prime(live, source);
+        if (!live.filling && !atSpanEnd(live, source)) void this.prime(live, source);
       }
     }
     // Both clocks are pulled back to where the hold began, every frame of it:
@@ -676,7 +696,7 @@ export class PreviewMixer {
       const source = live.retime.srcAt(from - live.start);
       // Already reading, at the end of its source, or standing close enough
       // that the play's first read is the one it was going to make anyway.
-      if (live.filling || source >= live.out - 1e-3) continue;
+      if (live.filling || atSpanEnd(live, source)) continue;
       if (live.walk && live.walk.position >= source && live.walk.position - source <= 1) continue;
       void this.prime(live, source);
     }
@@ -696,9 +716,15 @@ export class PreviewMixer {
     live.filling = true;
     live.fillAt = performance.now();
     try {
-      const walk = (live.walk ??= openAudioWalk(live.url, source, live.out));
-      if (Math.abs(walk.position - source) > 0.02) walk.seek(source);
-      await walk.next();
+      // A voice laid through its map has no walk: its first window is the
+      // primer, decoded now and held for the play that follows.
+      if (retimeFits(live.retime)) {
+        await this.stretchedWindow(live, source);
+      } else {
+        const walk = (live.walk ??= openAudioWalk(live.url, source, live.out));
+        if (Math.abs(walk.position - source) > 0.02) walk.seek(source);
+        await walk.next();
+      }
       // The read answering is the source answering: a voice backed off by an
       // outage is willing again the moment its file reads, so the play that
       // follows is never left waiting out a cadence the outage booked.
@@ -846,20 +872,28 @@ export class PreviewMixer {
     try {
       const from = live.scheduled;
       const sourceFrom = live.retime.srcAt(from - live.start);
-      if (sourceFrom >= live.out - 1e-3) {
+      if (atSpanEnd(live, sourceFrom)) {
         live.ended = true;
         return;
       }
       let buffer: AudioBuffer | null;
+      // How far past `from` this window's first sample belongs. A window laid
+      // through the map can start short of the second it was asked for, when
+      // the read ran into the end of the source; played at `from` it would
+      // run early for its whole length.
+      let shift = 0;
       try {
         // Nothing scheduled means the sound is standing still — the play just
         // began, a seek landed, a hold let go — and the picture is not
         // waiting. The first window is short so the sound joins it now.
         const group = live.windows.length ? GROUP_S : FIRST_GROUP_S;
-        buffer =
-          !live.retime.uniform || Math.abs(live.retime.rate - 1) > 1e-3
-            ? await this.stretchedWindow(live, sourceFrom)
-            : await this.walkGroup(live, sourceFrom, current, group);
+        if (retimeFits(live.retime)) {
+          const fit = await this.stretchedWindow(live, sourceFrom);
+          buffer = fit?.buffer ?? null;
+          shift = Math.max(0, fit?.shift ?? 0);
+        } else {
+          buffer = await this.walkGroup(live, sourceFrom, current, group);
+        }
       } catch {
         // The read is the only part of this that says anything about the
         // source, so it is the only part a failure is spent on.
@@ -878,10 +912,10 @@ export class PreviewMixer {
         // further than the one before it has found where the track really
         // stops, and a track that runs a fraction short of its picture is
         // inside the slack.
-        if (sourceFrom >= live.out - END_SLACK_S || sourceFrom <= live.reached + 1e-3) {
+        if (atSpanEnd(live, sourceFrom, END_SLACK_S) || progress(live, sourceFrom) <= live.reached + 1e-3) {
           live.ended = true;
         } else {
-          live.reached = sourceFrom;
+          live.reached = progress(live, sourceFrom);
           // A source that stopped answering mid-file is the one case a
           // re-mint cannot speak to, so this failure keeps to itself.
           this.miss(live, false);
@@ -890,9 +924,10 @@ export class PreviewMixer {
       }
       const tNow = this.at();
       if (!current() || live.scheduled !== from) return;
-      const until = from + buffer.duration;
+      const at2 = from + shift;
+      const until = at2 + buffer.duration;
       if (until <= tNow) {
-        this.noteLate(live, tNow - from);
+        this.noteLate(live, tNow - at2);
         // The read outlived the moment it was for — a long wait on bytes, a
         // tab in the background. Where it left the walk is behind the clock
         // now, so the voice re-aims at the clock and gives up the stretch in
@@ -903,7 +938,7 @@ export class PreviewMixer {
       const node = this.ctx.createBufferSource();
       node.buffer = buffer;
       node.connect(live.head);
-      const at = this.anchor.ctx + (from - this.anchor.timeline);
+      const at = this.anchor.ctx + (at2 - this.anchor.timeline);
       const now = this.ctx.currentTime;
       if (at >= now) {
         node.start(at);
@@ -973,26 +1008,22 @@ export class PreviewMixer {
    * Held briefly, because stepping back over a cut replays the same window and
    * everything older is a full decode away anyway.
    */
-  private async stretchedWindow(live: LiveVoice, sourceFrom: number): Promise<AudioBuffer | null> {
+  private async stretchedWindow(live: LiveVoice, sourceFrom: number): Promise<FittedWindow | null> {
     const rt = live.retime;
     const tFrom = rt.tAt(sourceFrom);
-    const sourceTo = Math.min(live.out, rt.srcAt(tFrom + WINDOW_STRETCHED_S));
-    const key = `${live.url}|${sourceFrom.toFixed(3)}|${sourceTo.toFixed(3)}|${rt.key}`;
+    // The window runs on from `sourceFrom` the way the voice reads: up the
+    // source, or down it on a reversed clip, and never past the span.
+    const far = rt.srcAt(tFrom + WINDOW_STRETCHED_S);
+    const lo = rt.reverse ? Math.max(live.in, far) : sourceFrom;
+    const hi = rt.reverse ? sourceFrom : Math.min(live.out, far);
+    const key = `${live.url}|${lo.toFixed(3)}|${hi.toFixed(3)}|${rt.key}`;
     const held = this.decoded.get(key);
     if (held) return held;
-    const raw = await decodeAudioSpan(live.url, sourceFrom, sourceTo);
+    const raw = await decodeAudioSpan(live.url, lo, hi);
     if (!raw) return null;
-    // A curve's window is laid by the clip's own map from where the window
-    // starts, so its length is exactly the timeline the picture spends on it.
-    const buffer = this.stretch(
-      raw,
-      rt.uniform
-        ? 1 / rt.rate
-        : {
-            factorAt: (sec) => 1 / rt.rateAtSrc(sourceFrom + sec),
-            outLength: Math.round((rt.tAt(sourceFrom + raw.duration) - tFrom) * raw.sampleRate),
-          }
-    );
+    // The window is laid by the clip's own map from where it starts, so its
+    // length is exactly the timeline the picture spends on it.
+    const buffer = this.fit(raw, rt, lo, hi);
     // Oldest first until the cache is back inside its share. Emptying the
     // whole cache would throw away the window the playhead is standing on along
     // with the ones it has finished, and the next frame would pay a full decode
@@ -1000,9 +1031,9 @@ export class PreviewMixer {
     this.decoded.set(key, buffer);
     const cap = allowance("mixerAudio", STRETCH_CACHE_BYTES);
     let cached = decodedBytes(this.decoded);
-    for (const [oldest, buf] of this.decoded) {
+    for (const [oldest, held] of this.decoded) {
       if (cached <= cap || this.decoded.size <= 1) break;
-      cached -= buf.length * buf.numberOfChannels * 4;
+      cached -= held.buffer.length * held.buffer.numberOfChannels * 4;
       this.decoded.delete(oldest);
     }
     return buffer;
@@ -1052,18 +1083,23 @@ export class PreviewMixer {
   }
 
   /** Re-lay a buffer at a different length, keeping its pitch. */
-  private stretch(buffer: AudioBuffer, factor: number | StretchSchedule): AudioBuffer {
+  private fit(
+    buffer: AudioBuffer,
+    rt: Retime,
+    lo: number,
+    hi: number
+  ): { buffer: AudioBuffer; shift: number } {
     const channels: Float32Array[] = [];
     for (let c = 0; c < buffer.numberOfChannels; c++) channels.push(buffer.getChannelData(c));
-    const out = timeStretch(channels, buffer.sampleRate, factor);
+    const out = fitSpan(channels, buffer.sampleRate, rt, lo, hi);
     const result = new AudioBuffer({
-      length: Math.max(1, out[0]?.length ?? 1),
-      numberOfChannels: Math.max(1, out.length),
+      length: Math.max(1, out.channels[0]?.length ?? 1),
+      numberOfChannels: Math.max(1, out.channels.length),
       sampleRate: buffer.sampleRate,
     });
     // A fresh view per channel: `copyToChannel` wants a plain Float32Array,
     // and the stretch hands back views whose buffer type it declines.
-    out.forEach((data, i) => result.copyToChannel(new Float32Array(data), i));
-    return result;
+    out.channels.forEach((data, i) => result.copyToChannel(new Float32Array(data), i));
+    return { buffer: result, shift: out.shift };
   }
 }

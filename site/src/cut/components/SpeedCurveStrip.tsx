@@ -82,7 +82,10 @@ function Strip({ clip }: { clip: VideoClip }) {
     () => draft ?? speedCurveOf(clip) ?? flatSpeedCurve(clip),
     [draft, clip]
   );
-  const rt = useMemo(() => retimeOf({ in: clip.in, out: clip.out, speedCurve: nodes }), [clip.in, clip.out, nodes]);
+  const rt = useMemo(
+    () => retimeOf({ in: clip.in, out: clip.out, speedCurve: nodes, reverse: clip.reverse }),
+    [clip.in, clip.out, nodes, clip.reverse]
+  );
 
   const boxRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
@@ -165,7 +168,7 @@ function Strip({ clip }: { clip: VideoClip }) {
     useEditor.getState().setClipSpeedCurve(clip.id, next);
   };
   const seekToSrc = (src: number, list: SpeedNode[]) => {
-    const map = retimeOf({ in: clip.in, out: clip.out, speedCurve: list });
+    const map = retimeOf({ in: clip.in, out: clip.out, speedCurve: list, reverse: clip.reverse });
     useEditor.getState().seek(clip.start + map.tAt(src));
   };
 

@@ -455,17 +455,19 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
 /** A clip's rate as the model reads it: one number, or the average plus the
  * curve's nodes as [sourceSeconds, rate] when the rate changes through the
  * footage. */
-function describeRate(c: { speed?: number; speedCurve?: SpeedNode[]; in: number; out: number }) {
+function describeRate(c: { speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean; in: number; out: number }) {
   const nodes = speedCurveOf(c);
-  if (!nodes) return { speed: r(c.speed ?? 1) };
+  const reverse = c.reverse ? { reverse: true } : {};
+  if (!nodes) return { speed: r(c.speed ?? 1), ...reverse };
   return {
     speed: r(retimeOf(c).rate),
     speedCurve: nodes.map(([at, rate]) => [r(at), r(rate)]),
+    ...reverse,
   };
 }
 
 function describeAudio(
-  a: { assetId: string; start: number; in: number; out: number; volume: number; fadeIn?: number; fadeOut?: number; speed?: number; speedCurve?: SpeedNode[]; sound?: ClipSound; duck?: number; lane?: number; hidden?: boolean },
+  a: { assetId: string; start: number; in: number; out: number; volume: number; fadeIn?: number; fadeOut?: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean; sound?: ClipSound; duck?: number; lane?: number; hidden?: boolean },
   assets: Map<string, { name: string }>
 ) {
   const rt = retimeOf(a);
@@ -480,7 +482,7 @@ function describeAudio(
     fadeIn: r(a.fadeIn ?? 0),
     fadeOut: r(a.fadeOut ?? 0),
     ...(a.sound ? { sound: a.sound } : {}),
-    ...(speed !== 1 || a.speedCurve ? describeRate(a) : {}),
+    ...(speed !== 1 || a.speedCurve || a.reverse ? describeRate(a) : {}),
     ...(a.lane ? { lane: a.lane } : {}),
     ...(a.hidden ? { hidden: true } : {}),
     // A voiceover: while it plays, other audio ducks to this gain.
@@ -512,7 +514,7 @@ function describeOverlayClip(c: VideoClip, assets: Map<string, { name: string }>
         : {}),
     ...(c.rotation ? { rotation: c.rotation } : {}),
     ...((c.opacity ?? 1) < 1 ? { opacity: r(c.opacity ?? 1) } : {}),
-    ...(retimeOf(c).rate !== 1 || c.speedCurve ? describeRate(c) : {}),
+    ...(retimeOf(c).rate !== 1 || c.speedCurve || c.reverse ? describeRate(c) : {}),
     ...(c.grade ? { colorGrade: c.grade } : {}),
     ...(c.mask ? { mask: c.mask } : {}),
     ...(c.boxStyle ? { boxStyle: c.boxStyle } : {}),

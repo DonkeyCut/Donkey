@@ -932,14 +932,19 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
                 in: round2(clip.in),
                 out: round2(clip.out),
                 speed: round2(speed),
+                ...(clip.reverse ? { reverse: true } : {}),
                 ...(speedCurveOf(clip)
                   ? {
                       speedCurve: speedCurveOf(clip)!.map(([at, rate]) => [round2(at), round2(rate)]),
-                      note: `this clip has a speed curve (average ${round2(speed)}×): source_t maps to the timeline through the curve, with the clip occupying [${round2(clip.start)}, ${round2(clip.start + retimeOf(clip).len)}]; work in source seconds here`,
+                      note: `this clip has a speed curve (average ${round2(speed)}×${clip.reverse ? ", played backward" : ""}): source_t maps to the timeline through the curve, with the clip occupying [${round2(clip.start)}, ${round2(clip.start + retimeOf(clip).len)}]; work in source seconds here`,
                     }
-                  : {
-                      note: `timeline_t = ${round2(clip.start)} + (source_t - ${round2(clip.in)}) / ${round2(speed)}, for source_t in [${round2(clip.in)}, ${round2(clip.out)}]`,
-                    }),
+                  : clip.reverse
+                    ? {
+                        note: `this clip plays backward: timeline_t = ${round2(clip.start)} + (${round2(clip.out)} - source_t) / ${round2(speed)}, for source_t in [${round2(clip.in)}, ${round2(clip.out)}]`,
+                      }
+                    : {
+                        note: `timeline_t = ${round2(clip.start)} + (source_t - ${round2(clip.in)}) / ${round2(speed)}, for source_t in [${round2(clip.in)}, ${round2(clip.out)}]`,
+                      }),
               },
             }
           : {}),
@@ -1007,7 +1012,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // Pre-map each silence's overlap with the clip's trimmed range onto the
       // timeline so the model cuts on ready numbers.
       const toTimeline = (t: number) =>
-        round2(clip!.start + (clamp(t, clip!.in, clip!.out) - clip!.in) / speed);
+        round2(clip!.start + retimeOf(clip!).tAt(clamp(t, clip!.in, clip!.out)));
       return {
         silences: silences.map((x) => ({
           start: round2(x.start),
@@ -1051,7 +1056,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
               throw new ToolError(e instanceof Error ? e.message : "Could not read the audio.");
             });
       const beats = grid.beats.filter((b) => b >= from && (to === undefined || b <= to));
-      const toTimeline = (t: number) => round2(clip!.start + (t - clip!.in) / speed);
+      const toTimeline = (t: number) => round2(clip!.start + retimeOf(clip!).tAt(t));
       return {
         bpm: grid.bpm,
         beats: beats.map(round2),
@@ -2079,6 +2084,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (isNum(input.speed))
         patch.speed =
           Math.abs(input.speed - 1) < 1e-4 ? undefined : Math.max(SPEED_FLOOR, input.speed);
+      if (typeof input.reverse === "boolean") patch.reverse = input.reverse || undefined;
       // duck >= 1 clears ducking (undefined); below 1 sets the gain.
       if (isNum(input.duck)) patch.duck = input.duck >= 1 ? undefined : clamp(input.duck, 0, 1);
       if (typeof input.hidden === "boolean") patch.hidden = input.hidden || undefined;
@@ -3554,13 +3560,17 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
 
   set_speed: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
-      if (!isNum(input.speed)) throw new ToolError("speed is required (e.g. 1.5).");
+      const reverse = typeof input.reverse === "boolean" ? input.reverse : undefined;
+      if (!isNum(input.speed) && reverse === undefined)
+        throw new ToolError("speed (e.g. 1.5) or reverse is required.");
       const before = clipLen(clip);
-      s.setClipSpeed(clip.id, input.speed);
+      if (isNum(input.speed)) s.setClipSpeed(clip.id, input.speed);
+      if (reverse !== undefined) s.setClipReverse(clip.id, reverse);
       const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
       return {
         id: next.id,
         speed: next.speed ?? 1,
+        ...(next.reverse ? { reverse: true } : {}),
         lenBefore: round2(before),
         lenAfter: round2(clipLen(next)),
         ...tracksAfter(),
@@ -4082,7 +4092,7 @@ function resolveWatchTarget(
   input: Record<string, unknown>
 ): {
   asset: MediaAsset;
-  clip: { id: string; start: number; in: number; out: number; speed?: number; speedCurve?: SpeedNode[] } | null;
+  clip: { id: string; start: number; in: number; out: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean } | null;
 } {
   if (input.clip_id !== undefined && input.clip_id !== null) {
     const id = String(input.clip_id);
@@ -4109,7 +4119,7 @@ function resolveWatchRange(
 ): {
   projectId: string;
   asset: MediaAsset;
-  clip: { id: string; start: number; in: number; out: number; speed?: number; speedCurve?: SpeedNode[] } | null;
+  clip: { id: string; start: number; in: number; out: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean } | null;
   speed: number;
   from: number;
   to: number | undefined;

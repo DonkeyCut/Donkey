@@ -36,7 +36,7 @@
  * grid: a scroll keeps a tile's capture where it was, a zoom re-aims it.
  */
 
-import type { Retime } from "@donkeycut/effects-kit";
+import { srcSpan, type Retime } from "@donkeycut/effects-kit";
 
 export type FilmTile = {
   /** The tile's place on the source grid at this zoom, stable across
@@ -111,9 +111,9 @@ export function pickThumbTimes(
   });
 }
 
-/** Tiles on the timeline grid for a clip whose rate changes: `imgW` pixels
- * each, the last one ending at the clip's edge, each showing the source
- * second playing at its middle. */
+/** Tiles on the timeline grid for a clip whose rate changes, or that plays
+ * backward: `imgW` pixels each, the last one ending at the clip's edge, each
+ * showing the source second playing at its middle. */
 function planCurvedStrip(
   p: Omit<Parameters<typeof planFilmstrip>[0], "retime"> & { retime: Retime },
   imgW: number
@@ -129,8 +129,9 @@ function planCurvedStrip(
     if (width <= 0) break;
     const tMid = (left + width / 2) / p.pps;
     const mid = Math.max(0, Math.min(p.duration, rt.srcAt(tMid)));
-    const a = Math.max(0, rt.srcAt(left / p.pps));
-    const b = Math.min(p.duration, rt.srcAt((left + width) / p.pps));
+    const edge = srcSpan(rt, left / p.pps, (left + width) / p.pps);
+    const a = Math.max(0, edge.lo);
+    const b = Math.min(p.duration, edge.hi);
     const idx = Math.min(p.thumbs.length - 1, Math.max(0, Math.floor(mid / p.thumbStep)));
     let src = p.thumbs[idx];
     let exact = false;
@@ -162,9 +163,10 @@ export function planFilmstrip(p: {
   /** Source seconds per timeline second across the strip (the clip's rate,
    * or its average rate under a curve). */
   speed: number;
-  /** The clip's map, when its rate changes through the footage. The strip
-   * then lays tiles on the timeline grid — a held moment takes the width it
-   * plays for — with each tile picturing the source second at its middle. */
+  /** The clip's map, when its rate changes through the footage or it plays
+   * backward. The strip then lays tiles on the timeline grid — a held moment
+   * takes the width it plays for — with each tile picturing the source second
+   * at its middle. */
   retime?: Retime;
   tileH: number;
   minTileW: number;
@@ -184,7 +186,8 @@ export function planFilmstrip(p: {
   const span = p.view ? Math.min(p.w, p.view.hi - p.view.lo) : p.w;
   const cells = Math.max(1, Math.ceil(span / natural));
   const imgW = natural * Math.ceil(cells / FILM_TILE_CAP);
-  if (p.retime && !p.retime.uniform) return planCurvedStrip({ ...p, retime: p.retime }, imgW);
+  if (p.retime && (!p.retime.uniform || p.retime.reverse))
+    return planCurvedStrip({ ...p, retime: p.retime }, imgW);
   const stepT = (imgW / p.pps) * p.speed;
   const filmOut = p.filmIn + (p.w / p.pps) * p.speed;
   // The window, in source time, clamped to the clip.
