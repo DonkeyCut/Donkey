@@ -17,9 +17,9 @@ const eslintConfig = defineConfig([
     "src/cut/worker/cf/**",
   ]),
   {
-    // effects-kit is a standalone package: it must build for any host, so it
-    // never reaches into the app's source or aliases.
-    files: ["packages/effects-kit/**/*.ts", "packages/effects-kit/**/*.tsx"],
+    // The packages are standalone: each must build for any host, so none
+    // reaches into the app's source or aliases.
+    files: ["packages/*/**/*.ts", "packages/*/**/*.tsx"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -27,7 +27,7 @@ const eslintConfig = defineConfig([
           patterns: [
             {
               group: ["@/*", "**/src/cut/*", "next", "next/*"],
-              message: "effects-kit is host-agnostic — no site/src or Next.js imports.",
+              message: "Packages are host-agnostic — no site/src or Next.js imports.",
             },
           ],
         },

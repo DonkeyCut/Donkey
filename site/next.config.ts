@@ -4,7 +4,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   pageExtensions: ["js", "jsx", "ts", "tsx", "md", "mdx"],
   // Workspace packages ship TypeScript source; the app build transpiles them.
-  transpilePackages: ["@donkeycut/effects-kit"],
+  transpilePackages: ["@donkeycut/effects-kit", "@donkeycut/abexp"],
   // Cache Components: pages prerender to a static shell and anything uncached
   // streams behind its own Suspense boundary. It is what the `unstable_instant`
   // export on the public pages and the app's home routes validates against, and
