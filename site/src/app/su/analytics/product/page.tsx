@@ -1,7 +1,19 @@
 "use client";
 
+import { ArrowUpRight } from "lucide-react";
 import { useMemo } from "react";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Line,
+  LineChart,
+  ReferenceLine,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 import {
   ChartContainer,
@@ -38,9 +50,10 @@ function formatDay(iso: string): string {
   });
 }
 
-function formatMicros(micros: bigint): string {
-  return `$${(Number(micros) / 1e6).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
-}
+const dollars = (micros: bigint | string) => Number(micros) / 1e6;
+const formatDollars = (value: number) =>
+  `${value < 0 ? "-" : ""}$${Math.abs(value).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+const formatMicros = (micros: bigint | string) => formatDollars(dollars(micros));
 
 function formatGb(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
@@ -207,11 +220,37 @@ function deriveReferrals(referrals: AnalyticsReferrals): ReferralView {
   return { config, cumulative, respondents, series, trendConfig };
 }
 
-/** The shared tooltip minus the noise: a day's zero rows say nothing on a
- * chart whose series are sparse, so only sources with a count show. */
-function NonZeroTooltipContent(props: React.ComponentProps<typeof ChartTooltipContent>) {
+type TooltipPayload = NonNullable<React.ComponentProps<typeof ChartTooltipContent>["payload"]>;
+
+const sumOf = (payload: TooltipPayload) =>
+  payload.reduce((sum, item) => sum + (typeof item.value === "number" ? item.value : 0), 0);
+
+/** The shared tooltip with the day's total on the date row. On a chart with
+ * several series a zero row says nothing, so those drop out; `total` picks
+ * the headline number (the sum of what shows, unless told otherwise). */
+function TotalTooltipContent({
+  format = (n) => n.toLocaleString("en-US"),
+  total = sumOf,
+  ...props
+}: React.ComponentProps<typeof ChartTooltipContent> & {
+  format?: (total: number) => string;
+  total?: (payload: TooltipPayload) => number;
+}) {
+  const shown =
+    props.payload && props.payload.length > 1
+      ? props.payload.filter((item) => item.value !== 0)
+      : props.payload;
   return (
-    <ChartTooltipContent {...props} payload={props.payload?.filter((item) => item.value !== 0)} />
+    <ChartTooltipContent
+      {...props}
+      payload={shown?.length ? shown : props.payload}
+      labelFormatter={(label, payload) => (
+        <div className="flex items-center justify-between gap-4">
+          <span>{formatDay(String(label))}</span>
+          <span className="font-mono tabular-nums">{format(total(payload))}</span>
+        </div>
+      )}
+    />
   );
 }
 
@@ -233,6 +272,27 @@ function groupOtherAnswers(answers: string[]): { label: string; count: number }[
   return [...groups.values()].sort((a, b) => b.count - a.count);
 }
 
+/** One tooltip row: swatch, label, value. */
+function TooltipRow({
+  color,
+  label,
+  value,
+}: {
+  color: string | undefined;
+  label: React.ReactNode;
+  value: string;
+}) {
+  return (
+    <>
+      <div className="size-2.5 shrink-0 rounded-[2px]" style={{ background: color }} />
+      <div className="flex flex-1 items-center justify-between gap-3 leading-none">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="font-mono font-medium text-foreground tabular-nums">{value}</span>
+      </div>
+    </>
+  );
+}
+
 /** The sources tooltip, which carries what "Other" meant: the day's free-text
  * answers hang under that row as an indented bulleted list. */
 function SourcesTooltipContent({
@@ -240,7 +300,7 @@ function SourcesTooltipContent({
   ...props
 }: React.ComponentProps<typeof ChartTooltipContent> & { config: ChartConfig }) {
   return (
-    <NonZeroTooltipContent
+    <TotalTooltipContent
       {...props}
       formatter={(value, name, item) => {
         const id = String(name);
@@ -249,16 +309,11 @@ function SourcesTooltipContent({
         );
         return (
           <>
-            <div
-              className="size-2.5 shrink-0 rounded-[2px]"
-              style={{ background: item.color }}
+            <TooltipRow
+              color={item.color}
+              label={config[id]?.label ?? id}
+              value={typeof value === "number" ? value.toLocaleString() : String(value)}
             />
-            <div className="flex flex-1 items-center justify-between gap-3 leading-none">
-              <span className="text-muted-foreground">{config[id]?.label ?? id}</span>
-              <span className="font-mono font-medium text-foreground tabular-nums">
-                {typeof value === "number" ? value.toLocaleString() : String(value)}
-              </span>
-            </div>
             {id === "other" && answers.length ? (
               <ul className="-mt-1 ml-[1.125rem] w-full list-disc space-y-0.5 pl-3 text-muted-foreground marker:text-muted-foreground/60">
                 {answers.slice(0, OTHER_ANSWERS_SHOWN).map((answer) => (
@@ -296,19 +351,128 @@ const totalRegisteredConfig = {
   totalRegistered: { label: "Total registered", color: "var(--chart-1)" },
 } satisfies ChartConfig;
 
+// Paid money in the series hues; refunds in the status red below the
+// baseline; declined attempts in neutral ink with a hatch, since they are a
+// state and never revenue.
 const revenueConfig = {
   pro: { label: "Pro", color: "var(--chart-1)" },
   topups: { label: "Top-ups", color: "var(--chart-2)" },
+  other: { label: "Other", color: "var(--chart-3)" },
+  refunds: { label: "Refunded", color: "var(--destructive)" },
+  declined: { label: "Declined", color: "var(--muted-foreground)" },
 } satisfies ChartConfig;
 
-// Per-day dollars from the rollup's micro strings, aligned with its days.
-function deriveRevenue(days: string[], billing: AnalyticsBilling) {
-  return days.map((day, i) => ({
-    day,
-    pro: Number(BigInt(billing.revenue[i]?.proMicros ?? "0")) / 1e6,
-    topups: Number(BigInt(billing.revenue[i]?.topupMicros ?? "0")) / 1e6,
-  }));
+type RevenuePoint = {
+  day: string;
+  pro: number;
+  topups: number;
+  // Paid charges the pull could tie to neither Pro nor a credit purchase.
+  other: number;
+  // Negative, so the bar hangs under the baseline.
+  refunds: number;
+  declined: number;
+  cancels: number;
+};
+
+// Per-day dollars from the billing section's micro strings, on its own
+// window (it ends today; the activity window ends yesterday).
+function deriveRevenue(billing: AnalyticsBilling): RevenuePoint[] {
+  return billing.days.map((day, i) => {
+    const entry = billing.revenue[i];
+    return {
+      cancels: entry?.cancels ?? 0,
+      day,
+      declined: dollars(entry?.declinedMicros ?? "0"),
+      other: dollars(entry?.otherMicros ?? "0"),
+      pro: dollars(entry?.proMicros ?? "0"),
+      refunds: -dollars(entry?.refundedMicros ?? "0"),
+      topups: dollars(entry?.topupMicros ?? "0"),
+    };
+  });
 }
+
+const netOf = (point: Pick<RevenuePoint, "pro" | "topups" | "other" | "refunds">) =>
+  point.pro + point.topups + point.other + point.refunds;
+
+/** The revenue tooltip: net on the date row, the day's money rows, and the
+ * cancel requests made that day with what the person said on the way out. */
+function RevenueTooltipContent({
+  events,
+  ...props
+}: React.ComponentProps<typeof ChartTooltipContent> & { events: AnalyticsBilling["events"] }) {
+  const point = props.payload?.[0]?.payload as RevenuePoint | undefined;
+  const cancels = point ? events.filter((e) => e.kind === "canceled" && e.day === point.day) : [];
+  return (
+    <div className="grid gap-1.5">
+      <TotalTooltipContent
+        {...props}
+        className="max-w-80"
+        format={formatDollars}
+        total={() => (point ? netOf(point) : 0)}
+        formatter={(value, name, item) => (
+          <TooltipRow
+            color={item.color}
+            label={revenueConfig[name as keyof typeof revenueConfig]?.label ?? String(name)}
+            value={formatDollars(typeof value === "number" ? value : 0)}
+          />
+        )}
+      />
+      {cancels.length > 0 && (
+        <div className="max-w-80 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
+          <p className="font-medium text-destructive">
+            {cancels.length === 1 ? "1 cancel request" : `${cancels.length} cancel requests`}
+          </p>
+          {cancels.map((event) => (
+            <p key={event.objectId ?? event.email ?? event.day} className="mt-1 text-muted-foreground">
+              {event.email ?? "unknown customer"}
+              {event.detail ? ` · ${event.detail}` : ""}
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Stripe dashboard destinations for the billing figures.
+const stripeLinks = (base: string) => ({
+  canceled: `${base}/subscriptions?status=canceled`,
+  declined: `${base}/payments?status%5B%5D=failed`,
+  paid: `${base}/payments?status%5B%5D=successful`,
+  payment: (id: string) => `${base}/payments/${id}`,
+  refunded: `${base}/payments?status%5B%5D=refunded`,
+  subscribers: `${base}/subscriptions?status=active`,
+  subscription: (id: string) => `${base}/subscriptions/${id}`,
+});
+
+function StripeLink({
+  href,
+  children,
+  className,
+}: {
+  href: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className={cn(
+        "inline-flex items-center gap-0.5 underline-offset-4 hover:text-foreground hover:underline",
+        className,
+      )}
+    >
+      {children}
+      <ArrowUpRight className="size-3 shrink-0" aria-hidden />
+    </a>
+  );
+}
+
+// The most recent declines and cancel requests shown under the chart; the
+// rest sit behind the Stripe link.
+const BILLING_EVENTS_SHOWN = 6;
 
 // The dashboard blocks in their default order. The ids are the saved-layout
 // contract: renaming one drops that block back to its default position.
@@ -320,6 +484,7 @@ const TILE_IDS = [
   "pro",
   "funded",
   "churn",
+  "declined",
 ] as const;
 const CARD_IDS = [
   "actives",
@@ -336,14 +501,19 @@ function StatTile({
   label,
   value,
   sub,
+  href,
 }: {
   label: string;
   value: string;
   sub: React.ReactNode;
+  // Where the figure lives in Stripe; the label becomes the link.
+  href?: string;
 }) {
   return (
     <div className="rounded-xl border bg-card p-5">
-      <p className="text-sm text-muted-foreground">{label}</p>
+      <p className="text-sm text-muted-foreground">
+        {href ? <StripeLink href={href}>{label}</StripeLink> : label}
+      </p>
       <p className="mt-1 text-2xl font-semibold">{value}</p>
       <p className="mt-1 text-xs text-muted-foreground">{sub}</p>
     </div>
@@ -357,7 +527,7 @@ function ChartCard({
   children,
 }: {
   title: string;
-  subtitle: string;
+  subtitle: React.ReactNode;
   className?: string;
   children: React.ReactNode;
 }) {
@@ -540,11 +710,11 @@ function ActivityGrid({
                       ? "no activity"
                       : `${user.activeDays} active ${user.activeDays === 1 ? "day" : "days"} · last ${formatDay(rollup.days[user.lastActive])}`}{" "}
                     · joined {formatDay(user.registeredAt.slice(0, 10))} ·{" "}
-                    {formatMicros(BigInt(user.balanceMicros))}
+                    {formatMicros(user.balanceMicros)}
                     {user.fundedMicros !== undefined && (
                       <span className="text-emerald-700 dark:text-emerald-500">
                         {" "}
-                        · paid {formatMicros(BigInt(user.fundedMicros))}
+                        · paid {formatMicros(user.fundedMicros)}
                       </span>
                     )}
                     {user.storageBytes !== undefined && (
@@ -606,9 +776,10 @@ export default function SuAnalyticsPage() {
     () => (rollup.data?.referrals ? deriveReferrals(rollup.data.referrals) : null),
     [rollup.data],
   );
+  const billingSection = rollup.data?.billing;
   const revenue = useMemo(
-    () => (rollup.data?.billing ? deriveRevenue(rollup.data.days, rollup.data.billing) : null),
-    [rollup.data],
+    () => (billingSection && "days" in billingSection ? deriveRevenue(billingSection) : null),
+    [billingSection],
   );
   // Trend lines toggled off stay off across visits.
   const [hiddenTrends, setHiddenTrends] = useLocalPref<string[]>(
@@ -625,7 +796,7 @@ export default function SuAnalyticsPage() {
     return (
       <div className="space-y-6 pb-9">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {Array.from({ length: 7 }, (_, i) => (
+          {Array.from({ length: 8 }, (_, i) => (
             <Skeleton key={i} className="h-[104px] rounded-xl" />
           ))}
         </div>
@@ -658,11 +829,13 @@ export default function SuAnalyticsPage() {
       : null;
   const count = (n: number | null) => (n === null ? "—" : n.toLocaleString("en-US"));
   const lastDay = data.days[data.days.length - 1];
-  // Billing is absent from rollups written before it shipped; the next run
-  // fills it in.
-  const billing = data.billing;
+  // Billing is absent from rollups written before it shipped (or before it
+  // took this shape); the next run fills it in.
+  const billing = data.billing && "days" in data.billing ? data.billing : undefined;
   const churnBase = billing ? billing.subscribers + billing.churned : 0;
   const staleBilling = "not in this rollup yet — run analytics";
+  const links = billing ? stripeLinks(billing.dashboardUrl) : undefined;
+  const nextCancel = billing?.canceling[0];
 
   const tileNodes: Record<TileId, React.ReactNode> = {
     registered: (
@@ -720,15 +893,34 @@ export default function SuAnalyticsPage() {
       <StatTile
         label="Pro subscribers"
         value={billing ? billing.subscribers.toLocaleString("en-US") : "—"}
-        sub={billing ? `${billing.canceling} canceling at period end` : staleBilling}
+        href={links?.subscribers}
+        sub={
+          !billing ? (
+            staleBilling
+          ) : billing.canceling.length === 0 ? (
+            "none canceling"
+          ) : (
+            <StripeLink
+              href={
+                nextCancel && billing.canceling.length === 1
+                  ? `${billing.dashboardUrl}/subscriptions/${nextCancel.subscriptionId}`
+                  : `${billing.dashboardUrl}/subscriptions?status=active`
+              }
+            >
+              {billing.canceling.length} canceling
+              {nextCancel?.endsAt ? ` · ends ${formatDay(nextCancel.endsAt.slice(0, 10))}` : ""}
+            </StripeLink>
+          )
+        }
       />
     ),
     funded: (
       <StatTile
         label="People funded"
         value={billing ? billing.funded.toLocaleString("en-US") : "—"}
+        href={links?.paid}
         sub={
-          billing ? `${formatMicros(BigInt(billing.fundedMicros))} paid all time` : staleBilling
+          billing ? `${formatMicros(billing.fundedMicros)} paid all time` : staleBilling
         }
       />
     ),
@@ -740,12 +932,25 @@ export default function SuAnalyticsPage() {
             ? `${((billing.churned / churnBase) * 100).toFixed(1)}%`
             : "—"
         }
+        href={links?.canceled}
         sub={
           !billing
             ? staleBilling
             : churnBase === 0
               ? "no subscriptions yet"
               : `${billing.churned} of ${churnBase} subscriptions ended`
+        }
+      />
+    ),
+    declined: (
+      <StatTile
+        label="Tried to pay"
+        value={billing ? billing.window.declinedCustomers.toLocaleString("en-US") : "—"}
+        href={links?.declined}
+        sub={
+          billing
+            ? `${formatMicros(billing.window.declinedMicros)} declined · ${billing.window.abandonedCheckouts} checkouts abandoned, last 60 days`
+            : staleBilling
         }
       />
     ),
@@ -783,7 +988,14 @@ export default function SuAnalyticsPage() {
             />
             <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={48} />
             <ChartTooltip
-              content={<ChartTooltipContent labelFormatter={(label) => formatDay(String(label))} />}
+              content={
+                <TotalTooltipContent
+                  total={(payload) => {
+                    const active = payload.find((item) => item.dataKey === "active");
+                    return typeof active?.value === "number" ? active.value : 0;
+                  }}
+                />
+              }
             />
             <Area
               dataKey="active"
@@ -825,9 +1037,7 @@ export default function SuAnalyticsPage() {
               tickMargin={8}
             />
             <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={48} />
-            <ChartTooltip
-              content={<ChartTooltipContent labelFormatter={(label) => formatDay(String(label))} />}
-            />
+            <ChartTooltip content={<TotalTooltipContent />} />
             <Bar
               dataKey="signups"
               fill="var(--color-signups)"
@@ -858,11 +1068,7 @@ export default function SuAnalyticsPage() {
               tickLine={false}
               width={48}
             />
-            <ChartTooltip
-              content={
-                <ChartTooltipContent labelFormatter={(label) => formatDay(String(label))} />
-              }
-            />
+            <ChartTooltip content={<TotalTooltipContent />} />
             <Area
               dataKey="totalRegistered"
               dot={false}
@@ -897,7 +1103,12 @@ export default function SuAnalyticsPage() {
                   <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={48} />
                   <ChartTooltip
                     content={
-                      <NonZeroTooltipContent labelFormatter={(label) => formatDay(String(label))} />
+                      <TotalTooltipContent
+                        total={(payload) => {
+                          const all = payload.find((item) => item.dataKey === "totalResponses");
+                          return typeof all?.value === "number" ? all.value : 0;
+                        }}
+                      />
                     }
                   />
                   {Object.keys(referrals.trendConfig)
@@ -967,10 +1178,7 @@ export default function SuAnalyticsPage() {
                   <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={48} />
                   <ChartTooltip
                     content={
-                      <SourcesTooltipContent
-                        config={referrals.config}
-                        labelFormatter={(label) => formatDay(String(label))}
-                      />
+                      <SourcesTooltipContent config={referrals.config} />
                     }
                   />
                   {Object.keys(referrals.config).map((id) => (
@@ -1001,17 +1209,42 @@ export default function SuAnalyticsPage() {
           ),
         }
       : {}),
-    ...(revenue
+    ...(revenue && billing && links
       ? {
           revenue: (
             <ChartCard
               title="Revenue"
-              subtitle={`Paid Stripe charges per day · $${revenue
-                .reduce((sum, point) => sum + point.pro + point.topups, 0)
-                .toLocaleString("en-US", { maximumFractionDigits: 2 })} in the last 60 days`}
+              subtitle={
+                <span className="flex flex-wrap gap-x-3 gap-y-1">
+                  <StripeLink href={links.paid}>
+                    {formatMicros(billing.window.netMicros)} net
+                  </StripeLink>
+                  <StripeLink href={links.refunded}>
+                    {formatMicros(billing.window.refundedMicros)} refunded
+                  </StripeLink>
+                  <StripeLink href={links.declined}>
+                    {formatMicros(billing.window.declinedMicros)} declined
+                  </StripeLink>
+                  <StripeLink href={links.canceled}>
+                    {billing.window.cancels} canceled
+                  </StripeLink>
+                  <span>· last 60 days</span>
+                </span>
+              }
             >
               <ChartContainer className="max-h-56 w-full" config={revenueConfig}>
-                <BarChart accessibilityLayer data={revenue} margin={{ left: -16 }}>
+                <BarChart accessibilityLayer data={revenue} margin={{ left: -16, top: 12 }}>
+                  <defs>
+                    <pattern
+                      id="revenue-declined-hatch"
+                      width="6"
+                      height="6"
+                      patternTransform="rotate(45)"
+                      patternUnits="userSpaceOnUse"
+                    >
+                      <line x1="0" y1="0" x2="0" y2="6" stroke="var(--color-declined)" strokeWidth="2" />
+                    </pattern>
+                  </defs>
                   <CartesianGrid vertical={false} />
                   <XAxis
                     axisLine={false}
@@ -1023,25 +1256,82 @@ export default function SuAnalyticsPage() {
                   />
                   <YAxis
                     axisLine={false}
-                    tickFormatter={(value) => `$${value}`}
+                    tickFormatter={(value) => formatDollars(Number(value))}
                     tickLine={false}
                     width={48}
                   />
-                  <ChartTooltip
-                    content={
-                      <NonZeroTooltipContent labelFormatter={(label) => formatDay(String(label))} />
-                    }
-                  />
-                  <Bar dataKey="pro" fill="var(--color-pro)" maxBarSize={24} stackId="revenue" />
+                  <ChartTooltip content={<RevenueTooltipContent events={billing.events} />} />
+                  {revenue
+                    .filter((point) => point.cancels > 0)
+                    .map((point) => (
+                      <ReferenceLine
+                        key={point.day}
+                        x={point.day}
+                        stroke="var(--destructive)"
+                        strokeDasharray="3 3"
+                        label={{
+                          fill: "var(--destructive)",
+                          fontSize: 10,
+                          position: "top",
+                          value: point.cancels === 1 ? "canceled" : `${point.cancels} canceled`,
+                        }}
+                      />
+                    ))}
+                  <Bar dataKey="pro" fill="var(--color-pro)" maxBarSize={24} stackId="money" />
+                  <Bar dataKey="topups" fill="var(--color-topups)" maxBarSize={24} stackId="money" />
+                  {revenue.some((point) => point.other > 0) && (
+                    <Bar dataKey="other" fill="var(--color-other)" maxBarSize={24} stackId="money" />
+                  )}
+                  <Bar dataKey="refunds" fill="var(--color-refunds)" maxBarSize={24} stackId="money" />
                   <Bar
-                    dataKey="topups"
-                    fill="var(--color-topups)"
+                    dataKey="declined"
+                    fill="url(#revenue-declined-hatch)"
                     maxBarSize={24}
-                    stackId="revenue"
+                    stackId="declined"
                   />
                   <ChartLegend content={<ChartLegendContent />} />
                 </BarChart>
               </ChartContainer>
+              {billing.events.length > 0 && (
+                <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
+                  {billing.events.slice(0, BILLING_EVENTS_SHOWN).map((event) => {
+                    const href =
+                      event.kind === "canceled"
+                        ? event.objectId
+                          ? links.subscription(event.objectId)
+                          : links.canceled
+                        : event.objectId
+                          ? links.payment(event.objectId)
+                          : links.declined;
+                    return (
+                      <li
+                        key={`${event.kind}-${event.objectId ?? event.day}`}
+                        className="flex flex-wrap items-baseline gap-x-2"
+                      >
+                        <span className="w-12 shrink-0 tabular-nums">{formatDay(event.day)}</span>
+                        <StripeLink href={href} className="text-foreground">
+                          {event.kind === "canceled"
+                            ? "canceled"
+                            : `${formatMicros(event.amountMicros ?? "0")} declined`}
+                        </StripeLink>
+                        <span className="truncate">{event.email ?? "unknown customer"}</span>
+                        {event.detail && (
+                          <span className="min-w-0 flex-1 truncate" title={event.detail}>
+                            {event.detail}
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
+                  {billing.events.length > BILLING_EVENTS_SHOWN && (
+                    <li>
+                      <StripeLink href={links.declined}>
+                        +{billing.events.length - BILLING_EVENTS_SHOWN} more in Stripe
+                      </StripeLink>
+                    </li>
+                  )}
+                </ul>
+              )}
             </ChartCard>
           ),
         }
