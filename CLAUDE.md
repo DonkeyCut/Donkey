@@ -44,6 +44,7 @@ Every Cut change has to hold on all four surfaces, and the plan for it says how:
 
 - Do not touch repository-root `prototype/` unless the user explicitly asks for that filesystem path. By default, assume requested product changes are for the Mac app or the site/landing page.
 - Ask before creating any new plan document.
+- Code reviews run on the latest Opus model; fixes and implementation run on the latest Fable model. Make the switch yourself: a review request (`/code-review`, "review this") runs in an agent with `model: "opus"` whatever the session model is, and a fix runs on Fable, spawned in an agent with `model: "fable"` when the session is on something else. Never ask the user to `/model`.
 - When writing or editing any engineering doc under `docs/`, follow `docs/guides/eng-doc-style.md`.
 - Write straight up — in prompts, docs, commits, code comments, summaries, and UI copy. State what a thing is, once, and stop. Never frame it against what it is not: no "X, not Y", no "X rather than Y", no "instead of Z", no "…, which is exactly what not to do". Cut filler.
 - Keep replies short and action-oriented. For implementation questions, give the recommendation first, then one to three short bullets on why; when the answer is obvious, just say what to do. Skip long explanations, caveats, and "one last thing" sections; flag a real blocker or risk with "One issue:" and explain it briefly.
