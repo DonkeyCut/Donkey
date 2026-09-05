@@ -20,11 +20,13 @@ import {
   CanvasSource,
   getFirstEncodableAudioCodec,
   getFirstEncodableVideoCodec,
+  MovOutputFormat,
   Mp4OutputFormat,
   Output,
   AudioBufferSource,
   Quality,
   StreamTarget,
+  type AudioCodec,
   type VideoCodec,
 } from "mediabunny";
 import { audioFxSpans } from "./audioEffects";
@@ -44,14 +46,37 @@ import { renderElementPng } from "./textRender";
 import { assetIsSilent, behindSubjectOverlay, clipCovers, frameOf, frontSubjectOverlay, isEffectOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, projectFadeSeconds, rectOf, removalActive } from "./types";
 import type { ClipSpan, EffectOverlay, MediaAsset, Overlay, StickerOverlay } from "./types";
 import type { ExportDoc, ExportSettings } from "./exportClient";
+import { videoBitrateFor } from "./exportDelivery";
 
 /** Audio is written at the rate and width a delivery file wants, rather than
  * the 16 kHz mono a speech model reads. */
 const AUDIO_RATE = 48000;
 const AUDIO_CHANNELS = 2;
 
-/** Video codecs to try, best first. */
-export const VIDEO_CODECS: VideoCodec[] = ["avc", "hevc", "vp9", "av1"];
+/**
+ * What a delivered file is made of: the codec the user chose, and nothing in
+ * its place.
+ *
+ * The container is only half of whether a file opens. An .mp4 carrying VP9,
+ * AV1, or Opus is a valid file that QuickTime, the Finder preview, and most
+ * phones refuse — the user gets something they cannot play and cannot convert.
+ * So there is no second codec to fall back to: a browser that cannot encode
+ * the chosen one at the chosen size fails `canRenderInBrowser`, and the export
+ * goes where that codec is available — the worker for a cloud project, the
+ * Mac app or the cloud for a browser-resident one. ProRes has no WebCodecs
+ * encoder anywhere, so it always takes that road.
+ */
+export function deliveryVideoCodec(settings: ExportSettings): VideoCodec | null {
+  return settings.codec === "h264" ? "avc" : settings.codec === "hevc" ? "hevc" : null;
+}
+export function deliveryAudioCodec(settings: ExportSettings): AudioCodec {
+  return settings.audioCodec === "pcm" ? "pcm-s16" : "aac";
+}
+
+/** Codecs a working clip may use — the removal bakes and the behind-speaker
+ * mask, which only this app's decoders and ffmpeg ever read, and both take
+ * any of these. A file that leaves the app uses `deliveryVideoCodec`. */
+export const WORKING_VIDEO_CODECS: VideoCodec[] = ["avc", "hevc", "vp9", "av1"];
 
 export interface RenderProgress {
   /** 0..1 across the whole render. */
@@ -111,18 +136,10 @@ export interface RenderOptions {
   signal?: AbortSignal;
 }
 
-/**
- * The bitrate a preset's CRF asks for, in bits per second.
- *
- * WebCodecs encodes to a bitrate; the presets are written in CRF, which is a
- * quality target the encoder spends whatever it needs to hit. The conversion
- * is the same bits-per-pixel model the export dialog already estimates sizes
- * with, so a preset keeps meaning roughly what it meant.
- */
+/** The bitrate the choice asks for — the model in `exportDelivery`, which
+ * the engine and the dialog's estimate read too. */
 export function bitrateFor(settings: ExportSettings): number {
-  const pixelsPerSec = settings.width * settings.height * settings.fps;
-  const bpp = 0.08 * 2 ** ((23 - settings.crf) / 6);
-  return Math.round(pixelsPerSec * bpp);
+  return videoBitrateFor(settings);
 }
 
 /** The frame reader for one open video source. */
@@ -690,6 +707,12 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
   };
 }
 
+/** Whether a mix spec has anything audible in it — the same test the mixer
+ * uses to decide which spans it decodes. */
+export function mixHasSound(spec: MixSpec): boolean {
+  return spec.clips.some((c) => c.file && !c.muted) || spec.items.some((i) => !i.muted);
+}
+
 /** Whole-video fade gain at `t`, the picture's side of the project fade. */
 function projectFadeGain(doc: ExportDoc, t: number, total: number): number {
   const fadeIn = projectFadeSeconds(doc.fadeIn, total);
@@ -726,11 +749,17 @@ export async function renderProjectToMp4(
   const duration = projectDuration(doc);
   if (!(duration > 0)) throw new Error("There is nothing to export yet.");
 
-  const codec = await getFirstEncodableVideoCodec(VIDEO_CODECS, {
+  const wanted = deliveryVideoCodec(settings);
+  if (!wanted) throw new Error("This browser can't encode ProRes.");
+  const codec = await getFirstEncodableVideoCodec([wanted], {
     width: settings.width,
     height: settings.height,
   });
-  if (!codec) throw new Error("This browser can't encode video.");
+  if (!codec) {
+    throw new Error(
+      `This browser can't encode ${settings.codec === "hevc" ? "HEVC" : "H.264"} at ${settings.width} × ${settings.height}.`
+    );
+  }
 
   const stop = () => {
     if (signal?.aborted) throw new DOMException("Export canceled.", "AbortError");
@@ -763,7 +792,10 @@ export async function renderProjectToMp4(
   };
 
   const output = new Output({
-    format: new Mp4OutputFormat({ fastStart: "reserve" }),
+    format:
+      settings.container === "mov"
+        ? new MovOutputFormat({ fastStart: "reserve" })
+        : new Mp4OutputFormat({ fastStart: "reserve" }),
     target: new StreamTarget(writable, { chunked: true }),
   });
 
@@ -774,22 +806,25 @@ export async function renderProjectToMp4(
     });
     // Reserving the index space needs a packet ceiling per track. The video's
     // is exact — one packet per frame; the audio's is the mix's sample count
-    // over the smallest samples-per-packet a codec here uses (Opus's 960; AAC
-    // packs more), plus slack for encoder priming.
+    // over a floor below the samples a packet carries (AAC packs 1024, the
+    // muxer's own PCM 2048), plus slack for encoder priming. Over-reserving
+    // costs a few bytes of index; under-reserving fails the finalize.
     output.addVideoTrack(video, { frameRate: settings.fps, maximumPacketCount: frames + 8 });
     let audio: AudioBufferSource | null = null;
     if (mix) {
-      const audioCodec = await getFirstEncodableAudioCodec(["aac", "opus"], {
+      // PCM is packed by the muxer itself; AAC needs the browser's encoder,
+      // and a cut with sound keeps it: an Opus stand-in plays nowhere the
+      // user is taking the file, so a browser without AAC hands the render on.
+      const audioCodec = await getFirstEncodableAudioCodec([deliveryAudioCodec(settings)], {
         numberOfChannels: AUDIO_CHANNELS,
         sampleRate: AUDIO_RATE,
       });
-      if (audioCodec) {
-        audio = new AudioBufferSource({
-          codec: audioCodec,
-          quality: new Quality({ bitrate: 192_000 }),
-        });
-        output.addAudioTrack(audio, { maximumPacketCount: Math.ceil(mix.length / 960) + 32 });
-      }
+      if (!audioCodec) throw new Error("This browser can't encode AAC audio.");
+      audio = new AudioBufferSource({
+        codec: audioCodec,
+        ...(audioCodec === "aac" ? { quality: new Quality({ bitrate: 192_000 }) } : {}),
+      });
+      output.addAudioTrack(audio, { maximumPacketCount: Math.ceil(mix.length / 960) + 32 });
     }
     await output.start();
 
@@ -1280,9 +1315,20 @@ export async function canRenderInBrowser(
     return false;
   }
   try {
-    return !!(await getFirstEncodableVideoCodec(VIDEO_CODECS, {
+    const wanted = deliveryVideoCodec(settings);
+    if (!wanted) return false;
+    const video = await getFirstEncodableVideoCodec([wanted], {
       width: settings.width,
       height: settings.height,
+    });
+    if (!video) return false;
+    // A cut with sound needs the audio half of the file too; a browser with
+    // no AAC encoder would otherwise render the whole thing and fail at the
+    // muxer, or hand back a video whose sound went missing.
+    if (!mixHasSound(mixSpecFor(doc, (a) => a.url))) return true;
+    return !!(await getFirstEncodableAudioCodec([deliveryAudioCodec(settings)], {
+      numberOfChannels: AUDIO_CHANNELS,
+      sampleRate: AUDIO_RATE,
     }));
   } catch {
     return false;

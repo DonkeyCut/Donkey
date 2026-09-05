@@ -7,10 +7,10 @@ import {
   updateBrowserExportJob,
 } from "./backend/browser/exportJobs";
 import { exportsDir, readFileAt, saveExport } from "./backend/browser/opfs";
-import { holdRegistered, registerBlobFile, releaseRegistered } from "./backend/browser/registry";
-import { quotaErrorMessage } from "./backend/cloud";
+import { holdRegistered, registerBlobFile, releaseRegistered, resolveRegisteredBlob } from "./backend/browser/registry";
+import { cloudBackend, quotaErrorMessage } from "./backend/cloud";
 import { downloadFromUrl } from "./download";
-import { renderProjectToMp4 } from "./exportRender";
+import { bitrateFor, renderProjectToMp4 } from "./exportRender";
 import { putSigned } from "./media";
 import { renderRemovalPieces } from "./removalVideo";
 import { createRasterCanvas, rasterCanvasToPng } from "./raster";
@@ -30,12 +30,58 @@ import type {
   VideoClip,
 } from "./types";
 
+import {
+  deliveryContainer,
+  EXPORT_CONTAINERS,
+  specMediaFiles,
+  type ExportAudioCodec,
+  type ExportCodec,
+  type ExportContainer,
+} from "./exportDelivery";
+export { EXPORT_CONTAINERS };
+export type { ExportAudioCodec, ExportCodec, ExportContainer };
+
 export interface ExportSettings {
   width: number;
   height: number;
   fps: number;
+  /** The quality tier, on x264's scale; the encoders that take a bitrate get
+   * `bitrateFor` of it. */
   crf: number;
   preset: string;
+  codec: ExportCodec;
+  container: ExportContainer;
+  audioCodec: ExportAudioCodec;
+  /** A bitrate the user typed, bits per second. Absent = the tier's model. */
+  bitrate?: number;
+}
+
+/** The delivery every render that is not the user's own export uses — hover
+ * proxies, share cards, ladder masters, the phone's presets. */
+export const DELIVERY_DEFAULTS = { codec: "h264", container: "mp4", audioCodec: "aac" } as const;
+
+export const EXPORT_CODECS = [
+  { id: "h264", label: "H.264", detail: "plays everywhere" },
+  { id: "hevc", label: "HEVC", detail: "half the size · newer devices" },
+  { id: "prores", label: "ProRes 422 HQ", detail: "edit master · MOV" },
+] as const satisfies readonly { id: ExportCodec; label: string; detail: string }[];
+
+export const EXPORT_AUDIO = [
+  { id: "aac", label: "AAC", detail: "192 kbps" },
+  { id: "pcm", label: "PCM", detail: "uncompressed · MOV" },
+] as const satisfies readonly { id: ExportAudioCodec; label: string; detail: string }[];
+
+/** What a container can carry: ProRes and PCM need MOV. */
+export function fitContainer(settings: ExportSettings): ExportSettings {
+  if (settings.codec === "prores" || settings.audioCodec === "pcm") {
+    return settings.container === "mov" ? settings : { ...settings, container: "mov" };
+  }
+  return settings;
+}
+
+/** The file extension a setting's container takes. */
+export function exportExtension(settings: Pick<ExportSettings, "container">): string {
+  return deliveryContainer(settings.container).ext;
 }
 
 /** Presets pick a short-side target; `presetSettings` derives both dims from
@@ -46,23 +92,157 @@ export const EXPORT_PRESETS = [
     label: "Best · 1080p",
     detail: "H.264 · best quality",
     shortSide: 1080,
-    settings: { fps: 30, crf: 19, preset: "medium" },
+    settings: { fps: 30, crf: 19, preset: "medium", ...DELIVERY_DEFAULTS },
   },
   {
     id: "fast",
     label: "Quick share · 1080p",
     detail: "smaller file, faster",
     shortSide: 1080,
-    settings: { fps: 30, crf: 24, preset: "veryfast" },
+    settings: { fps: 30, crf: 24, preset: "veryfast", ...DELIVERY_DEFAULTS },
   },
   {
     id: "light",
     label: "Draft · 720p",
     detail: "fastest render",
     shortSide: 720,
-    settings: { fps: 30, crf: 24, preset: "veryfast" },
+    settings: { fps: 30, crf: 24, preset: "veryfast", ...DELIVERY_DEFAULTS },
   },
 ] as const;
+
+/**
+ * The axes the export dialog offers, each one independent of the others: how
+ * big, how smooth, how heavy. A preset above is one point in that space; these
+ * let the user pick their own.
+ */
+export const EXPORT_RESOLUTIONS = [
+  { id: "2160", label: "4K", shortSide: 2160 },
+  { id: "1440", label: "1440p", shortSide: 1440 },
+  { id: "1080", label: "1080p", shortSide: 1080 },
+  { id: "720", label: "720p", shortSide: 720 },
+] as const;
+
+export const EXPORT_FRAME_RATES = [24, 30, 60] as const;
+
+export const EXPORT_QUALITIES = [
+  { id: "high", label: "High", detail: "best quality", crf: 19, preset: "medium" },
+  { id: "balanced", label: "Balanced", detail: "smaller file", crf: 23, preset: "fast" },
+  { id: "small", label: "Small", detail: "fastest render", crf: 28, preset: "veryfast" },
+] as const;
+
+export type ExportQualityId = (typeof EXPORT_QUALITIES)[number]["id"];
+
+/** The user's whole choice, as the dialog holds it. */
+export interface ExportChoice {
+  /** A `resolutionOptions` id; one the project lacks falls back to "source". */
+  resolution: string;
+  fps: number;
+  quality: ExportQualityId;
+  codec: ExportCodec;
+  container: ExportContainer;
+  audioCodec: ExportAudioCodec;
+  /** Megabits per second the user typed; absent = the tier. */
+  bitrateMbps?: number;
+}
+
+/**
+ * One-click exports. Each is a whole choice, so picking one sets every
+ * advanced control at once, and the advanced panel shows what it stands for.
+ */
+export const EXPORT_QUICK_PRESETS = [
+  {
+    id: "share",
+    label: "Share",
+    detail: "1080p · plays everywhere",
+    choice: { resolution: "1080", fps: 30, quality: "balanced", ...DELIVERY_DEFAULTS },
+  },
+  {
+    id: "best",
+    label: "Best",
+    detail: "source size · H.264",
+    choice: { resolution: "source", fps: 30, quality: "high", ...DELIVERY_DEFAULTS },
+  },
+  {
+    id: "small",
+    label: "Small",
+    detail: "720p · fastest",
+    choice: { resolution: "720", fps: 30, quality: "small", ...DELIVERY_DEFAULTS },
+  },
+  {
+    id: "master",
+    label: "Master",
+    detail: "ProRes 422 HQ · MOV · PCM",
+    choice: { resolution: "source", fps: 30, quality: "high", codec: "prores", container: "mov", audioCodec: "pcm" },
+  },
+] as const satisfies readonly { id: string; label: string; detail: string; choice: ExportChoice }[];
+
+/** The quick preset a choice is, when it is one. */
+export function quickPresetOf(choice: ExportChoice, options: ResolutionOption[]): string | null {
+  const key = (c: ExportChoice) =>
+    [resolveResolution(options, c.resolution).id, c.fps, c.quality, c.codec, c.container, c.audioCodec, c.bitrateMbps ?? ""].join("|");
+  const k = key(choice);
+  return EXPORT_QUICK_PRESETS.find((p) => key(p.choice) === k)?.id ?? null;
+}
+
+/** The option a resolution id names, or the source frame when the project
+ * has no such rung. */
+export function resolveResolution(options: ResolutionOption[], id: string): ResolutionOption {
+  return options.find((r) => r.id === id) ?? options[0];
+}
+
+/** The settings a choice adds up to, with the container fitted to the codec
+ * and audio it has to carry. */
+export function choiceSettings(choice: ExportChoice, options: ResolutionOption[]): ExportSettings {
+  const q = EXPORT_QUALITIES.find((x) => x.id === choice.quality) ?? EXPORT_QUALITIES[0];
+  const r = resolveResolution(options, choice.resolution);
+  return fitContainer({
+    width: r.width,
+    height: r.height,
+    fps: choice.fps,
+    crf: q.crf,
+    preset: q.preset,
+    codec: choice.codec,
+    container: choice.container,
+    audioCodec: choice.audioCodec,
+    // ProRes has one rate per profile; a typed bitrate is for the other codecs.
+    ...(choice.bitrateMbps && choice.codec !== "prores"
+      ? { bitrate: Math.round(choice.bitrateMbps * 1_000_000) }
+      : {}),
+  });
+}
+
+/** A size the dialog offers: the source's own frame, or a named rung under it. */
+export interface ResolutionOption {
+  id: string;
+  label: string;
+  width: number;
+  height: number;
+}
+
+/**
+ * The sizes this project can be exported at, largest first.
+ *
+ * "Source" leads and is the frame the footage justifies. The named rungs below
+ * it are the ones genuinely smaller — a rung that matches or exceeds the source
+ * would be the same render under a second name, or an upscale, and the dialog
+ * offers neither.
+ */
+export function resolutionOptions(
+  aspect: Aspect,
+  clips: VideoClip[],
+  assets: MediaAsset[]
+): ResolutionOption[] {
+  const src = sourceFrame(aspect, clips, assets);
+  const srcShort = Math.min(src.width, src.height);
+  return [
+    { id: "source", label: "Source", ...src },
+    ...EXPORT_RESOLUTIONS.filter((r) => r.shortSide < srcShort).map((r) => ({
+      id: r.id,
+      label: r.label,
+      ...scaledFrame(aspect, r.shortSide),
+    })),
+  ];
+}
 
 /** Frame dims for an aspect scaled to a short-side target, even-rounded. */
 function scaledFrame(aspect: Aspect, shortSide: number): { width: number; height: number } {
@@ -91,6 +271,15 @@ export function originalSettings(
   clips: VideoClip[],
   assets: MediaAsset[]
 ): ExportSettings {
+  return { ...sourceFrame(aspect, clips, assets), fps: 30, crf: 19, preset: "medium", ...DELIVERY_DEFAULTS };
+}
+
+/** The frame `originalSettings` renders at — see its note for the rules. */
+export function sourceFrame(
+  aspect: Aspect,
+  clips: VideoClip[],
+  assets: MediaAsset[]
+): { width: number; height: number } {
   const base = frameOf(aspect);
   const longBase = Math.max(base.w, base.h);
   const srcLong = Math.max(
@@ -106,23 +295,23 @@ export function originalSettings(
     Math.min(2, Math.max(1, srcLong / longBase || 1))
   );
   const even = (n: number) => 2 * Math.round((n * k) / 2);
-  return { width: even(base.w), height: even(base.h), fps: 30, crf: 19, preset: "medium" };
+  return { width: even(base.w), height: even(base.h) };
 }
 
 /**
- * Rough output size for a preset, in bytes. The encoder is CRF (variable
- * bitrate), so this is a heuristic: it models H.264 bits-per-pixel as halving
- * every +6 CRF from a ~0.08 bpp anchor at CRF 23, scaled by frame area and fps,
- * plus the fixed 192 kbps AAC audio. Busy footage runs larger and flat footage
- * smaller, so the dialog shows it as an approximation, not a promise.
+ * Rough output size for a setting, in bytes: the video bitrate the encoders
+ * are given (`bitrateFor`) plus the fixed 192 kbps AAC audio. A CRF encode
+ * spends what the footage needs, so busy footage runs larger and flat footage
+ * smaller; the dialog shows it as an approximation.
  */
 export function estimateExportBytes(settings: ExportSettings, durationSec: number): number {
   if (durationSec <= 0) return 0;
-  const pixelsPerSec = settings.width * settings.height * settings.fps;
-  const bpp = 0.08 * 2 ** ((23 - settings.crf) / 6);
-  const videoBps = pixelsPerSec * bpp;
-  const audioBps = 192_000;
-  return ((videoBps + audioBps) * durationSec) / 8;
+  return ((bitrateFor(settings) + audioBitrate(settings)) * durationSec) / 8;
+}
+
+/** AAC at the fixed 192 kbps; PCM is 48 kHz stereo 16-bit, uncompressed. */
+export function audioBitrate(settings: Pick<ExportSettings, "audioCodec">): number {
+  return settings.audioCodec === "pcm" ? 48_000 * 16 * 2 : 192_000;
 }
 
 /** Human-readable size estimate matching the finished-export MB display. */
@@ -1074,6 +1263,25 @@ export async function buildExportPayload(
   };
 }
 
+/**
+ * A cloud gate said no — the account is signed out, over its storage, or at
+ * its render cap. The worker would say the same, so the export ends here with
+ * the gate's own words.
+ */
+export class ExportRefusedError extends Error {}
+
+/** Concurrent PUTs a cloud export's inputs go up on. */
+const UPLOAD_LANES = 4;
+
+function cloudRefusal(res: Response, body: { error?: string; bytes?: number; quotaBytes?: number } | null | undefined): ExportRefusedError | null {
+  if (res.ok) return null;
+  if (res.status === 401) return new ExportRefusedError("Sign in to render this export in the cloud.");
+  const quota = quotaErrorMessage(res.status, body);
+  if (quota) return new ExportRefusedError(quota);
+  if (res.status === 429 || res.status === 413) return new ExportRefusedError(body?.error ?? "Export failed to start.");
+  return null;
+}
+
 /** Serialize a payload to the engine's multipart form: PNGs in render order,
  * then the spec — the exact request shape from before the payload split. */
 function exportFormFromPayload({ spec, pngs }: ExportPayload): FormData {
@@ -1093,7 +1301,8 @@ async function postExport(
   payload: ExportPayload,
   outName: string,
   backend: CutBackend,
-  extra?: Record<string, unknown>
+  extra?: Record<string, unknown>,
+  signal?: AbortSignal
 ): Promise<Response> {
   if (backend.kind !== "cloud") {
     return backend.fetch("/api/cut/export", { method: "POST", body: exportFormFromPayload(payload) });
@@ -1111,19 +1320,21 @@ async function postExport(
     const preBody =
       await apiJson<{ files?: { name: string; key: string; type?: string; url: string }[] }>(pre);
     if (!pre.ok || !preBody.files) {
-      throw new Error(
-        quotaErrorMessage(pre.status, preBody) ?? preBody.error ?? "Export failed to start."
-      );
+      throw cloudRefusal(pre, preBody) ?? new Error(preBody.error ?? "Export failed to start.");
     }
     const byName = new Map(preBody.files.map((f) => [f.name, f]));
+    // The list carries a borrowed render's whole media set, so the PUTs go a
+    // few at a time, and a cancel stops the ones still in flight.
+    const queue = [...payload.pngs];
     await Promise.all(
-      payload.pngs.map(async (p) => {
-        const target = byName.get(p.name);
-        if (!target) throw new Error("Export failed to start.");
-        // The content type the URL was signed with, not the blob's: they agree
-        // for the PNG frames and differ for the behind-speaker mask clip, and
-        // sending anything but the signed one fails the signature.
-        await putSigned(target.url, p.blob, target.type || "image/png");
+      Array.from({ length: Math.min(UPLOAD_LANES, queue.length) }, async () => {
+        for (let p = queue.shift(); p; p = queue.shift()) {
+          const target = byName.get(p.name);
+          if (!target) throw new Error("Export failed to start.");
+          // The content type the URL was signed with: it is the one the
+          // signature covers, and for a video it differs from the blob's.
+          await putSigned(target.url, p.blob, target.type || "image/png", { signal });
+        }
       })
     );
     for (const p of payload.pngs) overlays.push({ name: p.name, key: byName.get(p.name)!.key });
@@ -1137,10 +1348,10 @@ async function postExport(
 
 /** The cloud names the output client-side (the engine derives it from the
  * project name itself, deduping on disk); mirror the engine's sanitize rule. */
-function exportOutName(): string {
+function exportOutName(settings: ExportSettings): string {
   const base =
     useEditor.getState().projectName.replace(/[/\\:*?"<>|]/g, "").trim().slice(0, 60) || "export";
-  return `${base}.mp4`;
+  return `${base}${exportExtension(settings)}`;
 }
 
 /** Poll an export job to completion, reporting progress. Returns the file name. */
@@ -1186,14 +1397,12 @@ export async function createExportJob(
 ): Promise<string> {
   const backend = getBackend(); // pinned: the payload build takes a while
   const payload = await buildExportPayload(projectId, doc, settings, "export");
-  const res = await postExport(projectId, payload, exportOutName(), backend);
+  const res = await postExport(projectId, payload, exportOutName(settings), backend);
   const body = await apiJson<{ id?: string }>(res);
   if (!res.ok || !body.id) {
     // A quota rejection raises the upgrade wall on its way through, the same as
     // one from an upload — otherwise the only sign is a terse line in the dock.
-    throw new Error(
-      quotaErrorMessage(res.status, body) ?? body.error ?? "Export failed to start."
-    );
+    throw cloudRefusal(res, body) ?? new Error(body.error ?? "Export failed to start.");
   }
   return body.id;
 }
@@ -1237,13 +1446,11 @@ export async function runBrowserExport(
   const claim = await backend.fetch("/api/cut/export/client/presign", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ projectId, outName: exportOutName() }),
+    body: JSON.stringify({ projectId, outName: exportOutName(settings) }),
   });
-  const claimed = await apiJson<{ jobId?: string; url?: string; outName?: string }>(claim);
+  const claimed = await apiJson<{ jobId?: string; url?: string; outName?: string; type?: string }>(claim);
   if (!claim.ok || !claimed.jobId || !claimed.url) {
-    throw new Error(
-      quotaErrorMessage(claim.status, claimed) ?? claimed.error ?? "Export failed to start."
-    );
+    throw cloudRefusal(claim, claimed) ?? new Error(claimed.error ?? "Export failed to start.");
   }
   const jobId = claimed.jobId;
   opts.onClaimed?.(jobId);
@@ -1264,7 +1471,7 @@ export async function runBrowserExport(
     });
 
     try {
-      await putSigned(claimed.url, rendered.file, "video/mp4", {
+      await putSigned(claimed.url, rendered.file, claimed.type ?? "video/mp4", {
         signal: opts.signal,
         onProgress: (fraction) => opts.onProgress?.(0.9 + fraction * 0.1),
       });
@@ -1320,7 +1527,7 @@ async function runStoreExport(
     });
     let outName: string;
     try {
-      outName = await saveExport(projectId, rendered.file, exportOutName());
+      outName = await saveExport(projectId, rendered.file, exportOutName(settings));
     } finally {
       void rendered.discard();
     }
@@ -1343,6 +1550,108 @@ async function runStoreExport(
   } finally {
     releaseRegistered(`/api/cut/projects/${projectId}/`);
   }
+}
+
+/**
+ * Render a browser-resident project on the cloud worker.
+ *
+ * The tab is that project's whole machine, and when it cannot carry a render
+ * — no encoder for the codec, ProRes, scratch storage that gives out — the
+ * worker is the machine it borrows. The cut's media lives only in this
+ * browser, so it rides up with the job beside the overlay stills, the worker
+ * renders from those uploads, and the finished file comes back down into the
+ * project's own exports folder. The cloud keeps nothing: the uploads and the
+ * output are the job's scratch, gone when the job is dismissed or swept.
+ */
+async function runBorrowedExport(
+  projectId: string,
+  doc: ExportDoc,
+  settings: ExportSettings,
+  opts: Parameters<typeof runBrowserExport>[3] = {}
+): Promise<string> {
+  const job = reserveBrowserExportJob(projectId, opts.projectName);
+  opts.onClaimed?.(job.id);
+  let cloudJobId: string | null = null;
+  const stop = () => {
+    if (opts.signal?.aborted) throw new DOMException("Export canceled.", "AbortError");
+  };
+  // The payload build reads the project's store-served blob URLs and can take
+  // a while; the hold keeps them alive if the user opens another project
+  // meanwhile, and the asset's URL is read live for the same reason.
+  holdRegistered(`/api/cut/projects/${projectId}/`);
+  try {
+    const payload = await buildExportPayload(projectId, doc, settings, "export");
+    stop();
+    for (const name of specMediaFiles(payload.spec as Parameters<typeof specMediaFiles>[0])) {
+      const asset = doc.assets.find((a) => a.fileName === name);
+      const url = asset
+        ? (useEditor.getState().assets.find((a) => a.id === asset.id)?.url ?? asset.url)
+        : null;
+      const blob = url ? resolveRegisteredBlob(url) : null;
+      if (!blob) throw new Error(`${name} is not in this browser's storage.`);
+      payload.pngs.push({ name, blob });
+    }
+    const res = await postExport(
+      projectId,
+      payload,
+      exportOutName(settings),
+      cloudBackend,
+      { mediaFrom: "overlays" },
+      opts.signal
+    );
+    const body = await apiJson<{ id?: string }>(res);
+    if (!res.ok || !body.id) {
+      throw cloudRefusal(res, body) ?? new Error(body.error ?? "Export failed to start.");
+    }
+    cloudJobId = body.id;
+    // The cloud row is this export too; the dock shows the local row alone.
+    opts.onClaimed?.(cloudJobId);
+    const outName = await pollExport(
+      cloudJobId,
+      (_stage, ratio) => {
+        opts.onProgress?.(ratio * 0.95);
+        updateBrowserExportJob(job.id, { progress: ratio * 0.95 });
+      },
+      () => !!opts.signal?.aborted,
+      cloudBackend
+    );
+    stop();
+    const fileRes = await cloudBackend.fetch(`/api/cut/export/${cloudJobId}/file`, {
+      signal: opts.signal,
+    });
+    if (!fileRes.ok) throw new Error("Could not fetch the rendered export.");
+    const file = new File([await fileRes.blob()], outName, {
+      type: deliveryContainer(settings.container).mime,
+    });
+    stop();
+    const saved = await saveExport(projectId, file, outName);
+    const stored = await readFileAt(await exportsDir(projectId), saved);
+    if (stored) {
+      registerBlobFile(`/api/cut/export/${job.id}/file`, stored);
+      registerBlobFile(`/api/cut/projects/${projectId}/exports/${encodeURIComponent(saved)}`, stored);
+    }
+    updateBrowserExportJob(job.id, { status: "done", progress: 1, outName: saved });
+    // The cloud's copy was the job's scratch; dismissing the job drops it.
+    cancelExportJob(cloudJobId, cloudBackend);
+    return job.id;
+  } catch (err) {
+    if (cloudJobId) cancelExportJob(cloudJobId, cloudBackend);
+    removeBrowserExportJob(job.id);
+    throw err;
+  } finally {
+    releaseRegistered(`/api/cut/projects/${projectId}/`);
+  }
+}
+
+/** The cloud renders a browser-resident project's export when its tab
+ * cannot; see `runBorrowedExport`. */
+export function runBrowserExportInCloud(
+  projectId: string,
+  doc: ExportDoc,
+  settings: ExportSettings,
+  opts: Parameters<typeof runBrowserExport>[3] = {}
+): Promise<string> {
+  return runBorrowedExport(projectId, doc, settings, opts);
 }
 
 /** Cancel a running or queued export job, or retire a settled one from the
@@ -1404,7 +1713,7 @@ export async function renderShareLadder(
  * footage yet. */
 export async function renderPreviewProxy(projectId: string, doc: ExportDoc) {
   const backend = getBackend(); // pinned: the proxy render outlives navigation
-  const settings: ExportSettings = { ...scaledFrame(doc.aspect, 360), fps: 24, crf: 30, preset: "veryfast" };
+  const settings: ExportSettings = { ...scaledFrame(doc.aspect, 360), fps: 24, crf: 30, preset: "veryfast", ...DELIVERY_DEFAULTS };
   let res: Response;
   try {
     const payload = await buildExportPayload(projectId, doc, settings, "preview");
@@ -1461,7 +1770,7 @@ export function docFirstSeconds(doc: ExportDoc, seconds: number): ExportDoc {
 /** Card frame size for an aspect: 16:9 sits close to the 1.91:1 social cards
  * want, and portrait cuts get a tall card rather than a letterboxed wide one. */
 function cardSettings(aspect: Aspect): ExportSettings {
-  return { ...scaledFrame(aspect, 720), fps: 15, crf: 26, preset: "veryfast" };
+  return { ...scaledFrame(aspect, 720), fps: 15, crf: 26, preset: "veryfast", ...DELIVERY_DEFAULTS };
 }
 
 /** Render the project's link-preview card: the opening five seconds, which

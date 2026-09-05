@@ -25,7 +25,7 @@ import {
 import { personSegmenter, segmentSubjectAlpha } from "./cutout";
 import { FrameCompositor, MISSING_FRAME } from "./composite";
 import { overlayPlan, trackZeroPlan } from "./framePlan";
-import { ClipReader, VIDEO_CODECS } from "./exportRender";
+import { ClipReader, WORKING_VIDEO_CODECS } from "./exportRender";
 import type { ExportDoc } from "./exportClient";
 import { createRasterCanvas } from "./raster";
 import { getClipSpans } from "./store";
@@ -84,7 +84,7 @@ export async function renderSubjectMask(
   const even = (n: number) => 2 * Math.round((n * scale) / 2);
   const W = even(frame.w);
   const H = even(frame.h);
-  const codec = await getFirstEncodableVideoCodec(VIDEO_CODECS, { width: W, height: H });
+  const codec = await getFirstEncodableVideoCodec(WORKING_VIDEO_CODECS, { width: W, height: H });
   if (!codec) return null;
 
   // A small compositor: the video layers only, at mask resolution.

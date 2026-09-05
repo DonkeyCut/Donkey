@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { assertLocalRuntime } from "./local-only";
 import { createJobRegistry } from "./jobRegistry";
-import { runExport, type ExportSpec } from "./exportPipeline";
+import { containerExtension, runExport, type ExportSpec } from "./exportPipeline";
 import { exportsDir, mediaPath, projectDir, readProject, setActiveJobGuard } from "./projects";
 
 export type { ExportSpec } from "./exportPipeline";
@@ -141,7 +141,7 @@ export function cancelJob(id: string) {
 
 /** Export file named after the project, with a " 2", " 3"… suffix when the
  * name is already taken by a file on disk or an export still in flight. */
-async function exportName(projectId: string, projectName: string) {
+async function exportName(projectId: string, projectName: string, ext: string) {
   const base =
     projectName.replace(/[/\\:*?"<>|]/g, "").trim().slice(0, 60) || "export";
   const taken = new Set(
@@ -151,7 +151,7 @@ async function exportName(projectId: string, projectName: string) {
     if (j.projectId === projectId && j.outName) taken.add(j.outName);
   }
   for (let n = 1; ; n++) {
-    const candidate = n === 1 ? `${base}.mp4` : `${base} ${n}.mp4`;
+    const candidate = n === 1 ? `${base}${ext}` : `${base} ${n}${ext}`;
     if (!taken.has(candidate)) return candidate;
   }
 }
@@ -160,9 +160,9 @@ async function exportName(projectId: string, projectName: string) {
 // its outName is assigned, so two jobs racing through their first awaits could
 // otherwise both claim "<Project>.mp4" and overwrite each other's render.
 let namingQueue: Promise<unknown> = Promise.resolve();
-function claimExportName(job: Job, projectName: string): Promise<void> {
+function claimExportName(job: Job, projectName: string, ext: string): Promise<void> {
   const claim = namingQueue.then(async () => {
-    job.outName = await exportName(job.projectId, projectName);
+    job.outName = await exportName(job.projectId, projectName, ext);
   });
   namingQueue = claim.catch(() => {});
   return claim;
@@ -218,7 +218,7 @@ export async function createJob(form: FormData): Promise<Job> {
     if (!doc) throw new Error("Project not found.");
     job.projectName = doc.name;
     if (preview) job.outName = "preview.mp4";
-    else await claimExportName(job, doc.name);
+    else await claimExportName(job, doc.name, containerExtension(spec));
     job.outPath = path.join(
       preview ? projectDir(spec.projectId) : exportsDir(spec.projectId),
       job.outName

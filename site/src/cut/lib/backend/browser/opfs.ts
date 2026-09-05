@@ -17,6 +17,7 @@
 // Project directories are named by id — no Finder here, so nothing follows
 // display names. Everything is functions over handles; no module-level DOM or
 // storage access, because this file rides along in the engine bundle.
+import { isDeliveryName } from "../../exportDelivery";
 import type { ProjectDoc, ProjectFolder, ProjectSummary } from "../../types";
 import { currentEngineUser } from "../../api";
 
@@ -309,7 +310,7 @@ export async function listExports(id: string): Promise<ExportListing[]> {
   const items: ExportListing[] = [];
   try {
     for await (const [name, handle] of dir) {
-      if (handle.kind !== "file" || !name.endsWith(".mp4")) continue;
+      if (handle.kind !== "file" || !isDeliveryName(name)) continue;
       const file = await (handle as FileSystemFileHandle).getFile();
       if (file.size > 0) items.push({ file: name, size: file.size, mtime: file.lastModified });
     }

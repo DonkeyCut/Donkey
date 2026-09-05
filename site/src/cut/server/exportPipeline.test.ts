@@ -9,7 +9,7 @@ import {
 
 // Builds the real encode filtergraph for a spec by running the pipeline with
 // its edges stubbed: media exists, every stream probes present, SDR color,
-// libx264, and ffmpeg runs are captured instead of spawned.
+// software encoders, and every ffmpeg run is captured for the assertions.
 /** Every ffmpeg run the pipeline made for a spec, in order; the graph is the
  * one carrying `-filter_complex`. */
 const runsFor = async (over: Partial<ExportSpec>): Promise<string[][]> => {
@@ -26,7 +26,7 @@ const runsFor = async (over: Partial<ExportSpec>): Promise<string[][]> => {
     videoColorInfo: async () => null,
     videoDecodeCost: async () => null,
     mediaDuration: async (file) => produced.get(file) ?? 0,
-    h264Encoder: async () => "libx264",
+    videoEncoder: async (codec) => (codec === "hevc" ? "libx265" : codec === "prores" ? "prores_ks" : "libx264"),
     runFfmpeg: async (_job, args) => {
       ffmpegCalls.push(args);
       const piece = args[args.length - 1].match(/^(.*)\.\d+\.(?:mov|wav)$/);
@@ -774,5 +774,51 @@ describe("a reversed clip in the filtergraph", () => {
     expect(video).toContain("trim=0.000:4.000,setpts='(clip(T-STARTT");
     const first = g.find((f) => f.includes("apad=whole_dur="))!;
     expect(first).toContain(`apad=whole_dur=${retimeOf(curved).len.toFixed(3)}`);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// Delivery: the encode carries the codec, container and audio the spec asks
+// for, and a spec from before those fields existed is the H.264 + AAC MP4 it
+// always was.
+const encodeRun = async (over: Partial<ExportSpec>) => {
+  const runs = await runsFor({ clips: [clip("a.mp4")], ...over });
+  return runs.find((a) => a.includes("-filter_complex"))!;
+};
+const arg = (args: string[], flag: string) => args[args.indexOf(flag) + 1];
+
+describe("delivery", () => {
+  test("a spec without delivery fields is an H.264 + AAC MP4", async () => {
+    const args = await encodeRun({});
+    expect(arg(args, "-c:v")).toBe("libx264");
+    expect(arg(args, "-crf")).toBe("24");
+    expect(arg(args, "-pix_fmt")).toBe("yuv420p");
+    expect(arg(args, "-c:a")).toBe("aac");
+    expect(args[args.length - 1].endsWith("encode.mp4")).toBe(true);
+  });
+
+  test("HEVC is tagged hvc1 so QuickTime opens it", async () => {
+    const args = await encodeRun({ codec: "hevc" });
+    expect(arg(args, "-c:v")).toBe("libx265");
+    expect(arg(args, "-tag:v")).toBe("hvc1");
+    expect(arg(args, "-pix_fmt")).toBe("yuv420p");
+  });
+
+  test("a ProRes master writes 10-bit 4:2:2 HQ with PCM into a MOV", async () => {
+    const args = await encodeRun({ codec: "prores", container: "mov", audioCodec: "pcm" });
+    expect(arg(args, "-c:v")).toBe("prores_ks");
+    expect(arg(args, "-profile:v")).toBe("3");
+    expect(arg(args, "-pix_fmt")).toBe("yuv422p10le");
+    expect(arg(args, "-c:a")).toBe("pcm_s16le");
+    expect(args).not.toContain("-crf");
+    expect(args[args.length - 1].endsWith("encode.mov")).toBe(true);
+  });
+
+  test("a typed bitrate replaces the tier's CRF", async () => {
+    const args = await encodeRun({ bitrate: 6_000_000 });
+    expect(args).not.toContain("-crf");
+    expect(arg(args, "-b:v")).toBe("6000000");
+    expect(arg(args, "-maxrate")).toBe("9000000");
   });
 });

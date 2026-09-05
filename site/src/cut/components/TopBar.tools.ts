@@ -22,7 +22,7 @@ export const TOP_BAR_TOOLS = [
   {
     name: "open_export",
     description:
-      "Open the export dialog so the user can render the cut (presets from Original quality down to Draft 720p). Exporting itself stays a user action.",
+      "Open the export dialog so the user can render the cut: quick presets (Share, Best, Small, Master) or the advanced panel — format MP4/MOV, codec H.264/HEVC/ProRes, resolution Source down to 720p, frame rate 24/30/60, quality tier or bitrate, AAC or PCM audio. Exporting itself stays a user action.",
     inputSchema: obj({}),
   },
 ] as const satisfies readonly AiToolDef[];

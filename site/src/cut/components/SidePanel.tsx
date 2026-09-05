@@ -117,6 +117,7 @@ import { formatTime } from "@/cut/lib/time";
 import { useLocalPref } from "@/cut/lib/uiState";
 import type { MediaAsset, SidePanelTab } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
+import { containerOfName } from "@/cut/lib/exportDelivery";
 import { useRevealEffect, useRevealFlash } from "@/cut/lib/refReveal";
 import { usePanelRequestEffect } from "@/cut/lib/panelRequest";
 import { CopyNameLabel } from "./AssetRefs";
@@ -574,6 +575,41 @@ function ExportPulse({ file }: { file: string }) {
   return pulse ? <div aria-hidden className={genPulseOverlay} /> : null;
 }
 
+/** An export's first frame. A master the browser cannot decode — ProRes in a
+ * MOV — shows as a film badge in its place. */
+function ExportThumb({
+  src,
+  onPlayable,
+  onUnplayable,
+}: {
+  src: string;
+  onPlayable: () => void;
+  onUnplayable: () => void;
+}) {
+  const [playable, setPlayable] = useState(true);
+  if (!playable) {
+    return (
+      <span className="flex h-11 w-[25px] shrink-0 items-center justify-center rounded-[4px] bg-muted text-muted-foreground">
+        <Film className="size-3" />
+      </span>
+    );
+  }
+  return (
+    <video crossOrigin={MEDIA_CORS}
+      muted
+      playsInline
+      preload="metadata"
+      src={src}
+      onLoadedMetadata={onPlayable}
+      onError={() => {
+        setPlayable(false);
+        onUnplayable();
+      }}
+      className="h-11 w-[25px] shrink-0 rounded-[4px] bg-black object-cover"
+    />
+  );
+}
+
 /** An export still being worked on, in the Exports list: spinner, live
  * progress, and a cancel that stops it. This is the project's record of the
  * work, so an export hidden from the dock still has its row and its cancel
@@ -789,6 +825,9 @@ function ProjectFilesPanel({
   const [settling, setSettling] = useState<ExportRow[]>([]);
   const lastExporting = useRef<ExportRow[]>([]);
   const [preview, setPreview] = useState<ExportItem | null>(null);
+  // Exports this browser cannot decode — a ProRes master — have no post
+  // preview to open; their row shows a badge and says what they are.
+  const [unplayable, setUnplayable] = useState<Set<string>>(() => new Set());
   const [deletingExport, setDeletingExport] = useState<ExportItem | null>(null);
 
   // Whatever is being worked on right now. When the last of it drops out — a
@@ -1060,15 +1099,23 @@ function ProjectFilesPanel({
                   <button
                     type="button"
                     className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
-                    title="Preview as a post"
-                    onClick={() => setPreview(it)}
+                    title={unplayable.has(it.file) ? "Master file" : "Preview as a post"}
+                    onClick={() => !unplayable.has(it.file) && setPreview(it)}
                   >
-                    <video crossOrigin={MEDIA_CORS}
-                      muted
-                      playsInline
-                      preload="metadata"
+                    <ExportThumb
+                      // A re-export under the same name is a new file; the key
+                      // lets it try to play again.
+                      key={`${it.file}:${it.mtime}`}
                       src={`${exportFileUrl(projectId, it)}#t=0.1`}
-                      className="h-11 w-[25px] shrink-0 rounded-[4px] bg-black object-cover"
+                      onPlayable={() =>
+                        setUnplayable((u) => {
+                          if (!u.has(it.file)) return u;
+                          const next = new Set(u);
+                          next.delete(it.file);
+                          return next;
+                        })
+                      }
+                      onUnplayable={() => setUnplayable((u) => new Set(u).add(it.file))}
                     />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[11.5px] font-medium">
@@ -1080,7 +1127,7 @@ function ProjectFilesPanel({
                         })}
                       </span>
                       <span className="block text-[10.5px] text-muted-foreground">
-                        {(it.size / (1024 * 1024)).toFixed(1)} MB · MP4
+                        {(it.size / (1024 * 1024)).toFixed(1)} MB · {containerOfName(it.file).label}
                       </span>
                     </span>
                   </button>

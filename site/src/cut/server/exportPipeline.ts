@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { deliveryContainer, videoBitrateFor } from "../lib/exportDelivery";
 import { readFile, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { atempoChain, hasStream, mediaDuration, num, videoColorInfo, videoDecodeCost } from "./util";
@@ -62,6 +63,12 @@ export interface ExportSpec {
   fps: number;
   crf: number;
   preset: string;
+  /** The delivery. A spec from before these existed is an H.264 + AAC MP4. */
+  codec?: "h264" | "hevc" | "prores";
+  container?: "mp4" | "mov";
+  audioCodec?: "aac" | "pcm";
+  /** A bitrate the user typed, bits per second; absent = the `crf` tier. */
+  bitrate?: number;
   duration: number;
   /** Whole-video fades, seconds: in from black / out to black, applied to the
    * final composite and mix after all overlays and soundtrack. */
@@ -323,21 +330,100 @@ export interface RenderHandle {
  * Homebrew ffmpeg does. The bundled engine ffmpeg is LGPL (`--disable-gpl`), so
  * it has no libx264 and `-preset`/`-crf` don't exist there; fall back to the
  * always-present VideoToolbox hardware H.264 encoder. */
-let h264EncoderCache: Promise<"libx264" | "h264_videotoolbox"> | null = null;
-export function h264Encoder(): Promise<"libx264" | "h264_videotoolbox"> {
-  return (h264EncoderCache ??= new Promise((resolve) => {
+/** The encoders this machine's ffmpeg carries, read once. An ffmpeg that
+ * cannot be asked answers empty, and the picks below then fall to the names
+ * the Mac's bundled build has. */
+let encodersCache: Promise<Set<string>> | null = null;
+function ffmpegEncoders(): Promise<Set<string>> {
+  return (encodersCache ??= new Promise((resolve) => {
     let out = "";
     const proc = spawn("ffmpeg", ["-hide_banner", "-encoders"]);
     proc.stdout?.on("data", (c: Buffer) => (out += c.toString()));
-    proc.on("error", () => resolve("h264_videotoolbox"));
-    proc.on("close", () => resolve(/\blibx264\b/.test(out) ? "libx264" : "h264_videotoolbox"));
+    proc.on("error", () => resolve(new Set()));
+    proc.on("close", () =>
+      resolve(new Set(out.split("\n").map((l) => l.trim().split(/\s+/)[1]).filter(Boolean)))
+    );
   }));
 }
 
-/** VideoToolbox constant quality (1–100, higher = better) from the CRF knob the
- * presets carry (lower CRF = better). Maps the 19/24/30 tiers to ~66/57/46. */
+export async function h264Encoder(): Promise<"libx264" | "h264_videotoolbox"> {
+  return (await ffmpegEncoders()).has("libx264") ? "libx264" : "h264_videotoolbox";
+}
+
+export type ExportVideoCodec = NonNullable<ExportSpec["codec"]>;
+
+/**
+ * The ffmpeg encoder for a delivery codec: the software one where the build
+ * has it (the worker's Debian ffmpeg), VideoToolbox on the Mac's LGPL build,
+ * and ffmpeg's own ProRes writer, which every build carries.
+ */
+export async function videoEncoder(codec: ExportVideoCodec): Promise<string> {
+  const have = await ffmpegEncoders();
+  if (codec === "prores") return "prores_ks";
+  if (codec === "hevc") return have.has("libx265") ? "libx265" : "hevc_videotoolbox";
+  return have.has("libx264") ? "libx264" : "h264_videotoolbox";
+}
+
+/** VideoToolbox constant quality (1–100, higher = better) from the CRF knob a
+ * fixed-quality convert carries (lower CRF = better). Maps 19/24/30 to
+ * ~66/57/46. */
 export function vtQuality(crf: number) {
   return Math.round(Math.max(35, Math.min(80, 100 - crf * 1.8)));
+}
+
+/**
+ * The bitrate an export's quality choice asks for at these dimensions, in bits
+ * per second: H.264 bits-per-pixel halving every +6 CRF from a ~0.08 bpp anchor
+ * at CRF 23.
+ *
+ * VideoToolbox is what the bundled ffmpeg has — the LGPL build carries no
+ * libx264 — and it has neither CRF nor `-preset`. Handed `-q:v`, the quality
+ * knob folded the whole preset range into a few points of constant quality:
+ * every choice in the export dialog rendered at the same size and took the same
+ * time, so picking "Quick share" gave back the "Best" file. A bitrate target
+ * keeps the choice meaningful, and `videoBitrateFor` is the same model the
+ * dialog quotes its size estimate from, so the file matches what the user was
+ * shown.
+ */
+export function targetBitrate(width: number, height: number, fps: number, crf: number, codec: ExportVideoCodec = "h264") {
+  return videoBitrateFor({ width, height, fps, crf, codec });
+}
+
+/**
+ * The encoder's own arguments for a spec's delivery: the codec, its rate
+ * control, the pixel format and profile players expect of it, and for HEVC the
+ * `hvc1` tag QuickTime requires. ffmpeg's ProRes writer has one quality per
+ * profile, so the tier and bitrate do not reach it.
+ */
+export function videoCodecArgs(enc: string, spec: ExportSpec): string[] {
+  const codec = spec.codec ?? "h264";
+  const bitrate = videoBitrateFor({ ...spec, codec });
+  const rate = ["-b:v", String(bitrate), "-maxrate", String(Math.round(bitrate * 1.5)), "-bufsize", String(bitrate * 3)];
+  switch (enc) {
+    case "libx264":
+      return ["-c:v", "libx264", "-preset", spec.preset, ...(spec.bitrate ? rate : ["-crf", String(spec.crf)]), "-profile:v", "high", "-pix_fmt", "yuv420p"];
+    case "h264_videotoolbox":
+      return ["-c:v", "h264_videotoolbox", ...rate, "-profile:v", "high", "-pix_fmt", "yuv420p", "-allow_sw", "1"];
+    case "libx265":
+      // x265's CRF scale sits about four points above x264's for the same picture.
+      return ["-c:v", "libx265", "-preset", spec.preset, ...(spec.bitrate ? rate : ["-crf", String(spec.crf + 4)]), "-x265-params", "log-level=error", "-tag:v", "hvc1", "-pix_fmt", "yuv420p"];
+    case "hevc_videotoolbox":
+      return ["-c:v", "hevc_videotoolbox", ...rate, "-profile:v", "main", "-tag:v", "hvc1", "-pix_fmt", "yuv420p", "-allow_sw", "1"];
+    case "prores_ks":
+      return ["-c:v", "prores_ks", "-profile:v", "3", "-vendor", "apl0", "-pix_fmt", "yuv422p10le"];
+    default:
+      throw new Error(`No encoder for ${codec}.`);
+  }
+}
+
+/** The audio arguments for a spec's delivery. */
+export function audioCodecArgs(spec: ExportSpec): string[] {
+  return spec.audioCodec === "pcm" ? ["-c:a", "pcm_s16le"] : ["-c:a", "aac", "-b:a", "192k"];
+}
+
+/** The file extension a spec's container takes. */
+export function containerExtension(spec: Pick<ExportSpec, "container">): string {
+  return deliveryContainer(spec.container).ext;
 }
 
 async function resolveMedia(
@@ -471,7 +557,7 @@ export interface ExportPipelineIO {
   videoColorInfo: typeof videoColorInfo;
   videoDecodeCost: typeof videoDecodeCost;
   mediaDuration: typeof mediaDuration;
-  h264Encoder: () => Promise<"libx264" | "h264_videotoolbox">;
+  videoEncoder: (codec: ExportVideoCodec) => Promise<string>;
   runFfmpeg: typeof runFfmpeg;
 }
 
@@ -484,7 +570,7 @@ const realIO: ExportPipelineIO = {
   videoColorInfo,
   videoDecodeCost,
   mediaDuration,
-  h264Encoder,
+  videoEncoder,
   runFfmpeg,
 };
 
@@ -544,7 +630,7 @@ export async function runExport(
       {
         ffmpeg: (args) => io.runFfmpeg(job, args),
         writeFile: (p, data) => io.writeFile(p, data),
-        h264Encoder: io.h264Encoder,
+        h264Encoder: () => io.videoEncoder("h264") as Promise<"libx264" | "h264_videotoolbox">,
         duration: io.mediaDuration,
       },
       src,
@@ -2140,16 +2226,12 @@ export async function runExport(
     aLabel = "afinal";
   }
 
-  const enc = await io.h264Encoder();
-  const videoCodecArgs =
-    enc === "libx264"
-      ? ["-c:v", "libx264", "-preset", spec.preset, "-crf", String(spec.crf)]
-      : ["-c:v", "h264_videotoolbox", "-q:v", String(vtQuality(spec.crf)), "-allow_sw", "1"];
+  const enc = await io.videoEncoder(spec.codec ?? "h264");
 
   // Encode into the tmp dir, then re-emit the container to strip a stray output
   // rotation flag (see the strip pass below). Keeping the encode intermediate
   // lets the second pass own faststart.
-  const encodePath = path.join(job.tmpDir, "encode.mp4");
+  const encodePath = path.join(job.tmpDir, `encode${containerExtension(spec)}`);
   await io.runFfmpeg(
     job,
     [
@@ -2158,15 +2240,12 @@ export async function runExport(
       "-filter_complex", assertGraphSafe(filters.join(";")),
       "-map", `[${vLabel}]`,
       "-map", `[${aLabel}]`,
-      ...videoCodecArgs,
-      "-profile:v", "high",
-      "-pix_fmt", "yuv420p",
+      ...videoCodecArgs(enc, spec),
       "-color_range", "tv",
       "-colorspace", "bt709",
       "-color_primaries", "bt709",
       "-color_trc", "bt709",
-      "-c:a", "aac",
-      "-b:a", "192k",
+      ...audioCodecArgs(spec),
       "-t", num(spec.duration),
       encodePath,
     ],

@@ -1,4 +1,5 @@
 import fsSync from "node:fs";
+import { isDeliveryName } from "../lib/exportDelivery";
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { resolveParent, settleParents } from "@/cut/lib/folderTree";
@@ -267,7 +268,7 @@ export async function listExports(id: string) {
   const names = await readdir(dir).catch(() => [] as string[]);
   const items = await Promise.all(
     names
-      .filter((n) => n.endsWith(".mp4"))
+      .filter((n) => isDeliveryName(n))
       .map(async (n) => {
         const info = await stat(path.join(dir, n)).catch(() => null);
         return info?.isFile() && info.size > 0

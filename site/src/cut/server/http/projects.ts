@@ -275,10 +275,8 @@ export const projectsApi = {
     } catch {
       return new Response("Bad request.", { status: 400 });
     }
-    return serveFileRange(p, req, {
-      contentType: "video/mp4",
-      ...(wantsDownload(req) ? { downloadName: name } : {}),
-    });
+    // The type follows the name: an MP4 or a MOV, whichever the export wrote.
+    return serveFileRange(p, req, wantsDownload(req) ? { downloadName: name } : {});
   },
 
   /** Reveal a rendered export in Finder (Cut runs on the user's own Mac). */

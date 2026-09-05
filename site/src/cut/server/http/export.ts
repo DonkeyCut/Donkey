@@ -46,9 +46,6 @@ export const exportApi = {
     if (!job || job.status !== "done") {
       return new Response("Export not ready.", { status: 404 });
     }
-    return serveFileRange(job.outPath, req, {
-      contentType: "video/mp4",
-      downloadName: job.outName,
-    });
+    return serveFileRange(job.outPath, req, { downloadName: job.outName });
   },
 };

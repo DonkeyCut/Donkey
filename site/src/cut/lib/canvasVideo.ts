@@ -16,7 +16,7 @@ import {
   Output,
   Quality,
 } from "mediabunny";
-import { VIDEO_CODECS } from "./exportRender";
+import { WORKING_VIDEO_CODECS } from "./exportRender";
 import { createRasterCanvas, type RasterSurface } from "./raster";
 
 export interface CanvasVideoEncoder {
@@ -39,7 +39,7 @@ export async function openCanvasVideo(opts: {
   /** The frame loop reads pixels back off the canvas. */
   readback?: boolean;
 }): Promise<CanvasVideoEncoder> {
-  const codec = await getFirstEncodableVideoCodec(VIDEO_CODECS, {
+  const codec = await getFirstEncodableVideoCodec(WORKING_VIDEO_CODECS, {
     width: opts.width,
     height: opts.height,
   });

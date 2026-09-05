@@ -136,16 +136,31 @@ describe("mixSpecFor", () => {
   });
 });
 
+const DELIVERY = { codec: "h264", container: "mp4", audioCodec: "aac" } as const;
+
 describe("bitrateFor", () => {
   test("spends more bits on a lower CRF", () => {
-    const base = { width: 1920, height: 1080, fps: 30, preset: "medium" };
+    const base = { width: 1920, height: 1080, fps: 30, preset: "medium", ...DELIVERY };
     expect(bitrateFor({ ...base, crf: 19 })).toBeGreaterThan(bitrateFor({ ...base, crf: 24 }));
   });
 
   test("scales with frame area", () => {
-    const base = { fps: 30, crf: 23, preset: "medium" };
+    const base = { fps: 30, crf: 23, preset: "medium", ...DELIVERY };
     expect(bitrateFor({ ...base, width: 1920, height: 1080 })).toBeGreaterThan(
       bitrateFor({ ...base, width: 1280, height: 720 })
     );
+  });
+});
+
+describe("bitrateFor by delivery", () => {
+  const base = { width: 1920, height: 1080, fps: 30, crf: 23, preset: "medium", container: "mp4", audioCodec: "aac" } as const;
+  test("HEVC asks for fewer bits than H.264 at the same tier", () => {
+    expect(bitrateFor({ ...base, codec: "hevc" })).toBeLessThan(bitrateFor({ ...base, codec: "h264" }));
+  });
+  test("ProRes is a fixed rate, above any tier", () => {
+    expect(bitrateFor({ ...base, codec: "prores" })).toBeGreaterThan(bitrateFor({ ...base, codec: "h264", crf: 10 }));
+  });
+  test("a typed bitrate wins", () => {
+    expect(bitrateFor({ ...base, codec: "h264", bitrate: 1_234_000 })).toBe(1_234_000);
   });
 });
