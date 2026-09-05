@@ -13,7 +13,11 @@
  *
  * Needs `next dev` on :3000. Spends no credits.
  *
- *   npm run eval:cut-export [--headed] [--base URL] [--hermetic]
+ *   npm run eval:cut-export [--headed] [--base URL] [--hermetic] [--webkit]
+ *
+ * `--webkit` runs the same render in Playwright's WebKit — the Safari engine,
+ * whose WebCodecs and origin-private storage differ from Chrome's — so a
+ * Safari user's export path gets exercised.
  *
  * `--hermetic` answers every API call inside the browser context — the doc
  * GET with an empty project, the rest with empty stubs — so the run needs no
@@ -22,7 +26,7 @@
  * serves.
  */
 
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, webkit, type Browser, type Page } from "playwright";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -105,11 +109,13 @@ async function buildFixtures(): Promise<void> {
 
 /** A browser with the fixture media served from disk and the session answered. */
 async function launch(): Promise<{ browser: Browser; page: Page }> {
-  const browser = await chromium.launch({
-    channel: "chrome",
-    headless: !has("--headed"),
-    args: ["--autoplay-policy=no-user-gesture-required"],
-  });
+  const browser = has("--webkit")
+    ? await webkit.launch({ headless: !has("--headed") })
+    : await chromium.launch({
+        channel: "chrome",
+        headless: !has("--headed"),
+        args: ["--autoplay-policy=no-user-gesture-required"],
+      });
   const context = await browser.newContext({
     extraHTTPHeaders: { "x-donkey-dev-auth-bypass": "1" },
     viewport: { width: 1600, height: 1000 },
@@ -214,6 +220,44 @@ async function open(page: Page, projectId: string): Promise<void> {
   );
 }
 
+/** What this browser can do for a render, as the page sees it: the probes
+ * `canRenderInBrowser` runs, reported one by one so a refusal names its cause. */
+async function probeInPage(page: Page): Promise<Record<string, unknown>> {
+  return page.evaluate(async () => {
+    const out: Record<string, unknown> = {};
+    try {
+      const root = await navigator.storage.getDirectory();
+      out.opfs = true;
+      const dir = await root.getDirectoryHandle("cut-export-probe", { create: true });
+      const h = await dir.getFileHandle("probe.bin", { create: true });
+      const w = await h.createWritable();
+      await w.write(new Uint8Array(16));
+      await w.close();
+      out.createWritable = true;
+      await root.removeEntry("cut-export-probe", { recursive: true });
+    } catch (e) {
+      out.opfsError = String(e);
+    }
+    const vprobe = async (codec: string) => {
+      try {
+        const r = await VideoEncoder.isConfigSupported({ codec, width: 1280, height: 720, bitrate: 4_000_000, framerate: 24 });
+        return r.supported ?? false;
+      } catch (e) {
+        return String(e);
+      }
+    };
+    out.avc = await vprobe("avc1.640028");
+    out.hevc = await vprobe("hvc1.1.6.L120.90");
+    try {
+      const r = await AudioEncoder.isConfigSupported({ codec: "mp4a.40.2", numberOfChannels: 2, sampleRate: 48000, bitrate: 192_000 });
+      out.aac = r.supported ?? false;
+    } catch (e) {
+      out.aac = String(e);
+    }
+    return out;
+  });
+}
+
 /** Render the fixture doc in the tab and hand the MP4 bytes back. */
 async function renderInPage(page: Page): Promise<{ b64: string; duration: number }> {
   return page.evaluate(
@@ -223,7 +267,10 @@ async function renderInPage(page: Page): Promise<{ b64: string; duration: number
           renderProjectToMp4: (
             doc: unknown,
             settings: unknown,
-            opts: { resolve: (a: { url: string }) => string }
+            opts: {
+              resolve: (a: { url: string }) => string;
+              onProgress?: (p: { ratio: number; stage: string }) => void;
+            }
           ) => Promise<{ file: Blob; discard(): Promise<void> }>;
           projectDuration: (doc: unknown) => number;
         };
@@ -296,12 +343,19 @@ async function renderInPage(page: Page): Promise<{ b64: string; duration: number
           showOnTimeline: false,
         },
       };
-      const settings = { width: 1280, height: 720, fps: 24, crf: 24, preset: "veryfast" };
+      const settings = { width: 1280, height: 720, fps: 24, crf: 24, preset: "veryfast", codec: "h264", container: "mp4", audioCodec: "aac" } as const;
 
       const duration = dev.projectDuration(doc);
-      const rendered = await dev.renderProjectToMp4(doc, settings, {
-        resolve: (a) => a.url,
-      });
+      let stage = "start";
+      let rendered: { file: Blob; discard(): Promise<void> };
+      try {
+        rendered = await dev.renderProjectToMp4(doc, settings, {
+          resolve: (a) => a.url,
+          onProgress: (p) => (stage = `${p.stage} ${(p.ratio * 100).toFixed(0)}%`),
+        });
+      } catch (e) {
+        throw new Error(`render failed at ${stage}: ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`);
+      }
       const bytes = new Uint8Array(await rendered.file.arrayBuffer());
       await rendered.discard();
       let bin = "";
@@ -320,6 +374,7 @@ async function main(): Promise<void> {
   console.log(`[fixtures] ready in ${OUT}`);
 
   const { browser, page } = await launch();
+  const probe = () => probeInPage(page).then((r) => console.log(`[probe] ${JSON.stringify(r)}`));
   let projectId = HERMETIC_PROJECT;
   if (!HERMETIC) {
     const res = await fetch(`${BASE}/api/cut/projects?u=${DEV_USER}`, {
@@ -333,6 +388,7 @@ async function main(): Promise<void> {
   console.log(`[ready] ${BASE}/app/p/${projectId}${HERMETIC ? " (hermetic)" : ""}`);
 
   await open(page, projectId);
+  await probe();
   const t0 = Date.now();
   const { b64, duration } = await renderInPage(page);
   await browser.close();
@@ -345,13 +401,13 @@ async function main(): Promise<void> {
     await run("ffprobe", [
       "-v", "error",
       "-show_entries", "format=duration",
-      "-show_entries", "stream=codec_type,width,height",
+      "-show_entries", "stream=codec_type,codec_name,width,height",
       "-of", "json",
       outPath,
     ])
   ) as {
     format: { duration: string };
-    streams: { codec_type: string; width?: number; height?: number }[];
+    streams: { codec_type: string; codec_name?: string; width?: number; height?: number }[];
   };
 
   const failures: string[] = [];
@@ -363,6 +419,11 @@ async function main(): Promise<void> {
   if (video?.width !== 1280 || video?.height !== 720) {
     failures.push(`picture is ${video?.width}x${video?.height}, settings say 1280x720`);
   }
+  // The file is for QuickTime and phones as much as for ffprobe: H.264 and
+  // AAC, whatever the browser would rather have encoded.
+  if (video?.codec_name !== "h264") failures.push(`video is ${video?.codec_name}, settings say h264`);
+  const audio = probed.streams.find((s) => s.codec_type === "audio");
+  if (audio?.codec_name !== "aac") failures.push(`audio is ${audio?.codec_name}, settings say aac`);
   if (!probed.streams.some((s) => s.codec_type === "audio")) {
     failures.push("no audio stream");
   }
