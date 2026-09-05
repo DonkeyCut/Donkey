@@ -28,6 +28,9 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { defaultSettings } from "../src/lib/config/registry";
+import { publicSubset } from "../src/lib/config/resolve";
+
 const SITE = path.resolve(import.meta.dir, "..");
 const OUT = path.resolve(SITE, "..", "dist", "cut-export");
 const STOCK = path.join(SITE, "public", "cut-stock-video");
@@ -123,6 +126,18 @@ async function launch(): Promise<{ browser: Browser; page: Page }> {
     // "Nothing saved yet" — the onboarding gate reads this and steps aside.
     await context.route("**/api/account/onboarding", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: "null" })
+    );
+    // The session gate's configuration read: defaults, no experiments held.
+    await context.route("**/api/account/config", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          settings: publicSubset(defaultSettings()),
+          experiments: {},
+          exposed: [],
+        }),
+      })
     );
     await context.route(
       (u) => /\/api\/(cut|cut-cloud)\/(projects|export-jobs|library)$/.test(u.pathname),
