@@ -226,7 +226,10 @@ struct RecordingCard: View {
                let image = UIImage(contentsOfFile: url.localPath) {
                 Image(uiImage: image)
                     .resizable()
-                    .scaledToFill()
+                    // A take shot sideways shows its whole frame: cropping a
+                    // landscape poster to a portrait tile leaves a sliver of
+                    // the middle.
+                    .aspectRatio(contentMode: image.size.width > image.size.height ? .fit : .fill)
             } else {
                 Image(systemName: "play.fill")
                     .foregroundStyle(.secondary)
