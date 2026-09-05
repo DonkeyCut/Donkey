@@ -4,6 +4,25 @@ import { prisma } from "@/lib/prisma";
 
 let cachedStripe: Stripe | null = null;
 
+// Every list drained through Stripe's auto-pager stops here, far above what
+// the account holds. Reaching it is an error: a figure built from a
+// truncated list would be quietly wrong.
+export const STRIPE_LIST_CAP = 10_000;
+
+export class StripeListTooLongError extends Error {
+  public constructor() {
+    super(`A Stripe list passed ${STRIPE_LIST_CAP} rows; raise STRIPE_LIST_CAP.`);
+    this.name = "StripeListTooLongError";
+  }
+}
+
+/** Drain a Stripe list to an array; throws when it reaches the cap. */
+export async function drainStripe<T>(list: Stripe.ApiListPromise<T>): Promise<T[]> {
+  const rows = await list.autoPagingToArray({ limit: STRIPE_LIST_CAP });
+  if (rows.length >= STRIPE_LIST_CAP) throw new StripeListTooLongError();
+  return rows;
+}
+
 export function getStripe(): Stripe {
   if (cachedStripe) {
     return cachedStripe;

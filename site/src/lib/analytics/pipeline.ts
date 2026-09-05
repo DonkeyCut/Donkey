@@ -10,6 +10,7 @@ import type { z } from "zod";
 import type { Prisma } from "@/generated/prisma/client";
 import { getObject, listObjectsWithDates, putObject } from "@/cut/server/cloud/r2";
 import { fetchActiveDistinctIds, isPosthogQueryConfigured } from "@/lib/analytics/posthog";
+import { pullStripeSnapshot } from "@/lib/analytics/stripe";
 import {
   addUtcDays,
   ANALYTICS_DB_SOURCES,
@@ -17,10 +18,13 @@ import {
   ANALYTICS_SOURCES,
   analyticsDbDayFileSchema,
   analyticsPosthogDayFileSchema,
+  analyticsRollupSchema,
+  analyticsSnapshotFileSchema,
   type AnalyticsDbDayFile,
   type AnalyticsPosthogDayFile,
   type AnalyticsRollup,
   type AnalyticsSnapshotFile,
+  type AnalyticsStripeSnapshot,
   utcDayOf,
 } from "@/lib/analytics/schema";
 import { cutLimitsForTier } from "@/cut/server/cloud/limits";
@@ -40,9 +44,23 @@ const WINDOW_DAYS = 60;
 const MAX_EXTRACT_DAYS_PER_RUN = 5;
 const SNAPSHOT_PAGE_SIZE = 1000;
 
-// Credit grant sources that correspond to a Stripe charge; the grant amount
-// equals the dollars paid, so these rows double as the revenue record.
-const PAID_GRANT_SOURCES = ["pro_subscription", "stripe_autoreload", "stripe_topup"];
+// The rollup's day window: yesterday and the days before it, oldest first.
+// Activity is extracted once a UTC day has closed, so today is never in it.
+function windowDays(): string[] {
+  return daysEnding(addUtcDays(utcDayOf(new Date()), -1));
+}
+
+// The billing window ends today: Stripe reports money and cancels as they
+// happen, and the webhook refresh exists to show them the same day.
+function billingDays(): string[] {
+  return daysEnding(utcDayOf(new Date()));
+}
+
+function daysEnding(last: string): string[] {
+  const days: string[] = [];
+  for (let i = WINDOW_DAYS - 1; i >= 0; i--) days.push(addUtcDays(last, -i));
+  return days;
+}
 
 export class InvalidDayError extends Error {}
 
@@ -248,44 +266,13 @@ async function writeSnapshot(): Promise<AnalyticsSnapshotFile> {
     cursor = page[page.length - 1].userId;
   }
 
-  const subscriptions = (
-    await fetchAllPages((cursorArgs) =>
-      prisma.proSubscription.findMany({
-        orderBy: { id: "asc" },
-        select: { cancelAtPeriodEnd: true, id: true, status: true, userId: true },
-        take: SNAPSHOT_PAGE_SIZE,
-        ...cursorArgs,
-      }),
-    )
-  ).map((sub) => ({
-    cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
-    status: sub.status,
-    userId: sub.userId,
-  }));
-
-  const payments = (
-    await fetchAllPages((cursorArgs) =>
-      prisma.userCreditGrant.findMany({
-        orderBy: { id: "asc" },
-        select: { createdAt: true, id: true, originalAmountMicros: true, source: true, userId: true },
-        take: SNAPSHOT_PAGE_SIZE,
-        where: { source: { in: PAID_GRANT_SOURCES } },
-        ...cursorArgs,
-      }),
-    )
-  ).map((grant) => ({
-    amountMicros: grant.originalAmountMicros.toString(),
-    day: utcDayOf(grant.createdAt),
-    source: grant.source,
-    userId: grant.userId,
-  }));
+  const stripe = await pullStripeSnapshot(billingDays()[0]);
 
   const snapshot: AnalyticsSnapshotFile = {
     balances,
     generatedAt: new Date().toISOString(),
-    payments,
     storage,
-    subscriptions,
+    stripe,
     users,
     version: 1,
   };
@@ -297,9 +284,8 @@ async function consolidate(
   snapshot: AnalyticsSnapshotFile,
   posthogConfigured: boolean,
 ): Promise<AnalyticsRollup> {
-  const yesterday = addUtcDays(utcDayOf(new Date()), -1);
-  const days: string[] = [];
-  for (let i = WINDOW_DAYS - 1; i >= 0; i--) days.push(addUtcDays(yesterday, -i));
+  const days = windowDays();
+  const yesterday = days[days.length - 1];
 
   const masks = new Map<string, number[]>();
   for (const user of snapshot.users) masks.set(user.id, days.map(() => 0));
@@ -343,16 +329,12 @@ async function consolidate(
   }
 
   const balanceByUser = new Map(snapshot.balances.map((b) => [b.userId, b.balanceMicros]));
-  const fundedByUser = new Map<string, bigint>();
-  for (const payment of snapshot.payments) {
-    fundedByUser.set(
-      payment.userId,
-      (fundedByUser.get(payment.userId) ?? BigInt(0)) + BigInt(payment.amountMicros),
-    );
-  }
+  const fundedByUser = fundedMicrosByUser(snapshot.stripe);
   const storageByUser = new Map((snapshot.storage ?? []).map((s) => [s.userId, s.bytes]));
   const proUsers = new Set(
-    snapshot.subscriptions.filter((sub) => isActiveProStatus(sub.status)).map((sub) => sub.userId),
+    (snapshot.stripe?.subscriptions ?? [])
+      .filter((sub) => isActiveProStatus(sub.status))
+      .map((sub) => sub.userId),
   );
   const users = snapshot.users
     .map((u) => {
@@ -374,7 +356,7 @@ async function consolidate(
     .sort((a, b) => (a.registeredAt < b.registeredAt ? 1 : -1));
 
   const rollup: AnalyticsRollup = {
-    billing: buildBilling(snapshot, days),
+    ...(snapshot.stripe ? { billing: buildBilling(snapshot.stripe, billingDays()) } : {}),
     days,
     generatedAt: new Date().toISOString(),
     missing,
@@ -387,48 +369,178 @@ async function consolidate(
   return rollup;
 }
 
-// Current subscription state plus the paid-grant revenue record, folded into
-// the counts and per-day sums the dashboard shows. Abandoned checkouts
-// (incomplete statuses) never subscribed, so they count nowhere; past_due and
-// paused sit outside both buckets until Stripe resolves them.
-function buildBilling(
-  snapshot: AnalyticsSnapshotFile,
+// All-time paid charges per user, for the user list's funded column.
+function fundedMicrosByUser(stripe: AnalyticsStripeSnapshot | undefined): Map<string, bigint> {
+  const funded = new Map<string, bigint>();
+  for (const charge of stripe?.charges ?? []) {
+    if (charge.status !== "paid" || !charge.userId) continue;
+    funded.set(
+      charge.userId,
+      (funded.get(charge.userId) ?? BigInt(0)) + BigInt(charge.amountMicros),
+    );
+  }
+  return funded;
+}
+
+// The Stripe record folded into what the dashboard shows: subscription state
+// now, per-day money, and the window's declines and cancel requests with the
+// ids that link into Stripe. Abandoned checkouts never subscribed, so they
+// count nowhere in churn; past_due and paused sit outside both buckets until
+// Stripe resolves them.
+export function buildBilling(
+  stripe: AnalyticsStripeSnapshot,
   days: string[],
 ): NonNullable<AnalyticsRollup["billing"]> {
+  type Billing = NonNullable<AnalyticsRollup["billing"]>;
+  const dayIndex = new Map(days.map((day, i) => [day, i]));
+  const inWindow = (iso: string | null) => iso !== null && dayIndex.has(utcDayOf(new Date(iso)));
+
   let subscribers = 0;
-  let canceling = 0;
   let churned = 0;
-  for (const sub of snapshot.subscriptions) {
+  const canceling: Billing["canceling"] = [];
+  const events: Billing["events"] = [];
+  const revenue = days.map(() => ({
+    cancels: 0,
+    declinedMicros: BigInt(0),
+    otherMicros: BigInt(0),
+    proMicros: BigInt(0),
+    refundedMicros: BigInt(0),
+    topupMicros: BigInt(0),
+  }));
+
+  for (const sub of stripe.subscriptions) {
     if (isActiveProStatus(sub.status)) {
       subscribers++;
-      if (sub.cancelAtPeriodEnd) canceling++;
+      if (sub.cancelScheduled) {
+        canceling.push({
+          comment: sub.comment,
+          customerId: sub.customerId,
+          email: sub.email,
+          endsAt: sub.cancelAt,
+          feedback: sub.feedback,
+          requestedAt: sub.canceledAt,
+          subscriptionId: sub.id,
+        });
+      }
     } else if (sub.status === "canceled" || sub.status === "unpaid") {
       churned++;
     }
+    // A cancel request lands on the day it was made, whether the
+    // subscription is still running out its period or already ended.
+    if (sub.canceledAt !== null && inWindow(sub.canceledAt)) {
+      const day = utcDayOf(new Date(sub.canceledAt));
+      revenue[dayIndex.get(day)!].cancels++;
+      events.push({
+        amountMicros: null,
+        customerId: sub.customerId,
+        day,
+        detail: [sub.feedback, sub.comment].filter(Boolean).join(" · ") || null,
+        email: sub.email,
+        kind: "canceled",
+        objectId: sub.id,
+      });
+    }
+  }
+  canceling.sort((a, b) => (a.endsAt ?? "").localeCompare(b.endsAt ?? ""));
+
+  const fundedCustomers = new Set<string>();
+  let fundedMicros = BigInt(0);
+  let paidMicros = BigInt(0);
+  let declinedMicros = BigInt(0);
+  const declinedCustomers = new Set<string>();
+  for (const charge of stripe.charges) {
+    const amount = BigInt(charge.amountMicros);
+    const i = dayIndex.get(charge.day);
+    if (charge.status === "paid") {
+      fundedMicros += amount;
+      fundedCustomers.add(charge.customerId ?? charge.id);
+      if (i === undefined) continue;
+      paidMicros += amount;
+      if (charge.kind === "pro") revenue[i].proMicros += amount;
+      else if (charge.kind === "topup") revenue[i].topupMicros += amount;
+      else revenue[i].otherMicros += amount;
+    } else if (i !== undefined) {
+      declinedMicros += amount;
+      declinedCustomers.add(charge.customerId ?? charge.id);
+      revenue[i].declinedMicros += amount;
+      events.push({
+        amountMicros: charge.amountMicros,
+        customerId: charge.customerId,
+        day: charge.day,
+        detail: charge.failure,
+        email: charge.email,
+        kind: "declined",
+        objectId: charge.paymentIntentId,
+      });
+    }
   }
 
-  const dayIndex = new Map(days.map((day, i) => [day, i]));
-  const revenue = days.map(() => ({ proMicros: BigInt(0), topupMicros: BigInt(0) }));
-  let fundedMicros = BigInt(0);
-  for (const payment of snapshot.payments) {
-    const amount = BigInt(payment.amountMicros);
-    fundedMicros += amount;
-    const i = dayIndex.get(payment.day);
+  let refundedMicros = BigInt(0);
+  for (const refund of stripe.refunds) {
+    const i = dayIndex.get(refund.day);
     if (i === undefined) continue;
-    if (payment.source === "pro_subscription") revenue[i].proMicros += amount;
-    else revenue[i].topupMicros += amount;
+    refundedMicros += BigInt(refund.amountMicros);
+    revenue[i].refundedMicros += BigInt(refund.amountMicros);
   }
+
+  events.sort((a, b) => b.day.localeCompare(a.day));
 
   return {
     canceling,
     churned,
-    funded: new Set(snapshot.payments.map((payment) => payment.userId)).size,
+    dashboardUrl: stripe.dashboardUrl,
+    days,
+    events,
+    funded: fundedCustomers.size,
     fundedMicros: fundedMicros.toString(),
     revenue: revenue.map((entry) => ({
+      cancels: entry.cancels,
+      declinedMicros: entry.declinedMicros.toString(),
+      otherMicros: entry.otherMicros.toString(),
       proMicros: entry.proMicros.toString(),
+      refundedMicros: entry.refundedMicros.toString(),
       topupMicros: entry.topupMicros.toString(),
     })),
     subscribers,
+    window: {
+      abandonedCheckouts: stripe.abandonedCheckouts.filter((c) => dayIndex.has(c.day)).length,
+      cancels: revenue.reduce((sum, entry) => sum + entry.cancels, 0),
+      declinedCustomers: declinedCustomers.size,
+      declinedMicros: declinedMicros.toString(),
+      netMicros: (paidMicros - refundedMicros).toString(),
+      paidMicros: paidMicros.toString(),
+      refundedMicros: refundedMicros.toString(),
+    },
+  };
+}
+
+// A Stripe billing webhook lands here: the Stripe record is re-read, the
+// snapshot keeps it for the next nightly consolidation, and the rollup's
+// billing section (plus each user's funded total) is rewritten in place so
+// the dashboard shows the event without waiting for the night. Without a
+// snapshot or rollup yet there is nothing to refresh; the nightly run builds
+// them.
+export async function refreshBilling(): Promise<Prisma.InputJsonValue> {
+  const [snapshot, rollup] = await Promise.all([
+    getObject(SNAPSHOT_KEY).then((obj) => readJson(obj, analyticsSnapshotFileSchema)),
+    getObject(ROLLUP_KEY).then((obj) => readJson(obj, analyticsRollupSchema)),
+  ]);
+  if (!snapshot || !rollup) return { refreshed: false };
+
+  const days = billingDays();
+  const stripe = await pullStripeSnapshot(days[0]);
+  await putJson(SNAPSHOT_KEY, { ...snapshot, stripe });
+
+  const fundedByUser = fundedMicrosByUser(stripe);
+  const users = rollup.users.map((user) => ({
+    ...user,
+    fundedMicros: fundedByUser.get(user.id)?.toString(),
+  }));
+  await putJson(ROLLUP_KEY, { ...rollup, billing: buildBilling(stripe, days), users });
+  return {
+    charges: stripe.charges.length,
+    refreshed: true,
+    subscriptions: stripe.subscriptions.length,
   };
 }
 

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { R2NotConfiguredError } from "@/cut/server/cloud/r2";
 import { InvalidDayError, runAnalyticsDaily } from "@/lib/analytics/pipeline";
 import { PosthogConfigError } from "@/lib/analytics/posthog";
+import { StripeListTooLongError, StripeNotConfiguredError } from "@/lib/billing/stripe";
 import { defineJob, JobFailure } from "@/lib/jobs/registry";
 
 // The nightly analytics run, also retriggerable by hand. An empty payload is
@@ -22,12 +23,15 @@ export const analyticsDailyJob = defineJob(
     try {
       return await runAnalyticsDaily(payload);
     } catch (e) {
-      // All three are permanent: retrying an unconfigured store, a bad
-      // PostHog project id, or an impossible day can never succeed.
+      // All of these are permanent: retrying an unconfigured store or Stripe,
+      // a bad PostHog project id, an impossible day, or a Stripe list past
+      // the cap can never succeed.
       if (
         e instanceof R2NotConfiguredError ||
         e instanceof InvalidDayError ||
-        e instanceof PosthogConfigError
+        e instanceof PosthogConfigError ||
+        e instanceof StripeNotConfiguredError ||
+        e instanceof StripeListTooLongError
       ) {
         throw new JobFailure(e.message);
       }

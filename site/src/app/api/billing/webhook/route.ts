@@ -13,6 +13,15 @@ import {
 } from "@/lib/billing/pro-subscription";
 import { getStripe, stripeId } from "@/lib/billing/stripe";
 import { notFoundResponse } from "@/lib/donkey-api-auth";
+import { ANALYTICS_BILLING_EVENTS } from "@/lib/billing/webhook-events";
+import { enqueueJob } from "@/lib/jobs/queue";
+import { prisma } from "@/lib/prisma";
+
+const analyticsBillingEvents = new Set<string>(ANALYTICS_BILLING_EVENTS);
+
+// Without a queue configured (local dev) a queued job runs inline before the
+// response; give it room.
+export const maxDuration = 300;
 
 // Pro is the only subscription product; ignore any other Stripe subscription
 // that reaches these webhook events.
@@ -96,6 +105,16 @@ export async function POST(request: Request) {
     }
     default:
       break;
+  }
+
+  // One checkout fans out into several of these within a second; a refresh
+  // already waiting in the queue will read the state they all produced.
+  if (analyticsBillingEvents.has(event.type)) {
+    const waiting = await prisma.asyncJob.findFirst({
+      select: { id: true },
+      where: { kind: "billing-refresh", state: "queued" },
+    });
+    if (!waiting) await enqueueJob("billing-refresh", {}, "stripe-webhook");
   }
 
   return NextResponse.json({ received: true });
