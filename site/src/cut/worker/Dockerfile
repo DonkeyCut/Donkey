@@ -6,7 +6,7 @@
 # export's final pass passes -display_rotation, which ffmpeg gained in 6.0.
 # Bookworm's 5.1 encodes the entire file and then dies on that last command, at
 # 98% progress, with "Unrecognized option". Trixie carries 7.1.
-FROM node:22-trixie-slim
+FROM node:24-trixie-slim
 
 # ffmpeg/ffprobe for the render pipeline; python3 runs the yt-dlp zipapp.
 RUN apt-get update \
