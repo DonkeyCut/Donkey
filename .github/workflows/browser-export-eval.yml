@@ -5,6 +5,10 @@ name: Browser Export Eval
 # Chrome against a hermetic dev server (scripts/eval-cut-export.ts --hermetic).
 # Every API call is answered inside the browser context, so the server needs
 # no database and boots on placeholder env values.
+#
+# The job runs on a Mac: the default delivery is H.264 + AAC, and Chrome
+# encodes AAC through the platform's encoder, which Linux has none of. A Linux
+# Chrome hands that export to the worker, so only a Mac renders it in the tab.
 
 on:
   workflow_dispatch:
@@ -25,8 +29,8 @@ concurrency:
 
 jobs:
   eval:
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
+    runs-on: macos-26
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: site
@@ -46,9 +50,10 @@ jobs:
         run: npx prisma generate
 
       - name: Install ffmpeg
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: brew install ffmpeg
 
       # Placeholder values: the hermetic eval answers every API call inside
       # the browser context, so nothing on the server ever reads these — they
