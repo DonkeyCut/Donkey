@@ -11,7 +11,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "node --max-old-space-size=8192 node_modules/eslint/bin/eslint.js",
     "postinstall": "patch-package && node scripts/check-mediabunny-patch.mjs && prisma generate && node scripts/copy-mediapipe-assets.mjs && node scripts/fetch-cut-fonts.mjs",
     "db:generate": "prisma generate",
     "db:pull": "prisma db pull",
