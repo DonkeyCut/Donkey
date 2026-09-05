@@ -25,6 +25,50 @@ export const OUTREACH_ACTIVE_WINDOW_DAYS = 30;
 /** How long a contacted account rests before the scan offers it again. */
 export const OUTREACH_RECONTACT_DAYS = 60;
 
+/** How far back a declined charge or an ended subscription still counts as
+ * a reason to reach out. */
+export const OUTREACH_PAYMENT_WINDOW_DAYS = 60;
+
+/** The share of the storage quota at which an account counts as full. */
+export const OUTREACH_STORAGE_FULL_SHARE = 0.9;
+
+/** Why an account is on the list. The first two are people using the product
+ * well; the rest are walls they hit — the moment a note can turn into a
+ * top-up, an upgrade, or a saved subscription. An account can carry several. */
+export const OUTREACH_REASONS = [
+  "spent",
+  "storage",
+  "no_credits",
+  "storage_full",
+  "payment_failed",
+  "past_due",
+  "canceling",
+  "canceled",
+] as const;
+
+export type OutreachReason = (typeof OUTREACH_REASONS)[number];
+
+export const OUTREACH_REASON_LABELS: Record<OutreachReason, string> = {
+  canceled: "Canceled Pro",
+  canceling: "Canceling Pro",
+  no_credits: "Out of credits",
+  past_due: "Payment past due",
+  payment_failed: "Payment declined",
+  spent: "Spending credits",
+  storage: "Holding media",
+  storage_full: "Storage full",
+};
+
+/** The reasons that are a wall the person ran into, shown in the warning tone. */
+export const OUTREACH_WALL_REASONS: readonly OutreachReason[] = [
+  "no_credits",
+  "storage_full",
+  "payment_failed",
+  "past_due",
+  "canceling",
+  "canceled",
+];
+
 export const OUTREACH_STATUSES = ["todo", "sent", "replied", "ignored"] as const;
 
 export type OutreachStatus = (typeof OUTREACH_STATUSES)[number];

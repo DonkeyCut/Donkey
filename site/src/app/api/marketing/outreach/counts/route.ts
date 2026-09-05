@@ -3,7 +3,9 @@ import { NextResponse } from "next/server";
 import { withSuperUser } from "@/lib/donkey-api-auth";
 import {
   CREDIT_SPENDERS_CAMPAIGN,
+  OUTREACH_REASONS,
   OUTREACH_STATUSES,
+  type OutreachReason,
   type OutreachStatus,
 } from "@/lib/marketing/campaigns";
 import { prisma } from "@/lib/prisma";
@@ -12,11 +14,20 @@ import { prisma } from "@/lib/prisma";
 // because the number belongs to every list at once: the totals stay put while a
 // list is being fetched, and one action refreshes all four.
 export const GET = withSuperUser(async () => {
-  const grouped = await prisma.userOutreach.groupBy({
-    _count: { _all: true },
-    by: ["status"],
-    where: { campaign: CREDIT_SPENDERS_CAMPAIGN },
-  });
+  const [grouped, ...byReason] = await Promise.all([
+    prisma.userOutreach.groupBy({
+      _count: { _all: true },
+      by: ["status"],
+      where: { campaign: CREDIT_SPENDERS_CAMPAIGN },
+    }),
+    // How many of the accounts still to email carry each reason; one account
+    // can count under several.
+    ...OUTREACH_REASONS.map((reason) =>
+      prisma.userOutreach.count({
+        where: { campaign: CREDIT_SPENDERS_CAMPAIGN, reasons: { has: reason }, status: "todo" },
+      }),
+    ),
+  ]);
 
   const counts = Object.fromEntries(
     OUTREACH_STATUSES.map((status) => [status, 0]),
@@ -27,5 +38,9 @@ export const GET = withSuperUser(async () => {
     }
   }
 
-  return NextResponse.json({ counts });
+  const reasons = Object.fromEntries(
+    OUTREACH_REASONS.map((reason, i) => [reason, byReason[i]]),
+  ) as Record<OutreachReason, number>;
+
+  return NextResponse.json({ counts, reasons });
 });

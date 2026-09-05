@@ -28,6 +28,10 @@ model UserOutreach {
   lastActiveAt DateTime?
   // When the balance last reached zero; null for an account still in credit.
   ranOutAt     DateTime?
+  // Why the scan listed the account (ids in src/lib/marketing/campaigns.ts).
+  reasons      String[]  @default([])
+  // The latest declined Stripe charge inside the payment window.
+  paymentFailedAt DateTime?
   scannedAt    DateTime @default(now())
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

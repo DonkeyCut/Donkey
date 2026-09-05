@@ -8,7 +8,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 
-import type { OutreachStatus } from "@/lib/marketing/campaigns";
+import type { OutreachReason, OutreachStatus } from "@/lib/marketing/campaigns";
 import { apiFetch } from "@/queries/apiClient";
 import type { AsyncJobStatus } from "@/queries/jobs";
 
@@ -26,6 +26,9 @@ export type OutreachRow = {
   storageBytes: string;
   lastActiveAt: string | null;
   ranOutAt: string | null;
+  // Why the scan listed the account; a wall reason is the moment to write.
+  reasons: OutreachReason[];
+  paymentFailedAt: string | null;
   signedUpAt: string;
   sentCount: number;
   firstSentAt: string | null;
@@ -33,15 +36,18 @@ export type OutreachRow = {
   repliedAt: string | null;
 };
 
-export const outreachQueryKey = (status: OutreachStatus) =>
-  ["outreach", status] as const;
+export const outreachQueryKey = (status: OutreachStatus, reason?: OutreachReason) =>
+  ["outreach", status, reason ?? "all"] as const;
 
-// Super-user only: one page of the outreach list for a status.
-export function useOutreach(status: OutreachStatus) {
+// Super-user only: one page of the outreach list for a status, narrowed to
+// one reason when asked.
+export function useOutreach(status: OutreachStatus, reason?: OutreachReason) {
   return useQuery({
     queryFn: () =>
-      apiFetch<{ rows: OutreachRow[] }>(`/api/marketing/outreach?status=${status}`),
-    queryKey: outreachQueryKey(status),
+      apiFetch<{ rows: OutreachRow[] }>(
+        `/api/marketing/outreach?status=${status}${reason ? `&reason=${reason}` : ""}`,
+      ),
+    queryKey: outreachQueryKey(status, reason),
   });
 }
 
@@ -68,14 +74,16 @@ export function useOutreachSearch(q: string, status?: OutreachStatus) {
 
 export const outreachCountsQueryKey = ["outreach", "counts"] as const;
 
-// How many rows every status holds. One key for all four, so switching lists
-// never blanks the totals.
+// How many rows every status holds, and how many of the to-email rows carry
+// each reason. One key for all of them, so switching lists never blanks the
+// totals.
 export function useOutreachCounts() {
   return useQuery({
     queryFn: () =>
-      apiFetch<{ counts: Record<OutreachStatus, number> }>(
-        "/api/marketing/outreach/counts",
-      ),
+      apiFetch<{
+        counts: Record<OutreachStatus, number>;
+        reasons: Record<OutreachReason, number>;
+      }>("/api/marketing/outreach/counts"),
     queryKey: outreachCountsQueryKey,
   });
 }

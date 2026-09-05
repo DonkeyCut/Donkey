@@ -24,7 +24,13 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { formatBytes } from "@/lib/bytes";
 import { cn } from "@/lib/utils";
-import type { OutreachStatus } from "@/lib/marketing/campaigns";
+import {
+  OUTREACH_REASON_LABELS,
+  OUTREACH_REASONS,
+  OUTREACH_WALL_REASONS,
+  type OutreachReason,
+  type OutreachStatus,
+} from "@/lib/marketing/campaigns";
 import { OUTREACH_PLACEHOLDERS } from "@/lib/marketing/placeholders";
 import {
   useBusyOutreachIds,
@@ -73,6 +79,14 @@ function ago(iso: string | null): string {
   return `${Math.floor(mins / (60 * 24))}d ago`;
 }
 
+// The walls the scan found lead the row in the warning tone, so a person
+// who was declined or is leaving Pro stands out at a glance. Out of credits
+// is carried by the balance badge that follows, and the two use reasons by
+// the spent and stored badges, so those never repeat here.
+const REASON_BADGES: readonly OutreachReason[] = OUTREACH_WALL_REASONS.filter(
+  (reason) => reason !== "no_credits",
+);
+
 // The list carries the numbers the scan wrote; the badges say what they mean
 // without a second read. Storage shows only when there is any, so a row with
 // the badge is someone with media parked in the cloud.
@@ -82,6 +96,14 @@ function RowBadges({ row, group }: { row: OutreachRow; group?: string }) {
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1.5">
       {group ? <Badge>{group}</Badge> : null}
+      {REASON_BADGES.filter((reason) => row.reasons.includes(reason)).map((reason) => (
+        <Badge key={reason} variant="destructive">
+          {OUTREACH_REASON_LABELS[reason]}
+          {reason === "payment_failed" && row.paymentFailedAt
+            ? ` · ${ago(row.paymentFailedAt)}`
+            : ""}
+        </Badge>
+      ))}
       <Badge variant="secondary">${row.spent} spent</Badge>
       <Badge variant={broke ? "destructive" : "outline"}>
         {broke ? `$0 left · ${ago(row.ranOutAt)}` : `$${row.balance} left`}
@@ -103,6 +125,8 @@ function RowBadges({ row, group }: { row: OutreachRow; group?: string }) {
 
 export default function SuOutreachPage() {
   const [status, setStatus] = useState<OutreachStatus>("todo");
+  // The to-email list narrows to one reason; the other lists show all.
+  const [reason, setReason] = useState<OutreachReason | undefined>();
   const [query, setQuery] = useState("");
   // A search starts wide — matches from every tab in one list — and clicking
   // a tab pins it to that group until the next search begins.
@@ -124,11 +148,12 @@ export default function SuOutreachPage() {
     const timer = setTimeout(() => setNeedle(trimmed), 300);
     return () => clearTimeout(timer);
   }, [query]);
-  const list = useOutreach(status);
+  const list = useOutreach(status, status === "todo" ? reason : undefined);
   // Search matches in the database across every tab, so a hit past the page
   // cap is still found and every tab reports its true match count.
   const search = useOutreachSearch(needle, scoped ? status : undefined);
-  const counts = useOutreachCounts().data?.counts;
+  const countsData = useOutreachCounts().data;
+  const counts = countsData?.counts;
   const act = useOutreachAction();
   const busy = useBusyOutreachIds();
   const templates = useOutreachTemplates();
@@ -357,6 +382,33 @@ export default function SuOutreachPage() {
           </Button>
         ))}
       </div>
+
+      {status === "todo" && !allTabs ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {[undefined, ...OUTREACH_REASONS].map((id) => {
+            const on = reason === id;
+            const count = id ? countsData?.reasons?.[id] : counts?.todo;
+            return (
+              <button
+                key={id ?? "all"}
+                type="button"
+                aria-pressed={on}
+                onClick={() => setReason(id)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors",
+                  on ? "border-foreground" : "border-border text-muted-foreground hover:bg-muted/60",
+                  id && OUTREACH_WALL_REASONS.includes(id) && !on && "text-destructive",
+                )}
+              >
+                {id ? OUTREACH_REASON_LABELS[id] : "All"}
+                {count !== undefined ? (
+                  <span className="tabular-nums opacity-60">{count}</span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
 
       <div className="rounded-xl border bg-card">
         {rows.length > 0 ? (

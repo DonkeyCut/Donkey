@@ -6,6 +6,7 @@ import { creditMicrosToString } from "@/lib/credits/amounts";
 import { notFoundResponse, withSuperUser } from "@/lib/donkey-api-auth";
 import {
   CREDIT_SPENDERS_CAMPAIGN,
+  OUTREACH_REASONS,
   OUTREACH_STATUSES,
 } from "@/lib/marketing/campaigns";
 import {
@@ -16,6 +17,7 @@ import { prisma } from "@/lib/prisma";
 
 const listQuerySchema = z.object({
   q: z.string().trim().min(1).max(200).optional(),
+  reason: z.enum(OUTREACH_REASONS).optional(),
   status: z.enum(OUTREACH_STATUSES).optional(),
 });
 
@@ -46,7 +48,9 @@ const rowSelect = {
   id: true,
   lastActiveAt: true,
   lastSentAt: true,
+  paymentFailedAt: true,
   ranOutAt: true,
+  reasons: true,
   repliedAt: true,
   sentCount: true,
   spentMicros: true,
@@ -61,7 +65,9 @@ type OutreachRow = {
   id: string;
   lastActiveAt: Date | null;
   lastSentAt: Date | null;
+  paymentFailedAt: Date | null;
   ranOutAt: Date | null;
+  reasons: string[];
   repliedAt: Date | null;
   sentCount: number;
   spentMicros: bigint;
@@ -81,7 +87,9 @@ function serialize(row: OutreachRow) {
     lastActiveAt: row.lastActiveAt?.toISOString() ?? null,
     lastSentAt: row.lastSentAt?.toISOString() ?? null,
     name: row.user.name,
+    paymentFailedAt: row.paymentFailedAt?.toISOString() ?? null,
     ranOutAt: row.ranOutAt?.toISOString() ?? null,
+    reasons: row.reasons,
     repliedAt: row.repliedAt?.toISOString() ?? null,
     sentCount: row.sentCount,
     signedUpAt: row.user.createdAt.toISOString(),
@@ -98,6 +106,7 @@ export const GET = withSuperUser(async (request) => {
   const params = new URL(request.url).searchParams;
   const parsed = listQuerySchema.safeParse({
     q: params.get("q") ?? undefined,
+    reason: params.get("reason") ?? undefined,
     status: params.get("status") ?? undefined,
   });
   if (!parsed.success) {
@@ -154,11 +163,16 @@ export const GET = withSuperUser(async (request) => {
   } as const;
   const status = parsed.data.status ?? "todo";
 
+  // A reason narrows the list to the accounts the scan listed for it.
   const rows = await prisma.userOutreach.findMany({
     orderBy: orderBy[status],
     select: rowSelect,
     take: 200,
-    where: { campaign: CREDIT_SPENDERS_CAMPAIGN, status },
+    where: {
+      campaign: CREDIT_SPENDERS_CAMPAIGN,
+      status,
+      ...(parsed.data.reason ? { reasons: { has: parsed.data.reason } } : {}),
+    },
   });
 
   return NextResponse.json({ rows: rows.map(serialize) });

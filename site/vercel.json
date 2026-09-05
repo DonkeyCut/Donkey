@@ -3,6 +3,6 @@
     { "path": "/api/cut-cloud/gc", "schedule": "0 4 * * *" },
     { "path": "/api/analytics/run", "schedule": "0 1 * * *" },
     { "path": "/api/experiments/results", "schedule": "0 3 * * *" },
-    { "path": "/api/marketing/outreach/scan", "schedule": "0 2 * * *" }
+    { "path": "/api/marketing/outreach/scan", "schedule": "15 1 * * *" }
   ]
 }
