@@ -10,7 +10,9 @@ import { localBackend } from "./backend/local";
 import {
   cancelExportJob,
   createExportJob,
+  ExportRefusedError,
   runBrowserExport,
+  runBrowserExportInCloud,
   type ExportDoc,
   type ExportSettings,
 } from "./exportClient";
@@ -110,13 +112,16 @@ export const useExports = create<ExportsState>((set, get) => ({
     // A cloud project renders in the tab: no upload of the cut to a container,
     // no queue behind other accounts, and the file matches the preview because
     // the same compositor drew both. A browser that can't carry the render —
-    // no encoder at these dimensions, no scratch storage — sends it to the
-    // worker, which has a whole machine. A browser-resident project renders in
-    // the tab too; the tab is its machine.
+    // no encoder for the codec, no scratch storage — sends it to the worker,
+    // which has a whole machine. A browser-resident project renders in the tab
+    // too, and borrows the same worker when the tab can't: its media goes up
+    // with the job and the file comes back into its own storage. Whatever the
+    // user chose, something renders it.
     const inBrowser =
       (backend.kind === "cloud" || backend.kind === "browser") &&
       (await canRenderInBrowser(doc, settings));
-    const abort = inBrowser ? new AbortController() : undefined;
+    const tabOwned = backend.kind !== "local";
+    const abort = tabOwned ? new AbortController() : undefined;
     set((s) => ({
       local: [
         ...s.local,
@@ -124,8 +129,8 @@ export const useExports = create<ExportsState>((set, get) => ({
           id: localId,
           projectId,
           projectName,
-          status: inBrowser ? "rendering" : "preparing",
-          ...(inBrowser ? { progress: 0 } : {}),
+          status: tabOwned ? "rendering" : "preparing",
+          ...(tabOwned ? { progress: 0 } : {}),
           createdAt: Date.now(),
           residency: backend.kind,
           abort,
@@ -135,44 +140,69 @@ export const useExports = create<ExportsState>((set, get) => ({
     // The loop may have been idling minutes deep; this export needs the fast
     // cadence from its first frame.
     wake();
-    let claimedId: string | null = null;
+    // Every job row this export claims — a tab render's reservation, and for
+    // a borrowed render the cloud row too — stays hidden behind the local row.
+    let claimed: string[] = [];
     const release = () => {
-      if (claimedId) set((s) => ({ rendering: s.rendering.filter((id) => id !== claimedId) }));
+      const gone = new Set(claimed);
+      claimed = [];
+      set((s) => ({ rendering: s.rendering.filter((id) => !gone.has(id)) }));
     };
     const fail = (err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
-      // A browser-resident project has exactly one other renderer, so a failed
-      // render says where to take it.
-      const hint = " Move the project to Cloud to export.";
-      const full = backend.kind === "browser" && !msg.includes(hint) ? msg + hint : msg;
       set((s) => ({
         local: s.local.map((r) =>
-          r.id === localId ? { ...r, status: "error" as const, error: full, abort: undefined } : r
+          r.id === localId ? { ...r, status: "error" as const, error: msg, abort: undefined } : r
         ),
       }));
     };
-    try {
-      if (backend.kind === "browser" && !inBrowser) {
-        throw new Error("This browser can't render this export.");
+    const tabOpts = {
+      signal: abort?.signal,
+      projectName,
+      // The reservation is a real job row, so the feed would show it beside
+      // the local row that carries the progress. Hide it until this tab is
+      // done with it.
+      onClaimed: (jobId: string) => {
+        claimed.push(jobId);
+        set((s) => ({ rendering: [...new Set([...s.rendering, jobId])] }));
+      },
+      onProgress: (progress: number) =>
+        set((s) => ({
+          local: s.local.map((r) => (r.id === localId ? { ...r, progress } : r)),
+        })),
+    };
+    // The worker renders what the tab could not: a cloud project's own media
+    // is already there, a browser project's goes up with the job.
+    const renderOnWorker = async () => {
+      release();
+      if (backend.kind === "browser") {
+        await runBrowserExportInCloud(projectId, doc, settings, tabOpts);
+        return;
       }
+      set((s) => ({
+        local: s.local.map((r) =>
+          r.id === localId ? { ...r, status: "preparing" as const, progress: undefined, abort: undefined } : r
+        ),
+      }));
+      await createExportJob(projectId, doc, settings);
+    };
+    try {
       if (inBrowser) {
-        await runBrowserExport(projectId, doc, settings, {
-          signal: abort!.signal,
-          projectName,
-          // The reservation is a real job row, so the feed would show it beside
-          // the local row that carries the progress. Hide it until this tab is
-          // done with it.
-          onClaimed: (jobId) => {
-            claimedId = jobId;
-            set((s) => ({ rendering: [...new Set([...s.rendering, jobId])] }));
-          },
-          onProgress: (progress) =>
-            set((s) => ({
-              local: s.local.map((r) => (r.id === localId ? { ...r, progress } : r)),
-            })),
-        });
+        try {
+          await runBrowserExport(projectId, doc, settings, tabOpts);
+        } catch (err) {
+          // The probe said yes and the browser then failed anyway — an encoder
+          // that refuses mid-stream, scratch storage that gives out. The
+          // export goes to the worker and the user sees it carry on, never an
+          // error for a render they could not have done anything about. A
+          // stopped render is theirs, and a gate's refusal is final: the
+          // worker sits behind the same gate.
+          if (err instanceof DOMException && err.name === "AbortError") throw err;
+          if (err instanceof ExportRefusedError) throw err;
+          await renderOnWorker();
+        }
       } else {
-        await createExportJob(projectId, doc, settings);
+        await renderOnWorker();
       }
       // Pull the finished (or queued) job into the feed *before* retiring the
       // placeholder — dropping the local row first left a round-trip with
@@ -182,8 +212,9 @@ export const useExports = create<ExportsState>((set, get) => ({
       // must not mark a started export as a start error, so it never reaches
       // the catch below.
       await get().refresh().catch(() => {});
+      const shown = new Set(claimed);
       set((s) => ({
-        rendering: s.rendering.filter((id) => id !== claimedId),
+        rendering: s.rendering.filter((id) => !shown.has(id)),
         local: s.local.filter((r) => r.id !== localId),
       }));
     } catch (err) {

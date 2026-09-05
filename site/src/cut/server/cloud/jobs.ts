@@ -7,7 +7,9 @@ import { cutLimitsFor, EXPORT_QUOTA_MARGIN, renderJobCheck } from "./limits";
 import { wakeRenderWorker } from "./wake";
 import { getProject } from "./projects";
 import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl } from "./mediaCdn";
-import { del, head, overlayKey, presignPut, projectExportKey } from "./r2";
+import { del, head, overlayKey, overlayPrefix, presignPut, projectExportKey } from "./r2";
+import { contentTypeFor } from "../serveFile";
+import { containerOfName, deliveryContainer, specMediaFiles, type ExportContainer } from "../../lib/exportDelivery";
 import { addUsage, quotaCheck, reservedBytes, usageBytes } from "./usage";
 import { caught, err, redirect } from "./util";
 
@@ -33,8 +35,13 @@ const MAX_RENDER_CLIPS = 2000;
 // carries one PNG per caption cue and one per frame of every animated
 // element, so the count and the batch run to a long, busy cut.
 const MAX_OVERLAY_FILES = 20_000;
-const MAX_OVERLAY_BYTES = 256 * 1024 ** 2;
+// A render's inputs: overlay stills, and for a browser-resident project the
+// cut's own media, which rides with the job because the worker has no other
+// way to reach a file that lives in a tab. A source clip can be as large as
+// any upload.
+const MAX_OVERLAY_BYTES = 4 * 1024 ** 3;
 const MAX_OVERLAY_BATCH_BYTES = 8 * 1024 ** 3;
+
 
 // The largest download an import may land, holding for unlimited tiers too.
 const IMPORT_MAX_BYTES = 2 * 1024 ** 3;
@@ -116,17 +123,23 @@ async function findJob(userId: string, id: string): Promise<JobRow | null> {
   return prisma.cutRenderJob.findFirst({ where: { id, userId } });
 }
 
-/** Engine-style export name: `base.mp4` with a " 2", " 3"… suffix when taken
+/** Engine-style export name: the base with the container's extension and a
+ * " 2", " 3"… suffix when taken
  * by an existing export object or a job still in flight. The client derives the
  * base from the project name; the dedupe happens here, where the rows are. */
 async function exportName(
   userId: string,
   projectId: string,
   baseName: string,
+  container: ExportContainer | undefined,
   tx: Prisma.TransactionClient | typeof prisma = prisma
 ) {
+  // The spec's container names the extension, the same way the engine's
+  // `containerExtension` does; a name alone (a tab's own claim) says it by its
+  // suffix.
+  const { ext } = container ? deliveryContainer(container) : containerOfName(baseName);
   const base =
-    baseName.replace(/\.mp4$/i, "").replace(/[/\\:*?"<>|]/g, "").trim().slice(0, 60) || "export";
+    baseName.replace(/\.(mp4|mov)$/i, "").replace(/[/\\:*?"<>|]/g, "").trim().slice(0, 60) || "export";
   const [files, jobs] = await Promise.all([
     tx.cutMediaObject.findMany({
       where: { userId, projectId, kind: "export" },
@@ -145,7 +158,7 @@ async function exportName(
     ...jobs.map((j) => j.outName).filter((n): n is string => !!n),
   ]);
   for (let n = 1; ; n++) {
-    const candidate = n === 1 ? `${base}.mp4` : `${base} ${n}.mp4`;
+    const candidate = n === 1 ? `${base}${ext}` : `${base} ${n}${ext}`;
     if (!taken.has(candidate)) return candidate;
   }
 }
@@ -177,18 +190,18 @@ export const jobsCloud = {
       if (over) return over;
       let total = 0;
       for (const f of files) {
-        if (!Number.isInteger(f.bytes) || f.bytes! < 1 || f.bytes! > MAX_OVERLAY_BYTES)
-          return err("Every overlay needs its size.", 400);
+        if (!Number.isInteger(f.bytes) || f.bytes! < 1) return err("Every overlay needs its size.", 400);
+        if (f.bytes! > MAX_OVERLAY_BYTES) return err(`${f.name} is too large to render in the cloud.`, 413);
         total += f.bytes!;
       }
-      if (total > MAX_OVERLAY_BATCH_BYTES) return err("Overlays are too large.", 413);
+      if (total > MAX_OVERLAY_BATCH_BYTES) return err("The cut's files are too large to render in the cloud.", 413);
       const batchId = crypto.randomUUID().slice(0, 12);
       const out = await Promise.all(
         files.map(async (f) => {
           const name = String(f.name ?? "").replace(/[/\\]/g, "");
           if (!name) throw new Error("Every overlay needs a name.");
           const key = overlayKey(userId, batchId, name);
-          const type = name.toLowerCase().endsWith(".mp4") ? "video/mp4" : "image/png";
+          const type = contentTypeFor(name);
           // The size is in the signature: a larger body is a 403 at the bucket.
           return { name, key, type, url: await presignPut(key, type, f.bytes) };
         })
@@ -204,17 +217,29 @@ export const jobsCloud = {
   async exportCreate(userId: string, req: Request) {
     try {
       const body = (await req.json()) as {
-        spec?: { target?: string; projectId?: string };
+        spec?: {
+          target?: string;
+          projectId?: string;
+          container?: ExportContainer;
+          clips?: { file?: string }[];
+          overlayVideos?: { file?: string }[];
+          audio?: { file?: string }[];
+        };
         overlays?: { name: string; key: string }[];
         projectId?: string;
         outName?: string;
         burnedSubtitles?: boolean;
+        /** "overlays": the cut's media was uploaded beside the stills, so the
+         * project it names is not one the cloud stores — a browser-resident
+         * project borrowing the worker. */
+        mediaFrom?: "overlays";
       };
       if (!body.spec || typeof body.spec !== "object") return err("spec is required.", 400);
       const projectId = body.projectId ?? body.spec.projectId;
       if (!projectId) return err("projectId is required.", 400);
+      const borrowed = body.mediaFrom === "overlays";
       const project = await getProject(userId, projectId);
-      if (!project) return err("Project not found.", 400);
+      if (!project && !borrowed) return err("Project not found.", 400);
       // Overlay keys come from the client; only this user's own overlay
       // uploads are acceptable render inputs — anything else would let a
       // crafted key pull another account's R2 objects into the render.
@@ -223,6 +248,14 @@ export const jobsCloud = {
         if (typeof o?.key !== "string" || !o.key.startsWith(overlayPrefix)) {
           return err("Invalid overlay key.", 400);
         }
+      }
+      if (borrowed) {
+        // Every file the cut plays has to have come up with the job; the
+        // worker has nowhere else to look for it.
+        const uploaded = new Set((body.overlays ?? []).map((o) => o.name));
+        const missing = specMediaFiles(body.spec).find((f) => !uploaded.has(f));
+        if (missing) return err(`${missing} was not uploaded with the export.`, 400);
+        if (!body.outName?.trim()) return err("outName is required.", 400);
       }
       // Hover proxies, share cards and share ladders are renders the editor
       // fires on its own; only renders the user asked for count against the
@@ -250,6 +283,7 @@ export const jobsCloud = {
       const jobSpec = {
         spec: body.spec,
         overlays: body.overlays ?? [],
+        ...(borrowed ? { mediaFrom: "overlays" } : {}),
         ...(target === "hls" ? { burnedSubtitles: body.burnedSubtitles === true } : {}),
       } as unknown as Prisma.InputJsonValue;
 
@@ -292,7 +326,7 @@ export const jobsCloud = {
       }
       const outName =
         target === "export"
-          ? await exportName(userId, projectId, body.outName?.trim() || project.name)
+          ? await exportName(userId, projectId, body.outName?.trim() || project?.name || "export", body.spec.container)
           : target === "hls"
             ? "master.m3u8"
             : `${target}.mp4`;
@@ -325,7 +359,7 @@ export const jobsCloud = {
       // The worker owns the size list (it builds the spec), and falls back to
       // the source-matched original for anything it does not know.
       const preset = typeof body.preset === "string" ? body.preset : "original";
-      const outName = await exportName(userId, projectId, project.name);
+      const outName = await exportName(userId, projectId, project.name, undefined);
       const row = await prisma.cutRenderJob.create({
         data: {
           userId,
@@ -363,12 +397,14 @@ export const jobsCloud = {
     });
     // A settled row is being dismissed from the dock: it leaves the feed and
     // stays on the books, so the day's render count still sees it. A finished
-    // file survives as the project's export media object.
+    // file survives as the project's export media object — except a borrowed
+    // render's, which was the job's scratch and goes with the row.
     if (canceled.count === 0) {
-      await prisma.cutRenderJob.updateMany({
-        where: { id: jobId, userId, state: { in: ["done", "error", "canceled"] } },
-        data: { state: "dismissed" },
-      });
+      const row = await findJob(userId, jobId);
+      if (row && ["done", "error", "canceled"].includes(row.state)) {
+        await prisma.cutRenderJob.update({ where: { id: row.id }, data: { state: "dismissed" } });
+        if (row.outputKey?.startsWith(overlayPrefix(userId))) await del([row.outputKey]);
+      }
     }
     return Response.json({ ok: true });
   },
@@ -400,7 +436,7 @@ export const jobsCloud = {
       // completion would then fail on the unique key with the render already
       // spent. The row is the reservation.
       const row = await prisma.$transaction(async (tx) => {
-        const outName = await exportName(userId, projectId, body.outName ?? "export.mp4", tx);
+        const outName = await exportName(userId, projectId, body.outName ?? "export.mp4", undefined, tx);
         return tx.cutRenderJob.create({
           data: {
             userId,
@@ -416,11 +452,13 @@ export const jobsCloud = {
         });
       });
       const key = projectExportKey(userId, projectId, row.outName!);
+      const type = containerOfName(row.outName!).mime;
       return Response.json({
         jobId: row.id,
         key,
         outName: row.outName,
-        url: await presignPut(key, "video/mp4"),
+        type,
+        url: await presignPut(key, type),
       });
     } catch (e) {
       return caught(e, "Could not start the export.");
@@ -461,7 +499,7 @@ export const jobsCloud = {
             projectId,
             r2Key: key,
             fileName: outName,
-            mime: "video/mp4",
+            mime: containerOfName(outName).mime,
             bytes: BigInt(bytes),
             kind: "export",
             uploadState: "complete",

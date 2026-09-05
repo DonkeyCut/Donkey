@@ -43,7 +43,7 @@ A cloud project exports in the browser, and so does a browser project — the ta
 
 That works because the editor composites the cut live to draw the preview. Rendering is the same drawing done on a clock the tab steps, so a browser and a container produce the same picture from the same document, and the browser needs nothing pulled out of storage that it is not already playing.
 
-Two facts decide whether a tab can carry a render, both probed per export: origin-private scratch storage to stream the file to, and a WebCodecs video encoder at the requested dimensions. A cut of any length renders in the tab, since the pipeline streams to disk and duration costs only time. A cloud project that fails either probe, or fails mid-render, goes to the worker silently. A browser project has no second machine, so the failure is the user's to resolve: the export says what went wrong and points at Move to Cloud.
+Two facts decide whether a tab can carry a render, both probed per export: origin-private scratch storage to stream the file to, and WebCodecs encoders for the codecs the user chose at the requested dimensions — the video one, and AAC when the cut has sound. The probe asks for exactly those codecs; nothing stands in for a missing one, because a file with a substitute codec inside is a file the user's player refuses. ProRes has no browser encoder, so a master always renders on the worker. A cut of any length renders in the tab, since the pipeline streams to disk and duration costs only time. A project that fails either probe, or fails mid-render, goes to the worker silently. For a cloud project the worker already holds the media. A browser project's media lives only in that tab, so it goes up with the job beside the overlay stills, the worker renders from those uploads, and the finished file comes back down into the project's own exports folder; the cloud keeps nothing afterwards. Whatever the user picked, something renders it — the only thing that stops a browser project's export is an account that cannot use the cloud, and the export says so.
 
 The worker also takes the renders the editor fires on its own — hover proxies, share cards, streaming ladders. Moving export to the Mac would be a third path and there is no longer much to win from it.
 
@@ -75,7 +75,7 @@ In place is what makes the plain version of this work. Someone with a folder of 
 | Work | Runs | Why |
 | --- | --- | --- |
 | Transcription, dictation | the Mac when it is there, hosted otherwise | the app ships the speech tool |
-| Export | the Mac for its own projects, the browser for cloud and browser ones, the worker when a cloud project's tab can't encode | see Export above |
+| Export | the Mac for its own projects, the browser for cloud and browser ones, the worker when the tab can't encode the choice | see Export above |
 | Thumbnails, waveforms, media probing | the browser, always | it decodes the media itself |
 | Converting media to MP4 | the machine holding the bytes: the Mac, the worker, or the tab — and the Mac for a browser project the tab can't decode | see Converting footage above |
 | Image, video, and voice generation | hosted, always | no local counterpart |

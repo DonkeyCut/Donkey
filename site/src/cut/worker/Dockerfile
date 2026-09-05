@@ -28,6 +28,10 @@ RUN ffmpeg -hide_banner -h full 2>&1 | grep -q -- '-display_rotation' \
 # encode time, so it fails here instead.
 RUN ffmpeg -hide_banner -encoders 2>&1 | grep -q '\blibx264\b' \
   || { echo "ffmpeg has no libx264: the share HLS ladder cannot encode." >&2; exit 1; }
+# HEVC exports a browser cannot encode itself land here; libx265 is their
+# only encoder on this image.
+RUN ffmpeg -hide_banner -encoders 2>&1 | grep -q '\blibx265\b' \
+  || { echo "ffmpeg has no libx265: HEVC exports cannot encode." >&2; exit 1; }
 
 WORKDIR /app
 # The browser primitives a job draws and decodes with: the server canvas, the

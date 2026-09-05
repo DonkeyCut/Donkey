@@ -5,7 +5,9 @@ import { buildDocExportSpec, isDocExportPreset } from "../lib/headless/docExport
 import { runExport, type ExportSpec, type RenderHandle } from "../server/exportPipeline";
 import { storeCardArtifacts } from "./cardJob";
 import { prisma, registerObject, type ClaimedJob } from "./db";
-import { downloadToFile, exportKey, mediaKey, previewKey, uploadFile } from "./r2";
+import { downloadToFile, exportKey, mediaKey, mimeFor, previewKey, uploadFile } from "./r2";
+import { overlayKey } from "../server/cloud/r2";
+import { specMediaFiles } from "../lib/exportDelivery";
 import { runnerSession } from "./session";
 
 /** The stored spec of an export/preview CutRenderJob: the engine export spec
@@ -19,6 +21,11 @@ export interface ExportJobSpec {
    * and builds the spec itself. */
   fromDoc?: { preset?: string };
   overlays?: { name: string; key: string }[];
+  /** "overlays": the cut's media came up with the job — a browser-resident
+   * project borrowing this worker. Its output is the job's scratch too: it
+   * lands in the same namespace, is never a media object, and dies when the
+   * tab dismisses the job or the sweep reaches it. */
+  mediaFrom?: "overlays";
   /** HLS only: whether the client burned captions into this render, decided by
    * what the share grants. Recorded on the ladder so a share that later stops
    * granting Subtitles is refused the render rather than served cue text it
@@ -79,21 +86,21 @@ export async function stageJobMedia(
   ]);
 
   const spec = body.spec;
-  const mediaFiles = new Set<string>();
-  for (const c of spec.clips) if (c.file) mediaFiles.add(c.file);
-  for (const o of spec.overlayVideos ?? []) if (o.file) mediaFiles.add(o.file);
-  for (const a of spec.audio ?? []) if (a.file) mediaFiles.add(a.file);
+  const mediaFiles = new Set(specMediaFiles(spec));
   const overlayPrefix = `cut/${job.userId}/overlays/`;
   for (const o of body.overlays ?? []) {
     if (!o.key.startsWith(overlayPrefix)) throw new Error("Invalid overlay key.");
   }
+  // A media file that came up with the job — a browser-resident project's
+  // clip — is read from its upload; the rest are the cloud project's own.
+  const uploaded = new Map((body.overlays ?? []).map((o) => [o.name, o.key]));
   await Promise.all([
     ...[...mediaFiles].map((f) =>
-      downloadToFile(mediaKey(job.userId, projectId, f), path.join(mediaDir, path.basename(f)))
+      downloadToFile(uploaded.get(f) ?? mediaKey(job.userId, projectId, f), path.join(mediaDir, path.basename(f)))
     ),
-    ...(body.overlays ?? []).map((o) =>
-      downloadToFile(o.key, path.join(handle.tmpDir, path.basename(o.name)))
-    ),
+    ...(body.overlays ?? [])
+      .filter((o) => !mediaFiles.has(o.name))
+      .map((o) => downloadToFile(o.key, path.join(handle.tmpDir, path.basename(o.name)))),
   ]);
   return mediaDir;
 }
@@ -161,16 +168,22 @@ export async function runExportJob(
     });
     if (live?.state !== "running") throw new Error("Canceled.");
 
+    const mime = mimeFor(outName);
+    if (body.mediaFrom === "overlays") {
+      const key = overlayKey(job.userId, job.id, outName);
+      await uploadFile(key, handle.outPath, mime);
+      return { outputKey: key, outName };
+    }
     const key = preview
       ? previewKey(job.userId, projectId)
       : exportKey(job.userId, projectId, outName);
-    const bytes = await uploadFile(key, handle.outPath, "video/mp4");
+    const bytes = await uploadFile(key, handle.outPath, mime);
     await registerObject({
       userId: job.userId,
       projectId,
       r2Key: key,
       fileName: outName,
-      mime: "video/mp4",
+      mime,
       bytes,
       kind: preview ? "preview" : "export",
     });
