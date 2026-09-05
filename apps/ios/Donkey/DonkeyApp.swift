@@ -2,9 +2,11 @@ import DonkeyKitModels
 import DonkeyKitUI
 import GoogleSignIn
 import SwiftUI
+import UIKit
 
 @main
 struct DonkeyApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var wiring = AppWiring()
 
     var body: some Scene {
@@ -24,6 +26,18 @@ struct DonkeyApp: App {
             }
             .onOpenURL { _ = GIDSignIn.sharedInstance.handle($0) }
         }
+    }
+}
+
+/// The system asks the delegate which way the window may turn, and the
+/// camera screen's lock answers: every orientation, except for the length of
+/// a take.
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        supportedInterfaceOrientationsFor window: UIWindow?
+    ) -> UIInterfaceOrientationMask {
+        InterfaceOrientationLock.shared.mask
     }
 }
 

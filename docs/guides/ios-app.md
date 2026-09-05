@@ -128,6 +128,9 @@ the Library tab. The well holds one take and retires it once it has been
 watched or thirty seconds pass, so the viewfinder goes back to being a
 viewfinder.
 
+The camera shoots whichever way the phone is held: turn it sideways and the
+take is a landscape file, with the shutter across on the trailing edge.
+
 ## Teleprompter
 
 The teleprompter paces raw notes by itself. Reading speed is words per

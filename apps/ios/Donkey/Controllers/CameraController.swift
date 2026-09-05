@@ -13,6 +13,14 @@ final class CameraController: CameraControlling {
     var onRecordingFinished: ((URL, TimeInterval, Data?) -> Void)?
 
     private let engine = CaptureEngine()
+    /// Watches the device against the preview layer so the picture stays
+    /// level however the phone is held.
+    private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
+    private var rotationObservations: [NSKeyValueObservation] = []
+    /// The angle the preview needs right now. Held because the preview
+    /// layer has no connection until the session has an input, so the angle
+    /// is applied again the moment the session reports running.
+    private var previewRotation: CGFloat = 90
 
     init() {
         session = engine.session
@@ -31,21 +39,69 @@ final class CameraController: CameraControlling {
                 model?.sessionFailed(reason: "Camera access is off.\nAllow camera access in Settings to record.")
                 return
             }
-            engine.start(facing: model?.facing ?? .front, settings: model?.settings ?? CameraSettings())
+            let facing = model?.facing ?? .front
+            engine.start(facing: facing, settings: model?.settings ?? CameraSettings())
+            trackRotation(facing: facing)
         }
     }
 
-    func deactivate() { engine.stop() }
-    func setFacing(_ facing: CameraFacing) { engine.set(facing: facing) }
+    func deactivate() {
+        rotationObservations = []
+        rotationCoordinator = nil
+        engine.stop()
+    }
+
+    func setFacing(_ facing: CameraFacing) {
+        engine.set(facing: facing)
+        trackRotation(facing: facing)
+    }
+
     func setZoom(display: Double) { engine.setZoom(display: display) }
     func setTorch(_ on: Bool) { engine.setTorch(on) }
     func apply(_ settings: CameraSettings) { engine.apply(settings) }
     func startRecording() { engine.startRecording() }
     func stopRecording() { engine.stopRecording() }
 
+    /// Follows the phone. The coordinator reads the device against the
+    /// preview layer: the preview takes the angle that keeps it upright on
+    /// screen, and the movie output takes the device's own angle, so a take
+    /// shot with the phone sideways writes a landscape file the way the
+    /// system camera does.
+    private func trackRotation(facing: CameraFacing) {
+        guard let device = CaptureEngine.camera(for: facing) else { return }
+        let coordinator = AVCaptureDevice.RotationCoordinator(
+            device: device,
+            previewLayer: previewView.previewLayer
+        )
+        rotationCoordinator = coordinator
+        previewRotation = coordinator.videoRotationAngleForHorizonLevelPreview
+        applyPreviewRotation()
+        engine.setCaptureRotation(coordinator.videoRotationAngleForHorizonLevelCapture)
+        rotationObservations = [
+            coordinator.observe(\.videoRotationAngleForHorizonLevelPreview, options: .new) { [weak self] _, change in
+                guard let angle = change.newValue else { return }
+                Task { @MainActor in
+                    self?.previewRotation = angle
+                    self?.applyPreviewRotation()
+                }
+            },
+            coordinator.observe(\.videoRotationAngleForHorizonLevelCapture, options: .new) { [weak self] _, change in
+                guard let angle = change.newValue else { return }
+                Task { @MainActor in self?.engine.setCaptureRotation(angle) }
+            },
+        ]
+    }
+
+    private func applyPreviewRotation() {
+        guard let connection = previewView.previewLayer.connection,
+              connection.isVideoRotationAngleSupported(previewRotation) else { return }
+        connection.videoRotationAngle = previewRotation
+    }
+
     private func handle(_ event: CaptureEngine.Event) {
         switch event {
         case .running(let mapping, let hasTorch, let effective):
+            applyPreviewRotation()
             model?.sessionDidStart(zoomMapping: mapping, hasTorch: hasTorch, effective: effective)
         case .failed(let reason):
             model?.sessionFailed(reason: reason)
@@ -81,6 +137,11 @@ private nonisolated final class CaptureEngine: NSObject, AVCaptureFileOutputReco
     private var facing: CameraFacing = .front
     private var settings = CameraSettings()
     private var zoomMapping = ZoomMapping(wideBase: 1, minDisplay: 1, maxDisplay: 1)
+    /// How the movie output aims the frames it writes, in degrees. The
+    /// controller keeps this current as the phone turns; a rolling take
+    /// keeps the angle it started with, since a movie file output cannot be
+    /// re-aimed once it is writing.
+    private var captureRotation: CGFloat = 90
 
     private static let recordableDimensions: Set<String> = [
         "1280x720", "1920x1080", "2560x1440", "3840x2160",
@@ -153,6 +214,13 @@ private nonisolated final class CaptureEngine: NSObject, AVCaptureFileOutputReco
         }
     }
 
+    func setCaptureRotation(_ angle: CGFloat) {
+        queue.async {
+            self.captureRotation = angle
+            self.applyCaptureRotation()
+        }
+    }
+
     func setTorch(_ on: Bool) {
         queue.async {
             guard let device = self.videoInput?.device, device.hasTorch else { return }
@@ -175,6 +243,7 @@ private nonisolated final class CaptureEngine: NSObject, AVCaptureFileOutputReco
     func startRecording() {
         queue.async {
             guard !self.movieOutput.isRecording else { return }
+            self.applyCaptureRotation()
             let url = FileManager.default.temporaryDirectory
                 .appending(path: UUID().uuidString + ".mov")
             self.movieOutput.startRecording(to: url, recordingDelegate: self)
@@ -214,7 +283,7 @@ private nonisolated final class CaptureEngine: NSObject, AVCaptureFileOutputReco
         setZoomImmediate(display: 1)
     }
 
-    private static func camera(for facing: CameraFacing) -> AVCaptureDevice? {
+    static func camera(for facing: CameraFacing) -> AVCaptureDevice? {
         let position: AVCaptureDevice.Position = facing == .front ? .front : .back
         let types: [AVCaptureDevice.DeviceType] = position == .back
             ? [.builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera, .builtInWideAngleCamera]
@@ -269,7 +338,18 @@ private nonisolated final class CaptureEngine: NSObject, AVCaptureFileOutputReco
                 movieOutput.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
             }
         }
+        applyCaptureRotation()
         effectiveSettings = choice.effective
+    }
+
+    /// A take in flight keeps its own angle: AVFoundation gives no defined
+    /// result for re-aiming a movie file output mid-recording, so the phone
+    /// turning during a take leaves the file as it started.
+    private func applyCaptureRotation() {
+        guard !movieOutput.isRecording,
+              let connection = movieOutput.connection(with: .video),
+              connection.isVideoRotationAngleSupported(captureRotation) else { return }
+        connection.videoRotationAngle = captureRotation
     }
 
     private var effectiveSettings = CameraSettings()

@@ -35,6 +35,12 @@ struct CameraScreen<CameraPreview: View>: View {
     /// be clear. It stays until the next tap: a hand working the controls is
     /// never raced by a clock.
     @State private var showsChrome = false
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+
+    /// The phone held sideways. The shutter crosses to the trailing edge and
+    /// the well drops under it, so both stay under the thumb of the hand
+    /// gripping the short edge.
+    private var isSideways: Bool { verticalSizeClass == .compact }
 
     private static var stageSpace: String { "cameraStage" }
     private static var wellSide: CGFloat { 54 }
@@ -86,6 +92,17 @@ struct CameraScreen<CameraPreview: View>: View {
         // A run begins on a clear stage, and the controls are back the moment
         // it ends.
         .onChange(of: stageIsClear) { _, _ in showsChrome = false }
+        // A take keeps the orientation it started in, so the screen keeps it
+        // too: the controls stay where the hand left them and the picture
+        // matches the file being written.
+        .onChange(of: camera.isRecording) { _, recording in
+            if recording {
+                InterfaceOrientationLock.shared.hold()
+            } else {
+                InterfaceOrientationLock.shared.release()
+            }
+        }
+        .onDisappear { InterfaceOrientationLock.shared.release() }
         // The docked clip keeps itself to one appearance: watching it or
         // waiting out the timer both retire it.
         .task(id: corner?.id) {
@@ -159,8 +176,8 @@ struct CameraScreen<CameraPreview: View>: View {
         // without this the stack hugs its content and the rail floats mid-screen.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .leading) { rail }
-        .overlay(alignment: .bottom) { recordButton }
-        .overlay(alignment: .bottomLeading) { thumbnailWell }
+        .overlay(alignment: isSideways ? .trailing : .bottom) { recordButton }
+        .overlay(alignment: isSideways ? .bottomTrailing : .bottomLeading) { thumbnailWell }
         .animation(.spring(duration: 0.45), value: corner?.id)
         .animation(.spring(duration: 0.45), value: camera.isRecording)
         .padding(.top, 8)
@@ -194,8 +211,8 @@ struct CameraScreen<CameraPreview: View>: View {
                     wellButton(corner)
                 }
             }
-            .padding(.leading, 20)
-            .padding(.bottom, 44)
+            .padding(isSideways ? .trailing : .leading, 20)
+            .padding(.bottom, isSideways ? 20 : 44)
     }
 
     private func wellButton(_ clip: CornerClip) -> some View {
@@ -219,7 +236,7 @@ struct CameraScreen<CameraPreview: View>: View {
         }
         .buttonStyle(.plain)
         .id(clip.id)
-        .transition(.scale(scale: 0.25, anchor: .bottomLeading).combined(with: .opacity))
+        .transition(.scale(scale: 0.25, anchor: isSideways ? .bottomTrailing : .bottomLeading).combined(with: .opacity))
         .accessibilityLabel("Play last recording")
     }
 
@@ -404,7 +421,7 @@ struct CameraScreen<CameraPreview: View>: View {
         .buttonStyle(.plain)
         .disabled(camera.availability != .running)
         .opacity(camera.availability == .running ? 1 : 0.5)
-        .padding(.bottom, 30)
+        .padding(isSideways ? .trailing : .bottom, isSideways ? 24 : 30)
         .accessibilityLabel(camera.isRecording ? "Stop recording" : "Record")
     }
 }
