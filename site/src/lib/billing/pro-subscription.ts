@@ -22,6 +22,13 @@ export function isActiveProStatus(status: string): boolean {
   return activeStatuses.has(status);
 }
 
+// A subscription that will end on its own: the portal schedules the end as
+// cancel_at (with cancel_at_period_end left false), the API's period-end flag
+// is the other spelling of the same decision.
+export function subscriptionCancelScheduled(subscription: Stripe.Subscription): boolean {
+  return subscription.cancel_at_period_end || subscription.cancel_at !== null;
+}
+
 export function proPriceId(): string | undefined {
   return process.env.STRIPE_PRO_PRICE_ID || undefined;
 }
@@ -93,7 +100,7 @@ export async function syncProSubscription(
 
   await prisma.proSubscription.upsert({
     create: {
-      cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      cancelAtPeriodEnd: subscriptionCancelScheduled(subscription),
       currentPeriodEnd: periodEnd,
       currentPeriodStart: periodStart,
       monthlyAllowanceMicros: allowanceMicros,
@@ -104,7 +111,7 @@ export async function syncProSubscription(
       userId,
     },
     update: {
-      cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      cancelAtPeriodEnd: subscriptionCancelScheduled(subscription),
       currentPeriodEnd: periodEnd,
       currentPeriodStart: periodStart,
       monthlyAllowanceMicros: allowanceMicros,
