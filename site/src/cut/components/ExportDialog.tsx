@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -52,7 +51,6 @@ export function ExportDialog() {
     [aspect, clips, assets]
   );
   const [choice, setChoice] = useState<ExportChoice>(EXPORT_QUICK_PRESETS[1].choice);
-  const [advanced, setAdvanced] = useState(false);
   // The field's own text, so a decimal in progress ("1.") survives the parse.
   const [mbpsText, setMbpsText] = useState("");
   const preset = quickPresetOf(choice, resolutions);
@@ -117,45 +115,34 @@ export function ExportDialog() {
 
   return (
     <Dialog open onOpenChange={(o) => !o && setExportOpen(false)}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Export</DialogTitle>
+      <DialogContent className="gap-0 p-0 sm:max-w-3xl">
+        <DialogHeader className="px-6 pt-6 pb-4">
+          <DialogTitle className="text-xl">Export</DialogTitle>
         </DialogHeader>
 
-        <div className="grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="Export preset">
-          {EXPORT_QUICK_PRESETS.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              role="radio"
-              aria-checked={preset === p.id}
-              className={cn(
-                "flex flex-col items-start rounded-lg border border-border bg-background px-3 py-2 text-left transition-colors hover:border-input",
-                preset === p.id && "border-primary bg-primary/10"
-              )}
-              onClick={() => {
-                setMbpsText("");
-                setChoice({ ...p.choice });
-              }}
-            >
-              <span className="text-sm font-medium">{p.label}</span>
-              <span className="text-[11px] text-muted-foreground">{p.detail}</span>
-            </button>
-          ))}
-        </div>
+        <div className="grid border-b border-border sm:grid-cols-[minmax(0,17rem)_1fr]">
+          <div
+            className="flex flex-col gap-0.5 px-6 pb-6 max-sm:border-b max-sm:border-border sm:border-r sm:border-border"
+            role="radiogroup"
+            aria-label="Export preset"
+          >
+            {EXPORT_QUICK_PRESETS.map((p) => (
+              <PresetRow
+                key={p.id}
+                checked={preset === p.id}
+                label={p.label}
+                detail={p.short}
+                title={p.detail}
+                onClick={() => {
+                  setMbpsText("");
+                  setChoice({ ...p.choice });
+                }}
+              />
+            ))}
+            <PresetRow checked={preset === null} label="Custom" />
+          </div>
 
-        <button
-          type="button"
-          className="flex items-center gap-1 self-start text-xs font-medium text-muted-foreground hover:text-foreground"
-          aria-expanded={advanced}
-          onClick={() => setAdvanced((a) => !a)}
-        >
-          <ChevronDown className={cn("size-3.5 transition-transform", advanced && "rotate-180")} />
-          Advanced
-        </button>
-
-        {advanced && (
-          <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-[auto_1fr] content-start items-center gap-x-4 gap-y-2 px-6 pb-6 max-sm:pt-6">
             <Choice label="Format">
               {EXPORT_CONTAINERS.map((c) => (
                 <Pill
@@ -197,7 +184,7 @@ export function ExportDialog() {
             </Choice>
             <Choice label="Frame rate">
               {EXPORT_FRAME_RATES.map((f) => (
-                <Pill key={f} checked={choice.fps === f} onClick={() => set({ fps: f })} title={`${f} fps`} />
+                <Pill key={f} checked={choice.fps === f} onClick={() => set({ fps: f })} title={String(f)} />
               ))}
             </Choice>
             {!prores && (
@@ -214,12 +201,7 @@ export function ExportDialog() {
                     detail={q.detail}
                   />
                 ))}
-                <label
-                  className={cn(
-                    "flex min-w-[4.5rem] items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-sm transition-colors hover:border-input",
-                    choice.bitrateMbps && "border-primary bg-primary/10"
-                  )}
-                >
+                <label className={cn(PILL, "w-[6.5rem]", choice.bitrateMbps && "border-primary bg-primary/10")}>
                   <Input
                     type="number"
                     inputMode="decimal"
@@ -228,7 +210,7 @@ export function ExportDialog() {
                     step={0.5}
                     placeholder="Mbps"
                     aria-label="Bitrate in megabits per second"
-                    className="h-6 w-16 px-1.5 text-sm"
+                    className="h-6 w-full border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
                     value={mbpsText}
                     onChange={(e) => {
                       setMbpsText(e.target.value);
@@ -236,7 +218,6 @@ export function ExportDialog() {
                       set({ bitrateMbps: v > 0 ? v : undefined });
                     }}
                   />
-                  <span className="text-[11px] text-muted-foreground">Mbps</span>
                 </label>
               </Choice>
             )}
@@ -252,10 +233,10 @@ export function ExportDialog() {
               ))}
             </Choice>
           </div>
-        )}
+        </div>
 
-        <DialogFooter className="flex-col gap-2 sm:flex-col">
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <DialogFooter className="flex-col gap-3 rounded-b-xl bg-muted/40 px-6 py-5 sm:flex-col">
+          <div className="flex items-center justify-between text-sm text-muted-foreground">
             <span>
               {settings.width} × {settings.height} · {settings.fps} fps · {settings.container.toUpperCase()} ·{" "}
               {codecLabel} + {settings.audioCodec.toUpperCase()}
@@ -264,10 +245,10 @@ export function ExportDialog() {
               {formatSizeEstimate(estimateExportBytes(settings, duration))}
             </span>
           </div>
-          <Button className="w-full" onClick={run}>
+          <Button className="h-11 w-full text-base" onClick={run}>
             Export video
           </Button>
-          <p className="text-center text-[11px] text-muted-foreground">
+          <p className="text-center text-xs text-muted-foreground">
             {inTab
               ? "Renders in the background. You can keep editing, open another project, or export more — each shows in the corner."
               : `This browser can't encode ${prores ? "ProRes" : "this"} itself, so it renders in the cloud and lands here when done.`}
@@ -281,12 +262,54 @@ export function ExportDialog() {
 /** The most a typed bitrate can ask for. */
 const MAX_MBPS = 200;
 
+/** One option in a row: every pill is the same height, label only; the detail rides the tooltip. */
+const PILL =
+  "flex h-9 items-center rounded-lg border border-border bg-background px-3.5 text-sm transition-colors hover:border-input";
+
+// One preset in the left pane: the name, and what it stands for on the right.
+// "Custom" has no click: it is the row that lights when the options match no preset.
+function PresetRow({
+  checked,
+  label,
+  detail,
+  title,
+  onClick,
+}: {
+  checked: boolean;
+  label: string;
+  detail?: string;
+  title?: string;
+  onClick?: () => void;
+}) {
+  const className = cn(
+    "flex h-11 items-center justify-between rounded-lg px-4 text-left transition-colors",
+    onClick && "hover:bg-muted/60",
+    checked && "bg-muted"
+  );
+  const body = (
+    <>
+      <span className="text-sm font-medium">{label}</span>
+      {detail && <span className="text-xs text-muted-foreground">{detail}</span>}
+    </>
+  );
+  if (!onClick) return <div className={className}>{body}</div>;
+  return (
+    <button type="button" role="radio" aria-checked={checked} title={title} className={className} onClick={onClick}>
+      {body}
+    </button>
+  );
+}
+
+// A row of the options grid: the label sits in the first column, the pills
+// fill the second, so every row's pills start on the same line.
 function Choice({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-1.5" role="radiogroup" aria-label={label}>
-      <span className="text-xs font-medium text-muted-foreground">{label}</span>
-      <div className="flex flex-wrap gap-1.5">{children}</div>
-    </div>
+    <>
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={label}>
+        {children}
+      </div>
+    </>
   );
 }
 
@@ -309,14 +332,15 @@ function Pill({
       role="radio"
       aria-checked={checked}
       disabled={disabled}
+      title={detail}
       className={cn(
-        "flex min-w-[4.5rem] flex-col items-start rounded-lg border border-border bg-background px-3 py-1.5 text-left transition-colors hover:border-input disabled:cursor-not-allowed disabled:opacity-40",
+        PILL,
+        "font-medium disabled:cursor-not-allowed disabled:opacity-40",
         checked && "border-primary bg-primary/10"
       )}
       onClick={onClick}
     >
-      <span className="text-sm font-medium">{title}</span>
-      {detail && <span className="text-[11px] text-muted-foreground">{detail}</span>}
+      {title}
     </button>
   );
 }

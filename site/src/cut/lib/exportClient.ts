@@ -154,27 +154,31 @@ export const EXPORT_QUICK_PRESETS = [
     id: "share",
     label: "Share",
     detail: "1080p · plays everywhere",
+    short: "1080p",
     choice: { resolution: "1080", fps: 30, quality: "balanced", ...DELIVERY_DEFAULTS },
   },
   {
     id: "best",
     label: "Best",
     detail: "source size · H.264",
+    short: "Source",
     choice: { resolution: "source", fps: 30, quality: "high", ...DELIVERY_DEFAULTS },
   },
   {
     id: "small",
     label: "Small",
     detail: "720p · fastest",
+    short: "720p",
     choice: { resolution: "720", fps: 30, quality: "small", ...DELIVERY_DEFAULTS },
   },
   {
     id: "master",
     label: "Master",
     detail: "ProRes 422 HQ · MOV · PCM",
+    short: "ProRes",
     choice: { resolution: "source", fps: 30, quality: "high", codec: "prores", container: "mov", audioCodec: "pcm" },
   },
-] as const satisfies readonly { id: string; label: string; detail: string; choice: ExportChoice }[];
+] as const satisfies readonly { id: string; label: string; detail: string; short: string; choice: ExportChoice }[];
 
 /** The quick preset a choice is, when it is one. */
 export function quickPresetOf(choice: ExportChoice, options: ResolutionOption[]): string | null {
