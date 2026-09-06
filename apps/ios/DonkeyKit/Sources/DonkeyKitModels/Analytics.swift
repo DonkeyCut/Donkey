@@ -35,14 +35,34 @@ nonisolated public struct AnalyticsRollup: Decodable, Sendable {
             }
         }
 
+        nonisolated public struct Canceling: Decodable, Sendable {
+            public var subscriptionId: String
+
+            public init(subscriptionId: String) {
+                self.subscriptionId = subscriptionId
+            }
+        }
+
+        /// The billing window, oldest → newest, ending today. It runs a day
+        /// past the activity window; `revenue` aligns with this list.
+        public var days: [String]
         public var subscribers: Int
-        public var canceling: Int
+        /// Live subscriptions set to end on their own.
+        public var canceling: [Canceling]
         public var funded: Int
         public var fundedMicros: String
         /// Per-day paid charges, aligned with `days`.
         public var revenue: [Revenue]
 
-        public init(subscribers: Int, canceling: Int, funded: Int, fundedMicros: String, revenue: [Revenue]) {
+        public init(
+            days: [String],
+            subscribers: Int,
+            canceling: [Canceling],
+            funded: Int,
+            fundedMicros: String,
+            revenue: [Revenue]
+        ) {
+            self.days = days
             self.subscribers = subscribers
             self.canceling = canceling
             self.funded = funded
@@ -77,6 +97,58 @@ nonisolated public struct AnalyticsRollup: Decodable, Sendable {
         self.billing = billing
         self.users = users
     }
+
+    /// Decodes the API's JSON. A body this build cannot read fails as
+    /// `AnalyticsError.unreadable` naming the field, so the screen says
+    /// which part of the contract moved.
+    public static func decode(_ data: Data) throws -> AnalyticsRollup {
+        do {
+            return try JSONDecoder().decode(AnalyticsRollup.self, from: data)
+        } catch let error as DecodingError {
+            throw AnalyticsError.unreadable(mismatch(error))
+        } catch {
+            throw AnalyticsError.unreadable(error.localizedDescription)
+        }
+    }
+
+    /// "billing.canceling is not an array", "users[0].activity is missing".
+    static func mismatch(_ error: DecodingError) -> String {
+        func path(_ context: DecodingError.Context) -> String {
+            let joined = context.codingPath.reduce(into: "") { text, key in
+                if let index = key.intValue {
+                    text += "[\(index)]"
+                } else {
+                    text += text.isEmpty ? key.stringValue : ".\(key.stringValue)"
+                }
+            }
+            return joined.isEmpty ? "the rollup" : joined
+        }
+        func name(_ type: Any.Type) -> String {
+            switch type {
+            case is String.Type: return "a string"
+            case is Bool.Type: return "a boolean"
+            case is Int.Type, is Double.Type, is Float.Type, is Int64.Type, is UInt.Type: return "a number"
+            default:
+                let text = String(describing: type)
+                if text.hasPrefix("Array<") { return "an array" }
+                if text.hasPrefix("Dictionary<") { return "an object" }
+                return text
+            }
+        }
+        switch error {
+        case .typeMismatch(let type, let context):
+            return "\(path(context)) is not \(name(type))"
+        case .valueNotFound(let type, let context):
+            return "\(path(context)) is null, expected \(name(type))"
+        case .keyNotFound(let key, let context):
+            let parent = path(context)
+            return parent == "the rollup" ? "\(key.stringValue) is missing" : "\(parent).\(key.stringValue) is missing"
+        case .dataCorrupted(let context):
+            return context.debugDescription
+        @unknown default:
+            return String(describing: error)
+        }
+    }
 }
 
 /// The rollup reduced to what the dashboard draws: one point per day plus the
@@ -90,32 +162,39 @@ nonisolated public struct AnalyticsSummary: Sendable, Equatable {
         public var working: Int?
         public var signups: Int
         public var totalRegistered: Int
+
+        public var id: Date { day }
+
+        public init(day: Date, active: Int?, working: Int?, signups: Int, totalRegistered: Int) {
+            self.day = day
+            self.active = active
+            self.working = working
+            self.signups = signups
+            self.totalRegistered = totalRegistered
+        }
+    }
+
+    /// One day of the billing window. That window ends today, a day past
+    /// the activity points, so money charts on its own axis.
+    nonisolated public struct RevenuePoint: Sendable, Equatable, Identifiable {
+        public var day: Date
         public var proDollars: Double
         public var topupDollars: Double
 
         public var id: Date { day }
         public var revenueDollars: Double { proDollars + topupDollars }
 
-        public init(
-            day: Date,
-            active: Int?,
-            working: Int?,
-            signups: Int,
-            totalRegistered: Int,
-            proDollars: Double,
-            topupDollars: Double
-        ) {
+        public init(day: Date, proDollars: Double, topupDollars: Double) {
             self.day = day
-            self.active = active
-            self.working = working
-            self.signups = signups
-            self.totalRegistered = totalRegistered
             self.proDollars = proDollars
             self.topupDollars = topupDollars
         }
     }
 
     public var points: [DayPoint]
+    /// Paid charges per day across the billing window; empty when the rollup
+    /// predates billing.
+    public var revenue: [RevenuePoint]
     public var registered: Int
     public var signups7d: Int
     public var signupsWindow: Int
@@ -167,17 +246,25 @@ nonisolated public struct AnalyticsSummary: Sendable, Equatable {
                 active = visited
                 working = worked
             }
-            let revenue = rollup.billing.flatMap { $0.revenue.indices.contains(i) ? $0.revenue[i] : nil }
             points.append(DayPoint(
                 day: Self.date(fromDay: day),
                 active: active,
                 working: working,
                 signups: signups,
-                totalRegistered: totalRegistered,
-                proDollars: Self.dollars(fromMicros: revenue?.proMicros ?? "0"),
-                topupDollars: Self.dollars(fromMicros: revenue?.topupMicros ?? "0")
+                totalRegistered: totalRegistered
             ))
         }
+
+        // Money rides the billing window, which runs through today.
+        let revenue = rollup.billing.map { billing in
+            zip(billing.days, billing.revenue).map { day, entry in
+                RevenuePoint(
+                    day: Self.date(fromDay: day),
+                    proDollars: Self.dollars(fromMicros: entry.proMicros),
+                    topupDollars: Self.dollars(fromMicros: entry.topupMicros)
+                )
+            }
+        } ?? []
 
         // Counts users active on any known day in the range; nil when the
         // whole range went unextracted.
@@ -194,6 +281,7 @@ nonisolated public struct AnalyticsSummary: Sendable, Equatable {
         let activePrior7d = activeInRange(len - 14, len - 7)
 
         self.points = points
+        self.revenue = revenue
         registered = rollup.users.count
         signups7d = rollup.days.suffix(7).reduce(0) { $0 + (signupsByDay[$1] ?? 0) }
         signupsWindow = points.reduce(0) { $0 + $1.signups }
@@ -206,10 +294,10 @@ nonisolated public struct AnalyticsSummary: Sendable, Equatable {
         }
         balanceDollars = rollup.users.reduce(0) { $0 + Self.dollars(fromMicros: $1.balanceMicros) }
         subscribers = rollup.billing?.subscribers
-        canceling = rollup.billing?.canceling
+        canceling = rollup.billing?.canceling.count
         funded = rollup.billing?.funded
         fundedDollars = rollup.billing.map { Self.dollars(fromMicros: $0.fundedMicros) }
-        revenueDollars = rollup.billing.map { _ in points.reduce(0) { $0 + $1.revenueDollars } }
+        revenueDollars = rollup.billing.map { _ in revenue.reduce(0) { $0 + $1.revenueDollars } }
         missingDayCount = missingDays.count
         generatedAt = Self.timestamp(from: rollup.generatedAt)
     }
@@ -246,8 +334,9 @@ nonisolated public struct AnalyticsSummary: Sendable, Equatable {
 nonisolated public enum AnalyticsError: Error, Equatable {
     /// The nightly job hasn't written a rollup yet.
     case noRollup
-    /// The answer came back, and it was not a rollup this build can read.
-    case unreadable
+    /// The answer came back, and it was not a rollup this build can read;
+    /// the text names the field that moved.
+    case unreadable(String)
 }
 
 /// What the app target's CutCloudClient does for the analytics dashboard.
@@ -304,8 +393,8 @@ public final class AnalyticsModel {
             message
         case CloudSyncError.unreachable(let reach, let code):
             "\(reach.sentence) (\(code))"
-        case AnalyticsError.unreadable:
-            "The rollup came back in a shape this build doesn't read."
+        case AnalyticsError.unreadable(let detail):
+            "The rollup came back in a shape this build doesn't read: \(detail)."
         default:
             "The rollup didn't load. Try again."
         }

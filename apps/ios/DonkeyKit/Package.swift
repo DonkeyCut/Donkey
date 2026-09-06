@@ -25,6 +25,9 @@ let package = Package(
         .testTarget(
             name: "DonkeyKitModelsTests",
             dependencies: ["DonkeyKitModels"],
+            // Fixtures/analytics-rollup.json is written by the site's
+            // analytics pipeline (npm run analytics:rollup-fixture).
+            resources: [.copy("Fixtures")],
             swiftSettings: [.defaultIsolation(MainActor.self)]
         ),
     ]

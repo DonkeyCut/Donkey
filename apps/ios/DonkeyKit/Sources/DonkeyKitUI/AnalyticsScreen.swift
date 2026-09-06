@@ -83,9 +83,9 @@ private struct SummaryList: View {
                     MetricSection(
                         title: "Revenue",
                         value: dollars(revenueDollars),
-                        caption: "Paid charges, last \(summary.points.count) days"
+                        caption: "Paid charges, last \(summary.revenue.count) days"
                     ) {
-                        RevenueChart(points: summary.points)
+                        RevenueChart(points: summary.revenue)
                     }
                 }
 
@@ -264,7 +264,7 @@ private struct SignupsChart: View {
 }
 
 private struct RevenueChart: View {
-    let points: [AnalyticsSummary.DayPoint]
+    let points: [AnalyticsSummary.RevenuePoint]
 
     var body: some View {
         Chart {
