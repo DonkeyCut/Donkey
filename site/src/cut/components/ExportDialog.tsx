@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   EXPORT_AUDIO,
   EXPORT_CODECS,
@@ -111,16 +113,17 @@ export function ExportDialog() {
   };
 
   const codecLabel = EXPORT_CODECS.find((c) => c.id === settings.codec)?.label ?? settings.codec;
+  const sizeEstimate = formatSizeEstimate(estimateExportBytes(settings, duration));
   const prores = settings.codec === "prores";
 
   return (
     <Dialog open onOpenChange={(o) => !o && setExportOpen(false)}>
-      <DialogContent className="gap-0 p-0 sm:max-w-3xl">
+      <DialogContent className="gap-0 p-0 sm:max-w-4xl">
         <DialogHeader className="px-6 pt-6 pb-4">
           <DialogTitle className="text-xl">Export</DialogTitle>
         </DialogHeader>
 
-        <div className="grid border-b border-border sm:grid-cols-[minmax(0,17rem)_1fr]">
+        <div className="grid sm:grid-cols-[12rem_1fr]">
           <div
             className="flex flex-col gap-0.5 px-6 pb-6 max-sm:border-b max-sm:border-border sm:border-r sm:border-border"
             role="radiogroup"
@@ -142,7 +145,7 @@ export function ExportDialog() {
             <PresetRow checked={preset === null} label="Custom" />
           </div>
 
-          <div className="grid grid-cols-[auto_1fr] content-start items-center gap-x-4 gap-y-2 px-6 pb-6 max-sm:pt-6">
+          <div className="grid grid-cols-[auto_1fr_10rem] content-start items-center gap-x-4 gap-y-2.5 px-6 pb-6 max-sm:grid-cols-[auto_1fr] max-sm:pt-6">
             <Choice label="Format">
               {EXPORT_CONTAINERS.map((c) => (
                 <Pill
@@ -155,23 +158,24 @@ export function ExportDialog() {
                 />
               ))}
             </Choice>
-            <Choice label="Codec">
+            <Choice label="Codec" hint={EXPORT_CODECS.find((c) => c.id === settings.codec)?.detail}>
               {EXPORT_CODECS.map((c) => (
                 <Pill
                   key={c.id}
                   checked={settings.codec === c.id}
-                  onClick={() =>
+                  onClick={() => {
+                    if (c.id === "prores") setMbpsText("");
                     set({
                       codec: c.id,
                       ...(c.id === "prores" ? { container: "mov", bitrateMbps: undefined } : {}),
-                    })
-                  }
+                    });
+                  }}
                   title={c.label}
                   detail={c.detail}
                 />
               ))}
             </Choice>
-            <Choice label="Resolution">
+            <Choice label="Resolution" hint={`${settings.width} × ${settings.height}`}>
               {resolutions.map((r) => (
                 <Pill
                   key={r.id}
@@ -184,44 +188,65 @@ export function ExportDialog() {
             </Choice>
             <Choice label="Frame rate">
               {EXPORT_FRAME_RATES.map((f) => (
-                <Pill key={f} checked={choice.fps === f} onClick={() => set({ fps: f })} title={String(f)} />
+                <Pill key={f} checked={choice.fps === f} onClick={() => set({ fps: f })} title={`${f} fps`} />
               ))}
             </Choice>
-            {!prores && (
-              <Choice label="Quality">
-                {EXPORT_QUALITIES.map((q) => (
-                  <Pill
-                    key={q.id}
-                    checked={!choice.bitrateMbps && choice.quality === q.id}
-                    onClick={() => {
-                      setMbpsText("");
-                      set({ quality: q.id, bitrateMbps: undefined });
-                    }}
-                    title={q.label}
-                    detail={q.detail}
-                  />
-                ))}
-                <label className={cn(PILL, "w-[6.5rem]", choice.bitrateMbps && "border-primary bg-primary/10")}>
-                  <Input
-                    type="number"
-                    inputMode="decimal"
-                    min={0.5}
-                    max={MAX_MBPS}
-                    step={0.5}
-                    placeholder="Mbps"
-                    aria-label="Bitrate in megabits per second"
-                    className="h-6 w-full border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
-                    value={mbpsText}
-                    onChange={(e) => {
-                      setMbpsText(e.target.value);
-                      const v = Math.min(Number(e.target.value), MAX_MBPS);
-                      set({ bitrateMbps: v > 0 ? v : undefined });
-                    }}
-                  />
-                </label>
-              </Choice>
-            )}
-            <Choice label="Audio">
+            {/* ProRes fixes its own bitrate, so the row stays put and greys out. */}
+            <Choice label="Quality" hint={sizeEstimate}>
+              {EXPORT_QUALITIES.map((q) => (
+                <Pill
+                  key={q.id}
+                  checked={!prores && !choice.bitrateMbps && choice.quality === q.id}
+                  disabled={prores}
+                  onClick={() => {
+                    setMbpsText("");
+                    set({ quality: q.id, bitrateMbps: undefined });
+                  }}
+                  title={q.label}
+                  detail={q.detail}
+                />
+              ))}
+              <label
+                className={cn(
+                  PILL,
+                  "gap-1 pr-3",
+                  prores && "cursor-not-allowed opacity-40",
+                  !prores && choice.bitrateMbps && "border-transparent bg-foreground/10"
+                )}
+              >
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  min={0.5}
+                  max={MAX_MBPS}
+                  step={0.5}
+                  placeholder="Custom"
+                  aria-label="Bitrate in megabits per second"
+                  disabled={prores}
+                  className="h-6 w-16 border-0 bg-transparent px-0 text-sm shadow-none [appearance:textfield] focus-visible:ring-0 disabled:cursor-not-allowed [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  value={mbpsText}
+                  onChange={(e) => {
+                    setMbpsText(e.target.value);
+                    const v = Math.min(Number(e.target.value), MAX_MBPS);
+                    set({ bitrateMbps: v > 0 ? v : undefined });
+                  }}
+                />
+                <span className="text-xs text-muted-foreground">Mbps</span>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={<span />}
+                      className="flex text-muted-foreground"
+                      aria-label="About custom bitrate"
+                    >
+                      <Info className="size-3.5" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-64">{BITRATE_HELP}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </label>
+            </Choice>
+            <Choice label="Audio" hint={EXPORT_AUDIO.find((a) => a.id === settings.audioCodec)?.detail}>
               {EXPORT_AUDIO.map((a) => (
                 <Pill
                   key={a.id}
@@ -235,20 +260,18 @@ export function ExportDialog() {
           </div>
         </div>
 
-        <DialogFooter className="flex-col gap-3 rounded-b-xl bg-muted/40 px-6 py-5 sm:flex-col">
+        <DialogFooter className="mx-0 mb-0 flex-col gap-3 rounded-b-xl bg-muted/40 px-6 py-5 sm:flex-col">
           <div className="flex items-center justify-between text-sm text-muted-foreground">
             <span>
               {settings.width} × {settings.height} · {settings.fps} fps · {settings.container.toUpperCase()} ·{" "}
               {codecLabel} + {settings.audioCodec.toUpperCase()}
             </span>
-            <span className="tabular-nums">
-              {formatSizeEstimate(estimateExportBytes(settings, duration))}
-            </span>
+            <span className="tabular-nums">{sizeEstimate}</span>
           </div>
           <Button className="h-11 w-full text-base" onClick={run}>
             Export video
           </Button>
-          <p className="text-center text-xs text-muted-foreground">
+          <p className="min-h-8 text-center text-xs text-muted-foreground">
             {inTab
               ? "Renders in the background. You can keep editing, open another project, or export more — each shows in the corner."
               : `This browser can't encode ${prores ? "ProRes" : "this"} itself, so it renders in the cloud and lands here when done.`}
@@ -262,9 +285,18 @@ export function ExportDialog() {
 /** The most a typed bitrate can ask for. */
 const MAX_MBPS = 200;
 
+const BITRATE_HELP = (
+  <>
+    Choose a quality preset or set a custom bitrate.
+    <br />
+    Higher bitrates mean better quality and larger files. Use Custom when a platform requires a specific
+    bitrate.
+  </>
+);
+
 /** One option in a row: every pill is the same height, label only; the detail rides the tooltip. */
 const PILL =
-  "flex h-9 items-center rounded-lg border border-border bg-background px-3.5 text-sm transition-colors hover:border-input";
+  "flex h-7 shrink-0 items-center whitespace-nowrap rounded-lg border border-border bg-background px-3.5 text-sm transition-colors hover:border-input";
 
 // One preset in the left pane: the name, and what it stands for on the right.
 // "Custom" has no click: it is the row that lights when the options match no preset.
@@ -283,8 +315,8 @@ function PresetRow({
 }) {
   const className = cn(
     "flex h-11 items-center justify-between rounded-lg px-4 text-left transition-colors",
-    onClick && "hover:bg-muted/60",
-    checked && "bg-muted"
+    onClick && "hover:bg-foreground/5",
+    checked && "bg-foreground/10"
   );
   const body = (
     <>
@@ -302,13 +334,17 @@ function PresetRow({
 
 // A row of the options grid: the label sits in the first column, the pills
 // fill the second, so every row's pills start on the same line.
-function Choice({ label, children }: { label: string; children: React.ReactNode }) {
+// `hint` says what the picked option means, in muted text after the pills.
+function Choice({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <>
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={label}>
+      <span className="whitespace-nowrap text-sm text-muted-foreground">{label}</span>
+      <div className="flex items-center gap-1.5" role="radiogroup" aria-label={label}>
         {children}
       </div>
+      <span className="truncate text-xs text-muted-foreground max-sm:hidden" title={hint}>
+        {hint}
+      </span>
     </>
   );
 }
@@ -336,7 +372,7 @@ function Pill({
       className={cn(
         PILL,
         "font-medium disabled:cursor-not-allowed disabled:opacity-40",
-        checked && "border-primary bg-primary/10"
+        checked && "border-transparent bg-foreground/10"
       )}
       onClick={onClick}
     >
