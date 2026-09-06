@@ -76,15 +76,28 @@ export function keyboardToEditor(): void {
   if (isTextEntry(el)) (el as HTMLElement).blur();
 }
 
+/** The part of a dialog's popup that decides whether it holds the keyboard. */
+export interface Popup {
+  hasAttribute: (name: string) => boolean;
+  checkVisibility: () => boolean;
+}
+
 /**
- * Whether a dialog stands over the editor, which owns the keyboard while it is
- * open. A popup keeps its element through its exit animation, and on a machine
- * dropping frames that runs long; Base UI marks those `data-closed`, and a
- * dialog on its way out has no claim on the keys.
+ * Whether this popup stands over the editor. A popup keeps its element through
+ * its exit animation, and on a machine dropping frames that runs long; Base UI
+ * marks those `data-closed`, and a dialog on its way out has no claim on the
+ * keys. A popup nobody can see has none either: the router keeps a page you
+ * navigated away from mounted, hidden, and a dialog left open on it is still
+ * in the document with the editor drawn on top of it.
  */
+export const popupOnTop = (el: Popup): boolean =>
+  !el.hasAttribute("data-closed") && el.checkVisibility();
+
+/** Whether a dialog stands over the editor, which owns the keyboard while it
+ * is open. */
 export function dialogOnTop(): boolean {
   for (const el of document.querySelectorAll('[data-slot="dialog-content"]')) {
-    if (!el.hasAttribute("data-closed")) return true;
+    if (popupOnTop(el)) return true;
   }
   return false;
 }

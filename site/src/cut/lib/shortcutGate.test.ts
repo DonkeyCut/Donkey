@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isDeleteKey, tellingKey, textEntryOf, typingOf } from "./shortcutGate";
+import { isDeleteKey, popupOnTop, tellingKey, textEntryOf, typingOf } from "./shortcutGate";
 
 const key = (k: string, code = "", mods: Partial<KeyboardEvent> = {}) =>
   ({ key: k, code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods }) as KeyboardEvent;
@@ -57,5 +57,24 @@ describe("what a decline is worth reporting", () => {
 
   test("AltGr is not a chord — it is how a Brazilian layout types", () => {
     expect(tellingKey(key("b", "KeyB", { ctrlKey: true, altKey: true }))).toBe(false);
+  });
+});
+
+describe("which dialog holds the keyboard", () => {
+  const popup = (attrs: string[], shown: boolean) => ({
+    hasAttribute: (name: string) => attrs.includes(name),
+    checkVisibility: () => shown,
+  });
+
+  test("an open dialog on screen holds it", () => {
+    expect(popupOnTop(popup(["data-open"], true))).toBe(true);
+  });
+
+  test("a dialog on its way out lets go", () => {
+    expect(popupOnTop(popup(["data-closed"], true))).toBe(false);
+  });
+
+  test("a dialog left open on a page the router keeps hidden lets go", () => {
+    expect(popupOnTop(popup(["data-open"], false))).toBe(false);
   });
 });
