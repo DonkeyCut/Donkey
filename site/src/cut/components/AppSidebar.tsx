@@ -65,6 +65,10 @@ export function AppSidebar() {
       // needs no round trip to draw it.
       seedNewProjectDoc(project.id, project.name, r);
       track("project_created", { source: "sidebar" });
+      // The dialog closes here, before the editor opens: the page it sits on
+      // stays mounted behind the editor, and a dialog left open on it would
+      // still be open on the way back.
+      setCreateIn(null);
       // The link carries no residency; the editor resolves it by asking which
       // backend owns the id, so a cloud project created from a Mac still opens
       // against the cloud.

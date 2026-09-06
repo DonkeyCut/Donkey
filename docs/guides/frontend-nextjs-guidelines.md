@@ -68,6 +68,8 @@ away and back. Effects are torn down on the way out and re-run on the way back,
 so anything holding a real resource — a decoder, an audio graph, a timer —
 releases it in an effect cleanup, and anything transient that should not come
 back open, like a dropdown, closes in a `useLayoutEffect` cleanup.
+A document-wide DOM query sees those hidden pages too, portals included, so a
+scan that asks whether something is on screen checks `checkVisibility()`.
 
 ## Navigation
 

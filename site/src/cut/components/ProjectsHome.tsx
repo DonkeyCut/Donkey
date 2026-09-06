@@ -444,6 +444,10 @@ export function ProjectsHome() {
     patch(r, (s) => ({ ...s, projects: [project, ...s.projects] }));
     seedNewProjectDoc(project.id, project.name, r, aspect);
     track("project_created", { source: "projects_home" });
+    // The dialog closes here, before the editor opens: the page it sits on
+    // stays mounted behind the editor, and a dialog left open on it would
+    // still be open on the way back.
+    setCreateIn(null);
     router.push(projectHref(base, project.id, "projects", folderId));
   };
 
