@@ -99,13 +99,37 @@ const passesThrough = (pathname: string) =>
 // header that says so.
 const SU_ROOT = "/su";
 
+// The gate's answer is held per cookie for a short while. A page visit is
+// several requests — the document, then the router's prefetch of every page
+// on the rail, each a handful of segment fetches — and every one of them
+// passed through the gate, so a visit cost dozens of session lookups and
+// each prefetch waited on one. The hold is short because the answer decides
+// who is served the section's code; the data routes check the role on every
+// request regardless.
+const GATE_HOLD_MS = 30_000;
+const GATE_HOLD_MAX = 256;
+const gateHeld = new Map<string, { superUser: boolean; until: number }>();
+
+async function gateAnswer(cookie: string): Promise<{ status: number; superUser: boolean }> {
+  const held = gateHeld.get(cookie);
+  if (held && held.until > Date.now()) return { status: 200, superUser: held.superUser };
+  const account = await fetch(`${SU_APP_ORIGIN}/api/account/me`, {
+    cache: "no-store",
+    headers: { cookie },
+  });
+  if (!account.ok) return { status: account.status, superUser: false };
+  const { superUser } = (await account.json()) as { superUser: boolean };
+  if (cookie) {
+    if (gateHeld.size >= GATE_HOLD_MAX) gateHeld.delete(gateHeld.keys().next().value!);
+    gateHeld.set(cookie, { superUser: superUser === true, until: Date.now() + GATE_HOLD_MS });
+  }
+  return { status: 200, superUser: superUser === true };
+}
+
 async function suHost(req: NextRequest, pathname: string): Promise<NextResponse> {
   if (underPath(pathname, "/api")) return NextResponse.next();
 
-  const account = await fetch(`${SU_APP_ORIGIN}/api/account/me`, {
-    cache: "no-store",
-    headers: { cookie: req.headers.get("cookie") ?? "" },
-  });
+  const account = await gateAnswer(req.headers.get("cookie") ?? "");
   if (account.status === 401) {
     // The callback has to carry the exact origin sign-in trusts (src/lib/auth.ts),
     // so hosted names it from the constant; dev's su.localhost is plain http on
@@ -116,11 +140,10 @@ async function suHost(req: NextRequest, pathname: string): Promise<NextResponse>
       `${SU_APP_ORIGIN}/sign-in?callbackURL=${encodeURIComponent(here)}`,
     );
   }
-  if (!account.ok) {
+  if (account.status !== 200) {
     return new NextResponse("The super-user gate is unavailable.", { status: 503 });
   }
-  const { superUser } = (await account.json()) as { superUser: boolean };
-  if (superUser !== true) return NextResponse.redirect(`${SU_APP_ORIGIN}/app`);
+  if (!account.superUser) return NextResponse.redirect(`${SU_APP_ORIGIN}/app`);
 
   const url = req.nextUrl.clone();
   url.pathname = `${SU_ROOT}${pathname === "/" ? "" : pathname}`;
