@@ -37,9 +37,9 @@ const snapshot: AnalyticsSnapshotFile = {
     dashboardUrl: "https://dashboard.stripe.com/test",
     refunds: [{ amountMicros: "1000000", chargeId: "ch_2", day: "2026-09-02", id: "re_1" }],
     subscriptions: [
-      { cancelAt: "2026-09-08T00:00:00.000Z", cancelScheduled: true, canceledAt: "2026-08-31T10:00:00.000Z", comment: "Export broke.", createdAt: "2026-08-09T00:00:00.000Z", customerId: "cus_p", email: "p@x.test", feedback: "switched_service", id: "sub_1", status: "active", userId: "u_pro" },
-      { cancelAt: null, cancelScheduled: false, canceledAt: null, comment: null, createdAt: "2026-07-01T00:00:00.000Z", customerId: "cus_s", email: "s@x.test", feedback: null, id: "sub_2", status: "active", userId: "u_su" },
-      { cancelAt: null, cancelScheduled: false, canceledAt: "2026-07-15T00:00:00.000Z", comment: null, createdAt: "2026-06-01T00:00:00.000Z", customerId: "cus_r", email: "r@x.test", feedback: null, id: "sub_3", status: "canceled", userId: "u_gone" },
+      { cancelAt: "2026-09-08T00:00:00.000Z", cancelScheduled: true, canceledAt: "2026-08-31T10:00:00.000Z", comment: "Export broke.", createdAt: "2026-08-09T00:00:00.000Z", customerId: "cus_p", email: "p@x.test", endedAt: null, feedback: "switched_service", id: "sub_1", status: "active", userId: "u_pro" },
+      { cancelAt: null, cancelScheduled: false, canceledAt: null, comment: null, createdAt: "2026-07-01T00:00:00.000Z", customerId: "cus_s", email: "s@x.test", endedAt: null, feedback: null, id: "sub_2", status: "active", userId: "u_su" },
+      { cancelAt: null, cancelScheduled: false, canceledAt: "2026-07-15T00:00:00.000Z", comment: null, createdAt: "2026-06-01T00:00:00.000Z", customerId: "cus_r", email: "r@x.test", endedAt: "2026-07-01T00:00:00.000Z", feedback: null, id: "sub_3", status: "canceled", userId: "u_gone" },
     ],
   },
   users: [

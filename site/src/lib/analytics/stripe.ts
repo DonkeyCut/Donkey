@@ -78,6 +78,7 @@ export async function pullStripeSnapshot(since: string): Promise<AnalyticsStripe
       createdAt: isoOfUnix(sub.created),
       customerId: who.customerId,
       email: who.email,
+      endedAt: sub.ended_at !== null ? isoOfUnix(sub.ended_at) : null,
       feedback: sub.cancellation_details?.feedback ?? null,
       id: sub.id,
       status: sub.status,

@@ -470,6 +470,8 @@ export function buildBilling(
         day,
         detail: [sub.feedback, sub.comment].filter(Boolean).join(" · ") || null,
         email: sub.email,
+        ended: !isActiveProStatus(sub.status),
+        endsAt: sub.cancelAt ?? sub.endedAt,
         kind: "canceled",
         objectId: sub.id,
       });
@@ -503,6 +505,8 @@ export function buildBilling(
         day: charge.day,
         detail: charge.failure,
         email: charge.email,
+        ended: false,
+        endsAt: null,
         kind: "declined",
         objectId: charge.paymentIntentId,
       });

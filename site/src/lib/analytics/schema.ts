@@ -81,6 +81,8 @@ export const analyticsStripeSnapshotSchema = z.object({
       // When it ends (or ended), and when the person asked for that.
       cancelAt: z.string().nullable(),
       canceledAt: z.string().nullable(),
+      // When it stopped, once it has.
+      endedAt: z.string().nullable().catch(null),
       // What they told the portal on the way out.
       feedback: z.string().nullable(),
       comment: z.string().nullable(),
@@ -251,6 +253,10 @@ export const analyticsRollupSchema = z.object({
           amountMicros: z.string().nullable(),
           // The decline reason, or the cancel feedback and comment.
           detail: z.string().nullable(),
+          // For a cancel: when the subscription ends (or ended), and whether
+          // it has already stopped.
+          endsAt: z.string().nullable().catch(null),
+          ended: z.boolean().catch(false),
         }),
       ),
     })

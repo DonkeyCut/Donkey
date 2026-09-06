@@ -25,11 +25,11 @@ const snapshot: AnalyticsStripeSnapshot = {
   refunds: [{ amountMicros: "5000000", chargeId: "ch_2", day: "2026-09-03", id: "re_1" }],
   subscriptions: [
     // Live, and scheduled to end through the portal's cancel_at.
-    { cancelAt: "2026-09-08T00:00:00.000Z", cancelScheduled: true, canceledAt: "2026-09-02T10:00:00.000Z", comment: "Export broke.", createdAt: "2026-08-09T00:00:00.000Z", customerId: "cus_p", email: "p@x.test", feedback: "switched_service", id: "sub_1", status: "active", userId: "u_p" },
+    { cancelAt: "2026-09-08T00:00:00.000Z", cancelScheduled: true, canceledAt: "2026-09-02T10:00:00.000Z", comment: "Export broke.", createdAt: "2026-08-09T00:00:00.000Z", customerId: "cus_p", email: "p@x.test", endedAt: null, feedback: "switched_service", id: "sub_1", status: "active", userId: "u_p" },
     // Live, staying.
-    { cancelAt: null, cancelScheduled: false, canceledAt: null, comment: null, createdAt: "2026-09-01T00:00:00.000Z", customerId: "cus_q", email: "q@x.test", feedback: null, id: "sub_2", status: "active", userId: "u_q" },
+    { cancelAt: null, cancelScheduled: false, canceledAt: null, comment: null, createdAt: "2026-09-01T00:00:00.000Z", customerId: "cus_q", email: "q@x.test", endedAt: null, feedback: null, id: "sub_2", status: "active", userId: "u_q" },
     // Ended before the window.
-    { cancelAt: null, cancelScheduled: false, canceledAt: "2026-07-01T00:00:00.000Z", comment: null, createdAt: "2026-06-01T00:00:00.000Z", customerId: "cus_r", email: "r@x.test", feedback: null, id: "sub_3", status: "canceled", userId: "u_r" },
+    { cancelAt: null, cancelScheduled: false, canceledAt: "2026-07-01T00:00:00.000Z", comment: null, createdAt: "2026-06-01T00:00:00.000Z", customerId: "cus_r", email: "r@x.test", endedAt: "2026-07-01T00:00:00.000Z", feedback: null, id: "sub_3", status: "canceled", userId: "u_r" },
   ],
 };
 
@@ -77,6 +77,22 @@ describe("buildBilling", () => {
       ["2026-09-02", "canceled", "sub_1", "switched_service · Export broke."],
       ["2026-09-02", "declined", "pi_4", "Your card has insufficient funds."],
     ]);
+  });
+
+  test("a cancel event says where the subscription stands", () => {
+    const cancel = billing.events.find((e) => e.kind === "canceled");
+    expect([cancel?.ended, cancel?.endsAt]).toEqual([false, "2026-09-08T00:00:00.000Z"]);
+    const stopped = buildBilling(
+      {
+        ...snapshot,
+        subscriptions: [
+          { ...snapshot.subscriptions[2], canceledAt: "2026-09-01T00:00:00.000Z", endedAt: "2026-09-01T00:00:00.000Z" },
+        ],
+      },
+      days,
+    );
+    const gone = stopped.events.find((e) => e.kind === "canceled");
+    expect([gone?.ended, gone?.endsAt]).toEqual([true, "2026-09-01T00:00:00.000Z"]);
   });
 });
 
