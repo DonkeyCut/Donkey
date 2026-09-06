@@ -13,6 +13,7 @@ export type OnboardingState = {
   skipped: boolean;
   referralSources: string[];
   referralOther: string | null;
+  signupCreditsGranted: boolean;
 };
 
 type OnboardingUpdate =

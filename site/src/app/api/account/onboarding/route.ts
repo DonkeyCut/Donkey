@@ -13,17 +13,29 @@ import {
 } from "@/lib/onboarding/sequence";
 import { prisma } from "@/lib/prisma";
 
+type OnboardingRow = {
+  version: number;
+  completedAt: Date | null;
+  skipped: boolean;
+  referralSources: string[];
+  referralOther: string | null;
+};
+
 type OnboardingState = {
   version: number;
   completedAt: string | null;
   skipped: boolean;
   referralSources: string[];
   referralOther: string | null;
+  // Whether the signup credit grant landed on this account. An address that
+  // deleted an earlier account starts without it, and the credits slide says
+  // so.
+  signupCreditsGranted: boolean;
 };
 
 // An account that has never opened the sequence has no row; it reads as an
 // unfinished run of the current sequence rather than as an error.
-const UNSTARTED: OnboardingState = {
+const UNSTARTED: OnboardingRow = {
   version: ONBOARDING_VERSION,
   completedAt: null,
   skipped: false,
@@ -32,10 +44,9 @@ const UNSTARTED: OnboardingState = {
 };
 
 export const GET = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) => {
-  const row = await prisma.userOnboarding.findUnique({
-    where: { userId: request.donkey.userId },
-  });
-  return NextResponse.json(row ? toState(row) : UNSTARTED);
+  const userId = request.donkey.userId;
+  const row = await prisma.userOnboarding.findUnique({ where: { userId } });
+  return NextResponse.json(await toState(userId, row ?? UNSTARTED));
 });
 
 const updateSchema = z
@@ -79,21 +90,20 @@ export const PUT = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) =>
     create: { userId, version: ONBOARDING_VERSION, ...data },
     update: data,
   });
-  return NextResponse.json(toState(row));
+  return NextResponse.json(await toState(userId, row));
 });
 
-function toState(row: {
-  version: number;
-  completedAt: Date | null;
-  skipped: boolean;
-  referralSources: string[];
-  referralOther: string | null;
-}): OnboardingState {
+async function toState(userId: string, row: OnboardingRow): Promise<OnboardingState> {
+  const grant = await prisma.userCreditGrant.findFirst({
+    where: { userId, source: "signup" },
+    select: { id: true },
+  });
   return {
     version: row.version,
     completedAt: row.completedAt?.toISOString() ?? null,
     skipped: row.skipped,
     referralSources: row.referralSources,
     referralOther: row.referralOther,
+    signupCreditsGranted: grant !== null,
   };
 }
