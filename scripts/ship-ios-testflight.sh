@@ -67,6 +67,12 @@ else
   BUILD_ROOT="$SOURCE"
 fi
 
+# The model tests hold the phone to the site's contracts (the analytics
+# rollup fixture among them), so every build that ships reads what the
+# server serves.
+echo "==> Testing DonkeyKit"
+swift test --package-path "$BUILD_ROOT/apps/ios/DonkeyKit" --scratch-path "$ROOT/dist/ios-kit-build" --quiet
+
 cat > "$EXPORT_PLIST" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

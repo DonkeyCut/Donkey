@@ -25,6 +25,7 @@
     "eval:cut-headless": "bun run scripts/eval-cut-headless.ts",
     "email:dev": "email dev --dir src/emails --port 3001",
     "test": "bun test src packages/effects-kit/src packages/abexp/src",
+    "analytics:rollup-fixture": "bun run scripts/analytics-rollup-fixture.ts",
     "test:genvideo": "bun run scripts/genvideo-selftest.ts",
     "eval:genvideo": "bun run scripts/genvideo-eval.ts",
     "eval:cut-perf": "bun run scripts/eval-cut-perf.ts",

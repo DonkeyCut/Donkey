@@ -1,0 +1,207 @@
+{
+  "billing": {
+    "canceling": [
+      {
+        "comment": "Export broke.",
+        "customerId": "cus_p",
+        "email": "p@x.test",
+        "endsAt": "2026-09-08T00:00:00.000Z",
+        "feedback": "switched_service",
+        "requestedAt": "2026-08-31T10:00:00.000Z",
+        "subscriptionId": "sub_1"
+      }
+    ],
+    "churned": 1,
+    "dashboardUrl": "https://dashboard.stripe.com/test",
+    "days": [
+      "2026-08-30",
+      "2026-08-31",
+      "2026-09-01",
+      "2026-09-02"
+    ],
+    "events": [
+      {
+        "amountMicros": null,
+        "customerId": "cus_p",
+        "day": "2026-08-31",
+        "detail": "switched_service · Export broke.",
+        "email": "p@x.test",
+        "kind": "canceled",
+        "objectId": "sub_1"
+      },
+      {
+        "amountMicros": "20000000",
+        "customerId": "cus_d",
+        "day": "2026-08-31",
+        "detail": "Your card has insufficient funds.",
+        "email": "d@x.test",
+        "kind": "declined",
+        "objectId": "pi_3"
+      }
+    ],
+    "funded": 2,
+    "fundedMicros": "25000000",
+    "revenue": [
+      {
+        "cancels": 0,
+        "declinedMicros": "0",
+        "otherMicros": "0",
+        "proMicros": "20000000",
+        "refundedMicros": "0",
+        "topupMicros": "0"
+      },
+      {
+        "cancels": 1,
+        "declinedMicros": "20000000",
+        "otherMicros": "0",
+        "proMicros": "0",
+        "refundedMicros": "0",
+        "topupMicros": "0"
+      },
+      {
+        "cancels": 0,
+        "declinedMicros": "0",
+        "otherMicros": "0",
+        "proMicros": "0",
+        "refundedMicros": "0",
+        "topupMicros": "5000000"
+      },
+      {
+        "cancels": 0,
+        "declinedMicros": "0",
+        "otherMicros": "0",
+        "proMicros": "0",
+        "refundedMicros": "1000000",
+        "topupMicros": "0"
+      }
+    ],
+    "subscribers": 2,
+    "window": {
+      "abandonedCheckouts": 1,
+      "cancels": 1,
+      "declinedCustomers": 1,
+      "declinedMicros": "20000000",
+      "netMicros": "24000000",
+      "paidMicros": "25000000",
+      "refundedMicros": "1000000"
+    }
+  },
+  "days": [
+    "2026-08-30",
+    "2026-08-31",
+    "2026-09-01"
+  ],
+  "generatedAt": "2026-09-02T04:00:00.000Z",
+  "missing": [
+    {
+      "day": "2026-08-31",
+      "sources": [
+        "db",
+        "posthog"
+      ]
+    }
+  ],
+  "referrals": {
+    "days": [
+      {
+        "counts": [
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1
+        ],
+        "day": "2026-08-31",
+        "others": [
+          "a podcast"
+        ],
+        "respondents": 1
+      },
+      {
+        "counts": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "day": "2026-09-01",
+        "others": [],
+        "respondents": 0
+      }
+    ],
+    "sources": [
+      "discord",
+      "tiktok",
+      "instagram",
+      "youtube",
+      "reddit",
+      "search",
+      "friend",
+      "other"
+    ]
+  },
+  "sources": [
+    "inference",
+    "renders",
+    "copies",
+    "libraryAssets",
+    "templates",
+    "creditLedger",
+    "posthog"
+  ],
+  "users": [
+    {
+      "activity": [
+        0,
+        0,
+        64
+      ],
+      "balanceMicros": "0",
+      "email": "n@x.test",
+      "fundedMicros": "5000000",
+      "id": "u_new",
+      "name": "New Person",
+      "registeredAt": "2026-08-31T12:00:00.000Z",
+      "storageBytes": "0",
+      "storageQuotaBytes": 262144000
+    },
+    {
+      "activity": [
+        65,
+        0,
+        64
+      ],
+      "balanceMicros": "3000000",
+      "email": "p@x.test",
+      "fundedMicros": "20000000",
+      "id": "u_pro",
+      "name": "Pro Person",
+      "registeredAt": "2026-08-01T10:00:00.000Z",
+      "storageBytes": "1048576",
+      "storageQuotaBytes": 107374182400
+    },
+    {
+      "activity": [
+        2,
+        0,
+        2
+      ],
+      "balanceMicros": "500000",
+      "email": "s@x.test",
+      "id": "u_su",
+      "name": "Super Person",
+      "registeredAt": "2026-07-01T00:00:00.000Z",
+      "storageBytes": "0",
+      "storageQuotaBytes": null,
+      "superUser": true
+    }
+  ],
+  "version": 1
+}

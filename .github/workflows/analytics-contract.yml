@@ -1,0 +1,70 @@
+name: Analytics Contract
+
+# The phone decodes the analytics rollup the site's nightly pipeline writes.
+# The site test regenerates the rollup from the pipeline and fails when the
+# checked-in fixture is behind it; the DonkeyKit tests decode that fixture.
+# Together they fail any change that moves the rollup's shape without the
+# phone's model moving with it.
+#
+# The fixture's bytes follow whatever the pipeline imports (the referral
+# source list, the tier limits), so the site job runs on every site change.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - site/**
+      - apps/ios/DonkeyKit/**
+      - .github/workflows/analytics-contract.yml
+  push:
+    branches: [main]
+    paths:
+      - site/**
+      - apps/ios/DonkeyKit/**
+      - .github/workflows/analytics-contract.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: analytics-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  site:
+    name: Site analytics tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The pipeline module constructs its database client on import; the
+      # tests never open a connection, so a placeholder address is enough.
+      - name: Test
+        env:
+          DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+          DIRECT_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+        run: ./node_modules/.bin/bun test src/lib/analytics
+
+  donkeykit:
+    name: DonkeyKit tests
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Test
+        working-directory: apps/ios/DonkeyKit
+        run: swift test

@@ -197,6 +197,19 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 The camera shows its fallback state in the simulator; capture, torch, zoom,
 and HDR need a device.
 
+### The analytics contract
+
+The Analytics screen decodes the rollup the site's nightly pipeline writes,
+and the two sides are held together by one fixture. The site builds it by
+running the real consolidation over a small fixed record, so the JSON is what
+the server serves today; the checked-in copy lives with the DonkeyKit tests,
+and the site's tests fail while that copy is behind the pipeline. The DonkeyKit
+tests decode the copy through the phone's model. Changing what the rollup
+carries means regenerating the fixture from `site/` with
+`npm run analytics:rollup-fixture` and running the DonkeyKit tests; the
+Analytics Contract workflow runs both on every change to either side, and the
+TestFlight script runs the DonkeyKit tests before it archives.
+
 iOS commits never carry the ` [rebuild]` label — that label releases the Mac
 app.
 
