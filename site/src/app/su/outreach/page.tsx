@@ -397,7 +397,6 @@ export default function SuOutreachPage() {
                 className={cn(
                   "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors",
                   on ? "border-foreground" : "border-border text-muted-foreground hover:bg-muted/60",
-                  id && OUTREACH_WALL_REASONS.includes(id) && !on && "text-destructive",
                 )}
               >
                 {id ? OUTREACH_REASON_LABELS[id] : "All"}
