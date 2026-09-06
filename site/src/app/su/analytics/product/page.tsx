@@ -23,7 +23,6 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import { Skeleton } from "@/components/ui/skeleton";
 import type {
   AnalyticsBilling,
   AnalyticsReferrals,
@@ -34,6 +33,7 @@ import { REFERRAL_SOURCES } from "@/lib/onboarding/sequence";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { cn } from "@/lib/utils";
 import { DragBlock, useReorder } from "@/app/su/analytics/Reorder";
+import { SuStandIn } from "@/app/su/SuStandIn";
 import { useRowWindow } from "@/app/su/analytics/rowWindow";
 import { useAnalyticsRollup } from "@/queries/analytics";
 import { ApiError } from "@/queries/apiClient";
@@ -862,24 +862,7 @@ export default function SuAnalyticsPage() {
   const tiles = useReorder("su-analytics-tile-order", TILE_IDS);
   const cards = useReorder("su-analytics-card-order", CARD_IDS);
 
-  if (rollup.isPending) {
-    return (
-      <div className="space-y-6 pb-9">
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {Array.from({ length: 8 }, (_, i) => (
-            <Skeleton key={i} className="h-[104px] rounded-xl" />
-          ))}
-        </div>
-        <div className="grid gap-6 xl:grid-cols-2">
-          <Skeleton className="h-96 rounded-xl" />
-          <Skeleton className="h-96 rounded-xl" />
-          <Skeleton className="h-96 rounded-xl" />
-          <Skeleton className="h-96 rounded-xl" />
-        </div>
-        <Skeleton className="h-80 rounded-xl" />
-      </div>
-    );
-  }
+  if (rollup.isPending) return <SuStandIn />;
 
   if (rollup.error || !view || !rollup.data) {
     const noData = rollup.error instanceof ApiError && rollup.error.status === 404;

@@ -12,7 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
+import { SuStandIn } from "@/app/su/SuStandIn";
 import { useResetSetting, useSaveSetting, useSettings, type SettingRow } from "@/queries/settings";
 
 // Every registered setting, editable. The value on screen is what the product
@@ -21,7 +21,7 @@ import { useResetSetting, useSaveSetting, useSettings, type SettingRow } from "@
 export default function SuSettingsPage() {
   const settings = useSettings();
   if (!settings.data) {
-    return <Skeleton className="h-40 w-full max-w-2xl" />;
+    return <SuStandIn />;
   }
   if (settings.data.settings.length === 0) {
     return (

@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
+import { SuStandIn } from "@/app/su/SuStandIn";
 import { describeAudience } from "@donkeycut/abexp";
 import type { ExperimentStatus } from "@/lib/config/experiment";
 import type { MetricResult, VerdictState } from "@donkeycut/abexp";
@@ -58,7 +58,7 @@ export default function SuExperimentsListPage() {
     setDialogOpen(true);
   };
 
-  if (!experiments.data) return <Skeleton className="h-40 w-full" />;
+  if (!experiments.data) return <SuStandIn />;
 
   return (
     <div className="space-y-6 pb-9">
