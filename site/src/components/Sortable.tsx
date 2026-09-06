@@ -234,7 +234,7 @@ export function SortCard({
         onDragStart(e);
       }}
       className={cn(
-        "group relative h-full rounded-xl [&>div]:h-full",
+        "group relative h-full min-w-0 rounded-xl [&>div]:h-full",
         dragging &&
           "bg-muted/40 outline-2 outline-dashed -outline-offset-2 outline-muted-foreground/30 [&>*]:invisible",
         className,

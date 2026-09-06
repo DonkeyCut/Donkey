@@ -575,7 +575,7 @@ function ChartCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className={cn("rounded-xl border bg-card p-5", className)}>
+    <div className={cn("min-w-0 overflow-hidden rounded-xl border bg-card p-5", className)}>
       <p className="font-medium">{title}</p>
       <p className="text-sm text-muted-foreground">{subtitle}</p>
       <div className="mt-4">{children}</div>
