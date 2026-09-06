@@ -16,6 +16,7 @@ Supported product and engineering guides live in `docs/guides/`. This list is th
 - [Donkey Cut's AI Assistant](guides/cut/ai-assistant.md) — how a chat turn runs: the providers, the tool bridge into the editor, what the model knows, and the context budgets.
 - [Brief to Video](guides/cut/brief-to-video.md) — the director pipeline's strategy: story planning, the identity ladder that keeps a cast consistent, and where audio goes next.
 - [Local Compute](guides/cut/local-compute.md) — why a project the engine doesn't store still uses the Mac when there is one, and the rule that keeps its data where it lives regardless.
+- [Performance](guides/performance.md) — the frame budget, the four ways we keep the main thread clear, the memory budget, and how a change is measured before it ships.
 
 **Site and backend**
 
