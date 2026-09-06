@@ -280,11 +280,51 @@ async function writeSnapshot(): Promise<AnalyticsSnapshotFile> {
   return snapshot;
 }
 
+// One day's stored inputs to consolidation, null where a file was absent or
+// unreadable.
+export type AnalyticsDayFiles = {
+  db: AnalyticsDbDayFile | null;
+  posthog: AnalyticsPosthogDayFile | null;
+};
+
 async function consolidate(
   snapshot: AnalyticsSnapshotFile,
   posthogConfigured: boolean,
 ): Promise<AnalyticsRollup> {
-  const days = windowDays();
+  const rollup = await buildRollup({
+    billingDays: billingDays(),
+    days: windowDays(),
+    generatedAt: new Date().toISOString(),
+    posthogConfigured,
+    readDayFiles: async (day) => ({
+      db: readJson(await getObject(dayDbKey(day)), analyticsDbDayFileSchema),
+      posthog: posthogConfigured
+        ? readJson(await getObject(dayPosthogKey(day)), analyticsPosthogDayFileSchema)
+        : null,
+    }),
+    snapshot,
+  });
+  await putJson(ROLLUP_KEY, rollup);
+  return rollup;
+}
+
+// The whole rollup from its inputs. Day files come through the reader one
+// day at a time, so a 60-day window holds one day's ids at once; nothing here
+// touches storage or the clock. Every rollup in storage came out of this
+// function, so the fixture the phone's model is tested against comes out of
+// it too (rollup-fixture.ts): a change to what the dashboard is served
+// reaches that test in the same change.
+export async function buildRollup(input: {
+  snapshot: AnalyticsSnapshotFile;
+  // The activity window, oldest first; every user's activity aligns with it.
+  days: string[];
+  // The billing window, oldest first, ending today.
+  billingDays: string[];
+  readDayFiles: (day: string) => Promise<AnalyticsDayFiles>;
+  posthogConfigured: boolean;
+  generatedAt: string;
+}): Promise<AnalyticsRollup> {
+  const { days, snapshot } = input;
   const yesterday = days[days.length - 1];
 
   const masks = new Map<string, number[]>();
@@ -295,30 +335,26 @@ async function consolidate(
   for (let i = 0; i < days.length; i++) {
     const day = days[i];
     const absent: string[] = [];
+    const files = await input.readDayFiles(day);
 
-    const dbFile = readJson(await getObject(dayDbKey(day)), analyticsDbDayFileSchema);
-    if (!dbFile) {
+    if (!files.db) {
       absent.push("db");
     } else {
       for (const source of ANALYTICS_DB_SOURCES) {
         const bit = 1 << ANALYTICS_SOURCES.indexOf(source);
-        for (const id of dbFile.active[source] ?? []) {
+        for (const id of files.db.active[source] ?? []) {
           const mask = masks.get(id);
           if (mask) mask[i] |= bit;
         }
       }
     }
 
-    if (posthogConfigured) {
-      const posthogFile = readJson(
-        await getObject(dayPosthogKey(day)),
-        analyticsPosthogDayFileSchema,
-      );
-      if (!posthogFile) {
+    if (input.posthogConfigured) {
+      if (!files.posthog) {
         absent.push("posthog");
       } else {
         // Anonymous pre-sign-in distinct_ids match no snapshot user and drop out.
-        for (const id of posthogFile.activeDistinctIds) {
+        for (const id of files.posthog.activeDistinctIds) {
           const mask = masks.get(id);
           if (mask) mask[i] |= posthogBit;
         }
@@ -355,18 +391,16 @@ async function consolidate(
     })
     .sort((a, b) => (a.registeredAt < b.registeredAt ? 1 : -1));
 
-  const rollup: AnalyticsRollup = {
-    ...(snapshot.stripe ? { billing: buildBilling(snapshot.stripe, billingDays()) } : {}),
+  return {
+    ...(snapshot.stripe ? { billing: buildBilling(snapshot.stripe, input.billingDays) } : {}),
     days,
-    generatedAt: new Date().toISOString(),
+    generatedAt: input.generatedAt,
     missing,
     referrals: buildReferrals(snapshot, yesterday),
     sources: [...ANALYTICS_SOURCES],
     users,
     version: ANALYTICS_ROLLUP_VERSION,
   };
-  await putJson(ROLLUP_KEY, rollup);
-  return rollup;
 }
 
 // All-time paid charges per user, for the user list's funded column.
