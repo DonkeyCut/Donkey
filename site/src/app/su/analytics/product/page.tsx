@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowUpRight } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import {
   Area,
   AreaChart,
@@ -34,6 +34,7 @@ import { REFERRAL_SOURCES } from "@/lib/onboarding/sequence";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { cn } from "@/lib/utils";
 import { DragBlock, useReorder } from "@/app/su/analytics/Reorder";
+import { useRowWindow } from "@/app/su/analytics/rowWindow";
 import { useAnalyticsRollup } from "@/queries/analytics";
 import { ApiError } from "@/queries/apiClient";
 
@@ -42,12 +43,21 @@ import { ApiError } from "@/queries/apiClient";
 // any source bit for the day; "working" narrows to the DB event sources, i.e.
 // the user did something beyond opening the app.
 
+// Formatting a day goes through the locale machinery, which is slow enough
+// that a label per grid cell held the page for over a second. The rollup
+// names a few hundred distinct days, so each is formatted once.
+const dayLabels = new Map<string, string>();
 function formatDay(iso: string): string {
-  return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
+  let label = dayLabels.get(iso);
+  if (label === undefined) {
+    label = new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    });
+    dayLabels.set(iso, label);
+  }
+  return label;
 }
 
 const dollars = (micros: bigint | string) => Number(micros) / 1e6;
@@ -574,12 +584,10 @@ function ChartCard({
 function ActivityDot({
   mask,
   workBits,
-  label,
   unknown,
 }: {
   mask: number;
   workBits: number;
-  label: string;
   unknown: boolean;
 }) {
   const worked = (mask & workBits) !== 0;
@@ -596,7 +604,6 @@ function ActivityDot({
               ? "bg-[var(--chart-1)] opacity-40"
               : "bg-muted",
       )}
-      title={label}
     />
   );
 }
@@ -667,17 +674,35 @@ function ActivityGrid({
     (v) => USER_SORTS.some((option) => option.id === v),
   );
   const users = useMemo(() => rankUsers(rollup, workBits, sort), [rollup, workBits, sort]);
+  const body = useRef<HTMLTableSectionElement>(null);
+  const rows = useRowWindow(users.length, body);
 
-  const dotLabel = (email: string, day: string, mask: number) => {
-    if (missingDays.has(day)) return `${email} — ${formatDay(day)}: no data`;
-    if (mask === 0) return `${email} — ${formatDay(day)}: inactive`;
-    const sources = rollup.sources.filter((_, i) => (mask & (1 << i)) !== 0);
-    return `${email} — ${formatDay(day)}: ${sources.join(", ")}`;
-  };
   // Newest day sits in the leftmost column so the current dots are in view
   // before any horizontal scroll; each column keeps its index into the
   // activity masks.
-  const columns = rollup.days.map((day, i) => ({ day, i })).reverse();
+  const columns = useMemo(
+    () => rollup.days.map((day, i) => ({ day, i, unknown: missingDays.has(day) })).reverse(),
+    [rollup.days, missingDays],
+  );
+  const columnCount = columns.length + 1;
+
+  // A dot's tooltip is built when the pointer reaches it. Building one per
+  // cell up front was the bulk of the page's arrival cost.
+  const describeDot = (event: React.PointerEvent<HTMLTableSectionElement>) => {
+    const cell = (event.target as HTMLElement).closest<HTMLElement>("[data-dot]");
+    if (!cell || cell.title) return;
+    const user = users[Number(cell.dataset.user)];
+    const column = columns[Number(cell.dataset.col)];
+    if (!user || !column) return;
+    const mask = user.activity[column.i] ?? 0;
+    const when = formatDay(column.day);
+    cell.title = column.unknown
+      ? `${user.email} — ${when}: no data`
+      : mask === 0
+        ? `${user.email} — ${when}: inactive`
+        : `${user.email} — ${when}: ${rollup.sources.filter((_, i) => (mask & (1 << i)) !== 0).join(", ")}`;
+  };
+
   return (
     <div className="rounded-xl border bg-card p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -722,59 +747,71 @@ function ActivityGrid({
               ))}
             </tr>
           </thead>
-          <tbody>
-            {users.map((user) => (
-              <tr key={user.id}>
-                <td className="sticky left-0 z-10 bg-card py-1 pr-4 whitespace-nowrap">
-                  <span className="flex items-center gap-1.5">
-                    <span className="block max-w-56 truncate text-sm" title={user.name}>
-                      {user.email}
-                    </span>
-                    {user.superUser === true && (
-                      <span className="rounded-sm bg-muted px-1 text-[10px] text-muted-foreground">
-                        su
-                      </span>
-                    )}
-                  </span>
-                  <span className="block text-xs text-muted-foreground">
-                    {user.activeDays === 0
-                      ? "no activity"
-                      : `${user.activeDays} active ${user.activeDays === 1 ? "day" : "days"} · last ${formatDay(rollup.days[user.lastActive])}`}{" "}
-                    · joined {formatDay(user.registeredAt.slice(0, 10))} ·{" "}
-                    {formatMicros(user.balanceMicros)}
-                    {user.fundedMicros !== undefined && (
-                      <span className="text-emerald-700 dark:text-emerald-500">
-                        {" "}
-                        · paid {formatMicros(user.fundedMicros)}
-                      </span>
-                    )}
-                    {user.storageBytes !== undefined && (
-                      <span
-                        className={storageTone(Number(user.storageBytes), user.storageQuotaBytes)}
-                        title={
-                          user.storageQuotaBytes == null
-                            ? "unlimited storage"
-                            : `of ${formatGb(user.storageQuotaBytes)}`
-                        }
-                      >
-                        {" "}
-                        · {formatGb(Number(user.storageBytes))}
-                      </span>
-                    )}
-                  </span>
-                </td>
-                {columns.map(({ day, i }) => (
-                  <td key={day} className="p-0.5">
-                    <ActivityDot
-                      label={dotLabel(user.email, day, user.activity[i] ?? 0)}
-                      mask={user.activity[i] ?? 0}
-                      unknown={missingDays.has(day)}
-                      workBits={workBits}
-                    />
-                  </td>
-                ))}
+          <tbody ref={body} onPointerOver={describeDot}>
+            {rows.above > 0 && (
+              <tr aria-hidden>
+                <td colSpan={columnCount} className="p-0" style={{ height: rows.above }} />
               </tr>
-            ))}
+            )}
+            {users.slice(rows.start, rows.end).map((user, offset) => {
+              const index = rows.start + offset;
+              return (
+                <tr key={user.id} data-row="">
+                  <td className="sticky left-0 z-10 bg-card py-1 pr-4 whitespace-nowrap">
+                    <span className="flex items-center gap-1.5">
+                      <span className="block max-w-56 truncate text-sm" title={user.name}>
+                        {user.email}
+                      </span>
+                      {user.superUser === true && (
+                        <span className="rounded-sm bg-muted px-1 text-[10px] text-muted-foreground">
+                          su
+                        </span>
+                      )}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      {user.activeDays === 0
+                        ? "no activity"
+                        : `${user.activeDays} active ${user.activeDays === 1 ? "day" : "days"} · last ${formatDay(rollup.days[user.lastActive])}`}{" "}
+                      · joined {formatDay(user.registeredAt.slice(0, 10))} ·{" "}
+                      {formatMicros(user.balanceMicros)}
+                      {user.fundedMicros !== undefined && (
+                        <span className="text-emerald-700 dark:text-emerald-500">
+                          {" "}
+                          · paid {formatMicros(user.fundedMicros)}
+                        </span>
+                      )}
+                      {user.storageBytes !== undefined && (
+                        <span
+                          className={storageTone(Number(user.storageBytes), user.storageQuotaBytes)}
+                          title={
+                            user.storageQuotaBytes == null
+                              ? "unlimited storage"
+                              : `of ${formatGb(user.storageQuotaBytes)}`
+                          }
+                        >
+                          {" "}
+                          · {formatGb(Number(user.storageBytes))}
+                        </span>
+                      )}
+                    </span>
+                  </td>
+                  {columns.map(({ day, i, unknown }, col) => (
+                    <td key={day} className="p-0.5" data-dot data-user={index} data-col={col}>
+                      <ActivityDot
+                        mask={user.activity[i] ?? 0}
+                        unknown={unknown}
+                        workBits={workBits}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+            {rows.below > 0 && (
+              <tr aria-hidden>
+                <td colSpan={columnCount} className="p-0" style={{ height: rows.below }} />
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
