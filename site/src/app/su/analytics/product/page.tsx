@@ -434,29 +434,34 @@ function CancelMarker({ viewBox }: { viewBox?: { x: number; y: number; height: n
 }
 
 /** The revenue tooltip: net on the date row, the day's money rows, and the
- * cancel requests made that day: who, where the subscription stands now,
- * and what the person said on the way out. */
+ * cancel requests made that day: who, and where the subscription stands
+ * now. A day with no money shows only
+ * its cancels, and a day with nothing at all shows no tooltip. */
 function RevenueTooltipContent({
   events,
   ...props
 }: React.ComponentProps<typeof ChartTooltipContent> & { events: AnalyticsBilling["events"] }) {
   const point = props.payload?.[0]?.payload as RevenuePoint | undefined;
   const cancels = point ? events.filter((e) => e.kind === "canceled" && e.day === point.day) : [];
+  const hasMoney = props.payload?.some((item) => item.value !== 0) ?? false;
+  if (!hasMoney && cancels.length === 0) return null;
   return (
     <div className="grid gap-1.5">
-      <TotalTooltipContent
-        {...props}
-        className="max-w-80"
-        format={formatDollars}
-        total={() => (point ? netOf(point) : 0)}
-        formatter={(value, name, item) => (
-          <TooltipRow
-            color={item.color}
-            label={revenueConfig[name as keyof typeof revenueConfig]?.label ?? String(name)}
-            value={formatDollars(typeof value === "number" ? value : 0)}
-          />
-        )}
-      />
+      {hasMoney && (
+        <TotalTooltipContent
+          {...props}
+          className="max-w-80"
+          format={formatDollars}
+          total={() => (point ? netOf(point) : 0)}
+          formatter={(value, name, item) => (
+            <TooltipRow
+              color={item.color}
+              label={revenueConfig[name as keyof typeof revenueConfig]?.label ?? String(name)}
+              value={formatDollars(typeof value === "number" ? value : 0)}
+            />
+          )}
+        />
+      )}
       {cancels.length > 0 && (
         <div className="max-w-80 space-y-1.5 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
           {cancels.map((event) => (
@@ -466,9 +471,6 @@ function RevenueTooltipContent({
                 <span className="font-medium text-foreground">{cancelStatus(event)}</span>
               </p>
               <p className="text-muted-foreground">{event.email ?? "unknown customer"}</p>
-              {event.detail && (
-                <p className="line-clamp-3 text-muted-foreground">{event.detail}</p>
-              )}
             </div>
           ))}
         </div>
@@ -1359,7 +1361,7 @@ export default function SuAnalyticsPage() {
                           <span className="shrink-0 text-foreground">{cancelStatus(event)}</span>
                         )}
                         <span className="truncate">{event.email ?? "unknown customer"}</span>
-                        {event.detail && (
+                        {event.kind === "declined" && event.detail && (
                           <span className="min-w-0 flex-1 truncate" title={event.detail}>
                             {event.detail}
                           </span>
