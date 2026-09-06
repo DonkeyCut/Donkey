@@ -256,11 +256,11 @@ const SAME = 1e-4;
  * waits between them. The windows live on their own sink, whose pool holds
  * two of them: the one the pointer is in stays valid while the next lands.
  *
- * A drag faster than the fills outruns the windows. For that, the first fill
- * into a keyframe span also spreads `BACK_COARSE` frames over the whole span
- * at half the decode height, through a second small sink, so every position
- * in the span has a picture near it before the fine windows get there. The
- * fine frame replaces it the moment one lands.
+ * A drag faster than the fills outruns the windows. The moment it does, a
+ * second small sink spreads `BACK_COARSE` frames over the rest of the keyframe
+ * span at half the decode height, so every position in the span has a picture
+ * near it before the fine windows get there. The fine frame replaces it the
+ * moment one lands.
  */
 export const BACK_WINDOW = 10;
 /** Canvases the backward sink cycles: two windows, each with the frame a fill
@@ -509,6 +509,10 @@ interface BackWalk {
   landed: number;
   /** The keyframe the coarse frames were spread from. */
   coarseKt: number | null;
+  /** The stretch of the current keyframe span below the first window landed
+   * in it: from the keyframe to the frame under that window. A pointer asking
+   * inside it has outrun the windows, which is what the coarse spread is for. */
+  prefix: { kt: number; to: number } | null;
   /** The fill in flight. */
   run: Promise<void> | null;
 }
@@ -1329,10 +1333,30 @@ export class ClipFrameSource {
         sentFor: null,
         landed: 0,
         coarseKt: null,
+        prefix: null,
         run: null,
       };
     }
+    this.backSpread(this.back, t);
     this.pumpBack();
+  }
+
+  /**
+   * Send the coarse spread over the span's prefix once the pointer is in it.
+   *
+   * The spread is a second decode of the span, and on a decoder with no
+   * hardware behind it that second decode is what makes the fine window land
+   * late. So it waits for the moment it is for: the pointer below the window
+   * in flight, with nothing sharp to show. A creep the windows keep up with
+   * never pays for it.
+   */
+  private backSpread(b: BackWalk, t: number): void {
+    const p = b.prefix;
+    if (!p || b.coarseKt === p.kt) return;
+    if (t > p.to + SAME || t < p.kt - SAME) return;
+    if (this.hasExact(t)) return;
+    b.coarseKt = p.kt;
+    void this.backCoarse(b, p.kt, p.to);
   }
 
   private pumpBack(): void {
@@ -1393,9 +1417,7 @@ export class ClipFrameSource {
    *
    * The pass yields nothing before the window's first frame — the prefix is
    * decoded and discarded inside the sink — so the pool only ever cycles by a
-   * window per fill, which is what keeps the window before it valid. The
-   * first fill into a keyframe span also sends the coarse pass over the span,
-   * on its own sink, alongside.
+   * window per fill, which is what keeps the window before it valid.
    */
   private async backFill(b: BackWalk, top: number): Promise<void> {
     b.sentFor = top;
@@ -1408,10 +1430,10 @@ export class ClipFrameSource {
       const dt = this.frameDt;
       const start = Math.max(kt, top - (BACK_WINDOW - 1) * dt, 0);
       const sentAt = performance.now();
-      if (b.coarseKt !== kt && start - kt > 2 * dt) {
-        b.coarseKt = kt;
-        void this.backCoarse(b, kt, start - dt);
-      }
+      // The first window into a span names the prefix under it; the spread
+      // over that prefix goes out from `backSpread` if the pointer gets there
+      // before the windows do.
+      if (b.prefix?.kt !== kt) b.prefix = start - kt > 2 * dt ? { kt, to: start - dt } : null;
       this.backSink ??= frameSink(
         this.track,
         { height: this.height },
