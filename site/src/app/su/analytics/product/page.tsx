@@ -414,20 +414,22 @@ function cancelStatus(event: BillingEvent): string {
   return day ? `ends ${day}` : "ending";
 }
 
-/** A dot at the top of the plot on a day with cancel requests. Drawn as the
- * label of an invisible reference line, whose box is the plot's full height
- * at that day's x. */
-function CancelMarker({ viewBox }: { viewBox?: { x: number; y: number } }) {
+/** An × on a day with cancel requests, centered in the plot's height. Drawn
+ * as the label of an invisible reference line, whose box is the plot's full
+ * height at that day's x. It sits inside the plot, so hovering it raises the
+ * day's tooltip like any bar, and it takes no pointer events or selection of
+ * its own. A halo in the card color keeps it legible over a bar. */
+function CancelMarker({ viewBox }: { viewBox?: { x: number; y: number; height: number } }) {
   if (!viewBox) return null;
+  const cx = viewBox.x;
+  const cy = viewBox.y + viewBox.height / 2;
+  const r = 3.5;
+  const d = `M${cx - r} ${cy - r}L${cx + r} ${cy + r}M${cx + r} ${cy - r}L${cx - r} ${cy + r}`;
   return (
-    <circle
-      cx={viewBox.x}
-      cy={viewBox.y - 5}
-      r={3.5}
-      fill="var(--destructive)"
-      stroke="var(--card)"
-      strokeWidth={1.5}
-    />
+    <g pointerEvents="none" style={{ userSelect: "none" }} aria-hidden>
+      <path d={d} fill="none" stroke="var(--card)" strokeLinecap="round" strokeWidth={4.5} />
+      <path d={d} fill="none" stroke="var(--destructive)" strokeLinecap="round" strokeWidth={2} />
+    </g>
   );
 }
 
@@ -1301,7 +1303,17 @@ export default function SuAnalyticsPage() {
               }
             >
               <ChartContainer className="max-h-56 w-full" config={revenueConfig}>
-                <BarChart accessibilityLayer data={revenue} margin={{ left: -16, top: 12 }}>
+                {/* The money and the declined bars are two stacks, which the
+                    chart would set side by side in each day's band; a gap
+                    equal to a slot lays them over each other, so the bar
+                    sits on the band's center with the hover band and the
+                    cancel dot. */}
+                <BarChart
+                  accessibilityLayer
+                  barGap="-80%"
+                  data={revenue}
+                  margin={{ left: -16 }}
+                >
                   <CartesianGrid vertical={false} />
                   <XAxis
                     axisLine={false}
