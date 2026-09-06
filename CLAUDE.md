@@ -12,6 +12,7 @@ Never infer semantic intent by string matching raw user input. Do not add phrase
 ## Performance
 
 Performance comes first. Everything we ship has to be fast on the machines people edit on, and a change that makes the preview, the timeline, or the app slower is a regression whatever else it adds.
+`docs/guides/performance.md` is the guide: the frame budget, the techniques, and how a change is measured.
 
 - Work scales with what is on screen and what the person is doing, never with the size of the project. Draw and decode the visible part, queue the rest behind it, and skip what nothing shows.
 - Keep the main thread and the frame loop clear: one animation frame per tick, no synchronous decodes or layout reads inside a hot path, no allocation per frame.
