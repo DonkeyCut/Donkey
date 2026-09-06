@@ -351,15 +351,15 @@ const totalRegisteredConfig = {
   totalRegistered: { label: "Total registered", color: "var(--chart-1)" },
 } satisfies ChartConfig;
 
-// Paid money in the series hues; refunds in the status red below the
-// baseline; declined attempts in neutral ink with a hatch, since they are a
-// state and never revenue.
+// Paid money in the series hues; refunds in their own hue below the
+// baseline; declined attempts in faded neutral ink, since they are a state
+// and never revenue. Cancel requests are the status red, which no bar uses.
 const revenueConfig = {
   pro: { label: "Pro", color: "var(--chart-1)" },
   topups: { label: "Top-ups", color: "var(--chart-2)" },
   other: { label: "Other", color: "var(--chart-3)" },
-  refunds: { label: "Refunded", color: "var(--destructive)" },
-  declined: { label: "Declined", color: "var(--muted-foreground)" },
+  refunds: { label: "Refunded", color: "var(--chart-5)" },
+  declined: { label: "Declined", color: "color-mix(in oklab, var(--muted-foreground) 45%, transparent)" },
 } satisfies ChartConfig;
 
 type RevenuePoint = {
@@ -394,8 +394,36 @@ function deriveRevenue(billing: AnalyticsBilling): RevenuePoint[] {
 const netOf = (point: Pick<RevenuePoint, "pro" | "topups" | "other" | "refunds">) =>
   point.pro + point.topups + point.other + point.refunds;
 
+type BillingEvent = AnalyticsBilling["events"][number];
+
+/** Where a canceled subscription stands now: still running until its end
+ * date, or already stopped. */
+function cancelStatus(event: BillingEvent): string {
+  const day = event.endsAt ? formatDay(event.endsAt.slice(0, 10)) : null;
+  if (event.ended) return day ? `ended ${day}` : "ended";
+  return day ? `ends ${day}` : "ending";
+}
+
+/** A dot at the top of the plot on a day with cancel requests. Drawn as the
+ * label of an invisible reference line, whose box is the plot's full height
+ * at that day's x. */
+function CancelMarker({ viewBox }: { viewBox?: { x: number; y: number } }) {
+  if (!viewBox) return null;
+  return (
+    <circle
+      cx={viewBox.x}
+      cy={viewBox.y - 5}
+      r={3.5}
+      fill="var(--destructive)"
+      stroke="var(--card)"
+      strokeWidth={1.5}
+    />
+  );
+}
+
 /** The revenue tooltip: net on the date row, the day's money rows, and the
- * cancel requests made that day with what the person said on the way out. */
+ * cancel requests made that day: who, where the subscription stands now,
+ * and what the person said on the way out. */
 function RevenueTooltipContent({
   events,
   ...props
@@ -418,15 +446,18 @@ function RevenueTooltipContent({
         )}
       />
       {cancels.length > 0 && (
-        <div className="max-w-80 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
-          <p className="font-medium text-destructive">
-            {cancels.length === 1 ? "1 cancel request" : `${cancels.length} cancel requests`}
-          </p>
+        <div className="max-w-80 space-y-1.5 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
           {cancels.map((event) => (
-            <p key={event.objectId ?? event.email ?? event.day} className="mt-1 text-muted-foreground">
-              {event.email ?? "unknown customer"}
-              {event.detail ? ` · ${event.detail}` : ""}
-            </p>
+            <div key={event.objectId ?? event.email ?? event.day}>
+              <p className="flex items-center justify-between gap-3">
+                <span className="font-medium text-destructive">canceled</span>
+                <span className="font-medium text-foreground">{cancelStatus(event)}</span>
+              </p>
+              <p className="text-muted-foreground">{event.email ?? "unknown customer"}</p>
+              {event.detail && (
+                <p className="line-clamp-3 text-muted-foreground">{event.detail}</p>
+              )}
+            </div>
           ))}
         </div>
       )}
@@ -1234,17 +1265,6 @@ export default function SuAnalyticsPage() {
             >
               <ChartContainer className="max-h-56 w-full" config={revenueConfig}>
                 <BarChart accessibilityLayer data={revenue} margin={{ left: -16, top: 12 }}>
-                  <defs>
-                    <pattern
-                      id="revenue-declined-hatch"
-                      width="6"
-                      height="6"
-                      patternTransform="rotate(45)"
-                      patternUnits="userSpaceOnUse"
-                    >
-                      <line x1="0" y1="0" x2="0" y2="6" stroke="var(--color-declined)" strokeWidth="2" />
-                    </pattern>
-                  </defs>
                   <CartesianGrid vertical={false} />
                   <XAxis
                     axisLine={false}
@@ -1267,14 +1287,8 @@ export default function SuAnalyticsPage() {
                       <ReferenceLine
                         key={point.day}
                         x={point.day}
-                        stroke="var(--destructive)"
-                        strokeDasharray="3 3"
-                        label={{
-                          fill: "var(--destructive)",
-                          fontSize: 10,
-                          position: "top",
-                          value: point.cancels === 1 ? "canceled" : `${point.cancels} canceled`,
-                        }}
+                        stroke="none"
+                        label={<CancelMarker />}
                       />
                     ))}
                   <Bar dataKey="pro" fill="var(--color-pro)" maxBarSize={24} stackId="money" />
@@ -1283,12 +1297,7 @@ export default function SuAnalyticsPage() {
                     <Bar dataKey="other" fill="var(--color-other)" maxBarSize={24} stackId="money" />
                   )}
                   <Bar dataKey="refunds" fill="var(--color-refunds)" maxBarSize={24} stackId="money" />
-                  <Bar
-                    dataKey="declined"
-                    fill="url(#revenue-declined-hatch)"
-                    maxBarSize={24}
-                    stackId="declined"
-                  />
+                  <Bar dataKey="declined" fill="var(--color-declined)" maxBarSize={24} stackId="declined" />
                   <ChartLegend content={<ChartLegendContent />} />
                 </BarChart>
               </ChartContainer>
@@ -1314,6 +1323,9 @@ export default function SuAnalyticsPage() {
                             ? "canceled"
                             : `${formatMicros(event.amountMicros ?? "0")} declined`}
                         </StripeLink>
+                        {event.kind === "canceled" && (
+                          <span className="shrink-0 text-foreground">{cancelStatus(event)}</span>
+                        )}
                         <span className="truncate">{event.email ?? "unknown customer"}</span>
                         {event.detail && (
                           <span className="min-w-0 flex-1 truncate" title={event.detail}>
