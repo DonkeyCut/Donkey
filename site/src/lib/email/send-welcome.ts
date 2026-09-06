@@ -14,14 +14,19 @@ import {
   unsubscribeActionUrl,
   unsubscribePageUrl,
 } from "@/lib/email/unsubscribe";
-import { signupAppCredits } from "@/lib/onboarding/sequence";
 import { prisma } from "@/lib/prisma";
 
 // Sends the one-time welcome email. Two layers keep it single-send: the row
 // claim below is the permanent record (only the caller whose conditional
 // update flips the null actually sends), and Resend's idempotency key covers a
 // crash between claim release and retry for 24 hours.
-export async function sendWelcomeEmail(user: EmailUser): Promise<void> {
+// `credits` is the amount the signup grant landed, or null when the address
+// had already received it on an earlier account; the email names it only when
+// it is there.
+export async function sendWelcomeEmail(
+  user: EmailUser,
+  credits: string | null,
+): Promise<void> {
   if (!isResendConfigured()) {
     console.log("[email] RESEND_API_KEY not set; skipping welcome email", {
       userId: user.id,
@@ -59,7 +64,7 @@ export async function sendWelcomeEmail(user: EmailUser): Promise<void> {
       replyTo: emailFrom() || from,
       subject: "Thanks for signing up ❤️",
       react: WelcomeEmail({
-        credits: signupAppCredits,
+        credits,
         name: firstName,
         unsubscribeUrl: unsubscribePageUrl(user.id),
       }),

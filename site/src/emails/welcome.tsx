@@ -23,7 +23,8 @@ import { DonkeyMark } from "./_components/DonkeyMark";
 
 type WelcomeEmailProps = {
   name: string;
-  credits: string;
+  // Null when the account received no signup credits.
+  credits: string | null;
   unsubscribeUrl: string;
 };
 
@@ -60,10 +61,12 @@ export default function WelcomeEmail({
               The editor will always have a free version, and the entire
               project is open source.
             </Text>
-            <Text className="text-[15px] leading-relaxed">
-              I also added ${credits} in AI credits to your account so you can
-              try AI Chat or generate videos, images, audio, and more.
-            </Text>
+            {credits !== null && (
+              <Text className="text-[15px] leading-relaxed">
+                I also added ${credits} in AI credits to your account so you
+                can try AI Chat or generate videos, images, audio, and more.
+              </Text>
+            )}
             <Text className="text-[15px] leading-relaxed">
               If you enjoy using Donkey Cut, I&apos;d really appreciate a ⭐ on
               GitHub. If you have questions, feedback, or just want to say hi,

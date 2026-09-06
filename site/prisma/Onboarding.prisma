@@ -20,3 +20,17 @@ model UserOnboarding {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 }
+
+// What stays behind when an account is deleted: a hash of its address, and
+// the credits it was granted and spent. Signup reads it so an address that
+// already received its signup credits starts a second account with none.
+// Rows carry no foreign key; they outlive the user they came from.
+model DeletedAccount {
+  // sha256 of the lowercased address, so the table holds no email.
+  emailHash     String   @id
+  userId        String
+  signedUpAt    DateTime
+  deletedAt     DateTime @default(now())
+  grantedMicros BigInt   @default(0)
+  chargedMicros BigInt   @default(0)
+}

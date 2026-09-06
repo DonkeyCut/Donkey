@@ -7,6 +7,7 @@ import { deletePrefix, INFERENCE_PREFIX, R2NotConfiguredError } from "@/cut/serv
 import { getStripe, StripeNotConfiguredError } from "@/lib/billing/stripe";
 import { getResend, isResendConfigured } from "@/lib/email/resend";
 import { defineJob, JobFailure } from "@/lib/jobs/registry";
+import { deletedAccountKey } from "@/lib/onboarding/deleted-account";
 import { prisma } from "@/lib/prisma";
 
 // Deletes an account and everything it owns. Order matters: the Stripe
@@ -15,9 +16,11 @@ import { prisma } from "@/lib/prisma";
 // contact, then the Cut cloud content — per-project and per-asset cascades,
 // which also clear R2 objects and HLS ladder records — then the user-keyed
 // rows that carry no foreign key, an R2 sweep of anything left under the
-// user's prefixes, and finally the user row, whose FK cascades take sessions,
-// accounts, credits, billing, onboarding, and email settings. Every step is
-// idempotent, so a queue redelivery resumes where the last attempt stopped.
+// user's prefixes, then the record the address leaves behind so a second
+// signup under it gets no signup credits, and finally the user row, whose FK
+// cascades take sessions, accounts, credits, billing, onboarding, and email
+// settings. Every step is idempotent, so a queue redelivery resumes where the
+// last attempt stopped.
 export const deleteUserJob = defineJob(
   z.object({ email: z.string().trim().email() }),
   async ({ email }) => {
@@ -86,6 +89,23 @@ export const deleteUserJob = defineJob(
     } catch (e) {
       if (!(e instanceof R2NotConfiguredError)) throw e;
     }
+
+    const credits = await prisma.userCreditAccount.findUnique({
+      where: { userId: user.id },
+      select: { lifetimeGrantedMicros: true, lifetimeChargedMicros: true },
+    });
+    const emailHash = deletedAccountKey(user.email);
+    const record = {
+      userId: user.id,
+      signedUpAt: user.createdAt,
+      grantedMicros: credits?.lifetimeGrantedMicros ?? BigInt(0),
+      chargedMicros: credits?.lifetimeChargedMicros ?? BigInt(0),
+    };
+    await prisma.deletedAccount.upsert({
+      where: { emailHash },
+      create: { emailHash, ...record },
+      update: record,
+    });
 
     await prisma.user.delete({ where: { id: user.id } });
 
