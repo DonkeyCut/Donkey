@@ -31,14 +31,19 @@ export function GuidesMenu() {
     else s.setGuidesHidden(!s.guidesHidden);
   };
   return (
-    <div className="mr-2 flex items-center">
+    <div
+      className={cn(
+        "mr-2 flex items-center overflow-hidden rounded-md border border-border",
+        showing && "bg-accent text-foreground"
+      )}
+    >
       <Button
         variant="ghost"
         size="icon-sm"
         aria-label={showing ? "Hide guides" : "Show guides"}
         title={showing ? "Hide guides (⌘;)" : "Show guides (⌘;)"}
         aria-pressed={showing}
-        className={cn("rounded-r-none", showing && "bg-accent text-foreground")}
+        className="rounded-r-none"
         onClick={toggle}
       >
         <Grid3x3 strokeWidth={1.5} />
@@ -51,7 +56,7 @@ export function GuidesMenu() {
               size="icon-sm"
               aria-label="Guide presets"
               title="Guide presets"
-              className={cn("w-4 rounded-l-none", showing && "bg-accent text-foreground")}
+              className="w-4 rounded-l-none"
             />
           }
         >
