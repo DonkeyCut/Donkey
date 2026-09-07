@@ -623,6 +623,7 @@ export function Editor({
         s.aspect !== last.aspect ||
         s.fadeIn !== (last.fadeIn ?? 0) ||
         s.fadeOut !== (last.fadeOut ?? 0) ||
+        s.background !== last.background ||
         s.publish.caption !== last.publish?.caption ||
         s.publish.tags !== last.publish?.tags ||
         s.publish.soundTitle !== last.publish?.soundTitle ||
