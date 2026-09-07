@@ -16,8 +16,8 @@ import { DonkeyMark } from "./_components/DonkeyMark";
 
 // The one email a new account gets: a personal note from David. Sent by
 // src/lib/email/send-welcome.ts; preview with `npm run email:dev`. The credit
-// amount arrives as a prop so src/lib/onboarding/sequence.ts stays its single
-// source. This module stays pure — the react-email preview server bundles it
+// amount arrives as a prop: it is whatever the signup grant landed, sized by
+// the signupCredits setting. This module stays pure — the react-email preview server bundles it
 // on its own, so everything it needs comes in as props and asset/link URLs are
 // absolute.
 

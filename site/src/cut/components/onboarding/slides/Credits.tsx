@@ -3,33 +3,33 @@
 import { useEffect, useRef } from "react";
 
 import { burstConfetti } from "@/cut/components/onboarding/confetti";
-import { signupAppCredits } from "@/lib/onboarding/sequence";
 
 // The signup grant already landed when the account was created, so this slide
-// never grants anything — it says what's there. That's as true on a replay as
-// on a first run, so the words don't change between them; the burst fires every
-// time the slide is reached. An account whose address already received the
-// grant on an earlier, deleted account has none, and the slide says that.
-export function CreditsSlide({ granted }: { granted: boolean }) {
+// never grants anything — it says what's there: the USD the grant carried, read
+// from the account. That's as true on a replay as on a first run, so the words
+// don't change between them; the burst fires every time the slide is reached.
+// An account with no grant — its address already had one on an earlier,
+// deleted account, or the signup-credits setting grants nothing — gets the
+// slide without an amount.
+export function CreditsSlide({ credits }: { credits: string | null }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    if (!granted) return;
+    if (credits === null) return;
     return burstConfetti(canvas);
-  }, [granted]);
+  }, [credits]);
 
-  if (!granted) {
+  if (credits === null) {
     return (
       <div className="relative flex flex-col items-center text-center">
         <div className="relative max-w-[900px]">
           <h2 className="text-[clamp(26px,4.4vw,52px)] font-light leading-[1.02] tracking-[-0.03em]">
-            Welcome back
+            Welcome
           </h2>
           <p className="mx-auto mt-4 max-w-[460px] text-left text-[16px] leading-[1.55] text-[#454545]">
-            Signup credits came with your first account. Top up or go Pro to
-            generate video, audio and images.
+            Top up or go Pro to generate video, audio and images.
           </p>
         </div>
       </div>
@@ -53,7 +53,7 @@ export function CreditsSlide({ granted }: { granted: boolean }) {
             balance, not on the offer. */}
         <h2 className="flex flex-wrap items-baseline justify-center gap-x-4 leading-[1.02] tracking-[-0.03em]">
           <span className="text-[clamp(40px,7.4vw,84px)] font-semibold text-coral tabular-nums">
-            ${signupAppCredits}
+            ${credits}
           </span>
           <span className="text-[clamp(26px,4.4vw,52px)] font-light">
             in AI credits is on us

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { creditMicrosToString } from "@/lib/credits/amounts";
 import {
   withDonkeyAuth,
   type DonkeyAuthenticatedRequest,
@@ -27,10 +28,10 @@ type OnboardingState = {
   skipped: boolean;
   referralSources: string[];
   referralOther: string | null;
-  // Whether the signup credit grant landed on this account. An address that
-  // deleted an earlier account starts without it, and the credits slide says
-  // so.
-  signupCreditsGranted: boolean;
+  // USD the signup grant landed on this account, or null when none did: the
+  // address deleted an earlier account, or the setting grants nothing. The
+  // credits slide names this amount.
+  signupCredits: string | null;
 };
 
 // An account that has never opened the sequence has no row; it reads as an
@@ -96,7 +97,7 @@ export const PUT = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) =>
 async function toState(userId: string, row: OnboardingRow): Promise<OnboardingState> {
   const grant = await prisma.userCreditGrant.findFirst({
     where: { userId, source: "signup" },
-    select: { id: true },
+    select: { originalAmountMicros: true },
   });
   return {
     version: row.version,
@@ -104,6 +105,6 @@ async function toState(userId: string, row: OnboardingRow): Promise<OnboardingSt
     skipped: row.skipped,
     referralSources: row.referralSources,
     referralOther: row.referralOther,
-    signupCreditsGranted: grant !== null,
+    signupCredits: grant ? creditMicrosToString(grant.originalAmountMicros) : null,
   };
 }

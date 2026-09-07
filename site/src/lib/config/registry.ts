@@ -10,6 +10,8 @@ import {
 } from "@donkeycut/abexp";
 import { z } from "zod";
 
+import { maxCreditGrantDollars, maxCreditGrantExpiryDays } from "@/lib/credits/top-up";
+
 // The settings registry: every runtime tunable the product has, declared once
 // with a schema and a default. A value resolves default < override < variant
 // (src/lib/config/resolve.ts); su edits the override, an experiment supplies
@@ -51,7 +53,25 @@ export const SETTINGS = defineSettings({
     description:
       "The bars a verdict is called against, and how long an ended experiment keeps being recomputed.",
   },
+  signupCredits: {
+    schema: z
+      .object({
+        // USD the signup hook grants a new account; 0 grants nothing.
+        dollars: z.number().int().min(0).max(maxCreditGrantDollars),
+        // Days the grant stays spendable; null keeps it forever.
+        expiresAfterDays: z.number().int().min(1).max(maxCreditGrantExpiryDays).nullable(),
+      })
+      .strict(),
+    default: { dollars: 0, expiresAfterDays: 7 },
+    public: false,
+    title: "Signup credits",
+    description: "USD a new account is granted at signup, and how many days the grant lives.",
+  },
 });
+
+// The settings su shows on its Product tab: what an account gets. The
+// settings tab under Experiments still lists every key.
+export const PRODUCT_SETTING_KEYS = ["signupCredits"] as const satisfies readonly SettingKey[];
 
 export type SettingKey = keyof typeof SETTINGS;
 export type Settings = SettingsOf<typeof SETTINGS>;
