@@ -41,24 +41,36 @@ model UserCreditGrant {
   @@map("user_credit_grant")
 }
 
-// Credit given by hand waits here until the person claims it from the email
-// they were sent. The claim makes the grant, with the lifetime counted from
-// the claim; until then nothing reaches the balance.
+// A credit offer: credit promised to an account, landing as a grant when the
+// account claims it. Kinds differ in what makes the offer and what claims it:
+// a manual one is claimed from the email it was sent in, a promotion's by the
+// act it rewards, within its window. The row carries what was promised, so a
+// later change to a setting leaves a shown offer as shown, and every kind
+// shares the one shape: a new promotion is a setting and code.
 model CreditOffer {
   id               String           @id @default(cuid())
   userId           String
   user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // What made the offer: "manual" from su, or the promotion's key.
+  kind             String           @default("manual")
   amountMicros     BigInt
+  // The credit's life once claimed: a fixed moment, or days from the claim;
+  // neither keeps it forever.
+  expiresAt        DateTime?
   expiresAfterDays Int?
+  // The last moment the offer can be claimed; null keeps it open.
+  closesAt         DateTime?
   description      String?
-  offeredByUserId  String
+  // Whatever else the kind promised, in the kind's own shape.
+  terms            Json?
+  offeredByUserId  String?
   emailSentAt      DateTime?
   claimedAt        DateTime?
   grantId          String?          @unique
   grant            UserCreditGrant? @relation(fields: [grantId], references: [id], onDelete: SetNull)
   createdAt        DateTime         @default(now())
 
-  @@index([userId])
+  @@index([userId, kind])
   @@map("credit_offer")
 }
 

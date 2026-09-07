@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+import type { CreditOffer } from "@/generated/prisma/client";
 import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
 import { grantCredits } from "@/lib/credits/inference";
 import { creditGrantExpiry } from "@/lib/credits/top-up";
@@ -10,6 +11,9 @@ import { prisma } from "@/lib/prisma";
 // domain-separated derivation of the auth secret, the same shape as the
 // unsubscribe link. The claim itself also needs the offered account's session.
 const TOKEN_DOMAIN = "donkey-credit-offer-v1";
+
+// The kind su makes by hand; a promotion's offers carry the promotion's key.
+export const MANUAL_OFFER_KIND = "manual";
 
 function signature(offerId: string): Buffer {
   const secret = process.env.BETTER_AUTH_SECRET;
@@ -55,6 +59,7 @@ export async function createCreditOffer(input: {
         claimedAt: null,
         emailSentAt: null,
         expiresAfterDays: input.expiresAfterDays,
+        kind: MANUAL_OFFER_KIND,
         userId: input.user.id,
       },
     })) ??
@@ -63,6 +68,7 @@ export async function createCreditOffer(input: {
         amountMicros: input.amountMicros,
         description: input.description,
         expiresAfterDays: input.expiresAfterDays,
+        kind: MANUAL_OFFER_KIND,
         offeredByUserId: input.offeredByUserId,
         userId: input.user.id,
       },
@@ -81,28 +87,47 @@ export async function createCreditOffer(input: {
 
 export class CreditOfferNotYoursError extends Error {}
 
-// Makes the grant for a claimed offer. The grant dedupes on the offer id, so
-// a second click returns the first claim.
-export async function claimCreditOffer(offerId: string, userId: string) {
-  const offer = await prisma.creditOffer.findUnique({ where: { id: offerId } });
-  if (!offer) return null;
-  if (offer.userId !== userId) throw new CreditOfferNotYoursError();
+/** Whether an offer can still be claimed now. */
+export function creditOfferOpen(offer: { claimedAt: Date | null; closesAt: Date | null }, now: Date): boolean {
+  return offer.claimedAt === null && (offer.closesAt === null || now.getTime() <= offer.closesAt.getTime());
+}
+
+/** Lands an offer as a grant and records the claim. The grant dedupes on
+ * its source id, so landing twice returns the first grant; a kind whose
+ * offers must land once per account keys the id on the account. */
+export async function landCreditOffer(
+  offer: CreditOffer,
+  grant: { source: string; sourceId: string; description: string },
+) {
   if (offer.claimedAt && offer.grantId) {
-    const grant = await prisma.userCreditGrant.findUnique({ where: { id: offer.grantId } });
-    if (grant) return { grant, offer };
+    const existing = await prisma.userCreditGrant.findUnique({ where: { id: offer.grantId } });
+    if (existing) return { grant: existing, offer };
   }
-  const grant = await grantCredits({
+  const landed = await grantCredits({
     amountMicros: offer.amountMicros,
-    description: offer.description ?? "Manual credit grant",
-    expiresAt: creditGrantExpiry(offer.expiresAfterDays),
-    metadata: { expiresAfterDays: offer.expiresAfterDays, offerId: offer.id, offeredByUserId: offer.offeredByUserId },
-    source: "manual_dollar",
-    sourceId: `offer:${offer.id}`,
-    userId,
+    description: offer.description ?? grant.description,
+    expiresAt: offer.expiresAt ?? creditGrantExpiry(offer.expiresAfterDays),
+    metadata: { kind: offer.kind, offerId: offer.id, offeredByUserId: offer.offeredByUserId },
+    source: grant.source,
+    sourceId: grant.sourceId,
+    userId: offer.userId,
   });
   const claimed = await prisma.creditOffer.update({
-    data: { claimedAt: new Date(), grantId: grant.id },
+    data: { claimedAt: new Date(), grantId: landed.id },
     where: { id: offer.id },
   });
-  return { grant, offer: claimed };
+  return { grant: landed, offer: claimed };
+}
+
+// Claims a manual offer from its email link. An email token never names a
+// promotion's offer; those land from the act they reward.
+export async function claimCreditOffer(offerId: string, userId: string) {
+  const offer = await prisma.creditOffer.findUnique({ where: { id: offerId } });
+  if (!offer || offer.kind !== MANUAL_OFFER_KIND) return null;
+  if (offer.userId !== userId) throw new CreditOfferNotYoursError();
+  return landCreditOffer(offer, {
+    description: "Manual credit grant",
+    source: "manual_dollar",
+    sourceId: `offer:${offer.id}`,
+  });
 }
