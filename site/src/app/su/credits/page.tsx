@@ -21,10 +21,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SETTINGS } from "@/lib/config/registry";
 import {
+  creditGrantExpiryPresets,
   creditTopUpDefaultDollars,
   creditTopUpPresetsDollars,
   maxCreditGrantDollars,
+  maxCreditGrantExpiryDays,
 } from "@/lib/credits/top-up";
 import { useAccount, useGrantCredits } from "@/queries/credits";
 
@@ -33,6 +36,17 @@ import { useAccount, useGrantCredits } from "@/queries/credits";
 // maxCreditGrantDollars to guard against typos.
 const presetDollars = creditTopUpPresetsDollars;
 
+// How long the grant lives: a preset, a custom day count, or never. The pick
+// starts on the lifetime the signup grant defaults to. An empty custom field
+// stands for never.
+const defaultExpiryDays = SETTINGS.signupCredits.default.expiresAfterDays;
+
+function describeExpiry(days: number | null): string {
+  if (days === null) return "never expires";
+  const preset = creditGrantExpiryPresets.find((p) => p.days === days);
+  return `expires in ${preset ? preset.label : `${days} days`}`;
+}
+
 export default function SuCreditsPage() {
   const account = useAccount();
   const grant = useGrantCredits();
@@ -40,6 +54,7 @@ export default function SuCreditsPage() {
   // super user edits the field we track their override here.
   const [emailOverride, setEmailOverride] = useState<string | null>(null);
   const [amount, setAmount] = useState(String(creditTopUpDefaultDollars));
+  const [expiry, setExpiry] = useState(defaultExpiryDays === null ? "" : String(defaultExpiryDays));
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [lastResult, setLastResult] = useState<string | null>(null);
 
@@ -63,22 +78,34 @@ export default function SuCreditsPage() {
     amountDollars > 0 &&
     amountDollars <= maxCreditGrantDollars;
 
+  const expiresAfterDays = expiry.trim() === "" ? null : Number(expiry);
+  const expiryValid =
+    expiresAfterDays === null ||
+    (Number.isInteger(expiresAfterDays) &&
+      expiresAfterDays >= 1 &&
+      expiresAfterDays <= maxCreditGrantExpiryDays);
+  const expiryLabel = describeExpiry(expiresAfterDays);
+
   const submit = () => {
-    if (!amountValid) {
+    if (!amountValid || !expiryValid) {
       return;
     }
     setLastResult(null);
     grant.mutate(
       {
         amountDollars,
+        expiresAfterDays,
         ...(grantingToSelf
           ? { userId: account.data.userId }
           : { email: overrideEmail }),
       },
       {
         onSuccess: (result) => {
+          const expires = result.grant.expiresAt
+            ? `expires ${new Date(result.grant.expiresAt).toLocaleDateString()}`
+            : "never expires";
           setLastResult(
-            `Added $${amountDollars} to ${result.targetUser.email} — new balance $${result.balance.balance}.`,
+            `Added $${amountDollars} to ${result.targetUser.email} (${expires}) — new balance $${result.balance.balance}.`,
           );
           // Reset back to the default recipient (the current user).
           setEmailOverride(null);
@@ -137,8 +164,41 @@ export default function SuCreditsPage() {
             </div>
           </div>
 
+          <div className="space-y-2">
+            <Label htmlFor="grant-expiry">Expires</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              {creditGrantExpiryPresets.map((preset) => (
+                <Button
+                  key={preset.days}
+                  onClick={() => setExpiry(String(preset.days))}
+                  type="button"
+                  variant={expiry === String(preset.days) ? "default" : "outline"}
+                >
+                  {preset.label}
+                </Button>
+              ))}
+              <Button
+                onClick={() => setExpiry("")}
+                type="button"
+                variant={expiry.trim() === "" ? "default" : "outline"}
+              >
+                Never
+              </Button>
+              <Input
+                className="max-w-[7rem]"
+                id="grant-expiry"
+                max={maxCreditGrantExpiryDays}
+                min={1}
+                onChange={(event) => setExpiry(event.target.value)}
+                placeholder="Days"
+                type="number"
+                value={expiry}
+              />
+            </div>
+          </div>
+
           <Button
-            disabled={grant.isPending || !amountValid}
+            disabled={grant.isPending || !amountValid || !expiryValid}
             onClick={() => setConfirmOpen(true)}
           >
             {grant.isPending ? "Granting…" : `Grant $${amountDollars}`}
@@ -151,7 +211,8 @@ export default function SuCreditsPage() {
                 <DialogDescription>
                   Grant <span className="font-medium">${amountDollars}</span> in
                   credits to{" "}
-                  <span className="font-medium">{recipientLabel}</span>?
+                  <span className="font-medium">{recipientLabel}</span>? The
+                  grant {expiryLabel}.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>

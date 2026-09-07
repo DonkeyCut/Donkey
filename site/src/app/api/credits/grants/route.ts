@@ -3,18 +3,24 @@ import { z } from "zod";
 
 import { creditMicrosToString, creditStringToMicros } from "@/lib/credits/amounts";
 import { getCreditBalance, grantCredits } from "@/lib/credits/inference";
-import { maxCreditGrantDollars } from "@/lib/credits/top-up";
+import {
+  creditGrantExpiry,
+  maxCreditGrantDollars,
+  maxCreditGrantExpiryDays,
+} from "@/lib/credits/top-up";
 import { notFoundResponse, withSuperUser } from "@/lib/donkey-api-auth";
 import { prisma } from "@/lib/prisma";
 
 // The target is identified by userId (grant to self) or by email (grant to
 // another user). At least one is required. A single grant is capped to guard
-// against typos.
+// against typos. The caller states how long the grant lives; null keeps it
+// forever.
 const creditGrantRequestSchema = z
   .object({
     amountDollars: z.coerce.number().int().positive().max(maxCreditGrantDollars),
     description: z.string().trim().min(1).max(500).optional(),
     email: z.string().trim().email().optional(),
+    expiresAfterDays: z.number().int().min(1).max(maxCreditGrantExpiryDays).nullable(),
     sourceId: z.string().trim().min(1).max(160).optional(),
     userId: z.string().trim().min(1).optional(),
   })
@@ -61,8 +67,10 @@ export const POST = withSuperUser(async (request) => {
   const grant = await grantCredits({
     amountMicros,
     description,
+    expiresAt: creditGrantExpiry(parsed.data.expiresAfterDays),
     metadata: {
       amountDollars: String(parsed.data.amountDollars),
+      expiresAfterDays: parsed.data.expiresAfterDays,
       grantedByUserId: request.donkey.userId,
       targetUserId: targetUser.id,
     },
@@ -77,6 +85,7 @@ export const POST = withSuperUser(async (request) => {
     creditMicrosGranted: amountMicros.toString(),
     creditsGranted: creditMicrosToString(amountMicros),
     grant: {
+      expiresAt: grant.expiresAt?.toISOString() ?? null,
       id: grant.id,
       source: grant.source,
       sourceId: grant.sourceId,

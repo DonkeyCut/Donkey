@@ -96,9 +96,15 @@ export function useGrantCredits() {
     mutationFn: (input: {
       amountDollars: number;
       email?: string;
+      // Days until the grant expires; null keeps it forever.
+      expiresAfterDays: number | null;
       userId?: string;
     }) =>
-      apiFetch<{ balance: CreditBalance; targetUser: { email: string } }>(
+      apiFetch<{
+        balance: CreditBalance;
+        grant: { expiresAt: string | null };
+        targetUser: { email: string };
+      }>(
         "/api/credits/grants",
         { body: JSON.stringify(input), method: "POST" },
       ),
