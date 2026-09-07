@@ -16,13 +16,18 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { CUT_PRO } from "@/app/cut/_components/landing/cutPricingPlans";
+import { formatDeadline, minutesLeft } from "@/cut/components/SubscribeBonusPill";
 import { track } from "@/lib/analytics";
 import { formatUsd } from "@/lib/credits/format-usd";
+import { formatCreditExpiry } from "@/lib/credits/top-up";
+import { useSubscribeBonus } from "@/queries/credits";
 
 export function ProCard() {
   const pro = useProSubscription();
   const checkout = useStartCheckout();
   const portal = useOpenBillingPortal();
+  const bonus = useSubscribeBonus();
 
   if (pro.isLoading) {
     return (
@@ -39,6 +44,8 @@ export function ProCard() {
 
   const data = pro.data;
   const isActive = data?.isActive ?? false;
+  const offer = bonus.data;
+  const offerOpen = offer?.status === "open";
 
   return (
     <Card>
@@ -72,7 +79,19 @@ export function ProCard() {
                 Cancels at the end of the current period.
               </div>
             ) : null}
+            {offer?.status === "claimed" ? (
+              <div>Your {formatUsd(offer.dollars)} subscribe bonus landed in your credits.</div>
+            ) : null}
           </div>
+        </CardContent>
+      ) : offer && offerOpen ? (
+        <CardContent className="text-sm text-foreground">
+          Subscribe for {CUT_PRO.price} by {formatDeadline(offer.closesAt)} and get a one-time{" "}
+          {formatUsd(offer.dollars)} in credits
+          {offer.creditsExpireAt
+            ? `, spendable through ${formatCreditExpiry(new Date(offer.creditsExpireAt))}`
+            : ""}
+          .
         </CardContent>
       ) : null}
       <CardFooter className="gap-3">
@@ -94,6 +113,13 @@ export function ProCard() {
             disabled={checkout.isPending}
             onClick={() => {
               track("pro_checkout_started");
+              if (offer && offerOpen) {
+                track("subscribe_bonus_checkout_started", {
+                  dollars: Number(offer.dollars),
+                  minutesLeft: minutesLeft(offer.closesAt, Date.now()),
+                  source: "settings",
+                });
+              }
               checkout.mutate(undefined, {
                 onSuccess: (result) => window.location.assign(result.url),
               });

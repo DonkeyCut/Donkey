@@ -7,6 +7,7 @@ import {
 } from "@/lib/billing/stripe";
 import { creditMicrosPerCent, zeroCreditMicros } from "@/lib/credits/amounts";
 import { grantCredits } from "@/lib/credits/inference";
+import { claimSubscribeBonus, SUBSCRIBE_BONUS_METADATA_KEY } from "@/lib/credits/subscribe-bonus-claim";
 import { prisma } from "@/lib/prisma";
 
 // Donkey Pro: the Mac app subscription.
@@ -121,6 +122,13 @@ export async function syncProSubscription(
     },
     where: { userId },
   });
+
+  // A subscription whose checkout was taken up from the subscribe bonus
+  // offer names the offer; the claim dedupes, so every later event is a no-op.
+  const offerId = subscription.metadata?.[SUBSCRIBE_BONUS_METADATA_KEY];
+  if (isActiveProStatus(subscription.status) && offerId) {
+    await claimSubscribeBonus(userId, offerId);
+  }
 
   // Grant the period's included allowance once it is active and the period is
   // known. expiresAt = period end means it is spent before never-expiring

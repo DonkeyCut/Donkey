@@ -79,11 +79,32 @@ export const SETTINGS = defineSettings({
     title: "Credit expiry notice",
     description: "How many days before signup or manually granted credits expire the account is emailed.",
   },
+  subscribeBonus: {
+    schema: z
+      .object({
+        // USD granted for subscribing to Pro while the offer is open; 0 makes
+        // no offer.
+        dollars: z.number().int().min(0).max(maxCreditGrantDollars),
+        // Share of the signup grant spent before the offer opens.
+        spentPercent: z.number().int().min(1).max(100),
+        // Hours the offer stays open once the app has shown it.
+        windowHours: z.number().int().min(1).max(24 * 30),
+        // The last UTC day the bonus credit is spendable (YYYY-MM-DD); null
+        // keeps it forever.
+        creditsExpireOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD").nullable(),
+      })
+      .strict(),
+    default: { dollars: 0, spentPercent: 50, windowHours: 24, creditsExpireOn: null },
+    public: true,
+    title: "Subscribe bonus",
+    description:
+      "Credit offered to an account that has spent this share of its signup grant, for subscribing to Pro within the window. The credit is spendable through the last day.",
+  },
 });
 
 // The settings su shows on its Product tab: what an account gets. The
 // settings tab under Experiments still lists every key.
-export const PRODUCT_SETTING_KEYS = ["signupCredits", "creditExpiryNotice"] as const satisfies readonly SettingKey[];
+export const PRODUCT_SETTING_KEYS = ["signupCredits", "creditExpiryNotice", "subscribeBonus"] as const satisfies readonly SettingKey[];
 
 export type SettingKey = keyof typeof SETTINGS;
 export type Settings = SettingsOf<typeof SETTINGS>;
