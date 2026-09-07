@@ -29,6 +29,8 @@ import {
 } from "@/lib/analytics/schema";
 import { cutLimitsForTier } from "@/cut/server/cloud/limits";
 import { isActiveProStatus } from "@/lib/billing/pro-subscription";
+import { zeroCreditMicros } from "@/lib/credits/amounts";
+import { lapsedCreditByUser } from "@/lib/credits/inference";
 import { REFERRAL_SOURCES } from "@/lib/onboarding/sequence";
 import { prisma } from "@/lib/prisma";
 
@@ -238,6 +240,10 @@ async function writeSnapshot(): Promise<AnalyticsSnapshotFile> {
       : {}),
   }));
 
+  // The stored balance still carries a lapsed grant until the account is
+  // read, charged, or reached by the nightly sweep; the snapshot takes the
+  // lapsed amount off so every balance is what the account can spend.
+  const lapsed = await lapsedCreditByUser();
   const balances = (
     await fetchAllPages((cursorArgs) =>
       prisma.userCreditAccount.findMany({
@@ -248,7 +254,9 @@ async function writeSnapshot(): Promise<AnalyticsSnapshotFile> {
       }),
     )
   ).map((account) => ({
-    balanceMicros: account.balanceMicros.toString(),
+    balanceMicros: (
+      account.balanceMicros - (lapsed.get(account.userId) ?? zeroCreditMicros)
+    ).toString(),
     userId: account.userId,
   }));
 

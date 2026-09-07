@@ -26,12 +26,13 @@ export async function provisionSignupGrants(user: EmailUser): Promise<void> {
     });
   }
   const credits = returning || setting.dollars <= 0 ? null : String(setting.dollars);
+  const expiresAt = creditGrantExpiry(setting.expiresAfterDays) ?? null;
   // Settle the steps independently: one failing must not block the others,
   // and signup itself must never fail because a bonus grant hiccupped.
   const results = await Promise.allSettled([
     credits === null
       ? Promise.resolve()
-      : grantSignupAppCredits(user.id, credits, setting.expiresAfterDays),
+      : grantSignupAppCredits(user.id, credits, expiresAt),
     seedStarterProject(user.id),
     seedFontsFolder(user.id),
     sendWelcomeEmail(user, credits),
@@ -51,14 +52,14 @@ export async function provisionSignupGrants(user: EmailUser): Promise<void> {
 export async function grantSignupAppCredits(
   userId: string,
   credits: string,
-  expiresAfterDays: number | null,
+  expiresAt: Date | null,
 ) {
   // grantCredits dedupes on (source, sourceId, userId), so this is a no-op on
   // re-run.
   return grantCredits({
     amountMicros: creditStringToMicros(credits),
     description: "Signup bonus credits",
-    expiresAt: creditGrantExpiry(expiresAfterDays),
+    expiresAt: expiresAt ?? undefined,
     source: "signup",
     sourceId: `signup-app-credit:${userId}`,
     userId,

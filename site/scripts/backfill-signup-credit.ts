@@ -11,6 +11,7 @@
  */
 
 import { getGlobalSetting } from "../src/lib/config/effective";
+import { creditGrantExpiry } from "../src/lib/credits/top-up";
 import { grantSignupAppCredits } from "../src/lib/onboarding/signup-grants";
 import { prisma } from "../src/lib/prisma";
 
@@ -27,7 +28,11 @@ if (setting.dollars <= 0) {
 }
 
 for (const userId of userIds) {
-  const grant = await grantSignupAppCredits(userId, String(setting.dollars), setting.expiresAfterDays);
+  const grant = await grantSignupAppCredits(
+    userId,
+    String(setting.dollars),
+    creditGrantExpiry(setting.expiresAfterDays) ?? null,
+  );
   console.log(`${userId}: grant ${grant.id} (${grant.originalAmountMicros} micros)`);
 }
 

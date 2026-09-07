@@ -257,6 +257,59 @@ export async function expireCredits(userId: string, now = new Date()) {
   ));
 }
 
+// Expiry is otherwise applied when an account is read or charged, so an
+// account nobody touched after its grant lapsed still carries the lapsed
+// amount in balanceMicros. The nightly sweep settles those accounts here.
+// Each account is its own serializable transaction, the same path a live read
+// takes; an account whose transaction keeps losing to live charges is logged
+// and skipped, and the sweep stops at its time budget so the job never runs
+// past its worker. Whatever is left waits for the next run, or for the
+// account's next read.
+export async function expireAllCredits(now = new Date(), budgetMs = 240_000) {
+  const startedAt = Date.now();
+  const overdue = await prisma.userCreditGrant.findMany({
+    distinct: ["userId"],
+    orderBy: { expiresAt: "asc" },
+    select: { userId: true },
+    where: {
+      expiresAt: { lte: now },
+      remainingAmountMicros: { gt: zeroCreditMicros },
+      status: "active",
+    },
+  });
+  let settled = 0;
+  let failed = 0;
+  let index = 0;
+  for (; index < overdue.length; index++) {
+    if (Date.now() - startedAt > budgetMs) break;
+    const { userId } = overdue[index];
+    try {
+      await expireCredits(userId, now);
+      settled++;
+    } catch (error) {
+      failed++;
+      console.error("[credit-expiry] failed to settle an account", { error, userId });
+    }
+  }
+  return { failed, remaining: overdue.length - index, settled };
+}
+
+// What each account could spend right now, with grants past their expiry
+// taken off even where the sweep has not reached the account yet. A read,
+// so a snapshot of every balance costs one aggregate on top of the page scan.
+export async function lapsedCreditByUser(now = new Date()) {
+  const rows = await prisma.userCreditGrant.groupBy({
+    _sum: { remainingAmountMicros: true },
+    by: ["userId"],
+    where: {
+      expiresAt: { lte: now },
+      remainingAmountMicros: { gt: zeroCreditMicros },
+      status: "active",
+    },
+  });
+  return new Map(rows.map((row) => [row.userId, row._sum.remainingAmountMicros ?? zeroCreditMicros]));
+}
+
 export async function assertCanUseInference(input: CreditPreflightInput) {
   await ensureCreditAccount(input.userId);
   await expireCredits(input.userId);
