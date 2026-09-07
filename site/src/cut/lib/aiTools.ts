@@ -1,5 +1,6 @@
 "use client";
 
+import { GUIDE_IDS, isGuideId, safeAreaOf, sanitizeGuideLines, type GuideId } from "./guides";
 import {
   ALL_EFFECT_IDS,
   autoGradeFromImageData,
@@ -3783,6 +3784,26 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       s.setAspect(a);
       const f = frameOf(a);
       return { aspect: a, frame: `${f.w}x${f.h}` };
+  },
+
+  set_guides: (s, input) => {
+      if (!Array.isArray(input.show)) throw new ToolError("show must be a list of guide ids.");
+      const bad = input.show.filter((id) => !isGuideId(id));
+      if (bad.length)
+        throw new ToolError(`Unknown guide ${bad.join(", ")} — pick from ${GUIDE_IDS.join(", ")}.`);
+      const show = input.show as GuideId[];
+      if (input.lines !== undefined) {
+        s.setGuideLines(sanitizeGuideLines(input.lines));
+        if (!show.includes("custom")) show.push("custom");
+      }
+      s.setGuides(show);
+      s.setGuidesHidden(false);
+      const after = useEditor.getState();
+      return {
+        guides: after.guides,
+        safeArea: safeAreaOf(after.guides, after.aspect),
+        ...(after.guides.includes("custom") ? { customLines: after.guideLines } : {}),
+      };
   },
 
   set_project_fade: (s, input) => {

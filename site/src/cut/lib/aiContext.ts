@@ -1,5 +1,6 @@
 "use client";
 
+import { guideGeometry, safeAreaOf } from "./guides";
 import { hasOverlayAnim, retimeOf, speedCurveOf, type ClipSound, type SpeedNode } from "@donkeycut/effects-kit";
 import { chatOwner } from "./chatAssets";
 import { useGenerate } from "./generate";
@@ -232,6 +233,24 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
       ...(s.fadeIn > 0 ? { fadeIn: r(s.fadeIn) } : {}),
       ...(s.fadeOut > 0 ? { fadeOut: r(s.fadeOut) } : {}),
       background: s.background,
+      // The guides showing on the preview, with the room they leave for
+      // graphics: safeArea and keepOut are frame fractions (x, y, w, h).
+      ...(s.guides.length > 0
+        ? {
+            guides: {
+              on: s.guides,
+              safeArea: safeAreaOf(s.guides, s.aspect),
+              ...(s.guides.includes("custom") ? { customLines: s.guideLines } : {}),
+              keepOut: guideGeometry(s.guides, s.aspect).boxes.map((b) => ({
+                label: b.label,
+                x: r(b.x),
+                y: r(b.y),
+                w: r(b.w),
+                h: r(b.h),
+              })),
+            },
+          }
+        : {}),
     },
     playhead: r(playheadAt()),
     skimmer: skimAt() === null ? null : r(skimAt()!),
