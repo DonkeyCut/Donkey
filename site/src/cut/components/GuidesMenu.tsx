@@ -39,21 +39,21 @@ export function GuidesMenu() {
     >
       <Button
         variant="ghost"
-        size="icon-sm"
+        size="icon-xs"
         aria-label={showing ? "Hide guides" : "Show guides"}
         title={showing ? "Hide guides (⌘;)" : "Show guides (⌘;)"}
         aria-pressed={showing}
         className="rounded-r-none"
         onClick={toggle}
       >
-        <Grid3x3 strokeWidth={1.5} />
+        <Grid3x3 className="size-5" strokeWidth={1.5} />
       </Button>
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
             <Button
               variant="ghost"
-              size="icon-sm"
+              size="icon-xs"
               aria-label="Guide presets"
               title="Guide presets"
               className="w-4 rounded-l-none"
