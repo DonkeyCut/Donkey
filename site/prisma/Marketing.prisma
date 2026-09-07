@@ -61,3 +61,54 @@ model OutreachTemplate {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+// A promotion is one email written on su and sent to a segment: an audience
+// (the experiment rules, minus country) and, optionally, everyone who already
+// received earlier promotions left out. The words live here so a draft can be
+// edited, test-sent and counted before anything goes out. Sending resolves the
+// segment into recipient rows once and hands them to the promotion-send job.
+
+model Promotion {
+  id                  String               @id @default(cuid())
+  name                String
+  subject             String
+  body                String
+  ctaLabel            String?
+  ctaUrl              String?
+  // "bulk" sends from the list address, "personal" from the operator's own.
+  sender              String               @default("bulk")
+  // Who gets it (src/lib/config/audience via @donkeycut/abexp). {} admits everyone.
+  audience            Json                 @default("{}")
+  // Earlier promotions whose recipients are skipped.
+  excludePromotionIds String[]             @default([])
+  // "draft" | "sending" | "sent"
+  status              String               @default("draft")
+  startedAt           DateTime?
+  finishedAt          DateTime?
+  actorUserId         String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  recipients          PromotionRecipient[]
+
+  @@index([status, createdAt])
+}
+
+// One row per account a promotion resolved to. sentAt marks the send; error
+// holds why one did not go out. The pair is unique, so a retried send can
+// never mail an account twice.
+model PromotionRecipient {
+  id          String    @id @default(cuid())
+  promotionId String
+  promotion   Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sentAt      DateTime?
+  // Sends tried so far; the last error stays on the row. A row is given up
+  // after MAX_SEND_ATTEMPTS (src/lib/marketing/promotionInput.ts).
+  attempts    Int       @default(0)
+  error       String?
+  createdAt   DateTime  @default(now())
+
+  @@unique([promotionId, userId])
+  @@index([promotionId, sentAt])
+}

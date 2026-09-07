@@ -128,6 +128,10 @@ ship at a looser p-value or demand a larger sample without a deploy. The
 exposure property rides every PostHog event, so any funnel there breaks down
 by variant as well.
 
+## Promotions
+
+A promotion is one email from su to an audience, minus anyone an earlier promotion reached; the Pro offers behind it (subscribe bonus, allowance multiplier) are Product-tab settings.
+
 ## Verification
 
 The registry, audience, assignment, experiment schema, statistics and verdict

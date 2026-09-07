@@ -9,6 +9,7 @@ import {
   OUTREACH_REASONS,
   OUTREACH_STATUSES,
 } from "@/lib/marketing/campaigns";
+import { firstNameOf } from "@/lib/marketing/placeholders";
 import {
   OutreachNotSendableError,
   sendOutreachEmail,
@@ -217,7 +218,7 @@ export const POST = withSuperUser(async (request) => {
         vars: {
           balance: creditMicrosToString(outreach.balanceMicros),
           email: outreach.user.email,
-          firstName: outreach.user.name.trim().split(/\s+/)[0] || outreach.user.name,
+          firstName: firstNameOf(outreach.user.name),
           name: outreach.user.name,
           spent: creditMicrosToString(outreach.spentMicros),
           storage: formatBytes(Number(outreach.storageBytes)),

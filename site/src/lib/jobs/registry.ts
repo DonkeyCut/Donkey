@@ -8,6 +8,7 @@ import { creditExpiryNoticeJob } from "@/lib/jobs/credit-expiry-notice";
 import { deleteUserJob } from "@/lib/jobs/delete-user";
 import { experimentResultsJob } from "@/lib/jobs/experiment-results";
 import { outreachScanJob } from "@/lib/jobs/outreach-scan";
+import { promotionSendJob } from "@/lib/jobs/promotion-send";
 
 // Thrown by an executor when the job can never succeed — the message lands on
 // the job row as its error. Anything else thrown is transient: the claim is
@@ -36,4 +37,5 @@ export const jobKinds: Record<string, JobKind> = {
   "delete-user": deleteUserJob,
   "experiment-results": experimentResultsJob,
   "outreach-scan": outreachScanJob,
+  "promotion-send": promotionSendJob,
 };

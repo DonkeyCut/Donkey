@@ -28,6 +28,7 @@ model User {
   onboarding    UserOnboarding?
   emailSettings UserEmailSettings?
   outreach      UserOutreach[]
+  promotionsReceived    PromotionRecipient[]
   experimentAssignments ExperimentAssignment[]
   experimentHoldout ExperimentHoldout?
 

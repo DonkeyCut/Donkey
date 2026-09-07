@@ -26,6 +26,20 @@ export const OUTREACH_PLACEHOLDERS = [
   "storage",
 ] as const satisfies readonly (keyof OutreachVars)[];
 
+/** What a promotion may name: the account itself, nothing that costs a query
+ * per recipient. */
+export type PromotionVars = {
+  firstName: string;
+  name: string;
+  email: string;
+};
+
+export const PROMOTION_PLACEHOLDERS = [
+  "firstName",
+  "name",
+  "email",
+] as const satisfies readonly (keyof PromotionVars)[];
+
 const PLACEHOLDER = /\{\{\s*([a-zA-Z]+)\s*\}\}/g;
 
 export class UnknownPlaceholderError extends Error {
@@ -35,13 +49,27 @@ export class UnknownPlaceholderError extends Error {
   }
 }
 
+/** First word of an account name, the way a note addresses someone. */
+export function firstNameOf(name: string): string {
+  return name.trim().split(/\s+/)[0] || name;
+}
+
+function fill(text: string, vars: Record<string, string>, allowed: readonly string[]): string {
+  return text.replace(PLACEHOLDER, (_match, key: string) => {
+    if (!allowed.includes(key)) {
+      throw new UnknownPlaceholderError(key);
+    }
+    return vars[key];
+  });
+}
+
 /** Fills a subject or body for one recipient. An unknown placeholder throws
  * rather than mailing the braces out, so a typo is caught before the send. */
 export function fillOutreachText(text: string, vars: OutreachVars): string {
-  return text.replace(PLACEHOLDER, (_match, key: string) => {
-    if (!(OUTREACH_PLACEHOLDERS as readonly string[]).includes(key)) {
-      throw new UnknownPlaceholderError(key);
-    }
-    return vars[key as keyof OutreachVars];
-  });
+  return fill(text, vars, OUTREACH_PLACEHOLDERS);
+}
+
+/** The promotion fill: the same rule over the smaller set. */
+export function fillPromotionText(text: string, vars: PromotionVars): string {
+  return fill(text, vars, PROMOTION_PLACEHOLDERS);
 }

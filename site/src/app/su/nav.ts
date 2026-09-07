@@ -4,6 +4,7 @@ import {
   FlaskConical,
   ListChecks,
   Mail,
+  Megaphone,
   Package,
   UserRound,
 } from "lucide-react";
@@ -72,6 +73,13 @@ export const SU_NAV: SuSurface[] = [
     icon: Mail,
     title: "Outreach",
     Action: ScanOutreachButton,
+  },
+  {
+    href: "/promotions",
+    label: "Promotions",
+    icon: Megaphone,
+    title: "Promotions",
+    description: "One email to a segment of accounts.",
   },
   {
     href: "/experiments",

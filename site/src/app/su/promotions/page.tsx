@@ -1,0 +1,165 @@
+"use client";
+
+import { useState } from "react";
+import { describeAudience } from "@donkeycut/abexp";
+
+import { PromotionDialog } from "@/app/su/promotions/PromotionDialog";
+import { SuStandIn } from "@/app/su/SuStandIn";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import type { PromotionSender, PromotionStatus } from "@/lib/marketing/promotionInput";
+import { useDeletePromotion, usePromotions, type PromotionSummary } from "@/queries/promotions";
+
+type BadgeVariant = "default" | "secondary" | "outline" | "destructive";
+
+const STATUS_VARIANT: Record<PromotionStatus, BadgeVariant> = {
+  draft: "outline",
+  sending: "default",
+  sent: "secondary",
+};
+
+const when = (iso: string) => new Date(iso).toLocaleString();
+
+// A dialog opens on a row to edit it, or on a copy of one (its exclusions
+// pre-set to the original) to write the next promotion to everyone else.
+type Opened = { key: number; existing: PromotionSummary | null; seed: PromotionSummary | null };
+
+export default function SuPromotionsPage() {
+  const promotions = usePromotions();
+  const [opened, setOpened] = useState<Opened | null>(null);
+  const [counter, setCounter] = useState(0);
+  const open = (existing: PromotionSummary | null, seed: PromotionSummary | null) => {
+    setCounter((k) => k + 1);
+    setOpened({ key: counter + 1, existing, seed });
+  };
+
+  if (!promotions.data) return <SuStandIn />;
+  const { promotions: rows, senders } = promotions.data;
+
+  return (
+    <div className="space-y-6 pb-9">
+      <div className="flex justify-end">
+        <Button onClick={() => open(null, null)}>New promotion</Button>
+      </div>
+      {rows.length === 0 ? <p className="text-sm text-muted-foreground">No promotions yet.</p> : null}
+      {rows.map((p) => (
+        <PromotionRow
+          key={p.id}
+          promotion={p}
+          all={rows}
+          senders={senders}
+          onOpen={() => open(p, null)}
+          onDuplicate={() =>
+            open(null, {
+              ...p,
+              excludePromotionIds: Array.from(new Set([p.id, ...p.excludePromotionIds])),
+            })
+          }
+        />
+      ))}
+      {opened ? (
+        <PromotionDialog
+          key={opened.key}
+          existing={opened.existing}
+          seed={opened.seed}
+          promotions={rows}
+          senders={senders}
+          open
+          onOpenChange={(isOpen) => {
+            if (!isOpen) setOpened(null);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function PromotionRow({
+  promotion: p,
+  all,
+  senders,
+  onOpen,
+  onDuplicate,
+}: {
+  promotion: PromotionSummary;
+  all: PromotionSummary[];
+  senders: Record<PromotionSender, string>;
+  onOpen: () => void;
+  onDuplicate: () => void;
+}) {
+  const remove = useDeletePromotion();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const skipped = p.excludePromotionIds
+    .map((id) => all.find((other) => other.id === id)?.name ?? "a deleted promotion")
+    .join(", ");
+  const { recipients, sent, failed } = p.counts;
+
+  return (
+    <div className="rounded-lg border p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-medium">{p.name}</span>
+            <Badge variant={STATUS_VARIANT[p.status]}>{p.status}</Badge>
+          </div>
+          <p className="mt-1 truncate text-sm text-muted-foreground">{p.subject}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            From {senders[p.sender] || `${p.sender} (not configured)`} · {describeAudience(p.audience)}
+            {skipped ? ` · skips recipients of ${skipped}` : ""}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {p.status === "draft"
+              ? `Draft · saved ${when(p.updatedAt)}`
+              : `${sent} of ${recipients} sent${failed ? ` · ${failed} failed` : ""}${
+                  p.startedAt ? ` · started ${when(p.startedAt)}` : ""
+                }${p.finishedAt ? ` · finished ${when(p.finishedAt)}` : ""}`}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button size="sm" variant={p.status === "draft" ? "default" : "outline"} onClick={onOpen}>
+            {p.status === "draft" ? "Edit" : "View"}
+          </Button>
+          <Button size="sm" variant="outline" onClick={onDuplicate}>
+            Duplicate
+          </Button>
+          {p.status !== "sending" ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={remove.isPending}
+              onClick={() => setConfirmDelete(true)}
+            >
+              Delete
+            </Button>
+          ) : null}
+        </div>
+      </div>
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete “{p.name}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {p.status === "sent"
+                ? "Its recipient list goes with it, so a later promotion can no longer skip the people it reached."
+                : "The draft is removed."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep</AlertDialogCancel>
+            <AlertDialogAction onClick={() => remove.mutate(p.id)}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
