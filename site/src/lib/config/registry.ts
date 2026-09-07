@@ -67,11 +67,23 @@ export const SETTINGS = defineSettings({
     title: "Signup credits",
     description: "USD a new account is granted at signup, and how many days the grant lives.",
   },
+  creditExpiryNotice: {
+    schema: z
+      .object({
+        // How many days before a given grant expires its account is emailed.
+        daysBefore: z.number().int().min(1).max(maxCreditGrantExpiryDays),
+      })
+      .strict(),
+    default: { daysBefore: 3 },
+    public: false,
+    title: "Credit expiry notice",
+    description: "How many days before signup or manually granted credits expire the account is emailed.",
+  },
 });
 
 // The settings su shows on its Product tab: what an account gets. The
 // settings tab under Experiments still lists every key.
-export const PRODUCT_SETTING_KEYS = ["signupCredits"] as const satisfies readonly SettingKey[];
+export const PRODUCT_SETTING_KEYS = ["signupCredits", "creditExpiryNotice"] as const satisfies readonly SettingKey[];
 
 export type SettingKey = keyof typeof SETTINGS;
 export type Settings = SettingsOf<typeof SETTINGS>;

@@ -4,7 +4,7 @@ import {
   DONKEY_LOGO_PNG_BASE64,
 } from "@/emails/_components/logo";
 import CreditsExpiringEmail from "@/emails/credits-expiring";
-import { formatUsd } from "@/lib/credits/format-usd";
+import { formatUsdPlain } from "@/lib/credits/format-usd";
 import { formatCreditExpiry } from "@/lib/credits/top-up";
 import {
   bulkFrom,
@@ -19,15 +19,16 @@ import {
   unsubscribePageUrl,
 } from "@/lib/email/unsubscribe";
 
-// Tells one account what is left of its signup credits and the day they
-// expire. `credits` is the remaining amount as a decimal string. The caller
-// decides who gets it and records that it went; here the idempotency key keeps
-// a retry within 24 hours from sending twice.
+// Tells one account what is left of a grant and the day it expires.
+// `credits` is the remaining amount as a decimal string. The caller decides
+// who gets it, records that it went, and names the send: one key per grant,
+// so a retry within 24 hours cannot send twice and two grants on one account
+// each get their own mail.
 export async function sendCreditsExpiringEmail(
   user: EmailUser,
   credits: string,
   expiresAt: Date,
-  idempotencyKey = `credits-expiring:${user.id}:${expiresAt.toISOString().slice(0, 10)}`,
+  idempotencyKey: string,
 ): Promise<void> {
   if (!isResendConfigured()) throw new ResendNotConfiguredError();
   const from = bulkFrom();
@@ -39,9 +40,9 @@ export async function sendCreditsExpiringEmail(
       from,
       to: user.email,
       replyTo: emailFrom() || from,
-      subject: `Your ${formatUsd(credits)} in AI credits expires ${formatCreditExpiry(expiresAt)}`,
+      subject: `Your ${formatUsdPlain(credits)} in AI credits expires ${formatCreditExpiry(expiresAt)}`,
       react: CreditsExpiringEmail({
-        credits: formatUsd(credits),
+        credits: formatUsdPlain(credits),
         editorUrl: `${DONKEYCUT_CANONICAL}/app`,
         expiresOn: formatCreditExpiry(expiresAt),
         name: firstName,

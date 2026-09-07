@@ -1,52 +1,58 @@
 #!/usr/bin/env bun
 /**
- * Tells every account with unspent signup credits the day they expire. One
- * notice per grant: the send is recorded on the grant's metadata, so a re-run
- * only reaches accounts the last run missed. Accounts that unsubscribed from
- * product email are skipped.
+ * Runs the credit-expiry notice by hand. The daily job mails accounts whose
+ * given credit expires inside the creditExpiryNotice window; this widens the
+ * window for a one-off, and can send a single preview to an account's own
+ * address. Each grant is noticed once whichever path sends, so a run here and
+ * the job never double-mail.
  *
  * Run from site/ with production credentials in the environment:
- *   NODE_ENV=production bun run scripts/send-credits-expiring.ts               # dry run
- *   NODE_ENV=production bun run scripts/send-credits-expiring.ts --to me@x.com # one preview
- *   NODE_ENV=production bun run scripts/send-credits-expiring.ts --apply
+ *   NODE_ENV=production bun run scripts/send-credits-expiring.ts                    # dry run
+ *   NODE_ENV=production bun run scripts/send-credits-expiring.ts --to me@x.com      # one preview
+ *   NODE_ENV=production bun run scripts/send-credits-expiring.ts --apply --within 30
  */
 
+import { getGlobalSetting } from "../src/lib/config/effective";
 import { creditMicrosToString, zeroCreditMicros } from "../src/lib/credits/amounts";
+import {
+  expiryNoticed,
+  NOTICED_GRANT_SOURCES,
+  sendDueCreditExpiryNotices,
+} from "../src/lib/email/credit-expiry-notices";
 import { sendCreditsExpiringEmail } from "../src/lib/email/send-credits-expiring";
-import { isMarketingUnsubscribed } from "../src/lib/email/unsubscribe";
-import { isJsonObject } from "../src/lib/inference/json";
 import { prisma } from "../src/lib/prisma";
 
 const args = process.argv.slice(2);
 const apply = args.includes("--apply");
-const previewTo = args[args.indexOf("--to") + 1];
-const preview = args.includes("--to") ? previewTo : null;
+const preview = args.includes("--to") ? args[args.indexOf("--to") + 1] : null;
 if (args.includes("--to") && !preview) {
   console.error("--to needs an address");
   process.exit(1);
 }
+const withinDays = args.includes("--within")
+  ? Number(args[args.indexOf("--within") + 1])
+  : (await getGlobalSetting("creditExpiryNotice")).daysBefore;
+if (!Number.isInteger(withinDays) || withinDays < 1) {
+  console.error("--within needs a whole number of days");
+  process.exit(1);
+}
 
 const now = new Date();
+const DAY_MS = 24 * 60 * 60 * 1000;
 const grants = await prisma.userCreditGrant.findMany({
-  orderBy: { createdAt: "asc" },
-  select: {
-    id: true,
-    expiresAt: true,
-    metadata: true,
-    remainingAmountMicros: true,
-    user: { select: { email: true, id: true, name: true } },
-  },
+  orderBy: { expiresAt: "asc" },
+  select: { expiresAt: true, metadata: true, remainingAmountMicros: true, userId: true },
   where: {
-    expiresAt: { gt: now },
+    expiresAt: { gt: now, lte: new Date(now.getTime() + withinDays * DAY_MS) },
     remainingAmountMicros: { gt: zeroCreditMicros },
-    source: "signup",
+    source: { in: [...NOTICED_GRANT_SOURCES] },
     status: "active",
   },
 });
-const pending = grants.filter(
-  (g) => !(isJsonObject(g.metadata) && typeof g.metadata.expiryNoticeSentAt === "string"),
+const pending = grants.filter((g) => !expiryNoticed(g.metadata));
+console.log(
+  `${grants.length} given grants expire within ${withinDays} days, ${pending.length} not yet notified`,
 );
-console.log(`${grants.length} live signup grants, ${pending.length} not yet notified`);
 
 if (preview) {
   const sample = pending[0] ?? grants[0];
@@ -54,8 +60,14 @@ if (preview) {
     console.error("nothing to preview");
     process.exit(1);
   }
+  // The footer's unsubscribe link is the previewer's own, never a customer's.
+  const previewer = await prisma.user.findUnique({ select: { id: true }, where: { email: preview } });
+  if (!previewer) {
+    console.error(`${preview} has no account; previews go to an account's address`);
+    process.exit(1);
+  }
   await sendCreditsExpiringEmail(
-    { email: preview, id: sample.user.id, name: "Ada" },
+    { email: preview, id: previewer.id, name: "Ada" },
     creditMicrosToString(sample.remainingAmountMicros),
     sample.expiresAt,
     // Every preview is its own send, whatever the copy did in between.
@@ -63,39 +75,10 @@ if (preview) {
   );
   console.log(`preview sent to ${preview}`);
 } else if (apply) {
-  let sent = 0;
-  let skipped = 0;
-  let failed = 0;
-  for (const grant of pending) {
-    if (!grant.expiresAt) continue;
-    if (await isMarketingUnsubscribed(grant.user.id)) {
-      skipped++;
-      continue;
-    }
-    try {
-      await sendCreditsExpiringEmail(
-        grant.user,
-        creditMicrosToString(grant.remainingAmountMicros),
-        grant.expiresAt,
-      );
-      await prisma.userCreditGrant.update({
-        data: {
-          metadata: {
-            ...(isJsonObject(grant.metadata) ? grant.metadata : {}),
-            expiryNoticeSentAt: new Date().toISOString(),
-          },
-        },
-        where: { id: grant.id },
-      });
-      sent++;
-    } catch (error) {
-      failed++;
-      console.error(`${grant.user.id}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  console.log(`sent ${sent}, skipped ${skipped} unsubscribed, failed ${failed}`);
+  const result = await sendDueCreditExpiryNotices({ now, withinDays });
+  console.log(`sent ${result.sent}, failed ${result.failed}`);
 } else {
-  console.log("dry run; pass --to <address> for one preview, --apply to send to everyone");
+  console.log("dry run; pass --to <address> for one preview, --apply to send");
 }
 
 await prisma.$disconnect();

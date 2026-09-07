@@ -4,6 +4,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { analyticsDailyJob } from "@/lib/jobs/analytics-daily";
 import { billingRefreshJob } from "@/lib/jobs/billing-refresh";
 import { creditExpiryJob } from "@/lib/jobs/credit-expiry";
+import { creditExpiryNoticeJob } from "@/lib/jobs/credit-expiry-notice";
 import { deleteUserJob } from "@/lib/jobs/delete-user";
 import { experimentResultsJob } from "@/lib/jobs/experiment-results";
 import { outreachScanJob } from "@/lib/jobs/outreach-scan";
@@ -31,6 +32,7 @@ export const jobKinds: Record<string, JobKind> = {
   "analytics-daily": analyticsDailyJob,
   "billing-refresh": billingRefreshJob,
   "credit-expiry": creditExpiryJob,
+  "credit-expiry-notice": creditExpiryNoticeJob,
   "delete-user": deleteUserJob,
   "experiment-results": experimentResultsJob,
   "outreach-scan": outreachScanJob,
