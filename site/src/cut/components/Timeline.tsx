@@ -29,6 +29,7 @@ import {
   hasLibraryDrag,
   hasTemplateDrag,
 } from "@/cut/lib/assetDrag";
+import { registerFileLanding } from "@/cut/lib/timelineDrop";
 import { audioClipRefs, clipRefs, draggingRef, hasRefDrag, refFromAsset, type AssetRef } from "@/cut/lib/assetRef";
 import { sendFrameToChat, type FrameGrabOrigin } from "@/cut/lib/chatIntake";
 import { copyRefImage } from "@/cut/lib/refMedia";
@@ -1359,6 +1360,73 @@ export function Timeline() {
   // carries: the row lights every place a drop could play, the same as a bar
   // drag does, each zone sized and placed the way that style lands.
   const [xTileDrag, setXTileDrag] = useState<TransitionStyle | null>(null);
+  // The browser needs the accept and the cursor from a `dragover` handler
+  // itself. Everything else the handler decides — the layout reads that find
+  // the row and the time, the ripple, the preview state — waits for the next
+  // animation frame, and a burst of dragover events between two frames paints
+  // once, from the last position. The thread stays clear while the drag is
+  // in flight, so the release is handled the moment it comes.
+  const previewFrame = useRef<number | null>(null);
+  const previewNext = useRef<(() => void) | null>(null);
+  const schedulePreview = useCallback((paint: () => void) => {
+    previewNext.current = paint;
+    if (previewFrame.current !== null) return;
+    previewFrame.current = requestAnimationFrame(() => {
+      previewFrame.current = null;
+      const run = previewNext.current;
+      previewNext.current = null;
+      run?.();
+    });
+  }, []);
+  // A drop, a leave or an end clears the previews; a paint still queued from
+  // the last dragover would put one back, so it is dropped with them.
+  const cancelPreview = useCallback(() => {
+    if (previewFrame.current !== null) cancelAnimationFrame(previewFrame.current);
+    previewFrame.current = null;
+    previewNext.current = null;
+  }, []);
+  useEffect(() => cancelPreview, [cancelPreview]);
+  // Every drag ends here, wherever it was released: the landing previews and
+  // the placement hold clear on the browser's own `dragend`, which fires for
+  // a drop the timeline took, a release elsewhere, and an escape alike. No
+  // preview can outlive its drag and sit on the rows into the next one.
+  useEffect(() => {
+    const end = () => {
+      cancelPreview();
+      setAssetDrop(null);
+      endCrossDrag();
+      setAudioDrop(null);
+      setDropType(null);
+      setElementDrop(null);
+      setJointDrop(null);
+      setXTileDrag(null);
+    };
+    window.addEventListener("dragend", end, true);
+    return () => window.removeEventListener("dragend", end, true);
+  }, [cancelPreview, setAssetDrop, endCrossDrag, setAudioDrop, setElementDrop, setJointDrop]);
+  // The landing an OS file release resolved to, handed to the editor's file
+  // drop through `registerFileLanding`. Stashed by this surface's own drop,
+  // which runs first; a release the surface never saw resolves from the
+  // geometry at the moment of asking.
+  const fileLanding = useRef<{ at: number; place: TrackTarget } | null>(null);
+  const footerRef = useRef<HTMLElement>(null);
+  useEffect(
+    () =>
+      registerFileLanding((x, y) => {
+        const stashed = fileLanding.current;
+        fileLanding.current = null;
+        if (stashed) return stashed;
+        // The surface that takes the drop is the region a file lands in, the
+        // ruler and the reach past the stack included.
+        const surface = footerRef.current;
+        if (!surface) return null;
+        const r = surface.getBoundingClientRect();
+        if (y < r.top || y > r.bottom || x < r.left || x > r.right) return null;
+        return { at: dropTimeAt(x), place: resolveDropTrack(x, y) };
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [resolveDropTrack]
+  );
   // A transition bar mid-drag, drawn where the pointer has it.
   const [transitionDrag, setTransitionDrag] = useState<XBar | null>(null);
   // A drag past the top edge opens a row there, pushing the stack down by one
@@ -1687,7 +1755,10 @@ export function Timeline() {
         ghost: {
           url: libraryMediaUrl(lib.fileName, lib.residency),
           kind: lib.type,
-          aspect: lib.width && lib.height ? lib.width / lib.height : undefined,
+          name: lib.title || lib.name,
+          duration: lib.duration,
+          width: lib.width,
+          height: lib.height,
           // The card's cover is already painted and cached, so the segment
           // has a frame of the video in it from the first move — true frames
           // replace it tile by tile as the reads land.
@@ -1701,18 +1772,7 @@ export function Timeline() {
       if (!asset || stickerOf(asset) || !isClipMedia(asset.type)) return null;
       return {
         duration: asset.type === "image" ? STILL_SECONDS : asset.duration,
-        ghost:
-          asset.type === "image"
-            ? { url: asset.url, kind: "image" }
-            : {
-                url: asset.url,
-                kind: "video",
-                aspect:
-                  asset.width && asset.height ? asset.width / asset.height : undefined,
-                thumbs: asset.thumbs,
-                thumbStep: asset.thumbStep,
-                poster: asset.thumbs?.[0],
-              },
+        ghost: { asset },
       };
     }
     const stockVideo = draggingStockVideo(e);
@@ -1722,17 +1782,20 @@ export function Timeline() {
         ghost: {
           url: stockVideo.url,
           kind: "video",
-          aspect:
-            stockVideo.width && stockVideo.height
-              ? stockVideo.width / stockVideo.height
-              : undefined,
+          name: stockVideo.name,
+          duration: stockVideo.duration ?? 0,
+          width: stockVideo.width,
+          height: stockVideo.height,
           poster: stockVideo.thumb,
         },
       };
     }
     const still = draggingStill(e);
     return still
-      ? { duration: STILL_SECONDS, ghost: { url: still.url, kind: "image" } }
+      ? {
+          duration: STILL_SECONDS,
+          ghost: { url: still.url, kind: "image", name: still.name, duration: STILL_SECONDS },
+        }
       : null;
   };
 
@@ -1748,17 +1811,18 @@ export function Timeline() {
       e.preventDefault();
       e.stopPropagation();
       e.dataTransfer.dropEffect = "copy";
-      setAssetDrop(null);
-      setDropType("video"); // keep the insertion zones lit however the drag entered
-      previewCross(
-        resolveDropTrack(e.clientX, e.clientY),
-        Math.max(0, timeAt(e.clientX)),
-        vid.duration,
-        vid.ghost
-      );
+      const x = e.clientX;
+      const y = e.clientY;
+      schedulePreview(() => {
+        setAssetDrop(null);
+        setDropType("video"); // keep the insertion zones lit however the drag entered
+        previewCross(resolveDropTrack(x, y), Math.max(0, timeAt(x)), vid.duration, vid.ghost);
+      });
     },
     onDragLeave: (e: React.DragEvent) => {
-      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) endCrossDrag();
+      if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+      cancelPreview();
+      endCrossDrag();
     },
     onDrop: (e: React.DragEvent) => {
       // A sticker crossing a video row is still headed for the element rows;
@@ -1766,6 +1830,7 @@ export function Timeline() {
       if (draggedSticker()) return;
       e.preventDefault();
       e.stopPropagation();
+      cancelPreview();
       const place = resolveDropTrack(e.clientX, e.clientY);
       const t = Math.max(0, timeAt(e.clientX));
       endCrossDrag();
@@ -1798,13 +1863,13 @@ export function Timeline() {
           height: stockVideo.height,
         })
           .then((vid) => useEditor.getState().addVideoFromAsset(vid.id, place, t))
-          .catch(() => {});
+          .catch((err: unknown) => reportSwallowed("[cut] stock video drop failed", err));
         return;
       }
       if (still && projectId) {
         void importImage(projectId, still)
           .then((img) => useEditor.getState().addVideoFromAsset(img.id, place, t))
-          .catch(() => {});
+          .catch((err: unknown) => reportSwallowed("[cut] image drop failed", err));
       }
     },
   };
@@ -1820,38 +1885,16 @@ export function Timeline() {
     });
   };
 
-  // The dragged media as a floating segment: its filmstrip fills it edge to
-  // edge at true length and it rides above the row's clips (z-20), so the drag
-  // reads as a placed segment sliding to its landing spot. The picture is the
-  // whole segment — the sound band belongs to a clip, and a dragged one has no
-  // waveform to draw there — and the slot wash sits under it, so a moment with
-  // no frames yet reads as a landing spot rather than a black bar.
-  const dropSegment = (t: number, len: number, h: number, ghost?: DropGhost) => (
-    <div
-      className="tl-asset-drop-slot pointer-events-none absolute top-0.5 z-20 overflow-hidden rounded-[2.5px] bg-[#0a84ff]/10 opacity-90 shadow-2xl ring-[1.5px] ring-[#0a84ff]/70 transition-[left] duration-100 ease-out"
-      style={{ left: t * pps, width: Math.max(10, len * pps - CLIP_GAP), height: h }}
-    >
-      {ghost && (
-        <div className="pointer-events-none absolute inset-0">
-          <DropGhostFilm ghost={ghost} w={Math.max(10, len * pps - CLIP_GAP)} h={h} pps={pps} />
-        </div>
-      )}
-      <span className="absolute top-1 left-1 rounded-[5px] bg-black/65 px-1.5 py-px font-mono text-[10px] tabular-nums text-white">
-        {len.toFixed(1)}s
-      </span>
-    </div>
-  );
-
   // The landing preview on a video row while the drag targets it. External
   // media paints the segment itself; an internal drag paints the plain slot —
   // the same chrome as the lane slots — since the dragged clip is its own ghost.
   const trackSlot = (place: TrackTarget, h: number) =>
     samePlacement(overlayDrop?.target ?? null, place) ? (
       overlayDrop!.ghost ? (
-        dropSegment(overlayDrop!.t, overlayDrop!.len, h, overlayDrop!.ghost)
+        <GhostClip ghost={overlayDrop!.ghost} t={overlayDrop!.t} len={overlayDrop!.len} h={h} pps={pps} />
       ) : (
         <div
-          className="pointer-events-none absolute top-0.5 rounded-[2.5px] bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4)] transition-[left] duration-150 ease-out"
+          className="tl-drop-slot pointer-events-none absolute top-0.5 rounded-[2.5px] bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4)] transition-[left] duration-150 ease-out"
           style={{
             left: overlayDrop!.t * pps,
             width: Math.max(10, overlayDrop!.len * pps - CLIP_GAP),
@@ -1916,6 +1959,7 @@ export function Timeline() {
 
   return (
     <footer
+      ref={footerRef}
       className="relative flex min-w-0 shrink-0 flex-col overflow-hidden border-t border-border bg-card select-none"
       style={{ height: timelineH }}
       // The floating object ghost (`setObjectDragImage`) hands over to this
@@ -1927,10 +1971,49 @@ export function Timeline() {
         if (hasTemplateDrag(e)) {
           e.preventDefault();
           e.dataTransfer.dropEffect = "copy";
+          cancelPreview();
           setAssetDrop(null);
           setOverlayDrop(null);
           setAudioDrop(null);
           setDropType(null);
+          return;
+        }
+        // OS files: the editor's window-level drop imports them, and asks
+        // this surface where they land. The browser withholds their bytes
+        // until the release, so the landing paints as the plain slot at a
+        // nominal length; the placed clip fills in once it is measured.
+        const files = draggedFiles(e);
+        if (files) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+          const x = e.clientX;
+          const y = e.clientY;
+          const len =
+            files.count * (files.kind === "image" ? STILL_SECONDS : FILE_SLOT_SECONDS);
+          schedulePreview(() => {
+            setElementDrop(null);
+            setJointDrop(null);
+            setXTileDrag(null);
+            if (files.kind === "audio") {
+              setDropType("audio");
+              setAudioDrop({ row: audioRowAt(y), t: dropTimeAt(x), len });
+              setAssetDrop(null);
+              setOverlayDrop(null);
+              return;
+            }
+            setDropType("video");
+            setAudioDrop(null);
+            const place = resolveDropTrack(x, y);
+            if (place.kind === "insert") {
+              setAssetDrop(null);
+              setOverlayDrop({ target: place, t: dropTimeAt(x), len });
+              return;
+            }
+            setOverlayDrop(null);
+            const cur = useEditor.getState();
+            const { start, shifts } = rippleInsert(track0Clips(cur.clips), dropTimeAt(x), len);
+            setAssetDrop({ t: start, len, shifts });
+          });
           return;
         }
         const isLib = hasLibraryDrag(e);
@@ -1942,49 +2025,51 @@ export function Timeline() {
           return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "copy";
+        // What the event carries is read now — the drag data is only readable
+        // while the handler runs — and the preview paints from it on the next
+        // frame (`schedulePreview`).
+        const x = e.clientX;
+        const y = e.clientY;
         // An element — a sticker, or a shape or effect from a panel — lands on
         // the element rows, so none of the clip previews apply to it.
         if (element || draggedSticker()) {
           // The band paints the bar being carried; a "move" cursor keeps the
           // copy badge off it.
           e.dataTransfer.dropEffect = "move";
-          setAssetDrop(null);
-          setOverlayDrop(null);
-          setAudioDrop(null);
-          setDropType(null);
-          // An empty band has no rows to hit; the drag opens the first one,
-          // where the drop will land.
-          const hit = overlayRowAt(e.clientY);
-          const row =
-            !element || element.kind !== "transition"
-              ? hit ?? (overlayLanes.count === 0 ? 0 : null)
-              : null;
-          // The pointer's own time, not `dropTimeAt`: an empty timeline pins
-          // clip drops to 0, but an element rides wherever it is held.
-          const bandTop = overlayRef.current?.getBoundingClientRect().top;
-          setElementDrop(
-            row !== null
-              ? {
-                  row,
-                  t: Math.max(0, timeAt(e.clientX)),
-                  y:
-                    bandTop !== undefined
-                      ? e.clientY - bandTop - (TEXT_H - 6) / 2
-                      : row * TEXT_H + 2,
-                }
-              : null
-          );
-          setXTileDrag(element?.kind === "transition" ? element.style : null);
-          setJointDrop(
-            element?.kind === "transition"
-              ? nearestAnchor(Math.max(0, timeAt(e.clientX)))
-              : null
-          );
+          schedulePreview(() => {
+            setAssetDrop(null);
+            setOverlayDrop(null);
+            setAudioDrop(null);
+            setDropType(null);
+            // An empty band has no rows to hit; the drag opens the first one,
+            // where the drop will land.
+            const hit = overlayRowAt(y);
+            const row =
+              !element || element.kind !== "transition"
+                ? hit ?? (overlayLanes.count === 0 ? 0 : null)
+                : null;
+            // The pointer's own time, not `dropTimeAt`: an empty timeline pins
+            // clip drops to 0, but an element rides wherever it is held.
+            const bandTop = overlayRef.current?.getBoundingClientRect().top;
+            setElementDrop(
+              row !== null
+                ? {
+                    row,
+                    t: Math.max(0, timeAt(x)),
+                    y:
+                      bandTop !== undefined
+                        ? y - bandTop - (TEXT_H - 6) / 2
+                        : row * TEXT_H + 2,
+                  }
+                : null
+            );
+            setXTileDrag(element?.kind === "transition" ? element.style : null);
+            setJointDrop(
+              element?.kind === "transition" ? nearestAnchor(Math.max(0, timeAt(x))) : null
+            );
+          });
           return;
         }
-        setElementDrop(null);
-        setJointDrop(null);
-        setXTileDrag(null);
         // Preview where a video would land; audio drops free-form. Library and
         // stock drags carry their own shape since they aren't in the project yet.
         let type: "video" | "audio" | "image" | undefined;
@@ -2010,45 +2095,43 @@ export function Timeline() {
         }
         // What the ghost paints: the source's frames, from wherever it lives.
         const ghost = draggedVideo(e)?.ghost;
-        // A still rides the video tracks: reveal their guides and new-track rows.
-        setDropType(isClipMedia(type) ? "video" : type ?? null);
-        if (type === "audio") {
-          // Preview which audio row the sound would land on.
-          setAudioDrop({
-            row: audioRowAt(e.clientY),
-            t: dropTimeAt(e.clientX),
-            len: duration,
-          });
-          setAssetDrop(null);
-          return;
-        }
-        setAudioDrop(null);
-        if (!isClipMedia(type) || !duration) {
-          setAssetDrop(null);
-          return;
-        }
-        // Past the stack's edges the drop opens a new track: preview it in
-        // the would-be new row instead of track 0.
-        const place = resolveDropTrack(e.clientX, e.clientY);
-        if (place.kind === "insert") {
-          setAssetDrop(null);
-          setOverlayDrop({ target: place, t: dropTimeAt(e.clientX), len: duration, ghost });
-          return;
-        }
-        setOverlayDrop(null);
-        // Preview the true landing spot: a drop at the pointer inserts here,
-        // rippling later clips right, so the ghost sits where the segment will
-        // actually land — a box under the pointer that lands minutes away lies.
-        const cur = useEditor.getState();
-        const { start, shifts } = rippleInsert(
-          track0Clips(cur.clips),
-          dropTimeAt(e.clientX),
-          duration
-        );
-        setAssetDrop({ t: start, len: duration, ghost, shifts });
+        schedulePreview(() => {
+          setElementDrop(null);
+          setJointDrop(null);
+          setXTileDrag(null);
+          // A still rides the video tracks: reveal their guides and new-track rows.
+          setDropType(isClipMedia(type) ? "video" : type ?? null);
+          if (type === "audio") {
+            // Preview which audio row the sound would land on.
+            setAudioDrop({ row: audioRowAt(y), t: dropTimeAt(x), len: duration });
+            setAssetDrop(null);
+            return;
+          }
+          setAudioDrop(null);
+          if (!isClipMedia(type) || !duration) {
+            setAssetDrop(null);
+            return;
+          }
+          // Past the stack's edges the drop opens a new track: preview it in
+          // the would-be new row instead of track 0.
+          const place = resolveDropTrack(x, y);
+          if (place.kind === "insert") {
+            setAssetDrop(null);
+            setOverlayDrop({ target: place, t: dropTimeAt(x), len: duration, ghost });
+            return;
+          }
+          setOverlayDrop(null);
+          // Preview the true landing spot: a drop at the pointer inserts here,
+          // rippling later clips right, so the ghost sits where the segment will
+          // actually land — a box under the pointer that lands minutes away lies.
+          const cur = useEditor.getState();
+          const { start, shifts } = rippleInsert(track0Clips(cur.clips), dropTimeAt(x), duration);
+          setAssetDrop({ t: start, len: duration, ghost, shifts });
+        });
       }}
       onDragLeave={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+          cancelPreview();
           setAssetDrop(null);
           endCrossDrag();
           setAudioDrop(null);
@@ -2059,6 +2142,16 @@ export function Timeline() {
         }
       }}
       onDrop={(e) => {
+        cancelPreview();
+        // OS files: the window-level drop in the editor imports them and
+        // reads the landing resolved here, before the previews (and the new
+        // row a drag past the stack opened) clear under it.
+        if (draggedFiles(e)) {
+          fileLanding.current = {
+            at: dropTimeAt(e.clientX),
+            place: resolveDropTrack(e.clientX, e.clientY),
+          };
+        }
         // Resolve the hovered rows before the previews (and their rows) clear.
         const audioRow = audioRowAt(e.clientY);
         const elementLane = overlayLaneAt(e.clientY);
@@ -2105,7 +2198,10 @@ export function Timeline() {
         if (tpl && projectId) {
           e.preventDefault();
           if (tpl.scope === "project") void addProjectTemplateToTimeline(projectId, tpl.template, t);
-          else void addTemplateToProject(projectId, tpl.template, t).catch(() => {});
+          else
+            void addTemplateToProject(projectId, tpl.template, t).catch((err: unknown) =>
+              reportSwallowed("[cut] template drop failed", err)
+            );
           return;
         }
         if (libId && lib && projectId) {
@@ -2131,7 +2227,7 @@ export function Timeline() {
             duration: stockMusic.duration,
           })
             .then((asset) => placeAssetAt(asset.id, "audio", t, audioRow))
-            .catch(() => {});
+            .catch((err: unknown) => reportSwallowed("[cut] stock music drop failed", err));
           return;
         }
 
@@ -2147,14 +2243,14 @@ export function Timeline() {
             height: stockVideo.height,
           })
             .then((asset) => placeAssetAt(asset.id, "video", t, 0, videoPlace))
-            .catch(() => {});
+            .catch((err: unknown) => reportSwallowed("[cut] stock video drop failed", err));
           return;
         }
         if (still && projectId) {
           e.preventDefault();
           void importImage(projectId, still)
             .then((asset) => placeAssetAt(asset.id, "image", t, 0, videoPlace))
-            .catch(() => {});
+            .catch((err: unknown) => reportSwallowed("[cut] image drop failed", err));
         }
       }}
     >
@@ -2725,7 +2821,18 @@ export function Timeline() {
               />
             )}
             {assetDrop &&
-              dropSegment(assetDrop.t, assetDrop.len, rowH0 - 4, assetDrop.ghost)}
+              (assetDrop.ghost ? (
+                <GhostClip ghost={assetDrop.ghost} t={assetDrop.t} len={assetDrop.len} h={rowH0 - 4} pps={pps} />
+              ) : (
+                <div
+                  className="tl-drop-slot pointer-events-none absolute top-0.5 rounded-[2.5px] bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4)] transition-[left] duration-150 ease-out"
+                  style={{
+                    left: assetDrop.t * pps,
+                    width: Math.max(10, assetDrop.len * pps - CLIP_GAP),
+                    height: rowH0 - 4,
+                  }}
+                />
+              ))}
             {spans.map((span) => (
               <ClipView
                 key={span.clip.id}
@@ -4333,112 +4440,163 @@ function ClipMenu({
 /** What the drag ghost knows about the media under the cursor — enough to
  * tile the segment at the source's aspect before the asset exists in the
  * project. */
-type DropGhost = {
-  /** Playable source: a project media URL, a stock file, a library route. */
-  url: string;
-  kind: "video" | "image";
-  /** Source width/height ratio when known; 16:9 stands in until a frame says. */
-  aspect?: number;
-  /** Pre-sampled filmstrip (project assets) — true frames with no reads. */
-  thumbs?: string[];
-  thumbStep?: number;
-  /** One known frame (a poster) to repeat while true frames are read. */
-  poster?: string;
-};
+/** What the landing preview draws: the media the drop would lay down. A
+ * project asset is itself. A library clip, a stock clip, or an image ref is
+ * not in the project yet, so the drag carries what it knows about the source
+ * and the ghost stands an asset up from it. Every field is a primitive or a
+ * stable store reference, so the preview state dedupes by value and a still
+ * pointer re-renders nothing. */
+type DropGhost =
+  | { asset: MediaAsset }
+  | {
+      url: string;
+      kind: "video" | "image";
+      name: string;
+      duration: number;
+      width?: number;
+      height?: number;
+      /** One known frame — the card's cover — to paint every tile with until
+       * the true frame at each tile's moment lands. */
+      poster?: string;
+    };
 
-/** The ghost segment's filmstrip. An image tiles itself at its natural aspect.
- * A video with a filmstrip samples it exactly like a placed clip. Anything
- * else paints every tile with the best frame in hand — the poster at first —
- * and swaps each tile to the true frame at its source time as the edge-frame
- * reader captures them, so a fresh drag sharpens into a real strip within a
- * beat. Tile times depend on the source alone, not the drop position, so the
- * strip never re-reads while the segment slides along the row. */
-function DropGhostFilm({
+/** The asset a ghost renders as: the project's own, or one stood up from the
+ * drag. A stood-up video carries its poster as a one-thumb strip, so the
+ * planner paints the whole box with a real frame at once and the tile reader
+ * swaps each tile to its true frame as those land; an image is its own strip.
+ * Stood up once per source, so the tile reader's plan holds while the ghost
+ * slides. */
+const ghostAssets = new Map<string, MediaAsset>();
+function ghostAsset(ghost: DropGhost, len: number): MediaAsset {
+  if ("asset" in ghost) return ghost.asset;
+  const key = `${ghost.kind}|${ghost.url}|${ghost.poster ?? ""}|${len}`;
+  const hit = ghostAssets.get(key);
+  if (hit) return hit;
+  const strip =
+    ghost.kind === "image"
+      ? { thumbs: [ghost.url], thumbStep: len }
+      : ghost.poster
+        ? { thumbs: [ghost.poster], thumbStep: Math.max(1, ghost.duration) }
+        : {};
+  const asset: MediaAsset = {
+    id: `ghost:${ghost.url}`,
+    fileName: ghost.url,
+    name: ghost.name,
+    type: ghost.kind,
+    url: ghost.url,
+    duration: ghost.kind === "image" ? len : ghost.duration,
+    width: ghost.width,
+    height: ghost.height,
+    ...strip,
+  };
+  ghostAssets.set(key, asset);
+  return asset;
+}
+
+/** The landing preview: the clip the drop would lay down, drawn by the same
+ * pieces a placed clip is drawn with. The strip planner runs over the asset's
+ * own thumbs; the tiles it lacks come from the edge-frame reader behind the
+ * play, the same reads the placed clip would make and keep; the sound band
+ * draws the asset's peaks. So what slides along the row is what will be there
+ * after the release, at the cost of one more clip on the row — and the plan
+ * depends on the source and the zoom alone, so sliding moves the box on the
+ * compositor and plans nothing. */
+function GhostClip({
   ghost,
-  w,
+  t,
+  len,
   h,
   pps,
 }: {
   ghost: DropGhost;
-  w: number;
+  /** Where the segment lands, timeline seconds. */
+  t: number;
+  len: number;
+  /** The row's bar height: the box never draws past its row. */
   h: number;
   pps: number;
 }) {
-  const [, bump] = useReducer((x: number) => x + 1, 0);
-  const aspect = ghost.aspect ?? 16 / 9;
-  const natural = Math.max(24, Math.round(h * aspect));
-  const count = Math.max(1, Math.min(120, Math.ceil(w / natural)));
-  const imgW = Math.max(natural, w / count);
-  const needsReads = ghost.kind === "video" && !ghost.thumbs?.length;
+  const asset = ghostAsset(ghost, len);
+  const w = Math.max(10, len * pps);
+  const barW = Math.max(10, w - CLIP_GAP);
+  const rt = retimeOf({ in: 0, out: len });
+  const hasWave = hasSoundBand(asset);
+  const boxH = Math.min(h, hasWave ? VIDEO_H - 4 : FILM_H);
+  const boxRef = useRef<HTMLDivElement>(null);
+  // Bumped as tile captures land, so the memo re-plans and picks them up.
+  const [filmGen, onTileFrame] = useReducer((x: number) => x + 1, 0);
+  const boxLeft = PAD_SIDE + t * pps;
+  const view = useStripView(boxLeft, w);
+  const filmstrip = useMemo(
+    () => filmstripFrames(asset, 0, w, pps, rt, FILM_H, 26, undefined, view),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [asset, w, pps, rt, filmGen, view]
+  );
+  useTileFrames(boxRef, "drop-ghost", asset, filmstrip, 0, w, pps, rt.key, onTileFrame);
+  // A source with no strip and no cover has nothing to plan tiles from until
+  // one frame is in hand. The placed clip reads its head frame ahead of the
+  // play; the ghost asks for the same frame behind it, and the plan takes it
+  // from the cache the moment it lands.
+  const seedless = filmstrip.length === 0 && asset.type === "video" && !!asset.url;
   useEffect(() => {
-    if (!needsReads) return;
+    if (!seedless) return;
     let live = true;
-    for (let k = 0; k < count; k++) {
-      const t = (k * imgW + imgW / 2) / pps;
-      if (peekEdgeFrame(ghost.url, t)) continue;
-      // Behind a play, like the strip's own tiles: a drag across the timeline
-      // while the cut plays would otherwise put a hundred keyframe decodes of
-      // a 4K file in front of the walk drawing the picture. The ghost shows
-      // its poster until the play stops.
-      void requestEdgeFrame(`drop-ghost:${k}`, ghost.url, t, undefined, {
-        background: true,
-      }).then((src) => {
-        if (live && src) bump();
-      });
-    }
+    void requestEdgeFrame("drop-ghost:head", asset.url, 0, undefined, { background: true }).then(
+      (src) => {
+        if (live && src) onTileFrame();
+      }
+    );
     return () => {
       live = false;
-      dropEdgeFrames("drop-ghost:");
     };
-  }, [needsReads, ghost.url, count, imgW, pps]);
-  if (ghost.kind === "image") {
-    // The browser tiles the image at its own aspect — no measuring needed.
-    return (
-      <div
-        className="absolute inset-0"
-        style={{
-          backgroundImage: `url("${ghost.url}")`,
-          backgroundSize: "auto 100%",
-          backgroundRepeat: "repeat-x",
-        }}
-      />
-    );
-  }
-  const tiles: { src: string | null; left: number }[] = [];
-  let known: string | null = ghost.poster ?? null;
-  for (let k = 0; k < count; k++) {
-    const t = (k * imgW + imgW / 2) / pps;
-    let src: string | null = null;
-    if (ghost.thumbs?.length && ghost.thumbStep) {
-      src =
-        ghost.thumbs[
-          Math.min(ghost.thumbs.length - 1, Math.max(0, Math.floor(t / ghost.thumbStep)))
-        ];
-    } else {
-      src = peekEdgeFrame(ghost.url, t);
-    }
-    if (src) known = src;
-    tiles.push({ src: src ?? known, left: k * imgW });
-  }
+  }, [seedless, asset]);
+  // Reads still queued for a ghost that left the row are let go; frames that
+  // landed stay cached, and the clip the drop lays down opens on them.
+  useEffect(() => () => dropEdgeFrames("drop-ghost:"), []);
   return (
-    <div className="pointer-events-none absolute inset-0">
-      {tiles.map(
-        (tile, k) =>
-          tile.src && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              key={k}
-              src={tile.src}
-              alt=""
-              draggable={false}
-              className="absolute top-0 h-full max-w-none object-cover"
-              style={{ left: tile.left, width: imgW }}
-            />
-          )
+    <div
+      ref={boxRef}
+      className="tl-clip tl-clip-ghost pointer-events-none absolute top-0.5 left-0 z-20 overflow-hidden rounded-[2.5px] bg-black opacity-80 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)] transition-transform duration-100 ease-out"
+      style={{ transform: `translateX(${t * pps}px)`, width: barW, height: boxH }}
+    >
+      <div className="pointer-events-none absolute inset-x-0 top-0" style={{ height: FILM_H }}>
+        <Filmstrip frames={filmstrip} hidden={view.hi <= view.lo} />
+      </div>
+      {hasWave && boxH > FILM_H && (
+        <div
+          className="tl-clip-wave pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-b from-[#59c09d] to-[#43b18d]"
+          style={{ height: WAVE_H }}
+        >
+          <WaveformCanvas asset={asset} from={0} to={len} w={barW} h={WAVE_H - 4} className="inset-x-0 inset-y-0.5" />
+        </div>
       )}
+      <span className="tl-dur-chip pointer-events-none absolute top-1 left-1 z-2 rounded-[5px] bg-black/65 px-1.5 py-px font-mono text-[10px] tabular-nums text-white">
+        {(Math.round(len * 10) / 10).toFixed(1)}s
+      </span>
     </div>
   );
 }
+
+/** What an OS drag carries, read off the item kinds the browser exposes
+ * mid-drag: clip media rides the video rows, sound the audio rows. The count
+ * sizes the placeholder, one nominal clip per file. */
+function draggedFiles(e: React.DragEvent): { kind: "video" | "image" | "audio"; count: number } | null {
+  const dt = e.dataTransfer;
+  if (!dt || !Array.from(dt.types).includes("Files") || hasRefDrag(e)) return null;
+  const items = Array.from(dt.items ?? []).filter((i) => i.kind === "file");
+  const types = items.map((i) => i.type);
+  // A type the OS withholds counts as a video: that is what a drop of it
+  // usually turns out to be, and the wrong placeholder costs one re-plan.
+  const clip = types.filter((t) => !t || /^(video|image)\//.test(t));
+  if (clip.length) {
+    return { kind: clip.every((t) => t.startsWith("image/")) ? "image" : "video", count: clip.length };
+  }
+  const audio = types.filter((t) => t.startsWith("audio/"));
+  return audio.length ? { kind: "audio", count: audio.length } : null;
+}
+
+/** The length an OS video file's landing slot shows before the file is measured. */
+const FILE_SLOT_SECONDS = 5;
 
 /** The one frame a clip has before its strip is sampled: the capture taken for
  * its left edge, or any frame already read off this source. */

@@ -57,15 +57,8 @@ import {
   shortcutDecline,
   shortcutReached,
 } from "@/cut/lib/shortcutGate";
-import {
-  docAudioClips,
-  docClips,
-  docOverlays,
-  projectDuration,
-  serializeDoc,
-  storedAssets,
-  useEditor,
-} from "@/cut/lib/store";
+import { docAudioClips, docClips, docOverlays, projectDuration, serializeDoc, storedAssets, useEditor, clipLen, type VideoTrackPlacement } from "@/cut/lib/store";
+import { fileLandingAt } from "@/cut/lib/timelineDrop";
 import { playheadAt, previewAt, skimAt } from "@/cut/lib/playhead";
 import type { MediaAsset } from "@/cut/lib/types";
 import { AiPanel } from "./AiPanel";
@@ -714,12 +707,21 @@ export function Editor({
          * when every one of them is busy there — what a paste means by "here".
          * Without it the file takes track 0's next free slot. */
         atFirstFit?: boolean;
+        /** The video row a timeline drop resolved to: the row under the
+         * pointer, or a new track past the stack. Clip media inserts there at
+         * `at`, rippling the row's later clips right, each file after the
+         * last; without it the file takes track 0's next free slot. */
+        place?: VideoTrackPlacement;
         /** Media folder the import files into — the one open in the Media
          * panel when the upload started. */
         folderId?: string;
       }
     ) => {
       const list = Array.from(files);
+      // A run of files lands in order, each after the last; a new track is
+      // opened by the first and the rest join it.
+      let at = opts?.at;
+      let place = opts?.place;
       // The keyboard comes back to the editor. An import is started from a
       // panel control — an Upload button, a library tile, a file input the OS
       // dialog hands focus back to — and whichever one it was keeps focus
@@ -755,16 +757,27 @@ export function Editor({
           // (drops that land outside the timeline); placement is up to the user.
           if (!opts?.mediaOnly) {
             if (opts?.atFirstFit) {
-              s.addAssetAtPlayhead(asset.id, opts.at);
+              s.addAssetAtPlayhead(asset.id, at);
             } else if (asset.type === "video" || asset.type === "image") {
-              // A drop on the timeline lands at the pointer (sliding to track
-              // 0's next free slot); an upload appends at the end. A still
-              // rides track 0 like footage.
-              s.addClipFromAsset(asset.id, opts?.at);
+              if (place && at !== undefined) {
+                // A timeline drop inserts at the pointer on the row it was
+                // released over, the way every media drag lands.
+                const from = at;
+                s.addVideoFromAsset(asset.id, place, from);
+                const placed = useEditor.getState().clips.find((c) => c.assetId === asset.id && c.start >= from - 1e-6);
+                if (placed) {
+                  at = placed.start + clipLen(placed);
+                  place = { kind: "track", track: placed.track };
+                }
+              } else {
+                // An upload appends at the end. A still rides track 0 like
+                // footage.
+                s.addClipFromAsset(asset.id, at);
+              }
             } else {
               // A timeline drop lands at the pointer; an upload drops at the
               // playhead (the store slides it right only if that spot is taken).
-              s.addAudioFromAsset(asset.id, opts?.at);
+              s.addAudioFromAsset(asset.id, at);
             }
           }
           // A pending import already holds its bytes, so the filmstrip is
@@ -798,19 +811,6 @@ export function Editor({
         ? "media"
         : "other";
     };
-    // Time under the pointer when the drop lands on the timeline's tracks,
-    // else null. Geometric, because the drop is handled at the window level
-    // and the pointer may sit over any timeline child.
-    const timelineDropTime = (e: DragEvent): number | null => {
-      const scroll = document.querySelector(".tl-scroll");
-      const inner = document.querySelector(".tl-content");
-      if (!scroll || !inner) return null;
-      const r = scroll.getBoundingClientRect();
-      if (e.clientY < r.top || e.clientY > r.bottom || e.clientX < r.left || e.clientX > r.right)
-        return null;
-      const t = (e.clientX - inner.getBoundingClientRect().left) / useEditor.getState().pxPerSec;
-      return Math.max(0, t);
-    };
     // The video canvas joins the timeline as a place that adds to the cut: a
     // drop there appends, since the canvas has no time under the pointer.
     const overCanvas = (e: DragEvent) => {
@@ -829,7 +829,9 @@ export function Editor({
     const hintKind = (e: DragEvent): "media" | "other" | null => {
       if (fileZoneAt(e.clientX, e.clientY)) return null;
       if (dragKind(e) !== "media") return "other";
-      return timelineDropTime(e) != null || overCanvas(e) ? "media" : "other";
+      // The timeline says whether the point lands on it, with the same
+      // resolution the drop uses.
+      return fileLandingAt(e.clientX, e.clientY) != null || overCanvas(e) ? "media" : "other";
     };
     const setHint = (kind: "media" | "other" | null) => {
       if (useEditor.getState().dropActive !== kind) useEditor.getState().setDropActive(kind);
@@ -866,13 +868,13 @@ export function Editor({
         zone(Array.from(e.dataTransfer.files));
         return;
       }
-      const at = timelineDropTime(e);
-      if (at != null) {
+      const landing = fileLandingAt(e.clientX, e.clientY);
+      if (landing) {
         // The first drop on an empty timeline starts the cut at 0: a lone
         // clip floating at the pointer time reads as broken.
         const s = useEditor.getState();
         const empty = s.clips.length === 0 && s.audioClips.length === 0;
-        void importFiles(e.dataTransfer.files, { at: empty ? 0 : at });
+        void importFiles(e.dataTransfer.files, { at: empty ? 0 : landing.at, place: landing.place });
         return;
       }
       void importFiles(e.dataTransfer.files, { mediaOnly: !overCanvas(e) });
