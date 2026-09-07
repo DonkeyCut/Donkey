@@ -128,6 +128,49 @@ export const overlayLayers = (clips: VideoClip[]) => clips.filter((c) => c.track
  * dragging away the last track-0 clip re-grounds the rows above it, so the
  * spine — the sequence that carries transitions, fades, and ripple — always
  * exists while any clip does. */
+/**
+ * Two clips on one track closer than this abut. The sound fold has always
+ * closed a gap this small, and a picture drawn at a fixed frame rate lands a
+ * frame of bare background in one, so the document never keeps it.
+ */
+export const MICRO_GAP_S = 0.05;
+
+/**
+ * Every clip within `MICRO_GAP_S` of the end of the clip before it on its
+ * track — or of the head of the timeline — moved onto that edge. A drop that
+ * lands a hair short of a neighbour, and a speed change that leaves the run
+ * behind it a hair adrift, both close here, so no renderer meets a gap too
+ * small to mean anything. The same array comes back when nothing moves.
+ */
+export function closeMicroGaps(clips: VideoClip[]): VideoClip[] {
+  const byTrack = new Map<number, VideoClip[]>();
+  for (const c of clips) {
+    const run = byTrack.get(c.track);
+    if (run) run.push(c);
+    else byTrack.set(c.track, [c]);
+  }
+  let out: VideoClip[] | null = null;
+  for (const run of byTrack.values()) {
+    // A gap is judged where the run ended before anything moved, so a row of
+    // clips each dropped a hair short closes onto its own neighbour as the
+    // run pulls left. A clip that abutted its neighbour follows it too: a
+    // shrink that pulled the run left would otherwise open a gap behind it.
+    let end = 0;
+    let judged = 0;
+    for (const c of [...run].sort((a, b) => a.start - b.start)) {
+      const gap = c.start - judged;
+      const start = gap > -1e-6 && gap <= MICRO_GAP_S && Math.abs(end - c.start) > 1e-6 ? end : c.start;
+      if (start !== c.start) {
+        out ??= [...clips];
+        out[clips.indexOf(c)] = { ...c, start };
+      }
+      judged = Math.max(judged, c.start + clipLen(c));
+      end = Math.max(end, start + clipLen(c));
+    }
+  }
+  return out ?? clips;
+}
+
 export function groundTracks(clips: VideoClip[]): VideoClip[] {
   const lift = clips.length ? Math.min(...clips.map((c) => c.track)) : 0;
   return lift > 0 ? clips.map((c) => ({ ...c, track: c.track - lift })) : clips;
@@ -1281,7 +1324,7 @@ function normalizeWrite(prev: EditorState, incoming: Partial<EditorState>): Part
     next = { ...next };
     for (const k of DOC_KEYS) delete (next as Record<string, unknown>)[k];
   }
-  if (next.clips) next = { ...next, clips: groundTracks(next.clips) };
+  if (next.clips) next = { ...next, clips: closeMicroGaps(groundTracks(next.clips)) };
   if (next.clips || next.transitions) {
     const clips = next.clips ?? prev.clips;
     const derived = deriveTransitionFields(clips, next.transitions ?? prev.transitions);
@@ -5757,7 +5800,7 @@ export function laneGapAt(
 ): { start: number; len: number } | null {
   let prevEnd = 0;
   for (const s of laneSpans(doc, lane)) {
-    if (s.start - prevEnd > 0.05 && t >= prevEnd && t < s.start) {
+    if (s.start - prevEnd > MICRO_GAP_S && t >= prevEnd && t < s.start) {
       return { start: prevEnd, len: s.start - prevEnd };
     }
     prevEnd = Math.max(prevEnd, s.end);
@@ -6060,7 +6103,7 @@ export function spanSequence(spans: ClipSpan[]): { gapBefore: number; span: Clip
   let cursor = 0;
   for (const sp of spans) {
     const gap = sp.start - cursor;
-    out.push({ gapBefore: gap > 0.05 ? gap : 0, span: sp });
+    out.push({ gapBefore: gap > MICRO_GAP_S ? gap : 0, span: sp });
     cursor = sp.start + sp.len;
   }
   return out;

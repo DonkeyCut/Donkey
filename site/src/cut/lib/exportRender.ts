@@ -44,7 +44,7 @@ import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
 import { createRasterCanvas, type RasterSurface } from "./raster";
 import { renderElementPng } from "./textRender";
 import { assetIsSilent, behindSubjectOverlay, clipCovers, frameOf, frontSubjectOverlay, isEffectOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, projectFadeSeconds, rectOf, removalActive } from "./types";
-import type { ClipSpan, EffectOverlay, MediaAsset, Overlay, StickerOverlay } from "./types";
+import type { ClipAnim, ClipSpan, EffectOverlay, MediaAsset, Overlay, StickerOverlay } from "./types";
 import type { ExportDoc, ExportSettings } from "./exportClient";
 import { videoBitrateFor } from "./exportDelivery";
 
@@ -616,6 +616,23 @@ function overlayRamps(
 }
 
 /**
+ * The audio ramps a track-0 clip's own entrance and exit carry — the gain
+ * the preview's frame plan applies: a fade takes the sound down with the
+ * picture, a zoom, a pop and a slide leave it, and an edge a transition owns
+ * stands down. The tail gets the room the head left.
+ */
+function trackZeroFades(spans: ClipSpan[], i: number): { fadeIn: number; fadeOut: number } {
+  const sp = spans[i];
+  const ramps = (anim: ClipAnim | undefined, room: number) =>
+    anim && !["zoom", "pop", "slideleft", "slideright", "slideup", "slidedown"].includes(anim.style)
+      ? Math.min(anim.seconds, Math.max(0, room))
+      : 0;
+  const fadeIn = (spans[i - 1]?.transitionOut ?? 0) > 0 ? 0 : ramps(sp.clip.animIn, sp.len);
+  const fadeOut = sp.transitionOut > 0 ? 0 : ramps(sp.clip.animOut, sp.len - fadeIn);
+  return { fadeIn, fadeOut };
+}
+
+/**
  * The mix spec for a doc: track-0 clip audio in sequence, plus everything
  * placed at an absolute time — the soundtrack and every upper-track clip's own
  * sound, which the preview plays and the file therefore has to carry.
@@ -677,7 +694,7 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
   const clips: MixClip[] =
     spans.length === 0
       ? [spacer(duration)]
-      : spanSequence(spans).flatMap(({ gapBefore, span: sp }) => [
+      : spanSequence(spans).flatMap(({ gapBefore, span: sp }, i) => [
           ...(gapBefore > 0 ? [spacer(gapBefore)] : []),
           {
             file: resolve(sp.asset),
@@ -689,6 +706,7 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
             reverse: sp.clip.reverse,
             volume: sp.clip.volume,
             sound: sp.clip.sound,
+            ...trackZeroFades(spans, i),
             transition: sp.transitionOut,
             soundCross: sp.soundOut,
             soundBack: sp.soundBack,

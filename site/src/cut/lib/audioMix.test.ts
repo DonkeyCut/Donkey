@@ -58,6 +58,19 @@ describe("foldClips", () => {
     expect(geo[1].at).toBe(1);
   });
 
+  test("a clip's own fade animation ramps its sound, the tail in the room the head left", () => {
+    const geo = foldClips([clip({ out: 2, fadeIn: 0.5, fadeOut: 1.8 }), clip({ fadeIn: 0.3 })]);
+    expect(geo[0].fadeIn).toBeCloseTo(0.5, 5);
+    expect(geo[0].fadeOut).toBeCloseTo(1.5, 5);
+    expect(geo[1].fadeIn).toBeCloseTo(0.3, 5);
+    expect(geo[1].fadeOut).toBe(0);
+  });
+
+  test("a transition's tail fade takes over a shorter own fade at the same edge", () => {
+    const geo = foldClips([clip({ fadeOut: 0.2, transition: 1 }), clip()]);
+    expect(geo[0].fadeOut).toBeCloseTo(1, 5);
+  });
+
   test("counts a speed change against the footprint, not the source span", () => {
     expect(foldClips([clip({ out: 4, speed: 2 })])[0].dur).toBeCloseTo(2, 5);
   });

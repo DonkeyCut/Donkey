@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { groupRemap } from "@donkeycut/effects-kit";
-import { adoptTransitionFields, assetIdsInUse, clipLen, cutTranscribeSpec, deriveTransitionFields, docOverlays, getClipSpans, liftClipLooks, moveOverlayGroup, overlayLaneOrder, normalizeElementLanes, parkedTransitions, placeInRun, projectDuration, rippleInsert, separateOverlaps, serializeDoc, startTrimRipple, useEditor } from "./store";
+import { adoptTransitionFields, assetIdsInUse, clipLen, closeMicroGaps, cutTranscribeSpec, deriveTransitionFields, docOverlays, getClipSpans, liftClipLooks, moveOverlayGroup, overlayLaneOrder, normalizeElementLanes, parkedTransitions, placeInRun, projectDuration, rippleInsert, separateOverlaps, serializeDoc, startTrimRipple, useEditor } from "./store";
 import { playheadAt, setPlayhead, setSkim } from "./playhead";
 import { emptySubtitles, uploadedFontId } from "./types";
 import type { AudioClip, MediaAsset, SubtitleCue, TextOverlay, VideoClip } from "./types";
@@ -184,6 +184,48 @@ describe("the document projection", () => {
       { id: "s1", kind: "shape", shape: "rect", start: 0, end: 2, x: 0.5, y: 0.5, w: 0.2, h: 0.2, fill: "#fff" },
     ] as unknown as Parameters<typeof docOverlays>[0];
     expect(docOverlays(overlays)).toBe(overlays);
+  });
+});
+
+describe("micro gaps", () => {
+  beforeEach(() => {
+    useEditor.setState({ clips: [], audioClips: [], overlays: [], transitions: [], loaded: true });
+  });
+
+  test("a clip dropped a hair short of its neighbour lands on it, on every write", () => {
+    useEditor.setState({
+      clips: [
+        vclip({ id: "a", start: 0, out: 4 }),
+        vclip({ id: "b", start: 4.03, out: 3 }),
+        vclip({ id: "c", start: 7.06, out: 2 }),
+        vclip({ id: "p", track: 1, start: 0.02, out: 1 }),
+      ],
+    });
+    const by = (id: string) => useEditor.getState().clips.find((c) => c.id === id)!;
+    expect(by("b").start).toBe(4);
+    expect(by("c").start).toBe(7);
+    expect(by("p").start).toBe(0);
+  });
+
+  test("a shrink that pulls the run left carries the clips that abutted it", () => {
+    useEditor.setState({
+      clips: [
+        vclip({ id: "a", start: 0, out: 4 }),
+        vclip({ id: "b", start: 4, out: 3 }),
+        vclip({ id: "c", start: 7, out: 2 }),
+        vclip({ id: "p", track: 1, start: 1, out: 1 }),
+      ],
+    });
+    useEditor.getState().setClipTrim("a", 0, 3.97);
+    const by = (id: string) => useEditor.getState().clips.find((c) => c.id === id)!;
+    expect(by("a").out).toBeCloseTo(3.97, 5);
+    expect(by("b").start).toBeCloseTo(3.97, 5);
+    expect(by("c").start).toBeCloseTo(6.97, 5);
+  });
+
+  test("a real gap stays, and so does a clip already on the edge", () => {
+    const clips = [vclip({ id: "a", start: 0, out: 4 }), vclip({ id: "b", start: 4, out: 3 }), vclip({ id: "c", start: 7.2, out: 2 })];
+    expect(closeMicroGaps(clips)).toBe(clips);
   });
 });
 

@@ -44,6 +44,11 @@ export interface MixClip {
   volume?: number;
   /** The clip's own treatment, run on its sound before the fades. */
   sound?: ClipSound;
+  /** Head and tail ramps of the clip's own fade animation, timeline seconds:
+   * the sound goes down to silence with the picture, the gain the preview
+   * plays. An edge a transition owns carries none. */
+  fadeIn?: number;
+  fadeOut?: number;
   /** Cross-dissolve overlap into the next clip, timeline seconds. */
   transition?: number;
   /** Half the cross dissolve into the next clip, timeline seconds: the two
@@ -146,10 +151,16 @@ export function foldClips(clips: MixClip[]) {
   geo.forEach((g, j) => {
     g.at = acc;
     acc += g.dur;
+    // The clip's own fade animation ramps its sound; the tail's room is what
+    // the head left, the way the engine's stanza splits them.
+    const own = Math.min(Math.max(0, g.clip.fadeIn ?? 0), g.dur);
+    if (own > 0.01) g.fadeIn = own;
+    const ownOut = Math.min(Math.max(0, g.clip.fadeOut ?? 0), Math.max(0, g.dur - g.fadeIn));
+    if (ownOut > 0.01) g.fadeOut = ownOut;
     const next = geo[j + 1];
     if (!next) return;
     const fade = Math.min(g.clip.transition ?? 0, g.dur * 0.9);
-    if (fade > 0.01) g.fadeOut = fade;
+    if (fade > 0.01) g.fadeOut = Math.max(g.fadeOut, fade);
     const cross = Math.min(g.clip.soundCross ?? 0, g.dur * 0.9, next.dur * 0.9);
     if (cross > 0.01) {
       g.crossOut = cross;
