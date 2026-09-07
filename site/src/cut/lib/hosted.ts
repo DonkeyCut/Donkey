@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { create } from "zustand";
 
 import { offloadHostedMedia } from "./hostedBlobs";
@@ -49,6 +50,22 @@ export const useHostedBalance = create<{ balance: string | null; settled: number
   balance: null,
   settled: 0,
 }));
+
+/** A hosted call that answered with no balance was charged after its
+ * response left; the re-read waits for the charge to land. */
+const SETTLE_DELAY_MS = 1500;
+
+/** Re-reads a query once a charge from this tab has landed. Only the count
+ * moving matters; the mount value is whatever the page has done so far. */
+export function useInvalidateOnSettle(queryKey: readonly unknown[]): void {
+  const queryClient = useQueryClient();
+  const settled = useHostedBalance((s) => s.settled);
+  useEffect(() => {
+    if (settled === 0) return;
+    const id = setTimeout(() => void queryClient.invalidateQueries({ queryKey }), SETTLE_DELAY_MS);
+    return () => clearTimeout(id);
+  }, [settled, queryClient, queryKey]);
+}
 
 export function reportBalance(balance: string | undefined) {
   if (balance === undefined) {

@@ -14,7 +14,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useEngineUser } from "@/cut/lib/backend/hooks";
-import { useHostedBalance } from "@/cut/lib/hosted";
+import { useHostedBalance, useInvalidateOnSettle } from "@/cut/lib/hosted";
 import { useCutBase } from "@/cut/lib/nav";
 import { track } from "@/lib/analytics";
 import { formatUsd } from "@/lib/credits/format-usd";
@@ -26,10 +26,6 @@ import { useAccountFlags } from "@/queries/featureFlags";
 // up under the pointer, where they say it can be clicked.
 const PILL =
   "flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border border-transparent px-3 py-1.5 text-xs font-medium tabular-nums text-muted-foreground transition-colors hover:border-border hover:bg-card hover:shadow-xs";
-
-/** A hosted call that answered with no balance was charged after its
- * response left; the re-read waits for the charge to land. */
-const SETTLE_DELAY_MS = 1500;
 
 /** The bar's reading of a balance: cents while there is less than $10, where
  * each one changes what the next generation can be, and whole dollars past
@@ -60,7 +56,6 @@ function BalancePill() {
   const queryClient = useQueryClient();
   const balance = useCreditBalance();
   const reported = useHostedBalance((s) => s.balance);
-  const settled = useHostedBalance((s) => s.settled);
 
   // A charged call reported the balance it left: that is the balance, with no
   // request to make.
@@ -71,16 +66,7 @@ function BalancePill() {
     );
   }, [reported, queryClient]);
   // A call that answered without one: re-read once its charge has landed.
-  // Only the count moving matters; the mount value is whatever the page has
-  // done so far.
-  useEffect(() => {
-    if (settled === 0) return;
-    const id = setTimeout(
-      () => void queryClient.invalidateQueries({ queryKey: creditBalanceQueryKey }),
-      SETTLE_DELAY_MS
-    );
-    return () => clearTimeout(id);
-  }, [settled, queryClient]);
+  useInvalidateOnSettle(creditBalanceQueryKey);
   // Background work — renders, cloud jobs — charges without a call from this
   // tab, and a top-up happens on another page; a slow poll keeps the number
   // honest between them, and a focus refetch catches the trip back from billing.
