@@ -338,7 +338,10 @@ export function CutOnboarding() {
           )}
           {step === 2 && <ModesSlide />}
           {step === 3 && (
-            <CreditsSlide credits={state?.signupCredits ?? null} />
+            <CreditsSlide
+              credits={state?.signupCredits ?? null}
+              expiresAt={state?.signupCreditsExpiresAt ?? null}
+            />
           )}
           {step === 4 && <AiChatSlide />}
           {step === 5 && !isPro && <PlansSlide onSkipPro={() => finish(false)} />}

@@ -32,6 +32,8 @@ type OnboardingState = {
   // address deleted an earlier account, or the setting grants nothing. The
   // credits slide names this amount.
   signupCredits: string | null;
+  // When that grant stops being spendable, or null when it never does.
+  signupCreditsExpiresAt: string | null;
 };
 
 // An account that has never opened the sequence has no row; it reads as an
@@ -95,10 +97,15 @@ export const PUT = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) =>
 });
 
 async function toState(userId: string, row: OnboardingRow): Promise<OnboardingState> {
+  // The expiry is shown while it is still ahead of a live grant.
   const grant = await prisma.userCreditGrant.findFirst({
     where: { userId, source: "signup" },
-    select: { originalAmountMicros: true },
+    select: { expiresAt: true, originalAmountMicros: true, status: true },
   });
+  const expiresAt =
+    grant?.status === "active" && grant.expiresAt && grant.expiresAt > new Date()
+      ? grant.expiresAt
+      : null;
   return {
     version: row.version,
     completedAt: row.completedAt?.toISOString() ?? null,
@@ -106,5 +113,6 @@ async function toState(userId: string, row: OnboardingRow): Promise<OnboardingSt
     referralSources: row.referralSources,
     referralOther: row.referralOther,
     signupCredits: grant ? creditMicrosToString(grant.originalAmountMicros) : null,
+    signupCreditsExpiresAt: expiresAt?.toISOString() ?? null,
   };
 }

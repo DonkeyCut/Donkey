@@ -14,6 +14,7 @@ export type OnboardingState = {
   referralSources: string[];
   referralOther: string | null;
   signupCredits: string | null;
+  signupCreditsExpiresAt: string | null;
 };
 
 type OnboardingUpdate =

@@ -44,3 +44,8 @@ export function creditGrantExpiry(expiresAfterDays: number | null, now = new Dat
   if (expiresAfterDays === null) return undefined;
   return new Date(now.getTime() + expiresAfterDays * 24 * 60 * 60 * 1000);
 }
+
+/** The expiry as people read it: "September 14, 2026". */
+export function formatCreditExpiry(expiresAt: Date): string {
+  return expiresAt.toLocaleDateString("en-US", { day: "numeric", month: "long", year: "numeric" });
+}

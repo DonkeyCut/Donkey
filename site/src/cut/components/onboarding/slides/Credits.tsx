@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 
 import { burstConfetti } from "@/cut/components/onboarding/confetti";
+import { formatCreditExpiry } from "@/lib/credits/top-up";
 
 // The signup grant already landed when the account was created, so this slide
 // never grants anything — it says what's there: the USD the grant carried, read
@@ -10,8 +11,15 @@ import { burstConfetti } from "@/cut/components/onboarding/confetti";
 // don't change between them; the burst fires every time the slide is reached.
 // An account with no grant — its address already had one on an earlier,
 // deleted account, or the signup-credits setting grants nothing — gets the
-// slide without an amount.
-export function CreditsSlide({ credits }: { credits: string | null }) {
+// slide without an amount. A grant with an expiry names the date under the
+// amount.
+export function CreditsSlide({
+  credits,
+  expiresAt,
+}: {
+  credits: string | null;
+  expiresAt: string | null;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -65,6 +73,11 @@ export function CreditsSlide({ credits }: { credits: string | null }) {
           Already in your account — nothing to claim. Spend it on generated
           video, audio and images.
         </p>
+        {expiresAt !== null && (
+          <p className="mt-3 text-[13px] leading-[1.5] text-[#8a8a8a]">
+            Expires {formatCreditExpiry(new Date(expiresAt))}.
+          </p>
+        )}
       </div>
     </div>
   );
