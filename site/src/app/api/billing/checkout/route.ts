@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { proPriceId } from "@/lib/billing/pro-subscription";
 import { ensureStripeCustomer, getStripe } from "@/lib/billing/stripe";
+import { openSubscribeBonusOffer, SUBSCRIBE_BONUS_METADATA_KEY } from "@/lib/credits/subscribe-bonus-claim";
 import {
   notFoundResponse,
   unauthorizedResponse,
@@ -29,6 +30,9 @@ export const POST = withDonkeyAuth(async (request) => {
     name: session.user.name,
     userId: session.user.id,
   });
+  // A checkout started while the subscribe bonus offer is open carries the
+  // offer, so the webhook lands the bonus on the subscription it creates.
+  const offer = await openSubscribeBonusOffer(session.user.id);
   const stripe = getStripe();
   const origin = request.nextUrl.origin;
   const checkout = await stripe.checkout.sessions.create({
@@ -38,7 +42,12 @@ export const POST = withDonkeyAuth(async (request) => {
     customer: customerId,
     line_items: [{ price: priceId, quantity: 1 }],
     mode: "subscription",
-    subscription_data: { metadata: { userId: session.user.id } },
+    subscription_data: {
+      metadata: {
+        userId: session.user.id,
+        ...(offer ? { [SUBSCRIBE_BONUS_METADATA_KEY]: offer.id } : {}),
+      },
+    },
     success_url: `${origin}/app/settings?checkout=success`,
   });
 

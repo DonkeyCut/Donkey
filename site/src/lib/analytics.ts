@@ -56,6 +56,9 @@ export type AnalyticsEvents = {
     tag: string;
     slot: string;
   };
+  // The subscribe bonus: shown once when the offer opens, and taken up.
+  subscribe_bonus_offered: { dollars: number };
+  subscribe_bonus_checkout_started: { dollars: number; minutesLeft: number; source: "editor" | "settings" };
   // Billing (settings).
   pro_checkout_started: void;
   billing_portal_opened: void;

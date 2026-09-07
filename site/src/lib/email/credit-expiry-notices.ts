@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 
 // The grants an account is warned about: credit it was given. Purchased
 // credit never expires, and the Pro allowance turns over every month.
-export const NOTICED_GRANT_SOURCES = ["signup", "manual_dollar"] as const;
+export const NOTICED_GRANT_SOURCES = ["signup", "manual_dollar", "subscribe_bonus"] as const;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

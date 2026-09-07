@@ -7,6 +7,7 @@ import { apiFetch } from "@/queries/apiClient";
 export const creditBalanceQueryKey = ["credits", "balance"] as const;
 export const creditAutoReloadQueryKey = ["credits", "auto-reload"] as const;
 export const accountQueryKey = ["account", "me"] as const;
+export const subscribeBonusQueryKey = ["credits", "subscribe-bonus"] as const;
 
 export type CreditBalance = {
   balance: string;
@@ -42,6 +43,29 @@ export function useCreditBalance() {
   return useQuery({
     queryFn: () => apiFetch<CreditBalance>("/api/credits/balance"),
     queryKey: creditBalanceQueryKey,
+  });
+}
+
+export type SubscribeBonus = {
+  // USD, as a credit string.
+  dollars: string;
+  openedAt: string;
+  closesAt: string;
+  creditsExpireAt: string | null;
+  status: "open" | "closed" | "claimed";
+};
+
+// The account's subscribe bonus offer. The read is what opens it, so the
+// query keeps asking while the app is up: a poll between charges, and a
+// refetch when the tab comes back.
+export function useSubscribeBonus(options: { enabled?: boolean } = {}) {
+  return useQuery({
+    enabled: options.enabled ?? true,
+    queryFn: () => apiFetch<{ offer: SubscribeBonus | null }>("/api/credits/subscribe-bonus"),
+    queryKey: subscribeBonusQueryKey,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    select: (data) => data.offer,
   });
 }
 

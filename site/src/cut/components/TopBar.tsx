@@ -40,6 +40,7 @@ import { CreditsPill } from "./CreditsPill";
 import { RecordDialog, type RecordMode } from "./RecordDialog";
 import { ShareDialog } from "./ShareDialog";
 import { StoragePill } from "./StoragePill";
+import { SubscribeBonusPill } from "./SubscribeBonusPill";
 
 function AspectIcon({ aspect, className }: { aspect: Aspect; className?: string }) {
   const o = aspectOrientation(aspect);
@@ -628,6 +629,7 @@ export function TopBar({
           button. */}
       <div className="flex shrink-0 items-center gap-2 pr-3">
         <div ref={pillRef} className="flex items-center gap-2">
+          <SubscribeBonusPill />
           <CreditsPill />
           <StoragePill />
         </div>
