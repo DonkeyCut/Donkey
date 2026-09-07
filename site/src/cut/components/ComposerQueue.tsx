@@ -311,6 +311,9 @@ function QueueEditBox({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
+          // Enter while an IME is composing commits the character, so the
+          // edit waits for the composition to end.
+          if (e.nativeEvent.isComposing || e.keyCode === 229) return;
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             onSave(value);

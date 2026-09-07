@@ -1452,6 +1452,12 @@ export function MentionTextarea({
         }}
         onKeyDown={(e) => {
           e.stopPropagation();
+          // A composing input method — Korean, Japanese, Chinese — presses
+          // Enter to commit the character it is building, and the key only
+          // becomes a submit once the composition has ended. Chrome and
+          // Firefox flag the press as composing; Safari reports it as
+          // keyCode 229.
+          if (e.nativeEvent.isComposing || e.keyCode === 229) return;
           if (
             e.key === "Backspace" &&
             onRemoveLastRef &&
