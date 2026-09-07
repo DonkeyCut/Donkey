@@ -418,10 +418,6 @@ export function setObjectDragImage(
     }
   }
 
-  // Whether the pointer is over a spot that will take the drop. By the time
-  // `dragover` bubbles to the document a real target has already claimed the
-  // event, so its `defaultPrevented` is the tell.
-  let overValid = false;
   // Where the pointer last was: `dragend` reports no position on every
   // platform, and a release nothing wanted flies home from here.
   let lastX = e.clientX;
@@ -429,13 +425,12 @@ export function setObjectDragImage(
   const onOver = (ev: DragEvent) => {
     // A real target has already claimed this event by the time it reaches the
     // document, so its `defaultPrevented` is what says the spot takes a drop.
-    overValid = ev.defaultPrevented;
     // Dead space accepts the drag too, which keeps the native snap-back
     // animation from holding `dragend` — and the ghost — for a beat after a
     // release nothing wanted. The cursor still reads as no-drop; with the
     // effect at none the browser fires no `drop` for the release, so
     // `dragend` below is what sends the pick home.
-    if (!overValid && ev.dataTransfer) ev.dataTransfer.dropEffect = "none";
+    if (!ev.defaultPrevented && ev.dataTransfer) ev.dataTransfer.dropEffect = "none";
     ev.preventDefault();
     lastX = ev.clientX;
     lastY = ev.clientY;
@@ -479,48 +474,53 @@ export function setObjectDragImage(
       setTimeout(() => back.remove(), 320);
     }
   };
+  // The drop landed: the ghost goes at once and the source lets go of its
+  // selection, since the carried items have a new home.
+  const landed = () => {
+    root.remove();
+    onLanded?.();
+  };
   // Letting go settles the ghost at once — flyers still gathering in clear
-  // with it. A landing removes everything on the spot; a release nothing
-  // accepted sends the pick home. `dragend` fires for every drag, including
-  // one released outside the window and one whose target stopped the drop
-  // from bubbling; when no `drop` came first it decides between the two.
+  // with it. Every listener detaches on the first verdict; the rest are
+  // no-ops.
   let settled = false;
   const detach = () => {
     settled = true;
     for (const fly of flies) fly.remove();
     document.removeEventListener("dragover", onOver);
-    document.removeEventListener("drop", onDead, true);
-    window.removeEventListener("drop", onLand);
+    window.removeEventListener("drop", onDrop, true);
     window.removeEventListener("dragend", onEnd, true);
   };
+  // The verdict on a release comes from the drop event itself, never from a
+  // flag kept during the drag: a target that stops the drop or the dragovers
+  // from bubbling (a timeline row, say) still passes this capture listener at
+  // the window, ahead of every handler. Whether it took the drop is only
+  // known once dispatch is over, so the verdict waits a task and reads the
+  // event's `defaultPrevented` — set by any handler that acted on the drop.
+  let dropSeen = false;
+  const onDrop = (ev: DragEvent) => {
+    dropSeen = true;
+    const x = ev.clientX;
+    const y = ev.clientY;
+    setTimeout(() => {
+      if (settled) return;
+      detach();
+      if (ev.defaultPrevented) landed();
+      else flyHome(x, y);
+    }, 0);
+  };
+  // `dragend` fires for every drag, including one released outside the
+  // window. When no `drop` came first, the browser's own effect says whether
+  // anything took it: none means the pick goes home from where it was last
+  // seen. When a drop was seen, its own verdict above decides.
   const onEnd = (ev: DragEvent) => {
-    if (settled) return;
+    if (settled || dropSeen) return;
     detach();
-    // A release outside the window ends the drag with nothing under the
-    // pointer; the ghost goes home from where it was last seen.
-    if (!overValid || ev.dataTransfer?.dropEffect === "none") flyHome(lastX, lastY);
-    else root.remove();
-  };
-  // Capture at the document, ahead of every element handler: a release over a
-  // spot that never accepted the drag is swallowed here, so the drop the
-  // `dragover` above made possible reaches nothing that would act on it.
-  const onDead = (ev: DragEvent) => {
-    if (overValid) return;
-    ev.preventDefault();
-    ev.stopPropagation();
-    detach();
-    flyHome(ev.clientX, ev.clientY);
-  };
-  // Bubble at the window, behind every element handler: the drop landed and
-  // the target has already read it, so the source can drop its selection.
-  const onLand = () => {
-    detach();
-    root.remove();
-    onLanded?.();
+    if (ev.dataTransfer?.dropEffect === "none") flyHome(lastX, lastY);
+    else landed();
   };
   document.addEventListener("dragover", onOver);
-  document.addEventListener("drop", onDead, true);
-  window.addEventListener("drop", onLand);
+  window.addEventListener("drop", onDrop, true);
   window.addEventListener("dragend", onEnd, true);
 }
 
