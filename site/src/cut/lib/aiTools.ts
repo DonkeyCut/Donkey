@@ -1,6 +1,6 @@
 "use client";
 
-import { GUIDE_IDS, isGuideId, sanitizeGuideLines, type GuideId } from "./guides";
+import { GUIDE_IDS, guideFits, guidePreset, isGuideId, sanitizeGuideLines, type GuideId } from "./guides";
 import {
   ALL_EFFECT_IDS,
   autoGradeFromImageData,
@@ -3792,6 +3792,11 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (bad.length)
         throw new ToolError(`Unknown guide ${bad.join(", ")} — pick from ${GUIDE_IDS.join(", ")}.`);
       const show = input.show as GuideId[];
+      const unfit = show.filter((id) => !guideFits(id, s.aspect));
+      if (unfit.length)
+        throw new ToolError(
+          `${unfit.map((id) => guidePreset(id).name).join(", ")} fits portrait frames only; this project is ${s.aspect}. Turn it on after set_aspect to a portrait shape, or place by project.safeZones.margins.`
+        );
       if (input.lines !== undefined) {
         s.setGuideLines(sanitizeGuideLines(input.lines));
         if (!show.includes("custom")) show.push("custom");
