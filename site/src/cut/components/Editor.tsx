@@ -729,14 +729,14 @@ export function Editor({
       // Typing is never interrupted: a focused text field keeps the keyboard.
       focusShell();
       setImporting((n) => n + list.length);
-      // Files are prepared one at a time: each claims its stored name against
-      // the names already taken, so two drops of the same name must not race
-      // for it. Only the bytes go out in parallel, from the upload queue.
+      // Files are probed one at a time, so a run lands in drop order. Their
+      // bytes go out in parallel, from the upload queue.
       for (const file of list) {
         try {
-          // Cloud: the file is probed and named before anything is uploaded,
-          // so it can be placed now and sent behind the editor. Local: the
-          // engine names a file only once it holds the bytes.
+          // The file is probed from its own header and placed now; the claim,
+          // the copy and the upload run behind the editor. Footage this
+          // browser cannot decode goes the plain way: the project converts it
+          // first, and the asset is built from what comes back.
           const pending = await prepareImport(projectId, file);
           const asset = pending?.asset ?? (await importFileToProject(projectId, file));
           if (!asset) continue;

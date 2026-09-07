@@ -304,12 +304,10 @@ export const visualRefs = (refs: AssetRef[]): AssetRef[] =>
  * the chat composer is an attachment, not a filing. Panel drops omit it and
  * file into Media as user imports.
  *
- * A cloud drop shows its chip the moment the local bytes are probed: the ref
- * plays from the file's own object URL while the upload queue sends the bytes
+ * A drop shows its chip the moment the local bytes are probed: the ref plays
+ * from the file's own object URL while the upload queue sends the bytes
  * behind the composer, and the asset swaps to its stored URL when they land
- * (chips and the send paths read the live URL from the asset). The engine
- * takes a file's bytes in one quick local call, so its imports go straight
- * through. */
+ * (chips and the send paths read the live URL from the asset). */
 export async function refsFromDroppedFiles(
   projectId: string,
   files: File[],

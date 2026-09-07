@@ -2,6 +2,7 @@
 
 import { scanBeats, scanSilence, scanSpeech, type BeatScan, type PcmChunk, type SpeechScan } from "./audioScan";
 import { apiFetch, apiJson, getBackend, type CutBackend } from "./backend";
+import { registerBlobFile } from "./backend/browser/registry";
 import { cloudBackend } from "./backend/cloud";
 import { pollCloudJob } from "./cloudJob";
 import { quotaErrorMessage } from "./backend/cloud";
@@ -9,7 +10,7 @@ import { encodeWav } from "./cloudTranscribe";
 import { allowance, canvasBytes, holdMemory } from "./memoryBudget";
 import { normalizeLink } from "./link";
 import { downloadFromUrl } from "./download";
-import { startUpload, uploadInFlight } from "./importQueue";
+import { markUploadStored, startUpload, uploadInFlight } from "./importQueue";
 import { convertProjectFile, dropProjectFile, mp4DisplayName } from "./mediaConvert";
 import {
   audioChunks,
@@ -252,6 +253,39 @@ export function putSigned(
   });
 }
 
+/** A multipart POST with upload progress and a cancel, answering the stored
+ * name the engine replies with. */
+function postFormWatched(
+  url: string,
+  form: FormData,
+  opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (opts?.signal?.aborted) return reject(new DOMException("Upload cancelled.", "AbortError"));
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    if (opts?.onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && e.total > 0) opts.onProgress!(e.loaded / e.total);
+      };
+    }
+    xhr.onload = () => {
+      let body: { fileName?: string; error?: string } = {};
+      try {
+        body = JSON.parse(xhr.responseText) as typeof body;
+      } catch {
+        // A reply that never reached a handler is plain text.
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && body.fileName) resolve(body.fileName);
+      else reject(new Error(body.error ?? "Upload failed."));
+    };
+    xhr.onerror = () => reject(new Error("Upload failed."));
+    xhr.onabort = () => reject(new DOMException("Upload cancelled.", "AbortError"));
+    opts?.signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+    xhr.send(form);
+  });
+}
+
 /** Upload raw media bytes into a project. Local: the engine's multipart POST,
  * byte-identical to the pre-seam request. Cloud: presign -> direct R2 PUT ->
  * complete. Returns the stored (deduped) file name. */
@@ -271,11 +305,14 @@ export async function uploadProjectMediaTo(
   if (backend.kind !== "cloud") {
     const form = new FormData();
     form.append("file", file, name);
-    const res = await backend.fetch(`/api/cut/projects/${projectId}/media`, {
-      method: "POST",
-      body: form,
-      signal: opts?.signal,
-    });
+    const path = `/api/cut/projects/${projectId}/media`;
+    // The engine's copy is watched the way a cloud PUT is: the bytes leaving
+    // are the progress, and a cancel stops them. The in-page browser router
+    // answers fetch only, and writes fast enough to need neither.
+    if (backend.kind === "local" && typeof XMLHttpRequest !== "undefined") {
+      return postFormWatched(backend.url(path), form, opts);
+    }
+    const res = await backend.fetch(path, { method: "POST", body: form, signal: opts?.signal });
     const body = await apiJson<{ fileName?: string }>(res);
     if (!res.ok || !body.fileName) throw new Error(body.error ?? "Upload failed.");
     return body.fileName;
@@ -427,109 +464,148 @@ export type PendingImport = {
   send: (opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }) => Promise<string>;
 };
 
-/** Prepare a dropped file so it can appear instantly: reserve its stored name
- * and probe it from local bytes, both before anything is uploaded. The caller
- * adds the asset, then runs `send` in the background.
+/** Prepare a dropped file so it is on the timeline at the release: probed
+ * from its own header, playing from the bytes in hand, named after the file.
+ * Everything else — the claim on a stored name, the copy into the browser
+ * store or the engine, the upload — runs behind the editor from `send`, and
+ * the asset joins the saved document once its bytes are held somewhere a
+ * reload can find them.
  *
- * Cloud only. The engine takes a file's bytes and hands back its name in one
- * request, so there is no name to build an asset around ahead of time — and a
- * copy to local disk is quick enough that there is nothing to hide. */
+ * Returns null for footage this browser cannot decode (a phone's HEVC, a
+ * camera's ProRes): that import goes the plain way, where the project
+ * converts the file and the asset is built from what comes back. */
 export async function prepareImport(
   projectId: string,
   file: File,
   backend: CutBackend = getBackend()
 ): Promise<PendingImport | null> {
-  if (backend.kind !== "cloud") return null;
   const type = assetTypeOf(file);
   if (!type) return null;
-
-  const objectUrl = URL.createObjectURL(file);
+  let meta: Awaited<ReturnType<typeof probeMedia>>;
   try {
-    // Probing and claiming the name are independent, so the asset is ready
-    // after whichever is slower rather than after both in turn. The probe
-    // reads the dropped bytes rather than the object URL, so it never goes
-    // back through the network stack for a file already in hand.
-    const metaP = probeMedia(type, file);
-    let signed: { key: string; url: string; fileName: string } | null = null;
-    let stashed: { fileName: string; url: string } | null = null;
-    // Names this browser already pinned locally (413-era stashes with no cloud
-    // row): the cloud can't see them, so its dedupe is told to steer clear —
-    // a claim on one of them would overwrite the only copy of another file.
-    const avoid = (await pendingUploadsFor(projectId)).map((p) => p.fileName);
-    try {
-      signed = await presignUpload(
-        `/api/cut/projects/${projectId}/media/presign`,
-        file,
-        file.name,
-        backend,
-        avoid.length > 0 ? { avoid } : {}
-      );
-    } catch (err) {
-      // A full account still imports: the bytes stay in the browser store
-      // under a locally deduped name, pinned until the drain claims a cloud
-      // name for them once there is room.
-      const status = (err as { status?: number }).status;
-      stashed = status === 413 ? await stashUnclaimedMedia(projectId, file) : null;
-      if (!stashed) {
-        await metaP.catch(() => {});
-        throw err;
-      }
-    }
-    // Local-first: the bytes land in the browser store under the claimed name
-    // before they leave it, so the asset saves into the document now and the
-    // upload drains behind it, surviving reloads through the store's ledger.
-    // A browser that can't hold the store keeps the tab-scoped object URL.
-    const storedUrl = signed
-      ? await stashCloudMedia(projectId, file, signed.fileName)
-      : stashed!.url;
-    const fileName = signed ? signed.fileName : stashed!.fileName;
-    // Footage this browser has no decoder for imports the plain way instead:
-    // the file reaches the project first and converts there, which local-first
-    // can't do — the optimistic asset would be one nothing here can play.
-    const meta = await metaP.catch((e: unknown) => {
-      if (e instanceof UnreadableMediaError && e.undecodable) return null;
-      throw e;
-    });
-    if (!meta) {
-      URL.revokeObjectURL(objectUrl);
-      await dropLocalMedia(projectId, fileName);
-      return null;
-    }
-    const localUrl = storedUrl ?? objectUrl;
-    if (storedUrl) URL.revokeObjectURL(objectUrl);
-    const id = uid();
-    keepImportedBytes(id, file);
-    const asset: MediaAsset = {
-      id,
-      fileName,
-      name: file.name,
-      type: meta.type,
-      duration: meta.duration,
-      ...(meta.width !== undefined ? { width: meta.width } : {}),
-      ...(meta.height !== undefined ? { height: meta.height } : {}),
-      url: localUrl,
-      upload: { progress: 0, ...(storedUrl ? { stored: true } : {}) },
-    };
-    const claim = signed;
-    const send = claim
-      ? async (opts?: { onProgress?: (fraction: number) => void; signal?: AbortSignal }) => {
-          await putSigned(claim.url, file, file.type || "application/octet-stream", opts);
-          const res = await backend.fetch(`/api/cut/projects/${projectId}/media/complete`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ key: claim.key }),
-          });
-          const body = await apiJson<{ fileName?: string }>(res);
-          if (!res.ok || !body.fileName) throw new Error(body.error ?? "Upload failed.");
-          await clearPendingUpload(projectId, body.fileName);
-          return body.fileName;
-        }
-      : sendStoredUpload(backend, projectId, stashed!.fileName);
-    return { asset, localUrl, send };
-  } catch (err) {
-    URL.revokeObjectURL(objectUrl);
-    throw err;
+    // The header is the only thing the clip waits on.
+    meta = await probeMedia(type, file);
+  } catch (e) {
+    if (e instanceof UnreadableMediaError && e.undecodable) return null;
+    throw e;
   }
+  const id = uid();
+  keepImportedBytes(id, file);
+  // The bytes in hand are registered like a store file: decoders resolve the
+  // File behind the URL and read it as a blob, since ranged fetches of a blob
+  // URL are unreliable, and the URL lives for the session the way every
+  // registered one does — the filmstrip sweep reads it long after the copy
+  // has landed.
+  const localUrl = registerBlobFile(`pending/${id}`, file);
+  const asset: MediaAsset = {
+    id,
+    // A name of its own until the store claims one: nothing may match this
+    // asset by file name — a pin's resume, a delete's shared-file guard —
+    // before the bytes are actually stored under a name.
+    fileName: `pending:${id}:${file.name}`,
+    name: file.name,
+    type: meta.type,
+    duration: meta.duration,
+    ...(meta.width !== undefined ? { width: meta.width } : {}),
+    ...(meta.height !== undefined ? { height: meta.height } : {}),
+    url: localUrl,
+    upload: { progress: 0 },
+  };
+  const send: PendingImport["send"] =
+    backend.kind === "cloud"
+      ? sendCloudImport(backend, projectId, file, id)
+      : (opts) => uploadProjectMediaTo(backend, projectId, file, file.name, opts);
+  return { asset, localUrl, send };
+}
+
+/** Claims run one at a time, each against the names already taken, so two
+ * files of one name in a drop never race for the same stored name. Only the
+ * claim waits its turn; the copies run side by side. */
+let claimChain: Promise<unknown> = Promise.resolve();
+function claimInTurn<T>(work: () => Promise<T>): Promise<T> {
+  const next = claimChain.then(work, work);
+  claimChain = next.catch(() => {});
+  return next;
+}
+
+type CloudClaim = {
+  /** The presigned PUT; null when the account was full and the bytes wait in
+   * the browser store for the ledger drain to claim a cloud name. */
+  signed: { key: string; url: string; fileName: string } | null;
+  fileName: string;
+  /** Whether the browser store holds the bytes under `fileName`. */
+  stored: boolean;
+};
+
+/** The drain for a dropped file on a cloud project: claim the stored name,
+ * land the bytes in the browser store under it — the asset joins the saved
+ * document there, and a reload resumes the upload from the ledger — then PUT
+ * them and complete. A browser that cannot hold the store keeps the import
+ * tab-scoped and uploads it directly; a full account (413) stashes the bytes
+ * under a local name, and the ledger drain claims a cloud name for them once
+ * there is room. The claim is made once: a retry drains what it holds. */
+function sendCloudImport(
+  backend: CutBackend,
+  projectId: string,
+  file: File,
+  assetId: string
+): PendingImport["send"] {
+  let claim: CloudClaim | null = null;
+  const live = () => {
+    const s = useEditor.getState();
+    return s.projectId === projectId && s.assets.some((a) => a.id === assetId);
+  };
+  return async (opts) => {
+    if (!claim) {
+      const made = await claimInTurn(async (): Promise<Omit<CloudClaim, "stored">> => {
+        const avoid = (await pendingUploadsFor(projectId)).map((p) => p.fileName);
+        try {
+          const signed = await presignUpload(
+            `/api/cut/projects/${projectId}/media/presign`,
+            file,
+            file.name,
+            backend,
+            avoid.length > 0 ? { avoid } : {}
+          );
+          return { signed, fileName: signed.fileName };
+        } catch (err) {
+          if ((err as { status?: number }).status !== 413) throw err;
+          return { signed: null, fileName: "" };
+        }
+      });
+      if (made.signed) {
+        const storedUrl = await stashCloudMedia(projectId, file, made.fileName);
+        claim = { ...made, stored: storedUrl !== null };
+      } else {
+        const stashed = await stashUnclaimedMedia(projectId, file);
+        if (!stashed) throw new Error(quotaErrorMessage(413, {}) ?? "Upload failed.");
+        claim = { signed: null, fileName: stashed.fileName, stored: true };
+      }
+      // Deleted, or left behind, while the claim ran: the copy comes back out
+      // and nothing is completed, so nothing counts against the account.
+      if (opts?.signal?.aborted || !live()) {
+        const gone = claim;
+        claim = null;
+        if (gone.stored) await dropLocalMedia(projectId, gone.fileName);
+        throw new DOMException("Cancelled.", "AbortError");
+      }
+      if (claim.stored) markUploadStored(assetId, claim.fileName);
+    }
+    // Stored bytes drain from the store, own name excluded from the steer;
+    // that path also re-signs, so a retry never reuses a signature that aged.
+    if (claim.stored || !claim.signed) {
+      return sendStoredUpload(backend, projectId, claim.fileName)(opts);
+    }
+    await putSigned(claim.signed.url, file, file.type || "application/octet-stream", opts);
+    const res = await backend.fetch(`/api/cut/projects/${projectId}/media/complete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: claim.signed.key }),
+    });
+    const body = await apiJson<{ fileName?: string }>(res);
+    if (!res.ok || !body.fileName) throw new Error(body.error ?? "Upload failed.");
+    return body.fileName;
+  };
 }
 
 /** The drain for a store-backed upload, built from the stored bytes alone so

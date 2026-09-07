@@ -78,6 +78,16 @@ export function startUpload(projectId: string, pending: PendingImport) {
 /** Whether a job's bytes are held by the browser store — see the header. */
 const storeBacked = (job: Job) => job.pending.asset.upload?.stored === true;
 
+/** The browser store took the bytes mid-drain, under the name the cloud
+ * claimed: from here the job is background sync (see the header), and the
+ * asset carries its stored name into the saved document. */
+export function markUploadStored(assetId: string, fileName: string) {
+  const upload = { progress: 0, stored: true as const };
+  const job = jobs.get(assetId);
+  if (job) job.pending.asset = { ...job.pending.asset, fileName, upload };
+  useEditor.getState().updateAsset(assetId, { fileName, upload });
+}
+
 /** The `upload` patch for a job, keeping `stored` so a progress tick can't
  * demote a store-backed asset to tab-scoped (which would strip it from the
  * saved document), and `server` so the indicator keeps calling a copy a copy.
@@ -153,17 +163,16 @@ function stopStored(job: Job) {
 
 async function run(job: Job) {
   const { asset, localUrl, send } = job.pending;
-  const stored = storeBacked(job);
   await acquire();
   try {
-    if (!wanted(job)) return stored ? stopStored(job) : cancelUpload(asset.id);
+    if (!wanted(job)) return storeBacked(job) ? stopStored(job) : cancelUpload(asset.id);
     let shown = -1;
     const fileName = await send({
       signal: job.controller.signal,
       onProgress: (fraction) => {
         // The progress stream is the cheapest place to notice the asset is
         // gone, and the only one that fires during a long upload.
-        if (!wanted(job)) return stored ? stopStored(job) : cancelUpload(asset.id);
+        if (!wanted(job)) return storeBacked(job) ? stopStored(job) : cancelUpload(asset.id);
         const pct = Math.floor(fraction * 100);
         if (pct === shown) return;
         shown = pct;
@@ -171,13 +180,13 @@ async function run(job: Job) {
       },
     });
     if (!wanted(job)) {
-      if (stored) {
+      if (storeBacked(job) && useEditor.getState().projectId !== job.projectId) {
         // The bytes landed exactly where the saved document points; the job
         // is simply finished, in whatever project the user is in now.
         jobs.delete(asset.id);
         return;
       }
-      // The bytes beat the cancel: they are stored and counted, and nothing
+      // The bytes beat the delete: they are stored and counted, and nothing
       // in the document points at them any more.
       cancelUpload(asset.id);
       return dropLanded(job, fileName);
@@ -210,7 +219,7 @@ async function run(job: Job) {
   } catch (err) {
     if (job.controller.signal.aborted) return;
     if ((err as { paused?: boolean }).paused) return pauseUpload(job);
-    if (!wanted(job)) return stored ? stopStored(job) : cancelUpload(asset.id);
+    if (!wanted(job)) return storeBacked(job) ? stopStored(job) : cancelUpload(asset.id);
     useEditor.getState().updateAsset(
       asset.id,
       uploadPatch(job, 0, err instanceof Error ? err.message : "Upload failed.")
