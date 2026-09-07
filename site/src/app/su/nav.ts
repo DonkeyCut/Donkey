@@ -1,4 +1,12 @@
-import { ChartColumn, CreditCard, FlaskConical, ListChecks, Mail, UserRound } from "lucide-react";
+import {
+  ChartColumn,
+  CreditCard,
+  FlaskConical,
+  ListChecks,
+  Mail,
+  Package,
+  UserRound,
+} from "lucide-react";
 import type { ComponentType } from "react";
 
 import { RunAnalyticsButton } from "@/app/su/analytics/RunAnalyticsButton";
@@ -50,6 +58,13 @@ export const SU_NAV: SuSurface[] = [
     icon: CreditCard,
     title: "Credits",
     description: "Grant credits to a user.",
+  },
+  {
+    href: "/product",
+    label: "Product",
+    icon: Package,
+    title: "Product",
+    description: "What a new account starts with.",
   },
   {
     href: "/outreach",

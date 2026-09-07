@@ -33,7 +33,8 @@ The registry parses every default against its schema when the module loads,
 so a wrong default fails the process at boot. A stored override that no longer
 parses after a schema change is skipped, logged, and shown on su as invalid so
 it can be reset. The su settings tab draws its form from the schema, so a new
-setting needs no form code.
+setting needs no form code. The Product tab on su shows the settings that shape
+what an account gets, such as the signup credit grant, with the same cards.
 
 **Every tunable is a setting.** A threshold, a switch, a mode: if an operator
 might want it different, it is a registry entry, and a feature that people
