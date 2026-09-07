@@ -28,6 +28,8 @@ AI is hosted whatever the home: image, video, and voiceover generation and the a
 
 The preview scrubs and plays from per-clip decoders held in memory. It shows a frame the moment it arrives and refines behind it, so the timeline always answers and a jump lands on a picture. Every cache is bounded by one memory budget sized to the machine. The performance guide holds the frame budget and how a change is measured.
 
+Guides draw over the preview from the button beside the timeline zoom: thirds, center, safe margins, the short-form keep-out zone where TikTok, Reels and Shorts draw their own UI, and custom lines dragged into place on the preview. They save with the project, snap a dragged element to their edges, never export, and the assistant reads the safe area they leave when it places graphics.
+
 ## The export
 
 An export is the preview drawn again frame by frame into an MP4 by the same compositor and mixer, so the file matches what the person saw. The finished file goes to the project's home: the app's project folder for a Mac project, storage for a cloud one, the page's store for a browser one. A browser that cannot carry the render hands it to the machine behind the project, and the ffmpeg pipeline stays for ProRes, headless renders, share cards, and streaming ladders. The local-compute guide covers where each kind of work runs.
