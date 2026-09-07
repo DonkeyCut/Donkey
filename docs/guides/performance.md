@@ -11,6 +11,12 @@ with the size of the project. If you are tempted to loop over every clip on ever
 or decode a file nobody is looking at, that work belongs behind the visible part or
 nowhere at all.
 
+## Local first, upload behind
+
+Files stay local first. The editor works from the local copy while uploads happen in
+the background. On Mac, heavy jobs run on the machine. The network never gets between
+an action and its result.
+
 ## The frame budget
 
 The browser draws a frame only between our tasks. At 60Hz a frame has about 10ms for our
@@ -51,6 +57,12 @@ where it was.
 **Split last.** Yielding has a cost of its own, and some work cannot be cut, so split
 only what remains after the three above. Yield by time against the frame budget, and
 never so finely that the switching costs more than the work.
+
+## A preview is the thing itself
+
+The drag preview uses the same renderer and caches as the clip itself. It updates
+instantly, once per frame, without recalculating the layout. Moving it just transforms
+the box—the preview stays in sync with the source.
 
 ## Rules
 
