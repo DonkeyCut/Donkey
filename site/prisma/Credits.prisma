@@ -22,10 +22,6 @@ model UserCreditGrant {
   user                  User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   source                String
   sourceId              String?
-  // What the amounts below are denominated in. "credit" = USD micros that feed
-  // UserCreditAccount.balanceMicros. Historical rows carry retired units, so
-  // balance paths filter on this column.
-  unit                  String    @default("credit")
   originalAmountMicros  BigInt
   remainingAmountMicros BigInt
   expiresAt             DateTime?
@@ -38,9 +34,9 @@ model UserCreditGrant {
   updatedAt             DateTime                @updatedAt
   ledgerEntries         UserCreditLedgerEntry[]
 
-  @@unique([userId, unit, source, sourceId])
+  @@unique([userId, source, sourceId])
   @@index([accountId])
-  @@index([userId, unit, status])
+  @@index([userId, status])
   @@map("user_credit_grant")
 }
 

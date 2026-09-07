@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 
 import { getActiveProSubscription } from "@/lib/billing/pro-subscription";
 import { creditMicrosToString, zeroCreditMicros } from "@/lib/credits/amounts";
-import { creditGrantUnit } from "@/lib/credits/inference";
 import { withDonkeyAuth } from "@/lib/donkey-api-auth";
 import { prisma } from "@/lib/prisma";
 
@@ -21,7 +20,6 @@ export const GET = withDonkeyAuth(async (request) => {
         OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
         source: "pro_subscription",
         status: "active",
-        unit: creditGrantUnit,
         userId,
       },
     }),

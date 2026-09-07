@@ -13,11 +13,6 @@ import {
 import { isJsonObject, toJsonValue } from "@/lib/inference/json";
 import type { JsonObject, JsonValue } from "@/lib/inference/providers";
 
-// UserCreditGrant.unit value. Dollar grants ("credit") feed the account
-// balance and pay for hosted inference. Balance queries filter on this unit
-// because historical rows carry retired units.
-export const creditGrantUnit = "credit";
-
 export const inferenceUsageRoutes = {
   assets: "/api/inference/assets/",
   assetsRefresh: "/api/inference/assets/refresh/",
@@ -161,7 +156,6 @@ export async function grantCredits(input: {
       where: {
         source: input.source,
         sourceId: input.sourceId,
-        unit: creditGrantUnit,
         userId: input.userId,
       },
     });
@@ -204,7 +198,6 @@ export async function grantCredits(input: {
             remainingAmountMicros: input.amountMicros,
             source: input.source,
             sourceId: input.sourceId,
-            unit: creditGrantUnit,
             userId: input.userId,
           },
         });
@@ -240,7 +233,6 @@ export async function grantCredits(input: {
         where: {
           source: input.source,
           sourceId: input.sourceId,
-          unit: creditGrantUnit,
           userId: input.userId,
         },
       });
@@ -565,8 +557,6 @@ export async function getCreditBalance(userId: string) {
           gt: zeroCreditMicros,
         },
         status: "active",
-        // Dollar grants only; historical rows can carry retired units.
-        unit: creditGrantUnit,
         userId,
         OR: [
           {
@@ -768,9 +758,6 @@ async function expireCreditsForAccount(
         gt: zeroCreditMicros,
       },
       status: "active",
-      // Dollar grants only — a historical row with a retired unit must never
-      // decrement balanceMicros here.
-      unit: creditGrantUnit,
     },
   });
 
@@ -877,9 +864,6 @@ async function debitGrants(
         gt: zeroCreditMicros,
       },
       status: "active",
-      // Dollar inference only spends dollar grants — a historical row with a
-      // retired unit must never be debited here.
-      unit: creditGrantUnit,
     },
   });
 
