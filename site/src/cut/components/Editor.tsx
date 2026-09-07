@@ -621,6 +621,8 @@ export function Editor({
         s.mediaFolders !== (last.mediaFolders as unknown) ||
         s.subtitles !== (last.subtitles as unknown) ||
         s.aspect !== last.aspect ||
+        s.guides !== last.guides ||
+        s.guideLines !== last.guideLines ||
         s.fadeIn !== (last.fadeIn ?? 0) ||
         s.fadeOut !== (last.fadeOut ?? 0) ||
         s.background !== last.background ||
@@ -1042,6 +1044,9 @@ export function Editor({
         s.splitAtPlayhead(skimAt() ?? undefined);
       } else if (e.key.toLowerCase() === "s" && !e.metaKey && !e.ctrlKey && !e.altKey) {
         s.splitAtPlayhead(skimAt() ?? undefined);
+      } else if (mod && e.key === ";") {
+        e.preventDefault();
+        s.setGuidesHidden(!s.guidesHidden);
       } else if (e.key.toLowerCase() === "t" && !e.metaKey && !e.ctrlKey && !e.altKey) {
         s.addOverlay();
       } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !controlFocused) {

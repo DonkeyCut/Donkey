@@ -1,5 +1,6 @@
 // Cloud twin of the engine's project CRUD (server/projects.ts + http/projects.ts):
 // docs and metadata in Postgres, media bytes in R2. Every query scopes by userId.
+import { sanitizeGuideLines, sanitizeGuides } from "@/cut/lib/guides";
 import { resolveParent } from "@/cut/lib/folderTree";
 import { normalizeAspect, type ProjectDoc, type ProjectFolder, type ProjectSummary } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
@@ -218,6 +219,8 @@ export const projectsCloud = {
         templates: Array.isArray(body.templates) ? body.templates : existing.templates,
         mediaFolders: Array.isArray(body.mediaFolders) ? body.mediaFolders : existing.mediaFolders,
         aspect: normalizeAspect(body.aspect) ?? existing.aspect,
+        guides: Array.isArray(body.guides) ? sanitizeGuides(body.guides) : existing.guides,
+        guideLines: body.guideLines !== undefined ? sanitizeGuideLines(body.guideLines) : existing.guideLines,
         fadeIn: typeof body.fadeIn === "number" ? body.fadeIn : existing.fadeIn,
         fadeOut: typeof body.fadeOut === "number" ? body.fadeOut : existing.fadeOut,
         background: typeof body.background === "string" ? body.background : existing.background,

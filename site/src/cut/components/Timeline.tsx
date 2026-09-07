@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer,
 import { ArrowDownToLine, AudioLines, Check, Clapperboard, Copy, Diamond, Download, EllipsisVertical, Eye, EyeOff, FolderOpen, FolderPlus, Fullscreen, Loader2, MoreHorizontal, Pause, Play, Scissors, SkipBack, Sticker, Trash2, Type, Volume2, VolumeX } from "lucide-react";
 import { EFFECT_CHIP_ICONS, effectIconKind, SHAPE_CHIP_ICONS, TRANSITION_ICONS } from "@/cut/components/entityIcons";
 import { Button } from "@/components/ui/button";
+import { GuidesMenu } from "@/cut/components/GuidesMenu";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -2320,6 +2321,7 @@ export function Timeline() {
               barTight && "invisible absolute right-0 pointer-events-none"
             )}
           >
+            <GuidesMenu />
             <Slider
               className="data-horizontal:w-28"
               min={0}
@@ -2333,6 +2335,7 @@ export function Timeline() {
               Fit
             </Button>
           </div>
+          {barTight && <GuidesMenu />}
           {barTight && (
             <TimelineToolsMenu
               pps={pps}

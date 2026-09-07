@@ -1,3 +1,4 @@
+import { sanitizeGuideLines, sanitizeGuides } from "@/cut/lib/guides";
 import { execFile } from "node:child_process";
 import { normalizeAspect, type ProjectDoc } from "@/cut/lib/types";
 import { detectSilence, extractAudio, makeFreezeFrame, probeDims, probeDuration } from "../frames";
@@ -130,6 +131,8 @@ export const projectsApi = {
         templates: Array.isArray(body.templates) ? body.templates : existing.templates,
         mediaFolders: Array.isArray(body.mediaFolders) ? body.mediaFolders : existing.mediaFolders,
         aspect: normalizeAspect(body.aspect) ?? existing.aspect,
+        guides: Array.isArray(body.guides) ? sanitizeGuides(body.guides) : existing.guides,
+        guideLines: body.guideLines !== undefined ? sanitizeGuideLines(body.guideLines) : existing.guideLines,
         fadeIn: typeof body.fadeIn === "number" ? body.fadeIn : existing.fadeIn,
         fadeOut: typeof body.fadeOut === "number" ? body.fadeOut : existing.fadeOut,
         background: typeof body.background === "string" ? body.background : existing.background,

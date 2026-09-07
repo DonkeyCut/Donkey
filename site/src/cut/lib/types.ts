@@ -1,3 +1,4 @@
+import type { GuideId, GuideLines } from "./guides";
 import {
   behindSubjectMask,
   overlayKind,
@@ -1433,6 +1434,11 @@ export interface ProjectDoc {
   overlays: Overlay[];
   /** Output frame; absent in older projects (which are all 9:16). */
   aspect?: Aspect;
+  /** Preview guides turned on: thirds, center, safe margins, platform
+   * keep-out zones. Drawn over the preview only; absent = none. */
+  guides?: GuideId[];
+  /** The custom guide lines, frame fractions per axis; absent = none. */
+  guideLines?: GuideLines;
   /** Whole-video fades, seconds: in from black at the start, out to black at
    * the end. Applied to the final picture and mix (titles, captions, and
    * soundtrack fade together), so they survive clip reordering. */

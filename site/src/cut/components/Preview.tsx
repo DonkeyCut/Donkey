@@ -24,6 +24,7 @@ import { CLIP_MAX_ZOOM, clipCovers, clipKeyed, clipPoseAt, clipZoom, contentRect
 import { hasMaskKeys, type MaskKey } from "@donkeycut/effects-kit";
 import { cn } from "@/lib/utils";
 import { MaskGizmoCore, OverlayChromeHost, OverlayLayer, StagePress } from "./OverlayLayer";
+import { GuideOverlay } from "./GuideOverlay";
 import { RemovalBrush } from "./RemovalBrush";
 import { CORNER_HANDLES, HANDLE_AXIS, TransformHandles, type ResizeHandle } from "./TransformHandles";
 import {
@@ -634,6 +635,7 @@ export function Preview() {
           className="pointer-events-none absolute inset-0"
           style={{ "--stage-radius": `${stageRadius(stage.w, stage.h)}px` } as React.CSSProperties}
         />
+        <GuideOverlay stage={stage} />
         <ClipMaskGizmo stage={stage} />
         <RemovalBrush stage={stage} />
         <ClipTransformGizmo stage={stage} />

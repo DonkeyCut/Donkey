@@ -1,5 +1,6 @@
 "use client";
 
+import { EMPTY_GUIDE_LINES, sanitizeGuideLines, sanitizeGuides, type GuideId, type GuideLines } from "./guides";
 import {
   groupRemap,
   isAudioEffect,
@@ -330,6 +331,12 @@ export interface EditorState {
   /** The aspect was chosen deliberately (picker, set_aspect, or saved in the
    * doc) — the first-import orientation guess stands down. Not a doc field. */
   aspectTouched: boolean;
+  /** Preview guides turned on, persisted per project. */
+  guides: GuideId[];
+  /** The custom guide lines, drawn when "custom" is among `guides`. */
+  guideLines: GuideLines;
+  /** Guides stay chosen but draw nothing (⌘;). Not a doc field. */
+  guidesHidden: boolean;
   /** Whole-video fades, seconds (0 = off): in from black at the start, out to
    * black at the end of the cut. Applied to the final picture and mix. */
   fadeIn: number;
@@ -416,6 +423,15 @@ export interface EditorState {
   setSharedView: (features: ShareFeatures) => void;
 
   setAspect: (a: Aspect) => void;
+  setGuides: (ids: GuideId[]) => void;
+  toggleGuide: (id: GuideId) => void;
+  setGuidesHidden: (hidden: boolean) => void;
+  setGuideLines: (lines: GuideLines) => void;
+  /** Add a custom line at the frame center (stepping aside from one already
+   * there), turning the custom set on and the guides visible. */
+  addGuideLine: (axis: "v" | "h") => void;
+  moveGuideLine: (axis: "v" | "h", index: number, at: number) => void;
+  removeGuideLine: (axis: "v" | "h", index: number) => void;
   /** Set the whole-video fade in/out (seconds; 0 clears). Like the aspect,
    * project-level settings sit outside the undo history. */
   setProjectFade: (patch: { fadeIn?: number; fadeOut?: number }) => void;
@@ -1292,6 +1308,8 @@ const DOC_KEYS = [
   "templates",
   "mediaFolders",
   "aspect",
+  "guides",
+  "guideLines",
   "fadeIn",
   "fadeOut",
   "background",
@@ -1694,6 +1712,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       mediaFolders: [],
       aspect: lastChosenAspect() ?? "9:16",
       aspectTouched: lastChosenAspect() !== null,
+      guides: [],
+      guideLines: EMPTY_GUIDE_LINES,
       fadeIn: 0,
       fadeOut: 0,
       background: DEFAULT_BACKGROUND,
@@ -1744,6 +1764,9 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     mediaFolders: [],
     aspect: lastChosenAspect() ?? "9:16",
     aspectTouched: lastChosenAspect() !== null,
+    guides: [],
+    guidesHidden: false,
+    guideLines: EMPTY_GUIDE_LINES,
     fadeIn: 0,
     fadeOut: 0,
     background: DEFAULT_BACKGROUND,
@@ -2112,6 +2135,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           mediaFolders: doc.mediaFolders ?? [],
           aspect: normalizeAspect(doc.aspect) ?? lastChosenAspect() ?? "9:16",
           aspectTouched: doc.aspect !== undefined || lastChosenAspect() !== null,
+          guides: sanitizeGuides(doc.guides),
+          guideLines: sanitizeGuideLines(doc.guideLines),
           fadeIn: doc.fadeIn ?? 0,
           fadeOut: doc.fadeOut ?? 0,
           background: projectBackground(doc.background),
@@ -2326,6 +2351,39 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       rememberAspect(n);
       set({ aspect: n, aspectTouched: true });
     },
+    setGuides: (ids) => set({ guides: sanitizeGuides(ids) }),
+    toggleGuide: (id) =>
+      set((s) => ({
+        guides: s.guides.includes(id)
+          ? s.guides.filter((g) => g !== id)
+          : sanitizeGuides([...s.guides, id]),
+        // Turning a guide on is a request to see it.
+        guidesHidden: s.guides.includes(id) ? s.guidesHidden : false,
+      })),
+    setGuidesHidden: (hidden) => set({ guidesHidden: hidden }),
+    setGuideLines: (lines) => set({ guideLines: sanitizeGuideLines(lines) }),
+    addGuideLine: (axis) =>
+      set((s) => {
+        const have = s.guideLines[axis];
+        let at = 0.5;
+        while (have.some((n) => Math.abs(n - at) < 0.01) && at < 0.95) at += 0.05;
+        return {
+          guideLines: { ...s.guideLines, [axis]: [...have, at] },
+          guides: s.guides.includes("custom") ? s.guides : sanitizeGuides([...s.guides, "custom"]),
+          guidesHidden: false,
+        };
+      }),
+    moveGuideLine: (axis, index, at) =>
+      set((s) => {
+        if (index < 0 || index >= s.guideLines[axis].length) return {};
+        const next = [...s.guideLines[axis]];
+        next[index] = Math.min(1, Math.max(0, at));
+        return { guideLines: { ...s.guideLines, [axis]: next } };
+      }),
+    removeGuideLine: (axis, index) =>
+      set((s) => ({
+        guideLines: { ...s.guideLines, [axis]: s.guideLines[axis].filter((_, i) => i !== index) },
+      })),
     setProjectFade: (patch) => {
       const clamp = (v: number | undefined) =>
         v === undefined ? undefined : Math.max(0, Math.min(TRANSITION_MAX, v));
@@ -5223,6 +5281,8 @@ export function serializeDoc(s: {
   templates: LibraryTemplate[];
   mediaFolders: MediaFolder[];
   aspect: Aspect;
+  guides: GuideId[];
+  guideLines: GuideLines;
   fadeIn: number;
   fadeOut: number;
   background: string;
@@ -5245,6 +5305,8 @@ export function serializeDoc(s: {
     templates: s.templates,
     mediaFolders: s.mediaFolders,
     aspect: s.aspect,
+    guides: s.guides,
+    guideLines: s.guideLines,
     fadeIn: s.fadeIn,
     fadeOut: s.fadeOut,
     background: s.background,

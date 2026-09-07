@@ -1,5 +1,6 @@
 "use client";
 
+import { guideSnapLines } from "@/cut/lib/guides";
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { releaseAnimRest, useAnimPreview } from "@/cut/lib/animPreview";
@@ -178,6 +179,9 @@ export function OverlayLayer({
   );
   const selection = useEditor((s) => s.selection);
   const aspect = useEditor((s) => s.aspect);
+  const shownGuides = useEditor((s) => s.guides);
+  const guideLines = useEditor((s) => s.guideLines);
+  const guidesHidden = useEditor((s) => s.guidesHidden);
   // Titles preview under the skimmer too (paused only), matching the canvas.
   const t = usePreviewTime();
   const skimTime = useSkim();
@@ -218,9 +222,15 @@ export function OverlayLayer({
       const r = el.getBoundingClientRect();
       const cx = px * stageWidth;
       const cy = py * stageHeight;
-      // Frame lines: edges, safe margins, center.
+      // Frame lines: edges, safe margins, center, and every guide showing —
+      // a keep-out box offers its inner edge, so a title pulls flush to it.
       const vt = [0, CANVAS_MARGIN * stageWidth, stageWidth / 2, (1 - CANVAS_MARGIN) * stageWidth, stageWidth];
       const ht = [0, CANVAS_MARGIN * stageHeight, stageHeight / 2, (1 - CANVAS_MARGIN) * stageHeight, stageHeight];
+      if (!guidesHidden) {
+        const lines = guideSnapLines(shownGuides, aspect, guideLines);
+        vt.push(...lines.v.map((f) => f * stageWidth));
+        ht.push(...lines.h.map((f) => f * stageHeight));
+      }
       // Plus every other on-screen box's edges and center (titles and the
       // subtitle caption alike), read from its rect in stage space.
       const rootRect = root.getBoundingClientRect();
@@ -261,7 +271,7 @@ export function OverlayLayer({
       setGuides({ v, h });
       return { x: outX, y: outY };
     },
-    [stageWidth, stageHeight]
+    [stageWidth, stageHeight, shownGuides, guideLines, guidesHidden, aspect]
   );
 
   const clearGuides = useCallback(() => setGuides({ v: [], h: [] }), []);
