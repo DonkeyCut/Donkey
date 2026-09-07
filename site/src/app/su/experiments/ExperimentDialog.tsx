@@ -3,7 +3,15 @@
 import { useState } from "react";
 import { Plus, X } from "lucide-react";
 
+import {
+  AudienceFields,
+  audienceDraftFrom,
+  audienceInputFrom,
+  blankAudienceDraft,
+  type AudienceDraft,
+} from "@/app/su/experiments/AudienceFields";
 import { SchemaField, type JsonSchema } from "@/app/su/experiments/SchemaField";
+import { Field } from "@/app/su/Field";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -18,7 +26,6 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import type { AudienceInput } from "@donkeycut/abexp";
 import { METRIC_SOURCES, experimentSchema, type ExperimentInput } from "@/lib/config/experiment";
 import { PUBLIC_SETTING_KEYS, SETTINGS, type SettingKey } from "@/lib/config/registry";
 import { useSettings } from "@/queries/settings";
@@ -38,16 +45,7 @@ type Draft = {
   name: string;
   description: string;
   percent: string;
-  audience: {
-    countries: string;
-    createdAfter: string;
-    createdBefore: string;
-    plan: "any" | "free" | "pro";
-    paid: "any" | "yes" | "no";
-    activeWithinDays: string;
-    storageUsedPercentAtLeast: string;
-    creditsUsedPercentAtLeast: string;
-  };
+  audience: AudienceDraft;
   variants: { key: string; name: string; weight: string; config: Record<string, unknown> }[];
   metrics: { key: string; name: string; source: (typeof METRIC_SOURCES)[number]; event: string }[];
 };
@@ -57,16 +55,7 @@ const blank = (): Draft => ({
   name: "",
   description: "",
   percent: "100",
-  audience: {
-    countries: "",
-    createdAfter: "",
-    createdBefore: "",
-    plan: "any",
-    paid: "any",
-    activeWithinDays: "",
-    storageUsedPercentAtLeast: "",
-    creditsUsedPercentAtLeast: "",
-  },
+  audience: blankAudienceDraft(),
   variants: [
     { key: "control", name: "Control", weight: "50", config: {} },
     { key: "treatment", name: "Treatment", weight: "50", config: {} },
@@ -74,45 +63,18 @@ const blank = (): Draft => ({
   metrics: [{ key: "purchase", name: "Purchase", source: "purchase", event: "" }],
 });
 
-const day = (iso: string | null) => (iso ? iso.slice(0, 10) : "");
-const numberOrBlank = (n: number | null) => (n === null ? "" : String(n));
-
 const fromSummary = (e: ExperimentSummary): Draft => ({
   key: e.key,
   name: e.name,
   description: e.description ?? "",
   percent: String(e.percent),
-  audience: {
-    countries: e.audience.countries.join(", "),
-    createdAfter: day(e.audience.createdAfter),
-    createdBefore: day(e.audience.createdBefore),
-    plan: e.audience.plan,
-    paid: e.audience.paid,
-    activeWithinDays: numberOrBlank(e.audience.activeWithinDays),
-    storageUsedPercentAtLeast: numberOrBlank(e.audience.storageUsedPercentAtLeast),
-    creditsUsedPercentAtLeast: numberOrBlank(e.audience.creditsUsedPercentAtLeast),
-  },
+  audience: audienceDraftFrom(e.audience),
   variants: e.variants.map((v) => ({ ...v, weight: String(v.weight) })),
   metrics: e.metrics.map((m) => ({ ...m, event: m.event ?? "" })),
 });
 
-const dayStart = (d: string) => (d ? new Date(`${d}T00:00:00Z`).toISOString() : null);
-const numberOrNull = (s: string) => (s.trim() === "" ? null : Number(s));
-
 function toInput(draft: Draft): unknown {
-  const audience: AudienceInput = {
-    countries: draft.audience.countries
-      .split(",")
-      .map((s) => s.trim().toUpperCase())
-      .filter(Boolean),
-    createdAfter: dayStart(draft.audience.createdAfter),
-    createdBefore: dayStart(draft.audience.createdBefore),
-    plan: draft.audience.plan,
-    paid: draft.audience.paid,
-    activeWithinDays: numberOrNull(draft.audience.activeWithinDays),
-    storageUsedPercentAtLeast: numberOrNull(draft.audience.storageUsedPercentAtLeast),
-    creditsUsedPercentAtLeast: numberOrNull(draft.audience.creditsUsedPercentAtLeast),
-  };
+  const audience = audienceInputFrom(draft.audience);
   return {
     key: draft.key.trim(),
     name: draft.name.trim(),
@@ -170,7 +132,7 @@ export function ExperimentDialog({
     else create.mutate(input, done);
   };
 
-  const setAudience = (patch: Partial<Draft["audience"]>) =>
+  const setAudience = (patch: Partial<AudienceDraft>) =>
     setDraft((d) => ({ ...d, audience: { ...d.audience, ...patch } }));
   const setVariant = (i: number, patch: Partial<Draft["variants"][number]>) =>
     setDraft((d) => ({ ...d, variants: d.variants.map((v, j) => (j === i ? { ...v, ...patch } : v)) }));
@@ -211,99 +173,18 @@ export function ExperimentDialog({
             />
           </Field>
 
-          <div className="space-y-3">
-            <Label>Audience</Label>
-            <div className="grid grid-cols-3 gap-3">
-              <Field label="Countries (empty = any)" htmlFor="aud-countries">
-                <Input
-                  id="aud-countries"
-                  placeholder="US, GB, CA"
-                  value={draft.audience.countries}
-                  onChange={(e) => setAudience({ countries: e.target.value })}
-                />
-              </Field>
-              <Field label="Created on or after" htmlFor="aud-after">
-                <Input
-                  id="aud-after"
-                  type="date"
-                  value={draft.audience.createdAfter}
-                  onChange={(e) => setAudience({ createdAfter: e.target.value })}
-                />
-              </Field>
-              <Field label="Created before" htmlFor="aud-before">
-                <Input
-                  id="aud-before"
-                  type="date"
-                  value={draft.audience.createdBefore}
-                  onChange={(e) => setAudience({ createdBefore: e.target.value })}
-                />
-              </Field>
-              <Field label="Plan" htmlFor="aud-plan">
-                <Select value={draft.audience.plan} onValueChange={(v) => setAudience({ plan: v as Draft["audience"]["plan"] })}>
-                  <SelectTrigger id="aud-plan">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="any">Any</SelectItem>
-                    <SelectItem value="free">No Pro</SelectItem>
-                    <SelectItem value="pro">Pro</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="Has paid" htmlFor="aud-paid">
-                <Select value={draft.audience.paid} onValueChange={(v) => setAudience({ paid: v as Draft["audience"]["paid"] })}>
-                  <SelectTrigger id="aud-paid">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="any">Any</SelectItem>
-                    <SelectItem value="yes">Yes</SelectItem>
-                    <SelectItem value="no">No</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="Active within days" htmlFor="aud-active">
-                <Input
-                  id="aud-active"
-                  type="number"
-                  min={1}
-                  max={365}
-                  value={draft.audience.activeWithinDays}
-                  onChange={(e) => setAudience({ activeWithinDays: e.target.value })}
-                />
-              </Field>
-              <Field label="Storage used ≥ %" htmlFor="aud-storage">
-                <Input
-                  id="aud-storage"
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={draft.audience.storageUsedPercentAtLeast}
-                  onChange={(e) => setAudience({ storageUsedPercentAtLeast: e.target.value })}
-                />
-              </Field>
-              <Field label="Credits spent ≥ %" htmlFor="aud-credits">
-                <Input
-                  id="aud-credits"
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={draft.audience.creditsUsedPercentAtLeast}
-                  onChange={(e) => setAudience({ creditsUsedPercentAtLeast: e.target.value })}
-                />
-              </Field>
-              <Field label="Percent enrolled" htmlFor="exp-percent">
-                <Input
-                  id="exp-percent"
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={draft.percent}
-                  onChange={(e) => setDraft({ ...draft, percent: e.target.value })}
-                />
-              </Field>
-            </div>
-          </div>
+          <AudienceFields value={draft.audience} onChange={setAudience}>
+            <Field label="Percent enrolled" htmlFor="exp-percent">
+              <Input
+                id="exp-percent"
+                type="number"
+                min={0}
+                max={100}
+                value={draft.percent}
+                onChange={(e) => setDraft({ ...draft, percent: e.target.value })}
+              />
+            </Field>
+          </AudienceFields>
 
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -489,13 +370,3 @@ export function ExperimentDialog({
   );
 }
 
-function Field({ label, htmlFor, children }: { label: string; htmlFor: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1.5">
-      <Label htmlFor={htmlFor} className="text-xs text-muted-foreground">
-        {label}
-      </Label>
-      {children}
-    </div>
-  );
-}
