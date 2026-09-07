@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 import type { CreditOffer } from "@/generated/prisma/client";
+import { CUT_APP_BASE } from "@/cut/lib/appBase";
 import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
 import { grantCredits } from "@/lib/credits/inference";
 import { creditGrantExpiry } from "@/lib/credits/top-up";
@@ -36,8 +37,10 @@ export function verifyCreditOfferToken(token: string): string | null {
   return offerId;
 }
 
+// The claim link opens the app with the token in the address; the app's home
+// reads it and presents the offer in a dialog (ClaimCreditsDialog).
 export function creditOfferClaimUrl(offerId: string): string {
-  return `${DONKEYCUT_CANONICAL}/claim?token=${encodeURIComponent(creditOfferToken(offerId))}`;
+  return `${DONKEYCUT_CANONICAL}${CUT_APP_BASE}?claim=${encodeURIComponent(creditOfferToken(offerId))}`;
 }
 
 // Records the offer and emails the claim link. The row comes first so the

@@ -2,15 +2,39 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { creditMicrosToString } from "@/lib/credits/amounts";
+import { formatUsdPlain } from "@/lib/credits/format-usd";
 import { getCreditBalance } from "@/lib/credits/inference";
 import {
   claimCreditOffer,
   CreditOfferNotYoursError,
+  MANUAL_OFFER_KIND,
   verifyCreditOfferToken,
 } from "@/lib/credits/offers";
+import { describeCreditLifetime } from "@/lib/email/send-credits-offered";
 import { forbiddenResponse, notFoundResponse, withDonkeyAuth } from "@/lib/donkey-api-auth";
+import { prisma } from "@/lib/prisma";
 
 const claimRequestSchema = z.object({ token: z.string().min(1) }).strict();
+
+// Describes the offer a claim link names, for the dialog that presents it.
+// The token proves the link came from the offer's email; the session has to be
+// the offered account's, and a different account is told so before it tries.
+export const GET = withDonkeyAuth(async (request) => {
+  const token = request.nextUrl.searchParams.get("token");
+  const offerId = token ? verifyCreditOfferToken(token) : null;
+  if (!offerId) return notFoundResponse();
+  const offer = await prisma.creditOffer.findUnique({
+    select: { amountMicros: true, claimedAt: true, expiresAfterDays: true, kind: true, userId: true },
+    where: { id: offerId },
+  });
+  if (!offer || offer.kind !== MANUAL_OFFER_KIND) return notFoundResponse();
+  if (offer.userId !== request.donkey.userId) return forbiddenResponse();
+  return NextResponse.json({
+    claimed: offer.claimedAt !== null,
+    credits: formatUsdPlain(creditMicrosToString(offer.amountMicros)),
+    lifetime: describeCreditLifetime(offer.expiresAfterDays),
+  });
+});
 
 // Claims a credit offer for the signed-in account. The token names the offer
 // and proves the link came from its email; the session has to be the offered

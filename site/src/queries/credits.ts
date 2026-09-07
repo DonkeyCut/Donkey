@@ -133,3 +133,38 @@ export function useOfferCredits() {
       ),
   });
 }
+
+export const creditOfferQueryKey = (token: string) => ["credits", "offer", token] as const;
+
+export type CreditOffer = {
+  claimed: boolean;
+  // Formatted USD, "$5".
+  credits: string;
+  // "a week", or null when the credit keeps forever.
+  lifetime: string | null;
+};
+
+// The offer a claim link names. 404 is a link that no longer opens anything;
+// 403 is an offer made to another account.
+export function useCreditOffer(token: string, options: { enabled?: boolean } = {}) {
+  return useQuery({
+    enabled: options.enabled ?? true,
+    queryFn: () => apiFetch<CreditOffer>(`/api/credits/offers/claim?token=${encodeURIComponent(token)}`),
+    queryKey: creditOfferQueryKey(token),
+    retry: false,
+  });
+}
+
+// Lands the offer on the signed-in account; the balance re-reads so the top
+// bar shows the credit at once.
+export function useClaimCreditOffer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (token: string) =>
+      apiFetch<{ balance: string; credits: string; expiresAt: string | null }>(
+        "/api/credits/offers/claim",
+        { body: JSON.stringify({ token }), method: "POST" },
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: creditBalanceQueryKey }),
+  });
+}

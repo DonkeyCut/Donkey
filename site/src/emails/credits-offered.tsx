@@ -92,6 +92,6 @@ CreditsOfferedEmail.PreviewProps = {
   name: "Ada",
   credits: "$25.00",
   lifetime: "7 days",
-  claimUrl: "https://donkeycut.com/claim?token=preview",
+  claimUrl: "https://donkeycut.com/app?claim=preview",
   unsubscribeUrl: "https://donkeycut.com/unsubscribe?token=preview",
 } satisfies CreditsOfferedEmailProps;
