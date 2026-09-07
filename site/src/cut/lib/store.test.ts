@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { groupRemap } from "@donkeycut/effects-kit";
-import { adoptTransitionFields, assetIdsInUse, clipLen, cutTranscribeSpec, deriveTransitionFields, docOverlays, getClipSpans, liftClipLooks, moveOverlayGroup, overlayLaneOrder, normalizeElementLanes, parkedTransitions, placeInRun, projectDuration, separateOverlaps, serializeDoc, startTrimRipple, useEditor } from "./store";
+import { adoptTransitionFields, assetIdsInUse, clipLen, cutTranscribeSpec, deriveTransitionFields, docOverlays, getClipSpans, liftClipLooks, moveOverlayGroup, overlayLaneOrder, normalizeElementLanes, parkedTransitions, placeInRun, projectDuration, rippleInsert, separateOverlaps, serializeDoc, startTrimRipple, useEditor } from "./store";
 import { playheadAt, setPlayhead, setSkim } from "./playhead";
 import { emptySubtitles, uploadedFontId } from "./types";
 import type { AudioClip, MediaAsset, SubtitleCue, TextOverlay, VideoClip } from "./types";
@@ -188,16 +188,55 @@ describe("the document projection", () => {
 });
 
 describe("video placement", () => {
-  test("adding onto an occupied upper track slides to the next free slot", () => {
+  test("adding onto an occupied upper track inserts at the pointer and ripples the resident", () => {
     const a = asset(2);
+    const resident = vclip({ track: 1, start: 1, out: 2 });
     useEditor.setState({
       assets: [a],
-      clips: [vclip({ track: 0, start: 0, out: 2 }), vclip({ track: 1, start: 1, out: 2 })],
+      clips: [vclip({ track: 0, start: 0, out: 2 }), resident],
     });
     s().addVideoFromAsset(a.id, { kind: "track", track: 1 }, 1.5);
     expectLaneSound(videoLane(1));
     const added = s().clips.find((c) => c.assetId === a.id)!;
+    expect(added.start).toBeCloseTo(1.5);
+    expect(clipById(resident.id).start).toBeCloseTo(3.5);
+  });
+
+  test("a clip longer than the row lands beside the pointer, never at the end", () => {
+    const a = asset(60);
+    const first = vclip({ track: 0, start: 0, out: 3 });
+    const second = vclip({ track: 0, start: 3, out: 3 });
+    const third = vclip({ track: 0, start: 6, out: 3 });
+    useEditor.setState({ assets: [a], clips: [first, second, third] });
+    s().addVideoFromAsset(a.id, { kind: "track", track: 0 }, 2);
+    const added = s().clips.find((c) => c.assetId === a.id)!;
     expect(added.start).toBeCloseTo(3);
+    expect(clipById(first.id).start).toBeCloseTo(0);
+    expect(clipById(second.id).start).toBeCloseTo(63);
+    expect(clipById(third.id).start).toBeCloseTo(66);
+    expectLaneSound(videoLane(0));
+  });
+
+  test("rippleInsert keys the insertion point off the pointer", () => {
+    const row = [
+      vclip({ track: 0, start: 0, out: 4 }),
+      vclip({ track: 0, start: 4, out: 4 }),
+    ];
+    // Left half of the first clip: the drop goes ahead of it.
+    expect(rippleInsert(row, 1, 10)).toEqual({
+      start: 1,
+      shifts: [
+        { id: row[0].id, start: 11 },
+        { id: row[1].id, start: 15 },
+      ],
+    });
+    // Right half: the drop lands right after it.
+    expect(rippleInsert(row, 3, 10)).toEqual({
+      start: 4,
+      shifts: [{ id: row[1].id, start: 14 }],
+    });
+    // A leading gap the drop fits in moves nothing.
+    expect(rippleInsert([vclip({ track: 0, start: 5, out: 2 })], 0, 2).shifts).toEqual([]);
   });
 
   test("adding onto a freshly inserted track keeps the requested start", () => {
@@ -219,7 +258,8 @@ describe("video placement", () => {
     useEditor.setState({ clips: [mover, anchor, resident] });
     s().dropVideoClip(mover.id, { kind: "track", track: 1 }, 1.2);
     expect(clipById(mover.id).track).toBe(1);
-    expect(clipById(mover.id).start).toBeCloseTo(3);
+    expect(clipById(mover.id).start).toBeCloseTo(1.2);
+    expect(clipById(resident.id).start).toBeCloseTo(3.2);
     expectLaneSound(videoLane(1));
   });
 

@@ -1154,10 +1154,12 @@ export function placeInRun(
 
 /** Where a `len`-long clip dropped at pointer-time `t` lands on its row,
  * and how the clips after it slide to open room. The drop-at-pointer companion
- * to `nextFreeStart` (which only ever appends): clips whose center sits left of
- * the drop hold their place; the rest shift right as one run, so a clip dropped
- * into a leading gap or between two others inserts there instead of piling up at
- * the end when it is longer than the gap. */
+ * to `nextFreeStart` (which only ever appends). The pointer is the insertion
+ * point: a resident whose center sits left of it holds its place, and the rest
+ * shift right as one run. The drop lands at the pointer, or right after the
+ * last holding resident when the pointer is inside one, so every drop lands
+ * beside where it was let go whatever its length — a long clip dropped near
+ * the head of the row inserts there and carries the row after it. */
 export function rippleInsert(
   row: VideoClip[],
   t: number,
@@ -1166,9 +1168,8 @@ export function rippleInsert(
   const items = row
     .map((c) => ({ id: c.id, start: c.start, len: clipLen(c) }))
     .sort((a, b) => a.start - b.start);
-  const center = t + len / 2;
-  const before = items.filter((c) => c.start + c.len / 2 <= center);
-  const after = items.filter((c) => c.start + c.len / 2 > center);
+  const before = items.filter((c) => c.start + c.len / 2 <= t);
+  const after = items.filter((c) => c.start + c.len / 2 > t);
   const floor = before.reduce((m, c) => Math.max(m, c.start + c.len), 0);
   const start = Math.max(t, floor);
   const delta = after.length ? Math.max(0, start + len - after[0].start) : 0;
