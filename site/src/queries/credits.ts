@@ -125,7 +125,7 @@ export function useOfferCredits() {
       userId?: string;
     }) =>
       apiFetch<{
-        offer: { expiresAfterDays: number | null; id: string };
+        offer: { closesAt: string | null; expiresAfterDays: number | null; id: string };
         targetUser: { email: string };
       }>(
         "/api/credits/offers",
@@ -138,6 +138,8 @@ export const creditOfferQueryKey = (token: string) => ["credits", "offer", token
 
 export type CreditOffer = {
   claimed: boolean;
+  // The last moment the offer can be claimed; null keeps it open.
+  closesAt: string | null;
   // Formatted USD, "$5".
   credits: string;
   // "a week", or null when the credit keeps forever.
@@ -145,7 +147,7 @@ export type CreditOffer = {
 };
 
 // The offer a claim link names. 404 is a link that no longer opens anything;
-// 403 is an offer made to another account.
+// 403 is an offer made to another account; 410 is a claim window that closed.
 export function useCreditOffer(token: string, options: { enabled?: boolean } = {}) {
   return useQuery({
     enabled: options.enabled ?? true,

@@ -79,6 +79,18 @@ export const SETTINGS = defineSettings({
     title: "Credit expiry notice",
     description: "How many days before signup or manually granted credits expire the account is emailed.",
   },
+  manualCreditOffer: {
+    schema: z
+      .object({
+        // Days the emailed claim link stays open after it is sent.
+        claimWindowDays: z.number().int().min(1).max(365),
+      })
+      .strict(),
+    default: { claimWindowDays: 3 },
+    public: false,
+    title: "Manual credit offer",
+    description: "How many days the claim link in a credit offer email stays open.",
+  },
   subscribeBonus: {
     schema: z
       .object({
@@ -121,7 +133,7 @@ export const SETTINGS = defineSettings({
 
 // The settings su shows on its Product tab: what an account gets. The
 // settings tab under Experiments still lists every key.
-export const PRODUCT_SETTING_KEYS = ["signupCredits", "creditExpiryNotice", "subscribeBonus", "proAllowancePromotion"] as const satisfies readonly SettingKey[];
+export const PRODUCT_SETTING_KEYS = ["signupCredits", "creditExpiryNotice", "manualCreditOffer", "subscribeBonus", "proAllowancePromotion"] as const satisfies readonly SettingKey[];
 
 export type SettingKey = keyof typeof SETTINGS;
 export type Settings = SettingsOf<typeof SETTINGS>;

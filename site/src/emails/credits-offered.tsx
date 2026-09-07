@@ -27,6 +27,8 @@ type CreditsOfferedEmailProps = {
   // How long the credits live once claimed, already worded ("7 days"), or
   // null when they never expire.
   lifetime: string | null;
+  // The last day the link works, already worded ("September 10, 2026").
+  claimBy: string;
   claimUrl: string;
   unsubscribeUrl: string;
 };
@@ -35,6 +37,7 @@ export default function CreditsOfferedEmail({
   name,
   credits,
   lifetime,
+  claimBy,
   claimUrl,
   unsubscribeUrl,
 }: CreditsOfferedEmailProps) {
@@ -58,6 +61,7 @@ export default function CreditsOfferedEmail({
               Claim {credits} in credits
             </Button>
             <Text className="text-[15px] leading-relaxed">
+              The link works until {claimBy}.{" "}
               {lifetime !== null
                 ? `Once claimed, they are good for ${lifetime}. `
                 : ""}
@@ -92,6 +96,7 @@ CreditsOfferedEmail.PreviewProps = {
   name: "Ada",
   credits: "$25.00",
   lifetime: "7 days",
+  claimBy: "September 10, 2026",
   claimUrl: "https://donkeycut.com/app?claim=preview",
   unsubscribeUrl: "https://donkeycut.com/unsubscribe?token=preview",
 } satisfies CreditsOfferedEmailProps;

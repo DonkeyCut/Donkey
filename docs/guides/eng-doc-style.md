@@ -3,6 +3,8 @@
 How to write the docs in this repo: architecture notes, runtime specs,
 contributor guides — anything a teammate or a coding agent reads once and then
 has to follow. Lead with the point, keep it short, and write like a person.
+The voice is the one in the [Writing Style](writing-style.md) guide; this doc
+adds the structure an engineering doc needs on top of it.
 
 ## Principles
 

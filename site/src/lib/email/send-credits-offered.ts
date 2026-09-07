@@ -5,6 +5,7 @@ import {
 import CreditsOfferedEmail from "@/emails/credits-offered";
 import { creditMicrosToString } from "@/lib/credits/amounts";
 import { formatUsdPlain } from "@/lib/credits/format-usd";
+import { formatCreditExpiry } from "@/lib/credits/top-up";
 import {
   bulkFrom,
   emailFrom,
@@ -32,7 +33,7 @@ export function describeCreditLifetime(days: number | null): string | null {
 // the footer still offers the opt-out.
 export async function sendCreditsOfferedEmail(
   user: EmailUser,
-  offer: { amountMicros: bigint; claimUrl: string; expiresAfterDays: number | null; id: string },
+  offer: { amountMicros: bigint; claimUrl: string; closesAt: Date; expiresAfterDays: number | null; id: string },
 ): Promise<void> {
   if (!isResendConfigured()) throw new ResendNotConfiguredError();
   const from = bulkFrom();
@@ -47,6 +48,7 @@ export async function sendCreditsOfferedEmail(
       replyTo: emailFrom() || from,
       subject: `${credits} in AI credits is waiting for you`,
       react: CreditsOfferedEmail({
+        claimBy: formatCreditExpiry(offer.closesAt),
         claimUrl: offer.claimUrl,
         credits,
         lifetime: describeCreditLifetime(offer.expiresAfterDays),

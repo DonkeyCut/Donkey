@@ -35,9 +35,10 @@ Supported product and engineering guides live in `docs/guides/`. This list is th
 
 - [Swift Guide](guides/swift.md) — the MVC split, language defaults, concurrency, SwiftUI, Mac platform behavior, data, and tests for the iOS and Mac apps.
 - [Code Review Guide](guides/code-review.md) — what makes a change reviewable, and how we review.
+- [Writing Style](guides/writing-style.md) — the one voice for everything we write: docs, articles, marketing, UI copy, commits, and chat.
 - [Engineering Doc Style Guide](guides/eng-doc-style.md) — the required structure, sentence-level rules, and post-writing test for every doc here.
 
-Add or update an entry here when behavior becomes supported. Don't duplicate this index in subdirectories or app folders; link directly between related docs only when the relationship helps a maintainer. Write and edit docs following the [Engineering Doc Style Guide](guides/eng-doc-style.md).
+Add or update an entry here when behavior becomes supported. Don't duplicate this index in subdirectories or app folders; link directly between related docs only when the relationship helps a maintainer. Write in the voice of the [Writing Style](guides/writing-style.md) guide, and structure docs following the [Engineering Doc Style Guide](guides/eng-doc-style.md).
 
 ## Navigation Rules
 

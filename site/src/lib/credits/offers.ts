@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 import type { CreditOffer } from "@/generated/prisma/client";
 import { CUT_APP_BASE } from "@/cut/lib/appBase";
+import { getGlobalSetting } from "@/lib/config/effective";
 import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
 import { grantCredits } from "@/lib/credits/inference";
 import { creditGrantExpiry } from "@/lib/credits/top-up";
@@ -43,11 +44,16 @@ export function creditOfferClaimUrl(offerId: string): string {
   return `${DONKEYCUT_CANONICAL}${CUT_APP_BASE}?claim=${encodeURIComponent(creditOfferToken(offerId))}`;
 }
 
+/** The last moment a claim link sent now can be used. */
+export function manualOfferClosesAt(claimWindowDays: number, now = new Date()): Date {
+  return new Date(now.getTime() + claimWindowDays * 24 * 60 * 60 * 1000);
+}
+
 // Records the offer and emails the claim link. The row comes first so the
 // link can name it, and stays if the send fails: the next attempt with the
 // same recipient, amount and lifetime picks the unsent offer up again, and
 // the send keys on the offer id, so the person gets one link however many
-// times the operator retries.
+// times the operator retries. The claim window runs from the send.
 export async function createCreditOffer(input: {
   amountMicros: bigint;
   description?: string;
@@ -55,6 +61,8 @@ export async function createCreditOffer(input: {
   offeredByUserId: string;
   user: { email: string; id: string; name: string };
 }) {
+  const { claimWindowDays } = await getGlobalSetting("manualCreditOffer");
+  const closesAt = manualOfferClosesAt(claimWindowDays);
   const offer =
     (await prisma.creditOffer.findFirst({
       where: {
@@ -69,6 +77,7 @@ export async function createCreditOffer(input: {
     (await prisma.creditOffer.create({
       data: {
         amountMicros: input.amountMicros,
+        closesAt,
         description: input.description,
         expiresAfterDays: input.expiresAfterDays,
         kind: MANUAL_OFFER_KIND,
@@ -79,16 +88,20 @@ export async function createCreditOffer(input: {
   await sendCreditsOfferedEmail(input.user, {
     amountMicros: offer.amountMicros,
     claimUrl: creditOfferClaimUrl(offer.id),
+    closesAt,
     expiresAfterDays: offer.expiresAfterDays,
     id: offer.id,
   });
   return prisma.creditOffer.update({
-    data: { emailSentAt: new Date() },
+    data: { closesAt, emailSentAt: new Date() },
     where: { id: offer.id },
   });
 }
 
 export class CreditOfferNotYoursError extends Error {}
+
+// The claim window closed before the link was used.
+export class CreditOfferClosedError extends Error {}
 
 /** Whether an offer can still be claimed now. */
 export function creditOfferOpen(offer: { claimedAt: Date | null; closesAt: Date | null }, now: Date): boolean {
@@ -128,6 +141,7 @@ export async function claimCreditOffer(offerId: string, userId: string) {
   const offer = await prisma.creditOffer.findUnique({ where: { id: offerId } });
   if (!offer || offer.kind !== MANUAL_OFFER_KIND) return null;
   if (offer.userId !== userId) throw new CreditOfferNotYoursError();
+  if (!offer.claimedAt && !creditOfferOpen(offer, new Date())) throw new CreditOfferClosedError();
   return landCreditOffer(offer, {
     description: "Manual credit grant",
     source: "manual_dollar",

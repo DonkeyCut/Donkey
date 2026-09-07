@@ -26,6 +26,7 @@ import {
   creditGrantExpiryPresets,
   creditTopUpDefaultDollars,
   creditTopUpPresetsDollars,
+  formatCreditExpiry,
   maxCreditGrantDollars,
   maxCreditGrantExpiryDays,
 } from "@/lib/credits/top-up";
@@ -103,6 +104,8 @@ export default function SuCreditsPage() {
         onSuccess: (result) => {
           setLastResult(
             `Offered $${amountDollars} to ${result.targetUser.email}. The credit lands when they claim it from the email${
+              result.offer.closesAt ? ` by ${formatCreditExpiry(new Date(result.offer.closesAt))}` : ""
+            }${
               result.offer.expiresAfterDays === null
                 ? " and never expires."
                 : `, and ${describeExpiry(result.offer.expiresAfterDays)} from then.`

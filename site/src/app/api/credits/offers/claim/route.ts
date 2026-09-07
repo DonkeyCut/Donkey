@@ -6,7 +6,9 @@ import { formatUsdPlain } from "@/lib/credits/format-usd";
 import { getCreditBalance } from "@/lib/credits/inference";
 import {
   claimCreditOffer,
+  CreditOfferClosedError,
   CreditOfferNotYoursError,
+  creditOfferOpen,
   MANUAL_OFFER_KIND,
   verifyCreditOfferToken,
 } from "@/lib/credits/offers";
@@ -19,18 +21,22 @@ const claimRequestSchema = z.object({ token: z.string().min(1) }).strict();
 // Describes the offer a claim link names, for the dialog that presents it.
 // The token proves the link came from the offer's email; the session has to be
 // the offered account's, and a different account is told so before it tries.
+// An offer whose claim window closed unclaimed is gone (410).
+const goneResponse = () => NextResponse.json({ error: "This offer has closed." }, { status: 410 });
 export const GET = withDonkeyAuth(async (request) => {
   const token = request.nextUrl.searchParams.get("token");
   const offerId = token ? verifyCreditOfferToken(token) : null;
   if (!offerId) return notFoundResponse();
   const offer = await prisma.creditOffer.findUnique({
-    select: { amountMicros: true, claimedAt: true, expiresAfterDays: true, kind: true, userId: true },
+    select: { amountMicros: true, claimedAt: true, closesAt: true, expiresAfterDays: true, kind: true, userId: true },
     where: { id: offerId },
   });
   if (!offer || offer.kind !== MANUAL_OFFER_KIND) return notFoundResponse();
   if (offer.userId !== request.donkey.userId) return forbiddenResponse();
+  if (!offer.claimedAt && !creditOfferOpen(offer, new Date())) return goneResponse();
   return NextResponse.json({
     claimed: offer.claimedAt !== null,
+    closesAt: offer.closesAt?.toISOString() ?? null,
     credits: formatUsdPlain(creditMicrosToString(offer.amountMicros)),
     lifetime: describeCreditLifetime(offer.expiresAfterDays),
   });
@@ -58,6 +64,7 @@ export const POST = withDonkeyAuth(async (request) => {
     });
   } catch (error) {
     if (error instanceof CreditOfferNotYoursError) return forbiddenResponse();
+    if (error instanceof CreditOfferClosedError) return goneResponse();
     throw error;
   }
 });

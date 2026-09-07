@@ -56,6 +56,7 @@ export const POST = withSuperUser(async (request) => {
   return NextResponse.json({
     amountDollars: parsed.data.amountDollars,
     offer: {
+      closesAt: offer.closesAt?.toISOString() ?? null,
       emailSentAt: offer.emailSentAt?.toISOString() ?? null,
       expiresAfterDays: offer.expiresAfterDays,
       id: offer.id,
