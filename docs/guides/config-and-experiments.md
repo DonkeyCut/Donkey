@@ -132,6 +132,14 @@ by variant as well.
 
 A promotion is one email from su to an audience, minus anyone an earlier promotion reached; the Pro offers behind it (subscribe bonus, allowance multiplier) are Product-tab settings.
 
+A credit promotion is a credit offer: one row that promises an account an
+amount, the credit's life, and the window it can be claimed in, then records
+the grant that lands. Every kind shares that row, and a kind is a setting and
+code: what opens the offer and what claims it. The manual credit su sends by
+email is one kind; the subscribe bonus, offered when an account has spent a
+share of its signup grant and landed by a Pro subscription created inside the
+window, is another. A new promotion adds no table.
+
 ## Verification
 
 The registry, audience, assignment, experiment schema, statistics and verdict
