@@ -57,7 +57,7 @@ export const SU_NAV: SuSurface[] = [
     label: "Credits",
     icon: CreditCard,
     title: "Credits",
-    description: "Grant credits to a user.",
+    description: "Offer credits to a user.",
   },
   {
     href: "/product",

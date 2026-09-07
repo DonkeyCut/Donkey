@@ -150,10 +150,11 @@ balance short of one flat-priced generation also returns the price it could not
 cover, and that account can still run chat and the other metered calls, so a
 client knows to keep the rest of the surface working.
 
-Manual credit grants go through `POST /api/credits/grants/`. The caller must be
-signed in with `user.superUser` set, and the target user is addressed by
-internal id. The route reads a whole-dollar amount as credits — `$1` is one
-credit, or `1,000,000` micros — then writes the grant and its ledger entry.
+Credit given by hand is an offer. The caller must be signed in with
+`user.superUser` set, and the target user is addressed by internal id or by
+email. The route records the offer and emails a claim link; the grant and its
+ledger entry are written when the person claims, with the credit's lifetime
+counted from that moment.
 
 Known OpenAI, Gemini, and ElevenLabs models fall back to backend-owned prices
 unless a database rate overrides them. The fallbacks mirror current public

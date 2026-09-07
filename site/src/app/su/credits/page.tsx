@@ -29,7 +29,7 @@ import {
   maxCreditGrantDollars,
   maxCreditGrantExpiryDays,
 } from "@/lib/credits/top-up";
-import { useAccount, useGrantCredits } from "@/queries/credits";
+import { useAccount, useOfferCredits } from "@/queries/credits";
 
 // Quick-pick amounts mirror the pay-as-you-go presets; super users can also type
 // a custom dollar value. The grant route caps a single grant at
@@ -49,7 +49,7 @@ function describeExpiry(days: number | null): string {
 
 export default function SuCreditsPage() {
   const account = useAccount();
-  const grant = useGrantCredits();
+  const grant = useOfferCredits();
   // null means "use the current user's email as the default recipient"; once the
   // super user edits the field we track their override here.
   const [emailOverride, setEmailOverride] = useState<string | null>(null);
@@ -101,11 +101,12 @@ export default function SuCreditsPage() {
       },
       {
         onSuccess: (result) => {
-          const expires = result.grant.expiresAt
-            ? `expires ${new Date(result.grant.expiresAt).toLocaleDateString()}`
-            : "never expires";
           setLastResult(
-            `Added $${amountDollars} to ${result.targetUser.email} (${expires}) — new balance $${result.balance.balance}.`,
+            `Offered $${amountDollars} to ${result.targetUser.email}. The credit lands when they claim it from the email${
+              result.offer.expiresAfterDays === null
+                ? " and never expires."
+                : `, and ${describeExpiry(result.offer.expiresAfterDays)} from then.`
+            }`,
           );
           // Reset back to the default recipient (the current user).
           setEmailOverride(null);
@@ -119,10 +120,10 @@ export default function SuCreditsPage() {
     <div className="max-w-2xl space-y-6 pb-9">
       <Card>
         <CardHeader>
-          <CardTitle>Grant credits</CardTitle>
+          <CardTitle>Offer credits</CardTitle>
           <CardDescription>
-            Defaults to your account — change the recipient to grant to another
-            user.
+            The recipient gets an email with a claim button; the credit lands
+            when they click it. Defaults to your account.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -201,18 +202,17 @@ export default function SuCreditsPage() {
             disabled={grant.isPending || !amountValid || !expiryValid}
             onClick={() => setConfirmOpen(true)}
           >
-            {grant.isPending ? "Granting…" : `Grant $${amountDollars}`}
+            {grant.isPending ? "Sending…" : `Offer $${amountDollars}`}
           </Button>
 
           <Dialog onOpenChange={setConfirmOpen} open={confirmOpen}>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Confirm credit grant</DialogTitle>
+                <DialogTitle>Confirm credit offer</DialogTitle>
                 <DialogDescription>
-                  Grant <span className="font-medium">${amountDollars}</span> in
-                  credits to{" "}
-                  <span className="font-medium">{recipientLabel}</span>? The
-                  grant {expiryLabel}.
+                  Email <span className="font-medium">{recipientLabel}</span> an
+                  offer of <span className="font-medium">${amountDollars}</span> in
+                  credits? Once claimed, the credit {expiryLabel}.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
@@ -220,7 +220,7 @@ export default function SuCreditsPage() {
                   Cancel
                 </DialogClose>
                 <Button disabled={grant.isPending} onClick={submit}>
-                  {grant.isPending ? "Granting…" : `Grant $${amountDollars}`}
+                  {grant.isPending ? "Sending…" : `Offer $${amountDollars}`}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -231,7 +231,7 @@ export default function SuCreditsPage() {
           ) : null}
           {grant.isError ? (
             <p className="text-sm text-destructive">
-              Grant failed. Check the email and amount, then try again.
+              Offer failed. Check the email and amount, then try again.
             </p>
           ) : null}
         </CardContent>

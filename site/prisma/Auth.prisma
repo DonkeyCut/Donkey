@@ -17,6 +17,7 @@ model User {
   accounts      Account[]
   creditAccount UserCreditAccount?
   creditGrants  UserCreditGrant[]
+  creditOffers  CreditOffer[]
   creditLedgerEntries UserCreditLedgerEntry[]
   inferenceUsageEvents InferenceUsageEvent[]
   creditLimits UserCreditLimit[]

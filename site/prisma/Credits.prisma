@@ -33,11 +33,33 @@ model UserCreditGrant {
   createdAt             DateTime                @default(now())
   updatedAt             DateTime                @updatedAt
   ledgerEntries         UserCreditLedgerEntry[]
+  offer                 CreditOffer?
 
   @@unique([userId, source, sourceId])
   @@index([accountId])
   @@index([userId, status])
   @@map("user_credit_grant")
+}
+
+// Credit given by hand waits here until the person claims it from the email
+// they were sent. The claim makes the grant, with the lifetime counted from
+// the claim; until then nothing reaches the balance.
+model CreditOffer {
+  id               String           @id @default(cuid())
+  userId           String
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amountMicros     BigInt
+  expiresAfterDays Int?
+  description      String?
+  offeredByUserId  String
+  emailSentAt      DateTime?
+  claimedAt        DateTime?
+  grantId          String?          @unique
+  grant            UserCreditGrant? @relation(fields: [grantId], references: [id], onDelete: SetNull)
+  createdAt        DateTime         @default(now())
+
+  @@index([userId])
+  @@map("credit_offer")
 }
 
 model UserCreditLedgerEntry {
