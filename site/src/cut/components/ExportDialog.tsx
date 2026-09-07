@@ -55,7 +55,10 @@ export function ExportDialog() {
   const [choice, setChoice] = useState<ExportChoice>(EXPORT_QUICK_PRESETS[1].choice);
   // The field's own text, so a decimal in progress ("1.") survives the parse.
   const [mbpsText, setMbpsText] = useState("");
-  const preset = quickPresetOf(choice, resolutions);
+  // Custom is a row of its own: picked by click, it stays lit whatever the
+  // options add up to, until a preset row is clicked.
+  const [customPicked, setCustomPicked] = useState(false);
+  const preset = customPicked ? null : quickPresetOf(choice, resolutions);
   const settings = useMemo(() => choiceSettings(choice, resolutions), [choice, resolutions]);
   const set = (patch: Partial<ExportChoice>) => setChoice((c) => ({ ...c, ...patch }));
 
@@ -138,11 +141,17 @@ export function ExportDialog() {
                 title={p.detail}
                 onClick={() => {
                   setMbpsText("");
+                  setCustomPicked(false);
                   setChoice({ ...p.choice });
                 }}
               />
             ))}
-            <PresetRow checked={preset === null} label="Custom" />
+            <PresetRow
+              checked={preset === null}
+              label="Custom"
+              title="Set every option yourself"
+              onClick={() => setCustomPicked(true)}
+            />
           </div>
 
           <div className="grid grid-cols-[auto_1fr_10rem] content-start items-center gap-x-4 gap-y-2.5 px-6 pb-6 max-sm:grid-cols-[auto_1fr] max-sm:pt-6">
@@ -299,7 +308,8 @@ const PILL =
   "flex h-7 shrink-0 items-center whitespace-nowrap rounded-lg border border-border bg-background px-3.5 text-sm transition-colors hover:border-input";
 
 // One preset in the left pane: the name, and what it stands for on the right.
-// "Custom" has no click: it is the row that lights when the options match no preset.
+// "Custom" is the row that lights when the options match no preset, and the
+// one a click lands on to start from the options as they are.
 function PresetRow({
   checked,
   label,
@@ -311,23 +321,22 @@ function PresetRow({
   label: string;
   detail?: string;
   title?: string;
-  onClick?: () => void;
+  onClick: () => void;
 }) {
-  const className = cn(
-    "flex h-11 items-center justify-between rounded-lg px-4 text-left transition-colors",
-    onClick && "hover:bg-foreground/5",
-    checked && "bg-foreground/10"
-  );
-  const body = (
-    <>
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={checked}
+      title={title}
+      className={cn(
+        "flex h-11 items-center justify-between rounded-lg px-4 text-left transition-colors hover:bg-foreground/5",
+        checked && "bg-foreground/10"
+      )}
+      onClick={onClick}
+    >
       <span className="text-sm font-medium">{label}</span>
       {detail && <span className="text-xs text-muted-foreground">{detail}</span>}
-    </>
-  );
-  if (!onClick) return <div className={className}>{body}</div>;
-  return (
-    <button type="button" role="radio" aria-checked={checked} title={title} className={className} onClick={onClick}>
-      {body}
     </button>
   );
 }
