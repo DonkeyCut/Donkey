@@ -109,18 +109,16 @@ export const useExports = create<ExportsState>((set, get) => ({
   start: async (projectId, doc, settings, projectName) => {
     const localId = `local-${crypto.randomUUID().slice(0, 8)}`;
     const backend = getBackend();
-    // A cloud project renders in the tab: no upload of the cut to a container,
-    // no queue behind other accounts, and the file matches the preview because
-    // the same compositor drew both. A browser that can't carry the render —
-    // no encoder for the codec, no scratch storage — sends it to the worker,
-    // which has a whole machine. A browser-resident project renders in the tab
-    // too, and borrows the same worker when the tab can't: its media goes up
-    // with the job and the file comes back into its own storage. Whatever the
-    // user chose, something renders it.
-    const inBrowser =
-      (backend.kind === "cloud" || backend.kind === "browser") &&
-      (await canRenderInBrowser(doc, settings));
-    const tabOwned = backend.kind !== "local";
+    // Every project renders in the tab: the file matches the preview because
+    // the compositor that drew the stage and the graph that played the sound
+    // draw and mix the file. A browser that can't carry the render — no
+    // encoder for the codec, no scratch storage — hands it to the machine
+    // behind the project: the engine on this Mac for a Mac project, the
+    // worker for a cloud one, and the worker again for a browser project,
+    // whose media goes up with the job and whose file comes back into its own
+    // storage. Whatever the user chose, something renders it.
+    const inBrowser = await canRenderInBrowser(doc, settings);
+    const tabOwned = backend.kind !== "local" || inBrowser;
     const abort = tabOwned ? new AbortController() : undefined;
     set((s) => ({
       local: [
@@ -171,8 +169,9 @@ export const useExports = create<ExportsState>((set, get) => ({
           local: s.local.map((r) => (r.id === localId ? { ...r, progress } : r)),
         })),
     };
-    // The worker renders what the tab could not: a cloud project's own media
-    // is already there, a browser project's goes up with the job.
+    // The machine behind the project renders what the tab could not: the
+    // engine has a Mac project's media, the worker a cloud project's, and a
+    // browser project's goes up with the job.
     const renderOnWorker = async () => {
       release();
       if (backend.kind === "browser") {
@@ -193,10 +192,10 @@ export const useExports = create<ExportsState>((set, get) => ({
         } catch (err) {
           // The probe said yes and the browser then failed anyway — an encoder
           // that refuses mid-stream, scratch storage that gives out. The
-          // export goes to the worker and the user sees it carry on, never an
-          // error for a render they could not have done anything about. A
-          // stopped render is theirs, and a gate's refusal is final: the
-          // worker sits behind the same gate.
+          // export goes to the machine behind the project and the user sees
+          // it carry on, never an error for a render they could not have done
+          // anything about. A stopped render is theirs, and a gate's refusal
+          // is final: the worker sits behind the same gate.
           if (err instanceof DOMException && err.name === "AbortError") throw err;
           if (err instanceof ExportRefusedError) throw err;
           await renderOnWorker();

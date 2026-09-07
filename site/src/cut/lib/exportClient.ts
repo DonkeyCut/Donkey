@@ -1421,8 +1421,10 @@ export async function createExportJob(
  * nothing waits behind another account's render — and the file matches the
  * preview, because the same compositor drew both.
  *
- * Cloud projects only: a local project's engine has ffmpeg, a whole machine,
- * and the media already on disk.
+ * Every residency: a cloud project's file goes up to storage, a browser
+ * project's into the tab's own store, and a Mac project's to the engine on
+ * this machine, which holds the job row and lands the file in the project's
+ * folder.
  */
 export async function runBrowserExport(
   projectId: string,
@@ -1440,7 +1442,7 @@ export async function runBrowserExport(
 ): Promise<string> {
   const backend = getBackend(); // pinned: the render outlives navigation
   if (backend.kind === "browser") return runStoreExport(projectId, doc, settings, opts);
-  if (backend.kind !== "cloud") throw new Error("This project renders on its own machine.");
+  if (backend.kind === "local") return runEngineExport(projectId, doc, settings, opts, backend);
 
   // The name and the destination are claimed before a frame is drawn, so a
   // render that is going to be refused for space or for the render cap is
@@ -1503,6 +1505,101 @@ export async function runBrowserExport(
     throw err;
   } finally {
     releaseRegistered(`/api/cut/projects/${projectId}/`);
+  }
+}
+
+/**
+ * A Mac-resident project's export: the same in-tab render, with the finished
+ * file streamed into the project's exports folder on this Mac. The engine
+ * holds the job row — the file's name, the dock's slot, the progress every
+ * other tab's dock shows — and encodes nothing: what the user watched on the
+ * stage is what goes into the file, drawn by the same compositor and mixed
+ * by the same graph.
+ */
+/** How often a tab render tells the engine it is still drawing. Well inside
+ * the engine's silence window even for a hidden tab's throttled timers. */
+const CLIENT_HEARTBEAT_MS = 5000;
+
+async function runEngineExport(
+  projectId: string,
+  doc: ExportDoc,
+  settings: ExportSettings,
+  opts: NonNullable<Parameters<typeof runBrowserExport>[3]>,
+  backend: CutBackend
+): Promise<string> {
+  const claim = await backend.fetch("/api/cut/export/client", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ projectId, container: settings.container }),
+  });
+  const claimed = await apiJson<{ id?: string; outName?: string }>(claim);
+  if (!claim.ok || !claimed.id) throw new Error(claimed.error ?? "Export failed to start.");
+  const jobId = claimed.id;
+  opts.onClaimed?.(jobId);
+  // The engine's feed carries the progress to every other tab's dock; a
+  // report every couple of percent is plenty for a bar.
+  let reported = 0;
+  const post = (ratio: number) =>
+    void backend
+      .fetch(`/api/cut/export/client/${jobId}/progress`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ratio }),
+      })
+      .catch(() => {});
+  const report = (ratio: number) => {
+    if (ratio - reported < 0.02 && ratio < 1) return;
+    reported = ratio;
+    post(ratio);
+  };
+  // Each report is also the engine's sign that this tab is still drawing; a
+  // long stretch with no new percent still says so on a timer, so a tab that
+  // closed mid-render is told apart from one encoding a slow stretch.
+  const heartbeat = setInterval(() => post(reported), CLIENT_HEARTBEAT_MS);
+  try {
+    const rendered = await renderProjectToMp4(doc, settings, {
+      resolve: (asset) =>
+        useEditor.getState().assets.find((a) => a.id === asset.id)?.url ?? asset.url,
+      signal: opts.signal,
+      // The render is nearly all of the work; the hand-in to the engine on
+      // this machine is the tail of the bar.
+      onProgress: ({ ratio }) => {
+        opts.onProgress?.(ratio * 0.95);
+        report(ratio * 0.95);
+      },
+    });
+    let done: Response;
+    try {
+      done = await backend.fetch(`/api/cut/export/client/${jobId}/file`, {
+        method: "PUT",
+        headers: { "Content-Type": deliveryContainer(settings.container).mime },
+        body: rendered.file,
+        signal: opts.signal,
+      });
+    } finally {
+      // The file streamed from scratch disk into the engine's folder; its
+      // space comes back as soon as the hand-in is done with it.
+      void rendered.discard();
+    }
+    // The engine refuses a file for a job it no longer holds: the user
+    // canceled this render from another dock. That is their stop, and it
+    // ends here the way a cancel in this tab does.
+    if (done.status === 409) throw new DOMException("Export canceled.", "AbortError");
+    const body = await apiJson<{ id?: string }>(done);
+    if (!done.ok || !body.id) throw new Error(body.error ?? "Could not save the export.");
+    opts.onProgress?.(1);
+    return body.id;
+  } catch (err) {
+    // A render that stopped — cancelled, failed — gives back the name it was
+    // holding, so no row stays in the feed for a file that will never exist.
+    // The release lands before the store hears of the stop, so the feed the
+    // dock reads next is already clear of the row.
+    await backend
+      .fetch(`/api/cut/export/client/${jobId}/release`, { method: "POST" })
+      .catch(() => {});
+    throw err;
+  } finally {
+    clearInterval(heartbeat);
   }
 }
 

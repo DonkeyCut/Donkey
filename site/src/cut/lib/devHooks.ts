@@ -8,6 +8,7 @@
  */
 
 import { renderProjectToMp4 } from "./exportRender";
+import { useExports } from "./exportStore";
 import { useGenerate } from "./generate";
 import { useGenScene } from "./genScene";
 import { edgeFramesPending, enrichAsset, importFileToProject } from "./media";
@@ -44,6 +45,9 @@ export function installDevHooks(): void {
     // the bytes back out.
     renderProjectToMp4,
     projectDuration,
+    // The export eval starts a real export through the store, the way the
+    // dialog does, and watches the dock's feed for the file.
+    useExports,
   };
   // The perf eval arms and reads the frame trace through here. Off until
   // `start()` is called, so an ordinary dev session records nothing.

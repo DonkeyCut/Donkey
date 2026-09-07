@@ -73,6 +73,10 @@ export const CUT_ROUTES: CutRoute[] = [
 
   { method: "GET", path: "/api/cut/export-jobs", handler: () => exportApi.activeAll() },
   { method: "POST", path: "/api/cut/export", handler: (req) => exportApi.create(req) },
+  { method: "POST", path: "/api/cut/export/client", handler: (req) => exportApi.createClient(req) },
+  { method: "POST", path: "/api/cut/export/client/:jobId/progress", handler: (req, p) => exportApi.clientProgress(req, { jobId: p.jobId }) },
+  { method: "PUT", path: "/api/cut/export/client/:jobId/file", handler: (req, p) => exportApi.clientComplete(req, { jobId: p.jobId }) },
+  { method: "POST", path: "/api/cut/export/client/:jobId/release", handler: (req, p) => exportApi.clientRelease(req, { jobId: p.jobId }) },
   { method: "GET", path: "/api/cut/export/:jobId", handler: (req, p) => exportApi.status(req, { jobId: p.jobId }) },
   { method: "DELETE", path: "/api/cut/export/:jobId", handler: (req, p) => exportApi.cancel(req, { jobId: p.jobId }) },
   { method: "GET", path: "/api/cut/export/:jobId/file", handler: (req, p) => exportApi.file(req, { jobId: p.jobId }) },

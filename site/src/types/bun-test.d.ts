@@ -10,6 +10,8 @@ declare module "bun:test" {
     skipIf(condition: boolean): TestFn;
   }
   export const test: TestFn;
+  export function beforeAll(fn: () => void | Promise<void>): void;
+  export function afterAll(fn: () => void | Promise<void>): void;
   export function beforeEach(fn: () => void | Promise<void>): void;
   export function afterEach(fn: () => void | Promise<void>): void;
   export interface Matchers {

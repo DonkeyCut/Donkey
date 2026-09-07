@@ -47,6 +47,10 @@ const arg = (name: string) => {
 const has = (name: string) => args.includes(name);
 const BASE = arg("--base") ?? "http://localhost:3000";
 const HERMETIC = has("--hermetic");
+/** Export a Mac-resident project: the fixtures go into a project on the dev
+ * server's engine mount, the page starts the export through the store the
+ * way the dialog does, and the engine lands the file in the project folder. */
+const ENGINE = has("--engine") && !HERMETIC;
 /** The dev-only account the API bypass authenticates as. */
 const DEV_USER = "donkey-dev-auth-bypass";
 /** The project id a hermetic run opens; its doc is answered in-context. */
@@ -61,7 +65,8 @@ function run(cmd: string, cmdArgs: string[]): Promise<string> {
     const p = spawn(cmd, cmdArgs);
     let out = "";
     let err = "";
-    p.stdout.on("data", (d) => (out += d.toString()));
+    // Bytes land as latin1 so a raw-video or PCM stream reads back intact.
+    p.stdout.on("data", (d: Buffer) => (out += d.toString("latin1")));
     p.stderr.on("data", (d) => (err += d.toString()));
     p.on("error", reject);
     p.on("close", (code) => {
@@ -258,10 +263,85 @@ async function probeInPage(page: Page): Promise<Record<string, unknown>> {
   });
 }
 
+/** The fixture cut: every feature the renderer carries, over media named by
+ * `url`. */
+function fixtureDoc(url: (file: string) => string, clipS = CLIP_S) {
+  const asset = (id: string, file: string, type: string, duration: number) => ({
+    id,
+    fileName: file,
+    name: id,
+    type,
+    url: url(file),
+    duration,
+    ...(type === "video" ? { width: 1280, height: 720 } : {}),
+  });
+  const doc = {
+    aspect: "16:9",
+    background: "#102030",
+    fadeIn: 0.3,
+    fadeOut: 0.3,
+    assets: [
+      asset("v0", "clip-0.mp4", "video", clipS),
+      asset("v1", "clip-1.mp4", "video", clipS),
+      asset("m0", "music.m4a", "audio", 8),
+    ],
+    clips: [
+      {
+        id: "c0", assetId: "v0", track: 0, start: 0, in: 0, out: clipS,
+        muted: false, volume: 0.8,
+        fit: "fill", zoom: 1.4, panX: 0.3, panY: -0.2,
+        speed: 1.25,
+        transition: 0.5, transitionStyle: "crossfade",
+      },
+      {
+        id: "c1", assetId: "v1", track: 0, start: clipS / 1.25, in: 0, out: clipS,
+        muted: false,
+        fit: "fit",
+        grade: { brightness: 5, contrast: 8, saturation: -10, temperature: 12, hue: 10 },
+        kf: [
+          { t: 0, x: 0.5, y: 0.5, scale: 1, rotation: 0, opacity: 1 },
+          { t: 2, x: 0.6, y: 0.4, scale: 0.85, rotation: 12, opacity: 1 },
+        ],
+      },
+      {
+        id: "c2", assetId: "v0", track: 1, start: 1, in: 0, out: 1.5,
+        muted: true,
+        frame: { x: 0.55, y: 0.05, w: 0.4, h: 0.4 },
+        fit: "fill", rotation: 5, opacity: 0.9,
+      },
+    ],
+    audioClips: [
+      {
+        id: "a0", assetId: "m0", start: 0, in: 0, out: 5,
+        volume: 0.5, fadeIn: 0.3, fadeOut: 0.5, lane: 0,
+      },
+    ],
+    overlays: [
+      {
+        id: "t0", kind: "text", text: "Everything test",
+        start: 0.5, end: 3, x: 0.5, y: 0.2, lane: 0,
+        size: 64, font: "sf", weight: 700, color: "#FFFFFF",
+        shadow: true, plate: true,
+      },
+    ],
+    subtitles: {
+      cues: [
+        { id: "s0", start: 0.3, end: 1.2, text: "every feature" },
+        { id: "s1", start: 1.4, end: 2.2, text: "in one render" },
+      ],
+      showOnVideo: true,
+      showOnTimeline: false,
+    },
+  };
+  return doc;
+}
+
+const SETTINGS = { width: 1280, height: 720, fps: 24, crf: 24, preset: "veryfast", codec: "h264", container: "mp4", audioCodec: "aac" } as const;
+
 /** Render the fixture doc in the tab and hand the MP4 bytes back. */
-async function renderInPage(page: Page): Promise<{ b64: string; duration: number }> {
+async function renderInPage(page: Page, doc: unknown): Promise<{ b64: string; duration: number }> {
   return page.evaluate(
-    async ({ clipS }) => {
+    async ({ doc, settings }) => {
       const dev = (window as unknown as {
         __cutDev: {
           renderProjectToMp4: (
@@ -276,74 +356,6 @@ async function renderInPage(page: Page): Promise<{ b64: string; duration: number
         };
       }).__cutDev;
 
-      const asset = (id: string, file: string, type: string, duration: number) => ({
-        id,
-        fileName: file,
-        name: id,
-        type,
-        url: `/__cutexport/${file}`,
-        duration,
-        ...(type === "video" ? { width: 1280, height: 720 } : {}),
-      });
-      const doc = {
-        aspect: "16:9",
-        background: "#102030",
-        fadeIn: 0.3,
-        fadeOut: 0.3,
-        assets: [
-          asset("v0", "clip-0.mp4", "video", clipS),
-          asset("v1", "clip-1.mp4", "video", clipS),
-          asset("m0", "music.m4a", "audio", 8),
-        ],
-        clips: [
-          {
-            id: "c0", assetId: "v0", track: 0, start: 0, in: 0, out: clipS,
-            muted: false, volume: 0.8,
-            fit: "fill", zoom: 1.4, panX: 0.3, panY: -0.2,
-            speed: 1.25,
-            transition: 0.5, transitionStyle: "crossfade",
-          },
-          {
-            id: "c1", assetId: "v1", track: 0, start: clipS / 1.25, in: 0, out: clipS,
-            muted: false,
-            fit: "fit",
-            grade: { brightness: 5, contrast: 8, saturation: -10, temperature: 12, hue: 10 },
-            kf: [
-              { t: 0, x: 0.5, y: 0.5, scale: 1, rotation: 0, opacity: 1 },
-              { t: 2, x: 0.6, y: 0.4, scale: 0.85, rotation: 12, opacity: 1 },
-            ],
-          },
-          {
-            id: "c2", assetId: "v0", track: 1, start: 1, in: 0, out: 1.5,
-            muted: true,
-            frame: { x: 0.55, y: 0.05, w: 0.4, h: 0.4 },
-            fit: "fill", rotation: 5, opacity: 0.9,
-          },
-        ],
-        audioClips: [
-          {
-            id: "a0", assetId: "m0", start: 0, in: 0, out: 5,
-            volume: 0.5, fadeIn: 0.3, fadeOut: 0.5, lane: 0,
-          },
-        ],
-        overlays: [
-          {
-            id: "t0", kind: "text", text: "Everything test",
-            start: 0.5, end: 3, x: 0.5, y: 0.2, lane: 0,
-            size: 64, font: "sf", weight: 700, color: "#FFFFFF",
-            shadow: true, plate: true,
-          },
-        ],
-        subtitles: {
-          cues: [
-            { id: "s0", start: 0.3, end: 1.2, text: "every feature" },
-            { id: "s1", start: 1.4, end: 2.2, text: "in one render" },
-          ],
-          showOnVideo: true,
-          showOnTimeline: false,
-        },
-      };
-      const settings = { width: 1280, height: 720, fps: 24, crf: 24, preset: "veryfast", codec: "h264", container: "mp4", audioCodec: "aac" } as const;
 
       const duration = dev.projectDuration(doc);
       let stage = "start";
@@ -365,7 +377,48 @@ async function renderInPage(page: Page): Promise<{ b64: string; duration: number
       }
       return { b64: btoa(bin), duration };
     },
-    { clipS: CLIP_S }
+    { doc, settings: SETTINGS }
+  );
+}
+
+/** Start the export through the store, the way the dialog does, and watch the
+ * dock's rows until the engine's row reads done. */
+async function exportThroughStore(page: Page, doc: unknown): Promise<{ duration: number; rows: string[] }> {
+  return page.evaluate(
+    async ({ doc, settings }) => {
+      const dev = (window as unknown as {
+        __cutDev: {
+          projectDuration: (doc: unknown) => number;
+          useEditor: { getState(): { projectId: string; projectName: string } };
+          useExports: {
+            getState(): {
+              start(projectId: string, doc: unknown, settings: unknown, name: string): Promise<void>;
+              local: { status: string; progress?: number; error?: string }[];
+              jobs: { id: string; status: string; outName?: string; error?: string }[];
+              rendering: string[];
+            };
+          };
+        };
+      }).__cutDev;
+      const editor = dev.useEditor.getState();
+      void dev.useExports.getState().start(editor.projectId, doc, settings, editor.projectName);
+      const rows: string[] = [];
+      const t0 = Date.now();
+      while (Date.now() - t0 < 180_000) {
+        await new Promise((r) => setTimeout(r, 250));
+        const st = dev.useExports.getState();
+        const line = [
+          ...st.local.map((r) => `tab:${r.status}${r.progress != null ? ` ${(r.progress * 100).toFixed(0)}%` : ""}${r.error ? ` ${r.error}` : ""}`),
+          ...st.jobs.map((j) => `engine:${j.status}${st.rendering.includes(j.id) ? " (hidden)" : ""} ${j.outName ?? ""}${j.error ? ` ${j.error}` : ""}`),
+        ].join(" | ");
+        if (rows[rows.length - 1] !== line) rows.push(line);
+        if (st.local.some((r) => r.status === "error")) throw new Error(`export failed: ${rows.join("\n")}`);
+        if (st.local.length === 0 && st.jobs.some((j) => j.status === "done")) break;
+      }
+      if (!dev.useExports.getState().jobs.some((j) => j.status === "done")) throw new Error(`export never finished: ${rows.join("\n")}`);
+      return { duration: dev.projectDuration(doc), rows };
+    },
+    { doc, settings: SETTINGS }
   );
 }
 
@@ -376,8 +429,9 @@ async function main(): Promise<void> {
   const { browser, page } = await launch();
   const probe = () => probeInPage(page).then((r) => console.log(`[probe] ${JSON.stringify(r)}`));
   let projectId = HERMETIC_PROJECT;
+  const engine = (p: string, init?: RequestInit) => fetch(`${BASE}${p}${p.includes("?") ? "&" : "?"}u=${DEV_USER}`, init);
   if (!HERMETIC) {
-    const res = await fetch(`${BASE}/api/cut/projects?u=${DEV_USER}`, {
+    const res = await engine("/api/cut/projects", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "cut-export eval" }),
@@ -385,17 +439,60 @@ async function main(): Promise<void> {
     if (!res.ok) throw new Error(`create project failed: ${res.status} (is next dev running?)`);
     projectId = ((await res.json()) as { id: string }).id;
   }
-  console.log(`[ready] ${BASE}/app/p/${projectId}${HERMETIC ? " (hermetic)" : ""}`);
-
-  await open(page, projectId);
-  await probe();
-  const t0 = Date.now();
-  const { b64, duration } = await renderInPage(page);
-  await browser.close();
+  console.log(`[ready] ${BASE}/app/p/${projectId}${HERMETIC ? " (hermetic)" : ENGINE ? " (engine)" : ""}`);
 
   const outPath = path.join(OUT, "export.mp4");
-  await writeFile(outPath, Buffer.from(b64, "base64"));
-  console.log(`[render] ${((Date.now() - t0) / 1000).toFixed(1)}s → ${outPath}`);
+  let duration = 0;
+  const t0 = Date.now();
+  try {
+    if (ENGINE) {
+      // The media lives in the project on the engine, and the doc names it
+      // by the engine's own media URLs, the way an imported file is stored.
+      const upload = async (file: string) => {
+        const form = new FormData();
+        const type = file.endsWith(".m4a") ? "audio/mp4" : "video/mp4";
+        form.set("file", new File([await readFile(path.join(OUT, file))], file, { type }));
+        const res = await engine(`/api/cut/projects/${projectId}/media`, { method: "POST", body: form });
+        if (!res.ok) throw new Error(`upload ${file} failed: ${res.status}`);
+        return ((await res.json()) as { fileName: string }).fileName;
+      };
+      const stored = new Map<string, string>();
+      for (const file of ["clip-0.mp4", "clip-1.mp4", "music.m4a"]) stored.set(file, await upload(file));
+      const doc = fixtureDoc((file) => `/api/cut/projects/${projectId}/media/${encodeURIComponent(stored.get(file)!)}`);
+      const put = await engine(`/api/cut/projects/${projectId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(doc),
+      });
+      if (!put.ok) throw new Error(`save project failed: ${put.status}`);
+
+      await open(page, projectId);
+      await probe();
+      const result = await exportThroughStore(page, doc);
+      duration = result.duration;
+      for (const row of result.rows) console.log(`  ${row}`);
+      await browser.close();
+
+      const feed = (await (await engine(`/api/cut/projects/${projectId}/exports`)).json()) as { file: string }[];
+      const landed = feed.find((f) => f.file.endsWith(".mp4"));
+      if (!landed) throw new Error(`no export in the project folder: ${JSON.stringify(feed)}`);
+      const file = await engine(`/api/cut/projects/${projectId}/exports/${encodeURIComponent(landed.file)}`);
+      if (!file.ok) throw new Error(`read ${landed.file} failed: ${file.status}`);
+      await writeFile(outPath, Buffer.from(await file.arrayBuffer()));
+      console.log(`[render] ${((Date.now() - t0) / 1000).toFixed(1)}s → ${landed.file} in the project folder → ${outPath}`);
+    } else {
+      await open(page, projectId);
+      await probe();
+      const rendered = await renderInPage(page, fixtureDoc((file) => `/__cutexport/${file}`));
+      duration = rendered.duration;
+      await browser.close();
+      await writeFile(outPath, Buffer.from(rendered.b64, "base64"));
+      console.log(`[render] ${((Date.now() - t0) / 1000).toFixed(1)}s → ${outPath}`);
+    }
+  } finally {
+    // The project was this run's; nothing of it stays on the machine.
+    if (!HERMETIC) await engine(`/api/cut/projects/${projectId}`, { method: "DELETE" }).catch(() => {});
+  }
 
   const probed = JSON.parse(
     await run("ffprobe", [
@@ -427,6 +524,37 @@ async function main(): Promise<void> {
   if (!probed.streams.some((s) => s.codec_type === "audio")) {
     failures.push("no audio stream");
   }
+
+  // The picture at every cut: a frame of bare background between two
+  // clips is the black flash a fixed-rate render lands in a gap the timeline
+  // never showed. The project fade darkens the first and last frames by
+  // design, so the scan stays clear of them.
+  const raw = await run("ffmpeg", ["-loglevel", "error", "-i", outPath, "-vf", "scale=1:1:flags=area", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]);
+  const bytes = Buffer.from(raw, "binary");
+  const frames: number[][] = [];
+  for (let i = 0; i + 2 < bytes.length; i += 3) frames.push([bytes[i], bytes[i + 1], bytes[i + 2]]);
+  const dark = (c: number[]) => c[0] + c[1] + c[2] < 96;
+  const flashes = frames
+    .map((c, i) => ({ c, i }))
+    .filter(({ c, i }) => i / 24 > 0.5 && i / 24 < duration - 0.5 && dark(c) && !dark(frames[i - 1]) && !dark(frames[i + 1]))
+    .map(({ i }) => (i / 24).toFixed(2));
+  if (flashes.length) failures.push(`bare frames at ${flashes.join(", ")}s`);
+
+  // The level: the second clip at full volume over the music bed at half,
+  // measured where nothing fades, against the sources through the same
+  // decode. Half a decibel either way is the preview's own gain math.
+  const rmsOf = async (file: string, from: number, to: number) => {
+    const pcm = await run("ffmpeg", ["-loglevel", "error", "-ss", String(from), "-t", String(to - from), "-i", file, "-vn", "-af", "pan=mono|c0=c0", "-f", "f32le", "-ar", "48000", "-"]);
+    const x = new Float32Array(Buffer.from(pcm, "binary").buffer);
+    let sum = 0;
+    for (const v of x) sum += v * v;
+    return Math.sqrt(sum / Math.max(1, x.length));
+  };
+  const expected = Math.hypot(await rmsOf(path.join(OUT, "clip-1.mp4"), 0.5, 1.5), 0.5 * (await rmsOf(path.join(OUT, "music.m4a"), 0.5, 1.5)));
+  const level = await rmsOf(outPath, 3.5, 4.5);
+  const dB = 20 * Math.log10(level / expected);
+  if (!(Math.abs(dB) <= 0.5)) failures.push(`level at 3.5–4.5s is ${dB.toFixed(2)} dB off the sources`);
+  console.log(`[level] ${dB >= 0 ? "+" : ""}${dB.toFixed(2)} dB against the sources; ${frames.length} frames, ${flashes.length} bare`);
 
   if (failures.length) {
     console.error(`[FAIL] ${failures.join("; ")}`);

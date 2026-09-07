@@ -1,5 +1,5 @@
 import { type ChildProcess } from "node:child_process";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readdir, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { assertLocalRuntime } from "./local-only";
@@ -29,15 +29,30 @@ export interface Job {
   outPath: string;
   outName: string;
   proc?: ChildProcess;
+  /** A render the browser tab carries itself: the row holds the file's name
+   * and the dock's slot while the tab draws the frames, and the finished file
+   * streams in when it is done. The engine encodes nothing for it. */
+  client?: boolean;
+  /** A tab render's last sign of life: its claim, a progress report, or the
+   * start of its hand-in. */
+  seenAt?: number;
   log: string[];
 }
 
 const MAX_RUNNING = 2; // concurrent ffmpeg exports; extra exports queue behind them
 // Survives dev-server module reloads; caps the terminal backlog. Queued jobs
 // are active work, not backlog, so they are exempt from eviction.
-const { jobs, runningCount, retire } = createJobRegistry<Job>("__veditorJobs", {
+const { jobs, retire } = createJobRegistry<Job>("__veditorJobs", {
   isTerminal: (j) => j.status === "done" || j.status === "error",
 });
+
+/** Renders holding an ffmpeg slot. A tab's own render is in the feed with
+ * status "running" and takes none: the encoding happens in the browser. */
+const runningCount = () => {
+  let n = 0;
+  for (const j of jobs.values()) if (j.status === "running" && !j.client) n++;
+  return n;
+};
 
 // Export jobs waiting for a running slot, oldest first. Held on globalThis so a
 // dev-server module reload doesn't strand a queued render. Preview proxies never
@@ -49,13 +64,34 @@ interface Pending {
 const g = globalThis as unknown as { __veditorPending?: Pending[] };
 const pending: Pending[] = (g.__veditorPending ??= []);
 
+/** How long a tab render may go quiet before its row is given up. The tab
+ * reports every few seconds while it draws; a tab that closed, crashed, or
+ * lost the page mid-render stops, and its row would otherwise hold the file
+ * name and the project's busy flag forever. Long enough to ride out a hidden
+ * tab's throttled timers. */
+const CLIENT_RENDER_WINDOW_MS = 3 * 60 * 1000;
+
+/** Settle every tab render that fell silent: the row errors and retires, so
+ * the name frees, the folder may follow its project's name again, and the
+ * docks stop polling for a render nothing is drawing. */
+function sweepClientJobs(now = Date.now()): void {
+  for (const job of jobs.values()) {
+    if (!job.client || job.status !== "running") continue;
+    if (now - (job.seenAt ?? job.startedAt ?? job.createdAt) < CLIENT_RENDER_WINDOW_MS) continue;
+    job.status = "error";
+    job.error = "The tab rendering this export went away.";
+    retire(job);
+  }
+}
+
 // A project folder never moves while a render holds paths inside it: the
 // rename-follows-name machinery asks here before touching the folder.
-setActiveJobGuard((projectId) =>
-  [...jobs.values()].some(
+setActiveJobGuard((projectId) => {
+  sweepClientJobs();
+  return [...jobs.values()].some(
     (j) => j.projectId === projectId && (j.status === "queued" || j.status === "running")
-  )
-);
+  );
+});
 
 /** Promote queued exports into free running slots, oldest first. Called after
  * every enqueue and every settle, so the queue always drains to capacity. */
@@ -111,6 +147,7 @@ function jobView(j: Job) {
 /** Every export job across all projects — the source of truth the app-wide
  * exports dock reflects, so it shows the same set in every tab. */
 export function listAllJobs() {
+  sweepClientJobs();
   return [...jobs.values()]
     .filter((j) => j.target !== "preview")
     .sort((a, b) => a.createdAt - b.createdAt)
@@ -122,6 +159,12 @@ export function cancelJob(id: string) {
   if (!job) return;
   if (job.status === "running" && job.proc) {
     job.proc.kill("SIGKILL");
+    job.status = "error";
+    job.error = "Export canceled.";
+    retire(job);
+  } else if (job.status === "running" && job.client) {
+    // The tab drawing it learns of the cancel when it comes to hand the file
+    // in and is refused; the row settles now so every dock clears.
     job.status = "error";
     job.error = "Export canceled.";
     retire(job);
@@ -147,8 +190,10 @@ async function exportName(projectId: string, projectName: string, ext: string) {
   const taken = new Set(
     await readdir(exportsDir(projectId)).catch(() => [] as string[])
   );
+  // A failed job wrote nothing under its name; only live and finished ones
+  // hold theirs.
   for (const j of jobs.values()) {
-    if (j.projectId === projectId && j.outName) taken.add(j.outName);
+    if (j.projectId === projectId && j.outName && j.status !== "error") taken.add(j.outName);
   }
   for (let n = 1; ; n++) {
     const candidate = n === 1 ? `${base}${ext}` : `${base} ${n}${ext}`;
@@ -252,4 +297,110 @@ export async function createJob(form: FormData): Promise<Job> {
     retire(job);
   }
   return job;
+}
+
+/**
+ * Open a job for a render the tab carries itself. The name is claimed and the
+ * row enters the feed as running, so every dock shows it and no other export
+ * can take its file name; the frames are the browser's to draw.
+ */
+export async function createClientJob(
+  projectId: string,
+  container: ExportSpec["container"]
+): Promise<Job> {
+  assertLocalRuntime();
+  sweepClientJobs();
+  const job: Job = {
+    id: crypto.randomUUID().slice(0, 12),
+    projectId,
+    projectName: "",
+    target: "export",
+    status: "running",
+    progress: 0,
+    createdAt: Date.now(),
+    startedAt: Date.now(),
+    seenAt: Date.now(),
+    tmpDir: "",
+    outPath: "",
+    outName: "",
+    client: true,
+    log: [],
+  };
+  jobs.set(job.id, job);
+  try {
+    const doc = await readProject(projectId);
+    if (!doc) throw new Error("Project not found.");
+    job.projectName = doc.name;
+    await claimExportName(job, doc.name, containerExtension({ container }));
+    job.outPath = path.join(exportsDir(projectId), job.outName);
+    await mkdir(path.dirname(job.outPath), { recursive: true });
+  } catch (err) {
+    job.status = "error";
+    job.error = err instanceof Error ? err.message : String(err);
+    retire(job);
+  }
+  return job;
+}
+
+/** How far the tab has drawn, for the docks in every other tab. A report is
+ * also the tab's heartbeat, whatever the ratio. */
+export function progressClientJob(id: string, ratio: number): void {
+  const job = jobs.get(id);
+  if (!job?.client || job.status !== "running") return;
+  job.seenAt = Date.now();
+  if (Number.isFinite(ratio)) job.progress = Math.max(job.progress, Math.min(1, Math.max(0, ratio)));
+}
+
+/**
+ * The finished file, streamed into exports/ under the claimed name. Null when
+ * the job is no longer a running tab render — canceled from another dock, or
+ * never one at all — so the tab knows its file has nowhere to go.
+ */
+export async function completeClientJob(
+  id: string,
+  body: ReadableStream<Uint8Array> | null
+): Promise<Job | null> {
+  const job = jobs.get(id);
+  if (!job?.client || job.status !== "running") return null;
+  job.seenAt = Date.now();
+  const partial = `${job.outPath}.part`;
+  try {
+    if (!body) throw new Error("The export arrived without a file.");
+    // Read chunk by chunk into a file handle. A body whose connection drops
+    // rejects the loop, so the catch below runs; under Bun the Node stream
+    // adapter hangs on the same body and leaks the rejection.
+    const file = await open(partial, "w");
+    try {
+      for await (const chunk of body) await file.write(chunk);
+    } finally {
+      await file.close();
+    }
+    await rename(partial, job.outPath);
+    job.status = "done";
+    job.progress = 1;
+  } catch (err) {
+    await rm(partial, { force: true });
+    job.status = "error";
+    job.error = err instanceof Error ? err.message : String(err);
+  } finally {
+    retire(job);
+  }
+  return job;
+}
+
+/** A tab render that stopped before its file landed gives the name and the
+ * row back; nothing of it stays in the feed. That covers a render the tab
+ * abandoned while still running and one whose hand-in broke off — a cancel
+ * that lands mid-stream errors the row first, and the tab's release then
+ * takes it out so no dock shows a failure card for the user's own stop. A
+ * finished file keeps its row. */
+export function releaseClientJob(id: string): void {
+  const job = jobs.get(id);
+  if (!job?.client || job.status === "done") return;
+  jobs.delete(id);
+}
+
+/** Test seam: settle tab renders that have been silent longer than the window. */
+export function sweepClientJobsForTest(now: number): void {
+  sweepClientJobs(now);
 }
