@@ -7,7 +7,7 @@
 // claim on load would start the credit's lifetime before the person saw it.
 // Closing drops the token from the address, so a reload opens nothing.
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { Loader2, Sparkle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -52,14 +52,14 @@ function OpenDialog({ token, onClose }: { token: string; onClose: () => void }) 
   const offer = useCreditOffer(token);
   const claim = useClaimCreditOffer();
   const done = claim.data ?? (offer.data?.claimed ? { expiresAt: null } : null);
+  // The dialog opens once the offer is known, at the size it keeps: the body
+  // reserves two lines and every state ends in one row of buttons.
+  if (offer.isPending) return null;
 
-  let title = "Your credits";
-  let body: React.ReactNode;
+  let title = "Claim your credits";
+  let body: string;
   let footer: React.ReactNode;
-  if (offer.isPending) {
-    body = "Checking this link…";
-    footer = null;
-  } else if (offer.isError) {
+  if (offer.isError) {
     title = "This link is no longer valid";
     body =
       offer.error instanceof ApiError && offer.error.status === 403
@@ -72,8 +72,8 @@ function OpenDialog({ token, onClose }: { token: string; onClose: () => void }) 
     }`;
     footer = <Button onClick={onClose}>Start editing</Button>;
   } else {
-    body = `${offer.data.credits} in AI credits is waiting for you.${
-      offer.data.lifetime ? ` Once claimed, it is good for ${offer.data.lifetime}.` : ""
+    body = `You have ${offer.data.credits} in AI credits. They\u2019re waiting for you.${
+      offer.data.lifetime ? ` Once claimed, it\u2019s good for ${offer.data.lifetime}.` : ""
     }`;
     footer = (
       <>
@@ -92,17 +92,22 @@ function OpenDialog({ token, onClose }: { token: string; onClose: () => void }) 
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{body}</DialogDescription>
+          <DialogTitle className="flex items-center gap-2 text-lg">
+            <Sparkle className="size-5 shrink-0 fill-violet-500/25 text-violet-500" />
+            {title}
+          </DialogTitle>
+          <DialogDescription className="min-h-10">{body}</DialogDescription>
         </DialogHeader>
-        {footer && <DialogFooter>{footer}</DialogFooter>}
-        {claim.isError && (
-          <p className="text-sm text-destructive">
-            {claim.error instanceof ApiError && claim.error.status === 403
-              ? "This offer belongs to a different account. Sign in with the address the email was sent to."
-              : "That didn't go through. Try again."}
-          </p>
-        )}
+        <DialogFooter className="mx-0 mb-0 items-center border-0 bg-transparent p-0">
+          {claim.isError && (
+            <p className="text-sm text-destructive sm:mr-auto">
+              {claim.error instanceof ApiError && claim.error.status === 403
+                ? "This offer belongs to a different account. Sign in with the address the email was sent to."
+                : "That didn\u2019t go through. Try again."}
+            </p>
+          )}
+          {footer}
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
