@@ -7,6 +7,7 @@
 // (answered with blob URLs), exports, the export-jobs feed, and the library
 // shelf (./library.ts). Everything else is the driver's cloud proxy.
 import { resolveParent, settleParents } from "../../folderTree";
+import { sanitizeGuideLines, sanitizeGuides } from "../../guides";
 import { normalizeAspect, type ProjectDoc, type ProjectFolder } from "../../types";
 import {
   getBrowserExportJob,
@@ -94,8 +95,11 @@ async function putProject(req: Request, id: string): Promise<Response> {
       templates: Array.isArray(body.templates) ? body.templates : existing.templates,
       mediaFolders: Array.isArray(body.mediaFolders) ? body.mediaFolders : existing.mediaFolders,
       aspect: normalizeAspect(body.aspect) ?? existing.aspect,
+      guides: Array.isArray(body.guides) ? sanitizeGuides(body.guides) : existing.guides,
+      guideLines: body.guideLines !== undefined ? sanitizeGuideLines(body.guideLines) : existing.guideLines,
       fadeIn: typeof body.fadeIn === "number" ? body.fadeIn : existing.fadeIn,
       fadeOut: typeof body.fadeOut === "number" ? body.fadeOut : existing.fadeOut,
+      background: typeof body.background === "string" ? body.background : existing.background,
       subtitles:
         body.subtitles && typeof body.subtitles === "object" ? body.subtitles : existing.subtitles,
       ui: body.ui && typeof body.ui === "object" ? { ...existing.ui, ...body.ui } : existing.ui,
