@@ -9,8 +9,7 @@ import {
   SOUND_EQ_BANDS,
   SOUND_PRESETS,
   soundFilters,
-  soundRecipe,
-} from "./audioFx";
+  soundRecipe, dynamicsMakeupGain } from "./audioFx";
 import { ALL_EFFECT_IDS, EFFECT_IDS, EFFECT_LABELS } from "./effects";
 
 // The bundled engine ffmpeg is LGPL and carries no GPL-only filters. A recipe
@@ -144,12 +143,28 @@ describe("clip sound", () => {
     expect(names[0]).toBe("lowshelf");
     // The shelves carry the slope Web Audio's shelf nodes run at.
     expect(chain).toContain("lowshelf=f=100:width_type=s:w=1:g=2");
-    expect(names[names.length - 3]).toBe("highshelf");
-    expect(names[names.length - 2]).toBe("acompressor");
-    expect(names[names.length - 1]).toBe("alimiter");
+    expect(names[names.length - 4]).toBe("highshelf");
+    expect(names[names.length - 3]).toBe("acompressor");
+    expect(names[names.length - 2]).toBe("alimiter");
+    expect(names[names.length - 1]).toBe("volume");
     // Thresholds go to ffmpeg as linear amplitude.
     expect(chain).toContain("acompressor=threshold=0.126:ratio=3:attack=10:release=80");
+    // The browser's dynamics node reads peaks, links the channels on the
+    // louder one, and adds a fixed makeup gain; the chain carries all three.
+    expect(chain).toContain(":knee=1.259:makeup=2.204:detection=peak:link=maximum");
     expect(chain).toContain("alimiter=limit=0.891");
+    expect(chain).toContain("alimiter=limit=0.891:attack=5:release=50:level=false,volume=1.068");
+  });
+
+  test("the makeup gain is the browser kernel's: a full-scale signal's curve gain, inverted, to the 0.6", () => {
+    // A hard-knee 20:1 stage at −12 dB puts 0 dBFS at −11.4 dB; the makeup
+    // is (10^(11.4/20))^0.6. Measured off a real in-tab render at 2.197.
+    expect(dynamicsMakeupGain(-12, 0, 20)).toBeCloseTo(2.198, 2);
+    expect(dynamicsMakeupGain(-1, 0, 20)).toBeCloseTo(1.068, 2);
+    // A stage that never engages a full-scale signal adds nothing.
+    expect(dynamicsMakeupGain(0, 0, 4)).toBeCloseTo(1, 5);
+    // The soft knee lands the voice preset near +7 dB.
+    expect(20 * Math.log10(dynamicsMakeupGain(-18, 2, 3))).toBeCloseTo(6.86, 1);
   });
 });
 

@@ -49,7 +49,10 @@ export async function bakeRetimedAudio(
   retime: Retime,
   back: number,
   ahead: number,
-  outFile: string
+  outFile: string,
+  /** A mono source is laid into both channels at full level, the way the
+   * browser's mixer upmixes it; ffmpeg's own upmix would sit it 3 dB down. */
+  opts: { mono?: boolean } = {}
 ): Promise<BakedAudio> {
   const rt = retime;
   // A handle cannot reach before the source's first sample; the head reach
@@ -70,8 +73,7 @@ export async function bakeRetimedAudio(
     "-t",
     num(Math.max(0.001, to - from)),
     "-vn",
-    "-ac",
-    String(CHANNELS),
+    ...(opts.mono ? ["-af", "pan=stereo|c0=c0|c1=c0"] : ["-ac", String(CHANNELS)]),
     "-ar",
     String(BAKE_RATE),
     "-f",

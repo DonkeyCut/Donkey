@@ -23,6 +23,7 @@ const runsFor = async (over: Partial<ExportSpec>): Promise<string[][]> => {
     readFile: (async () => new Uint8Array(0)) as unknown as ExportPipelineIO["readFile"],
     unlink: (async () => {}) as unknown as ExportPipelineIO["unlink"],
     hasStream: async () => true,
+    audioChannels: async (file) => (file.includes("mono") ? 1 : 2),
     videoColorInfo: async () => null,
     videoDecodeCost: async () => null,
     mediaDuration: async (file) => produced.get(file) ?? 0,
@@ -820,5 +821,21 @@ describe("delivery", () => {
     expect(args).not.toContain("-crf");
     expect(arg(args, "-b:v")).toBe("6000000");
     expect(arg(args, "-maxrate")).toBe("9000000");
+  });
+});
+
+describe("channel layout", () => {
+  test("a mono source is laid into both channels at full level, a stereo one passes through", async () => {
+    const f = await graphFor({
+      clips: [clip("mono-voice.mp4"), clip("stereo.mp4")],
+      audio: [{ file: "mono-bed.m4a", in: 0, out: 2, start: 0, volume: 0.5 }],
+    });
+    const inputs = ["mono-voice.mp4", "stereo.mp4", "mono-bed.m4a"];
+    const stanza = (file: string) =>
+      f.find((x) => x.startsWith(`[${inputs.indexOf(file)}:a]`) && x.includes("aresample=44100"))!;
+    expect(stanza("mono-voice.mp4")).toContain("aresample=44100,pan=stereo|c0=c0|c1=c0,aformat=");
+    expect(stanza("mono-bed.m4a")).toContain("aresample=44100,pan=stereo|c0=c0|c1=c0,aformat=");
+    expect(stanza("stereo.mp4")).toContain("aresample=44100,aformat=");
+    expect(stanza("stereo.mp4")).not.toContain("pan=");
   });
 });

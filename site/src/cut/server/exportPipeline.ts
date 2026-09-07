@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { deliveryContainer, videoBitrateFor } from "../lib/exportDelivery";
 import { readFile, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { atempoChain, hasStream, mediaDuration, num, videoColorInfo, videoDecodeCost } from "./util";
+import { atempoChain, audioChannels, hasStream, mediaDuration, num, videoColorInfo, videoDecodeCost } from "./util";
 import { assertGraphSafe, fexpr } from "./filterGraph";
 import { bakeRetimedAudio, setptsExpr, type BakedAudio } from "./retimeAudio";
 import { bakeTurnedMedia } from "./turnMedia";
@@ -554,6 +554,7 @@ export interface ExportPipelineIO {
   readFile: typeof readFile;
   unlink: typeof unlink;
   hasStream: typeof hasStream;
+  audioChannels: typeof audioChannels;
   videoColorInfo: typeof videoColorInfo;
   videoDecodeCost: typeof videoDecodeCost;
   mediaDuration: typeof mediaDuration;
@@ -567,6 +568,7 @@ const realIO: ExportPipelineIO = {
   readFile,
   unlink,
   hasStream,
+  audioChannels,
   videoColorInfo,
   videoDecodeCost,
   mediaDuration,
@@ -592,7 +594,7 @@ export async function runExport(
   // becomes a forward clip over that file, its curve's nodes carried along,
   // and everything below reads it like any other footage. The copy joins the
   // inputs by its own path, past the project-folder lookup.
-  const turned = new Map<string, { video: boolean; audio: boolean }>();
+  const turned = new Map<string, { video: boolean; audio: boolean; mono: boolean }>();
   const turn = async <
     T extends {
       file: string;
@@ -623,6 +625,7 @@ export async function runExport(
     const hi = Math.max(lo + 0.001, reach.hi);
     const video = !soundOnly && (await io.hasStream(src, "v"));
     const audio = await io.hasStream(src, "a");
+    const mono = audio && (await io.audioChannels(src)) === 1;
     const colorFix = video ? sdrConvert(await io.videoColorInfo(src)) : "";
     const decodeCost = video ? ((await io.videoDecodeCost(src)) ?? 0) : 0;
     const file = path.join(job.tmpDir, `turned_${tag}.${video ? "mov" : "wav"}`);
@@ -637,7 +640,7 @@ export async function runExport(
       { lo, hi, video, audio, colorFix, decodeCost },
       file
     );
-    turned.set(file, { video, audio });
+    turned.set(file, { video, audio, mono });
     return { ...mirrorRetimable(c, pivot), file };
   };
   const turnedClips: ExportSpec["clips"] = [];
@@ -706,6 +709,14 @@ export async function runExport(
   ];
   const audioPresence = new Map<string, boolean>();
   const videoPresence = new Map<string, boolean>();
+  // Files whose audio is one channel. ffmpeg's own mono-to-stereo lays the
+  // channel into each side 3 dB down; the browser's mixer, which the preview
+  // and the in-tab fold play through, copies it at full level. Every read of
+  // a mono file upmixes by hand so the export sits where the preview did.
+  const monoFiles = new Set<string>();
+  const toStereo = (file: string) =>
+    `aresample=44100,${monoFiles.has(file) ? "pan=stereo|c0=c0|c1=c0," : ""}` +
+    "aformat=sample_fmts=fltp:channel_layouts=stereo,";
   // file → filter prefix folding a wide-gamut/HDR source down to BT.709 (or "").
   const colorFix = new Map<string, string>();
   const inputs: string[] = [];
@@ -729,6 +740,7 @@ export async function runExport(
       let audioProbeFailed = false;
       const hasAudio = await io.hasStream(paths[i], "a", () => (audioProbeFailed = true));
       audioPresence.set(f, hasAudio || audioProbeFailed);
+      if (hasAudio && (await io.audioChannels(paths[i])) === 1) monoFiles.add(f);
       let videoProbeFailed = false;
       const hasVideo = await io.hasStream(paths[i], "v", () => (videoProbeFailed = true));
       videoPresence.set(f, hasVideo || videoProbeFailed);
@@ -742,6 +754,7 @@ export async function runExport(
     inputs.push("-i", file);
     audioPresence.set(file, streams.audio);
     videoPresence.set(file, streams.video);
+    if (streams.mono) monoFiles.add(file);
     colorFix.set(file, "");
   }
   // Animated overlays: each is its own concat-demuxer slideshow (region-sized
@@ -1011,7 +1024,8 @@ export async function runExport(
       rt,
       c.soundBack ?? 0,
       c.soundAhead ?? 0,
-      file
+      file,
+      { mono: monoFiles.has(c.file) }
     );
     const idx = nInputs++;
     inputs.push("-i", file);
@@ -1582,7 +1596,7 @@ export async function runExport(
         ]);
       filters.push(
         audioRead(c, 0, dur) +
-          `aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,${vol}` +
+          `${toStereo(c.file)}${vol}` +
           `apad=whole_dur=${num(dur)},atrim=0:${num(dur)}${afades}[a${j}]`
       );
     } else {
@@ -1684,7 +1698,7 @@ export async function runExport(
     const lab = `xh${key}`;
     filters.push(
       audioRead(src, fromT, toT) +
-        `aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,` +
+        toStereo(src.file) +
         `${soundChain(src.sound)}` +
         `${(src.volume ?? 1) !== 1 ? `volume=${num(src.volume ?? 1)},` : ""}anull${crossFilters([expr])},` +
         `adelay=${Math.max(0, Math.round(at * 1000))}:all=1[${lab}]`
@@ -1975,7 +1989,7 @@ export async function runExport(
       const lab = `ovs${k}`;
       filters.push(
         audioRead(oc, -back, olen + ahead) +
-          `aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,` +
+          toStereo(oc.file) +
           `${soundChain(oc.sound)}${vol}${afades}anull` +
           `${crosses},adelay=${delayMs}:all=1[${lab}]`
       );
@@ -2135,7 +2149,7 @@ export async function runExport(
       fades.push(`afade=t=out:st=${num(Math.max(0, len - a.fadeOut))}:d=${num(a.fadeOut)}`);
     filters.push(
       audioRead(a, 0, len) +
-        `aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,` +
+        toStereo(a.file) +
         `${soundChain(a.sound)}volume=${num(a.volume)},` +
         (fades.length ? fades.join(",") + "," : "") +
         `adelay=${delayMs}:all=1[snd${k}]`

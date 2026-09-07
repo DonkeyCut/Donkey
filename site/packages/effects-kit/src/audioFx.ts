@@ -470,6 +470,47 @@ function bandFilter(b: AudioBandSpec): string {
 
 /** dBFS as the linear amplitude ffmpeg's dynamics filters take. */
 const linear = (db: number) => Math.pow(10, db / 20);
+const decibels = (x: number) => 20 * Math.log10(x);
+
+/** The soft knee the compressor stage runs with, in dB, on both renderers. */
+export const COMPRESSOR_KNEE_DB = 2;
+
+/**
+ * The fixed gain the browser's dynamics node puts on its output.
+ *
+ * Every browser ships the same kernel for that node, and the kernel raises
+ * whatever it outputs by a gain worked out from its own curve: the level a
+ * full-scale signal would come out at, inverted and taken to the 0.6 power.
+ * The preview and the in-tab fold hear a treated clip that much louder than
+ * its curve alone, so the ffmpeg chain carries the same number and an export
+ * lands at the level the preview played. This is that kernel's arithmetic:
+ * an exponential knee whose steepness is bisected until its slope at the
+ * knee's end meets the ratio, then a straight line at the ratio above it.
+ */
+export function dynamicsMakeupGain(thresholdDb: number, kneeDb: number, ratio: number): number {
+  const linearThreshold = linear(thresholdDb);
+  const kneeEndDb = thresholdDb + kneeDb;
+  const kneeEnd = linear(kneeEndDb);
+  const slope = 1 / ratio;
+  const kneeCurve = (x: number, k: number) =>
+    x < linearThreshold ? x : linearThreshold + (1 - Math.exp(-k * (x - linearThreshold))) / k;
+  const slopeAt = (x: number, k: number) => {
+    if (x < linearThreshold) return 1;
+    const x2 = x * 1.001;
+    return (decibels(kneeCurve(x2, k)) - decibels(kneeCurve(x, k))) / (decibels(x2) - decibels(x));
+  };
+  let minK = 0.1;
+  let maxK = 10000;
+  let k = 5;
+  for (let i = 0; i < 15; i++) {
+    if (slopeAt(kneeEnd, k) < slope) maxK = k;
+    else minK = k;
+    k = Math.sqrt(minK * maxK);
+  }
+  const fullRangeGain =
+    1 < kneeEnd ? kneeCurve(1, k) : linear(decibels(kneeCurve(kneeEnd, k)) + slope * (0 - kneeEndDb));
+  return Math.pow(1 / fullRangeGain, 0.6);
+}
 
 /**
  * The effect as one ffmpeg audio chain — comma-joined filters, no stream
@@ -510,16 +551,25 @@ export function recipeFilters(r: AudioFxRecipe): string | null {
   if (r.compressor) {
     const c = r.compressor;
     // acompressor's threshold is linear amplitude; attack and release are ms.
-    // No makeup, so the two sides agree: the Web Audio node adds none either.
+    // The knee is the same width in dB as the browser node's, detection is
+    // peak with the channels linked on the louder one, which is how that
+    // node reads its input, and the makeup is the gain that node adds.
+    const makeup = dynamicsMakeupGain(c.thresholdDb, COMPRESSOR_KNEE_DB, c.ratio);
     steps.push(
       `acompressor=threshold=${fmt(linear(c.thresholdDb))}:ratio=${fmt(c.ratio)}` +
-        `:attack=${fmt(c.attackMs)}:release=${fmt(c.releaseMs)}:knee=2:makeup=1`
+        `:attack=${fmt(c.attackMs)}:release=${fmt(c.releaseMs)}` +
+        `:knee=${fmt(linear(COMPRESSOR_KNEE_DB))}:makeup=${fmt(makeup)}:detection=peak:link=maximum`
     );
   }
   if (r.limiter) {
     // A lookahead of a few milliseconds, the same as the browser's dynamics
     // node carries, and no automatic level: the ceiling is the whole point.
+    // The browser stands its limiter in with a hard-knee 20:1 compressor at
+    // the ceiling, and that node's makeup gain rides the whole signal, so it
+    // follows here as a level.
+    const makeup = dynamicsMakeupGain(r.limiter.ceilingDb, 0, 20);
     steps.push(`alimiter=limit=${fmt(linear(r.limiter.ceilingDb))}:attack=5:release=50:level=false`);
+    if (Math.abs(makeup - 1) > 1e-3) steps.push(`volume=${fmt(makeup)}`);
   }
   if (r.gain !== undefined && r.gain !== 1) steps.push(`volume=${fmt(r.gain)}`);
   return steps.length > 0 ? steps.join(",") : null;
@@ -632,7 +682,7 @@ export function buildAudioFx(
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = c.thresholdDb;
     comp.ratio.value = Math.max(1, Math.min(20, c.ratio));
-    comp.knee.value = 2;
+    comp.knee.value = COMPRESSOR_KNEE_DB;
     comp.attack.value = c.attackMs / 1000;
     comp.release.value = c.releaseMs / 1000;
     node.connect(comp);

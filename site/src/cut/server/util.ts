@@ -252,6 +252,40 @@ export function mediaDuration(file: string): Promise<number | null> {
 }
 
 /**
+ * How many channels a file's first audio stream carries, or null when the
+ * probe fails or the file has no audio. A mono source is the one the mix
+ * upmixes by hand: ffmpeg's own mono-to-stereo lays the channel into each
+ * side 3 dB down, and the browser's mixer copies it at full level.
+ */
+export function audioChannels(file: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    const p = spawn("ffprobe", [
+      "-v", "error",
+      "-select_streams", "a:0",
+      "-show_entries", "stream=channels",
+      "-of", "csv=p=0",
+      file,
+    ]);
+    let out = "";
+    const timer = setTimeout(() => {
+      p.kill("SIGKILL");
+      resolve(null);
+    }, 30_000);
+    timer.unref();
+    p.stdout.on("data", (d) => (out += d));
+    p.on("close", (code) => {
+      clearTimeout(timer);
+      const n = Number(out.trim().split("\n")[0]);
+      resolve(code === 0 && Number.isFinite(n) && n > 0 ? n : null);
+    });
+    p.on("error", () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
+  });
+}
+
+/**
  * Whether a media file carries a stream of the given kind ("a" audio /
  * "v" video). Resolves false only when ffprobe reports no such stream; a
  * probe that errors is reported by `onProbeError` so callers can decide
