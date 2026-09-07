@@ -5,6 +5,8 @@ import {
   stripeId,
   unixToDate,
 } from "@/lib/billing/stripe";
+import { promotedAllowanceMicros } from "@/lib/billing/allowance-promotion";
+import { getGlobalSetting } from "@/lib/config/effective";
 import { creditMicrosPerCent, zeroCreditMicros } from "@/lib/credits/amounts";
 import { grantCredits } from "@/lib/credits/inference";
 import { claimSubscribeBonus, SUBSCRIBE_BONUS_METADATA_KEY } from "@/lib/credits/subscribe-bonus-claim";
@@ -97,7 +99,13 @@ export async function syncProSubscription(
   const price = item?.price;
   const periodStart = unixToDate(item?.current_period_start ?? null);
   const periodEnd = unixToDate(item?.current_period_end ?? null);
-  const allowanceMicros = allowanceMicrosFromPrice(price);
+  const allowanceMicros = periodStart
+    ? promotedAllowanceMicros(
+        allowanceMicrosFromPrice(price),
+        await getGlobalSetting("proAllowancePromotion"),
+        periodStart,
+      )
+    : allowanceMicrosFromPrice(price);
 
   await prisma.proSubscription.upsert({
     create: {

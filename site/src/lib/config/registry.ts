@@ -100,11 +100,28 @@ export const SETTINGS = defineSettings({
     description:
       "Credit offered to an account that has spent this share of its signup grant, for subscribing to Pro within the window. The credit is spendable through the last day.",
   },
+  proAllowancePromotion: {
+    schema: z
+      .object({
+        // Multiplies the AI allowance a Pro billing period starts with; 1 is
+        // the plain plan.
+        multiplier: z.number().int().min(1).max(20),
+        // The last UTC day a period may start on and still get the multiplier
+        // (YYYY-MM-DD); null keeps it on for every period.
+        lastDay: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD").nullable(),
+      })
+      .strict(),
+    default: { multiplier: 1, lastDay: null },
+    public: true,
+    title: "Pro allowance promotion",
+    description:
+      "Multiplies the AI allowance a Pro billing period starts with, for periods that start on or before the last day. Later periods start with the plain allowance.",
+  },
 });
 
 // The settings su shows on its Product tab: what an account gets. The
 // settings tab under Experiments still lists every key.
-export const PRODUCT_SETTING_KEYS = ["signupCredits", "creditExpiryNotice", "subscribeBonus"] as const satisfies readonly SettingKey[];
+export const PRODUCT_SETTING_KEYS = ["signupCredits", "creditExpiryNotice", "subscribeBonus", "proAllowancePromotion"] as const satisfies readonly SettingKey[];
 
 export type SettingKey = keyof typeof SETTINGS;
 export type Settings = SettingsOf<typeof SETTINGS>;

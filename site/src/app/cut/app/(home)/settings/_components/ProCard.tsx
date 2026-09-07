@@ -16,18 +16,29 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { CUT_PRO } from "@/app/cut/_components/landing/cutPricingPlans";
+import { activeProPromotion, CUT_PRO } from "@/app/cut/_components/landing/cutPricingPlans";
 import { formatDeadline, minutesLeft } from "@/cut/components/SubscribeBonusPill";
 import { track } from "@/lib/analytics";
 import { formatUsd } from "@/lib/credits/format-usd";
 import { formatCreditExpiry } from "@/lib/credits/top-up";
 import { useSubscribeBonus } from "@/queries/credits";
+import { useAccountConfig } from "@/queries/accountConfig";
+
+// The promotion's last day, the way the card names it.
+const lastDayLabel = (day: string) =>
+  new Date(`${day}T00:00:00Z`).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
+  });
 
 export function ProCard() {
   const pro = useProSubscription();
   const checkout = useStartCheckout();
   const portal = useOpenBillingPortal();
   const bonus = useSubscribeBonus();
+  const config = useAccountConfig({ enabled: true });
+  const promotion = config.data ? activeProPromotion(config.data.settings.proAllowancePromotion) : null;
 
   if (pro.isLoading) {
     return (
@@ -61,6 +72,22 @@ export function ProCard() {
           credits any time.
         </CardDescription>
       </CardHeader>
+      {promotion && !isActive ? (
+        <CardContent className="text-sm">
+          {promotion.lastDay !== null ? (
+            <>
+              <span className="font-medium">Get Pro by {lastDayLabel(promotion.lastDay)}</span> and every
+              month that starts by then includes ${promotion.allowanceDollars} of AI, {promotion.multiplier}× the
+              usual ${CUT_PRO.monthlyDollars}.
+            </>
+          ) : (
+            <>
+              Every month currently includes ${promotion.allowanceDollars} of AI, {promotion.multiplier}× the
+              usual ${CUT_PRO.monthlyDollars}.
+            </>
+          )}
+        </CardContent>
+      ) : null}
       {isActive && data ? (
         <CardContent className="text-sm text-muted-foreground">
           <div className="space-y-1">
@@ -77,6 +104,13 @@ export function ProCard() {
             {data.cancelAtPeriodEnd ? (
               <div className="text-foreground">
                 Cancels at the end of the current period.
+              </div>
+            ) : null}
+            {promotion ? (
+              <div>
+                {promotion.lastDay !== null
+                  ? `Months that start by ${lastDayLabel(promotion.lastDay)} include $${promotion.allowanceDollars} of AI.`
+                  : `Each new month includes $${promotion.allowanceDollars} of AI.`}
               </div>
             ) : null}
             {offer?.status === "claimed" ? (
