@@ -24,13 +24,20 @@ import { useClaimCreditOffer, useCreditOffer } from "@/queries/credits";
 
 const PARAM = "claim";
 
+// The address is read only once the account id has landed. The id is absent in
+// the prerendered shell, and the shell's instant-navigation check fails a
+// search-param read it cannot sample.
 export function ClaimCreditsDialog() {
   const user = useEngineUser();
+  return user ? <AddressedDialog /> : null;
+}
+
+function AddressedDialog() {
   const params = useSearchParams();
   const token = params.get(PARAM);
   const router = useRouter();
   const pathname = usePathname();
-  if (!user || !token) return null;
+  if (!token) return null;
   // Only the token leaves the address; an open folder stays open.
   const close = () => {
     const rest = new URLSearchParams(params);
