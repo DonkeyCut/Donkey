@@ -3,20 +3,13 @@
 import type React from "react";
 import { startDrag } from "@/cut/lib/drag";
 import { useEditor } from "@/cut/lib/store";
-import { guideGeometry } from "@/cut/lib/guides";
+import { guideGeometry, type GuideGeometry } from "@/cut/lib/guides";
 
 /** A custom line released this close to a frame edge drops. */
 const EDGE_DROP = 0.01;
 
-/**
- * The preview guides: thin lines and shaded keep-out regions drawn over the
- * stage in an SVG sized to it. The layer sits beside the stage in the chrome
- * host, outside the picture, so it never enters the frame loop, a captured
- * frame, or an export. It hides in a shared read-only view and under ⌘;.
- * Custom lines draw in blue and drag; a click on one, or a release at the
- * frame edge, removes it.
- */
-export function GuideOverlay({ stage }: { stage: { w: number; h: number } }) {
+/** The geometry of the guides showing now, or null when nothing draws. */
+function useGuideGeometry(): GuideGeometry | null {
   const guides = useEditor((s) => s.guides);
   const guideLines = useEditor((s) => s.guideLines);
   const hidden = useEditor((s) => s.guidesHidden);
@@ -32,10 +25,24 @@ export function GuideOverlay({ stage }: { stage: { w: number; h: number } }) {
     geo.custom.h.length === 0
   )
     return null;
+  return geo;
+}
+
+/**
+ * The custom lines' grab strokes. They mount inside the stage, under the
+ * elements, so a title beside a line is still the title when clicked; the
+ * picture beside it grabs the line. A drag moves the line; a click on one, or
+ * a release at the frame edge, removes it.
+ */
+export function GuideHandles({ stage }: { stage: { w: number; h: number } }) {
+  const geo = useGuideGeometry();
+  if (!geo) return null;
   const { w, h } = stage;
-  const label = Math.max(9, Math.min(12, w / 36));
 
   const dragLine = (axis: "v" | "h", index: number, from: number) => (e: React.PointerEvent) => {
+    // Primary button only: startDrag ignores the rest, and the batch has to
+    // close on the same press that opened it.
+    if (e.button !== 0) return;
     const size = axis === "v" ? w : h;
     const st = useEditor.getState();
     st.beginHistoryBatch();
@@ -53,6 +60,59 @@ export function GuideOverlay({ stage }: { stage: { w: number; h: number } }) {
       },
     });
   };
+
+  return (
+    <svg
+      className="pointer-events-none absolute inset-0"
+      width={w}
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      aria-hidden
+    >
+      {geo.custom.v.map((f, i) => (
+        <line
+          key={`cv-${i}`}
+          x1={f * w}
+          y1={0}
+          x2={f * w}
+          y2={h}
+          stroke="transparent"
+          strokeWidth="12"
+          className="cursor-col-resize"
+          style={{ pointerEvents: "stroke" }}
+          onPointerDown={dragLine("v", i, f)}
+        />
+      ))}
+      {geo.custom.h.map((f, i) => (
+        <line
+          key={`ch-${i}`}
+          x1={0}
+          y1={f * h}
+          x2={w}
+          y2={f * h}
+          stroke="transparent"
+          strokeWidth="12"
+          className="cursor-row-resize"
+          style={{ pointerEvents: "stroke" }}
+          onPointerDown={dragLine("h", i, f)}
+        />
+      ))}
+    </svg>
+  );
+}
+
+/**
+ * The preview guides: thin lines and shaded keep-out regions drawn over the
+ * stage in an SVG sized to it. The layer sits beside the stage in the chrome
+ * host, outside the picture, so it never enters the frame loop, a captured
+ * frame, or an export. It hides in a shared read-only view and under ⌘;.
+ * Custom lines draw in blue; GuideHandles, inside the stage, moves them.
+ */
+export function GuideOverlay({ stage }: { stage: { w: number; h: number } }) {
+  const geo = useGuideGeometry();
+  if (!geo) return null;
+  const { w, h } = stage;
+  const label = Math.max(9, Math.min(12, w / 36));
 
   return (
     <svg
@@ -123,32 +183,12 @@ export function GuideOverlay({ stage }: { stage: { w: number; h: number } }) {
         <g key={`cv-${i}`}>
           <line x1={f * w} y1={0} x2={f * w} y2={h} stroke="rgba(0,0,0,0.45)" strokeWidth="3" />
           <line x1={f * w} y1={0} x2={f * w} y2={h} stroke="rgb(96,165,250)" strokeWidth="1" />
-          <line
-            x1={f * w}
-            y1={0}
-            x2={f * w}
-            y2={h}
-            stroke="transparent"
-            strokeWidth="12"
-            className="cursor-col-resize" style={{ pointerEvents: "stroke" }}
-            onPointerDown={dragLine("v", i, f)}
-          />
         </g>
       ))}
       {geo.custom.h.map((f, i) => (
         <g key={`ch-${i}`}>
           <line x1={0} y1={f * h} x2={w} y2={f * h} stroke="rgba(0,0,0,0.45)" strokeWidth="3" />
           <line x1={0} y1={f * h} x2={w} y2={f * h} stroke="rgb(96,165,250)" strokeWidth="1" />
-          <line
-            x1={0}
-            y1={f * h}
-            x2={w}
-            y2={f * h}
-            stroke="transparent"
-            strokeWidth="12"
-            className="cursor-row-resize" style={{ pointerEvents: "stroke" }}
-            onPointerDown={dragLine("h", i, f)}
-          />
         </g>
       ))}
     </svg>

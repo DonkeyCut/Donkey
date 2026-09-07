@@ -24,7 +24,7 @@ import { CLIP_MAX_ZOOM, clipCovers, clipKeyed, clipPoseAt, clipZoom, contentRect
 import { hasMaskKeys, type MaskKey } from "@donkeycut/effects-kit";
 import { cn } from "@/lib/utils";
 import { MaskGizmoCore, OverlayChromeHost, OverlayLayer, StagePress } from "./OverlayLayer";
-import { GuideOverlay } from "./GuideOverlay";
+import { GuideHandles, GuideOverlay } from "./GuideOverlay";
 import { RemovalBrush } from "./RemovalBrush";
 import { CORNER_HANDLES, HANDLE_AXIS, TransformHandles, type ResizeHandle } from "./TransformHandles";
 import {
@@ -608,6 +608,7 @@ export function Preview() {
           </StagePictureFx>
           <BufferingBadge />
           <OriginalPeekBadge />
+          <GuideHandles stage={stage} />
           <StagePress.Provider value={stagePress}>
             {slices.map((slice) =>
               slice.kind === "elements" ? (

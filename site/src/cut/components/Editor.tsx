@@ -1046,7 +1046,7 @@ export function Editor({
         s.splitAtPlayhead(skimAt() ?? undefined);
       } else if (mod && e.key === ";") {
         e.preventDefault();
-        s.setGuidesHidden(!s.guidesHidden);
+        s.toggleGuidesShown();
       } else if (e.key.toLowerCase() === "t" && !e.metaKey && !e.ctrlKey && !e.altKey) {
         s.addOverlay();
       } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !controlFocused) {

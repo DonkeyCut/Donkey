@@ -278,6 +278,9 @@ interface DocSnapshot {
   audioClips: AudioClip[];
   overlays: Overlay[];
   subtitles: SubtitlesBlock;
+  /** The custom guide lines: placed, dragged and removed on the preview, so
+   * undo brings one back. */
+  guideLines: GuideLines;
   /** Each asset's beat grid. Beats are edited on the timeline like anything
    * else — dragged, added, removed, cleared — but they live on the asset
    * rather than in the doc arrays, so the checkpoint carries them separately
@@ -426,6 +429,9 @@ export interface EditorState {
   setGuides: (ids: GuideId[]) => void;
   toggleGuide: (id: GuideId) => void;
   setGuidesHidden: (hidden: boolean) => void;
+  /** The guides button and ⌘;: hide or show what is chosen; with nothing
+   * chosen, turn on the safe margins. */
+  toggleGuidesShown: () => void;
   setGuideLines: (lines: GuideLines) => void;
   /** Add a custom line at the frame center (stepping aside from one already
    * there), turning the custom set on and the guides visible. */
@@ -1516,9 +1522,10 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
   api.setState = set as typeof api.setState;
 
   const snapshot = (): DocSnapshot => {
-    const { clips, transitions, audioClips, overlays, subtitles, assets } = get();
+    const { clips, transitions, audioClips, overlays, subtitles, assets, guideLines } = get();
     return {
       beats: assets.map((a) => ({ id: a.id, grid: a.beats })),
+      guideLines: { v: [...guideLines.v], h: [...guideLines.h] },
       // Render-owned clips are excluded — history captures the user's timeline,
       // not the background run's placements (restoreDoc re-attaches the live ones).
       clips: clips.filter((c) => !genClipIds.has(c.id)).map((c) => ({ ...c })),
@@ -1713,6 +1720,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       aspect: lastChosenAspect() ?? "9:16",
       aspectTouched: lastChosenAspect() !== null,
       guides: [],
+      guidesHidden: false,
       guideLines: EMPTY_GUIDE_LINES,
       fadeIn: 0,
       fadeOut: 0,
@@ -2136,6 +2144,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           aspect: normalizeAspect(doc.aspect) ?? lastChosenAspect() ?? "9:16",
           aspectTouched: doc.aspect !== undefined || lastChosenAspect() !== null,
           guides: sanitizeGuides(doc.guides),
+          guidesHidden: false,
           guideLines: sanitizeGuideLines(doc.guideLines),
           fadeIn: doc.fadeIn ?? 0,
           fadeOut: doc.fadeOut ?? 0,
@@ -2361,8 +2370,18 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         guidesHidden: s.guides.includes(id) ? s.guidesHidden : false,
       })),
     setGuidesHidden: (hidden) => set({ guidesHidden: hidden }),
-    setGuideLines: (lines) => set({ guideLines: sanitizeGuideLines(lines) }),
-    addGuideLine: (axis) =>
+    toggleGuidesShown: () =>
+      set((s) =>
+        s.guides.length === 0
+          ? { guides: ["margins"], guidesHidden: false }
+          : { guidesHidden: !s.guidesHidden }
+      ),
+    setGuideLines: (lines) => {
+      push();
+      set({ guideLines: sanitizeGuideLines(lines) });
+    },
+    addGuideLine: (axis) => {
+      push();
       set((s) => {
         const have = s.guideLines[axis];
         let at = 0.5;
@@ -2372,18 +2391,23 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           guides: s.guides.includes("custom") ? s.guides : sanitizeGuides([...s.guides, "custom"]),
           guidesHidden: false,
         };
-      }),
-    moveGuideLine: (axis, index, at) =>
+      });
+    },
+    moveGuideLine: (axis, index, at) => {
+      push();
       set((s) => {
         if (index < 0 || index >= s.guideLines[axis].length) return {};
         const next = [...s.guideLines[axis]];
         next[index] = Math.min(1, Math.max(0, at));
         return { guideLines: { ...s.guideLines, [axis]: next } };
-      }),
-    removeGuideLine: (axis, index) =>
+      });
+    },
+    removeGuideLine: (axis, index) => {
+      push();
       set((s) => ({
         guideLines: { ...s.guideLines, [axis]: s.guideLines[axis].filter((_, i) => i !== index) },
-      })),
+      }));
+    },
     setProjectFade: (patch) => {
       const clamp = (v: number | undefined) =>
         v === undefined ? undefined : Math.max(0, Math.min(TRANSITION_MAX, v));
@@ -5180,6 +5204,7 @@ useEditor.subscribe((s, prev) => {
     s.audioClips !== prev.audioClips ||
     s.overlays !== prev.overlays ||
     s.subtitles !== prev.subtitles ||
+    s.guideLines !== prev.guideLines ||
     (s.assets !== prev.assets && beatsEdited(prev.assets, s.assets))
   )
     docSeq++;

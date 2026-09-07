@@ -25,11 +25,7 @@ export function GuidesMenu() {
   const guides = useEditor((s) => s.guides);
   const guidesHidden = useEditor((s) => s.guidesHidden);
   const showing = guides.length > 0 && !guidesHidden;
-  const toggle = () => {
-    const s = useEditor.getState();
-    if (s.guides.length === 0) s.toggleGuide("margins");
-    else s.setGuidesHidden(!s.guidesHidden);
-  };
+  const toggle = () => useEditor.getState().toggleGuidesShown();
   return (
     <div
       className={cn(
