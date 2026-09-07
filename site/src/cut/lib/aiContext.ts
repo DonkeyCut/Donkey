@@ -1,6 +1,6 @@
 "use client";
 
-import { guideGeometry, safeAreaOf } from "./guides";
+import { GUIDE_PRESETS, guideFits, guideGeometry, safeAreaOf } from "./guides";
 import { hasOverlayAnim, retimeOf, speedCurveOf, type ClipSound, type SpeedNode } from "@donkeycut/effects-kit";
 import { chatOwner } from "./chatAssets";
 import { useGenerate } from "./generate";
@@ -233,21 +233,29 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
       ...(s.fadeIn > 0 ? { fadeIn: r(s.fadeIn) } : {}),
       ...(s.fadeOut > 0 ? { fadeOut: r(s.fadeOut) } : {}),
       background: s.background,
-      // The guides showing on the preview, with the room they leave for
-      // graphics: safeArea and keepOut are frame fractions (x, y, w, h).
+      // Every guide preset's safe area for this frame, whether or not it
+      // shows, so placement can respect a platform's UI without a guide on:
+      // safeArea and keepOut are frame fractions (x, y, w, h).
+      safeZones: Object.fromEntries(
+        GUIDE_PRESETS.filter((p) => p.id !== "custom" && guideFits(p.id, s.aspect)).flatMap((p) => {
+          const safeArea = safeAreaOf([p.id], s.aspect);
+          if (!safeArea) return [];
+          const keepOut = guideGeometry([p.id], s.aspect).boxes.map((b) => ({
+            label: b.label,
+            x: r(b.x),
+            y: r(b.y),
+            w: r(b.w),
+            h: r(b.h),
+          }));
+          return [[p.id, { safeArea, ...(keepOut.length ? { keepOut } : {}) }]];
+        })
+      ),
+      // The guides showing on the preview and the user's own lines.
       ...(s.guides.length > 0
         ? {
             guides: {
               on: s.guides,
-              safeArea: safeAreaOf(s.guides, s.aspect),
               ...(s.guides.includes("custom") ? { customLines: s.guideLines } : {}),
-              keepOut: guideGeometry(s.guides, s.aspect).boxes.map((b) => ({
-                label: b.label,
-                x: r(b.x),
-                y: r(b.y),
-                w: r(b.w),
-                h: r(b.h),
-              })),
             },
           }
         : {}),

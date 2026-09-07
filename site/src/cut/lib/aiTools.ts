@@ -1,6 +1,6 @@
 "use client";
 
-import { GUIDE_IDS, isGuideId, safeAreaOf, sanitizeGuideLines, type GuideId } from "./guides";
+import { GUIDE_IDS, isGuideId, sanitizeGuideLines, type GuideId } from "./guides";
 import {
   ALL_EFFECT_IDS,
   autoGradeFromImageData,
@@ -3801,7 +3801,6 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const after = useEditor.getState();
       return {
         guides: after.guides,
-        safeArea: safeAreaOf(after.guides, after.aspect),
         ...(after.guides.includes("custom") ? { customLines: after.guideLines } : {}),
       };
   },
