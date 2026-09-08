@@ -61,15 +61,29 @@ function AddressedDialog() {
 function OpenDialog({ token, onClose }: { token: string; onClose: () => void }) {
   const offer = useCreditOffer(token);
   const claim = useClaimCreditOffer();
+  // The dialog opens at once, checking the link, at the size it keeps: the
+  // body reserves two lines and every state ends in one row of buttons.
   const done = claim.data ?? (offer.data?.claimed ? { expiresAt: offer.data.expiresAt } : null);
-  // The dialog opens once the offer is known, at the size it keeps: the body
-  // reserves two lines and every state ends in one row of buttons.
-  if (offer.isPending) return null;
 
   let title = "Claim your credits";
-  let body: string;
+  let body: React.ReactNode;
   let footer: React.ReactNode;
-  if (offer.isError) {
+  if (offer.isPending) {
+    body = (
+      <span className="flex items-center gap-2">
+        <Loader2 className="size-4 shrink-0 animate-spin" />
+        Checking your offer…
+      </span>
+    );
+    footer = (
+      <>
+        <Button variant="ghost" onClick={onClose}>
+          Not now
+        </Button>
+        <Button disabled>Claim</Button>
+      </>
+    );
+  } else if (offer.isError) {
     const status = offer.error instanceof ApiError ? offer.error.status : null;
     title = status === 410 ? "This offer has expired" : "This link is no longer valid";
     body =
@@ -109,7 +123,7 @@ function OpenDialog({ token, onClose }: { token: string; onClose: () => void }) 
             <Sparkle className="size-5 shrink-0 fill-violet-500/25 text-violet-500" />
             {title}
           </DialogTitle>
-          <DialogDescription className="min-h-10">{body}</DialogDescription>
+          <DialogDescription className="min-h-12 text-base">{body}</DialogDescription>
         </DialogHeader>
         <DialogFooter className="mx-0 mb-0 items-center border-0 bg-transparent p-0">
           {claim.isError && (
