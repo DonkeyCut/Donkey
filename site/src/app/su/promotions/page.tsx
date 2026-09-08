@@ -43,11 +43,21 @@ export default function SuPromotionsPage() {
     setOpened({ key: counter + 1, existing, seed });
   };
 
-  if (!promotions.data) return <SuStandIn />;
+  const loadError = promotions.isError ? (
+    <div role="alert" className="space-y-3 rounded-lg border border-destructive/30 p-4">
+      <p className="text-sm text-destructive">Couldn’t load promotions. {promotions.error.message}</p>
+      <Button variant="outline" disabled={promotions.isFetching} onClick={() => void promotions.refetch()}>
+        {promotions.isFetching ? "Retrying…" : "Retry"}
+      </Button>
+    </div>
+  ) : null;
+
+  if (!promotions.data) return promotions.isPending ? <SuStandIn /> : loadError;
   const { promotions: rows, senders } = promotions.data;
 
   return (
     <div className="space-y-6 pb-9">
+      {loadError}
       <div className="flex justify-end">
         <Button onClick={() => open(null, null)}>New promotion</Button>
       </div>
@@ -137,14 +147,19 @@ function PromotionRow({
               size="sm"
               variant="ghost"
               disabled={remove.isPending}
-              onClick={() => setConfirmDelete(true)}
+              onClick={() => {
+                remove.reset();
+                setConfirmDelete(true);
+              }}
             >
               Delete
             </Button>
           ) : null}
         </div>
       </div>
-      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+      <AlertDialog open={confirmDelete} onOpenChange={(isOpen) => {
+        if (!remove.isPending) setConfirmDelete(isOpen);
+      }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete “{p.name}”?</AlertDialogTitle>
@@ -154,9 +169,19 @@ function PromotionRow({
                 : "The draft is removed."}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {remove.isError ? (
+            <p role="alert" className="text-sm text-destructive">
+              Couldn’t delete promotion. {remove.error.message}
+            </p>
+          ) : null}
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep</AlertDialogCancel>
-            <AlertDialogAction onClick={() => remove.mutate(p.id)}>Delete</AlertDialogAction>
+            <AlertDialogCancel disabled={remove.isPending}>Keep</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={remove.isPending}
+              onClick={() => remove.mutate(p.id, { onSuccess: () => setConfirmDelete(false) })}
+            >
+              {remove.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

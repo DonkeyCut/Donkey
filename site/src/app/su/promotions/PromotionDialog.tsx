@@ -164,12 +164,14 @@ export function PromotionDialog({
   };
 
   const onSave = async () => {
+    setNotice(null);
     const id = await ensureSaved();
     if (id) onOpenChange(false);
   };
 
   const onTest = async () => {
     setNotice(null);
+    setIssues([]);
     const id = readOnly ? existing.id : await ensureSaved();
     if (!id) return;
     test.mutate(id, {
@@ -311,7 +313,7 @@ export function PromotionDialog({
           </div>
 
           {issues.length > 0 ? (
-            <ul className="list-disc space-y-1 pl-5 text-sm text-destructive">
+            <ul role="alert" className="list-disc space-y-1 pl-5 text-sm text-destructive">
               {issues.map((issue) => (
                 <li key={issue}>{issue}</li>
               ))}
