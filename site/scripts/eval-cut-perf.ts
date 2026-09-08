@@ -203,9 +203,11 @@ const MACHINES: Machine[] = [
   // The nightly runner: a four-core virtual machine with no video decoder,
   // so every frame is software, and a shared host under it. Nothing is
   // throttled — the runner is already the slow machine — and the decode
-  // factor is read off three nights of its reports: a jump lands three to
-  // four frames late there, a drag's tail within five.
-  { name: "ci", cpu: 1, slots: 0, softwareMs: 0, decodeLanes: 4, outputLatencyS: 0, netKbps: 0, rttMs: 0, software: true, decode: 5, lagP95S: 0.05, stallShare: 0.002, lateShare: 0.02, decayFloor: 0.02 },
+  // factor is read off its reports: a jump's tick runs to eighty-odd
+  // milliseconds there and lands four to five frames late, a drag's tail
+  // within five. Six clears every clean run; the outliers a shared host adds
+  // are what the majority rule is for.
+  { name: "ci", cpu: 1, slots: 0, softwareMs: 0, decodeLanes: 4, outputLatencyS: 0, netKbps: 0, rttMs: 0, software: true, decode: 6, lagP95S: 0.05, stallShare: 0.002, lateShare: 0.02, decayFloor: 0.02 },
 ];
 
 const MACHINE_NAME = arg("--machine") ?? "desktop";
