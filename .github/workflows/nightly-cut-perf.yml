@@ -4,9 +4,11 @@ name: Nightly Cut Perf
 # in a real Chrome against a dev server, on a machine whose display and load
 # never change. The scrub cases are held to the `ci` machine profile's
 # budgets: the runner has no hardware video decoder, and that profile names
-# what a scrub costs on one. The playback cases run for the record — their
-# lag budgets describe a machine with a decoder — and the full report, with
-# every scrub case's trace, is kept as an artifact.
+# what a scrub costs on one. A case that breaches runs again, to three runs,
+# and the majority decides, so one hiccup on the shared host is one run. The
+# playback cases run for the record on the same profile — their lag budgets
+# describe a machine with a decoder — and the full report, with every scrub
+# case's trace, is kept as an artifact.
 
 on:
   workflow_dispatch:
@@ -81,7 +83,7 @@ jobs:
 
       - name: Full eval, for the record
         if: always()
-        run: npm run eval:cut-perf -- --out /tmp/cut-perf.json | tee /tmp/cut-perf.log
+        run: npm run eval:cut-perf -- --machine ci --out /tmp/cut-perf.json | tee /tmp/cut-perf.log
 
       - name: Keys after a drop
         if: always()
@@ -91,7 +93,11 @@ jobs:
         if: always()
         run: |
           {
-            echo '## Cut perf'
+            echo '## Scrub gate, ci profile'
+            echo '```'
+            grep -E '^\[(ok|FAIL)|breached' /tmp/cut-perf-scrub.log || true
+            echo '```'
+            echo '## Full eval, for the record'
             echo '```'
             grep -E '^\[(ok|FAIL)' /tmp/cut-perf.log || true
             echo '```'

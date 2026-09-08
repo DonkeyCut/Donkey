@@ -45,6 +45,10 @@
  *                         [--enforce-budgets] [--headed] [--dump-trace] [--software-decode]
  *                         [--machine desktop|laptop|ryzen-5500u|potato|software-decode|ci] [--cpu N]
  *                         [--net <kbps>] [--rtt <ms>] [--big-file <path>]
+ *
+ * `--enforce-budgets` holds the run to the machine's gate: a case that
+ * breaches is run again, to three runs, and the majority decides. A
+ * regression breaches every run; a hiccup on a shared host breaches one.
  */
 
 import { chromium, type Browser, type Page } from "playwright";
@@ -71,6 +75,11 @@ const arg = (name: string) => {
 const has = (name: string) => args.includes(name);
 const BASE = arg("--base") ?? "http://localhost:3000";
 const RUNS = Number(arg("--runs") ?? 1);
+/** Set on the process the coordinator spawns per case. */
+const CHILD = has("--child");
+/** Runs a case that breached is taken to before the majority rule judges it.
+ * Three is the fewest with a majority that one bad run cannot make. */
+const RUNS_ON_BREACH = 3;
 const ONLY = arg("--only");
 const BUCKET = arg("--bucket");
 const ENFORCE = has("--enforce-budgets");
@@ -2752,7 +2761,7 @@ async function fanOut(names: string[]): Promise<CaseResult[]> {
       MACHINE_NAME,
       "--runs",
       String(RUNS),
-      ...["--headed", "--dump-trace", "--detail", "--software-decode"].filter((f) => has(f)),
+      ...["--headed", "--dump-trace", "--detail", "--software-decode", "--enforce-budgets"].filter((f) => has(f)),
       ...(arg("--cpu") ? ["--cpu", String(MACHINE.cpu)] : []),
       ...(arg("--slots") ? ["--slots", String(MACHINE.slots)] : []),
       ...(arg("--sw") ? ["--sw", String(MACHINE.softwareMs)] : []),
@@ -2763,6 +2772,7 @@ async function fanOut(names: string[]): Promise<CaseResult[]> {
       import.meta.path,
       "--only",
       name,
+      "--child",
       "--out",
       out,
       ...passthrough,
@@ -2819,7 +2829,12 @@ async function main(): Promise<void> {
 
   const results: CaseResult[] = [];
   for (const c of cases) {
-    for (let i = 0; i < RUNS; i++) {
+    // Under the gate a breach earns the case more runs, up to the count the
+    // majority rule needs; the runs a case is asked for it always gets.
+    const runsFor = (done: CaseResult[]) =>
+      ENFORCE && done.some((r) => !r.pass) ? Math.max(RUNS, RUNS_ON_BREACH) : RUNS;
+    const mine: CaseResult[] = [];
+    for (let i = 0; i < runsFor(mine); i++) {
       // A project per run. Seeding a second time into one that already holds
       // the first run's clips leaves the editor with media it cannot decode,
       // and every frame after that is a frame the picture never arrived for —
@@ -2849,6 +2864,7 @@ async function main(): Promise<void> {
         if (shelfId) await unshelve(shelfId);
       }
       results.push(r);
+      mine.push(r);
       const mark = r.pass ? "ok  " : "FAIL";
       console.log(`[${mark}] ${c.name.padEnd(24)} ${detailOf(r)}${r.notes.length ? ` — ${r.notes.join("; ")}` : ""}`);
     }
@@ -2889,8 +2905,9 @@ async function writeReport(results: CaseResult[]): Promise<void> {
       .map(([name, runs]) => `${name} (${runs.filter((r) => !r.pass).length}/${runs.length})`)
       .join(", ");
     console.error(`\n${failed.length} case(s) breached the ${MACHINE.name} gate: ${how}`);
-    if (ENFORCE) process.exit(1);
-    console.error("(report only)");
+    // A child reports to the coordinator, which judges the whole run.
+    if (ENFORCE && !CHILD) process.exit(1);
+    if (!ENFORCE) console.error("(report only)");
   }
 }
 
