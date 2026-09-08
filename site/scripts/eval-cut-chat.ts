@@ -34,14 +34,13 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  geminiModelRoleNames,
   geminiModelRoles,
   geminiModels,
   resolveGeminiModel,
 } from "../src/lib/inference/gemini-models";
 import { cases, type Bucket, type EvalCase } from "./lib/cut-eval/cases";
 import { makeFixtureAudio } from "./lib/cut-eval/fixtures";
-import { runCase, type RunConfig } from "./lib/cut-eval/harness";
+import { defaultRunConfig, runCase, type RunConfig } from "./lib/cut-eval/harness";
 import {
   buildBucketSummaries,
   buildCaseReport,
@@ -174,7 +173,8 @@ async function main() {
   // --simple-model / --complex-model override a role each. The default is
   // production's routed pair.
   const both = argValue("--model");
-  const judgeModel = NO_JUDGE ? null : geminiModelRoles.fastDecision;
+  const defaults = defaultRunConfig(BASE);
+  const judgeModel = NO_JUDGE ? null : defaults.judgeModel;
   const configs = MATRIX
     ? CANDIDATES.map((cand) => ({
         label: cand.label,
@@ -192,13 +192,13 @@ async function main() {
           cfg: {
             base: BASE,
             simpleModel: resolveModel(
-              argValue("--simple-model") ?? both ?? geminiModelRoleNames.chatSimple
+              argValue("--simple-model") ?? both ?? defaults.simpleModel
             ),
             complexModel: resolveModel(
-              argValue("--complex-model") ?? both ?? geminiModelRoleNames.chat
+              argValue("--complex-model") ?? both ?? defaults.complexModel
             ),
             gateModel: resolveModel(
-              argValue("--gate-model") ?? geminiModelRoleNames.fastDecision
+              argValue("--gate-model") ?? defaults.gateModel
             ),
             judgeModel,
           },
