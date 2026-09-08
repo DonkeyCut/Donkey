@@ -412,18 +412,18 @@ export function Preview() {
       setZoom(1);
     };
     refitRef.current = fit;
-    // The fit happens once per aspect. After that the camera holds its place
-    // on screen: when a panel opens and the pane's center moves, the pan
-    // absorbs the difference. The observer's callback runs after layout and
-    // before paint, and the transform is written right there, so the frame the
-    // pane moved in is the frame the move is cancelled in.
+    // A horizontally centered camera follows the pane's center as panels
+    // resize. A panned camera holds its screen position. The observer applies
+    // the compensation after layout and before paint.
     let prev: DOMRect | null = null;
     const measure = () => {
       const r = wrap.getBoundingClientRect();
       if (!prev) {
         fit();
       } else {
-        const dx = prev.left + prev.width / 2 - (r.left + r.width / 2);
+        const dx = camRef.current.x === 0
+          ? 0
+          : prev.left + prev.width / 2 - (r.left + r.width / 2);
         const dy = prev.top + prev.height / 2 - (r.top + r.height / 2);
         if (dx || dy) {
           camRef.current.x += dx;
