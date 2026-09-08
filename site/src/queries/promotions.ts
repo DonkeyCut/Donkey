@@ -21,7 +21,7 @@ type Body = { promotions: PromotionSummary[]; senders: Record<PromotionSender, s
 // each sender stands for. Polls while a send is running.
 export function usePromotions() {
   return useQuery({
-    queryFn: () => apiFetch<Body>("/api/marketing/promotions"),
+    queryFn: () => apiFetch<Body>("/api/su/promotions"),
     queryKey: promotionsQueryKey,
     refetchInterval: (query) =>
       query.state.data?.promotions.some((p) => p.status === "sending") ? 3000 : false,
@@ -34,7 +34,7 @@ export function useSavePromotion() {
   return useMutation({
     mutationFn: ({ id, ...input }: PromotionInput & { id: string | null }) =>
       apiFetch<{ id: string; promotions: PromotionSummary[] }>(
-        id ? `/api/marketing/promotions/${encodeURIComponent(id)}` : "/api/marketing/promotions",
+        id ? `/api/su/promotions/${encodeURIComponent(id)}` : "/api/su/promotions",
         { body: JSON.stringify(input), method: id ? "PUT" : "POST" },
       ),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: promotionsQueryKey }),
@@ -45,7 +45,7 @@ export function useDeletePromotion() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      apiFetch<{ promotions: PromotionSummary[] }>(`/api/marketing/promotions/${encodeURIComponent(id)}`, {
+      apiFetch<{ promotions: PromotionSummary[] }>(`/api/su/promotions/${encodeURIComponent(id)}`, {
         method: "DELETE",
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: promotionsQueryKey }),
@@ -58,7 +58,7 @@ export function useSendPromotion() {
   return useMutation({
     mutationFn: (id: string) =>
       apiFetch<{ jobId: string; recipients: number }>(
-        `/api/marketing/promotions/${encodeURIComponent(id)}/send`,
+        `/api/su/promotions/${encodeURIComponent(id)}/send`,
         { method: "POST" },
       ),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: promotionsQueryKey }),
@@ -69,7 +69,7 @@ export function useSendPromotion() {
 export function useTestPromotion() {
   return useMutation({
     mutationFn: (id: string) =>
-      apiFetch<{ sentTo: string }>(`/api/marketing/promotions/${encodeURIComponent(id)}/test`, {
+      apiFetch<{ sentTo: string }>(`/api/su/promotions/${encodeURIComponent(id)}/test`, {
         method: "POST",
       }),
   });
@@ -79,7 +79,7 @@ export function useTestPromotion() {
 export function useCountSegment() {
   return useMutation({
     mutationFn: (segment: { audience: Audience; excludePromotionIds: string[] }) =>
-      apiFetch<SegmentCount>("/api/marketing/promotions/segment", {
+      apiFetch<SegmentCount>("/api/su/promotions/segment", {
         body: JSON.stringify(segment),
         method: "POST",
       }),
