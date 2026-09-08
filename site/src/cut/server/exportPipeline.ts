@@ -2028,7 +2028,7 @@ export async function runExport(
         filters.push(`[${onto}][oes${k}]overlay=0:0:eof_action=pass[${next}]`);
         return next;
       }
-      filters.push(`[${animIdx}:v]fps=${fps},format=yuva420p,setsar=1[oanim${k}]`);
+      filters.push(`[${animIdx}:v]format=yuva420p,fps=${fps},setsar=1[oanim${k}]`);
       filters.push(
         `[${onto}][oanim${k}]overlay=${num(o.x ?? 0)}:${num(o.y ?? 0)}:eof_action=pass[${next}]`
       );
@@ -2090,7 +2090,7 @@ export async function runExport(
   // costs one ffmpeg input per language instead of one per still. They sit
   // over every element and every effect.
   captionInputs.forEach((idx, k) => {
-    filters.push(`[${idx}:v]fps=${fps},format=yuva420p,setsar=1[caps${k}]`);
+    filters.push(`[${idx}:v]format=yuva420p,fps=${fps},setsar=1[caps${k}]`);
     filters.push(`[${vLabel}][caps${k}]overlay=0:0:eof_action=pass[vcaps${k}]`);
     vLabel = `vcaps${k}`;
   });
