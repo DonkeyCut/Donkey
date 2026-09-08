@@ -2016,15 +2016,20 @@ export async function runExport(
         // at its region, the matte multiplies into its alpha, and the
         // trimmed element composites at the origin — in its own lane order,
         // behind (inverted) or on the person alike.
+        // The slideshow is a handful of stills, so the conversion, the pad
+        // and the alpha extraction run on those stills and `fps` duplicates
+        // references afterwards; the per-frame work is the matte blend, paced
+        // by the matte.
         const matte = nextMatte(`bse${k}`, o.subject);
         filters.push(
-          `[${animIdx}:v]fps=${fps},setsar=1,format=rgba,` +
-            `pad=${W}:${H}:${num(o.x ?? 0)}:${num(o.y ?? 0)}:color=black@0.0[oep${k}]`
+          `[${animIdx}:v]format=rgba,` +
+            `pad=${W}:${H}:${num(o.x ?? 0)}:${num(o.y ?? 0)}:color=black@0.0,setsar=1[oep${k}]`
         );
         filters.push(`[oep${k}]split[oe0${k}][oe1${k}]`);
-        filters.push(`[oe1${k}]alphaextract[oea${k}]`);
+        filters.push(`[oe0${k}]fps=${fps}[oef${k}]`);
+        filters.push(`[oe1${k}]alphaextract,fps=${fps}[oea${k}]`);
         filters.push(`[oea${k}][${matte}]blend=all_mode=multiply[oem${k}]`);
-        filters.push(`[oe0${k}][oem${k}]alphamerge,format=yuva420p[oes${k}]`);
+        filters.push(`[oef${k}][oem${k}]alphamerge,format=yuva420p[oes${k}]`);
         filters.push(`[${onto}][oes${k}]overlay=0:0:eof_action=pass[${next}]`);
         return next;
       }
