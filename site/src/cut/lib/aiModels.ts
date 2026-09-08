@@ -26,3 +26,9 @@ export const AI_MODELS: AiModel[] = [
   // Hermetic test provider for e2e runs — hidden unless enabled in the UI.
   { id: "cut-test", label: "Test model", provider: "test", hidden: true },
 ];
+
+export function aiModelProvider(id: string): AiModel["provider"] {
+  const model = AI_MODELS.find((m) => m.id === id);
+  if (!model) throw new Error(`Unknown chat model: ${id}`);
+  return model.provider;
+}

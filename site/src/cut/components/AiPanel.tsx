@@ -90,7 +90,7 @@ import { useCreditsRecheck, useOutOfCredits } from "@/cut/lib/hosted";
 import { hydratePiSession, readPiSession, streamCutChat } from "@/cut/lib/pi/cutAgent";
 import { productionDeps } from "@/cut/lib/pi/prodDeps";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { AI_MODELS } from "@/cut/lib/aiModels";
+import { AI_MODELS, aiModelProvider as provider } from "@/cut/lib/aiModels";
 import { saveAssetToLibrary } from "@/cut/lib/library";
 import { formatDuration, useGenScene } from "@/cut/lib/genScene";
 import { lightboxItemFromRef, useLightbox } from "@/cut/lib/lightbox";
@@ -306,17 +306,6 @@ const SUGGESTIONS = [
   "Rewrite subtitles for social",
   "Write my post caption + tags",
 ];
-
-/** Chat provider bucket for a model id. */
-const provider = (id: string): string =>
-  (AI_MODELS.find((m) => m.id === id)?.provider ?? "") ||
-  id.startsWith("claude")
-    ? "claude"
-    : id.startsWith("gemini")
-      ? "gemini"
-      : id === "cut-test"
-        ? "test"
-        : "codex";
 
 export function AiPanel({
   projectId,
