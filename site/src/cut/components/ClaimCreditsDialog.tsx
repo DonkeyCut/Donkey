@@ -98,7 +98,7 @@ function OpenDialog({ token }: { token: string }) {
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="top-[18%] min-h-80 translate-y-0 grid-rows-[auto_1fr] sm:max-w-md">
+      <DialogContent className="top-[18%] translate-y-0 sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-lg">
             <Sparkle className="size-5 shrink-0 fill-violet-500/25 text-violet-500" />
@@ -106,7 +106,7 @@ function OpenDialog({ token }: { token: string }) {
           </DialogTitle>
           <DialogDescription className="min-h-10">{body}</DialogDescription>
         </DialogHeader>
-        <DialogFooter className="mx-0 mb-0 items-center self-end border-0 bg-transparent p-0">
+        <DialogFooter className="mx-0 mb-0 items-center border-0 bg-transparent p-0">
           {claim.isError && (
             <p className="text-sm text-destructive sm:mr-auto">
               {claim.error instanceof ApiError && claim.error.status === 403
