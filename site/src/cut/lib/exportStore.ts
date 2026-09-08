@@ -328,6 +328,11 @@ export const useExports = create<ExportsState>((set, get) => ({
         ...slice("cloud", cloudRows),
         ...slice("browser", browserRows),
       ];
+      // Polls land in the middle of drags. The same rows again hand back the
+      // state as it was, so nothing that reads the feed re-renders; a fresh
+      // array for an unchanged list re-rendered the dock and the Media tab on
+      // every poll, a long task under the scrub.
+      if (sameJobs(jobs, s.jobs)) return s;
       return {
         jobs,
         dismissed: s.dismissed.filter((id) => jobs.some((j) => j.id === id)),
@@ -335,6 +340,18 @@ export const useExports = create<ExportsState>((set, get) => ({
     });
   },
 }));
+
+/** Whether two feed rows say the same thing. Every field is a primitive, so
+ * a shallow compare is the whole compare. */
+const sameJob = (a: ExportJob, b: ExportJob): boolean => {
+  const keys = Object.keys(a) as (keyof ExportJob)[];
+  return (
+    keys.length === Object.keys(b).length && keys.every((k) => Object.is(a[k], b[k]))
+  );
+};
+
+const sameJobs = (a: ExportJob[], b: ExportJob[]): boolean =>
+  a.length === b.length && a.every((j, i) => sameJob(j, b[i]));
 
 /** One row a surface shows: an engine job, or a local row this tab owns. */
 export type ExportRow =
