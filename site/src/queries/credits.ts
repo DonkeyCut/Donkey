@@ -142,6 +142,9 @@ export type CreditOffer = {
   closesAt: string | null;
   // Formatted USD, "$5".
   credits: string;
+  // When the claimed credit expires; null before the claim and for a credit
+  // that keeps forever.
+  expiresAt: string | null;
   // "a week", or null when the credit keeps forever.
   lifetime: string | null;
 };
@@ -157,8 +160,9 @@ export function useCreditOffer(token: string, options: { enabled?: boolean } = {
   });
 }
 
-// Lands the offer on the signed-in account; the balance re-reads so the top
-// bar shows the credit at once.
+// Lands the offer on the signed-in account. The balance re-reads so the top
+// bar shows the credit at once, and the offer's own entry records the claim,
+// so a dialog that opens on the same token again presents the landed credit.
 export function useClaimCreditOffer() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -167,6 +171,11 @@ export function useClaimCreditOffer() {
         "/api/credits/offers/claim",
         { body: JSON.stringify({ token }), method: "POST" },
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: creditBalanceQueryKey }),
+    onSuccess: (landed, token) => {
+      queryClient.setQueryData<CreditOffer>(creditOfferQueryKey(token), (offer) =>
+        offer ? { ...offer, claimed: true, expiresAt: landed.expiresAt } : offer,
+      );
+      void queryClient.invalidateQueries({ queryKey: creditBalanceQueryKey });
+    },
   });
 }

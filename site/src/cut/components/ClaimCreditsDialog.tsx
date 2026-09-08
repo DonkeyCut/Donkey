@@ -1,14 +1,16 @@
 "use client";
 
 // A credit offer's face. The email's claim link opens the app home with the
-// offer token in the address (?claim=…); this reads it, presents the offer,
-// and lands the credit on a press. The credit waits for that press:
-// link-prefetching mail scanners open URLs on the recipient's behalf, and a
-// claim on load would start the credit's lifetime before the person saw it.
-// Closing drops the token from the address, so a reload opens nothing.
+// offer token in the address (?claim=…); this takes the token out of the
+// address the moment it is read, holds it for the dialog's life, and lands the
+// credit on a press. The credit waits for that press: link-prefetching mail
+// scanners open URLs on the recipient's behalf, and a claim on load would
+// start the credit's lifetime before the person saw it. The address is clean
+// from the first paint, so a reload, a back step or a forward step opens
+// nothing; the link itself opens a claimed offer as the credit it landed.
 import { useSearchParams } from "next/navigation";
 import { Loader2, Sparkle } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -33,33 +35,36 @@ export function ClaimCreditsDialog() {
   return user ? <AddressedDialog /> : null;
 }
 
-function AddressedDialog() {
-  const token = useSearchParams().get(PARAM);
-  if (!token) return null;
-  return <OpenDialog key={token} token={token} />;
-}
-
 // Only the token leaves the address; an open folder stays open. The native
 // history call syncs into the router without a server round trip, so the
-// close holds whatever the connection is doing.
+// drop holds whatever the connection is doing.
 function dropTokenFromAddress() {
   const url = new URL(window.location.href);
   url.searchParams.delete(PARAM);
   window.history.replaceState(null, "", url);
 }
 
-function OpenDialog({ token }: { token: string }) {
+function AddressedDialog() {
+  const inAddress = useSearchParams().get(PARAM);
+  // The token is held from the render that reads it; a new one in the address
+  // replaces it.
+  const [held, setHeld] = useState(inAddress);
+  if (inAddress && inAddress !== held) setHeld(inAddress);
+  useEffect(() => {
+    if (inAddress) dropTokenFromAddress();
+  }, [inAddress]);
+  const token = inAddress ?? held;
+  if (!token) return null;
+  return <OpenDialog key={token} token={token} onClose={() => setHeld(null)} />;
+}
+
+function OpenDialog({ token, onClose }: { token: string; onClose: () => void }) {
   const offer = useCreditOffer(token);
   const claim = useClaimCreditOffer();
-  const [open, setOpen] = useState(true);
-  const done = claim.data ?? (offer.data?.claimed ? { expiresAt: null } : null);
+  const done = claim.data ?? (offer.data?.claimed ? { expiresAt: offer.data.expiresAt } : null);
   // The dialog opens once the offer is known, at the size it keeps: the body
   // reserves two lines and every state ends in one row of buttons.
   if (offer.isPending) return null;
-  const onClose = () => {
-    setOpen(false);
-    dropTokenFromAddress();
-  };
 
   let title = "Claim your credits";
   let body: string;
@@ -80,8 +85,8 @@ function OpenDialog({ token }: { token: string }) {
     }`;
     footer = <Button onClick={onClose}>Start editing</Button>;
   } else {
-    body = `You have ${offer.data.credits} in AI credits. They\u2019re waiting for you.${
-      offer.data.lifetime ? ` Once claimed, it\u2019s good for ${offer.data.lifetime}.` : ""
+    body = `You have ${offer.data.credits} in AI credits. They’re waiting for you.${
+      offer.data.lifetime ? ` Once claimed, it’s good for ${offer.data.lifetime}.` : ""
     }${offer.data.closesAt ? ` Claim by ${formatCreditExpiry(new Date(offer.data.closesAt))}.` : ""}`;
     footer = (
       <>
@@ -97,7 +102,7 @@ function OpenDialog({ token }: { token: string }) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="top-[18%] translate-y-0 sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-lg">
@@ -113,7 +118,7 @@ function OpenDialog({ token }: { token: string }) {
                 ? "This offer belongs to a different account. Sign in with the address the email was sent to."
                 : claim.error instanceof ApiError && claim.error.status === 410
                 ? "The claim window for this offer has closed."
-                : "That didn\u2019t go through. Try again."}
+                : "That didn’t go through. Try again."}
             </p>
           )}
           {footer}

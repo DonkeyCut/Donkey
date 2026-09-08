@@ -28,7 +28,15 @@ export const GET = withDonkeyAuth(async (request) => {
   const offerId = token ? verifyCreditOfferToken(token) : null;
   if (!offerId) return notFoundResponse();
   const offer = await prisma.creditOffer.findUnique({
-    select: { amountMicros: true, claimedAt: true, closesAt: true, expiresAfterDays: true, kind: true, userId: true },
+    select: {
+      amountMicros: true,
+      claimedAt: true,
+      closesAt: true,
+      expiresAfterDays: true,
+      grant: { select: { expiresAt: true } },
+      kind: true,
+      userId: true,
+    },
     where: { id: offerId },
   });
   if (!offer || offer.kind !== MANUAL_OFFER_KIND) return notFoundResponse();
@@ -38,6 +46,7 @@ export const GET = withDonkeyAuth(async (request) => {
     claimed: offer.claimedAt !== null,
     closesAt: offer.closesAt?.toISOString() ?? null,
     credits: formatUsdPlain(creditMicrosToString(offer.amountMicros)),
+    expiresAt: offer.grant?.expiresAt?.toISOString() ?? null,
     lifetime: describeCreditLifetime(offer.expiresAfterDays),
   });
 });
