@@ -54,7 +54,8 @@ const recoveredMediaRead = (item: { type?: string }) => item?.type === "MediaFet
 // and half-saved-file errors straight into production error tracking.
 if (process.env.NEXT_PUBLIC_POSTHOG_KEY && process.env.NODE_ENV === "production") {
   posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY, {
-    api_host: "https://us.i.posthog.com",
+    api_host: "https://e.donkeycut.com",
+    ui_host: "https://us.posthog.com",
     defaults: "2026-05-30",
     disable_session_recording: replayFree(),
     // Error tracking: unhandled errors, unhandled rejections, and every

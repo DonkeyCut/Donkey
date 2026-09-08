@@ -1,5 +1,5 @@
 // PostHog read access for the analytics pipeline. Browser ingestion uses the
-// public project key against us.i.posthog.com; these reads go through the
+// public project key through e.donkeycut.com; these reads go through the
 // query API on the main host, addressed by POSTHOG_PROJECT_ID and authorized
 // by POSTHOG_PERSONAL_API_KEY — both env, and both required before any
 // PostHog extraction runs.
