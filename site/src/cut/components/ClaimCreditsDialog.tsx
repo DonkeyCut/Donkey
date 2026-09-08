@@ -117,7 +117,7 @@ function OpenDialog({ token, onClose }: { token: string; onClose: () => void }) 
 
   return (
     <Dialog open onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="top-[18%] translate-y-0 sm:max-w-md">
+      <DialogContent className="top-[18%] translate-y-0 px-6 sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-lg">
             <Sparkle className="size-5 shrink-0 fill-violet-500/25 text-violet-500" />
