@@ -4592,7 +4592,10 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     setSubtitleWordsPerCue: async (n) => {
       const s = get();
       const per = Math.min(MAX_WORDS_PER_CUE, Math.max(MIN_WORDS_PER_CUE, Math.round(n)));
-      if (s.subtitles.wordsPerCue === per) return;
+      if (
+        s.subtitles.wordsPerCue === per &&
+        s.subtitles.cues.every((cue) => cue.text.split(/\s+/).filter(Boolean).length <= per)
+      ) return;
       const projectId = s.projectId;
       const epoch = laneEpoch;
       push();
