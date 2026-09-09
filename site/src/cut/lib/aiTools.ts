@@ -225,6 +225,7 @@ function tracksAfter() {
   }));
   const lanes = cur.audioClips.map((a) => ({
     id: a.id,
+    lane: a.lane ?? 0,
     start: round2(a.start),
     len: round2(a.out - a.in),
   }));
@@ -2076,6 +2077,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const a = requireItem(s.audioClips, input.id, "soundtrack clip");
       const len = retimeOf(a).len;
       const patch: Partial<AudioClip> = {};
+      if (input.lane !== undefined) patch.lane = audioLaneInput(input.lane);
       if (isNum(input.volume)) patch.volume = clamp(input.volume, 0, 3);
       if (isNum(input.fadeIn)) patch.fadeIn = clamp(input.fadeIn, 0, len / 2);
       if (isNum(input.fadeOut)) patch.fadeOut = clamp(input.fadeOut, 0, len / 2);
@@ -2103,6 +2105,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return {
         id: a.id,
         ...patch,
+        lane: landed.lane ?? 0,
         ...("start" in patch ? { start: round2(landed.start) } : {}),
       };
   },
@@ -4359,18 +4362,25 @@ const NOT_PLACED = { added: false, clipId: null, index: null };
 /** Place a project asset on the timeline like a drag: video/image onto track 0
  * (an `index` insert, a free-positioned `start`, or appended at the end),
  * audio onto the soundtrack. Returns the created clip's summary. */
+function audioLaneInput(value: unknown): number {
+  if (!isNum(value) || !Number.isInteger(value) || value < 0)
+    throw new ToolError("Audio lane must be a non-negative integer.");
+  return value;
+}
+
 function placeAssetOnTimeline(asset: MediaAsset, input: Record<string, unknown>) {
   const s = useEditor.getState();
   const start = isNum(input.start) ? Math.max(0, input.start) : undefined;
   if (asset.type === "audio") {
-    s.addAudioFromAsset(asset.id, start);
+    const lane = input.lane === undefined ? 0 : audioLaneInput(input.lane);
+    s.addAudioFromAsset(asset.id, start, { lane });
     const sel = useEditor.getState().selection;
     const c =
       sel?.kind === "audio"
         ? useEditor.getState().audioClips.find((x) => x.id === sel.id)
         : undefined;
     if (!c) throw new ToolError("Could not create the soundtrack clip.");
-    return { id: c.id, kind: asset.type, start: round2(c.start), len: round2(c.out - c.in) };
+    return { id: c.id, kind: asset.type, lane: c.lane ?? 0, start: round2(c.start), len: round2(c.out - c.in) };
   }
   let clipId: string | null;
   if (isNum(input.index)) {

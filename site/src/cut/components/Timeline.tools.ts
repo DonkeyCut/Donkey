@@ -50,6 +50,7 @@ export const TIMELINE_TOOLS = [
       "Put a project asset on the timeline, the same way the user dragging it in would: a video or image lands on video track 0 (at `start`, inserted at `index`, or appended at the end; a taken spot slides it right), audio lands on the soundtrack (at `start`, default the playhead). Asset ids come from `media` in editor_state — imports, attachments, and chat media alike. Call it only when the user asked for the media in the cut (\"add my beach photo\", \"stitch these into a movie\"); otherwise media stays on its card or panel for them to drag.",
     inputSchema: obj({
       asset_id: str("Project asset id from `media` in editor_state"),
+      lane: { type: "integer", minimum: 0, description: "Audio assets only: soundtrack lane, default 0. Put music on lane 1 to overlap narration on lane 0." },
       start: num("Timeline start s"),
       index: num("Insert position on video track 0 (video/image only; 0 = first)"),
     }, ["asset_id"]),

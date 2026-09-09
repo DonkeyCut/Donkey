@@ -172,9 +172,10 @@ export const INSPECTOR_TOOLS = [
   {
     name: "update_audio",
     description:
-      "Update a soundtrack clip: volume (0..3), fadeIn/fadeOut seconds, start position, in/out trim, speed, reverse, hidden, or duck. `duck` is voiceover ducking — while this clip plays, ALL other audio (video-clip sound and other music) drops to that gain (0..1); pass 1 to clear ducking. Use it to make a voiceover sit over quieter music.",
+      "Update a soundtrack clip: volume (0..3), fadeIn/fadeOut seconds, start position, lane, in/out trim, speed, reverse, hidden, or duck. Audio overlaps across lanes; clips on the same lane slide to its next free slot. To put music under narration, move music to lane 1 and start 0 in the same call, with narration on lane 0. `duck` is voiceover ducking — while this clip plays, ALL other audio drops to that gain (0..1); pass 1 to clear ducking.",
     inputSchema: obj({
       id: str("Soundtrack clip id"),
+      lane: { type: "integer", minimum: 0, description: "Audio lane, 0-based. Separate lanes play together." },
       volume: num("0..3 (1 = unchanged, above 1 boosts)"),
       fadeIn: num("Fade-in seconds"),
       fadeOut: num("Fade-out seconds"),
