@@ -1,4 +1,5 @@
 "use client";
+import { bindChatRuntime } from "@/cut/lib/chatRuntime";
 
 import { useEffect, type ReactNode } from "react";
 
@@ -33,6 +34,7 @@ export function RequireSession({ children }: { children: ReactNode }) {
   const config = useAccountConfig({ enabled: Boolean(userId) });
   useEffect(() => {
     if (!userId || !config.data) return;
+    bindChatRuntime(config.data.settings.chatRuntime);
     reportExposures(config.data);
   }, [userId, config.data]);
 

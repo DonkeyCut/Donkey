@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Copy, Loader2, Sparkles } from "lucide-react";
 import { authHrefFor } from "@/app/_components/landing/useAppEntryHref";
+import { ChatStatusBadge, type ChatStatus } from "./ChatStatusBadge";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/cut/lib/backend";
 import { quotaErrorMessage } from "@/cut/lib/backend/cloud";
@@ -15,7 +16,8 @@ import { authClient } from "@/lib/auth-client";
 // includes it) and copy the project into their own account. Copying needs a
 // session: signed-out clicks route through sign-in with this share URL as the
 // callback.
-export function ViewerTopBar() {
+export function ViewerTopBar({ chatStatus }: { chatStatus: ChatStatus }) {
+  const aiOpen = useEditor((s) => s.aiOpen);
   const base = useCutBase();
   const projectName = useEditor((s) => s.projectName);
   const chatShared = useEditor((s) => s.sharedFeatures?.chat === true);
@@ -89,7 +91,7 @@ export function ViewerTopBar() {
           <Button
             variant="ghost"
             size="sm"
-            className="ai-toggle"
+            className="ai-toggle relative"
             aria-label="Chat"
             title="Chat (⌘J)"
             onClick={() => {
@@ -98,6 +100,7 @@ export function ViewerTopBar() {
             }}
           >
             <Sparkles data-icon="inline-start" /> Chat
+            {!aiOpen && <ChatStatusBadge status={chatStatus} />}
           </Button>
         )}
         <Button size="sm" disabled={copying} onClick={() => void copyProject()}>

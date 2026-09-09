@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, ChevronLeft, CloudUpload, Loader2, Mic, Monitor, MoreHorizontal, Ratio, Share2, Smartphone, Sparkles, Square, Upload, Video } from "lucide-react";
+import { ChatStatusBadge, type ChatStatus } from "./ChatStatusBadge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -49,12 +50,14 @@ function AspectIcon({ aspect, className }: { aspect: Aspect; className?: string 
 }
 
 export function TopBar({
+  chatStatus,
   onImport,
   from,
   folder,
   uploading = 0,
   copying = 0,
 }: {
+  chatStatus: ChatStatus;
   onImport: (files: File[], opts?: { origin?: "recording" }) => void;
   from?: string | null;
   folder?: string | null;
@@ -392,7 +395,7 @@ export function TopBar({
       <Button
         variant={aiOpen ? "default" : "outline"}
         size="sm"
-        className="ai-toggle"
+        className="ai-toggle relative"
         aria-label="Chat"
         aria-pressed={aiOpen}
         title="Chat (⌘J)"
@@ -402,6 +405,7 @@ export function TopBar({
         }}
       >
         <Sparkles data-icon="inline-start" /> Chat
+        {!aiOpen && <ChatStatusBadge status={chatStatus} />}
       </Button>
     </>
   );
@@ -657,9 +661,10 @@ export function TopBar({
           ) : (
             <DropdownMenu>
               <DropdownMenuTrigger
-                render={<Button variant="ghost" size="icon-sm" aria-label="More actions" title="More actions" />}
+                render={<Button variant="ghost" size="icon-sm" className="relative" aria-label="More actions" title="More actions" />}
               >
                 <MoreHorizontal />
+                {!aiOpen && <ChatStatusBadge status={chatStatus} />}
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
                 {cutMode === "cloud" && (
@@ -689,7 +694,7 @@ export function TopBar({
                   }}
                 >
                   <Sparkles />
-                  <span className="flex-1">Chat</span>
+                  <span className="relative flex-1">Chat{!aiOpen && <ChatStatusBadge status={chatStatus} />}</span>
                   {aiOpen && <Check className="size-3.5 text-muted-foreground" />}
                 </DropdownMenuItem>
               </DropdownMenuContent>

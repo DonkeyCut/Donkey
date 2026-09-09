@@ -1,6 +1,9 @@
 "use client";
 
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { ChatStatus } from "./ChatStatusBadge";
+
+import { chatRuntime } from "@/cut/lib/chatRuntime";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type ChatTransport, type UIMessage } from "ai";
 import {
@@ -46,15 +49,18 @@ import { engineReady } from "@/cut/lib/api";
 import { useCutCaps, useLocalCompute } from "@/cut/lib/backend/hooks";
 import { localBackend } from "@/cut/lib/backend/local";
 import { buildAiContext } from "@/cut/lib/aiContext";
-import { runAiTool } from "@/cut/lib/aiTools";
 import { setAssetDragData } from "@/cut/lib/assetDrag";
 import { registerChatIntake } from "@/cut/lib/chatIntake";
 import { videoModel } from "@/cut/lib/videoModels";
 import {
+  chatThreadDeleted,
+  deleteStoredThread,
+  isStoredThread,
   readActiveChat,
   readRawThreads,
   writeActiveChat,
   writeRawThreads,
+  subscribeChatThreads,
 } from "@/cut/lib/chatThreads";
 import {
   deleteCloudThread,
@@ -87,8 +93,17 @@ import {
   useSignedIn,
 } from "@/cut/lib/generate";
 import { useCreditsRecheck, useOutOfCredits } from "@/cut/lib/hosted";
-import { hydratePiSession, readPiSession, streamCutChat } from "@/cut/lib/pi/cutAgent";
+import { dropPiSession, hydratePiSession, readPiSession, streamCutChat } from "@/cut/lib/pi/cutAgent";
 import { productionDeps } from "@/cut/lib/pi/prodDeps";
+import { withChatProject } from "@/cut/lib/projectChatTools";
+import { runAiTool } from "@/cut/lib/aiTools";
+import { holdEditorChat } from "@/cut/lib/editorWork";
+import { recoverSceneCall } from "@/cut/lib/chatRecovery";
+import { replayChatStream } from "@/cut/lib/chatReplay";
+import { claimEngineTool, cancelEngineChat } from "@/cut/lib/engineChat";
+import { projectBackend } from "@/cut/lib/residency";
+import { beginBrowserChat, browserChatRunning, cancelBrowserChat, watchBrowserChatTurns } from "@/cut/lib/browserChatTurns";
+import { putCloudThread } from "@/cut/lib/chatCloud";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { AI_MODELS, aiModelProvider as provider } from "@/cut/lib/aiModels";
 import { saveAssetToLibrary } from "@/cut/lib/library";
@@ -124,6 +139,7 @@ interface ChatThread {
   title: string;
   updatedAt: number;
   messages: UIMessage[];
+  completedMessageId?: string;
   /** Provider-native session ids so a resumed thread keeps its context. */
   sessions: Record<string, string>;
   /** The pi loop's LLM context (structured tool history included), when the
@@ -133,12 +149,26 @@ interface ChatThread {
 
 
 const THREAD_LIMIT = 30;
+const seenRepliesKey = (projectId: string) => `cut-ai-seen-replies-${projectId}`;
+
+function readSeenReplies(projectId: string): Record<string, string> {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(seenRepliesKey(projectId)) ?? "{}");
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {};
+    return Object.fromEntries(Object.entries(stored).filter((entry): entry is [string, string] =>
+      typeof entry[1] === "string",
+    ));
+  } catch {
+    return {};
+  }
+}
+
 // How long a streaming turn's newest snapshot may park before it must land —
 // the same cadence the cloud mirror debounces on.
 const THREAD_SAVE_MS = 1500;
 
 function readThreads(projectId: string): ChatThread[] {
-  return readRawThreads(projectId) as ChatThread[];
+  return readRawThreads(projectId).filter((t) => isStoredThread(t) && !t.deleted) as ChatThread[];
 }
 
 /** Persisted copies drop frame payloads (data URLs) from tool outputs — one
@@ -232,6 +262,12 @@ function settleInterruptedTools(messages: UIMessage[]): UIMessage[] {
 }
 
 function writeThreads(projectId: string, list: ChatThread[]) {
+  const editor = useEditor.getState();
+  if (editor.projectId !== projectId || !editor.loaded) {
+    // Pruning needs this project's media ownership; a background save keeps its history.
+    writeRawThreads(projectId, slimForStorage(list));
+    return;
+  }
   // Cap history, but retain any overflow thread that still owns chat media or
   // a working scene run — killing media or work is an explicit act (deleting
   // its thread), never a side effect of the history cap.
@@ -309,10 +345,14 @@ const SUGGESTIONS = [
 
 export function AiPanel({
   projectId,
+  visible,
   onClose,
+  onStatusChange,
 }: {
   projectId: string;
+  visible: boolean;
   onClose: () => void;
+  onStatusChange: (projectId: string, status: ChatStatus) => void;
 }) {
   const [info, setInfo] = useState<ModelsInfo | null>(null);
   const engineUp = useLocalCompute();
@@ -334,11 +374,64 @@ export function AiPanel({
       ? crypto.randomUUID()
       : (readActiveChat(projectId) ?? crypto.randomUUID()),
   );
+  const [runningThreads, setRunningThreads] = useState<Record<string, string>>({});
+  const onRunningChange = useCallback((id: string, running: boolean, turnModel: string) => {
+    setRunningThreads((threads) => {
+      if (running) return threads[id] ? threads : { ...threads, [id]: turnModel };
+      if (!threads[id]) return threads;
+      const remaining = { ...threads };
+      delete remaining[id];
+      return remaining;
+    });
+  }, []);
   useEffect(() => {
     writeActiveChat(projectId, activeChat);
   }, [activeChat, projectId]);
+  const onThreadDeleted = useCallback((id: string) => {
+    setActiveChat((current) => current === id ? crypto.randomUUID() : current);
+    onRunningChange(id, false, "");
+  }, [onRunningChange]);
+  const anyRunning = Object.keys(runningThreads).length > 0;
+  useEffect(() => {
+    reportActivity("chat", anyRunning);
+    return () => reportActivity("chat", false);
+  }, [anyRunning]);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [threads, setThreads] = useState<ChatThread[]>([]);
+  const [threads, setThreads] = useState<ChatThread[]>(() => readThreads(projectId));
+  const [seenReplies, setSeenReplies] = useState(() => readSeenReplies(projectId));
+  useEffect(() => {
+    const receive = (event: StorageEvent) => {
+      if (event.key === seenRepliesKey(projectId)) setSeenReplies(readSeenReplies(projectId));
+    };
+    window.addEventListener("storage", receive);
+    return () => window.removeEventListener("storage", receive);
+  }, [projectId]);
+
+  const markThreadRead = (thread: ChatThread) => {
+    const reply = thread.completedMessageId;
+    if (!reply || runningThreads[thread.id] || thread.messages.at(-1)?.id !== reply ||
+        seenReplies[thread.id] === reply) return;
+    const next = readSeenReplies(projectId);
+    delete next[thread.id];
+    next[thread.id] = reply;
+    const recent = Object.fromEntries(Object.entries(next).slice(-THREAD_LIMIT));
+    try {
+      localStorage.setItem(seenRepliesKey(projectId), JSON.stringify(recent));
+    } catch { /* Keep read state for this visit. */ }
+    setSeenReplies(recent);
+  };
+  useEffect(() => {
+    return subscribeChatThreads(projectId, () => setThreads(readThreads(projectId)));
+  }, [projectId]);
+  const hasUnread = threads.some((thread) =>
+    !runningThreads[thread.id] && thread.completedMessageId &&
+    thread.messages.at(-1)?.id === thread.completedMessageId &&
+    seenReplies[thread.id] !== thread.completedMessageId,
+  );
+  const chatStatus: ChatStatus = anyRunning ? "working" : hasUnread ? "unread" : null;
+  useEffect(() => {
+    onStatusChange(projectId, chatStatus);
+  }, [projectId, chatStatus, onStatusChange]);
   // A cloud project's server threads merge into localStorage before the
   // session reads it, so a project opened on another device resumes its chats.
   const [chatsReady, setChatsReady] = useState(false);
@@ -350,6 +443,18 @@ export function AiPanel({
     return () => {
       alive = false;
     };
+  }, [projectId]);
+
+  useEffect(() => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async () => {
+      if (!document.hidden && useEditor.getState().projectId === projectId)
+        await ensureCloudThreads(projectId, true);
+      if (!stopped) timer = setTimeout(() => void refresh(), chatRuntime().syncIntervalMs);
+    };
+    timer = setTimeout(() => void refresh(), chatRuntime().syncIntervalMs);
+    return () => { stopped = true; clearTimeout(timer); };
   }, [projectId]);
 
   // A shared view opens on the owner's newest thread — the viewer has no chat
@@ -395,10 +500,10 @@ export function AiPanel({
   };
 
   const deleteThread = (id: string) => {
-    writeThreads(
-      projectId,
-      readThreads(projectId).filter((t) => t.id !== id),
-    );
+    deleteStoredThread(projectId, id);
+    cancelBrowserChat(projectId, id);
+    if (engineUp) void cancelEngineChat(projectId, id).catch(() => {});
+    onRunningChange(id, false, model);
     setThreads((p) => p.filter((t) => t.id !== id));
     // The thread's chat-only assets go with it; anything placed or filed
     // into Media/Library stays.
@@ -449,7 +554,7 @@ export function AiPanel({
     // is the point of having it open. Fixed rather than absolute so it is the
     // viewport it pins to, not the editor's box — narrower than the panel and
     // that box is wider than the screen, and the panel would hang off it.
-    <aside className="ai-panel relative flex min-h-0 w-[340px] shrink-0 animate-in flex-col border-l border-border bg-card duration-300 ease-out slide-in-from-right-full max-[900px]:fixed max-[900px]:inset-y-0 max-[900px]:right-0 max-[900px]:z-50 max-[900px]:w-full max-[900px]:max-w-[340px] max-[900px]:shadow-[-16px_0_40px_rgba(0,0,0,0.14)]">
+    <aside style={visible ? undefined : { display: "none" }} className="ai-panel relative z-50 flex min-h-0 w-[340px] shrink-0 animate-in flex-col border-l border-border bg-card duration-300 ease-out slide-in-from-right-full max-[900px]:fixed max-[900px]:inset-y-0 max-[900px]:right-0 max-[900px]:w-full max-[900px]:max-w-[340px] max-[900px]:shadow-[-16px_0_40px_rgba(0,0,0,0.14)]">
       <div className="flex h-[46px] shrink-0 items-center gap-1.5 border-b border-border pr-2 pl-3.5">
         <div className="flex-1" />
         <Button
@@ -524,19 +629,39 @@ export function AiPanel({
                 threads.map((t) => (
                   <button
                     key={t.id}
-                    className="group relative flex w-full flex-col gap-0.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-muted"
+                    className="group relative flex w-full items-center gap-2 rounded-lg py-2 pr-9 pl-2.5 text-left transition-colors hover:bg-muted"
                     onClick={() => openThread(t)}
+                    onMouseEnter={() => markThreadRead(t)}
+                    onFocus={() => markThreadRead(t)}
                   >
-                    <span className="w-full truncate pr-6 text-[12px] font-medium">
-                      {t.title}
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="truncate text-[12px] font-medium">
+                        {t.title}
+                      </span>
+                      <span className="text-[10.5px] text-muted-foreground">
+                        {new Date(t.updatedAt).toLocaleString([], {
+                          month: "short",
+                          day: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}
+                      </span>
                     </span>
-                    <span className="text-[10.5px] text-muted-foreground">
-                      {new Date(t.updatedAt).toLocaleString([], {
-                        month: "short",
-                        day: "numeric",
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
+                    <span className="grid size-3.5 shrink-0 place-items-center">
+                      {runningThreads[t.id] ? (
+                        <CircleDashed
+                          role="img"
+                          aria-label="Working"
+                          className="size-3.5 animate-spin text-muted-foreground"
+                        />
+                      ) : t.completedMessageId && t.messages.at(-1)?.id === t.completedMessageId &&
+                          seenReplies[t.id] !== t.completedMessageId ? (
+                        <span
+                          role="img"
+                          aria-label="Completed"
+                          className="size-2 rounded-full bg-blue-500"
+                        />
+                      ) : null}
                     </span>
                     {!readOnly && (
                     <span
@@ -560,16 +685,19 @@ export function AiPanel({
         </>
       )}
 
-      {chatsReady && (
+      {chatsReady && [...new Set([sessionThread, ...Object.keys(runningThreads)])].map((id) => (
         <ChatSession
-          key={sessionThread}
+          key={id}
           projectId={projectId}
-          threadId={sessionThread}
+          threadId={id}
+          visible={visible && id === sessionThread}
+          onRunningChange={onRunningChange}
+          onDeleted={onThreadDeleted}
           info={mergedInfo}
-          model={model}
+          model={runningThreads[id] ?? model}
           onModelChange={selectModel}
         />
-      )}
+      ))}
     </aside>
   );
 }
@@ -611,17 +739,22 @@ function ChipsReveal({ open, children }: { open: boolean; children: ReactNode })
   );
 }
 
-/** One chat with the agent. Remounts per active thread; its messages and
- * provider session are restored from the saved thread on open. */
+/** Running sessions stay mounted for the lifetime of their editor. */
 function ChatSession({
   projectId,
   threadId,
+  visible,
+  onRunningChange,
+  onDeleted,
   info,
   model,
   onModelChange,
 }: {
   projectId: string;
   threadId: string;
+  visible: boolean;
+  onRunningChange: (id: string, running: boolean, model: string) => void;
+  onDeleted: (id: string) => void;
   info: ModelsInfo | null;
   model: string;
   onModelChange: (id: string) => void;
@@ -649,7 +782,7 @@ function ChatSession({
     micWasActive.current = mic.state !== "idle";
   }, [mic.state]);
   const [attachments, setAttachments] = useState<AssetRef[]>([]);
-  const candidates = useRefCandidates();
+  const candidates = useRefCandidates(visible);
   // Any OS file drag over the window hints the composer as a drop target;
   // hovering it (dropActive below) strengthens the ring and shows the label.
   const fileDropHint = useEditor((s) => s.dropActive !== null);
@@ -724,14 +857,17 @@ function ChatSession({
       },
       notice: showNotice,
     });
-  }, [readOnly]);
+  }, [readOnly, visible]);
   const sessionKeyRef = useRef<string | null>(null);
+  const toolAbort = useRef(new AbortController());
   // Resume from the saved thread when this id exists in history.
   const [initialThread] = useState<ChatThread | undefined>(() =>
     typeof window === "undefined"
       ? undefined
       : readThreads(projectId).find((t) => t.id === threadId),
   );
+  const seenThreadAt = useRef(initialThread?.updatedAt ?? 0);
+  const completedMessageId = useRef(initialThread?.completedMessageId);
   const providerSessions = useRef<Record<string, string>>({
     ...(initialThread?.sessions ?? {}),
   });
@@ -757,6 +893,16 @@ function ChatSession({
   const setClientTools = useCallback((on: boolean) => {
     clientToolsRef.current = on;
   }, []);
+  const replayHandler = useRef<(id: string, requestId?: string) => boolean>(() => false);
+  const closeReplay = useRef<(() => void) | null>(null);
+  const finishBrowserTurn = useRef<(() => void) | null>(null);
+  const registerBrowserTurn = useCallback((signal?: AbortSignal) => {
+    const turn = beginBrowserChat(projectId, threadId, signal);
+    finishBrowserTurn.current = turn.finish;
+    return turn.signal;
+  }, [projectId, threadId]);
+  const prepareReplay = useCallback((id: string, requestId?: string) => replayHandler.current(id, requestId), []);
+  const attachReplay = useCallback((close: () => void) => { closeReplay.current = close; }, []);
   const transport = useMemo<ChatTransport<UIMessage>>(() => {
     // Built on the first send: a request callback handed to a constructor
     // here would count as running during render, and it reads the model.
@@ -775,12 +921,18 @@ function ChatSession({
           return {
             api: localBackend.url("/api/cut/ai/chat"),
             body: {
+              threadId,
+              runtime: chatRuntime(),
               messages,
               model: currentModel(),
               context: buildAiContext(),
               providerSession: sessionFor(currentModel()),
             },
           };
+        },
+        prepareReconnectToStreamRequest: async () => {
+          await engineReady();
+          return { api: localBackend.url(`/api/cut/ai/chat/${encodeURIComponent(threadId)}/stream?projectId=${encodeURIComponent(projectId)}`) };
         },
       }));
     return {
@@ -789,25 +941,64 @@ function ChatSession({
       sendMessages: async (options) => {
         if (provider(currentModel()) === "gemini") {
           setClientTools(true);
+          const signal = registerBrowserTurn(options.abortSignal);
           return streamCutChat({
             threadId,
             model: currentModel(),
             messages: options.messages,
-            abortSignal: options.abortSignal,
-            deps: productionDeps(),
+            abortSignal: signal,
+            deps: productionDeps(projectId, signal),
           });
         }
         setClientTools(false);
+        toolAbort.current = new AbortController();
         return engine().sendMessages(options);
       },
-      reconnectToStream: (options) => engine().reconnectToStream(options),
+      reconnectToStream: async (options) => {
+        if (provider(currentModel()) === "gemini") return Promise.resolve(null);
+        setClientTools(false);
+        const stream = await engine().reconnectToStream(options);
+        return stream ? replayChatStream(stream, prepareReplay, attachReplay, completedMessageId.current) : null;
+      },
     };
-  }, [threadId, currentModel, sessionFor, setClientTools]);
+  }, [threadId, projectId, currentModel, sessionFor, setClientTools, prepareReplay, attachReplay, registerBrowserTurn]);
 
-  const { messages, sendMessage, stop, status, error, clearError } = useChat({
+  const { messages, setMessages, sendMessage, stop, status, error, clearError } = useChat({
     id: threadId,
+    resume: !readOnly && provider(model) !== "gemini",
     messages: initialThread && settleInterruptedTools(initialThread.messages),
     transport,
+    onError: () => {
+      finishBrowserTurn.current?.();
+      finishBrowserTurn.current = null;
+      endChatTurn(threadId);
+    },
+    onFinish: ({ messages: finished, message, isAbort, isDisconnect, isError }) => {
+      // This callback outlives the panel when a browser turn finishes after navigation.
+      endChatTurn(threadId);
+      finishBrowserTurn.current?.();
+      finishBrowserTurn.current = null;
+      if (chatThreadDeleted(projectId, threadId)) return;
+      if (!isAbort && !isDisconnect && !isError) completedMessageId.current = message.id;
+      const stored = readThreads(projectId);
+      const previous = stored.find((thread) => thread.id === threadId);
+      const firstUser = finished.find((message) => message.role === "user");
+      const thread: ChatThread = {
+        ...previous,
+        id: threadId,
+        title: firstUser?.parts.map((part) => part.type === "text" ? part.text : "").join("").trim().slice(0, 80) || "New chat",
+        updatedAt: Date.now(),
+        completedMessageId: completedMessageId.current,
+        messages: recoverSceneCall(finished, threadId, useEditor.getState().projectId === projectId ? useEditor.getState().genvideo : undefined),
+        sessions: { ...providerSessions.current },
+        pi: readPiSession(threadId) ?? previous?.pi,
+      };
+      seenThreadAt.current = thread.updatedAt;
+      writeThreads(projectId, [thread, ...stored.filter((item) => item.id !== threadId)]);
+      void projectBackend(projectId).then((backend) => {
+        if (backend.kind === "cloud") return putCloudThread(backend, projectId, slimForStorage([thread])[0]);
+      }).catch(() => {});
+    },
     onData: (part) => {
       if (part.type === "data-session") {
         const d = part.data as {
@@ -826,23 +1017,27 @@ function ChatSession({
       if (clientToolsRef.current) return;
       // Execute on the editor store, then hand the result back to the
       // server-side bridge (which is holding the provider's tool call open).
+      const sessionKey = sessionKeyRef.current;
+      const signal = toolAbort.current.signal;
       void (async () => {
         const post = (payload: Record<string, unknown>) =>
           localBackend.fetch("/api/cut/ai/tool-result", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              sessionKey: sessionKeyRef.current,
+              sessionKey,
               toolCallId: toolCall.toolCallId,
               ...payload,
             }),
           });
         try {
-          const output = await runAiTool(
-            toolCall.toolName,
-            (toolCall.input ?? {}) as Record<string, unknown>,
-          );
-          await post({ output });
+          await withChatProject(projectId, async () => {
+            if (!(await claimEngineTool(sessionKey, toolCall.toolCallId))) return;
+            signal.throwIfAborted();
+            beginChatTurn(threadId);
+            const output = await runAiTool(toolCall.toolName, (toolCall.input ?? {}) as Record<string, unknown>);
+            await post({ output });
+          }, signal);
         } catch (err) {
           await post({
             errorText: err instanceof Error ? err.message : String(err),
@@ -852,6 +1047,20 @@ function ChatSession({
     },
   });
 
+  const savedScene = useEditor((s) => s.projectId === projectId ? s.genvideo : undefined);
+  useLayoutEffect(() => {
+    replayHandler.current = (id, requestId) => {
+      const lastUser = messages.findLast((m) => m.role === "user");
+      if (requestId && lastUser?.id !== requestId) return false;
+      setMessages((current) => current.map((m) => m.id === id ? { ...m, parts: [] } : m));
+      return true;
+    };
+  }, [messages, setMessages]);
+  const displayMessages = useMemo(
+    () => visible ? recoverSceneCall(messages, threadId, savedScene) : messages,
+    [messages, threadId, savedScene, visible],
+  );
+
   // The scene card is part of the conversation, not a pinned banner: it
   // renders right under the turn that planned the scene (the newest
   // generate_scene call), so later queries and answers read below it in
@@ -859,7 +1068,7 @@ function ChatSession({
   // one) falls back to the end of the list.
   const sceneAnchorId = useMemo(
     () =>
-      [...messages].reverse().find((m) =>
+      visible ? [...messages].reverse().find((m) =>
         m.parts.some((part) => {
           const name =
             part.type === "dynamic-tool"
@@ -869,28 +1078,64 @@ function ChatSession({
                 : undefined;
           return name === "generate_scene";
         }),
-      )?.id,
-    [messages],
+      )?.id : undefined,
+    [messages, visible],
   );
 
-  const busy = status === "submitted" || status === "streaming";
-  // The tab's own icon carries the turn, for the user reading another tab.
+  const browserRunning = useSyncExternalStore(watchBrowserChatTurns, () => browserChatRunning(projectId, threadId), () => false);
+  const busy = status === "submitted" || status === "streaming" || browserRunning;
   useEffect(() => {
-    reportActivity("chat", busy);
-    return () => reportActivity("chat", false);
-  }, [busy]);
-
+    toolAbort.current = new AbortController();
+    return () => {
+      toolAbort.current.abort();
+      // The engine owns the provider run; closing its reader detaches this editor.
+      if (provider(modelRef.current) !== "gemini") void stop();
+      closeReplay.current?.();
+    };
+  }, [stop]);
+  useEffect(() => {
+    onRunningChange(threadId, busy, model);
+  }, [busy, threadId, model, onRunningChange]);
+  useEffect(() => {
+    if (busy) return holdEditorChat(projectId);
+  }, [busy, projectId]);
+  const receivedThread = useRef(false);
+  useEffect(() => {
+    const receive = () => {
+      if (chatThreadDeleted(projectId, threadId)) {
+        toolAbort.current.abort();
+        cancelBrowserChat(projectId, threadId);
+        if (provider(modelRef.current) !== "gemini") void cancelEngineChat(projectId, threadId).catch(() => {});
+        void stop();
+        useGenScene.getState().killThread(threadId);
+        onDeleted(threadId);
+        return;
+      }
+      if (busy) return;
+      const thread = readThreads(projectId).find((t) => t.id === threadId);
+      if (!thread || thread.updatedAt <= seenThreadAt.current) return;
+      seenThreadAt.current = thread.updatedAt;
+      receivedThread.current = true;
+      completedMessageId.current = thread.completedMessageId;
+      providerSessions.current = { ...thread.sessions };
+      dropPiSession(threadId);
+      hydratePiSession(threadId, thread.pi);
+      setMessages(thread.messages);
+    };
+    const unsubscribe = subscribeChatThreads(projectId, receive);
+    receive();
+    return unsubscribe;
+  }, [projectId, threadId, busy, setMessages, stop, onDeleted]);
   // While this thread is open its tools tag created assets with it, so
   // deleting the thread later can clean them up.
   useEffect(() => {
+    if (!visible) return;
     setActiveChatThread(threadId);
     return () => setActiveChatThread(null);
-  }, [threadId]);
+  }, [threadId, visible]);
 
-  // Pin this thread as the owner while its turn streams. Deliberately no
-  // unmount cleanup: a thread switch mid-turn unmounts this session while the
-  // stream (and its tool calls) keeps running — the pin must outlive the
-  // panel so that work still files under the thread that asked.
+  // Browser turns can finish after project navigation, so ownership lasts
+  // until the turn settles.
   useEffect(() => {
     if (busy) beginChatTurn(threadId);
     else endChatTurn(threadId);
@@ -915,8 +1160,8 @@ function ChatSession({
   const saveTimer = useRef<number | null>(null);
   const saveThreadNow = useCallback(() => {
     const thread = pendingThread.current;
-    if (!thread) return;
     pendingThread.current = null;
+    if (!thread || chatThreadDeleted(projectId, thread.id)) return;
     if (saveTimer.current !== null) {
       window.clearTimeout(saveTimer.current);
       saveTimer.current = null;
@@ -926,13 +1171,15 @@ function ChatSession({
     // session has been let go reads back as undefined, and writing that would
     // erase the tool-call context the stored one still has. What is on disk
     // stands until a live session replaces it.
-    const merged = { ...thread, pi: thread.pi ?? stored.find((t) => t.id === thread.id)?.pi };
+    const merged = { ...thread, completedMessageId: completedMessageId.current, pi: thread.pi ?? stored.find((t) => t.id === thread.id)?.pi };
+    seenThreadAt.current = merged.updatedAt;
     writeThreads(projectId, [merged, ...stored.filter((t) => t.id !== thread.id)]);
     // Cloud projects mirror the thread server-side (debounced while it streams).
     queueCloudThreadSave(projectId, slimForStorage([merged])[0]);
   }, [projectId]);
   useEffect(() => {
     if (messages.length === 0) return;
+    if (receivedThread.current) { receivedThread.current = false; return; }
     const firstUser = messages.find((m) => m.role === "user");
     const title =
       firstUser?.parts
@@ -944,7 +1191,7 @@ function ChatSession({
       id: threadId,
       title,
       updatedAt: Date.now(),
-      messages,
+      messages: recoverSceneCall(messages, threadId, useEditor.getState().genvideo),
       sessions: { ...providerSessions.current },
       pi: readPiSession(threadId),
     };
@@ -1000,11 +1247,11 @@ function ChatSession({
     });
     ro.observe(content);
     return () => ro.disconnect();
-  }, []);
+  }, [visible]);
   useEffect(() => {
     const el = scrollRef.current;
     if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
-  }, [messages, busy]);
+  }, [messages, busy, visible]);
 
   const [sendError, setSendError] = useState<string | null>(null);
   // Messages submitted while a turn runs wait here and dispatch one at a time
@@ -1027,7 +1274,7 @@ function ChatSession({
     const ro = new ResizeObserver(() => setOverlayH(el.offsetHeight));
     ro.observe(el);
     return () => ro.disconnect();
-  }, [readOnly]);
+  }, [readOnly, visible]);
   const currentAvailable = info
     ? info.providers[provider(model)]?.available !== false
     : true;
@@ -1160,14 +1407,16 @@ function ChatSession({
   // the picker, so fall back to the first installed provider rather than sit on
   // a selection the user can no longer see or change.
   useEffect(() => {
-    if (!info || info.providers[provider(model)]?.installed !== false) return;
+    if (!visible || !info || info.providers[provider(model)]?.installed !== false) return;
     const fallback = AI_MODELS.find(
       (m) => !m.hidden && info.providers[provider(m.id)]?.installed !== false,
     );
     if (fallback && fallback.id !== model) onModelChange(fallback.id);
-  }, [info, model, onModelChange]);
+  }, [info, model, onModelChange, visible]);
   const outOfCredits = useOutOfCredits((s) => s.out);
   useCreditsRecheck();
+
+  if (!visible) return null;
 
   return (
     <div
@@ -1208,7 +1457,7 @@ function ChatSession({
               </div>
             </div>
           )}
-          {messages.map((m) => (
+          {displayMessages.map((m) => (
             <Fragment key={m.id}>
               <MessageView message={m} />
               {m.id === sceneAnchorId && <SceneCard threadId={threadId} />}
@@ -1418,6 +1667,9 @@ function ChatSession({
                         // pausing it anyway would leave a stale flag.
                         if (queue.some((m) => m.status === "queued"))
                           setQueuePaused(true);
+                        toolAbort.current.abort();
+                        if (provider(model) !== "gemini") void cancelEngineChat(projectId, threadId).catch((error) => showNotice(String(error)));
+                        cancelBrowserChat(projectId, threadId);
                         void stop();
                       }}
                     >

@@ -1,5 +1,6 @@
 "use client";
 
+import { chatRuntime } from "@/cut/lib/chatRuntime";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Clapperboard, Laptop, Loader2, X } from "lucide-react";
@@ -41,6 +42,8 @@ import { meterMainThread, meterPerf, stopMainThreadMeter, stopMeter } from "@/cu
 import { isDragActive } from "@/cut/lib/drag";
 import { track } from "@/lib/analytics";
 import { ensureCloudThreads } from "@/cut/lib/chatCloud";
+import { registerEditorSave, editorChatActive, editorToolsActive, finishEditorWork, holdEditorLoad } from "@/cut/lib/editorWork";
+import { noteProjectRevision, projectRevision } from "@/cut/lib/projectRevision";
 import { readProjectThreads, writeActiveChat } from "@/cut/lib/chatThreads";
 import { backTarget, useCutBase } from "@/cut/lib/nav";
 import { useOnboardingCover } from "@/cut/lib/onboarding";
@@ -62,6 +65,7 @@ import { fileLandingAt } from "@/cut/lib/timelineDrop";
 import { playheadAt, previewAt, skimAt } from "@/cut/lib/playhead";
 import type { MediaAsset } from "@/cut/lib/types";
 import { AiPanel } from "./AiPanel";
+import type { ChatStatus } from "./ChatStatusBadge";
 import { ExportDialog } from "./ExportDialog";
 import { Inspector } from "./Inspector";
 import { Lightbox } from "./Lightbox";
@@ -98,6 +102,12 @@ export function Editor({
    * the store in read-only mode before mounting. */
   viewer?: boolean;
 }) {
+  const [chatActivity, setChatActivity] = useState<{ projectId: string; status: ChatStatus } | null>(null);
+  const onChatStatusChange = useCallback((id: string, status: ChatStatus) => {
+    setChatActivity((current) => current?.projectId === id && current.status === status
+      ? current : { projectId: id, status });
+  }, []);
+  const chatStatus = chatActivity?.projectId === projectId ? chatActivity.status : null;
   useEffect(() => installDevHooks(), []);
   // Diagnostics: the engine counts what its frames did, the main thread
   // reports the frames it was blocked in — with the script that ran them —
@@ -146,11 +156,7 @@ export function Editor({
   // rendering the editor against it would leak that project's state (chat,
   // clips, selection) into this route.
   const stale = useEditor((s) => s.projectId) !== projectId;
-  // Leaving the editor keeps the store as it was, so on reopening the same
-  // project `stale` alone would let a full editor — preview, decoders, poster
-  // — render against that leftover state for the frames before the load
-  // resets it: a flash of the old picture, then the loading screen. The
-  // editor earns its first paint only once this mount's own load has begun.
+  // This mount earns its first paint once its own document load begins.
   const [opened, setOpened] = useState(false);
   const exportOpen = useEditor((s) => s.exportOpen);
   const aiOpen = useEditor((s) => s.aiOpen);
@@ -216,23 +222,21 @@ export function Editor({
     let alive = true;
     let waiting: (() => void) | undefined;
 
-    const open = () => {
+    const open = async () => {
+      const release = await holdEditorLoad();
+      if (!alive) { release(); return; }
       const bind = viewer
         ? Promise.resolve({ mode: "shared" as const, reachable: true })
         : resolveProjectPlacement(projectId).then((placement) => {
             if (alive) bindCutMode(placement.mode);
             return placement;
           });
-      void bind.then((placement) => {
+      void bind.then(async (placement) => {
         if (!alive) return;
         if (placement.reachable) {
           setNeedsApp(false);
-          // loadProject clears `loaded` synchronously before its first await,
-          // so marking the mount opened here can never show the editor
-          // against leftover state.
-          // loadProject sweeps the enrich caches itself, once per paint.
-          void useEditor.getState().loadProject(projectId, { viewer });
           setOpened(true);
+          await useEditor.getState().loadProject(projectId, { viewer });
           return;
         }
         // The project is on this Mac with no app answering. The gate keeps
@@ -258,7 +262,7 @@ export function Editor({
           return;
         }
         setNeedsApp(true);
-      });
+      }).finally(release);
     };
     open();
 
@@ -268,7 +272,7 @@ export function Editor({
     return () => {
       alive = false;
       waiting?.();
-      releaseCutMode();
+
     };
   }, [projectId, viewer]);
 
@@ -333,15 +337,20 @@ export function Editor({
   // response is cached at the edge for that same interval, so the poll usually
   // never reaches the origin at all.
   useEffect(() => {
-    if (!viewer) return;
     let stopped = false;
+    let polling = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const tick = async () => {
-      if (stopped) return;
-      let nextIn = document.hidden ? VIEWER_POLL_MAX_MS : VIEWER_POLL_MIN_MS;
+      if (stopped || polling) return;
+      polling = true;
+      let nextIn = document.hidden ? VIEWER_POLL_MAX_MS : (viewer ? VIEWER_POLL_MIN_MS : chatRuntime().syncIntervalMs);
       try {
-        if (!document.hidden) {
+        const current = useEditor.getState();
+        if (!document.hidden && current.projectId === projectId && current.loaded &&
+            !current.playing && !editorToolsActive() && !editorChatActive(projectId) && (viewer || current.saveState === "saved")) {
           const res = await apiFetch(`/api/cut/projects/${projectId}`, { method: "HEAD" });
+          const latest = useEditor.getState();
+          if (stopped || latest.projectId !== projectId || !latest.loaded || latest.playing) return;
           if ([401, 403, 404].includes(res.status)) {
             stopped = true;
             setShareGone(true);
@@ -356,23 +365,34 @@ export function Editor({
             // still coming from cache is fetched again on the next tick
             // instead of the viewer settling on an older cut.
             const version = res.headers.get("x-cut-doc-version");
-            const showing = loadedDocVersion(projectId);
+            const showing = viewer ? loadedDocVersion(projectId) : projectRevision(projectId);
             if (version && showing && version !== showing) {
+              if (!viewer && (useEditor.getState().saveState !== "saved" || editorToolsActive() || editorChatActive(projectId))) return;
               const at = playheadAt();
               await useEditor.getState().loadProject(projectId, { inPlace: true, viewer });
-              useEditor.getState().seek(at);
+              if (!stopped && useEditor.getState().projectId === projectId) useEditor.getState().seek(at);
             }
           }
         }
       } catch {
         // Transient network failure — the next tick retries.
       } finally {
+        polling = false;
         if (!stopped) timer = setTimeout(() => void tick(), nextIn);
       }
     };
-    timer = setTimeout(() => void tick(), VIEWER_POLL_MIN_MS);
+    const focus = () => {
+      if (document.hidden) return;
+      if (timer) clearTimeout(timer);
+      void tick();
+    };
+    document.addEventListener("visibilitychange", focus);
+    window.addEventListener("focus", focus);
+    timer = setTimeout(() => void tick(), viewer ? VIEWER_POLL_MIN_MS : chatRuntime().syncIntervalMs);
     return () => {
       stopped = true;
+      document.removeEventListener("visibilitychange", focus);
+      window.removeEventListener("focus", focus);
       if (timer) clearTimeout(timer);
     };
   }, [viewer, projectId]);
@@ -494,7 +514,10 @@ export function Editor({
 
   // Autosave: debounce document changes into PUT /api/cut/projects/<id>.
   useEffect(() => {
-    if (viewer) return;
+    if (viewer) return () => {
+      useEditor.getState().closeProject(projectId);
+      releaseCutMode();
+    };
     let timer: ReturnType<typeof setTimeout> | null = null;
     let last = serializeDoc(useEditor.getState());
     let lastName = useEditor.getState().projectName;
@@ -518,27 +541,21 @@ export function Editor({
     // racing a second PUT alongside the first — the engine would apply the
     // two in whichever order they arrive, and the cloud would answer the
     // second with a conflict against this same session's write.
-    let inFlight = false;
+    let inFlight: Promise<void> | null = null;
     let queued = false;
-    // Bumped on every edit. A save that succeeds only rewrites the disk
-    // snapshot clean when no edit landed while it was on the wire — a newer
-    // dirty record must not be overwritten by the older doc the save carried.
     let editSeq = 0;
-    const save = async () => {
+    const save = (): Promise<void> => {
       if (inFlight) {
         queued = true;
-        return;
+        return inFlight;
       }
-      inFlight = true;
-      try {
-        await putDoc();
-      } finally {
-        inFlight = false;
-        if (queued) {
+      inFlight = (async () => {
+        do {
           queued = false;
-          void save();
-        }
-      }
+          await putDoc();
+        } while (queued);
+      })().finally(() => { inFlight = null; });
+      return inFlight;
     };
     const putDoc = async () => {
       const s = useEditor.getState();
@@ -553,8 +570,13 @@ export function Editor({
           body: JSON.stringify(doc),
         });
         if (res.ok) {
+          const saved = await res.clone().json() as { revision?: string; version?: number; updatedAt?: number };
+          const revision = saved.revision ?? saved.version ?? saved.updatedAt;
+          if (revision !== undefined && useEditor.getState().projectId === projectId)
+            noteProjectRevision(projectId, String(revision));
           failures = 0;
-          useEditor.getState().setSaveState("saved");
+          if (useEditor.getState().projectId === projectId && useEditor.getState().loadEpoch === s.loadEpoch)
+            useEditor.getState().setSaveState(editSeq === seqAtSend ? "saved" : "dirty");
           // The snapshot the next open paints from is whatever this browser
           // last put on the server, so it tracks every save.
           if (editSeq === seqAtSend) writeCachedDoc(projectId, doc);
@@ -567,6 +589,14 @@ export function Editor({
         retry();
       }
     };
+
+    const unregisterSave = registerEditorSave(projectId, async () => {
+      if (timer) clearTimeout(timer);
+      if (inFlight || useEditor.getState().saveState !== "saved") await save();
+      const current = useEditor.getState();
+      if (current.projectId === projectId && (!current.loaded || current.saveState !== "saved"))
+        throw new Error("Save the project before continuing the video run.");
+    });
 
     // Re-baselined every time a document is hydrated — the snapshot an open
     // paints, the live document that replaces it, a conflict reload — so a
@@ -648,6 +678,7 @@ export function Editor({
       // inside the debounce window resumes on the next open instead of
       // losing the edit.
       writeCachedDocDirty(projectId, last, knownDocVersion(projectId));
+      if (inFlight) queued = true;
       if (s.saveState !== "saving") s.setSaveState("dirty");
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => void save(), 800);
@@ -656,10 +687,21 @@ export function Editor({
     const onPageHide = () => flushCachedDocWrites();
     window.addEventListener("pagehide", onPageHide);
     return () => {
-      unsub();
       if (timer) clearTimeout(timer);
       window.removeEventListener("pagehide", onPageHide);
-      flushCachedDocWrites();
+      void finishEditorWork(async () => {
+        try {
+          if (useEditor.getState().projectId !== projectId) return;
+          if (inFlight || useEditor.getState().saveState !== "saved") await save();
+          useEditor.getState().closeProject(projectId);
+          releaseCutMode();
+        } finally {
+          unregisterSave();
+          unsub();
+          if (timer) clearTimeout(timer);
+          flushCachedDocWrites();
+        }
+      }).catch((error) => console.error("Could not finish saving the project:", error));
     };
   }, [projectId, viewer]);
 
@@ -1133,9 +1175,10 @@ export function Editor({
       <TabStatus />
       <div className="grid min-w-0 flex-1 grid-rows-[46px_minmax(0,1fr)_auto_auto]">
         {viewer ? (
-          <ViewerTopBar />
+          <ViewerTopBar chatStatus={chatStatus} />
         ) : (
           <TopBar
+            chatStatus={chatStatus}
             onImport={importFiles}
             from={from}
             folder={folder}
@@ -1160,10 +1203,12 @@ export function Editor({
         <SpeedCurveStrip />
         <Timeline />
       </div>
-      {aiOpen && (!viewer || sharedFeatures?.chat) && (
+      {(!viewer || sharedFeatures?.chat) && (
         <AiPanel
           key={projectId}
           projectId={projectId}
+          visible={aiOpen}
+          onStatusChange={onChatStatusChange}
           onClose={() => useEditor.getState().setAiOpen(false)}
         />
       )}
