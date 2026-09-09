@@ -1,3 +1,4 @@
+import { listChatThreads } from "./chats";
 // Viewer-side reads of a shared cloud project. Every handler resolves the
 // share token first, then reads the OWNER's rows and presigns the owner's R2
 // keys — the viewer's session (if any) only ever gates access. The server is
@@ -237,15 +238,7 @@ export const sharedView = {
     const view = await resolveShare(token, req);
     if (view instanceof Response) return view;
     if (id !== view.share.projectId || !view.features.chat) return err("Not found.", 404);
-    const rows = await prisma.cutChatThread.findMany({
-      where: { userId: view.share.userId, projectId: id },
-      orderBy: { updatedAt: "desc" },
-      select: { data: true, updatedAt: true },
-    });
-    return Response.json(
-      rows.map((r) => r.data),
-      { headers: shareCacheHeaders(view.share, rows[0]?.updatedAt) }
-    );
+    return listChatThreads(view.share.userId, id, req, (updatedAt) => shareCacheHeaders(view.share, updatedAt));
   },
 
   /**

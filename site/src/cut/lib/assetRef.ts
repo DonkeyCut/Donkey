@@ -864,20 +864,21 @@ export function selectionRefTokens(s: EntitySources & {
  * Names are unique within the list (first scope wins) so a mention resolves
  * to one asset. Library items mention by name; stock ids are already short
  * (`@nature-dunes`). */
-export function useRefCandidates(): AssetRef[] {
-  const assets = useEditor((s) => s.assets);
-  const clips = useEditor((s) => s.clips);
-  const audioClips = useEditor((s) => s.audioClips);
-  const overlays = useEditor((s) => s.overlays);
-  const transitions = useEditor((s) => s.transitions);
-  const subtitles = useEditor((s) => s.subtitles);
-  const projectTemplates = useEditor((s) => s.templates);
+export function useRefCandidates(enabled = true): AssetRef[] {
+  const assets = useEditor((s) => enabled ? s.assets : null);
+  const clips = useEditor((s) => enabled ? s.clips : null);
+  const audioClips = useEditor((s) => enabled ? s.audioClips : null);
+  const overlays = useEditor((s) => enabled ? s.overlays : null);
+  const transitions = useEditor((s) => enabled ? s.transitions : null);
+  const subtitles = useEditor((s) => enabled ? s.subtitles : null);
+  const projectTemplates = useEditor((s) => enabled ? s.templates : null);
   // The same listing the Library panel and the Camera Roll read, so a clip
   // uploaded from the phone or a template just pushed to the shelf is
   // mentionable the moment it lands.
-  const lib = useLibrary().data ?? EMPTY_LIBRARY;
+  const lib = useLibrary({ enabled }).data ?? EMPTY_LIBRARY;
 
   return useMemo(() => {
+    if (!assets || !clips || !audioClips || !overlays || !transitions || !subtitles || !projectTemplates) return [];
     const project = projectRefs(assets);
     const seen = new Set<string>();
     const out: AssetRef[] = [];

@@ -4,7 +4,7 @@
 // Media bytes ride presigned R2 URLs minted by those routes, not this
 // transport.
 import { emitStorageQuota } from "../storageQuota";
-import type { CutBackend } from "./types";
+import type { CutBackend, CutRequestInit } from "./types";
 
 const cloudPath = (path: string) => path.replace(/^\/api\/cut\//, "/api/cut-cloud/");
 
@@ -71,10 +71,11 @@ const docGets = new Map<string, Promise<void>>();
 // /projects/:id only — /projects/folders is the folder collection, not a doc.
 const PROJECT_DOC = /^\/api\/cut\/projects\/(?!folders$)([^/?]+)$/;
 
-async function cloudFetch(path: string, init?: RequestInit): Promise<Response> {
+async function cloudFetch(path: string, options?: CutRequestInit): Promise<Response> {
+  const { observe, ...init } = options ?? {};
   const doc = PROJECT_DOC.exec(path);
   const method = (init?.method ?? "GET").toUpperCase();
-  if (!doc || (method !== "GET" && method !== "PUT")) return cloudRequest(cloudPath(path), init);
+  if (observe || !doc || (method !== "GET" && method !== "PUT")) return cloudRequest(cloudPath(path), init);
   const projectId = decodeURIComponent(doc[1]);
 
   if (method === "GET") {

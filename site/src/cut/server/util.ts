@@ -26,7 +26,9 @@ export async function writeJsonAtomic(filePath: string, value: unknown) {
   const tmp = `${filePath}.${crypto.randomUUID().slice(0, 8)}.tmp`;
   await writeFile(tmp, json);
   await writeFile(`${filePath}.bak`, json).catch(() => {});
+  const revision = String((await stat(tmp)).mtimeMs);
   await rename(tmp, filePath);
+  return revision;
 }
 
 /** First executable *file* named `name` on PATH, or null. Directories carry the

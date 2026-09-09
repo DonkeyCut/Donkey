@@ -183,7 +183,12 @@ export const projectsCloud = {
     }
   },
 
-  async get(userId: string, id: string) {
+  async get(userId: string, id: string, req: Request) {
+    if (req.method === "HEAD") {
+      const row = await prisma.cutProject.findFirst({ where: { id, userId }, select: { version: true } });
+      if (!row) return err("Project not found.", 404);
+      return new Response(null, { headers: { "x-cut-doc-version": String(row.version) } });
+    }
     const row = await getProject(userId, id);
     if (!row) return err("Project not found.", 404);
     return Response.json(docOf(row), {

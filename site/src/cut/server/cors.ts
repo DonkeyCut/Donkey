@@ -29,5 +29,9 @@ export function preflightHeaders(
 
 /** Response headers that expose an allowed origin on a normal response. */
 export function corsHeaders(origin: string): Record<string, string> {
-  return { "Access-Control-Allow-Origin": origin, Vary: "Origin" };
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Expose-Headers": "x-cut-doc-version, x-cut-poll-after",
+    Vary: "Origin",
+  };
 }

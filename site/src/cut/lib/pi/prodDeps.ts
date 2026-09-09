@@ -4,6 +4,8 @@ import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
 import { AI_SKILL_INDEX, AI_SKILLS } from "@/cut/server/ai/catalog";
 import { buildAiContext } from "../aiContext";
 import { runAiTool } from "../aiTools";
+import { runProjectChatTool, withChatProject } from "../projectChatTools";
+import { useEditor } from "../store";
 import { normalizeRef } from "../assetRef";
 import { NO_CREDITS_MESSAGE } from "../credits";
 import { useGenerate } from "../generate";
@@ -17,7 +19,8 @@ import { currentDebris } from "./debris";
 // cutAgent itself stays importable anywhere — the eval runs the same loop in
 // Bun with its own deps.
 
-export function productionDeps(): CutAgentDeps {
+export function productionDeps(projectId?: string, signal?: AbortSignal): CutAgentDeps {
+  const context = buildAiContext();
   return {
     post: (payload, signal) => hostedPost("/api/inference/responses", payload, signal),
     execTool: async (name, args) => {
@@ -27,19 +30,20 @@ export function productionDeps(): CutAgentDeps {
         if (!doc) throw new Error(`No such skill. Available: ${AI_SKILL_INDEX.join(", ")}`);
         return doc;
       }
-      return runAiTool(name, args);
+      return projectId ? runProjectChatTool(projectId, name, args, signal) : runAiTool(name, args);
     },
     models: {
       simple: geminiModelRoleNames.chatSimple,
       complex: geminiModelRoleNames.chat,
       gate: geminiModelRoleNames.fastDecision,
     },
-    buildContext: () => buildAiContext(),
+    buildContext: () => context,
     resolveRefs: async (meta) => {
       const refs = meta.map(normalizeRef).filter((r) => r !== null);
-      return (await refsToParts(refs)).parts;
+      const resolve = async () => (await refsToParts(refs)).parts;
+      return projectId ? withChatProject(projectId, resolve, signal) : resolve();
     },
-    debris: currentDebris,
+    debris: () => !projectId || useEditor.getState().projectId === projectId ? currentDebris() : [],
     onAuthFail: () => useGenerate.getState().probe(),
     noCreditsMessage: NO_CREDITS_MESSAGE,
     hooks: {

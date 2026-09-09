@@ -1,11 +1,17 @@
 import { spawn, execFile } from "node:child_process";
 import os from "node:os";
+import { z } from "zod";
+import { SETTINGS } from "@/lib/config/registry";
+import { startTurnStream, followTurnStream, cancelTurnStream } from "../ai/turnStreams";
 import path from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } from "ai";
+import { createUIMessageStream, type UIMessage } from "ai";
 
 import {
   callBrowserTool,
+  attachSession,
+  detachSession,
+  claimBrowserTool,
   registerSession,
   resolveBrowserTool,
   unregisterSession,
@@ -16,6 +22,7 @@ import { writeVisualCues, type VisualFrame } from "../ai/visualSubtitles";
 import { AI_SKILL_INDEX, AI_SKILLS, AI_TOOLS, attachedAssetsBlock, systemPrompt } from "../ai/catalog";
 
 interface ChatBody {
+  threadId: string;
   messages: UIMessage[];
   model: string;
   context?: unknown;
@@ -68,6 +75,7 @@ async function runClaude(
   sessionKey: string,
   signal: AbortSignal
 ) {
+  signal.throwIfAborted();
   const q = query({
     prompt,
     options: {
@@ -163,6 +171,7 @@ async function runCodex(
   sessionKey: string,
   signal: AbortSignal
 ) {
+  signal.throwIfAborted();
   const mcp = mcpCommand(base, sessionKey);
   const session = body.providerSession;
   const args = ["exec"];
@@ -386,14 +395,23 @@ export const aiApi = {
   },
 
   async chat(req: Request) {
-    const body = (await req.json()) as ChatBody;
+    const body = (await req.json().catch(() => null)) as ChatBody;
+    const identity = z.object({
+      threadId: z.string().min(1).max(200),
+      model: z.string().min(1).max(200),
+      messages: z.array(z.object({ id: z.string(), role: z.enum(["user", "assistant", "system"]), parts: z.array(z.object({ type: z.string() })) })),
+      runtime: SETTINGS.chatRuntime.schema,
+      context: z.object({ project: z.object({ id: z.string().min(1).max(200) }) }),
+    }).safeParse(body);
+    if (!identity.success) return Response.json({ error: "A project and chat are required." }, { status: 400 });
+    const projectId = identity.data.context.project.id;
     const base = new URL(req.url).origin;
     const sessionKey = crypto.randomUUID();
     const userText = lastUserText(body.messages);
     const attachments = lastUserAttachments(body.messages);
     const prompt = `${userText}${attachedAssetsBlock(attachments)}\n\n<editor_state>\n${JSON.stringify(body.context ?? {})}\n</editor_state>`;
 
-    const stream = createUIMessageStream({
+    return startTurnStream(projectId, body.threadId, (signal) => createUIMessageStream({
       execute: async ({ writer }) => {
         const emit: UIChunkWriter["write"] = (chunk) =>
           writer.write(chunk as Parameters<typeof writer.write>[0]);
@@ -401,16 +419,18 @@ export const aiApi = {
         // turn whose tab closes finishes through the engine's own executor.
         const projectId = (body.context as { project?: { id?: string } } | undefined)?.project?.id;
         registerSession(sessionKey, { write: emit }, typeof projectId === "string" ? projectId : undefined);
-        emit({ type: "start" });
+        emit({ type: "start", messageId: `turn-${sessionKey}`, messageMetadata: {
+          requestMessageId: body.messages.findLast((message) => message.role === "user")?.id,
+        } });
         // The browser posts tool outputs back to /api/cut/ai/tool-result with this key.
         emit({ type: "data-session", data: { sessionKey }, transient: true });
         try {
           if (body.model.startsWith("claude")) {
-            await runClaude(emit, prompt, body, base, sessionKey, req.signal);
+            await runClaude(emit, prompt, body, base, sessionKey, signal);
           } else if (body.model === "cut-test") {
             await runFake(emit, sessionKey, userText);
           } else {
-            await runCodex(emit, prompt, body, base, sessionKey, req.signal);
+            await runCodex(emit, prompt, body, base, sessionKey, signal);
           }
         } catch (err) {
           emit({ type: "error", errorText: err instanceof Error ? err.message : String(err) });
@@ -419,9 +439,26 @@ export const aiApi = {
           emit({ type: "finish" });
         }
       },
-    });
+    }), () => attachSession(sessionKey), () => detachSession(sessionKey), identity.data.runtime.journalBytes, req.signal);
+  },
 
-    return createUIMessageStreamResponse({ stream });
+  async resumeChat(req: Request, threadId: string) {
+    const projectId = new URL(req.url).searchParams.get("projectId");
+    if (!projectId) return Response.json({ error: "A project is required." }, { status: 400 });
+    return followTurnStream(projectId, threadId, req.signal);
+  },
+
+  async cancelChat(req: Request, threadId: string) {
+    const body = z.object({ projectId: z.string().min(1).max(200) }).safeParse(await req.json().catch(() => null));
+    if (!body.success) return Response.json({ error: "A project is required." }, { status: 400 });
+    cancelTurnStream(body.data.projectId, threadId);
+    return Response.json({ ok: true });
+  },
+
+  async claimTool(req: Request) {
+    const body = z.object({ sessionKey: z.string().min(1).max(200), toolCallId: z.string().min(1).max(200) }).safeParse(await req.json().catch(() => null));
+    if (!body.success) return Response.json({ error: "A chat session and tool call are required." }, { status: 400 });
+    return Response.json({ claimed: claimBrowserTool(body.data.sessionKey, body.data.toolCallId) });
   },
 
   async models() {

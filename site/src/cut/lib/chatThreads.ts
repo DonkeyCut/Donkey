@@ -11,6 +11,17 @@ export const threadsKey = (projectId: string) => `cut-ai-threads-${projectId}`;
 // The open chat survives hiding the panel — only the + button starts a new one.
 export const activeChatKey = (projectId: string) => `cut-ai-active-${projectId}`;
 
+const changes = new Set<(projectId: string) => void>();
+export function subscribeChatThreads(projectId: string, onChange: () => void): () => void {
+  const local = (id: string) => { if (id === projectId) onChange(); };
+  const remote = (event: StorageEvent) => {
+    if (event.key === threadsKey(projectId)) onChange();
+  };
+  changes.add(local);
+  window.addEventListener("storage", remote);
+  return () => { changes.delete(local); window.removeEventListener("storage", remote); };
+}
+
 // Where the threads live. An owner's are durable in localStorage; a shared
 // viewer holds the owner's copy in memory for the tab, so reading someone
 // else's project leaves nothing in this browser — and an owner opening their
@@ -25,7 +36,7 @@ export function holdThreadsInMemory(): void {
 /** A saved thread as this module handles it: an opaque record read only for its
  * id and modified time, so history, the cloud mirror, and project copies can
  * move threads around without knowing the panel's payload. */
-export type StoredThread = { id: string; updatedAt?: number };
+export type StoredThread = { id: string; updatedAt?: number; deleted?: boolean };
 
 export const isStoredThread = (v: unknown): v is StoredThread =>
   !!v && typeof v === "object" && typeof (v as StoredThread).id === "string";
@@ -44,12 +55,17 @@ export function readRawThreads(projectId: string): unknown[] {
 
 /** Replace a project's thread list, payload untouched. */
 export function writeRawThreads(projectId: string, list: unknown[]): void {
+  // Deletion wins over callbacks and remote copies still holding the old thread.
+  const deleted = readRawThreads(projectId).filter(isStoredThread).filter((t) => t.deleted);
+  if (deleted.length) list = mergeThreads(list.filter(isStoredThread), deleted);
   if (memory) {
     memory.threads.set(projectId, list);
+    for (const onChange of changes) onChange(projectId);
     return;
   }
   try {
     localStorage.setItem(threadsKey(projectId), JSON.stringify(list));
+    for (const onChange of changes) onChange(projectId);
   } catch {
     // Storage full/blocked — history just won't persist.
   }
@@ -92,7 +108,7 @@ export function mergeThreads(...lists: StoredThread[][]): StoredThread[] {
   const byId = new Map<string, StoredThread>();
   for (const t of lists.flat()) {
     const prev = byId.get(t.id);
-    if (!prev || (t.updatedAt ?? 0) >= (prev.updatedAt ?? 0)) byId.set(t.id, t);
+    if (!prev || t.deleted || (!prev.deleted && (t.updatedAt ?? 0) >= (prev.updatedAt ?? 0))) byId.set(t.id, t);
   }
   return [...byId.values()].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
 }
@@ -102,7 +118,7 @@ export function mergeThreads(...lists: StoredThread[][]): StoredThread[] {
  * (deleted, or its whole project deleted, which clears these keys) is dismissed
  * rather than landed, so a reload can't resurrect media the user removed. */
 export function readThreadIds(projectId: string): Set<string> {
-  return new Set(readProjectThreads(projectId).map((t) => t.id));
+  return new Set(readProjectThreads(projectId).filter((t) => !t.deleted).map((t) => t.id));
 }
 
 /** Drop a project's chat history and active-thread pointer — called when the
@@ -119,4 +135,13 @@ export function clearProjectThreads(projectId: string): void {
   } catch {
     // Storage blocked — nothing to clear.
   }
+}
+
+export function chatThreadDeleted(projectId: string, threadId: string): boolean {
+  return readProjectThreads(projectId).some((t) => t.id === threadId && t.deleted === true);
+}
+
+export function deleteStoredThread(projectId: string, threadId: string): void {
+  const threads = readProjectThreads(projectId).filter((t) => t.id !== threadId);
+  writeProjectThreads(projectId, [{ id: threadId, updatedAt: Date.now(), deleted: true }, ...threads]);
 }

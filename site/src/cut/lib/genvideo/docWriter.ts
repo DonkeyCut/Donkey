@@ -16,7 +16,7 @@ import { retimeOf } from "@donkeycut/effects-kit";
  * the doc is just the other end of the same contract.
  */
 
-import { apiJson, getBackend, type CutBackend } from "../backend";
+import { apiJson, type CutBackend } from "../backend";
 import { storedMediaUrl } from "../mediaSync";
 import { projectBackend } from "../residency";
 import { footprints, nextFreeStart, placeInRun, RENDERS_CAP, storedAssets, useEditor } from "../store";
@@ -36,15 +36,16 @@ export function withProjectDoc(
   mutate: (doc: ProjectDoc) => void,
   // Background writes can outlive navigation into a project of the other
   // residency; callers that know their backend pin it here.
-  backend: CutBackend = getBackend()
+  backend?: CutBackend
 ): Promise<void> {
   const prev = chains.get(projectId) ?? Promise.resolve();
   const next = prev.then(async () => {
-    const res = await backend.fetch(`/api/cut/projects/${projectId}`);
+    const owner = backend ?? await projectBackend(projectId);
+    const res = await owner.fetch(`/api/cut/projects/${projectId}`);
     const doc = await apiJson<ProjectDoc>(res);
     if (!res.ok) throw new Error(doc?.error ?? "Could not read the project.");
     mutate(doc);
-    const put = await backend.fetch(`/api/cut/projects/${projectId}`, {
+    const put = await owner.fetch(`/api/cut/projects/${projectId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(doc),

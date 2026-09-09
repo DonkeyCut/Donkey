@@ -167,16 +167,25 @@ export async function updateIndex(mutate: (idx: StoreIndex) => StoreIndex | void
 
 // --- docs ---
 
+export async function docFile(id: string): Promise<File | null> {
+  return readFileAt(await projectDir(id), "project.json");
+}
+
 export async function readDoc(id: string): Promise<ProjectDoc | null> {
   return readJson<ProjectDoc>(await projectDir(id), "project.json");
 }
 
-export async function writeDoc(id: string, doc: ProjectDoc): Promise<void> {
-  const dir = await projectDir(id, true);
-  if (!dir) throw new Error("Browser storage is unavailable.");
-  doc.id = id;
-  doc.updatedAt = Date.now();
-  await writeFileAt(dir, "project.json", JSON.stringify(doc));
+export async function writeDoc(id: string, doc: ProjectDoc): Promise<string> {
+  return withStoreLock(`doc:${id}`, async () => {
+    const dir = await projectDir(id, true);
+    if (!dir) throw new Error("Browser storage is unavailable.");
+    doc.id = id;
+    doc.updatedAt = Date.now();
+    await writeFileAt(dir, "project.json", JSON.stringify(doc));
+    const file = await readFileAt(dir, "project.json");
+    if (!file) throw new Error("Could not read the saved project.");
+    return String(file.lastModified);
+  });
 }
 
 /** Every project id in the store (directories holding a readable doc). */

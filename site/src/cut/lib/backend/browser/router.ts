@@ -114,8 +114,8 @@ async function putProject(req: Request, id: string): Promise<Response> {
       genvideo: body.genvideo !== undefined ? body.genvideo ?? undefined : existing.genvideo,
       renders: Array.isArray(body.renders) ? body.renders : existing.renders,
     };
-    await store.writeDoc(id, doc);
-    return json({ ok: true, updatedAt: doc.updatedAt });
+    const revision = await store.writeDoc(id, doc);
+    return json({ ok: true, updatedAt: doc.updatedAt, revision });
   } catch (e) {
     return caught(e, "Could not save project.");
   }
@@ -386,9 +386,11 @@ export async function dispatchBrowserRoute(
     // /projects/:id
     if (rest.length === 2) {
       if (method === "HEAD" || method === "GET") {
-        const doc = await store.readDoc(id);
-        if (!doc) return err("Project not found.", 404);
-        return method === "HEAD" ? new Response(null, { status: 200 }) : json(doc);
+        const file = await store.docFile(id);
+        if (!file) return err("Project not found.", 404);
+        const headers = { "x-cut-doc-version": String(file.lastModified) };
+        if (method === "HEAD") return new Response(null, { headers });
+        return new Response(file, { headers: { ...headers, "Content-Type": "application/json" } });
       }
       if (method === "PUT") return putProject(req(), id);
       if (method === "DELETE") {

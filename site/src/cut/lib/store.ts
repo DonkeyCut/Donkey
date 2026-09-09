@@ -1,4 +1,5 @@
 "use client";
+import { noteProjectRevision } from "./projectRevision";
 
 import { EMPTY_GUIDE_LINES, sanitizeGuideLines, sanitizeGuides, type GuideId, type GuideLines } from "./guides";
 import {
@@ -419,6 +420,7 @@ export interface EditorState {
   /** Open a project from an already-fetched document. The headless runner's
    * open: resets the store, drains pending doc writes, and hydrates straight
    * from the given document. */
+  closeProject: (id: string) => void;
   openProjectDoc: (id: string, doc: Partial<ProjectDoc>, assets: MediaAsset[]) => Promise<void>;
   setProjectName: (name: string) => void;
   setSaveState: (s: SaveState) => void;
@@ -1676,79 +1678,86 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
 
   /** Reset to an empty, loading project and drain any background doc writes
    * still queued for it, so no open ever reads a half-written document. */
-  const resetForOpen = async (id: string, viewer: boolean) => {
-    // Blob URLs minted for the project being left go with it; the next open
-    // of that project re-registers what its store holds. A re-open of the
-    // same project keeps them — its state still points at them.
-    const prev = get().projectId;
-    if (prev && prev !== id) revokeRegistered(`/api/cut/projects/${prev}/`);
-    // Coming back to a project whose revoke is still waiting on an in-flight
-    // render's hold: the subtree is live again, so the revoke no longer
-    // applies — hydration is about to reuse those registrations.
-    cancelRevoke(`/api/cut/projects/${id}/`);
-    history.length = 0;
-    future.length = 0;
-    pending = null;
-    // A fresh project owns no live run — any prior run's render-owned ids are
-    // stale, and the loaded clips are ordinary, fully-undoable content.
-    genClipIds.clear();
-    genAudioIds.clear();
-    hydrating = true;
-    set({
-      projectId: id,
-      loaded: false,
-      loadError: null,
-      saveState: "saved",
-      resumePush: false,
-      // A share view is the one that refuses edits, and the surface opening
-      // the project is what knows it is one. Every other open clears the flag:
-      // left standing, it follows a tab out of a share link and back into that
-      // person's own projects, where a read-only editor keeps the mouse and
-      // loses the keyboard — which reads as a keyboard that has stopped
-      // working.
-      readOnly: viewer,
-      sharedFeatures: viewer ? get().sharedFeatures : null,
-      selectedKey: null,
-      assets: [],
-      loadingMedia: new Set<string>(),
-      clips: [],
-      transitions: [],
-      audioClips: [],
-      overlays: [],
-      templates: [],
-      mediaFolders: [],
-      aspect: lastChosenAspect() ?? "9:16",
-      aspectTouched: lastChosenAspect() !== null,
-      guides: [],
-      guidesHidden: false,
-      guideLines: EMPTY_GUIDE_LINES,
-      fadeIn: 0,
-      fadeOut: 0,
-      background: DEFAULT_BACKGROUND,
-      selection: null,
-      multiSelection: [],
-      playing: false,
-      buffering: false,
-      previewStopAt: null,
-      removalPeek: null,
-      subtitles: emptySubtitles(),
-      subtitleLane: 0,
-      subtitleStatus: "idle",
-      subtitleError: null,
-      exportOpen: false,
-      genvideo: undefined,
-      renders: [],
-      firstOpen: undefined,
-    });
-    hydrating = false;
-    // A background scene run may still be writing this project's doc — drain
-    // its queued writes so the open never reads a half-written doc. Ordering
-    // matters: projectId is set (loaded false) BEFORE this await, so a write
-    // arriving during the drain waits for the load (projectWriteMode) instead
-    // of queueing a doc write the drain would miss — nothing can land between
-    // the drain and the fetch that follows. Lazy import: docWriter reads store
-    // helpers, so a static import would be a cycle.
-    await import("./genvideo/docWriter").then((m) => m.docWriterIdle(id)).catch(() => {});
+  let loadGeneration = 0;
+  let loadTarget: string | null = null;
+  const resetForOpen = async (id: string, viewer: boolean, generation: number) => {
+    const { holdEditorLoad } = await import("./editorWork");
+    const release = await holdEditorLoad();
+    try {
+      if (generation !== loadGeneration) return;
+      // Blob URLs minted for the project being left go with it; the next open
+      // of that project re-registers what its store holds. A re-open of the
+      // same project keeps them — its state still points at them.
+      const prev = get().projectId;
+      if (prev && prev !== id) revokeRegistered(`/api/cut/projects/${prev}/`);
+      // Coming back to a project whose revoke is still waiting on an in-flight
+      // render's hold: the subtree is live again, so the revoke no longer
+      // applies — hydration is about to reuse those registrations.
+      cancelRevoke(`/api/cut/projects/${id}/`);
+      history.length = 0;
+      future.length = 0;
+      pending = null;
+      // A fresh project owns no live run — any prior run's render-owned ids are
+      // stale, and the loaded clips are ordinary, fully-undoable content.
+      genClipIds.clear();
+      genAudioIds.clear();
+      hydrating = true;
+      set({
+        projectId: id,
+        loaded: false,
+        loadError: null,
+        saveState: "saved",
+        resumePush: false,
+        // A share view is the one that refuses edits, and the surface opening
+        // the project is what knows it is one. Every other open clears the flag:
+        // left standing, it follows a tab out of a share link and back into that
+        // person's own projects, where a read-only editor keeps the mouse and
+        // loses the keyboard — which reads as a keyboard that has stopped
+        // working.
+        readOnly: viewer,
+        sharedFeatures: viewer ? get().sharedFeatures : null,
+        selectedKey: null,
+        assets: [],
+        loadingMedia: new Set<string>(),
+        clips: [],
+        transitions: [],
+        audioClips: [],
+        overlays: [],
+        templates: [],
+        mediaFolders: [],
+        aspect: lastChosenAspect() ?? "9:16",
+        aspectTouched: lastChosenAspect() !== null,
+        guides: [],
+        guidesHidden: false,
+        guideLines: EMPTY_GUIDE_LINES,
+        fadeIn: 0,
+        fadeOut: 0,
+        background: DEFAULT_BACKGROUND,
+        selection: null,
+        multiSelection: [],
+        playing: false,
+        buffering: false,
+        previewStopAt: null,
+        removalPeek: null,
+        subtitles: emptySubtitles(),
+        subtitleLane: 0,
+        subtitleStatus: "idle",
+        subtitleError: null,
+        exportOpen: false,
+        genvideo: undefined,
+        renders: [],
+        firstOpen: undefined,
+      });
+      hydrating = false;
+      // A background scene run may still be writing this project's doc — drain
+      // its queued writes so the open never reads a half-written doc. Ordering
+      // matters: projectId is set (loaded false) BEFORE this await, so a write
+      // arriving during the drain waits for the load (projectWriteMode) instead
+      // of queueing a doc write the drain would miss — nothing can land between
+      // the drain and the fetch that follows. Lazy import: docWriter reads store
+      // helpers, so a static import would be a cycle.
+      await import("./genvideo/docWriter").then((m) => m.docWriterIdle(id)).catch(() => {});
+    } finally { release(); }
   };
 
   return {
@@ -1808,7 +1817,11 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       // clicking back in — is not a re-read, and gets the snapshot's head
       // start like any other open.
       const inPlace = opts?.inPlace === true;
-      await resetForOpen(id, opts?.viewer === true);
+      const generation = ++loadGeneration;
+      loadTarget = id;
+      const current = () => generation === loadGeneration;
+      await resetForOpen(id, opts?.viewer === true, generation);
+      if (!current()) return;
 
       // One shape of hydration, used by both the snapshot painted below and
       // the live document that replaces it, so the legacy migrations happen
@@ -1823,7 +1836,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const sweepEnrich = () =>
         void import("./media")
           .then((m) => {
-            if (get().projectId !== id || !get().loaded) return;
+            if (!current() || get().projectId !== id || !get().loaded) return;
             for (const a of get().assets) void m.enrichAsset(a);
           })
           .catch(() => {});
@@ -1853,7 +1866,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           ? [null, null]
           : await Promise.all([readCachedDoc(id), uiReq]);
         const stored = cached?.doc;
-        const openable = () => !landed && get().projectId === id && !get().loaded;
+        const openable = () => current() && !landed && get().projectId === id && !get().loaded;
         if (stored && ui && openable()) {
           const stale = stored.assets ?? [];
           // Signed R2 links are cached alongside the doc, so a snapshot open
@@ -1913,6 +1926,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
 
       try {
         const [res, ui] = await Promise.all([docReq, uiReq]);
+        if (!current()) return;
         if (!res.ok) {
           // Gone, or no longer ours to read: the server is the authority on
           // that, so retire the snapshot and show the error even when it is
@@ -1927,6 +1941,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           throw new Error("This project could not be loaded.");
         }
         const doc = (await res.json()) as ProjectDoc;
+        if (!current()) return;
+        if (get().projectId === id) noteProjectRevision(id, res.headers.get("x-cut-doc-version"));
         // The strips and peaks the snapshot's sweep already filled ride
         // across the replacement — the landing document names the same
         // assets, and blanking them would gray the timeline it just painted.
@@ -1957,8 +1973,10 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
               })
             );
           }
+          if (!current()) return;
           const missing = assets.filter((a) => !held.has(a.fileName));
           const signed = await fetchSignedMediaUrls(id, missing.map((a) => a.fileName));
+          if (!current()) return;
           for (const a of assets) {
             a.url = held.get(a.fileName) ?? signed.urls.get(a.fileName) ?? a.url;
           }
@@ -2000,7 +2018,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             });
             prefetchCloudMedia(id, queue, (fileName, url) => {
               const st = get();
-              if (st.projectId !== id) return;
+              if (!current() || st.projectId !== id) return;
               if (url) st.applyMediaUrls(new Map([[fileName, url]]));
               // Video was never in the set; re-seating it would hand every
               // subscriber a new Set identity for no change.
@@ -2060,11 +2078,11 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         // better answer than an error page: the project is open and editable,
         // a version behind at worst, and autosave retries until the link is
         // back.
-        if (!paintedFromCache) {
+        if (current() && !paintedFromCache) {
           set({ loadError: err instanceof Error ? err.message : String(err) });
         }
       } finally {
-        hydrating = false;
+        if (current()) hydrating = false;
       }
     },
 
@@ -2182,8 +2200,16 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       }
     },
 
+    closeProject: (id) => {
+      if (loadTarget === id) { loadGeneration++; loadTarget = null; }
+      if (get().projectId === id) set({ projectId: null, loaded: false, playing: false });
+    },
+
     openProjectDoc: async (id, doc, assets) => {
-      await resetForOpen(id, false);
+      const generation = ++loadGeneration;
+      loadTarget = id;
+      await resetForOpen(id, false, generation);
+      if (generation !== loadGeneration) return;
       get().applyDocState(doc, assets, {});
     },
 

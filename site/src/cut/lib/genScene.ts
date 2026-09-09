@@ -1,16 +1,20 @@
 "use client";
 
+import { chatRuntime } from "./chatRuntime";
 import { create } from "zustand";
 import { apiFetch, apiJson } from "./backend";
 import { useGenerate } from "./generate";
 import { realSuite } from "./genvideo/adapters";
 import { GEN_FPS, StoreEditorBridge } from "./genvideo/editorBridge";
 import { VideoOrchestrator } from "./genvideo/orchestrator";
+import { ownScene, SceneOwnedElsewhere } from "./genvideo/sceneOwnership";
+import { projectBackend } from "./residency";
+type SceneOrchestrator = ReturnType<typeof ownScene>;
 import { onActivity } from "./genvideo/activity";
 import { projectWriteMode, withProjectDoc } from "./genvideo/docWriter";
 import type { RefAsset, Shot, VideoEvent, VideoPhase, VideoProject } from "./genvideo/types";
 import { useEditor } from "./store";
-import { nearestAspect, type Aspect } from "./types";
+import { nearestAspect } from "./types";
 import { defaultVideoAspects } from "./videoModels";
 
 // Brief-to-video ("generate a video") controller. It owns one VideoOrchestrator
@@ -84,7 +88,7 @@ export interface StartSceneParams {
 // the OPEN project only. A run keeps rendering when the user switches away —
 // its placements land in the project's persisted doc (see StoreEditorBridge)
 // and the mirror re-attaches when they come back.
-const orchestrators = new Map<string, VideoOrchestrator>();
+const orchestrators = new Map<string, SceneOrchestrator>();
 
 useEditor.subscribe((s, prev) => {
   // The card mirrors the open project's run only; the orchestrator itself
@@ -98,7 +102,7 @@ useEditor.subscribe((s, prev) => {
   // paid run resumes (and its media re-tags) even when the AI panel never
   // mounts. loadProject flips `loaded` false→true in the same set() that
   // fills genvideo, so the edge fires once per open.
-  if (!s.loaded || prev.loaded || !s.projectId) return;
+  if (!s.loaded || (prev.loaded && s.loadEpoch === prev.loadEpoch) || !s.projectId) return;
   // A headless process (the turn runner, an eval) opens projects to run one
   // job; resuming a persisted plan there would spend credits on a render the
   // page is already resuming for its user.
@@ -107,7 +111,7 @@ useEditor.subscribe((s, prev) => {
   // adopt or resume it (resuming would render on the viewer's account).
   if (s.readOnly) return;
   const live = orchestrators.get(s.projectId);
-  if (live && !live.isAborted && !isTerminal(statusFor(live.project))) {
+  if (live?.working && !live.isAborted) {
     // The run is still working: its clips loaded as ordinary content — re-mark
     // them render-owned, then mirror the live run. A run that FINISHED while
     // the project was closed falls through instead: its clips belong to the
@@ -119,7 +123,6 @@ useEditor.subscribe((s, prev) => {
     return;
   }
   if (!s.genvideo) return;
-  if (useGenScene.getState().run?.projectId === s.projectId) return;
   useGenScene.getState().hydrate(s.projectId, s.genvideo);
 });
 
@@ -214,9 +217,9 @@ function killRun(projectId: string): void {
     useEditor.getState().setGenvideo(undefined);
     useEditor.getState().releaseGenClips();
   } else {
-    void withProjectDoc(projectId, (doc) => {
+    void projectBackend(projectId).then((backend) => withProjectDoc(projectId, (doc) => {
       doc.genvideo = undefined;
-    }).catch(() => {});
+    }, backend)).catch(() => {});
   }
   const run = useGenScene.getState().run;
   if (run?.projectId === projectId) useGenScene.setState({ run: null });
@@ -568,13 +571,23 @@ function fail(projectId: string, message: string): void {
 /** Settle handlers scoped to one orchestrator: a superseded run's late
  * resolution must never touch the run mirror — by the time it settles, the
  * project's slot may belong to a fresh run. */
-function settled(projectId: string, orch: VideoOrchestrator): () => void {
+function settled(projectId: string, orch: SceneOrchestrator): () => void {
   return () => {
     if (orchestrators.get(projectId) === orch && !orch.isAborted) syncFromProject(projectId);
   };
 }
-function failed(projectId: string, orch: VideoOrchestrator): (e: unknown) => void {
+function failed(projectId: string, orch: SceneOrchestrator): (e: unknown) => void {
   return (e) => {
+    if (e instanceof SceneOwnedElsewhere) {
+      if (orchestrators.get(projectId) !== orch) return;
+      orchestrators.delete(projectId);
+      setTimeout(() => {
+        const s = useEditor.getState();
+        if (s.projectId === projectId && s.loaded && s.genvideo && !s.readOnly && !orchestrators.has(projectId))
+          useGenScene.getState().hydrate(projectId, s.genvideo);
+      }, chatRuntime().syncIntervalMs);
+      return;
+    }
     if (orchestrators.get(projectId) === orch && !orch.isAborted) {
       fail(projectId, e instanceof Error ? e.message : String(e));
     }
@@ -596,8 +609,8 @@ function resumeDoneRun(): boolean {
   return true;
 }
 
-function buildOrchestrator(projectId: string, project: VideoProject): VideoOrchestrator {
-  return new VideoOrchestrator(project, {
+function buildOrchestrator(projectId: string, project: VideoProject, fresh = false): SceneOrchestrator {
+  return ownScene(projectId, new VideoOrchestrator(project, {
     editor: new StoreEditorBridge(projectId),
     // project.chatId (persisted) owns the run's media, so tagging survives a
     // reload/resume, not just the initial turn.
@@ -608,16 +621,17 @@ function buildOrchestrator(projectId: string, project: VideoProject): VideoOrche
     // keeps its plan durable wherever the user is. Routed through
     // projectWriteMode so a plan save never races a load's doc fetch.
     persist: async (p) => {
-      if ((await projectWriteMode(projectId)) === "store") {
+      if ((await projectWriteMode(projectId)) === "store" &&
+          useEditor.getState().projectId === projectId && useEditor.getState().loaded) {
         useEditor.getState().setGenvideo(p);
         return;
       }
       return withProjectDoc(projectId, (doc) => {
         doc.genvideo = { ...p };
-      }).catch(() => {});
+      }, await projectBackend(projectId));
     },
     concurrency: CONCURRENCY,
-  });
+  }), fresh);
 }
 
 interface GenSceneState {
@@ -680,7 +694,7 @@ export const useGenScene = create<GenSceneState>((set, get) => ({
     // Supersede this project's previous run so two orchestrators never write
     // the same project at once; runs in other projects keep going.
     orchestrators.get(projectId)?.abort();
-    const orch = buildOrchestrator(projectId, project);
+    const orch = buildOrchestrator(projectId, project, true);
     orchestrators.set(projectId, orch);
     set({
       run: {
@@ -871,6 +885,10 @@ export const useGenScene = create<GenSceneState>((set, get) => ({
   },
 
   hydrate: (projectId, project) => {
+    if (orchestrators.get(projectId)?.working) {
+      mirrorRun(projectId, orchestrators.get(projectId)!.project);
+      return;
+    }
     // Re-assert chat ownership over the run's media before anything else, so
     // even a finished run's leftovers never sit in the generate panels.
     claimRunMedia(projectId, project);

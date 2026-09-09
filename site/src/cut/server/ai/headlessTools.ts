@@ -122,7 +122,7 @@ async function flush(doc: OpenDoc): Promise<void> {
 /** Run one tool call against the engine-held store for `projectId`,
  * persisting the doc after it. The bridge calls this when no editor tab is
  * attached to the chat session. */
-export async function callHeadlessTool(
+async function executeHeadlessTool(
   projectId: string,
   toolName: string,
   input: unknown
@@ -153,4 +153,12 @@ export async function callHeadlessTool(
   } catch (err) {
     return { errorText: err instanceof Error ? err.message : String(err) };
   }
+}
+
+let toolsIdle: Promise<unknown> = Promise.resolve();
+/** The engine's editor store belongs to one tool invocation at a time. */
+export function callHeadlessTool(projectId: string, toolName: string, input: unknown): Promise<{ output?: unknown; errorText?: string }> {
+  const result = toolsIdle.then(() => executeHeadlessTool(projectId, toolName, input));
+  toolsIdle = result.catch(() => {});
+  return result;
 }

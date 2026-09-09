@@ -1,5 +1,6 @@
 import { matchRouteTable } from "./match";
 import { aiApi } from "./ai";
+import { localSceneLease } from "../ai/sceneLease";
 import { convertApi } from "./convert";
 import { engineApi } from "./engine";
 import { exportApi } from "./export";
@@ -93,6 +94,10 @@ export const CUT_ROUTES: CutRoute[] = [
   { method: "POST", path: "/api/cut/mic/:id/cancel", handler: (req, p) => micApi.cancel(req, { id: p.id }) },
 
   { method: "POST", path: "/api/cut/ai/chat", handler: (req) => aiApi.chat(req) },
+  { method: "POST", path: "/api/cut/projects/:id/scene-lease", handler: (req, p) => localSceneLease(p.id, req) },
+  { method: "GET", path: "/api/cut/ai/chat/:id/stream", handler: (req, p) => aiApi.resumeChat(req, p.id) },
+  { method: "POST", path: "/api/cut/ai/chat/:id/cancel", handler: (req, p) => aiApi.cancelChat(req, p.id) },
+  { method: "POST", path: "/api/cut/ai/tool-claim", handler: (req) => aiApi.claimTool(req) },
   { method: "POST", path: "/api/cut/ai/captions", handler: (req) => aiApi.captions(req) },
   { method: "POST", path: "/api/cut/ai/visual-subtitles", handler: (req) => aiApi.visualSubtitles(req) },
   { method: "GET", path: "/api/cut/ai/models", handler: () => aiApi.models() },

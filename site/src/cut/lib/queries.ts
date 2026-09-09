@@ -143,7 +143,7 @@ const LIBRARY_LIVE_MS = 6000;
  * timer and re-read the moment the window comes back to the front, so a
  * recording made on the phone shows up here without a reload. The timer only
  * runs while this tab is the focused one. */
-export function useLibrary({ live = false }: { live?: boolean } = {}) {
+export function useLibrary({ live = false, enabled = true }: { live?: boolean; enabled?: boolean } = {}) {
   // Not read for the query itself — the backend binding decides which
   // residencies are reachable, so a mode change re-keys and re-reads.
   useCutMode();
@@ -152,11 +152,12 @@ export function useLibrary({ live = false }: { live?: boolean } = {}) {
   const snap = snapshotKey(scope, "library");
 
   useEffect(
-    () => seedFromSnapshot<LibraryData>(client, libraryKey(scope), snap),
-    [client, scope, snap]
+    () => { if (enabled) return seedFromSnapshot<LibraryData>(client, libraryKey(scope), snap); },
+    [client, scope, snap, enabled]
   );
 
   return useQuery<LibraryData>({
+    enabled,
     queryKey: libraryKey(scope),
     queryFn: async () => {
       const data = await fetchLibrary({ remembered: true });

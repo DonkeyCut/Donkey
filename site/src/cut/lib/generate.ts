@@ -440,7 +440,8 @@ export const useGenerate = create<GenerateState>((set, get) => {
     };
     const backend = jobBackend(j);
     void (async () => {
-      if ((await projectWriteMode(j.projectId)) === "store")
+      if ((await projectWriteMode(j.projectId)) === "store" &&
+          useEditor.getState().projectId === j.projectId && useEditor.getState().loaded)
         useEditor.getState().upsertRender(record);
       else await upsertRenderInDoc(j.projectId, record, backend);
     })().catch(() => {});
@@ -452,7 +453,8 @@ export const useGenerate = create<GenerateState>((set, get) => {
     const ids = mirrored.map((j) => j.id);
     const backend = jobBackend(mirrored[0]);
     void (async () => {
-      if ((await projectWriteMode(projectId)) === "store")
+      if ((await projectWriteMode(projectId)) === "store" &&
+          useEditor.getState().projectId === projectId && useEditor.getState().loaded)
         useEditor.getState().removeRenders(ids);
       else await removeRendersInDoc(projectId, ids, backend);
     })().catch(() => {});

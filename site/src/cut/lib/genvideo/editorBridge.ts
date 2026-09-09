@@ -105,7 +105,7 @@ export class StoreEditorBridge implements EditorBridge {
     endFrame: number,
     opts?: { srcInSec?: number; muted?: boolean; anchorAfterIds?: string[]; followClipIds?: string[] }
   ): Promise<string> {
-    if ((await this.mode()) === "store") {
+    if ((await this.mode()) === "store" && this.open()) {
       const id = useEditor.getState().placeGenClip(mediaId, toSec(startFrame), toSec(endFrame), opts);
       if (!id) throw new Error(`placeClip: no placeable asset ${mediaId}`);
       return id;
@@ -119,7 +119,7 @@ export class StoreEditorBridge implements EditorBridge {
   }
 
   async replaceClipMedia(clipId: string, mediaId: string): Promise<void> {
-    if ((await this.mode()) === "store") {
+    if ((await this.mode()) === "store" && this.open()) {
       useEditor.getState().updateClip(clipId, { assetId: mediaId });
       return;
     }
@@ -129,7 +129,7 @@ export class StoreEditorBridge implements EditorBridge {
   }
 
   async retimeClip(clipId: string, durationFrames: number): Promise<void> {
-    if ((await this.mode()) === "store") {
+    if ((await this.mode()) === "store" && this.open()) {
       const clip = useEditor.getState().clips.find((c) => c.id === clipId);
       if (!clip) return;
       // Trim the tail so the footprint matches, at whatever rate the clip carries.
@@ -145,7 +145,7 @@ export class StoreEditorBridge implements EditorBridge {
   }
 
   async removeClip(clipId: string): Promise<void> {
-    if ((await this.mode()) === "store") {
+    if ((await this.mode()) === "store" && this.open()) {
       useEditor.getState().removeClipById(clipId);
       return;
     }
@@ -158,7 +158,7 @@ export class StoreEditorBridge implements EditorBridge {
     const safeStyle: TransitionStyle = TRANSITION_STYLE_IDS.includes(style as TransitionStyle)
       ? (style as TransitionStyle)
       : "crossfade";
-    if ((await this.mode()) === "store") {
+    if ((await this.mode()) === "store" && this.open()) {
       useEditor.getState().setClipTransition(clipId, toSec(durationFrames), safeStyle);
       return;
     }
@@ -180,7 +180,7 @@ export class StoreEditorBridge implements EditorBridge {
       ...(opts?.lane !== undefined ? { lane: opts.lane } : {}),
       ...(opts?.volume !== undefined ? { volume: opts.volume } : {}),
     };
-    if ((await this.mode()) === "store") {
+    if ((await this.mode()) === "store" && this.open()) {
       const id = useEditor
         .getState()
         .placeGenAudio(mediaId, toSec(startFrame), toSec(durationFrames), audioOpts);
@@ -196,7 +196,7 @@ export class StoreEditorBridge implements EditorBridge {
   }
 
   async removeAudio(clipId: string): Promise<void> {
-    if ((await this.mode()) === "store") {
+    if ((await this.mode()) === "store" && this.open()) {
       useEditor.getState().removeAudioById(clipId);
       return;
     }

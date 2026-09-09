@@ -20,6 +20,17 @@ import { maxCreditGrantDollars, maxCreditGrantExpiryDays } from "@/lib/credits/t
 // tune ships its setting here in the same change.
 
 export const SETTINGS = defineSettings({
+  chatRuntime: {
+    schema: z.object({
+      syncIntervalMs: z.number().int().min(1000).max(30000),
+      sceneLeaseMs: z.number().int().min(15000).max(120000),
+      journalBytes: z.number().int().min(1048576).max(33554432),
+    }).strict(),
+    default: { syncIntervalMs: 5000, sceneLeaseMs: 30000, journalBytes: 8388608 },
+    public: true,
+    title: "Chat continuity",
+    description: "Project and conversation refresh cadence, scene ownership expiry, and saved engine transcript size.",
+  },
   experimentResults: {
     schema: z
       .object({

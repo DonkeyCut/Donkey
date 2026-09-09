@@ -25,11 +25,14 @@ export type CutCaps = {
   watch: boolean;
 };
 
+/** Observational reads leave the next document save based on the loaded version. */
+export type CutRequestInit = RequestInit & { observe?: boolean };
+
 export interface CutBackend {
   kind: CutMode;
   caps: CutCaps;
   /** fetch() against this backend, preserving the engine route shapes. */
-  fetch(path: string, init?: RequestInit): Promise<Response>;
+  fetch(path: string, init?: CutRequestInit): Promise<Response>;
   /** Absolute-or-relative URL for a backend API path (media src, downloads). */
   url(path: string): string;
 }

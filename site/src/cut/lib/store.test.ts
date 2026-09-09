@@ -2132,3 +2132,62 @@ describe("repairAssetDuration", () => {
     expect(clipById("c").out).toBe(2);
   });
 });
+
+for (const outcome of ["document", "deleted", "network error"] as const) {
+  test(`a superseded load cannot change the next project after ${outcome}`, async () => {
+    const { engineGateOpen } = await import("./api");
+    engineGateOpen();
+    const originalFetch = globalThis.fetch;
+    let finish!: (response: Response) => void;
+    let fail!: (error: Error) => void;
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => { started = resolve; });
+    const doc = { name: "Old project", assets: [], clips: [], audioClips: [], overlays: [] };
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      if (String(url).includes("/projects/old-project")) {
+        started();
+        return new Promise<Response>((resolve, reject) => { finish = resolve; fail = reject; });
+      }
+      return Response.json({});
+    }) as typeof fetch;
+    try {
+      const pending = s().loadProject("old-project", { inPlace: true });
+      await ready;
+      await s().openProjectDoc("next-project", { name: "Next project" }, []);
+      if (outcome === "network error") fail(new Error("Disconnected"));
+      else finish(Response.json(doc, { status: outcome === "deleted" ? 404 : 200 }));
+      await pending;
+      expect(s().projectId).toBe("next-project");
+      expect(s().projectName).toBe("Next project");
+      expect(s().loaded).toBe(true);
+      expect(s().loadError).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+}
+
+test("closing a project invalidates its pending load and releases its editor identity", async () => {
+  const { engineGateOpen } = await import("./api");
+  engineGateOpen();
+  const originalFetch = globalThis.fetch;
+  let finish!: (response: Response) => void;
+  let started!: () => void;
+  const ready = new Promise<void>((resolve) => { started = resolve; });
+  globalThis.fetch = (async (url: string | URL | Request) => {
+    if (String(url).includes("/projects/closing-project")) {
+      started();
+      return new Promise<Response>((resolve) => { finish = resolve; });
+    }
+    return Response.json({});
+  }) as typeof fetch;
+  try {
+    const pending = s().loadProject("closing-project", { inPlace: true });
+    await ready;
+    s().closeProject("closing-project");
+    finish(Response.json({ name: "Closed project", assets: [], clips: [], audioClips: [], overlays: [] }));
+    await pending;
+    expect(s().projectId).toBeNull();
+    expect(s().loaded).toBe(false);
+  } finally { globalThis.fetch = originalFetch; }
+});

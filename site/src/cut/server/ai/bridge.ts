@@ -14,11 +14,15 @@ export interface UIChunkWriter {
 interface Waiter {
   resolve: (r: { output?: unknown; errorText?: string }) => void;
   timer: ReturnType<typeof setTimeout>;
+  claimed: boolean;
+  toolName: string;
+  input: unknown;
 }
 
 interface Session {
   writer: UIChunkWriter;
   waiters: Map<string, Waiter>;
+  attached: boolean;
 }
 
 // Survives dev-server module reloads.
@@ -32,8 +36,27 @@ const g2 = globalThis as unknown as { __veditorAiProjects?: Map<string, string> 
 const sessionProjects = (g2.__veditorAiProjects ??= new Map<string, string>());
 
 export function registerSession(key: string, writer: UIChunkWriter, projectId?: string) {
-  sessions.set(key, { writer, waiters: new Map() });
+  sessions.set(key, { writer, waiters: new Map(), attached: true });
   if (projectId) sessionProjects.set(key, projectId);
+}
+
+export function attachSession(key: string): void {
+  const session = sessions.get(key);
+  if (session) session.attached = true;
+}
+
+export function detachSession(key: string): void {
+  const session = sessions.get(key);
+  if (!session) return;
+  session.attached = false;
+  for (const waiter of session.waiters.values()) {
+    clearTimeout(waiter.timer);
+    const projectId = sessionProjects.get(key);
+    if (!waiter.claimed && projectId)
+      void detachedTool(projectId, waiter.toolName, waiter.input).then(waiter.resolve);
+    else waiter.resolve({ errorText: "The editor disconnected before recording this result. Check the project state before repeating the operation." });
+  }
+  session.waiters.clear();
 }
 
 export function unregisterSession(key: string) {
@@ -54,6 +77,12 @@ export function unregisterSession(key: string) {
 
 const TOOL_TIMEOUT_MS = 120_000; // subtitles generation can take a while
 
+function detachedTool(projectId: string, toolName: string, input: unknown): Promise<{ output?: unknown; errorText?: string }> {
+  return import("./headlessRuntime").then((module) => module.callDetachedTool(projectId, toolName, input)).catch((error: unknown) => ({
+    errorText: error instanceof Error ? error.message : String(error),
+  }));
+}
+
 /**
  * Forward a tool call to the browser via the chat stream and wait for the
  * result. Returns { output } or { errorText }.
@@ -64,14 +93,21 @@ export function callBrowserTool(
   input: unknown
 ): Promise<{ output?: unknown; errorText?: string }> {
   const session = sessions.get(sessionKey);
-  if (!session) {
+  if (!session || !session.attached) {
     // The tab is gone (closed mid-turn) or the key is stale. A session whose
     // project is known finishes headless: the engine hydrates the doc and
     // runs the tool itself, so the turn completes and lands on disk.
     const projectId = sessionProjects.get(sessionKey);
     if (projectId) {
       console.log(`[cut-ai] ${toolName}: no editor tab for ${sessionKey}; running headless on ${projectId}`);
-      return import("./headlessTools").then((m) => m.callHeadlessTool(projectId, toolName, input));
+      const toolCallId = crypto.randomUUID();
+      session?.writer.write({ type: "tool-input-available", toolCallId, toolName, input });
+      return detachedTool(projectId, toolName, input).then((result) => {
+        session?.writer.write(result.errorText !== undefined
+          ? { type: "tool-output-error", toolCallId, errorText: result.errorText }
+          : { type: "tool-output-available", toolCallId, output: result.output ?? null });
+        return result;
+      });
     }
     console.warn(
       `[cut-ai] ${toolName}: no live editor session for ${sessionKey}; live: ${[...sessions.keys()].join(", ") || "none"}`
@@ -90,6 +126,9 @@ export function callBrowserTool(
     }, TOOL_TIMEOUT_MS);
     session.waiters.set(toolCallId, {
       timer,
+      claimed: false,
+      toolName,
+      input,
       resolve: (r) => {
         if (r.errorText !== undefined) {
           session.writer.write({ type: "tool-output-error", toolCallId, errorText: r.errorText });
@@ -100,6 +139,13 @@ export function callBrowserTool(
       },
     });
   });
+}
+
+export function claimBrowserTool(sessionKey: string, toolCallId: string): boolean {
+  const waiter = sessions.get(sessionKey)?.waiters.get(toolCallId);
+  if (!waiter || waiter.claimed) return false;
+  waiter.claimed = true;
+  return true;
 }
 
 /** Called by /api/cut/ai/tool-result when the browser finishes a tool. */

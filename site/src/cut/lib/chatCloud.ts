@@ -6,6 +6,8 @@
 import { cutMode, getBackend, type CutBackend } from "./backend";
 import { cloudBackend } from "./backend/cloud";
 import {
+  chatThreadDeleted,
+  deleteStoredThread,
   isStoredThread,
   mergeThreads,
   readProjectThreads,
@@ -13,7 +15,14 @@ import {
   type StoredThread,
 } from "./chatThreads";
 
-const seeded = new Map<string, Promise<void>>();
+let syncState: {
+  projectId: string;
+  backend: CutBackend;
+  versions: Map<string, string>;
+  pending?: Promise<void>;
+  seeded: boolean;
+  dirty: boolean;
+} | undefined;
 
 /** A cloud project's threads as the server holds them. Takes its backend, so a
  * project copy can read the residency it is copying from rather than the one
@@ -46,46 +55,60 @@ export async function putCloudThread(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(thread),
   });
+  if (res.status === 410) { deleteStoredThread(projectId, thread.id); return; }
   if (!res.ok) throw new Error("Could not save a chat thread.");
 }
 
-/** Bring a cloud project's chat history and the server's copy into agreement,
- * per thread the newer updatedAt winning, and push back whatever the server is
- * missing or trailing on. The push is what makes the mirror hold: a save that
- * never landed — offline, a request that failed, a thread written before this
- * project moved to the cloud — would otherwise stay local forever, and a share
- * link would show a project with no chat at all. Resolves immediately for local
- * projects; memoized per project, but a failure clears the memo so the next
- * panel mount retries. */
-export function ensureCloudThreads(projectId: string): Promise<void> {
-  // Shared viewers sync too, read-only: syncThreads pushes nothing back, and
-  // the saves and deletes below are cloud-only.
-  if (cutMode() === "local" || cutMode() === "browser") return Promise.resolve();
-  let p = seeded.get(projectId);
-  if (!p) {
-    p = syncThreads(projectId).catch(() => {
-      seeded.delete(projectId);
-    });
-    seeded.set(projectId, p);
-  }
-  return p;
+/** Merge changed conversations and retry local saves, including offline deletions. */
+export function ensureCloudThreads(projectId: string, refresh = false): Promise<void> {
+  const backend = getBackend();
+  if (backend.kind === "local" || backend.kind === "browser") return Promise.resolve();
+  if (!syncState || syncState.projectId !== projectId || syncState.backend !== backend)
+    syncState = { projectId, backend, versions: new Map(), seeded: false, dirty: true };
+  const state = syncState;
+  if (state.pending) return state.pending;
+  if (state.seeded && !refresh) return Promise.resolve();
+  state.pending = syncThreads(state).then(() => { state.seeded = true; }).catch(() => {
+    state.seeded = false;
+  }).finally(() => { state.pending = undefined; });
+  return state.pending;
 }
 
-async function syncThreads(projectId: string): Promise<void> {
-  const backend = getBackend();
-  const remote = await fetchCloudThreads(backend, projectId);
-  // A viewer's list is the owner's list — there is nothing of their own to
-  // merge, so the share's threads stand alone (in memory, per chatThreads).
-  if (backend.kind === "shared") {
-    writeProjectThreads(projectId, remote);
-    return;
+async function syncThreads(state: NonNullable<typeof syncState>): Promise<void> {
+  const { projectId, backend, versions } = state;
+  const path = `/api/cut/projects/${projectId}/chats`;
+  const response = await backend.fetch(`${path}?revisions=1`);
+  if (!response.ok) throw new Error("Could not read the project's chats.");
+  const index = await response.json() as { id: string; revision: string }[];
+  const remoteIds = new Set(index.map((row) => row.id));
+  for (const row of index) {
+    if (versions.get(row.id) === row.revision) continue;
+    const res = await backend.fetch(`${path}?id=${encodeURIComponent(row.id)}&revision=${encodeURIComponent(row.revision)}`);
+    if (!res.ok) throw new Error("Could not read the conversation.");
+    const remote = (await res.json() as unknown[]).filter(isStoredThread);
+    const local = readProjectThreads(projectId);
+    const merged = mergeThreads(remote, local);
+    writeProjectThreads(projectId, merged);
+    const incoming = remote.find((t) => t.id === row.id);
+    const outgoing = merged.find((t) => t.id === row.id);
+    if (backend.kind === "cloud" && outgoing && incoming &&
+        (outgoing.deleted && !incoming.deleted || !outgoing.deleted && (outgoing.updatedAt ?? 0) > (incoming.updatedAt ?? 0))) {
+      await saveCloudThread(backend, projectId, outgoing);
+    }
+    versions.set(row.id, row.revision);
   }
-  const merged = mergeThreads(remote, readProjectThreads(projectId));
-  writeProjectThreads(projectId, merged);
-  const stored = new Map(remote.map((t) => [t.id, t.updatedAt ?? 0]));
-  const behind = merged.filter((t) => (stored.get(t.id) ?? -1) < (t.updatedAt ?? 0));
-  // One at a time: a full history can be a few megabytes of transcript.
-  for (const thread of behind) await putCloudThread(backend, projectId, thread);
+  if (backend.kind === "cloud" && state.dirty) {
+    for (const thread of readProjectThreads(projectId)) {
+      if (!remoteIds.has(thread.id)) await saveCloudThread(backend, projectId, thread);
+    }
+    state.dirty = false;
+  }
+}
+
+async function saveCloudThread(backend: CutBackend, projectId: string, thread: StoredThread): Promise<void> {
+  if (!thread.deleted) return putCloudThread(backend, projectId, thread);
+  const res = await backend.fetch(`/api/cut/projects/${projectId}/chats/${thread.id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Could not delete the conversation.");
 }
 
 // Saves debounce per thread: while a turn streams, the panel re-saves on every
@@ -106,7 +129,11 @@ let pageHideHooked = false;
 const saveKey = (projectId: string, threadId: string) => `${projectId}/${threadId}`;
 
 export function queueCloudThreadSave(projectId: string, thread: StoredThread): void {
-  if (cutMode() !== "cloud") return;
+  if (cutMode() !== "cloud" || chatThreadDeleted(projectId, thread.id)) return;
+  if (syncState?.projectId === projectId) {
+    syncState.versions.delete(thread.id);
+    syncState.dirty = true;
+  }
   const key = saveKey(projectId, thread.id);
   const prev = pending.get(key);
   if (prev) clearTimeout(prev.timer);
@@ -132,13 +159,19 @@ async function flushOne(key: string, keepalive = false): Promise<void> {
     // a cloud project, and by the time the debounce fires the user may have
     // closed it — with the Mac app running, the ambient backend is then the
     // engine, which has no chats route and no copy of this project.
-    await cloudBackend.fetch(`/api/cut/projects/${entry.projectId}/chats/${entry.threadId}`, {
+    const response = await cloudBackend.fetch(`/api/cut/projects/${entry.projectId}/chats/${entry.threadId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(entry.data),
       keepalive,
     });
+    if (response.status === 410) deleteStoredThread(entry.projectId, entry.threadId);
+    else if (!response.ok) throw new Error("Could not save the conversation.");
   } catch {
+    if (syncState?.projectId === entry.projectId) {
+      syncState.versions.delete(entry.threadId);
+      syncState.dirty = true;
+    }
     // The thread is still in localStorage; the next sync pushes it up.
   }
 }
@@ -151,6 +184,10 @@ export function flushCloudThreadSaves(keepalive = false): void {
 /** Delete the server copy of a thread (deleted or pruned locally). */
 export function deleteCloudThread(projectId: string, threadId: string): void {
   if (cutMode() !== "cloud") return;
+  if (syncState?.projectId === projectId) {
+    syncState.versions.delete(threadId);
+    syncState.dirty = true;
+  }
   const entry = pending.get(saveKey(projectId, threadId));
   if (entry) {
     clearTimeout(entry.timer);
@@ -159,7 +196,6 @@ export function deleteCloudThread(projectId: string, threadId: string): void {
   void cloudBackend.fetch(`/api/cut/projects/${projectId}/chats/${threadId}`, {
     method: "DELETE",
   }).catch(() => {
-    // Offline delete — the copy resurfaces on the next merge; the user can
-    // delete it again.
+    // The durable tombstone retries on the next sync.
   });
 }

@@ -18,6 +18,7 @@ import {
   moveProjectToFolder,
   previewPath,
   readProject,
+  projectFileRevision,
   updateProjectFolder,
   saveMedia,
   sweepOrphanMedia,
@@ -98,11 +99,15 @@ export const projectsApi = {
     }
   },
 
-  async get(_req: Request, { id }: { id: string }) {
+  async get(req: Request, { id }: { id: string }) {
+    const revision = await projectFileRevision(id);
+    if (!revision) return err("Project not found.", 404);
+    const headers = { "x-cut-doc-version": revision };
+    if (req.method === "HEAD") return new Response(null, { headers });
     const doc = await readProject(id).catch(() => null);
     if (!doc) return err("Project not found.", 404);
     void sweepOrphanMedia(id, doc).catch(() => {});
-    return Response.json(doc);
+    return Response.json(doc, { headers });
   },
 
   async put(req: Request, { id }: { id: string }) {
@@ -157,8 +162,8 @@ export const projectsApi = {
         genvideo: body.genvideo !== undefined ? body.genvideo ?? undefined : existing.genvideo,
         renders: Array.isArray(body.renders) ? body.renders : existing.renders,
       };
-      await writeProject(id, doc);
-      return Response.json({ ok: true, updatedAt: doc.updatedAt });
+      const revision = await writeProject(id, doc);
+      return Response.json({ ok: true, updatedAt: doc.updatedAt, revision });
     } catch (e) {
       return caught(e, "Could not save project.");
     }

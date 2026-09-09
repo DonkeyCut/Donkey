@@ -18,6 +18,7 @@ import { notesCloud } from "./notes";
 import { notePhoneClient, phoneApi } from "./phone";
 import { projectsCloud } from "./projects";
 import { turnsCloud } from "./turns";
+import { cloudSceneLease } from "./sceneLease";
 import { shareCloud } from "./share";
 import { transcribeCloud } from "./transcribe";
 import { usageApi } from "./usage";
@@ -41,7 +42,7 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "PUT", path: "/api/cut-cloud/projects/folders/:id", handler: (r, u, p) => projectsCloud.updateFolder(u, p.id, r) },
   { method: "DELETE", path: "/api/cut-cloud/projects/folders/:id", handler: (_r, u, p) => projectsCloud.deleteFolder(u, p.id) },
   { method: "POST", path: "/api/cut-cloud/projects/:id/move", handler: (r, u, p) => projectsCloud.move(u, p.id, r) },
-  { method: "GET", path: "/api/cut-cloud/projects/:id", handler: (_r, u, p) => projectsCloud.get(u, p.id) },
+  { method: "GET", path: "/api/cut-cloud/projects/:id", handler: (r, u, p) => projectsCloud.get(u, p.id, r) },
   { method: "PUT", path: "/api/cut-cloud/projects/:id", handler: (r, u, p) => projectsCloud.put(u, p.id, r) },
   { method: "DELETE", path: "/api/cut-cloud/projects/:id", handler: (_r, u, p) => projectsCloud.remove(u, p.id) },
   { method: "POST", path: "/api/cut-cloud/projects/:id/duplicate", handler: (_r, u, p) => copyJobs.requestDuplicate(u, p.id) },
@@ -58,7 +59,7 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "GET", path: "/api/cut-cloud/projects/:id/share", handler: (_r, u, p) => shareCloud.get(u, p.id) },
   { method: "PUT", path: "/api/cut-cloud/projects/:id/share", handler: (r, u, p) => shareCloud.put(u, p.id, r) },
   { method: "DELETE", path: "/api/cut-cloud/projects/:id/share", handler: (_r, u, p) => shareCloud.remove(u, p.id) },
-  { method: "GET", path: "/api/cut-cloud/projects/:id/chats", handler: (_r, u, p) => chatsCloud.list(u, p.id) },
+  { method: "GET", path: "/api/cut-cloud/projects/:id/chats", handler: (r, u, p) => chatsCloud.list(u, p.id, r) },
   { method: "PUT", path: "/api/cut-cloud/projects/:id/chats/:chatId", handler: (r, u, p) => chatsCloud.put(u, p.id, p.chatId, r) },
   { method: "DELETE", path: "/api/cut-cloud/projects/:id/chats/:chatId", handler: (_r, u, p) => chatsCloud.remove(u, p.id, p.chatId) },
   { method: "POST", path: "/api/cut-cloud/projects/:id/image", handler: (r, u, p) => mediaCloud.importImage(u, p.id, r) },
@@ -103,6 +104,7 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "GET", path: "/api/cut-cloud/export/:jobId/file", handler: (_r, u, p) => jobsCloud.exportFile(u, p.jobId) },
   { method: "GET", path: "/api/cut-cloud/jobs/:jobId", handler: (_r, u, p) => jobsCloud.status(u, p.jobId) },
   { method: "POST", path: "/api/cut-cloud/projects/:id/turns", handler: (r, u, p) => turnsCloud.queue(u, p.id, r) },
+  { method: "POST", path: "/api/cut-cloud/projects/:id/scene-lease", handler: (r, u, p) => cloudSceneLease(u, p.id, r) },
   { method: "POST", path: "/api/cut-cloud/turns/:jobId/cancel", handler: (_r, u, p) => turnsCloud.cancel(u, p.jobId) },
 
   { method: "GET", path: "/api/cut-cloud/notes", handler: (_r, u) => notesCloud.list(u) },

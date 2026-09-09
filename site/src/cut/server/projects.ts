@@ -313,6 +313,12 @@ export async function sweepOrphanMedia(id: string, doc: ProjectDoc): Promise<voi
 
 const docPath = (id: string) => path.join(projectDir(id), "project.json");
 
+/** Filesystem metadata makes unchanged-document polls independent of project size. */
+export async function projectFileRevision(id: string): Promise<string | null> {
+  const info = await stat(docPath(id)).catch(() => null);
+  return info ? String(info.mtimeMs) : null;
+}
+
 export async function readProject(id: string): Promise<ProjectDoc | null> {
   const file = docPath(id);
   let raw: string;
@@ -343,8 +349,9 @@ export async function readProject(id: string): Promise<ProjectDoc | null> {
 export async function writeProject(id: string, doc: ProjectDoc) {
   doc.id = id;
   doc.updatedAt = Date.now();
-  await writeJsonAtomic(docPath(id), doc);
+  const revision = await writeJsonAtomic(docPath(id), doc);
   followName(id, doc.name);
+  return revision;
 }
 
 export async function createProject(

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 
 import {
+  chatThreadDeleted,
+  deleteStoredThread,
   clearProjectThreads,
   mergeThreads,
   readProjectThreads,
@@ -59,4 +61,13 @@ describe("mergeThreads", () => {
   test("a thread with no timestamp still survives the merge", () => {
     expect(mergeThreads([{ id: "a" }], []).map((t) => t.id)).toEqual(["a"]);
   });
+});
+
+test("a deleted thread stays deleted after a late completion or stale remote save", () => {
+  writeProjectThreads("p", [{ id: "a", updatedAt: 1 }]);
+  deleteStoredThread("p", "a");
+  writeProjectThreads("p", [{ id: "a", updatedAt: Date.now() + 10_000 }]);
+  expect(chatThreadDeleted("p", "a")).toBe(true);
+  expect(readThreadIds("p").has("a")).toBe(false);
+  expect(mergeThreads([{ id: "a", deleted: true }], [{ id: "a", updatedAt: 999 }])[0].deleted).toBe(true);
 });
