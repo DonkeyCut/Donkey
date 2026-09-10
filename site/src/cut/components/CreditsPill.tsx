@@ -2,23 +2,20 @@
 
 // The top bar's balance: what the account can still spend on hosted work —
 // chat, generation, voice — so a session can be planned around it. Reads as a
-// number and leads to the billing page.
+// number; clicking it opens the plan card with the exact balance and the way
+// into Pro.
 import { useEffect } from "react";
-import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
-import { Coins } from "lucide-react";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Loader2, Zap } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useEngineUser } from "@/cut/lib/backend/hooks";
 import { useHostedBalance, useInvalidateOnSettle } from "@/cut/lib/hosted";
-import { useCutBase } from "@/cut/lib/nav";
+import { useUpgradeToPro } from "@/cut/lib/proUpgrade";
 import { track } from "@/lib/analytics";
 import { formatUsd } from "@/lib/credits/format-usd";
 import { CREDITS_PILL_FLAG } from "@/lib/feature-flags";
+import { useProSubscription } from "@/queries/billing";
 import { creditBalanceQueryKey, useCreditBalance, type CreditBalance } from "@/queries/credits";
 import { useAccountFlags } from "@/queries/featureFlags";
 
@@ -52,7 +49,6 @@ export function CreditsPill() {
 }
 
 function BalancePill() {
-  const base = useCutBase();
   const queryClient = useQueryClient();
   const balance = useCreditBalance();
   const reported = useHostedBalance((s) => s.balance);
@@ -85,28 +81,44 @@ function BalancePill() {
 
   if (!balance.data) return null;
   const dollars = Number.parseFloat(balance.data.balance) || 0;
-  const message =
-    dollars > 0
-      ? `${formatUsd(balance.data.balance)} credits remaining`
-      : "No credits left";
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Link
-              href={`${base}/settings`}
-              aria-label={`Credits: ${compactUsd(dollars)}`}
-              onClick={() => track("cut_credits_pill_clicked", { dollars })}
-              className={PILL}
-            />
-          }
-        >
-          <Coins className="size-3.5" />
-          {compactUsd(dollars)}
-        </TooltipTrigger>
-        <TooltipContent side="bottom">{message}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Popover>
+      <PopoverTrigger
+        aria-label={`Credits: ${compactUsd(dollars)}`}
+        onClick={() => track("cut_credits_pill_clicked", { dollars })}
+        className={PILL}
+      >
+        <Zap className="size-3.5" />
+        {compactUsd(dollars)}
+      </PopoverTrigger>
+      <PopoverContent side="bottom" align="end" sideOffset={6} className="w-64 p-0">
+        <PlanCard balance={balance.data.balance} />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// Mounted only while the card is open, so the plan query runs on demand.
+function PlanCard({ balance }: { balance: string }) {
+  const pro = useProSubscription();
+  const upgrade = useUpgradeToPro();
+  const isPro = pro.data?.isActive === true;
+  return (
+    <div className="text-sm">
+      <div className="flex items-center justify-between gap-3 px-4 py-3">
+        <span className="font-semibold">{isPro ? "Pro" : "Free"}</span>
+        {pro.data && !isPro && (
+          <Button size="sm" disabled={upgrade.isPending} onClick={upgrade.start}>
+            {upgrade.isPending && <Loader2 className="animate-spin" data-icon="inline-start" />}
+            Upgrade
+          </Button>
+        )}
+      </div>
+      <div className="flex items-center gap-2.5 border-t border-border px-4 py-3">
+        <Zap className="size-4 text-muted-foreground" />
+        <span className="flex-1 text-muted-foreground">Credits</span>
+        <span className="font-medium tabular-nums">{formatUsd(balance)}</span>
+      </div>
+    </div>
   );
 }
