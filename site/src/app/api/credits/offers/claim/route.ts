@@ -39,7 +39,7 @@ export const GET = withDonkeyAuth(async (request) => {
     },
     where: { id: offerId },
   });
-  if (!offer || offer.kind !== MANUAL_OFFER_KIND) return notFoundResponse();
+  if (!offer || (offer.kind !== MANUAL_OFFER_KIND && offer.kind !== "promotion_email")) return notFoundResponse();
   if (offer.userId !== request.donkey.userId) return forbiddenResponse();
   if (!offer.claimedAt && !creditOfferOpen(offer, new Date())) return goneResponse();
   return NextResponse.json({

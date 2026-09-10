@@ -11,7 +11,7 @@ import { SuShell } from "@/app/su/SuShell";
 // exports dock, the welcome sequence — mounts on an admin page.
 export const metadata: Metadata = {
   robots: { follow: false, index: false },
-  title: "Super user",
+  title: "Super User",
 };
 
 export default function SuLayout({ children }: { children: ReactNode }) {

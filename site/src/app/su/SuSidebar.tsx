@@ -91,7 +91,7 @@ export function SuSidebar() {
           />
         </span>
         <span className="text-[17px] font-semibold tracking-tight">
-          Super user
+          Super User
         </span>
       </SidebarHeader>
 

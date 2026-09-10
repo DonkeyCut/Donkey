@@ -32,12 +32,14 @@ export type PromotionVars = {
   firstName: string;
   name: string;
   email: string;
+  claimUrl?: string;
 };
 
 export const PROMOTION_PLACEHOLDERS = [
   "firstName",
   "name",
   "email",
+  "claimUrl",
 ] as const satisfies readonly (keyof PromotionVars)[];
 
 const PLACEHOLDER = /\{\{\s*([a-zA-Z]+)\s*\}\}/g;
@@ -54,12 +56,16 @@ export function firstNameOf(name: string): string {
   return name.trim().split(/\s+/)[0] || name;
 }
 
-function fill(text: string, vars: Record<string, string>, allowed: readonly string[]): string {
+function fill(text: string, vars: Record<string, unknown>, allowed: readonly string[]): string {
   return text.replace(PLACEHOLDER, (_match, key: string) => {
     if (!allowed.includes(key)) {
       throw new UnknownPlaceholderError(key);
     }
-    return vars[key];
+    const value = vars[key];
+    if (typeof value !== "string") {
+      throw new UnknownPlaceholderError(key);
+    }
+    return value;
   });
 }
 

@@ -1,4 +1,5 @@
-import type { Prisma } from "@/generated/prisma/client";
+import { Prisma } from "@/generated/prisma/client";
+import { SAMPLE_CLAIM_URL } from "@/lib/marketing/promotionOfferInput";
 import { invalidResponse } from "@/lib/config/experimentList";
 import { UnknownPlaceholderError } from "@/lib/marketing/placeholders";
 import { renderPromotion, SAMPLE_RECIPIENT } from "@/lib/marketing/promotionCopy";
@@ -10,7 +11,7 @@ import type { PromotionInput } from "@/lib/marketing/promotionInput";
 
 export function copyIssue(input: PromotionInput): Response | null {
   try {
-    renderPromotion(input, SAMPLE_RECIPIENT);
+    renderPromotion(input, SAMPLE_RECIPIENT, input.creditOffer ? SAMPLE_CLAIM_URL : undefined);
     return null;
   } catch (error) {
     if (error instanceof UnknownPlaceholderError) {
@@ -23,6 +24,7 @@ export function copyIssue(input: PromotionInput): Response | null {
 export function promotionData(input: PromotionInput, actorUserId: string) {
   return {
     actorUserId,
+    creditOffer: input.creditOffer ? (input.creditOffer as Prisma.InputJsonValue) : Prisma.DbNull,
     audience: input.audience as Prisma.InputJsonValue,
     body: input.body,
     ctaLabel: input.ctaLabel,

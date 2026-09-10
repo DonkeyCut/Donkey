@@ -59,12 +59,12 @@ export type RenderedPromotion = {
 
 /** What one recipient reads. Throws UnknownPlaceholderError on a typo, so a
  * save or a send fails before any mail leaves. */
-export function renderPromotion(copy: PromotionCopy, user: EmailUser): RenderedPromotion {
-  const vars = promotionVars(user);
+export function renderPromotion(copy: PromotionCopy, user: EmailUser, claimUrl?: string): RenderedPromotion {
+  const vars = { ...promotionVars(user), claimUrl };
   const subject = fillPromotionText(copy.subject, vars);
   const cta =
     copy.ctaLabel !== null && copy.ctaUrl !== null
-      ? { label: fillPromotionText(copy.ctaLabel, vars), url: copy.ctaUrl }
+      ? { label: fillPromotionText(copy.ctaLabel, vars), url: fillPromotionText(copy.ctaUrl, vars) }
       : null;
   const body = fillPromotionText(copy.body.replaceAll(BUTTON_MARK, "\u0000button\u0000"), vars).replaceAll(
     "\u0000button\u0000",

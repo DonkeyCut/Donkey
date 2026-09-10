@@ -15,6 +15,7 @@ export const audienceSchema = z
     // Account creation window; either edge may be open.
     createdAfter: z.iso.datetime().nullable().default(null),
     createdBefore: z.iso.datetime().nullable().default(null),
+    minimumAccountAgeDays: z.number().int().min(1).max(36500).nullable().default(null),
     // Whether the account holds an active Pro subscription.
     plan: z.enum(["any", "free", "pro"]).default("any"),
     // Whether the account has ever paid for anything.
@@ -50,7 +51,7 @@ export type AudienceFact = keyof AudienceFacts;
 export function audienceNeeds(audience: Audience): Set<AudienceFact> {
   const needs = new Set<AudienceFact>();
   if (audience.countries.length > 0) needs.add("country");
-  if (audience.createdAfter || audience.createdBefore) needs.add("createdAt");
+  if (audience.createdAfter || audience.createdBefore || audience.minimumAccountAgeDays != null) needs.add("createdAt");
   if (audience.plan !== "any") needs.add("pro");
   if (audience.paid !== "any") needs.add("paid");
   if (audience.activeWithinDays !== null) needs.add("lastActiveAt");
@@ -60,6 +61,8 @@ export function audienceNeeds(audience: Audience): Set<AudienceFact> {
 }
 
 export function matchesAudience(audience: Audience, facts: AudienceFacts, now: Date): boolean {
+  if (audience.minimumAccountAgeDays != null &&
+      facts.createdAt.getTime() > now.getTime() - audience.minimumAccountAgeDays * 86_400_000) return false;
   if (audience.countries.length > 0) {
     if (!facts.country || !audience.countries.includes(facts.country)) return false;
   }
@@ -89,6 +92,7 @@ export function matchesAudience(audience: Audience, facts: AudienceFacts, now: D
 /** One line for a list: the rules an audience sets. */
 export function describeAudience(audience: Audience): string {
   const parts: string[] = [];
+  if (audience.minimumAccountAgeDays != null) parts.push(`signed up at least ${audience.minimumAccountAgeDays} days ago`);
   if (audience.countries.length) parts.push(audience.countries.join(", "));
   if (audience.createdAfter) parts.push(`created from ${audience.createdAfter.slice(0, 10)}`);
   if (audience.createdBefore) parts.push(`created before ${audience.createdBefore.slice(0, 10)}`);

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { Prisma } from "@/generated/prisma/client";
 import { notFoundResponse, withSuperUser } from "@/lib/donkey-api-auth";
 import { prisma } from "@/lib/prisma";
 
@@ -14,6 +15,7 @@ const saveSchema = z
     subject: z.string().trim().min(1).max(200),
     trackReplies: z.boolean(),
     unsubscribeLink: z.boolean(),
+    promotion: z.record(z.string(), z.unknown()).nullable().optional(),
   })
   .strict();
 
@@ -25,6 +27,7 @@ const templateSelect = {
   trackReplies: true,
   unsubscribeLink: true,
   updatedAt: true,
+  promotion: true,
 } as const;
 
 type TemplateRow = {
@@ -35,6 +38,7 @@ type TemplateRow = {
   trackReplies: boolean;
   unsubscribeLink: boolean;
   updatedAt: Date;
+  promotion: unknown;
 };
 
 function serialize(row: TemplateRow) {
@@ -46,6 +50,7 @@ function serialize(row: TemplateRow) {
     trackReplies: row.trackReplies,
     unsubscribeLink: row.unsubscribeLink,
     updatedAt: row.updatedAt.toISOString(),
+    promotion: row.promotion,
   };
 }
 
@@ -75,6 +80,7 @@ export const POST = withSuperUser(async (request) => {
   }
 
   const { body, name, subject, trackReplies, unsubscribeLink } = parsed.data;
+  const promotion = parsed.data.promotion ? (parsed.data.promotion as Prisma.InputJsonValue) : Prisma.DbNull;
   const template = await prisma.outreachTemplate.upsert({
     create: {
       actorUserId: request.donkey.userId,
@@ -83,6 +89,7 @@ export const POST = withSuperUser(async (request) => {
       subject,
       trackReplies,
       unsubscribeLink,
+      promotion,
     },
     select: templateSelect,
     update: {
@@ -91,6 +98,7 @@ export const POST = withSuperUser(async (request) => {
       subject,
       trackReplies,
       unsubscribeLink,
+      promotion,
     },
     where: { name },
   });

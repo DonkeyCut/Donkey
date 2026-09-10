@@ -39,12 +39,14 @@ import {
   useTestPromotion,
   type PromotionSummary,
 } from "@/queries/promotions";
+import { useOutreachTemplates, useSaveOutreachTemplate } from "@/queries/outreachTemplates";
 
 // One form writes a promotion and sends it: the words, the button, which
 // address it comes from, who gets it, and which earlier promotions' readers
 // are left out. A sent promotion opens read-only.
 
 type Draft = {
+  creditOffer: import("@/lib/marketing/promotionOfferInput").PromotionOffer | null;
   name: string;
   subject: string;
   body: string;
@@ -59,8 +61,9 @@ const blank = (): Draft => ({
   name: "",
   subject: "",
   body: "",
-  ctaLabel: "",
-  ctaUrl: "",
+  ctaLabel: "Claim my AI credits",
+  ctaUrl: "{{claimUrl}}",
+  creditOffer: { dollars: 15, claimWindowDays: 3, expiresAfterDays: 28 },
   sender: "bulk",
   audience: blankAudienceDraft(),
   excludePromotionIds: [],
@@ -70,8 +73,9 @@ const fromSummary = (p: PromotionSummary): Draft => ({
   name: p.name,
   subject: p.subject,
   body: p.body,
-  ctaLabel: p.ctaLabel ?? "",
-  ctaUrl: p.ctaUrl ?? "",
+  ctaLabel: p.ctaLabel ?? (p.creditOffer ? "Claim my AI credits" : ""),
+    ctaUrl: p.ctaUrl ?? (p.creditOffer ? "{{claimUrl}}" : ""),
+    creditOffer: p.creditOffer ?? { dollars: 15, claimWindowDays: 3, expiresAfterDays: 28 },
   sender: p.sender,
   audience: audienceDraftFrom(p.audience),
   excludePromotionIds: p.excludePromotionIds,
@@ -84,6 +88,7 @@ function toInput(draft: Draft): unknown {
     body: draft.body.trim(),
     ctaLabel: draft.ctaLabel.trim() || null,
     ctaUrl: draft.ctaUrl.trim() || null,
+    creditOffer: draft.creditOffer,
     sender: draft.sender,
     audience: audienceInputFrom(draft.audience),
     excludePromotionIds: draft.excludePromotionIds,
@@ -114,14 +119,17 @@ export function PromotionDialog({
   const [savedId, setSavedId] = useState<string | null>(existing?.id ?? null);
   const [issues, setIssues] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
+  const [templateName, setTemplateName] = useState("");
   const [confirm, setConfirm] = useState<{ id: string; count: SegmentCount } | null>(null);
   const save = useSavePromotion();
   const send = useSendPromotion();
   const test = useTestPromotion();
   const count = useCountSegment();
+  const saveTemplate = useSaveOutreachTemplate();
+  const templates = useOutreachTemplates();
 
   const readOnly = existing !== null && existing.status !== "draft";
-  const busy = save.isPending || send.isPending || test.isPending || count.isPending;
+  const busy = save.isPending || send.isPending || test.isPending || count.isPending || saveTemplate.isPending;
   // Earlier promotions that reached anyone; the one being edited is not a
   // choice against itself.
   const earlier = promotions.filter((p) => p.id !== existing?.id && p.status !== "draft");
@@ -135,6 +143,18 @@ export function PromotionDialog({
         ? Array.from(new Set([...d.excludePromotionIds, id]))
         : d.excludePromotionIds.filter((x) => x !== id),
     }));
+  const loadTemplate = (id: string) => {
+    const template = templates.data?.templates.find((item) => item.id === id);
+    if (!template) return;
+    setDraft((current) => ({
+      ...current,
+      subject: template.subject,
+      body: template.body,
+      creditOffer: template.promotion
+        ? (template.promotion as Draft["creditOffer"])
+        : current.creditOffer,
+    }));
+  };
 
   const parse = (): PromotionInput | null => {
     const parsed = promotionInputSchema.safeParse(toInput(draft));
@@ -167,6 +187,25 @@ export function PromotionDialog({
     setNotice(null);
     const id = await ensureSaved();
     if (id) onOpenChange(false);
+  };
+
+  const onSaveTemplate = () => {
+    const name = templateName.trim();
+    if (!name) {
+      setIssues(["Enter a template name."]);
+      return;
+    }
+    saveTemplate.mutate({
+      name,
+      subject: draft.subject.trim(),
+      body: draft.body.trim(),
+      unsubscribeLink: true,
+      trackReplies: false,
+      promotion: draft.creditOffer,
+    }, {
+      onSuccess: () => setNotice(`Template ${name} saved.`),
+      onError: fail,
+    });
   };
 
   const onTest = async () => {
@@ -216,6 +255,16 @@ export function PromotionDialog({
               ? "Sent as it reads here."
               : "One email to everyone in the segment. Unsubscribed accounts are always left out."}
           </DialogDescription>
+          {!readOnly && templates.data?.templates.length ? (
+            <Select onValueChange={(id: string | null) => id && loadTemplate(id)}>
+              <SelectTrigger><SelectValue placeholder="Load saved template" /></SelectTrigger>
+              <SelectContent>
+                {templates.data.templates.map((template) => (
+                  <SelectItem key={template.id} value={template.id}>{template.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
         </DialogHeader>
 
         <div className="grid gap-5">
@@ -333,6 +382,17 @@ export function PromotionDialog({
               </Button>
             ) : (
               <>
+                <Input
+                  aria-label="Template name"
+                  placeholder="Template name"
+                  value={templateName}
+                  onChange={(e) => setTemplateName(e.target.value)}
+                  disabled={busy}
+                  className="w-36"
+                />
+                <Button type="button" variant="outline" disabled={busy} onClick={onSaveTemplate}>
+                  {saveTemplate.isPending ? "Saving…" : "Save template"}
+                </Button>
                 <Button type="button" variant="secondary" disabled={busy} onClick={onSave}>
                   {save.isPending ? "Saving…" : "Save draft"}
                 </Button>

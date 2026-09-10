@@ -135,7 +135,12 @@ export default {
           body: JSON.stringify({ jobId }),
         });
         if (res.ok) message.ack();
-        else message.retry({ delaySeconds: 30 });
+        else {
+          const retryAfter = Number(res.headers.get("retry-after"));
+          message.retry({
+            delaySeconds: Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 30,
+          });
+        }
       } catch {
         message.retry({ delaySeconds: 30 });
       }

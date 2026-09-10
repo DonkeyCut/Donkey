@@ -12,6 +12,7 @@ export type SavedTemplate = {
   unsubscribeLink: boolean;
   trackReplies: boolean;
   updatedAt: string;
+  promotion: Record<string, unknown> | null;
 };
 
 export const outreachTemplatesQueryKey = ["outreach", "templates"] as const;
@@ -35,6 +36,7 @@ export function useSaveOutreachTemplate() {
       body: string;
       unsubscribeLink: boolean;
       trackReplies: boolean;
+      promotion?: Record<string, unknown> | null;
     }) =>
       apiFetch<{ template: SavedTemplate }>("/api/marketing/templates", {
         body: JSON.stringify(input),

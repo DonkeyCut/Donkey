@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 // conversions below move between it and the audience schema.
 
 export type AudienceDraft = {
+  minimumAccountAgeDays: string;
   countries: string;
   createdAfter: string;
   createdBefore: string;
@@ -26,6 +27,7 @@ export const blankAudienceDraft = (): AudienceDraft => ({
   countries: "",
   createdAfter: "",
   createdBefore: "",
+  minimumAccountAgeDays: "",
   plan: "any",
   paid: "any",
   activeWithinDays: "",
@@ -39,6 +41,7 @@ const dayStart = (d: string) => (d ? new Date(`${d}T00:00:00Z`).toISOString() : 
 const numberOrNull = (s: string) => (s.trim() === "" ? null : Number(s));
 
 export const audienceDraftFrom = (a: Audience): AudienceDraft => ({
+  minimumAccountAgeDays: numberOrBlank(a.minimumAccountAgeDays),
   countries: a.countries.join(", "),
   createdAfter: day(a.createdAfter),
   createdBefore: day(a.createdBefore),
@@ -50,6 +53,7 @@ export const audienceDraftFrom = (a: Audience): AudienceDraft => ({
 });
 
 export const audienceInputFrom = (draft: AudienceDraft): AudienceInput => ({
+  minimumAccountAgeDays: draft.minimumAccountAgeDays.trim() ? Number(draft.minimumAccountAgeDays) : null,
   countries: draft.countries
     .split(",")
     .map((s) => s.trim().toUpperCase())
@@ -109,6 +113,17 @@ export function AudienceFields({
             disabled={disabled}
             value={value.createdBefore}
             onChange={(e) => onChange({ createdBefore: e.target.value })}
+          />
+        </Field>
+        <Field label="Signed up at least (days)" htmlFor="aud-min-age">
+          <Input
+            id="aud-min-age"
+            type="number"
+            min={1}
+            max={36500}
+            disabled={disabled}
+            value={value.minimumAccountAgeDays}
+            onChange={(e) => onChange({ minimumAccountAgeDays: e.target.value })}
           />
         </Field>
         <Field label="Plan" htmlFor="aud-plan">

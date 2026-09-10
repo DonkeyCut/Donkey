@@ -18,13 +18,20 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { PromotionSender, PromotionStatus } from "@/lib/marketing/promotionInput";
-import { useDeletePromotion, usePromotions, type PromotionSummary } from "@/queries/promotions";
+import {
+  useCancelPromotion,
+  useDeletePromotion,
+  usePromotions,
+  useSendPromotion,
+  type PromotionSummary,
+} from "@/queries/promotions";
 
 type BadgeVariant = "default" | "secondary" | "outline" | "destructive";
 
 const STATUS_VARIANT: Record<PromotionStatus, BadgeVariant> = {
   draft: "outline",
   sending: "default",
+  paused: "outline",
   sent: "secondary",
 };
 
@@ -108,6 +115,8 @@ function PromotionRow({
   onDuplicate: () => void;
 }) {
   const remove = useDeletePromotion();
+  const cancel = useCancelPromotion();
+  const resume = useSendPromotion();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const skipped = p.excludePromotionIds
     .map((id) => all.find((other) => other.id === id)?.name ?? "a deleted promotion")
@@ -142,7 +151,25 @@ function PromotionRow({
           <Button size="sm" variant="outline" onClick={onDuplicate}>
             Duplicate
           </Button>
-          {p.status !== "sending" ? (
+          {p.status === "sending" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={cancel.isPending}
+              onClick={() => cancel.mutate(p.id)}
+            >
+              {cancel.isPending ? "Pausing…" : "Pause"}
+            </Button>
+          ) : p.status === "paused" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={resume.isPending}
+              onClick={() => resume.mutate(p.id)}
+            >
+              {resume.isPending ? "Resuming…" : "Resume"}
+            </Button>
+          ) : (
             <Button
               size="sm"
               variant="ghost"
@@ -154,7 +181,7 @@ function PromotionRow({
             >
               Delete
             </Button>
-          ) : null}
+          )}
         </div>
       </div>
       <AlertDialog open={confirmDelete} onOpenChange={(isOpen) => {
