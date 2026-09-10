@@ -11,6 +11,7 @@ import {
 import type { ComponentType } from "react";
 
 import { RunAnalyticsButton } from "@/app/su/analytics/RunAnalyticsButton";
+import { DrainNowButton } from "@/app/su/jobs/email/DrainNowButton";
 import { ScanOutreachButton } from "@/app/su/outreach/ScanOutreachButton";
 
 // The super-user surfaces in rail order, addressed from the root of their own
@@ -104,7 +105,19 @@ export const SU_NAV: SuSurface[] = [
     label: "Jobs",
     icon: ListChecks,
     title: "Jobs",
-    description: "Background work started from these surfaces, newest first.",
+    tabs: [
+      {
+        href: "/jobs/list",
+        label: "Jobs",
+        description: "Background work started from these surfaces, newest first.",
+      },
+      {
+        href: "/jobs/email",
+        label: "Email",
+        description: "The outbox: today's quota, what is queued by kind, and what failed.",
+        Action: DrainNowButton,
+      },
+    ],
   },
 ];
 
