@@ -5,12 +5,14 @@
 // number; clicking it opens the plan card with the exact balance and the way
 // into Pro.
 import { useEffect } from "react";
+import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
 import { Loader2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useEngineUser } from "@/cut/lib/backend/hooks";
 import { useHostedBalance, useInvalidateOnSettle } from "@/cut/lib/hosted";
+import { useCutBase } from "@/cut/lib/nav";
 import { useUpgradeToPro } from "@/cut/lib/proUpgrade";
 import { track } from "@/lib/analytics";
 import { formatUsd } from "@/lib/credits/format-usd";
@@ -98,8 +100,11 @@ function BalancePill() {
   );
 }
 
-// Mounted only while the card is open, so the plan query runs on demand.
+// Mounted only while the card is open, so the plan query runs on demand. A
+// free account is sold Pro; a Pro account already pays, so its button goes to
+// billing, where credits are bought.
 function PlanCard({ balance }: { balance: string }) {
+  const base = useCutBase();
   const pro = useProSubscription();
   const upgrade = useUpgradeToPro();
   const isPro = pro.data?.isActive === true;
@@ -107,12 +112,17 @@ function PlanCard({ balance }: { balance: string }) {
     <div className="text-sm">
       <div className="flex items-center justify-between gap-3 px-4 py-3">
         <span className="font-semibold">{isPro ? "Pro" : "Free"}</span>
-        {pro.data && !isPro && (
-          <Button size="sm" disabled={upgrade.isPending} onClick={upgrade.start}>
-            {upgrade.isPending && <Loader2 className="animate-spin" data-icon="inline-start" />}
-            Upgrade
-          </Button>
-        )}
+        {pro.data &&
+          (isPro ? (
+            <Button size="sm" render={<Link href={`${base}/settings`} />}>
+              Buy credits
+            </Button>
+          ) : (
+            <Button size="sm" disabled={upgrade.isPending} onClick={upgrade.start}>
+              {upgrade.isPending && <Loader2 className="animate-spin" data-icon="inline-start" />}
+              Upgrade
+            </Button>
+          ))}
       </div>
       <div className="flex items-center gap-2.5 border-t border-border px-4 py-3">
         <Zap className="size-4 text-muted-foreground" />
