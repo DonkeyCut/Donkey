@@ -1157,10 +1157,6 @@ export function Editor({
     );
   }
 
-  const anySidePanel = sharedFeatures
-    ? sharedFeatures.media || sharedFeatures.genai || sharedFeatures.subtitles || sharedFeatures.details
-    : true;
-
   return (
     // The shell tracks the window rather than flooring at a width the window
     // has to scroll to reach. A floor moved the problem instead of solving it:
@@ -1191,10 +1187,7 @@ export function Editor({
             hasInspector ? "grid-cols-[auto_minmax(0,1fr)_auto]" : "grid-cols-[auto_minmax(0,1fr)]"
           }`}
         >
-          {anySidePanel && (
-            <SidePanel projectId={projectId} onImport={importFiles} importing={importing > 0} />
-          )}
-          {!anySidePanel && <div />}
+          <SidePanel projectId={projectId} onImport={importFiles} importing={importing > 0} />
           <div className="grid min-h-0 min-w-0">
             <Preview />
           </div>

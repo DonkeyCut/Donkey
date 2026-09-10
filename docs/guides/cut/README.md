@@ -36,7 +36,7 @@ An export is the preview drawn again frame by frame into an MP4 by the same comp
 
 ## Sharing
 
-A cloud project can be shared read-only by link, with the owner choosing which surfaces a viewer sees. The server filters the doc and its media to that set before anything leaves, and a viewer can copy the shared project into their own account.
+A cloud project can be shared read-only by link, with the owner choosing which surfaces a viewer can open. The server filters the doc and its media to that set before anything leaves; the rail still shows every tab, and a withheld one sits locked with a hover note saying the view is read-only. A viewer can copy the shared project into their own account.
 
 ## The assistant
 

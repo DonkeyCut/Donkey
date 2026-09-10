@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Captions, Check, Clapperboard, ClipboardList, Copy, Download, Ellipsis, Film, FolderOpen, FolderPlus, Image as ImageIcon, Loader2, Music, Plus, Shapes, Sparkles, Trash2, Upload, X, Blend } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { LiveElapsed } from "@/cut/components/Elapsed";
 import {
   AlertDialog,
@@ -171,22 +172,23 @@ export function SidePanel({
   onImport: (files: FileList | File[], opts?: { mediaOnly?: boolean; folderId?: string }) => void;
   importing: boolean;
 }) {
-  // A shared view shows only the surfaces the share opted in; the Library is
-  // the viewer's own cross-project shelf and never appears there.
+  // A shared view opens only the surfaces the share opted in. The rail still
+  // shows every tab so the viewer sees what the editor has; a tab the share
+  // withholds sits locked, and hovering it says why. The Library is the
+  // viewer's own cross-project shelf and never appears there.
   const sharedFeatures = useEditor((s) => s.sharedFeatures);
-  const visibleTabs = !sharedFeatures
-    ? TABS
-    : TABS.filter(({ id }) =>
-        id === "media"
-          ? sharedFeatures.media
-          : id === "video" || id === "image" || id === "audio"
-            ? sharedFeatures.genai
-            : id === "subtitles"
-              ? sharedFeatures.subtitles
-              : id === "publish"
-                ? sharedFeatures.details
-                : false
-      );
+  const offered = (id: Tab): boolean =>
+    !sharedFeatures ||
+    (id === "media"
+      ? sharedFeatures.media
+      : id === "video" || id === "image" || id === "audio"
+        ? sharedFeatures.genai
+        : id === "subtitles"
+          ? sharedFeatures.subtitles
+          : id === "publish"
+            ? sharedFeatures.details
+            : false);
+  const visibleTabs = TABS.filter(({ id }) => offered(id));
   // `null` collapses the panel: clicking the active tab unselects it, leaving
   // just the icon rail so the video canvas takes the freed width.
   const [tabPref, setTab] = useLocalPref<Tab | null>("cut-side-tab", "media", (v) =>
@@ -297,7 +299,8 @@ export function SidePanel({
         )}
         contentClassName="flex flex-col items-center gap-1 py-3"
       >
-        {visibleTabs.map(({ id, label, icon: Icon }, tabIndex) => {
+        {TABS.map(({ id, label, icon: Icon }, tabIndex) => {
+          const locked = !offered(id);
           // The open tab never badges — its completions are already on screen.
           const unseenCount = isGenTab(id) && id !== tab ? unseen[id].length : 0;
           // Full width of the rail, whatever a scrollbar has left of it, so a
@@ -306,14 +309,16 @@ export function SidePanel({
           // from its icon chip's deeper fill; no ring, so nothing to keep off
           // the rail edges. The outline stays off — click focus otherwise
           // draws one around the tile.
-          const tileClass =
-            "flex w-full min-w-0 shrink-0 flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-muted-foreground outline-none transition-colors hover:text-foreground";
+          const tileClass = cn(
+            "flex w-full min-w-0 shrink-0 flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-muted-foreground outline-none transition-colors",
+            locked ? "cursor-default opacity-50" : "hover:text-foreground"
+          );
           const inner = (
             <>
               <span
                 className={cn(
                   "relative grid size-9 place-items-center rounded-lg transition-colors",
-                  tab === id ? "bg-foreground/10 text-foreground" : "hover:bg-muted/60",
+                  tab === id ? "bg-foreground/10 text-foreground" : !locked && "hover:bg-muted/60",
                   dropTab === id && "bg-primary/15 text-primary"
                 )}
               >
@@ -331,7 +336,22 @@ export function SidePanel({
             </>
           );
 
-          const tile = (
+          // A locked tile stays a live element so hover reaches it: a disabled
+          // button swallows pointer events and the tooltip would never open.
+          const tile = locked ? (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger
+                  render={<button className={tileClass} aria-disabled type="button" />}
+                >
+                  {inner}
+                </TooltipTrigger>
+                <TooltipContent side="right" sideOffset={8}>
+                  View only. Ask the owner for edit access.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : (
             <button
               className={tileClass}
               aria-pressed={tab === id}
@@ -366,7 +386,7 @@ export function SidePanel({
               {(id === "video" || id === "subtitles") && tabIndex > 0 && (
                 <div aria-hidden className="my-1 h-px w-8 shrink-0 bg-border" />
               )}
-              {id === "media" ? (
+              {id === "media" && !locked ? (
                 <RefDropZone
                   onRef={dropRefOnTab}
                   className="w-full shrink-0 rounded-lg"
