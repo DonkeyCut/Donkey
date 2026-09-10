@@ -131,6 +131,7 @@ by variant as well.
 ## Promotions
 
 A promotion is one email from su to an audience, minus anyone an earlier promotion reached; the Pro offers behind it (subscribe bonus, allowance multiplier) are Product-tab settings.
+Every outbound email is a row in one outbox, sent by one drainer in priority order under a daily cap shared by the whole site. A promotion queues its most recently active recipients first and stops at what the rest of the day is forecast to need for welcome and credit emails, and for mail sent by hand during work hours, then picks up the slots that go unused as the day runs down. The cap, the reserves and the work hours are the Daily email sends setting, and the order between kinds is the Email priorities setting.
 
 A credit promotion is a credit offer: one row that promises an account an
 amount, the credit's life, and the window it can be claimed in, then records

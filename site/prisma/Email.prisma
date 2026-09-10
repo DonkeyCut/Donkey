@@ -14,3 +14,45 @@ model UserEmailSettings {
   createdAt               DateTime  @default(now())
   updatedAt               DateTime  @updatedAt
 }
+
+// The outbox. Every email the site sends is a row here first; one drainer
+// sends rows in priority order under the day's quota
+// (src/lib/email/outbox.ts). The row is the send's record: a retried queue
+// call adds nothing because the idempotency key is unique.
+model EmailSend {
+  id             String     @id @default(cuid())
+  // One of EMAIL_KIND_IDS (src/lib/email/kindIds.ts).
+  kind           String
+  // Higher goes first: the kind's priority when the row was queued.
+  priority       Int
+  // Order within a priority. A promotion's most recently active recipient is 0.
+  rank           Int        @default(0)
+  userId         String?
+  user           User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  promotionId    String?
+  promotion      Promotion? @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  // What the kind's builder needs to make the message.
+  payload        Json
+  idempotencyKey String     @unique
+  // "queued" | "sending" | "sent" | "failed" | "skipped"
+  state          String     @default("queued")
+  attempts       Int        @default(0)
+  error          String?
+  // A failed attempt pushes the next one out.
+  notBefore      DateTime   @default(now())
+  sentAt         DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@index([state, priority, rank, createdAt])
+  @@index([promotionId, state])
+}
+
+// Global outbound email cap for free-tier limits: how many emails were sent
+// on each UTC calendar day.
+model EmailDailyQuota {
+  day      String   @id
+  sent     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

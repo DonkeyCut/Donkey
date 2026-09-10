@@ -9,6 +9,8 @@ import {
   type SettingsOf,
 } from "@donkeycut/abexp";
 import { z } from "zod";
+import { promotionOfferSchema } from "@/lib/marketing/promotionOfferInput";
+import { DEFAULT_EMAIL_PRIORITIES, EMAIL_KIND_IDS } from "@/lib/email/kindIds";
 
 import { maxCreditGrantDollars, maxCreditGrantExpiryDays } from "@/lib/credits/top-up";
 
@@ -19,7 +21,23 @@ import { maxCreditGrantDollars, maxCreditGrantExpiryDays } from "@/lib/credits/t
 // declarations the server validates against. A feature that people might
 // tune ships its setting here in the same change.
 
+function validTimeZone(zone: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const SETTINGS = defineSettings({
+  promotionCreditOffer: {
+    schema: promotionOfferSchema.extend({ minimumAccountAgeDays: z.number().int().min(1).max(36500) }).strict(),
+    default: { dollars: 15, claimWindowDays: 3, expiresAfterDays: 28, minimumAccountAgeDays: 7 },
+    public: false,
+    title: "Promotion credit offer",
+    description: "Default credit offer and minimum account age for new promotion drafts. Saved drafts keep their terms.",
+  },
   chatRuntime: {
     schema: z.object({
       syncIntervalMs: z.number().int().min(1000).max(30000),
@@ -77,6 +95,54 @@ export const SETTINGS = defineSettings({
     public: false,
     title: "Signup credits",
     description: "USD a new account is granted at signup, and how many days the grant lives.",
+  },
+  emailDailySend: {
+    schema: z
+      .object({
+        // Emails the provider lets the account send per UTC day.
+        providerLimit: z.number().int().min(1).max(100000),
+        // Slots kept free for emails sent by hand while work hours remain in
+        // the UTC day; released once the work day is over.
+        manualReserve: z.number().int().min(0).max(100000),
+        manualTimeZone: z.string().refine(validTimeZone, "Unknown IANA time zone"),
+        // Work hours in that zone, start inclusive and end exclusive.
+        manualStartHour: z.number().int().min(0).max(23),
+        manualEndHour: z.number().int().min(1).max(24),
+        manualWeekdaysOnly: z.boolean(),
+        // Days of signup history the transactional forecast averages over.
+        signupLookbackDays: z.number().int().min(1).max(90),
+        // Slots kept free beyond the forecast for transactional email the
+        // forecast cannot see, such as credit offers sent by hand.
+        transactionalHeadroom: z.number().int().min(0).max(100000),
+      })
+      .strict()
+      .refine((v) => v.manualStartHour < v.manualEndHour, { message: "Work hours must end after they start." })
+      .refine((v) => v.manualReserve + v.transactionalHeadroom < v.providerLimit, {
+        message: "The reserves must leave room for bulk sends.",
+      }),
+    default: {
+      providerLimit: 99,
+      manualReserve: 10,
+      manualTimeZone: "Asia/Seoul",
+      manualStartHour: 9,
+      manualEndHour: 18,
+      manualWeekdaysOnly: true,
+      signupLookbackDays: 7,
+      transactionalHeadroom: 5,
+    },
+    public: false,
+    title: "Daily email sends",
+    description:
+      "The provider's daily send cap, the slots held for emails sent by hand during work hours, and how the transactional forecast that holds slots ahead of promotions is sized.",
+  },
+  emailPriorities: {
+    schema: z
+      .object(Object.fromEntries(EMAIL_KIND_IDS.map((id) => [id, z.number().int().min(0).max(1000)])))
+      .strict(),
+    default: { ...DEFAULT_EMAIL_PRIORITIES },
+    public: false,
+    title: "Email priorities",
+    description: "The order the outbox sends in when the day's quota is short: higher goes first. A change applies to emails queued from then on.",
   },
   creditExpiryNotice: {
     schema: z
@@ -144,7 +210,7 @@ export const SETTINGS = defineSettings({
 
 // The settings su shows on its Product tab: what an account gets. The
 // settings tab under Experiments still lists every key.
-export const PRODUCT_SETTING_KEYS = ["signupCredits", "creditExpiryNotice", "manualCreditOffer", "subscribeBonus", "proAllowancePromotion"] as const satisfies readonly SettingKey[];
+export const PRODUCT_SETTING_KEYS = ["signupCredits", "creditExpiryNotice", "manualCreditOffer", "promotionCreditOffer", "subscribeBonus", "proAllowancePromotion"] as const satisfies readonly SettingKey[];
 
 export type SettingKey = keyof typeof SETTINGS;
 export type Settings = SettingsOf<typeof SETTINGS>;
