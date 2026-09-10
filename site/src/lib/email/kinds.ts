@@ -12,7 +12,7 @@ import { buildWelcomeEmail, recordWelcomeSent } from "@/lib/email/send-welcome";
 import { isMarketingUnsubscribed } from "@/lib/email/unsubscribe";
 import { buildReplyForwardEmail, replyForwardPayloadSchema } from "@/lib/marketing/forward-reply";
 import { UnknownPlaceholderError } from "@/lib/marketing/placeholders";
-import { SAMPLE_CLAIM_URL, promotionOfferOf } from "@/lib/marketing/promotionOfferInput";
+import { promotionOfferOf } from "@/lib/marketing/promotionOfferInput";
 import { buildPromotionEmail, promotionCopyOf } from "@/lib/marketing/promotions";
 import { buildOutreachEmail, outreachPayloadSchema, recordOutreachSent } from "@/lib/marketing/send-outreach";
 import { prisma } from "@/lib/prisma";
@@ -125,6 +125,25 @@ async function abandonPromotion(promotionId: string, error: Error): Promise<void
   await prisma.promotion.update({ data: { status: "draft" }, where: { id: promotionId } });
 }
 
+// A promotion with a credit offer mails each person their own claim link,
+// backed by an offer row that the real send and the test send share.
+async function promotionEmailFor(promotion: Awaited<ReturnType<typeof promotionRowOf>>, user: EmailUser) {
+  const offer = promotionOfferOf(promotion.creditOffer);
+  const claimUrl = offer
+    ? (
+        await createPromotionCreditOffer({
+          promotionId: promotion.id,
+          userId: user.id,
+          amountDollars: offer.dollars,
+          claimWindowDays: offer.claimWindowDays,
+          expiresAfterDays: offer.expiresAfterDays,
+          offeredByUserId: promotion.actorUserId,
+        })
+      ).claimUrl
+    : undefined;
+  return buildPromotionEmail(promotionCopyOf(promotion), user, claimUrl);
+}
+
 const promotion = define({
   quota: "bulk",
   payload: promotionPayloadSchema,
@@ -133,33 +152,20 @@ const promotion = define({
     // The opt-out is read again right before the send, so someone who
     // unsubscribed after the segment was resolved is skipped.
     if (!user || (await isMarketingUnsubscribed(user.id))) return null;
-    const offer = promotionOfferOf(promotion.creditOffer);
-    const claimUrl = offer
-      ? (
-          await createPromotionCreditOffer({
-            promotionId,
-            userId: user.id,
-            amountDollars: offer.dollars,
-            claimWindowDays: offer.claimWindowDays,
-            expiresAfterDays: offer.expiresAfterDays,
-            offeredByUserId: promotion.actorUserId,
-          })
-        ).claimUrl
-      : undefined;
-    return buildPromotionEmail(promotionCopyOf(promotion), user, claimUrl);
+    return promotionEmailFor(promotion, user);
   },
   onAbandon: async ({ promotionId }, _row, error) => abandonPromotion(promotionId, error),
 });
 
 // The saved copy mailed to the operator, placeholders filled with their own
-// account and a sample claim link where the copy has one.
+// account. A credit offer gives them their own working claim link.
 const promotionTest = define({
   quota: "manual",
   payload: promotionPayloadSchema,
   build: async ({ promotionId }, row) => {
     const [user, promotion] = await Promise.all([userOf(row), promotionRowOf(promotionId)]);
     if (!user) return null;
-    return buildPromotionEmail(promotionCopyOf(promotion), user, promotion.creditOffer ? SAMPLE_CLAIM_URL : undefined);
+    return promotionEmailFor(promotion, user);
   },
 });
 
