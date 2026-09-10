@@ -83,14 +83,14 @@ export const SU_NAV = [
     title: "Jobs",
     tabs: [
       {
-        href: "/jobs/list",
-        label: "Jobs",
-        description: "Background work started from these surfaces, newest first.",
-      },
-      {
         href: "/jobs/email",
         label: "Email",
         description: "The outbox: today's quota, what is queued by kind, and what failed.",
+      },
+      {
+        href: "/jobs/list",
+        label: "Background",
+        description: "Background work started from these surfaces, newest first.",
       },
     ],
   },
