@@ -8,6 +8,7 @@ import {
   isDonkeycutHost,
   isSuHost,
 } from "@/cut/lib/hosts";
+import { suSectionHome } from "@/app/su/nav";
 
 // Cut (the video editor, publicly "Donkey Cut") lives under /cut in this single
 // site app: the marketing landing at /cut and the app under /cut/app. The
@@ -128,6 +129,17 @@ async function gateAnswer(cookie: string): Promise<{ status: number; superUser: 
 
 async function suHost(req: NextRequest, pathname: string): Promise<NextResponse> {
   if (underPath(pathname, "/api")) return NextResponse.next();
+
+  // The host root and a section address open a page, answered here so no
+  // page ever renders a redirect. One thrown from a page reaches the browser
+  // as a meta tag behind the streamed shell, and the page's slot paints empty
+  // until the router follows it.
+  const home = suSectionHome(pathname);
+  if (home) {
+    const url = req.nextUrl.clone();
+    url.pathname = home;
+    return NextResponse.redirect(url, 307);
+  }
 
   const account = await gateAnswer(req.headers.get("cookie") ?? "");
   if (account.status === 401) {

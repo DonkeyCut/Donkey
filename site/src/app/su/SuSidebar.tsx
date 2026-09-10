@@ -2,10 +2,21 @@
 
 import Link, { useLinkStatus } from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ArrowLeft, ChevronRight } from "lucide-react";
+import {
+  ArrowLeft,
+  ChartColumn,
+  ChevronRight,
+  CreditCard,
+  FlaskConical,
+  ListChecks,
+  Mail,
+  Megaphone,
+  Package,
+  UserRound,
+} from "lucide-react";
 import { useEffect } from "react";
 
-import { SU_NAV, suSurfaceAt } from "@/app/su/nav";
+import { SU_NAV, suSurfaceAt, suTabs, type SuSurface } from "@/app/su/nav";
 import {
   Collapsible,
   CollapsibleContent,
@@ -27,11 +38,22 @@ import {
 } from "@/components/ui/sidebar";
 import { SU_APP_ORIGIN } from "@/cut/lib/hosts";
 
-// Every page the rail can open. A section's own address redirects to its
-// first tab, so the tabs are the pages.
-const RAIL_PAGES = SU_NAV.flatMap((surface) =>
-  surface.tabs ? surface.tabs.map((tab) => tab.href) : [surface.href],
-);
+// Each surface's icon, keyed by address. The rail's list (nav.ts) stays free
+// of React so the proxy can read it, so the icons live here.
+const SURFACE_ICONS: Record<SuSurface["href"], typeof UserRound> = {
+  "/analytics": ChartColumn,
+  "/credits": CreditCard,
+  "/experiments": FlaskConical,
+  "/jobs": ListChecks,
+  "/outreach": Mail,
+  "/product": Package,
+  "/promotions": Megaphone,
+  "/users": UserRound,
+};
+
+// Every page the rail can open. A section's own address opens its first tab,
+// so the tabs are the pages.
+const RAIL_PAGES = SU_NAV.flatMap((surface) => suTabs(surface)?.map((tab) => tab.href) ?? [surface.href]);
 
 /** The clicked row's answer while its page is on the way: the accent fill,
  * breathing. A link only shows its pending state when the page was not
@@ -99,7 +121,9 @@ export function SuSidebar() {
         <SidebarGroup>
           <SidebarMenu className="gap-0.5">
             {SU_NAV.map((surface) => {
-              const { href, label, icon: Icon, tabs } = surface;
+              const { href, label } = surface;
+              const Icon = SURFACE_ICONS[href];
+              const tabs = suTabs(surface);
               const active = here.surface === surface;
               if (!tabs) {
                 return (
@@ -135,7 +159,7 @@ export function SuSidebar() {
                       {tabs.map((tab) => (
                         <SidebarMenuSubItem key={tab.href}>
                           <SidebarMenuSubButton
-                            isActive={active && here.tab === tab}
+                            isActive={active && here.page === tab}
                             render={<Link href={tab.href} />}
                             className="relative isolate"
                           >
