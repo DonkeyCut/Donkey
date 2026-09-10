@@ -27,12 +27,7 @@ export function GuidesMenu() {
   const showing = guides.length > 0 && !guidesHidden;
   const toggle = () => useEditor.getState().toggleGuidesShown();
   return (
-    <div
-      className={cn(
-        "mr-2 flex items-center overflow-hidden rounded-md border border-border",
-        showing && "bg-accent text-foreground"
-      )}
-    >
+    <div className="mr-2 flex items-center overflow-hidden rounded-md border border-border">
       <Button
         variant="ghost"
         size="icon-xs"
@@ -42,7 +37,7 @@ export function GuidesMenu() {
         className="rounded-r-none"
         onClick={toggle}
       >
-        <Grid3x3 className="size-5" strokeWidth={1.5} />
+        <Grid3x3 className={cn("size-5", showing && "text-[#0a84ff]")} strokeWidth={1.5} />
       </Button>
       <DropdownMenu>
         <DropdownMenuTrigger
