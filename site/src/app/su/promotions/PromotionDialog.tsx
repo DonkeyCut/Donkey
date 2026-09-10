@@ -24,6 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import type { Settings } from "@/lib/config/registry";
 import { PROMOTION_PLACEHOLDERS } from "@/lib/marketing/placeholders";
 import { BUTTON_MARK } from "@/lib/marketing/promotionCopy";
 import {
@@ -32,6 +33,7 @@ import {
   type PromotionSender,
   type SegmentCount,
 } from "@/lib/marketing/promotionInput";
+import { CLAIM_URL_PLACEHOLDER, type PromotionOffer } from "@/lib/marketing/promotionOfferInput";
 import {
   useCountSegment,
   useSavePromotion,
@@ -45,8 +47,10 @@ import { useOutreachTemplates, useSaveOutreachTemplate } from "@/queries/outreac
 // address it comes from, who gets it, and which earlier promotions' readers
 // are left out. A sent promotion opens read-only.
 
+type OfferDefaults = Settings["promotionCreditOffer"];
+
 type Draft = {
-  creditOffer: import("@/lib/marketing/promotionOfferInput").PromotionOffer | null;
+  creditOffer: PromotionOffer | null;
   name: string;
   subject: string;
   body: string;
@@ -57,15 +61,25 @@ type Draft = {
   excludePromotionIds: string[];
 };
 
-const blank = (): Draft => ({
+const CLAIM_LABEL = "Claim my AI credits";
+
+const offerOf = (d: OfferDefaults): PromotionOffer => ({
+  dollars: d.dollars,
+  claimWindowDays: d.claimWindowDays,
+  expiresAfterDays: d.expiresAfterDays,
+});
+
+// A new draft starts as a credit promotion on the setting's terms, reaching
+// accounts at least the setting's age.
+const blank = (defaults: OfferDefaults): Draft => ({
   name: "",
   subject: "",
   body: "",
-  ctaLabel: "Claim my AI credits",
-  ctaUrl: "{{claimUrl}}",
-  creditOffer: { dollars: 15, claimWindowDays: 3, expiresAfterDays: 28 },
+  ctaLabel: CLAIM_LABEL,
+  ctaUrl: CLAIM_URL_PLACEHOLDER,
+  creditOffer: offerOf(defaults),
   sender: "bulk",
-  audience: blankAudienceDraft(),
+  audience: { ...blankAudienceDraft(), minimumAccountAgeDays: String(defaults.minimumAccountAgeDays) },
   excludePromotionIds: [],
 });
 
@@ -73,13 +87,23 @@ const fromSummary = (p: PromotionSummary): Draft => ({
   name: p.name,
   subject: p.subject,
   body: p.body,
-  ctaLabel: p.ctaLabel ?? (p.creditOffer ? "Claim my AI credits" : ""),
-    ctaUrl: p.ctaUrl ?? (p.creditOffer ? "{{claimUrl}}" : ""),
-    creditOffer: p.creditOffer ?? { dollars: 15, claimWindowDays: 3, expiresAfterDays: 28 },
+  ctaLabel: p.ctaLabel ?? "",
+  ctaUrl: p.ctaUrl ?? "",
+  creditOffer: p.creditOffer,
   sender: p.sender,
   audience: audienceDraftFrom(p.audience),
   excludePromotionIds: p.excludePromotionIds,
 });
+
+// Turning the offer on makes the button the claim link; turning it off takes
+// that button away, since it pointed at nothing else.
+const withOffer = (d: Draft, offer: PromotionOffer | null): Draft => {
+  if (offer) {
+    return { ...d, creditOffer: offer, ctaUrl: CLAIM_URL_PLACEHOLDER, ctaLabel: d.ctaLabel.trim() || CLAIM_LABEL };
+  }
+  const wasClaim = d.ctaUrl === CLAIM_URL_PLACEHOLDER;
+  return { ...d, creditOffer: null, ctaUrl: wasClaim ? "" : d.ctaUrl, ctaLabel: wasClaim ? "" : d.ctaLabel };
+};
 
 function toInput(draft: Draft): unknown {
   return {
@@ -100,6 +124,7 @@ const placeholders = PROMOTION_PLACEHOLDERS.map((k) => `{{${k}}}`).join(", ");
 export function PromotionDialog({
   existing,
   seed,
+  offerDefaults,
   promotions,
   senders,
   open,
@@ -108,13 +133,14 @@ export function PromotionDialog({
   existing: PromotionSummary | null;
   // A copy to start from, when the promotion is new.
   seed: PromotionSummary | null;
+  offerDefaults: OfferDefaults;
   promotions: PromotionSummary[];
   senders: Record<PromotionSender, string>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const [draft, setDraft] = useState<Draft>(() =>
-    existing ? fromSummary(existing) : seed ? { ...fromSummary(seed), name: `${seed.name} (copy)` } : blank(),
+    existing ? fromSummary(existing) : seed ? { ...fromSummary(seed), name: `${seed.name} (copy)` } : blank(offerDefaults),
   );
   const [savedId, setSavedId] = useState<string | null>(existing?.id ?? null);
   const [issues, setIssues] = useState<string[]>([]);
@@ -146,14 +172,10 @@ export function PromotionDialog({
   const loadTemplate = (id: string) => {
     const template = templates.data?.templates.find((item) => item.id === id);
     if (!template) return;
-    setDraft((current) => ({
-      ...current,
-      subject: template.subject,
-      body: template.body,
-      creditOffer: template.promotion
-        ? (template.promotion as Draft["creditOffer"])
-        : current.creditOffer,
-    }));
+    setDraft((current) => {
+      const next = { ...current, subject: template.subject, body: template.body };
+      return template.promotion ? withOffer(next, template.promotion as PromotionOffer) : next;
+    });
   };
 
   const parse = (): PromotionInput | null => {
@@ -334,6 +356,47 @@ export function PromotionDialog({
                 onChange={(e) => setDraft({ ...draft, ctaUrl: e.target.value })}
               />
             </Field>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <Label htmlFor="promo-offer">Credit offer</Label>
+                <p className="text-xs text-muted-foreground">
+                  Each recipient gets a claim link for AI credits; the button link becomes {CLAIM_URL_PLACEHOLDER}.
+                </p>
+              </div>
+              <Switch
+                id="promo-offer"
+                checked={draft.creditOffer !== null}
+                disabled={readOnly}
+                onCheckedChange={(on) => setDraft(withOffer(draft, on ? offerOf(offerDefaults) : null))}
+              />
+            </div>
+            {draft.creditOffer ? (
+              <div className="grid grid-cols-3 gap-3">
+                {(
+                  [
+                    ["dollars", "Dollars"],
+                    ["claimWindowDays", "Days to claim"],
+                    ["expiresAfterDays", "Days the credit lives"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <Field key={key} label={label} htmlFor={`promo-offer-${key}`}>
+                    <Input
+                      id={`promo-offer-${key}`}
+                      type="number"
+                      min={1}
+                      disabled={readOnly}
+                      value={draft.creditOffer![key]}
+                      onChange={(e) =>
+                        setDraft({ ...draft, creditOffer: { ...draft.creditOffer!, [key]: Number(e.target.value) } })
+                      }
+                    />
+                  </Field>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           <AudienceFields value={draft.audience} onChange={setAudience} countries={false} disabled={readOnly} />

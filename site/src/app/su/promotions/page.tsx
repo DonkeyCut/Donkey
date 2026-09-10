@@ -25,6 +25,8 @@ import {
   useSendPromotion,
   type PromotionSummary,
 } from "@/queries/promotions";
+import type { Settings } from "@/lib/config/registry";
+import { useSettings } from "@/queries/settings";
 
 type BadgeVariant = "default" | "secondary" | "outline" | "destructive";
 
@@ -44,6 +46,11 @@ type Opened = { key: number; existing: PromotionSummary | null; seed: PromotionS
 export default function SuPromotionsPage() {
   const promotions = usePromotions();
   const [opened, setOpened] = useState<Opened | null>(null);
+  // New drafts start from the Promotion credit offer setting.
+  const settings = useSettings();
+  const offerDefaults = settings.data?.settings.find((row) => row.key === "promotionCreditOffer")?.value as
+    | Settings["promotionCreditOffer"]
+    | undefined;
   const [counter, setCounter] = useState(0);
   const open = (existing: PromotionSummary | null, seed: PromotionSummary | null) => {
     setCounter((k) => k + 1);
@@ -84,11 +91,12 @@ export default function SuPromotionsPage() {
           }
         />
       ))}
-      {opened ? (
+      {opened && offerDefaults ? (
         <PromotionDialog
           key={opened.key}
           existing={opened.existing}
           seed={opened.seed}
+          offerDefaults={offerDefaults}
           promotions={rows}
           senders={senders}
           open
