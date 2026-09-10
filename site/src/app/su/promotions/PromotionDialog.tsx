@@ -278,7 +278,7 @@ export function PromotionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-6xl">
         <DialogHeader>
           <DialogTitle>{readOnly ? draft.name : existing ? "Edit promotion" : "New promotion"}</DialogTitle>
           <DialogDescription>
@@ -301,7 +301,8 @@ export function PromotionDialog({
           ) : null}
         </DialogHeader>
 
-        <div className="grid gap-5">
+        <div className="grid gap-5 lg:grid-cols-2 lg:gap-8">
+          <div className="grid content-start gap-5">
           <Field label="Name" htmlFor="promo-name">
             <Input
               id="promo-name"
@@ -369,6 +370,9 @@ export function PromotionDialog({
             </Field>
           </div>
 
+          </div>
+
+          <div className="grid content-start gap-5">
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -435,6 +439,9 @@ export function PromotionDialog({
             )}
           </div>
 
+          </div>
+
+          <div className="grid gap-3 lg:col-span-2">
           {issues.length > 0 ? (
             <ul role="alert" className="list-disc space-y-1 pl-5 text-sm text-destructive">
               {issues.map((issue) => (
@@ -443,6 +450,7 @@ export function PromotionDialog({
             </ul>
           ) : null}
           {notice ? <p className="text-sm text-muted-foreground">{notice}</p> : null}
+          </div>
         </div>
 
         <DialogFooter className="gap-2 sm:justify-between">
