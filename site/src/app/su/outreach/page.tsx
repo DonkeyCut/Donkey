@@ -508,7 +508,7 @@ export default function SuOutreachPage() {
         onOpenChange={(open) => setSendTarget(open ? sendTarget : null)}
         open={sendTarget !== null}
       >
-        <DialogContent className="grid max-h-[85vh] grid-rows-[auto_minmax(0,1fr)_auto] max-w-[calc(100%-2rem)] sm:max-w-3xl">
+        <DialogContent className="grid max-h-[85vh] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>Email {sendTarget?.name}</DialogTitle>
             <DialogDescription>
