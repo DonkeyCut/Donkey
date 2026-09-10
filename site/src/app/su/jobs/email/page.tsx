@@ -115,7 +115,7 @@ function KindsSection({ kinds }: { kinds: OutboxOverview["kinds"] }) {
             {[...kinds]
               .sort((a, b) => b.priority - a.priority)
               .map((k) => (
-                <tr key={k.kind} className="border-t">
+                <tr key={k.kind} className="border-t hover:bg-muted/50">
                   <td className={cn(cell, "font-medium")}>{k.kind}</td>
                   <td className={cn(cell, "tabular-nums text-muted-foreground")}>{k.priority}</td>
                   <td className={cn(cell, "text-muted-foreground")}>{k.quota}</td>
@@ -138,7 +138,7 @@ function ItemRow({ item, onRetry, retrying }: { item: OutboxItem; onRetry: () =>
       ? `retries ${formatWhen(item.notBefore)}`
       : `queued ${formatWhen(item.createdAt)}`;
   return (
-    <li className="flex items-start gap-2.5">
+    <li className="-mx-2 flex items-start gap-2.5 rounded-md px-2 py-1 hover:bg-muted/50">
       <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", stateDot[item.state] ?? stateDot.queued)} />
       <div className="min-w-0 flex-1 text-sm">
         <div className="flex flex-wrap items-baseline gap-x-2">
@@ -165,7 +165,7 @@ function ItemRow({ item, onRetry, retrying }: { item: OutboxItem; onRetry: () =>
 function ItemList({ items }: { items: OutboxItem[] }) {
   const action = useOutboxAction();
   return (
-    <ul className="space-y-2">
+    <ul className="space-y-1">
       {items.map((item) => (
         <ItemRow
           key={item.id}
@@ -187,7 +187,7 @@ function CampaignGroup({ campaign, count, items }: { campaign: OutboxCampaign; c
     <li className="space-y-2">
       <button
         type="button"
-        className="flex w-full items-start gap-2.5 text-left text-sm"
+        className="-mx-2 flex w-[calc(100%+1rem)] items-start gap-2.5 rounded-md px-2 py-1 text-left text-sm hover:bg-muted/50"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
@@ -247,7 +247,7 @@ function ItemsSection({
       {entries.length === 0 ? (
         <p className="text-sm text-muted-foreground">{empty}</p>
       ) : (
-        <ul className="space-y-2">
+        <ul className="space-y-1">
           {entries.map((entry) =>
             entry.kind === "item" ? (
               <ItemList key={entry.item.id} items={[entry.item]} />
