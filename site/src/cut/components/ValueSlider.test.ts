@@ -13,6 +13,9 @@ const ALLOWED: Record<string, number> = {
   // The wrapper's own render plus its doc comment quoting the banned string.
   "ValueSlider.tsx": 2,
   "Timeline.tsx": 2,
+  // The export dialog's Scale picks one of a few named stops; its readout is
+  // the stop's name, so there is no number to type.
+  "ExportDialog.tsx": 1,
 };
 
 describe("ValueSlider", () => {
