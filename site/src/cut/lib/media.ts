@@ -142,17 +142,34 @@ export async function revealMedia(projectId: string, fileName: string) {
   );
 }
 
+const VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "webm", "mkv"];
+const AUDIO_EXTENSIONS = ["mp3", "m4a", "aac", "wav", "ogg", "flac"];
+const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "gif", "avif", "bmp"];
+
+const hasExtension = (file: File, extensions: string[]) =>
+  new RegExp(`\\.(${extensions.join("|")})$`, "i").test(file.name);
+
 export function isVideoFile(file: File) {
-  return file.type.startsWith("video/") || /\.(mp4|mov|m4v|webm|mkv)$/i.test(file.name);
+  return file.type.startsWith("video/") || hasExtension(file, VIDEO_EXTENSIONS);
 }
 
 export function isAudioFile(file: File) {
-  return file.type.startsWith("audio/") || /\.(mp3|m4a|aac|wav|ogg|flac)$/i.test(file.name);
+  return file.type.startsWith("audio/") || hasExtension(file, AUDIO_EXTENSIONS);
 }
 
 export function isImageFile(file: File) {
-  return file.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(file.name);
+  return file.type.startsWith("image/") || hasExtension(file, IMAGE_EXTENSIONS);
 }
+
+/** What a media file input's `accept` lists: every kind `isMediaFile` takes,
+ * by MIME family and by extension, so the OS picker offers the same files a
+ * drop does. */
+export const MEDIA_ACCEPT = [
+  "video/*",
+  "audio/*",
+  "image/*",
+  ...[...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS, ...IMAGE_EXTENSIONS].map((ext) => `.${ext}`),
+].join(",");
 
 export function isTextFile(file: File) {
   return file.type.startsWith("text/") || /\.(txt|md|markdown|srt|vtt|csv|json)$/i.test(file.name);

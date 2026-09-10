@@ -63,7 +63,7 @@ import {
   setObjectDragImage,
 } from "@/cut/lib/assetDrag";
 import { useInView } from "@/cut/hooks/useInView";
-import { fileKind, isMediaFile } from "@/cut/lib/media";
+import { fileKind, isMediaFile, MEDIA_ACCEPT } from "@/cut/lib/media";
 import { patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
 import {
   createLibraryFolder,
@@ -811,7 +811,7 @@ export function LibraryView() {
           <input
             ref={inputRef}
             type="file"
-            accept={`video/*,audio/*,${linkedAccept()}`}
+            accept={`${MEDIA_ACCEPT},${linkedAccept()}`}
             multiple
             hidden
             onChange={(e) => {

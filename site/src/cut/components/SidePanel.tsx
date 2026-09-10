@@ -97,7 +97,7 @@ import {
   shelfForNewItem,
   syncLinkedLibrary,
 } from "@/cut/lib/linkedLibrary";
-import { downloadMedia, isMediaFile, revealMedia } from "@/cut/lib/media";
+import { downloadMedia, isMediaFile, MEDIA_ACCEPT, revealMedia } from "@/cut/lib/media";
 import { mediaUrl, TRANSITION_MAX } from "@/cut/lib/types";
 import { parseSecondsInput } from "@/cut/components/ScrubValue";
 import { ColorField } from "@/cut/components/ColorField";
@@ -945,7 +945,7 @@ function ProjectFilesPanel({
           <input
             ref={inputRef}
             type="file"
-            accept={`video/*,audio/*,${linkedAccept()}`}
+            accept={`${MEDIA_ACCEPT},${linkedAccept()}`}
             multiple
             hidden
             onChange={(e) => {
