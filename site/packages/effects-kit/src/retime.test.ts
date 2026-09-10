@@ -215,9 +215,12 @@ describe("speedCurveOf", () => {
 describe("speedCurvePreset", () => {
   test("lays a preset over the span in source seconds", () => {
     const nodes = speedCurvePreset("whip", 10, 20)!;
-    expect(nodes[0]).toEqual([10, 1]);
-    expect(nodes[nodes.length - 1]).toEqual([20, 1]);
-    expect(nodes.find((n) => n[1] === 6)![0]).toBe(15);
+    expect(nodes[0][0]).toBe(10);
+    expect(nodes[nodes.length - 1][0]).toBe(20);
+    const peak = nodes.reduce((a, b) => (b[1] > a[1] ? b : a));
+    expect(peak[0]).toBe(15);
+    expect(peak[1]).toBeGreaterThan(1);
+    expect(nodes[0][1]).toBeLessThan(1);
     expect(speedCurvePreset("nope", 0, 1)).toBeUndefined();
   });
 });

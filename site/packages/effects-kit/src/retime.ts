@@ -341,6 +341,11 @@ export interface SpeedCurvePreset {
   shape: SpeedNode[];
 }
 
+/** The fast and slow levels the presets sit on: half a decade either side of
+ * 1×, the graph's dashed lines. */
+const HI = Math.sqrt(10);
+const LO = 1 / Math.sqrt(10);
+
 export const SPEED_CURVE_PRESETS: SpeedCurvePreset[] = [
   {
     id: "flat",
@@ -354,45 +359,74 @@ export const SPEED_CURVE_PRESETS: SpeedCurvePreset[] = [
   {
     id: "rampIn",
     label: "Ramp in",
-    hint: "opens fast and settles to normal",
+    hint: "opens fast and eases into slow motion",
     shape: [
-      [0, 3],
-      [0.45, 1],
-      [1, 1],
+      [0, HI],
+      [0.35, HI],
+      [0.65, LO],
+      [1, LO],
     ],
   },
   {
     id: "rampOut",
     label: "Ramp out",
-    hint: "plays normal then accelerates out",
+    hint: "opens in slow motion and eases out fast",
     shape: [
-      [0, 1],
-      [0.55, 1],
-      [1, 3],
+      [0, LO],
+      [0.35, LO],
+      [0.65, HI],
+      [1, HI],
     ],
   },
   {
-    id: "whip",
-    label: "Whip",
-    hint: "a burst of speed in the middle",
+    id: "drift",
+    label: "Drift",
+    hint: "a rush that sinks into slow motion, then recovers",
     shape: [
       [0, 1],
-      [0.35, 1],
-      [0.5, 6],
-      [0.65, 1],
+      [0.25, 1],
+      [0.45, HI],
+      [0.65, LO],
+      [0.85, 1],
+      [1, 1],
+    ],
+  },
+  {
+    id: "pulse",
+    label: "Pulse",
+    hint: "two rushes around a slow beat",
+    shape: [
+      [0, 1],
+      [0.15, 1],
+      [0.3, HI],
+      [0.5, LO],
+      [0.7, HI],
+      [0.85, 1],
       [1, 1],
     ],
   },
   {
     id: "hold",
     label: "Hold",
-    hint: "slows into a moment in the middle and races either side of it",
+    hint: "races in, slows into a moment in the middle, races out",
     shape: [
-      [0, 1.6],
-      [0.35, 1.6],
-      [0.5, 0.3],
-      [0.65, 1.6],
-      [1, 1.6],
+      [0, HI],
+      [0.35, HI],
+      [0.5, LO],
+      [0.65, HI],
+      [1, HI],
+    ],
+  },
+  {
+    id: "whip",
+    label: "Whip",
+    hint: "slow motion with a burst of speed in the middle",
+    shape: [
+      [0, LO],
+      [0.4, LO],
+      [0.5, HI],
+      [0.6, LO],
+      [1, LO],
     ],
   },
   {
@@ -401,12 +435,12 @@ export const SPEED_CURVE_PRESETS: SpeedCurvePreset[] = [
     hint: "alternating rushes and slow beats",
     shape: [
       [0, 1],
-      [0.15, 4],
-      [0.25, 0.5],
-      [0.4, 4],
-      [0.5, 0.5],
-      [0.65, 4],
-      [0.75, 0.5],
+      [0.15, HI],
+      [0.25, LO],
+      [0.4, HI],
+      [0.5, LO],
+      [0.65, HI],
+      [0.75, LO],
       [1, 1],
     ],
   },
@@ -420,6 +454,21 @@ export function speedCurvePreset(id: string, inS: number, outS: number): SpeedNo
   if (!p) return undefined;
   const span = Math.max(0, outS - inS);
   return p.shape.map(([x, r]): SpeedNode => [inS + x * span, r]);
+}
+
+/** The preset a curve is, when it is one: every node sits where the preset
+ * puts it through the span, at the preset's rate. */
+export function speedCurvePresetOf(nodes: SpeedNode[], inS: number, outS: number): string | undefined {
+  const span = Math.max(0, outS - inS);
+  if (span <= 0) return undefined;
+  return SPEED_CURVE_PRESETS.find(
+    (p) =>
+      p.shape.length === nodes.length &&
+      p.shape.every(([x, r], i) => {
+        const [at, rate] = nodes[i];
+        return Math.abs((at - inS) / span - x) < 1e-3 && Math.abs(rate / r - 1) < 1e-3;
+      })
+  )?.id;
 }
 
 /** One line per preset, for the assistant's catalog. */
