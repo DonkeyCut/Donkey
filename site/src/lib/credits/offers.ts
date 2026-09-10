@@ -133,8 +133,8 @@ export async function landCreditOffer(
   return { grant: landed, offer: claimed };
 }
 
-// Claims a manual offer from its email link. An email token never names a
-// promotion's offer; those land from the act they reward.
+// Claims an offer from its email link: the ones su sends by hand and the ones
+// a promotion mails. Every other kind lands from the act it rewards.
 export async function claimCreditOffer(offerId: string, userId: string) {
   const offer = await prisma.creditOffer.findUnique({ where: { id: offerId } });
   if (!offer || (offer.kind !== MANUAL_OFFER_KIND && offer.kind !== "promotion_email")) return null;

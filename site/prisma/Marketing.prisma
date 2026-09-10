@@ -67,7 +67,8 @@ model OutreachTemplate {
 // (the experiment rules, minus country) and, optionally, everyone who already
 // received earlier promotions left out. The words live here so a draft can be
 // edited, test-sent and counted before anything goes out. Sending resolves the
-// segment into recipient rows once and hands them to the promotion-send job.
+// segment into outbox rows once (EmailSend, prisma/Email.prisma) and the
+// outbox drainer mails them under the day's quota.
 
 model Promotion {
   creditOffer Json?
