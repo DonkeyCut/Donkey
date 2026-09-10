@@ -277,6 +277,7 @@ export type OutboxItem = {
   priority: number;
   rank: number;
   email: string | null;
+  promotionId: string | null;
   promotionName: string | null;
   attempts: number;
   error: string | null;
@@ -287,9 +288,21 @@ export type OutboxItem = {
   createdAt: string;
 };
 
+// One promotion's standing across every row it ever queued, so a campaign
+// reads as one line with whole counts however many rows the lists show.
+export type OutboxCampaign = {
+  id: string;
+  name: string;
+  queued: number;
+  sent: number;
+  skipped: number;
+  failed: number;
+};
+
 export type OutboxOverview = {
   quota: DailyEmailQuotaStatus;
   kinds: OutboxKindRow[];
+  campaigns: OutboxCampaign[];
   // What is waiting, then what failed, then what went most recently.
   items: OutboxItem[];
   // A drainer is running or due now; one held back by a quota wait is not.
@@ -302,12 +315,13 @@ const ITEMS = 60;
  * rows worth a look. */
 export async function outboxOverview(now = new Date()): Promise<OutboxOverview> {
   const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const [quota, priorities, queued, sentToday, failed, waiting, broken, recent, drain] = await Promise.all([
+  const [quota, priorities, queued, sentToday, failed, byCampaign, waiting, broken, recent, drain] = await Promise.all([
     dailyEmailQuotaStatus(now),
     getGlobalSetting("emailPriorities"),
     prisma.emailSend.groupBy({ _count: true, by: ["kind"], where: { state: { in: ["queued", "sending"] } } }),
     prisma.emailSend.groupBy({ _count: true, by: ["kind"], where: { sentAt: { gte: dayStart }, state: "sent" } }),
     prisma.emailSend.groupBy({ _count: true, by: ["kind"], where: { state: "failed" } }),
+    prisma.emailSend.groupBy({ _count: true, by: ["promotionId", "state"], where: { promotionId: { not: null } } }),
     prisma.emailSend.findMany({
       include: { promotion: { select: { name: true } }, user: { select: { email: true } } },
       orderBy: [{ priority: "desc" }, { rank: "asc" }, { createdAt: "asc" }],
@@ -344,6 +358,20 @@ export async function outboxOverview(now = new Date()): Promise<OutboxOverview> 
     sentToday: countOf(sentToday, kind),
     failed: countOf(failed, kind),
   }));
+  const campaignIds = [...new Set(byCampaign.map((g) => g.promotionId).filter((id): id is string => id !== null))];
+  const names = await prisma.promotion.findMany({ select: { id: true, name: true }, where: { id: { in: campaignIds } } });
+  const campaigns = names.map((p) => {
+    const count = (states: string[]) =>
+      byCampaign.filter((g) => g.promotionId === p.id && states.includes(g.state)).reduce((n, g) => n + g._count, 0);
+    return {
+      id: p.id,
+      name: p.name,
+      queued: count(["queued", "sending"]),
+      sent: count(["sent"]),
+      skipped: count(["skipped"]),
+      failed: count(["failed"]),
+    };
+  });
   const items = [...waiting, ...broken, ...recent].map((row) => ({
     id: row.id,
     kind: row.kind,
@@ -351,6 +379,7 @@ export async function outboxOverview(now = new Date()): Promise<OutboxOverview> 
     priority: row.priority,
     rank: row.rank,
     email: row.user?.email ?? null,
+    promotionId: row.promotionId,
     promotionName: row.promotion?.name ?? null,
     attempts: row.attempts,
     error: row.error,
@@ -359,7 +388,7 @@ export async function outboxOverview(now = new Date()): Promise<OutboxOverview> 
     sentAt: row.sentAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
   }));
-  return { quota, kinds, items, drainPending: drain !== null };
+  return { quota, kinds, campaigns, items, drainPending: drain !== null };
 }
 
 /** Puts a failed row back in the queue with a clean slate and sends for a

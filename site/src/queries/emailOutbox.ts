@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { OutboxOverview } from "@/lib/email/outbox";
 import { apiFetch } from "@/queries/apiClient";
 
-export type { OutboxItem, OutboxKindRow, OutboxOverview } from "@/lib/email/outbox";
+export type { OutboxCampaign, OutboxItem, OutboxKindRow, OutboxOverview } from "@/lib/email/outbox";
 
 export const emailOutboxQueryKey = ["su", "email", "outbox"] as const;
 

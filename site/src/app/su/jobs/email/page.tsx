@@ -1,8 +1,17 @@
 "use client";
 
+import { ChevronRight } from "lucide-react";
+import { useState } from "react";
+
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useEmailOutbox, useOutboxAction, type OutboxItem, type OutboxOverview } from "@/queries/emailOutbox";
+import {
+  useEmailOutbox,
+  useOutboxAction,
+  type OutboxCampaign,
+  type OutboxItem,
+  type OutboxOverview,
+} from "@/queries/emailOutbox";
 
 function formatWhen(iso: string): string {
   const then = new Date(iso);
@@ -153,23 +162,104 @@ function ItemRow({ item, onRetry, retrying }: { item: OutboxItem; onRetry: () =>
   );
 }
 
-function ItemsSection({ title, items, empty }: { title: string; items: OutboxItem[]; empty: string }) {
+function ItemList({ items }: { items: OutboxItem[] }) {
   const action = useOutboxAction();
+  return (
+    <ul className="space-y-2">
+      {items.map((item) => (
+        <ItemRow
+          key={item.id}
+          item={item}
+          onRetry={() => action.mutate({ action: "retry", id: item.id })}
+          retrying={action.isPending}
+        />
+      ))}
+    </ul>
+  );
+}
+
+// A campaign's rows fold under one line carrying the whole count from the
+// server; the rows beneath are the section's page of it.
+function CampaignGroup({ campaign, count, items }: { campaign: OutboxCampaign; count: number; items: OutboxItem[] }) {
+  const [open, setOpen] = useState(false);
+  const dot = stateDot[items[0].state] ?? stateDot.queued;
+  return (
+    <li className="space-y-2">
+      <button
+        type="button"
+        className="flex w-full items-start gap-2.5 text-left text-sm"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", dot)} />
+        <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2">
+          <span className="font-medium">promotion</span>
+          <span className="text-muted-foreground">{campaign.name}</span>
+          <span className="tabular-nums">{count}</span>
+          {items.length < count ? <span className="text-muted-foreground">showing {items.length}</span> : null}
+        </span>
+        <ChevronRight className={cn("mt-0.5 size-4 shrink-0 transition-transform duration-200", open && "rotate-90")} />
+      </button>
+      {open ? (
+        <div className="border-l pl-4">
+          <ItemList items={items} />
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+function ItemsSection({
+  title,
+  items,
+  empty,
+  campaigns,
+  countOf,
+}: {
+  title: string;
+  items: OutboxItem[];
+  empty: string;
+  campaigns: OutboxCampaign[];
+  countOf: (campaign: OutboxCampaign) => number;
+}) {
+  // Rows keep their order; a campaign's rows collapse into one entry at the
+  // place its first row sits.
+  const entries: ({ kind: "item"; item: OutboxItem } | { kind: "campaign"; campaign: OutboxCampaign; items: OutboxItem[] })[] =
+    [];
+  const grouped = new Map<string, OutboxItem[]>();
+  for (const item of items) {
+    const campaign = item.promotionId ? campaigns.find((c) => c.id === item.promotionId) : undefined;
+    if (!campaign) {
+      entries.push({ kind: "item", item });
+      continue;
+    }
+    const rows = grouped.get(campaign.id);
+    if (rows) rows.push(item);
+    else {
+      const fresh = [item];
+      grouped.set(campaign.id, fresh);
+      entries.push({ kind: "campaign", campaign, items: fresh });
+    }
+  }
   return (
     <section className="space-y-2">
       <h2 className="text-sm font-medium">{title}</h2>
-      {items.length === 0 ? (
+      {entries.length === 0 ? (
         <p className="text-sm text-muted-foreground">{empty}</p>
       ) : (
         <ul className="space-y-2">
-          {items.map((item) => (
-            <ItemRow
-              key={item.id}
-              item={item}
-              onRetry={() => action.mutate({ action: "retry", id: item.id })}
-              retrying={action.isPending}
-            />
-          ))}
+          {entries.map((entry) =>
+            entry.kind === "item" ? (
+              <ItemList key={entry.item.id} items={[entry.item]} />
+            ) : (
+              <CampaignGroup
+                key={entry.campaign.id}
+                campaign={entry.campaign}
+                count={countOf(entry.campaign)}
+                items={entry.items}
+              />
+            ),
+          )}
         </ul>
       )}
     </section>
@@ -188,15 +278,33 @@ export default function SuEmailPage() {
       </p>
     );
   }
-  const { items } = outbox.data;
+  const { items, campaigns } = outbox.data;
   const byState = (states: string[]) => items.filter((i) => states.includes(i.state));
   return (
     <div className="max-w-3xl space-y-8 pb-9">
       <QuotaSection quota={outbox.data.quota} />
       <KindsSection kinds={outbox.data.kinds} />
-      <ItemsSection title="Waiting" items={byState(["queued", "sending"])} empty="Nothing waiting." />
-      <ItemsSection title="Failed" items={byState(["failed"])} empty="Nothing failed." />
-      <ItemsSection title="Recently sent" items={byState(["sent", "skipped"])} empty="Nothing sent yet." />
+      <ItemsSection
+        title="Waiting"
+        items={byState(["queued", "sending"])}
+        empty="Nothing waiting."
+        campaigns={campaigns}
+        countOf={(c) => c.queued}
+      />
+      <ItemsSection
+        title="Failed"
+        items={byState(["failed"])}
+        empty="Nothing failed."
+        campaigns={campaigns}
+        countOf={(c) => c.failed}
+      />
+      <ItemsSection
+        title="Recently sent"
+        items={byState(["sent", "skipped"])}
+        empty="Nothing sent yet."
+        campaigns={campaigns}
+        countOf={(c) => c.sent + c.skipped}
+      />
     </div>
   );
 }
