@@ -45,16 +45,20 @@ export const POST = withSuperUser(async (request) => {
   });
   if (!targetUser) return notFoundResponse();
 
-  const offer = await createCreditOffer({
+  const { delivery, offer } = await createCreditOffer({
     amountMicros: creditStringToMicros(String(parsed.data.amountDollars)),
     description: parsed.data.description,
     expiresAfterDays: parsed.data.expiresAfterDays,
     offeredByUserId: request.donkey.userId,
     user: targetUser,
   });
+  if (delivery.state === "failed") {
+    return NextResponse.json({ error: "not_sendable", message: delivery.error }, { status: 409 });
+  }
 
   return NextResponse.json({
     amountDollars: parsed.data.amountDollars,
+    delivery: delivery.state,
     offer: {
       closesAt: offer.closesAt?.toISOString() ?? null,
       emailSentAt: offer.emailSentAt?.toISOString() ?? null,

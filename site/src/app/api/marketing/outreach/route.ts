@@ -9,11 +9,9 @@ import {
   OUTREACH_REASONS,
   OUTREACH_STATUSES,
 } from "@/lib/marketing/campaigns";
+import { deliverEmail } from "@/lib/email/outbox";
 import { firstNameOf } from "@/lib/marketing/placeholders";
-import {
-  OutreachNotSendableError,
-  sendOutreachEmail,
-} from "@/lib/marketing/send-outreach";
+import { outreachIdempotencyKey } from "@/lib/marketing/send-outreach";
 import { prisma } from "@/lib/prisma";
 
 const listQuerySchema = z.object({
@@ -206,15 +204,18 @@ export const POST = withSuperUser(async (request) => {
   const actorUserId = request.donkey.userId;
 
   if (parsed.data.action === "send") {
-    try {
-      await sendOutreachEmail({
-        attempt: outreach.sentCount + 1,
+    const attempt = outreach.sentCount + 1;
+    const delivery = await deliverEmail({
+      idempotencyKey: outreachIdempotencyKey(outreach.id, attempt),
+      kind: "outreach",
+      payload: {
+        actorUserId,
+        attempt,
         body: parsed.data.body,
         outreachId: outreach.id,
         subject: parsed.data.subject,
         trackReplies: parsed.data.trackReplies,
         unsubscribeLink: parsed.data.unsubscribeLink,
-        user: outreach.user,
         vars: {
           balance: creditMicrosToString(outreach.balanceMicros),
           email: outreach.user.email,
@@ -223,28 +224,14 @@ export const POST = withSuperUser(async (request) => {
           spent: creditMicrosToString(outreach.spentMicros),
           storage: formatBytes(Number(outreach.storageBytes)),
         },
-      });
-    } catch (error) {
-      if (error instanceof OutreachNotSendableError) {
-        return NextResponse.json(
-          { error: "not_sendable", message: error.message },
-          { status: 409 },
-        );
-      }
-      throw error;
-    }
-    const row = await prisma.userOutreach.update({
-      data: {
-        actorUserId,
-        firstSentAt: outreach.firstSentAt ?? now,
-        lastSentAt: now,
-        sentCount: { increment: 1 },
-        status: "sent",
       },
-      select: rowSelect,
-      where: { id: outreach.id },
+      userId: outreach.user.id,
     });
-    return NextResponse.json({ row: serialize(row) });
+    if (delivery.state === "failed") {
+      return NextResponse.json({ error: "not_sendable", message: delivery.error }, { status: 409 });
+    }
+    const row = await prisma.userOutreach.findUniqueOrThrow({ select: rowSelect, where: { id: outreach.id } });
+    return NextResponse.json({ delivery: delivery.state, row: serialize(row) });
   }
 
   const data =

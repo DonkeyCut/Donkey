@@ -4,18 +4,11 @@ import type { Prisma } from "@/generated/prisma/client";
 import { DONKEY_LOGO_CID, DONKEY_LOGO_PNG_BASE64 } from "@/emails/_components/logo";
 import PromotionEmail from "@/emails/promotion";
 import { collectFacts } from "@/lib/config/audienceFacts";
-import {
-  bulkFrom,
-  emailFrom,
-  getResend,
-  isResendConfigured,
-  ResendNotConfiguredError,
-  type EmailUser,
-} from "@/lib/email/resend";
+import { bulkFrom, emailFrom, type EmailMessage, type EmailUser } from "@/lib/email/resend";
+import { PermanentSendError } from "@/lib/email/errors";
 import { unsubscribeActionUrl, unsubscribePageUrl } from "@/lib/email/unsubscribe";
 import { renderPromotion, type PromotionCopy } from "@/lib/marketing/promotionCopy";
 import {
-  MAX_SEND_ATTEMPTS,
   PROMOTION_SENDERS,
   PROMOTION_STATUSES,
   type PromotionSender,
@@ -24,6 +17,7 @@ import {
   type SegmentCount,
 } from "@/lib/marketing/promotionInput";
 import { prisma } from "@/lib/prisma";
+import { promotionOfferOf } from "@/lib/marketing/promotionOfferInput";
 
 // Promotions on the server: which address each sender is, who a segment
 // resolves to, one send, and the list su reads.
@@ -62,47 +56,36 @@ export function promotionAudienceOf(raw: Prisma.JsonValue): Audience {
   return audienceSchema.parse(raw);
 }
 
-/** Sends one promotion email. The idempotency key is the caller's: the job
- * keys on the recipient so a retried run cannot mail anyone twice. */
-export async function sendPromotionEmail(input: {
-  copy: PromotionCopy;
-  user: EmailUser;
-  idempotencyKey: string;
-}): Promise<void> {
-  if (!isResendConfigured()) throw new ResendNotConfiguredError();
-  const from = promotionSenders()[input.copy.sender];
-  if (!from) throw new Error(`The ${input.copy.sender} sender is not configured.`);
-  const rendered = renderPromotion(input.copy, input.user);
-  const { error } = await getResend().emails.send(
-    {
-      from,
-      to: input.user.email,
-      replyTo: emailFrom() || from,
-      subject: rendered.subject,
-      react: PromotionEmail({
-        blocks: rendered.blocks,
-        cta: rendered.cta,
-        preview: rendered.preview,
-        unsubscribeUrl: unsubscribePageUrl(input.user.id),
-      }),
-      attachments: [
-        {
-          content: DONKEY_LOGO_PNG_BASE64,
-          contentId: DONKEY_LOGO_CID,
-          contentType: "image/png",
-          filename: "donkey-cut.png",
-        },
-      ],
-      headers: {
-        "List-Unsubscribe": `<${unsubscribeActionUrl(input.user.id)}>`,
-        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+/** One promotion email for one account. The idempotency key is the row's:
+ * the outbox keys on the recipient so a retried run cannot mail anyone twice. */
+export function buildPromotionEmail(copy: PromotionCopy, user: EmailUser, claimUrl: string | undefined): EmailMessage {
+  const from = promotionSenders()[copy.sender];
+  if (!from) throw new PermanentSendError(`The ${copy.sender} sender is not configured.`);
+  const rendered = renderPromotion(copy, user, claimUrl);
+  return {
+    from,
+    to: user.email,
+    replyTo: emailFrom() || from,
+    subject: rendered.subject,
+    react: PromotionEmail({
+      blocks: rendered.blocks,
+      cta: rendered.cta,
+      preview: rendered.preview,
+      unsubscribeUrl: unsubscribePageUrl(user.id),
+    }),
+    attachments: [
+      {
+        content: DONKEY_LOGO_PNG_BASE64,
+        contentId: DONKEY_LOGO_CID,
+        contentType: "image/png",
+        filename: "donkey-cut.png",
       },
+    ],
+    headers: {
+      "List-Unsubscribe": `<${unsubscribeActionUrl(user.id)}>`,
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
     },
-    { idempotencyKey: input.idempotencyKey },
-  );
-  if (error) {
-    throw new Error(`Resend send failed: ${error.name}: ${error.message}`);
-  }
+  };
 }
 
 export type PromotionSegment = { audience: Audience; excludePromotionIds: string[] };
@@ -127,10 +110,10 @@ export async function resolvePromotionSegment(
       where: { marketingUnsubscribedAt: { not: null } },
     }),
     segment.excludePromotionIds.length > 0
-      ? prisma.promotionRecipient.findMany({
+      ? prisma.emailSend.findMany({
           distinct: ["userId"],
           select: { userId: true },
-          where: { promotionId: { in: segment.excludePromotionIds }, sentAt: { not: null } },
+          where: { promotionId: { in: segment.excludePromotionIds }, state: "sent" },
         })
       : Promise.resolve([]),
   ]);
@@ -184,6 +167,7 @@ function summarize(
 ): PromotionSummary {
   return {
     id: row.id,
+    creditOffer: promotionOfferOf(row.creditOffer),
     name: row.name,
     subject: row.subject,
     body: row.body,
@@ -205,16 +189,16 @@ function summarize(
 export async function listPromotions(): Promise<PromotionSummary[]> {
   const [rows, all, sent, failed] = await Promise.all([
     prisma.promotion.findMany({ orderBy: { createdAt: "desc" } }),
-    prisma.promotionRecipient.groupBy({ _count: true, by: ["promotionId"] }),
-    prisma.promotionRecipient.groupBy({ _count: true, by: ["promotionId"], where: { sentAt: { not: null } } }),
-    prisma.promotionRecipient.groupBy({
+    prisma.emailSend.groupBy({ _count: true, by: ["promotionId"], where: { promotionId: { not: null } } }),
+    prisma.emailSend.groupBy({ _count: true, by: ["promotionId"], where: { promotionId: { not: null }, state: "sent" } }),
+    prisma.emailSend.groupBy({
       _count: true,
       by: ["promotionId"],
-      where: { attempts: { gte: MAX_SEND_ATTEMPTS }, sentAt: null },
+      where: { promotionId: { not: null }, state: { in: ["failed", "skipped"] } },
     }),
   ]);
-  const countOf = (groups: { promotionId: string; _count: number }[]) =>
-    new Map(groups.map((g) => [g.promotionId, g._count]));
+  const countOf = (groups: { promotionId: string | null; _count: number }[]) =>
+    new Map(groups.flatMap((g) => (g.promotionId ? [[g.promotionId, g._count] as const] : [])));
   const recipients = countOf(all);
   const sentBy = countOf(sent);
   const failedBy = countOf(failed);

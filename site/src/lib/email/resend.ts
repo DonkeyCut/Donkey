@@ -23,6 +23,9 @@ export function registeredUsersSegmentId(): string {
 }
 
 // What every email path needs to know about an account.
+/** One message as the provider takes it. */
+export type EmailMessage = Parameters<Resend["emails"]["send"]>[0];
+
 export type EmailUser = {
   id: string;
   email: string;

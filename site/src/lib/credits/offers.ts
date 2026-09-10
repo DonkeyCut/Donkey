@@ -6,7 +6,8 @@ import { getGlobalSetting } from "@/lib/config/effective";
 import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
 import { grantCredits } from "@/lib/credits/inference";
 import { creditGrantExpiry } from "@/lib/credits/top-up";
-import { sendCreditsOfferedEmail } from "@/lib/email/send-credits-offered";
+import { deliverEmail } from "@/lib/email/outbox";
+import { creditsOfferedIdempotencyKey } from "@/lib/email/send-credits-offered";
 import { prisma } from "@/lib/prisma";
 
 // Claim links authenticate with an HMAC over the offer id, keyed by a
@@ -85,17 +86,14 @@ export async function createCreditOffer(input: {
         userId: input.user.id,
       },
     }));
-  await sendCreditsOfferedEmail(input.user, {
-    amountMicros: offer.amountMicros,
-    claimUrl: creditOfferClaimUrl(offer.id),
-    closesAt,
-    expiresAfterDays: offer.expiresAfterDays,
-    id: offer.id,
+  await prisma.creditOffer.update({ data: { closesAt }, where: { id: offer.id } });
+  const delivery = await deliverEmail({
+    idempotencyKey: creditsOfferedIdempotencyKey(offer.id),
+    kind: "credit-offer",
+    payload: { offerId: offer.id },
+    userId: input.user.id,
   });
-  return prisma.creditOffer.update({
-    data: { closesAt, emailSentAt: new Date() },
-    where: { id: offer.id },
-  });
+  return { delivery, offer: await prisma.creditOffer.findUniqueOrThrow({ where: { id: offer.id } }) };
 }
 
 export class CreditOfferNotYoursError extends Error {}
@@ -139,7 +137,7 @@ export async function landCreditOffer(
 // promotion's offer; those land from the act they reward.
 export async function claimCreditOffer(offerId: string, userId: string) {
   const offer = await prisma.creditOffer.findUnique({ where: { id: offerId } });
-  if (!offer || offer.kind !== MANUAL_OFFER_KIND) return null;
+  if (!offer || (offer.kind !== MANUAL_OFFER_KIND && offer.kind !== "promotion_email")) return null;
   if (offer.userId !== userId) throw new CreditOfferNotYoursError();
   if (!offer.claimedAt && !creditOfferOpen(offer, new Date())) throw new CreditOfferClosedError();
   return landCreditOffer(offer, {
@@ -147,4 +145,32 @@ export async function claimCreditOffer(offerId: string, userId: string) {
     source: "manual_dollar",
     sourceId: `offer:${offer.id}`,
   });
+}
+
+export async function createPromotionCreditOffer(input: {
+  promotionId: string;
+  userId: string;
+  amountDollars: number;
+  claimWindowDays: number;
+  expiresAfterDays: number;
+  offeredByUserId: string | null;
+  now?: Date;
+}) {
+  const now = input.now ?? new Date();
+  const offerId = `${input.promotionId}:${input.userId}`;
+  const offer = await prisma.creditOffer.upsert({
+    where: { id: offerId },
+    create: {
+      id: offerId,
+      userId: input.userId,
+      kind: "promotion_email",
+      amountMicros: BigInt(input.amountDollars) * BigInt(1_000_000),
+      expiresAfterDays: input.expiresAfterDays,
+      closesAt: new Date(now.getTime() + input.claimWindowDays * 86_400_000),
+      description: "Promotional AI credits",
+      offeredByUserId: input.offeredByUserId,
+    },
+    update: {},
+  });
+  return { offer, claimUrl: creditOfferClaimUrl(offer.id) };
 }

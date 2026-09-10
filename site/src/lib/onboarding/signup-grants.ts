@@ -5,7 +5,8 @@ import { creditStringToMicros } from "@/lib/credits/amounts";
 import { grantCredits } from "@/lib/credits/inference";
 import { creditGrantExpiry } from "@/lib/credits/top-up";
 import { type EmailUser } from "@/lib/email/resend";
-import { sendWelcomeEmail } from "@/lib/email/send-welcome";
+import { deliverEmail } from "@/lib/email/outbox";
+import { welcomeIdempotencyKey } from "@/lib/email/send-welcome";
 import { syncResendContact } from "@/lib/email/sync-contact";
 import { isDeletedAddress } from "@/lib/onboarding/deleted-account";
 
@@ -35,7 +36,7 @@ export async function provisionSignupGrants(user: EmailUser): Promise<void> {
       : grantSignupAppCredits(user.id, credits, expiresAt),
     seedStarterProject(user.id),
     seedFontsFolder(user.id),
-    sendWelcomeEmail(user, credits),
+    deliverEmail({ idempotencyKey: welcomeIdempotencyKey(user.id), kind: "welcome", payload: { credits }, userId: user.id }),
     syncResendContact(user),
   ]);
 

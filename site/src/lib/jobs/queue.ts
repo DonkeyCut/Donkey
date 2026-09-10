@@ -7,7 +7,7 @@
 import { NextResponse } from "next/server";
 
 import type { Prisma } from "@/generated/prisma/client";
-import { JobFailure, jobKinds } from "@/lib/jobs/registry";
+import { JobDeferred, JobFailure, jobKinds } from "@/lib/jobs/registry";
 import { prisma } from "@/lib/prisma";
 
 const JOBS_QUEUE_NAME = "donkey-jobs";
@@ -19,6 +19,8 @@ const STALE_QUEUED_MS = 30_000;
 // claim treats such a row as reclaimable so a queue retry can run it again,
 // and the status poll surfaces it as an error instead of spinning forever.
 const STALE_RUNNING_MS = 15 * 60_000;
+// The longest the queue will hold a message before delivery.
+const MAX_QUEUE_DELAY_S = 12 * 60 * 60;
 
 type JobRow = NonNullable<Awaited<ReturnType<typeof prisma.asyncJob.findUnique>>>;
 
@@ -43,8 +45,9 @@ async function queueId(accountId: string, token: string): Promise<string | null>
   return cachedQueueId;
 }
 
-/** Publish one job id to the jobs queue; false when unconfigured or failed. */
-async function publishJob(jobId: string): Promise<boolean> {
+/** Publish one job id to the jobs queue, held back by the delay; false when
+ * unconfigured or failed. */
+async function publishJob(jobId: string, delaySeconds = 0): Promise<boolean> {
   const accountId = process.env.R2_ACCOUNT_ID;
   const token = process.env.CLOUDFLARE_QUEUES_API_TOKEN;
   if (!accountId || !token) return false;
@@ -56,7 +59,11 @@ async function publishJob(jobId: string): Promise<boolean> {
       {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ body: { jobId }, content_type: "json" }),
+        body: JSON.stringify({
+          body: { jobId },
+          content_type: "json",
+          delay_seconds: Math.min(delaySeconds, MAX_QUEUE_DELAY_S),
+        }),
       },
     );
     return res.ok;
@@ -65,16 +72,17 @@ async function publishJob(jobId: string): Promise<boolean> {
   }
 }
 
-/** Queue the job and hand back its id; without a queue (local dev) the job
- * runs now, before responding — a serverless response must not leave
- * fire-and-forget work behind. */
+/** Queue the job, held back by the delay, and hand back its id; without a
+ * queue (local dev) the job runs now, before responding — a serverless
+ * response must not leave fire-and-forget work behind. */
 export async function enqueueJob(
   kind: string,
   payload: Prisma.InputJsonValue,
   createdBy: string,
+  options: { delaySeconds?: number } = {},
 ): Promise<{ jobId: string }> {
   const job = await prisma.asyncJob.create({ data: { kind, payload, createdBy } });
-  const queued = await publishJob(job.id);
+  const queued = await publishJob(job.id, options.delaySeconds);
   if (!queued) await executeJob(job.id);
   return { jobId: job.id };
 }
@@ -109,7 +117,9 @@ export async function jobStatusResponse(job: JobRow): Promise<Response> {
 
 /** Execute one job (called by the queue consumer through /api/jobs/worker).
  * A 200 consumes the message (including permanent failures, which land on the
- * job row); a 500 releases the claim and lets the queue retry. */
+ * job row); a 500 releases the claim and lets the queue retry. A deferral
+ * consumes the message too and publishes a fresh one held back by the job's
+ * own delay, so waiting on a quota never spends the queue's retries. */
 export async function executeJob(jobId: string): Promise<Response> {
   // A stale running row is a killed execution, so the claim takes it too —
   // that way the queue's redelivery actually re-runs it instead of ack'ing.
@@ -150,6 +160,16 @@ export async function executeJob(jobId: string): Promise<Response> {
     });
     return NextResponse.json({ ok: true });
   } catch (e) {
+    if (e instanceof JobDeferred) {
+      await prisma.asyncJob
+        .updateMany({ where: { id: jobId, state: "running" }, data: { state: "queued" } })
+        .catch(() => {});
+      if (await publishJob(jobId, e.retryAfterSeconds)) return NextResponse.json({ ok: true });
+      return NextResponse.json(
+        { error: e.message },
+        { headers: { "Retry-After": String(e.retryAfterSeconds) }, status: 503 },
+      );
+    }
     if (e instanceof JobFailure) return fail(e.message);
     // Transient failure: release the claim so the queue's retry can run the
     // job again from where its idempotent steps left off.

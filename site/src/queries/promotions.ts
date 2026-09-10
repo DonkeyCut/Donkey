@@ -57,8 +57,20 @@ export function useSendPromotion() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      apiFetch<{ jobId: string; recipients: number }>(
+      apiFetch<{ recipients: number }>(
         `/api/su/promotions/${encodeURIComponent(id)}/send`,
+        { method: "POST" },
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: promotionsQueryKey }),
+  });
+}
+
+export function useCancelPromotion() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ promotions: PromotionSummary[] }>(
+        `/api/su/promotions/${encodeURIComponent(id)}/cancel`,
         { method: "POST" },
       ),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: promotionsQueryKey }),

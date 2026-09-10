@@ -25,6 +25,7 @@ import {
   OUTREACH_STORAGE_FULL_SHARE,
   type OutreachReason,
 } from "@/lib/marketing/campaigns";
+import { lastActiveByUser } from "@/lib/marketing/lastActive";
 import { prisma } from "@/lib/prisma";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -218,26 +219,8 @@ async function scan() {
     return { added: 0, dropped: await retire(), scanned: 0 };
   }
 
-  const [billed, uploaded, edited, stored, ranOut, existing] = await Promise.all([
-    prisma.inferenceUsageEvent.groupBy({
-      _max: { createdAt: true },
-      by: ["userId"],
-      where: { billingStatus: "charged", userId: { in: userIds } },
-    }),
-    // Cloud work the person did by hand: media they put up and projects they
-    // edited. Housekeeping writes the storage counter on its own — GC sweeps,
-    // copy jobs, the render worker — so its timestamp says nothing about a
-    // person being there.
-    prisma.cutMediaObject.groupBy({
-      _max: { createdAt: true },
-      by: ["userId"],
-      where: { quotaExempt: false, uploadState: "complete", userId: { in: userIds } },
-    }),
-    prisma.cutProject.groupBy({
-      _max: { updatedAt: true },
-      by: ["userId"],
-      where: { userId: { in: userIds } },
-    }),
+  const [lastActiveBy, stored, ranOut, existing] = await Promise.all([
+    lastActiveByUser(userIds),
     prisma.cutStorageUsage.findMany({
       select: { bytes: true, userId: true },
       where: { userId: { in: userIds } },
@@ -255,16 +238,6 @@ async function scan() {
     }),
   ]);
 
-  // Model work and cloud editing are both use of the product, so either one
-  // keeps an account looking as recent as it is.
-  const lastActiveBy = new Map<string, Date>();
-  const touch = (userId: string, at: Date | null) => {
-    const best = newest(at, lastActiveBy.get(userId));
-    if (best) lastActiveBy.set(userId, best);
-  };
-  for (const row of billed) touch(row.userId, row._max.createdAt);
-  for (const row of uploaded) touch(row.userId, row._max.createdAt);
-  for (const row of edited) touch(row.userId, row._max.updatedAt);
   const storedBy = new Map(stored.map((row) => [row.userId, row.bytes]));
   const ranOutBy = new Map(ranOut.map((row) => [row.userId, row._max.createdAt]));
   const existingBy = new Map(existing.map((row) => [row.userId, row]));

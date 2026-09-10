@@ -8,12 +8,22 @@ import { creditExpiryNoticeJob } from "@/lib/jobs/credit-expiry-notice";
 import { deleteUserJob } from "@/lib/jobs/delete-user";
 import { experimentResultsJob } from "@/lib/jobs/experiment-results";
 import { outreachScanJob } from "@/lib/jobs/outreach-scan";
-import { promotionSendJob } from "@/lib/jobs/promotion-send";
+import { emailDrainJob } from "@/lib/jobs/email-drain";
 
 // Thrown by an executor when the job can never succeed — the message lands on
 // the job row as its error. Anything else thrown is transient: the claim is
 // released and the queue redelivers.
 export class JobFailure extends Error {}
+
+export class JobDeferred extends Error {
+  public constructor(
+    message: string,
+    public readonly retryAfterSeconds: number,
+  ) {
+    super(message);
+    this.name = "JobDeferred";
+  }
+}
 
 export type JobKind = {
   // Validates a payload at creation time and again at execution time; a stored
@@ -35,7 +45,7 @@ export const jobKinds: Record<string, JobKind> = {
   "credit-expiry": creditExpiryJob,
   "credit-expiry-notice": creditExpiryNoticeJob,
   "delete-user": deleteUserJob,
+  "email-drain": emailDrainJob,
   "experiment-results": experimentResultsJob,
   "outreach-scan": outreachScanJob,
-  "promotion-send": promotionSendJob,
 };
