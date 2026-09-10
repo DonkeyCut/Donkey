@@ -178,13 +178,11 @@ export function groundTracks(clips: VideoClip[]): VideoClip[] {
   return lift > 0 ? clips.map((c) => ({ ...c, track: c.track - lift })) : clips;
 }
 
-/** Open a slot at `level`, shifting the tracks at/above it up by one. `exclude`
- * is the clip being placed (left untouched). Level 0 shifts the whole stack up:
- * the placed clip becomes the new track 0 — the spine transplants to it. */
-function openInsertSlot(clips: VideoClip[], level: number, exclude?: string): VideoClip[] {
-  return clips.map((c) =>
-    c.id !== exclude && c.track >= level ? { ...c, track: c.track + 1 } : c
-  );
+/** Open a slot at `level`, shifting the tracks at/above it up by one. Level 0
+ * shifts the whole stack up: the placed clip becomes the new track 0 — the
+ * spine transplants to it. */
+function openInsertSlot(clips: VideoClip[], level: number): VideoClip[] {
+  return clips.map((c) => (c.track >= level ? { ...c, track: c.track + 1 } : c));
 }
 const shiftTracksUp = (clips: VideoClip[], place: VideoTrackPlacement): VideoClip[] =>
   place.kind === "insert" ? openInsertSlot(clips, place.level) : clips;
@@ -210,19 +208,18 @@ const sole = (sel: NonNullable<Selection>) => ({ selection: sel, multiSelection:
  * the landing start, and the ripple shifts it pushes onto that row. An
  * existing track has residents — insert at the pointer and ripple that
  * track's later clips right. An inserted track is brand-new, so the start
- * holds as-is. `exclude` is the clip being moved (left out of the ripple). */
+ * holds as-is. */
 function landOnPlacement(
   clips: VideoClip[],
   place: VideoTrackPlacement,
   start: number,
-  len: number,
-  exclude?: string
+  len: number
 ): { track: number; start: number; shifts: { id: string; start: number }[] } {
   const track = place.kind === "insert" ? place.level : place.track;
   const landing =
     place.kind === "track"
       ? rippleInsert(
-          clips.filter((c) => c.track === track && c.id !== exclude),
+          clips.filter((c) => c.track === track),
           Math.max(0, start),
           len
         )
@@ -687,10 +684,6 @@ export interface EditorState {
   /** Add a video asset to the timeline at a placement: an existing track or a
    * freshly inserted one. Used by media / library drops. */
   addVideoFromAsset: (assetId: string, place: VideoTrackPlacement, start: number) => void;
-  /** Move an existing clip to a placement, preserving its trim/region/speed.
-   * Inserting a track renumbers the ones above it; dropping onto track 0 lands
-   * free-positioned at the drop time. Owns its own history. */
-  dropVideoClip: (id: string, place: VideoTrackPlacement, start: number) => void;
   /** "Detach Audio": lift the selected clip's sound onto the
    * soundtrack track (and mute the clip) so it can be cut independently. */
   detachAudio: () => void;
@@ -3525,52 +3518,6 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           v.id
         )
       );
-    },
-
-    dropVideoClip: (id, place, start) => {
-      const src = get().clips.find((c) => c.id === id);
-      if (!src) return;
-      // No checkpoint here: the lane coordinator's drag gesture already pushed
-      // one at pointer-down, so the whole move is a single undo step.
-      if (place.kind === "track" && place.track === src.track) {
-        return; // a same-track move commits through the lane coordinator
-      }
-
-      // The clip leaves its track, so the hole it leaves closes behind it:
-      // the source row's later clips slide left by its length. Matching by id
-      // keeps the closure correct through an insert's track renumbering.
-      const srcLen = clipLen(src);
-      const closing: [string, number][] = get()
-        .clips.filter(
-          (c) => c.track === src.track && c.id !== id && c.start > src.start + 1e-9
-        )
-        .map((c) => [c.id, Math.max(0, c.start - srcLen)]);
-
-      const { track, start: at, shifts } = landOnPlacement(
-        get().clips,
-        place,
-        start,
-        srcLen,
-        id
-      );
-      const move = new Map([...shifts.map((sh) => [sh.id, sh.start] as const), ...closing]);
-      set((st) => {
-        // Inserting a new track opens the slot by renumbering the others; the
-        // moved clip itself is excluded from the shift, then placed at `track`.
-        const shifted =
-          place.kind === "insert" ? openInsertSlot(st.clips, place.level, id) : st.clips;
-        return placedState(
-          st,
-          shifted.map((c) =>
-            c.id === id
-              ? { ...c, track, start: at }
-              : move.has(c.id)
-                ? { ...c, start: move.get(c.id)! }
-                : c
-          ),
-          id
-        );
-      });
     },
 
     detachAudio: () => {

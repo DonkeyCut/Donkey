@@ -293,27 +293,6 @@ describe("video placement", () => {
     expect(clipById(resident.id).track).toBe(2); // renumbered above the insert
   });
 
-  test("dragging a track-0 clip up onto an occupied track slides it clear", () => {
-    const mover = vclip({ track: 0, start: 0, out: 2 });
-    const anchor = vclip({ track: 0, start: 2, out: 2 });
-    const resident = vclip({ track: 1, start: 1, out: 2 });
-    useEditor.setState({ clips: [mover, anchor, resident] });
-    s().dropVideoClip(mover.id, { kind: "track", track: 1 }, 1.2);
-    expect(clipById(mover.id).track).toBe(1);
-    expect(clipById(mover.id).start).toBeCloseTo(1.2);
-    expect(clipById(resident.id).start).toBeCloseTo(3.2);
-    expectLaneSound(videoLane(1));
-  });
-
-  test("dropping a layer clip down onto occupied track 0 slides it clear", () => {
-    const resident = vclip({ track: 0, start: 0, out: 2 });
-    const mover = vclip({ track: 1, start: 0.5, out: 2 });
-    useEditor.setState({ clips: [resident, mover] });
-    s().dropVideoClip(mover.id, { kind: "track", track: 0 }, 1);
-    expect(clipById(mover.id).track).toBe(0);
-    expect(clipById(mover.id).start).toBeCloseTo(2);
-    expectLaneSound(videoLane(0));
-  });
 });
 
 describe("committed video updates (AI chat / inspector)", () => {
@@ -1187,15 +1166,6 @@ describe("spine grounding", () => {
     expect(clipById(upper.id).track).toBe(1);
   });
 
-  test("dragging the only track-0 clip up onto a layer grounds the stack", () => {
-    const mover = vclip({ track: 0, start: 0, out: 2 });
-    const resident = vclip({ track: 1, start: 1, out: 2 });
-    useEditor.setState({ clips: [mover, resident] });
-    s().dropVideoClip(mover.id, { kind: "track", track: 1 }, 1.2);
-    expect(clipById(mover.id).track).toBe(0);
-    expect(clipById(resident.id).track).toBe(0);
-    expectLaneSound(videoLane(0));
-  });
 });
 
 describe("upper-track transitions", () => {

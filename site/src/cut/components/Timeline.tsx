@@ -49,7 +49,7 @@ import { useExports } from "@/cut/lib/exportStore";
 import { isDragActive, startDrag, subscribeDragActive } from "@/cut/lib/drag";
 import { keyboardToEditor, shortcutDecline } from "@/cut/lib/shortcutGate";
 import { additiveClick } from "@/cut/lib/hostKeys";
-import { CLIP_GAP, laneDragFor, laneDragParts, startLaneMove, startLaneTrim, type LaneDrag, type LaneKind } from "@/cut/lib/laneTracks";
+import { CLIP_GAP, laneDragFor, laneDragParts, resolveRow, startLaneMove, startLaneTrim, type LaneDrag, type RowBox } from "@/cut/lib/laneTracks";
 import { reportSwallowed } from "@/cut/lib/report";
 import { downloadMedia, dropEdgeFrames, ensurePeaks, importImage, importStockMusic, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia, stripFailedFor, subscribeStripStatus } from "@/cut/lib/media";
 import { planFilmstrip, type FilmTile } from "@/cut/lib/filmstrip";
@@ -114,12 +114,6 @@ function useDropPreview<T>(initial: T): [T, (next: T) => void] {
 
 /** Video row height: the picture band plus the sound band under it. */
 const VIDEO_H = 88;
-/** How far past the top or bottom of the video stack a drag has to carry a
- * clip to open a new track. Every drop inside the stack lands on a row, which
- * opens room for it, so this reach is the one gesture that adds a track — and
- * it is long enough that drifting off a row while sliding along it never
- * does. */
-const NEW_TRACK_PX = 24;
 const OVERLAY_H = VIDEO_H; // every video track shares the same row height
 /** Extra row height under a video row whose clips carry mask keys: room for
  * the key rail below the bars. The diamonds read as part of the clip, so the
@@ -298,26 +292,27 @@ function EffectChipIcon({ effect }: { effect: EffectId }) {
  * length — so the landing ghost matches what the drop makes. */
 const ELEMENT_DROP_SECONDS = 3;
 
+/** The video stack's landing-slot chrome. */
+const VIDEO_SLOT =
+  "rounded-[2.5px] bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4)]";
+
 const FAMILY_STYLE: Record<
   OverlayFamily,
-  { bar: string; row: string; rowIdle: string; slot: string }
+  { bar: string; row: string; slot: string }
 > = {
   text: {
     bar: "bg-[#7B4BD1]",
     row: "border-[#7B4BD1]/70 bg-[#7B4BD1]/5",
-    rowIdle: "border-[#7B4BD1]/25",
     slot: "bg-[#7B4BD1]/10 shadow-[inset_0_0_0_1.5px_rgba(123,75,209,0.5)]",
   },
   element: {
     bar: "bg-[#C43C87]",
     row: "border-[#C43C87]/70 bg-[#C43C87]/5",
-    rowIdle: "border-[#C43C87]/25",
     slot: "bg-[#C43C87]/10 shadow-[inset_0_0_0_1.5px_rgba(196,60,135,0.5)]",
   },
   effect: {
     bar: "bg-[#0D8577]",
     row: "border-[#0D8577]/70 bg-[#0D8577]/5",
-    rowIdle: "border-[#0D8577]/25",
     slot: "bg-[#0D8577]/10 shadow-[inset_0_0_0_1.5px_rgba(13,133,119,0.5)]",
   },
 };
@@ -667,9 +662,6 @@ export function Timeline() {
   } | null>(null);
   // Kind of external media being dragged over the timeline (audio vs video).
   const [dropType, setDropType] = useState<"video" | "audio" | null>(null);
-  // A video clip is being dragged (internal or external): reveals the
-  // would-be new tracks past the stack's edges.
-  const [videoDragging, setVideoDragging] = useState(false);
   // The pending drop preview: which track/gap, at what time, for how long —
   // and which resident clips slide right to open the room, so the row can
   // paint them parting ahead of the drop.
@@ -685,10 +677,9 @@ export function Timeline() {
   } | null>(null);
   // Stage-x pixel a snapped title edge sits at, for the guide line (null = off).
   const [snapX, setSnapX] = useState<number | null>(null);
-  const videoDragActive = videoDragging || dropType === "video";
-  // The drop the pointer resolved to last, so a new track that has opened
-  // under the pointer keeps its hold until the drag returns to a row.
-  const lastDrop = useRef<TrackTarget | null>(null);
+  // The row an external drag resolved to last, so a new track that has
+  // opened under the pointer keeps its hold until the drag returns to a row.
+  const heldRow = useRef<number | null>(null);
 
   // Residents sliding ahead of an in-flight drop: clip id → the start it
   // previews at. Painted as an animated left offset, so the row opens room
@@ -700,56 +691,33 @@ export function Timeline() {
     return m;
   }, [assetDrop, overlayDrop]);
 
-  // Which drop the cursor is over. Inside the video stack the answer is always
-  // a row: the row under the pointer takes the clip and opens room for it, so
-  // aiming anywhere over a track lands on that track. A new track comes from
-  // one gesture — carrying the clip past the top or the bottom of the stack —
-  // and that new row then mounts under the pointer, so it holds itself while
-  // the pointer stays out there and lets go the moment it returns to a row.
-  // `draggedId` is the clip being carried, when one is; every drag flavor
-  // resolves through here, clips grabbed off the timeline and external media
-  // alike.
-  const resolveDropTrack = useCallback(
-    (clientX: number, clientY: number, draggedId?: string): TrackTarget => {
+  // The video stack's rows as screen boxes, top first — the frontmost layer
+  // down to track 0 — read live, since rows mount and shift while a drag runs.
+  const videoRows = () =>
+    Array.from(innerRef.current?.querySelectorAll<HTMLElement>("[data-tl-vrow]") ?? [], (el) => {
+      const r = el.getBoundingClientRect();
+      return { track: Number(el.dataset.tlVrow), top: r.top, h: r.height };
+    }).sort((a, b) => a.top - b.top);
+
+  // Which drop an external media drag is over: the same row rule every lane
+  // drag uses — the row under the pointer takes the clip and opens room for
+  // it, and a new track comes from carrying it past the top or the bottom of
+  // the stack, where the new row then mounts and holds itself.
+  const resolveDropTrack = useCallback((clientY: number): TrackTarget => {
     // An empty video timeline has no base yet: the first clip always lands on
     // track 0, whatever height the pointer is at. Otherwise a drop above the
     // thin empty row resolves to an overlay track, leaving track 0 empty — and
     // an empty track 0 plays black (the compositor's master lives there).
     const st = useEditor.getState();
-    const answer = (t: TrackTarget) => ((lastDrop.current = t), t);
-    if (st.clips.length === 0) return answer(TRACK_ZERO);
-    const rows = Array.from(
-      innerRef.current?.querySelectorAll<HTMLElement>("[data-tl-vrow]") ?? []
-    )
-      .map((el) => ({ track: Number(el.dataset.tlVrow), r: el.getBoundingClientRect() }))
-      .sort((a, b) => a.r.top - b.r.top);
-    if (!rows.length) return answer(TRACK_ZERO);
-    const top = rows[0];
-    const bottom = rows[rows.length - 1];
-    const held = lastDrop.current?.kind === "insert" ? lastDrop.current.level : null;
-    const topLevel = Math.max(0, ...overlayLayers(st.clips).map((c) => c.track)) + 1;
-    // A clip alone on the outermost row has no new track to open on that side:
-    // the row it left collapses behind it, so it would land alone on a fresh
-    // row with the same picture on it. The reach that way aims at rows only;
-    // the other way still reorders the stack, so it stays live.
-    const dragged = draggedId ? st.clips.find((c) => c.id === draggedId) : undefined;
-    const soleTrack =
-      dragged && st.clips.every((c) => c.track !== dragged.track || c.id === dragged.id)
-        ? dragged.track
-        : null;
-    // Past the stack: a new top layer above it, a new track 0 below it (the
-    // spine transplants onto the drop). Reaching there takes NEW_TRACK_PX of
-    // travel; holding it takes none, since by then the new track's own row
-    // fills the space the pointer is in.
-    if (soleTrack !== top.track && clientY < top.r.top - (held === topLevel ? 0 : NEW_TRACK_PX))
-      return answer({ kind: "insert", level: topLevel });
-    if (soleTrack !== bottom.track && clientY > bottom.r.bottom + (held === 0 ? 0 : NEW_TRACK_PX))
-      return answer({ kind: "insert", level: 0 });
-    // Inside the stack: the row the pointer is over, or the one under it when
-    // the pointer sits in the gap between two rows. The row makes space for
-    // the drop — nothing new opens between two tracks.
-    const row = rows.find((r) => clientY <= r.r.bottom) ?? bottom;
-    return answer({ kind: "track", track: row.track });
+    if (st.clips.length === 0) return TRACK_ZERO;
+    const rows = videoRows();
+    if (!rows.length) return TRACK_ZERO;
+    const row = resolveRow(rows, clientY, heldRow.current, { top: true, bottom: true });
+    heldRow.current = row;
+    if (row < 0)
+      return { kind: "insert", level: Math.max(0, ...overlayLayers(st.clips).map((c) => c.track)) + 1 };
+    if (row >= rows.length) return { kind: "insert", level: 0 };
+    return { kind: "track", track: rows[row].track };
   }, []);
 
   // Drive the drop preview while a clip is dragged across tracks: highlight the
@@ -761,7 +729,7 @@ export function Timeline() {
       // The drag let go of the placement system (it is home, or it ended): the
       // next resolve starts from the geometry alone.
       if (target === null) {
-        lastDrop.current = null;
+        heldRow.current = null;
         return setOverlayDrop(null);
       }
       const landing =
@@ -780,35 +748,17 @@ export function Timeline() {
   // A drag that left the timeline or landed lets go of the placement hold too,
   // so the next one starts from the geometry alone.
   const endCrossDrag = useCallback(() => {
-    lastDrop.current = null;
+    heldRow.current = null;
     setOverlayDrop(null);
   }, []);
-
-  // Releasing a track-0 clip on any other track lifts it out onto that track
-  // (or a new one); on its own track the lane coordinator commits the move.
-  const onClipCrossDrop = useCallback(
-    (id: string, target: TrackTarget, start: number) => {
-      previewCross(null);
-      if (samePlacement(target, TRACK_ZERO)) return;
-      useEditor.getState().dropVideoClip(id, target, start);
-    },
-    [previewCross]
-  );
-
-  // Releasing an overlay clip anywhere: another track, a new inserted track, or
-  // down onto track 0.
-  const onOverlayCrossDrop = useCallback(
-    (id: string, target: TrackTarget, start: number) => {
-      previewCross(null);
-      useEditor.getState().dropVideoClip(id, target, start);
-    },
-    [previewCross]
-  );
 
   // The one in-flight lane-track drag (audio, title, upper layer, or cue):
   // the coordinator publishes it so each section can render the ghost, the
   // landing slot, and grow its row stack while a new row is hovered.
   const [laneDrag, setLaneDrag] = useState<LaneDrag | null>(null);
+  // A video clip is being dragged (internal or external): the would-be new
+  // tracks past the stack's edges can open, and every clip parts.
+  const videoDragActive = laneDrag?.kind === "video" || dropType === "video";
 
   // Right-click on any row's empty space — video, audio, or title: a small
   // popover offering to close that row's gap under the cursor. The cut is
@@ -906,7 +856,7 @@ export function Timeline() {
     const rowOf = new Map(used.map((l, i) => [l, i]));
     return { used, rowOf, count: used.length };
   }, [overlays]);
-  // The color an element drag paints its landing rows with: the carried item's
+  // The color an element drag paints its landing slot with: the carried item's
   // own, so the move reads as one thing from grab to drop.
   const draggedFamily = useMemo<OverlayFamily>(() => {
     const held = laneDrag?.kind === "overlay" ? overlays.find((o) => o.id === laneDrag.id) : null;
@@ -924,6 +874,9 @@ export function Timeline() {
   // new top layer above, or a new track 0 below (the spine transplants there).
   const topInsertLevel = (aboveTracks[0] ?? 0) + 1;
   const bottomInsertLevel = 0;
+  // A video track's display row, top first: the layers in stack order, then
+  // track 0 at the bottom — the row numbers a video lane drag speaks in.
+  const videoRowCount = aboveTracks.length + 1;
 
   // Audio tracks mirror the title tracks: clips carry a `lane`; used lanes
   // compact to contiguous display rows, so empty tracks disappear on their own.
@@ -1002,25 +955,28 @@ export function Timeline() {
   // The band's rows in screen space, top row first. The video stack measures
   // its own row elements (their heights vary with the mask key rail); the
   // stacked bands are uniform, so their rows come off the band's top edge.
-  const rowBoxes = useCallback(
-    (band: RowBand): { top: number; h: number }[] => {
-      if (band === "video")
-        return Array.from(
-          innerRef.current?.querySelectorAll<HTMLElement>("[data-tl-vrow]") ?? [],
-          (el) => {
-            const r = el.getBoundingClientRect();
-            return { top: r.top, h: r.height };
-          }
-        );
-      const el = band === "overlay" ? overlayRef.current : audioRef.current;
-      if (!el) return [];
-      const h = band === "overlay" ? TEXT_H : AUDIO_H;
-      const n = band === "overlay" ? overlayLanes.count : audioLanes.count;
-      const top = el.getBoundingClientRect().top;
-      return Array.from({ length: n }, (_, r) => ({ top: top + r * h, h }));
-    },
-    [overlayLanes.count, audioLanes.count]
-  );
+  const rowBoxes = useCallback((band: RowBand): RowBox[] => {
+    if (band === "video") return videoRows();
+    const el = band === "overlay" ? overlayRef.current : audioRef.current;
+    return Array.from(el?.querySelectorAll<HTMLElement>("[data-tl-row]") ?? [], (row) => {
+      const r = row.getBoundingClientRect();
+      return { top: r.top, h: r.height };
+    });
+  }, []);
+  const videoRowBoxes = useCallback(() => rowBoxes("video"), [rowBoxes]);
+  const audioRowBoxes = useCallback(() => rowBoxes("audio"), [rowBoxes]);
+  const overlayRowBoxes = useCallback(() => rowBoxes("overlay"), [rowBoxes]);
+  /** The row boxes a stacked band lays out for its used rows, so gestures
+   * can read the band's geometry live. */
+  const rowMarks = (n: number, h: number, shift: number) =>
+    Array.from({ length: n }, (_, r) => (
+      <div
+        key={`row-${r}`}
+        data-tl-row=""
+        className="pointer-events-none absolute inset-x-0"
+        style={{ top: r * h + shift, height: h }}
+      />
+    ));
   // Grab a row by its gutter cell and carry it to a new place in the band.
   const gripRow = (band: RowBand, row: number) => (e: React.PointerEvent) => {
     const rows = rowBoxes(band);
@@ -1100,13 +1056,6 @@ export function Timeline() {
     }
     return map;
   }, [clips, assets]);
-
-  // The home track of an in-flight upper-layer drag, so that row can render
-  // the landing slot while the clip stays on its own track.
-  const draggedOverlayTrack =
-    laneDrag?.kind === "overlayClip" && !laneDrag.away
-      ? overlayClips.find((c) => c.id === laneDrag.id)?.track ?? null
-      : null;
 
   // The audio row under a screen y, one past the last row = a new track.
   // Before any audio exists there are no rows, so everything resolves to 0.
@@ -1423,7 +1372,7 @@ export function Timeline() {
         if (!surface) return null;
         const r = surface.getBoundingClientRect();
         if (y < r.top || y > r.bottom || x < r.left || x > r.right) return null;
-        return { at: dropTimeAt(x), place: resolveDropTrack(x, y) };
+        return { at: dropTimeAt(x), place: resolveDropTrack(y) };
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [resolveDropTrack]
@@ -1432,8 +1381,8 @@ export function Timeline() {
   const [transitionDrag, setTransitionDrag] = useState<XBar | null>(null);
   // A drag past the top edge opens a row there, pushing the stack down by one
   // for as long as it is aimed that way.
-  const topRowShift =
-    laneDrag?.kind === "overlay" && laneDrag.targetRow < 0 ? TEXT_H : 0;
+  const topRowShift = laneDrag?.kind === "overlay" && laneDrag.targetRow < 0 ? TEXT_H : 0;
+  const audioTopShift = laneDrag?.kind === "audio" && laneDrag.targetRow < 0 ? AUDIO_H : 0;
 
   // Where a dropped asset should land. An empty timeline has no arrangement to
   // read a position against, so the drop starts the film at 0 no matter where
@@ -1817,7 +1766,7 @@ export function Timeline() {
       schedulePreview(() => {
         setAssetDrop(null);
         setDropType("video"); // keep the insertion zones lit however the drag entered
-        previewCross(resolveDropTrack(x, y), Math.max(0, timeAt(x)), vid.duration, vid.ghost);
+        previewCross(resolveDropTrack(y), Math.max(0, timeAt(x)), vid.duration, vid.ghost);
       });
     },
     onDragLeave: (e: React.DragEvent) => {
@@ -1832,7 +1781,7 @@ export function Timeline() {
       e.preventDefault();
       e.stopPropagation();
       cancelPreview();
-      const place = resolveDropTrack(e.clientX, e.clientY);
+      const place = resolveDropTrack(e.clientY);
       const t = Math.max(0, timeAt(e.clientX));
       endCrossDrag();
       setDropType(null);
@@ -1948,11 +1897,17 @@ export function Timeline() {
   // track at z-level `level`.
   const newTrackRow = (level: number) => {
     const place: TrackTarget = { kind: "insert", level };
-    if (!videoDragActive || !samePlacement(overlayDrop?.target ?? null, place)) return null;
+    const aimed =
+      (laneDrag?.kind === "video" && laneDrag.targetRow === (level === 0 ? videoRowCount : -1)) ||
+      (dropType === "video" && samePlacement(overlayDrop?.target ?? null, place));
+    if (!aimed) return null;
     return (
       <div className="relative mt-1.5" style={{ height: OVERLAY_H }}>
         {laneRail(OVERLAY_H - 2)}
         {trackSlot(place, OVERLAY_H - 4)}
+        {laneDrag?.kind === "video" && (
+          <LaneSlot drag={laneDrag} pps={pps} top={2} barH={OVERLAY_H - 4} className={VIDEO_SLOT} />
+        )}
       </div>
     );
   };
@@ -2004,7 +1959,7 @@ export function Timeline() {
             }
             setDropType("video");
             setAudioDrop(null);
-            const place = resolveDropTrack(x, y);
+            const place = resolveDropTrack(y);
             if (place.kind === "insert") {
               setAssetDrop(null);
               setOverlayDrop({ target: place, t: dropTimeAt(x), len });
@@ -2115,7 +2070,7 @@ export function Timeline() {
           }
           // Past the stack's edges the drop opens a new track: preview it in
           // the would-be new row instead of track 0.
-          const place = resolveDropTrack(x, y);
+          const place = resolveDropTrack(y);
           if (place.kind === "insert") {
             setAssetDrop(null);
             setOverlayDrop({ target: place, t: dropTimeAt(x), len: duration, ghost });
@@ -2150,7 +2105,7 @@ export function Timeline() {
         if (draggedFiles(e)) {
           fileLanding.current = {
             at: dropTimeAt(e.clientX),
-            place: resolveDropTrack(e.clientX, e.clientY),
+            place: resolveDropTrack(e.clientY),
           };
         }
         // Resolve the hovered rows before the previews (and their rows) clear.
@@ -2159,7 +2114,7 @@ export function Timeline() {
         setElementDrop(null);
         setJointDrop(null);
         setXTileDrag(null);
-        const videoPlace = resolveDropTrack(e.clientX, e.clientY);
+        const videoPlace = resolveDropTrack(e.clientY);
         setAssetDrop(null);
         endCrossDrag();
         setAudioDrop(null);
@@ -2443,9 +2398,9 @@ export function Timeline() {
                 height:
                   Math.max(
                     overlayLanes.count,
-                    // An in-flight element drag shows its whole landing area —
-                    // only the rows it can actually reach.
-                    laneDrag?.kind === "overlay" ? laneDrag.maxRow + 1 : 0,
+                    // An in-flight element drag aimed under the band opens
+                    // the row it will land on.
+                    laneDrag?.kind === "overlay" ? laneDrag.targetRow + 1 : 0,
                     // A panel drag over an empty band opens the first row for
                     // its landing preview.
                     elementDrop !== null ? elementDrop.row + 1 : 0
@@ -2456,9 +2411,16 @@ export function Timeline() {
               onPointerDown={deselectIfSelf}
               onContextMenu={openStackedGapMenu("overlay", TEXT_H, overlayLanes.used)}
             >
-              {Array.from({ length: overlayLanes.count }, (_, r) =>
-                laneRail((r + 1) * TEXT_H - 4 + topRowShift, r)
+              {Array.from(
+                {
+                  length:
+                    overlayLanes.count +
+                    (topRowShift ? 1 : 0) +
+                    (laneDrag?.kind === "overlay" && laneDrag.targetRow === overlayLanes.count ? 1 : 0),
+                },
+                (_, r) => laneRail((r + 1) * TEXT_H - 4, r)
               )}
+              {rowMarks(overlayLanes.count, TEXT_H, topRowShift)}
               {overlayLanes.used.map((lane, r) => (
                 <Fragment key={`tgap-${lane}`}>
                   {gapHighlight(
@@ -2545,38 +2507,12 @@ export function Timeline() {
                     </>
                   );
                 })()}
-              {/* The new row above, revealed once the drag heads past the top
-                  edge — showing it any earlier would push every row down
-                  under a freshly grabbed bar. */}
-              {topRowShift > 0 && (
-                <div
-                  className={cn(
-                    "pointer-events-none absolute inset-x-0 rounded-[3px] border border-dashed",
-                    FAMILY_STYLE[draggedFamily].row
-                  )}
-                  style={{ top: 2, height: TEXT_H - 6 }}
-                />
-              )}
-              {laneDrag?.kind === "overlay" &&
-                Array.from({ length: laneDrag.maxRow + 1 }, (_, r) => (
-                  <div
-                    key={r}
-                    className={cn(
-                      "pointer-events-none absolute inset-x-0 rounded-[3px] border border-dashed transition-colors",
-                      r === laneDrag.targetRow
-                        ? FAMILY_STYLE[draggedFamily].row
-                        : FAMILY_STYLE[draggedFamily].rowIdle
-                    )}
-                    style={{ top: r * TEXT_H + 2 + topRowShift, height: TEXT_H - 6 }}
-                  />
-                ))}
               {laneDrag?.kind === "overlay" && (
                 <LaneSlot
                   drag={laneDrag}
                   pps={pps}
-                  rowH={TEXT_H}
+                  top={laneDrag.targetRow * TEXT_H + 2 + topRowShift}
                   barH={TEXT_H - 6}
-                  shift={topRowShift}
                   className={cn("rounded-[3px]", FAMILY_STYLE[draggedFamily].slot)}
                 />
               )}
@@ -2597,7 +2533,7 @@ export function Timeline() {
                           : "part"
                         : null
                     }
-                    laneCount={overlayLanes.count}
+                    rows={overlayRowBoxes}
                     selected={selKeys.has(`overlay:${o.id}`)}
                     drag={drag}
                     parting={laneDragParts(laneDrag, "overlay", o.id)}
@@ -2748,14 +2684,8 @@ export function Timeline() {
             >
               {laneRail(rowH - 2 + railH)}
               {gapHighlight({ kind: "video", index: track }, rowH - 4)}
-              {draggedOverlayTrack === track && laneDrag && (
-                <LaneSlot
-                  drag={laneDrag}
-                  pps={pps}
-                  rowH={rowH}
-                  barH={rowH - 4}
-                  className="rounded-[2.5px] bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4)]"
-                />
+              {laneDrag?.kind === "video" && laneDrag.targetRow === row && (
+                <LaneSlot drag={laneDrag} pps={pps} top={2} barH={rowH - 4} className={VIDEO_SLOT} />
               )}
               {trackSpans.map((span) => (
                 <ClipView
@@ -2764,17 +2694,13 @@ export function Timeline() {
                   mention={clipMentions.get(span.clip.id)}
                   pps={pps}
                   selected={selKeys.has(`clip:${span.clip.id}`)}
-                  drag={laneDragFor(laneDrag, "overlayClip", span.clip.id)}
-                  parting={
-                    laneDragParts(laneDrag, "overlayClip", span.clip.id) || videoDragActive
-                  }
+                  drag={laneDragFor(laneDrag, "video", span.clip.id)}
+                  parting={laneDragParts(laneDrag, "video", span.clip.id) || videoDragActive}
                   partAt={dropPartAt.get(span.clip.id)}
+                  homeRow={row}
+                  rows={videoRowBoxes}
                   onDrag={setLaneDrag}
                   onSnap={setSnapX}
-                  resolveTarget={resolveDropTrack}
-                  onCrossMove={previewCross}
-                  onCrossDrop={onOverlayCrossDrop}
-                  onDragActive={setVideoDragging}
                   onFrameMenu={openFrameMenu}
                 />
               ))}
@@ -2814,14 +2740,8 @@ export function Timeline() {
             {spans.length > 0 && laneRail(rowH0 - 2 + rail0)}
             {gapHighlight({ kind: "video", index: 0 }, rowH0 - 4)}
             {trackSlot(TRACK_ZERO, rowH0 - 4)}
-            {laneDrag?.kind === "clip" && !laneDrag.away && (
-              <LaneSlot
-                drag={laneDrag}
-                pps={pps}
-                rowH={rowH0}
-                barH={rowH0 - 4}
-                className="rounded-[2.5px] bg-[#0a84ff]/10 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.4),inset_0_2px_10px_rgba(10,60,140,0.08)]"
-              />
+            {laneDrag?.kind === "video" && laneDrag.targetRow === aboveTracks.length && (
+              <LaneSlot drag={laneDrag} pps={pps} top={2} barH={rowH0 - 4} className={VIDEO_SLOT} />
             )}
             {assetDrop &&
               (assetDrop.ghost ? (
@@ -2843,15 +2763,13 @@ export function Timeline() {
                 mention={clipMentions.get(span.clip.id)}
                 pps={pps}
                 selected={selKeys.has(`clip:${span.clip.id}`)}
-                drag={laneDragFor(laneDrag, "clip", span.clip.id)}
-                parting={laneDragParts(laneDrag, "clip", span.clip.id) || videoDragActive}
+                drag={laneDragFor(laneDrag, "video", span.clip.id)}
+                parting={laneDragParts(laneDrag, "video", span.clip.id) || videoDragActive}
                 partAt={dropPartAt.get(span.clip.id)}
+                homeRow={aboveTracks.length}
+                rows={videoRowBoxes}
                 onDrag={setLaneDrag}
                 onSnap={setSnapX}
-                resolveTarget={resolveDropTrack}
-                onCrossMove={previewCross}
-                onCrossDrop={onClipCrossDrop}
-                onDragActive={setVideoDragging}
                 onFrameMenu={openFrameMenu}
               />
             ))}
@@ -2873,40 +2791,36 @@ export function Timeline() {
                 height:
                   Math.max(
                     audioLanes.count,
-                    // An in-flight audio drag shows its whole landing area —
-                    // only the rows it can actually reach.
-                    laneDrag?.kind === "audio" ? laneDrag.maxRow + 1 : 0,
+                    // An in-flight audio drag aimed under the band opens the
+                    // row it will land on.
+                    laneDrag?.kind === "audio" ? laneDrag.targetRow + 1 : 0,
                     (audioDrop?.row ?? -1) + 1
-                  ) * AUDIO_H,
+                  ) *
+                    AUDIO_H +
+                  audioTopShift,
               }}
               onPointerDown={deselectIfSelf}
               onContextMenu={openStackedGapMenu("audio", AUDIO_H, audioLanes.used)}
             >
-              {Array.from({ length: audioLanes.count }, (_, r) =>
-                laneRail((r + 1) * AUDIO_H - 2, r)
+              {Array.from(
+                {
+                  length:
+                    Math.max(audioLanes.count, (audioDrop?.row ?? -1) + 1) +
+                    (audioTopShift ? 1 : 0) +
+                    (laneDrag?.kind === "audio" && laneDrag.targetRow === audioLanes.count ? 1 : 0),
+                },
+                (_, r) => laneRail((r + 1) * AUDIO_H - 2, r)
               )}
+              {rowMarks(audioLanes.count, AUDIO_H, audioTopShift)}
               {audioLanes.used.map((lane, r) => (
                 <Fragment key={`agap-${lane}`}>
                   {gapHighlight(
                     { kind: "audio", index: lane },
                     AUDIO_H - 4,
-                    stackedRowTop("audio", r, AUDIO_H)
+                    stackedRowTop("audio", r, AUDIO_H) + audioTopShift
                   )}
                 </Fragment>
               ))}
-              {laneDrag?.kind === "audio" &&
-                Array.from({ length: laneDrag.maxRow + 1 }, (_, r) => (
-                  <div
-                    key={r}
-                    className={cn(
-                      "pointer-events-none absolute inset-x-0 rounded-[2.5px] border border-dashed transition-colors",
-                      r === laneDrag.targetRow
-                        ? "border-emerald-500/70 bg-emerald-500/5"
-                        : "border-emerald-500/25"
-                    )}
-                    style={{ top: r * AUDIO_H + 2, height: AUDIO_H - 4 }}
-                  />
-                ))}
               {audioDrop && (
                 <div
                   className="tl-audio-drop-slot pointer-events-none absolute rounded-[2.5px] border-[1.5px] border-dashed border-emerald-500/80 bg-emerald-500/10 transition-[left] duration-150 ease-out"
@@ -2918,11 +2832,11 @@ export function Timeline() {
                   }}
                 />
               )}
-              {laneDrag?.kind === "audio" && !laneDrag.away && (
+              {laneDrag?.kind === "audio" && (
                 <LaneSlot
                   drag={laneDrag}
                   pps={pps}
-                  rowH={AUDIO_H}
+                  top={laneDrag.targetRow * AUDIO_H + 2 + audioTopShift}
                   barH={AUDIO_H - 4}
                   className="rounded-[2.5px] bg-emerald-500/10 shadow-[inset_0_0_0_1.5px_rgba(16,185,129,0.5)]"
                 />
@@ -2937,7 +2851,7 @@ export function Timeline() {
                     asset={assets.find((x) => x.id === a.assetId)}
                     mention={audioMentions.get(a.id)}
                     pps={pps}
-                    top={stackedRowTop("audio", homeRow, AUDIO_H)}
+                    top={stackedRowTop("audio", homeRow, AUDIO_H) + audioTopShift}
                     homeRow={homeRow}
                     rowMove={
                       rowDrag?.band === "audio"
@@ -2946,7 +2860,7 @@ export function Timeline() {
                           : "part"
                         : null
                     }
-                    laneCount={audioLanes.count}
+                    rows={audioRowBoxes}
                     selected={selKeys.has(`audio:${a.id}`)}
                     drag={drag}
                     parting={laneDragParts(laneDrag, "audio", a.id)}
@@ -2971,18 +2885,10 @@ export function Timeline() {
                 laneRail((lane + 1) * SUB_H - 3, lane)
               )}
               {laneDrag?.kind === "cue" && (
-                // A cue belongs to its language track, so that one row is the
-                // whole landing area while the ghost floats free.
-                <div
-                  className="pointer-events-none absolute inset-x-0 rounded-[2.5px] border border-dashed border-amber-500/50"
-                  style={{ top: laneDrag.targetRow * SUB_H + 1, height: SUB_H - 4 }}
-                />
-              )}
-              {laneDrag?.kind === "cue" && (
                 <LaneSlot
                   drag={laneDrag}
                   pps={pps}
-                  rowH={SUB_H}
+                  top={laneDrag.targetRow * SUB_H + 1}
                   barH={SUB_H - 4}
                   className="rounded-[2.5px] bg-amber-400/15 shadow-[inset_0_0_0_1.5px_rgba(245,158,11,0.55)]"
                 />
@@ -3865,12 +3771,10 @@ function ClipView({
   drag,
   parting,
   partAt,
+  homeRow,
+  rows,
   onDrag,
   onSnap,
-  resolveTarget,
-  onCrossMove,
-  onCrossDrop,
-  onDragActive,
   onFrameMenu,
 }: {
   span: ClipSpan;
@@ -3886,18 +3790,11 @@ function ClipView({
   parting: boolean;
   /** The start this clip previews at while a hovering drop parts its row. */
   partAt?: number;
+  /** The clip's display row in the stack, and the stack's rows read live. */
+  homeRow: number;
+  rows: () => RowBox[];
   onDrag: (d: LaneDrag | null) => void;
   onSnap: (x: number | null) => void;
-  /** Which drop the given screen point is over: a video row, or a new track
-   * past the stack's edge. The carried clip's id decides whether a new track
-   * is on offer at all. */
-  resolveTarget: (clientX: number, clientY: number, draggedId?: string) => TrackTarget;
-  /** Preview a cross-track drop (null clears it). */
-  onCrossMove: (target: TrackTarget | null, start?: number, len?: number) => void;
-  /** Commit a cross-track drop of this clip at `start`. */
-  onCrossDrop: (id: string, target: TrackTarget, start: number) => void;
-  /** Toggle the between-track insertion zones while this clip is dragging. */
-  onDragActive: (active: boolean) => void;
   /** Right-click: offer the frame under the pointer to the chat composer. */
   onFrameMenu: (
     e: React.MouseEvent,
@@ -3905,10 +3802,7 @@ function ClipView({
   ) => void;
 }) {
   const { clip, asset } = span;
-  // The row the clip lives on names its lane; the two gesture kinds write
-  // through different store actions.
-  const lane: LaneKind = clip.track === 0 ? "clip" : "overlayClip";
-  const spine = lane === "clip";
+  const spine = clip.track === 0;
   const loading = useEditor((s) => s.loadingMedia.has(asset.fileName));
   const baking = useMatteBakes((s) => s.jobs[clip.id]?.status === "running");
   const rt = retimeOf(clip);
@@ -3961,26 +3855,9 @@ function ClipView({
   );
   useTileFrames(boxRef, clip.id, asset, filmstrip, filmIn, w, pps, rt.key, onTileFrame);
 
-  // The move gesture is the shared lane behavior (parting, snapping); its
-  // verticality is the video placement system — the other tracks and the new
-  // tracks past the stack — resolved from the rows' geometry.
-  const ui = {
-    pps,
-    rowH: VIDEO_H,
-    laneCount: 0,
-    homeRow: 0,
-    visStart: span.start,
-    onDrag,
-    onSnap,
-    vertical: {
-      resolve: (ev: PointerEvent) => resolveTarget(ev.clientX, ev.clientY, clip.id),
-      isHome: (t: TrackTarget) => samePlacement(t, { kind: "track", track: clip.track }),
-      preview: (t: TrackTarget | null, start: number, len: number) =>
-        t ? onCrossMove(t, start, len) : onCrossMove(null),
-      commit: (id: string, t: TrackTarget, start: number) => onCrossDrop(id, t, start),
-      setActive: onDragActive,
-    },
-  };
+  // The move gesture is the shared lane behavior: parting, snapping, and
+  // retracking across the stack's rows.
+  const ui = { pps, rows, homeRow, visStart: span.start, onDrag, onSnap };
 
   return (
     <>
@@ -4010,7 +3887,7 @@ function ClipView({
           addBeatAt(e, asset, clip, pps);
           return;
         }
-        startLaneMove(e, lane, clip.id, ui);
+        startLaneMove(e, "video", clip.id, ui);
       }}
       onContextMenu={(e) => {
         if (asset.type !== "video") return;
@@ -4130,11 +4007,11 @@ function ClipView({
       <BeatDots asset={asset} lo={clip.in} hi={clip.out} retime={rt} pps={pps} w={barW} />
       <span
         className={cn(trimFor(barW), "tl-trim-l left-0")}
-        onPointerDown={(e) => startLaneTrim(e, lane, clip.id, "l", ui)}
+        onPointerDown={(e) => startLaneTrim(e, "video", clip.id, "l", ui)}
       />
       <span
         className={cn(trimFor(barW), "tl-trim-r right-0")}
-        onPointerDown={(e) => startLaneTrim(e, lane, clip.id, "r", ui)}
+        onPointerDown={(e) => startLaneTrim(e, "video", clip.id, "r", ui)}
       />
     </div>
     <ClipMaskKeyStrip
@@ -5381,7 +5258,7 @@ function AudioView({
   pps,
   top,
   homeRow,
-  laneCount,
+  rows,
   selected,
   drag,
   parting,
@@ -5398,7 +5275,8 @@ function AudioView({
   /** Home-row top in px; while carried the ghost adds the pointer's offset. */
   top: number;
   homeRow: number;
-  laneCount: number;
+  /** The band's rows read live, for the drag's row resolution. */
+  rows: () => RowBox[];
   selected: boolean;
   /** This bar's live drag when it is the one being carried (ghost mode). */
   drag: LaneDrag | null;
@@ -5431,7 +5309,7 @@ function AudioView({
 
   if (!asset) return null;
 
-  const ui = { pps, rowH: AUDIO_H, laneCount, homeRow, onDrag, onSnap };
+  const ui = { pps, rows, homeRow, onDrag, onSnap };
 
   return (
     <div
@@ -5788,7 +5666,7 @@ function TextBar({
   pps,
   top,
   homeRow,
-  laneCount,
+  rows,
   selected,
   drag,
   parting,
@@ -5801,7 +5679,8 @@ function TextBar({
   pps: number;
   top: number;
   homeRow: number;
-  laneCount: number;
+  /** The band's rows read live, for the drag's row resolution. */
+  rows: () => RowBox[];
   selected: boolean;
   /** A row drag is running in this band: "lift" is the row being carried,
    * "part" a row sliding into the place it closes up into. */
@@ -5821,9 +5700,7 @@ function TextBar({
   // The bar is drawn a gutter narrower than the footprint; the keys on it
   // measure against that.
   const barW = Math.max(8, w - CLIP_GAP);
-  // Element rows are a z-order, so the top of the stack is a place a drag
-  // can reach: past the top edge opens a row there.
-  const ui = { pps, rowH: TEXT_H, laneCount, homeRow, topInsert: true, onDrag, onSnap };
+  const ui = { pps, rows, homeRow, onDrag, onSnap };
   // Per-kind chip content: a title shows its text, a shape its name behind a
   // shape glyph, a sticker its glyph and name.
   const ShapeIcon = SHAPE_CHIP_ICONS[o.kind === "shape" ? o.shape : "rect"];
@@ -5935,7 +5812,8 @@ function SubBar({
   onSnap: (x: number | null) => void;
 }) {
   const w = Math.max(8, (cue.end - cue.start) * pps);
-  const ui = { pps, rowH: SUB_H, laneCount: 0, homeRow, onDrag, onSnap };
+  // A cue never leaves its language row, so the band's rows go unread.
+  const ui = { pps, rows: () => [], homeRow, onDrag, onSnap };
 
   return (
     <div
@@ -5974,23 +5852,21 @@ function SubBar({
   );
 }
 
-/** The landing-slot preview for an in-flight lane drag, drawn in the track
- * family's own chrome; it tracks the coordinator's resolved slot and row. */
+/** The landing-slot preview for an in-flight lane drag, drawn in the band's
+ * own chrome; it tracks the coordinator's resolved slot, at the row top the
+ * band resolves for it. */
 function LaneSlot({
   drag,
   pps,
-  rowH,
+  top,
   barH,
-  shift = 0,
   className,
 }: {
   drag: LaneDrag;
   pps: number;
-  rowH: number;
+  top: number;
   barH: number;
-  /** Rows pushed down by a new row opening above them. */
-  shift?: number;
-  className?: string;
+  className: string;
 }) {
   return (
     <div
@@ -6000,7 +5876,7 @@ function LaneSlot({
       )}
       style={{
         left: drag.slotStart * pps,
-        top: drag.targetRow * rowH + 2 + shift,
+        top,
         width: Math.max(8, drag.len * pps - CLIP_GAP),
         height: barH,
       }}
