@@ -67,7 +67,7 @@ export const SU_NAV = [
     tabs: [
       {
         href: "/experiments/list",
-        label: "Experiments",
+        label: "Tests",
         description: "Variants over settings, assigned once per account and kept.",
       },
       {
