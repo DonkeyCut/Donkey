@@ -58,7 +58,9 @@ export type PromotionSummary = {
   finishedAt: string | null;
   createdAt: string;
   updatedAt: string;
-  counts: { recipients: number; sent: number; failed: number };
+  // Recipients queued, sent, failed, and what came of it: buttons followed,
+  // credit offers claimed.
+  counts: { recipients: number; sent: number; failed: number; clicked: number; claimed: number };
 };
 
 // What a segment resolves to before anything is sent.

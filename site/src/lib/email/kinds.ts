@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { creditOfferClaimUrl, createPromotionCreditOffer } from "@/lib/credits/offers";
+import { clickUrl } from "@/lib/email/click";
 import { recordExpiryNoticeSent } from "@/lib/email/credit-expiry-notices";
 import type { EmailSendKind } from "@/lib/email/daily-send-limit";
 import { PermanentSendError } from "@/lib/email/errors";
@@ -126,8 +127,13 @@ async function abandonPromotion(promotionId: string, error: Error): Promise<void
 }
 
 // A promotion with a credit offer mails each person their own claim link,
-// backed by an offer row that the real send and the test send share.
-async function promotionEmailFor(promotion: Awaited<ReturnType<typeof promotionRowOf>>, user: EmailUser) {
+// backed by an offer row that the real send and the test send share. The
+// real send's button is counted when followed.
+async function promotionEmailFor(
+  promotion: Awaited<ReturnType<typeof promotionRowOf>>,
+  user: EmailUser,
+  trackClick?: (url: string) => string,
+) {
   const offer = promotionOfferOf(promotion.creditOffer);
   const claimUrl = offer
     ? (
@@ -141,7 +147,7 @@ async function promotionEmailFor(promotion: Awaited<ReturnType<typeof promotionR
         })
       ).claimUrl
     : undefined;
-  return buildPromotionEmail(promotionCopyOf(promotion), user, claimUrl);
+  return buildPromotionEmail(promotionCopyOf(promotion), user, claimUrl, trackClick);
 }
 
 const promotion = define({
@@ -152,7 +158,7 @@ const promotion = define({
     // The opt-out is read again right before the send, so someone who
     // unsubscribed after the segment was resolved is skipped.
     if (!user || (await isMarketingUnsubscribed(user.id))) return null;
-    return promotionEmailFor(promotion, user);
+    return promotionEmailFor(promotion, user, (url) => clickUrl(row.id, url));
   },
   onAbandon: async ({ promotionId }, _row, error) => abandonPromotion(promotionId, error),
 });

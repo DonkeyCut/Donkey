@@ -129,7 +129,7 @@ function PromotionRow({
   const skipped = p.excludePromotionIds
     .map((id) => all.find((other) => other.id === id)?.name ?? "a deleted promotion")
     .join(", ");
-  const { recipients, sent, failed } = p.counts;
+  const { recipients, sent, failed, clicked, claimed } = p.counts;
 
   return (
     <div className="rounded-lg border p-4">
@@ -147,7 +147,9 @@ function PromotionRow({
           <p className="mt-1 text-xs text-muted-foreground">
             {p.status === "draft"
               ? `Draft · saved ${when(p.updatedAt)}`
-              : `${sent} of ${recipients} sent${failed ? ` · ${failed} failed` : ""}${
+              : `${sent} of ${recipients} sent${failed ? ` · ${failed} failed` : ""} · ${clicked} clicked${
+                  p.creditOffer ? ` · ${claimed} claimed` : ""
+                }${
                   p.startedAt ? ` · started ${when(p.startedAt)}` : ""
                 }${p.finishedAt ? ` · finished ${when(p.finishedAt)}` : ""}`}
           </p>

@@ -17,6 +17,7 @@ import {
   type SegmentCount,
 } from "@/lib/marketing/promotionInput";
 import { prisma } from "@/lib/prisma";
+import { PROMOTION_OFFER_KIND } from "@/lib/credits/offers";
 import { promotionOfferOf } from "@/lib/marketing/promotionOfferInput";
 
 // Promotions on the server: which address each sender is, who a segment
@@ -58,10 +59,17 @@ export function promotionAudienceOf(raw: Prisma.JsonValue): Audience {
 
 /** One promotion email for one account. The idempotency key is the row's:
  * the outbox keys on the recipient so a retried run cannot mail anyone twice. */
-export function buildPromotionEmail(copy: PromotionCopy, user: EmailUser, claimUrl: string | undefined): EmailMessage {
+export function buildPromotionEmail(
+  copy: PromotionCopy,
+  user: EmailUser,
+  claimUrl: string | undefined,
+  // Wraps the button's link so the follow is counted; the test send has none.
+  trackClick?: (url: string) => string,
+): EmailMessage {
   const from = promotionSenders()[copy.sender];
   if (!from) throw new PermanentSendError(`The ${copy.sender} sender is not configured.`);
   const rendered = renderPromotion(copy, user, claimUrl);
+  const cta = rendered.cta && trackClick ? { ...rendered.cta, url: trackClick(rendered.cta.url) } : rendered.cta;
   return {
     from,
     to: user.email,
@@ -69,7 +77,7 @@ export function buildPromotionEmail(copy: PromotionCopy, user: EmailUser, claimU
     subject: rendered.subject,
     react: PromotionEmail({
       blocks: rendered.blocks,
-      cta: rendered.cta,
+      cta,
       preview: rendered.preview,
       unsubscribeUrl: unsubscribePageUrl(user.id),
     }),
@@ -161,10 +169,7 @@ export async function resolvePromotionSegment(
 
 type PromotionRow = NonNullable<Awaited<ReturnType<typeof prisma.promotion.findUnique>>>;
 
-function summarize(
-  row: PromotionRow,
-  counts: { recipients: number; sent: number; failed: number },
-): PromotionSummary {
+function summarize(row: PromotionRow, counts: PromotionSummary["counts"]): PromotionSummary {
   return {
     id: row.id,
     creditOffer: promotionOfferOf(row.creditOffer),
@@ -185,9 +190,10 @@ function summarize(
   };
 }
 
-/** Every promotion, newest first, with how far its send got. */
+/** Every promotion, newest first, with how far its send got and what came
+ * of it: buttons followed, and credit offers claimed. */
 export async function listPromotions(): Promise<PromotionSummary[]> {
-  const [rows, all, sent, failed] = await Promise.all([
+  const [rows, all, sent, failed, clicked, claimedOffers] = await Promise.all([
     prisma.promotion.findMany({ orderBy: { createdAt: "desc" } }),
     prisma.emailSend.groupBy({ _count: true, by: ["promotionId"], where: { promotionId: { not: null } } }),
     prisma.emailSend.groupBy({ _count: true, by: ["promotionId"], where: { promotionId: { not: null }, state: "sent" } }),
@@ -196,17 +202,32 @@ export async function listPromotions(): Promise<PromotionSummary[]> {
       by: ["promotionId"],
       where: { promotionId: { not: null }, state: { in: ["failed", "skipped"] } },
     }),
+    prisma.emailSend.groupBy({
+      _count: true,
+      by: ["promotionId"],
+      where: { clickedAt: { not: null }, promotionId: { not: null } },
+    }),
+    // A promotion's offers are keyed `${promotionId}:${userId}`.
+    prisma.creditOffer.findMany({ select: { id: true }, where: { claimedAt: { not: null }, kind: PROMOTION_OFFER_KIND } }),
   ]);
   const countOf = (groups: { promotionId: string | null; _count: number }[]) =>
     new Map(groups.flatMap((g) => (g.promotionId ? [[g.promotionId, g._count] as const] : [])));
   const recipients = countOf(all);
   const sentBy = countOf(sent);
   const failedBy = countOf(failed);
+  const clickedBy = countOf(clicked);
+  const claimedBy = new Map<string, number>();
+  for (const offer of claimedOffers) {
+    const promotionId = offer.id.slice(0, offer.id.indexOf(":"));
+    claimedBy.set(promotionId, (claimedBy.get(promotionId) ?? 0) + 1);
+  }
   return rows.map((row) =>
     summarize(row, {
       recipients: recipients.get(row.id) ?? 0,
       sent: sentBy.get(row.id) ?? 0,
       failed: failedBy.get(row.id) ?? 0,
+      clicked: clickedBy.get(row.id) ?? 0,
+      claimed: claimedBy.get(row.id) ?? 0,
     }),
   );
 }

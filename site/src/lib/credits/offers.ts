@@ -17,6 +17,8 @@ const TOKEN_DOMAIN = "donkey-credit-offer-v1";
 
 // The kind su makes by hand; a promotion's offers carry the promotion's key.
 export const MANUAL_OFFER_KIND = "manual";
+// The kind of an offer a promotion email made; its id is `${promotionId}:${userId}`.
+export const PROMOTION_OFFER_KIND = "promotion_email";
 
 function signature(offerId: string): Buffer {
   const secret = process.env.BETTER_AUTH_SECRET;
@@ -137,7 +139,7 @@ export async function landCreditOffer(
 // a promotion mails. Every other kind lands from the act it rewards.
 export async function claimCreditOffer(offerId: string, userId: string) {
   const offer = await prisma.creditOffer.findUnique({ where: { id: offerId } });
-  if (!offer || (offer.kind !== MANUAL_OFFER_KIND && offer.kind !== "promotion_email")) return null;
+  if (!offer || (offer.kind !== MANUAL_OFFER_KIND && offer.kind !== PROMOTION_OFFER_KIND)) return null;
   if (offer.userId !== userId) throw new CreditOfferNotYoursError();
   if (!offer.claimedAt && !creditOfferOpen(offer, new Date())) throw new CreditOfferClosedError();
   return landCreditOffer(offer, {
@@ -163,7 +165,7 @@ export async function createPromotionCreditOffer(input: {
     create: {
       id: offerId,
       userId: input.userId,
-      kind: "promotion_email",
+      kind: PROMOTION_OFFER_KIND,
       amountMicros: BigInt(input.amountDollars) * BigInt(1_000_000),
       expiresAfterDays: input.expiresAfterDays,
       closesAt: new Date(now.getTime() + input.claimWindowDays * 86_400_000),

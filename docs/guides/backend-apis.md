@@ -6,7 +6,8 @@ the site's own client views, signed in with a session cookie.
 **The one rule:** every route handler is wrapped in `withDonkeyAuth`. A public
 endpoint is a deliberate exception with a product reason — today only Better
 Auth's own routes, the signature-verified Stripe and Resend webhooks, the
-HMAC-token-verified one-click email unsubscribe, and a plain health check. Ship
+HMAC-token-verified one-click email unsubscribe and promotion button redirect,
+and a plain health check. Ship
 a handler without the wrapper and the endpoint is open to anyone.
 
 ## Authentication

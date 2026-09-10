@@ -41,6 +41,8 @@ model EmailSend {
   // A failed attempt pushes the next one out.
   notBefore      DateTime   @default(now())
   sentAt         DateTime?
+  // The first time the recipient followed the message's button.
+  clickedAt      DateTime?
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
