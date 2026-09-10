@@ -6,6 +6,9 @@ import {
   isMaskAnimated,
   maskFrameAt,
   maskKeyAt,
+  maskOutlinePathD,
+  maskSizeAxes,
+  penClosed,
   restingMaskFrame,
   type Mask,
   type MaskKey,
@@ -92,7 +95,9 @@ describe("mask shapes", () => {
       await import("./mask");
     expect(MASK_SHAPE_KINDS).toEqual(MASK_KINDS.filter((k) => k !== "subject"));
     for (const kind of MASK_SHAPE_KINDS) {
-      const d = maskOutlinePathD({ kind }, 200, 100, 1000);
+      // A pen's outline is whatever was drawn; the others carry their own.
+      const points = kind === "pen" ? [{ x: -0.5, y: -0.5 }, { x: 0.5, y: -0.5 }, { x: 0, y: 0.5 }] : undefined;
+      const d = maskOutlinePathD({ kind, points }, 200, 100, 1000);
       expect(d.startsWith("M")).toBe(true);
       if (kind !== "linear" && kind !== "mirror") expect(d.endsWith("Z")).toBe(true);
     }
@@ -114,5 +119,31 @@ describe("mask shapes", () => {
     expect(rounded).toContain("a50 50");
     // A square's vertical side is its width, so the outline is square.
     expect(maskOutlinePathD({ kind: "square" }, 200, 100, 1000)).toBe("M-100 -100 h200 v200 h-200 Z");
+  });
+});
+
+describe("pen masks", () => {
+  const tri = [
+    { x: -0.5, y: -0.5 },
+    { x: 0.5, y: -0.5 },
+    { x: 0, y: 0.5 },
+  ];
+
+  test("a pen box starts as the whole frame, so points are frame fractions", () => {
+    expect(restingMaskFrame({ kind: "pen" })).toEqual({ x: 0, y: 0, w: 1, h: 1, rotation: 0, feather: 0, radius: 0 });
+    expect(maskSizeAxes("pen")).toEqual(["w", "h"]);
+  });
+
+  test("the outline closes at three corners and not before", () => {
+    expect(penClosed({ kind: "pen" })).toBe(false);
+    expect(penClosed({ kind: "pen", points: tri.slice(0, 2) })).toBe(false);
+    expect(penClosed({ kind: "pen", points: tri })).toBe(true);
+    expect(maskOutlinePathD({ kind: "pen" }, 100, 100, 200)).toBe("");
+  });
+
+  test("the outline path scales the corners by the box and centers on the offset", () => {
+    expect(maskOutlinePathD({ kind: "pen", points: tri }, 200, 100, 300, 0, 10, 20)).toBe(
+      "M-90 -30 L110 -30 L10 70 Z"
+    );
   });
 });

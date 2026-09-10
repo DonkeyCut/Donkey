@@ -21,7 +21,7 @@ import {
 } from "@/cut/lib/posterCache";
 import { resizePreviewSurface, setPreviewCanvas } from "@/cut/lib/previewCanvas";
 import { CLIP_MAX_ZOOM, clipCovers, clipKeyed, clipPoseAt, clipZoom, contentRect, frameOf, isFullRect, rectOf, REGION_MAX_SCALE, type VideoClip } from "@/cut/lib/types";
-import { hasMaskKeys, type MaskKey } from "@donkeycut/effects-kit";
+import { hasMaskKeys, type MaskKey, type MaskPoint } from "@donkeycut/effects-kit";
 import { cn } from "@/lib/utils";
 import { MaskGizmoCore, OverlayChromeHost, OverlayLayer, StagePress } from "./OverlayLayer";
 import { GuideHandles, GuideOverlay } from "./GuideOverlay";
@@ -1252,6 +1252,11 @@ function ClipMaskGizmo({ stage }: { stage: { w: number; h: number } }) {
     if (hasMaskKeys(cur)) return st.setClipMaskKey(clip.id, tLocal, patch, { transient: true });
     st.updateClipTransient(clip.id, { mask: { ...cur, ...patch } });
   };
+  const writePoints = (points: MaskPoint[]) => {
+    const st = useEditor.getState();
+    const cur = st.clips.find((c) => c.id === clip.id)?.mask;
+    if (cur) st.updateClipTransient(clip.id, { mask: { ...cur, points } });
+  };
   return (
     <div
       className="absolute"
@@ -1271,6 +1276,7 @@ function ClipMaskGizmo({ stage }: { stage: { w: number; h: number } }) {
         rotation={pose?.rotation ?? 0}
         poseScale={pose?.scale ?? 1}
         writeGeom={writeGeom}
+        writePoints={writePoints}
         begin={() => useEditor.getState().pushHistory()}
       />
     </div>

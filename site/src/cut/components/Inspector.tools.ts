@@ -25,6 +25,7 @@ import {
   MASK_FEATHER_MAX,
   MASK_KINDS,
   MASK_RADIUS_MAX,
+  PEN_MIN_POINTS,
 } from "@donkeycut/effects-kit";
 import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 
@@ -107,7 +108,7 @@ export const INSPECTOR_TOOLS = [
   {
     name: "set_mask",
     description:
-      "Mask an overlay element or a video clip — trim its picture to a shape or to the person in the shot. Kinds: rect (rounded box), square (rounded square, side = w of the frame width), circle (ellipse; w and h are frame fractions, so a perfect circle needs w × frame width = h × frame height — omitting h gives you that circle), linear (half-plane: at rotation 0 the top side stays), mirror (band across the item), heart / star / triangle / diamond / hexagon (the outline filled into the w × h box, point up), subject (the person matte: invert true sits the item behind the speaker; invert false keeps it only on the person — an element newly masked as subject defaults to behind, a clip to on-person). Position is the mask center's offset from the item's own center (a clip's region center), in frame fractions; w/h size it in frame fractions; feather softens the edge; invert keeps what the shape leaves out; radius rounds a rect or square's corners. Subject masks use only feather and invert. Pass kind \"none\" to remove the mask. `keys` animates the geometry over time — each key is the full geometry at a moment, moving linearly between keys; pass an empty list to clear the keys and keep the mask still.",
+      "Mask an overlay element or a video clip — trim its picture to a shape or to the person in the shot. Kinds: rect (rounded box), square (rounded square, side = w of the frame width), circle (ellipse; w and h are frame fractions, so a perfect circle needs w × frame width = h × frame height — omitting h gives you that circle), linear (half-plane: at rotation 0 the top side stays), mirror (band across the item), heart / star / triangle / diamond / hexagon (the outline filled into the w × h box, point up), pen (an outline you give as `points` — the shape for any region the fixed shapes miss: the gap between two hands, a doorway, a screen in the shot; its box defaults to the whole frame, w = h = 1, so a point is an offset from the item's center in frame fractions, (-0.5, -0.5) the frame's top-left corner; the box's position, size, rotation and keys then carry the whole drawing), subject (the person matte: invert true sits the item behind the speaker; invert false keeps it only on the person — an element newly masked as subject defaults to behind, a clip to on-person). Position is the mask center's offset from the item's own center (a clip's region center), in frame fractions; w/h size it in frame fractions; feather softens the edge; invert keeps what the shape leaves out; radius rounds a rect or square's corners. Subject masks use only feather and invert. Pass kind \"none\" to remove the mask. `keys` animates the geometry over time — each key is the full geometry at a moment, moving linearly between keys; pass an empty list to clear the keys and keep the mask still.",
     inputSchema: obj({
       id: str("Overlay element id or video clip id"),
       kind: {
@@ -123,6 +124,11 @@ export const INSPECTOR_TOOLS = [
       feather: num(`Edge softness, px at the 1080 design short side (0..${MASK_FEATHER_MAX})`),
       invert: bool("Keep the pixels outside the shape"),
       radius: num(`Rect or square corner radius, px at 1080 short side (0..${MASK_RADIUS_MAX})`),
+      points: {
+        type: "array",
+        description: `Pen only: the outline's corners in order around it, at least ${PEN_MIN_POINTS}, each an offset from the mask center in fractions of the mask box (with the pen's default w = h = 1: frame fractions from the item's center, -0.5..0.5 inside the frame); replaces the outline`,
+        items: obj({ x: num("Offset x, fraction of the mask box width"), y: num("Offset y, fraction of the mask box height") }, ["x", "y"]),
+      },
       keys: {
         type: "array",
         description:

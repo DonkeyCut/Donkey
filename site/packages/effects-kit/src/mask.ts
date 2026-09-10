@@ -1,7 +1,7 @@
 /**
  * Masks: per-layer coverage that trims a layer's pixels to a shape — a
- * rounded rect, an ellipse, a half-plane, a band, a heart, a star, a polygon
- * — or to the person in the shot. The mask travels with its layer: its center is an offset from the
+ * rounded rect, an ellipse, a half-plane, a band, a heart, a star, a polygon,
+ * a pen-drawn outline — or to the person in the shot. The mask travels with its layer: its center is an offset from the
  * layer's anchor, so a keyframed or dragged layer carries its mask along in
  * every renderer.
  *
@@ -30,6 +30,7 @@ export type MaskKind =
   | "triangle"
   | "diamond"
   | "hexagon"
+  | "pen"
   | "subject";
 
 /** Every mask kind with the name the UI shows for it, in picker order. The
@@ -45,6 +46,7 @@ export const MASK_SHAPES: { id: MaskKind; label: string }[] = [
   { id: "triangle", label: "Triangle" },
   { id: "diamond", label: "Diamond" },
   { id: "hexagon", label: "Hexagon" },
+  { id: "pen", label: "Pen" },
   { id: "subject", label: "Subject" },
 ];
 
@@ -71,6 +73,42 @@ export function maskPolyKind(kind: MaskKind): ShapeKind | null {
     default:
       return null;
   }
+}
+
+/** One corner of a pen mask's outline, as an offset from the mask's center
+ * in fractions of its w × h box: (−0.5, −0.5) is the box's top-left corner.
+ * The box carries the outline, so the mask's position, size, rotation and
+ * keys move the drawing as one piece. */
+export interface MaskPoint {
+  x: number;
+  y: number;
+}
+
+/** The fewest corners a pen outline closes with. */
+export const PEN_MIN_POINTS = 3;
+
+/** Whether a pen mask has an outline to cut with. Short of that the mask is
+ * still being drawn and the whole picture shows. */
+export function penClosed(m: Mask): boolean {
+  return m.kind === "pen" && (m.points?.length ?? 0) >= PEN_MIN_POINTS;
+}
+
+/** Trace a pen outline into `sink`, its box w × h px centered on (dx, dy). */
+export function tracePen(
+  sink: { moveTo(x: number, y: number): void; lineTo(x: number, y: number): void; closePath(): void },
+  points: MaskPoint[],
+  w: number,
+  h: number,
+  dx = 0,
+  dy = 0
+): void {
+  points.forEach((p, i) => {
+    const x = dx + p.x * w;
+    const y = dy + p.y * h;
+    if (i === 0) sink.moveTo(x, y);
+    else sink.lineTo(x, y);
+  });
+  sink.closePath();
 }
 
 /** Which size axes a kind has: a square one side, a mirror band one height,
@@ -111,6 +149,23 @@ export function maskOutlinePathD(
   const side = m.kind === "square" ? w : h;
   const poly = maskPolyKind(m.kind);
   if (poly) return shapePathD(poly, w, h, dx - w / 2, dy - h / 2);
+  if (m.kind === "pen") {
+    if (!penClosed(m)) return "";
+    const parts: string[] = [];
+    tracePen(
+      {
+        moveTo: (x, y) => parts.push(`M${n(x)} ${n(y)}`),
+        lineTo: (x, y) => parts.push(`L${n(x)} ${n(y)}`),
+        closePath: () => parts.push("Z"),
+      },
+      m.points!,
+      w,
+      h,
+      dx,
+      dy
+    );
+    return parts.join(" ");
+  }
   if (m.kind === "rect" || m.kind === "square") {
     const r = Math.min(radiusPx, w / 2, side / 2);
     const x0 = dx - w / 2;
@@ -168,6 +223,9 @@ export interface Mask {
   invert?: boolean;
   /** Rect or square corner radius, design px; a key can carry its own. */
   radius?: number;
+  /** A pen mask's corners, in order around the outline. Fewer than
+   * PEN_MIN_POINTS means the outline is still being drawn. */
+  points?: MaskPoint[];
   /** Keyframed geometry, its own track beside the layer's pose keys. */
   kf?: MaskKey[];
 }
@@ -184,11 +242,13 @@ export interface MaskFrame {
 }
 
 export function restingMaskFrame(m: Mask): MaskFrame {
+  // A pen outline is drawn in frame space, so its box starts as the frame.
+  const size = m.kind === "pen" ? 1 : 0.5;
   return {
     x: m.x ?? 0,
     y: m.y ?? 0,
-    w: m.w ?? 0.5,
-    h: m.h ?? 0.5,
+    w: m.w ?? size,
+    h: m.h ?? size,
     rotation: m.rotation ?? 0,
     feather: m.feather ?? 0,
     radius: m.radius ?? 0,
@@ -308,6 +368,17 @@ export function paintMaskCoverage(
     ctx.beginPath();
     tracePolyShape(ctx, maskPolyKind(m.kind)!, w, h, -w / 2, -h / 2);
     ctx.fill();
+  } else if (m.kind === "pen") {
+    // The drawn outline filled into the w×h box. While it is still being
+    // drawn the whole picture shows, so the user draws over what they see.
+    if (!penClosed(m)) {
+      ctx.fillRect(-big, -big, big * 2, big * 2);
+    } else {
+      if (feather > 0 && "filter" in ctx) ctx.filter = `blur(${feather / 2}px)`;
+      ctx.beginPath();
+      tracePen(ctx, m.points!, w, h);
+      ctx.fill();
+    }
   } else if (m.kind === "linear") {
     // Half-plane: at rotation 0 the top half stays. The gradient band spans
     // the feather, centered on the edge line.

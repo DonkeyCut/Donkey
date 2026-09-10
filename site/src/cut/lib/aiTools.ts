@@ -47,6 +47,8 @@ import {
   MASK_KINDS,
   MASK_RADIUS_MAX,
   maskHasRadius,
+  PEN_MIN_POINTS,
+  penClosed,
   type RemovalStroke,
   type StrokeStyleId,
 } from "@donkeycut/effects-kit";
@@ -655,6 +657,24 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     };
     // A radius belongs to a box; a shape that has no corners to round drops it.
     if (!maskHasRadius(mask.kind)) delete mask.radius;
+    // A pen outline is its corners; every other kind has no use for them.
+    if (mask.kind === "pen") {
+      if (Array.isArray(input.points)) {
+        const pts = (input.points as unknown[]).map((p) => {
+          const q = p as Record<string, unknown>;
+          if (!isNum(q?.x) || !isNum(q?.y))
+            throw new ToolError("Every pen point needs numeric x and y.");
+          return { x: clamp(q.x, -2, 2), y: clamp(q.y, -2, 2) };
+        });
+        if (pts.length < PEN_MIN_POINTS)
+          throw new ToolError(`A pen outline needs at least ${PEN_MIN_POINTS} points.`);
+        mask.points = pts;
+      }
+      if (!penClosed(mask))
+        throw new ToolError(`A pen mask needs \`points\`: at least ${PEN_MIN_POINTS} corners.`);
+    } else {
+      delete mask.points;
+    }
     // An element newly masked by the person starts behind them — the common
     // ask — unless the call named a direction; invert false shows it only on
     // the person. Clips keep the plain direction (Subject keeps the person).

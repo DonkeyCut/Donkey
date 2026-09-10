@@ -1,7 +1,7 @@
 "use client";
 
 import { guideSnapLines } from "@/cut/lib/guides";
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createContext, Fragment, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { releaseAnimRest, useAnimPreview } from "@/cut/lib/animPreview";
 import { startDrag } from "@/cut/lib/drag";
@@ -16,7 +16,7 @@ import {
   subtitleLaneCount,
   trackPos,
 } from "@/cut/lib/subtitles";
-import { evalOverlayFrame, glyphStateAt, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, MASK_FEATHER_MAX, MASK_RADIUS_MAX, maskFrameAt, maskHasRadius, maskOutlinePathD, maskSizeAxes, overlayWords, paintMaskCoverage, resolveShadow, shapeMetrics, shapePathD, textStretch, WORD_ACCENT_DEFAULT, wordDrawsAt, type LottieHandle, type Mask, type MaskKey, type OverlayFrameState, type WordDraw } from "@donkeycut/effects-kit";
+import { evalOverlayFrame, glyphStateAt, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, MASK_FEATHER_MAX, MASK_RADIUS_MAX, maskFrameAt, maskHasRadius, maskOutlinePathD, maskSizeAxes, overlayWords, paintMaskCoverage, PEN_MIN_POINTS, penClosed, resolveShadow, shapeMetrics, shapePathD, textStretch, WORD_ACCENT_DEFAULT, wordDrawsAt, type LottieHandle, type Mask, type MaskKey, type MaskPoint, type OverlayFrameState, type WordDraw } from "@donkeycut/effects-kit";
 import {
   LINE_HEIGHT,
   PLATE_PAD_X,
@@ -1392,6 +1392,13 @@ function useMaskCss(
  * `rotation`/`poseScale`, then through the mask's own angle for the resize.
  * With mask keys in play a drag writes the key at the playhead, the same
  * contract as dragging a keyframed element.
+ *
+ * A pen mask adds its own two states. Unclosed, the stage becomes a drawing
+ * surface: a click places a corner, clicking the first corner (or a
+ * double-click, or Enter) closes the outline, Backspace takes the last corner
+ * back and Escape clears the draft. Closed, every corner wears a grip that
+ * drags it, a hollow grip on each edge adds a corner there, and a
+ * double-click on a corner removes it.
  */
 export function MaskGizmoCore({
   mask: m,
@@ -1401,6 +1408,7 @@ export function MaskGizmoCore({
   rotation,
   poseScale,
   writeGeom,
+  writePoints,
   begin,
 }: {
   mask: Mask;
@@ -1411,9 +1419,13 @@ export function MaskGizmoCore({
   poseScale: number;
   /** Keyed geometry: lands on the key at the playhead when keys exist. */
   writeGeom: (patch: Partial<Omit<MaskKey, "t">>) => void;
+  /** A pen mask's corners, on the mask itself (corners are never keyed). */
+  writePoints: (points: MaskPoint[]) => void;
   begin: () => void;
 }) {
   const f = maskFrameAt(m, tLocal);
+  const pen = m.kind === "pen";
+  const drawing = pen && !penClosed(m);
   // Guide lines while a drag sits on a detent: `rot` is the locked quarter
   // turn, `x`/`y` mark the mask centered on an axis, `w`/`h` a size locked at
   // exactly full frame. Local space, so on an element they ride its transform
@@ -1432,6 +1444,11 @@ export function MaskGizmoCore({
   /** The corner radius shown while its grip drags; null when idle. */
   const [round, setRound] = useState<number | null>(null);
   const interiorRef = useRef<HTMLDivElement>(null);
+  /** The pen corners placed so far, local px around the anchor, while the
+   * outline is open; the pointer's current spot trails the last one. */
+  const [draft, setDraft] = useState<{ x: number; y: number }[]>([]);
+  const [trail, setTrail] = useState<{ x: number; y: number } | null>(null);
+  const drawRef = useRef<SVGSVGElement>(null);
   // Screen deltas → the box's local space (undo the element transform).
   const toLocal = (dx: number, dy: number) => {
     const r = (-rotation * Math.PI) / 180;
@@ -1443,6 +1460,95 @@ export function MaskGizmoCore({
   };
   const theta = (f.rotation * Math.PI) / 180;
   const sizable = maskSizeAxes(m.kind).length > 0;
+  // A screen point in the gizmo's local px: the drawing surface's own matrix
+  // folds in every transform above it, the layer's pose included.
+  const localPoint = (clientX: number, clientY: number) => {
+    const ctm = drawRef.current?.getScreenCTM();
+    if (!ctm) return { x: 0, y: 0 };
+    const pt = new DOMPoint(clientX, clientY).matrixTransform(ctm.inverse());
+    return { x: pt.x, y: pt.y };
+  };
+  // Local px → a pen corner in the mask's box: back through the mask's
+  // center and angle, then in fractions of its size.
+  const toPoint = (lx: number, ly: number): MaskPoint => {
+    const ox = lx - f.x * stageWidth;
+    const oy = ly - f.y * stageHeight;
+    const mx = ox * Math.cos(theta) + oy * Math.sin(theta);
+    const my = -ox * Math.sin(theta) + oy * Math.cos(theta);
+    return {
+      x: +(mx / Math.max(1e-6, f.w * stageWidth)).toFixed(4),
+      y: +(my / Math.max(1e-6, f.h * stageHeight)).toFixed(4),
+    };
+  };
+  const closeDraft = (pts: { x: number; y: number }[]) => {
+    if (pts.length < PEN_MIN_POINTS) return;
+    begin();
+    writePoints(pts.map((p) => toPoint(p.x, p.y)));
+    setDraft([]);
+    setTrail(null);
+  };
+  // Two corners within a grip's reach of each other are one corner: a
+  // double-click's second press, or a click back on the first corner.
+  const near = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    Math.hypot(a.x - b.x, a.y - b.y) < 10 / (poseScale || 1);
+  const placeCorner = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const at = localPoint(e.clientX, e.clientY);
+    if (draft.length >= PEN_MIN_POINTS && near(at, draft[0]!)) return closeDraft(draft);
+    if (draft.length > 0 && near(at, draft[draft.length - 1]!)) return;
+    setDraft([...draft, at]);
+  };
+  // Keys while drawing: Enter closes, Backspace takes a corner back, Escape
+  // clears the draft. Captured on the window ahead of the editor's own
+  // shortcuts, so Escape never reaches the selection.
+  useEffect(() => {
+    if (!drawing) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Enter") closeDraft(draft);
+      else if (e.key === "Backspace") setDraft(draft.slice(0, -1));
+      else if (e.key === "Escape") setDraft([]);
+      else return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawing, draft]);
+  // A corner grip drags its corner; a hollow edge grip adds one where it
+  // sits and drags it from there. A double-click on a corner removes it.
+  const dragCorner = (e: React.PointerEvent, points: MaskPoint[], index: number) => {
+    e.stopPropagation();
+    begin();
+    const p0 = points[index]!;
+    startDrag(e, {
+      onMove: (dx, dy) => {
+        const l = toLocal(dx, dy);
+        const mx = l.x * Math.cos(theta) + l.y * Math.sin(theta);
+        const my = -l.x * Math.sin(theta) + l.y * Math.cos(theta);
+        const next = points.slice();
+        next[index] = {
+          x: +(p0.x + mx / Math.max(1e-6, f.w * stageWidth)).toFixed(4),
+          y: +(p0.y + my / Math.max(1e-6, f.h * stageHeight)).toFixed(4),
+        };
+        writePoints(next);
+      },
+    });
+  };
+  const addCorner = (e: React.PointerEvent, points: MaskPoint[], after: number) => {
+    const a = points[after]!;
+    const b = points[(after + 1) % points.length]!;
+    const next = points.slice();
+    next.splice(after + 1, 0, { x: +((a.x + b.x) / 2).toFixed(4), y: +((a.y + b.y) / 2).toFixed(4) });
+    dragCorner(e, next, after + 1);
+  };
+  const removeCorner = (points: MaskPoint[], index: number) => {
+    if (points.length <= PEN_MIN_POINTS) return;
+    begin();
+    writePoints(points.filter((_, i) => i !== index));
+  };
   // The outline traces the mask's hard edge in local px; a square's side is
   // `w` of the frame width on both axes (the painter's rule), and
   // linear/mirror edges run wider than any frame so they always cross it.
@@ -1453,8 +1559,9 @@ export function MaskGizmoCore({
   const span = stageWidth + stageHeight;
   // Which grips the kind can honor: a square's axes move together, a mirror
   // band only opens and closes, and a linear edge has no size at all.
-  const maskHandles: ResizeHandle[] =
-    m.kind === "square"
+  const maskHandles: ResizeHandle[] = drawing
+    ? []
+    : m.kind === "square"
       ? CORNER_HANDLES
       : m.kind === "mirror"
         ? ["n", "s"]
@@ -1643,6 +1750,64 @@ export function MaskGizmoCore({
   // the outline; linear/mirror get a grabbable strip along their edge line.
   const grabW = m.kind === "linear" || m.kind === "mirror" ? span * 2 : w;
   const grabH = m.kind === "linear" ? 28 : m.kind === "mirror" ? Math.max(h, 28) : h;
+  const points = pen && !drawing ? m.points! : null;
+  const grip = {
+    borderColor: "#ff9f0a",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.4)",
+  };
+  if (drawing) {
+    const outline = draft.map((p) => `${p.x},${p.y}`).join(" ");
+    return (
+      <svg
+        ref={drawRef}
+        className="absolute overflow-visible"
+        width={1}
+        height={1}
+        style={{ left: "50%", top: "50%", cursor: "crosshair" }}
+        onPointerDown={placeCorner}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          closeDraft(draft);
+        }}
+        onPointerMove={(e) => setTrail(localPoint(e.clientX, e.clientY))}
+        onPointerLeave={() => setTrail(null)}
+      >
+        <rect x={-span} y={-span} width={span * 2} height={span * 2} fill="transparent" style={{ pointerEvents: "all" }} />
+        {draft.length > 0 && (
+          <>
+            <polyline points={outline} {...edge} />
+            {trail && (
+              <line
+                x1={draft[draft.length - 1]!.x}
+                y1={draft[draft.length - 1]!.y}
+                x2={trail.x}
+                y2={trail.y}
+                stroke="#ff9f0a"
+                strokeOpacity={0.6}
+                strokeWidth={1.5}
+                strokeDasharray="6 4"
+                vectorEffect="non-scaling-stroke"
+                className="pointer-events-none"
+              />
+            )}
+            {draft.map((p, i) => (
+              <circle
+                key={i}
+                cx={p.x}
+                cy={p.y}
+                r={i === 0 && draft.length >= PEN_MIN_POINTS ? 7 : 5}
+                fill="#ffffff"
+                stroke="#ff9f0a"
+                strokeWidth={2.5}
+                vectorEffect="non-scaling-stroke"
+                className="pointer-events-none"
+              />
+            ))}
+          </>
+        )}
+      </svg>
+    );
+  }
   return (
     <>
       <div
@@ -1692,6 +1857,35 @@ export function MaskGizmoCore({
           transform: `rotate(${f.rotation}deg)`,
         }}
       >
+        {points &&
+          points.map((p, i) => {
+            const q = points[(i + 1) % points.length]!;
+            return (
+              <Fragment key={i}>
+                <span
+                  title="Drag to move the corner; double-click to remove it"
+                  onPointerDown={(e) => dragCorner(e, points, i)}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    removeCorner(points, i);
+                  }}
+                  className="pointer-events-auto absolute block size-[11px] cursor-move rounded-full border-[2.5px] bg-white"
+                  style={{ left: p.x * w, top: p.y * h, transform: "translate(-50%, -50%)", ...grip }}
+                />
+                <span
+                  title="Drag to add a corner here"
+                  onPointerDown={(e) => addCorner(e, points, i)}
+                  className="pointer-events-auto absolute block size-[7px] cursor-copy rounded-full border-[1.5px] bg-white/70"
+                  style={{
+                    left: ((p.x + q.x) / 2) * w,
+                    top: ((p.y + q.y) / 2) * h,
+                    transform: "translate(-50%, -50%)",
+                    ...grip,
+                  }}
+                />
+              </Fragment>
+            );
+          })}
         <div
           className="absolute left-0"
           style={{ top: bottom + featherPx / 2 + 22, transform: "translate(-50%, -50%)" }}
@@ -1831,6 +2025,10 @@ function MaskGizmo({
     if (hasMaskKeys(cur)) return st().setOverlayMaskKey(o.id, tLocal, patch, { transient: true });
     st().updateOverlayTransient(o.id, { mask: { ...cur, ...patch } });
   };
+  const writePoints = (points: MaskPoint[]) => {
+    const cur = st().overlays.find((x) => x.id === o.id)?.mask;
+    if (cur) st().updateOverlayTransient(o.id, { mask: { ...cur, points } });
+  };
   return (
     <MaskGizmoCore
       mask={o.mask!}
@@ -1840,6 +2038,7 @@ function MaskGizmo({
       rotation={rotation}
       poseScale={poseScale}
       writeGeom={writeGeom}
+      writePoints={writePoints}
       begin={() => st().pushHistory()}
     />
   );

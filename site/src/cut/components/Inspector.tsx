@@ -2,7 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, Frame, House, Italic, Link2, Link2Off, Loader2, type LucideIcon, Palette, PanelRightClose, PanelRightOpen, Scissors, Smile, Sparkles, Trash2, Type, User, Volume2 } from "lucide-react";
+import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, Frame, House, Italic, Link2, Link2Off, Loader2, type LucideIcon, Palette, PanelRightClose, PanelRightOpen, PenTool, Scissors, Smile, Sparkles, Trash2, Type, User, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSpeedCurveUi } from "@/cut/lib/speedCurveUi";
 import { EmojiPicker } from "@/cut/components/EmojiPicker";
@@ -75,6 +75,7 @@ import {
   maskHasRadius,
   maskOutlinePathD,
   maskSizeAxes,
+  penClosed,
   restingMaskFrame,
 } from "@donkeycut/effects-kit";
 import { clipWindow, maxClipFade, useEditor, type EditorState } from "@/cut/lib/store";
@@ -3115,6 +3116,7 @@ function KeyRow({
  * top half, a mirror its band; the person matte wears a figure. */
 function MaskShapeIcon({ kind }: { kind: MaskKind }) {
   if (kind === "subject") return <User className="size-[18px]" strokeWidth={1.75} />;
+  if (kind === "pen") return <PenTool className="size-[18px]" strokeWidth={1.75} />;
   const d = maskOutlinePathD({ kind }, 15, kind === "square" ? 15 : 12, 12, 2.5);
   return (
     <svg viewBox="-10 -10 20 20" className="size-[18px]" fill="none" stroke="currentColor" strokeWidth={1.5}>
@@ -3546,6 +3548,14 @@ function MaskSection({ target }: { target: MaskTarget }) {
   };
   const sizeAxes = m ? maskSizeAxes(m.kind) : [];
   const subject = m?.kind === "subject";
+  // A pen outline still being drawn has no geometry to edit yet.
+  const drawing = !!m && m.kind === "pen" && !penClosed(m);
+  // A pen mask starts over: the outline goes, and the box returns to the
+  // frame so the next drawing lands where the clicks fall.
+  const redraw = () => {
+    if (!m) return;
+    target.set({ kind: "pen", invert: m.invert, feather: m.feather });
+  };
   // A circle at rest is round: w and h are fractions of different frame
   // edges, so equal pixels means unequal fractions.
   const roundCircle = (w: number) => {
@@ -3566,12 +3576,12 @@ function MaskSection({ target }: { target: MaskTarget }) {
       return;
     }
     setLinked(null);
-    target.set({ kind: m.kind, invert: m.invert, kf: m.kf, ...(subject ? {} : geom) });
+    target.set({ kind: m.kind, invert: m.invert, kf: m.kf, points: m.points, ...(subject ? {} : geom) });
   };
   return (
     <Section
       title="Mask"
-      info="Trim the picture to a shape, or to the person in the shot (Subject). Drag the shape to move it, its grips to resize, the lollipop to rotate, the chevron under it to feather the edge, and the corner grip to round a box. Invert keeps what the shape leaves out — an inverted Subject mask sits the picture behind the speaker."
+      info="Trim the picture to a shape, to an outline you draw (Pen), or to the person in the shot (Subject). Drag the shape to move it, its grips to resize, the lollipop to rotate, the chevron under it to feather the edge, and the corner grip to round a box. Pen: click the picture to place corners and click the first one to close; drag a corner to move it, the small grip on an edge to add one, double-click a corner to remove it. Invert keeps what the shape leaves out — an inverted Subject mask sits the picture behind the speaker."
       enabled={!!m}
       onEnabledChange={(v) => target.set(v ? { kind: "rect" } : undefined)}
       aside={
@@ -3580,9 +3590,10 @@ function MaskSection({ target }: { target: MaskTarget }) {
             variant="ghost"
             size="sm"
             className="h-7 px-2 text-[12px] text-muted-foreground"
-            onClick={reset}
+            onClick={m.kind === "pen" ? redraw : reset}
+            disabled={drawing}
           >
-            Reset
+            {m.kind === "pen" ? "Redraw" : "Reset"}
           </Button>
         ) : undefined
       }
@@ -3609,13 +3620,18 @@ function MaskSection({ target }: { target: MaskTarget }) {
                   // A fresh circle starts perfectly round: w and h are frame
                   // fractions, so equal pixels means unequal fractions. The
                   // size link and ⇧-drag on the stage keep it round after.
+                  // Pen is drawn fresh over the frame, so its box starts as
+                  // the frame; leaving it drops the outline.
+                  if (kind === "pen") return redraw();
                   const patch =
                     kind === "circle" && !hasMaskKeys(m)
                       ? roundCircle(m.w ?? 0.5)
                       : kind === "subject" && m.kind !== "subject" && target.subjectStartsBehind
                         ? { invert: true }
                         : {};
-                  target.set({ ...m, ...patch, kind });
+                  const rest = { ...m };
+                  delete rest.points;
+                  target.set({ ...rest, ...patch, kind });
                 }}
               >
                 <MaskShapeIcon kind={s.id} />
@@ -3623,7 +3639,13 @@ function MaskSection({ target }: { target: MaskTarget }) {
               </button>
             ))}
           </div>
-          {!subject && (
+          {drawing && (
+            <p className="px-1 py-1.5 text-[11.5px] leading-snug text-muted-foreground">
+              Click the picture to place corners. Click the first corner, double-click, or press
+              Enter to close the outline.
+            </p>
+          )}
+          {!subject && !drawing && (
             <KeyRow
               element={target.element}
               now={now}
@@ -3634,7 +3656,7 @@ function MaskSection({ target }: { target: MaskTarget }) {
               onSeek={seek}
             />
           )}
-          {!subject && (
+          {!subject && !drawing && (
             <Row label="Position">
               {(["x", "y"] as const).map((axis) => (
                 <span key={axis} className="flex items-center gap-1">
@@ -3664,7 +3686,7 @@ function MaskSection({ target }: { target: MaskTarget }) {
               ))}
             </Row>
           )}
-          {sizeAxes.length > 0 && (
+          {sizeAxes.length > 0 && !drawing && (
             <Row label="Size">
               {sizeAxes.map((axis, i) => (
                 <span key={axis} className="flex items-center gap-1">
@@ -3706,7 +3728,7 @@ function MaskSection({ target }: { target: MaskTarget }) {
               ))}
             </Row>
           )}
-          {!subject && (
+          {!subject && !drawing && (
             <Row label="Rotation">
               <ValueSlider
                 label="Mask rotation"
@@ -3731,6 +3753,7 @@ function MaskSection({ target }: { target: MaskTarget }) {
               />
             </Row>
           )}
+          {!drawing && (
           <Row label="Feather">
             <ValueSlider
               label="Feather"
@@ -3753,6 +3776,7 @@ function MaskSection({ target }: { target: MaskTarget }) {
               }}
             />
           </Row>
+          )}
           {maskHasRadius(m.kind) && (
             <Row label="Radius">
               <ValueSlider
@@ -3777,13 +3801,15 @@ function MaskSection({ target }: { target: MaskTarget }) {
               />
             </Row>
           )}
-          <Row label="Invert">
-            <Switch
-              checked={!!m.invert}
-              onCheckedChange={(v) => target.set({ ...m, invert: v || undefined })}
-              aria-label="Invert mask"
-            />
-          </Row>
+          {!drawing && (
+            <Row label="Invert">
+              <Switch
+                checked={!!m.invert}
+                onCheckedChange={(v) => target.set({ ...m, invert: v || undefined })}
+                aria-label="Invert mask"
+              />
+            </Row>
+          )}
         </>
       )}
     </Section>
