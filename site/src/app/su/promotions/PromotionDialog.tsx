@@ -14,6 +14,7 @@ import { Field } from "@/app/su/Field";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -283,7 +284,7 @@ export function PromotionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-6xl">
+      <DialogContent className="sm:max-w-6xl">
         <DialogHeader>
           <DialogTitle>{readOnly ? draft.name : existing ? "Edit promotion" : "New promotion"}</DialogTitle>
           <DialogDescription>
@@ -306,7 +307,7 @@ export function PromotionDialog({
           ) : null}
         </DialogHeader>
 
-        <div className="grid gap-5 lg:grid-cols-2 lg:gap-8">
+        <DialogBody className="grid gap-5 lg:grid-cols-2 lg:gap-8">
           <div className="grid content-start gap-5">
           <Field label="Name" htmlFor="promo-name">
             <Input
@@ -467,7 +468,7 @@ export function PromotionDialog({
           ) : null}
           {notice ? <p className="text-sm text-muted-foreground">{notice}</p> : null}
           </div>
-        </div>
+        </DialogBody>
 
         <DialogFooter className="gap-2 sm:justify-between">
           <Button type="button" variant="outline" disabled={busy} onClick={onTest}>

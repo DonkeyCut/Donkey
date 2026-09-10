@@ -15,6 +15,7 @@ import { Field } from "@/app/su/Field";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -146,7 +147,7 @@ export function ExperimentDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+      <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{existing ? "Edit experiment" : "New experiment"}</DialogTitle>
           <DialogDescription>
@@ -155,7 +156,7 @@ export function ExperimentDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-5">
+        <DialogBody className="grid gap-5">
           <div className="grid grid-cols-2 gap-3">
             <Field label="Key" htmlFor="exp-key">
               <Input
@@ -362,7 +363,7 @@ export function ExperimentDialog({
               ))}
             </ul>
           ) : null}
-        </div>
+        </DialogBody>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
