@@ -23,7 +23,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { PICKED_RING } from "@/cut/lib/assetPick";
 import { startDrag } from "@/cut/lib/drag";
-import { playheadAt, setSkim, skimAt, subscribePlayhead } from "@/cut/lib/playhead";
+import {
+  playheadAt,
+  setSkim,
+  skimAt,
+  subscribePlayhead,
+} from "@/cut/lib/playhead";
 import { useSpeedCurveUi } from "@/cut/lib/speedCurveUi";
 import { useEditor } from "@/cut/lib/store";
 import type { VideoClip } from "@/cut/lib/types";
@@ -63,7 +68,8 @@ const LABELED = new Set([10, 0.1]);
 const LOG_MIN = Math.log10(SPEED_CURVE_MIN);
 const LOG_MAX = Math.log10(SPEED_CURVE_MAX);
 
-const clampRate = (r: number) => Math.min(SPEED_CURVE_MAX, Math.max(SPEED_CURVE_MIN, r));
+const clampRate = (r: number) =>
+  Math.min(SPEED_CURVE_MAX, Math.max(SPEED_CURVE_MIN, r));
 /** A rate as people say it: 2×, 0.5×, 0.25×. */
 const fmtRate = (r: number) => `${+r.toFixed(2)}×`;
 const fmtSec = (s: number) => `${s.toFixed(1)}s`;
@@ -72,14 +78,21 @@ export function SpeedCurveStrip() {
   // The strip shows for the selected clip when that clip's curve is open.
   // Every clip keeps its own state, so a selection elsewhere hides the strip
   // and a return to the clip brings it back.
-  const selectedId = useEditor((s) => (s.selection?.kind === "clip" ? s.selection.id : null));
-  const clipId = useSpeedCurveUi((s) => (selectedId && s.open.has(selectedId) ? selectedId : null));
-  const clip = useEditor((s) => (clipId ? s.clips.find((c) => c.id === clipId) : undefined));
+  const selectedId = useEditor((s) =>
+    s.selection?.kind === "clip" ? s.selection.id : null,
+  );
+  const clipId = useSpeedCurveUi((s) =>
+    selectedId && s.open.has(selectedId) ? selectedId : null,
+  );
+  const clip = useEditor((s) =>
+    clipId ? s.clips.find((c) => c.id === clipId) : undefined,
+  );
   // Clips that are gone drop their entry.
   const clipIds = useEditor((s) => s.clips);
   useEffect(() => {
     const ui = useSpeedCurveUi.getState();
-    for (const id of ui.open) if (!clipIds.some((c) => c.id === id)) ui.close(id);
+    for (const id of ui.open)
+      if (!clipIds.some((c) => c.id === id)) ui.close(id);
   }, [clipIds]);
   if (!clip) return null;
   return <Strip key={clip.id} clip={clip} />;
@@ -88,7 +101,9 @@ export function SpeedCurveStrip() {
 function Strip({ clip }: { clip: VideoClip }) {
   const asset = useEditor((s) => s.assets.find((a) => a.id === clip.assetId));
   const picked = useEditor((s) =>
-    s.selectedKey?.track === "speed" && s.selectedKey.id === clip.id ? s.selectedKey.t : null
+    s.selectedKey?.track === "speed" && s.selectedKey.id === clip.id
+      ? s.selectedKey.t
+      : null,
   );
   const [draft, setDraft] = useState<SpeedNode[] | null>(null);
   // The axis a drag started on. Width is timeline time, so editing the curve
@@ -97,11 +112,17 @@ function Strip({ clip }: { clip: VideoClip }) {
   const [heldAxis, setHeldAxis] = useState<Retime | null>(null);
   const nodes = useMemo(
     () => draft ?? speedCurveOf(clip) ?? flatSpeedCurve(clip),
-    [draft, clip]
+    [draft, clip],
   );
   const rt = useMemo(
-    () => retimeOf({ in: clip.in, out: clip.out, speedCurve: nodes, reverse: clip.reverse }),
-    [clip.in, clip.out, nodes, clip.reverse]
+    () =>
+      retimeOf({
+        in: clip.in,
+        out: clip.out,
+        speedCurve: nodes,
+        reverse: clip.reverse,
+      }),
+    [clip.in, clip.out, nodes, clip.reverse],
   );
 
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -123,15 +144,22 @@ function Strip({ clip }: { clip: VideoClip }) {
   const axisLen = Math.max(1e-3, axis.len);
   const xOf = (src: number) => PAD_X + (axis.tAt(src) / axisLen) * innerW;
   const srcOf = (x: number) =>
-    axis.srcAt(Math.max(0, Math.min(axisLen, ((x - PAD_X) / innerW) * axisLen)));
+    axis.srcAt(
+      Math.max(0, Math.min(axisLen, ((x - PAD_X) / innerW) * axisLen)),
+    );
   const yOf = (rate: number) =>
-    PAD_Y + (1 - (Math.log10(clampRate(rate)) - LOG_MIN) / (LOG_MAX - LOG_MIN)) * innerH;
+    PAD_Y +
+    (1 - (Math.log10(clampRate(rate)) - LOG_MIN) / (LOG_MAX - LOG_MIN)) *
+      innerH;
   const rateOf = (y: number) =>
-    clampRate(Math.pow(10, LOG_MIN + (1 - (y - PAD_Y) / innerH) * (LOG_MAX - LOG_MIN)));
+    clampRate(
+      Math.pow(10, LOG_MIN + (1 - (y - PAD_Y) / innerH) * (LOG_MAX - LOG_MIN)),
+    );
 
   const beats = useMemo(
-    () => (asset?.beats?.beats ?? []).filter((b) => b >= clip.in && b <= clip.out),
-    [asset?.beats, clip.in, clip.out]
+    () =>
+      (asset?.beats?.beats ?? []).filter((b) => b >= clip.in && b <= clip.out),
+    [asset?.beats, clip.in, clip.out],
   );
 
   const curvePath = useMemo(() => {
@@ -180,7 +208,10 @@ function Strip({ clip }: { clip: VideoClip }) {
 
   const pick = (src: number | null) => {
     useEditor.setState({
-      selectedKey: src === null ? null : { kind: "clip", id: clip.id, t: src, track: "speed" },
+      selectedKey:
+        src === null
+          ? null
+          : { kind: "clip", id: clip.id, t: src, track: "speed" },
     });
   };
   const commit = (next: SpeedNode[]) => {
@@ -194,7 +225,11 @@ function Strip({ clip }: { clip: VideoClip }) {
     hi: i < list.length - 1 ? list[i + 1][0] - MIN_GAP : clip.out,
   });
 
-  const insertAt = (src: number, rate: number, list: SpeedNode[]): SpeedNode[] => {
+  const insertAt = (
+    src: number,
+    rate: number,
+    list: SpeedNode[],
+  ): SpeedNode[] => {
     const next: SpeedNode[] = [...list, [src, clampRate(rate)]];
     next.sort((a, b) => a[0] - b[0]);
     return next;
@@ -224,7 +259,9 @@ function Strip({ clip }: { clip: VideoClip }) {
     const { lo, hi } = bounds(nodes, i);
     const src = Math.min(hi, Math.max(lo, nodes[i][0] + dSrc));
     const rate = clampRate(nodes[i][1] * rateScale);
-    const next = nodes.map((n, j) => (j === i ? ([src, rate] as SpeedNode) : n));
+    const next = nodes.map((n, j) =>
+      j === i ? ([src, rate] as SpeedNode) : n,
+    );
     pick(src);
     commit(next);
   };
@@ -237,11 +274,16 @@ function Strip({ clip }: { clip: VideoClip }) {
     for (let dx = -LINE_HIT_PX; dx <= LINE_HIT_PX; dx += 2) {
       const sx = x + dx;
       if (sx < PAD_X || sx > PAD_X + innerW) continue;
-      if (Math.abs(yOf(rt.rateAtSrc(srcAtX(sx))) - y) <= LINE_HIT_PX) return true;
+      if (Math.abs(yOf(rt.rateAtSrc(srcAtX(sx))) - y) <= LINE_HIT_PX)
+        return true;
     }
     return false;
   };
-  const graphPoint = (e: { clientX: number; clientY: number; currentTarget: Element }) => {
+  const graphPoint = (e: {
+    clientX: number;
+    clientY: number;
+    currentTarget: Element;
+  }) => {
     const rect = e.currentTarget.getBoundingClientRect();
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   };
@@ -251,7 +293,8 @@ function Strip({ clip }: { clip: VideoClip }) {
   const scrubFrom = (e: React.PointerEvent, x: number) => {
     pick(null);
     setSkim(null);
-    const seekAt = (px: number) => useEditor.getState().seek(clip.start + rt.tAt(srcAtX(px)));
+    const seekAt = (px: number) =>
+      useEditor.getState().seek(clip.start + rt.tAt(srcAtX(px)));
     seekAt(x);
     startDrag(e, { onMove: (dx) => seekAt(x + dx) });
   };
@@ -260,7 +303,10 @@ function Strip({ clip }: { clip: VideoClip }) {
     const { x, y } = graphPoint(e);
     // The line beside a node belongs to the node's handle, so a press there
     // scrubs like any other.
-    if (onLine(x, y) && !nodes.some((n) => Math.abs(xOf(n[0]) - x) < SNAP_PX * 2)) {
+    if (
+      onLine(x, y) &&
+      !nodes.some((n) => Math.abs(xOf(n[0]) - x) < SNAP_PX * 2)
+    ) {
       const src = srcAtX(x);
       const next = insertAt(src, rt.rateAtSrc(src), nodes);
       pick(src);
@@ -293,7 +339,8 @@ function Strip({ clip }: { clip: VideoClip }) {
     setSkim(null);
     startDrag(e, {
       cursor: () => "ew-resize",
-      onMove: (dx) => useEditor.getState().seek(clip.start + rt.tAt(srcAtX(x0 + dx))),
+      onMove: (dx) =>
+        useEditor.getState().seek(clip.start + rt.tAt(srcAtX(x0 + dx))),
     });
   };
 
@@ -357,7 +404,15 @@ function Strip({ clip }: { clip: VideoClip }) {
     e.stopPropagation();
   };
 
-  const pickedRate = picked === null ? null : nodes.find((n) => Math.abs(n[0] - picked) < 1e-6)?.[1];
+  const pickedRate =
+    picked === null
+      ? null
+      : nodes.find((n) => Math.abs(n[0] - picked) < 1e-6)?.[1];
+  // The node under a drag, for the rate tag beside it.
+  const dragging =
+    draft && picked !== null
+      ? (draft.find((n) => Math.abs(n[0] - picked) < 1e-6) ?? null)
+      : null;
 
   // The picker names the preset the curve is; a curve that is none of them
   // is "Custom", drawn as itself through the span.
@@ -365,8 +420,10 @@ function Strip({ clip }: { clip: VideoClip }) {
   const preset = SPEED_CURVE_PRESETS.find((p) => p.id === presetId);
   const span = Math.max(1e-6, clip.out - clip.in);
   const shape = useMemo<SpeedNode[]>(
-    () => preset?.shape ?? nodes.map(([at, r]): SpeedNode => [(at - clip.in) / span, r]),
-    [preset, nodes, clip.in, span]
+    () =>
+      preset?.shape ??
+      nodes.map(([at, r]): SpeedNode => [(at - clip.in) / span, r]),
+    [preset, nodes, clip.in, span],
   );
 
   return (
@@ -401,7 +458,12 @@ function Strip({ clip }: { clip: VideoClip }) {
             <span>{preset?.label ?? "Custom"}</span>
             <ChevronDown className="size-3 text-muted-foreground" />
           </DropdownMenuTrigger>
-          <DropdownMenuContent side="top" align="center" sideOffset={8} className="overflow-visible p-0">
+          <DropdownMenuContent
+            side="top"
+            align="center"
+            sideOffset={8}
+            className="overflow-visible p-0"
+          >
             {/* The pad is the picked tile's ring and its offset, drawn outside
                 the tile. */}
             <div className="grid grid-cols-2 gap-2 p-2">
@@ -411,7 +473,7 @@ function Strip({ clip }: { clip: VideoClip }) {
                   title={p.hint}
                   className={cn(
                     "relative block h-20 w-40 overflow-hidden rounded-xl border border-border bg-muted/40 p-0 focus:bg-muted",
-                    p.id === presetId && PICKED_RING
+                    p.id === presetId && PICKED_RING,
                   )}
                   onClick={() => {
                     pick(null);
@@ -422,14 +484,20 @@ function Strip({ clip }: { clip: VideoClip }) {
                   <span className="absolute inset-x-2.5 top-2.5">
                     <Sparkline shape={p.shape} w={140} h={48} grid />
                   </span>
-                  <span className="absolute bottom-1.5 left-2.5 text-[11.5px] font-medium">{p.label}</span>
+                  <span className="absolute bottom-1.5 left-2.5 text-[11.5px] font-medium">
+                    {p.label}
+                  </span>
                 </DropdownMenuItem>
               ))}
             </div>
             <MenuPrimitive.Arrow className="absolute -bottom-2 left-1/2 -translate-x-1/2">
               <svg width="20" height="10" viewBox="0 0 20 10" className="block">
                 <path d="M0 0 L10 10 L20 0" className="fill-popover" />
-                <path d="M0 0 L10 10 L20 0" fill="none" className="stroke-foreground/10" />
+                <path
+                  d="M0 0 L10 10 L20 0"
+                  fill="none"
+                  className="stroke-foreground/10"
+                />
               </svg>
             </MenuPrimitive.Arrow>
           </DropdownMenuContent>
@@ -457,11 +525,18 @@ function Strip({ clip }: { clip: VideoClip }) {
         >
           <RotateCcw className="size-3.5" />
         </IconButton>
-        <IconButton title="Close (Esc)" onClick={() => useSpeedCurveUi.getState().close(clip.id)}>
+        <IconButton
+          title="Close (Esc)"
+          onClick={() => useSpeedCurveUi.getState().close(clip.id)}
+        >
           <X className="size-3.5" />
         </IconButton>
       </div>
-      <div ref={boxRef} className="relative select-none overflow-hidden" style={{ height: GRAPH_H }}>
+      <div
+        ref={boxRef}
+        className="relative select-none overflow-hidden"
+        style={{ height: GRAPH_H }}
+      >
         <svg
           className="absolute inset-0 h-full w-full"
           onPointerDown={onGraphPointerDown}
@@ -480,7 +555,13 @@ function Strip({ clip }: { clip: VideoClip }) {
                 strokeDasharray={r === 1 ? undefined : "2 3"}
               />
               {LABELED.has(r) && (
-                <text x={PAD_X + 3} y={yOf(r) - 2} fontSize={9} fill="currentColor" fillOpacity={0.85}>
+                <text
+                  x={PAD_X + 3}
+                  y={yOf(r) - 2}
+                  fontSize={9}
+                  fill="currentColor"
+                  fillOpacity={0.85}
+                >
                   {fmtRate(r)}
                 </text>
               )}
@@ -523,6 +604,14 @@ function Strip({ clip }: { clip: VideoClip }) {
               />
             );
           })}
+          {dragging && (
+            <RateTag
+              x={xOf(dragging[0])}
+              y={yOf(dragging[1])}
+              rate={dragging[1]}
+              boxW={width}
+            />
+          )}
         </svg>
         <div
           ref={skimRef}
@@ -561,7 +650,9 @@ function Sparkline({
 }) {
   const pad = 2;
   const yOf = (rate: number) =>
-    pad + (1 - (Math.log10(clampRate(rate)) - LOG_MIN) / (LOG_MAX - LOG_MIN)) * (h - pad * 2);
+    pad +
+    (1 - (Math.log10(clampRate(rate)) - LOG_MIN) / (LOG_MAX - LOG_MIN)) *
+      (h - pad * 2);
   const d = useMemo(() => {
     const rt = retimeOf({ in: 0, out: 1, speedCurve: shape });
     const steps = Math.max(32, Math.round(w / 2));
@@ -595,7 +686,14 @@ function Sparkline({
             strokeDasharray="2 3"
           />
         ))}
-      <line x1={0} x2={w} y1={yOf(1)} y2={yOf(1)} stroke="currentColor" strokeOpacity={0.3} />
+      <line
+        x1={0}
+        x2={w}
+        y1={yOf(1)}
+        y2={yOf(1)}
+        stroke="currentColor"
+        strokeOpacity={0.3}
+      />
       <path
         d={d}
         fill="none"
@@ -605,6 +703,49 @@ function Sparkline({
         strokeLinecap="round"
       />
     </svg>
+  );
+}
+
+/** The rate beside a node while it is dragged: a dark label on whichever
+ * side has room, held inside the graph. */
+function RateTag({
+  x,
+  y,
+  rate,
+  boxW,
+}: {
+  x: number;
+  y: number;
+  rate: number;
+  boxW: number;
+}) {
+  const label = fmtRate(rate);
+  const w = label.length * 6.5 + 10;
+  const h = 16;
+  const gap = 10;
+  const left = x + gap + w <= boxW ? x + gap : x - gap - w;
+  const cy = Math.min(GRAPH_H - h / 2, Math.max(h / 2, y));
+  return (
+    <g className="pointer-events-none">
+      <rect
+        x={left}
+        y={cy - h / 2}
+        width={w}
+        height={h}
+        rx={4}
+        className="fill-foreground/60"
+      />
+      <text
+        x={left + w / 2}
+        y={cy + 3.5}
+        textAnchor="middle"
+        fontSize={10}
+        fontWeight={600}
+        className="fill-background tabular-nums"
+      >
+        {label}
+      </text>
+    </g>
   );
 }
 
@@ -619,18 +760,17 @@ function IconButton({
   onClick: () => void;
   children: React.ReactNode;
 }) {
+  // The strip is the muted grey, so the ghost hover reads against it.
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
+      size="icon-xs"
       title={title}
       disabled={disabled}
       onClick={onClick}
-      className={cn(
-        "grid size-6 place-items-center rounded text-foreground hover:bg-accent",
-        disabled && "pointer-events-none opacity-40"
-      )}
+      className="hover:bg-foreground/10 dark:hover:bg-foreground/15"
     >
       {children}
-    </button>
+    </Button>
   );
 }
