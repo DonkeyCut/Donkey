@@ -150,7 +150,6 @@ export function PromotionDialog({
   );
   const [issues, setIssues] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
-  const [templateName, setTemplateName] = useState("");
   const [confirm, setConfirm] = useState<{ id: string; count: SegmentCount } | null>(null);
   const save = useSavePromotion();
   const send = useSendPromotion();
@@ -219,10 +218,12 @@ export function PromotionDialog({
     if (id) setNotice("Draft saved.");
   };
 
+  // The template takes the promotion's name; saving again under that name
+  // replaces it.
   const onSaveTemplate = () => {
-    const name = templateName.trim();
+    const name = draft.name.trim();
     if (!name) {
-      setIssues(["Enter a template name."]);
+      setIssues(["Name the promotion first."]);
       return;
     }
     saveTemplate.mutate({
@@ -455,14 +456,6 @@ export function PromotionDialog({
               </Button>
             ) : (
               <>
-                <Input
-                  aria-label="Template name"
-                  placeholder="Template name"
-                  value={templateName}
-                  onChange={(e) => setTemplateName(e.target.value)}
-                  disabled={busy}
-                  className="w-36"
-                />
                 <Button type="button" variant="outline" disabled={busy} onClick={onSaveTemplate}>
                   {saveTemplate.isPending ? "Saving…" : "Save template"}
                 </Button>
