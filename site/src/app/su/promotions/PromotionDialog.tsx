@@ -294,33 +294,31 @@ export function PromotionDialog({
         </DialogHeader>
 
         <div className="grid gap-5">
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Name" htmlFor="promo-name">
-              <Input
-                id="promo-name"
-                placeholder="Founding Pro, October"
-                disabled={readOnly}
-                value={draft.name}
-                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-              />
-            </Field>
-            <Field label="From" htmlFor="promo-sender">
-              <Select
-                disabled={readOnly}
-                value={draft.sender}
-                items={{ bulk: senderLabel("bulk"), personal: senderLabel("personal") }}
-                onValueChange={(v) => setDraft({ ...draft, sender: v as PromotionSender })}
-              >
-                <SelectTrigger id="promo-sender">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="bulk">{senderLabel("bulk")}</SelectItem>
-                  <SelectItem value="personal">{senderLabel("personal")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-          </div>
+          <Field label="Name" htmlFor="promo-name">
+            <Input
+              id="promo-name"
+              placeholder="Founding Pro, October"
+              disabled={readOnly}
+              value={draft.name}
+              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+            />
+          </Field>
+          <Field label="From" htmlFor="promo-sender">
+            <Select
+              disabled={readOnly}
+              value={draft.sender}
+              items={{ bulk: senderLabel("bulk"), personal: senderLabel("personal") }}
+              onValueChange={(v) => setDraft({ ...draft, sender: v as PromotionSender })}
+            >
+              <SelectTrigger id="promo-sender">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="bulk">{senderLabel("bulk")}</SelectItem>
+                <SelectItem value="personal">{senderLabel("personal")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
           <Field label="Subject" htmlFor="promo-subject">
             <Input
               id="promo-subject"
