@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -25,6 +26,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import type { Settings } from "@/lib/config/registry";
+import { cn } from "@/lib/utils";
 import { PROMOTION_PLACEHOLDERS } from "@/lib/marketing/placeholders";
 import { BUTTON_MARK } from "@/lib/marketing/promotionCopy";
 import {
@@ -151,6 +153,9 @@ export function PromotionDialog({
   const [issues, setIssues] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<{ id: string; count: SegmentCount } | null>(null);
+  // Narrow screens stack the columns and fold the offer, audience and
+  // exclusions under a disclosure; wide ones show them beside the email.
+  const [showTargeting, setShowTargeting] = useState(false);
   const save = useSavePromotion();
   const send = useSendPromotion();
   const test = useTestPromotion();
@@ -372,7 +377,18 @@ export function PromotionDialog({
 
           </div>
 
-          <div className="grid content-start gap-5">
+          <button
+            type="button"
+            className="flex items-center gap-1 text-sm font-medium lg:hidden"
+            aria-expanded={showTargeting}
+            aria-controls="promo-targeting"
+            onClick={() => setShowTargeting((v) => !v)}
+          >
+            <ChevronRight className={cn("size-4 transition-transform duration-200", showTargeting && "rotate-90")} />
+            Offer and audience
+          </button>
+
+          <div id="promo-targeting" className={cn("content-start gap-5", showTargeting ? "grid" : "hidden lg:grid")}>
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div>
