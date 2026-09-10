@@ -143,6 +143,11 @@ export function PromotionDialog({
     existing ? fromSummary(existing) : seed ? { ...fromSummary(seed), name: `${seed.name} (copy)` } : blank(offerDefaults),
   );
   const [savedId, setSavedId] = useState<string | null>(existing?.id ?? null);
+  // The draft as it was last stored; a new promotion has unsaved edits from
+  // the start.
+  const [savedDraft, setSavedDraft] = useState<string | null>(() =>
+    existing ? JSON.stringify(fromSummary(existing)) : null,
+  );
   const [issues, setIssues] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [templateName, setTemplateName] = useState("");
@@ -155,6 +160,7 @@ export function PromotionDialog({
   const templates = useOutreachTemplates();
 
   const readOnly = existing !== null && existing.status !== "draft";
+  const dirty = !readOnly && JSON.stringify(draft) !== savedDraft;
   const busy = save.isPending || send.isPending || test.isPending || count.isPending || saveTemplate.isPending;
   // Earlier promotions that reached anyone; the one being edited is not a
   // choice against itself.
@@ -198,6 +204,7 @@ export function PromotionDialog({
     try {
       const result = await save.mutateAsync({ id: savedId, ...input });
       setSavedId(result.id);
+      setSavedDraft(JSON.stringify(draft));
       return result.id;
     } catch (e) {
       fail(e as Error);
@@ -459,10 +466,10 @@ export function PromotionDialog({
                 <Button type="button" variant="outline" disabled={busy} onClick={onSaveTemplate}>
                   {saveTemplate.isPending ? "Saving…" : "Save template"}
                 </Button>
-                <Button type="button" variant="secondary" disabled={busy} onClick={onSave}>
+                <Button type="button" variant={dirty ? "default" : "secondary"} disabled={busy} onClick={onSave}>
                   {save.isPending ? "Saving…" : "Save draft"}
                 </Button>
-                <Button type="button" disabled={busy} onClick={onSend}>
+                <Button type="button" variant={dirty ? "secondary" : "default"} disabled={busy} onClick={onSend}>
                   {count.isPending ? "Counting…" : "Send"}
                 </Button>
               </>
