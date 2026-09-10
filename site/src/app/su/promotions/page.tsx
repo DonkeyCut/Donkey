@@ -147,12 +147,25 @@ function PromotionRow({
           <p className="mt-1 text-xs text-muted-foreground">
             {p.status === "draft"
               ? `Draft · saved ${when(p.updatedAt)}`
-              : `${sent} of ${recipients} sent${failed ? ` · ${failed} failed` : ""} · ${clicked} clicked${
-                  p.creditOffer ? ` · ${claimed} claimed` : ""
-                }${
-                  p.startedAt ? ` · started ${when(p.startedAt)}` : ""
-                }${p.finishedAt ? ` · finished ${when(p.finishedAt)}` : ""}`}
+              : `${p.startedAt ? `Started ${when(p.startedAt)}` : ""}${
+                  p.finishedAt ? ` · finished ${when(p.finishedAt)}` : ""
+                }`}
           </p>
+          {p.status !== "draft" ? (
+            <dl className="mt-4 flex flex-wrap gap-x-8 gap-y-2">
+              {[
+                ["Sent", `${sent} of ${recipients}`],
+                ...(failed ? [["Failed", String(failed)]] : []),
+                ["Clicked", String(clicked)],
+                ...(p.creditOffer ? [["Claimed", String(claimed)]] : []),
+              ].map(([label, value]) => (
+                <div key={label}>
+                  <dt className="text-xs text-muted-foreground">{label}</dt>
+                  <dd className="text-lg font-medium tabular-nums">{value}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Button size="sm" variant={p.status === "draft" ? "default" : "outline"} onClick={onOpen}>
