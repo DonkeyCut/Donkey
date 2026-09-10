@@ -26,6 +26,7 @@ Before changing `site/` UI, routes, API handlers, or data access patterns:
 - Read the relevant Next.js guide in `site/node_modules/next/dist/docs/`; this version may differ from your training data.
 - Read the applicable site guidance in `docs/guides/`.
 - Do not hand-write SQL migrations.
+- Every database read and write goes through the Prisma client API. Never use `$queryRaw` or `$executeRaw`; an atomic counter is `updateMany` with `increment` guarded by a `where` on the current value, checked through its count.
 - Do not run database migrations, including `prisma migrate`, `prisma db push`, or any command that applies schema changes to Supabase or another database.
 - Keep Prisma table/model definitions out of `site/prisma/schema.prisma`. Put tables in logically grouped sibling `.prisma` files under `site/prisma/`; reserve `schema.prisma` for shared Prisma configuration such as generator and datasource blocks.
 - Treat `/prototype`, "the prototype route", or route-shaped prototype requests as work on the Next.js route under `site/`, not as a repository-root `prototype/` directory.

@@ -26,6 +26,7 @@ Before changing `site/` UI, routes, API handlers, or data access patterns:
 - Read the relevant Next.js guide in `site/node_modules/next/dist/docs/`; this version may differ from your training data.
 - Read the applicable site guidance in `docs/guides/`.
 - Do not hand-write SQL migrations.
+- Every database read and write goes through the Prisma client API. Never use `$queryRaw` or `$executeRaw`; an atomic counter is `updateMany` with `increment` guarded by a `where` on the current value, checked through its count.
 - Do not run database migrations, including `prisma migrate`, `prisma db push`, or any command that applies schema changes to Supabase or another database.
 - Keep Prisma table/model definitions out of `site/prisma/schema.prisma`. Put tables in logically grouped sibling `.prisma` files under `site/prisma/`; reserve `schema.prisma` for shared Prisma configuration such as generator and datasource blocks.
 - Treat `/prototype`, "the prototype route", or route-shaped prototype requests as work on the Next.js route under `site/`, not as a repository-root `prototype/` directory.
@@ -45,7 +46,7 @@ Every Cut change has to hold on all four surfaces, and the plan for it says how:
 
 - Do not touch repository-root `prototype/` unless the user explicitly asks for that filesystem path. By default, assume requested product changes are for the Mac app or the site/landing page.
 - Ask before creating any new plan document.
-- Code reviews run on the latest Opus model. Make the switch yourself: a review request (`/review`, "review this") runs in the `code-reviewer` agent (`.claude/agents/code-reviewer.md`, which pins `model: opus`) whatever the session model is. A forked skill runs on the session model, so a review never goes through a fork. Never ask the user to `/model`.
+- Code reviews run on the latest Opus model; fixes and implementation run on the latest Fable model. Make the switch yourself: a review request (`/review`, "review this") runs in the `code-reviewer` agent (`.claude/agents/code-reviewer.md`, which pins `model: opus`) whatever the session model is, and a fix runs on Fable, spawned in an agent with `model: "fable"` when the session is on something else. A forked skill runs on the session model, so a review never goes through a fork. Never ask the user to `/model`.
 - All writing follows `docs/guides/writing-style.md` exactly, for documentation, marketing, and every other writing surface. Read it before writing. Engineering docs under `docs/` also follow the structure in `docs/guides/eng-doc-style.md`.
 - Write straight up — in prompts, docs, commits, code comments, summaries, and UI copy. State what a thing is, once, and stop. Never frame it against what it is not: no "X, not Y", no "X rather than Y", no "instead of Z", no "…, which is exactly what not to do". Cut filler.
 - Keep replies short and action-oriented. For implementation questions, give the recommendation first, then one to three short bullets on why; when the answer is obvious, just say what to do. Skip long explanations, caveats, and "one last thing" sections; flag a real blocker or risk with "One issue:" and explain it briefly.
@@ -62,7 +63,6 @@ Every Cut change has to hold on all four surfaces, and the plan for it says how:
 - Prefer deleting over documenting what was removed. Guides describe what is supported now, not what used to be.
 - Build forward by default. Prefer updating callers and contracts to the new supported shape instead of preserving old compatibility paths; ask before adding or keeping backwards-compatibility shims.
 - Configuration is code with a runtime override. Tunables, switches and thresholds are declared in the settings registry (`site/src/lib/config/registry.ts`) with a default and a schema, overridden from su, and read through it everywhere; env is for secrets. An experiment is variants over settings, drawn by an audience; a feature that people might tune ships its setting in the same change.
-- Every model change must verify official availability and pricing, update billing, and pass affected evals before shipping.
 - Fail hard. One provider, one model, one code path per job; a missing API key, service, or capability is an error surfaced to the caller. No secondary providers, no retry-on-another-model paths, no `env.X || default` softening. A fallback exists only when it is absolutely necessary — a surface that genuinely cannot carry the feature — and the summary and the guide say so.
 - After finishing a task, summarize what you did. Ground the summary in the actual code changes — name the files and behavior that changed, not the intent you set out with. If nothing changed, say so. When the change has a shape worth seeing — a system flow or a UI layout — include a small ASCII diagram of it.
 - This is an open source project. Stay alert for security concerns, and never commit PII, API keys, tokens, credentials, private config, or other secrets.
