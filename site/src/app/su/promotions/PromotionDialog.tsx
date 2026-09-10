@@ -205,10 +205,11 @@ export function PromotionDialog({
     }
   };
 
+  // The dialog stays open on a save, so the draft can go on being edited.
   const onSave = async () => {
     setNotice(null);
     const id = await ensureSaved();
-    if (id) onOpenChange(false);
+    if (id) setNotice("Draft saved.");
   };
 
   const onSaveTemplate = () => {
@@ -278,7 +279,10 @@ export function PromotionDialog({
               : "One email to everyone in the segment. Unsubscribed accounts are always left out."}
           </DialogDescription>
           {!readOnly && templates.data?.templates.length ? (
-            <Select onValueChange={(id: string | null) => id && loadTemplate(id)}>
+            <Select
+              items={Object.fromEntries(templates.data.templates.map((t) => [t.id, t.name]))}
+              onValueChange={(id: string | null) => id && loadTemplate(id)}
+            >
               <SelectTrigger><SelectValue placeholder="Load saved template" /></SelectTrigger>
               <SelectContent>
                 {templates.data.templates.map((template) => (
@@ -304,6 +308,7 @@ export function PromotionDialog({
               <Select
                 disabled={readOnly}
                 value={draft.sender}
+                items={{ bulk: senderLabel("bulk"), personal: senderLabel("personal") }}
                 onValueChange={(v) => setDraft({ ...draft, sender: v as PromotionSender })}
               >
                 <SelectTrigger id="promo-sender">
@@ -460,7 +465,7 @@ export function PromotionDialog({
                   {save.isPending ? "Saving…" : "Save draft"}
                 </Button>
                 <Button type="button" disabled={busy} onClick={onSend}>
-                  {count.isPending ? "Counting…" : "Send…"}
+                  {count.isPending ? "Counting…" : "Send"}
                 </Button>
               </>
             )}

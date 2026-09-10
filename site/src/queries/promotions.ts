@@ -17,6 +17,18 @@ export const promotionsQueryKey = ["su", "promotions"] as const;
 
 type Body = { promotions: PromotionSummary[]; senders: Record<PromotionSender, string> };
 
+// A write answers with the whole list, and it lands in the cache as the
+// answer arrives, so a row reopened right after a save reads what was saved.
+function useTakeList() {
+  const queryClient = useQueryClient();
+  return (result: { promotions: PromotionSummary[] }) => {
+    queryClient.setQueryData<Body>(promotionsQueryKey, (body) =>
+      body ? { ...body, promotions: result.promotions } : body,
+    );
+    void queryClient.invalidateQueries({ queryKey: promotionsQueryKey });
+  };
+}
+
 // Super-user only: every promotion with how far its send got, and the address
 // each sender stands for. Polls while a send is running.
 export function usePromotions() {
@@ -30,25 +42,25 @@ export function usePromotions() {
 
 // A new draft, or an edit of one. Answers with the saved id.
 export function useSavePromotion() {
-  const queryClient = useQueryClient();
+  const takeList = useTakeList();
   return useMutation({
     mutationFn: ({ id, ...input }: PromotionInput & { id: string | null }) =>
       apiFetch<{ id: string; promotions: PromotionSummary[] }>(
         id ? `/api/su/promotions/${encodeURIComponent(id)}` : "/api/su/promotions",
         { body: JSON.stringify(input), method: id ? "PUT" : "POST" },
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: promotionsQueryKey }),
+    onSuccess: takeList,
   });
 }
 
 export function useDeletePromotion() {
-  const queryClient = useQueryClient();
+  const takeList = useTakeList();
   return useMutation({
     mutationFn: (id: string) =>
       apiFetch<{ promotions: PromotionSummary[] }>(`/api/su/promotions/${encodeURIComponent(id)}`, {
         method: "DELETE",
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: promotionsQueryKey }),
+    onSuccess: takeList,
   });
 }
 
@@ -66,14 +78,14 @@ export function useSendPromotion() {
 }
 
 export function useCancelPromotion() {
-  const queryClient = useQueryClient();
+  const takeList = useTakeList();
   return useMutation({
     mutationFn: (id: string) =>
       apiFetch<{ promotions: PromotionSummary[] }>(
         `/api/su/promotions/${encodeURIComponent(id)}/cancel`,
         { method: "POST" },
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: promotionsQueryKey }),
+    onSuccess: takeList,
   });
 }
 
