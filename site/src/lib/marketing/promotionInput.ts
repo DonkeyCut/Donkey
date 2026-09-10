@@ -18,7 +18,12 @@ export const promotionInputSchema = z
     subject: z.string().trim().min(1).max(200),
     body: z.string().trim().min(1).max(10_000),
     ctaLabel: z.string().trim().min(1).max(80).nullable(),
-    ctaUrl: z.union([z.url().max(2000).refine((url) => ["https:", "http:"].includes(new URL(url).protocol), "Use an HTTP or HTTPS link."), z.literal(CLAIM_URL_PLACEHOLDER)]).nullable(),
+    ctaUrl: z
+      .union([
+        z.literal(CLAIM_URL_PLACEHOLDER),
+        z.url({ protocol: /^https?$/, error: "Use an HTTP or HTTPS link." }).max(2000),
+      ])
+      .nullable(),
     creditOffer: promotionOfferSchema.nullable().default(null),
     sender: z.enum(PROMOTION_SENDERS),
     audience: audienceSchema,
