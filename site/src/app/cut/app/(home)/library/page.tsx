@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { LibraryView } from "@/cut/components/LibraryView";
 import { SessionGate } from "@/cut/components/SessionGate";
 
-export const unstable_instant = { prefetch: "static" };
+export const instant = true;
 
 // Suspense: the view reads the open folder from ?folder=…, and useSearchParams
 // needs a boundary in a statically prerendered shell.

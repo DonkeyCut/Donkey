@@ -43,11 +43,11 @@ inside a `use cache` scope.
 A page that should feel instant declares it:
 
 ```ts
-export const unstable_instant = { prefetch: "static" };
+export const instant = true;
 ```
 
-Next then checks, in dev and at build, that the route produces a shell at every
-entry point, and names the component that would block the navigation. The public
+Next then checks in dev that the route produces a shell at every entry point,
+and names the component that would block the navigation. The public
 pages carry it, and so do the app's home surfaces.
 
 Getting the app there set the boundary the whole subtree is built around. The

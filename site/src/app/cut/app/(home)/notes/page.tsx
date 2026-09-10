@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { NotesView } from "@/cut/components/NotesView";
 import { SessionGate } from "@/cut/components/SessionGate";
 
-export const unstable_instant = { prefetch: "static" };
+export const instant = true;
 
 export default function NotesPage() {
   return (

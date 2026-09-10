@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
   // Workspace packages ship TypeScript source; the app build transpiles them.
   transpilePackages: ["@donkeycut/effects-kit", "@donkeycut/abexp"],
   // Cache Components: pages prerender to a static shell and anything uncached
-  // streams behind its own Suspense boundary. It is what the `unstable_instant`
+  // streams behind its own Suspense boundary. It is what the `instant`
   // export on the public pages and the app's home routes validates against, and
   // it puts the router's client cache on React <Activity> — a page you navigate
   // away from stays mounted hidden (up to three), with its effects torn down.
@@ -23,9 +23,6 @@ const nextConfig: NextConfig = {
   experimental: {
     serverActions: { bodySizeLimit: "4gb" },
     proxyClientMaxBodySize: "4gb",
-    // Dev-only DevTools panel: freeze a page load or a link click at the shell
-    // the route actually prefetches, so a regression is visible while editing.
-    instantNavigationDevToolsToggle: true,
   },
   // Cut is local-only: /api/cut/* 404s on a hosted deploy and never runs the
   // engine. But Turbopack's file tracer still follows the route's import of the
