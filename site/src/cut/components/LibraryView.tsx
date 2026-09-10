@@ -388,7 +388,12 @@ export function LibraryView() {
   const [addOpen, setAddOpen] = useState(false);
   const [url, setUrl] = useState("");
   const [folderCreating, setFolderCreating] = useState(false);
-  const [deleting, setDeleting] = useState<LibraryAsset | null>(null);
+  // What a delete is about to take: the pick when the card is in it, else
+  // the one card. Null while nothing is being asked.
+  const [deleting, setDeleting] = useState<LibraryAsset[] | null>(null);
+  // The right-click menu over a card, anchored to the pointer, with the ids it
+  // acts on.
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; ids: string[] } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // Whether an OS-file drag is hovering the surface (a depth counter tames
   // enter/leave noise as the cursor crosses child tiles).
@@ -558,13 +563,16 @@ export function LibraryView() {
 
   const remove = async () => {
     if (!deleting) return;
-    const { id, residency } = deleting;
     setDeleting(null);
-    if (!live(residency)) return;
-    patch((d) => ({ ...d, assets: d.assets.filter((a) => a.id !== id) }));
-    if (isLinkedType(deleting.type)) forgetLinkedCopy(id);
+    // A shelf that isn't answering keeps its items.
+    const taking = deleting.filter((a) => live(a.residency));
+    if (taking.length === 0) return;
+    const gone = new Set(taking.map((a) => a.id));
+    patch((d) => ({ ...d, assets: d.assets.filter((a) => !gone.has(a.id)) }));
+    setSelected(new Set());
+    for (const a of taking) if (isLinkedType(a.type)) forgetLinkedCopy(a.id);
     try {
-      await deleteFromLibrary(residency, id);
+      await Promise.all(taking.map((a) => deleteFromLibrary(a.residency, a.id)));
     } catch {
       void reload();
     }
@@ -691,6 +699,25 @@ export function LibraryView() {
   // The picked run, built once for the whole grid: every card hands the same
   // array to its drag and its ⌘C.
   const pickedRun = shown.filter((a) => selected.has(a.id));
+  // A card inside the pick carries the whole set, the rule its drag and ⌘C
+  // follow.
+  const setOf = (a: LibraryAsset) => (selected.has(a.id) ? pickedRun : [a]);
+
+  // Right-click over a card: the selection menu, with the card joining the
+  // pick if it wasn't in it. The browser's own media menu never shows here.
+  const onPageContextMenu = (e: React.MouseEvent) => {
+    const t = e.target as HTMLElement;
+    if (t.closest("button,a,input,textarea,[role='button'],[role='menuitem'],[data-no-marquee]"))
+      return;
+    const card = t.closest<HTMLElement>("[data-sel-id]");
+    if (!card) return;
+    const id = card.dataset.selId!;
+    if (!shown.some((a) => a.id === id)) return;
+    e.preventDefault();
+    const ids = selected.has(id) ? [id, ...[...selected].filter((x) => x !== id)] : [id];
+    if (!selected.has(id)) setSelected(new Set([id]));
+    setCtxMenu({ x: e.clientX, y: e.clientY, ids });
+  };
   // Similar-shape tiles get their own band of wrapped rows, so a wide tile
   // never shares a row with a tall one; audio and unmeasured assets band as
   // squares. Order within and across bands follows the listing. An arrival
@@ -756,6 +783,7 @@ export function LibraryView() {
         fileOver &&
           "rounded-3xl outline-2 outline-dashed outline-offset-[-10px] outline-[#0a84ff]/60",
       )}
+      onContextMenu={onPageContextMenu}
       onDragEnter={(e) => {
         if (!isFileDrag(e)) return;
         e.preventDefault();
@@ -978,7 +1006,7 @@ export function LibraryView() {
                           : () => setNeedsApp(true)
                       }
                       onDelete={
-                        live(a.residency) ? () => setDeleting(a) : undefined
+                        live(a.residency) ? () => setDeleting(setOf(a)) : undefined
                       }
                       onDragStartExtra={(e) => onCardDragExtra(e, a)}
                     />
@@ -1033,6 +1061,30 @@ export function LibraryView() {
           </DialogContent>
         </Dialog>
 
+        {/* The right-click menu, anchored to the pointer. */}
+        <DropdownMenu open={ctxMenu !== null} onOpenChange={(o) => !o && setCtxMenu(null)}>
+          {ctxMenu && (
+            <DropdownMenuContent
+              className="w-48"
+              sideOffset={0}
+              anchor={{
+                getBoundingClientRect: () => new DOMRect(ctxMenu.x, ctxMenu.y, 0, 0),
+              }}
+              finalFocus={false}
+            >
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={() => {
+                  setDeleting(shown.filter((a) => ctxMenu.ids.includes(a.id)));
+                  setCtxMenu(null);
+                }}
+              >
+                <Trash2 /> Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          )}
+        </DropdownMenu>
+
         <AlertDialog
           open={!!deleting}
           onOpenChange={(o) => !o && setDeleting(null)}
@@ -1040,10 +1092,13 @@ export function LibraryView() {
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>
-                Delete “{deleting?.name}”?
+                {deleting && deleting.length > 1
+                  ? `Delete ${deleting.length} items?`
+                  : `Delete “${deleting?.[0]?.name}”?`}
               </AlertDialogTitle>
               <AlertDialogDescription>
-                Projects that already use it keep their own copy.
+                Projects that already use {deleting && deleting.length > 1 ? "them" : "it"} keep
+                their own copy.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

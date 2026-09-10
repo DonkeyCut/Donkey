@@ -1608,7 +1608,12 @@ function LibraryPanel({ projectId }: { projectId: string }) {
     null,
     (v) => v === null || typeof v === "string"
   );
-  const [deleting, setDeleting] = useState<LibraryAsset | null>(null);
+  // What a delete is about to take: the pick when the card is in it, else
+  // the one card. Null while nothing is being asked.
+  const [deleting, setDeleting] = useState<LibraryAsset[] | null>(null);
+  // The right-click menu over a card, anchored to the pointer, with the ids it
+  // acts on.
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; ids: string[] } | null>(null);
   const [uploading, setUploading] = useState(0);
 
   // Where an asset shows: phone recordings gather in the derived Camera Roll
@@ -1653,12 +1658,13 @@ function LibraryPanel({ projectId }: { projectId: string }) {
 
   const remove = async () => {
     if (!deleting) return;
-    const { id, residency } = deleting;
-    patch((d) => ({ ...d, assets: d.assets.filter((a) => a.id !== id) }));
+    const gone = new Set(deleting.map((a) => a.id));
+    patch((d) => ({ ...d, assets: d.assets.filter((a) => !gone.has(a.id)) }));
     setDeleting(null);
-    if (isLinkedType(deleting.type)) forgetLinkedCopy(id);
+    setPicked(new Set());
+    for (const a of deleting) if (isLinkedType(a.type)) forgetLinkedCopy(a.id);
     try {
-      await deleteFromLibrary(residency, id);
+      await Promise.all(deleting.map((a) => deleteFromLibrary(a.residency, a.id)));
     } catch {
       // Server delete failed; pull a fresh list so the UI stays truthful.
       void reload();
@@ -1746,6 +1752,25 @@ function LibraryPanel({ projectId }: { projectId: string }) {
   const { picked, setPicked, pick } = useTilePicks(shown.map((a) => a.id));
   // Built once for the whole grid; each card hands the same array on.
   const pickedRun = shown.filter((a) => picked.has(a.id));
+  // A card inside the pick carries the whole set, the rule its drag and ⌘C
+  // follow.
+  const setOf = (a: LibraryAsset) => (picked.has(a.id) ? pickedRun : [a]);
+
+  // Right-click over a card: the selection menu, with the card joining the
+  // pick if it wasn't in it. The browser's own media menu never shows here.
+  const onShelfContextMenu = (e: React.MouseEvent) => {
+    const t = e.target as HTMLElement;
+    if (t.closest("button,a,input,textarea,[role='button'],[role='menuitem'],[data-no-marquee]"))
+      return;
+    const card = t.closest<HTMLElement>("[data-sel-id]");
+    if (!card) return;
+    const id = card.dataset.selId!;
+    if (!shown.some((a) => a.id === id)) return;
+    e.preventDefault();
+    const ids = picked.has(id) ? [id, ...[...picked].filter((x) => x !== id)] : [id];
+    if (!picked.has(id)) setPicked(new Set([id]));
+    setCtxMenu({ x: e.clientX, y: e.clientY, ids });
+  };
 
   // Let a clip be dragged onto a folder tile to file it (alongside the timeline
   // drag payload the card already sets). The ghost is the card's picture, and
@@ -1812,6 +1837,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
         dropActive &&
           "rounded-xl bg-[#0a84ff]/5 outline-2 outline-dashed outline-offset-[-4px] outline-[#0a84ff]/60"
       )}
+      onContextMenu={onShelfContextMenu}
     >
       {openFolder !== null && (
         <div className="flex h-12 shrink-0 items-center pr-2.5 pl-2.5">
@@ -1967,7 +1993,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
                 onUse={
                   a.type === "font" ? undefined : () => void addLibraryAssetToProject(projectId, a)
                 }
-                onDelete={() => setDeleting(a)}
+                onDelete={() => setDeleting(setOf(a))}
                 onDragStartExtra={(e) => onCardDragExtra(e, a)}
               />
             ))}
@@ -1983,12 +2009,41 @@ function LibraryPanel({ projectId }: { projectId: string }) {
         </ScrollArea>
       )}
 
+      {/* The right-click menu, anchored to the pointer. */}
+      <DropdownMenu open={ctxMenu !== null} onOpenChange={(o) => !o && setCtxMenu(null)}>
+        {ctxMenu && (
+          <DropdownMenuContent
+            className="w-48"
+            sideOffset={0}
+            anchor={{
+              getBoundingClientRect: () => new DOMRect(ctxMenu.x, ctxMenu.y, 0, 0),
+            }}
+            finalFocus={false}
+          >
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => {
+                setDeleting(shown.filter((a) => ctxMenu.ids.includes(a.id)));
+                setCtxMenu(null);
+              }}
+            >
+              <Trash2 /> Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        )}
+      </DropdownMenu>
+
       <AlertDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete “{deleting?.name}”?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {deleting && deleting.length > 1
+                ? `Delete ${deleting.length} items?`
+                : `Delete “${deleting?.[0]?.name}”?`}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Projects that already use it keep their own copy.
+              Projects that already use {deleting && deleting.length > 1 ? "them" : "it"} keep
+              their own copy.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
