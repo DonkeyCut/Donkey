@@ -181,7 +181,7 @@ export function Inspector() {
   );
 
   return (
-    <aside data-field-panel="" className="flex min-h-0 bg-muted/40">
+    <aside data-field-panel="" className="relative flex min-h-0 bg-muted/40">
       {/* Keyed on what is selected: picking something else builds a fresh
           column, so it opens on that thing's own fields. */}
       <InspectorColumn
@@ -297,7 +297,9 @@ function InspectorColumn({
  * The panel's tab rail: a floating pill at its top-left, Home over the selection's
  * deep views, then the button that hides or shows the body. Every button is
  * an icon with its name in the tooltip; the open view reads dark, and a
- * hidden panel lights none of them.
+ * hidden panel lights none of them. With the body hidden the pill floats over
+ * the preview's corner and holds no column, so selecting and deselecting
+ * leave the preview where it is.
  */
 function InspectorRail({
   clipId,
@@ -318,7 +320,7 @@ function InspectorRail({
   // visible from any view.
   const baking = useMatteBakes((s) => !!clipId && s.jobs[clipId]?.status === "running");
   return (
-    <div className="shrink-0 px-2 pt-2">
+    <div className={cn("shrink-0 px-2 pt-2", !open && "absolute top-0 right-0 z-10")}>
       <div className="flex flex-col items-center gap-1 rounded-xl border bg-background p-1 shadow-md">
         <RailButton id="home" label="Home" Icon={House} active={view === "main"} onClick={() => onPick("main")} />
         {tabs.map(({ id, label, Icon }) => (
