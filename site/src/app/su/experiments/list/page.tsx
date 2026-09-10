@@ -310,7 +310,14 @@ function Overrides({ experiment: e }: { experiment: ExperimentSummary }) {
             if (ev.key === "Enter") submit();
           }}
         />
-        <Select value={variant} onValueChange={(v) => setVariant(v ?? HOLD_OUT_KEY)}>
+        <Select
+          value={variant}
+          items={{
+            ...Object.fromEntries(e.variants.map((v) => [v.key, v.name])),
+            [HOLD_OUT_KEY]: "Hold out",
+          }}
+          onValueChange={(v) => setVariant(v ?? HOLD_OUT_KEY)}
+        >
           <SelectTrigger className="w-44">
             <SelectValue />
           </SelectTrigger>

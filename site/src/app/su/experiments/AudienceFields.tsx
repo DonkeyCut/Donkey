@@ -35,6 +35,12 @@ export const blankAudienceDraft = (): AudienceDraft => ({
   creditsUsedPercentAtLeast: "",
 });
 
+// Each select's label per value; the root reads them so the trigger shows
+// the label the menu shows.
+const PLAN_LABELS: Record<AudienceDraft["plan"], string> = { any: "Any", free: "No Pro", pro: "Pro" };
+const PAID_LABELS: Record<AudienceDraft["paid"], string> = { any: "Any", yes: "Yes", no: "No" };
+const entries = <K extends string>(labels: Record<K, string>) => Object.entries(labels) as [K, string][];
+
 const day = (iso: string | null) => (iso ? iso.slice(0, 10) : "");
 const numberOrBlank = (n: number | null) => (n === null ? "" : String(n));
 const dayStart = (d: string) => (d ? new Date(`${d}T00:00:00Z`).toISOString() : null);
@@ -130,15 +136,16 @@ export function AudienceFields({
           <Select
             disabled={disabled}
             value={value.plan}
+            items={PLAN_LABELS}
             onValueChange={(v) => onChange({ plan: v as AudienceDraft["plan"] })}
           >
             <SelectTrigger id="aud-plan">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="any">Any</SelectItem>
-              <SelectItem value="free">No Pro</SelectItem>
-              <SelectItem value="pro">Pro</SelectItem>
+              {entries(PLAN_LABELS).map(([v, label]) => (
+                <SelectItem key={v} value={v}>{label}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </Field>
@@ -146,15 +153,16 @@ export function AudienceFields({
           <Select
             disabled={disabled}
             value={value.paid}
+            items={PAID_LABELS}
             onValueChange={(v) => onChange({ paid: v as AudienceDraft["paid"] })}
           >
             <SelectTrigger id="aud-paid">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="any">Any</SelectItem>
-              <SelectItem value="yes">Yes</SelectItem>
-              <SelectItem value="no">No</SelectItem>
+              {entries(PAID_LABELS).map(([v, label]) => (
+                <SelectItem key={v} value={v}>{label}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </Field>

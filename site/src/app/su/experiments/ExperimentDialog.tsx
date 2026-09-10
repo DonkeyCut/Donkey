@@ -40,6 +40,11 @@ import {
 // it. A variant's settings are drawn with the same fields the settings tab
 // uses.
 
+type MetricSource = (typeof METRIC_SOURCES)[number];
+// The label per source; the select's root reads it so the trigger shows the
+// label the menu shows.
+const SOURCE_LABELS: Record<MetricSource, string> = { event: "PostHog event", purchase: "Purchase" };
+
 type Draft = {
   key: string;
   name: string;
@@ -315,14 +320,16 @@ export function ExperimentDialog({
                 <Field label="Source" htmlFor={`m-${i}-source`}>
                   <Select
                     value={metric.source}
+                    items={SOURCE_LABELS}
                     onValueChange={(v) => setMetric(i, { source: v as Draft["metrics"][number]["source"] })}
                   >
                     <SelectTrigger id={`m-${i}-source`}>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="event">PostHog event</SelectItem>
-                      <SelectItem value="purchase">Purchase</SelectItem>
+                      {(Object.keys(SOURCE_LABELS) as MetricSource[]).map((s) => (
+                        <SelectItem key={s} value={s}>{SOURCE_LABELS[s]}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </Field>
