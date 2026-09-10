@@ -99,13 +99,14 @@ async function releaseSlot(day: string): Promise<void> {
   });
 }
 
-/** Runs one provider send inside the day's quota. The slot is kept only when
- * the provider accepted the email: a thrown error or a resolved `{ error }`
- * gives it back. */
+/** Runs one provider send inside the day's quota, with the slot held before
+ * the callback starts so what it builds goes out at once. The slot is kept
+ * only when the provider accepted the email: a thrown error, a resolved
+ * `{ error }`, or null (nothing to send) gives it back. */
 export async function withDailyEmailQuota<T extends { error: unknown }>(
   kind: EmailSendKind,
-  send: () => Promise<T>,
-): Promise<T> {
+  send: () => Promise<T | null>,
+): Promise<T | null> {
   const now = new Date();
   const day = utcDayOf(now);
   await reserveSlot(day, kind, now);
@@ -116,13 +117,13 @@ export async function withDailyEmailQuota<T extends { error: unknown }>(
         error: releaseError instanceof Error ? releaseError.message : String(releaseError),
       });
     });
-  let result: T;
+  let result: T | null;
   try {
     result = await send();
   } catch (error) {
     await release();
     throw error;
   }
-  if (result.error) await release();
+  if (result === null || result.error) await release();
   return result;
 }

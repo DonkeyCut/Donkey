@@ -41,8 +41,12 @@ export type QueueEmailInput = {
 export type DeliverResult = { id: string; state: "sent" | "queued" | "failed" | "skipped"; error: string | null };
 
 type Outcome =
-  | { outcome: "sent" | "retried" | "failed" | "skipped" | "busy" }
-  | { outcome: "refused"; retryAfterSeconds: number };
+  | { outcome: "sent" | "failed" | "skipped" | "busy" }
+  | { outcome: "refused" | "retried"; retryAfterSeconds: number };
+
+// A provider blip backs the row off, further each time, so a bad hour does
+// not burn its attempts.
+const backoffSeconds = (attempts: number) => attempts * 5 * 60;
 
 function claimable(now: Date): Prisma.EmailSendWhereInput {
   return {
@@ -75,12 +79,13 @@ async function rowsOf(inputs: QueueEmailInput[]) {
   }));
 }
 
-/** Queues many emails at once; rows already queued under the same key are
- * left as they are. Returns how many were new. */
+/** Queues many emails at once and sends for a drainer; rows already queued
+ * under the same key are left as they are, and still get the drainer, so a
+ * resumed promotion moves. Returns how many were new. */
 export async function queueEmails(inputs: QueueEmailInput[]): Promise<number> {
   if (inputs.length === 0) return 0;
   const { count } = await prisma.emailSend.createMany({ data: await rowsOf(inputs), skipDuplicates: true });
-  if (count > 0) await scheduleDrain(0);
+  await scheduleDrain(0);
   return count;
 }
 
@@ -92,24 +97,19 @@ export async function deliverEmail(input: QueueEmailInput): Promise<DeliverResul
   const row = await prisma.emailSend.findUniqueOrThrow({ where: { idempotencyKey: input.idempotencyKey } });
   if (row.state === "queued") {
     const outcome = await sendRow(row, new Date());
-    if (outcome.outcome === "refused") await scheduleDrain(outcome.retryAfterSeconds);
+    if (outcome.outcome === "refused" || outcome.outcome === "retried") await scheduleDrain(outcome.retryAfterSeconds);
   }
   const settled = await prisma.emailSend.findUniqueOrThrow({ select: { error: true, id: true, state: true }, where: { id: row.id } });
   const state = settled.state === "sending" ? "queued" : (settled.state as DeliverResult["state"]);
   return { error: settled.error, id: settled.id, state };
 }
 
-/** Makes sure a drainer is coming, no sooner than the delay. One pending
- * drain job serves every caller. */
+/** Makes sure a drainer is coming no later than the delay. One pending
+ * drain job serves every caller; one held back for later is pulled forward. */
 export async function scheduleDrain(delaySeconds: number): Promise<void> {
-  const pending = await prisma.asyncJob.findFirst({
-    select: { id: true },
-    where: { kind: "email-drain", state: { in: ["queued", "running"] } },
-  });
-  if (pending) return;
   // Imported here because the job registry imports this module.
-  const { enqueueJob } = await import("@/lib/jobs/queue");
-  await enqueueJob("email-drain", {}, "system", { delaySeconds });
+  const { ensureJob } = await import("@/lib/jobs/queue");
+  await ensureJob("email-drain", {}, "system", { delaySeconds });
 }
 
 type DrainableRow = Awaited<ReturnType<typeof prisma.emailSend.findMany>>[number];
@@ -139,14 +139,16 @@ async function sendRow(row: DrainableRow, now: Date): Promise<Outcome> {
 
   try {
     if (!isResendConfigured()) throw new ResendNotConfiguredError();
-    const message = await kind.build(payload, outboxRow);
-    if (!message) {
+    // The slot is held before the message is built, so anything the build
+    // writes down (a claim window, say) dates from the send itself.
+    const result = await withDailyEmailQuota(kind.quota, async () => {
+      const message = await kind.build(payload, outboxRow);
+      return message ? getResend().emails.send(message, { idempotencyKey: row.idempotencyKey }) : null;
+    });
+    if (result === null) {
       await settle({ attempts, error: null, state: "skipped" });
       return { outcome: "skipped" };
     }
-    const result = await withDailyEmailQuota(kind.quota, () =>
-      getResend().emails.send(message, { idempotencyKey: row.idempotencyKey }),
-    );
     if (result.error) throw new Error(`Resend send failed: ${result.error.name}: ${result.error.message}`);
     await settle({ attempts, error: null, sentAt: new Date(), state: "sent" });
     await kind.afterSend?.(payload, outboxRow);
@@ -157,15 +159,14 @@ async function sendRow(row: DrainableRow, now: Date): Promise<Outcome> {
       return { outcome: "refused", retryAfterSeconds: error.retryAfterSeconds };
     }
     if (isPermanent(error) || attempts >= MAX_ATTEMPTS) return giveUp(error, payload);
-    // A provider blip: back off, further each time, so a bad hour does not
-    // burn the row's attempts.
+    const retryAfterSeconds = backoffSeconds(attempts);
     await settle({
       attempts,
       error: messageOf(error),
-      notBefore: new Date(now.getTime() + attempts * 5 * 60_000),
+      notBefore: new Date(now.getTime() + retryAfterSeconds * 1000),
       state: "queued",
     });
-    return { outcome: "retried" };
+    return { outcome: "retried", retryAfterSeconds };
   }
 }
 
@@ -174,7 +175,8 @@ export type DrainResult = {
   failed: number;
   skipped: number;
   retried: number;
-  // Seconds until a refused quota is expected to open; null when nothing was refused.
+  // Seconds until the next thing worth coming back for: a refused quota
+  // expected to open, or a backed-off row coming due. Null when nothing waits.
   retryAfterSeconds: number | null;
   // Whether the budget ran out with rows still owed.
   more: boolean;
@@ -226,8 +228,25 @@ export async function drainOutbox(budgetMs: number): Promise<DrainResult> {
   }
 
   await finishPromotions(touchedPromotions);
-  if (refused.size > 0) result.retryAfterSeconds = Math.min(...refused.values());
+  const waits = [...refused.values()];
+  const backedOff = await nextBackedOffRow(new Date());
+  if (backedOff) waits.push(Math.max(1, Math.ceil((backedOff.getTime() - Date.now()) / 1000)));
+  if (waits.length > 0) result.retryAfterSeconds = Math.min(...waits);
   return result;
+}
+
+// When the soonest row held back by a failed attempt comes due.
+async function nextBackedOffRow(now: Date): Promise<Date | null> {
+  const row = await prisma.emailSend.findFirst({
+    orderBy: { notBefore: "asc" },
+    select: { notBefore: true },
+    where: {
+      notBefore: { gt: now },
+      state: "queued",
+      OR: [{ promotionId: null }, { promotion: { status: "sending" } }],
+    },
+  });
+  return row?.notBefore ?? null;
 }
 
 // A promotion with nothing left to send is sent.
@@ -273,6 +292,7 @@ export type OutboxOverview = {
   kinds: OutboxKindRow[];
   // What is waiting, then what failed, then what went most recently.
   items: OutboxItem[];
+  // A drainer is running or due now; one held back by a quota wait is not.
   drainPending: boolean;
 };
 
@@ -306,7 +326,13 @@ export async function outboxOverview(now = new Date()): Promise<OutboxOverview> 
       take: ITEMS,
       where: { state: { in: ["sent", "skipped"] } },
     }),
-    prisma.asyncJob.findFirst({ select: { id: true }, where: { kind: "email-drain", state: { in: ["queued", "running"] } } }),
+    prisma.asyncJob.findFirst({
+      select: { id: true },
+      where: {
+        kind: "email-drain",
+        OR: [{ state: "running" }, { notBefore: null, state: "queued" }, { notBefore: { lte: now }, state: "queued" }],
+      },
+    }),
   ]);
   const countOf = (groups: { kind: string; _count: number }[], kind: string) =>
     groups.find((g) => g.kind === kind)?._count ?? 0;

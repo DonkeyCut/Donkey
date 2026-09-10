@@ -81,18 +81,54 @@ export async function enqueueJob(
   createdBy: string,
   options: { delaySeconds?: number } = {},
 ): Promise<{ jobId: string }> {
-  const job = await prisma.asyncJob.create({ data: { kind, payload, createdBy } });
-  const queued = await publishJob(job.id, options.delaySeconds);
+  const delaySeconds = options.delaySeconds ?? 0;
+  const job = await prisma.asyncJob.create({
+    data: { createdBy, kind, notBefore: delaySeconds > 0 ? dueAt(delaySeconds) : null, payload },
+  });
+  const queued = await publishJob(job.id, delaySeconds);
   if (!queued) await executeJob(job.id);
   return { jobId: job.id };
 }
 
+function dueAt(delaySeconds: number): Date {
+  return new Date(Date.now() + delaySeconds * 1000);
+}
+
+/** One job of this kind on its way, no later than the delay. A pending job
+ * that is due sooner is left alone; one held back for later is pulled
+ * forward; none means a new one. Kinds whose work is shared, such as the
+ * email drainer, are asked for this way so every caller feeds one run. */
+export async function ensureJob(
+  kind: string,
+  payload: Prisma.InputJsonValue,
+  createdBy: string,
+  options: { delaySeconds?: number } = {},
+): Promise<{ jobId: string }> {
+  const delaySeconds = options.delaySeconds ?? 0;
+  const pending = await prisma.asyncJob.findFirst({
+    orderBy: { createdAt: "asc" },
+    select: { id: true, notBefore: true, state: true },
+    where: { kind, state: { in: ["queued", "running"] } },
+  });
+  if (!pending) return enqueueJob(kind, payload, createdBy, { delaySeconds });
+  const due = dueAt(delaySeconds);
+  if (pending.state === "queued" && pending.notBefore && pending.notBefore > due) {
+    // The earlier message still arrives on its own schedule; by then the row
+    // is settled and the claim turns that delivery away.
+    await prisma.asyncJob.update({ data: { notBefore: delaySeconds > 0 ? due : null }, where: { id: pending.id } });
+    await publishJob(pending.id, delaySeconds);
+  }
+  return { jobId: pending.id };
+}
+
 /** Self-heal one polled row: a stale queued job re-publishes its message, and
  * a stale running job (crashed execution) becomes an error instead of spinning
- * the poller forever. Returns the row, refreshed when it changed. */
+ * the poller forever. A job held back until later is left to its delayed
+ * message. Returns the row, refreshed when it changed. */
 export async function healJob(job: JobRow): Promise<JobRow> {
   const idleMs = Date.now() - job.updatedAt.getTime();
-  if (job.state === "queued" && idleMs > STALE_QUEUED_MS) {
+  const held = job.notBefore !== null && job.notBefore.getTime() > Date.now();
+  if (job.state === "queued" && idleMs > STALE_QUEUED_MS && !held) {
     await publishJob(job.id);
   } else if (job.state === "running" && idleMs > STALE_RUNNING_MS) {
     await prisma.asyncJob.updateMany({
@@ -162,7 +198,10 @@ export async function executeJob(jobId: string): Promise<Response> {
   } catch (e) {
     if (e instanceof JobDeferred) {
       await prisma.asyncJob
-        .updateMany({ where: { id: jobId, state: "running" }, data: { state: "queued" } })
+        .updateMany({
+          data: { notBefore: dueAt(e.retryAfterSeconds), state: "queued" },
+          where: { id: jobId, state: "running" },
+        })
         .catch(() => {});
       if (await publishJob(jobId, e.retryAfterSeconds)) return NextResponse.json({ ok: true });
       return NextResponse.json(

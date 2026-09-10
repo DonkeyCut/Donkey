@@ -9,6 +9,9 @@ model AsyncJob {
   kind      String
   payload   Json
   state     String   @default("queued") // queued | running | done | error
+  // When a held-back job is due; the message carrying it is delayed to match,
+  // so a poll before then republishes nothing.
+  notBefore DateTime?
   result    Json?
   error     String?
   createdBy String
