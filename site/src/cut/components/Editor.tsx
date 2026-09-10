@@ -1173,7 +1173,7 @@ export function Editor({
     <div ref={shellRef} tabIndex={-1} className="flex h-full min-w-0 overflow-hidden outline-none">
       {/* The tab wears whatever is still running here. */}
       <TabStatus />
-      <div className="grid min-w-0 flex-1 grid-rows-[46px_minmax(0,1fr)_auto_auto]">
+      <div className="grid min-w-0 flex-1 grid-rows-[46px_minmax(0,1fr)_auto]">
         {viewer ? (
           <ViewerTopBar chatStatus={chatStatus} />
         ) : (
@@ -1200,8 +1200,12 @@ export function Editor({
           </div>
           {hasInspector && <Inspector />}
         </div>
-        <SpeedCurveStrip />
-        <Timeline />
+        {/* The strip anchors to the timeline's top edge and floats over the
+            row above it. */}
+        <div className="relative min-w-0">
+          <SpeedCurveStrip />
+          <Timeline />
+        </div>
       </div>
       {(!viewer || sharedFeatures?.chat) && (
         <AiPanel

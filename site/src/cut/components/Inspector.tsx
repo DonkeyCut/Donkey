@@ -1010,7 +1010,7 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
   const speed = speedDraft ?? (curved ? retimeOf(clip).rate : (clip.speed ?? 1));
   const speedLen =
     curved && speedDraft === null ? retimeOf(clip).len : (clip.out - clip.in) / (speed > 0 ? speed : 1);
-  const curveOpen = useSpeedCurveUi((s) => s.clipId === clip.id);
+  const curveOpen = useSpeedCurveUi((s) => s.open.has(clip.id));
   // Typing can trim out to the source's end but no further; an image has no
   // intrinsic duration, so its clip can be any length.
   const maxOut = asset && asset.type !== "image" ? asset.duration : Infinity;
@@ -1130,13 +1130,13 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
             onClick={() => {
               const ui = useSpeedCurveUi.getState();
               if (curveOpen) {
-                ui.close();
+                ui.close(clip.id);
                 return;
               }
               if (!curved) {
                 useEditor.getState().setClipSpeedCurve(clip.id, flatSpeedCurve(clip));
               }
-              ui.open(clip.id);
+              ui.openFor(clip.id);
             }}
           >
             {curveOpen ? "Editing" : curved ? "Edit" : "Add"}

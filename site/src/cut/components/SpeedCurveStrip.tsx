@@ -1,6 +1,7 @@
 "use client";
 
-import { Minus, Plus, RotateCcw, X } from "lucide-react";
+import { Menu as MenuPrimitive } from "@base-ui/react/menu";
+import { ChevronDown, Minus, Plus, RotateCcw, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   flatSpeedCurve,
@@ -9,26 +10,35 @@ import {
   SPEED_CURVE_MIN,
   SPEED_CURVE_PRESETS,
   speedCurveOf,
+  speedCurvePresetOf,
   type Retime,
   type SpeedNode,
 } from "@donkeycut/effects-kit";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
+import { PICKED_RING } from "@/cut/lib/assetPick";
 import { startDrag } from "@/cut/lib/drag";
-import { planFilmstrip, type FilmTile } from "@/cut/lib/filmstrip";
-import { playheadAt, subscribePlayhead } from "@/cut/lib/playhead";
+import { playheadAt, setSkim, skimAt, subscribePlayhead } from "@/cut/lib/playhead";
 import { useSpeedCurveUi } from "@/cut/lib/speedCurveUi";
 import { useEditor } from "@/cut/lib/store";
-import type { MediaAsset, VideoClip } from "@/cut/lib/types";
+import type { VideoClip } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 
 /**
- * The speed curve editor: a strip docked over the timeline that draws one
+ * The speed curve editor: a strip floating over the timeline's top edge, the
+ * full width of the editor, over whatever sits above it. It draws one
  * clip's rate across its footage. Left to right is the clip's trimmed source;
  * up and down is the rate on a log scale, 1× through the middle. Nodes are
- * the curve's control points: drag one to move it, click the graph to add
- * one on the curve, double-click a node to take it away. The picture behind
- * the graph is the footage at 1×, so a node lands on the moment it slows or
- * hurries. Drags scrub the preview to the node, so what plays there is on
- * screen while it is placed.
+ * the curve's control points: drag one to move it, click the line to add one
+ * where it was clicked, double-click a node to take it away. A click off the
+ * line moves the playhead there, and hovering the graph skims the preview,
+ * so the moment under the pointer is on screen before a node is placed.
+ * Touching the line or a node leaves the playhead where it is.
  *
  * Edits draft locally and commit on release through the store's one curve
  * setter, so every gesture is one undo step and every surface reads the
@@ -40,10 +50,15 @@ const PAD_X = 14;
 const PAD_Y = 10;
 /** Pixels within which a drag lands on a beat or the 1× line. */
 const SNAP_PX = 6;
+/** Pixels within which a press counts as a press on the line. */
+const LINE_HIT_PX = 8;
 /** Closest two nodes may sit, source seconds. */
 const MIN_GAP = 1 / 60;
 const FRAME = 1 / 30;
-const RATE_LINES = [0.1, 0.25, 0.5, 1, 2, 4, 10];
+/** The grid: the ends carry a label, 1× is the solid line through the
+ * middle, and the lines halfway between, on the log scale, are dashed. */
+const RATE_LINES = [10, Math.sqrt(10), 1, 1 / Math.sqrt(10), 0.1];
+const LABELED = new Set([10, 0.1]);
 
 const LOG_MIN = Math.log10(SPEED_CURVE_MIN);
 const LOG_MAX = Math.log10(SPEED_CURVE_MAX);
@@ -54,17 +69,19 @@ const fmtRate = (r: number) => `${+r.toFixed(2)}×`;
 const fmtSec = (s: number) => `${s.toFixed(1)}s`;
 
 export function SpeedCurveStrip() {
-  const clipId = useSpeedCurveUi((s) => s.clipId);
+  // The strip shows for the selected clip when that clip's curve is open.
+  // Every clip keeps its own state, so a selection elsewhere hides the strip
+  // and a return to the clip brings it back.
+  const selectedId = useEditor((s) => (s.selection?.kind === "clip" ? s.selection.id : null));
+  const clipId = useSpeedCurveUi((s) => (selectedId && s.open.has(selectedId) ? selectedId : null));
   const clip = useEditor((s) => (clipId ? s.clips.find((c) => c.id === clipId) : undefined));
-  const selected = useEditor(
-    (s) => !!clipId && s.selection?.kind === "clip" && s.selection.id === clipId
-  );
-  // The strip follows the clip it opened for: a selection elsewhere, or the
-  // clip going away, closes it.
+  // Clips that are gone drop their entry.
+  const clipIds = useEditor((s) => s.clips);
   useEffect(() => {
-    if (clipId && (!clip || !selected)) useSpeedCurveUi.getState().close();
-  }, [clipId, clip, selected]);
-  if (!clip || !selected) return null;
+    const ui = useSpeedCurveUi.getState();
+    for (const id of ui.open) if (!clipIds.some((c) => c.id === id)) ui.close(id);
+  }, [clipIds]);
+  if (!clip) return null;
   return <Strip key={clip.id} clip={clip} />;
 }
 
@@ -117,11 +134,6 @@ function Strip({ clip }: { clip: VideoClip }) {
     [asset?.beats, clip.in, clip.out]
   );
 
-  const tiles = useMemo<FilmTile[]>(
-    () => (asset && innerW > 1 ? stripTiles(asset, clip, innerW, axis) : []),
-    [asset, clip, innerW, axis]
-  );
-
   const curvePath = useMemo(() => {
     if (innerW <= 1) return "";
     const steps = Math.max(2, Math.min(400, Math.round(innerW / 2)));
@@ -134,15 +146,15 @@ function Strip({ clip }: { clip: VideoClip }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rt, axis, innerW, innerH]);
 
-  // The playhead, mapped through the clip's map onto the source axis. One DOM
-  // write per move.
+  // The playhead and the skimmer, mapped through the clip's map onto the
+  // graph's axis. One DOM write per line per move.
   const playheadRef = useRef<HTMLDivElement | null>(null);
+  const skimRef = useRef<HTMLDivElement | null>(null);
   const geom = useRef({ xOf, rt, start: clip.start, len: rt.len });
-  const paintPlayhead = () => {
-    const el = playheadRef.current;
+  const paintLine = (el: HTMLDivElement | null, t: number | null) => {
     if (!el) return;
     const g = geom.current;
-    const tLocal = playheadAt() - g.start;
+    const tLocal = t === null ? -1 : t - g.start;
     if (tLocal < -1e-6 || tLocal > g.len + 1e-6) {
       el.style.opacity = "0";
       return;
@@ -150,13 +162,21 @@ function Strip({ clip }: { clip: VideoClip }) {
     el.style.opacity = "1";
     el.style.left = `${g.xOf(g.rt.srcAt(tLocal))}px`;
   };
-  // The map and the geometry change with every draft and resize; the line
-  // reads the newest through the ref and repaints after each render.
+  const paintLines = () => {
+    paintLine(playheadRef.current, playheadAt());
+    paintLine(skimRef.current, skimAt());
+  };
+  // The map and the geometry change with every draft and resize; the lines
+  // read the newest through the ref and repaint after each render.
   useEffect(() => {
     geom.current = { xOf, rt, start: clip.start, len: rt.len };
-    paintPlayhead();
+    paintLines();
   });
-  useEffect(() => subscribePlayhead(paintPlayhead), []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => subscribePlayhead(paintLines), []);
+  // The skimmer belongs to the pointer over the graph; the strip closing
+  // leaves it off.
+  useEffect(() => () => setSkim(null), []);
 
   const pick = (src: number | null) => {
     useEditor.setState({
@@ -166,10 +186,6 @@ function Strip({ clip }: { clip: VideoClip }) {
   const commit = (next: SpeedNode[]) => {
     setDraft(null);
     useEditor.getState().setClipSpeedCurve(clip.id, next);
-  };
-  const seekToSrc = (src: number, list: SpeedNode[]) => {
-    const map = retimeOf({ in: clip.in, out: clip.out, speedCurve: list, reverse: clip.reverse });
-    useEditor.getState().seek(clip.start + map.tAt(src));
   };
 
   /** Where a node may sit between its neighbours. */
@@ -211,19 +227,74 @@ function Strip({ clip }: { clip: VideoClip }) {
     const next = nodes.map((n, j) => (j === i ? ([src, rate] as SpeedNode) : n));
     pick(src);
     commit(next);
-    seekToSrc(src, next);
   };
 
+  const srcAtX = (x: number) => Math.min(clip.out, Math.max(clip.in, srcOf(x)));
+  /** Whether a graph point sits on the drawn line. A steep segment is nearly
+   * vertical, so the line is sampled across the hit width, and the press
+   * counts when any sample is within reach. */
+  const onLine = (x: number, y: number) => {
+    for (let dx = -LINE_HIT_PX; dx <= LINE_HIT_PX; dx += 2) {
+      const sx = x + dx;
+      if (sx < PAD_X || sx > PAD_X + innerW) continue;
+      if (Math.abs(yOf(rt.rateAtSrc(srcAtX(sx))) - y) <= LINE_HIT_PX) return true;
+    }
+    return false;
+  };
+  const graphPoint = (e: { clientX: number; clientY: number; currentTarget: Element }) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
+
+  // A press on the line adds a node there; a press anywhere else in the
+  // strip moves the playhead, and dragging from there scrubs.
+  const scrubFrom = (e: React.PointerEvent, x: number) => {
+    pick(null);
+    setSkim(null);
+    const seekAt = (px: number) => useEditor.getState().seek(clip.start + rt.tAt(srcAtX(px)));
+    seekAt(x);
+    startDrag(e, { onMove: (dx) => seekAt(x + dx) });
+  };
   const onGraphPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     if (e.button !== 0) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const src = Math.min(clip.out, Math.max(clip.in, srcOf(x)));
-    if (nodes.some((n) => Math.abs(xOf(n[0]) - x) < SNAP_PX * 2)) return;
-    const next = insertAt(src, rt.rateAtSrc(src), nodes);
-    pick(src);
-    commit(next);
-    seekToSrc(src, next);
+    const { x, y } = graphPoint(e);
+    // The line beside a node belongs to the node's handle, so a press there
+    // scrubs like any other.
+    if (onLine(x, y) && !nodes.some((n) => Math.abs(xOf(n[0]) - x) < SNAP_PX * 2)) {
+      const src = srcAtX(x);
+      const next = insertAt(src, rt.rateAtSrc(src), nodes);
+      pick(src);
+      commit(next);
+      return;
+    }
+    scrubFrom(e, x);
+  };
+  const onHeaderPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || (e.target as Element).closest("button")) return;
+    scrubFrom(e, e.clientX - e.currentTarget.getBoundingClientRect().left);
+  };
+
+  // Hovering skims the preview to the moment under the pointer, the way the
+  // timeline does; a held button or a running cut leaves the picture to the
+  // playhead. The cursor says what a press would do.
+  const onGraphPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    const { x, y } = graphPoint(e);
+    e.currentTarget.style.cursor = onLine(x, y) ? "crosshair" : "default";
+    if (e.buttons || useEditor.getState().playing) return setSkim(null);
+    setSkim(clip.start + rt.tAt(srcAtX(x)));
+  };
+  const onGraphPointerLeave = () => setSkim(null);
+
+  const onCapPointerDown = (e: React.PointerEvent) => {
+    const box = boxRef.current;
+    if (!box) return;
+    const left = box.getBoundingClientRect().left;
+    const x0 = e.clientX - left;
+    setSkim(null);
+    startDrag(e, {
+      cursor: () => "ew-resize",
+      onMove: (dx) => useEditor.getState().seek(clip.start + rt.tAt(srcAtX(x0 + dx))),
+    });
   };
 
   const onNodePointerDown = (e: React.PointerEvent, i: number) => {
@@ -235,6 +306,7 @@ function Strip({ clip }: { clip: VideoClip }) {
     const { lo, hi } = bounds(nodes, i);
     let live: SpeedNode[] = nodes;
     startDrag(e, {
+      cursor: () => "grabbing",
       onMove: (dx, dy, ev) => {
         let x = x0 + dx;
         let y = y0 + dy;
@@ -248,12 +320,10 @@ function Strip({ clip }: { clip: VideoClip }) {
         live = nodes.map((n, j) => (j === i ? ([src, rate] as SpeedNode) : n));
         setDraft(live);
         pick(src);
-        seekToSrc(src, live);
       },
       onUp: (_dx, _dy, moved) => {
         setHeldAxis(null);
         if (moved) commit(live);
-        else seekToSrc(node[0], nodes);
       },
     });
   };
@@ -278,7 +348,7 @@ function Strip({ clip }: { clip: VideoClip }) {
         removePicked();
         break;
       case "Escape":
-        useSpeedCurveUi.getState().close();
+        useSpeedCurveUi.getState().close(clip.id);
         break;
       default:
         return;
@@ -289,36 +359,81 @@ function Strip({ clip }: { clip: VideoClip }) {
 
   const pickedRate = picked === null ? null : nodes.find((n) => Math.abs(n[0] - picked) < 1e-6)?.[1];
 
+  // The picker names the preset the curve is; a curve that is none of them
+  // is "Custom", drawn as itself through the span.
+  const presetId = speedCurvePresetOf(nodes, clip.in, clip.out);
+  const preset = SPEED_CURVE_PRESETS.find((p) => p.id === presetId);
+  const span = Math.max(1e-6, clip.out - clip.in);
+  const shape = useMemo<SpeedNode[]>(
+    () => preset?.shape ?? nodes.map(([at, r]): SpeedNode => [(at - clip.in) / span, r]),
+    [preset, nodes, clip.in, span]
+  );
+
   return (
     <div
-      className="flex min-w-0 flex-col border-t border-border bg-background outline-none"
+      className="absolute inset-x-0 bottom-full z-40 flex min-w-0 flex-col border-t border-border bg-muted shadow-[0_-6px_16px_rgba(0,0,0,0.08)] outline-none"
       tabIndex={0}
       onKeyDown={onKeyDown}
       data-testid="speed-curve-strip"
     >
-      <div className="flex h-8 items-center gap-1.5 px-2 text-[11px]">
-        <span className="font-medium">Speed Curve</span>
+      <div
+        className="flex h-10 items-center gap-1.5 px-2 pt-2 text-[11px]"
+        onPointerDown={onHeaderPointerDown}
+      >
         {pickedRate != null && (
           <span className="tabular-nums text-foreground/70">
             node {fmtRate(pickedRate)} at {fmtSec(rt.tAt(picked!))}
           </span>
         )}
         <span className="flex-1" />
-        {SPEED_CURVE_PRESETS.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            title={p.hint}
-            className="rounded px-1.5 py-0.5 text-foreground hover:bg-accent"
-            onClick={() => {
-              pick(null);
-              setDraft(null);
-              useEditor.getState().setClipSpeedPreset(clip.id, p.id);
-            }}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="outline"
+                size="xs"
+                title={preset?.hint ?? "Pick a preset curve"}
+                className="gap-1.5 pl-1.5 font-normal"
+              />
+            }
           >
-            {p.label}
-          </button>
-        ))}
+            <Sparkline shape={shape} />
+            <span>{preset?.label ?? "Custom"}</span>
+            <ChevronDown className="size-3 text-muted-foreground" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="center" sideOffset={8} className="overflow-visible p-0">
+            {/* The pad is the picked tile's ring and its offset, drawn outside
+                the tile. */}
+            <div className="grid grid-cols-2 gap-2 p-2">
+              {SPEED_CURVE_PRESETS.map((p) => (
+                <DropdownMenuItem
+                  key={p.id}
+                  title={p.hint}
+                  className={cn(
+                    "relative block h-20 w-40 overflow-hidden rounded-xl border border-border bg-muted/40 p-0 focus:bg-muted",
+                    p.id === presetId && PICKED_RING
+                  )}
+                  onClick={() => {
+                    pick(null);
+                    setDraft(null);
+                    useEditor.getState().setClipSpeedPreset(clip.id, p.id);
+                  }}
+                >
+                  <span className="absolute inset-x-2.5 top-2.5">
+                    <Sparkline shape={p.shape} w={140} h={48} grid />
+                  </span>
+                  <span className="absolute bottom-1.5 left-2.5 text-[11.5px] font-medium">{p.label}</span>
+                </DropdownMenuItem>
+              ))}
+            </div>
+            <MenuPrimitive.Arrow className="absolute -bottom-2 left-1/2 -translate-x-1/2">
+              <svg width="20" height="10" viewBox="0 0 20 10" className="block">
+                <path d="M0 0 L10 10 L20 0" className="fill-popover" />
+                <path d="M0 0 L10 10 L20 0" fill="none" className="stroke-foreground/10" />
+              </svg>
+            </MenuPrimitive.Arrow>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <span className="mx-1 h-4 w-px bg-border" />
         <IconButton title="Add a node at the playhead" onClick={addAtPlayhead}>
           <Plus className="size-3.5" />
@@ -342,28 +457,16 @@ function Strip({ clip }: { clip: VideoClip }) {
         >
           <RotateCcw className="size-3.5" />
         </IconButton>
-        <IconButton title="Close (Esc)" onClick={() => useSpeedCurveUi.getState().close()}>
+        <IconButton title="Close (Esc)" onClick={() => useSpeedCurveUi.getState().close(clip.id)}>
           <X className="size-3.5" />
         </IconButton>
       </div>
       <div ref={boxRef} className="relative select-none overflow-hidden" style={{ height: GRAPH_H }}>
-        {/* The footage at 1×, dimmed, so a node sits on its moment. */}
-        <div className="pointer-events-none absolute inset-y-0" style={{ left: PAD_X, width: innerW }}>
-          {tiles.map((t, i) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              key={i}
-              src={t.src}
-              alt=""
-              draggable={false}
-              className="absolute top-0 h-full object-cover opacity-30"
-              style={{ left: t.left, width: t.width }}
-            />
-          ))}
-        </div>
         <svg
-          className="absolute inset-0 h-full w-full cursor-crosshair"
+          className="absolute inset-0 h-full w-full"
           onPointerDown={onGraphPointerDown}
+          onPointerMove={onGraphPointerMove}
+          onPointerLeave={onGraphPointerLeave}
         >
           {RATE_LINES.map((r) => (
             <g key={r}>
@@ -373,12 +476,14 @@ function Strip({ clip }: { clip: VideoClip }) {
                 y1={yOf(r)}
                 y2={yOf(r)}
                 stroke="currentColor"
-                strokeOpacity={r === 1 ? 0.45 : 0.14}
+                strokeOpacity={r === 1 ? 0.45 : 0.18}
                 strokeDasharray={r === 1 ? undefined : "2 3"}
               />
-              <text x={PAD_X + 3} y={yOf(r) - 2} fontSize={9} fill="currentColor" fillOpacity={0.85}>
-                {fmtRate(r)}
-              </text>
+              {LABELED.has(r) && (
+                <text x={PAD_X + 3} y={yOf(r) - 2} fontSize={9} fill="currentColor" fillOpacity={0.85}>
+                  {fmtRate(r)}
+                </text>
+              )}
             </g>
           ))}
           {beats.map((b) => (
@@ -404,7 +509,7 @@ function Strip({ clip }: { clip: VideoClip }) {
                 fill="white"
                 stroke={isPicked ? "#0a84ff" : "rgba(0,0,0,0.5)"}
                 strokeWidth={isPicked ? 2 : 1}
-                className="cursor-move"
+                className="cursor-grab"
                 onPointerDown={(e) => {
                   e.stopPropagation();
                   onNodePointerDown(e, i);
@@ -420,12 +525,86 @@ function Strip({ clip }: { clip: VideoClip }) {
           })}
         </svg>
         <div
-          ref={playheadRef}
-          className="pointer-events-none absolute top-0 h-full w-px bg-red-500"
+          ref={skimRef}
+          className="pointer-events-none absolute top-0 h-full w-px bg-foreground/30"
           style={{ opacity: 0 }}
         />
+        <div
+          ref={playheadRef}
+          className="pointer-events-none absolute top-0 h-full w-[1.5px] bg-[#0a84ff] shadow-[0_0_8px_rgba(10,132,255,0.6)]"
+          style={{ opacity: 0 }}
+        >
+          {/* The timeline playhead's grab cap: drag it to scrub. */}
+          <div
+            className="pointer-events-auto absolute top-0 left-[-4.5px] h-3 w-2.5 cursor-ew-resize rounded-t-[3px] bg-[#0a84ff] [clip-path:polygon(0_0,100%_0,100%_58%,50%_100%,0_58%)]"
+            onPointerDown={onCapPointerDown}
+          />
+        </div>
       </div>
     </div>
+  );
+}
+
+/** A curve at a glance: the 1× line and the rate through the span, on the
+ * same log scale as the graph, drawn by the same evaluator. */
+function Sparkline({
+  shape,
+  w = 32,
+  h = 16,
+  grid,
+}: {
+  shape: SpeedNode[];
+  w?: number;
+  h?: number;
+  /** Draw the graph's dashed ends around the 1× line, for a tile. */
+  grid?: boolean;
+}) {
+  const pad = 2;
+  const yOf = (rate: number) =>
+    pad + (1 - (Math.log10(clampRate(rate)) - LOG_MIN) / (LOG_MAX - LOG_MIN)) * (h - pad * 2);
+  const d = useMemo(() => {
+    const rt = retimeOf({ in: 0, out: 1, speedCurve: shape });
+    const steps = Math.max(32, Math.round(w / 2));
+    const pts: string[] = [];
+    for (let i = 0; i <= steps; i++) {
+      const x = 1 + (i / steps) * (w - 2);
+      pts.push(`${x.toFixed(1)},${yOf(rt.rateAtSrc(i / steps)).toFixed(1)}`);
+    }
+    return `M${pts.join("L")}`;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shape, w, h]);
+  return (
+    // Sized inline: a menu item squares every svg inside it to an icon, and
+    // an inline size outranks that rule.
+    <svg
+      viewBox={`0 0 ${w} ${h}`}
+      style={{ width: w, height: h }}
+      className="shrink-0 overflow-visible"
+      aria-hidden
+    >
+      {grid &&
+        [SPEED_CURVE_MAX, SPEED_CURVE_MIN].map((r) => (
+          <line
+            key={r}
+            x1={0}
+            x2={w}
+            y1={yOf(r)}
+            y2={yOf(r)}
+            stroke="currentColor"
+            strokeOpacity={0.2}
+            strokeDasharray="2 3"
+          />
+        ))}
+      <line x1={0} x2={w} y1={yOf(1)} y2={yOf(1)} stroke="currentColor" strokeOpacity={0.3} />
+      <path
+        d={d}
+        fill="none"
+        stroke="#0a84ff"
+        strokeWidth={grid ? 2 : 1.5}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }
 
@@ -454,24 +633,4 @@ function IconButton({
       {children}
     </button>
   );
-}
-
-/** The strip's tiles: the same plan the clip's bar draws, laid across `w`
- * pixels — same map, same tile times, so the two pictures agree. */
-function stripTiles(asset: MediaAsset, clip: VideoClip, w: number, retime: Retime): FilmTile[] {
-  if (!asset.thumbs?.length || !asset.thumbStep) return [];
-  return planFilmstrip({
-    thumbs: asset.thumbs,
-    thumbStep: asset.thumbStep,
-    duration: asset.duration,
-    aspect: (asset.width ?? 16) / Math.max(1, asset.height ?? 9),
-    filmIn: clip.in,
-    w,
-    pps: w / Math.max(1e-3, retime.len),
-    speed: retime.rate,
-    retime,
-    tileH: GRAPH_H,
-    minTileW: 24,
-    cuts: asset.sceneCuts,
-  });
 }
