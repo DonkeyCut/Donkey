@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -86,7 +86,7 @@ function useRemovalWriter(clip: VideoClip) {
   return { draft, commit };
 }
 
-export function RemovalPanel({ clip, onBack }: { clip: VideoClip; onBack: () => void }) {
+export function RemovalPanel({ clip }: { clip: VideoClip }) {
   const removal = clip.removal;
   const { commit } = useRemovalWriter(clip);
   const peeking = useEditor((s) => s.removalPeek === clip.id);
@@ -121,15 +121,7 @@ export function RemovalPanel({ clip, onBack }: { clip: VideoClip; onBack: () => 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 bg-card pb-2">
-        <div className="flex h-10 shrink-0 items-center gap-1 px-2.5 text-sm font-semibold tracking-tight">
-          <button
-            type="button"
-            aria-label="Back"
-            className="clip-cutout-back grid size-6 place-items-center rounded text-muted-foreground transition-colors hover:text-foreground"
-            onClick={onBack}
-          >
-            <ChevronLeft className="size-4" />
-          </button>
+        <div className="flex h-10 shrink-0 items-center px-3.5 text-sm font-semibold tracking-tight">
           Cutout
         </div>
       </div>

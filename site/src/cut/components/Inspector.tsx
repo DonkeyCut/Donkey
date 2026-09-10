@@ -2,7 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, Frame, Italic, Link2, Link2Off, Loader2, Palette, Scissors, Smile, Trash2, Type, User, Volume2 } from "lucide-react";
+import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, Frame, House, Italic, Link2, Link2Off, Loader2, type LucideIcon, Palette, PanelRightClose, PanelRightOpen, Scissors, Smile, Sparkles, Trash2, Type, User, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSpeedCurveUi } from "@/cut/lib/speedCurveUi";
 import { EmojiPicker } from "@/cut/components/EmojiPicker";
@@ -181,7 +181,7 @@ export function Inspector() {
   );
 
   return (
-    <aside data-field-panel="" className="flex min-h-0 flex-col border-l border-border bg-card">
+    <aside data-field-panel="" className="flex min-h-0 bg-muted/40">
       {/* Keyed on what is selected: picking something else builds a fresh
           column, so it opens on that thing's own fields. */}
       <InspectorColumn
@@ -194,6 +194,27 @@ export function Inspector() {
   );
 }
 
+/** A view the rail opens beside Home. */
+type RailTab = { id: string; label: string; Icon: LucideIcon };
+
+/** The video clip's deep views, in rail order under Home. */
+const CLIP_TABS: readonly RailTab[] = [
+  { id: "color", label: "Color", Icon: Palette },
+  { id: "cutout", label: "Cutout", Icon: Scissors },
+  { id: "frame", label: "Frame", Icon: Frame },
+  { id: "audio", label: "Audio", Icon: Volume2 },
+];
+
+/** An overlay's one deep view: its animation. */
+const ANIM_TAB: RailTab = { id: "animate", label: "Animation", Icon: Sparkles };
+
+/**
+ * The panel for one selection: the tab rail on its left, the open view's
+ * body beside it. The view belongs to the selection — the column is keyed on
+ * what is selected — so anything newly picked opens on Home. Hiding the panel
+ * keeps the rail and drops the body; it comes back only from the rail, so
+ * selecting more of the timeline never reopens it.
+ */
 function InspectorColumn({
   clip,
   audio,
@@ -203,56 +224,155 @@ function InspectorColumn({
   audio?: AudioClip;
   overlay?: Overlay;
 }) {
-  // Whether the Animations view is open holds for the session per overlay,
-  // so an overlay reselected after a look elsewhere reopens on it. The
-  // transitional "returned" state stays local — it exists for scroll restore
-  // on the way back, and only "open"/"closed" are worth remembering.
-  const [heldAnim, setHeldAnim] = usePanelView<"open" | "closed">(
-    `overlay-anim:${overlay?.id ?? "none"}`,
-    "closed"
+  const open = useEditor((s) => s.inspectorOpen);
+  const setOpen = useEditor((s) => s.setInspectorOpen);
+  const [view, setView] = useState("main");
+  // Coming home from the animation view marks the return, so the overlay
+  // panel can scroll its Animation row back into sight; the mark clears on
+  // the next pick.
+  const [returned, setReturned] = useState(false);
+  const pick = useCallback(
+    (id: string) => {
+      setReturned(view === ANIM_TAB.id && id === "main");
+      setView(id);
+      setOpen(true);
+    },
+    [view, setOpen]
   );
-  const [animView, setAnimView] = useState<"closed" | "open" | "returned">(heldAnim);
   const nav = useMemo<AnimNav>(
     () => ({
-      view: animView,
-      open: () => {
-        setHeldAnim("open");
-        setAnimView("open");
-      },
-      back: () => {
-        setHeldAnim("closed");
-        setAnimView("returned");
-      },
+      view: view === ANIM_TAB.id ? "open" : returned ? "returned" : "closed",
+      open: () => pick(ANIM_TAB.id),
+      back: () => pick("main"),
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [animView]
+    [view, returned, pick]
   );
 
-  if (overlay && animView === "open")
-    return (
-      <AnimNavContext.Provider value={nav}>
-        <AnimationPanel overlay={overlay} onBack={nav.back} />
-      </AnimNavContext.Provider>
-    );
-  if (clip) return <ClipColumn clip={clip} />;
+  const tabs = clip ? CLIP_TABS : overlay ? [ANIM_TAB] : [];
+  const shown = tabs.some((t) => t.id === view) ? view : "main";
   return (
-    <AnimNavContext.Provider value={nav}>
-      <ScrollArea className="min-h-0 flex-1">
-        {audio ? (
-          <AudioPanel clip={audio} />
-        ) : overlay ? (
-          isTextOverlay(overlay) ? (
-            <TextPanel overlay={overlay} />
-          ) : isShapeOverlay(overlay) ? (
-            <ShapePanel overlay={overlay} />
-          ) : isEffectOverlay(overlay) ? (
-            <EffectPanel overlay={overlay} />
+    <>
+      <InspectorRail
+        clipId={clip?.id}
+        tabs={tabs}
+        view={open ? shown : null}
+        open={open}
+        onPick={pick}
+        onToggle={() => setOpen(!open)}
+      />
+      {open && (
+        <div className="flex min-h-0 w-[272px] shrink-0 flex-col border-l border-border bg-card">
+          {clip ? (
+            <ClipColumn clip={clip} tab={shown} />
+          ) : overlay && shown === ANIM_TAB.id ? (
+            <AnimNavContext.Provider value={nav}>
+              <AnimationPanel overlay={overlay} />
+            </AnimNavContext.Provider>
           ) : (
-            <StickerPanel overlay={overlay} />
-          )
-        ) : null}
-      </ScrollArea>
-    </AnimNavContext.Provider>
+            <AnimNavContext.Provider value={nav}>
+              <ScrollArea className="min-h-0 flex-1">
+                {audio ? (
+                  <AudioPanel clip={audio} />
+                ) : overlay ? (
+                  isTextOverlay(overlay) ? (
+                    <TextPanel overlay={overlay} />
+                  ) : isShapeOverlay(overlay) ? (
+                    <ShapePanel overlay={overlay} />
+                  ) : isEffectOverlay(overlay) ? (
+                    <EffectPanel overlay={overlay} />
+                  ) : (
+                    <StickerPanel overlay={overlay} />
+                  )
+                ) : null}
+              </ScrollArea>
+            </AnimNavContext.Provider>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
+ * The panel's tab rail: a floating pill at its top-left, Home over the selection's
+ * deep views, then the button that hides or shows the body. Every button is
+ * an icon with its name in the tooltip; the open view reads dark, and a
+ * hidden panel lights none of them.
+ */
+function InspectorRail({
+  clipId,
+  tabs,
+  view,
+  open,
+  onPick,
+  onToggle,
+}: {
+  clipId?: string;
+  tabs: readonly RailTab[];
+  view: string | null;
+  open: boolean;
+  onPick: (id: string) => void;
+  onToggle: () => void;
+}) {
+  // A running matte bake shows on the Cutout tab itself, so the work stays
+  // visible from any view.
+  const baking = useMatteBakes((s) => !!clipId && s.jobs[clipId]?.status === "running");
+  return (
+    <div className="shrink-0 px-2 pt-2">
+      <div className="flex flex-col items-center gap-1 rounded-xl border bg-background p-1 shadow-md">
+        <RailButton id="home" label="Home" Icon={House} active={view === "main"} onClick={() => onPick("main")} />
+        {tabs.map(({ id, label, Icon }) => (
+          <RailButton key={id} id={id} label={label} Icon={Icon} active={view === id} onClick={() => onPick(id)}>
+            {id === "cutout" && baking && (
+              <Loader2 className="absolute top-1 right-1 size-2.5 animate-spin" />
+            )}
+          </RailButton>
+        ))}
+        <div className="my-0.5 h-px w-5 bg-border" />
+        <RailButton
+          id="toggle"
+          label={open ? "Hide panel" : "Show panel"}
+          Icon={open ? PanelRightClose : PanelRightOpen}
+          active={false}
+          onClick={onToggle}
+        />
+      </div>
+    </div>
+  );
+}
+
+function RailButton({
+  id,
+  label,
+  Icon,
+  active,
+  onClick,
+  children,
+}: {
+  id: string;
+  label: string;
+  Icon: LucideIcon;
+  active: boolean;
+  onClick: () => void;
+  children?: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      aria-pressed={active}
+      className={cn(
+        `panel-tab-${id} relative grid size-8 place-items-center rounded-lg transition-colors`,
+        active
+          ? "bg-neutral-900 text-white"
+          : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+      )}
+      onClick={onClick}
+    >
+      <Icon className="size-4" strokeWidth={active ? 2.25 : 2} />
+      {children}
+    </button>
   );
 }
 
@@ -404,101 +524,46 @@ function LayoutButtons({
   );
 }
 
-/** The clip column's floor toolbar: the three deep views, each an icon over
- * its name. The open view's button reads dark and pressing it again returns
- * to the main settings. */
-const CLIP_TABS = [
-  { id: "color", label: "Color", Icon: Palette },
-  { id: "cutout", label: "Cutout", Icon: Scissors },
-  { id: "frame", label: "Frame", Icon: Frame },
-  { id: "audio", label: "Audio", Icon: Volume2 },
-] as const;
-type ClipTab = (typeof CLIP_TABS)[number]["id"] | "main";
-
 /**
- * The video clip's column: the main settings with the Color, Frame, and Audio
- * views behind a toolbar pinned under the scroller, so it stays put whichever
- * view is open. Color lays out its own bands around its own scroller; the
- * others ride the column's. The open view holds for the session per clip, so
- * deselecting to look at something and coming back lands this clip on its
- * own view; a clip whose panel was never opened starts at the main one.
+ * The video clip's body: Home, or the rail's open view. Color and Cutout lay
+ * out their own bands around their own scroller; the others ride this one.
  */
-function ClipColumn({ clip }: { clip: VideoClip }) {
-  const [tab, setTab] = usePanelView<ClipTab>(`clip-tab:${clip.id}`, "main");
-  const back = () => setTab("main");
+function ClipColumn({ clip, tab }: { clip: VideoClip; tab: string }) {
+  if (tab === "color") return <ColorPanel clip={clip} />;
+  if (tab === "cutout") return <RemovalPanel clip={clip} />;
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      {tab === "color" ? (
-        <ColorPanel clip={clip} onBack={back} />
-      ) : tab === "cutout" ? (
-        <RemovalPanel clip={clip} onBack={back} />
+    <ScrollArea className="min-h-0 flex-1">
+      {tab === "frame" ? (
+        <ClipFramePanel clip={clip} />
+      ) : tab === "audio" ? (
+        <ClipAudioPanel clip={clip} />
       ) : (
-        <ScrollArea className="min-h-0 flex-1">
-          {tab === "frame" ? (
-            <ClipFramePanel clip={clip} onBack={back} />
-          ) : tab === "audio" ? (
-            <ClipAudioPanel clip={clip} onBack={back} />
-          ) : (
-            <ClipPanel clip={clip} />
-          )}
-        </ScrollArea>
+        <ClipPanel clip={clip} />
       )}
-      <ClipToolbar clipId={clip.id} tab={tab} onPick={(t) => setTab(tab === t ? "main" : t)} />
-    </div>
+    </ScrollArea>
   );
 }
 
-function ClipToolbar({
-  clipId,
-  tab,
-  onPick,
-}: {
-  clipId: string;
-  tab: ClipTab;
-  onPick: (tab: Exclude<ClipTab, "main">) => void;
-}) {
-  // A running matte bake shows on the Cutout tab itself, so the work stays
-  // visible from any view.
-  const baking = useMatteBakes((s) => s.jobs[clipId]?.status === "running");
+/** Header for a view: its name, with a back chevron when the view sits
+ * inside another one. The band the Color view opens with. */
+function SubviewHead({ title, onBack }: { title: string; onBack?: () => void }) {
   return (
-    <div className="flex shrink-0 border-t border-border bg-card">
-      {CLIP_TABS.map(({ id, label, Icon }) => (
+    <div
+      className={cn(
+        "flex h-10 shrink-0 items-center gap-1 text-sm font-semibold tracking-tight",
+        onBack ? "px-2.5" : "px-3.5"
+      )}
+    >
+      {onBack && (
         <button
-          key={id}
           type="button"
-          aria-pressed={tab === id}
-          className={cn(
-            `clip-tab-${id} relative flex flex-1 flex-col items-center justify-center gap-0.5 py-1 text-[10px] leading-none font-medium transition-colors`,
-            tab === id
-              ? "bg-neutral-900 text-white"
-              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-          )}
-          onClick={() => onPick(id)}
+          aria-label="Back"
+          className="grid size-6 place-items-center rounded text-muted-foreground transition-colors hover:text-foreground"
+          onClick={onBack}
         >
-          <Icon className="size-3.5" strokeWidth={tab === id ? 2.25 : 2} />
-          {label}
-          {id === "cutout" && baking && (
-            <Loader2 className="absolute top-1 right-1.5 size-2.5 animate-spin" />
-          )}
+          <ChevronLeft className="size-4" />
         </button>
-      ))}
-    </div>
-  );
-}
-
-/** Header for a toolbar view: the back chevron and the view's name, the same
- * band the Color view opens with. */
-function SubviewHead({ title, onBack }: { title: string; onBack: () => void }) {
-  return (
-    <div className="flex h-10 shrink-0 items-center gap-1 px-2.5 text-sm font-semibold tracking-tight">
-      <button
-        type="button"
-        aria-label="Back"
-        className="grid size-6 place-items-center rounded text-muted-foreground transition-colors hover:text-foreground"
-        onClick={onBack}
-      >
-        <ChevronLeft className="size-4" />
-      </button>
+      )}
       {title}
     </div>
   );
@@ -506,10 +571,10 @@ function SubviewHead({ title, onBack }: { title: string; onBack: () => void }) {
 
 /** The Frame view: what the clip's box does — its pose keyframes, border,
  * shadow, and mask. */
-function ClipFramePanel({ clip, onBack }: { clip: VideoClip; onBack: () => void }) {
+function ClipFramePanel({ clip }: { clip: VideoClip }) {
   return (
     <>
-      <SubviewHead title="Frame" onBack={onBack} />
+      <SubviewHead title="Frame" />
       <div className="flex flex-col gap-1 px-3.5 pb-4">
         <ClipTransformSection clip={clip} />
         <ClipBorderSection clip={clip} />
@@ -521,7 +586,7 @@ function ClipFramePanel({ clip, onBack }: { clip: VideoClip; onBack: () => void 
 }
 
 /** The Audio view: the clip's own sound and the generated voice laid over it. */
-function ClipAudioPanel({ clip, onBack }: { clip: VideoClip; onBack: () => void }) {
+function ClipAudioPanel({ clip }: { clip: VideoClip }) {
   const asset = useEditor((s) => s.assets.find((a) => a.id === clip.assetId));
   const updateClip = useEditor((s) => s.updateClip);
   const [volumeDraft, setVolumeDraft] = useState<number | null>(null);
@@ -538,7 +603,7 @@ function ClipAudioPanel({ clip, onBack }: { clip: VideoClip; onBack: () => void 
   }
   return (
     <>
-      <SubviewHead title="Audio" onBack={onBack} />
+      <SubviewHead title="Audio" />
       <div className="flex flex-col gap-1 px-3.5 pb-4">
         <Row label="Volume">
           <ValueSlider
@@ -2480,7 +2545,7 @@ type AnimSlot = "in" | "out" | "loop" | "move" | "words";
  * the tile grid, the active slot's own control under it. The slots pick from
  * the same grid, one at a time — the tiles are big enough to read the motion,
  * which a stack of grids would not be. */
-function AnimationPanel({ overlay: o, onBack }: { overlay: Overlay; onBack: () => void }) {
+function AnimationPanel({ overlay: o }: { overlay: Overlay }) {
   const anim = o.anim ?? {};
   // The active slot holds for the session, like every settings view's tab.
   const [picked, setSlot] = usePanelView<AnimSlot>(`anim-slot:${o.id}`, "in");
@@ -2562,15 +2627,7 @@ function AnimationPanel({ overlay: o, onBack }: { overlay: Overlay; onBack: () =
     // even while the grid rubber-bands at its ends.
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 bg-card pb-2">
-        <div className="flex h-10 shrink-0 items-center gap-1 px-2.5 text-sm font-semibold tracking-tight">
-          <button
-            type="button"
-            aria-label="Back"
-            className="anim-back grid size-6 place-items-center rounded text-muted-foreground transition-colors hover:text-foreground"
-            onClick={onBack}
-          >
-            <ChevronLeft className="size-4" />
-          </button>
+        <div className="flex h-10 shrink-0 items-center px-3.5 text-sm font-semibold tracking-tight">
           Animation
         </div>
         <div className="mx-3.5 flex shrink-0 rounded-lg bg-muted p-0.5 text-[11.5px] font-medium">

@@ -396,6 +396,9 @@ export interface EditorState {
   dropActive: "media" | "other" | null;
   /** Whether the AI assistant panel is open (remembered across sessions). */
   aiOpen: boolean;
+  /** Whether the settings panel shows its body beside its tab rail. Hiding it
+   * holds across sessions and selections: only the rail brings it back. */
+  inspectorOpen: boolean;
   /** In-progress or finished brief-to-video run; persisted on ProjectDoc.genvideo
    * and driven by the genScene store. Absent when no scene was generated. */
   genvideo?: VideoProject;
@@ -827,6 +830,7 @@ export interface EditorState {
   setExportOpen: (v: boolean) => void;
   setDropActive: (v: "media" | "other" | null) => void;
   setAiOpen: (v: boolean) => void;
+  setInspectorOpen: (v: boolean) => void;
   undo: () => void;
   redo: () => void;
   upsertRender: (r: RenderRecord) => void;
@@ -1806,6 +1810,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     exportOpen: false,
     dropActive: null,
     aiOpen: typeof window !== "undefined" && localStorage.getItem("cut-ai-open") === "1",
+    inspectorOpen: typeof window === "undefined" || localStorage.getItem("cut-inspector-open") !== "0",
     genvideo: undefined,
     renders: [],
 
@@ -5033,6 +5038,14 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       set({ aiOpen: v });
       try {
         localStorage.setItem("cut-ai-open", v ? "1" : "0");
+      } catch {
+        // View preference only.
+      }
+    },
+    setInspectorOpen: (v) => {
+      set({ inspectorOpen: v });
+      try {
+        localStorage.setItem("cut-inspector-open", v ? "1" : "0");
       } catch {
         // View preference only.
       }

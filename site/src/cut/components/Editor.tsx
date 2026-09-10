@@ -1188,7 +1188,7 @@ export function Editor({
         )}
         <div
           className={`grid min-h-0 ${
-            hasInspector ? "grid-cols-[auto_minmax(0,1fr)_272px]" : "grid-cols-[auto_minmax(0,1fr)]"
+            hasInspector ? "grid-cols-[auto_minmax(0,1fr)_auto]" : "grid-cols-[auto_minmax(0,1fr)]"
           }`}
         >
           {anySidePanel && (

@@ -48,7 +48,7 @@ import { Switch } from "@/components/ui/switch";
  * checkpoint per gesture, and preview, filmstrip and exports render the same
  * numbers.
  */
-export function ColorPanel({ clip, onBack }: { clip: VideoClip; onBack: () => void }) {
+export function ColorPanel({ clip }: { clip: VideoClip }) {
   // The open level holds for the session per clip, so deselecting and coming
   // back lands on the same view.
   const [view, setView] = usePanelView<"presets" | "adjust">(
@@ -58,7 +58,7 @@ export function ColorPanel({ clip, onBack }: { clip: VideoClip; onBack: () => vo
   if (view === "adjust") {
     return <AdjustView clip={clip} onBack={() => setView("presets")} />;
   }
-  return <PresetView clip={clip} onBack={onBack} onAdjust={() => setView("adjust")} />;
+  return <PresetView clip={clip} onAdjust={() => setView("adjust")} />;
 }
 
 /** The tools of the Adjust view; `dirty` feeds each tab's marker dot. */
@@ -94,15 +94,7 @@ function useGradeWriter(clip: VideoClip) {
 /* Level 1: presets                                                    */
 /* ------------------------------------------------------------------ */
 
-function PresetView({
-  clip,
-  onBack,
-  onAdjust,
-}: {
-  clip: VideoClip;
-  onBack: () => void;
-  onAdjust: () => void;
-}) {
+function PresetView({ clip, onAdjust }: { clip: VideoClip; onAdjust: () => void }) {
   const [category, setCategory] = useState<GradePresetCategory | "all">("all");
   // The clip's own frame, ungraded: a swatch shows what its preset does to the
   // footage, never what the clip's current grade already did.
@@ -134,15 +126,7 @@ function PresetView({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 bg-card pb-2">
-        <div className="flex h-10 shrink-0 items-center gap-1 px-2.5 text-sm font-semibold tracking-tight">
-          <button
-            type="button"
-            aria-label="Back"
-            className="clip-color-back grid size-6 place-items-center rounded text-muted-foreground transition-colors hover:text-foreground"
-            onClick={onBack}
-          >
-            <ChevronLeft className="size-4" />
-          </button>
+        <div className="flex h-10 shrink-0 items-center gap-1 px-3.5 text-sm font-semibold tracking-tight">
           Color
           <button
             type="button"
