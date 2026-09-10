@@ -93,6 +93,13 @@ export function penClosed(m: Mask): boolean {
   return m.kind === "pen" && (m.points?.length ?? 0) >= PEN_MIN_POINTS;
 }
 
+/** Whether the mask keeps the outside of its coverage. A pen outline still
+ * being drawn shows the whole picture whichever way the toggle sits, so the
+ * corners land on what the user sees. */
+export function maskInverts(m: Mask): boolean {
+  return !!m.invert && !(m.kind === "pen" && !penClosed(m));
+}
+
 /** Trace a pen outline into `sink`, its box w × h px centered on (dx, dy). */
 export function tracePen(
   sink: { moveTo(x: number, y: number): void; lineTo(x: number, y: number): void; closePath(): void },
@@ -439,9 +446,10 @@ export function paintMaskLuma(
   ctx.globalCompositeOperation = "source-over";
   // Inverted: a white ground with the coverage differenced out of it, so a
   // feathered edge reads as 1 − coverage. Plain: coverage over black.
-  ctx.fillStyle = m.invert ? "#ffffff" : "#000000";
+  const invert = maskInverts(m);
+  ctx.fillStyle = invert ? "#ffffff" : "#000000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  if (m.invert) ctx.globalCompositeOperation = "difference";
+  if (invert) ctx.globalCompositeOperation = "difference";
   ctx.translate(-boxX, -boxY);
   paintMaskCoverage(ctx, m, tLocal, frame, anchor);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -492,5 +500,5 @@ export function applyMaskToCanvas(
   if (transform) sctx.setTransform(transform);
   paintMaskCoverage(sctx, m, tLocal, frame, anchor);
   sctx.setTransform(1, 0, 0, 1, 0, 0);
-  maskComposite(target, scratch as CanvasImageSource, m.invert);
+  maskComposite(target, scratch as CanvasImageSource, maskInverts(m));
 }

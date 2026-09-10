@@ -16,7 +16,7 @@ import {
   subtitleLaneCount,
   trackPos,
 } from "@/cut/lib/subtitles";
-import { evalOverlayFrame, glyphStateAt, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, MASK_FEATHER_MAX, MASK_RADIUS_MAX, maskFrameAt, maskHasRadius, maskOutlinePathD, maskSizeAxes, overlayWords, paintMaskCoverage, PEN_MIN_POINTS, penClosed, resolveShadow, shapeMetrics, shapePathD, textStretch, WORD_ACCENT_DEFAULT, wordDrawsAt, type LottieHandle, type Mask, type MaskKey, type MaskPoint, type OverlayFrameState, type WordDraw } from "@donkeycut/effects-kit";
+import { evalOverlayFrame, glyphStateAt, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, MASK_FEATHER_MAX, MASK_RADIUS_MAX, maskFrameAt, maskHasRadius, maskInverts, maskOutlinePathD, maskSizeAxes, overlayWords, paintMaskCoverage, PEN_MIN_POINTS, penClosed, resolveShadow, shapeMetrics, shapePathD, textStretch, WORD_ACCENT_DEFAULT, wordDrawsAt, type LottieHandle, type Mask, type MaskKey, type MaskPoint, type OverlayFrameState, type WordDraw } from "@donkeycut/effects-kit";
 import {
   LINE_HEIGHT,
   PLATE_PAD_X,
@@ -1344,7 +1344,7 @@ function useMaskCss(
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalCompositeOperation = "source-over";
     ctx.clearRect(0, 0, cw, ch);
-    if (m.invert) {
+    if (maskInverts(m)) {
       // Keep-outside: full coverage with the shape cut out of it, because a
       // CSS mask has no invert of its own.
       ctx.fillStyle = "#ffffff";
