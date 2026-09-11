@@ -25,7 +25,10 @@ export function Footer() {
   const linkGroups: FooterColumn[] = [
     {
       title: "Product",
-      links: [{ href: GITHUB_REPO_URL, label: "GitHub" }],
+      links: [
+        { href: GITHUB_REPO_URL, label: "GitHub" },
+        { href: "/blog", label: "Blog" },
+      ],
     },
     {
       title: "Legal",

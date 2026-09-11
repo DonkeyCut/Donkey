@@ -19,6 +19,7 @@ export function CutFooter() {
       links: [
         { href: GITHUB_REPO_URL, label: "GitHub" },
         { href: DISCORD_URL, label: "Discord" },
+        { href: "/blog", label: "Blog" },
       ],
     },
     {
