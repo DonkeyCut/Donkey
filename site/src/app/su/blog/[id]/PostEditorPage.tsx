@@ -1,6 +1,6 @@
 "use client";
 
-import { Ellipsis, ExternalLink, Eye, EyeOff } from "lucide-react";
+import { Ellipsis, ExternalLink, Eye, EyeOff, Save, Send } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -257,21 +257,24 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
         ) : null}
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <Badge variant={published ? "default" : "outline"}>{published ? "Published" : "Draft"}</Badge>
-          <Button size="sm" variant={dirty ? "default" : "outline"} disabled={busy || !dirty} onClick={() => void doSave()}>
-            {save.isPending ? "Saving…" : "Save"}
-          </Button>
-          {published ? null : (
-            <Button size="sm" disabled={busy} onClick={() => void doPublish()}>
-              {publish.isPending ? "Publishing…" : "Publish"}
-            </Button>
-          )}
           <DropdownMenu>
             <DropdownMenuTrigger
-              render={<Button size="icon-sm" variant="outline" aria-label="More actions" disabled={busy} />}
+              render={<Button size="icon-sm" variant="outline" aria-label="Actions" disabled={busy} />}
             >
               <Ellipsis />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem disabled={!dirty} onClick={() => void doSave()}>
+                <Save />
+                {save.isPending ? "Saving…" : "Save"}
+              </DropdownMenuItem>
+              {published ? null : (
+                <DropdownMenuItem onClick={() => void doPublish()}>
+                  <Send />
+                  {publish.isPending ? "Publishing…" : "Publish"}
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => void openPreview()}>
                 <Eye />
                 Preview
