@@ -5,9 +5,12 @@
 // (the media Worker treats stock/sfx/ as public). The bytes live in R2 and a
 // local cache, never in git; the manifest (ids, prompts, peaks) is committed.
 // Idempotent: an id already in the bucket is skipped, so re-running fills gaps
-// or picks up new catalog entries only.
+// or picks up new catalog entries only. Ids named on the command line are
+// rendered again under a fresh file name (the files are cached as immutable),
+// so a weak take or a reworded prompt gets a new take:
 //
 //   cd site && ./node_modules/.bin/bun scripts/generate-stock-sfx.ts
+//   cd site && ./node_modules/.bin/bun scripts/generate-stock-sfx.ts camera-burst-3
 //
 // Needs ELEVENLABS_API_KEY and R2_ACCOUNT_ID / R2_ACCESS_KEY_ID /
 // R2_SECRET_ACCESS_KEY (bun auto-loads site/.env) and ffmpeg on PATH. Each take
@@ -24,6 +27,7 @@ import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
 
 import { CUT_MEDIA_ORIGIN } from "../src/cut/lib/hosts";
 import type { StockSfxCategory } from "../src/cut/lib/stock";
+import { STOCK_SFX } from "../src/cut/lib/stockSfxManifest";
 
 interface CatalogItem {
   id: string;
@@ -53,6 +57,9 @@ const HEAD_SILENCE_DB = -45;
 const TAIL_SILENCE_DB = -58;
 const TAIL_KEEP_S = 0.12;
 const PEAK_DB = -1;
+// A one-shot whose waveform sits above half its peak for more than this share
+// of its length is a noise take (the phone-snap failure) and is rendered again.
+const NOISE_WALL_SHARE = 0.9;
 // The model is asked for at least this long; a half-second request can come
 // back as a near-empty take, and the trim takes the slack back off.
 const MIN_REQUEST_SECONDS = 1;
@@ -99,9 +106,9 @@ const CATALOG: CatalogItem[] = [
   ], core),
   ...sfx("Camera", [
     ["shutter", 0.6, "A single DSLR camera shutter click, crisp mechanical mirror slap, dry.", ["camera", "shutter", "photo", "snap", "dslr"]],
-    ["burst", 1.2, "A rapid burst of five DSLR camera shutter clicks, mechanical, dry.", ["camera", "shutter", "burst", "rapid", "photos"]],
+    ["burst", 1.2, "Burst mode on a DSLR: five fast mechanical shutter clicks in a tight even row, each one a crisp mirror slap, dry, close-miked, silent before and after, no motor whine.", ["camera", "shutter", "burst", "rapid", "photos"]],
     ["zoom", 0.8, "A quick camera lens zoom motor whir with a soft stop, dry, close-miked.", ["camera", "zoom", "lens", "motor", "whir"]],
-    ["phone-snap", 0.6, "A smartphone camera shutter sound, a short digital snap, clean.", ["camera", "phone", "snap", "shutter", "selfie"]],
+    ["phone-snap", 0.6, "A smartphone camera taking one photo: a single short bright digital click-snap, crisp and clean, close, silent before and after, no hiss, no noise, no reverb.", ["camera", "phone", "snap", "shutter", "selfie"]],
     ["film-advance", 1, "A film camera shutter click followed by the film advance lever winding, mechanical.", ["camera", "film", "advance", "wind", "vintage"]],
     ["zoom-in-whoosh", 0.7, "A fast punch-in zoom whoosh, a quick rising air swipe that stops sharp.", ["camera", "zoom in", "punch in", "whoosh", "fast"]],
     ["zoom-out-whoosh", 0.7, "A fast zoom-out whoosh, a quick falling air swipe that stops sharp.", ["camera", "zoom out", "whoosh", "fast", "pull back"]],
@@ -114,7 +121,7 @@ const CATALOG: CatalogItem[] = [
     ["pop", 0.8, "A camera flash firing: a quick rising electric charge whine then a bright pop.", ["flash", "camera", "pop", "charge", "quick cut"]],
     ["cut", 0.7, "A bright quick flash transition, a short shimmering white burst that cuts to silence.", ["flash", "transition", "bright", "burst", "quick cut"]],
     ["strobe", 1, "Three fast camera flash pops in quick succession, bright and snappy, dry.", ["flash", "strobe", "pops", "fast", "paparazzi"]],
-    ["paparazzi", 2, "A crowd of paparazzi camera flashes and shutters firing rapidly, bright pops and clicks.", ["flash", "paparazzi", "cameras", "red carpet", "crowd"]],
+    ["paparazzi", 2, "Paparazzi on a red carpet: many camera shutters clicking rapidly with bright flash pops layered over them, dense and busy, clean, no music, no voices.", ["flash", "paparazzi", "cameras", "red carpet", "crowd"]],
     ["bulb", 0.8, "An old-fashioned flashbulb firing with a soft crunching pop and a fizz.", ["flash", "bulb", "vintage", "pop", "fizz"]],
   ], core),
   ...sfx("UI", [
@@ -662,6 +669,7 @@ const CATALOG: CatalogItem[] = [
     ["rotary-dial", 2, "A rotary phone dialing one number.", ["retro", "rotary", "phone", "dial", "vintage"]],
     ["film-burn", 1.5, "A film burn, a crackling flare as the film melts.", ["retro", "film burn", "crackle", "flare", "melt"]],
   ], loops),
+
 ];
 
 function makeClients(): { eleven: ElevenLabsClient; r2: S3Client } {
@@ -681,9 +689,33 @@ function makeClients(): { eleven: ElevenLabsClient; r2: S3Client } {
   };
 }
 
-const keyFor = (id: string) => `${KEY_PREFIX}${id}.mp3`;
-const cachePath = (id: string) => path.join(CACHE_DIR, `${id}.mp3`);
-const fileUrl = (id: string) => `${CUT_MEDIA_ORIGIN}/${keyFor(id)}`;
+const keyFor = (name: string) => `${KEY_PREFIX}${name}.mp3`;
+const cachePath = (name: string) => path.join(CACHE_DIR, `${name}.mp3`);
+const fileUrl = (name: string) => `${CUT_MEDIA_ORIGIN}/${keyFor(name)}`;
+
+/** Each sound's file name without its extension: the id for a first render,
+ * `<id>.r<n>` once it has been rendered again. The shipped manifest says which
+ * file a sound currently has; a redo takes the next free number. */
+const names = new Map<string, string>();
+const fileName = (c: CatalogItem) => names.get(c.id) ?? c.id;
+const shippedName = (id: string): string | undefined => {
+  const file = STOCK_SFX.find((s) => s.id === id)?.file;
+  return file?.slice(file.lastIndexOf("/") + 1).replace(/\.mp3$/, "");
+};
+async function inBucket(r2: S3Client, name: string): Promise<boolean> {
+  try {
+    await r2.send(new HeadObjectCommand({ Bucket: BUCKET, Key: keyFor(name) }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function nextName(r2: S3Client, id: string): Promise<string> {
+  for (let n = 2; ; n++) {
+    const name = `${id}.r${n}`;
+    if (!existsSync(cachePath(name)) && !(await inBucket(r2, name))) return name;
+  }
+}
 
 /** Renders one take and resolves to its mp3 bytes plus what it cost. */
 async function generateOne(
@@ -716,7 +748,7 @@ function run(cmd: string, args: string[]): string {
  * the same level. A loop keeps its ends — trimming would break the seam. */
 async function finish(item: CatalogItem, raw: Buffer): Promise<void> {
   await mkdir(CACHE_DIR, { recursive: true });
-  const rawPath = path.join(CACHE_DIR, `${item.id}.raw.mp3`);
+  const rawPath = path.join(CACHE_DIR, `${fileName(item)}.raw.mp3`);
   await writeFile(rawPath, raw);
   const trim = item.loop
     ? "anull"
@@ -727,41 +759,51 @@ async function finish(item: CatalogItem, raw: Buffer): Promise<void> {
       .stderr?.toString()
       .match(/max_volume:\s*(-?[\d.]+) dB/);
     const gain = peak ? PEAK_DB - Number.parseFloat(peak[1]) : 0;
-    run("ffmpeg", ["-v", "error", "-y", "-i", rawPath, "-af", `${filter},volume=${gain.toFixed(2)}dB`, "-codec:a", "libmp3lame", "-q:a", "2", cachePath(item.id)]);
+    run("ffmpeg", ["-v", "error", "-y", "-i", rawPath, "-af", `${filter},volume=${gain.toFixed(2)}dB`, "-codec:a", "libmp3lame", "-q:a", "2", cachePath(fileName(item))]);
   };
   render(trim);
   // A take that is one sharp transient can trim down to nothing; it keeps its
   // silence rather than vanishing.
-  if (!readable(item.id)) render("anull");
+  if (!readable(fileName(item))) render("anull");
   await unlink(rawPath);
+  // A one-shot that never drops below half its peak is a wall of noise, a
+  // take the model gave up on; throwing sends it back for another attempt.
+  if (!item.loop) {
+    const peaks = computePeaks(fileName(item));
+    const loud = peaks.filter((p) => p > 0.5).length / peaks.length;
+    if (loud > NOISE_WALL_SHARE) {
+      await unlink(cachePath(fileName(item)));
+      throw new Error(`take is a wall of noise (${Math.round(loud * 100)}% of it near peak)`);
+    }
+  }
 }
 
 /** Whether ffprobe can read a finished file as audio with some length. */
-function readable(id: string): boolean {
-  const proc = spawnSync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", cachePath(id)]);
+function readable(name: string): boolean {
+  const proc = spawnSync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", cachePath(name)]);
   const sec = Number.parseFloat(proc.stdout?.toString().trim() ?? "");
   return proc.status === 0 && Number.isFinite(sec) && sec > 0.05;
 }
 
 /** The finished mp3's real length via ffprobe. */
-function probeDuration(id: string): number {
+function probeDuration(name: string): number {
   const sec = Number.parseFloat(
-    run("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", cachePath(id)]).trim()
+    run("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", cachePath(name)]).trim()
   );
-  if (!Number.isFinite(sec) || sec <= 0) throw new Error(`ffprobe could not read ${id}.mp3's duration`);
+  if (!Number.isFinite(sec) || sec <= 0) throw new Error(`ffprobe could not read ${name}.mp3's duration`);
   return Math.round(sec * 100) / 100;
 }
 
 /** Normalized 0..1 waveform peaks for the card: decode to mono PCM, take the
  * max magnitude per bucket, scale so the loudest bar fills. */
-function computePeaks(id: string): number[] {
+function computePeaks(name: string): number[] {
   const proc = spawnSync(
     "ffmpeg",
-    ["-v", "error", "-i", cachePath(id), "-f", "s16le", "-ac", "1", "-ar", "8000", "-"],
+    ["-v", "error", "-i", cachePath(name), "-f", "s16le", "-ac", "1", "-ar", "8000", "-"],
     { maxBuffer: 256 * 1024 * 1024 }
   );
   const buf = proc.stdout;
-  if (proc.status !== 0 || !buf || buf.length < 2) throw new Error(`ffmpeg could not decode ${id}.mp3`);
+  if (proc.status !== 0 || !buf || buf.length < 2) throw new Error(`ffmpeg could not decode ${name}.mp3`);
   const samples = new Int16Array(buf.buffer, buf.byteOffset, Math.floor(buf.length / 2));
   const bucket = Math.max(1, Math.floor(samples.length / PEAKS));
   const raw: number[] = [];
@@ -777,38 +819,34 @@ function computePeaks(id: string): number[] {
   return raw.map((p) => Math.round((p / max) * 100) / 100);
 }
 
-async function upload(r2: S3Client, id: string): Promise<void> {
+async function upload(r2: S3Client, name: string): Promise<void> {
   await r2.send(
     new PutObjectCommand({
       Bucket: BUCKET,
-      Key: keyFor(id),
-      Body: await readFile(cachePath(id)),
+      Key: keyFor(name),
+      Body: await readFile(cachePath(name)),
       ContentType: "audio/mpeg",
       CacheControl: "public, max-age=31536000, immutable",
     })
   );
 }
 
-/** True when the bucket already holds this id; pulls it into the cache when
+/** True when the bucket already holds this file; pulls it into the cache when
  * the local copy is missing so its peaks can be read. */
-async function adopt(r2: S3Client, id: string): Promise<boolean> {
-  if (existsSync(cachePath(id))) {
-    if (readable(id)) return true;
+async function adopt(r2: S3Client, name: string): Promise<boolean> {
+  if (existsSync(cachePath(name))) {
+    if (readable(name)) return true;
     // A broken local file (a render cut short) is not a finished sound.
-    await unlink(cachePath(id));
+    await unlink(cachePath(name));
   }
-  try {
-    await r2.send(new HeadObjectCommand({ Bucket: BUCKET, Key: keyFor(id) }));
-  } catch {
-    return false;
-  }
-  const res = await r2.send(new GetObjectCommand({ Bucket: BUCKET, Key: keyFor(id) }));
+  if (!(await inBucket(r2, name))) return false;
+  const res = await r2.send(new GetObjectCommand({ Bucket: BUCKET, Key: keyFor(name) }));
   const bytes = await res.Body?.transformToByteArray();
   if (!bytes) return false;
   await mkdir(CACHE_DIR, { recursive: true });
-  await writeFile(cachePath(id), Buffer.from(bytes));
-  if (readable(id)) return true;
-  await unlink(cachePath(id));
+  await writeFile(cachePath(name), Buffer.from(bytes));
+  if (readable(name)) return true;
+  await unlink(cachePath(name));
   return false;
 }
 
@@ -820,7 +858,7 @@ async function writeManifest(results: Map<string, Result>) {
     category: c.category,
     prompt: c.prompt,
     tags: c.tags,
-    file: fileUrl(c.id),
+    file: fileUrl(fileName(c)),
     duration: results.get(c.id)!.duration,
     peaks: results.get(c.id)!.peaks,
     ...(c.loop ? { loop: true } : {}),
@@ -843,10 +881,19 @@ async function main() {
     if (ids.has(c.id)) throw new Error(`duplicate catalog id ${c.id}`);
     ids.add(c.id);
   }
+  const redo = new Set(process.argv.slice(2));
+  for (const id of redo) if (!ids.has(id)) throw new Error(`${id} is not a catalog id`);
   const { eleven, r2 } = makeClients();
   const results = new Map<string, Result>();
   for (const c of CATALOG) {
-    if (await adopt(r2, c.id)) results.set(c.id, { duration: probeDuration(c.id), peaks: computePeaks(c.id) });
+    if (redo.has(c.id)) {
+      names.set(c.id, await nextName(r2, c.id));
+      continue;
+    }
+    const shipped = shippedName(c.id);
+    if (shipped) names.set(c.id, shipped);
+    const name = fileName(c);
+    if (await adopt(r2, name)) results.set(c.id, { duration: probeDuration(name), peaks: computePeaks(name) });
   }
   const todo = CATALOG.filter((c) => !results.has(c.id));
   console.log(`model=${MODEL} existing=${results.size} generating=${todo.length}`);
@@ -863,8 +910,8 @@ async function main() {
           const { mp3, credits } = await generateOne(eleven, item);
           spent += credits;
           await finish(item, mp3);
-          results.set(item.id, { duration: probeDuration(item.id), peaks: computePeaks(item.id) });
-          await upload(r2, item.id);
+          results.set(item.id, { duration: probeDuration(fileName(item)), peaks: computePeaks(fileName(item)) });
+          await upload(r2, fileName(item));
           await writeManifest(results);
           console.log(`✓ ${item.id} (${results.get(item.id)!.duration}s, ${credits} credits, ${spent} total)`);
           if (spent >= MAX_CREDITS) {
@@ -873,7 +920,7 @@ async function main() {
           }
           break;
         } catch (e) {
-          if (attempt >= 2) {
+          if (attempt >= 3) {
             failed++;
             console.error(`✗ ${item.id}: ${e instanceof Error ? e.message : e}`);
             break;
