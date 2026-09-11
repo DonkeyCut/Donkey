@@ -7,7 +7,7 @@ import { assertGraphSafe, fexpr } from "./filterGraph";
 import { bakeRetimedAudio, setptsExpr, type BakedAudio } from "./retimeAudio";
 import { bakeTurnedMedia } from "./turnMedia";
 import { CLIP_MAX_ZOOM, projectFadeSeconds, regionPx, TRANSITION_XFADE, TRANSITION_ZOOM, type ColorGrade, type TransitionStyle } from "../lib/types";
-import { audioFxFilters, buildGradeLut, effectFilterLines, gradeKey, gradeNeedsLut, gradeToFfmpegFilter, isAudioEffect, lookFilterLines, lutToCube, mirrorRetimable, retimeOf, shortestTurn, srcSpan, sortedKeys, soundFilters, type ClipSound, type OverlayKey, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
+import { audioFxFilters, buildGradeLut, effectFilterLines, gradeKey, gradeNeedsLut, gradeToFfmpegFilter, isAudioEffect, lookFilterLines, lutToCube, mirrorRetimable, retimeOf, shortestTurn, slowRuns, srcSpan, sortedKeys, soundFilters, type ClipSound, type OverlayKey, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
 
 // The render pipeline itself: spec in, finished mp4 out. Shared by the local
 // engine's job registry (jobs.ts) and the cloud render worker, which stage
@@ -101,6 +101,8 @@ export interface ExportSpec {
      * (see retimeOf); present, `speed` is ignored. */
     speedCurve?: SpeedNode[];
     reverse?: boolean;
+    /** Synthesize the frames wherever the rate runs below 1× (see slowRuns). */
+    smoothSlow?: boolean;
     /** Transition into the next clip, in timeline seconds (overlap). */
     transition?: number;
     /** Half the cross dissolve into the next clip, in timeline seconds: the
@@ -192,6 +194,8 @@ export interface ExportSpec {
      * (see retimeOf); present, `speed` is ignored. */
     speedCurve?: SpeedNode[];
     reverse?: boolean;
+    /** Synthesize the frames wherever the rate runs below 1× (see slowRuns). */
+    smoothSlow?: boolean;
     /** Transition ramps, timeline seconds from this overlay's head/tail. On
      * an upper track a fade is an alpha fade (the tracks beneath show
      * through); a cross transition arrives as the incoming clip's headFade
@@ -483,6 +487,60 @@ const retimedPts = (rt: Retime) =>
   rt.uniform ? `(PTS-STARTPTS)/${num(rt.rate)}` : fexpr(setptsExpr(rt));
 
 /** Timeline length of a media clip's span through its rate or curve. */
+/** ffmpeg's motion-compensated interpolation, laying `fps` frames over the
+ * sparse ones a slowed span has: bidirectional block motion estimation and
+ * overlapped-block compensation, with its scene-change guard on so a cut
+ * inside the footage is never blended across. */
+const MOTION_INTERPOLATE = "mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1:scd=fdiff";
+
+/**
+ * The head of a footage clip's picture chain: its retimed, framed source at
+ * `fps`. A clip smoothing its slow motion runs ffmpeg's motion interpolation
+ * over exactly the stretches its rate is under 1× — the span is cut into
+ * pieces at those boundaries, each piece re-stamped to `fps` on its own
+ * (interpolated or plain), and the pieces joined back — so a curve that
+ * dips and races past 1× is smoothed in the dip alone. The framing runs
+ * first, so the estimate works at the output size on the frames the slow
+ * stretch actually has.
+ */
+function framedTimebase(
+  timebase: string,
+  framing: string,
+  tag: string,
+  c: { smoothSlow?: boolean; image?: boolean },
+  rt: Retime,
+  fps: number,
+  filters: string[]
+): string {
+  const plain = `${timebase},fps=${fps},${framing},setsar=1`;
+  if (c.image || !c.smoothSlow) return plain;
+  const runs = slowRuns(rt, 1 / fps);
+  if (runs.length === 0) return plain;
+  const interp = `minterpolate=fps=${fps}:${MOTION_INTERPOLATE}`;
+  const framed = `${timebase},${framing},setsar=1`;
+  if (runs.length === 1 && runs[0][0] <= 1e-6 && runs[0][1] >= rt.len - 1e-6) {
+    return `${framed},${interp}`;
+  }
+  const pieces: { from: number; to: number; slow: boolean }[] = [];
+  let at = 0;
+  for (const [from, to] of runs) {
+    if (from > at + 1e-6) pieces.push({ from: at, to: from, slow: false });
+    pieces.push({ from, to, slow: true });
+    at = to;
+  }
+  if (rt.len > at + 1e-6) pieces.push({ from: at, to: rt.len, slow: false });
+  filters.push(`${framed},split=${pieces.length}${pieces.map((_, k) => `[smi${tag}_${k}]`).join("")}`);
+  pieces.forEach((pc, k) => {
+    filters.push(
+      `[smi${tag}_${k}]trim=${num(pc.from)}:${num(pc.to)},setpts=PTS-STARTPTS,${pc.slow ? interp : `fps=${fps}`}[smo${tag}_${k}]`
+    );
+  });
+  filters.push(
+    `${pieces.map((_, k) => `[smo${tag}_${k}]`).join("")}concat=n=${pieces.length}:v=1:a=0,fps=${fps}[smo${tag}]`
+  );
+  return `[smo${tag}]null`;
+}
+
 const spanLen = (c: { in: number; out: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean }) =>
   Math.max(0.1, retimeOf(c).len);
 
@@ -1448,7 +1506,7 @@ export async function runExport(
       // a still just replays its looped input.
       // The grade sits after the color conversion (so it acts on the same
       // BT.709 values the preview shows) and before the terminal format.
-      let core = `${timebase},fps=${fps},${frame},setsar=1,${rmIn ? "" : colorFix.get(c.file) ?? ""}${gradeChain(rmIn ? undefined : c.grade)}format=${segFmt}`;
+      let core = `${framedTimebase(timebase, frame, `c${j}`, rmIn ? {} : c, rt, fps, filters)},${rmIn ? "" : colorFix.get(c.file) ?? ""}${gradeChain(rmIn ? undefined : c.grade)}format=${segFmt}`;
       // The look bakes in after grade + framing, before the edge effects, so
       // animations move already-graded pixels (matching the preview order). A
       // removal clip's look runs after the flatten below instead — the chain's
@@ -1851,7 +1909,7 @@ export async function runExport(
         ? `[${idx}:v]setpts=PTS-STARTPTS`
         : `[${idx}:v]trim=${num(oc.in)}:${num(oc.out)},setpts=${retimedPts(ort)}`;
     }
-    let core = `${timebase},fps=${fps},${framing},setsar=1,${orIn ? "" : colorFix.get(oc.file) ?? ""}${gradeChain(orIn ? undefined : oc.grade)}format=${orIn ? "yuva420p" : lookFmt}`;
+    let core = `${framedTimebase(timebase, framing, `o${k}`, orIn ? {} : oc, ort, fps, filters)},${orIn ? "" : colorFix.get(oc.file) ?? ""}${gradeChain(orIn ? undefined : oc.grade)}format=${orIn ? "yuva420p" : lookFmt}`;
     // Looks bake into footage overlays only: an image may carry alpha, which
     // the look chain's internal filters would flatten onto black over the
     // tracks beneath. The alpha fades stay safe: they apply after the look.

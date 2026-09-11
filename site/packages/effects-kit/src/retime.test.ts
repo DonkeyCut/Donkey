@@ -3,8 +3,11 @@ import {
   flatSpeedCurve,
   mirrorRetimable,
   retimeOf,
+  slowRuns,
+  smoothsAt,
   speedCurveOf,
   speedCurvePreset,
+  speedCurvePresetOf,
   SPEED_CURVE_MAX,
   SPEED_CURVE_MIN,
   type SpeedNode,
@@ -75,6 +78,21 @@ describe("retimeOf", () => {
     for (let t = 0; t <= rev.len; t += rev.len / 41) {
       expect(6 - fwd.srcAt(t)).toBeCloseTo(rev.srcAt(t), 6);
     }
+  });
+
+  test("a flat curve is four even nodes at the clip's rate", () => {
+    expect(flatSpeedCurve({ in: 1, out: 7, speed: 2 })).toEqual([
+      [1, 2],
+      [3, 2],
+      [5, 2],
+      [7, 2],
+    ]);
+  });
+
+  test("a curve flat at 1× reads as the Flat preset whatever its node count", () => {
+    expect(speedCurvePresetOf([[0, 1], [4, 1]], 0, 4)).toBe("flat");
+    expect(speedCurvePresetOf(flatSpeedCurve({ in: 0, out: 4 }), 0, 4)).toBe("flat");
+    expect(speedCurvePresetOf([[0, 2], [4, 2]], 0, 4)).toBeUndefined();
   });
 
   test("a flat curve equals the uniform map", () => {
@@ -222,5 +240,42 @@ describe("speedCurvePreset", () => {
     expect(peak[1]).toBeGreaterThan(1);
     expect(nodes[0][1]).toBeLessThan(1);
     expect(speedCurvePreset("nope", 0, 1)).toBeUndefined();
+  });
+});
+
+describe("slowRuns", () => {
+  test("a uniform span is one run when slow and none when not", () => {
+    expect(slowRuns(retimeOf({ in: 0, out: 4, speed: 0.5 }), 1 / 30)).toEqual([[0, 8]]);
+    expect(slowRuns(retimeOf({ in: 0, out: 4, speed: 1 }), 1 / 30)).toEqual([]);
+    expect(slowRuns(retimeOf({ in: 0, out: 4, speed: 2 }), 1 / 30)).toEqual([]);
+  });
+
+  test("a curve that dips and races past 1× is slow in the dip alone", () => {
+    const rt = retimeOf({
+      in: 0,
+      out: 6,
+      speedCurve: [
+        [0, 1],
+        [2, 0.4],
+        [4, 3],
+        [6, 3],
+      ],
+    });
+    const runs = slowRuns(rt, 1 / 30);
+    expect(runs.length).toBe(1);
+    const [[from, to]] = runs;
+    expect(from).toBeGreaterThan(0);
+    expect(to).toBeLessThan(rt.len);
+    // Inside the run the rate is under 1×, and just outside it is not.
+    expect(rt.rateAt((from + to) / 2)).toBeLessThan(1);
+    expect(rt.rateAt(from - 0.1)).toBeGreaterThanOrEqual(1 - 1e-3);
+    expect(rt.rateAt(to + 0.1)).toBeGreaterThanOrEqual(1 - 1e-3);
+  });
+
+  test("smoothsAt is on only with the flag and under 1×", () => {
+    const rt = retimeOf({ in: 0, out: 4, speed: 0.5 });
+    expect(smoothsAt({ smoothSlow: true }, rt, 1)).toBe(true);
+    expect(smoothsAt({}, rt, 1)).toBe(false);
+    expect(smoothsAt({ smoothSlow: true }, retimeOf({ in: 0, out: 4, speed: 1 }), 1)).toBe(false);
   });
 });

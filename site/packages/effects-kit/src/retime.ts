@@ -301,6 +301,41 @@ export function srcSpan(rt: Retime, tFrom: number, tTo: number): { lo: number; h
   return a <= b ? { lo: a, hi: b } : { lo: b, hi: a };
 }
 
+/** Rate below which a smoothed clip synthesizes frames. Exactly 1× shows
+ * every source frame once; only a slower stretch repeats them. */
+export const SLOW_RATE = 1 - 1e-3;
+
+/** Whether a clip's picture is synthesized at timeline offset `tLocal`: the
+ * clip smooths its slow motion, and the map runs slower than 1× there. */
+export const smoothsAt = (c: { smoothSlow?: boolean }, rt: Retime, tLocal: number) =>
+  !!c.smoothSlow && rt.rateAt(tLocal) < SLOW_RATE;
+
+/**
+ * The stretches of a span, in timeline seconds from its head, where the map
+ * runs slower than 1×: `[from, to]` pairs, ascending, sampled every `step`
+ * seconds (an output frame) with runs shorter than two samples dropped. A
+ * uniform slow span is one run over its whole length; a curve that dips and
+ * recovers gives one run per dip. A renderer that cannot ask the rate per
+ * frame (an ffmpeg graph) interpolates exactly these.
+ */
+export function slowRuns(rt: Retime, step: number): [number, number][] {
+  const runs: [number, number][] = [];
+  if (!(step > 0) || rt.len <= 0) return runs;
+  if (rt.uniform) return rt.rate < SLOW_RATE ? [[0, rt.len]] : runs;
+  let open: number | null = null;
+  const n = Math.ceil(rt.len / step);
+  for (let i = 0; i <= n; i++) {
+    const t = Math.min(rt.len, i * step);
+    const slow = t < rt.len && rt.rateAt(t) < SLOW_RATE;
+    if (slow && open === null) open = t;
+    else if (!slow && open !== null) {
+      if (t - open >= 2 * step - 1e-9) runs.push([open, t]);
+      open = null;
+    }
+  }
+  return runs;
+}
+
 /**
  * The same span over media that has been turned around: source second `s`
  * of the original sits at `pivot − s` in the turned copy. A reversed clip
@@ -318,14 +353,14 @@ export function mirrorRetimable<T extends Retimable>(c: T, pivot: number): T {
   };
 }
 
-/** A flat curve at the clip's current rate, one node on each edge of the
- * span — what a clip starts from when it enters curve editing. */
+/** A flat curve at the clip's current rate: four nodes spaced evenly
+ * through the span, one on each edge and two between — what a clip starts
+ * from when it enters curve editing, with handles already where a ramp
+ * usually wants them. */
 export function flatSpeedCurve(c: Retimable): SpeedNode[] {
   const rate = clampRate(uniformRate(c));
-  return [
-    [c.in, rate],
-    [c.out, rate],
-  ];
+  const span = Math.max(0, c.out - c.in);
+  return [0, 1 / 3, 2 / 3, 1].map((x): SpeedNode => [c.in + x * span, rate]);
 }
 
 /* ------------------------------------------------------------------ */
@@ -353,6 +388,8 @@ export const SPEED_CURVE_PRESETS: SpeedCurvePreset[] = [
     hint: "one rate across the clip",
     shape: [
       [0, 1],
+      [1 / 3, 1],
+      [2 / 3, 1],
       [1, 1],
     ],
   },
@@ -461,6 +498,10 @@ export function speedCurvePreset(id: string, inS: number, outS: number): SpeedNo
 export function speedCurvePresetOf(nodes: SpeedNode[], inS: number, outS: number): string | undefined {
   const span = Math.max(0, outS - inS);
   if (span <= 0) return undefined;
+  // Flat is a rate, not a node count: a curve at 1× everywhere is the Flat
+  // preset however many nodes carry it, so one seeded before the preset grew
+  // its middle nodes still reads as Flat.
+  if (nodes.length >= 2 && nodes.every(([, rate]) => Math.abs(rate - 1) < 1e-3)) return "flat";
   return SPEED_CURVE_PRESETS.find(
     (p) =>
       p.shape.length === nodes.length &&

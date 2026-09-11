@@ -529,6 +529,9 @@ export interface EditorState {
   setClipSpeedCurve: (id: string, nodes: SpeedNode[] | undefined) => void;
   /** Lay a preset ramp over the clip's trimmed span. */
   setClipSpeedPreset: (id: string, preset: string) => void;
+  /** Smooth the clip's slow motion: synthesize the frames between source
+   * frames wherever its rate runs below 1×. */
+  setClipSmoothSlow: (id: string, on: boolean) => void;
   /** Play the clip's footage backward (picture and sound); the footprint
    * stays. */
   setClipReverse: (id: string, reverse: boolean) => void;
@@ -2865,6 +2868,12 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       get().setClipSpeedCurve(id, nodes);
     },
 
+    setClipSmoothSlow: (id, on) => {
+      const clip = get().clips.find((c) => c.id === id);
+      if (!clip || !!clip.smoothSlow === on) return;
+      get().updateClip(id, { smoothSlow: on || undefined });
+    },
+
     setClipReverse: (id, reverse) => {
       const clip = get().clips.find((c) => c.id === id);
       if (!clip || !!clip.reverse === reverse) return;
@@ -3913,13 +3922,13 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             if (mi == null) continue;
             // Track-0 clips re-materialize onto track 0 (asClip), so a template
             // stands up its own video instead of an empty timeline.
-            layers.push({ media: mi, start: sp.start - start0, in: sp.clip.in, out: sp.clip.out, ...framingOf(sp.clip), muted: sp.clip.muted, speed: sp.clip.speed, speedCurve: sp.clip.speedCurve, reverse: sp.clip.reverse, sound: sp.clip.sound, track: 1, asClip: true });
+            layers.push({ media: mi, start: sp.start - start0, in: sp.clip.in, out: sp.clip.out, ...framingOf(sp.clip), muted: sp.clip.muted, speed: sp.clip.speed, speedCurve: sp.clip.speedCurve, reverse: sp.clip.reverse, smoothSlow: sp.clip.smoothSlow, sound: sp.clip.sound, track: 1, asClip: true });
           } else {
             const c = s.clips.find((x) => x.id === sel.id);
             if (!c) continue;
             const mi = mediaFor(c.assetId);
             if (mi == null) continue;
-            layers.push({ media: mi, start: c.start - start0, in: c.in, out: c.out, ...framingOf(c), muted: c.muted, speed: c.speed, speedCurve: c.speedCurve, reverse: c.reverse, sound: c.sound, track: c.track + 1 });
+            layers.push({ media: mi, start: c.start - start0, in: c.in, out: c.out, ...framingOf(c), muted: c.muted, speed: c.speed, speedCurve: c.speedCurve, reverse: c.reverse, smoothSlow: c.smoothSlow, sound: c.sound, track: c.track + 1 });
           }
         } else if (sel.kind === "audio") {
           const c = s.audioClips.find((x) => x.id === sel.id);
@@ -4058,6 +4067,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           ...(l.speed ? { speed: l.speed } : {}),
           ...(l.speedCurve ? { speedCurve: l.speedCurve } : {}),
           ...(l.reverse ? { reverse: true } : {}),
+          ...(l.smoothSlow ? { smoothSlow: true } : {}),
           ...(l.sound ? { sound: l.sound } : {}),
         }));
       const topTrack = Math.max(0, ...overlayLayers(get().clips).map((c) => c.track));
@@ -4078,6 +4088,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         ...(l.speed ? { speed: l.speed } : {}),
         ...(l.speedCurve ? { speedCurve: l.speedCurve } : {}),
         ...(l.reverse ? { reverse: true } : {}),
+        ...(l.smoothSlow ? { smoothSlow: true } : {}),
         ...(l.sound ? { sound: l.sound } : {}),
       }));
       const newAudio: AudioClip[] = template.audio

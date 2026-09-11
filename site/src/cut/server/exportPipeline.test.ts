@@ -355,6 +355,44 @@ describe("a speed curve in the filtergraph", () => {
   });
 });
 
+describe("smooth slow motion in the filtergraph", () => {
+  test("a slowed clip runs motion interpolation over its whole span", async () => {
+    const g = await graphFor({ clips: [clip("a.mp4", { speed: 0.5, smoothSlow: true }), clip("b.mp4")] });
+    const video = g.find((f) => f.startsWith("[0:v]trim="))!;
+    expect(video).toContain("minterpolate=fps=30:mi_mode=mci");
+    expect(video).not.toContain("split=");
+    // The plain clip beside it is untouched.
+    expect(g.find((f) => f.startsWith("[1:v]trim="))).not.toContain("minterpolate");
+  });
+
+  test("a curve that dips is interpolated in the dip alone", async () => {
+    const curved = clip("a.mp4", {
+      smoothSlow: true,
+      speedCurve: [
+        [0, 1],
+        [1.5, 0.4],
+        [3, 3],
+        [4, 3],
+      ],
+    });
+    const g = await graphFor({ clips: [curved, clip("b.mp4")] });
+    const head = g.find((f) => f.startsWith("[0:v]trim="))!;
+    expect(head).toContain("split=3[smic0_0][smic0_1][smic0_2]");
+    const pieces = g.filter((f) => f.startsWith("[smic0_"));
+    expect(pieces.length).toBe(3);
+    expect(pieces[0]).toContain("fps=30[smo");
+    expect(pieces[0]).not.toContain("minterpolate");
+    expect(pieces[1]).toContain("minterpolate=fps=30");
+    expect(pieces[2]).not.toContain("minterpolate");
+    expect(g.some((f) => f.includes("concat=n=3:v=1:a=0,fps=30[smoc0]"))).toBe(true);
+  });
+
+  test("a clip at 1× or faster keeps its plain chain with the flag on", async () => {
+    const g = await graphFor({ clips: [clip("a.mp4", { speed: 2, smoothSlow: true })] });
+    expect(g.join(";")).not.toContain("minterpolate");
+  });
+});
+
 describe("clip sound in the filtergraph", () => {
   const sound = {
     eq: [2, 1, -2, -1, 1.5, 1, -1],

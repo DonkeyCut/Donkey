@@ -805,6 +805,7 @@ export async function buildExportPayload(
     speed: clipSpeed(sp.clip),
     speedCurve: sp.clip.speedCurve,
     reverse: sp.clip.reverse,
+    smoothSlow: sp.clip.smoothSlow,
     transition: sp.transitionOut,
     // A cross dissolve carries its own window: the picture cuts, so the
     // server's blend must not see one. The handles are what the crossing
@@ -1010,6 +1011,7 @@ export async function buildExportPayload(
           speed: c.speed,
           speedCurve: c.speedCurve,
           reverse: c.reverse,
+          smoothSlow: c.smoothSlow,
           image: assetById.get(c.assetId)!.type === "image",
           grade: normalizeGrade(c.grade),
           look: c.look,

@@ -554,6 +554,12 @@ export interface VideoClip {
    * tail shows `in`, picture and sound alike. The rate still applies, so the
    * footprint is unchanged. */
   reverse?: boolean;
+  /** Smooth slow motion: wherever the rate runs below 1×, the frames between
+   * two source frames are synthesized so the picture moves at the output
+   * rate. At 1× and faster the footage shows its own frames. The preview
+   * and the tab's export blend the two neighbours; ffmpeg exports estimate
+   * the motion between them. */
+  smoothSlow?: boolean;
   /** Transition into the next clip on this clip's track, in timeline seconds
    * (absent/0 = hard cut). Every style overlaps the two clips by this much,
    * so the cut shortens. On upper tracks a transition blends the incoming
@@ -1044,6 +1050,7 @@ export interface TemplateLayer {
   speed?: number;
   speedCurve?: SpeedNode[];
   reverse?: boolean;
+  smoothSlow?: boolean;
   sound?: ClipSound;
   track: number;
   /** Came from video track 0 — re-materializes as a timeline clip, not an
