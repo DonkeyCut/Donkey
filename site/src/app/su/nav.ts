@@ -1,7 +1,7 @@
 // The super-user surfaces in rail order, addressed from the root of their own
-// host. One entry carries what a surface is drawn from — the rail's tab, the
-// header's title and description — so adding a surface is one edit here and a
-// page.tsx; the rail keeps the icons and the header keeps the actions, keyed by
+// host. One entry carries what a surface is drawn from — the rail's tab and
+// the header's title — so adding a surface is one edit here and a page.tsx;
+// the rail keeps the icons and the header keeps the actions, keyed by
 // address, because the proxy imports this file and it has to stay free of
 // React. The host opens on the first entry, so reordering this list moves
 // where it opens.
@@ -13,7 +13,6 @@
 type SuTabShape = {
   href: string;
   label: string;
-  description?: string;
 };
 
 type SuSurfaceShape = SuTabShape & {
@@ -35,19 +34,16 @@ export const SU_NAV = [
     href: "/users",
     label: "Users",
     title: "Users",
-    description: "Account actions.",
   },
   {
     href: "/credits",
     label: "Credits",
     title: "Credits",
-    description: "Offer credits to a user.",
   },
   {
     href: "/product",
     label: "Product",
     title: "Product",
-    description: "What a new account starts with.",
   },
   {
     href: "/outreach",
@@ -58,7 +54,6 @@ export const SU_NAV = [
     href: "/promotions",
     label: "Promotions",
     title: "Promotions",
-    description: "One email to a segment of accounts.",
   },
   {
     href: "/blog",
@@ -73,12 +68,10 @@ export const SU_NAV = [
       {
         href: "/experiments/list",
         label: "Tests",
-        description: "Variants over settings, assigned once per account and kept.",
       },
       {
         href: "/experiments/settings",
         label: "Settings",
-        description: "Every runtime setting, with its default from code and its override here.",
       },
     ],
   },
@@ -90,12 +83,10 @@ export const SU_NAV = [
       {
         href: "/jobs/email",
         label: "Email",
-        description: "The outbox: today's quota, what is queued by kind, and what failed.",
       },
       {
         href: "/jobs/list",
         label: "Background",
-        description: "Background work started from these surfaces, newest first.",
       },
     ],
   },

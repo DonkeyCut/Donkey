@@ -30,8 +30,8 @@ const PAGE_ACTIONS: Partial<Record<SuPage["href"], ComponentType>> = {
   "/outreach": ScanOutreachButton,
 };
 
-// The title is the surface's; the description and action belong to whichever
-// page is showing, since a section's tabs each drive their own work. The
+// The title is the surface's; the action belongs to whichever page is
+// showing, since a section's tabs each drive their own work. The
 // header carries the button that shows and hides the rail (also ⌘B).
 export function SuHeader() {
   const pathname = usePathname();
@@ -60,11 +60,6 @@ export function SuHeader() {
               {surface.title}
             </h1>
           )}
-          {"description" in page && page.description ? (
-            <p className="mt-1 text-sm text-muted-foreground">
-              {page.description}
-            </p>
-          ) : null}
         </div>
       </div>
       {Action ? <Action /> : null}
