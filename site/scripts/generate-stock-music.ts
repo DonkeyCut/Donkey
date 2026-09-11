@@ -1,24 +1,29 @@
 // Generates the bundled Cut stock-music catalog with the same Lyria renderer the
-// app uses, then writes the typed manifest the editor imports. Idempotent: items
-// whose mp3 already exists are skipped, so re-running fills gaps or picks up new
-// catalog entries only.
+// app uses, uploads the files to the media bucket, and writes the typed
+// manifest the editor imports. The bytes live in R2 and a local cache, never in
+// git; people hear them from media.donkeycut.com (the media Worker treats
+// stock/music/ as public). Idempotent: an id already in the bucket is skipped,
+// so re-running fills gaps or picks up new catalog entries only.
 //
 //   cd site && ./node_modules/.bin/bun scripts/generate-stock-music.ts
 //
-// Needs GOOGLE_APPLICATION_CREDENTIALS_JSON (bun auto-loads site/.env) and ffmpeg
-// on PATH (for duration + waveform peaks). Each bed renders as a ~30s mp3 under
-// public/cut-stock-music. Lyria takes no response_format and rejects background
-// interactions, so the create call blocks until the clip is ready; it also
-// filters prompts strictly, so a blocked prompt is logged and skipped (not
-// retried — it would block every time).
+// Needs GOOGLE_APPLICATION_CREDENTIALS_JSON and R2_ACCOUNT_ID /
+// R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY (bun auto-loads site/.env) and
+// ffmpeg on PATH (for duration + waveform peaks). Each bed renders as a ~30s
+// mp3. Lyria takes no response_format and rejects background interactions, so
+// the create call blocks until the clip is ready; it also filters prompts
+// strictly, so a blocked prompt is logged and skipped (not retried — it would
+// block every time).
 
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { GoogleGenAI } from "@google/genai";
 import { JWT } from "google-auth-library";
 
+import { CUT_MEDIA_ORIGIN } from "../src/cut/lib/hosts";
 import { geminiMusicModels } from "../src/lib/inference/gemini-models";
 import type { StockMusicCategory } from "../src/cut/lib/stock";
 
@@ -30,7 +35,9 @@ interface CatalogItem {
 }
 
 const MODEL = geminiMusicModels.clip;
-const OUT_DIR = path.join(import.meta.dirname, "..", "public", "cut-stock-music");
+const BUCKET = "donkey-cut";
+const KEY_PREFIX = "stock/music/";
+const CACHE_DIR = path.join(import.meta.dirname, "..", ".cache", "stock-music");
 const MANIFEST = path.join(import.meta.dirname, "..", "src", "cut", "lib", "stockMusicManifest.ts");
 // Clips render in ~10-15s each; a small fan-out keeps well under quota.
 const CONCURRENCY = 3;
@@ -126,6 +133,22 @@ function makeClient(): { client: GoogleGenAI; authClient: JWT; project: string }
   return { client, authClient, project: creds.project_id };
 }
 
+function makeR2(): S3Client {
+  const accountId = process.env.R2_ACCOUNT_ID;
+  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
+  if (!accountId || !accessKeyId || !secretAccessKey) throw new Error("R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY are not set.");
+  return new S3Client({
+    region: "auto",
+    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+    credentials: { accessKeyId, secretAccessKey },
+  });
+}
+
+const keyFor = (id: string) => `${KEY_PREFIX}${id}.mp3`;
+const cachePath = (id: string) => path.join(CACHE_DIR, `${id}.mp3`);
+const fileUrl = (id: string) => `${CUT_MEDIA_ORIGIN}/${keyFor(id)}`;
+
 class BlockedError extends Error {}
 
 /** Renders one bed and resolves to its mp3 bytes. Lyria rejects background, so
@@ -167,7 +190,7 @@ async function generateOne(client: GoogleGenAI, authClient: JWT, item: CatalogIt
 function probeDuration(id: string): number {
   const proc = spawnSync("ffprobe", [
     "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
-    path.join(OUT_DIR, `${id}.mp3`),
+    cachePath(id),
   ]);
   const sec = Number.parseFloat(proc.stdout?.toString().trim() ?? "");
   if (proc.status !== 0 || !Number.isFinite(sec) || sec <= 0) {
@@ -181,7 +204,7 @@ function probeDuration(id: string): number {
 function computePeaks(id: string): number[] {
   const proc = spawnSync(
     "ffmpeg",
-    ["-v", "error", "-i", path.join(OUT_DIR, `${id}.mp3`), "-f", "s16le", "-ac", "1", "-ar", "8000", "-"],
+    ["-v", "error", "-i", cachePath(id), "-f", "s16le", "-ac", "1", "-ar", "8000", "-"],
     { maxBuffer: 256 * 1024 * 1024 }
   );
   const buf = proc.stdout;
@@ -201,40 +224,85 @@ function computePeaks(id: string): number[] {
   return raw.map((p) => Math.round((p / max) * 100) / 100);
 }
 
+async function upload(r2: S3Client, id: string): Promise<void> {
+  await r2.send(
+    new PutObjectCommand({
+      Bucket: BUCKET,
+      Key: keyFor(id),
+      Body: await readFile(cachePath(id)),
+      ContentType: "audio/mpeg",
+      CacheControl: "public, max-age=31536000, immutable",
+    })
+  );
+}
+
+/** True when the bucket already holds this id; pulls it into the cache when
+ * the local copy is missing so its peaks can be read. */
+async function adopt(r2: S3Client, id: string): Promise<boolean> {
+  if (existsSync(cachePath(id))) return true;
+  try {
+    await r2.send(new HeadObjectCommand({ Bucket: BUCKET, Key: keyFor(id) }));
+  } catch {
+    return false;
+  }
+  const res = await r2.send(new GetObjectCommand({ Bucket: BUCKET, Key: keyFor(id) }));
+  const bytes = await res.Body?.transformToByteArray();
+  if (!bytes) return false;
+  await mkdir(CACHE_DIR, { recursive: true });
+  await writeFile(cachePath(id), Buffer.from(bytes));
+  return true;
+}
+
 async function writeManifest(results: Map<string, { duration: number; peaks: number[] }>) {
   const entries = CATALOG.filter((c) => results.has(c.id)).map((c) => ({
     id: c.id,
     category: c.category,
     prompt: c.prompt,
     tags: c.tags,
-    file: `/cut-stock-music/${c.id}.mp3`,
+    file: fileUrl(c.id),
     duration: results.get(c.id)!.duration,
     peaks: results.get(c.id)!.peaks,
   }));
   const body = `// Generated by scripts/generate-stock-music.ts — do not edit by hand.
 import type { StockMusic } from "./stock";
 
-export const STOCK_MUSIC: StockMusic[] = ${JSON.stringify(entries, null, 2)};
+export const STOCK_MUSIC: StockMusic[] = [
+${entries.map((e) => `  ${JSON.stringify(e)},`).join("\n")}
+];
 `;
   await writeFile(MANIFEST, body);
 }
 
 async function main() {
-  const { client, authClient, project } = makeClient();
-  await mkdir(OUT_DIR, { recursive: true });
+  const r2 = makeR2();
+  await mkdir(CACHE_DIR, { recursive: true });
 
   const results = new Map<string, { duration: number; peaks: number[] }>();
-  // Adopt any clip already on disk (a resumed run) so its manifest row survives.
+  // Adopt every clip the bucket or the cache already holds so its manifest row
+  // survives; a clip on disk that the bucket lacks is uploaded now.
   for (const c of CATALOG) {
-    if (existsSync(path.join(OUT_DIR, `${c.id}.mp3`))) {
-      try {
-        results.set(c.id, { duration: probeDuration(c.id), peaks: computePeaks(c.id) });
-      } catch (e) {
-        console.error(`✗ reprobe ${c.id}: ${e instanceof Error ? e.message : e}`);
-      }
+    if (!(await adopt(r2, c.id))) continue;
+    try {
+      results.set(c.id, { duration: probeDuration(c.id), peaks: computePeaks(c.id) });
+    } catch (e) {
+      await unlink(cachePath(c.id));
+      console.error(`✗ reprobe ${c.id}: ${e instanceof Error ? e.message : e}`);
+      continue;
+    }
+    try {
+      await r2.send(new HeadObjectCommand({ Bucket: BUCKET, Key: keyFor(c.id) }));
+    } catch {
+      await upload(r2, c.id);
+      console.log(`↑ ${c.id}`);
     }
   }
   const todo = CATALOG.filter((c) => !results.has(c.id));
+  await writeManifest(results);
+  if (todo.length === 0) {
+    console.log(`manifest: ${results.size}/${CATALOG.length} beds, nothing to generate`);
+    return;
+  }
+  const { client, authClient, project } = makeClient();
   console.log(`model=${MODEL} project=${project} existing=${results.size} generating=${todo.length}`);
 
   let failed = 0;
@@ -245,8 +313,9 @@ async function main() {
       for (let attempt = 1; ; attempt++) {
         try {
           const mp3 = await generateOne(client, authClient, item);
-          await writeFile(path.join(OUT_DIR, `${item.id}.mp3`), mp3);
+          await writeFile(cachePath(item.id), mp3);
           results.set(item.id, { duration: probeDuration(item.id), peaks: computePeaks(item.id) });
+          await upload(r2, item.id);
           await writeManifest(results); // incremental: partial progress is usable
           console.log(`✓ ${item.id} (${results.get(item.id)!.duration}s)`);
           break;
