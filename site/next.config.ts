@@ -29,6 +29,15 @@ const nextConfig: NextConfig = {
     serverActions: { bodySizeLimit: "4gb" },
     proxyClientMaxBodySize: "4gb",
   },
+  // Build assets are fetched by search crawlers to render pages, which puts
+  // every chunk, stylesheet and font in Search Console as a candidate page.
+  // The header lets them be fetched and keeps them out of the index.
+  headers: async () => [
+    {
+      source: "/_next/static/:path*",
+      headers: [{ key: "X-Robots-Tag", value: "noindex" }],
+    },
+  ],
   // Cut is local-only: /api/cut/* 404s on a hosted deploy and never runs the
   // engine. But Turbopack's file tracer still follows the route's import of the
   // engine router, and that graph reaches cwd-rooted file operations it can't
