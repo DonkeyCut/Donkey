@@ -14,7 +14,7 @@ export const POST = withSuperUser(async (_request, { params }: Params) => {
   if (!parsed.success) return notFoundResponse();
   const promotion = await prisma.promotion.findUnique({ where: { id: parsed.data } });
   if (!promotion) return notFoundResponse();
-  if (promotion.status !== "sending") {
+  if (promotion.status !== "queuing" && promotion.status !== "sending") {
     return invalidResponse([{ path: ["status"], message: "This promotion is not running." }]);
   }
   await prisma.promotion.update({ data: { status: "paused" }, where: { id: promotion.id } });

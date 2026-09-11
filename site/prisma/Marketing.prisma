@@ -84,7 +84,7 @@ model Promotion {
   audience            Json                 @default("{}")
   // Earlier promotions whose recipients are skipped.
   excludePromotionIds String[]             @default([])
-  // "draft" | "sending" | "paused" | "sent"
+  // "draft" | "queuing" | "sending" | "paused" | "sent"
   status              String               @default("draft")
   startedAt           DateTime?
   finishedAt          DateTime?

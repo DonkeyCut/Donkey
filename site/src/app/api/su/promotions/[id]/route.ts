@@ -37,7 +37,7 @@ export const DELETE = withSuperUser(async (_request, { params }: Params) => {
   if (!id.success) return notFoundResponse();
   const existing = await prisma.promotion.findUnique({ select: { status: true }, where: { id: id.data } });
   if (!existing) return notFoundResponse();
-  if (existing.status === "sending") {
+  if (existing.status === "queuing" || existing.status === "sending") {
     return invalidResponse([{ path: ["status"], message: "A promotion that is sending cannot be deleted." }]);
   }
   await prisma.promotion.delete({ where: { id: id.data } });

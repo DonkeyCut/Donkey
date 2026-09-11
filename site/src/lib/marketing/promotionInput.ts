@@ -8,7 +8,9 @@ import { CLAIM_URL_PLACEHOLDER, promotionOfferSchema, type PromotionOffer } from
 export const PROMOTION_SENDERS = ["bulk", "personal"] as const;
 export type PromotionSender = (typeof PROMOTION_SENDERS)[number];
 
-export const PROMOTION_STATUSES = ["draft", "sending", "paused", "sent"] as const;
+// "queuing" while a job reads the segment into outbox rows; "sending" once
+// every recipient is queued, so the drainer can finish it.
+export const PROMOTION_STATUSES = ["draft", "queuing", "sending", "paused", "sent"] as const;
 
 export type PromotionStatus = (typeof PROMOTION_STATUSES)[number];
 

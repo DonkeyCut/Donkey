@@ -32,6 +32,7 @@ type BadgeVariant = "default" | "secondary" | "outline" | "destructive";
 
 const STATUS_VARIANT: Record<PromotionStatus, BadgeVariant> = {
   draft: "outline",
+  queuing: "default",
   sending: "default",
   paused: "outline",
   sent: "secondary",
@@ -174,7 +175,7 @@ function PromotionRow({
           <Button size="sm" variant="outline" onClick={onDuplicate}>
             Duplicate
           </Button>
-          {p.status === "sending" ? (
+          {p.status === "queuing" || p.status === "sending" ? (
             <Button
               size="sm"
               variant="outline"

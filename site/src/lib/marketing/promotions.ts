@@ -3,7 +3,7 @@ import { audienceNeeds, audienceSchema, matchesAudience, type Audience } from "@
 import type { Prisma } from "@/generated/prisma/client";
 import { DONKEY_LOGO_CID, DONKEY_LOGO_PNG_BASE64 } from "@/emails/_components/logo";
 import PromotionEmail from "@/emails/promotion";
-import { collectFacts } from "@/lib/config/audienceFacts";
+import { collectFactsFor } from "@/lib/config/audienceFacts";
 import { bulkFrom, emailFrom, type EmailMessage, type EmailUser } from "@/lib/email/resend";
 import { PermanentSendError } from "@/lib/email/errors";
 import { unsubscribeActionUrl, unsubscribePageUrl } from "@/lib/email/unsubscribe";
@@ -98,72 +98,84 @@ export function buildPromotionEmail(
 
 export type PromotionSegment = { audience: Audience; excludePromotionIds: string[] };
 
-export type SegmentResolution = SegmentCount & { users: EmailUser[] };
+export type SegmentResolution = SegmentCount & {
+  // Where the walk stopped: the last account read when the deadline came,
+  // null once the whole list was seen. A caller resumes by passing it back.
+  cursor: string | null;
+};
+
+export type ResolveOptions = {
+  now?: Date;
+  // Resume from an earlier call's cursor.
+  cursor?: string;
+  // A time (ms since epoch) after which no further page is read.
+  deadline?: number;
+  // Receives each page of recipients as it is found. Returning false stops
+  // the walk, leaving the cursor on that page.
+  onPage?: (users: EmailUser[]) => Promise<boolean | void>;
+};
 
 const USER_PAGE = 500;
-const FACTS_CONCURRENCY = 10;
 
 /** Everyone a segment reaches: the accounts the audience rules admit, less
- * the unsubscribed, less the recipients of the excluded promotions. The
- * counts of those left out are taken inside the audience, so they describe
- * the segment. Country is never known here, so a countries rule admits
- * nobody. */
+ * the unsubscribed, less the recipients of the excluded promotions. The list
+ * is read a page at a time and every fact is one set query over the page,
+ * so a segment of any size costs a handful of statements per page and holds
+ * one page in memory. The counts describe the pages this call walked; those
+ * left out are taken inside the audience, so they describe the segment.
+ * Country is never known here, so a countries rule admits nobody. */
 export async function resolvePromotionSegment(
   segment: PromotionSegment,
-  now = new Date(),
+  { now = new Date(), cursor, deadline, onPage }: ResolveOptions = {},
 ): Promise<SegmentResolution> {
-  const [unsubscribedRows, receivedRows] = await Promise.all([
-    prisma.userEmailSettings.findMany({
-      select: { userId: true },
-      where: { marketingUnsubscribedAt: { not: null } },
-    }),
-    segment.excludePromotionIds.length > 0
-      ? prisma.emailSend.findMany({
-          distinct: ["userId"],
-          select: { userId: true },
-          where: { promotionId: { in: segment.excludePromotionIds }, state: "sent" },
-        })
-      : Promise.resolve([]),
-  ]);
-  const unsubscribed = new Set(unsubscribedRows.map((r) => r.userId));
-  const received = new Set(receivedRows.map((r) => r.userId));
   const needs = audienceNeeds(segment.audience);
-
-  const result: SegmentResolution = {
-    users: [],
-    recipients: 0,
-    unsubscribed: 0,
-    alreadyReceived: 0,
-    outsideAudience: 0,
-  };
-  let cursor: string | undefined;
+  const result: SegmentResolution = { cursor: null, recipients: 0, unsubscribed: 0, alreadyReceived: 0, outsideAudience: 0 };
+  let last = cursor;
   for (;;) {
     const page = await prisma.user.findMany({
       orderBy: { id: "asc" },
-      select: { createdAt: true, email: true, id: true, name: true },
+      select: {
+        createdAt: true,
+        email: true,
+        emailSettings: { select: { marketingUnsubscribedAt: true } },
+        id: true,
+        name: true,
+      },
       take: USER_PAGE,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      ...(last ? { cursor: { id: last }, skip: 1 } : {}),
     });
     if (page.length === 0) break;
-    cursor = page[page.length - 1].id;
-
-    for (let i = 0; i < page.length; i += FACTS_CONCURRENCY) {
-      const slice = page.slice(i, i + FACTS_CONCURRENCY);
-      const matched = await Promise.all(
-        slice.map(async (user) => {
-          const facts = await collectFacts(user.id, { country: null, createdAt: user.createdAt }, needs);
-          return matchesAudience(segment.audience, facts, now);
-        }),
-      );
-      slice.forEach((user, j) => {
-        if (!matched[j]) result.outsideAudience++;
-        else if (unsubscribed.has(user.id)) result.unsubscribed++;
-        else if (received.has(user.id)) result.alreadyReceived++;
-        else result.users.push({ email: user.email, id: user.id, name: user.name });
-      });
+    const ids = page.map((u) => u.id);
+    const [facts, receivedRows] = await Promise.all([
+      collectFactsFor(page.map((u) => ({ id: u.id, country: null, createdAt: u.createdAt })), needs),
+      segment.excludePromotionIds.length > 0
+        ? prisma.emailSend.findMany({
+            distinct: ["userId"],
+            select: { userId: true },
+            where: { promotionId: { in: segment.excludePromotionIds }, state: "sent", userId: { in: ids } },
+          })
+        : [],
+    ]);
+    const received = new Set(receivedRows.map((r) => r.userId));
+    const users: EmailUser[] = [];
+    for (const user of page) {
+      if (!matchesAudience(segment.audience, facts.get(user.id)!, now)) result.outsideAudience++;
+      else if (user.emailSettings?.marketingUnsubscribedAt) result.unsubscribed++;
+      else if (received.has(user.id)) result.alreadyReceived++;
+      else users.push({ email: user.email, id: user.id, name: user.name });
+    }
+    result.recipients += users.length;
+    last = page[page.length - 1].id;
+    if (onPage && (await onPage(users)) === false) {
+      result.cursor = last;
+      return result;
+    }
+    if (page.length < USER_PAGE) break;
+    if (deadline !== undefined && Date.now() >= deadline) {
+      result.cursor = last;
+      return result;
     }
   }
-  result.recipients = result.users.length;
   return result;
 }
 

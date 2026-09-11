@@ -9,6 +9,7 @@ import { deleteUserJob } from "@/lib/jobs/delete-user";
 import { experimentResultsJob } from "@/lib/jobs/experiment-results";
 import { outreachScanJob } from "@/lib/jobs/outreach-scan";
 import { emailDrainJob } from "@/lib/jobs/email-drain";
+import { promotionQueueJob } from "@/lib/jobs/promotion-queue";
 
 // Thrown by an executor when the job can never succeed — the message lands on
 // the job row as its error. Anything else thrown is transient: the claim is
@@ -48,4 +49,5 @@ export const jobKinds: Record<string, JobKind> = {
   "email-drain": emailDrainJob,
   "experiment-results": experimentResultsJob,
   "outreach-scan": outreachScanJob,
+  "promotion-queue": promotionQueueJob,
 };

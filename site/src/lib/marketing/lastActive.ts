@@ -35,9 +35,13 @@ export async function lastActiveByUser(userIds: string[]): Promise<Map<string, D
   return lastActiveBy;
 }
 
-/** The ids most recently active first; accounts never seen using the
- * product come last, in the order given. */
-export function byMostRecentlyActive<T extends { id: string }>(users: T[], lastActiveBy: Map<string, Date>): T[] {
-  const at = (user: T) => lastActiveBy.get(user.id)?.getTime() ?? 0;
-  return [...users].sort((a, b) => at(b) - at(a));
+// The largest rank a row can hold: an account never seen using the product.
+const NEVER_ACTIVE_RANK = 2 ** 31 - 1;
+
+/** A promotion row's place in the queue: seconds since the account last used
+ * the product, so the people most recently active go first however many
+ * pages the segment was read in. */
+export function activityRank(now: Date, lastActiveAt: Date | undefined): number {
+  if (!lastActiveAt) return NEVER_ACTIVE_RANK;
+  return Math.min(NEVER_ACTIVE_RANK, Math.max(0, Math.floor((now.getTime() - lastActiveAt.getTime()) / 1000)));
 }

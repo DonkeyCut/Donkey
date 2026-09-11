@@ -36,7 +36,7 @@ export function usePromotions() {
     queryFn: () => apiFetch<Body>("/api/su/promotions"),
     queryKey: promotionsQueryKey,
     refetchInterval: (query) =>
-      query.state.data?.promotions.some((p) => p.status === "sending") ? 3000 : false,
+      query.state.data?.promotions.some((p) => p.status === "queuing" || p.status === "sending") ? 3000 : false,
   });
 }
 
@@ -69,10 +69,9 @@ export function useSendPromotion() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      apiFetch<{ recipients: number }>(
-        `/api/su/promotions/${encodeURIComponent(id)}/send`,
-        { method: "POST" },
-      ),
+      apiFetch<{ promotions: PromotionSummary[] }>(`/api/su/promotions/${encodeURIComponent(id)}/send`, {
+        method: "POST",
+      }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: promotionsQueryKey }),
   });
 }
