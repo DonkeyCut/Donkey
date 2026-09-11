@@ -96,13 +96,15 @@ export const SETTINGS = defineSettings({
     title: "Signup credits",
     description: "USD a new account is granted at signup, and how many days the grant lives.",
   },
-  emailDailySend: {
+  emailSendBudget: {
     schema: z
       .object({
-        // Emails the provider lets the account send per UTC day.
-        providerLimit: z.number().int().min(1).max(100000),
-        // Slots kept free for emails sent by hand while work hours remain in
-        // the UTC day; released once the work day is over.
+        // Emails the provider's plan includes per billing cycle.
+        monthlyAllowance: z.number().int().min(1).max(10_000_000),
+        // Day of the month the plan renews, at UTC midnight.
+        renewalDay: z.number().int().min(1).max(31),
+        // Slots kept free per work day for emails sent by hand, held for
+        // every work day left in the cycle.
         manualReserve: z.number().int().min(0).max(100000),
         manualTimeZone: z.string().refine(validTimeZone, "Unknown IANA time zone"),
         // Work hours in that zone, start inclusive and end exclusive.
@@ -113,27 +115,29 @@ export const SETTINGS = defineSettings({
         signupLookbackDays: z.number().int().min(1).max(90),
         // Slots kept free beyond the forecast for transactional email the
         // forecast cannot see, such as credit offers sent by hand.
-        transactionalHeadroom: z.number().int().min(0).max(100000),
+        transactionalHeadroom: z.number().int().min(0).max(1_000_000),
       })
       .strict()
       .refine((v) => v.manualStartHour < v.manualEndHour, { message: "Work hours must end after they start." })
-      .refine((v) => v.manualReserve + v.transactionalHeadroom < v.providerLimit, {
-        message: "The reserves must leave room for bulk sends.",
+      // A cycle holds at most 31 work days, so this keeps every ceiling above zero.
+      .refine((v) => v.manualReserve * 31 + v.transactionalHeadroom < v.monthlyAllowance, {
+        message: "The reserves must leave room for bulk sends over a 31-day cycle.",
       }),
     default: {
-      providerLimit: 99,
+      monthlyAllowance: 50000,
+      renewalDay: 11,
       manualReserve: 10,
       manualTimeZone: "Asia/Seoul",
       manualStartHour: 9,
       manualEndHour: 18,
       manualWeekdaysOnly: true,
       signupLookbackDays: 7,
-      transactionalHeadroom: 5,
+      transactionalHeadroom: 200,
     },
     public: false,
-    title: "Daily email sends",
+    title: "Email send budget",
     description:
-      "The provider's daily send cap, the slots held for emails sent by hand during work hours, and how the transactional forecast that holds slots ahead of promotions is sized.",
+      "The plan's monthly allowance and renewal day, the slots held per work day for emails sent by hand, and how the transactional forecast that holds slots ahead of promotions is sized.",
   },
   emailPriorities: {
     schema: z
@@ -142,7 +146,7 @@ export const SETTINGS = defineSettings({
     default: { ...DEFAULT_EMAIL_PRIORITIES },
     public: false,
     title: "Email priorities",
-    description: "The order the outbox sends in when the day's quota is short: higher goes first. A change applies to emails queued from then on.",
+    description: "The order the outbox sends in when the budget is short: higher goes first. A change applies to emails queued from then on.",
   },
   creditExpiryNotice: {
     schema: z

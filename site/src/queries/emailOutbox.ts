@@ -10,7 +10,7 @@ export type { OutboxCampaign, OutboxItem, OutboxKindRow, OutboxOverview } from "
 
 export const emailOutboxQueryKey = ["su", "email", "outbox"] as const;
 
-// Super-user only: the outbox and the day's quota. Polls while anything is
+// Super-user only: the outbox and the cycle's budget. Polls while anything is
 // queued so sends settle on screen without a refresh.
 export function useEmailOutbox() {
   return useQuery({

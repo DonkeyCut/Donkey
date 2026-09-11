@@ -1,12 +1,12 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { getGlobalSetting } from "@/lib/config/effective";
 import {
-  DailyEmailSendLimitError,
-  dailyEmailQuotaStatus,
-  type DailyEmailQuotaStatus,
+  EmailBudgetError,
+  emailBudgetStatus,
+  type EmailBudgetStatus,
   type EmailSendKind,
-  withDailyEmailQuota,
-} from "@/lib/email/daily-send-limit";
+  withEmailBudget,
+} from "@/lib/email/send-budget";
 import { PermanentSendError } from "@/lib/email/errors";
 import { EMAIL_KIND_IDS, type EmailKindId } from "@/lib/email/kindIds";
 import { EMAIL_KINDS, type OutboxRow } from "@/lib/email/kinds";
@@ -15,9 +15,9 @@ import { UnknownPlaceholderError } from "@/lib/marketing/placeholders";
 import { prisma } from "@/lib/prisma";
 
 // The outbox. Every email is queued as a row and sent by the drainer in
-// priority order, each row under its kind's share of the day's quota. An
+// priority order, each row under its kind's share of the cycle's budget. An
 // interactive send (an operator's note, a signup's welcome) is queued and
-// tried at once; when the quota refuses it, it waits its turn. The row is
+// tried at once; when the budget refuses it, it waits its turn. The row is
 // the record: what went, what failed and why, and what is still owed.
 
 const PAGE = 50;
@@ -89,7 +89,7 @@ export async function queueEmails(inputs: QueueEmailInput[]): Promise<number> {
   return count;
 }
 
-/** Queues one email and tries to send it now. When the quota refuses it, the
+/** Queues one email and tries to send it now. When the budget refuses it, the
  * row waits for the drainer; a permanent failure is reported on the result. */
 export async function deliverEmail(input: QueueEmailInput): Promise<DeliverResult> {
   const [data] = await rowsOf([input]);
@@ -113,7 +113,7 @@ export async function scheduleDrain(delaySeconds: number): Promise<void> {
 }
 
 /** Starts a drainer for one kind now, on an operator's say-so. Its own job,
- * so a drainer held back by another kind's quota wait does not stand in
+ * so a drainer held back by another kind's budget wait does not stand in
  * for it. */
 export async function drainKindNow(kind: EmailKindId, createdBy: string): Promise<void> {
   const { enqueueJob } = await import("@/lib/jobs/queue");
@@ -149,7 +149,7 @@ async function sendRow(row: DrainableRow, now: Date): Promise<Outcome> {
     if (!isResendConfigured()) throw new ResendNotConfiguredError();
     // The slot is held before the message is built, so anything the build
     // writes down (a claim window, say) dates from the send itself.
-    const result = await withDailyEmailQuota(kind.quota, async () => {
+    const result = await withEmailBudget(kind.quota, async () => {
       const message = await kind.build(payload, outboxRow);
       return message ? getResend().emails.send(message, { idempotencyKey: row.idempotencyKey }) : null;
     });
@@ -162,7 +162,7 @@ async function sendRow(row: DrainableRow, now: Date): Promise<Outcome> {
     await kind.afterSend?.(payload, outboxRow);
     return { outcome: "sent" };
   } catch (error) {
-    if (error instanceof DailyEmailSendLimitError) {
+    if (error instanceof EmailBudgetError) {
       await settle({ state: "queued" });
       return { outcome: "refused", retryAfterSeconds: error.retryAfterSeconds };
     }
@@ -183,15 +183,15 @@ export type DrainResult = {
   failed: number;
   skipped: number;
   retried: number;
-  // Seconds until the next thing worth coming back for: a refused quota
+  // Seconds until the next thing worth coming back for: a refused budget
   // expected to open, or a backed-off row coming due. Null when nothing waits.
   retryAfterSeconds: number | null;
   // Whether the budget ran out with rows still owed.
   more: boolean;
 };
 
-/** Sends what the outbox holds, highest priority first, until the budget or
- * the quota runs out. A refused quota class is left alone for the rest of
+/** Sends what the outbox holds, highest priority first, until the time or
+ * the budget runs out. A refused budget class is left alone for the rest of
  * the run; the classes above it keep going. Given a kind, only that kind's
  * rows go. */
 export async function drainOutbox(budgetMs: number, kind?: EmailKindId): Promise<DrainResult> {
@@ -214,7 +214,7 @@ export async function drainOutbox(budgetMs: number, kind?: EmailKindId): Promise
           claimable(now),
           { kind: kind ?? { notIn: refusedKinds() }, notBefore: { lte: now } },
           // A paused promotion's rows wait where they are.
-          { OR: [{ promotionId: null }, { promotion: { status: "sending" } }] },
+          { OR: [{ promotionId: null }, { promotion: { status: { in: ["queuing", "sending"] } } }] },
         ],
       },
     });
@@ -254,13 +254,14 @@ async function nextBackedOffRow(now: Date, kind?: EmailKindId): Promise<Date | n
       kind,
       notBefore: { gt: now },
       state: "queued",
-      OR: [{ promotionId: null }, { promotion: { status: "sending" } }],
+      OR: [{ promotionId: null }, { promotion: { status: { in: ["queuing", "sending"] } } }],
     },
   });
   return row?.notBefore ?? null;
 }
 
-// A promotion with nothing left to send is sent.
+// A promotion with every recipient queued and nothing left to send is sent.
+// One still queuing is left to its job, which finishes it or hands it here.
 async function finishPromotions(promotionIds: Set<string>): Promise<void> {
   for (const promotionId of promotionIds) {
     const owed = await prisma.emailSend.count({ where: { promotionId, state: { in: ["queued", "sending"] } } });
@@ -314,7 +315,7 @@ export type OutboxCampaign = {
 };
 
 export type OutboxOverview = {
-  quota: DailyEmailQuotaStatus;
+  quota: EmailBudgetStatus;
   kinds: OutboxKindRow[];
   campaigns: OutboxCampaign[];
   // What is waiting, then what failed, then what went most recently.
@@ -323,12 +324,12 @@ export type OutboxOverview = {
 
 const ITEMS = 60;
 
-/** The outbox as su sees it: the day's quota, every kind's standing, and the
+/** The outbox as su sees it: the cycle's budget, every kind's standing, and the
  * rows worth a look. */
 export async function outboxOverview(now = new Date()): Promise<OutboxOverview> {
   const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const [quota, priorities, queued, sentToday, failed, byCampaign, waiting, broken, recent, drains] = await Promise.all([
-    dailyEmailQuotaStatus(now),
+    emailBudgetStatus(now),
     getGlobalSetting("emailPriorities"),
     prisma.emailSend.groupBy({ _count: true, by: ["kind"], where: { state: { in: ["queued", "sending"] } } }),
     prisma.emailSend.groupBy({ _count: true, by: ["kind"], where: { sentAt: { gte: dayStart }, state: "sent" } }),
@@ -358,7 +359,7 @@ export async function outboxOverview(now = new Date()): Promise<OutboxOverview> 
     }),
   ]);
   // A drainer without a kind covers every kind. One running or due now is
-  // draining; one held back for later is waiting on the quota, and the kind
+  // draining; one held back for later is waiting on the budget, and the kind
   // reports the earliest of those.
   const drainers = drains.map((d) => ({
     kind: (d.payload as { kind?: EmailKindId } | null)?.kind ?? null,

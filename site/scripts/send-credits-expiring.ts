@@ -17,7 +17,7 @@ import { getGlobalSetting } from "../src/lib/config/effective";
 import { creditMicrosToString } from "../src/lib/credits/amounts";
 import { pendingCreditExpiryGrants } from "../src/lib/email/credit-expiry-due";
 import { queueDueCreditExpiryNotices } from "../src/lib/email/credit-expiry-notices";
-import { withDailyEmailQuota } from "../src/lib/email/daily-send-limit";
+import { withEmailBudget } from "../src/lib/email/send-budget";
 import { drainOutbox } from "../src/lib/email/outbox";
 import { getResend } from "../src/lib/email/resend";
 import { buildCreditsExpiringEmail } from "../src/lib/email/send-credits-expiring";
@@ -61,7 +61,7 @@ if (preview) {
     creditMicrosToString(sample.remainingAmountMicros),
     sample.expiresAt,
   );
-  const result = await withDailyEmailQuota("manual", () =>
+  const result = await withEmailBudget("manual", () =>
     // Every preview is its own send, whatever the copy did in between.
     getResend().emails.send(message, { idempotencyKey: `credits-expiring-preview:${preview}:${Date.now()}` }),
   );

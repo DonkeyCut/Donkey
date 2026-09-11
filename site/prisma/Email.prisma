@@ -9,14 +9,14 @@ model UserEmailSettings {
   // Claimed before sending, so a retried signup can never double-send.
   welcomeEmailSentAt      DateTime?
   // Null means subscribed. Set by the one-click endpoint, the /unsubscribe
-  // page, the settings toggle, or the Resend webhook.
+  // page, or the settings toggle.
   marketingUnsubscribedAt DateTime?
   createdAt               DateTime  @default(now())
   updatedAt               DateTime  @updatedAt
 }
 
 // The outbox. Every email the site sends is a row here first; one drainer
-// sends rows in priority order under the day's quota
+// sends rows in priority order under the plan's monthly budget
 // (src/lib/email/outbox.ts). The row is the send's record: a retried queue
 // call adds nothing because the idempotency key is unique.
 model EmailSend {
@@ -25,7 +25,9 @@ model EmailSend {
   kind           String
   // Higher goes first: the kind's priority when the row was queued.
   priority       Int
-  // Order within a priority. A promotion's most recently active recipient is 0.
+  // Order within a priority. A promotion row holds the seconds since its
+  // recipient last used the product when it was queued, so the most recently
+  // active go first.
   rank           Int        @default(0)
   userId         String?
   user           User?      @relation(fields: [userId], references: [id], onDelete: Cascade)

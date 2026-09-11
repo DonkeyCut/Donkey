@@ -3,7 +3,7 @@ import { z } from "zod";
 import { creditOfferClaimUrl, createPromotionCreditOffer } from "@/lib/credits/offers";
 import { clickUrl } from "@/lib/email/click";
 import { recordExpiryNoticeSent } from "@/lib/email/credit-expiry-notices";
-import type { EmailSendKind } from "@/lib/email/daily-send-limit";
+import type { EmailSendKind } from "@/lib/email/send-budget";
 import { PermanentSendError } from "@/lib/email/errors";
 import type { EmailKindId } from "@/lib/email/kindIds";
 import type { EmailMessage, EmailUser } from "@/lib/email/resend";

@@ -28,9 +28,15 @@ function formatWhen(iso: string): string {
 }
 
 function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
   const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function formatDay(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 const stateDot: Record<string, string> = {
@@ -41,8 +47,9 @@ const stateDot: Record<string, string> = {
   failed: "bg-destructive",
 };
 
-// The day's quota as three stop lines on one counter. Each bar is how far
-// that class of send may go today; the fill is what has gone out so far.
+// The cycle's budget as three stop lines on one counter. Each bar is how far
+// that class of send may go before the plan renews; the fill is what has
+// gone out so far this cycle.
 function QuotaSection({ quota }: { quota: OutboxOverview["quota"] }) {
   const { forecast } = quota;
   const classes = [
@@ -51,29 +58,31 @@ function QuotaSection({ quota }: { quota: OutboxOverview["quota"] }) {
       ceiling: quota.ceilings.manual,
       note:
         quota.manualReserve > 0
-          ? `${quota.manualReserve} held below this for hand-sent mail while work hours remain`
-          : "work hours over; the hand-sent reserve is released",
+          ? `${quota.manualReserve} held below this for hand-sent mail on the work days left`
+          : "no work days left; the hand-sent reserve is released",
     },
     { label: "Transactional", ceiling: quota.ceilings.transactional, note: "welcome and credit emails" },
     {
       label: "Bulk",
       ceiling: quota.ceilings.bulk,
-      note: `holds back ${forecast.total} for the rest of today: ${forecast.signups} signups expected, ${forecast.expiry} expiry notices owed, ${forecast.headroom} headroom`,
+      note: `holds back ${forecast.total} for the rest of the cycle: ${forecast.signups} signups expected, ${forecast.expiry} expiry notices owed, ${forecast.headroom} headroom`,
     },
   ];
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-baseline gap-x-3 text-sm">
-        <span className="font-medium">Today, {quota.day} UTC</span>
+        <span className="font-medium">
+          Cycle {formatDay(quota.cycle.start)} – {formatDay(quota.cycle.end)}
+        </span>
         <span className="text-muted-foreground">
-          {quota.sent} of {quota.providerLimit} sent · resets in {formatDuration(quota.resetsInSeconds)}
+          {quota.sent} of {quota.allowance} sent · {quota.sentToday} today · renews in {formatDuration(quota.renewsInSeconds)}
         </span>
       </div>
       <ul className="space-y-3">
         {classes.map((c) => {
           const ceiling = Math.max(0, c.ceiling);
-          const width = Math.min(100, (100 * ceiling) / quota.providerLimit);
-          const fill = Math.min(100, (100 * Math.min(quota.sent, ceiling)) / quota.providerLimit);
+          const width = Math.min(100, (100 * ceiling) / quota.allowance);
+          const fill = Math.min(100, (100 * Math.min(quota.sent, ceiling)) / quota.allowance);
           const left = Math.max(0, ceiling - quota.sent);
           return (
             <li key={c.label} className="grid grid-cols-[120px_1fr_72px] items-center gap-x-3 gap-y-0.5 text-sm">
@@ -285,7 +294,7 @@ function ItemsSection({
   );
 }
 
-// The outbox: where the day's quota stands, what each kind has queued and
+// The outbox: where the cycle's budget stands, what each kind has queued and
 // sent, and the rows waiting, failed, and lately sent. The layout gates this
 // route to super users, so the hook runs unconditionally.
 export default function SuEmailPage() {

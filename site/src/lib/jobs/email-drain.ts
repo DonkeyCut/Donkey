@@ -9,7 +9,7 @@ import { defineJob, JobDeferred } from "@/lib/jobs/registry";
 const BUDGET_MS = 200_000;
 
 /** Runs the drainer inside a job: a run that ran out of time queues its
- * continuation, and one that ran out of quota comes back when the quota is
+ * continuation, and one that ran out of budget comes back when the budget is
  * expected to open. A run for one kind continues for that kind. */
 export async function drainAsJob(kind?: EmailKindId): Promise<DrainResult> {
   const result = await drainOutbox(BUDGET_MS, kind);
@@ -19,7 +19,7 @@ export async function drainAsJob(kind?: EmailKindId): Promise<DrainResult> {
     return result;
   }
   if (result.retryAfterSeconds !== null) {
-    throw new JobDeferred("Daily email quota reached; the outbox resumes when it opens.", result.retryAfterSeconds);
+    throw new JobDeferred("Email budget reached; the outbox resumes when it opens.", result.retryAfterSeconds);
   }
   return result;
 }
