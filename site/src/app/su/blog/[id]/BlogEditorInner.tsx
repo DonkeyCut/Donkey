@@ -49,6 +49,7 @@ import { useEffect, useMemo, useState } from "react";
 import { BlogVideo } from "@/app/cut/blog/_components/BlogVideo";
 import { BLOG_ARTICLE_CLASS } from "@/app/cut/blog/_components/mdxComponents";
 import type { BlogEditorProps } from "@/app/su/blog/[id]/BlogEditor";
+import { EDITOR_ICON_CLASS, editorIcon } from "@/app/su/blog/[id]/editorIcons";
 import { parseVideoUrl } from "@/lib/blog/video";
 
 // The article editor. The body is MDX: markdown with three named blocks the
@@ -182,7 +183,7 @@ function InsertVideo() {
       tooltipTitle="Insert video"
       submitButtonTitle="Insert"
       dialogInputPlaceholder="YouTube, Vimeo or .mp4 address"
-      buttonContent={<Video className="size-5" />}
+      buttonContent={<Video className={EDITOR_ICON_CLASS} />}
       onSubmit={(value) => {
         const src = value.trim();
         if (src) insertJsx({ name: "Video", kind: "flow", props: { src } });
@@ -199,13 +200,13 @@ function InsertCtas() {
         title="Insert call to action banner"
         onClick={() => insertJsx({ name: "BlogCTA", kind: "flow", props: { variant: "banner" } })}
       >
-        <Megaphone className="size-5" />
+        <Megaphone className={EDITOR_ICON_CLASS} />
       </ButtonWithTooltip>
       <ButtonWithTooltip
         title="Insert inline call to action"
         onClick={() => insertJsx({ name: "InlineCTA", kind: "flow", props: {} })}
       >
-        <MessageSquareQuote className="size-5" />
+        <MessageSquareQuote className={EDITOR_ICON_CLASS} />
       </ButtonWithTooltip>
     </>
   );
@@ -274,6 +275,7 @@ export default function BlogEditorInner({ markdown, diffMarkdown, onChange, uplo
           if (!initialNormalize) onChange(next);
         }}
         onError={({ error }) => setParseError(error)}
+        iconComponentFor={editorIcon}
         plugins={plugins}
         contentEditableClassName={`${BLOG_ARTICLE_CLASS} min-h-[60vh] px-6 py-5`}
         placeholder="Write the article…"
